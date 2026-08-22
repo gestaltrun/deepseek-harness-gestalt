@@ -503,12 +503,16 @@ describe('SessionPersistenceSqlite schema ownership', () => {
       attempts += 1
       return Object.assign(new Error('database is locked'), { errcode: 5 })
     })
-    await expect(openDatabase(
-      BusyDatabase,
-      await freshDbPath('dsh-sqlite-journal-paced-'),
-      'wal',
-      50,
-    )).rejects.toThrow('database is locked')
+    const path = await freshDbPath('dsh-sqlite-journal-paced-')
+    vi.useFakeTimers()
+    try {
+      const rejected = expect(openDatabase(BusyDatabase, path, 'wal', 50))
+        .rejects.toThrow('database is locked')
+      await vi.advanceTimersByTimeAsync(50)
+      await rejected
+    } finally {
+      vi.useRealTimers()
+    }
     expect(attempts).toBeGreaterThan(1)
     expect(attempts).toBeLessThanOrEqual(6)
   })

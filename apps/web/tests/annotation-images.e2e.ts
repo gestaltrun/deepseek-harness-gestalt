@@ -243,8 +243,14 @@ describe('web e2e: composer and history image annotation pins', () => {
     await page.keyboard.press('Escape')
     await expect(page.getByRole('button', { name: '2 annotations' }).isVisible()).resolves.toBe(true)
     await page.getByRole('button', { name: 'Discard annotation draft' }).click()
-    await expect(page.getByRole('button', { name: '1 annotation' }).count()).resolves.toBe(0)
-    await expect(page.getByRole('button', { name: '2 annotations' }).count()).resolves.toBe(0)
+    await expect.poll(
+      () => page.getByRole('button', { name: '1 annotation' }).count(),
+      { timeout: 5_000 },
+    ).toBe(0)
+    await expect.poll(
+      () => page.getByRole('button', { name: '2 annotations' }).count(),
+      { timeout: 5_000 },
+    ).toBe(0)
     await selectPhrase(page)
     await page.getByRole('toolbar').getByRole('button', { name: 'Add annotation' }).click()
     await savePinNote(page, 'Keep the emphasis')

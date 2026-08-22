@@ -20,7 +20,7 @@ Status: implemented
 
 生产 Platform 挂载持久 PostgreSQL pairing authority、PostgreSQL Relay route store、Redis directory 与 coordination adapter、pairing HTTP 和 Relay WSS。Platform 不提供配对密码实现：旧的 Platform 中介操作 fail closed，产品端点只使用 mailbox 操作。Desktop 把 reconnect state 保存到 Electron `safeStorage` 保护且 owner-only 原子替换的文件；Mobile 把 reconnect state 与 Mobile-only Relay grant 保存到账号隔离的 IndexedDB 记录。每次物理重连都使用新的 attachment id 与新的 IK 临时密钥。
 
-Relay 在 attachment 登记、替换和关闭后，向已连接的对端发送 content-free `peer-update`，包括跨 Platform Instance 的情况。新投影只启动候选 IK；只有 Snow 认证准确的 route、selector、双方 attachment id 与 generation 后，候选 channel 才能替换 active channel。Desktop 会在 grant 轮换或撤销前使 pending accept 失效，并让它们与物理 lifecycle 取消竞争；每次 await 后都重新校验 projection identity 与 generation，因此迟到的 IK 结果只会被释放，不会安装或发送，controller stop 也不会等待一个反向等待 lifecycle queue 的 callback。Desktop 先发送 IK 响应，再发送版本化加密的 `foreground-sync`；Mobile mutation authority 在该 projection 认证前保持关闭。
+Relay 在 attachment 登记、替换和关闭后，向已连接的对端发送 content-free `peer-update`，包括跨 Platform Instance 的情况。新投影只启动候选 IK；只有 Snow 认证准确的 route、selector、双方 attachment id 与 generation 后，候选 channel 才能替换 active channel。Desktop 会在 grant 轮换或撤销前使 pending accept 失效，并让它们与物理 lifecycle 取消竞争；每次 await 后都重新校验 projection identity 与 generation，因此迟到的 IK 结果只会被释放，不会安装或发送，controller stop 也不会等待一个反向等待 lifecycle queue 的 callback。Desktop 只有在当前 generation 上成功发送 IK 响应与版本化加密的 `foreground-sync` 后，才发布候选 channel 并推进 revision。发送或 generation 失败会恰好释放候选项一次，下一次 IK 尝试保持独立。Mobile mutation authority 在同步 projection 认证前保持关闭。
 
 ## 考虑过的替代方案
 

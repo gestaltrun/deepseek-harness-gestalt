@@ -146,26 +146,31 @@ export class DesktopSnowRelayChannelOwner {
     if (projected === undefined) throw new Error('Desktop Relay rejected an unprojected Snow peer')
     const acceptedPromise = this.owner.accept(ciphertext, sourceAttachmentId, current.routeId, current.attachmentId)
     const accepted = await abortableAccept(acceptedPromise, [current.cancellation.signal, lifecycleSignal])
-    if (!this.isCurrent(current, pairingSelector, projected)) {
-      accepted.channel.dispose()
-      throw new Error('Desktop Relay rejected a stale Snow IK transcript')
+    let published = false
+    try {
+      if (!this.isCurrent(current, pairingSelector, projected)
+        || accepted.generation !== projected.generation
+        || accepted.pairingSelector !== projected.pairingSelector) {
+        throw new Error('Desktop Relay rejected a stale Snow IK transcript')
+      }
+      await this.send(accepted.pairingSelector, accepted.targetAttachmentId, accepted.payload)
+      if (!this.isCurrent(current, pairingSelector, projected)) {
+        throw new Error('Desktop Relay rejected a stale Snow IK transcript')
+      }
+      const nextRevision = this.desktopRevision + 1
+      const synchronization = sealDesktopForegroundSynchronization(
+        accepted.channel, accepted.generation, nextRevision,
+      )
+      await this.send(accepted.pairingSelector, accepted.targetAttachmentId, synchronization)
+      if (!this.isCurrent(current, pairingSelector, projected)) {
+        throw new Error('Desktop Relay rejected a stale Snow IK transcript')
+      }
+      this.channels.set(sourceAttachmentId, { channel: accepted.channel, peer: projected })
+      this.desktopRevision = nextRevision
+      published = true
+    } finally {
+      if (!published) accepted.channel.dispose()
     }
-    if (accepted.generation !== projected.generation || accepted.pairingSelector !== projected.pairingSelector) {
-      accepted.channel.dispose()
-      throw new Error('Desktop Relay rejected a stale Snow IK transcript')
-    }
-    await this.send(accepted.pairingSelector, accepted.targetAttachmentId, accepted.payload)
-    if (!this.isCurrent(current, pairingSelector, projected)) {
-      accepted.channel.dispose()
-      throw new Error('Desktop Relay rejected a stale Snow IK transcript')
-    }
-    this.channels.set(sourceAttachmentId, { channel: accepted.channel, peer: projected })
-    this.desktopRevision += 1
-    await this.send(
-      accepted.pairingSelector,
-      accepted.targetAttachmentId,
-      sealDesktopForegroundSynchronization(accepted.channel, accepted.generation, this.desktopRevision),
-    )
   }
 
   private isCurrent(

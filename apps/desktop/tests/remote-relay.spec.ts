@@ -179,6 +179,119 @@ describe('Desktop Remote Relay composition', () => {
       Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
     )).rejects.toThrow('stale Snow IK transcript')
     expect(secondChannel.dispose).toHaveBeenCalledOnce()
+
+    const thirdChannel = fakeSnowChannel()
+    const thirdPeers = [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }]
+    let thirdSend = 0
+    const third = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: thirdChannel.channel,
+      pairingSelector: selector, generation: 1,
+    }) }, async () => {
+      thirdSend += 1
+      if (thirdSend === 2) thirdPeers.splice(0)
+    })
+    third.updatePeers({ ...ready, peers: thirdPeers }, selector)
+    await expect(third.receive(
+      Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )).rejects.toThrow('stale Snow IK transcript')
+    expect(thirdChannel.dispose).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    ['IK response', 1],
+    ['foreground synchronization', 2],
+  ] as const)(
+    'disposes an unpublished channel when the %s send fails and retries without advancing revision',
+    async (_stage, failedSend) => {
+      const selector = parseRelayPairingSelector(`pairing-send-${String(failedSend)}`)
+      const desktopAttachmentId = parseRelayAttachmentId(`desktop-send-${String(failedSend)}`)
+      const mobileAttachmentId = parseRelayAttachmentId(`mobile-send-${String(failedSend)}`)
+      const failedChannel = fakeSnowChannel()
+      const recoveredChannel = fakeSnowChannel()
+      const accept = vi.fn()
+        .mockResolvedValueOnce({
+          targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: failedChannel.channel,
+          pairingSelector: selector, generation: 1,
+        })
+        .mockResolvedValueOnce({
+          targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(3), channel: recoveredChannel.channel,
+          pairingSelector: selector, generation: 1,
+        })
+      let sends = 0
+      const send = vi.fn(async () => {
+        sends += 1
+        if (sends === failedSend) throw new Error('Relay send failed')
+      })
+      const owner = new DesktopSnowRelayChannelOwner({ accept }, send)
+      owner.updatePeers({
+        type: 'ready', transportVersion: 1, routeId: parseRelayRouteId(`route-send-${String(failedSend)}`),
+        attachmentId: desktopAttachmentId,
+        peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+      }, selector)
+
+      await expect(owner.receive(
+        Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+      )).rejects.toThrow('Relay send failed')
+      expect(failedChannel.dispose).toHaveBeenCalledOnce()
+      expect(failedChannel.open).not.toHaveBeenCalled()
+      await owner.receive(
+        Uint8Array.of(4), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+      )
+      expect(accept).toHaveBeenCalledTimes(2)
+      expect(recoveredChannel.seal).toHaveBeenCalledWith({
+        type: 'projection', projection: { type: 'foreground-sync', generation: 1, desktopRevision: 1 },
+      })
+      owner.invalidate(selector)
+      expect(failedChannel.dispose).toHaveBeenCalledOnce()
+      expect(recoveredChannel.dispose).toHaveBeenCalledOnce()
+    },
+  )
+
+  it('contains a generation invalidation racing a failed IK response send', async () => {
+    const selector = parseRelayPairingSelector('pairing-race-send')
+    const desktopAttachmentId = parseRelayAttachmentId('desktop-race-send')
+    const mobileAttachmentId = parseRelayAttachmentId('mobile-race-send')
+    const failedChannel = fakeSnowChannel()
+    const recoveredChannel = fakeSnowChannel()
+    const accept = vi.fn()
+      .mockResolvedValueOnce({
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: failedChannel.channel,
+        pairingSelector: selector, generation: 1,
+      })
+      .mockResolvedValueOnce({
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(3), channel: recoveredChannel.channel,
+        pairingSelector: selector, generation: 2,
+      })
+    const send = vi.fn(async () => {
+      owner.invalidate(selector)
+      throw new Error('Relay send lost the attachment')
+    })
+    const owner = new DesktopSnowRelayChannelOwner({ accept }, send)
+    const ready = {
+      type: 'ready' as const, transportVersion: 1 as const, routeId: parseRelayRouteId('route-race-send'),
+      attachmentId: desktopAttachmentId,
+      peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+    }
+    owner.updatePeers(ready, selector)
+
+    await expect(owner.receive(
+      Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )).rejects.toThrow('Relay send lost the attachment')
+    expect(failedChannel.dispose).toHaveBeenCalledOnce()
+    send.mockImplementation(async () => {})
+    owner.updatePeers({
+      ...ready, peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 2 }],
+    }, selector)
+    await owner.receive(
+      Uint8Array.of(4), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    expect(accept).toHaveBeenCalledTimes(2)
+    expect(recoveredChannel.seal).toHaveBeenCalledWith({
+      type: 'projection', projection: { type: 'foreground-sync', generation: 2, desktopRevision: 1 },
+    })
+    owner.invalidate(selector)
+    expect(failedChannel.dispose).toHaveBeenCalledOnce()
+    expect(recoveredChannel.dispose).toHaveBeenCalledOnce()
   })
 
   it('cancels before accept starts and contains a rejected accept promise', async () => {

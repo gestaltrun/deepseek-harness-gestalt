@@ -102,4 +102,33 @@ describe('MobilePairing', () => {
 
     await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(deactivateFailure) })
   })
+
+  it('reports failed unpairing and keeps the product in an explicit unresolved state', async () => {
+    const failure = new AggregateError([new Error('Relay revoke failed')], 'Mobile Personal Pairing unpair failed')
+    const reportLifecycleError = vi.fn()
+    let snapshot: ReturnType<MobilePairingActions['getSnapshot']> = { status: 'paired' }
+    let notify = (): void => {}
+    const actions: MobilePairingActions = {
+      getSnapshot: () => snapshot,
+      subscribe: (listener) => { notify = listener; return () => {} },
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      activate: vi.fn().mockResolvedValue(undefined),
+      deactivate: vi.fn().mockResolvedValue(undefined),
+      unpair: vi.fn(async () => {
+        snapshot = { status: 'unpair-failed', error: failure.message }
+        notify()
+        throw failure
+      }),
+    }
+    render(createElement(MobilePairing, { actions, reportLifecycleError }))
+
+    fireEvent.click(screen.getByRole('button', { name: '解除配对' }))
+
+    await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(failure) })
+    expect(screen.getByRole('heading', { name: '解除配对失败' })).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('可能仍然有效')
+    expect(screen.queryByText('连接 Paired Desktop')).toBeNull()
+  })
 })

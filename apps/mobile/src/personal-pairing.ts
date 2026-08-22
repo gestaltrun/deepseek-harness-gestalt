@@ -241,9 +241,11 @@ export class MobilePairingController implements MobilePairingActions {
       }
       try {
         await settleOwnedCleanup(operations, 'Mobile Personal Pairing unpair failed')
-      } finally {
-        this.publish({ status: 'ready' })
+      } catch (error) {
+        this.publish({ status: 'unpair-failed', error: errorMessage(error) })
+        throw error
       }
+      this.publish({ status: 'ready' })
     })
   }
 

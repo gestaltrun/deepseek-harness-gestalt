@@ -24,4 +24,4 @@ Mobile 页面通过浏览器 `getUserMedia` 与受维护的 ZXing 浏览器 deco
 
 ## Consequences
 
-当 Device 信息不能识别 iOS 或 Android Installation，或名称无效时，Mobile 登录会在 OAuth 流量前失败。缺少持久展示信息的既有 Mobile Account Session 可以通过 PostgreSQL 解析，随后 Account core 会在验证证明后撤销它并返回 `SESSION_REVOKED`；客户端清除本地授权，新登录会记录原生展示。完成重放会保留已鉴别账号、Mobile Installation、完整邀请与 Mobile 握手的 SHA-256 commitment，因此 id 碰撞无法替换其中任一值。解除配对会尝试全部自有清理并汇总失败；账号激活会等待先前 Companion 释放与 Relay 撤销。产品 Mobile 新增 `@capacitor/device` 与 `@zxing/browser`；相机访问要求安全上下文与用户授权。发布入口在收到已鉴别 Desktop resync 前不会显示写死的 Desktop 身份或本地 Session。keyless Loader snapshot 仍是开发证据，不是产品链路验收。
+当 Device 信息不能识别 iOS 或 Android Installation，或名称无效时，Mobile 登录会在 OAuth 流量前失败。缺少持久展示信息的既有 Mobile Account Session 可以通过 PostgreSQL 解析，随后 Account core 会在验证证明后撤销它并返回 `SESSION_REVOKED`；客户端清除本地授权，新登录会记录原生展示。完成重放会保留已鉴别账号、Mobile Installation、完整邀请与 Mobile 握手的 SHA-256 commitment，因此 id 碰撞无法替换其中任一值。配对事务格式版本 1 会记录这项 commitment；迁移时，不含该值的无版本记录会失去重放权限，但已确认配对与清理责任会保留。解除配对会尝试全部自有清理并汇总失败；只有全部成功才发布 ready，否则保留明确且已报告的失败。账号激活会等待先前 Companion 释放与 Relay 撤销。产品 Mobile 新增 `@capacitor/device` 与 `@zxing/browser`；相机访问要求安全上下文与用户授权。发布入口在收到已鉴别 Desktop resync 前不会显示写死的 Desktop 身份或本地 Session。keyless Loader snapshot 仍是开发证据，不是产品链路验收。

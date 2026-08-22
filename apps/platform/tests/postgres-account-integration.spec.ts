@@ -8,13 +8,21 @@ import {
   parsePlatformAccountId,
 } from '@deepseek-ai/dsh-platform-account'
 import {
+  parseDevicePrincipalId,
+  parsePairingChallengeId,
+  parsePairingCompletionId,
   parsePendingPairingId,
   parsePersonalPairingId,
+  parsePersonalPairingKeyReference,
   parseRelayConnectionToken,
   parseRelayCredentialFingerprint,
 } from '@deepseek-ai/dsh-remote-access'
 import pg from 'pg'
 import { describe, expect, it } from 'vitest'
+import {
+  emptyPairingTransactionState,
+  encodePairingTransactionState,
+} from '../src/pairing-state-codec.ts'
 import { PostgresAccountBackend } from '../src/postgres-backend.ts'
 import { PostgresPersonalPairingAuthorityStore } from '../src/postgres-pairing-store.ts'
 
@@ -155,6 +163,35 @@ describe.skipIf(!postgresAvailable)('PostgresAccountBackend with disposable Post
       await runtime.close()
     }
   })
+
+  it('recovers an unversioned pairing transaction in PostgreSQL without dropping confirmed pairings', async () => {
+    const runtime = await startPostgres()
+    try {
+      const store = new PostgresPersonalPairingAuthorityStore('gestalt-production', runtime.pool)
+      await store.migrate()
+      await runtime.pool.query(
+        `INSERT INTO remote_access_pairing_transactions (database_identity, state)
+         VALUES ($1, $2::jsonb)`,
+        ['gestalt-production', JSON.stringify(legacyTransactionDocument())],
+      )
+
+      await store.runPairingTransaction(async (state) => {
+        expect(state.pairings.get(parsePersonalPairingId('pairing-legacy'))?.device.name).toBe('Preserved phone')
+        expect(state.completions.size).toBe(0)
+        expect(state.settledChallenges.get(parsePairingChallengeId('challenge-legacy'))?.outcome).toBe('completed')
+        state.blobSequence.next = 12
+      })
+
+      const durable = await runtime.pool.query<{ state: unknown }>(
+        `SELECT state FROM remote_access_pairing_transactions
+          WHERE database_identity = $1`,
+        ['gestalt-production'],
+      )
+      expect(durable.rows[0]?.state).toMatchObject({ formatVersion: 1, blobSequence: { next: 12 } })
+    } finally {
+      await runtime.close()
+    }
+  })
 })
 
 const LEGACY_SCHEMA = `
@@ -176,6 +213,51 @@ CREATE TABLE account_sessions (
 );
 CREATE TABLE account_proofs (jti text PRIMARY KEY, expires_at bigint NOT NULL);
 `
+
+function legacyTransactionDocument(): unknown {
+  const state = emptyPairingTransactionState()
+  const pairingId = parsePersonalPairingId('pairing-legacy')
+  const principalId = parseDevicePrincipalId('principal-legacy')
+  state.pairings.set(pairingId, {
+    id: pairingId,
+    devicePrincipal: {
+      id: principalId,
+      accountId: parsePlatformAccountId('account-legacy'),
+      installationId: parseInstallationId('mobile-legacy'),
+      authority: 'companion-surface',
+    },
+    device: { name: 'Preserved phone', platform: 'ios' },
+    pairedAt: 2,
+    lastAccessAt: 3,
+    online: false,
+    desktopInstallationId: parseInstallationId('desktop-legacy'),
+    keyReference: parsePersonalPairingKeyReference('key-legacy'),
+    cleanup: { resource: Uint8Array.of(1) },
+  })
+  state.principalIds.add(principalId)
+  state.completions.set(parsePairingCompletionId('completion-legacy'), {
+    accountId: 'account-legacy',
+    desktopInstallationId: parseInstallationId('desktop-legacy'),
+    mobileInstallationId: parseInstallationId('mobile-legacy'),
+    challengeId: parsePairingChallengeId('challenge-legacy'),
+    requestDigest: new Uint8Array(32).fill(7),
+    challengeCleanup: { resource: Uint8Array.of(2) },
+    view: {
+      pendingPairingId: parsePendingPairingId('pending-legacy'),
+      authenticationWords: ['amber', 'binary', 'cedar', 'delta', 'ember', 'frost'],
+      desktopHandshake: Uint8Array.of(3),
+      device: { name: 'Legacy pending phone', platform: 'android' },
+    },
+    completedAt: 10,
+  })
+  const document = structuredClone(encodePairingTransactionState(state)) as {
+    formatVersion?: unknown
+    completions: Array<[string, Record<string, unknown>]>
+  }
+  delete document.formatVersion
+  for (const [, completion] of document.completions) delete completion.requestDigest
+  return document
+}
 
 async function startPostgres(): Promise<{ pool: pg.Pool; close(): Promise<void> }> {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-account-pg-'))

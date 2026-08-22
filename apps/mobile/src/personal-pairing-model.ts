@@ -11,6 +11,7 @@ export type MobilePairingSnapshot =
     authenticationWords: readonly [string, string, string, string, string, string]
   }
   | { status: 'paired' }
+  | { status: 'unpair-failed'; error: string }
   | { status: 'unavailable'; error: string }
 
 /** Mobile adapter for full-link/QR completion and handshake state. */
@@ -29,6 +30,9 @@ export interface MobilePairingActions {
   activate(): Promise<void>
   /** Stop timers and drain in-flight work on sign-out or unmount. */
   deactivate(): Promise<void>
-  /** Unpair this installation: wipe handshake material, drop Relay authority, and stop the connection. */
+  /**
+   * Unpair this installation by attempting every owned cleanup.
+   * A rejected cleanup publishes `unpair-failed`, preserves an unresolved product state, and rejects with every failure.
+   */
   unpair(): Promise<void>
 }

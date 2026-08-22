@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-22-authenticated-mobile-installation-camera-pairing.md
-2026-08-22-authenticated-mobile-installation-camera-pairing.md: ee255c32c9f1b61019bd9726beed1108b9186c77
-2026-08-22-authenticated-mobile-installation-camera-pairing.zh.md: 32701a883c44c6dea491f6e88c4c904fee3d77f4
+2026-08-22-authenticated-mobile-installation-camera-pairing.md: fdc248900b89fab05d897a57f2785d2bf2b4ec95
+2026-08-22-authenticated-mobile-installation-camera-pairing.zh.md: 5f01d84a4100a2e4dc36dff714086490a99fdfcc

@@ -32,6 +32,7 @@ const CHALLENGE_OUTCOMES = new Set<ChallengeOutcome>([
 const PENDING_OUTCOMES = new Set<PendingOutcome>([
   'confirmed', 'rejected', 'disabled', 'collision', 'disposed',
 ])
+const PAIRING_TRANSACTION_FORMAT_VERSION = 1
 
 /** Empty exclusive pairing-transaction document. */
 export function emptyPairingTransactionState(): PersonalPairingTransactionState {
@@ -53,12 +54,13 @@ export function emptyPairingTransactionState(): PersonalPairingTransactionState 
 }
 
 /**
- * Encode one exclusive pairing-transaction document as JSON-safe data.
+ * Encode one exclusive pairing-transaction document in the current JSON-safe format.
  * @param state - in-memory Maps mutated under the store lease.
  * @returns JSON-serializable document.
  */
 export function encodePairingTransactionState(state: PersonalPairingTransactionState): unknown {
   return {
+    formatVersion: PAIRING_TRANSACTION_FORMAT_VERSION,
     challenges: [...state.challenges].map(([id, record]) => [id, encodeChallenge(record)]),
     settledChallenges: [...state.settledChallenges].map(([id, record]) => [id, encodeSettledChallenge(record)]),
     completions: [...state.completions].map(([id, record]) => [id, encodeCompletion(record)]),
@@ -78,11 +80,29 @@ export function encodePairingTransactionState(state: PersonalPairingTransactionS
 /**
  * Decode one exclusive pairing-transaction document after a durable read.
  * @param value - JSON or jsonb document.
- * @returns Maps ready for in-lease mutation.
+ * @returns Maps ready for in-lease mutation; legacy replay entries without a request digest become cleanup-owning terminal records.
+ * @throws TypeError when an explicit format version is unknown or the selected document format is malformed.
  */
 export function decodePairingTransactionState(value: unknown): PersonalPairingTransactionState {
   if (value === null || value === undefined) return emptyPairingTransactionState()
   const record = asRecord(value, 'pairing transaction state')
+  if (!Object.hasOwn(record, 'formatVersion')) return decodeLegacyPairingTransactionState(record)
+  const formatVersion = asSafeInteger(record.formatVersion, 'pairing transaction formatVersion')
+  if (formatVersion !== PAIRING_TRANSACTION_FORMAT_VERSION) {
+    throw new TypeError('pairing transaction format version is unsupported')
+  }
+  return decodePairingTransactionFields(
+    record,
+    decodeMap(record.completions, 'completions', parsePairingCompletionId, decodeCompletion),
+    decodeMap(record.pending, 'pending', parsePendingPairingId, decodePending),
+  )
+}
+
+function decodePairingTransactionFields(
+  record: Record<string, unknown>,
+  completions: PersonalPairingTransactionState['completions'],
+  pending: PersonalPairingTransactionState['pending'],
+): PersonalPairingTransactionState {
   const orphans = new Map<CleanupRecord<Uint8Array>, OrphanPendingCleanupRecord>()
   for (const encoded of asArray(record.orphanPendingCleanups, 'orphanPendingCleanups')) {
     const orphan = decodeOrphan(encoded)
@@ -93,8 +113,8 @@ export function decodePairingTransactionState(value: unknown): PersonalPairingTr
     settledChallenges: decodeMap(
       record.settledChallenges, 'settledChallenges', parsePairingChallengeId, decodeSettledChallenge,
     ),
-    completions: decodeMap(record.completions, 'completions', parsePairingCompletionId, decodeCompletion),
-    pending: decodeMap(record.pending, 'pending', parsePendingPairingId, decodePending),
+    completions,
+    pending,
     settledPending: decodeMap(record.settledPending, 'settledPending', parsePendingPairingId, decodeSettledPending),
     pairings: decodeMap(record.pairings, 'pairings', parsePersonalPairingId, decodeStoredPairing),
     principalIds: new Set(asArray(record.principalIds, 'principalIds').map(parseDevicePrincipalId)),
@@ -105,6 +125,114 @@ export function decodePairingTransactionState(value: unknown): PersonalPairingTr
     blobUploads: decodeMap(record.blobUploads, 'blobUploads', asPlainString, decodeBlobUploads),
     blobSequence: { next: asSafeInteger(asRecord(record.blobSequence, 'blobSequence').next, 'blobSequence.next') },
   }
+}
+
+type LegacyCompletionReplayRecord = Pick<
+  CompletionReplayRecord,
+  | 'accountId'
+  | 'desktopInstallationId'
+  | 'mobileInstallationId'
+  | 'challengeId'
+  | 'challengeCleanup'
+  | 'completedAt'
+>
+type LegacyPendingPairingRecord = LegacyCompletionReplayRecord & Pick<PendingPairingRecord, 'cleanup' | 'activationCleanup'>
+
+function decodeLegacyPairingTransactionState(record: Record<string, unknown>): PersonalPairingTransactionState {
+  const safeCompletions = new Map<ReturnType<typeof parsePairingCompletionId>, CompletionReplayRecord>()
+  const unsafeCompletions: LegacyCompletionReplayRecord[] = []
+  for (const [id, encoded] of decodeEntries(record.completions, 'completions')) {
+    const completionId = parsePairingCompletionId(asPlainString(id, 'completions key'))
+    const completion = asRecord(encoded, 'completion')
+    if (Object.hasOwn(completion, 'requestDigest')) safeCompletions.set(completionId, decodeCompletion(completion))
+    else unsafeCompletions.push(decodeLegacyCompletion(completion))
+  }
+  const safePending = new Map<ReturnType<typeof parsePendingPairingId>, PendingPairingRecord>()
+  const unsafePending = new Map<ReturnType<typeof parsePendingPairingId>, LegacyPendingPairingRecord>()
+  for (const [id, encoded] of decodeEntries(record.pending, 'pending')) {
+    const pendingId = parsePendingPairingId(asPlainString(id, 'pending key'))
+    const pending = asRecord(encoded, 'pending pairing')
+    if (Object.hasOwn(pending, 'requestDigest')) safePending.set(pendingId, decodePending(pending))
+    else unsafePending.set(pendingId, decodeLegacyPending(pending))
+  }
+  const state = decodePairingTransactionFields(record, safeCompletions, safePending)
+  for (const completion of unsafeCompletions) recoverLegacyChallenge(state, completion)
+  for (const [pendingId, pending] of unsafePending) {
+    recoverLegacyChallenge(state, pending)
+    if (state.settledPending.has(pendingId)) {
+      throw new TypeError('legacy pairing transaction contains duplicate pending state')
+    }
+    state.settledPending.set(pendingId, {
+      accountId: pending.accountId,
+      desktopInstallationId: pending.desktopInstallationId,
+      mobileInstallationId: pending.mobileInstallationId,
+      outcome: 'disposed',
+      cleanup: pending.cleanup,
+      ...(pending.activationCleanup === undefined ? {} : { activeCleanup: pending.activationCleanup }),
+      settledAt: pending.completedAt,
+    })
+  }
+  return state
+}
+
+function decodeEntries(value: unknown, name: string): Array<[unknown, unknown]> {
+  return asArray(value, name).map((entry) => {
+    if (!Array.isArray(entry) || entry.length !== 2) throw new TypeError(`${name} entries must be pairs`)
+    return [entry[0], entry[1]]
+  })
+}
+
+function decodeLegacyCompletion(value: Record<string, unknown>): LegacyCompletionReplayRecord {
+  return {
+    accountId: asPlainString(value.accountId, 'completion.accountId'),
+    desktopInstallationId: parseInstallationId(value.desktopInstallationId),
+    mobileInstallationId: parseInstallationId(value.mobileInstallationId),
+    challengeId: parsePairingChallengeId(value.challengeId),
+    challengeCleanup: decodeCleanup(value.challengeCleanup),
+    completedAt: asSafeInteger(value.completedAt, 'completion.completedAt'),
+  }
+}
+
+function decodeLegacyPending(value: Record<string, unknown>): LegacyPendingPairingRecord {
+  return {
+    ...decodeLegacyCompletion(value),
+    cleanup: decodeCleanup(value.cleanup),
+    ...(value.activationCleanup === undefined ? {} : { activationCleanup: decodeCleanup(value.activationCleanup) }),
+  }
+}
+
+function recoverLegacyChallenge(
+  state: PersonalPairingTransactionState,
+  completion: LegacyCompletionReplayRecord,
+): void {
+  if (state.challenges.has(completion.challengeId)) {
+    throw new TypeError('legacy pairing transaction contains active and completed challenge state')
+  }
+  const settled = state.settledChallenges.get(completion.challengeId)
+  if (settled === undefined) {
+    state.settledChallenges.set(completion.challengeId, {
+      accountId: completion.accountId,
+      desktopInstallationId: completion.desktopInstallationId,
+      outcome: 'completed',
+      cleanup: completion.challengeCleanup,
+      settledAt: completion.completedAt,
+    })
+    return
+  }
+  if (settled.accountId !== completion.accountId
+    || settled.desktopInstallationId !== completion.desktopInstallationId
+    || settled.outcome !== 'completed'
+    || !sameCleanup(settled.cleanup, completion.challengeCleanup)) {
+    throw new TypeError('legacy pairing transaction completed challenge state is inconsistent')
+  }
+}
+
+function sameCleanup(left: CleanupRecord<Uint8Array>, right: CleanupRecord<Uint8Array>): boolean {
+  const leftResource = left.resource
+  const rightResource = right.resource
+  if (leftResource === undefined || rightResource === undefined) return leftResource === rightResource
+  return leftResource.byteLength === rightResource.byteLength
+    && leftResource.every((byte, index) => byte === rightResource[index])
 }
 
 function encodeChallenge(record: ChallengeRecord): unknown {

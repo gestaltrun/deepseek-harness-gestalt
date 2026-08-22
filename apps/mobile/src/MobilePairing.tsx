@@ -55,6 +55,10 @@ export function MobilePairing({
     setCameraActive(false)
   }
 
+  const unpair = (): void => {
+    void actions.unpair().catch(reportLifecycleError)
+  }
+
   if (snapshot.status === 'unavailable') {
     return <section className={css.card}><h2>Personal Pairing</h2><p role="alert">{snapshot.error}</p></section>
   }
@@ -78,12 +82,22 @@ export function MobilePairing({
       </section>
     )
   }
+  if (snapshot.status === 'unpair-failed') {
+    return (
+      <section className={css.card} data-mobile-pairing="unpair-failed">
+        <h2>解除配对失败</h2>
+        <p role="alert">部分本地或 Relay 权限可能仍然有效。请再次解除配对。</p>
+        <small>{snapshot.error}</small>
+        <button type="button" className={css.continue} onClick={unpair}>重试解除配对</button>
+      </section>
+    )
+  }
   if (snapshot.status === 'paired') {
     return (
       <section className={css.card} data-mobile-pairing="paired">
         <h2>已配对</h2>
         <p>Companion Surface 已激活。</p>
-        <button type="button" className={css.continue} onClick={() => { void actions.unpair() }}>解除配对</button>
+        <button type="button" className={css.continue} onClick={unpair}>解除配对</button>
       </section>
     )
   }

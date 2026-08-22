@@ -172,7 +172,10 @@ describe('MobilePairingController', () => {
     expect(companion.releasePairing).toHaveBeenCalledOnce()
     expect(relay.configure).toHaveBeenCalledWith(undefined)
     expect(relay.stop).toHaveBeenCalledOnce()
-    expect(controller.getSnapshot()).toEqual({ status: 'ready' })
+    expect(controller.getSnapshot()).toEqual({
+      status: 'unpair-failed',
+      error: 'Mobile Personal Pairing unpair failed',
+    })
   })
 
   it('awaits account-change Companion release and Relay revocation before activation settles', async () => {

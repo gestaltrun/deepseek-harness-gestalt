@@ -1,6 +1,7 @@
 # Agent Note: 托管 Windows 完整通道使用 2 个顶层门禁工作进程
 
 Status: implemented
+Archived: 2026-08-23
 
 [English](2026-08-20-hosted-windows-two-gate-workers.md) | 中文
 

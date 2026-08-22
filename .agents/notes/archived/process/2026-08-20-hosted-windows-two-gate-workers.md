@@ -1,6 +1,7 @@
 # Agent Note: Hosted Windows complete lane uses two top-level gate workers
 
 Status: implemented
+Archived: 2026-08-23
 
 English | [中文](2026-08-20-hosted-windows-two-gate-workers.zh.md)
 

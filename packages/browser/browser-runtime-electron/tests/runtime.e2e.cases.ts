@@ -136,6 +136,7 @@ const box = document.getElementById('box')
 const out = document.getElementById('out')
 const sync = () => { out.textContent = box.value }
 box.addEventListener('input', sync)
+box.focus()
 </script>
 </body></html>`)
       return

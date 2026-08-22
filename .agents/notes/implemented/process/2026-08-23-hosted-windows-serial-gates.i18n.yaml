@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-23-hosted-windows-serial-gates.md
-2026-08-23-hosted-windows-serial-gates.md: 11c56375d72f73fcd50266ffda35e7072ea10bee
-2026-08-23-hosted-windows-serial-gates.zh.md: cf7b79195407ecc2504ff7e33d7115cebd5e6a79
+2026-08-23-hosted-windows-serial-gates.md: b7699815016e2fcc623f3f588f91f5c7b137d61f
+2026-08-23-hosted-windows-serial-gates.zh.md: 36984791b3fe074a6a6ad6ff6e45b63eb7f1a234

@@ -126,6 +126,8 @@ describe('CI workflow', () => {
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000',
     })
     expect(String(windowsNative.env.DSH_COVERAGE_MAX_WORKERS)).toContain("|| '1'")
+    expect(String(windowsNative.env.DSH_COVERAGE_PARTITION_CONCURRENCY)).toContain("&& '8'")
+    expect(String(windowsNative.env.DSH_COVERAGE_PARTITION_CONCURRENCY)).toContain("|| '1'")
     expect(windowsNative.env.DSH_GATE_CONCURRENCY).toBe('1')
     expect(String(windowsNative.env.DSH_PUBLINT_CONCURRENCY)).toContain("|| '1'")
     const nativeCommandSteps = (windowsNative.steps as unknown[]).filter((step): step is Record<string, unknown> & { run: string } => (

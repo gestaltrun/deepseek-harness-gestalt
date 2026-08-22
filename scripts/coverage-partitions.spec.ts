@@ -4,11 +4,13 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   COVERAGE_PARTITION_MODE_ENV,
+  COVERAGE_PARTITION_CONCURRENCY_ENV,
   COVERAGE_PARTITIONS_ENV,
   COVERAGE_TEST_TIMEOUT_ENV,
   CoveragePartitionCoordinator,
   coverageTestTimeoutArgs,
   forwardedCoverageArgs,
+  parseCoveragePartitionConcurrency,
   parseCoveragePartitionCount,
   type CoverageCommand,
   type CoverageCommandResult,
@@ -44,6 +46,22 @@ describe('coverage partition count', () => {
   })
 })
 
+describe('coverage partition concurrency', () => {
+  it.each([
+    [undefined, undefined],
+    ['', undefined],
+    ['1', 1],
+    ['3', 3],
+  ])('parses %j as %j', (raw, expected) => {
+    expect(parseCoveragePartitionConcurrency(raw)).toBe(expected)
+  })
+
+  it.each(['0', '-1', '1.5', '01', 'many'])('rejects %j', (raw) => {
+    expect(() => parseCoveragePartitionConcurrency(raw))
+      .toThrow(`${COVERAGE_PARTITION_CONCURRENCY_ENV} must be a positive integer`)
+  })
+})
+
 describe('coverage partition timeout', () => {
   it('applies one configured timeout to tests and polling', () => {
     expect(coverageTestTimeoutArgs('30000')).toEqual([
@@ -74,6 +92,38 @@ describe('coverage forwarded arguments', () => {
 })
 
 describe('coverage partition coordinator', () => {
+  it('limits concurrently active partition processes without changing the shard count', async () => {
+    const root = await temporaryRoot()
+    let active = 0
+    let peak = 0
+    const runCommand = vi.fn(async (command: CoverageCommand) => {
+      if (command.blobPath === undefined) return passed
+      active += 1
+      peak = Math.max(peak, active)
+      await writeBlob(command)
+      await new Promise(resolve => setTimeout(resolve, 1))
+      active -= 1
+      return passed
+    })
+    const coordinator = new CoveragePartitionCoordinator({
+      root,
+      partitions: 3,
+      maxConcurrency: 1,
+      pnpmEntrypoint: '/pnpm.cjs',
+      runCommand,
+    })
+
+    await expect(coordinator.run()).resolves.toBe(0)
+
+    expect(peak).toBe(1)
+    expect(runCommand.mock.calls.map(([command]) => command.label)).toEqual([
+      'partition 1/3',
+      'partition 2/3',
+      'partition 3/3',
+      'merged coverage report',
+    ])
+  })
+
   it('runs every single-worker partition before one merged threshold check', async () => {
     const root = await temporaryRoot()
     const commands: CoverageCommand[] = []
@@ -109,6 +159,7 @@ describe('coverage partition coordinator', () => {
         '--testTimeout=30000',
       ]))
       expect(command.env).toEqual({
+        [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: '1',
       })
@@ -118,6 +169,7 @@ describe('coverage partition coordinator', () => {
     expect(mergeCommand.args).toContain('--coverage')
     expect(mergeCommand.args.some(argument => argument.startsWith('--merge-reports='))).toBe(true)
     expect(mergeCommand.env).toEqual({
+      [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
       [COVERAGE_PARTITIONS_ENV]: undefined,
       [COVERAGE_PARTITION_MODE_ENV]: undefined,
     })

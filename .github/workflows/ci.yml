@@ -478,6 +478,9 @@ jobs:
     env:
       DSH_COVERAGE_MAX_WORKERS: ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '2' || '1' }}
       DSH_COVERAGE_PARTITIONS: '8'
+      # Standard hosted capacity executes the eight isolated shards one at a
+      # time. The 16-core failover pool retains the measured eight-way fan-out.
+      DSH_COVERAGE_PARTITION_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '1' }}
       # Instrumented process and polling fixtures can exceed Vitest's defaults.
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
       # The two coverage inventories are individually single-worker on hosted

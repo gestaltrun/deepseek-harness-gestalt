@@ -199,6 +199,44 @@ describe('coverage partition coordinator', () => {
     expect(runCommand).toHaveBeenCalledTimes(3)
   })
 
+  it('retries one partition once after an isolated Vitest worker exit', async () => {
+    const root = await temporaryRoot()
+    const reported = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    let firstPartitionRuns = 0
+    const runCommand = vi.fn(async (command: CoverageCommand) => {
+      await writeBlob(command)
+      if (command.label === 'partition 1/2' && firstPartitionRuns++ === 0) {
+        return {
+          exitCode: 1,
+          signalCode: null,
+          outputTail: [
+            'Error: [vitest-pool]: Worker forks emitted error.',
+            'Caused by: Error: Worker exited unexpectedly',
+          ].join('\n'),
+        }
+      }
+      return passed
+    })
+    const coordinator = new CoveragePartitionCoordinator({
+      root,
+      partitions: 2,
+      maxConcurrency: 1,
+      pnpmEntrypoint: '/pnpm.cjs',
+      runCommand,
+    })
+
+    await expect(coordinator.run()).resolves.toBe(0)
+    expect(reported).toHaveBeenCalledWith(
+      'coverage-partitions: retry partition 1/2 after an unexpected Vitest worker exit',
+    )
+    expect(runCommand.mock.calls.map(([command]) => command.label)).toEqual([
+      'partition 1/2',
+      'partition 1/2',
+      'partition 2/2',
+      'merged coverage report',
+    ])
+  })
+
   it('rejects a missing partition blob before merge', async () => {
     const root = await temporaryRoot()
     const runCommand = vi.fn(async (command: CoverageCommand) => {

@@ -146,7 +146,12 @@ export class CoveragePartitionCoordinator {
           const command = commands[index]
           if (command === undefined) throw new Error(`coverage partition ${String(index + 1)} is missing.`)
           console.log(`coverage-partitions: start ${command.label}`)
-          const result = await this.runCommand(command)
+          let result = await this.runCommand(command)
+          if (isIsolatedVitestWorkerExit(result)) {
+            console.warn(`coverage-partitions: retry ${command.label} after an unexpected Vitest worker exit`)
+            if (command.blobPath !== undefined) await removeOwnedFile(command.blobPath)
+            result = await this.runCommand(command)
+          }
           results[index] = result
           if (commandFailed(result)) {
             console.error(`coverage-partitions: FAIL ${command.label} (${commandFailureReason(result)})`)
@@ -287,6 +292,23 @@ function commandFailureReason(result: CoverageCommandResult): string {
     result.signalCode === null ? undefined : `signal ${result.signalCode}`,
   ].filter((fact): fact is string => fact !== undefined)
   return facts.join(', ') || 'no exit code or signal'
+}
+
+function isIsolatedVitestWorkerExit(result: CoverageCommandResult): boolean {
+  const output = result.outputTail ?? ''
+  return result.exitCode === 1
+    && result.signalCode === null
+    && result.error === undefined
+    && output.includes('[vitest-pool]: Worker forks emitted error.')
+    && output.includes('Worker exited unexpectedly')
+    && !output.includes('Failed Tests')
+}
+
+async function removeOwnedFile(path: string): Promise<void> {
+  await unlink(path).catch((error: unknown) => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return
+    throw error
+  })
 }
 
 async function removeOwnedTree(path: string): Promise<void> {

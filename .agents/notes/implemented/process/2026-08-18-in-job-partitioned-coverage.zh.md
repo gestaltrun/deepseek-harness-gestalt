@@ -24,11 +24,11 @@ Status: implemented
 
 分区子进程通过协调器流式传递 stdout 与 stderr。覆盖率门禁选择 `run-gates` 流式输出，因此测试进度与失败会在发生时进入 CI 日志，调度器不会缓冲完整日志。协调器还会为每个子进程保留一份有界的 64 KiB 混合输出尾部；子进程以失败状态结算时，它会打印 spawn 错误、退出码或信号，并在校验完整 blob 集合前重印这份尾部，使具体 Vitest 失败与最终分区诊断相邻。
 
-普通测试失败仍通过 `--coverage.reportOnFailure` 产出 blob，使合并步骤可以先报告完整覆盖率状态，再由协调器返回失败。spawn 失败、信号终止、非零退出、blob 缺失或多余，以及合并失败都会让门禁失败。协调器只删除自己拥有的覆盖率目录树；若该路径是链接，则只 unlink，不递归跟随。
+普通测试失败仍通过 `--coverage.reportOnFailure` 产出 blob，使合并步骤可以先报告完整覆盖率状态，再由协调器返回失败。若某分区以 Vitest 的精确 `Worker forks emitted error` 与 `Worker exited unexpectedly` 诊断退出，且没有 `Failed Tests` 区段，协调器会删除该分区的 blob 并再运行一次。普通测试失败绝不重试，重试仍失败时门禁保持失败。spawn 失败、信号终止、其他非零退出、blob 缺失或多余，以及合并失败都会让门禁失败。协调器只删除自己拥有的覆盖率目录树；若该路径是链接，则只 unlink，不递归跟随。
 
 ## 验证
 
-`scripts/coverage-partitions.spec.ts` 固定了参数构造、包脚本分隔符移除、分区数与并发数解析、有界调度、单 worker 分区、唯一一次合并阈值命令、失败测试合并、完整 blob 校验前的失败诊断、spawn 失败后等待兄弟分区，以及链接安全清理。`scripts/run-gates.spec.ts` 固定了显式启用、非法数量拒绝、完整 Windows 清单及其阻断性划分，以及不缓冲的流式输出。`scripts/ci-workflow.spec.ts` 固定了 Windows 托管与故障切换上限。
+`scripts/coverage-partitions.spec.ts` 固定了参数构造、包脚本分隔符移除、分区数与并发数解析、有界调度、单 worker 分区、唯一一次合并阈值命令、失败测试合并、孤立 worker 退出的一次有界重试、完整 blob 校验前的失败诊断、spawn 失败后等待兄弟分区，以及链接安全清理。`scripts/run-gates.spec.ts` 固定了显式启用、非法数量拒绝、完整 Windows 清单及其阻断性划分，以及不缓冲的流式输出。`scripts/ci-workflow.spec.ts` 固定了 Windows 托管与故障切换上限。
 
 已完成的原生 Windows 对比中，较大 runner 上的双分区耗时约 405 秒，16 分区耗时 112.66–122.01 秒，但 16 路调度与构建、豁免覆盖率并行时，会形成超过 20 个活动执行单元。8 个 shard 继续保留独立进程隔离和有界报告大小。在标准托管 runner 上，同一提交同时运行全部 8 个分区耗时 710.81 秒，并在 12 个文件中产生 15 项失败；互不相关的超时集合让 4 个受支持源码位置未被覆盖。因此，托管上限设为 1。两个 Linux 样本中，保守的双分区配置耗时 276.68 秒和 282.27 秒；该配置运行稳定，却把普通路径原有的 4 个插桩 worker 减半，因此 Linux 保留 4 路扇出。
 

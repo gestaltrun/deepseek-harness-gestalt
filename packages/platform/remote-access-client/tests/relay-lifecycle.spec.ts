@@ -492,6 +492,25 @@ describe('RemoteRelayEndpointController', () => {
     vi.useRealTimers()
   })
 
+  it('times out after challenge proof when Platform withholds the ready acknowledgement', async () => {
+    const socket = new FakeSocket(false)
+    const onTransportError = vi.fn()
+    const controller = new RemoteRelayEndpointController({
+      ...mobileOptions(async () => socket), attachTimeoutMs: 50,
+      reconnectDelayMs: 100, onTransportError,
+    })
+    const starting = controller.start()
+    await vi.waitFor(() => { expect(socket.decoded()).toHaveLength(1) })
+    respondToChallenge(socket)
+    await vi.waitFor(() => { expect(socket.decoded()).toHaveLength(2) })
+    await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'REMOTE_OFFLINE' }),
+    ) })
+    const stopping = controller.stop()
+    await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+    await stopping
+  })
+
   it('does not publish a connection when stop wins immediately after ready', async () => {
     const socket = new FakeSocket(false)
     const controller = new RemoteRelayEndpointController(mobileOptions(async () => socket))
@@ -607,6 +626,39 @@ describe('RemoteRelayEndpointController', () => {
     }))
     await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'RELAY_ATTACHMENT_REJECTED' }),
+    ) })
+    await controller.stop()
+  })
+
+  it('reconnects after a ready-stage error and accepts a matching peer update', async () => {
+    const rejected = new FakeSocket(false)
+    const ready = new FakeSocket()
+    const sockets: RelayEndpointSocket[] = [rejected, ready]
+    const onPeerAttachments = vi.fn()
+    const controller = new RemoteRelayEndpointController({
+      ...mobileOptions(async () => {
+        const socket = sockets.shift()
+        if (socket === undefined) throw new Error('no replacement')
+        return socket
+      }),
+      attachTimeoutMs: 1_000,
+      onPeerAttachments,
+    })
+    const starting = controller.start()
+    await vi.waitFor(() => { expect(rejected.decoded()).toHaveLength(1) })
+    respondToChallenge(rejected)
+    await vi.waitFor(() => { expect(rejected.decoded()).toHaveLength(2) })
+    rejected.receive(encodeRelayMessage({
+      type: 'error', transportVersion: 1, code: 'RELAY_ROUTE_REVOKED',
+    }))
+    await starting
+    onPeerAttachments.mockClear()
+    ready.receive(encodeRelayMessage({
+      type: 'peer-update', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+      attachmentId: parseRelayAttachmentId('mobile-one'), peers: [],
+    }))
+    await vi.waitFor(() => { expect(onPeerAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'peer-update', attachmentId: 'mobile-one' }),
     ) })
     await controller.stop()
   })

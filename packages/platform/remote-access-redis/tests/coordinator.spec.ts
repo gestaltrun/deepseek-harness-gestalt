@@ -73,11 +73,20 @@ describe('RedisRelayCoordinator', () => {
     expect(await platformA.publish(entry.instanceId, {
       type: 'delivered', deliveryId: parseRelayDeliveryId('delivery-one'),
     })).toBe(true)
+    expect(await platformA.publish(entry.instanceId, {
+      type: 'peer-update', transportVersion: 1, routeId,
+      attachmentId, peers: [{
+        attachmentId: parseRelayAttachmentId('mobile-one'),
+        pairingSelector: parseRelayPairingSelector('pairing-one'), generation: 3,
+      }],
+      targetConnectionToken: entry.connectionToken, revision: entry.revision,
+    })).toBe(true)
     await platformA.invalidate({ type: 'invalidate', routeId, revision: 4 })
 
     expect(received).toEqual([
       expect.objectContaining({ type: 'ciphertext', ciphertext }),
       { type: 'delivered', deliveryId: parseRelayDeliveryId('delivery-one') },
+      expect.objectContaining({ type: 'peer-update', attachmentId, revision: entry.revision }),
       { type: 'invalidate', routeId, revision: 4 },
     ])
     expect(bus.published.join('\n')).not.toContain('private prompt')
@@ -125,6 +134,13 @@ describe('RedisRelayCoordinator', () => {
     await expect(coordinator.publish(parseRelayInstanceId('platform-a'), {
       type: 'invalidate', routeId: entry.routeId, revision: 2,
     })).rejects.toThrow('must use invalidate')
+
+    const sparse = clientFixture()
+    sparse.sMembers.mockResolvedValueOnce(['desktop-stale'])
+    const sparseCoordinator = new RedisRelayCoordinator({
+      command: sparse, subscriber: clientFixture(), keyPrefix: 'dsh:relay',
+    })
+    await expect(sparseCoordinator.list(parseRelayRouteId('route-stale'))).resolves.toEqual([])
   })
 
   it('cancels an in-flight directory registration through the maintained Redis client', async () => {

@@ -388,7 +388,7 @@ export interface EndpointPairingPublication {
   routeId: RelayRouteId
   desktopCredentialDigest: Uint8Array
   credentialDigest: Uint8Array
-  pairing: StoredPersonalPairing
+  pairing: EndpointStoredPersonalPairing
   accessGeneration: number
 }
 
@@ -832,6 +832,14 @@ export type StoredPersonalPairing = PersonalPairingView & {
   endpointRelayRevision?: number
 }
 
+/** Confirmed pairing fields required while endpoint authority publication remains prepared. */
+export type EndpointStoredPersonalPairing = StoredPersonalPairing & {
+  endpointPendingPairingId: PendingPairingId
+  endpointRouteId: RelayRouteId
+  endpointDesktopCredentialDigest: Uint8Array
+  endpointCredentialDigest: Uint8Array
+}
+
 /** Provider combining instance-local handshake work with deployment-owned confirmed authority. */
 export class PersonalPairingProvider extends RemoteAccessService {
   private transactionState: PersonalPairingTransactionState | undefined
@@ -1199,7 +1207,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
         mailbox.exportState(), account.id, installation.id, 'desktop', 1,
       )
       const now = this.clock.now()
-      const pairing: StoredPersonalPairing = {
+      const pairing: EndpointStoredPersonalPairing = {
         id: pairingId,
         devicePrincipal: {
           id: principalId, accountId: account.id, installationId: pending.mobileInstallationId,
@@ -1236,7 +1244,6 @@ export class PersonalPairingProvider extends RemoteAccessService {
     const register = this.options.relay?.registerPairingCredentialDigests
     if (register === undefined) throw new Error('Remote Relay cannot register endpoint-owned pairing authority')
     let registered = false
-    let authorityPublished = false
     try {
       await this.assertEndpointPublicationCurrent(publication)
       const relayRevision = await register.call(this.options.relay,
@@ -1251,20 +1258,15 @@ export class PersonalPairingProvider extends RemoteAccessService {
         pendingPairingId: publication.pendingPairingId,
         pairingId: publication.pairing.id,
       })
-      authorityPublished = true
       await this.assertEndpointPublicationCurrent(publication)
       return await this.exclusive(async () => {
-        await this.assertEndpointAccessCurrent(publication)
-        const retained = this.requireTransactions().endpointPublications.get(publication.pendingPairingId)
+        const retained = await this.assertEndpointAccessCurrent(publication)
         const existing = [...this.pairings.values()].find(
           pairing => pairing.endpointPendingPairingId === publication.pendingPairingId,
         )
         if (existing !== undefined) return {
           pairing: clonePairing(existing), routeId: existing.endpointRouteId as RelayRouteId,
           relayRevision: existing.endpointRelayRevision as number,
-        }
-        if (retained === undefined || !sameEndpointPublication(retained, publication)) {
-          throw new RemoteAccessError('PAIRING_PENDING_INVALID', 'Endpoint Pairing publication is unavailable')
         }
         const pairing = { ...retained.pairing, endpointRelayRevision: relayRevision }
         const mailbox = this.endpointMailbox()
@@ -1288,7 +1290,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
         return { pairing: clonePairing(pairing), routeId: retained.routeId, relayRevision }
       })
     } catch (error) {
-      if (registered || authorityPublished) await this.retainEndpointPublicationRevocation(publication)
+      if (registered) await this.retainEndpointPublicationRevocation(publication)
       try { await this.reconcileEndpointPublicationRevocations() } catch (cleanupError) {
         throw new AggregateError([error, cleanupError], 'Endpoint Pairing publication rollback failed')
       }
@@ -1667,11 +1669,12 @@ export class PersonalPairingProvider extends RemoteAccessService {
       if (settled.outcome === 'confirmed' && settled.view !== undefined) {
         const authority = await this.authority.getMobilePairing(pendingPairingId)
         if (authority === undefined) return { status: 'rejected' }
+        if (authority.sealedRelayAuthority === undefined) {
+          return { status: 'paired', pairingId: settled.view.id }
+        }
         return {
           status: 'paired', pairingId: settled.view.id,
-          ...(authority.sealedRelayAuthority === undefined
-            ? {}
-            : { sealedRelayAuthority: authority.sealedRelayAuthority.slice() }),
+          sealedRelayAuthority: authority.sealedRelayAuthority.slice(),
         }
       }
       return { status: 'rejected' }
@@ -2360,7 +2363,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
     await this.exclusive(async () => { await this.assertEndpointAccessCurrent(publication) })
   }
 
-  private async assertEndpointAccessCurrent(publication: EndpointPairingPublication): Promise<void> {
+  private async assertEndpointAccessCurrent(publication: EndpointPairingPublication): Promise<EndpointPairingPublication> {
     const retained = this.requireTransactions().endpointPublications.get(publication.pendingPairingId)
     const access = this.requireTransactions().endpointAccessGenerations.get(
       accessKey(publication.accountId, publication.desktopInstallationId),
@@ -2371,6 +2374,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
       || access.routeId !== publication.routeId || !authority.enabled || authority.routeId !== publication.routeId) {
       throw new RemoteAccessError('PAIRING_PENDING_INVALID', 'Endpoint Pairing publication generation is stale')
     }
+    return retained
   }
 
   private get challenges(): PersonalPairingTransactionState['challenges'] { return this.requireTransactions().challenges }
@@ -2479,12 +2483,8 @@ function cloneEndpointPublication(publication: EndpointPairingPublication): Endp
     desktopCredentialDigest: publication.desktopCredentialDigest.slice(),
     pairing: { ...publication.pairing, device: { ...publication.pairing.device },
       devicePrincipal: { ...publication.pairing.devicePrincipal },
-      ...(publication.pairing.endpointCredentialDigest === undefined
-        ? {}
-        : { endpointCredentialDigest: publication.pairing.endpointCredentialDigest.slice() }),
-      ...(publication.pairing.endpointDesktopCredentialDigest === undefined
-        ? {}
-        : { endpointDesktopCredentialDigest: publication.pairing.endpointDesktopCredentialDigest.slice() }) },
+      endpointCredentialDigest: publication.pairing.endpointCredentialDigest.slice(),
+      endpointDesktopCredentialDigest: publication.pairing.endpointDesktopCredentialDigest.slice() },
   }
 }
 

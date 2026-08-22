@@ -103,6 +103,13 @@ describe('RemoteRelayProvider', () => {
     await expect(platform.activateCredentialDigest(
       routeId, 'desktop', new Uint8Array(32).fill(4), parseRelayPairingSelector('pairing-diverged'),
     )).rejects.toMatchObject({ code: 'RELAY_ROUTE_REVOKED' })
+    await expect(platform.activateCredentialDigest(
+      routeId, 'desktop', new Uint8Array(32).fill(5), parseRelayPairingSelector('pairing-consistent'),
+    )).resolves.toBe(2)
+    await expect(platform.registerPairingCredentialDigests(
+      routeId, parseRelayPairingSelector('pairing-registered'),
+      new Uint8Array(32).fill(6), new Uint8Array(32).fill(7),
+    )).resolves.toBe(2)
     await platform.dispose()
   })
 

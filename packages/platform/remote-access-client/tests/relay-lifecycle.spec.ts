@@ -830,6 +830,49 @@ describe('DesktopRelayEndpointLifecycle', () => {
     expect(lifecycle.getState()).toEqual({ connected: false, stopReason: 'sleep' })
   })
 
+  it.each(['replacement', 'revocation', 'stop'] as const)(
+    'settles %s while an inbound callback is pending without a lifecycle lock cycle',
+    async (event) => {
+      const first = new FakeSocket()
+      const second = new FakeSocket()
+      const sockets: RelayEndpointSocket[] = [first, second]
+      const entered = deferred<undefined>()
+      const retired = deferred<undefined>()
+      const lifecycle = new DesktopRelayEndpointLifecycle({
+        ...desktopOptions(async () => {
+          const socket = sockets.shift()
+          if (socket === undefined) throw new Error('unexpected connection')
+          return socket
+        }),
+        onPairingRetired: () => { retired.resolve(undefined) },
+        onCiphertext: async (_ciphertext, _source, _local, _selector, signal) => {
+          entered.resolve(undefined)
+          if (event === 'stop') {
+            await new Promise<void>((resolve) => { signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+          } else {
+            await retired.promise
+          }
+        },
+      })
+      const grant = desktopGrant('route-one', 'pairing-one', 1)
+      await lifecycle.configure(grant)
+      await lifecycle.start()
+      first.receive(encodeRelayMessage({
+        type: 'ciphertext', transportVersion: 1, routeId: grant.routeId,
+        sourceAttachmentId: parseRelayAttachmentId('mobile-pending'),
+        targetAttachmentId: parseRelayAttachmentId('desktop-test'), ciphertext: Uint8Array.of(1),
+      }))
+      await entered.promise
+
+      if (event === 'replacement') await lifecycle.configure(desktopGrant('route-two', 'pairing-one', 2))
+      else if (event === 'revocation') await lifecycle.synchronize([])
+      else await lifecycle.stop('sleep')
+
+      expect(first.closed).toBe(true)
+      if (event === 'replacement') await lifecycle.stop()
+    },
+  )
+
   it('quiesces a replaced or revoked grant and ignores callbacks from its retired attachment', async () => {
     const releaseClose = deferred<undefined>()
     const first = new BlockingCloseSocket(releaseClose.promise)

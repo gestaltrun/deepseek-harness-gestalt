@@ -6,7 +6,7 @@
 
 Platform 返回不含邀请 PSK 的路由元数据。Desktop 在本地创建完整 XKpsk3 QR 或 HTTPS 载荷，把私有状态保存在受保护存储中，并且只通过 Platform 发送不透明 message 2 与端点公钥摘要。握手完成后保持待确认，两个安装显示由本地 transcript 派生的同一组六个认证词。完成 id 与确认 id 保证重试幂等，串行变更保证并发完成只有一个获得路由挑战。
 
-系统先提交终态，再执行清理。每个已鉴权安装最多持有四个存活挑战、四个待确认配对，以及合计十六条存活或为重放保留的生命周期记录。清理完成的幂等重放投影在五分钟后淘汰；清理失败的终态记录会继续占用容量，直到销毁成功。端点 publication 在 Relay 登记前按 route generation 持久化；拒绝、过期、关闭手机访问或发布失败会把两个凭据摘要与已确认 Mobile 结果移入分步补偿记录。每个成功撤销步骤都独立提交，因此另一 Platform 进程可在崩溃后继续清理且不重复已完成步骤。提供方释放资源时保留已确认配对与 route 权限，使滚动替换能够重连；只有显式关闭才负责持久撤销。
+系统先提交终态，再执行清理。每个已鉴权安装最多持有四个存活挑战、四个待确认配对，以及合计十六条存活或为重放保留的生命周期记录。清理完成的幂等重放投影在五分钟后淘汰；清理失败的终态记录会继续占用容量，直到销毁成功。端点 publication 在 Relay 登记前按 route generation 持久化；拒绝、过期、关闭手机访问、发布失败与显式撤销个人配对都会在更改 authority 前，把两个凭据摘要与已确认 Mobile 结果移入分步补偿记录。每次 credential 撤销、Mobile authority 删除和 stored pairing 清理都独立提交，因此另一 Platform 进程可在崩溃后继续清理且不会丢失 digest。除非 Relay 同时提供登记与撤销能力，否则端点 mutation 会在更改状态前失败。提供方释放资源时保留已确认配对与 route 权限，使滚动替换能够重连；只有显式关闭才负责持久撤销。
 
 产品 endpoint 流程把 XKpsk3 适配器、邀请 PSK、P-256 私有凭据与重连状态留在 Desktop 和 Mobile。Platform 只保存不透明 mailbox 消息、过期与幂等元数据、route generation、按配对划分的公钥摘要与补偿进度。确认会拒绝相同或跨配对复用的端点摘要，并在同一 selector 下原子发布两端摘要。Desktop 受保护存储在发布前最多接纳十六项存活或待确认配对；sleep、关闭窗口和普通 quit 只让 Relay 静默，不删除 vault。Mobile 在擦除一次性邀请状态前提交已打开的密封 authority 与 reconnect state。进程重启会恢复同一事务，或者直接从已提交 grant 启动 Relay，不会再次打开该 grant。生成的设备主体只有 `companion-surface` 权限。开发 keyless 适配器仅供测试，受运维 Platform 组合与产品快照都不包含它。
 

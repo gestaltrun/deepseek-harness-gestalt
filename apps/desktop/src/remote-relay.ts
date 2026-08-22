@@ -3,7 +3,16 @@
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
-import { parseRelayAttachmentId, REMOTE_PROTOCOL_LIMITS, type RelayPeerDescriptor } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  parseRelayAttachmentId,
+  REMOTE_PROTOCOL_LIMITS,
+  type RelayAttachmentId,
+  type RelayPairingSelector,
+  type RelayPeerDescriptor,
+  type RelayPeerUpdateMessage,
+  type RelayReadyMessage,
+  type RelayRouteId,
+} from '@deepseek-ai/dsh-remote-protocol'
 import type { RelayEndpointSocket } from '@deepseek-ai/dsh-remote-access-client'
 import {
   DesktopRelayEndpointLifecycle,
@@ -40,6 +49,137 @@ export interface DesktopRemoteRelayOptions {
   initializeWasm?: () => void
 }
 
+interface DesktopSnowAcceptOwner {
+  accept(
+    ciphertext: Uint8Array,
+    sourceAttachmentId: RelayAttachmentId,
+    routeId: RelayRouteId,
+    localAttachmentId: RelayAttachmentId,
+  ): ReturnType<SnowDesktopAttachmentOwner['accept']>
+}
+
+type DesktopRelaySender = (
+  pairingSelector: RelayPairingSelector,
+  targetAttachmentId: RelayAttachmentId,
+  ciphertext: Uint8Array,
+) => Promise<void>
+
+interface DesktopSnowProjection {
+  routeId: RelayRouteId
+  attachmentId: RelayAttachmentId
+  peers: readonly RelayPeerDescriptor[]
+  cancellation: AbortController
+}
+
+/** Attachment-generation owner that rejects late Snow accept results before channel publication. */
+export class DesktopSnowRelayChannelOwner {
+  private readonly channels = new Map<RelayAttachmentId, {
+    channel: SnowCompanionProtocolChannel
+    peer: RelayPeerDescriptor
+  }>()
+  private readonly projections = new Map<RelayPairingSelector, DesktopSnowProjection>()
+  private desktopRevision = 0
+
+  /** @param owner - Desktop Snow IK responder. @param send - current Relay attachment sender. */
+  constructor(
+    private readonly owner: DesktopSnowAcceptOwner,
+    private readonly send: DesktopRelaySender,
+  ) {}
+
+  /** @param update - current route-bound peer projection. @param selector - owned pairing selector. */
+  updatePeers(update: RelayReadyMessage | RelayPeerUpdateMessage, selector: RelayPairingSelector): void {
+    this.invalidate(selector)
+    this.projections.set(selector, {
+      routeId: update.routeId,
+      attachmentId: update.attachmentId,
+      peers: update.peers,
+      cancellation: new AbortController(),
+    })
+  }
+
+  /** @param selector - pairing whose attachment generation is no longer current. */
+  invalidate(selector: RelayPairingSelector): void {
+    this.projections.get(selector)?.cancellation.abort()
+    this.projections.delete(selector)
+    for (const [attachmentId, active] of this.channels) {
+      if (active.peer.pairingSelector !== selector) continue
+      active.channel.dispose()
+      this.channels.delete(attachmentId)
+    }
+  }
+
+  /** @param attachmentId - lost local attachment invalidating its pairing projection. */
+  connectionLost(attachmentId: RelayAttachmentId): void {
+    for (const [selector, projection] of this.projections) {
+      if (projection.attachmentId === attachmentId) this.invalidate(selector)
+    }
+  }
+
+  /**
+   * Open one current-generation encrypted frame or authenticate a fresh IK attachment.
+   * @param ciphertext - Relay-routed Snow ciphertext.
+   * @param sourceAttachmentId - Relay-authenticated peer attachment.
+   * @param localAttachmentId - current Desktop attachment.
+   * @param pairingSelector - pairing selected by the Relay projection.
+   * @param lifecycleSignal - physical controller lifetime.
+   */
+  async receive(
+    ciphertext: Uint8Array,
+    sourceAttachmentId: RelayAttachmentId,
+    localAttachmentId: RelayAttachmentId,
+    pairingSelector: RelayPairingSelector,
+    lifecycleSignal: AbortSignal,
+  ): Promise<void> {
+    const current = this.projections.get(pairingSelector)
+    if (current === undefined) throw new Error('Desktop Relay ciphertext has no peer projection')
+    if (current.attachmentId !== localAttachmentId) throw new Error('Desktop Relay ciphertext has a stale local attachment')
+    const projected = current.peers.find(peer => peer.attachmentId === sourceAttachmentId)
+    const existing = this.channels.get(sourceAttachmentId)
+    if (existing !== undefined) {
+      if (projected === undefined || projected.generation !== existing.peer.generation
+        || projected.pairingSelector !== existing.peer.pairingSelector) {
+        throw new Error('Desktop Relay rejected a stale Snow channel')
+      }
+      existing.channel.open(ciphertext)
+      return
+    }
+    if (projected === undefined) throw new Error('Desktop Relay rejected an unprojected Snow peer')
+    const acceptedPromise = this.owner.accept(ciphertext, sourceAttachmentId, current.routeId, current.attachmentId)
+    const accepted = await abortableAccept(acceptedPromise, [current.cancellation.signal, lifecycleSignal])
+    if (!this.isCurrent(current, pairingSelector, projected)) {
+      accepted.channel.dispose()
+      throw new Error('Desktop Relay rejected a stale Snow IK transcript')
+    }
+    if (accepted.generation !== projected.generation || accepted.pairingSelector !== projected.pairingSelector) {
+      accepted.channel.dispose()
+      throw new Error('Desktop Relay rejected a stale Snow IK transcript')
+    }
+    await this.send(accepted.pairingSelector, accepted.targetAttachmentId, accepted.payload)
+    if (!this.isCurrent(current, pairingSelector, projected)) {
+      accepted.channel.dispose()
+      throw new Error('Desktop Relay rejected a stale Snow IK transcript')
+    }
+    this.channels.set(sourceAttachmentId, { channel: accepted.channel, peer: projected })
+    this.desktopRevision += 1
+    await this.send(
+      accepted.pairingSelector,
+      accepted.targetAttachmentId,
+      sealDesktopForegroundSynchronization(accepted.channel, accepted.generation, this.desktopRevision),
+    )
+  }
+
+  private isCurrent(
+    projection: DesktopSnowProjection,
+    selector: RelayPairingSelector,
+    peer: RelayPeerDescriptor,
+  ): boolean {
+    const retained = this.projections.get(selector)
+    return retained === projection && !projection.cancellation.signal.aborted
+      && retained.peers.some(candidate => candidate.attachmentId === peer.attachmentId
+        && candidate.generation === peer.generation && candidate.pairingSelector === peer.pairingSelector)
+  }
+}
+
 /**
  * Parse the complete Desktop WSS bundle before network acquisition.
  * @param source - Desktop process environment.
@@ -74,16 +214,9 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
   const config = loadDesktopRemoteRelayConfig(options.source)
   ;(options.initializeWasm ?? initializeDesktopSnowWasm)()
   const owner = new SnowDesktopAttachmentOwner(selector => options.snowPairingVault.reconnectState(selector))
-  const channels = new Map<string, {
-    channel: SnowCompanionProtocolChannel
-    peer: RelayPeerDescriptor
-  }>()
-  const projections = new Map<string, {
-    routeId: Parameters<SnowDesktopAttachmentOwner['accept']>[2]
-    attachmentId: Parameters<SnowDesktopAttachmentOwner['accept']>[3]
-    peers: readonly RelayPeerDescriptor[]
-  }>()
-  let desktopRevision = 0
+  const channelOwner = new DesktopSnowRelayChannelOwner(owner, async (...input) => {
+    await lifecycle.sendCiphertext(...input)
+  })
   const lifecycle = new DesktopRelayEndpointLifecycle({
     attachmentId: () => parseRelayAttachmentId(crypto.randomUUID()),
     connect: async signal => options.connect === undefined
@@ -94,61 +227,41 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
     attachTimeoutMs: config.attachTimeoutMs,
     heartbeatIntervalMs: config.heartbeatIntervalMs,
     reconnectDelayMs: config.reconnectDelayMs,
-    onPeerAttachments: (update, selector) => {
-      projections.set(selector, { routeId: update.routeId, attachmentId: update.attachmentId, peers: update.peers })
+    onPeerAttachments: (update, selector) => { channelOwner.updatePeers(update, selector) },
+    onCiphertext: async (ciphertext, sourceAttachmentId, localAttachmentId, pairingSelector, signal) => {
+      await channelOwner.receive(ciphertext, sourceAttachmentId, localAttachmentId, pairingSelector, signal)
     },
-    onCiphertext: async (ciphertext, sourceAttachmentId, localAttachmentId, pairingSelector) => {
-      const current = projections.get(pairingSelector)
-      if (current === undefined) throw new Error('Desktop Relay ciphertext has no peer projection')
-      if (current.attachmentId !== localAttachmentId) throw new Error('Desktop Relay ciphertext has a stale local attachment')
-      const existing = channels.get(sourceAttachmentId)
-      const projected = current.peers.find(peer => peer.attachmentId === sourceAttachmentId)
-      if (existing !== undefined) {
-        if (projected === undefined || projected.generation !== existing.peer.generation
-          || projected.pairingSelector !== existing.peer.pairingSelector) {
-          throw new Error('Desktop Relay rejected a stale Snow channel')
-        }
-        existing.channel.open(ciphertext)
-        return
-      }
-      if (projected === undefined) throw new Error('Desktop Relay rejected an unprojected Snow peer')
-      const accepted = await owner.accept(
-        ciphertext, sourceAttachmentId, current.routeId, current.attachmentId,
-      )
-      if (accepted.generation !== projected.generation
-        || accepted.pairingSelector !== projected.pairingSelector) {
-        accepted.channel.dispose()
-        throw new Error('Desktop Relay rejected a stale Snow IK transcript')
-      }
-      for (const [attachmentId, active] of channels) {
-        if (active.peer.pairingSelector === accepted.pairingSelector) {
-          active.channel.dispose()
-          channels.delete(attachmentId)
-        }
-      }
-      channels.set(sourceAttachmentId, { channel: accepted.channel, peer: projected })
-      await lifecycle.sendCiphertext(accepted.pairingSelector, accepted.targetAttachmentId, accepted.payload)
-      desktopRevision += 1
-      await lifecycle.sendCiphertext(
-        accepted.pairingSelector, accepted.targetAttachmentId,
-        sealDesktopForegroundSynchronization(accepted.channel, accepted.generation, desktopRevision),
-      )
-    },
+    onPairingRetired: (selector) => { channelOwner.invalidate(selector) },
     resynchronize: async () => {},
-    onConnectionLost: (attachmentId) => {
-      for (const [selector, projection] of projections) {
-        if (projection.attachmentId !== attachmentId) continue
-        projections.delete(selector)
-        for (const [sourceAttachmentId, active] of channels) {
-          if (active.peer.pairingSelector === selector) {
-            active.channel.dispose()
-            channels.delete(sourceAttachmentId)
-          }
-        }
-      }
-    },
+    onConnectionLost: (attachmentId) => { channelOwner.connectionLost(attachmentId) },
   })
   return lifecycle
+}
+
+async function abortableAccept<T extends { channel: SnowCompanionProtocolChannel }>(
+  promise: Promise<T>,
+  signals: readonly AbortSignal[],
+): Promise<T> {
+  const cleanups: Array<() => void> = []
+  const cancellation = new Promise<never>((_resolve, reject) => {
+    const abort = (): void => { reject(new Error('Desktop Relay Snow accept was cancelled')) }
+    for (const signal of signals) {
+      if (signal.aborted) {
+        abort()
+        return
+      }
+      signal.addEventListener('abort', abort, { once: true })
+      cleanups.push(() => { signal.removeEventListener('abort', abort) })
+    }
+  })
+  try {
+    return await Promise.race([promise, cancellation])
+  } catch (error) {
+    void promise.then((result) => { result.channel.dispose() }, () => {})
+    throw error
+  } finally {
+    for (const cleanup of cleanups) cleanup()
+  }
 }
 
 function initializeDesktopSnowWasm(): void {

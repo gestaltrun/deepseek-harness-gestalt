@@ -179,6 +179,8 @@ function encodeEndpointRevocation(revocation: EndpointPairingRevocation): unknow
     desktopRevoked: revocation.desktopRevoked,
     mobileRevoked: revocation.mobileRevoked,
     authorityRevoked: revocation.authorityRevoked,
+    removeStoredPairing: revocation.removeStoredPairing,
+    pairingRemoved: revocation.pairingRemoved,
   }
 }
 
@@ -187,10 +189,11 @@ function decodeEndpointRevocation(value: unknown): EndpointPairingRevocation {
   rejectUnsupportedKeys(record, [
     'accountId', 'desktopInstallationId', 'mobileInstallationId', 'pendingPairingId',
     'pairingId', 'routeId', 'desktopCredentialDigest', 'credentialDigest',
-    'desktopRevoked', 'mobileRevoked', 'authorityRevoked',
+    'desktopRevoked', 'mobileRevoked', 'authorityRevoked', 'removeStoredPairing', 'pairingRemoved',
   ], 'endpoint publication revocation')
   if (typeof record.desktopRevoked !== 'boolean' || typeof record.mobileRevoked !== 'boolean'
-    || typeof record.authorityRevoked !== 'boolean') {
+    || typeof record.authorityRevoked !== 'boolean' || typeof record.removeStoredPairing !== 'boolean'
+    || typeof record.pairingRemoved !== 'boolean') {
     throw new TypeError('endpoint publication revocation completion flags are invalid')
   }
   const decoded = {
@@ -209,6 +212,8 @@ function decodeEndpointRevocation(value: unknown): EndpointPairingRevocation {
     desktopRevoked: record.desktopRevoked,
     mobileRevoked: record.mobileRevoked,
     authorityRevoked: record.authorityRevoked,
+    removeStoredPairing: record.removeStoredPairing,
+    pairingRemoved: record.pairingRemoved,
   }
   assertDistinctCredentialDigests(
     decoded.desktopCredentialDigest, decoded.credentialDigest, 'endpoint publication revocation',

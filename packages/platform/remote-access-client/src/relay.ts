@@ -47,7 +47,11 @@ export interface RemoteRelayEndpointOptions {
     send: (targetAttachmentId: RelayAttachmentId, ciphertext: Uint8Array) => Promise<void>,
   ) => Promise<void>
   /** Endpoint-owned ciphertext receiver. */
-  onCiphertext?: (ciphertext: Uint8Array, sourceAttachmentId: RelayAttachmentId) => void | Promise<void>
+  onCiphertext?: (
+    ciphertext: Uint8Array,
+    sourceAttachmentId: RelayAttachmentId,
+    signal: AbortSignal,
+  ) => void | Promise<void>
   /** Observer invoked after Platform acknowledges one physical attachment. */
   onConnectionReady?: (attachmentId: RelayAttachmentId) => void
   /** Route-bound opposite attachments authenticated by Relay credential records. */
@@ -239,7 +243,7 @@ export class RemoteRelayEndpointController {
       while (!isAborted(signal)) {
         const next = await iterator.next()
         if (next.done || isAborted(signal)) break
-        await this.receive(connection, next.value)
+        await this.receive(connection, next.value, signal)
       }
     } finally {
       heartbeatAbort.abort()
@@ -310,13 +314,13 @@ export class RemoteRelayEndpointController {
     }
   }
 
-  private async receive(connection: ActiveConnection, encoded: Uint8Array): Promise<void> {
+  private async receive(connection: ActiveConnection, encoded: Uint8Array, signal: AbortSignal): Promise<void> {
     const message = decodeRelayMessage(encoded)
     if (message.type === 'ciphertext') {
       if (message.routeId !== connection.routeId || message.targetAttachmentId !== connection.attachmentId) {
         throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay ciphertext does not belong to this attachment')
       }
-      await this.options.onCiphertext?.(message.ciphertext, message.sourceAttachmentId)
+      await this.options.onCiphertext?.(message.ciphertext, message.sourceAttachmentId, signal)
       return
     }
     if (message.type === 'peer-update') {

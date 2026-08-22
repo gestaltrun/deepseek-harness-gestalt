@@ -405,6 +405,8 @@ export interface EndpointPairingRevocation {
   desktopRevoked: boolean
   mobileRevoked: boolean
   authorityRevoked: boolean
+  removeStoredPairing: boolean
+  pairingRemoved: boolean
 }
 
 /** Durable route phase used to cancel stale endpoint authority publication. */
@@ -838,6 +840,11 @@ export type EndpointStoredPersonalPairing = StoredPersonalPairing & {
   endpointRouteId: RelayRouteId
   endpointDesktopCredentialDigest: Uint8Array
   endpointCredentialDigest: Uint8Array
+}
+
+function isEndpointStoredPairing(pairing: StoredPersonalPairing): pairing is EndpointStoredPersonalPairing {
+  return pairing.endpointPendingPairingId !== undefined && pairing.endpointRouteId !== undefined
+    && pairing.endpointDesktopCredentialDigest !== undefined && pairing.endpointCredentialDigest !== undefined
 }
 
 /** Provider combining instance-local handshake work with deployment-owned confirmed authority. */
@@ -1341,81 +1348,80 @@ export class PersonalPairingProvider extends RemoteAccessService {
     desktop: PairingAccountAuthentication
     enabled: boolean
   }): Promise<MobileAccessState> {
-    return this.exclusive(async () => {
-      const { account, installation } = await this.authenticate(input.desktop, 'desktop')
-      this.evictExpiredRecords()
-      if (input.enabled) {
-        const before = await this.authority.getDesktop(account.id, installation.id)
-        const routeId = await this.authority.enableDesktop(
-          account.id,
-          installation.id,
-          this.options.relay === undefined
-            ? parseRelayRouteId('keyless-no-relay')
-            : parseRelayRouteId(this.randomId('relay-route')),
-        )
-        const key = accessKey(account.id, installation.id)
-        const retained = this.requireTransactions().endpointAccessGenerations.get(key)
-        if (!before.enabled || retained === undefined || retained.phase !== 'enabled' || retained.routeId !== routeId) {
-          this.requireTransactions().endpointAccessGenerations.set(key, {
-            generation: (retained?.generation ?? 0) + 1, phase: 'enabled', routeId,
-          })
+    return this.serialized(async () => {
+      if (!input.enabled) {
+        await this.runTransaction(async () => {
+          const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+          this.stageStoredEndpointRevocations(account.id, installation.id)
+        })
+      }
+      return await this.runTransaction(async () => {
+        const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+        this.evictExpiredRecords()
+        if (input.enabled) {
+          const before = await this.authority.getDesktop(account.id, installation.id)
+          const routeId = await this.authority.enableDesktop(
+            account.id,
+            installation.id,
+            this.options.relay === undefined
+              ? parseRelayRouteId('keyless-no-relay')
+              : parseRelayRouteId(this.randomId('relay-route')),
+          )
+          const key = accessKey(account.id, installation.id)
+          const retained = this.requireTransactions().endpointAccessGenerations.get(key)
+          if (!before.enabled || retained === undefined || retained.phase !== 'enabled' || retained.routeId !== routeId) {
+            this.requireTransactions().endpointAccessGenerations.set(key, {
+              generation: (retained?.generation ?? 0) + 1, phase: 'enabled', routeId,
+            })
+          }
+          return { enabled: true }
         }
-        return { enabled: true }
-      }
-      const routeIds = await this.authority.disableDesktop(account.id, installation.id)
-      const accessKeyValue = accessKey(account.id, installation.id)
-      const retainedAccess = this.requireTransactions().endpointAccessGenerations.get(accessKeyValue)
-      this.requireTransactions().endpointAccessGenerations.set(accessKeyValue, {
-        generation: (retainedAccess?.generation ?? 0) + 1, phase: 'disabled',
-      })
-      for (const publication of this.requireTransactions().endpointPublications.values()) {
-        if (publication.accountId === account.id && publication.desktopInstallationId === installation.id) {
-          this.stageEndpointPublicationRevocation(this.requireTransactions(), publication)
+        this.acknowledgeStoredEndpointRevocations(account.id, installation.id)
+        const routeIds = await this.authority.disableDesktop(account.id, installation.id)
+        const accessKeyValue = accessKey(account.id, installation.id)
+        const retainedAccess = this.requireTransactions().endpointAccessGenerations.get(accessKeyValue)
+        this.requireTransactions().endpointAccessGenerations.set(accessKeyValue, {
+          generation: (retainedAccess?.generation ?? 0) + 1, phase: 'disabled',
+        })
+        for (const publication of this.requireTransactions().endpointPublications.values()) {
+          if (publication.accountId === account.id && publication.desktopInstallationId === installation.id) {
+            this.stageEndpointPublicationRevocation(this.requireTransactions(), publication)
+          }
         }
-      }
-      if (this.options.relay !== undefined) {
-        await cleanupAll(routeIds.map(routeId => async () => {
-          await this.options.relay?.revokeRoute(routeId)
-          await this.authority.completeRouteRevocation(account.id, installation.id, routeId)
-        }))
-      } else {
-        await cleanupAll(routeIds.map(routeId => async () => {
-          await this.authority.completeRouteRevocation(account.id, installation.id, routeId)
-        }))
-      }
-      for (const challenge of [...this.challenges.values()]) {
-        if (challenge.accountId === account.id && challenge.desktopInstallationId === installation.id) {
-          this.settleChallenge(challenge, 'disabled')
+        if (this.options.relay !== undefined) {
+          await cleanupAll(routeIds.map(routeId => async () => {
+            await this.options.relay?.revokeRoute(routeId)
+            await this.authority.completeRouteRevocation(account.id, installation.id, routeId)
+          }))
+        } else {
+          await cleanupAll(routeIds.map(routeId => async () => {
+            await this.authority.completeRouteRevocation(account.id, installation.id, routeId)
+          }))
         }
-      }
-      const endpointMailbox = this.endpointMailbox()
-      endpointMailbox.disable(account.id, installation.id, this.clock.now())
-      this.commitEndpointMailbox(endpointMailbox)
-      for (const [id, record] of [...this.pending]) {
-        if (record.accountId === account.id && record.desktopInstallationId === installation.id) {
-          this.settlePending(id, record, 'disabled')
+        for (const challenge of [...this.challenges.values()]) {
+          if (challenge.accountId === account.id && challenge.desktopInstallationId === installation.id) {
+            this.settleChallenge(challenge, 'disabled')
+          }
         }
-      }
-      for (const [pairingId, pairing] of [...this.pairings]) {
-        if (pairing.devicePrincipal.accountId === account.id
+        const endpointMailbox = this.endpointMailbox()
+        endpointMailbox.disable(account.id, installation.id, this.clock.now())
+        this.commitEndpointMailbox(endpointMailbox)
+        for (const [id, record] of [...this.pending]) {
+          if (record.accountId === account.id && record.desktopInstallationId === installation.id) {
+            this.settlePending(id, record, 'disabled')
+          }
+        }
+        for (const [pairingId, pairing] of [...this.pairings]) {
+          if (pairing.devicePrincipal.accountId === account.id
           && pairing.desktopInstallationId === installation.id) {
-          this.pairings.delete(pairingId)
-          this.principalIds.delete(pairing.devicePrincipal.id)
-          if (pairing.cleanup !== undefined) await this.cleanupActive(pairing.cleanup)
-          if (pairing.endpointRouteId !== undefined && pairing.endpointCredentialDigest !== undefined) {
-            await this.options.relay?.revokeCredentialDigest?.(
-              pairing.endpointRouteId, 'mobile', pairing.endpointCredentialDigest,
-            )
-          }
-          if (pairing.endpointRouteId !== undefined && pairing.endpointDesktopCredentialDigest !== undefined) {
-            await this.options.relay?.revokeCredentialDigest?.(
-              pairing.endpointRouteId, 'desktop', pairing.endpointDesktopCredentialDigest,
-            )
+            this.pairings.delete(pairingId)
+            this.principalIds.delete(pairing.devicePrincipal.id)
+            if (pairing.cleanup !== undefined) await this.cleanupActive(pairing.cleanup)
           }
         }
-      }
-      await this.cleanupOwner(account.id, installation.id)
-      return { enabled: false }
+        await this.cleanupOwner(account.id, installation.id)
+        return { enabled: false }
+      })
     })
   }
 
@@ -1601,37 +1607,48 @@ export class PersonalPairingProvider extends RemoteAccessService {
     desktop: PairingAccountAuthentication
     pairingId: PersonalPairingId
   }): Promise<void> {
-    await this.exclusive(async () => {
-      const { account, installation } = await this.authenticate(input.desktop, 'desktop')
-      this.evictExpiredRecords()
-      const pairingId = parsePersonalPairingId(input.pairingId)
-      const pairing = this.pairings.get(pairingId)
-      if (pairing === undefined
-        || pairing.devicePrincipal.accountId !== account.id
-        || pairing.desktopInstallationId !== installation.id) {
-        throw new RemoteAccessError('PAIRING_PENDING_INVALID', 'Personal Pairing is invalid or unavailable')
-      }
-      this.pairings.delete(pairingId)
-      this.principalIds.delete(pairing.devicePrincipal.id)
-      const operations: Array<() => Promise<void>> = [
-        () => this.authority.revokeMobilePairing(pairingId),
-      ]
-      if (pairing.cleanup !== undefined) operations.push(() => this.cleanupActive(pairing.cleanup as CleanupRecord<ActivePairingKey>))
-      if (pairing.endpointRouteId !== undefined && pairing.endpointCredentialDigest !== undefined) {
-        const { endpointRouteId, endpointCredentialDigest } = pairing
-        operations.push(async () => {
-          await this.options.relay?.revokeCredentialDigest?.(endpointRouteId, 'mobile', endpointCredentialDigest)
+    await this.serialized(async () => {
+      const endpointOwned = await this.runTransaction(async () => {
+        const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+        this.evictExpiredRecords()
+        const pairingId = parsePersonalPairingId(input.pairingId)
+        const pairing = this.pairings.get(pairingId)
+        if (pairing === undefined) {
+          const settled = [...this.requireTransactions().endpointPublicationRevocations.values()].find(record =>
+            record.pairingId === pairingId && record.accountId === account.id
+            && record.desktopInstallationId === installation.id && record.pairingRemoved)
+          if (settled !== undefined) {
+            wipeEndpointRevocation(settled)
+            this.requireTransactions().endpointPublicationRevocations.delete(settled.pendingPairingId)
+            return true
+          }
+        }
+        const ownedPairing = this.requireOwnedPairing(pairingId, account.id, installation.id)
+        if (isEndpointStoredPairing(ownedPairing)) {
+          this.requireEndpointRelayAuthority()
+          this.stageStoredEndpointRevocation(this.requireTransactions(), ownedPairing)
+          return true
+        }
+        return false
+      })
+      if (endpointOwned) {
+        await this.runTransaction(async () => {
+          const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+          this.acknowledgeStoredEndpointRevocations(account.id, installation.id)
         })
+        return
       }
-      if (pairing.endpointRouteId !== undefined && pairing.endpointDesktopCredentialDigest !== undefined) {
-        const { endpointRouteId, endpointDesktopCredentialDigest } = pairing
-        operations.push(async () => {
-          await this.options.relay?.revokeCredentialDigest?.(
-            endpointRouteId, 'desktop', endpointDesktopCredentialDigest,
-          )
-        })
-      }
-      await cleanupAll(operations)
+      await this.runTransaction(async () => {
+        const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+        this.evictExpiredRecords()
+        const pairingId = parsePersonalPairingId(input.pairingId)
+        const pairing = this.requireOwnedPairing(pairingId, account.id, installation.id)
+        this.pairings.delete(pairingId)
+        this.principalIds.delete(pairing.devicePrincipal.id)
+        const operations: Array<() => Promise<void>> = [() => this.authority.revokeMobilePairing(pairingId)]
+        if (pairing.cleanup !== undefined) operations.push(() => this.cleanupActive(pairing.cleanup as CleanupRecord<ActivePairingKey>))
+        await cleanupAll(operations)
+      })
     })
   }
 
@@ -2239,7 +2256,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
     })
   }
 
-  private exclusive<T>(operation: () => T | Promise<T>): Promise<T> {
+  private runTransaction<T>(operation: () => T | Promise<T>): Promise<T> {
     const owned = async (): Promise<T> => {
       await this.reconcileEndpointPublicationRevocations()
       try {
@@ -2255,9 +2272,61 @@ export class PersonalPairingProvider extends RemoteAccessService {
         await this.reconcileEndpointPublicationRevocations()
       }
     }
-    const result = this.serial.then(owned, owned)
+    return owned()
+  }
+
+  private serialized<T>(operation: () => T | Promise<T>): Promise<T> {
+    const result = this.serial.then(operation, operation)
     this.serial = result.then(() => undefined, () => undefined)
     return result
+  }
+
+  private exclusive<T>(operation: () => T | Promise<T>): Promise<T> {
+    return this.serialized(async () => await this.runTransaction(operation))
+  }
+
+  private requireOwnedPairing(
+    pairingId: PersonalPairingId,
+    accountId: string,
+    desktopInstallationId: InstallationId,
+  ): StoredPersonalPairing {
+    const pairing = this.pairings.get(pairingId)
+    if (pairing === undefined || pairing.devicePrincipal.accountId !== accountId
+      || pairing.desktopInstallationId !== desktopInstallationId) {
+      throw new RemoteAccessError('PAIRING_PENDING_INVALID', 'Personal Pairing is invalid or unavailable')
+    }
+    return pairing
+  }
+
+  private stageStoredEndpointRevocations(accountId: string, desktopInstallationId: InstallationId): void {
+    const pairings = [...this.pairings.values()].filter((pairing): pairing is EndpointStoredPersonalPairing =>
+      pairing.devicePrincipal.accountId === accountId && pairing.desktopInstallationId === desktopInstallationId
+      && isEndpointStoredPairing(pairing))
+    if (pairings.length === 0) return
+    this.requireEndpointRelayAuthority()
+    for (const pairing of pairings) this.stageStoredEndpointRevocation(this.requireTransactions(), pairing)
+  }
+
+  private stageStoredEndpointRevocation(
+    state: PersonalPairingTransactionState,
+    pairing: EndpointStoredPersonalPairing,
+  ): void {
+    if (state.endpointPublicationRevocations.has(pairing.endpointPendingPairingId)) return
+    state.endpointPublicationRevocations.set(pairing.endpointPendingPairingId, {
+      accountId: pairing.devicePrincipal.accountId,
+      desktopInstallationId: pairing.desktopInstallationId,
+      mobileInstallationId: pairing.devicePrincipal.installationId,
+      pendingPairingId: pairing.endpointPendingPairingId,
+      pairingId: pairing.id,
+      routeId: pairing.endpointRouteId,
+      desktopCredentialDigest: pairing.endpointDesktopCredentialDigest.slice(),
+      credentialDigest: pairing.endpointCredentialDigest.slice(),
+      desktopRevoked: false,
+      mobileRevoked: false,
+      authorityRevoked: false,
+      removeStoredPairing: true,
+      pairingRemoved: false,
+    })
   }
 
   private stageEndpointPublicationRevocation(
@@ -2277,6 +2346,8 @@ export class PersonalPairingProvider extends RemoteAccessService {
         desktopRevoked: false,
         mobileRevoked: false,
         authorityRevoked: false,
+        removeStoredPairing: false,
+        pairingRemoved: true,
       })
     }
     state.endpointPublications.delete(publication.pendingPairingId)
@@ -2295,8 +2366,10 @@ export class PersonalPairingProvider extends RemoteAccessService {
   private async reconcileEndpointPublicationRevocations(): Promise<void> {
     while (true) {
       const revocation = await this.authority.runPairingTransaction((state) => {
-        const next = state.endpointPublicationRevocations.values().next()
-        return Promise.resolve(next.done ? undefined : cloneEndpointRevocation(next.value))
+        const next = [...state.endpointPublicationRevocations.values()].find(record =>
+          !record.desktopRevoked || !record.mobileRevoked || !record.authorityRevoked
+          || !record.pairingRemoved || !record.removeStoredPairing)
+        return Promise.resolve(next === undefined ? undefined : cloneEndpointRevocation(next))
       })
       if (revocation === undefined) return
       const relay = this.requireEndpointRelayAuthority()
@@ -2313,6 +2386,18 @@ export class PersonalPairingProvider extends RemoteAccessService {
       if (!revocation.authorityRevoked) {
         await this.authority.revokeMobilePairing(revocation.pairingId)
         await this.completeEndpointRevocationStep(revocation.pendingPairingId, 'authorityRevoked')
+        continue
+      }
+      if (!revocation.pairingRemoved) {
+        await this.authority.runPairingTransaction(async (state) => {
+          const retained = state.endpointPublicationRevocations.get(revocation.pendingPairingId)
+          if (retained === undefined || !sameEndpointRevocation(retained, revocation)) return
+          const pairing = state.pairings.get(revocation.pairingId)
+          if (pairing?.cleanup !== undefined) await this.cleanupActive(pairing.cleanup)
+          if (pairing !== undefined) state.principalIds.delete(pairing.devicePrincipal.id)
+          state.pairings.delete(revocation.pairingId)
+          retained.pairingRemoved = true
+        })
         continue
       }
       await this.authority.runPairingTransaction((state) => {
@@ -2334,6 +2419,15 @@ export class PersonalPairingProvider extends RemoteAccessService {
       throw new Error('Remote Relay pairing registration and revocation are unavailable')
     }
     return relay
+  }
+
+  private acknowledgeStoredEndpointRevocations(accountId: string, desktopInstallationId: InstallationId): void {
+    for (const [pendingPairingId, revocation] of this.requireTransactions().endpointPublicationRevocations) {
+      if (!revocation.removeStoredPairing || !revocation.pairingRemoved || revocation.accountId !== accountId
+        || revocation.desktopInstallationId !== desktopInstallationId) continue
+      wipeEndpointRevocation(revocation)
+      this.requireTransactions().endpointPublicationRevocations.delete(pendingPairingId)
+    }
   }
 
   private async completeEndpointRevocationStep(
@@ -2467,6 +2561,8 @@ function sameEndpointRevocation(left: EndpointPairingRevocation, right: Endpoint
     && left.desktopRevoked === right.desktopRevoked
     && left.mobileRevoked === right.mobileRevoked
     && left.authorityRevoked === right.authorityRevoked
+    && left.removeStoredPairing === right.removeStoredPairing
+    && left.pairingRemoved === right.pairingRemoved
     && bytesEqual(left.desktopCredentialDigest, right.desktopCredentialDigest)
     && bytesEqual(left.credentialDigest, right.credentialDigest)
 }

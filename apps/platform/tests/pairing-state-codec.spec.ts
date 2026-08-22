@@ -43,12 +43,17 @@ describe('pairing transaction codec', () => {
       desktopRevoked: true,
       mobileRevoked: false,
       authorityRevoked: false,
+      removeStoredPairing: true,
+      pairingRemoved: false,
     })
 
     const encoded = encodePairingTransactionState(state)
     expect(JSON.stringify(encoded)).not.toContain('relayCredential')
     expect(decodePairingTransactionState(encoded).endpointPublicationRevocations.get(pendingPairingId))
-      .toMatchObject({ desktopRevoked: true, mobileRevoked: false, authorityRevoked: false })
+      .toMatchObject({
+        desktopRevoked: true, mobileRevoked: false, authorityRevoked: false,
+        removeStoredPairing: true, pairingRemoved: false,
+      })
 
     const equal = structuredClone(encoded) as Record<string, unknown>
     const revocations = equal.endpointPublicationRevocations
@@ -64,6 +69,18 @@ describe('pairing transaction codec', () => {
     }
     ;(shortRevocations[0][1] as Record<string, unknown>).credentialDigest = { $b: 'AQ' }
     expect(() => decodePairingTransactionState(short)).toThrow('must contain 32 bytes')
+
+    for (const field of ['removeStoredPairing', 'pairingRemoved'] as const) {
+      const missing = structuredClone(encoded) as Record<string, unknown>
+      const missingRevocations = missing.endpointPublicationRevocations
+      if (!Array.isArray(missingRevocations) || !Array.isArray(missingRevocations[0])) {
+        throw new Error('revocation fixture is invalid')
+      }
+      const missingRevocation = missingRevocations[0][1] as Record<string, unknown>
+      if (field === 'removeStoredPairing') delete missingRevocation.removeStoredPairing
+      else delete missingRevocation.pairingRemoved
+      expect(() => decodePairingTransactionState(missing)).toThrow('completion flags are invalid')
+    }
   })
 
   it('preserves bytes, orphan cleanup identity, and quota windows', () => {

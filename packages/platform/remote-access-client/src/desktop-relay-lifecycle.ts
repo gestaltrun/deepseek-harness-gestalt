@@ -31,7 +31,9 @@ type DesktopRelayEndpointLifecycleOptions = Omit<RemoteRelayEndpointOptions,
     sourceAttachmentId: RelayAttachmentId,
     localAttachmentId: RelayAttachmentId,
     pairingSelector: RelayPairingSelector,
+    signal: AbortSignal,
   ) => void | Promise<void>
+  onPairingRetired?: (pairingSelector: RelayPairingSelector) => void
 }
 
 /** Observable fail-closed Relay lifecycle used before production crypto/provider approval. */
@@ -103,12 +105,12 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
         localAttachmentId = message.attachmentId
         await this.options.onPeerAttachments?.(message, selector)
       },
-      onCiphertext: async (ciphertext, sourceAttachmentId) => {
+      onCiphertext: async (ciphertext, sourceAttachmentId, signal) => {
         /* v8 ignore next -- the controller drops stopped-socket frames; this guard owns a callback already queued at retirement. */
         if (token.retired || this.endpoints.get(selector)?.token !== token) return
         /* v8 ignore next -- ready assigns the attachment id before the controller can dispatch ciphertext. */
         if (localAttachmentId === undefined) throw new Error('Desktop Relay has no local attachment identity')
-        await this.options.onCiphertext?.(ciphertext, sourceAttachmentId, localAttachmentId, selector)
+        await this.options.onCiphertext?.(ciphertext, sourceAttachmentId, localAttachmentId, selector, signal)
       },
     })
     const record = { controller, grant, token }
@@ -167,12 +169,9 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
     targetAttachmentId: RelayAttachmentId,
     ciphertext: Uint8Array,
   ): Promise<void> {
-    await this.exclusive(async () => {
-      const record = this.endpoints.get(pairingSelector)
-      /* v8 ignore next -- retirement deletes the record before setting any replacement; retained records are never retired. */
-      if (record === undefined || record.token.retired) throw new Error('Desktop Relay pairing authority is unavailable')
-      await record.controller.sendCiphertext(targetAttachmentId, ciphertext)
-    })
+    const record = this.endpoints.get(pairingSelector)
+    if (record === undefined || record.token.retired) throw new Error('Desktop Relay pairing authority is unavailable')
+    await record.controller.sendCiphertext(targetAttachmentId, ciphertext)
   }
   private async retire(
     selector: RelayPairingSelector,
@@ -180,6 +179,7 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
     reason: DesktopRelayStopReason,
   ): Promise<void> {
     record.token.retired = true
+    this.options.onPairingRetired?.(selector)
     /* v8 ignore else -- only the owning serialized operation can replace this map entry. */
     if (this.endpoints.get(selector) === record) this.endpoints.delete(selector)
     await record.controller.stop(reason)

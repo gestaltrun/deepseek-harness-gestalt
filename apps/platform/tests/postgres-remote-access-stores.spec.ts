@@ -161,6 +161,49 @@ describe('PostgresPersonalPairingAuthorityStore', () => {
       expect(state.principalIds.has('principal-uncommitted' as never)).toBe(false)
     })
   })
+
+  it('retains endpoint revocation digests and step progress across store restart', async () => {
+    const pool = createMemoryPlatformSqlPool()
+    const pendingPairingId = parsePendingPairingId('pending-revocation-restart')
+    const writer = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
+    await writer.migrate()
+    await writer.runPairingTransaction(async (state) => {
+      state.endpointPublicationRevocations.set(pendingPairingId, {
+        accountId: ACCOUNT,
+        desktopInstallationId: DESKTOP,
+        mobileInstallationId: MOBILE,
+        pendingPairingId,
+        pairingId: parsePersonalPairingId('pairing-revocation-restart'),
+        routeId: parseRelayRouteId('route-revocation-restart'),
+        desktopCredentialDigest: new Uint8Array(32).fill(21),
+        credentialDigest: new Uint8Array(32).fill(22),
+        desktopRevoked: false,
+        mobileRevoked: false,
+        authorityRevoked: false,
+        removeStoredPairing: true,
+        pairingRemoved: false,
+      })
+    })
+
+    const recovered = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
+    await recovered.runPairingTransaction(async (state) => {
+      const revocation = state.endpointPublicationRevocations.get(pendingPairingId)
+      expect(revocation?.desktopCredentialDigest).toEqual(new Uint8Array(32).fill(21))
+      expect(revocation?.credentialDigest).toEqual(new Uint8Array(32).fill(22))
+      if (revocation === undefined) throw new Error('revocation recovery record is absent')
+      revocation.desktopRevoked = true
+    })
+    const restarted = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
+    await restarted.runPairingTransaction(async (state) => {
+      expect(state.endpointPublicationRevocations.get(pendingPairingId)).toMatchObject({
+        desktopRevoked: true,
+        mobileRevoked: false,
+        authorityRevoked: false,
+        removeStoredPairing: true,
+        pairingRemoved: false,
+      })
+    })
+  })
 })
 
 describe('PostgresRelayRouteStore', () => {

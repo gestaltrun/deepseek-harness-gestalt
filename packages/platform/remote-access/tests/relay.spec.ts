@@ -79,8 +79,11 @@ describe('RemoteRelayProvider', () => {
   it('projects authenticated Mobile attach, heartbeat, ciphertext access, and disconnect activity', async () => {
     const routeStore = new SharedRouteStore()
     const coordinator = new SharedCoordinator()
-    const recordRelayActivity = vi.fn(async (
-      _input: Parameters<RelayPairingActivitySink['recordRelayActivity']>[0],
+    const recordRelayLease = vi.fn(async (
+      _input: Parameters<RelayPairingActivitySink['recordRelayLease']>[0],
+    ) => {})
+    const releaseRelayLease = vi.fn(async (
+      _input: Parameters<RelayPairingActivitySink['releaseRelayLease']>[0],
     ) => {})
     let now = 100
     const platform = new RemoteRelayProvider(new Context(), {
@@ -90,7 +93,7 @@ describe('RemoteRelayProvider', () => {
       config: CONFIG,
       randomBytes: uniqueRandomBytes(31),
       clock: { now: () => now },
-      pairingActivity: { recordRelayActivity },
+      pairingActivity: { recordRelayLease, releaseRelayLease },
     })
     const routeId = parseRelayRouteId('route-activity')
     const desktopGrant = await platform.rotateCredential(routeId, 'desktop')
@@ -111,22 +114,25 @@ describe('RemoteRelayProvider', () => {
       },
       deliver: async () => {},
     })
-    expect(recordRelayActivity).toHaveBeenLastCalledWith(expect.objectContaining({ online: true, accessedAt: 100 }))
+    expect(recordRelayLease).toHaveBeenLastCalledWith(expect.objectContaining({ accessedAt: 100, expiresAt: 30_100 }))
 
     now = 200
     await mobile.receive({ type: 'heartbeat', transportVersion: 1, attachmentId: mobileId, sentAt: now })
-    expect(recordRelayActivity).toHaveBeenLastCalledWith(expect.objectContaining({ online: true, accessedAt: 200 }))
+    expect(recordRelayLease).toHaveBeenLastCalledWith(expect.objectContaining({ accessedAt: 200, expiresAt: 30_200 }))
 
     now = 300
     await mobile.receive({
       type: 'ciphertext', transportVersion: 1, routeId,
       sourceAttachmentId: mobileId, targetAttachmentId: desktopId, ciphertext: Uint8Array.of(1),
     })
-    expect(recordRelayActivity).toHaveBeenLastCalledWith(expect.objectContaining({ online: true, accessedAt: 300 }))
+    expect(recordRelayLease).toHaveBeenLastCalledWith(expect.objectContaining({ accessedAt: 300 }))
 
     await mobile.close()
-    expect(recordRelayActivity).toHaveBeenLastCalledWith(expect.objectContaining({ online: false }))
-    expect(recordRelayActivity.mock.lastCall?.[0]).not.toHaveProperty('accessedAt')
+    expect(releaseRelayLease).toHaveBeenCalledWith({
+      credentialFingerprint: recordRelayLease.mock.lastCall?.[0].credentialFingerprint,
+      connectionToken: recordRelayLease.mock.lastCall?.[0].connectionToken,
+      observedAt: 300,
+    })
     await desktop.close()
     await platform.dispose()
   })

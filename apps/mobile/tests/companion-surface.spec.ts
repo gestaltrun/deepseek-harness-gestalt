@@ -21,6 +21,7 @@ describe('MobileCompanionSurface', () => {
     if (first === undefined) throw new Error('expected Desktop resync receiver')
     first.acceptValidatedDesktopResync({
       type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Authenticated Desktop',
       sessions: [{ id: 'session-first', title: 'First', summary: 'Authenticated' }],
       streaming: false,
     })
@@ -29,11 +30,13 @@ describe('MobileCompanionSurface', () => {
     runtime.markConnectionOpen()
     first.acceptValidatedDesktopResync({
       type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Stale Desktop',
       sessions: [{ id: 'session-stale', title: 'Stale', summary: 'Rejected' }],
       streaming: true,
     })
 
     expect(surface.getSnapshot()).toEqual({
+      desktopName: 'Authenticated Desktop',
       sessions: [{ id: 'session-first', title: 'First', summary: 'Authenticated' }],
       streaming: false,
     })
@@ -56,7 +59,8 @@ describe('MobileCompanionSurface', () => {
     const resync = surface.bindValidatedDesktopResync()
     if (resync === undefined) throw new Error('expected Desktop resync receiver')
     resync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Authenticated Desktop', sessions: [], streaming: false,
     })
 
     surface.create({ workspace: 'Work' })

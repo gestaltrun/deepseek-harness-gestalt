@@ -127,6 +127,87 @@ describe('MobilePairingController', () => {
     expect(controller.getSnapshot()).toEqual({ status: 'ready' })
   })
 
+  it('attempts every unpair cleanup and reports all authority-release failures', async () => {
+    const handshake = {
+      begin: vi.fn(),
+      acceptDesktopHandshake: vi.fn(),
+      wipe: vi.fn(async () => { throw new Error('handshake wipe failed') }),
+    }
+    const pairingKeys = { retain: vi.fn(), wipe: vi.fn(() => { throw new Error('pairing key wipe failed') }) }
+    const companion = {
+      forgetConnection: vi.fn(),
+      releasePairing: vi.fn(async () => { throw new Error('Companion release failed') }),
+    }
+    const relay = {
+      configure: vi.fn(async () => { throw new Error('Relay revoke failed') }),
+      start: vi.fn(),
+      stop: vi.fn(async () => { throw new Error('Relay stop failed') }),
+    }
+    const controller = new MobilePairingController({
+      installation: installationFixture(),
+      transport: transportFixture(),
+      handshake,
+      pairingKeys,
+      companion,
+      relay,
+      scanner: { scan: vi.fn() },
+    })
+
+    const failure = await controller.unpair().then(
+      () => undefined,
+      (error: unknown) => error as AggregateError,
+    )
+
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure?.message).toBe('Mobile Personal Pairing unpair failed')
+    expect(failure?.errors).toEqual([
+      expect.objectContaining({ message: 'handshake wipe failed' }),
+      expect.objectContaining({ message: 'pairing key wipe failed' }),
+      expect.objectContaining({ message: 'Companion release failed' }),
+      expect.objectContaining({ message: 'Relay revoke failed' }),
+      expect.objectContaining({ message: 'Relay stop failed' }),
+    ])
+    expect(handshake.wipe).toHaveBeenCalledOnce()
+    expect(pairingKeys.wipe).toHaveBeenCalledOnce()
+    expect(companion.releasePairing).toHaveBeenCalledOnce()
+    expect(relay.configure).toHaveBeenCalledWith(undefined)
+    expect(relay.stop).toHaveBeenCalledOnce()
+    expect(controller.getSnapshot()).toEqual({ status: 'ready' })
+  })
+
+  it('awaits account-change Companion release and Relay revocation before activation settles', async () => {
+    const account = { id: 'account-a' }
+    const release = deferred<undefined>()
+    const configure = deferred<undefined>()
+    const companion = {
+      forgetConnection: vi.fn(),
+      releasePairing: vi.fn(() => release.promise),
+    }
+    const relay = { configure: vi.fn(() => configure.promise), start: vi.fn(), stop: vi.fn() }
+    const controller = new MobilePairingController({
+      installation: installationFixture(() => account.id),
+      transport: transportFixture(),
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn() },
+      companion,
+      relay,
+      scanner: { scan: vi.fn() },
+    })
+    await controller.activate()
+    account.id = 'account-b'
+
+    let settled = false
+    const activation = controller.activate().then(() => { settled = true })
+    await vi.waitFor(() => {
+      expect(companion.releasePairing).toHaveBeenCalledOnce()
+      expect(relay.configure).toHaveBeenCalledWith(undefined)
+    })
+    expect(settled).toBe(false)
+    release.resolve(undefined)
+    configure.resolve(undefined)
+    await activation
+    expect(settled).toBe(true)
+  })
+
   it.each(['handshake', 'relay'] as const)(
     'fails closed when sealed Mobile authority has no %s lifecycle owner',
     async (missing) => {

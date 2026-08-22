@@ -9,6 +9,7 @@ interface ValidatedDesktopSurfaceResync {
   readonly type: 'desktop-resync'
   readonly version: 1
   readonly authenticated: true
+  readonly desktopName: string
   readonly sessions: readonly CompanionSessionSummary[]
   readonly streaming: boolean
 }
@@ -20,6 +21,8 @@ interface ValidatedDesktopSurfaceResyncReceiver {
 
 /** Current Desktop-confirmed content retained while a replacement connection resynchronizes. */
 interface MobileCompanionSurfaceSnapshot {
+  /** Desktop-owned name accepted only from the authenticated projection. */
+  readonly desktopName?: string
   /** Last authenticated Session projection. */
   readonly sessions: readonly CompanionSessionSummary[]
   /** Last authenticated execution state. */
@@ -84,6 +87,7 @@ export class MobileCompanionSurface {
         const accepted = lifecycleReceiver.acceptValidatedDesktopResync(message)
         if (!accepted) return
         this.#snapshot = {
+          desktopName: message.desktopName,
           sessions: message.sessions.map(session => ({
             ...session,
             ...(session.transcript === undefined ? {} : { transcript: [...session.transcript] }),

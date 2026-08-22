@@ -4,6 +4,7 @@ import {
   parsePairingRendezvousId,
   parsePendingPairingId,
   parsePersonalPairingId,
+  parseRelayConnectionToken,
   parseRelayCredentialFingerprint,
 } from '@deepseek-ai/dsh-remote-access'
 import { parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
@@ -50,20 +51,49 @@ describe('PostgresPersonalPairingAuthorityStore', () => {
       pairingId: parsePersonalPairingId('pairing-one'),
       credentialFingerprint: parseRelayCredentialFingerprint('credential-fingerprint-one'),
       lastAccessAt: 100,
-      online: false,
       sealedRelayAuthority: Uint8Array.of(1, 2, 3),
     }
     await writer.confirmMobilePairing(authority)
     await writer.confirmMobilePairing(authority)
     expect(await reader.getMobilePairing(pending)).toEqual(authority)
-    await writer.recordRelayActivity({
+    const tokenA = parseRelayConnectionToken('connection-a')
+    const tokenB = parseRelayConnectionToken('connection-b')
+    await writer.recordRelayLease({
       credentialFingerprint: authority.credentialFingerprint,
-      online: true,
+      connectionToken: tokenA,
+      expiresAt: 500,
       accessedAt: 200,
     })
-    expect(await reader.getPersonalPairingActivity(authority.pairingId)).toEqual({ lastAccessAt: 200, online: true })
-    await writer.recordRelayActivity({ credentialFingerprint: authority.credentialFingerprint, online: false })
-    expect(await reader.getPersonalPairingActivity(authority.pairingId)).toEqual({ lastAccessAt: 200, online: false })
+    await reader.recordRelayLease({
+      credentialFingerprint: authority.credentialFingerprint,
+      connectionToken: tokenB,
+      expiresAt: 600,
+      accessedAt: 250,
+    })
+    expect(await reader.getPersonalPairingActivity(authority.pairingId, 300))
+      .toEqual({ lastAccessAt: 250, online: true })
+    await writer.releaseRelayLease({
+      credentialFingerprint: authority.credentialFingerprint,
+      connectionToken: tokenA,
+      observedAt: 300,
+    })
+    expect(await reader.getPersonalPairingActivity(authority.pairingId, 300))
+      .toEqual({ lastAccessAt: 250, online: true })
+    await reader.releaseRelayLease({
+      credentialFingerprint: authority.credentialFingerprint,
+      connectionToken: tokenB,
+      observedAt: 300,
+    })
+    expect(await reader.getPersonalPairingActivity(authority.pairingId, 300))
+      .toEqual({ lastAccessAt: 250, online: false })
+    await writer.recordRelayLease({
+      credentialFingerprint: authority.credentialFingerprint,
+      connectionToken: tokenA,
+      expiresAt: 700,
+      accessedAt: 400,
+    })
+    expect(await reader.getPersonalPairingActivity(authority.pairingId, 700))
+      .toEqual({ lastAccessAt: 400, online: false })
     await expect(writer.confirmMobilePairing({
       ...authority,
       pairingId: parsePersonalPairingId('pairing-other'),

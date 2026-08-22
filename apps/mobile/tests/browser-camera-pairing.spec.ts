@@ -62,6 +62,31 @@ describe('BrowserCameraPairingQrScanner', () => {
     expect(scan).not.toHaveBeenCalled()
   })
 
+  it('settles cancellation while camera permission is pending and stops every late track', async () => {
+    const permission = deferred<MediaStream>()
+    const stopFirst = vi.fn()
+    const stopSecond = vi.fn()
+    const controller = new AbortController()
+    const scan = vi.fn()
+    const scanner = new BrowserCameraPairingQrScanner({
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => await permission.promise),
+      } as unknown as MediaDevices,
+      reader: { scan },
+    })
+    const scanning = scanner.scan(document.createElement('video'), controller.signal)
+
+    controller.abort()
+
+    await expect(scanning).rejects.toThrow('camera scan was cancelled')
+    permission.resolve({ getTracks: () => [{ stop: stopFirst }, { stop: stopSecond }] } as unknown as MediaStream)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(stopFirst).toHaveBeenCalledOnce()
+    expect(stopSecond).toHaveBeenCalledOnce()
+    expect(scan).not.toHaveBeenCalled()
+  })
+
   it('rejects an empty decoded QR value and releases the camera', async () => {
     const stop = vi.fn()
     const stopDecoder = vi.fn()
@@ -158,3 +183,9 @@ type BrowserScanCallback = (
   error: Error | undefined,
   controls: { stop(): void },
 ) => void
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => { resolve = settle })
+  return { promise, resolve }
+}

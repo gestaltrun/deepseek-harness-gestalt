@@ -26,6 +26,7 @@ import {
   parsePairingRendezvousId,
   parsePendingPairingId,
   parsePersonalPairingId,
+  parseRelayConnectionToken,
   parseRelayCredentialFingerprint,
   type PairingHandshakeProvider,
 } from '../src/index.ts'
@@ -62,10 +63,11 @@ describe('PersonalPairingProvider', () => {
     }
     await authority.confirmMobilePairing(first)
     await authority.confirmMobilePairing(first)
-    await expect(authority.getPersonalPairingActivity(first.pairingId)).resolves.toBeUndefined()
-    await authority.recordRelayActivity({
+    await expect(authority.getPersonalPairingActivity(first.pairingId, NOW)).resolves.toBeUndefined()
+    await authority.recordRelayLease({
       credentialFingerprint: parseRelayCredentialFingerprint('unknown-fingerprint'),
-      online: true,
+      connectionToken: parseRelayConnectionToken('unknown-connection'),
+      expiresAt: NOW + 1_000,
       accessedAt: NOW,
     })
     const sealed = { ...first, pendingPairingId: parsePendingPairingId('pending-sealed'), sealedRelayAuthority: Uint8Array.of(1, 2) }
@@ -90,6 +92,77 @@ describe('PersonalPairingProvider', () => {
     expect(await authority.getMobilePairing(sealed.pendingPairingId)).toEqual(sealed)
     await authority.revokeMobilePairing(first.pairingId)
     expect(await authority.getMobilePairing(pendingPairingId)).toBeUndefined()
+  })
+
+  it('projects Memory authority presence from independent expiring connection leases', async () => {
+    const authority = new MemoryPersonalPairingAuthorityStore()
+    const fingerprint = parseRelayCredentialFingerprint('memory-presence-fingerprint')
+    const pairingId = parsePersonalPairingId('memory-presence-pairing')
+    await authority.confirmMobilePairing({
+      accountId: 'account-one' as never,
+      desktopInstallationId: parseInstallationId('desktop-one'),
+      mobileInstallationId: parseInstallationId('mobile-one'),
+      pendingPairingId: parsePendingPairingId('memory-presence-pending'),
+      pairingId,
+      credentialFingerprint: fingerprint,
+      lastAccessAt: 100,
+    })
+    const first = parseRelayConnectionToken('memory-presence-first')
+    const second = parseRelayConnectionToken('memory-presence-second')
+    await authority.releaseRelayLease({
+      credentialFingerprint: parseRelayCredentialFingerprint('unknown-presence-fingerprint'),
+      connectionToken: first,
+      observedAt: 100,
+    })
+    await authority.recordRelayLease({
+      credentialFingerprint: fingerprint, connectionToken: first, expiresAt: 200, accessedAt: 100,
+    })
+    await authority.recordRelayLease({
+      credentialFingerprint: fingerprint, connectionToken: first, expiresAt: 180, accessedAt: 90,
+    })
+    await expect(authority.getPersonalPairingActivity(pairingId, 190)).resolves.toEqual({
+      lastAccessAt: 100,
+      online: true,
+    })
+    await authority.recordRelayLease({
+      credentialFingerprint: fingerprint,
+      connectionToken: second,
+      expiresAt: 300,
+      accessedAt: 160,
+    })
+    await authority.releaseRelayLease({ credentialFingerprint: fingerprint, connectionToken: first, observedAt: 170 })
+    await expect(authority.getPersonalPairingActivity(pairingId, 170)).resolves.toEqual({
+      lastAccessAt: 160,
+      online: true,
+    })
+    await authority.releaseRelayLease({ credentialFingerprint: fingerprint, connectionToken: second, observedAt: 170 })
+    await authority.recordRelayLease({
+      credentialFingerprint: fingerprint, connectionToken: first, expiresAt: 400, accessedAt: 200,
+    })
+    await expect(authority.getPersonalPairingActivity(pairingId, 400)).resolves.toEqual({
+      lastAccessAt: 200,
+      online: false,
+    })
+    const firstAccessFingerprint = parseRelayCredentialFingerprint('memory-first-access-fingerprint')
+    const firstAccessPairingId = parsePersonalPairingId('memory-first-access-pairing')
+    await authority.confirmMobilePairing({
+      accountId: 'account-one' as never,
+      desktopInstallationId: parseInstallationId('desktop-one'),
+      mobileInstallationId: parseInstallationId('mobile-two'),
+      pendingPairingId: parsePendingPairingId('memory-first-access-pending'),
+      pairingId: firstAccessPairingId,
+      credentialFingerprint: firstAccessFingerprint,
+    })
+    await authority.recordRelayLease({
+      credentialFingerprint: firstAccessFingerprint,
+      connectionToken: parseRelayConnectionToken('memory-first-access'),
+      expiresAt: 500,
+      accessedAt: 450,
+    })
+    await expect(authority.getPersonalPairingActivity(firstAccessPairingId, 450)).resolves.toEqual({
+      lastAccessAt: 450,
+      online: true,
+    })
   })
 
   it('shares Desktop access and pairing authority across Platform providers', async () => {
@@ -153,13 +226,19 @@ describe('PersonalPairingProvider', () => {
     const credentialFingerprint = parseRelayCredentialFingerprint(
       createHash('sha256').update(mobileCredential).digest('base64url'),
     )
-    await authority.recordRelayActivity({ credentialFingerprint, online: true, accessedAt: NOW + 100 })
+    const connectionToken = parseRelayConnectionToken('mobile-shared-connection')
+    await authority.recordRelayLease({
+      credentialFingerprint,
+      connectionToken,
+      expiresAt: pairing.pairedAt + 1_000,
+      accessedAt: pairing.pairedAt + 100,
+    })
     await expect(platformB.listPersonalPairings(desktop)).resolves.toEqual([
-      expect.objectContaining({ id: pairing.id, online: true, lastAccessAt: NOW + 100 }),
+      expect.objectContaining({ id: pairing.id, online: true, lastAccessAt: pairing.pairedAt + 100 }),
     ])
-    await authority.recordRelayActivity({ credentialFingerprint, online: false })
+    await authority.releaseRelayLease({ credentialFingerprint, connectionToken, observedAt: pairing.pairedAt + 200 })
     await expect(platformA.listPersonalPairings(desktop)).resolves.toEqual([
-      expect.objectContaining({ id: pairing.id, online: false, lastAccessAt: NOW + 100 }),
+      expect.objectContaining({ id: pairing.id, online: false, lastAccessAt: pairing.pairedAt + 100 }),
     ])
 
     await platformB.setMobileAccess({ desktop, enabled: false })
@@ -1628,6 +1707,46 @@ describe('PersonalPairingProvider', () => {
     expect(handshake.completeChallenge).toHaveBeenCalledOnce()
   })
 
+  it('binds completion replay to every invitation field and the Mobile handshake', async () => {
+    const handshake = handshakeProvider()
+    const provider = uniquePairingProvider(handshake)
+    const desktop = authentication('desktop-installation')
+    await provider.setMobileAccess({ desktop, enabled: true })
+    const challenge = await provider.createChallenge({
+      desktop,
+      rendezvousId: parsePairingRendezvousId('digest-binding'),
+      clientIp: '192.0.2.1',
+    })
+    const completionId = parsePairingCompletionId('completion-digest-binding')
+    const original = {
+      mobile: authentication('mobile-installation'),
+      completionId,
+      oneTimeLink: challenge.oneTimeLink,
+      mobileHandshake: Uint8Array.of(9),
+    }
+    const completed = await provider.completeChallenge(original)
+    await expect(provider.completeChallenge(original)).resolves.toEqual(completed)
+
+    const change = (name: string, value: string): string => {
+      const url = new URL(challenge.oneTimeLink)
+      url.searchParams.set(name, value)
+      return url.toString()
+    }
+    const altered = [
+      { ...original, mobileHandshake: Uint8Array.of(8) },
+      { ...original, oneTimeLink: change('secret', Buffer.alloc(32, 7).toString('base64url')) },
+      { ...original, oneTimeLink: change('rendezvous', 'different-rendezvous') },
+      { ...original, oneTimeLink: change('fingerprint', 'different-fingerprint') },
+      { ...original, oneTimeLink: change('expires', String(challenge.expiresAt + 1)) },
+    ]
+    for (const request of altered) {
+      await expect(provider.completeChallenge(request)).rejects.toEqual(
+        expect.objectContaining<Partial<RemoteAccessError>>({ code: 'PAIRING_ID_COLLISION' }),
+      )
+    }
+    expect(handshake.completeChallenge).toHaveBeenCalledOnce()
+  })
+
   it('retries an eager-expiry cleanup tombstone through the expired invitation', async () => {
     const scheduled: Array<() => void> = []
     const now = { value: NOW }
@@ -2310,7 +2429,8 @@ function authorityRejectingConfirm(
     getMobilePairing: store.getMobilePairing.bind(store),
     revokeMobilePairing: store.revokeMobilePairing.bind(store),
     getPersonalPairingActivity: store.getPersonalPairingActivity.bind(store),
-    recordRelayActivity: store.recordRelayActivity.bind(store),
+    recordRelayLease: store.recordRelayLease.bind(store),
+    releaseRelayLease: store.releaseRelayLease.bind(store),
     confirmMobilePairing: vi.fn(async () => { throw new Error(message) }),
   }
 }

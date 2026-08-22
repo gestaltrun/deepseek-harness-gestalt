@@ -87,6 +87,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       type: 'desktop-resync',
       version: 1,
       authenticated: true,
+      desktopName: 'Studio Mac',
       sessions: [{
         id: 'guarded-session',
         title: 'Guarded Session',
@@ -104,7 +105,8 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     runtime.forgetConnection()
     runtime.markConnectionOpen()
     firstResync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Stale Desktop', sessions: [], streaming: false,
     })
 
     await waitFor(() => {

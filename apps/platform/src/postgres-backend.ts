@@ -422,6 +422,6 @@ function mobilePresentationFromRow(
     if (value !== null) throw new TypeError('Desktop Installation must not have Mobile presentation')
     return {}
   }
-  if (value === null) throw new TypeError('Mobile Installation presentation is required')
+  if (value === null) return {}
   return { presentation: parseMobileInstallationPresentation(value) }
 }

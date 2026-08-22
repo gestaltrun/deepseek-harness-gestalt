@@ -10,7 +10,13 @@ export type { MobilePairingActions } from './personal-pairing-model.ts'
  * @param props - current pairing adapter.
  * @returns Settings-like Mobile flow for QR/link completion and word comparison.
  */
-export function MobilePairing({ actions }: { actions: MobilePairingActions }): ReactNode {
+export function MobilePairing({
+  actions,
+  reportLifecycleError = defaultLifecycleErrorReporter,
+}: {
+  actions: MobilePairingActions
+  reportLifecycleError?: (error: unknown) => void
+}): ReactNode {
   const snapshot = useSyncExternalStore(
     listener => actions.subscribe(listener),
     () => actions.getSnapshot(),
@@ -20,12 +26,12 @@ export function MobilePairing({ actions }: { actions: MobilePairingActions }): R
   const video = useRef<HTMLVideoElement>(null)
   const cameraAbort = useRef<AbortController>()
   useEffect(() => {
-    void actions.activate()
+    void actions.activate().catch(reportLifecycleError)
     return () => {
       cameraAbort.current?.abort()
-      void actions.deactivate()
+      void actions.deactivate().catch(reportLifecycleError)
     }
-  }, [actions])
+  }, [actions, reportLifecycleError])
 
   const startCamera = (): void => {
     const preview = video.current
@@ -105,4 +111,8 @@ export function MobilePairing({ actions }: { actions: MobilePairingActions }): R
       <small>不提供短码；Desktop 明确确认前不会获得访问权限。</small>
     </section>
   )
+}
+
+function defaultLifecycleErrorReporter(error: unknown): void {
+  console.error('[mobile-personal-pairing] lifecycle failure:', error)
 }

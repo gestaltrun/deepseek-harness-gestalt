@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MobilePairing, type MobilePairingActions } from '../src/MobilePairing.tsx'
 
@@ -78,5 +78,28 @@ describe('MobilePairing', () => {
     expect(activate).toHaveBeenCalledOnce()
     rendered.unmount()
     expect(deactivate).toHaveBeenCalledOnce()
+  })
+
+  it('contains and reports rejected mount and unmount lifecycle work', async () => {
+    const activateFailure = new Error('activation failed')
+    const deactivateFailure = new Error('deactivation failed')
+    const reportLifecycleError = vi.fn()
+    const snapshot = { status: 'ready' } as const
+    const actions: MobilePairingActions = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      activate: vi.fn().mockRejectedValue(activateFailure),
+      deactivate: vi.fn().mockRejectedValue(deactivateFailure),
+      unpair: vi.fn(),
+    }
+    const rendered = render(createElement(MobilePairing, { actions, reportLifecycleError }))
+    await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(activateFailure) })
+
+    rendered.unmount()
+
+    await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(deactivateFailure) })
   })
 })

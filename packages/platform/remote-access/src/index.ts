@@ -19,6 +19,7 @@ import {
   type RelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type {
+  RelayConnectionToken,
   RelayCredentialFingerprint,
   RelayCredentialGrant,
   RelayPairingActivitySink,
@@ -302,7 +303,6 @@ export interface MobilePairingAuthority {
   pairingId: PersonalPairingId
   credentialFingerprint?: RelayCredentialFingerprint
   lastAccessAt?: number
-  online?: boolean
   sealedRelayAuthority?: Uint8Array
 }
 
@@ -336,7 +336,7 @@ export interface PersonalPairingAuthorityStore extends RelayPairingActivitySink 
   /** Drop one confirmed Mobile pairing result after Desktop revocation. */
   revokeMobilePairing(pairingId: PersonalPairingId): Promise<void>
   /** Read authoritative Relay activity for one confirmed pairing. */
-  getPersonalPairingActivity(pairingId: PersonalPairingId): Promise<PersonalPairingActivity | undefined>
+  getPersonalPairingActivity(pairingId: PersonalPairingId, observedAt: number): Promise<PersonalPairingActivity | undefined>
 }
 
 /** Durable short-lived pairing transaction records loaded under one store-owned exclusive lease. */
@@ -366,6 +366,7 @@ export class MemoryPersonalPairingAuthorityStore implements PersonalPairingAutho
   private readonly desktops = new Map<string, StoredDesktopAuthority>()
   private readonly pairings = new Map<PendingPairingId, MobilePairingAuthority>()
   private readonly pairingTransactions = createPairingTransactionState()
+  private readonly pairingLeases = new Map<RelayCredentialFingerprint, Map<RelayConnectionToken, number>>()
   private pairingSerial: Promise<void> = Promise.resolve()
 
   runPairingTransaction<T>(operation: (state: PersonalPairingTransactionState) => Promise<T>): Promise<T> {
@@ -437,25 +438,53 @@ export class MemoryPersonalPairingAuthorityStore implements PersonalPairingAutho
     return Promise.resolve()
   }
 
-  getPersonalPairingActivity(pairingId: PersonalPairingId): Promise<PersonalPairingActivity | undefined> {
+  getPersonalPairingActivity(pairingId: PersonalPairingId, observedAt: number): Promise<PersonalPairingActivity | undefined> {
     const authority = [...this.pairings.values()].find(pairing => pairing.pairingId === pairingId)
-    return Promise.resolve(authority?.lastAccessAt === undefined || authority.online === undefined
+    if (authority?.credentialFingerprint !== undefined) this.pruneLeases(authority.credentialFingerprint, observedAt)
+    return Promise.resolve(authority?.lastAccessAt === undefined
       ? undefined
-      : { lastAccessAt: authority.lastAccessAt, online: authority.online })
+      : {
+        lastAccessAt: authority.lastAccessAt,
+        online: authority.credentialFingerprint !== undefined
+          && (this.pairingLeases.get(authority.credentialFingerprint)?.size ?? 0) > 0,
+      })
   }
 
-  recordRelayActivity(input: {
+  recordRelayLease(input: {
     credentialFingerprint: RelayCredentialFingerprint
-    online: boolean
-    accessedAt?: number
+    connectionToken: RelayConnectionToken
+    expiresAt: number
+    accessedAt: number
   }): Promise<void> {
     const authority = [...this.pairings.values()].find(
       pairing => pairing.credentialFingerprint === input.credentialFingerprint,
     )
     if (authority === undefined) return Promise.resolve()
-    authority.online = input.online
-    if (input.accessedAt !== undefined) authority.lastAccessAt = input.accessedAt
+    this.pruneLeases(input.credentialFingerprint, input.accessedAt)
+    const leases = this.pairingLeases.get(input.credentialFingerprint) ?? new Map<RelayConnectionToken, number>()
+    leases.set(input.connectionToken, Math.max(leases.get(input.connectionToken) ?? input.expiresAt, input.expiresAt))
+    this.pairingLeases.set(input.credentialFingerprint, leases)
+    authority.lastAccessAt = Math.max(authority.lastAccessAt ?? input.accessedAt, input.accessedAt)
     return Promise.resolve()
+  }
+
+  releaseRelayLease(input: {
+    credentialFingerprint: RelayCredentialFingerprint
+    connectionToken: RelayConnectionToken
+    observedAt: number
+  }): Promise<void> {
+    this.pruneLeases(input.credentialFingerprint, input.observedAt)
+    const leases = this.pairingLeases.get(input.credentialFingerprint)
+    leases?.delete(input.connectionToken)
+    if (leases?.size === 0) this.pairingLeases.delete(input.credentialFingerprint)
+    return Promise.resolve()
+  }
+
+  private pruneLeases(fingerprint: RelayCredentialFingerprint, observedAt: number): void {
+    const leases = this.pairingLeases.get(fingerprint)
+    if (leases === undefined) return
+    for (const [token, expiresAt] of leases) if (expiresAt <= observedAt) leases.delete(token)
+    if (leases.size === 0) this.pairingLeases.delete(fingerprint)
   }
 }
 
@@ -644,6 +673,8 @@ export interface CompletionReplayRecord {
   desktopInstallationId: InstallationId
   mobileInstallationId: InstallationId
   challengeId: PairingChallengeId
+  /** SHA-256 commitment to the complete authenticated completion request. */
+  requestDigest: Uint8Array
   challengeCleanup: CleanupRecord<PairingChallengeState>
   view: PairingCompletionView
   completedAt: number
@@ -886,16 +917,27 @@ export class PersonalPairingProvider extends RemoteAccessService {
       this.evictExpiredRecords()
       const completionId = parsePairingCompletionId(input.completionId)
       const invitation = parsePairingInvitationLink(input.oneTimeLink)
+      const requestDigest = await pairingCompletionRequestDigest({
+        accountId: account.id,
+        mobileInstallationId: installation.id,
+        invitation,
+        mobileHandshake: input.mobileHandshake,
+      })
       const previous = this.completions.get(completionId)
       if (previous !== undefined) {
-        if (previous.accountId !== account.id || previous.mobileInstallationId !== installation.id) {
-          throw new RemoteAccessError('PAIRING_CHALLENGE_USED', 'Pairing completion id belongs to another Installation')
+        try {
+          if (previous.accountId !== account.id || previous.mobileInstallationId !== installation.id) {
+            throw new RemoteAccessError('PAIRING_CHALLENGE_USED', 'Pairing completion id belongs to another Installation')
+          }
+          if (!constantTimeBytesEqual(previous.requestDigest, requestDigest)) {
+            throw new RemoteAccessError('PAIRING_ID_COLLISION', 'Pairing completion id was reused for another request')
+          }
+          await this.retryChallengeCleanup(previous.challengeCleanup)
+          return cloneCompletion(previous.view)
+        } finally {
+          invitation.invitationSecret.fill(0)
+          requestDigest.fill(0)
         }
-        if (previous.challengeId !== invitation.challengeId) {
-          throw new RemoteAccessError('PAIRING_ID_COLLISION', 'Pairing completion id was reused for another challenge')
-        }
-        await this.retryChallengeCleanup(previous.challengeCleanup)
-        return cloneCompletion(previous.view)
       }
 
       let challenge = this.challenges.get(invitation.challengeId)
@@ -964,6 +1006,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
         desktopInstallationId: challenge.desktopInstallationId,
         mobileInstallationId: installation.id,
         challengeId: invitation.challengeId,
+        requestDigest,
         challengeCleanup: settled.cleanup,
         view,
         completedAt: this.clock.now(),
@@ -987,7 +1030,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
         .filter(pairing => pairing.devicePrincipal.accountId === account.id
           && pairing.desktopInstallationId === installation.id)
       return await Promise.all(pairings.map(async (pairing) => {
-        const activity = await this.authority.getPersonalPairingActivity(pairing.id)
+        const activity = await this.authority.getPersonalPairingActivity(pairing.id, this.clock.now())
         return {
           ...clonePairing(pairing),
           ...(activity === undefined ? {} : activity),
@@ -1180,7 +1223,6 @@ export class PersonalPairingProvider extends RemoteAccessService {
             pairingId: view.id,
             ...(credentialFingerprint === undefined ? {} : { credentialFingerprint }),
             lastAccessAt: view.lastAccessAt,
-            online: view.online,
             ...(sealedRelayAuthority === undefined ? {} : { sealedRelayAuthority }),
           })
         } catch (error) {
@@ -1830,6 +1872,32 @@ function encodePairingInvitationLink(origin: string, invitation: PairingInvitati
   url.searchParams.set('expires', String(invitation.expiresAt))
   url.searchParams.set('protocol', String(invitation.protocolMajor))
   return url.toString()
+}
+
+async function pairingCompletionRequestDigest(input: {
+  accountId: string
+  mobileInstallationId: InstallationId
+  invitation: PairingInvitation
+  mobileHandshake: Uint8Array
+}): Promise<Uint8Array> {
+  const payload = new TextEncoder().encode(JSON.stringify({
+    accountId: input.accountId,
+    mobileInstallationId: input.mobileInstallationId,
+    challengeId: input.invitation.challengeId,
+    invitationSecret: encodeBase64Url(input.invitation.invitationSecret),
+    desktopFingerprint: input.invitation.desktopFingerprint,
+    rendezvousId: input.invitation.rendezvousId,
+    expiresAt: input.invitation.expiresAt,
+    protocolMajor: input.invitation.protocolMajor,
+    mobileHandshake: encodeBase64Url(input.mobileHandshake),
+  }))
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', payload))
+}
+
+function constantTimeBytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  let difference = 0
+  for (let index = 0; index < left.byteLength; index += 1) difference |= left[index] as number ^ right[index] as number
+  return difference === 0
 }
 
 function withoutSecret(invitation: PairingInvitation): Omit<PairingInvitation, 'invitationSecret'> {

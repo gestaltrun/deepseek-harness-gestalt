@@ -222,6 +222,12 @@ describe('Remote Access HTTP assembled flow', () => {
     expect(requests[1]).toEqual(requests[0])
     expect(mobileHandshake.begin).toHaveBeenCalledOnce()
     expect(handshake.completeChallenge).toHaveBeenCalledOnce()
+    await expect(http.completeChallenge({
+      authentication: mobile,
+      completionId: parsePairingCompletionId('mobile-controller-retry'),
+      oneTimeLink: challenge.oneTimeLink,
+      mobileHandshake: Uint8Array.of(8),
+    })).rejects.toMatchObject({ code: 'PAIRING_ID_COLLISION' })
     const [pending] = await http.listPendingPairings(desktop)
     if (pending === undefined) throw new Error('expected committed pending pairing')
     await http.confirmPairing({ authentication: desktop, pendingPairingId: pending.pendingPairingId })

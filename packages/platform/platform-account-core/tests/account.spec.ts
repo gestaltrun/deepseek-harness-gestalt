@@ -309,6 +309,7 @@ describe('PlatformAccount', () => {
       accessToken: session.accessToken,
       proof: key.proof('current', hashAccountToken(session.accessToken)),
     })).rejects.toMatchObject({ code: 'SESSION_REVOKED' })
+    await expect(readSession(session.sessionId)).resolves.toMatchObject({ active: false })
   })
 
   it('invalidates and closes only the current installation across instances', async () => {

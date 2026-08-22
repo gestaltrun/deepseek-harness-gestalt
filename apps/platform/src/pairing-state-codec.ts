@@ -157,6 +157,7 @@ function encodeCompletion(record: CompletionReplayRecord): unknown {
     desktopInstallationId: record.desktopInstallationId,
     mobileInstallationId: record.mobileInstallationId,
     challengeId: record.challengeId,
+    requestDigest: encodeBytes(record.requestDigest),
     challengeCleanup: encodeCleanup(record.challengeCleanup),
     view: encodeCompletionView(record.view),
     completedAt: record.completedAt,
@@ -170,6 +171,7 @@ function decodeCompletion(value: unknown): CompletionReplayRecord {
     desktopInstallationId: parseInstallationId(record.desktopInstallationId),
     mobileInstallationId: parseInstallationId(record.mobileInstallationId),
     challengeId: parsePairingChallengeId(record.challengeId),
+    requestDigest: decodeDigest(record.requestDigest, 'completion.requestDigest'),
     challengeCleanup: decodeCleanup(record.challengeCleanup),
     view: decodeCompletionView(record.view),
     completedAt: asSafeInteger(record.completedAt, 'completion.completedAt'),
@@ -416,6 +418,12 @@ function decodeBytes(value: unknown, name: string): Uint8Array {
   const encoded = record.$b
   if (typeof encoded !== 'string' || encoded === '') throw new TypeError(`${name} must be tagged bytes`)
   return Uint8Array.from(Buffer.from(encoded, 'base64url'))
+}
+
+function decodeDigest(value: unknown, name: string): Uint8Array {
+  const digest = decodeBytes(value, name)
+  if (digest.byteLength !== 32) throw new TypeError(`${name} must contain 32 bytes`)
+  return digest
 }
 
 function decodeMap<K, V>(

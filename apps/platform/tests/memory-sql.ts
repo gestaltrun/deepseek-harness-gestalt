@@ -17,7 +17,7 @@ interface MobileRow {
   mobile_installation_id: string
   credential_fingerprint: string | null
   last_access_at: number | null
-  online: boolean
+  presence_leases: Record<string, number>
   sealed_relay_authority: Buffer | null
 }
 
@@ -83,6 +83,7 @@ function cloneTables(tables: Tables): Tables {
       key,
       {
         ...row,
+        presence_leases: { ...row.presence_leases },
         sealed_relay_authority: row.sealed_relay_authority === null ? null : Buffer.from(row.sealed_relay_authority),
       },
     ])),
@@ -173,8 +174,8 @@ function dispatch(
           ? null
           : asString(values[6], 'credential fingerprint'),
         last_access_at: values[7] === null || values[7] === undefined ? null : asNumber(values[7], 'last access'),
-        online: values[8] === true,
-        sealed_relay_authority: values[9] === null || values[9] === undefined ? null : Buffer.from(values[9] as Buffer),
+        presence_leases: {},
+        sealed_relay_authority: values[8] === null || values[8] === undefined ? null : Buffer.from(values[8] as Buffer),
       })
     }
     return { rows: [], rowCount: 1 }
@@ -183,22 +184,37 @@ function dispatch(
     const row = live.mobile.get(`${asString(values[0], 'database identity')}\n${asString(values[1], 'pending pairing id')}`)
     return row === undefined ? { rows: [], rowCount: 0 } : { rows: [{ ...row }], rowCount: 1 }
   }
-  if (text.includes('select last_access_at, online from remote_access_mobile_pairings')) {
+  if (text.includes('returning last_access_at, presence_leases')) {
     const identity = asString(values[0], 'database identity')
     const pairingId = asString(values[1], 'pairing id')
     const row = [...live.mobile.entries()].find(([key, candidate]) =>
       key.startsWith(`${identity}\n`) && candidate.pairing_id === pairingId)?.[1]
+    if (row !== undefined) prunePresenceLeases(row, asNumber(values[2], 'observed at'))
     return row === undefined
       ? { rows: [], rowCount: 0 }
-      : { rows: [{ last_access_at: row.last_access_at, online: row.online }], rowCount: 1 }
+      : { rows: [{ last_access_at: row.last_access_at, presence_leases: { ...row.presence_leases } }], rowCount: 1 }
   }
-  if (text.includes('update remote_access_mobile_pairings')) {
+  if (text.includes('update remote_access_mobile_pairings') && text.includes('jsonb_build_object')) {
     const identity = asString(values[0], 'database identity')
     const fingerprint = asString(values[1], 'credential fingerprint')
     for (const [key, row] of live.mobile) {
       if (!key.startsWith(`${identity}\n`) || row.credential_fingerprint !== fingerprint) continue
-      row.online = values[2] === true
-      if (values[3] !== null && values[3] !== undefined) row.last_access_at = asNumber(values[3], 'last access')
+      prunePresenceLeases(row, asNumber(values[4], 'observed at'))
+      const connectionToken = asString(values[2], 'connection token')
+      const expiresAt = asNumber(values[3], 'lease expiry')
+      row.presence_leases[connectionToken] = Math.max(row.presence_leases[connectionToken] ?? expiresAt, expiresAt)
+      const accessedAt = asNumber(values[4], 'last access')
+      row.last_access_at = Math.max(row.last_access_at ?? accessedAt, accessedAt)
+    }
+    return { rows: [], rowCount: 1 }
+  }
+  if (text.includes('update remote_access_mobile_pairings') && text.includes('entry.key <>')) {
+    const identity = asString(values[0], 'database identity')
+    const fingerprint = asString(values[1], 'credential fingerprint')
+    for (const [key, row] of live.mobile) {
+      if (!key.startsWith(`${identity}\n`) || row.credential_fingerprint !== fingerprint) continue
+      prunePresenceLeases(row, asNumber(values[3], 'observed at'))
+      Reflect.deleteProperty(row.presence_leases, asString(values[2], 'connection token'))
     }
     return { rows: [], rowCount: 1 }
   }
@@ -299,6 +315,12 @@ function desktopKey(identity: unknown, accessKey: unknown): string {
 
 function routeKey(identity: unknown, routeId: unknown): string {
   return `${asString(identity, 'database identity')}\n${asString(routeId, 'route id')}`
+}
+
+function prunePresenceLeases(row: MobileRow, observedAt: number): void {
+  for (const [token, expiresAt] of Object.entries(row.presence_leases)) {
+    if (expiresAt <= observedAt) Reflect.deleteProperty(row.presence_leases, token)
+  }
 }
 
 function digestKey(value: unknown): string {

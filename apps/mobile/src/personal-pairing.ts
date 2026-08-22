@@ -102,10 +102,13 @@ export class BrowserCameraPairingQrScanner implements MobilePairingQrScanner {
     throwIfCameraAborted(signal)
     let stream: MediaStream
     try {
-      stream = await this.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: { ideal: 'environment' } },
-      })
+      stream = await acquireCameraStream(
+        this.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: 'environment' } },
+        }),
+        signal,
+      )
     } catch (error) {
       if (error instanceof DOMException && error.name === 'NotAllowedError') {
         throw new Error('Camera permission was denied', { cause: error })
@@ -215,7 +218,7 @@ export class MobilePairingController implements MobilePairingActions {
     await this.lifecycleBarrier
     await this.serial
     const accountId = this.currentAccountId()
-    if (this.accountId !== accountId) this.resetAccountScope()
+    if (this.accountId !== undefined && this.accountId !== accountId) await this.resetAccountScope()
     this.accountId = accountId
     this.active = true
   }
@@ -225,27 +228,35 @@ export class MobilePairingController implements MobilePairingActions {
       this.assertActiveAccount()
       this.attempt?.mobileHandshake.fill(0)
       this.clearAttempt()
-      await this.options.handshake.wipe?.()
-      this.options.pairingKeys?.wipe()
-      if (this.options.companion !== undefined) {
-        await this.options.companion.releasePairing()
-      }
+      const operations: Array<() => void | Promise<void>> = [
+        () => this.options.handshake.wipe?.(),
+        () => this.options.pairingKeys?.wipe(),
+      ]
+      if (this.options.companion !== undefined) operations.push(() => this.options.companion?.releasePairing())
       if (this.options.relay !== this.options.companion) {
-        await this.options.relay?.configure(undefined)
-        await this.options.relay?.stop()
+        operations.push(
+          () => this.options.relay?.configure(undefined),
+          () => this.options.relay?.stop(),
+        )
       }
-      this.publish({ status: 'ready' })
+      try {
+        await settleOwnedCleanup(operations, 'Mobile Personal Pairing unpair failed')
+      } finally {
+        this.publish({ status: 'ready' })
+      }
     })
   }
 
   async deactivate(): Promise<void> {
     this.active = false
-    this.resetAccountScope()
     const transaction = (async () => {
-      const first = await Promise.allSettled([this.options.relay?.stop() ?? Promise.resolve(), this.serial])
-      const final = await Promise.allSettled([this.options.relay?.stop() ?? Promise.resolve()])
-      this.resetAccountScope()
-      throwRejected([...first, ...final], 'Mobile Personal Pairing deactivation failed')
+      await this.lifecycleBarrier
+      const admitted = await Promise.allSettled([this.serial])
+      const cleanup = await Promise.allSettled([
+        this.resetAccountScope(),
+        this.options.relay?.stop() ?? Promise.resolve(),
+      ])
+      throwRejected([...admitted, ...cleanup], 'Mobile Personal Pairing deactivation failed')
     })()
     this.lifecycleBarrier = transaction.then(() => undefined, () => undefined)
     await transaction
@@ -332,10 +343,7 @@ export class MobilePairingController implements MobilePairingActions {
   private currentAttempt(): PreparedMobilePairingAttempt | undefined {
     const attempt = this.attempt
     if (attempt === undefined) return undefined
-    if (attempt.accountId !== this.requireAccountId()) {
-      this.resetAccountScope()
-      return undefined
-    }
+    this.requireAccountId()
     if (attempt.transmission === 'pending') return attempt
     const expiresAt = attempt.transmission === 'possibly-committed'
       ? attempt.replayExpiresAt ?? attempt.expiresAt
@@ -374,17 +382,17 @@ export class MobilePairingController implements MobilePairingActions {
     })()
   }
 
-  private resetAccountScope(): void {
+  private async resetAccountScope(): Promise<void> {
     this.clearAttempt()
-    this.options.companion?.forgetConnection()
-    if (this.options.companion !== undefined) {
-      void this.options.companion.releasePairing()
+    const operations: Array<() => void | Promise<void>> = [() => this.options.companion?.forgetConnection()]
+    if (this.options.companion !== undefined) operations.push(() => this.options.companion?.releasePairing())
+    if (this.options.relay !== this.options.companion) operations.push(() => this.options.relay?.configure(undefined))
+    try {
+      await settleOwnedCleanup(operations, 'Mobile Personal Pairing Account reset failed')
+    } finally {
+      this.accountId = undefined
+      this.snapshot = { status: 'ready' }
     }
-    if (this.options.relay !== this.options.companion) {
-      void this.options.relay?.configure(undefined)
-    }
-    this.accountId = undefined
-    this.snapshot = { status: 'ready' }
   }
 
   private currentAccountId(): PlatformAccountId {
@@ -496,6 +504,14 @@ function throwRejected(results: PromiseSettledResult<unknown>[], message: string
   if (errors.length > 0) throw new AggregateError(errors, message)
 }
 
+async function settleOwnedCleanup(
+  operations: ReadonlyArray<() => void | Promise<void>>,
+  message: string,
+): Promise<void> {
+  const results = await Promise.allSettled(operations.map(operation => Promise.resolve().then(operation)))
+  throwRejected(results, message)
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -511,5 +527,32 @@ function settleBeforeCameraAbort<T>(operation: Promise<T>, signal: AbortSignal |
     const cancelled = (): void => { reject(new Error('Personal Pairing camera scan was cancelled')) }
     signal.addEventListener('abort', cancelled, { once: true })
     void operation.then(resolve, reject).finally(() => { signal.removeEventListener('abort', cancelled) })
+  })
+}
+
+function acquireCameraStream(operation: Promise<MediaStream>, signal: AbortSignal | undefined): Promise<MediaStream> {
+  if (signal === undefined) return operation
+  return new Promise<MediaStream>((resolve, reject) => {
+    let cancelled = signal.aborted
+    const cancel = (): void => {
+      cancelled = true
+      reject(new Error('Personal Pairing camera scan was cancelled'))
+    }
+    if (cancelled) cancel()
+    else signal.addEventListener('abort', cancel, { once: true })
+    void operation.then(
+      (stream) => {
+        signal.removeEventListener('abort', cancel)
+        if (cancelled || signal.aborted) {
+          for (const track of stream.getTracks()) track.stop()
+          return
+        }
+        resolve(stream)
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', cancel)
+        if (!cancelled) reject(error instanceof Error ? error : new Error(String(error), { cause: error }))
+      },
+    )
   })
 }

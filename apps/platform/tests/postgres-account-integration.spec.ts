@@ -5,10 +5,18 @@ import { join } from 'node:path'
 import {
   parseInstallationId,
   parseLoginAttemptId,
+  parsePlatformAccountId,
 } from '@deepseek-ai/dsh-platform-account'
+import {
+  parsePendingPairingId,
+  parsePersonalPairingId,
+  parseRelayConnectionToken,
+  parseRelayCredentialFingerprint,
+} from '@deepseek-ai/dsh-remote-access'
 import pg from 'pg'
 import { describe, expect, it } from 'vitest'
 import { PostgresAccountBackend } from '../src/postgres-backend.ts'
+import { PostgresPersonalPairingAuthorityStore } from '../src/postgres-pairing-store.ts'
 
 const postgresAvailable = spawnSync('initdb', ['--version'], { encoding: 'utf8' }).status === 0
   && spawnSync('postgres', ['--version'], { encoding: 'utf8' }).status === 0
@@ -33,6 +41,11 @@ describe.skipIf(!postgresAvailable)('PostgresAccountBackend with disposable Post
       )
       const backend = new PostgresAccountBackend('gestalt', runtime.pool)
       await backend.migrate()
+      await expect(backend.getSession('session-legacy' as never)).resolves.toMatchObject({
+        installationKind: 'mobile',
+        installationId: 'mobile-stable',
+        active: true,
+      })
       const attemptId = parseLoginAttemptId('attempt-relogin')
       await backend.createAttempt({
         id: attemptId,
@@ -71,6 +84,73 @@ describe.skipIf(!postgresAvailable)('PostgresAccountBackend with disposable Post
         ['session-legacy'],
       )
       expect(legacy.rows).toEqual([{ active: false }])
+    } finally {
+      await runtime.close()
+    }
+  })
+
+  it('preserves overlapping Relay presence leases and expires a crashed connection', async () => {
+    const runtime = await startPostgres()
+    try {
+      const writer = new PostgresPersonalPairingAuthorityStore('gestalt-production', runtime.pool)
+      const reader = new PostgresPersonalPairingAuthorityStore('gestalt-production', runtime.pool)
+      await writer.migrate()
+      const accountId = parsePlatformAccountId('account-presence')
+      const pendingPairingId = parsePendingPairingId('pending-presence')
+      const pairingId = parsePersonalPairingId('pairing-presence')
+      const credentialFingerprint = parseRelayCredentialFingerprint('credential-presence')
+      await writer.confirmMobilePairing({
+        accountId,
+        desktopInstallationId: parseInstallationId('desktop-presence'),
+        mobileInstallationId: parseInstallationId('mobile-presence'),
+        pendingPairingId,
+        pairingId,
+        credentialFingerprint,
+        lastAccessAt: 100,
+        sealedRelayAuthority: Uint8Array.of(1, 2, 3),
+      })
+      await writer.recordRelayLease({
+        credentialFingerprint,
+        connectionToken: parseRelayConnectionToken('connection-a'),
+        expiresAt: 500,
+        accessedAt: 200,
+      })
+      await reader.recordRelayLease({
+        credentialFingerprint,
+        connectionToken: parseRelayConnectionToken('connection-a'),
+        expiresAt: 450,
+        accessedAt: 180,
+      })
+      await expect(writer.getPersonalPairingActivity(pairingId, 475)).resolves.toEqual({
+        lastAccessAt: 200,
+        online: true,
+      })
+      await reader.recordRelayLease({
+        credentialFingerprint,
+        connectionToken: parseRelayConnectionToken('connection-b'),
+        expiresAt: 600,
+        accessedAt: 250,
+      })
+      await writer.releaseRelayLease({
+        credentialFingerprint,
+        connectionToken: parseRelayConnectionToken('connection-a'),
+        observedAt: 300,
+      })
+      await expect(reader.getPersonalPairingActivity(pairingId, 300)).resolves.toEqual({
+        lastAccessAt: 250,
+        online: true,
+      })
+      await expect(reader.getPersonalPairingActivity(pairingId, 600)).resolves.toEqual({
+        lastAccessAt: 250,
+        online: false,
+      })
+      const durable = await runtime.pool.query<{ presence_leases: unknown }>(
+        `SELECT presence_leases
+           FROM remote_access_mobile_pairings
+          WHERE database_identity = $1 AND pending_pairing_id = $2`,
+        ['gestalt-production', pendingPairingId],
+      )
+      expect(durable.rows).toEqual([{ presence_leases: {} }])
     } finally {
       await runtime.close()
     }

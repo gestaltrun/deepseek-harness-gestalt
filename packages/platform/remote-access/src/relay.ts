@@ -25,11 +25,18 @@ export type RelayCredentialFingerprint = Branded<'RelayCredentialFingerprint'>
 
 /** Durable Mobile Pairing activity projection updated by authenticated Relay lifecycle events. */
 export interface RelayPairingActivitySink {
-  /** Record current online state and optionally an authenticated access timestamp. */
-  recordRelayActivity(input: {
+  /** Add or extend one authenticated attachment lease and optionally record its access time. */
+  recordRelayLease(input: {
     credentialFingerprint: RelayCredentialFingerprint
-    online: boolean
-    accessedAt?: number
+    connectionToken: RelayConnectionToken
+    expiresAt: number
+    accessedAt: number
+  }): Promise<void>
+  /** Remove only the authenticated attachment lease identified by this connection token. */
+  releaseRelayLease(input: {
+    credentialFingerprint: RelayCredentialFingerprint
+    connectionToken: RelayConnectionToken
+    observedAt: number
   }): Promise<void>
 }
 

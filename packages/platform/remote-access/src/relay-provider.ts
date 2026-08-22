@@ -45,7 +45,7 @@ interface LocalAttachment {
   writerDrained: boolean
   socketClosed: boolean
   capacityHeld: boolean
-  activityOffline: boolean
+  activityReleased: boolean
 }
 
 interface PendingDelivery {
@@ -222,7 +222,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
         writerDrained: false,
         socketClosed: input.close === undefined,
         capacityHeld,
-        activityOffline: false,
+        activityReleased: false,
       }
       local = attached
       this.attachments.set(key, attached)
@@ -239,7 +239,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
             this.disposed ? 'Platform Instance is offline' : 'Relay credential was superseded during attachment',
           )
         }
-        await this.recordPairingActivity(attached, true, this.now())
+        await this.recordPairingActivity(attached, this.now())
         this.armHeartbeat(attached)
       } catch (error) {
         if (!attached.closed) await this.closeAndDrain(attached)
@@ -299,7 +299,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
     if (message.routeId !== local.entry.routeId || message.sourceAttachmentId !== local.entry.attachmentId) {
       throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay ciphertext source does not match its attachment')
     }
-    await this.recordPairingActivity(local, true, this.now())
+    await this.recordPairingActivity(local, this.now())
     const target = await this.options.coordinator.locate(message.routeId, message.targetAttachmentId)
     if (target === undefined || target.expiresAt <= this.now()) {
       throw new RemoteRelayError('REMOTE_OFFLINE', 'Relay target is offline')
@@ -356,7 +356,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
       throw new RemoteRelayError('REMOTE_OFFLINE', 'Relay directory entry is no longer current')
     }
     local.entry = refreshed
-    await this.recordPairingActivity(local, true, this.now())
+    await this.recordPairingActivity(local, this.now())
     this.armHeartbeat(local)
   }
 
@@ -439,12 +439,13 @@ export class RemoteRelayProvider extends RemoteRelayService {
       complete: () => { local.socketClosed = true },
       promise: Promise.resolve().then(local.close),
     })
-    if (!local.activityOffline && local.entry.endpoint === 'mobile' && this.options.pairingActivity !== undefined) {
+    if (!local.activityReleased && local.entry.endpoint === 'mobile' && this.options.pairingActivity !== undefined) {
       operations.push({
-        complete: () => { local.activityOffline = true },
-        promise: this.options.pairingActivity.recordRelayActivity({
+        complete: () => { local.activityReleased = true },
+        promise: this.options.pairingActivity.releaseRelayLease({
           credentialFingerprint: local.credentialFingerprint,
-          online: false,
+          connectionToken: local.entry.connectionToken,
+          observedAt: this.now(),
         }),
       })
     }
@@ -465,13 +466,13 @@ export class RemoteRelayProvider extends RemoteRelayService {
 
   private async recordPairingActivity(
     local: LocalAttachment,
-    online: boolean,
     accessedAt: number,
   ): Promise<void> {
     if (local.entry.endpoint !== 'mobile' || this.options.pairingActivity === undefined) return
-    await this.options.pairingActivity.recordRelayActivity({
+    await this.options.pairingActivity.recordRelayLease({
       credentialFingerprint: local.credentialFingerprint,
-      online,
+      connectionToken: local.entry.connectionToken,
+      expiresAt: local.entry.expiresAt,
       accessedAt,
     })
   }

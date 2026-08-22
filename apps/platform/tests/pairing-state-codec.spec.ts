@@ -93,6 +93,7 @@ describe('pairing transaction codec', () => {
       desktopInstallationId: parseInstallationId('desktop-one'),
       mobileInstallationId: parseInstallationId('mobile-one'),
       challengeId: parsePairingChallengeId('challenge-one'),
+      requestDigest: new Uint8Array(32).fill(7),
       challengeCleanup: {},
       view: {
         pendingPairingId: parsePendingPairingId('pending-one'),
@@ -105,5 +106,7 @@ describe('pairing transaction codec', () => {
     const decoded = decodePairingTransactionState(encodePairingTransactionState(state))
     expect(decoded.pairings.get(parsePersonalPairingId('pairing-one'))?.mobileGrant?.revision).toBe(2)
     expect(decoded.completions.get(parsePairingCompletionId('completion-one'))?.view.device.platform).toBe('android')
+    expect(decoded.completions.get(parsePairingCompletionId('completion-one'))?.requestDigest)
+      .toEqual(new Uint8Array(32).fill(7))
   })
 })

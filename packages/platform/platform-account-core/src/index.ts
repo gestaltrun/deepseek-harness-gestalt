@@ -690,6 +690,7 @@ export class PlatformAccount extends AccountService {
       throw new AccountError('SESSION_EXPIRED', 'Account Session cannot issue a full access-token lifetime')
     }
     await this.verifyProof(session.publicKey, 'refresh', currentHash, input.proof)
+    await this.rejectLegacyMobileSession(session)
     const replacement = randomBytes(32).toString('base64url')
     const rotated = await this.backend.rotateRefresh(session.id, currentHash, hashAccountToken(replacement))
     if (rotated === undefined) throw new AccountError('SESSION_REVOKED', 'Account Session refresh token was already rotated')
@@ -700,6 +701,7 @@ export class PlatformAccount extends AccountService {
   async current(input: { accessToken: string; proof: AccountProof }): Promise<PlatformAccountView> {
     const { payload, session } = await this.authorizeAccess(input.accessToken)
     await this.verifyProof(session.publicKey, 'current', hashAccountToken(input.accessToken), input.proof)
+    await this.rejectLegacyMobileSession(session)
     return accountView(await this.requireAccount(payload.accountId))
   }
 
@@ -709,12 +711,13 @@ export class PlatformAccount extends AccountService {
   }): Promise<AuthenticatedInstallationView> {
     const { payload, session } = await this.authorizeAccess(input.accessToken)
     await this.verifyProof(session.publicKey, 'current', hashAccountToken(input.accessToken), input.proof)
+    await this.rejectLegacyMobileSession(session)
     const installation = session.installationKind === 'desktop'
       ? { id: session.installationId, kind: 'desktop' as const }
       : {
         id: session.installationId,
         kind: 'mobile' as const,
-        presentation: requireMobilePresentation(session.presentation),
+        presentation: structuredClone(session.presentation as MobileInstallationPresentation),
       }
     return {
       account: accountView(await this.requireAccount(payload.accountId)),
@@ -837,6 +840,12 @@ export class PlatformAccount extends AccountService {
     if (await this.backend.revokeSession(sessionId)) await this.invalidation.publish(sessionId)
   }
 
+  private async rejectLegacyMobileSession(session: SessionRecord): Promise<void> {
+    if (session.installationKind !== 'mobile' || session.presentation !== undefined) return
+    await this.revoke(session.id)
+    throw new AccountError('SESSION_REVOKED', 'Mobile Account Session has no Installation presentation')
+  }
+
   private async closeConnections(sessionId: AccountSessionId): Promise<void> {
     const connections = this.connections.get(sessionId)
     this.connections.delete(sessionId)
@@ -902,15 +911,6 @@ function accountView(account: AccountRecord): PlatformAccountView {
     githubLogin: account.githubLogin,
     avatarUrl: account.avatarUrl,
   }
-}
-
-function requireMobilePresentation(
-  presentation: MobileInstallationPresentation | undefined,
-): MobileInstallationPresentation {
-  if (presentation === undefined) {
-    throw new AccountError('SESSION_REVOKED', 'Mobile Account Session has no Installation presentation')
-  }
-  return structuredClone(presentation)
 }
 
 function installationLimit(kind: InstallationKind): number {

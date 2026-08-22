@@ -10,7 +10,7 @@ Mobile Access is false for each Desktop Installation until the Desktop Settings 
 
 The Mobile completion consumes the invitation only after its complete link matches the retained capability. A cross-account attempt destroys that invitation before the crypto adapter runs. A valid same-account handshake produces a pending key and handshake hash; the six derived authentication words appear on both installations, but active pairing lists remain empty until Desktop confirmation. Confirmation activates one unique provider-owned key reference and grants a branded Device Principal whose authority is exactly `companion-surface`.
 
-Mutations are serialized. Expiry, cancellation, rejection, disablement, and one successful completion commit terminal state before another mutation can observe the capability. Crypto-resource destruction is independently retryable: a failed cleanup never repeats handshake completion or pairing activation, and provider disposal attempts every challenge, pending key, active key, and cleanup record. Challenge expiry is scheduled at creation rather than waiting for another completion request. Opaque generated ids and activated key references are checked before insertion, so a collision cannot replace an existing record or abandon a newly allocated key.
+Mutations are serialized. Expiry, cancellation, rejection, disablement, and one successful completion commit terminal state before another mutation can observe the capability. Completion replay requires a fixed-size digest match over the authenticated Account, Mobile Installation, all invitation fields, and Mobile handshake bytes; changing any content under the same completion id is a collision. Crypto-resource destruction is independently retryable: a failed cleanup never repeats handshake completion or pairing activation, and provider disposal attempts every challenge, pending key, active key, and cleanup record. Challenge expiry is scheduled at creation rather than waiting for another completion request. Opaque generated ids and activated key references are checked before insertion, so a collision cannot replace an existing record or abandon a newly allocated key.
 
 ## Cryptographic adapter
 
@@ -18,7 +18,7 @@ Mutations are serialized. Expiry, cancellation, rejection, disablement, and one 
 
 ## Multi-instance Relay
 
-`ctx.remoteRelay` authenticates an attachment with the opaque route id and a separate rotatable 32-byte credential, persists only its digest and revision through `RelayRouteStore`, and registers the live attachment in an expiring shared directory. `remote-access-redis` carries directory metadata, content-free invalidation, and bounded ciphertext Pub/Sub only; it creates no offline queue. A target on another Platform Instance receives the same opaque Relay frame, while a missing target returns `REMOTE_OFFLINE` immediately.
+`ctx.remoteRelay` authenticates an attachment with the opaque route id and a separate rotatable 32-byte credential, persists only its digest and revision through `RelayRouteStore`, and registers the live attachment in an expiring shared directory. Mobile presence stores one expiring lease per authenticated connection token; exact-token close cannot clear another instance's live attachment, and missing cleanup becomes offline at lease expiry. `lastAccessAt` advances only on authenticated attach, heartbeat, or ciphertext access. `remote-access-redis` carries directory metadata, content-free invalidation, and bounded ciphertext Pub/Sub only; it creates no offline queue. A target on another Platform Instance receives the same opaque Relay frame, while a missing target returns `REMOTE_OFFLINE` immediately.
 
 Mobile and Desktop connect outward through one non-sticky TLS endpoint. Instance loss starts a fresh connection; Desktop sends an authoritative encrypted projection after attachment, and no live socket is migrated. Closing the Desktop window quits the process, while sleep, quit, sign-out, or disabling Mobile Access stops the Relay. Production stays fail-closed until reviewed product cryptography is assembled. The keyless two-instance Loader scenario proves the transport composition without weakening that gate.
 
@@ -139,7 +139,7 @@ abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes:
 abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: string }): Promise<void>
 ```
 
-Source: [`packages/platform/remote-access/src/index.ts:469`](../../packages/platform/remote-access/src/index.ts)
+Source: [`packages/platform/remote-access/src/index.ts:498`](../../packages/platform/remote-access/src/index.ts)
 
 <a id="ctxremoteattachmentauthority--remoteattachmentauthority"></a>
 
@@ -245,5 +245,5 @@ abstract revokeRoute(routeId: RelayRouteId): Promise<void>
 abstract attach(input: { message: RelayAttachMessage deliver: (message: RelayCiphertextMessage) => Promise<void> close?: () => void | Promise<void> signal?: AbortSignal announce?: () => Promise<void> }): Promise<RemoteRelayAttachment>
 ```
 
-Source: [`packages/platform/remote-access/src/relay.ts:155`](../../packages/platform/remote-access/src/relay.ts)
+Source: [`packages/platform/remote-access/src/relay.ts:162`](../../packages/platform/remote-access/src/relay.ts)
 <!-- END GENERATED cordis-surface -->

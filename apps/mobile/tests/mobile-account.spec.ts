@@ -95,6 +95,8 @@ describe('MobileAccount', () => {
     await screen.findByText('@octocat')
     expect(screen.getByText('当前安装')).toBeTruthy()
     expect(screen.getByText('independent review pending')).toBeTruthy()
+    expect(screen.queryByText('Paired Desktop')).toBeNull()
+    expect(screen.queryByText('Remote Offline')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '退出此安装' }))
     await waitFor(() => { expect(api.signOut).toHaveBeenCalledOnce() })

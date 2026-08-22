@@ -6,6 +6,8 @@ Service Definition for Platform Account identity and the Account Session bound t
 
 The public types brand Account, Login Attempt, Account Session, Installation, and proof-JTI ids. Runtime `AccountError` exposes stable failure codes for invalid or expired attempts, invalid or replayed proof, expired or revoked sessions, and open-registration `QUOTA` / `PLATFORM_CAPACITY` failures that carry `retryAfter` in seconds; the `./types` subpath remains type-only. Spec-fixed ceilings are ten live Desktop installations, ten live Mobile installations, and twenty concurrent tracked connections per Account. An optional shared `PlatformCapacityState` sheds new login while established sessions remain usable.
 
+`loadOperatedPlatformEnvironment` is the product-entry parser: it accepts one complete production identity and rejects local origins. `loadPlatformEnvironment` validates and selects a development/production pair only for bounded compositions such as examples and tests. Product clients supply the operated identity through deployment-owned build artifacts and have no runtime development selector.
+
 ## Model Experience
 
 None, as Platform Account state adds no messages, tools, or prompt text.

@@ -65,6 +65,17 @@ describe('Desktop release workflow', () => {
     expect(workflow).not.toContain('dist/**/*')
   })
 
+  it('projects the deployment Platform identity into every packaged artifact', () => {
+    expect(workflow.match(/Project operated Platform identity/g)).toHaveLength(2)
+    expect(workflow.match(/write-operated-platform-config\.mjs/g)).toHaveLength(2)
+    expect(workflow.match(/DSH_DESKTOP_OPERATED_PLATFORM_CONFIG/g)).toHaveLength(4)
+    expect(workflow.match(/vars\.PLATFORM_ORIGIN/g)).toHaveLength(2)
+    expect(workflow.match(/vars\.PLATFORM_GITHUB_CALLBACK/g)).toHaveLength(2)
+    expect(workflow.match(/vars\.PLATFORM_GITHUB_CLIENT_ID/g)).toHaveLength(2)
+    expect(workflow).not.toContain('PLATFORM_GITHUB_CLIENT_SECRET')
+    expect(record(record(desktopPackage).build).files).toContain('out/operated-platform.json')
+  })
+
   it('keeps the prepared workspace dependencies intact while packaging', () => {
     expect(record(record(desktopPackage).build).npmRebuild).toBe(false)
     expect(workflow).not.toContain('dsh-desktop exec electron-builder')

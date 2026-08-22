@@ -203,8 +203,10 @@ export interface PersonalPairingProviderOptions {
       registerPairingCredentialDigests?: never
       revokeCredentialDigest?: never
     })
-  /** Deployment-owned durable Mobile Access and pairing-to-route authority. */
+  /** Deployment-owned Mobile Access and pairing-to-route authority. Product entries provide a durable shared store. */
   authority?: PersonalPairingAuthorityStore
+  /** Whether this provider owns the complete authority lifetime and settles every retained record on disposal. */
+  ownsAuthority?: boolean
   /** Clock used for fixed challenge expiry and deterministic assembled scenarios. */
   clock?: { now(): number }
   /** Cryptographic random source; production defaults to Web Crypto. */
@@ -868,14 +870,17 @@ export class PersonalPairingProvider extends RemoteAccessService {
     if (options.relay !== undefined && options.authority === undefined) {
       throw new TypeError('Remote Relay composition requires a deployment-owned shared authority store')
     }
+    if (options.authority === undefined) {
+      throw new TypeError('Personal Pairing requires an explicitly owned authority store')
+    }
     if (options.relay !== undefined
       && (typeof options.relay.registerPairingCredentialDigests === 'function')
         !== (typeof options.relay.revokeCredentialDigest === 'function')) {
       throw new TypeError('Remote Relay composition requires pairing registration and revocation')
     }
     this.pairingLinkOrigin = origin.toString()
-    this.ownsAuthority = options.authority === undefined
-    this.authority = options.authority ?? new MemoryPersonalPairingAuthorityStore()
+    this.authority = options.authority
+    this.ownsAuthority = options.ownsAuthority === true
     this.clock = options.clock ?? { now: () => Date.now() }
     this.randomBytes = options.randomBytes ?? secureRandomBytes
     this.randomId = options.randomId ?? (kind => `${kind}-${crypto.randomUUID()}`)

@@ -6,10 +6,13 @@
   "ignoreBinaries": [
     "bwrap",
     "icacls",
+    "initdb",
     "jar",
     "javac",
     "keytool",
     "musl-gcc",
+    "openssl",
+    "postgres",
     "python3",
     "redis-server",
     "sandbox-exec",

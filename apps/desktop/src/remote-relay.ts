@@ -186,9 +186,8 @@ export class DesktopSnowRelayChannelOwner {
 }
 
 /**
- * Parse the complete Desktop WSS bundle before network acquisition.
- * @param source - Desktop process environment.
- * @returns validated WSS and bounded queue inputs.
+ * Keep Relay unavailable until the reviewed product channel is composed.
+ * @returns fail-closed Desktop-owned Relay lifecycle injected into Settings.
  */
 export function loadDesktopRemoteRelayConfig(
   source: NodeJS.ProcessEnv | Record<string, string | undefined>,

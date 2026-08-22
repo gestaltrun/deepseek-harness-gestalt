@@ -14,7 +14,7 @@
 
 一个安装只持有一个当前 Platform 账号。账号域配对密钥、缓存和操作回执使用包含环境与账号 id 的命名空间，因此切换账号会选择隔离的材料。一个串行 lifecycle owner 会依次处理恢复、刷新、登录、轮询、切换与退出，重复加载不能清除或复活较新的会话。Desktop 关闭时会关闭该 owner、排空已经接纳的轮询，并抑制 dispose 后的状态变更或发布。快照 listener 的错误会分别隔离。当前安装退出会提交会话失效，分别隔离错误并等待全部失效 listener 与连接 closer，同时保留个人配对。
 
-开发与生产使用不同的可信 origin、回调、OAuth App、凭证引用、数据库身份和身份命名空间。Desktop 与 Mobile 会解析两侧身份，并在渲染或流量前要求显式选择。所选身份绑定 HTTP Consumer 唯一的 CORS origin、客户端 transport、OAuth adapter、backend 数据库、本地存储、回调与签发账号命名空间；Consumer origin 缺失或不匹配会在注册路由前失败。HTTP 与持久化记录都会在各自边界从 `unknown` 解析，IndexedDB 只接受真正的 P-256 私有签名 `CryptoKey`。内存后端与失效总线只支持无密钥验收和开发；生产持久化与分布式失效属于 Platform 部署。
+通用能力可以为范围受限的 example 与测试校验彼此不同的开发和生产身份。Desktop 与 Mobile 产品入口会在渲染或流量前只接受一套实际运行的生产身份：Desktop 从应用 archive 读取发布流程生成的公开配置，Mobile 则通过构建配置接收同一组字段。该身份绑定 HTTP Consumer 唯一的 CORS origin、客户端 transport、OAuth adapter、backend 数据库、本地存储、回调与签发账号命名空间；字段缺失、localhost 或 Consumer origin 不匹配会在注册路由前失败。HTTP 与持久化记录都会在各自边界从 `unknown` 解析，IndexedDB 只接受真正的 P-256 私有签名 `CryptoKey`。内存后端与失效总线是 fixture adapter；生产持久化与分布式失效属于 Platform 部署。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 

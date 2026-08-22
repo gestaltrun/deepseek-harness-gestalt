@@ -1470,6 +1470,11 @@ describe('PersonalPairingProvider', () => {
     expect(() => new PersonalPairingProvider(new Context(), {
       account: accountService(account('account-one')),
       handshake: handshakeProvider(),
+      pairingLinkOrigin: 'https://platform.example.com/pair',
+    })).toThrow('explicitly owned authority store')
+    expect(() => new PersonalPairingProvider(new Context(), {
+      account: accountService(account('account-one')),
+      handshake: handshakeProvider(),
       relay: {
         revokeRoute: vi.fn(),
         registerPairingCredentialDigests: vi.fn(),
@@ -1744,6 +1749,8 @@ describe('PersonalPairingProvider', () => {
     const provider = new PersonalPairingProvider(new Context(), {
       account: accountService(account('account-one')),
       handshake,
+      authority: new MemoryPersonalPairingAuthorityStore(),
+      ownsAuthority: true,
       clock: { now: () => NOW },
       randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index),
       randomId: kind => `${kind}-id`,
@@ -2175,6 +2182,7 @@ describe('PersonalPairingProvider', () => {
         currentInstallation: vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken)),
       },
       handshake,
+      authority: new MemoryPersonalPairingAuthorityStore(),
       clock: { now: () => now.value },
       randomBytes: size => new Uint8Array(size),
       randomId: kind => invalidPendingId && kind === 'completion' ? '' : `${kind}-${String(sequence += 1)}`,
@@ -2382,6 +2390,8 @@ describe('PersonalPairingProvider', () => {
     const provider = new PersonalPairingProvider(ctx, {
       account: { currentInstallation: vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken)) },
       handshake,
+      authority: new MemoryPersonalPairingAuthorityStore(),
+      ownsAuthority: true,
       clock: { now: () => NOW },
       randomBytes: size => new Uint8Array(size),
       randomId: kind => kind === 'challenge' ? crypto.randomUUID() : `${kind}-collision`,
@@ -2408,6 +2418,7 @@ describe('PersonalPairingProvider', () => {
     const provider = new PersonalPairingProvider(new Context(), {
       account: { currentInstallation: vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken)) },
       handshake,
+      authority: new MemoryPersonalPairingAuthorityStore(),
       clock: { now: () => NOW },
       randomBytes: size => new Uint8Array(size),
       randomId: kind => kind === 'challenge' ? crypto.randomUUID() : `${kind}-collision`,
@@ -2492,6 +2503,7 @@ describe('PersonalPairingProvider', () => {
         currentInstallation: vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken)),
       },
       handshake,
+      authority: new MemoryPersonalPairingAuthorityStore(),
       clock: { now: () => NOW },
       randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index),
       randomId: (kind) => {
@@ -2690,6 +2702,7 @@ describe('PersonalPairingProvider', () => {
     const defaults = new PersonalPairingProvider(new Context(), {
       account: accountService(account('account-one')),
       handshake,
+      authority: new MemoryPersonalPairingAuthorityStore(),
       pairingLinkOrigin: 'https://platform.example.com/pair',
     })
     const desktop = authentication('desktop-installation')
@@ -2703,6 +2716,7 @@ describe('PersonalPairingProvider', () => {
     const badRandom = new PersonalPairingProvider(new Context(), {
       account: accountService(account('account-one')),
       handshake,
+      authority: new MemoryPersonalPairingAuthorityStore(),
       randomBytes: () => Uint8Array.of(1),
       pairingLinkOrigin: 'https://platform.example.com/pair',
     })
@@ -2981,6 +2995,7 @@ describe('PersonalPairingProvider', () => {
     const keyless = new PersonalPairingProvider(new Context(), {
       account: { currentInstallation: vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken)) },
       handshake: handshakeProvider(),
+      authority: new MemoryPersonalPairingAuthorityStore(),
       pairingLinkOrigin: 'https://platform.example.com/pair',
     })
     await keyless.setMobileAccess({ desktop, enabled: true })
@@ -3159,6 +3174,8 @@ function configuredProvider(
       currentInstallation: vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken)),
     },
     handshake: handshakeProvider(),
+    authority: new MemoryPersonalPairingAuthorityStore(),
+    ownsAuthority: true,
     pairingLinkOrigin: 'https://platform.example.com/pair',
     ...config,
   })
@@ -3282,6 +3299,8 @@ function uniquePairingProvider(
       currentInstallation: vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken)),
     },
     handshake,
+    authority: new MemoryPersonalPairingAuthorityStore(),
+    ownsAuthority: true,
     clock: { now: () => now.value },
     ...(schedule === undefined ? {} : { schedule }),
     randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index),
@@ -3302,6 +3321,8 @@ function collisionPairingProvider(
       currentInstallation: vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken)),
     },
     handshake,
+    authority: new MemoryPersonalPairingAuthorityStore(),
+    ownsAuthority: true,
     clock: { now: () => NOW },
     randomBytes: size => new Uint8Array(size),
     randomId: (kind) => {

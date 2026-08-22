@@ -31,6 +31,9 @@ export interface PlatformEnvironmentSelectionInput {
   production: Record<Exclude<keyof PlatformEnvironmentIdentity, 'environment'>, unknown>
 }
 
+/** Untrusted fields for the single operated production identity. */
+export type OperatedPlatformEnvironmentInput = Record<keyof PlatformEnvironmentIdentity, unknown>
+
 declare const selectedPlatformEnvironment: unique symbol
 
 /** One deployment identity selected from a validated development/production pair. */
@@ -62,6 +65,33 @@ export function loadPlatformEnvironment(input: PlatformEnvironmentSelectionInput
     development: identity('development'),
     production: identity('production'),
   }), input.selection)
+}
+
+/**
+ * Parse the single operated production identity used by shipped product entries.
+ * @param input - untrusted packaging or deployment fields.
+ * @returns immutable production identity after local origins and incomplete fields are rejected.
+ */
+export function loadOperatedPlatformEnvironment(
+  input: OperatedPlatformEnvironmentInput,
+): SelectedPlatformEnvironment {
+  if (input.environment !== 'production') {
+    throw new TypeError('Operated Platform environment must be production')
+  }
+  const origin = required(input.origin, 'production origin')
+  if (isLocalHostname(new URL(origin).hostname.toLowerCase())) {
+    throw new TypeError('Operated Platform origin must not use a local host')
+  }
+  const identity = validateEnvironmentIdentity({
+    environment: 'production',
+    origin,
+    callbackUrl: required(input.callbackUrl, 'production callback URL'),
+    githubClientId: required(input.githubClientId, 'production GitHub client id'),
+    credentialReference: required(input.credentialReference, 'production credential reference'),
+    databaseIdentity: required(input.databaseIdentity, 'production database identity'),
+    identityNamespace: required(input.identityNamespace, 'production identity namespace'),
+  }, 'production')
+  return Object.freeze(identity) as SelectedPlatformEnvironment
 }
 
 /**
@@ -139,4 +169,10 @@ function validateEnvironmentIdentity<T extends PlatformEnvironment>(
 function required(value: unknown, name: string): string {
   if (typeof value === 'string' && value.trim() !== '') return value
   throw new TypeError(`Platform ${name} is required`)
+}
+
+function isLocalHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname.endsWith('.localhost')
+    || hostname === '0.0.0.0' || hostname === '[::1]' || hostname === '::1'
+    || /^127(?:\.[0-9]{1,3}){3}$/u.test(hostname)
 }

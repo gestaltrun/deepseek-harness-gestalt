@@ -6,6 +6,8 @@
 
 公共类型对账号、登录尝试、账号会话、安装和证明 JTI id 使用品牌类型。运行时 `AccountError` 为无效或过期尝试、无效或重放证明、过期或已撤销会话，以及携带秒级 `retryAfter` 的开放注册 `QUOTA` / `PLATFORM_CAPACITY` 失败提供稳定错误码；`./types` 子路径保持仅含类型。规格固定上限为每个账号 10 个在线 Desktop 安装、10 个在线 Mobile 安装，以及 20 条并发被跟踪连接。可选的共享 `PlatformCapacityState` 会拒绝新的登录，已建立会话仍可使用。
 
+`loadOperatedPlatformEnvironment` 是产品入口 parser：它只接受一套完整生产身份，并拒绝本地 origin。`loadPlatformEnvironment` 仅供 example 与测试等范围受限的 composition 校验并选择开发／生产身份对。产品客户端通过部署所有的构建产物取得实际运行身份，不提供运行时开发 selector。
+
 ## 模型体验
 
 无。Platform 账号状态不对模型可见，不增加消息、工具或提示词文本。

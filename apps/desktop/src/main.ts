@@ -33,7 +33,7 @@ import {
 } from './updater.ts'
 import { windowChromeOptions } from './window-options.ts'
 import { desktopIconOptions } from './app-icon.ts'
-import { loadDesktopPlatformEnvironment } from './platform-environment.ts'
+import { readDesktopPlatformEnvironment } from './platform-environment.ts'
 import {
   DesktopAccountController, EncryptedDesktopAccountStore,
   UnavailableDesktopAccountController, type DesktopAccountActions,
@@ -54,6 +54,7 @@ import { createDesktopRemoteRelay } from './remote-relay.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const PRELOAD = join(here, 'preload.cjs')
+const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
 
 function smokeLog(line: string): void {
   const file = process.env.DSH_DESKTOP_SMOKE_FILE
@@ -78,6 +79,7 @@ let stopPairingEvents: (() => void) | undefined
 let accountSignedIn = false
 const hostStartController = new AbortController()
 let pendingHost: Promise<RunningWebHost> | undefined
+const accountEnvironment = readDesktopPlatformEnvironment(OPERATED_PLATFORM_CONFIG)
 
 smokeLog('main loaded')
 const gotLock = app.requestSingleInstanceLock()
@@ -110,49 +112,38 @@ async function boot(): Promise<void> {
   smokeLog('boot start')
   window = createWindow()
   smokeLog('window created')
-  let accountEnvironment: SelectedPlatformEnvironment | undefined
+  const snowPairingVault = await DesktopSnowPairingVault.load(new EncryptedDesktopSnowPairingStore(
+    join(app.getPath('userData'), `snow-pairings-${accountEnvironment.databaseIdentity}.bin`),
+    {
+      encrypt: value => safeStorage.encryptString(value),
+      decrypt: value => safeStorage.decryptString(Buffer.from(value)),
+    },
+  ))
+  const relay = createDesktopRemoteRelay({
+    environment: accountEnvironment, source: process.env, snowPairingVault,
+  })
+  account = createDesktopAccount(accountEnvironment)
+  let accountReady = true
   try {
-    accountEnvironment = loadDesktopPlatformEnvironment(process.env)
+    await account.start()
   } catch (error) {
-    smokeLog('account environment unavailable ' + (error instanceof Error ? error.message : String(error)))
-  }
-  if (accountEnvironment === undefined) {
-    account = new UnavailableDesktopAccountController('Platform environment is not configured')
-    pairing = new UnavailableDesktopPairingController('Platform environment is not configured')
-  } else {
-    const snowPairingVault = await DesktopSnowPairingVault.load(new EncryptedDesktopSnowPairingStore(
-      join(app.getPath('userData'), `snow-pairings-${accountEnvironment.databaseIdentity}.bin`),
-      {
-        encrypt: value => safeStorage.encryptString(value),
-        decrypt: value => safeStorage.decryptString(Buffer.from(value)),
-      },
-    ))
-    const relay = createDesktopRemoteRelay({
-      environment: accountEnvironment, source: process.env, snowPairingVault,
+    accountReady = false
+    smokeLog('account start failed ' + (error instanceof Error ? error.message : String(error)))
+    const failed = account
+    account = new UnavailableDesktopAccountController(
+      error instanceof Error ? error.message : String(error),
+    )
+    void failed.dispose().catch((disposeError: unknown) => {
+      console.error('[desktop-platform-account] dispose after failed start:', disposeError)
     })
-    account = createDesktopAccount(accountEnvironment)
-    let accountReady = true
-    try {
-      await account.start()
-    } catch (error) {
-      accountReady = false
-      smokeLog('account start failed ' + (error instanceof Error ? error.message : String(error)))
-      const failed = account
-      account = new UnavailableDesktopAccountController(
-        error instanceof Error ? error.message : String(error),
-      )
-      void failed.dispose().catch((disposeError: unknown) => {
-        console.error('[desktop-platform-account] dispose after failed start:', disposeError)
-      })
-    }
-    if (accountReady) smokeLog('account ready')
-    pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
-    accountSignedIn = account.getSnapshot().status === 'signed-in'
-    if (accountSignedIn) {
-      await pairing.start().catch((error: unknown) => {
-        console.error('[desktop-personal-pairing] initial Remote Access load failed:', error)
-      })
-    }
+  }
+  if (accountReady) smokeLog('account ready')
+  pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
+  accountSignedIn = account.getSnapshot().status === 'signed-in'
+  if (accountSignedIn) {
+    await pairing.start().catch((error: unknown) => {
+      console.error('[desktop-personal-pairing] initial Remote Access load failed:', error)
+    })
   }
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)

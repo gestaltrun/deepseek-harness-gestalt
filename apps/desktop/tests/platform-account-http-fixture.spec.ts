@@ -12,8 +12,8 @@ import { selectPlatformEnvironment, validatePlatformEnvironmentPair } from '@dee
 import { PlatformAccountHttpTransport } from '@deepseek-ai/dsh-platform-account-client'
 import {
   ACCESS_TOKEN_TTL_MS,
-  MemoryAccountBackend,
-  MemoryAccountInvalidationBus,
+  MemoryAccountBackend as FixtureAccountBackend,
+  MemoryAccountInvalidationBus as FixtureAccountInvalidationBus,
   PlatformAccount,
   type GitHubIdentityProvider,
 } from '@deepseek-ai/dsh-platform-account-core'
@@ -25,14 +25,14 @@ const ENVIRONMENT = selectPlatformEnvironment(validatePlatformEnvironmentPair({
   development: {
     environment: 'development', origin: 'https://platform.dev.example.com',
     callbackUrl: 'https://platform.dev.example.com/v1/account/oauth/github/callback',
-    githubClientId: 'desktop-real-development', credentialReference: 'credentials://development',
-    databaseIdentity: 'desktop-real-database-development', identityNamespace: 'desktop-real-development',
+    githubClientId: 'desktop-fixture-development', credentialReference: 'credentials://development',
+    databaseIdentity: 'desktop-fixture-database-development', identityNamespace: 'desktop-fixture-development',
   },
   production: {
     environment: 'production', origin: 'https://platform.example.com',
     callbackUrl: 'https://platform.example.com/v1/account/oauth/github/callback',
-    githubClientId: 'desktop-real-production', credentialReference: 'credentials://production',
-    databaseIdentity: 'desktop-real-database-production', identityNamespace: 'desktop-real-production',
+    githubClientId: 'desktop-fixture-production', credentialReference: 'credentials://production',
+    databaseIdentity: 'desktop-fixture-database-production', identityNamespace: 'desktop-fixture-production',
   },
 }), 'development')
 
@@ -52,14 +52,14 @@ afterEach(async () => {
   root = undefined
 })
 
-describe('Desktop Platform Account over a real HTTP Platform', () => {
+describe('Desktop Platform Account over an HTTP fixture', () => {
   it('signs in through the system browser, restores after restart, refreshes, and invalidates its session on sign-out', { timeout: 60_000 }, async () => {
     let now = Date.parse('2026-08-19T09:00:00.000Z')
     let callback: { code: string; state: string } | undefined
     const github: GitHubIdentityProvider = {
       environment: ENVIRONMENT,
       authorizationUrl(input) {
-        callback = { code: 'desktop-real-code', state: input.state }
+        callback = { code: 'desktop-fixture-code', state: input.state }
         const url = new URL('https://github.com/login/oauth/authorize')
         url.searchParams.set('client_id', ENVIRONMENT.githubClientId)
         url.searchParams.set('redirect_uri', input.callbackUrl)
@@ -69,15 +69,15 @@ describe('Desktop Platform Account over a real HTTP Platform', () => {
         return url.href
       },
       async exchange() {
-        return { providerSubject: 13994321, login: 'octocat', avatarUrl: 'https://avatars.example/octocat' }
+        return { providerSubject: 13994321, login: 'fixture-account', avatarUrl: 'https://avatars.example/fixture-account' }
       },
     }
     const provider = {
-      name: 'desktop-real-platform-account-provider',
+      name: 'desktop-fixture-platform-account-provider',
       apply(ctx: Context) {
         new PlatformAccount(ctx, {
-          backend: new MemoryAccountBackend(ENVIRONMENT.databaseIdentity),
-          invalidation: new MemoryAccountInvalidationBus(),
+          backend: new FixtureAccountBackend(ENVIRONMENT.databaseIdentity),
+          invalidation: new FixtureAccountInvalidationBus(),
           github,
           environment: ENVIRONMENT,
           clock: { now: () => now },
@@ -124,7 +124,7 @@ describe('Desktop Platform Account over a real HTTP Platform', () => {
     await vi.waitFor(() => { expect(controller.getSnapshot().status).toBe('signed-in') }, { timeout: 10_000 })
     expect(controller.getSnapshot()).toMatchObject({
       status: 'signed-in',
-      account: { githubLogin: 'octocat', githubId: 13994321 },
+      account: { githubLogin: 'fixture-account', githubId: 13994321 },
     })
     const firstAuthorization = await controller.authorizeCurrentInstallation()
     expect(firstAuthorization.accessToken).not.toBe('')
@@ -142,7 +142,7 @@ describe('Desktop Platform Account over a real HTTP Platform', () => {
       now: () => now,
     })
     await restart.start()
-    expect(restart.getSnapshot()).toMatchObject({ status: 'signed-in', account: { githubLogin: 'octocat' } })
+    expect(restart.getSnapshot()).toMatchObject({ status: 'signed-in', account: { githubLogin: 'fixture-account' } })
 
     now += ACCESS_TOKEN_TTL_MS + 1
     const rotated = await restart.authorizeCurrentInstallation()
@@ -181,14 +181,14 @@ function platformFetch(port: number): typeof fetch {
 }
 
 async function bootPlatform(provider: unknown): Promise<{ root: string; port: number }> {
-  root = await mkdtemp(join(tmpdir(), 'dsh-desktop-platform-account-'))
+  root = await mkdtemp(join(tmpdir(), 'dsh-desktop-platform-account-fixture-'))
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
     "- name: '@deepseek-ai/dsh-host-webserver'",
     '  config:',
     "    host: '127.0.0.1'",
     '    port: 0',
-    "- name: 'desktop-real-platform-account-provider'",
+    "- name: 'desktop-fixture-platform-account-provider'",
     "- name: '@deepseek-ai/dsh-platform-account-http'",
     `  config:\n    origin: '${ENVIRONMENT.origin}'`,
     '',
@@ -199,7 +199,7 @@ async function bootPlatform(provider: unknown): Promise<{ root: string; port: nu
   context.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
     ['@deepseek-ai/dsh-host-webserver', WebServer],
-    ['desktop-real-platform-account-provider', provider],
+    ['desktop-fixture-platform-account-provider', provider],
     ['@deepseek-ai/dsh-platform-account-http', PlatformAccountHttp],
   ])
   context.loader.internal = {

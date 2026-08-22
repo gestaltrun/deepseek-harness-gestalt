@@ -12,6 +12,8 @@ Mobile Companion 已具备可用于生产的 Account、配对、Relay、附件�
 
 产品 Desktop 与 Mobile 只组装已运营的 HTTPS Platform 身份、真实 GitHub Account 流程、持久化 Platform provider 与经过评审的逐配对加密通道。测试身份、内存 provider、测试证书、keyless 握手、固定 Relay 附着 id 与仅用于证明的同步帧只保留在有界测试中；这些测试的名称和断言不得作为产品验收证据。
 
+已运营身份、持久资源 composition 与产品入口 import gate 已由[将 Companion 产品绑定到唯一实际运行的 Platform 身份](../../implemented/architecture/2026-08-22-operated-companion-platform-identity.md)实现。
+
 每个 Personal Pairing 独占 Mobile 与 Desktop 附着身份、路由凭据、应用密钥和认证同步。Snow 通过新鲜临时密钥完成 XKpsk3 配对与 IK 重连。版本化 Encrypted Companion 消息承载同步；Relay authority 由配对派生通道密封，绝不以应用明文或 Platform 可见明文出现。
 
 Mobile 展示已认证 Installation 的名称与平台，通过浏览器相机 API 扫描完整 Pairing Challenge，并保留完整链接回退。两台手机保持独立配对和撤销，不共享密钥、附着 id、设备记录或在线状态。

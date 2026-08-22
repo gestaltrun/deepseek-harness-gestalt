@@ -3,6 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseAccountProofJti, parseInstallationId } from '@deepseek-ai/dsh-platform-account'
 import {
+  MemoryPersonalPairingAuthorityStore,
   PersonalPairingProvider,
   RemoteAccessError,
   parsePairingCompletionId,
@@ -64,6 +65,7 @@ describe('Remote Access HTTP assembled flow', () => {
     const remoteAccess = new PersonalPairingProvider(ctx, {
       account,
       handshake,
+      authority: new MemoryPersonalPairingAuthorityStore(),
       randomBytes: size => new Uint8Array(size),
       randomId: kind => `${kind}-${crypto.randomUUID()}`,
       pairingLinkOrigin: 'https://platform.example/pair',
@@ -164,6 +166,7 @@ describe('Remote Access HTTP assembled flow', () => {
     const remoteAccess = new PersonalPairingProvider(ctx, {
       account,
       handshake,
+      authority: new MemoryPersonalPairingAuthorityStore(),
       randomBytes: size => new Uint8Array(size),
       randomId: kind => `${kind}-${crypto.randomUUID()}`,
       pairingLinkOrigin: 'https://platform.example/pair',

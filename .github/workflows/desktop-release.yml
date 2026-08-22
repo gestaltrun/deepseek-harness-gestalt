@@ -53,6 +53,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       NODE_OPTIONS: --max-old-space-size=8192
+      DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
     environment:
       name: ${{ inputs.publish && 'desktop-release' || 'desktop-dry-run' }}
     strategy:
@@ -100,6 +101,16 @@ jobs:
 
       - name: Electron cookie-isolation e2e
         run: pnpm run test:electron-runtime-e2e
+
+      - name: Project operated Platform identity
+        env:
+          PLATFORM_ORIGIN: ${{ vars.PLATFORM_ORIGIN }}
+          PLATFORM_GITHUB_CALLBACK: ${{ vars.PLATFORM_GITHUB_CALLBACK }}
+          PLATFORM_GITHUB_CLIENT_ID: ${{ vars.PLATFORM_GITHUB_CLIENT_ID }}
+          PLATFORM_GITHUB_CREDENTIAL_REFERENCE: ${{ vars.PLATFORM_GITHUB_CREDENTIAL_REFERENCE }}
+          PLATFORM_POSTGRES_DATABASE: ${{ vars.PLATFORM_POSTGRES_DATABASE }}
+          PLATFORM_IDENTITY_NAMESPACE: ${{ vars.PLATFORM_IDENTITY_NAMESPACE }}
+        run: node apps/desktop/scripts/write-operated-platform-config.mjs "$DSH_DESKTOP_OPERATED_PLATFORM_CONFIG"
 
       - name: Build
         run: |
@@ -167,6 +178,9 @@ jobs:
     runs-on: windows-2025
     env:
       NODE_OPTIONS: --max-old-space-size=8192
+      DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
+    environment:
+      name: ${{ inputs.publish && 'desktop-release' || 'desktop-dry-run' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -186,6 +200,16 @@ jobs:
 
       - name: Electron cookie-isolation e2e
         run: pnpm run test:electron-runtime-e2e
+
+      - name: Project operated Platform identity
+        env:
+          PLATFORM_ORIGIN: ${{ vars.PLATFORM_ORIGIN }}
+          PLATFORM_GITHUB_CALLBACK: ${{ vars.PLATFORM_GITHUB_CALLBACK }}
+          PLATFORM_GITHUB_CLIENT_ID: ${{ vars.PLATFORM_GITHUB_CLIENT_ID }}
+          PLATFORM_GITHUB_CREDENTIAL_REFERENCE: ${{ vars.PLATFORM_GITHUB_CREDENTIAL_REFERENCE }}
+          PLATFORM_POSTGRES_DATABASE: ${{ vars.PLATFORM_POSTGRES_DATABASE }}
+          PLATFORM_IDENTITY_NAMESPACE: ${{ vars.PLATFORM_IDENTITY_NAMESPACE }}
+        run: node apps/desktop/scripts/write-operated-platform-config.mjs "$env:DSH_DESKTOP_OPERATED_PLATFORM_CONFIG"
 
       - name: Build
         run: |

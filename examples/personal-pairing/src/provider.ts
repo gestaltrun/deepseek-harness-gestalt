@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   DevelopmentKeylessPairingHandshakeProvider,
+  MemoryPersonalPairingAuthorityStore,
   PersonalPairingProvider,
   type PairingHandshakeProvider,
 } from '@deepseek-ai/dsh-remote-access'
@@ -40,6 +41,7 @@ export function apply(ctx: Context): void {
       },
     },
     handshake,
+    authority: new MemoryPersonalPairingAuthorityStore(),
     clock: { now: () => keylessClock.now },
     randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index),
     randomId: kind => `${kind}-${String(++id)}`,

@@ -37,8 +37,17 @@ import AccountService, {
   type SelectedPlatformEnvironment,
 } from '@deepseek-ai/dsh-platform-account'
 
-export { loadPlatformEnvironment, selectPlatformEnvironment, validatePlatformEnvironmentPair } from '@deepseek-ai/dsh-platform-account'
-export type { PlatformEnvironmentIdentity, PlatformEnvironmentPair } from '@deepseek-ai/dsh-platform-account'
+export {
+  loadOperatedPlatformEnvironment,
+  loadPlatformEnvironment,
+  selectPlatformEnvironment,
+  validatePlatformEnvironmentPair,
+} from '@deepseek-ai/dsh-platform-account'
+export type {
+  OperatedPlatformEnvironmentInput,
+  PlatformEnvironmentIdentity,
+  PlatformEnvironmentPair,
+} from '@deepseek-ai/dsh-platform-account'
 
 /** Fixed five-minute Login Attempt lifetime. */
 export const LOGIN_ATTEMPT_TTL_MS = 5 * 60 * 1000

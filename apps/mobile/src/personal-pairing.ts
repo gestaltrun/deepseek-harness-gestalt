@@ -3,6 +3,8 @@
 import {
   PAIRING_REPLAY_RETENTION_MS,
   RemoteAccessError,
+  deriveAuthenticationWords,
+  parsePairingChallengeId,
   parsePairingInvitationLink,
   type PairingCompletionId,
   type PairingCompletionView,
@@ -26,15 +28,32 @@ interface MobilePairingLifecycleOwner {
 export interface MobilePairingHandshakeClient {
   /** Prepare one Mobile handshake message and id for the complete invitation. */
   begin(oneTimeLink: string): Promise<{ completionId: PairingCompletionId; mobileHandshake: Uint8Array }>
+  /** Prepare Mobile XKpsk3 message 1 from an endpoint-owned opaque invitation. */
+  beginEndpointInvitation?(invitationPayload: Uint8Array): Promise<Uint8Array>
   /** Consume the Desktop handshake response before exposing authentication words. */
   acceptDesktopHandshake(desktopHandshake: Uint8Array): Promise<void>
+  /** @returns Mobile message 3 for a three-message handshake, or undefined for development keyless pairing. */
+  exportFinishMessage?(): Uint8Array | undefined
+  /** @returns public completed XKpsk3 authentication hash. */
+  exportAuthenticationHash?(): Uint8Array
   /** Open Mobile-specific Relay authority sealed to this Personal Pairing. */
   openRelayAuthority?(sealedAuthority: Uint8Array): Promise<RelayCredentialGrant>
+  /** Open and persist one-shot authority before invitation state is erased. */
+  openRelayAuthorityDurably?(
+    sealedAuthority: Uint8Array,
+    persist: (grant: RelayCredentialGrant, reconnectState: Uint8Array) => Promise<void>,
+  ): Promise<RelayCredentialGrant>
+  /** @returns endpoint-local XKpsk3 crash recovery before confirmation settles. */
+  exportRecoveryState?(): Uint8Array
+  /** Restore endpoint-local XKpsk3 state after process restart. */
+  restoreRecoveryState?(recovery: Uint8Array): void
   /**
    * Export the independent pairing key retained after the Desktop handshake.
    * @returns copy of at least 32 bytes, or undefined before activation.
    */
   exportPairingKeyMaterial?(): Uint8Array | undefined
+  /** @returns Mobile static reconnect state after opening Relay authority. */
+  exportReconnectState?(): Uint8Array
   /** Wipe any retained pairing key material on this installation. */
   wipe?(): void | Promise<void>
 }
@@ -47,11 +66,41 @@ export interface MobilePairingKeyRetention {
    * @param material - at least 32 bytes of pairing key material.
    */
   retain(pairingId: PersonalPairingId, material: Uint8Array): void
+  /** Atomically retain reconnect state and its Mobile Relay authority. */
+  retainConfirmedPairing?(pairingId: PersonalPairingId, material: Uint8Array, grant: RelayCredentialGrant): void
+  /** Select and load one signed-in Account scope before Relay attachment. */
+  selectAccount?(accountId: PlatformAccountId): Promise<void>
+  /** Retain the Mobile-only Relay grant beside its reconnect state. */
+  retainRelayAuthority?(pairingId: PersonalPairingId, grant: RelayCredentialGrant): void
+  /** @returns latest retained Mobile Relay grant for this Account. */
+  relayAuthority?(): RelayCredentialGrant | undefined
+  /** Persist one in-flight endpoint pairing before its next external effect. */
+  retainEndpointRecovery?(recovery: MobileEndpointPairingRecovery): void
+  /** @returns an Account-scoped endpoint pairing recovery copy. */
+  endpointRecovery?(): MobileEndpointPairingRecovery | undefined
+  /** Remove settled or rejected endpoint recovery. */
+  clearEndpointRecovery?(): void
+  /** Wait until queued durable writes settle. */
+  flush?(): Promise<void>
   /** Zero every retained pairing key. */
   wipe(): void
 }
 
-/** Browser-camera QR scanner returning the exact full invitation payload. */
+/** Account-scoped Mobile crash recovery for one endpoint-owned pairing transaction. */
+export interface MobileEndpointPairingRecovery {
+  link: string
+  expiresAt: number
+  accountId: PlatformAccountId
+  completionId: PairingCompletionId
+  mobileHandshake: Uint8Array
+  transmission: PreparedMobilePairingAttempt['transmission']
+  endpointChallengeId: ReturnType<typeof parsePairingChallengeId>
+  handshakeRecovery: Uint8Array
+  replayExpiresAt?: number
+  endpointHandshakeFinished: boolean
+}
+
+/** Native-product browser-camera QR scanner returning the exact full invitation payload. */
 interface MobilePairingQrScanner {
   /** @returns exact full invitation payload decoded from the camera preview. */
   scan(video: HTMLVideoElement, signal?: AbortSignal): Promise<string>
@@ -64,8 +113,17 @@ interface PreparedMobilePairingAttempt {
   completionId: PairingCompletionId
   mobileHandshake: Uint8Array
   transmission: 'prepared' | 'possibly-committed' | 'pending'
+  endpointChallengeId?: ReturnType<typeof parsePairingChallengeId>
+  endpointHandshakeFinished?: boolean
   replayExpiresAt?: number
   pendingProjection?: PairingCompletionView
+  confirmed?: {
+    pairingId: PersonalPairingId
+    sealedRelayAuthority: Uint8Array
+    reconnectState: Uint8Array
+    grant: RelayCredentialGrant
+    persisted: boolean
+  }
 }
 
 interface BrowserQrReader {
@@ -85,7 +143,7 @@ interface BrowserQrScannerControls {
 }
 
 /** Browser-camera scanner for the same complete invitation accepted by paste. */
-export class BrowserCameraPairingQrScanner implements MobilePairingQrScanner {
+export class NativeMobilePairingQrScanner implements MobilePairingQrScanner {
   private readonly mediaDevices: MediaDevices | undefined
   private readonly reader: BrowserQrReader
 
@@ -220,7 +278,38 @@ export class MobilePairingController implements MobilePairingActions {
     const accountId = this.currentAccountId()
     if (this.accountId !== undefined && this.accountId !== accountId) await this.resetAccountScope()
     this.accountId = accountId
+    await this.options.pairingKeys?.selectAccount?.(accountId)
     this.active = true
+    const recovery = this.options.pairingKeys?.endpointRecovery?.()
+    if (recovery !== undefined) {
+      if (recovery.accountId !== accountId || this.now() >= (recovery.replayExpiresAt ?? recovery.expiresAt)) {
+        recovery.mobileHandshake.fill(0)
+        recovery.handshakeRecovery.fill(0)
+        this.options.pairingKeys?.clearEndpointRecovery?.()
+        await this.options.pairingKeys?.flush?.()
+      } else {
+        if (this.options.handshake.restoreRecoveryState === undefined) {
+          throw new Error('Mobile endpoint pairing recovery has no handshake owner')
+        }
+        this.options.handshake.restoreRecoveryState(recovery.handshakeRecovery)
+        recovery.handshakeRecovery.fill(0)
+        const restoredAttempt: PreparedMobilePairingAttempt = {
+          link: recovery.link, expiresAt: recovery.expiresAt, accountId: recovery.accountId,
+          completionId: recovery.completionId, mobileHandshake: recovery.mobileHandshake,
+          transmission: recovery.transmission, endpointChallengeId: recovery.endpointChallengeId,
+          ...(recovery.replayExpiresAt === undefined ? {} : { replayExpiresAt: recovery.replayExpiresAt }),
+          endpointHandshakeFinished: recovery.endpointHandshakeFinished,
+        }
+        this.attempt = restoredAttempt
+        if (recovery.transmission === 'pending') this.scheduleEndpointStatus(recovery.completionId)
+        else await this.runAttempt(restoredAttempt)
+      }
+    }
+    const restoredGrant = this.options.pairingKeys?.relayAuthority?.()
+    if (restoredGrant !== undefined && this.options.relay !== undefined) {
+      await this.options.relay.configure(restoredGrant)
+      await this.options.relay.start()
+    }
   }
 
   async unpair(): Promise<void> {
@@ -231,6 +320,7 @@ export class MobilePairingController implements MobilePairingActions {
       const operations: Array<() => void | Promise<void>> = [
         () => this.options.handshake.wipe?.(),
         () => this.options.pairingKeys?.wipe(),
+        () => this.options.pairingKeys?.flush?.(),
       ]
       if (this.options.companion !== undefined) operations.push(() => this.options.companion?.releasePairing())
       if (this.options.relay !== this.options.companion) {
@@ -291,6 +381,22 @@ export class MobilePairingController implements MobilePairingActions {
   }
 
   private async prepareAttempt(link: string): Promise<PreparedMobilePairingAttempt> {
+    const endpoint = parseEndpointInvitation(link)
+    if (endpoint !== undefined) {
+      if (this.now() >= endpoint.expiresAt) throw new Error('Personal Pairing invitation expired')
+      if (this.options.handshake.beginEndpointInvitation === undefined) {
+        throw new Error('Endpoint-owned Personal Pairing handshake is unavailable')
+      }
+      const message1 = await this.options.handshake.beginEndpointInvitation(endpoint.payload)
+      const attempt: PreparedMobilePairingAttempt = {
+        link, expiresAt: endpoint.expiresAt, accountId: this.requireAccountId(),
+        completionId: `snow-${crypto.randomUUID()}` as PairingCompletionId,
+        mobileHandshake: message1, transmission: 'prepared', endpointChallengeId: endpoint.challengeId,
+      }
+      this.attempt = attempt
+      await this.checkpointEndpointAttempt(attempt)
+      return attempt
+    }
     const invitation = parsePairingInvitationLink(link)
     if (this.now() >= invitation.expiresAt) throw new Error('Personal Pairing invitation expired')
     const prepared = await this.options.handshake.begin(link)
@@ -313,6 +419,20 @@ export class MobilePairingController implements MobilePairingActions {
       this.assertActiveAccount()
       attempt.transmission = 'possibly-committed'
       attempt.replayExpiresAt = this.now() + PAIRING_REPLAY_RETENTION_MS
+      if (attempt.endpointChallengeId !== undefined) {
+        await this.checkpointEndpointAttempt(attempt)
+        const pending = await this.options.transport.submitEndpointMessage1({
+          authentication, challengeId: attempt.endpointChallengeId, completionId: attempt.completionId,
+          message1: attempt.mobileHandshake,
+        })
+        this.assertActiveAccount()
+        attempt.transmission = 'pending'
+        await this.checkpointEndpointAttempt(attempt)
+        this.publish({ status: 'completing' })
+        this.scheduleEndpointStatus(attempt.completionId)
+        void pending
+        return
+      }
       const completion = await this.options.transport.completeChallenge({
         authentication,
         completionId: attempt.completionId,
@@ -324,12 +444,27 @@ export class MobilePairingController implements MobilePairingActions {
       attempt.transmission = 'pending'
       await this.options.handshake.acceptDesktopHandshake(completion.desktopHandshake)
       this.assertActiveAccount()
+      const mobileFinish = this.options.handshake.exportFinishMessage?.()
+      let finished = completion
+      if (mobileFinish !== undefined) {
+        try {
+          finished = await this.options.transport.finishChallenge({
+            authentication: await this.options.installation.authorizeCurrentInstallation(),
+            pendingPairingId: completion.pendingPairingId,
+            mobileFinish,
+          })
+        } finally {
+          mobileFinish.fill(0)
+        }
+      }
+      this.assertActiveAccount()
+      attempt.pendingProjection = finished
       this.publish({
         status: 'pending',
-        deviceName: completion.device.name,
-        authenticationWords: completion.authenticationWords,
+        deviceName: finished.device.name,
+        authenticationWords: finished.authenticationWords,
       })
-      this.scheduleStatus(completion.pendingPairingId)
+      this.scheduleStatus(finished.pendingPairingId)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (this.isTerminal(error, attempt)) {
@@ -340,6 +475,92 @@ export class MobilePairingController implements MobilePairingActions {
       }
       throw error
     }
+  }
+
+  private scheduleEndpointStatus(completionId: PairingCompletionId): void {
+    if (!this.active) return
+    if (this.timer !== undefined) clearTimeout(this.timer)
+    this.timer = this.schedule(() => {
+      this.timer = undefined
+      if (!this.active) return
+      void this.exclusive(async () => {
+        try {
+          const authentication = await this.options.installation.authorizeCurrentInstallation()
+          const status = await this.options.transport.getEndpointPairingStatus({ authentication, completionId })
+          this.assertActiveAccount()
+          if (status.stage === 'awaiting-desktop' || status.stage === 'awaiting-authority') {
+            this.scheduleEndpointStatus(completionId)
+            return
+          }
+          if (status.stage === 'message2') {
+            const attempt = this.currentAttempt()
+            if (attempt === undefined) throw new Error('Mobile Personal Pairing has no retained endpoint attempt')
+            if (!attempt.endpointHandshakeFinished) {
+              await this.options.handshake.acceptDesktopHandshake(status.message2)
+              attempt.endpointHandshakeFinished = true
+              await this.checkpointEndpointAttempt(attempt)
+            }
+            const message3 = this.options.handshake.exportFinishMessage?.()
+            const hash = this.options.handshake.exportAuthenticationHash?.()
+            if (message3 === undefined || hash === undefined) {
+              throw new Error('Endpoint-owned Personal Pairing did not complete XKpsk3')
+            }
+            try {
+              await this.options.transport.submitEndpointMessage3({ authentication, completionId, message3 })
+            } finally {
+              message3.fill(0)
+            }
+            this.publish({
+              status: 'pending', deviceName: status.device.name,
+              authenticationWords: deriveAuthenticationWords(hash),
+            })
+            hash.fill(0)
+            this.scheduleEndpointStatus(completionId)
+            return
+          }
+          if (status.stage === 'rejected') {
+            this.clearAttempt()
+            this.publish({ status: 'unavailable', error: 'Desktop rejected Personal Pairing.' })
+            return
+          }
+          if ((this.options.handshake.openRelayAuthority === undefined
+            && this.options.handshake.openRelayAuthorityDurably === undefined) || this.options.relay === undefined) {
+            throw new Error('Mobile Relay authority has no product lifecycle owner')
+          }
+          const attempt = this.currentAttempt()
+          if (attempt === undefined) throw new Error('Mobile Personal Pairing has no retained confirmation attempt')
+          const confirmed = await this.prepareConfirmedEndpointAttempt(
+            attempt, status.pairingId, status.sealedRelayAuthority,
+          )
+          if (!confirmed.persisted) {
+            if (this.options.pairingKeys?.retainConfirmedPairing !== undefined) {
+              this.options.pairingKeys.retainConfirmedPairing(
+                confirmed.pairingId, confirmed.reconnectState, confirmed.grant,
+              )
+            } else {
+              this.options.pairingKeys?.retain(confirmed.pairingId, confirmed.reconnectState)
+              this.options.pairingKeys?.retainRelayAuthority?.(confirmed.pairingId, confirmed.grant)
+            }
+            await this.options.pairingKeys?.flush?.()
+            confirmed.persisted = true
+          }
+          await this.options.relay.configure(confirmed.grant)
+          await this.options.relay.start()
+          this.clearAttempt()
+          this.publish({ status: 'paired' })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          const attempt = this.attempt
+          if (attempt === undefined || this.isTerminal(error, attempt)) {
+            this.clearAttempt()
+            this.publish({ status: 'ready', error: message })
+          } else {
+            this.publish({ status: 'retryable', error: message })
+          }
+        }
+      })
+    }, this.pollIntervalMs)
+    this.timer.unref()
   }
 
   private currentAttempt(): PreparedMobilePairingAttempt | undefined {
@@ -362,9 +583,58 @@ export class MobilePairingController implements MobilePairingActions {
   }
 
   private clearAttempt(): void {
+    this.clearVolatileAttempt()
+    this.options.pairingKeys?.clearEndpointRecovery?.()
+  }
+
+  private clearVolatileAttempt(): void {
+    this.attempt?.mobileHandshake.fill(0)
+    this.attempt?.confirmed?.sealedRelayAuthority.fill(0)
+    this.attempt?.confirmed?.reconnectState.fill(0)
     this.attempt = undefined
     if (this.timer !== undefined) clearTimeout(this.timer)
     this.timer = undefined
+  }
+
+  private async prepareConfirmedEndpointAttempt(
+    attempt: PreparedMobilePairingAttempt,
+    pairingId: PersonalPairingId,
+    sealedRelayAuthority: Uint8Array,
+  ): Promise<NonNullable<PreparedMobilePairingAttempt['confirmed']>> {
+    const retained = attempt.confirmed
+    if (retained !== undefined) {
+      if (retained.pairingId !== pairingId || !sameBytes(retained.sealedRelayAuthority, sealedRelayAuthority)) {
+        throw new Error('Confirmed Personal Pairing changed during Mobile retry')
+      }
+      return retained
+    }
+    let durableReconnectState: Uint8Array | undefined
+    const pairingKeys = this.options.pairingKeys
+    let grant: RelayCredentialGrant | undefined
+    if (this.options.handshake.openRelayAuthorityDurably === undefined
+      || pairingKeys?.retainConfirmedPairing === undefined) {
+      grant = await this.options.handshake.openRelayAuthority?.(sealedRelayAuthority)
+    } else {
+      grant = await this.options.handshake.openRelayAuthorityDurably(
+        sealedRelayAuthority, async (openedGrant, reconnectState) => {
+          durableReconnectState = reconnectState.slice()
+          pairingKeys.retainConfirmedPairing?.(pairingId, reconnectState, openedGrant)
+          await pairingKeys.flush?.()
+        },
+      )
+    }
+    if (grant === undefined) throw new Error('Mobile Relay authority has no product lifecycle owner')
+    const reconnectState = durableReconnectState ?? this.options.handshake.exportReconnectState?.()
+    if (reconnectState === undefined) throw new Error('Mobile Snow reconnect state is unavailable')
+    attempt.confirmed = {
+      pairingId,
+      sealedRelayAuthority: sealedRelayAuthority.slice(),
+      reconnectState: reconnectState.slice(),
+      grant: { ...grant },
+      persisted: durableReconnectState !== undefined,
+    }
+    reconnectState.fill(0)
+    return attempt.confirmed
   }
 
   private completeLinkOwned(link: string): Promise<void> {
@@ -385,10 +655,11 @@ export class MobilePairingController implements MobilePairingActions {
   }
 
   private async resetAccountScope(): Promise<void> {
-    this.clearAttempt()
+    this.clearVolatileAttempt()
     const operations: Array<() => void | Promise<void>> = [() => this.options.companion?.forgetConnection()]
     if (this.options.companion !== undefined) operations.push(() => this.options.companion?.releasePairing())
     if (this.options.relay !== this.options.companion) operations.push(() => this.options.relay?.configure(undefined))
+    operations.push(() => this.options.pairingKeys?.flush?.())
     try {
       await settleOwnedCleanup(operations, 'Mobile Personal Pairing Account reset failed')
     } finally {
@@ -422,6 +693,27 @@ export class MobilePairingController implements MobilePairingActions {
     if (errors.length > 0) {
       console.error('[mobile-personal-pairing] subscriber failures:', new AggregateError(errors))
     }
+  }
+
+  private async checkpointEndpointAttempt(attempt: PreparedMobilePairingAttempt): Promise<void> {
+    if (attempt.endpointChallengeId === undefined) return
+    if (this.options.handshake.exportRecoveryState === undefined
+      || this.options.pairingKeys?.retainEndpointRecovery === undefined) {
+      throw new Error('Mobile endpoint pairing has no durable recovery owner')
+    }
+    const handshakeRecovery = this.options.handshake.exportRecoveryState()
+    try {
+      await this.options.pairingKeys.selectAccount?.(attempt.accountId)
+      this.options.pairingKeys.retainEndpointRecovery({
+        link: attempt.link, expiresAt: attempt.expiresAt, accountId: attempt.accountId,
+        completionId: attempt.completionId, mobileHandshake: attempt.mobileHandshake,
+        transmission: attempt.transmission, endpointChallengeId: attempt.endpointChallengeId,
+        handshakeRecovery,
+        ...(attempt.replayExpiresAt === undefined ? {} : { replayExpiresAt: attempt.replayExpiresAt }),
+        endpointHandshakeFinished: attempt.endpointHandshakeFinished ?? false,
+      })
+      await this.options.pairingKeys.flush?.()
+    } finally { handshakeRecovery.fill(0) }
   }
 
   private scheduleStatus(pendingPairingId: PendingPairingId): void {
@@ -501,6 +793,38 @@ export class MobilePairingController implements MobilePairingActions {
   }
 }
 
+function parseEndpointInvitation(link: string): {
+  challengeId: ReturnType<typeof parsePairingChallengeId>
+  expiresAt: number
+  payload: Uint8Array
+} | undefined {
+  let url: URL
+  try {
+    url = new URL(link)
+  } catch {
+    return undefined
+  }
+  const encoded = url.searchParams.get('payload')
+  if (encoded === null) return undefined
+  const expiresAt = Number(url.searchParams.get('expires'))
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= 0) {
+    throw new TypeError('Endpoint Pairing invitation expiry is invalid')
+  }
+  if (url.searchParams.get('protocol') !== '1') {
+    throw new TypeError('Endpoint Pairing invitation protocol is unsupported')
+  }
+  if (!/^[A-Za-z0-9_-]+$/u.test(encoded) || encoded.length % 4 === 1) {
+    throw new TypeError('Endpoint Pairing invitation payload must be canonical base64url')
+  }
+  const binary = atob(encoded.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat((4 - encoded.length % 4) % 4))
+  const payload = Uint8Array.from(binary, value => value.charCodeAt(0))
+  return {
+    challengeId: parsePairingChallengeId(url.searchParams.get('challenge')),
+    expiresAt,
+    payload,
+  }
+}
+
 function throwRejected(results: PromiseSettledResult<unknown>[], message: string): void {
   const errors = results.filter(result => result.status === 'rejected').map(result => result.reason as unknown)
   if (errors.length > 0) throw new AggregateError(errors, message)
@@ -557,4 +881,8 @@ function acquireCameraStream(operation: Promise<MediaStream>, signal: AbortSigna
       },
     )
   })
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index])
 }

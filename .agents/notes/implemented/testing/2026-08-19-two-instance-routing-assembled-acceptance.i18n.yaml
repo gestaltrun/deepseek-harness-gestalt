@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-08-19-two-instance-routing-assembled-acceptance.md
-2026-08-19-two-instance-routing-assembled-acceptance.md: 32174d1043afabbd5b589110d8059c55da6995d6
-2026-08-19-two-instance-routing-assembled-acceptance.zh.md: cee92a21544cea4b7ef52864b52d4580f965f4f0
+2026-08-19-two-instance-routing-assembled-acceptance.md: 0010b1aa3e78b846182272255beb0cdc22572219
+2026-08-19-two-instance-routing-assembled-acceptance.zh.md: d04872ff5f84b43b2072ebdfb81c80eb4b882817

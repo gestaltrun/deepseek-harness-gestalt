@@ -317,12 +317,12 @@ function uniqueProvider(
       }),
     },
     handshake: handshakeProvider(),
+    authority: authority ?? new MemoryPersonalPairingAuthorityStore(),
     clock: { now: () => now.value },
     randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index + 1),
     randomId: kind => `${kind}-${idPrefix}${String(++id)}`,
     pairingLinkOrigin: 'https://platform.example.com/pair',
     ...(capacity === undefined ? {} : { capacity }),
-    ...(authority === undefined ? {} : { authority }),
   })
 }
 

@@ -1,5 +1,7 @@
 import {
+  encodeRelayMessage,
   parseRelayAttachmentId,
+  parseRelayPairingSelector,
   parseRelayRouteId,
   type RelayCiphertextMessage,
 } from '@deepseek-ai/dsh-remote-protocol'
@@ -44,7 +46,17 @@ describe('RedisRelayCoordinator', () => {
     const stop = await platformB.listen(entry.instanceId, async (event) => { received.push(event) })
     await platformA.register(entry)
 
+    const mobileEntry: RelayDirectoryEntry = {
+      ...entry,
+      attachmentId: parseRelayAttachmentId('mobile-one'),
+      endpoint: 'mobile',
+      pairingSelector: parseRelayPairingSelector('pairing-one'),
+      connectionToken: parseRelayConnectionToken('connection-mobile'),
+    }
+    await platformA.register(mobileEntry)
+
     expect(await platformA.locate(routeId, attachmentId)).toEqual(entry)
+    expect(await platformA.list(routeId)).toEqual([entry, mobileEntry])
     expect(await platformA.refresh({ ...entry, expiresAt: 41_000 })).toBe(true)
     const ciphertext = Uint8Array.of(4, 8, 15, 16, 23, 42)
     const frame: RelayCiphertextMessage = {
@@ -61,11 +73,20 @@ describe('RedisRelayCoordinator', () => {
     expect(await platformA.publish(entry.instanceId, {
       type: 'delivered', deliveryId: parseRelayDeliveryId('delivery-one'),
     })).toBe(true)
+    expect(await platformA.publish(entry.instanceId, {
+      type: 'peer-update', transportVersion: 1, routeId,
+      attachmentId, peers: [{
+        attachmentId: parseRelayAttachmentId('mobile-one'),
+        pairingSelector: parseRelayPairingSelector('pairing-one'), generation: 3,
+      }],
+      targetConnectionToken: entry.connectionToken, revision: entry.revision,
+    })).toBe(true)
     await platformA.invalidate({ type: 'invalidate', routeId, revision: 4 })
 
     expect(received).toEqual([
       expect.objectContaining({ type: 'ciphertext', ciphertext }),
       { type: 'delivered', deliveryId: parseRelayDeliveryId('delivery-one') },
+      expect.objectContaining({ type: 'peer-update', attachmentId, revision: entry.revision }),
       { type: 'invalidate', routeId, revision: 4 },
     ])
     expect(bus.published.join('\n')).not.toContain('private prompt')
@@ -113,6 +134,13 @@ describe('RedisRelayCoordinator', () => {
     await expect(coordinator.publish(parseRelayInstanceId('platform-a'), {
       type: 'invalidate', routeId: entry.routeId, revision: 2,
     })).rejects.toThrow('must use invalidate')
+
+    const sparse = clientFixture()
+    sparse.sMembers.mockResolvedValueOnce(['desktop-stale'])
+    const sparseCoordinator = new RedisRelayCoordinator({
+      command: sparse, subscriber: clientFixture(), keyPrefix: 'dsh:relay',
+    })
+    await expect(sparseCoordinator.list(parseRelayRouteId('route-stale'))).resolves.toEqual([])
   })
 
   it('cancels an in-flight directory registration through the maintained Redis client', async () => {
@@ -123,7 +151,7 @@ describe('RedisRelayCoordinator', () => {
       commandSignal = signal
       return {
         ...command,
-        set: async () => await new Promise<never>((_resolve, reject) => {
+        eval: async () => await new Promise<never>((_resolve, reject) => {
           signal.addEventListener('abort', () => {
             reject(signal.reason instanceof Error ? signal.reason : new Error('registration aborted'))
           }, { once: true })
@@ -179,6 +207,18 @@ describe('RedisRelayCoordinator', () => {
       coordinationValue('ciphertext', 'AA=='),
       coordinationValue('ciphertext', 'A'),
       coordinationValue('ciphertext', 'AB'),
+      JSON.stringify({
+        type: 'peer-update', targetConnectionToken: 'connection-one', revision: 1,
+        frame: Buffer.from(encodeRelayMessage({
+          type: 'ciphertext', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+          sourceAttachmentId: parseRelayAttachmentId('mobile-one'),
+          targetAttachmentId: parseRelayAttachmentId('desktop-one'), ciphertext: Uint8Array.of(1),
+        })).toString('base64url'),
+      }),
+      coordinationValue('ciphertext', Buffer.from(encodeRelayMessage({
+        type: 'peer-update', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+        attachmentId: parseRelayAttachmentId('desktop-one'), peers: [],
+      })).toString('base64url')),
       JSON.stringify({
         type: 'ciphertext', sourceInstanceId: 'platform-a', targetConnectionToken: 'token',
         deliveryId: 'delivery-one', revision: 1,
@@ -331,21 +371,41 @@ class FakeRedisBus {
   readonly published: string[] = []
   readonly queuedMessages = 0
   private readonly values = new Map<string, string>()
+  private readonly sets = new Map<string, Set<string>>()
   private readonly subscriptions = new Map<string, Set<(message: string) => void>>()
 
   client(): RelayRedisClient {
     const client: RelayRedisClient = {
       get: async key => this.values.get(key) ?? null,
+      sMembers: async key => [...(this.sets.get(key) ?? [])],
       set: async (key, value) => { this.values.set(key, value); return 'OK' },
-      eval: async (_script, options) => {
+      eval: async (script, options) => {
         const [key] = options.keys
+        if (script.includes("redis.call('SET', KEYS[1], ARGV[1]")) {
+          this.values.set(key as string, options.arguments[0] as string)
+          const routeKey = options.keys[1] as string
+          const members = this.sets.get(routeKey) ?? new Set()
+          members.add(options.arguments[2] as string)
+          this.sets.set(routeKey, members)
+          return 1
+        }
         const value = key === undefined ? undefined : this.values.get(key)
         if (value === undefined) return 0
         const record = JSON.parse(value) as { connectionToken?: string }
         if (record.connectionToken !== options.arguments[0]) return 0
+        if (script.includes("redis.call('SREM'")) {
+          this.values.delete(key as string)
+          this.sets.get(options.keys[1] as string)?.delete(options.arguments[1] as string)
+          return 1
+        }
         const replacement = options.arguments[1]
-        if (replacement === undefined) this.values.delete(key as string)
-        else this.values.set(key as string, replacement)
+        if (replacement !== undefined) {
+          this.values.set(key as string, replacement)
+          const routeKey = options.keys[1] as string
+          const members = this.sets.get(routeKey) ?? new Set()
+          members.add(options.arguments[3] as string)
+          this.sets.set(routeKey, members)
+        }
         return 1
       },
       publish: async (channel, message) => {
@@ -398,6 +458,7 @@ function coordinationValue(type: string, frame: unknown): string {
 function clientFixture() {
   const fixture = {
     get: vi.fn(async () => null),
+    sMembers: vi.fn(async () => []),
     set: vi.fn(async () => 'OK'),
     eval: vi.fn(async () => 1),
     publish: vi.fn(async () => 1),

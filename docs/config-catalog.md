@@ -1790,7 +1790,7 @@ export interface AccountRecord extends PlatformAccountView {
 
 Depends on: [`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.md) · [`InstallationId`](subsystems/platform-account.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.md) · [`MobileInstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountId`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountView`](subsystems/platform-account.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
 
-Source: [`packages/platform/platform-account-core/src/index.ts:497`](../packages/platform/platform-account-core/src/index.ts)
+Source: [`packages/platform/platform-account-core/src/index.ts:506`](../packages/platform/platform-account-core/src/index.ts)
 
 <a id="deepseek-aidsh-platform-account-http"></a>
 
@@ -3710,6 +3710,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-llm-mock-server` ([`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts))
 - `@deepseek-ai/dsh-loader-smoke` ([`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts))
 - `@deepseek-ai/dsh-native-command` ([`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts))
+- `@deepseek-ai/dsh-noise-channel` ([`packages/platform/noise-channel/src/index.ts`](../packages/platform/noise-channel/src/index.ts))
 - `@deepseek-ai/dsh-output-retention` ([`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts))
 - `@deepseek-ai/dsh-platform-account-client` ([`packages/platform/platform-account-client/src/index.ts`](../packages/platform/platform-account-client/src/index.ts))
 - `@deepseek-ai/dsh-remote-access-client` ([`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts))

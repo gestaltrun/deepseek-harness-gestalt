@@ -246,7 +246,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     mode: 'seam',
     implementations: ['remote-access'],
     consumers: ['remote-access-http'],
-    note: 'The HTTP consumer exposes the lifecycle through one validated transport for Desktop Settings and Mobile; production remains fail-closed until an independently reviewed handshake provider is assembled.',
+    note: 'The HTTP consumer exposes endpoint-owned mailbox operations through one validated transport for Desktop Settings and Mobile; Platform receives routing metadata, opaque handshake messages, credential digests, and sealed authority only.',
   },
   {
     key: 'remoteRelay',

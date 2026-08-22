@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-[`apps/platform`](../../../../apps/platform/src/boot.ts) 在监听时迁移两个 PostgreSQL 适配器：[`PostgresPersonalPairingAuthorityStore`](../../../../apps/platform/src/postgres-pairing-store.ts) 拥有 Desktop route、已确认 Mobile pairing 结果和独占 pairing-transaction 文档，[`PostgresRelayRouteStore`](../../../../apps/platform/src/postgres-route-store.ts) 拥有哈希后的 Relay credential 与单调 revision。[`pairing-state-codec.ts`](../../../../apps/platform/src/pairing-state-codec.ts) 把独占的 `PersonalPairingTransactionState` Map（含 orphan cleanup 同一性）编码为 jsonb。`runPairingTransaction` 对按 database identity 键控的一行做 `SELECT … FOR UPDATE`，让两个实例串行化同一租约。配对 HTTP 和 Relay WSS 保持未挂载；该监听进程永不选择 `DevelopmentKeylessPairingHandshakeProvider`。
+[`launchOperatedPlatform`](../../../../apps/platform/src/launch.ts) 在监听前迁移两个 PostgreSQL 适配器：[`PostgresPersonalPairingAuthorityStore`](../../../../apps/platform/src/postgres-pairing-store.ts) 拥有 Desktop route、已确认 Mobile pairing 结果和独占 pairing-transaction 文档，[`PostgresRelayRouteStore`](../../../../apps/platform/src/postgres-route-store.ts) 拥有哈希后的 Relay credential 与单调 revision。[`pairing-state-codec.ts`](../../../../apps/platform/src/pairing-state-codec.ts) 把独占的 `PersonalPairingTransactionState` Map（含 orphan cleanup 同一性）编码为 jsonb。`runPairingTransaction` 对按 database identity 键控的一行做 `SELECT … FOR UPDATE`，让两个实例串行化同一租约。配对 HTTP 和 Relay WSS 保持未挂载；该监听进程永不选择 `DevelopmentKeylessPairingHandshakeProvider`。
 
 ## Alternatives considered
 
@@ -26,4 +26,4 @@ Status: implemented
 
 ## Testing
 
-[`apps/platform/tests/pairing-state-codec.spec.ts`](../../../../apps/platform/tests/pairing-state-codec.spec.ts) 与 [`apps/platform/tests/postgres-remote-access-stores.spec.ts`](../../../../apps/platform/tests/postgres-remote-access-stores.spec.ts) 钉住 codec 拒绝、orphan 同一性、Desktop route 保留或替换、Mobile 碰撞、独占事务回滚，以及 route 的 rotate/issue/authorize/revoke。[`production-env.spec.ts`](../../../../apps/platform/tests/production-env.spec.ts) 钉住监听进程迁移这两个 store，且不导入配对或 Relay provider。
+[`apps/platform/tests/pairing-state-codec.spec.ts`](../../../../apps/platform/tests/pairing-state-codec.spec.ts) 与 [`apps/platform/tests/postgres-remote-access-stores.spec.ts`](../../../../apps/platform/tests/postgres-remote-access-stores.spec.ts) 钉住 codec 拒绝、orphan 同一性、Desktop route 保留或替换、Mobile 碰撞、独占事务回滚，以及 route 的 rotate/issue/authorize/revoke。[`product-entry-durable.spec.ts`](../../../../apps/platform/tests/product-entry-durable.spec.ts) 会用临时 PostgreSQL 与 Redis store 驱动可执行入口的 launch composition，覆盖实际运行环境校验与 GitHub OAuth 身份，但不声称已有实际基础设施证据。

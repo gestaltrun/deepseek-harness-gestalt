@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BrowserCameraPairingQrScanner } from '../src/personal-pairing.ts'
+import { NativeMobilePairingQrScanner } from '../src/personal-pairing.ts'
 
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
-describe('BrowserCameraPairingQrScanner', () => {
+describe('NativeMobilePairingQrScanner', () => {
   it('reads one complete QR payload from the browser camera and releases every track', async () => {
     const stop = vi.fn()
     const stream = { getTracks: () => [{ stop }] } as unknown as MediaStream
@@ -18,7 +18,7 @@ describe('BrowserCameraPairingQrScanner', () => {
       callback({ getText: () => link }, undefined, { stop: stopDecoder })
       return { stop: stopDecoder }
     })
-    const scanner = new BrowserCameraPairingQrScanner({
+    const scanner = new NativeMobilePairingQrScanner({
       mediaDevices: { getUserMedia } as unknown as MediaDevices,
       reader: { scan },
     })
@@ -39,7 +39,7 @@ describe('BrowserCameraPairingQrScanner', () => {
   })
 
   it('fails explicitly when browser camera APIs are unavailable', async () => {
-    const scanner = new BrowserCameraPairingQrScanner({
+    const scanner = new NativeMobilePairingQrScanner({
       reader: { scan: vi.fn() },
     })
 
@@ -50,7 +50,7 @@ describe('BrowserCameraPairingQrScanner', () => {
   it('reports camera denial without starting the QR decoder', async () => {
     const denial = new DOMException('denied', 'NotAllowedError')
     const scan = vi.fn()
-    const scanner = new BrowserCameraPairingQrScanner({
+    const scanner = new NativeMobilePairingQrScanner({
       mediaDevices: {
         getUserMedia: vi.fn(async () => await Promise.reject(denial)),
       } as unknown as MediaDevices,
@@ -68,7 +68,7 @@ describe('BrowserCameraPairingQrScanner', () => {
     const stopSecond = vi.fn()
     const controller = new AbortController()
     const scan = vi.fn()
-    const scanner = new BrowserCameraPairingQrScanner({
+    const scanner = new NativeMobilePairingQrScanner({
       mediaDevices: {
         getUserMedia: vi.fn(async () => await permission.promise),
       } as unknown as MediaDevices,
@@ -90,7 +90,7 @@ describe('BrowserCameraPairingQrScanner', () => {
   it('rejects an empty decoded QR value and releases the camera', async () => {
     const stop = vi.fn()
     const stopDecoder = vi.fn()
-    const scanner = new BrowserCameraPairingQrScanner({
+    const scanner = new NativeMobilePairingQrScanner({
       mediaDevices: {
         getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop }] } as unknown as MediaStream)),
       } as unknown as MediaDevices,
@@ -117,7 +117,7 @@ describe('BrowserCameraPairingQrScanner', () => {
     let retries = 0
     let retryTimer: ReturnType<typeof setInterval> | undefined
     const stopDecoder = vi.fn(() => { clearInterval(retryTimer) })
-    const scanner = new BrowserCameraPairingQrScanner({
+    const scanner = new NativeMobilePairingQrScanner({
       mediaDevices: {
         getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop }] } as unknown as MediaStream)),
       } as unknown as MediaDevices,
@@ -151,7 +151,7 @@ describe('BrowserCameraPairingQrScanner', () => {
       drawImage,
       getImageData,
     }) as unknown as CanvasRenderingContext2D)
-    const scanner = new BrowserCameraPairingQrScanner({
+    const scanner = new NativeMobilePairingQrScanner({
       mediaDevices: {
         getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop }] } as unknown as MediaStream)),
       } as unknown as MediaDevices,

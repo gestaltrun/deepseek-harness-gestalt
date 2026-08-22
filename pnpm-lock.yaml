@@ -452,6 +452,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-desktop':
         specifier: workspace:^
         version: link:../../packages/client/ui-desktop
+      '@deepseek-ai/dsh-noise-channel':
+        specifier: workspace:^
+        version: link:../../packages/platform/noise-channel
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../../packages/platform/platform-account
@@ -519,6 +522,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-theme':
         specifier: workspace:^
         version: link:../../packages/client/ui-theme
+      '@deepseek-ai/dsh-noise-channel':
+        specifier: workspace:^
+        version: link:../../packages/platform/noise-channel
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../../packages/platform/platform-account
@@ -586,6 +592,12 @@ importers:
       '@deepseek-ai/dsh-remote-access':
         specifier: workspace:^
         version: link:../../packages/platform/remote-access
+      '@deepseek-ai/dsh-remote-access-http':
+        specifier: workspace:^
+        version: link:../../packages/platform/remote-access-http
+      '@deepseek-ai/dsh-remote-access-redis':
+        specifier: workspace:^
+        version: link:../../packages/platform/remote-access-redis
       '@deepseek-ai/dsh-remote-protocol':
         specifier: workspace:^
         version: link:../../packages/platform/remote-protocol
@@ -809,6 +821,9 @@ importers:
       '@deepseek-ai/dsh-mcp-client':
         specifier: workspace:*
         version: link:../packages/mcp/mcp-client
+      '@deepseek-ai/dsh-noise-channel':
+        specifier: workspace:*
+        version: link:../packages/platform/noise-channel
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:*
         version: link:../packages/interaction/permission-presets
@@ -6515,6 +6530,21 @@ importers:
         specifier: workspace:^
         version: link:../../interaction/user-questions
 
+  packages/platform/noise-channel:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-remote-access':
+        specifier: workspace:^
+        version: link:../remote-access
+      '@deepseek-ai/dsh-remote-protocol':
+        specifier: workspace:^
+        version: link:../remote-protocol
+
   packages/platform/platform-account:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -6649,6 +6679,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-noise-channel':
+        specifier: workspace:^
+        version: link:../noise-channel
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../platform-account
@@ -13162,6 +13195,7 @@ packages:
   '@xmldom/xmldom@0.8.14':
     resolution: {integrity: sha512-T4EDRUBVZYRldYApjEJiU0e1stYWaRAX7CuSnKzrpwdZKo53zGV8/pqfzV6FfwNl9YThD2OumQYvqtvjvgG7aQ==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@yarnpkg/cli-dist@4.17.1':
     resolution: {integrity: sha512-2tiSQuJNl/L3QwTdrq6lKWDpkcnp9MGvCT/rIldHcbu3SWfnLdmehvt3eulX1hT7FFt1Gjfq3CesF+kvhFip6g==}

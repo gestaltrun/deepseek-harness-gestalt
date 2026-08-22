@@ -89,7 +89,7 @@ describe('Mobile Platform Account entry', () => {
         return json({
           id: 'attempt-mobile-entry',
           state: 'state-mobile-entry',
-          authorizationUrl: 'https://github.com/login/oauth/authorize?client_id=mobile-development&redirect_uri=https%3A%2F%2Fdev.example%2Fv1%2Faccount%2Foauth%2Fgithub%2Fcallback&state=state-mobile-entry&code_challenge=challenge&code_challenge_method=S256',
+          authorizationUrl: 'https://github.com/login/oauth/authorize?client_id=mobile-production&redirect_uri=https%3A%2F%2Fplatform.example.com%2Fv1%2Faccount%2Foauth%2Fgithub%2Fcallback&state=state-mobile-entry&code_challenge=challenge&code_challenge_method=S256',
           pollingToken: 'signed-polling-token',
           expiresAt: Date.now() + 300_000,
         })
@@ -108,30 +108,29 @@ describe('Mobile Platform Account entry', () => {
     const opened = new URL(browserOpen.mock.calls[0]?.[0].url as string)
     expect(opened.protocol).toBe('https:')
     expect(opened.origin).toBe('https://github.com')
-    expect(opened.searchParams.get('redirect_uri')).toBe('https://dev.example/v1/account/oauth/github/callback')
+    expect(opened.searchParams.get('redirect_uri')).toBe('https://platform.example.com/v1/account/oauth/github/callback')
     expect(opened.searchParams.get('code_challenge_method')).toBe('S256')
     expect(opened.searchParams.has('scope')).toBe(false)
     expect(opened.searchParams.has('access_token')).toBe(false)
     expect(windowOpen).not.toHaveBeenCalled()
     await waitFor(() => { expect(calls.some(call => call.url.endsWith('/login-poll'))).toBe(true) })
-    expect(calls.every(call => call.url.startsWith('https://dev.example/'))).toBe(true)
+    expect(calls.every(call => call.url.startsWith('https://platform.example.com/'))).toBe(true)
   })
 
-  it('fails before rendering or traffic when deployment selection is missing', async () => {
+  it('fails before rendering or traffic when the operated origin is missing', async () => {
     configureEnvironment()
-    vi.stubEnv('VITE_PLATFORM_ENV', '')
+    vi.stubEnv('VITE_PLATFORM_ORIGIN', '')
     document.body.innerHTML = '<div id="root"></div>'
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
 
-    await expect(import('../src/main.tsx')).rejects.toThrow('must be development or production')
+    await expect(import('../src/main.tsx')).rejects.toThrow('production origin is required')
     expect(document.getElementById('root')?.childElementCount).toBe(0)
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('validates the development Relay bundle before rendering or network acquisition', async () => {
+  it('validates the production Relay bundle before rendering or network acquisition', async () => {
     configureEnvironment()
-    configureRelayEnvironment()
     vi.stubEnv('VITE_REMOTE_RELAY_INBOUND_MAX_BYTES', '1')
     document.body.innerHTML = '<div id="root"></div>'
     const fetch = vi.fn()
@@ -144,9 +143,21 @@ describe('Mobile Platform Account entry', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
+  it('rejects legacy environment selection before rendering or traffic', async () => {
+    configureEnvironment()
+    vi.stubEnv('VITE_PLATFORM_ENV', 'development')
+    document.body.innerHTML = '<div id="root"></div>'
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(import('../src/main.tsx')).rejects.toThrow('legacy environment selection is not accepted')
+
+    expect(document.getElementById('root')?.childElementCount).toBe(0)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('backgrounding stops the real Relay lifecycle and refuses settlement before sync', async () => {
     configureEnvironment()
-    configureRelayEnvironment()
     document.body.innerHTML = '<div id="root"></div>'
     vi.stubGlobal('fetch', vi.fn(async () => json({ status: 'pending' })))
     let hidden = false
@@ -168,28 +179,26 @@ describe('Mobile Platform Account entry', () => {
       credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'),
       revision: 1,
     })
-
     hidden = true
     document.dispatchEvent(new Event('visibilitychange'))
-    await waitFor(() => { expect(relayLifecycle.stop).toHaveBeenCalled() })
+    await waitFor(() => { expect(runtime.getState().foreground).toBe(false) })
     expect(runtime.getState()).toMatchObject({ foreground: false, socketOpen: false, synchronized: false })
     expect(settleCompanionInteraction({
       operationId: 'op-approve', kind: 'approval', summary: 'write a.ts', authorized: ['once'],
     }, { accepted: true, decision: 'once' }, runtime.getState()).settled).toBeUndefined()
 
-    relayLifecycle.isConnected.mockReturnValue(true)
     hidden = false
     document.dispatchEvent(new Event('visibilitychange'))
-    await waitFor(() => { expect(relayLifecycle.start).toHaveBeenCalled() })
-    expect(runtime.getState().socketOpen).toBe(true)
-    expect(runtime.getState().synchronized).toBe(false)
+    await waitFor(() => { expect(runtime.getState().foreground).toBe(true) })
+    expect(runtime.getState()).toMatchObject({ foreground: true, socketOpen: false, synchronized: false })
     expect(companionMayMutate(runtime.getState())).toBe(false)
     expect(settleCompanionInteraction({
       operationId: 'op-approve', kind: 'approval', summary: 'write a.ts', authorized: ['once'],
     }, { accepted: true, decision: 'once' }, runtime.getState()).settled).toBeUndefined()
 
-    relayLifecycle.onCiphertext?.()
+    expect(() => { relayLifecycle.onCiphertext?.() }).toThrow('pending Snow IK owner')
     expect(runtime.getState().synchronized).toBe(false)
+    relayLifecycle.onConnectionReady?.()
     const firstResync = runtime.bindValidatedDesktopResync()
     if (firstResync === undefined) throw new Error('expected first Desktop resync receiver')
     firstResync.acceptValidatedDesktopResync({ type: 'desktop-resync', version: 1, authenticated: true })
@@ -209,7 +218,6 @@ describe('Mobile Platform Account entry', () => {
     if (replacementResync === undefined) throw new Error('expected replacement Desktop resync receiver')
     replacementResync.acceptValidatedDesktopResync({ type: 'desktop-resync', version: 1, authenticated: true })
     expect(companionMayMutate(runtime.getState())).toBe(true)
-
     hidden = true
     document.dispatchEvent(new Event('visibilitychange'))
     await waitFor(() => { expect(companionMayMutate(runtime.getState())).toBe(false) })
@@ -219,26 +227,12 @@ describe('Mobile Platform Account entry', () => {
 
 function configureEnvironment(): void {
   const fields: Record<string, string> = {
-    VITE_PLATFORM_ENV: 'development',
-    VITE_PLATFORM_DEVELOPMENT_ORIGIN: 'https://dev.example',
-    VITE_PLATFORM_DEVELOPMENT_CALLBACK_URL: 'https://dev.example/v1/account/oauth/github/callback',
-    VITE_PLATFORM_DEVELOPMENT_GITHUB_CLIENT_ID: 'mobile-development',
-    VITE_PLATFORM_DEVELOPMENT_CREDENTIAL_REFERENCE: 'credentials://development',
-    VITE_PLATFORM_DEVELOPMENT_DATABASE_IDENTITY: 'database-development',
-    VITE_PLATFORM_DEVELOPMENT_IDENTITY_NAMESPACE: 'namespace-development',
-    VITE_PLATFORM_PRODUCTION_ORIGIN: 'https://prod.example',
-    VITE_PLATFORM_PRODUCTION_CALLBACK_URL: 'https://prod.example/v1/account/oauth/github/callback',
-    VITE_PLATFORM_PRODUCTION_GITHUB_CLIENT_ID: 'mobile-production',
-    VITE_PLATFORM_PRODUCTION_CREDENTIAL_REFERENCE: 'credentials://production',
-    VITE_PLATFORM_PRODUCTION_DATABASE_IDENTITY: 'database-production',
-    VITE_PLATFORM_PRODUCTION_IDENTITY_NAMESPACE: 'namespace-production',
-  }
-  for (const [key, value] of Object.entries(fields)) vi.stubEnv(key, value)
-}
-
-function configureRelayEnvironment(): void {
-  const fields: Record<string, string> = {
-    VITE_PERSONAL_PAIRING_KEYLESS: '1',
+    VITE_PLATFORM_ORIGIN: 'https://platform.example.com',
+    VITE_PLATFORM_CALLBACK_URL: 'https://platform.example.com/v1/account/oauth/github/callback',
+    VITE_PLATFORM_GITHUB_CLIENT_ID: 'mobile-production',
+    VITE_PLATFORM_CREDENTIAL_REFERENCE: 'credentials://production',
+    VITE_PLATFORM_DATABASE_IDENTITY: 'database-production',
+    VITE_PLATFORM_IDENTITY_NAMESPACE: 'namespace-production',
     VITE_REMOTE_RELAY_WSS_URL: 'wss://relay.example/v1/remote-access/relay',
     VITE_REMOTE_RELAY_INBOUND_MAX_BYTES: '9999999',
     VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES: '8',

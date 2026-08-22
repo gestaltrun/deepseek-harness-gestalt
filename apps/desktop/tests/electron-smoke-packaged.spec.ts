@@ -10,32 +10,11 @@ const appBin = process.env.DSH_PACKAGED_APP_BIN ?? join(
   'Contents', 'MacOS', 'DeepSeek Gestalt',
 )
 
-/** Development Platform environment values that never reach a live service endpoint. */
-const platformEnv = {
-  DSH_PLATFORM_ENV: 'development',
-  DSH_PLATFORM_DEVELOPMENT_ORIGIN: 'https://platform.invalid',
-  DSH_PLATFORM_DEVELOPMENT_CALLBACK_URL: 'https://platform.invalid/v1/account/oauth/github/callback',
-  DSH_PLATFORM_DEVELOPMENT_GITHUB_CLIENT_ID: 'desktop-smoke',
-  DSH_PLATFORM_DEVELOPMENT_CREDENTIAL_REFERENCE: 'credentials://desktop-smoke',
-  DSH_PLATFORM_DEVELOPMENT_DATABASE_IDENTITY: 'desktop-smoke',
-  DSH_PLATFORM_DEVELOPMENT_IDENTITY_NAMESPACE: 'desktop-smoke',
-  DSH_PLATFORM_PRODUCTION_ORIGIN: 'https://platform-production.invalid',
-  DSH_PLATFORM_PRODUCTION_CALLBACK_URL: 'https://platform-production.invalid/v1/account/oauth/github/callback',
-  DSH_PLATFORM_PRODUCTION_GITHUB_CLIENT_ID: 'desktop-smoke-production',
-  DSH_PLATFORM_PRODUCTION_CREDENTIAL_REFERENCE: 'credentials://desktop-smoke-production',
-  DSH_PLATFORM_PRODUCTION_DATABASE_IDENTITY: 'desktop-smoke-production',
-  DSH_PLATFORM_PRODUCTION_IDENTITY_NAMESPACE: 'desktop-smoke-production',
-} as const
-
 describe.skipIf(process.env.DSH_DESKTOP_SMOKE !== '1' || !existsSync(appBin))(
   'packed Desktop Host smoke',
   () => {
-    it('boots the packaged composition without platform environment', async () => {
-      await runPackagedSmoke({})
-    }, 120_000)
-
     it('drains the Remote Access relay offline across packaged shutdown', async () => {
-      await runPackagedSmoke(platformEnv, (finalLog) => {
+      await runPackagedSmoke((finalLog) => {
         expect(finalLog).toContain('relay production-gate {"connected":false}')
         expect(finalLog).toContain('relay sleep {"connected":false,"stopReason":"sleep"}')
         expect(finalLog).toContain('relay mobile-access-disabled {"connected":false,"stopReason":"mobile-access-disabled"}')
@@ -48,11 +27,9 @@ describe.skipIf(process.env.DSH_DESKTOP_SMOKE !== '1' || !existsSync(appBin))(
 
 /**
  * Run the packaged app under an isolated home until smoke completion.
- * @param platform - Platform environment entries; empty means the app boots with no Platform configuration.
  * @param assertShutdownLog - optional assertions over the final smoke log after process exit.
  */
 async function runPackagedSmoke(
-  platform: Record<string, string>,
   assertShutdownLog?: (finalLog: string) => void,
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), 'gestalt-pack-smoke-'))
@@ -64,13 +41,12 @@ async function runPackagedSmoke(
   await writeFile(log, '')
   const child = spawn(appBin, [`--user-data-dir=${join(dir, 'electron-user-data')}`], {
     env: {
-      ...process.env,
+      ...withoutRuntimePlatformEnvironment(process.env),
       APPDATA: appData,
       DSH_HOME: dshHome,
       DSH_DESKTOP_SMOKE: '1',
       DSH_DESKTOP_SMOKE_FILE: log,
       ELECTRON_ENABLE_LOGGING: '1',
-      ...platform,
       HOME: userHome,
       USERPROFILE: userHome,
     },
@@ -124,4 +100,10 @@ function processExists(pid: number): boolean {
   } catch {
     return false
   }
+}
+
+function withoutRuntimePlatformEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(source).filter(([name]) => !name.startsWith('DSH_PLATFORM_')),
+  )
 }

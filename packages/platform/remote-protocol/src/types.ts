@@ -6,8 +6,15 @@ export type RelayRouteId = Branded<'RelayRouteId'>
 /** Opaque identifier for one live Relay attachment. */
 export type RelayAttachmentId = Branded<'RelayAttachmentId'>
 
-/** Exactly 256 bits of transport attachment authority in canonical base64url form. */
+/** Opaque non-secret selector for one Personal Pairing's endpoint-owned static state. */
+export type RelayPairingSelector = Branded<'RelayPairingSelector'>
+
+/** Endpoint-owned P-256 PKCS#8 attachment signing key in canonical base64url form. */
 export type RelayCredential = Branded<'RelayCredential'>
+/** Endpoint P-256 SPKI verifier visible to Relay without granting signing authority. */
+export type RelayCredentialPublicKey = Branded<'RelayCredentialPublicKey'>
+/** Opaque identity of one single-use Relay attachment challenge. */
+export type RelayAttachChallengeId = Branded<'RelayAttachChallengeId'>
 
 /** Exactly 256 bits of one-time attachment blob authority in canonical base64url form. */
 export type AttachmentCapability = Branded<'AttachmentCapability'>
@@ -141,8 +148,17 @@ export interface CompanionTranscriptPageProjection {
   entries: readonly CompanionTextTranscriptEntry[]
 }
 
+/** Desktop-authoritative state marker required after each foreground IK reconnect. */
+export interface CompanionForegroundSyncProjection {
+  type: 'foreground-sync'
+  /** Physical attachment generation bound into the IK prologue. */
+  generation: number
+  /** Monotonic Desktop projection revision represented by this synchronization. */
+  desktopRevision: number
+}
+
 /** Projections in the first implemented Companion codec slice. */
-export type CompanionProjection = CompanionTranscriptPageProjection
+export type CompanionProjection = CompanionTranscriptPageProjection | CompanionForegroundSyncProjection
 
 /** Version-tagged encrypted application plaintext before endpoint encryption. */
 export type CompanionMessage =
@@ -166,15 +182,41 @@ export interface RelayCiphertextMessage {
   ciphertext: Uint8Array
 }
 
-/** Relay attachment request for one outbound endpoint connection. */
+/** Relay attachment challenge request containing only public authority. */
+export interface RelayAttachChallengeRequestMessage {
+  type: 'attach-challenge'
+  transportVersion: 1
+  routeId: RelayRouteId
+  attachmentId: RelayAttachmentId
+  endpoint: 'mobile' | 'desktop'
+  credentialPublicKey: RelayCredentialPublicKey
+}
+
+/** Platform-issued single-use challenge bound to one requested attachment tuple. */
+export interface RelayAttachChallengeMessage {
+  type: 'attach-challenge-response'
+  transportVersion: 1
+  routeId: RelayRouteId
+  attachmentId: RelayAttachmentId
+  endpoint: 'mobile' | 'desktop'
+  credentialPublicKey: RelayCredentialPublicKey
+  challengeId: RelayAttachChallengeId
+  nonce: Uint8Array
+  expiresAt: number
+}
+
+/** Relay attachment proof for one Platform-issued challenge. */
 export interface RelayAttachMessage {
   type: 'attach'
   transportVersion: 1
   routeId: RelayRouteId
   attachmentId: RelayAttachmentId
   endpoint: 'mobile' | 'desktop'
-  /** High-entropy route authority proved inside the TLS-protected attachment message. */
-  credential: RelayCredential
+  credentialPublicKey: RelayCredentialPublicKey
+  challengeId: RelayAttachChallengeId
+  nonce: Uint8Array
+  expiresAt: number
+  signature: Uint8Array
 }
 
 /** Content-free liveness frame for one Relay attachment. */
@@ -189,7 +231,27 @@ export interface RelayHeartbeatMessage {
 export interface RelayReadyMessage {
   type: 'ready'
   transportVersion: 1
+  routeId: RelayRouteId
   attachmentId: RelayAttachmentId
+  /** Current opposite-endpoint attachments authenticated under this route. */
+  peers: readonly RelayPeerDescriptor[]
+}
+
+/** Content-free replacement of the current opposite-endpoint attachment projection. */
+export interface RelayPeerUpdateMessage {
+  type: 'peer-update'
+  transportVersion: 1
+  routeId: RelayRouteId
+  /** Receiving attachment whose route projection is replaced. */
+  attachmentId: RelayAttachmentId
+  peers: readonly RelayPeerDescriptor[]
+}
+
+/** One route-bound peer tuple whose static identity is authenticated later by Snow IK. */
+export interface RelayPeerDescriptor {
+  attachmentId: RelayAttachmentId
+  pairingSelector: RelayPairingSelector
+  generation: number
 }
 
 /** Content-free revocation frame for one Relay attachment. */
@@ -220,9 +282,12 @@ export interface RelayErrorMessage {
 
 /** Relay Transport Protocol messages accepted by the version-one codec. */
 export type RelayMessage =
+  | RelayAttachChallengeRequestMessage
+  | RelayAttachChallengeMessage
   | RelayAttachMessage
   | RelayCiphertextMessage
   | RelayErrorMessage
   | RelayHeartbeatMessage
+  | RelayPeerUpdateMessage
   | RelayReadyMessage
   | RelayRevokeMessage

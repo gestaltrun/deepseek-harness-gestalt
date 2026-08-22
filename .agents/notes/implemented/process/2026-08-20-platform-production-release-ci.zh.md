@@ -10,11 +10,11 @@ Platform 监听进程及其 GitHub Actions 工作流只需要一套实际运行�
 
 ## 决策
 
-实际运行的 Platform 只有生产环境。[`apps/platform/src/production-env.ts`](../../../../apps/platform/src/production-env.ts) 列出监听进程所需密钥，将未设置的 `PLATFORM_ENVIRONMENT` 视为 production，并在 `loadPlatformEnvironment` 运行前拒绝任何其他选择。[`boot.ts`](../../../../apps/platform/src/boot.ts) 仍保留虚假的 development 身份，以便客户端成对校验拒绝共享身份；它们不是第二套监听进程。
+实际运行的 Platform 只有生产环境。[`apps/platform/src/production-env.ts`](../../../../apps/platform/src/production-env.ts) 列出监听进程所需密钥，将未设置的 `PLATFORM_ENVIRONMENT` 视为 production，并在 [`boot.ts`](../../../../apps/platform/src/boot.ts) 加载唯一完整的已运营身份前拒绝其他选择。监听入口没有 development 身份，也没有 credential、database 或 namespace fallback。
 
 GitHub Actions 只使用 Environment `production`。[Platform Image](../../../../.github/workflows/platform-image.yml) 会在拉取请求和匹配的 master 推送上构建，仅在 `workflow_dispatch` 且 `inputs.push` 为真时推送到 GHCR。[Platform Deploy](../../../../.github/workflows/platform-deploy.yml) 始终通过 [`production-env-cli.ts`](../../../../apps/platform/src/production-env-cli.ts)（`node --experimental-strip-types`）校验生产和 ECS 名称，仅在 `inputs.deploy` 为真时 SSH。该 CLI 入口不会打进 `boot.mjs`。
 
-Desktop 与 Mobile 仍解析完整环境对（[账号安装会话](../feature/2026-08-17-platform-account-installation-sessions.md)）。这条成对隔离规则并不要求存在一套在线的 development Platform。
+Desktop 与 Mobile 解析同一套生产身份，并在产品工作开始前拒绝 localhost（见[已运营 Companion Platform 身份](../architecture/2026-08-22-operated-companion-platform-identity.md)）。通用环境 pair 校验只保留给有界 capability 测试，不进入产品入口。
 
 ## 考虑过的替代方案
 

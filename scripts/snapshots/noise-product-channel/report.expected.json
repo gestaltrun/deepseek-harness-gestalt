@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 2,
+  "endpointMailboxXkpsk3": "pass",
+  "platformInvitationHasNoPsk": true,
+  "sealedRelayAuthority": true,
+  "canonicalDigestRelayAttach": true,
+  "livePeerUpdate": true,
+  "ikFreshEphemerals": true,
+  "authenticatedForegroundSync": true,
+  "staleTranscriptRejected": true
+}

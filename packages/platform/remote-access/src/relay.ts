@@ -9,6 +9,9 @@ import type {
   RelayCredential,
   RelayErrorCode,
   RelayHeartbeatMessage,
+  RelayPeerUpdateMessage,
+  RelayPairingSelector,
+  RelayReadyMessage,
   RelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 
@@ -63,14 +66,26 @@ export interface RelayRouteStore {
   /** @returns the new monotonically increasing route revision. */
   rotate(routeId: RelayRouteId, endpoint: 'mobile' | 'desktop', credentialDigest: Uint8Array): Promise<number>
   /** @returns the current revision after adding endpoint-specific authority, or undefined when the route is inactive. */
-  issue(routeId: RelayRouteId, endpoint: 'mobile' | 'desktop', credentialDigest: Uint8Array): Promise<number | undefined>
-  /** @returns the current authorized revision, or undefined for wrong/revoked authority. */
+  issue(
+    routeId: RelayRouteId,
+    endpoint: 'mobile' | 'desktop',
+    credentialDigest: Uint8Array,
+    pairingSelector?: RelayPairingSelector,
+  ): Promise<number | undefined>
+  /** Atomically register distinct pairing-scoped endpoint digests, rejecting reuse by another selector. */
+  registerPairing(
+    routeId: RelayRouteId,
+    pairingSelector: RelayPairingSelector,
+    desktopCredentialDigest: Uint8Array,
+    mobileCredentialDigest: Uint8Array,
+  ): Promise<number>
+  /** @returns current authority metadata, or undefined for wrong/revoked authority. */
   authorize(
     routeId: RelayRouteId,
     endpoint: 'mobile' | 'desktop',
     credentialDigest: Uint8Array,
     signal?: AbortSignal,
-  ): Promise<number | undefined>
+  ): Promise<RelayAuthorization | undefined>
   /** @returns the new revision after removing exactly one endpoint credential. */
   revokeCredential(
     routeId: RelayRouteId,
@@ -86,10 +101,18 @@ export interface RelayDirectoryEntry {
   routeId: RelayRouteId
   attachmentId: RelayAttachmentId
   endpoint: 'mobile' | 'desktop'
+  /** Mobile-only selector loaded from the credential record after authorization. */
+  pairingSelector?: RelayPairingSelector
   instanceId: RelayInstanceId
   connectionToken: RelayConnectionToken
   revision: number
   expiresAt: number
+}
+
+/** Non-secret metadata returned only after one credential digest is authorized. */
+export interface RelayAuthorization {
+  revision: number
+  pairingSelector?: RelayPairingSelector
 }
 
 /** Ciphertext-only forwarding or content-free invalidation carried between Platform Instances. */
@@ -101,6 +124,10 @@ export type RelayCoordinationEvent =
     revision: number
   })
   | { type: 'delivered'; deliveryId: RelayDeliveryId }
+  | (RelayPeerUpdateMessage & {
+    targetConnectionToken: RelayConnectionToken
+    revision: number
+  })
   | { type: 'invalidate'; routeId: RelayRouteId; revision: number }
 
 /** Shared ephemeral directory, invalidation, and ciphertext Pub/Sub adapter. */
@@ -118,6 +145,8 @@ export interface RelayCoordinator {
   unregister(entry: RelayDirectoryEntry): Promise<void>
   /** Resolve one live target without creating durable delivery state. */
   locate(routeId: RelayRouteId, attachmentId: RelayAttachmentId): Promise<RelayDirectoryEntry | undefined>
+  /** List current route attachments for a bounded server-control projection. */
+  list(routeId: RelayRouteId): Promise<readonly RelayDirectoryEntry[]>
   /** Publish one ephemeral coordination event to a currently subscribed Platform Instance. */
   publish(instanceId: RelayInstanceId, event: Exclude<RelayCoordinationEvent, { type: 'invalidate' }>): Promise<boolean>
   /** Fan out one content-free route invalidation. */
@@ -131,6 +160,8 @@ export interface RelayCredentialGrant {
   endpoint: 'mobile' | 'desktop'
   credential: RelayCredential
   revision: number
+  /** Mobile-only selector sealed with this grant and retained beside its digest. */
+  pairingSelector?: RelayPairingSelector
 }
 
 /** Stable, content-free Relay Transport failure.
@@ -163,25 +194,56 @@ export abstract class RemoteRelayService extends Service {
   /** @param ctx - Platform composition context receiving the Relay capability. */
   constructor(ctx: Context) { super(ctx, 'remoteRelay') }
 
-  /**
-   * Rotate one route to fresh authority and invalidate older attachments.
-   * @param routeId - opaque route receiving new attachment authority.
-   * @param endpoint - endpoint whose same-endpoint credentials the rotation replaces; defaults to desktop.
-   * @returns the one-time credential grant and its persistent revision.
+  /** Activate one endpoint-generated digest and replace same-endpoint authority.
+   * @param routeId - route receiving endpoint-owned authority.
+   * @param endpoint - endpoint kind bound to the digest.
+   * @param credentialDigest - SHA-256 digest of the endpoint-owned public key.
+   * @param pairingSelector - optional non-secret Personal Pairing selector.
+   * @returns new route revision.
    */
-  abstract rotateCredential(routeId: RelayRouteId, endpoint?: 'mobile' | 'desktop'): Promise<RelayCredentialGrant>
+  abstract activateCredentialDigest(
+    routeId: RelayRouteId,
+    endpoint: 'mobile' | 'desktop',
+    credentialDigest: Uint8Array,
+    pairingSelector?: RelayPairingSelector,
+  ): Promise<number>
   /**
-   * Issue distinct endpoint authority without invalidating other credentials on the active route.
-   * @param routeId - active route receiving another independently revocable bearer.
-   * @param endpoint - endpoint the new credential authorizes; defaults to mobile.
-   * @returns a fresh credential at the current route revision.
+   * Register endpoint-generated authority without receiving its bearer credential.
+   * @param routeId - active route receiving Mobile authority.
+   * @param endpoint - endpoint kind bound to the digest.
+   * @param credentialDigest - SHA-256 digest of the endpoint-owned credential.
+   * @param pairingSelector - non-secret pairing selector retained beside the digest.
+   * @returns current active route revision.
    */
-  abstract issueCredential(routeId: RelayRouteId, endpoint?: 'mobile' | 'desktop'): Promise<RelayCredentialGrant>
-  /**
-   * Remove one issued endpoint credential without revoking its route peers.
-   * @param grant - exact issued authority whose ownership did not commit.
+  abstract registerCredentialDigest(
+    routeId: RelayRouteId,
+    endpoint: 'mobile' | 'desktop',
+    credentialDigest: Uint8Array,
+    pairingSelector?: RelayPairingSelector,
+  ): Promise<number>
+  /** Register one pairing's endpoint-owned Desktop and Mobile digests atomically.
+   * @param routeId - route allocated to the authenticated Desktop installation.
+   * @param pairingSelector - non-secret Personal Pairing selector.
+   * @param desktopCredentialDigest - digest of the Desktop-owned signing credential.
+   * @param mobileCredentialDigest - digest of the Mobile-owned signing credential.
+   * @returns active route revision shared by both endpoint authorities.
    */
-  abstract revokeCredential(grant: RelayCredentialGrant): Promise<void>
+  abstract registerPairingCredentialDigests(
+    routeId: RelayRouteId,
+    pairingSelector: RelayPairingSelector,
+    desktopCredentialDigest: Uint8Array,
+    mobileCredentialDigest: Uint8Array,
+  ): Promise<number>
+  /** Remove endpoint-generated authority by its retained digest.
+   * @param routeId - route owning the authority.
+   * @param endpoint - endpoint kind bound to the digest.
+   * @param credentialDigest - exact retained SHA-256 digest.
+   */
+  abstract revokeCredentialDigest(
+    routeId: RelayRouteId,
+    endpoint: 'mobile' | 'desktop',
+    credentialDigest: Uint8Array,
+  ): Promise<void>
   /**
    * Revoke one route and close its attachments across Platform Instances.
    * @param routeId - opaque route whose current authority becomes invalid.
@@ -194,10 +256,10 @@ export abstract class RemoteRelayService extends Service {
    */
   abstract attach(input: {
     message: RelayAttachMessage
-    deliver: (message: RelayCiphertextMessage) => Promise<void>
+    deliver: (message: RelayCiphertextMessage | RelayPeerUpdateMessage) => Promise<void>
     close?: () => void | Promise<void>
     signal?: AbortSignal
-    announce?: () => Promise<void>
+    announce?: (message: RelayReadyMessage) => Promise<void>
   }): Promise<RemoteRelayAttachment>
 }
 

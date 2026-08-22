@@ -5,6 +5,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseAccountProofJti, parseInstallationId } from '@deepseek-ai/dsh-platform-account'
 import {
+  MemoryPersonalPairingAuthorityStore,
   MemoryPlatformCapacityGate,
   OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
   OPEN_REGISTRATION_QUOTAS,
@@ -155,6 +156,7 @@ function uniqueProvider(now: { value: number }, capacity?: MemoryPlatformCapacit
       }),
     },
     handshake: handshakeProvider(),
+    authority: new MemoryPersonalPairingAuthorityStore(),
     clock: { now: () => now.value },
     randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index + 1),
     randomId: kind => `${kind}-${String(++id)}`,

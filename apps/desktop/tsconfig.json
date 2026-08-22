@@ -20,6 +20,7 @@
     { "path": "../../packages/platform/platform-account-http" },
     { "path": "../../packages/platform/remote-access" },
     { "path": "../../packages/platform/remote-access-client" },
+    { "path": "../../packages/platform/noise-channel" },
     { "path": "../../packages/platform/remote-access-http" },
     { "path": "../../packages/platform/remote-protocol" },
     { "path": "../../packages/test-support/loader-smoke" }

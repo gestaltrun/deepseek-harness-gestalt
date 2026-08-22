@@ -7,3 +7,4 @@
   config:
     path: /v1/remote-access/relay
     attachTimeoutMs: 1000
+    maxPendingChallenges: 16

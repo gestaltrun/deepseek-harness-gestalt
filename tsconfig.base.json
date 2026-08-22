@@ -98,6 +98,7 @@
       "@deepseek-ai/dsh-platform-account-client": ["./packages/platform/platform-account-client/src/index.ts"],
       "@deepseek-ai/dsh-platform-account-core": ["./packages/platform/platform-account-core/src/index.ts"],
       "@deepseek-ai/dsh-platform-account-http": ["./packages/platform/platform-account-http/src/index.ts"],
+      "@deepseek-ai/dsh-noise-channel": ["./packages/platform/noise-channel/src/index.ts"],
       "@deepseek-ai/dsh-remote-access": ["./packages/platform/remote-access/src/index.ts"],
       "@deepseek-ai/dsh-remote-access/relay-provider": ["./packages/platform/remote-access/src/relay-provider.ts"],
       "@deepseek-ai/dsh-remote-access-redis": ["./packages/platform/remote-access-redis/src/index.ts"],

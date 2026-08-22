@@ -10,6 +10,7 @@ Platform 包拥有 DeepSeek Gestalt Desktop 与 Mobile 共用、且独立于具�
 | [`platform-account-core/`](platform-account-core/README.md) | `@deepseek-ai/dsh-platform-account-core` | GitHub 身份与当前安装账号会话提供方 | 提供 `ctx.platformAccount` |
 | [`platform-account-http/`](platform-account-http/README.md) | `@deepseek-ai/dsh-platform-account-http` | 固定回调与安装会话 HTTP 路由 | 消费方 |
 | [`platform-account-client/`](platform-account-client/README.md) | `@deepseek-ai/dsh-platform-account-client` | Desktop/Mobile 证明、受保护存储与账号域命名空间客户端 | 消费方库 |
+| [`noise-channel/`](noise-channel/README.md) | `@deepseek-ai/dsh-noise-channel` | Snow XKpsk3 配对、attachment-bound IK 与加密 Companion 消息通道 | 端点库 |
 | [`remote-access/`](remote-access/README.md) | `@deepseek-ai/dsh-remote-access` | Mobile Access 与 Personal Pairing lifecycle、crypto adapter 和 Companion-only Device Principal | `ctx.remoteAccess` |
 | [`remote-access-client/`](remote-access-client/README.md) | `@deepseek-ai/dsh-remote-access-client` | 配对 HTTP transport 与可重连 Mobile/Desktop Relay lifecycle | 消费方库 |
 | [`remote-access-http/`](remote-access-http/README.md) | `@deepseek-ai/dsh-remote-access-http` | 配对 HTTP 与 Relay WSS 消费方 | 消费方 |

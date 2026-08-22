@@ -19,6 +19,7 @@ import {
 } from '@deepseek-ai/dsh-platform-account'
 import {
   DevelopmentKeylessPairingHandshakeProvider,
+  MemoryPersonalPairingAuthorityStore,
   PAIRING_CHALLENGE_TTL_MS,
   PersonalPairingProvider,
   RemoteAccessError,
@@ -32,7 +33,7 @@ import { RemoteAccessHttpTransport } from '@deepseek-ai/dsh-remote-access-client
 import { DesktopPairingKeyVault } from '../src/pairing-keys.ts'
 import { DesktopPairingController } from '../src/personal-pairing.ts'
 import { PairingCompanionKeyVault } from '../../mobile/src/companion-keys.ts'
-import { DevelopmentKeylessMobileHandshakeClient } from '../../mobile/src/development-keyless-pairing.ts'
+import { KeylessMobileHandshakeFixture } from '../../mobile/tests/fixtures/development-keyless-pairing.fixture.ts'
 import { MobilePairingController } from '../../mobile/src/personal-pairing.ts'
 import * as RemoteAccessHttp from '../../../packages/platform/remote-access-http/src/index.ts'
 
@@ -96,7 +97,7 @@ describe('Personal Pairing assembled controllers', () => {
     const mobile = new MobilePairingController({
       installation: accountActions('mobile'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => { throw new Error('assembled path uses the full one-time link') } },
       pairingKeys: mobileKeys,
       now: () => clock.now,
@@ -117,7 +118,7 @@ describe('Personal Pairing assembled controllers', () => {
     const foreign = new MobilePairingController({
       installation: accountActions('mobile', 'account-two'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => foreignChallenge.oneTimeLink },
       now: () => clock.now,
       pollIntervalMs: 20,
@@ -156,7 +157,7 @@ describe('Personal Pairing assembled controllers', () => {
     await desktop.createChallenge()
     const reused = desktop.getSnapshot().challenge
     if (reused === undefined) throw new Error('single-use challenge was not created')
-    const firstMobile = new DevelopmentKeylessMobileHandshakeClient()
+    const firstMobile = new KeylessMobileHandshakeFixture()
     const firstAttempt = await firstMobile.begin(reused.oneTimeLink)
     const firstCompletion = await transport.completeChallenge({
       authentication: authentication('mobile'),
@@ -170,7 +171,7 @@ describe('Personal Pairing assembled controllers', () => {
       oneTimeLink: reused.oneTimeLink,
       mobileHandshake: firstAttempt.mobileHandshake,
     })).resolves.toMatchObject({ pendingPairingId: firstCompletion.pendingPairingId })
-    const secondAttempt = await new DevelopmentKeylessMobileHandshakeClient().begin(reused.oneTimeLink)
+    const secondAttempt = await new KeylessMobileHandshakeFixture().begin(reused.oneTimeLink)
     await expect(transport.completeChallenge({
       authentication: authentication('mobile'),
       completionId: secondAttempt.completionId,
@@ -185,7 +186,7 @@ describe('Personal Pairing assembled controllers', () => {
     const liveMobile = new MobilePairingController({
       installation: accountActions('mobile'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => expiring.oneTimeLink },
       now: () => clock.now,
       pollIntervalMs: 20,
@@ -209,7 +210,7 @@ describe('Personal Pairing assembled controllers', () => {
     const expiredMobile = new MobilePairingController({
       installation: accountActions('mobile'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => expired.oneTimeLink },
       now: () => clock.now,
       pollIntervalMs: 20,
@@ -315,6 +316,7 @@ async function loadComposition(): Promise<{ port: number }> {
           },
         },
         handshake: new DevelopmentKeylessPairingHandshakeProvider(),
+        authority: new MemoryPersonalPairingAuthorityStore(),
         clock: { now: () => clock.now },
         randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index + 1),
         randomId: kind => `${kind}-${String(++id)}`,

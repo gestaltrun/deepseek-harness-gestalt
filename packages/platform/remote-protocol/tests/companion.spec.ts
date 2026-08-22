@@ -83,6 +83,32 @@ describe('Encrypted Companion Protocol codec', () => {
     expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, absent))).toEqual(absent)
   })
 
+  it('round-trips versioned foreground synchronization and rejects a one-byte substitute', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile'),
+      createCompanionVersionOffer('desktop'),
+    )
+    const synchronization = {
+      type: 'projection',
+      projection: { type: 'foreground-sync', generation: 3, desktopRevision: 11 },
+    } as const
+    expect(decodeCompanionMessage(
+      negotiated,
+      encodeCompanionMessage(negotiated, synchronization),
+    )).toEqual(synchronization)
+    expect(() => decodeCompanionMessage(negotiated, Uint8Array.of(1))).toThrow(
+      expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+    )
+    for (const value of [
+      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', generation: 0, desktopRevision: 1 } },
+      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', generation: 1, desktopRevision: 0 } },
+    ]) {
+      expect(() => decodeCompanionMessage(negotiated, json(value))).toThrow(
+        expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+      )
+    }
+  })
+
   it('rejects forged operation-status answers that misstate the queried operation', () => {
     const negotiated = negotiateFresh(
       createCompanionVersionOffer('mobile'),

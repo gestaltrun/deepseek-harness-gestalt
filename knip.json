@@ -11,6 +11,8 @@
     "javac",
     "keytool",
     "musl-gcc",
+    "openssl",
+    "postgres",
     "python3",
     "postgres",
     "redis-server",

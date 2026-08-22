@@ -199,6 +199,7 @@ export function encodeCompanionMessage(
 ): Uint8Array {
   requireNegotiated(protocol)
   if (message.type === 'projection'
+    && message.projection.type === 'transcript-page'
     && message.projection.entries.length > REMOTE_PROTOCOL_LIMITS.transcriptPageEntries) {
     throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion transcript page exceeds its entry ceiling')
   }
@@ -343,6 +344,14 @@ function parseStatusResult(record: Record<string, unknown>): CompanionResult {
 
 function parseProjection(value: unknown): CompanionProjection {
   const record = object(value, 'Companion projection')
+  if (record.type === 'foreground-sync') {
+    exactKeys(record, ['type', 'generation', 'desktopRevision'], 'Companion foreground-sync projection')
+    return {
+      type: 'foreground-sync',
+      generation: positiveSafeInteger(record.generation, 'Companion foreground-sync generation'),
+      desktopRevision: positiveSafeInteger(record.desktopRevision, 'Companion foreground-sync desktopRevision'),
+    }
+  }
   if (record.type !== 'transcript-page') invalid('Companion projection type is unsupported')
   exactKeys(record, ['type', 'sessionId', 'entries'], 'Companion transcript-page projection')
   if (!Array.isArray(record.entries)) invalid('Companion transcript entries must be an array')

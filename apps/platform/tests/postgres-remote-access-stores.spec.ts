@@ -10,13 +10,13 @@ import {
   parseRelayConnectionToken,
   parseRelayCredentialFingerprint,
 } from '@deepseek-ai/dsh-remote-access'
-import { parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
+import { parseRelayPairingSelector, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
 import { describe, expect, it, vi } from 'vitest'
 import {
   emptyPairingTransactionState,
   encodePairingTransactionState,
 } from '../src/pairing-state-codec.ts'
-import { PostgresPersonalPairingAuthorityStore } from '../src/postgres-pairing-store.ts'
+import { PostgresPersonalPairingAuthorityStore, type PlatformSqlPool } from '../src/postgres-pairing-store.ts'
 import { PostgresRelayRouteStore } from '../src/postgres-route-store.ts'
 import { createMemoryPlatformSqlPool } from './memory-sql.ts'
 
@@ -118,6 +118,31 @@ describe('PostgresPersonalPairingAuthorityStore', () => {
     expect(await reader.getMobilePairing(pending)).toEqual(authority)
   })
 
+  it('fails revocation when PostgreSQL leaves Mobile authority behind', async () => {
+    const underlying = createMemoryPlatformSqlPool()
+    let retainDeletion = false
+    const pool: PlatformSqlPool = {
+      query: async (sql, values) => retainDeletion && sql.toLowerCase().includes('delete from remote_access_mobile_pairings')
+        ? { rows: [], rowCount: 0 }
+        : await underlying.query(sql, values),
+      connect: async () => await underlying.connect(),
+    }
+    const store = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
+    const authority = {
+      accountId: ACCOUNT,
+      desktopInstallationId: DESKTOP,
+      mobileInstallationId: MOBILE,
+      pendingPairingId: parsePendingPairingId('pending-retained'),
+      pairingId: parsePersonalPairingId('pairing-retained'),
+    }
+    await store.confirmMobilePairing(authority)
+    retainDeletion = true
+
+    await expect(store.revokeMobilePairing(authority.pairingId))
+      .rejects.toThrow('left Mobile authority registered')
+    expect(await store.getMobilePairing(authority.pendingPairingId)).toEqual(authority)
+  })
+
   it('serializes exclusive pairing transactions and rolls back a failed mutation', async () => {
     const pool = createMemoryPlatformSqlPool()
     const store = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
@@ -194,9 +219,153 @@ describe('PostgresPersonalPairingAuthorityStore', () => {
     await expect(rejected.runPairingTransaction(operation)).rejects.toThrow(/unsupported/)
     expect(operation).not.toHaveBeenCalled()
   })
+
+  it('rolls back the prepared document when the final database commit fails', async () => {
+    const underlying = createMemoryPlatformSqlPool()
+    let failCommit = true
+    const pool: PlatformSqlPool = {
+      query: async (sql, values) => await underlying.query(sql, values),
+      async connect() {
+        const client = await underlying.connect()
+        return {
+          release: () => { client.release() },
+          query: async (sql, values) => {
+            if (failCommit && sql.trim().toLowerCase() === 'commit') {
+              failCommit = false
+              throw new Error('final commit failed')
+            }
+            return await client.query(sql, values)
+          },
+        }
+      },
+    }
+    const store = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
+    await store.migrate()
+    await expect(store.runPairingTransaction(async (state) => {
+      state.principalIds.add('principal-uncommitted' as never)
+    })).rejects.toThrow('final commit failed')
+    await store.runPairingTransaction(async (state) => {
+      expect(state.principalIds.has('principal-uncommitted' as never)).toBe(false)
+    })
+  })
+
+  it('retains endpoint revocation digests and step progress across store restart', async () => {
+    const pool = createMemoryPlatformSqlPool()
+    const pendingPairingId = parsePendingPairingId('pending-revocation-restart')
+    const writer = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
+    await writer.migrate()
+    await writer.runPairingTransaction(async (state) => {
+      state.endpointPublicationRevocations.set(pendingPairingId, {
+        accountId: ACCOUNT,
+        desktopInstallationId: DESKTOP,
+        mobileInstallationId: MOBILE,
+        pendingPairingId,
+        pairingId: parsePersonalPairingId('pairing-revocation-restart'),
+        routeId: parseRelayRouteId('route-revocation-restart'),
+        desktopCredentialDigest: new Uint8Array(32).fill(21),
+        credentialDigest: new Uint8Array(32).fill(22),
+        desktopRevoked: false,
+        mobileRevoked: false,
+        authorityRevoked: false,
+        removeStoredPairing: true,
+        pairingRemoved: false,
+      })
+    })
+
+    const recovered = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
+    await recovered.runPairingTransaction(async (state) => {
+      const revocation = state.endpointPublicationRevocations.get(pendingPairingId)
+      expect(revocation?.desktopCredentialDigest).toEqual(new Uint8Array(32).fill(21))
+      expect(revocation?.credentialDigest).toEqual(new Uint8Array(32).fill(22))
+      if (revocation === undefined) throw new Error('revocation recovery record is absent')
+      revocation.desktopRevoked = true
+    })
+    const restarted = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
+    await restarted.runPairingTransaction(async (state) => {
+      expect(state.endpointPublicationRevocations.get(pendingPairingId)).toMatchObject({
+        desktopRevoked: true,
+        mobileRevoked: false,
+        authorityRevoked: false,
+        removeStoredPairing: true,
+        pairingRemoved: false,
+      })
+    })
+  })
 })
 
 describe('PostgresRelayRouteStore', () => {
+  it('atomically activates distinct pairing-scoped Desktop and Mobile digests', async () => {
+    const underlying = createMemoryPlatformSqlPool()
+    let failCommit = true
+    const pool: PlatformSqlPool = {
+      query: async (sql, values) => await underlying.query(sql, values),
+      async connect() {
+        const client = await underlying.connect()
+        return {
+          release: () => { client.release() },
+          query: async (sql, values) => {
+            if (failCommit && sql.trim().toLowerCase() === 'commit') {
+              failCommit = false
+              throw new Error('pairing authority commit failed')
+            }
+            return await client.query(sql, values)
+          },
+        }
+      },
+    }
+    const store = new PostgresRelayRouteStore('gestalt', pool)
+    await store.migrate()
+    const routeId = parseRelayRouteId('route-pairing-scoped')
+    const desktopOne = new Uint8Array(32).fill(1)
+    const mobileOne = new Uint8Array(32).fill(2)
+    await expect(store.registerPairing(
+      routeId, parseRelayPairingSelector('pairing-one'), desktopOne, mobileOne,
+    )).rejects.toThrow('pairing authority commit failed')
+    expect(await store.authorize(routeId, 'desktop', desktopOne)).toBeUndefined()
+    expect(await store.authorize(routeId, 'mobile', mobileOne)).toBeUndefined()
+
+    expect(await store.registerPairing(
+      routeId, parseRelayPairingSelector('pairing-one'), desktopOne, mobileOne,
+    )).toBe(1)
+    const desktopTwo = new Uint8Array(32).fill(3)
+    const mobileTwo = new Uint8Array(32).fill(4)
+    expect(await store.registerPairing(
+      routeId, parseRelayPairingSelector('pairing-two'), desktopTwo, mobileTwo,
+    )).toBe(1)
+    expect(await store.authorize(routeId, 'desktop', desktopOne)).toEqual({
+      revision: 1, pairingSelector: 'pairing-one',
+    })
+    expect(await store.authorize(routeId, 'mobile', mobileOne)).toEqual({
+      revision: 1, pairingSelector: 'pairing-one',
+    })
+    expect(await store.authorize(routeId, 'desktop', desktopTwo)).toEqual({
+      revision: 1, pairingSelector: 'pairing-two',
+    })
+    expect(await store.authorize(routeId, 'mobile', mobileTwo)).toEqual({
+      revision: 1, pairingSelector: 'pairing-two',
+    })
+
+    const reusedPeer = new Uint8Array(32).fill(5)
+    await expect(store.registerPairing(
+      routeId, parseRelayPairingSelector('pairing-reuse'), desktopOne, reusedPeer,
+    )).rejects.toThrow('already belongs to another Personal Pairing')
+    expect(await store.authorize(routeId, 'mobile', reusedPeer)).toBeUndefined()
+    await expect(store.registerPairing(
+      routeId, parseRelayPairingSelector('pairing-equal'), reusedPeer, reusedPeer,
+    )).rejects.toThrow('must be distinct')
+
+    const shared = new Uint8Array(32).fill(6)
+    const concurrent = await Promise.allSettled([
+      store.registerPairing(
+        routeId, parseRelayPairingSelector('pairing-concurrent-a'), shared, new Uint8Array(32).fill(7),
+      ),
+      store.registerPairing(
+        routeId, parseRelayPairingSelector('pairing-concurrent-b'), shared, new Uint8Array(32).fill(8),
+      ),
+    ])
+    expect(concurrent.map(result => result.status).sort()).toEqual(['fulfilled', 'rejected'])
+  })
+
   it('rotates, issues, authorizes, and revokes endpoint credentials', async () => {
     const pool = createMemoryPlatformSqlPool()
     const store = new PostgresRelayRouteStore('gestalt', pool)
@@ -207,18 +376,49 @@ describe('PostgresRelayRouteStore', () => {
     const replacement = Uint8Array.of(3, 3, 3)
     expect(await store.issue(routeId, 'mobile', mobile)).toBeUndefined()
     expect(await store.rotate(routeId, 'desktop', desktop)).toBe(1)
-    expect(await store.issue(routeId, 'mobile', mobile)).toBe(1)
-    expect(await store.authorize(routeId, 'desktop', desktop)).toBe(1)
-    expect(await store.authorize(routeId, 'mobile', mobile)).toBe(1)
+    expect(await store.issue(routeId, 'mobile', mobile, parseRelayPairingSelector('pairing-one'))).toBe(1)
+    expect(await store.authorize(routeId, 'desktop', desktop)).toEqual({ revision: 1 })
+    expect(await store.authorize(routeId, 'mobile', mobile)).toEqual({
+      revision: 1, pairingSelector: 'pairing-one',
+    })
     expect(await store.rotate(routeId, 'desktop', replacement)).toBe(2)
     expect(await store.authorize(routeId, 'desktop', desktop)).toBeUndefined()
-    expect(await store.authorize(routeId, 'desktop', replacement)).toBe(2)
-    expect(await store.authorize(routeId, 'mobile', mobile)).toBe(2)
+    expect(await store.authorize(routeId, 'desktop', replacement)).toEqual({ revision: 2 })
+    expect(await store.authorize(routeId, 'mobile', mobile)).toEqual({
+      revision: 2, pairingSelector: 'pairing-one',
+    })
     expect(await store.revokeCredential(routeId, 'mobile', mobile)).toBe(3)
     expect(await store.authorize(routeId, 'mobile', mobile)).toBeUndefined()
     expect(await store.revoke(routeId)).toBe(4)
     expect(await store.issue(routeId, 'mobile', mobile)).toBeUndefined()
     expect(await store.authorize(routeId, 'desktop', replacement)).toBeUndefined()
+  })
+
+  it('rolls back revocation when PostgreSQL leaves a credential authority behind', async () => {
+    const underlying = createMemoryPlatformSqlPool()
+    let retainDeletion = false
+    const pool: PlatformSqlPool = {
+      query: async (sql, values) => await underlying.query(sql, values),
+      async connect() {
+        const client = await underlying.connect()
+        return {
+          release: () => { client.release() },
+          query: async (sql, values) => retainDeletion
+            && sql.toLowerCase().includes('delete from remote_access_route_authorities')
+            ? { rows: [], rowCount: 0 }
+            : await client.query(sql, values),
+        }
+      },
+    }
+    const store = new PostgresRelayRouteStore('gestalt', pool)
+    const routeId = parseRelayRouteId('route-retained')
+    const digest = new Uint8Array(32).fill(7)
+    await store.rotate(routeId, 'desktop', digest)
+    retainDeletion = true
+
+    await expect(store.revokeCredential(routeId, 'desktop', digest))
+      .rejects.toThrow('did not quiesce')
+    expect(await store.authorize(routeId, 'desktop', digest)).toEqual({ revision: 1 })
   })
 })
 

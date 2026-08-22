@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import type {
   DesktopBridge,
   DesktopPairingChallenge,
@@ -22,9 +23,12 @@ import {
 } from '../../../packages/client/ui-desktop/src/client/pairing-source.ts'
 import {
   parseRelayCredential,
+  parseRelayPairingSelector,
   parseRelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { DesktopPairingKeyVault } from '../src/pairing-keys.ts'
+import { initializeSnowChannel, SnowMobileHandshakeClient } from '@deepseek-ai/dsh-noise-channel'
+import { DesktopSnowPairingVault } from '../src/snow-pairing-vault.ts'
 import {
   DesktopPairingController,
   UnavailableDesktopPairingController,
@@ -71,6 +75,215 @@ describe('UnavailableDesktopPairingController', () => {
 })
 
 describe('DesktopPairingController', () => {
+  it('preserves durable pairing authority across suspend and wipes it only on account-scope reset', async () => {
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset()
+    transport.getMobileAccessState.mockResolvedValue({ enabled: true })
+    transport.listEndpointPending.mockResolvedValue([])
+    const clear = vi.fn()
+    const flush = vi.fn(async () => {})
+    const grant = {
+      endpoint: 'desktop' as const,
+      routeId: parseRelayRouteId('route-retained'),
+      credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      pairingSelector: 'pairing-retained' as never,
+      revision: 1,
+    }
+    const vault = {
+      desktopRelayGrants: () => [grant],
+      clear,
+      flush,
+    } as unknown as DesktopSnowPairingVault
+    const synchronize = vi.fn(async () => {})
+    const relay = { synchronize, start: vi.fn(async () => {}), stop: vi.fn(async () => {}) }
+    const controller = new DesktopPairingController({
+      account: accountFixture(), transport, relay, snowPairingVault: vault,
+    })
+
+    await controller.start()
+    for (const reason of ['sleep', 'window-close', 'quit'] as const) {
+      await controller.deactivate(reason)
+      expect(clear).not.toHaveBeenCalled()
+      await controller.start()
+    }
+    expect(synchronize).toHaveBeenCalledWith([grant])
+
+    await controller.deactivate('mobile-access-disabled')
+    expect(clear).toHaveBeenCalledOnce()
+    expect(flush).toHaveBeenCalled()
+  })
+
+  it('restores the same pairing-scoped Relay grant after a full controller and vault restart', async () => {
+    const grant = {
+      endpoint: 'desktop' as const,
+      routeId: parseRelayRouteId('route-restart'),
+      credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      pairingSelector: parseRelayPairingSelector('pairing-restart'),
+      revision: 3,
+    }
+    const state = {
+      active: [{
+        pairingId: parsePersonalPairingId('pairing-restart'),
+        reconnectState: new Uint8Array(96).fill(9), desktopGrant: grant,
+      }],
+      challenges: [], pending: [], confirmations: [],
+    }
+    const store = { load: vi.fn(async () => state), save: vi.fn(async () => {}) }
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset()
+    transport.getMobileAccessState.mockResolvedValue({ enabled: true })
+    transport.listEndpointPending.mockResolvedValue([])
+    const firstSynchronize = vi.fn(async () => {})
+    const first = new DesktopPairingController({
+      account: accountFixture(), transport,
+      relay: { synchronize: firstSynchronize, start: vi.fn(async () => {}), stop: vi.fn(async () => {}) },
+      snowPairingVault: await DesktopSnowPairingVault.load(store),
+    })
+    await first.start()
+    await first.deactivate('window-close')
+    await first.dispose()
+
+    const secondSynchronize = vi.fn(async () => {})
+    const second = new DesktopPairingController({
+      account: accountFixture(), transport,
+      relay: { synchronize: secondSynchronize, start: vi.fn(async () => {}), stop: vi.fn(async () => {}) },
+      snowPairingVault: await DesktopSnowPairingVault.load(store),
+    })
+    await second.start()
+
+    expect(firstSynchronize).toHaveBeenCalledWith([grant])
+    expect(secondSynchronize).toHaveBeenCalledWith([grant])
+    expect(store.save).not.toHaveBeenCalled()
+    await second.dispose()
+  })
+
+  it('settles Platform-retained endpoint work after Desktop invitation state was wiped', async () => {
+    const transport = transportFixture()
+    transport.listEndpointPending.mockResolvedValue([{
+      pendingPairingId: parsePendingPairingId('pending-stale'),
+      challengeId: parsePairingChallengeId('challenge-stale'),
+      stage: 'message1', message1: Uint8Array.of(1),
+      device: { name: 'Stale phone', platform: 'ios' },
+    }])
+    const controller = new DesktopPairingController({
+      account: accountFixture(), transport,
+      relay: { configure: vi.fn(), start: vi.fn(), stop: vi.fn() },
+      snowPairingVault: new DesktopSnowPairingVault(),
+    })
+    await controller.start()
+    await controller.setEnabled(true)
+    expect(transport.rejectEndpointPairing).toHaveBeenCalledWith(expect.objectContaining({
+      pendingPairingId: 'pending-stale',
+    }))
+    expect(transport.submitEndpointMessage2).not.toHaveBeenCalled()
+  })
+
+  it('owns XKpsk3 invitation state, confirms a digest-only credential, and seals the Mobile grant', async () => {
+    initializeSnowChannel(readFileSync(new URL(
+      '../../../packages/platform/noise-channel/pkg/dsh_noise_channel_bg.wasm', import.meta.url,
+    )))
+    const transport = transportFixture()
+    const relay = { configure: vi.fn(), start: vi.fn(), stop: vi.fn() }
+    let failNextSave = false
+    const save = vi.fn(async () => {
+      if (!failNextSave) return
+      failNextSave = false
+      throw new Error('vault persistence failed after sealed delivery')
+    })
+    const vault = new DesktopSnowPairingVault({ load: vi.fn(async () => []), save })
+    const challengeId = parsePairingChallengeId('challenge-endpoint-owner')
+    const pendingPairingId = parsePendingPairingId('pending-endpoint-owner')
+    const deliveredAuthorities: Uint8Array[] = []
+    transport.deliverEndpointRelayAuthority.mockImplementation(async (input) => {
+      deliveredAuthorities.push(input.sealedRelayAuthority.slice())
+      if (deliveredAuthorities.length === 1) throw new Error('sealed authority response was lost after commit')
+    })
+    transport.createEndpointChallenge.mockImplementationOnce(async (input) => {
+      return {
+        challengeId, expiresAt: input.expiresAt,
+        routingLink: 'https://platform.example/pair?endpoint=1&expires=1787027200000&protocol=1',
+      }
+    })
+    transport.listEndpointPending.mockResolvedValue([])
+    const controller = new DesktopPairingController({
+      account: {
+        getSnapshot: signedInAccountSnapshot,
+        authorizeCurrentInstallation: vi.fn(async () => ({
+          accessToken: 'desktop-access',
+          proof: { jti: parseAccountProofJti('proof'), issuedAt: 1, signature: 'signature' },
+        })),
+      },
+      transport, relay, snowPairingVault: vault,
+    })
+    await controller.start()
+    await controller.setEnabled(true)
+    await controller.createChallenge()
+    const invitationLink = controller.getSnapshot().challenge?.oneTimeLink
+    if (invitationLink === undefined) throw new Error('endpoint invitation was not projected')
+    const encodedPayload = new URL(invitationLink).searchParams.get('payload')
+    if (encodedPayload === null) throw new Error('endpoint invitation has no local payload')
+    const invitationPayload = new Uint8Array(Buffer.from(encodedPayload, 'base64url'))
+
+    const mobile = new SnowMobileHandshakeClient()
+    const message1 = await mobile.beginEndpointInvitation(invitationPayload)
+    transport.listEndpointPending.mockResolvedValueOnce([{
+      pendingPairingId, challengeId, stage: 'message1', message1,
+      device: { name: 'Alice phone', platform: 'ios' },
+    }])
+    await controller.start()
+    const message2 = transport.submitEndpointMessage2.mock.calls.at(-1)?.[0].message2
+    if (message2 === undefined) throw new Error('Desktop Snow message 2 was not submitted')
+    await mobile.acceptDesktopHandshake(message2)
+    const message3 = mobile.exportFinishMessage()
+    transport.listEndpointPending.mockResolvedValueOnce([{
+      pendingPairingId, challengeId, stage: 'message3', message1, message2, message3,
+      device: { name: 'Alice phone', platform: 'ios' },
+    }])
+    await controller.start()
+    expect(controller.getSnapshot()).toMatchObject({ status: 'pending', pending: { id: pendingPairingId } })
+
+    const confirmation = {
+      pairing: {
+        id: parsePersonalPairingId('pairing-endpoint-owner'),
+        devicePrincipal: {
+          id: 'principal-endpoint' as never, accountId: 'account-one' as never,
+          installationId: 'mobile-one' as never, authority: 'companion-surface',
+        },
+        device: { name: 'Alice phone', platform: 'ios' }, pairedAt: 1, lastAccessAt: 1, online: false,
+      },
+      routeId: parseRelayRouteId('route-endpoint-owner'), relayRevision: 3,
+    }
+    const confirmationDigests: Uint8Array[] = []
+    transport.confirmEndpointPairing.mockImplementation(async (input) => {
+      confirmationDigests.push(input.mobileCredentialDigest.slice())
+      if (confirmationDigests.length === 1) throw new Error('confirmation response was lost after commit')
+      return confirmation
+    })
+    transport.listEndpointPending.mockResolvedValue([])
+    await expect(controller.confirm(pendingPairingId)).rejects.toThrow('confirmation response was lost after commit')
+    await expect(controller.confirm(pendingPairingId)).rejects.toThrow('sealed authority response was lost after commit')
+    const savesBeforeCommit = save.mock.calls.length
+    failNextSave = true
+    await expect(controller.confirm(pendingPairingId)).rejects.toThrow('vault persistence failed after sealed delivery')
+    await controller.confirm(pendingPairingId)
+    const sealed = deliveredAuthorities.at(-1)
+    if (sealed === undefined) throw new Error('Desktop did not deliver sealed Relay authority')
+    await expect(mobile.openRelayAuthority(sealed)).resolves.toMatchObject({
+      routeId: 'route-endpoint-owner', endpoint: 'mobile', revision: 3,
+      pairingSelector: 'pairing-endpoint-owner',
+    })
+    expect(vault.reconnectState('pairing-endpoint-owner' as never)).toHaveLength(96)
+    expect(confirmationDigests).toHaveLength(4)
+    expect(confirmationDigests[1]).toEqual(confirmationDigests[0])
+    expect(confirmationDigests[2]).toEqual(confirmationDigests[0])
+    expect(confirmationDigests[3]).toEqual(confirmationDigests[0])
+    expect(deliveredAuthorities).toHaveLength(3)
+    expect(deliveredAuthorities[1]).toEqual(deliveredAuthorities[0])
+    expect(deliveredAuthorities[2]).toEqual(deliveredAuthorities[0])
+    expect(save).toHaveBeenCalledTimes(savesBeforeCommit + 2)
+    await controller.dispose()
+  })
+
   it('installs the Settings Relay grant before starting the endpoint lifecycle', async () => {
     const transport = transportFixture()
     const grant = {
@@ -210,7 +423,7 @@ describe('DesktopPairingController', () => {
     await controller.setEnabled(true)
     await controller.confirm(parsePendingPairingId('pending-key'))
     expect(vault.pairingKeyMaterial(parsePersonalPairingId('pairing-key'))).toEqual(material)
-    await controller.deactivate()
+    await controller.deactivate('mobile-access-disabled')
     expect(vault.pairingKeyMaterial(parsePersonalPairingId('pairing-key'))).toBeUndefined()
   })
 
@@ -657,6 +870,13 @@ function transportFixture() {
       oneTimeLink: 'https://platform.example/pair?full=1',
       qrPayload: 'https://platform.example/pair?full=1',
     }),
+    createEndpointChallenge: vi.fn<RemoteAccessTransport['createEndpointChallenge']>(),
+    cancelEndpointChallenge: vi.fn<RemoteAccessTransport['cancelEndpointChallenge']>(),
+    listEndpointPending: vi.fn<RemoteAccessTransport['listEndpointPending']>(),
+    submitEndpointMessage2: vi.fn<RemoteAccessTransport['submitEndpointMessage2']>(),
+    confirmEndpointPairing: vi.fn<RemoteAccessTransport['confirmEndpointPairing']>(),
+    rejectEndpointPairing: vi.fn<RemoteAccessTransport['rejectEndpointPairing']>(),
+    deliverEndpointRelayAuthority: vi.fn<RemoteAccessTransport['deliverEndpointRelayAuthority']>(),
     cancelChallenge: vi.fn(),
     listPendingPairings: vi.fn().mockResolvedValue([]),
     listPersonalPairings: vi.fn().mockResolvedValue([{
@@ -676,6 +896,10 @@ function transportFixture() {
     rejectPairing: vi.fn(),
     revokePersonalPairing: vi.fn(),
     completeChallenge: vi.fn(),
+    submitEndpointMessage1: vi.fn(),
+    getEndpointPairingStatus: vi.fn(),
+    submitEndpointMessage3: vi.fn(),
+    finishChallenge: vi.fn(),
     getMobilePairingStatus: vi.fn(),
   } satisfies RemoteAccessTransport
 }

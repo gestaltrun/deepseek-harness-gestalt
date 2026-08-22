@@ -20,6 +20,7 @@ afterEach(() => { vi.unstubAllGlobals() })
 const challenge = {
   challengeId: 'challenge-one',
   desktopFingerprint: 'desktop-fingerprint',
+  desktopStaticPublicKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
   rendezvousId: 'rendezvous-one',
   expiresAt: 123,
   protocolMajor: 1,
@@ -60,6 +61,94 @@ function transport(value: unknown, status = 200): { client: RemoteAccessHttpTran
 }
 
 describe('RemoteAccessHttpTransport', () => {
+  it('serializes and parses endpoint-owned opaque pairing mailbox operations', async () => {
+    const replies = [
+      {
+        challengeId: 'challenge-endpoint', expiresAt: 456,
+        routingLink: 'https://platform.example/pair?challenge=challenge-endpoint',
+      },
+      {},
+      [
+        { pendingPairingId: 'pending-one', challengeId: 'challenge-one', stage: 'message1', message1: 'AQI', device: { name: 'One', platform: 'ios' } },
+        { pendingPairingId: 'pending-two', challengeId: 'challenge-two', stage: 'message3', message1: 'Aw', message2: 'BA', message3: 'BQ', device: { name: 'Two', platform: 'android' } },
+        { pendingPairingId: 'pending-three', challengeId: 'challenge-three', stage: 'confirmed', device: { name: 'Three', platform: 'ios' } },
+      ],
+      {}, {
+        pairing, routeId: 'route-one', relayRevision: 1,
+      }, {}, {},
+      { pendingPairingId: 'pending-one' },
+      {
+        stage: 'message2', pendingPairingId: 'pending-one', message2: 'Bg',
+        device: { name: 'Authenticated phone', platform: 'ios' },
+      },
+      {},
+      { stage: 'confirmed', pendingPairingId: 'pending-one', pairingId: 'pairing-one', sealedRelayAuthority: 'Bwg' },
+    ]
+    const fetch = vi.fn(async (
+      _input: Parameters<typeof globalThis.fetch>[0],
+      _init?: Parameters<typeof globalThis.fetch>[1],
+    ) => new Response(JSON.stringify(replies.shift()), { status: 200 }))
+    const client = new RemoteAccessHttpTransport({
+      environment: { environment: 'development', origin: 'https://platform.example' } as never,
+      fetch,
+    })
+    const challengeId = parsePairingChallengeId('challenge-endpoint')
+    const completionId = parsePairingCompletionId('completion-endpoint')
+    const pendingPairingId = parsePendingPairingId('pending-one')
+    const rendezvousId = parsePairingRendezvousId('rendezvous-endpoint')
+
+    await expect(client.createEndpointChallenge({
+      authentication, rendezvousId, expiresAt: 456,
+    })).resolves.toMatchObject({ challengeId, expiresAt: 456 })
+    await expect(client.cancelEndpointChallenge({ authentication, challengeId })).resolves.toBeUndefined()
+    await expect(client.listEndpointPending(authentication)).resolves.toEqual([
+      { pendingPairingId, challengeId: 'challenge-one', stage: 'message1', message1: Uint8Array.of(1, 2), device: { name: 'One', platform: 'ios' } },
+      {
+        pendingPairingId: 'pending-two', challengeId: 'challenge-two', stage: 'message3', message1: Uint8Array.of(3),
+        message2: Uint8Array.of(4), message3: Uint8Array.of(5), device: { name: 'Two', platform: 'android' },
+      },
+      { pendingPairingId: 'pending-three', challengeId: 'challenge-three', stage: 'confirmed', device: { name: 'Three', platform: 'ios' } },
+    ])
+    await expect(client.submitEndpointMessage2({ authentication, pendingPairingId, message2: Uint8Array.of(4) }))
+      .resolves.toBeUndefined()
+    await expect(client.confirmEndpointPairing({
+      authentication, pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(8),
+      mobileCredentialDigest: new Uint8Array(32).fill(9),
+    })).resolves.toMatchObject({ routeId: 'route-one', relayRevision: 1, pairing })
+    await expect(client.rejectEndpointPairing({ authentication, pendingPairingId })).resolves.toBeUndefined()
+    await expect(client.deliverEndpointRelayAuthority({
+      authentication, pendingPairingId, sealedRelayAuthority: Uint8Array.of(7, 8),
+    })).resolves.toBeUndefined()
+    await expect(client.submitEndpointMessage1({
+      authentication, challengeId, completionId,
+      message1: Uint8Array.of(1, 2),
+    })).resolves.toEqual({ pendingPairingId })
+    await expect(client.getEndpointPairingStatus({ authentication, completionId })).resolves.toEqual({
+      stage: 'message2', pendingPairingId, message2: Uint8Array.of(6),
+      device: { name: 'Authenticated phone', platform: 'ios' },
+    })
+    await expect(client.submitEndpointMessage3({ authentication, completionId, message3: Uint8Array.of(5) }))
+      .resolves.toBeUndefined()
+    await expect(client.getEndpointPairingStatus({ authentication, completionId })).resolves.toEqual({
+      stage: 'confirmed', pendingPairingId, pairingId: 'pairing-one', sealedRelayAuthority: Uint8Array.of(7, 8),
+    })
+    expect(fetch).toHaveBeenCalledTimes(11)
+    const bodies = fetch.mock.calls.map(call => JSON.parse(call[1]?.body as string) as Record<string, unknown>)
+    expect(bodies.map(body => body.operation)).toEqual([
+      'create-endpoint-challenge', 'cancel-endpoint-challenge', 'list-endpoint-pending', 'submit-endpoint-message2',
+      'confirm-endpoint-pairing', 'reject-endpoint-pairing', 'deliver-endpoint-relay-authority', 'submit-endpoint-message1',
+      'get-endpoint-pairing-status', 'submit-endpoint-message3', 'get-endpoint-pairing-status',
+    ])
+    expect(bodies[0]).not.toHaveProperty('invitationPayload')
+    expect(bodies[0]).not.toHaveProperty('desktopFingerprint')
+    expect(bodies[3]).toMatchObject({ message2: 'BA' })
+    expect(bodies[4]).toMatchObject({ mobileCredentialDigest: 'CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk' })
+    expect(bodies[6]).toMatchObject({ sealedRelayAuthority: 'Bwg' })
+    expect(bodies[7]).toMatchObject({ message1: 'AQI' })
+    expect(bodies[9]).toMatchObject({ message3: 'BQ' })
+  })
+
   it('uses the global Fetch implementation by default', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify({ enabled: false })))
     vi.stubGlobal('fetch', fetch)
@@ -82,7 +171,7 @@ describe('RemoteAccessHttpTransport', () => {
         relay: {
           routeId: 'route-one', endpoint: 'desktop', credential: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE', revision: 2,
         },
-      }, challenge, {}, [completion], [pairing], {}, pairing, {}, {}, completion,
+      }, challenge, {}, [completion], [pairing], {}, pairing, {}, {}, completion, completion,
       { status: 'pending' }, { status: 'rejected' }, {
         status: 'paired', pairingId: 'pairing-one', sealedRelayAuthority: 'AQI',
       }, {},
@@ -106,7 +195,9 @@ describe('RemoteAccessHttpTransport', () => {
     await expect(client.reissueDesktopRelayAuthority(authentication)).resolves.toMatchObject({
       enabled: true, relay: { routeId: 'route-one', endpoint: 'desktop', revision: 2 },
     })
-    await expect(client.createChallenge({ authentication, rendezvousId })).resolves.toMatchObject(challenge)
+    await expect(client.createChallenge({ authentication, rendezvousId })).resolves.toMatchObject({
+      ...challenge, desktopStaticPublicKey: new Uint8Array(32),
+    })
     await expect(client.cancelChallenge({ authentication, challengeId })).resolves.toBeUndefined()
     await expect(client.listPendingPairings(authentication)).resolves.toMatchObject([{
       pendingPairingId: 'pending-one', desktopHandshake: Uint8Array.of(1, 2),
@@ -126,12 +217,17 @@ describe('RemoteAccessHttpTransport', () => {
       oneTimeLink: challenge.oneTimeLink,
       mobileHandshake: Uint8Array.of(1, 2),
     })).resolves.toMatchObject({ desktopHandshake: Uint8Array.of(1, 2) })
+    await expect(client.finishChallenge({
+      authentication,
+      pendingPairingId,
+      mobileFinish: Uint8Array.of(3, 4),
+    })).resolves.toMatchObject({ pendingPairingId, desktopHandshake: Uint8Array.of(1, 2) })
     await expect(client.getMobilePairingStatus({ authentication, pendingPairingId })).resolves.toEqual({ status: 'pending' })
     await expect(client.getMobilePairingStatus({ authentication, pendingPairingId })).resolves.toEqual({ status: 'rejected' })
     await expect(client.getMobilePairingStatus({ authentication, pendingPairingId })).resolves.toEqual({
       status: 'paired', pairingId: 'pairing-one', sealedRelayAuthority: Uint8Array.of(1, 2),
     })
-    expect(fetch).toHaveBeenCalledTimes(15)
+    expect(fetch).toHaveBeenCalledTimes(16)
     const first = vi.mocked(fetch).mock.calls[0]
     expect(first?.[0]).toBe('https://platform.example/v1/remote-access/personal-pairing')
     expect(first?.[1]).toMatchObject({
@@ -148,6 +244,9 @@ describe('RemoteAccessHttpTransport', () => {
     expect(JSON.parse(completionBody)).toMatchObject({
       operation: 'complete-challenge', mobileHandshake: 'AQI',
     })
+    const finishBody = vi.mocked(fetch).mock.calls[12]?.[1]?.body
+    if (typeof finishBody !== 'string') throw new TypeError('finish request body must be a string')
+    expect(JSON.parse(finishBody)).toMatchObject({ operation: 'finish-challenge', mobileFinish: 'AwQ' })
   })
 
   it('preserves known service errors and rejects malformed HTTP failures', async () => {
@@ -233,6 +332,29 @@ describe('RemoteAccessHttpTransport', () => {
     }).client.getMobilePairingStatus({
       authentication, pendingPairingId: parsePendingPairingId('pending-one'),
     })).resolves.toEqual({ status: 'paired', pairingId: 'pairing-one' })
+  })
+
+  it.each([
+    [{ stage: 'awaiting-desktop', pendingPairingId: 'pending-one' }, 'awaiting-desktop'],
+    [{ stage: 'awaiting-authority', pendingPairingId: 'pending-one' }, 'awaiting-authority'],
+    [{ stage: 'rejected', pendingPairingId: 'pending-one' }, 'rejected'],
+  ])('parses the endpoint Mobile %s stage', async (value, stage) => {
+    await expect(transport(value).client.getEndpointPairingStatus({
+      authentication, completionId: parsePairingCompletionId('completion-one'),
+    })).resolves.toEqual({ stage, pendingPairingId: 'pending-one' })
+  })
+
+  it('rejects invalid endpoint mailbox response stages and fixed key bytes', async () => {
+    await expect(transport([{ pendingPairingId: 'pending-one', challengeId: 'challenge-one',
+      stage: 'invalid', message1: 'AQ', device: { name: 'Phone', platform: 'ios' } }])
+      .client.listEndpointPending(authentication)).rejects.toThrow('Desktop stage is invalid')
+    await expect(transport({ pendingPairingId: 'pending-one', stage: 'invalid' })
+      .client.getEndpointPairingStatus({
+        authentication, completionId: parsePairingCompletionId('completion-one'),
+      })).rejects.toThrow('Mobile stage is invalid')
+    await expect(transport({ ...challenge, desktopStaticPublicKey: 'AQ' }).client.createChallenge({
+      authentication, rendezvousId: parsePairingRendezvousId('rendezvous-one'),
+    })).rejects.toThrow('Desktop public key must contain 32 bytes')
   })
 
   it.each([

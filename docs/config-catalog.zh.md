@@ -453,7 +453,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/browser/browser-runtime-electron/src/index.ts:127`](../packages/browser/browser-runtime-electron/src/index.ts)
+来源：[`packages/browser/browser-runtime-electron/src/index.ts:135`](../packages/browser/browser-runtime-electron/src/index.ts)
 
 <a id="deepseek-aidsh-browser-runtime-tandem"></a>
 

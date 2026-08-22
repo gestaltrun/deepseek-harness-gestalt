@@ -249,6 +249,26 @@ describe('Electron Browser Runtime public lifecycle', () => {
     expect(host.windows.every(window => window.destroyed)).toBe(true)
   })
 
+  it('retries one hidden-page compositor bootstrap miss after an animation frame', async () => {
+    const { ctx, host } = await setup({ captureFailures: 1 })
+    const created = await ctx.browserRuntime.create({ profile: 'temporary' })
+
+    await expect(ctx.browserRuntime.screenshot({ target: created.target })).resolves.toMatchObject({
+      mediaType: 'image/png',
+      data: PNG_1X1_BASE64,
+    })
+    expect(host.windows[0]?.webContents.captureAttempts).toBe(2)
+  })
+
+  it('does not retry a non-compositor screenshot failure', async () => {
+    const { ctx, host } = await setup({ captureFailures: 1, captureFailureMessage: 'capture failed' })
+    const created = await ctx.browserRuntime.create({ profile: 'temporary' })
+
+    await expect(ctx.browserRuntime.screenshot({ target: created.target }))
+      .rejects.toMatchObject({ code: 'BROWSER_RUNTIME_UNAVAILABLE', message: /capture failed/ })
+    expect(host.windows[0]?.webContents.captureAttempts).toBe(1)
+  })
+
   it('serializes synthetic input with navigation in both arrival orders', async () => {
     const { ctx } = await setup()
     const created = await ctx.browserRuntime.create({ profile: 'temporary' })

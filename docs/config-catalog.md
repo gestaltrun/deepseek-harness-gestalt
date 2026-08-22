@@ -451,7 +451,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/browser/browser-runtime-electron/src/index.ts:127`](../packages/browser/browser-runtime-electron/src/index.ts)
+Source: [`packages/browser/browser-runtime-electron/src/index.ts:135`](../packages/browser/browser-runtime-electron/src/index.ts)
 
 <a id="deepseek-aidsh-browser-runtime-tandem"></a>
 

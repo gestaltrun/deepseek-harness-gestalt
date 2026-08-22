@@ -60,6 +60,7 @@ const PAGE_TEXT_SCRIPT = `(() => {
   const root = document.body ?? document.documentElement
   return root === null ? '' : (root.innerText ?? '')
 })()`
+const NEXT_ANIMATION_FRAME_SCRIPT = 'new Promise(resolve => requestAnimationFrame(() => resolve()))'
 const FOCUSED_EDITABLE_SCRIPT = `(() => {
   const active = document.activeElement
   return active instanceof HTMLInputElement
@@ -96,6 +97,13 @@ function isAbortedNavigation(error: unknown): boolean {
   const record = error as { code?: unknown; errno?: unknown; message?: unknown }
   if (record.code === 'ERR_ABORTED' || record.errno === -3) return true
   return typeof record.message === 'string' && record.message.includes('ERR_ABORTED')
+}
+
+/** True when Chromium has not created the hidden page's first Viz surface yet. */
+function isTransientCaptureError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && Reflect.get(error, 'message') === 'UnknownVizError'
 }
 
 const CHROMIUM_NET_ERROR = /\bERR_[A-Z0-9_]+\b/
@@ -534,10 +542,24 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
     })
   }
 
-  /** Capture one PNG screenshot of the hidden contents. */
+  /** Capture one PNG screenshot, retrying one pre-first-frame compositor miss. */
   private async capture(window: ElectronBrowserWindow, signal: AbortSignal | undefined): Promise<string> {
     return this.withTimeout(signal, window, async (combined) => {
-      const image = await this.raceContents(window, window.webContents.capturePage(), combined)
+      const capturePage = async () => (
+        await this.raceContents(window, window.webContents.capturePage(), combined)
+      )
+      let image: Awaited<ReturnType<typeof capturePage>>
+      try {
+        image = await capturePage()
+      } catch (error) {
+        if (!isTransientCaptureError(error)) throw error
+        await this.raceContents(
+          window,
+          window.webContents.executeJavaScript(NEXT_ANIMATION_FRAME_SCRIPT),
+          combined,
+        )
+        image = await capturePage()
+      }
       const bytes = image.toPNG()
       if (bytes.byteLength === 0) {
         throw new BrowserRuntimeError('Electron screenshot response must be image/png', 'BROWSER_PROTOCOL')

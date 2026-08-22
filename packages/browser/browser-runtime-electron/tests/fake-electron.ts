@@ -24,6 +24,8 @@ interface FakeOptions {
   readonly loadDelayMs?: number
   readonly captureDelayMs?: number
   readonly captureEmpty?: boolean
+  readonly captureFailures?: number
+  readonly captureFailureMessage?: string
   readonly crashOnLoad?: boolean
   readonly failLoad?: boolean | 'primitive' | 'null' | 'net' | 'net-chrome-error'
   /** Reject loadURL with ERR_ABORTED after committing the requested URL. */
@@ -87,6 +89,7 @@ class FakeWebContents implements ElectronWebContents {
   destroyed = false
   focused = false
   stopped = false
+  captureAttempts = 0
   readonly inputEvents: string[] = []
   private loadWait: (() => void) | undefined
   private readonly listeners = new Set<() => void>()
@@ -176,6 +179,10 @@ class FakeWebContents implements ElectronWebContents {
     this.page.text += event.keyCode
   }
   async capturePage(): Promise<ElectronNativeImage> {
+    this.captureAttempts += 1
+    if (this.captureAttempts <= (this.options.captureFailures ?? 0)) {
+      throw new Error(this.options.captureFailureMessage ?? 'UnknownVizError')
+    }
     if (this.options.captureDelayMs !== undefined) {
       await new Promise(resolve => setTimeout(resolve, this.options.captureDelayMs))
     }

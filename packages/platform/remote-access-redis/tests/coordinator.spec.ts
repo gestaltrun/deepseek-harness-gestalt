@@ -1,4 +1,5 @@
 import {
+  encodeRelayMessage,
   parseRelayAttachmentId,
   parseRelayPairingSelector,
   parseRelayRouteId,
@@ -190,6 +191,18 @@ describe('RedisRelayCoordinator', () => {
       coordinationValue('ciphertext', 'AA=='),
       coordinationValue('ciphertext', 'A'),
       coordinationValue('ciphertext', 'AB'),
+      JSON.stringify({
+        type: 'peer-update', targetConnectionToken: 'connection-one', revision: 1,
+        frame: Buffer.from(encodeRelayMessage({
+          type: 'ciphertext', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+          sourceAttachmentId: parseRelayAttachmentId('mobile-one'),
+          targetAttachmentId: parseRelayAttachmentId('desktop-one'), ciphertext: Uint8Array.of(1),
+        })).toString('base64url'),
+      }),
+      coordinationValue('ciphertext', Buffer.from(encodeRelayMessage({
+        type: 'peer-update', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+        attachmentId: parseRelayAttachmentId('desktop-one'), peers: [],
+      })).toString('base64url')),
       JSON.stringify({
         type: 'ciphertext', sourceInstanceId: 'platform-a', targetConnectionToken: 'token',
         deliveryId: 'delivery-one', revision: 1,

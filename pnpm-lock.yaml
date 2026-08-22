@@ -6651,9 +6651,6 @@ importers:
 
   packages/platform/remote-access-http:
     dependencies:
-      '@deepseek-ai/dsh-noise-channel':
-        specifier: workspace:^
-        version: link:../noise-channel
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
@@ -6676,6 +6673,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-noise-channel':
+        specifier: workspace:^
+        version: link:../noise-channel
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../platform-account
@@ -6685,6 +6685,9 @@ importers:
       '@deepseek-ai/dsh-remote-access-client':
         specifier: workspace:^
         version: link:../remote-access-client
+      '@deepseek-ai/dsh-remote-access-redis':
+        specifier: workspace:^
+        version: link:../remote-access-redis
       '@deepseek-ai/dsh-remote-protocol':
         specifier: workspace:^
         version: link:../remote-protocol

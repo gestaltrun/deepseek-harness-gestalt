@@ -149,7 +149,7 @@ function decodeEndpointPublication(value: unknown): EndpointPairingPublication {
     'accountId', 'desktopInstallationId', 'mobileInstallationId', 'pendingPairingId',
     'routeId', 'desktopCredentialDigest', 'credentialDigest', 'pairing', 'accessGeneration',
   ], 'endpoint publication')
-  return {
+  const publication = {
     accountId: parsePlatformAccountId(record.accountId),
     desktopInstallationId: parseInstallationId(record.desktopInstallationId),
     mobileInstallationId: parseInstallationId(record.mobileInstallationId),
@@ -160,6 +160,10 @@ function decodeEndpointPublication(value: unknown): EndpointPairingPublication {
     pairing: decodeStoredPairing(record.pairing),
     accessGeneration: positiveSafeInteger(record.accessGeneration, 'endpoint publication access generation'),
   }
+  assertDistinctCredentialDigests(
+    publication.desktopCredentialDigest, publication.credentialDigest, 'endpoint publication',
+  )
+  return publication
 }
 
 function encodeEndpointRevocation(revocation: EndpointPairingRevocation): unknown {
@@ -189,7 +193,7 @@ function decodeEndpointRevocation(value: unknown): EndpointPairingRevocation {
     || typeof record.authorityRevoked !== 'boolean') {
     throw new TypeError('endpoint publication revocation completion flags are invalid')
   }
-  return {
+  const decoded = {
     accountId: parsePlatformAccountId(record.accountId),
     desktopInstallationId: parseInstallationId(record.desktopInstallationId),
     mobileInstallationId: parseInstallationId(record.mobileInstallationId),
@@ -206,6 +210,10 @@ function decodeEndpointRevocation(value: unknown): EndpointPairingRevocation {
     mobileRevoked: record.mobileRevoked,
     authorityRevoked: record.authorityRevoked,
   }
+  assertDistinctCredentialDigests(
+    decoded.desktopCredentialDigest, decoded.credentialDigest, 'endpoint publication revocation',
+  )
+  return decoded
 }
 
 function decodeEndpointAccessGenerations(value: unknown): PersonalPairingTransactionState['endpointAccessGenerations'] {
@@ -455,7 +463,7 @@ function decodeStoredPairing(value: unknown): StoredPersonalPairing {
     'endpointRouteId', 'endpointCredentialDigest', 'endpointDesktopCredentialDigest',
     'endpointRelayRevision',
   ], 'stored pairing')
-  return {
+  const pairing: StoredPersonalPairing = {
     ...decodePairingView(record),
     desktopInstallationId: parseInstallationId(record.desktopInstallationId),
     ...(record.keyReference === undefined ? {} : { keyReference: parsePersonalPairingKeyReference(record.keyReference) }),
@@ -466,14 +474,32 @@ function decodeStoredPairing(value: unknown): StoredPersonalPairing {
     ...(record.endpointRouteId === undefined ? {} : { endpointRouteId: parseRelayRouteId(record.endpointRouteId) }),
     ...(record.endpointCredentialDigest === undefined
       ? {}
-      : { endpointCredentialDigest: decodeBytes(record.endpointCredentialDigest, 'stored pairing endpoint credential digest') }),
+      : { endpointCredentialDigest: decodeFixedBytes(
+        record.endpointCredentialDigest, 'stored pairing endpoint credential digest', 32,
+      ) }),
     ...(record.endpointDesktopCredentialDigest === undefined
       ? {}
-      : { endpointDesktopCredentialDigest: decodeBytes(record.endpointDesktopCredentialDigest, 'stored pairing endpoint Desktop credential digest') }),
+      : { endpointDesktopCredentialDigest: decodeFixedBytes(
+        record.endpointDesktopCredentialDigest, 'stored pairing endpoint Desktop credential digest', 32,
+      ) }),
     ...(record.endpointRelayRevision === undefined
       ? {}
-      : { endpointRelayRevision: asSafeInteger(record.endpointRelayRevision, 'stored pairing endpoint Relay revision') }),
+      : { endpointRelayRevision: positiveSafeInteger(
+        record.endpointRelayRevision, 'stored pairing endpoint Relay revision',
+      ) }),
   }
+  const hasEndpointConfirmation = pairing.endpointCredentialDigest !== undefined
+    || pairing.endpointDesktopCredentialDigest !== undefined || pairing.endpointRelayRevision !== undefined
+  if (hasEndpointConfirmation && (pairing.endpointCredentialDigest === undefined
+    || pairing.endpointDesktopCredentialDigest === undefined || pairing.endpointRelayRevision === undefined)) {
+    throw new TypeError('stored pairing endpoint confirmation is incomplete')
+  }
+  if (pairing.endpointCredentialDigest !== undefined && pairing.endpointDesktopCredentialDigest !== undefined) {
+    assertDistinctCredentialDigests(
+      pairing.endpointDesktopCredentialDigest, pairing.endpointCredentialDigest, 'stored pairing endpoint',
+    )
+  }
+  return pairing
 }
 
 function encodeOrphan(record: OrphanPendingCleanupRecord): unknown {
@@ -637,6 +663,12 @@ function decodeFixedBytes(value: unknown, name: string, length: number): Uint8Ar
   const bytes = decodeBytes(value, name)
   if (bytes.byteLength !== length) throw new TypeError(`${name} must contain ${String(length)} bytes`)
   return bytes
+}
+
+function assertDistinctCredentialDigests(left: Uint8Array, right: Uint8Array, name: string): void {
+  if (left.every((byte, index) => byte === right[index])) {
+    throw new TypeError(`${name} credential digests must be distinct`)
+  }
 }
 
 function decodeMap<K, V>(

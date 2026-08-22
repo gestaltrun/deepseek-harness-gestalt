@@ -7,8 +7,10 @@ import {
   RemoteAccessError,
   parsePairingCompletionId,
   parsePairingRendezvousId,
+  parsePendingPairingId,
   parsePersonalPairingId,
   type MobilePairingStatus,
+  type EndpointPairingMobileView,
   type PairingAccountAuthentication,
 } from '@deepseek-ai/dsh-remote-access'
 import {
@@ -257,7 +259,9 @@ describe('Remote Access HTTP assembled flow', () => {
     const remoteAccess = {
       getMobileAccessState: vi.fn(async () => ({ enabled: true })),
       setMobileAccess: vi.fn(async () => ({ enabled: true })),
-      createChallenge: vi.fn(async (_input: { clientIp: string }) => ({ challengeId: 'challenge-one' })),
+      createChallenge: vi.fn(async (_input: { clientIp: string }) => ({
+        challengeId: 'challenge-one', desktopStaticPublicKey: Uint8Array.of(1),
+      })),
       cancelChallenge: vi.fn(),
       listPendingPairings: vi.fn(async () => []),
       listPersonalPairings: vi.fn(async () => []),
@@ -272,6 +276,28 @@ describe('Remote Access HTTP assembled flow', () => {
       })),
       admitAttachmentBlob: vi.fn(async () => ({ reservationId: 'blob-1' })),
       releaseAttachmentBlob: vi.fn(),
+      createEndpointChallenge: vi.fn(async () => ({
+        challengeId: 'endpoint-challenge', expiresAt: 123,
+        routingLink: 'https://platform.example/pair?challenge=endpoint-challenge',
+      })),
+      cancelEndpointChallenge: vi.fn(),
+      listEndpointPending: vi.fn(async () => [
+        { stage: 'message1', pendingPairingId: 'pending-message1', challengeId: 'endpoint-challenge',
+          message1: Uint8Array.of(1), device: { name: 'One', platform: 'ios' } },
+        { stage: 'message3', pendingPairingId: 'pending-message3', challengeId: 'endpoint-challenge',
+          message1: Uint8Array.of(1), message2: Uint8Array.of(2), message3: Uint8Array.of(3),
+          device: { name: 'Two', platform: 'android' } },
+        { stage: 'confirmed', pendingPairingId: 'pending-confirmed', challengeId: 'endpoint-challenge',
+          device: { name: 'Three', platform: 'ios' } },
+      ]),
+      rejectEndpointPairing: vi.fn(),
+      getEndpointPairingStatus: vi.fn(async (): Promise<EndpointPairingMobileView> => ({
+        stage: 'message2', pendingPairingId: parsePendingPairingId('pending-message2'), message2: Uint8Array.of(2),
+      })),
+      finishChallenge: vi.fn(async () => ({
+        pendingPairingId: 'pending-one', authenticationWords: [], desktopHandshake: Uint8Array.of(1),
+        device: { name: 'phone', platform: 'ios' },
+      })),
     }
     const server = await start(remoteAccess as never)
     const auth = authentication('account-one:desktop:desktop-one')
@@ -288,6 +314,51 @@ describe('Remote Access HTTP assembled flow', () => {
     expect((await request({ operation: 'get-mobile-access' })).status).toBe(200)
     expect((await request({ operation: 'reissue-desktop-relay' })).status).toBe(200)
     expect((await request({ operation: 'cancel-challenge', challengeId: 'challenge-one' })).status).toBe(200)
+    expect((await request({
+      operation: 'create-endpoint-challenge', rendezvousId: 'endpoint-rendezvous', expiresAt: 123,
+    })).status).toBe(200)
+    expect((await request({
+      operation: 'create-endpoint-challenge', rendezvousId: 'endpoint-rendezvous', expiresAt: 0,
+    })).status).toBe(400)
+    expect((await request({
+      operation: 'cancel-endpoint-challenge', challengeId: 'endpoint-challenge',
+    })).status).toBe(200)
+    const endpointPending = await request({ operation: 'list-endpoint-pending' })
+    await expect(endpointPending.json()).resolves.toMatchObject([
+      { stage: 'message1', message1: 'AQ' },
+      { stage: 'message3', message1: 'AQ', message2: 'Ag', message3: 'Aw' },
+      { stage: 'confirmed' },
+    ])
+    expect((await request({
+      operation: 'reject-endpoint-pairing', pendingPairingId: 'pending-one',
+    })).status).toBe(200)
+    expect((await request({
+      operation: 'confirm-endpoint-pairing', pendingPairingId: 'pending-one',
+      desktopCredentialDigest: 'AQ', mobileCredentialDigest: 'Ag',
+    })).status).toBe(500)
+    const endpointMessage2 = await request({
+      operation: 'get-endpoint-pairing-status', completionId: 'completion-one',
+    })
+    await expect(endpointMessage2.json()).resolves.toMatchObject({ stage: 'message2', message2: 'Ag' })
+    remoteAccess.getEndpointPairingStatus.mockResolvedValueOnce({
+      stage: 'confirmed', pendingPairingId: parsePendingPairingId('pending-one'),
+      pairingId: parsePersonalPairingId('pairing-one'),
+      sealedRelayAuthority: Uint8Array.of(3),
+    })
+    const endpointConfirmed = await request({
+      operation: 'get-endpoint-pairing-status', completionId: 'completion-one',
+    })
+    await expect(endpointConfirmed.json()).resolves.toMatchObject({ stage: 'confirmed', sealedRelayAuthority: 'Aw' })
+    remoteAccess.getEndpointPairingStatus.mockResolvedValueOnce({
+      stage: 'awaiting-desktop', pendingPairingId: parsePendingPairingId('pending-one'),
+    })
+    const endpointWaiting = await request({
+      operation: 'get-endpoint-pairing-status', completionId: 'completion-one',
+    })
+    await expect(endpointWaiting.json()).resolves.toMatchObject({ stage: 'awaiting-desktop' })
+    expect((await request({
+      operation: 'finish-challenge', pendingPairingId: 'pending-one', mobileFinish: 'AQ',
+    })).status).toBe(200)
     expect((await request({ operation: 'admit-blob', bytes: 4 })).status).toBe(200)
     expect(remoteAccess.admitAttachmentBlob).toHaveBeenCalledWith(expect.objectContaining({ bytes: 4 }))
     expect((await request({ operation: 'admit-blob', bytes: 'x' })).status).toBe(400)

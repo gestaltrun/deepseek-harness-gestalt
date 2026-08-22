@@ -30,6 +30,7 @@ import type {
   RemoteRelayAttachment,
   RemoteRelayConfig,
 } from './relay.ts'
+import { createDeferred } from './deferred.ts'
 
 interface LocalAttachment {
   entry: RelayDirectoryEntry
@@ -172,7 +173,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
     announce?: (message: RelayReadyMessage) => Promise<void>
   }): Promise<RemoteRelayAttachment> {
     this.assertOpen()
-    const quiescence = deferred<void>()
+    const quiescence = createDeferred<void>()
     this.attachmentQuiescence.add(quiescence.promise)
     try {
       return await this.attachReserved(input)
@@ -559,7 +560,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
   }
 
   private awaitDelivery(deliveryId: RelayDeliveryId): PendingDelivery {
-    const result = deferred<boolean>()
+    const result = createDeferred<boolean>()
     const settle = (delivered: boolean): void => {
       clearTimeout(timeout)
       this.pendingDeliveries.delete(deliveryId)
@@ -652,10 +653,4 @@ function validateRemoteRelayConfig(config: RemoteRelayConfig): RemoteRelayConfig
     if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`Remote Relay ${name} must be a positive integer`)
   }
   return { ...config }
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((settle) => { resolve = settle })
-  return { promise, resolve }
 }

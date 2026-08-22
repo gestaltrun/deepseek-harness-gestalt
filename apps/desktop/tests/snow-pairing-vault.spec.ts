@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -15,6 +15,50 @@ const directories: string[] = []
 afterEach(async () => { await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true }))) })
 
 describe('DesktopSnowPairingVault', () => {
+  it('rejects hostile ids and non-positive active Relay revisions from protected state', async () => {
+    initializeSnowChannel(readFileSync(new URL(
+      '../../../packages/platform/noise-channel/pkg/dsh_noise_channel_bg.wasm', import.meta.url,
+    )))
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-snow-vault-hostile-'))
+    directories.push(directory)
+    const path = join(directory, 'pairings.bin')
+    const protection = {
+      encrypt: (value: string) => new TextEncoder().encode(value),
+      decrypt: (value: Uint8Array) => new TextDecoder().decode(value),
+    }
+    const store = new EncryptedDesktopSnowPairingStore(path, protection)
+    const invitation = await new DesktopSnowPairingVault().createInvitation(Date.now() + 60_000)
+    const recovery = Object.fromEntries(Object.entries(invitation.owner.exportRecoveryState()).map(([key, value]) => [
+      key, Buffer.from(value).toString('base64url'),
+    ]))
+    const document = {
+      active: [{
+        pairingId: 'pairing-hostile', state: Buffer.alloc(96, 1).toString('base64url'),
+        desktopGrant: {
+          routeId: 'route-hostile', endpoint: 'desktop',
+          credential: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+          revision: 1, pairingSelector: 'pairing-hostile',
+        },
+      }],
+      challenges: [{ challengeId: 'challenge-hostile', recovery }],
+      pending: [{ pendingPairingId: 'pending-hostile', recovery }],
+      confirmations: [],
+    }
+    const persist = async (value: unknown) => {
+      const encrypted = protection.encrypt(JSON.stringify(value))
+      await writeFile(path, Buffer.from(encrypted).toString('base64'))
+    }
+
+    await persist({ ...document, active: [{ ...document.active[0], desktopGrant: {
+      ...document.active[0]?.desktopGrant, revision: 0,
+    } }] })
+    await expect(store.load()).rejects.toThrow('Relay grant is invalid')
+    await persist({ ...document, challenges: [{ challengeId: 7, recovery }] })
+    await expect(store.load()).rejects.toThrow('Pairing Challenge id')
+    await persist({ ...document, pending: [{ pendingPairingId: 7, recovery }] })
+    await expect(store.load()).rejects.toThrow('Pending Pairing id')
+  })
+
   it('rejects a seventeenth retained pairing before any external publication can begin', async () => {
     initializeSnowChannel(readFileSync(new URL(
       '../../../packages/platform/noise-channel/pkg/dsh_noise_channel_bg.wasm', import.meta.url,

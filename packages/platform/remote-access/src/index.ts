@@ -193,10 +193,16 @@ export interface PersonalPairingProviderOptions {
   account: Pick<AccountService, 'currentInstallation'>
   /** Replaceable reviewed handshake adapter; this package does not implement Noise. */
   handshake: PairingHandshakeProvider
-  /** Optional assembled Relay authority; production omits it until the crypto gate is approved. */
-  relay?: Pick<RemoteRelayService, 'revokeRoute'> & Partial<Pick<RemoteRelayService,
-    'activateCredentialDigest' | 'registerCredentialDigest'
-    | 'registerPairingCredentialDigests' | 'revokeCredentialDigest'>>
+  /** Optional Relay whose pairing publication and compensating revocation operations are inseparable. */
+  relay?: Pick<RemoteRelayService, 'revokeRoute'>
+    & Partial<Pick<RemoteRelayService, 'activateCredentialDigest' | 'registerCredentialDigest'>>
+    & ({
+      registerPairingCredentialDigests: RemoteRelayService['registerPairingCredentialDigests']
+      revokeCredentialDigest: RemoteRelayService['revokeCredentialDigest']
+    } | {
+      registerPairingCredentialDigests?: never
+      revokeCredentialDigest?: never
+    })
   /** Deployment-owned durable Mobile Access and pairing-to-route authority. */
   authority?: PersonalPairingAuthorityStore
   /** Clock used for fixed challenge expiry and deterministic assembled scenarios. */
@@ -846,6 +852,11 @@ export class PersonalPairingProvider extends RemoteAccessService {
     if (origin.protocol !== 'https:') throw new TypeError('Personal Pairing link origin must use HTTPS')
     if (options.relay !== undefined && options.authority === undefined) {
       throw new TypeError('Remote Relay composition requires a deployment-owned shared authority store')
+    }
+    if (options.relay !== undefined
+      && (typeof options.relay.registerPairingCredentialDigests === 'function')
+        !== (typeof options.relay.revokeCredentialDigest === 'function')) {
+      throw new TypeError('Remote Relay composition requires pairing registration and revocation')
     }
     this.pairingLinkOrigin = origin.toString()
     this.ownsAuthority = options.authority === undefined
@@ -2285,17 +2296,14 @@ export class PersonalPairingProvider extends RemoteAccessService {
         return Promise.resolve(next.done ? undefined : cloneEndpointRevocation(next.value))
       })
       if (revocation === undefined) return
+      const relay = this.requireEndpointRelayAuthority()
       if (!revocation.desktopRevoked) {
-        await (this.options.relay?.revokeCredentialDigest?.(
-          revocation.routeId, 'desktop', revocation.desktopCredentialDigest,
-        ) ?? Promise.resolve())
+        await relay.revokeCredentialDigest(revocation.routeId, 'desktop', revocation.desktopCredentialDigest)
         await this.completeEndpointRevocationStep(revocation.pendingPairingId, 'desktopRevoked')
         continue
       }
       if (!revocation.mobileRevoked) {
-        await (this.options.relay?.revokeCredentialDigest?.(
-          revocation.routeId, 'mobile', revocation.credentialDigest,
-        ) ?? Promise.resolve())
+        await relay.revokeCredentialDigest(revocation.routeId, 'mobile', revocation.credentialDigest)
         await this.completeEndpointRevocationStep(revocation.pendingPairingId, 'mobileRevoked')
         continue
       }
@@ -2313,6 +2321,16 @@ export class PersonalPairingProvider extends RemoteAccessService {
         return Promise.resolve()
       })
     }
+  }
+
+  private requireEndpointRelayAuthority(): Pick<RemoteRelayService,
+    'registerPairingCredentialDigests' | 'revokeCredentialDigest'> {
+    const relay = this.options.relay
+    if (relay === undefined || typeof relay.registerPairingCredentialDigests !== 'function'
+      || typeof relay.revokeCredentialDigest !== 'function') {
+      throw new Error('Remote Relay pairing registration and revocation are unavailable')
+    }
+    return relay
   }
 
   private async completeEndpointRevocationStep(

@@ -119,6 +119,9 @@ describe('RelayWebSocketConsumer', () => {
     const attached = await sendAttach(first)
     expect(await attached.outcome).toMatchObject({ type: 'ready' })
     const replay = await connect(endpoint.url)
+    const replayChallenge = nextMessage(replay)
+    await sendAttachRequest(replay)
+    await replayChallenge
     const error = nextMessage(replay)
     replay.send(encodeRelayMessage(attached.proof))
     expect(await error).toMatchObject({ type: 'error', code: 'RELAY_ATTACHMENT_REJECTED' })
@@ -167,6 +170,7 @@ describe('RelayWebSocketConsumer', () => {
 
     const malformed = await connect(endpoint.url)
     const malformedError = nextMessage(malformed)
+    malformed.send('{')
     malformed.send('{')
     expect(await malformedError).toMatchObject({ type: 'error', code: 'RELAY_ATTACHMENT_REJECTED' })
     await once(malformed, 'close')

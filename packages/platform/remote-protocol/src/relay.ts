@@ -271,19 +271,15 @@ export function decodeRelayMessage(encoded: Uint8Array): RelayMessage {
     switch (record.type) {
       case 'attach-challenge':
         exactKeys(record, ['type', 'transportVersion', 'routeId', 'attachmentId', 'endpoint', 'credentialPublicKey'], 'Relay attach challenge request')
-        if (record.endpoint !== 'mobile' && record.endpoint !== 'desktop') invalid('Relay endpoint must be mobile or desktop')
         return {
           type: 'attach-challenge', transportVersion: 1,
-          routeId: parseRelayRouteId(record.routeId), attachmentId: parseRelayAttachmentId(record.attachmentId),
-          endpoint: record.endpoint, credentialPublicKey: parseRelayCredentialPublicKey(record.credentialPublicKey),
+          ...decodeRelayAttachIdentity(record),
         }
       case 'attach-challenge-response':
         exactKeys(record, ['type', 'transportVersion', 'routeId', 'attachmentId', 'endpoint', 'credentialPublicKey', 'challengeId', 'nonce', 'expiresAt'], 'Relay attach challenge response')
-        if (record.endpoint !== 'mobile' && record.endpoint !== 'desktop') invalid('Relay endpoint must be mobile or desktop')
         return {
           type: 'attach-challenge-response', transportVersion: 1,
-          routeId: parseRelayRouteId(record.routeId), attachmentId: parseRelayAttachmentId(record.attachmentId),
-          endpoint: record.endpoint, credentialPublicKey: parseRelayCredentialPublicKey(record.credentialPublicKey),
+          ...decodeRelayAttachIdentity(record),
           challengeId: parseRelayAttachChallengeId(record.challengeId),
           nonce: decodeProtocolBase64Url(record.nonce, 32, 'Relay attach challenge nonce'),
           expiresAt: positiveSafeInteger(record.expiresAt, 'Relay attach challenge expiresAt'),
@@ -294,13 +290,9 @@ export function decodeRelayMessage(encoded: Uint8Array): RelayMessage {
           ['type', 'transportVersion', 'routeId', 'attachmentId', 'endpoint', 'credentialPublicKey', 'challengeId', 'nonce', 'expiresAt', 'signature'],
           'Relay attach message',
         )
-        if (record.endpoint !== 'mobile' && record.endpoint !== 'desktop') invalid('Relay endpoint must be mobile or desktop')
         return {
           type: 'attach', transportVersion: 1,
-          routeId: parseRelayRouteId(record.routeId),
-          attachmentId: parseRelayAttachmentId(record.attachmentId),
-          endpoint: record.endpoint,
-          credentialPublicKey: parseRelayCredentialPublicKey(record.credentialPublicKey),
+          ...decodeRelayAttachIdentity(record),
           challengeId: parseRelayAttachChallengeId(record.challengeId),
           nonce: decodeProtocolBase64Url(record.nonce, 32, 'Relay attach challenge nonce'),
           expiresAt: positiveSafeInteger(record.expiresAt, 'Relay attach challenge expiresAt'),
@@ -360,6 +352,23 @@ export function decodeRelayMessage(encoded: Uint8Array): RelayMessage {
   } catch (error) {
     if (error instanceof RemoteProtocolError) throw error
     throw new RemoteProtocolError('REMOTE_PROTOCOL_INVALID_MESSAGE', 'Relay message is not valid protocol JSON')
+  }
+}
+
+function decodeRelayAttachIdentity(record: Record<string, unknown>): {
+  routeId: RelayRouteId
+  attachmentId: RelayAttachmentId
+  endpoint: 'mobile' | 'desktop'
+  credentialPublicKey: RelayCredentialPublicKey
+} {
+  if (record.endpoint !== 'mobile' && record.endpoint !== 'desktop') {
+    invalid('Relay endpoint must be mobile or desktop')
+  }
+  return {
+    routeId: parseRelayRouteId(record.routeId),
+    attachmentId: parseRelayAttachmentId(record.attachmentId),
+    endpoint: record.endpoint,
+    credentialPublicKey: parseRelayCredentialPublicKey(record.credentialPublicKey),
   }
 }
 

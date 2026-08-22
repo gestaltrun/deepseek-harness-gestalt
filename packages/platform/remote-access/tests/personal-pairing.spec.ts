@@ -14,6 +14,7 @@ import {
   PAIRING_REPLAY_RETENTION_MS,
   MemoryPersonalPairingAuthorityStore,
   PersonalPairingProvider,
+  RemoteAccessService,
   RemoteAccessError,
   type PersonalPairingProviderOptions,
   deriveAuthenticationWords,
@@ -30,6 +31,346 @@ import {
 const NOW = Date.parse('2026-08-18T10:00:00.000Z')
 
 describe('PersonalPairingProvider', () => {
+  it('keeps the service default three-message finish fail closed', async () => {
+    await expect(RemoteAccessService.prototype.finishChallenge.call({} as RemoteAccessService, {
+      mobile: authentication('mobile-installation'),
+      pendingPairingId: parsePendingPairingId('pending-default-finish'),
+      mobileFinish: Uint8Array.of(1),
+    })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+  })
+
+  it('validates endpoint invitation and confirmation stages before publication', async () => {
+    let identity = 0
+    const provider = configuredProvider({
+      clock: { now: () => NOW }, randomId: kind => `${kind}-endpoint-guards-${String(identity += 1)}`,
+    })
+    const desktop = authentication('desktop-installation')
+    const mobile = authentication('mobile-installation')
+    await expect(provider.createEndpointChallenge({
+      desktop, rendezvousId: parsePairingRendezvousId('disabled'), clientIp: '192.0.2.1',
+      expiresAt: NOW + 1,
+    })).rejects.toMatchObject({ code: 'MOBILE_ACCESS_DISABLED' })
+    await expect(provider.setMobileAccess({ desktop, enabled: false })).resolves.toEqual({ enabled: false })
+    await provider.setMobileAccess({ desktop, enabled: true })
+    for (const expiresAt of [NOW, NOW + PAIRING_CHALLENGE_TTL_MS + 1, NOW + 1.5]) {
+      await expect(provider.createEndpointChallenge({
+        desktop, rendezvousId: parsePairingRendezvousId(`invalid-${String(expiresAt)}`),
+        clientIp: '192.0.2.1', expiresAt,
+      })).rejects.toMatchObject({ code: 'PAIRING_CHALLENGE_INVALID' })
+    }
+    const cancelled = await provider.createEndpointChallenge({
+      desktop, rendezvousId: parsePairingRendezvousId('cancel-endpoint'), clientIp: '192.0.2.1',
+      expiresAt: NOW + 10_000,
+    })
+    await provider.cancelEndpointChallenge({ desktop, challengeId: cancelled.challengeId })
+
+    const incomplete = await prepareEndpointPairing(provider, desktop, mobile, 'incomplete', 'message1')
+    await expect(provider.confirmEndpointPairing({
+      desktop, pendingPairingId: incomplete.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(1),
+      mobileCredentialDigest: new Uint8Array(32).fill(2),
+    })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+    await provider.rejectEndpointPairing({ desktop, pendingPairingId: incomplete.pendingPairingId })
+    await expect(provider.getEndpointPairingStatus({ mobile, completionId: incomplete.completionId }))
+      .resolves.toMatchObject({ stage: 'rejected' })
+
+    const complete = await prepareEndpointPairing(provider, desktop, mobile, 'complete-no-relay', 'message3')
+    await expect(provider.confirmEndpointPairing({
+      desktop, pendingPairingId: complete.pendingPairingId,
+      desktopCredentialDigest: Uint8Array.of(1), mobileCredentialDigest: Uint8Array.of(2),
+    })).rejects.toThrow('must contain 32 bytes')
+    await expect(provider.confirmEndpointPairing({
+      desktop: authentication('desktop-other'), pendingPairingId: complete.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(1),
+      mobileCredentialDigest: new Uint8Array(32).fill(2),
+    })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+    await expect(provider.confirmEndpointPairing({
+      desktop, pendingPairingId: complete.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(1),
+      mobileCredentialDigest: new Uint8Array(32).fill(2),
+    })).rejects.toThrow('cannot register endpoint-owned pairing authority')
+  })
+
+  it('lets Mobile polling reconcile one retained endpoint publication without duplicate identity', async () => {
+    const routeId = parseRelayRouteId('route-poll-publication')
+    const relay = relayStub(routeId, 1)
+    const authority = new MemoryPersonalPairingAuthorityStore()
+    const firstRegistration = deferred<number>()
+    relay.registerPairingCredentialDigests
+      .mockImplementationOnce(async () => await firstRegistration.promise)
+      .mockResolvedValue(1)
+    const provider = configuredProvider({
+      relay, authority, clock: { now: () => NOW }, randomId: kind => `${kind}-poll-publication`,
+    })
+    const desktop = authentication('desktop-installation')
+    const mobile = authentication('mobile-installation')
+    await provider.setMobileAccess({ desktop, enabled: true })
+    const pending = await prepareEndpointPairing(provider, desktop, mobile, 'poll-publication', 'message3')
+    const first = provider.confirmEndpointPairing({
+      desktop, pendingPairingId: pending.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(4),
+      mobileCredentialDigest: new Uint8Array(32).fill(5),
+    })
+    await vi.waitFor(() => { expect(relay.registerPairingCredentialDigests).toHaveBeenCalledOnce() })
+    await expect(provider.confirmEndpointPairing({
+      desktop, pendingPairingId: pending.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(4),
+      mobileCredentialDigest: new Uint8Array(32).fill(6),
+    })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+    await expect(provider.getEndpointPairingStatus({ mobile, completionId: pending.completionId }))
+      .resolves.toMatchObject({ stage: 'awaiting-authority' })
+    firstRegistration.resolve(1)
+    await expect(first).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+    expect(relay.registerPairingCredentialDigests).toHaveBeenCalledTimes(2)
+    expect(await provider.listPersonalPairings(desktop)).toHaveLength(1)
+    await provider.setMobileAccess({ desktop, enabled: false })
+    expect(relay.revokeCredentialDigest).toHaveBeenCalledTimes(4)
+  })
+
+  it('enforces endpoint invitation and pending capacity for each owning installation', async () => {
+    const desktop = authentication('desktop-installation')
+    const mobile = authentication('mobile-installation')
+    const activeAuthority = new MemoryPersonalPairingAuthorityStore()
+    const active = configuredProvider({
+      authority: activeAuthority, clock: { now: () => NOW },
+      randomId: kind => `${kind}-active-capacity`,
+    })
+    await active.setMobileAccess({ desktop, enabled: true })
+    await activeAuthority.runPairingTransaction((state) => {
+      state.endpointMailbox = {
+        challenges: Array.from({ length: MAX_ACTIVE_PAIRING_CHALLENGES_PER_INSTALLATION }, (_, index) => ({
+          challengeId: parsePairingChallengeId(`active-${String(index)}`),
+          accountId: 'account-one' as never, desktopInstallationId: parseInstallationId('desktop-installation'),
+          expiresAt: NOW + 60_000,
+        })),
+        pending: [],
+      }
+      return Promise.resolve()
+    })
+    await expect(active.createEndpointChallenge({
+      desktop, rendezvousId: parsePairingRendezvousId('over-active'), clientIp: '192.0.2.1',
+      expiresAt: NOW + 60_000,
+    })).rejects.toMatchObject({ code: 'PAIRING_RESOURCE_LIMIT' })
+
+    for (const owner of ['mobile', 'desktop'] as const) {
+      const authority = new MemoryPersonalPairingAuthorityStore()
+      let sequence = 0
+      const provider = configuredProvider({
+        authority, clock: { now: () => NOW },
+        randomId: kind => `${kind}-${owner}-capacity-${String(sequence += 1)}`,
+      })
+      await provider.setMobileAccess({ desktop, enabled: true })
+      const challenge = await provider.createEndpointChallenge({
+        desktop, rendezvousId: parsePairingRendezvousId(`${owner}-capacity`), clientIp: '192.0.2.2',
+        expiresAt: NOW + 60_000,
+      })
+      await authority.runPairingTransaction((state) => {
+        state.endpointMailbox = {
+          challenges: state.endpointMailbox.challenges,
+          pending: Array.from({ length: MAX_PENDING_PAIRINGS_PER_INSTALLATION }, (_, index) => ({
+            pendingPairingId: parsePendingPairingId(`${owner}-pending-${String(index)}`),
+            completionId: parsePairingCompletionId(`${owner}-completion-${String(index)}`),
+            challengeId: parsePairingChallengeId(`${owner}-old-${String(index)}`),
+            accountId: 'account-one' as never,
+            desktopInstallationId: parseInstallationId('desktop-installation'),
+            mobileInstallationId: parseInstallationId(owner === 'mobile' ? 'mobile-installation' : `other-${String(index)}`),
+            device: { name: 'Phone', platform: 'ios' }, expiresAt: NOW + 60_000,
+            message1: Uint8Array.of(1), confirmed: false, rejected: false,
+          })),
+        }
+        return Promise.resolve()
+      })
+      await expect(provider.submitEndpointMessage1({
+        mobile, challengeId: challenge.challengeId,
+        completionId: parsePairingCompletionId(`${owner}-over-capacity`),
+        device: { name: 'Alice phone', platform: 'ios' }, message1: Uint8Array.of(1),
+      })).rejects.toMatchObject({ code: 'PAIRING_RESOURCE_LIMIT' })
+    }
+  })
+
+  it('round-trips and validates the optional Desktop static invitation key', async () => {
+    const handshake = handshakeProvider()
+    handshake.createChallenge.mockResolvedValueOnce({
+      desktopFingerprint: 'desktop-static', state: Uint8Array.of(1),
+      desktopStaticPublicKey: new Uint8Array(32).fill(7),
+    })
+    const provider = uniquePairingProvider(handshake)
+    const desktop = authentication('desktop-installation')
+    await provider.setMobileAccess({ desktop, enabled: true })
+    const challenge = await createChallengeFor(provider, desktop, 'static-key')
+    expect(parsePairingInvitationLink(challenge.oneTimeLink).desktopStaticPublicKey)
+      .toEqual(new Uint8Array(32).fill(7))
+    const invalid = new URL(challenge.oneTimeLink)
+    invalid.searchParams.set('spk', 'AQ')
+    expect(() => parsePairingInvitationLink(invalid.toString())).toThrow('exactly 256 bits')
+    const mobile = authentication('mobile-installation')
+    const input = {
+      mobile, completionId: parsePairingCompletionId('static-key-completion'),
+      oneTimeLink: challenge.oneTimeLink, device: { name: 'Phone', platform: 'ios' as const },
+      mobileHandshake: Uint8Array.of(1),
+    }
+    const changed = new URL(challenge.oneTimeLink)
+    changed.searchParams.set('spk', Buffer.alloc(32, 8).toString('base64url'))
+    await expect(provider.completeChallenge({
+      ...input, completionId: parsePairingCompletionId('changed-static-key'), oneTimeLink: changed.toString(),
+    }))
+      .rejects.toMatchObject({ code: 'PAIRING_CHALLENGE_INVALID' })
+    await provider.completeChallenge(input)
+    await expect(provider.completeChallenge(input)).resolves.toBeDefined()
+  })
+
+  it('rejects endpoint publication after route loss, random-id collision, or Account quota', async () => {
+    const desktop = authentication('desktop-installation')
+    const mobile = authentication('mobile-installation')
+    const create = async (suffix: string) => {
+      const authority = new MemoryPersonalPairingAuthorityStore()
+      const relay = relayStub(parseRelayRouteId(`route-${suffix}`), 1)
+      let sequence = 0
+      const provider = configuredProvider({
+        authority, relay, clock: { now: () => NOW },
+        randomId: kind => kind === 'pairing' ? `pairing-${suffix}`
+          : kind === 'principal' ? `principal-${suffix}` : `${kind}-${suffix}-${String(sequence += 1)}`,
+      })
+      await provider.setMobileAccess({ desktop, enabled: true })
+      const pending = await prepareEndpointPairing(provider, desktop, mobile, suffix, 'message3')
+      return { authority, provider, pending }
+    }
+    const lost = await create('route-lost')
+    vi.spyOn(lost.authority, 'getDesktop').mockResolvedValueOnce({ enabled: false })
+    await expect(lost.provider.confirmEndpointPairing({
+      desktop, pendingPairingId: lost.pending.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(1),
+      mobileCredentialDigest: new Uint8Array(32).fill(2),
+    })).rejects.toMatchObject({ code: 'MOBILE_ACCESS_DISABLED' })
+
+    const collision = await create('collision')
+    await collision.authority.runPairingTransaction((state) => {
+      state.pairings.set(parsePersonalPairingId('pairing-collision'), {} as never)
+      return Promise.resolve()
+    })
+    await expect(collision.provider.confirmEndpointPairing({
+      desktop, pendingPairingId: collision.pending.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(1),
+      mobileCredentialDigest: new Uint8Array(32).fill(2),
+    })).rejects.toMatchObject({ code: 'PAIRING_ID_COLLISION' })
+
+    const quota = await create('quota')
+    await quota.authority.runPairingTransaction((state) => {
+      for (let index = 0; index < OPEN_REGISTRATION_QUOTAS.personalPairings; index += 1) {
+        state.pairings.set(parsePersonalPairingId(`quota-${String(index)}`), {
+          devicePrincipal: { accountId: 'account-one' },
+        } as never)
+      }
+      return Promise.resolve()
+    })
+    await expect(quota.provider.confirmEndpointPairing({
+      desktop, pendingPairingId: quota.pending.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(1),
+      mobileCredentialDigest: new Uint8Array(32).fill(2),
+    })).rejects.toMatchObject({ code: 'QUOTA' })
+
+    const missingGenerationAuthority = new MemoryPersonalPairingAuthorityStore()
+    const missingRoute = parseRelayRouteId('route-missing-generation')
+    await missingGenerationAuthority.enableDesktop(
+      'account-one' as never, parseInstallationId('desktop-installation'), missingRoute,
+    )
+    const missingGeneration = configuredProvider({
+      authority: missingGenerationAuthority, relay: relayStub(missingRoute, 1),
+      clock: { now: () => NOW }, randomId: kind => `${kind}-missing-generation`,
+    })
+    const missingPending = await prepareEndpointPairing(
+      missingGeneration, desktop, mobile, 'missing-generation', 'message3',
+    )
+    await expect(missingGeneration.confirmEndpointPairing({
+      desktop, pendingPairingId: missingPending.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(1),
+      mobileCredentialDigest: new Uint8Array(32).fill(2),
+    })).rejects.toMatchObject({ code: 'MOBILE_ACCESS_DISABLED' })
+  })
+
+  it('durably compensates a rejected or locally invalidated in-flight endpoint publication', async () => {
+    const desktop = authentication('desktop-installation')
+    const mobile = authentication('mobile-installation')
+    const rejectedAuthority = new MemoryPersonalPairingAuthorityStore()
+    const rejectedRelay = relayStub(parseRelayRouteId('route-rejected-publication'), 1)
+    const registration = deferred<number>()
+    rejectedRelay.registerPairingCredentialDigests.mockImplementationOnce(async () => await registration.promise)
+    let rejectedSequence = 0
+    const rejected = configuredProvider({
+      authority: rejectedAuthority, relay: rejectedRelay, clock: { now: () => NOW },
+      randomId: kind => `${kind}-rejected-publication-${String(rejectedSequence += 1)}`,
+    })
+    await rejected.setMobileAccess({ desktop, enabled: true })
+    const pending = await prepareEndpointPairing(rejected, desktop, mobile, 'rejected-publication', 'message3')
+    const confirming = rejected.confirmEndpointPairing({
+      desktop, pendingPairingId: pending.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(1),
+      mobileCredentialDigest: new Uint8Array(32).fill(2),
+    })
+    await vi.waitFor(() => { expect(rejectedRelay.registerPairingCredentialDigests).toHaveBeenCalledOnce() })
+    await rejected.rejectEndpointPairing({ desktop, pendingPairingId: pending.pendingPairingId })
+    registration.resolve(1)
+    await expect(confirming).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+    expect(rejectedRelay.revokeCredentialDigest).toHaveBeenCalledTimes(4)
+
+    const invalidAuthority = new MemoryPersonalPairingAuthorityStore()
+    const invalidRelay = relayStub(parseRelayRouteId('route-invalid-publication'), 1)
+    let invalidSequence = 0
+    const invalid = configuredProvider({
+      authority: invalidAuthority, relay: invalidRelay, clock: { now: () => NOW },
+      randomId: kind => `${kind}-invalid-publication-${String(invalidSequence += 1)}`,
+    })
+    await invalid.setMobileAccess({ desktop, enabled: true })
+    const invalidPending = await prepareEndpointPairing(invalid, desktop, mobile, 'invalid-publication', 'message3')
+    invalidRelay.registerPairingCredentialDigests.mockImplementationOnce(async () => {
+      await invalidAuthority.runPairingTransaction((state) => {
+        const record = state.endpointMailbox.pending.find(
+          item => item.pendingPairingId === invalidPending.pendingPairingId,
+        )
+        if (record !== undefined) Reflect.deleteProperty(record, 'message3')
+        return Promise.resolve()
+      })
+      return 1
+    })
+    await expect(invalid.confirmEndpointPairing({
+      desktop, pendingPairingId: invalidPending.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(3),
+      mobileCredentialDigest: new Uint8Array(32).fill(4),
+    })).rejects.toThrow('message 3 is not available')
+    expect(await invalid.listPersonalPairings(desktop)).toEqual([])
+    expect(invalidRelay.revokeCredentialDigest).toHaveBeenCalledTimes(2)
+  })
+
+  it('retains durable compensation when Relay revocation is unavailable', async () => {
+    const authority = new MemoryPersonalPairingAuthorityStore()
+    const pendingPairingId = parsePendingPairingId('pending-missing-revocation')
+    await authority.runPairingTransaction((state) => {
+      state.endpointPublicationRevocations.set(pendingPairingId, {
+        accountId: 'account-one' as never,
+        desktopInstallationId: parseInstallationId('desktop-installation'),
+        mobileInstallationId: parseInstallationId('mobile-installation'),
+        pendingPairingId,
+        pairingId: parsePersonalPairingId('pairing-missing-revocation'),
+        routeId: parseRelayRouteId('route-missing-revocation'),
+        desktopCredentialDigest: new Uint8Array(32).fill(1),
+        credentialDigest: new Uint8Array(32).fill(2),
+        desktopRevoked: false,
+        mobileRevoked: false,
+        authorityRevoked: false,
+      })
+      return Promise.resolve()
+    })
+    const provider = configuredProvider({ authority })
+
+    await expect(provider.listPersonalPairings(authentication('desktop-installation')))
+      .rejects.toThrow('registration and revocation are unavailable')
+    await authority.runPairingTransaction((state) => {
+      expect(state.endpointPublicationRevocations.get(pendingPairingId))
+        .toMatchObject({ desktopRevoked: false, mobileRevoked: false, authorityRevoked: false })
+      return Promise.resolve()
+    })
+  })
+
   it('cancels an in-flight endpoint publication when its route generation is disabled', async () => {
     const routeId = parseRelayRouteId('relay-route-generation')
     const relay = relayStub(routeId, 1)
@@ -119,6 +460,14 @@ describe('PersonalPairingProvider', () => {
       device: { name: 'Alice phone', platform: 'ios' },
       message1: Uint8Array.of(11),
     })
+    await authority.runPairingTransaction((state) => {
+      state.endpointMailbox = { ...state.endpointMailbox, challenges: [] }
+      return Promise.resolve()
+    })
+    await expect(provider.submitEndpointMessage1({
+      mobile, challengeId: challenge.challengeId, completionId,
+      device: { name: 'Alice phone', platform: 'ios' }, message1: Uint8Array.of(11),
+    })).resolves.toEqual(completion)
     expect(await provider.listEndpointPending(desktop)).toEqual([{
       pendingPairingId: completion.pendingPairingId,
       challengeId: challenge.challengeId,
@@ -239,6 +588,45 @@ describe('PersonalPairingProvider', () => {
     await expect(provider.confirmPairing({ desktop, pendingPairingId: pending.pendingPairingId }))
       .resolves.toMatchObject({ device: { name: 'Alice phone' } })
     expect(handshake.finishChallenge).toHaveBeenCalledOnce()
+  })
+
+  it('fails closed across invalid or doubly-failed legacy finish cleanup', async () => {
+    const desktop = authentication('desktop-installation')
+    const mobile = authentication('mobile-installation')
+    const handshake = {
+      ...handshakeProvider(),
+      finishChallenge: vi.fn(async () => ({
+        handshakeHash: new Uint8Array(32), pendingPairingKey: Uint8Array.of(8),
+      })),
+    }
+    const provider = uniquePairingProvider(handshake)
+    await provider.setMobileAccess({ desktop, enabled: true })
+    await expect(provider.finishChallenge({
+      mobile, pendingPairingId: parsePendingPairingId('missing-finish'), mobileFinish: Uint8Array.of(1),
+    })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+    const firstChallenge = await createChallengeFor(provider, desktop, 'finish-fault-one')
+    const first = await provider.completeChallenge({
+      mobile, completionId: parsePairingCompletionId('finish-fault-one'), oneTimeLink: firstChallenge.oneTimeLink,
+      device: { name: 'Phone', platform: 'ios' }, mobileHandshake: Uint8Array.of(1),
+    })
+    Reflect.deleteProperty(handshake, 'finishChallenge')
+    await expect(provider.finishChallenge({
+      mobile, pendingPairingId: first.pendingPairingId, mobileFinish: Uint8Array.of(2),
+    })).rejects.toThrow('does not require a finish message')
+
+    handshake.finishChallenge = vi.fn(async () => ({
+      handshakeHash: new Uint8Array(32), pendingPairingKey: Uint8Array.of(9),
+    }))
+    const secondChallenge = await createChallengeFor(provider, desktop, 'finish-fault-two')
+    const second = await provider.completeChallenge({
+      mobile, completionId: parsePairingCompletionId('finish-fault-two'), oneTimeLink: secondChallenge.oneTimeLink,
+      device: { name: 'Phone', platform: 'ios' }, mobileHandshake: Uint8Array.of(1),
+    })
+    handshake.destroyPendingPairing.mockRejectedValueOnce(new Error('old cleanup failed'))
+      .mockRejectedValueOnce(new Error('replacement cleanup failed'))
+    await expect(provider.finishChallenge({
+      mobile, pendingPairingId: second.pendingPairingId, mobileFinish: Uint8Array.of(2),
+    })).rejects.toThrow('Pairing finish cleanup failed')
   })
 
   it('keeps a replacement route when stale disable cleanup completes', async () => {
@@ -512,10 +900,27 @@ describe('PersonalPairingProvider', () => {
       handshake: handshakeProvider(),
       relay: {
         revokeRoute: vi.fn(),
+        registerPairingCredentialDigests: vi.fn(),
+        revokeCredentialDigest: vi.fn(),
       },
       pairingLinkOrigin: 'https://platform.example.com/pair',
     })).toThrow('shared authority store')
   })
+
+  it.each(['registerPairingCredentialDigests', 'revokeCredentialDigest'] as const)(
+    'rejects a Relay composition without %s',
+    (missing) => {
+      const relay = relayStub(parseRelayRouteId('relay-complete-capability'), 1)
+      Reflect.deleteProperty(relay, missing)
+      expect(() => new PersonalPairingProvider(new Context(), {
+        account: accountService(account('account-one')),
+        handshake: handshakeProvider(),
+        relay,
+        authority: new MemoryPersonalPairingAuthorityStore(),
+        pairingLinkOrigin: 'https://platform.example.com/pair',
+      })).toThrow('requires pairing registration and revocation')
+    },
+  )
 
   it('enables routing metadata without letting Platform issue Desktop private authority', async () => {
     const routeId = parseRelayRouteId('relay-route-id')
@@ -525,6 +930,8 @@ describe('PersonalPairingProvider', () => {
       issueCredential: vi.fn(async () => ({ routeId, endpoint: 'mobile' as const, credential, revision: 1 })),
       revokeCredential: vi.fn(async () => {}),
       revokeRoute: vi.fn(async () => {}),
+      registerPairingCredentialDigests: vi.fn(async () => 1),
+      revokeCredentialDigest: vi.fn(async () => {}),
     }
     const provider = new PersonalPairingProvider(new Context(), {
       account: accountService(account('account-one')),
@@ -2183,6 +2590,31 @@ function configuredProvider(
     pairingLinkOrigin: 'https://platform.example.com/pair',
     ...config,
   })
+}
+
+async function prepareEndpointPairing(
+  provider: PersonalPairingProvider,
+  desktop: ReturnType<typeof authentication>,
+  mobile: ReturnType<typeof authentication>,
+  suffix: string,
+  stage: 'message1' | 'message3',
+): Promise<{ pendingPairingId: ReturnType<typeof parsePendingPairingId>; completionId: ReturnType<typeof parsePairingCompletionId> }> {
+  const challenge = await provider.createEndpointChallenge({
+    desktop, rendezvousId: parsePairingRendezvousId(`rendezvous-${suffix}`),
+    clientIp: `192.0.2.${String(suffix.length + 1)}`, expiresAt: NOW + 60_000,
+  })
+  const completionId = parsePairingCompletionId(`completion-${suffix}`)
+  const pending = await provider.submitEndpointMessage1({
+    mobile, challengeId: challenge.challengeId, completionId,
+    device: { name: 'Alice phone', platform: 'ios' }, message1: Uint8Array.of(1),
+  })
+  if (stage === 'message3') {
+    await provider.submitEndpointMessage2({
+      desktop, pendingPairingId: pending.pendingPairingId, message2: Uint8Array.of(2),
+    })
+    await provider.submitEndpointMessage3({ mobile, completionId, message3: Uint8Array.of(3) })
+  }
+  return { ...pending, completionId }
 }
 
 function createChallengeFor(

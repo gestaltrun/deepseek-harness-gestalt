@@ -69,6 +69,31 @@ describe('PostgresPersonalPairingAuthorityStore', () => {
     expect(await reader.getMobilePairing(pending)).toEqual(authority)
   })
 
+  it('fails revocation when PostgreSQL leaves Mobile authority behind', async () => {
+    const underlying = createMemoryPlatformSqlPool()
+    let retainDeletion = false
+    const pool: PlatformSqlPool = {
+      query: async (sql, values) => retainDeletion && sql.toLowerCase().includes('delete from remote_access_mobile_pairings')
+        ? { rows: [], rowCount: 0 }
+        : await underlying.query(sql, values),
+      connect: async () => await underlying.connect(),
+    }
+    const store = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
+    const authority = {
+      accountId: ACCOUNT,
+      desktopInstallationId: DESKTOP,
+      mobileInstallationId: MOBILE,
+      pendingPairingId: parsePendingPairingId('pending-retained'),
+      pairingId: parsePersonalPairingId('pairing-retained'),
+    }
+    await store.confirmMobilePairing(authority)
+    retainDeletion = true
+
+    await expect(store.revokeMobilePairing(authority.pairingId))
+      .rejects.toThrow('left Mobile authority registered')
+    expect(await store.getMobilePairing(authority.pendingPairingId)).toEqual(authority)
+  })
+
   it('serializes exclusive pairing transactions and rolls back a failed mutation', async () => {
     const pool = createMemoryPlatformSqlPool()
     const store = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
@@ -237,6 +262,33 @@ describe('PostgresRelayRouteStore', () => {
     expect(await store.revoke(routeId)).toBe(4)
     expect(await store.issue(routeId, 'mobile', mobile)).toBeUndefined()
     expect(await store.authorize(routeId, 'desktop', replacement)).toBeUndefined()
+  })
+
+  it('rolls back revocation when PostgreSQL leaves a credential authority behind', async () => {
+    const underlying = createMemoryPlatformSqlPool()
+    let retainDeletion = false
+    const pool: PlatformSqlPool = {
+      query: async (sql, values) => await underlying.query(sql, values),
+      async connect() {
+        const client = await underlying.connect()
+        return {
+          release: () => { client.release() },
+          query: async (sql, values) => retainDeletion
+            && sql.toLowerCase().includes('delete from remote_access_route_authorities')
+            ? { rows: [], rowCount: 0 }
+            : await client.query(sql, values),
+        }
+      },
+    }
+    const store = new PostgresRelayRouteStore('gestalt', pool)
+    const routeId = parseRelayRouteId('route-retained')
+    const digest = new Uint8Array(32).fill(7)
+    await store.rotate(routeId, 'desktop', digest)
+    retainDeletion = true
+
+    await expect(store.revokeCredential(routeId, 'desktop', digest))
+      .rejects.toThrow('did not quiesce')
+    expect(await store.authorize(routeId, 'desktop', digest)).toEqual({ revision: 1 })
   })
 })
 

@@ -14,6 +14,7 @@ import {
   type RelayRouteStore,
 } from '@deepseek-ai/dsh-remote-access'
 import { RemoteRelayProvider } from '@deepseek-ai/dsh-remote-access/relay-provider'
+import { createDeferred } from '../packages/platform/remote-access/src/deferred.ts'
 import { parseAccountProofJti, parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   SnowCompanionProtocolChannel,
@@ -163,7 +164,7 @@ describe('Snow product channel runnable snapshot', () => {
       message: await attachmentProof(openedGrant.credential, openedGrant.routeId, mobileAttachmentId, 'mobile'),
       deliver: (message) => { livePeerUpdate = message.type === 'peer-update'; return Promise.resolve() },
     })
-    const desktopReady = deferred<RelayReadyMessage>()
+    const desktopReady = createDeferred<RelayReadyMessage>()
     const desktopAttachment = await relay.attach({
       message: await attachmentProof(desktopGrant.credential, desktopGrant.routeId, desktopAttachmentId, 'desktop'),
       deliver: () => Promise.resolve(),
@@ -228,11 +229,6 @@ function authentication(kind: 'desktop' | 'mobile', installation: string) {
   }
 }
 
-function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((settle) => { resolve = settle })
-  return { promise, resolve }
-}
 
 function endpointOnlyHandshake(): PairingHandshakeProvider {
   const unavailable = () => Promise.reject(new Error('Snapshot forbids Platform pairing cryptography'))

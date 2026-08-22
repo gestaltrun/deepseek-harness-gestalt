@@ -30,6 +30,7 @@ import {
   writePairingMessage3,
 } from './wasm.ts'
 import { decodeSnowEndpointInvitation } from './endpoint-pairing.ts'
+import { concatBytes, hexPrefix } from './bytes.ts'
 
 const CHALLENGE_VERSION = 1
 const OPEN_VERSION = 2
@@ -61,7 +62,7 @@ export class SnowPairingHandshakeProvider implements PairingHandshakeProvider {
     ephemeral.privateKey.fill(0)
     ephemeral.publicKey.fill(0)
     return {
-      desktopFingerprint: `snow-${hex(desktop.publicKey, 16)}`,
+      desktopFingerprint: `snow-${hexPrefix(desktop.publicKey, 16)}`,
       desktopStaticPublicKey: desktop.publicKey,
       state,
     }
@@ -130,10 +131,10 @@ export class SnowPairingHandshakeProvider implements PairingHandshakeProvider {
   }> {
     const finished = decodeFinishedPending(input.pendingPairingKey)
     try {
-      const publicIdentity = concat(finished.desktopPublic, finished.mobilePublic)
+      const publicIdentity = concatBytes(finished.desktopPublic, finished.mobilePublic)
       const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', localBytes(publicIdentity)))
       return {
-        keyReference: `snow-${hex(digest, 16)}` as PersonalPairingKeyReference,
+        keyReference: `snow-${hexPrefix(digest, 16)}` as PersonalPairingKeyReference,
         activePairingKey: encodeFinishedPending({ ...finished }, ACTIVE_VERSION),
       }
     } finally {
@@ -268,24 +269,16 @@ export class SnowMobileHandshakeClient {
    * @returns validated Mobile Relay grant.
    */
   async openRelayAuthority(sealedAuthority: Uint8Array): Promise<RelayCredentialGrant> {
-    const prepared = this.prepared()
-    if (this.message2 === undefined || this.finishMessage === undefined || this.mobilePublic === undefined) {
-      throw new Error('Snow Personal Pairing has not finished XKpsk3')
-    }
-    const plaintext = await openPairingTransport({
-      mobileStaticPrivate: prepared.mobilePrivate,
-      mobileEphemeralPrivate: prepared.mobileEphemeral,
-      desktopPublic: prepared.desktopPublic,
-      psk: prepared.psk,
-      message2: this.message2,
-      ciphertext: sealedAuthority,
-    })
+    const { plaintext, reconnectState } = await this.openPreparedRelayAuthority(sealedAuthority)
     try {
       const grant = decodeGrant(plaintext)
-      this.reconnectState = concat(prepared.mobilePrivate, this.mobilePublic, prepared.desktopPublic)
+      this.reconnectState = reconnectState.slice()
       this.clearInvitationState()
       return grant
-    } finally { plaintext.fill(0) }
+    } finally {
+      plaintext.fill(0)
+      reconnectState.fill(0)
+    }
   }
 
   /** Open and durably settle Mobile authority before erasing the one-shot invitation state.
@@ -297,6 +290,23 @@ export class SnowMobileHandshakeClient {
     sealedAuthority: Uint8Array,
     persist: (grant: RelayCredentialGrant, reconnectState: Uint8Array) => Promise<void>,
   ): Promise<RelayCredentialGrant> {
+    const { plaintext, reconnectState } = await this.openPreparedRelayAuthority(sealedAuthority)
+    try {
+      const grant = decodeGrant(plaintext)
+      await persist({ ...grant }, reconnectState.slice())
+      this.reconnectState = reconnectState.slice()
+      this.clearInvitationState()
+      return grant
+    } finally {
+      plaintext.fill(0)
+      reconnectState.fill(0)
+    }
+  }
+
+  private async openPreparedRelayAuthority(sealedAuthority: Uint8Array): Promise<{
+    plaintext: Uint8Array
+    reconnectState: Uint8Array
+  }> {
     const prepared = this.prepared()
     if (this.message2 === undefined || this.finishMessage === undefined || this.mobilePublic === undefined) {
       throw new Error('Snow Personal Pairing has not finished XKpsk3')
@@ -309,16 +319,9 @@ export class SnowMobileHandshakeClient {
       message2: this.message2,
       ciphertext: sealedAuthority,
     })
-    const reconnectState = concat(prepared.mobilePrivate, this.mobilePublic, prepared.desktopPublic)
-    try {
-      const grant = decodeGrant(plaintext)
-      await persist({ ...grant }, reconnectState.slice())
-      this.reconnectState = reconnectState.slice()
-      this.clearInvitationState()
-      return grant
-    } finally {
-      plaintext.fill(0)
-      reconnectState.fill(0)
+    return {
+      plaintext,
+      reconnectState: concatBytes(prepared.mobilePrivate, this.mobilePublic, prepared.desktopPublic),
     }
   }
 
@@ -591,18 +594,4 @@ function assertKey(value: Uint8Array, name: string): void {
   if (value.byteLength !== KEY_BYTES) throw new TypeError(`${name} must contain exactly 32 bytes`)
 }
 
-function concat(...parts: Uint8Array[]): Uint8Array {
-  const value = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0))
-  let offset = 0
-  for (const part of parts) {
-    value.set(part, offset)
-    offset += part.byteLength
-  }
-  return value
-}
-
 function localBytes(value: Uint8Array): Uint8Array<ArrayBuffer> { return new Uint8Array(value) }
-
-function hex(bytes: Uint8Array, length: number): string {
-  return [...bytes.slice(0, length)].map(byte => byte.toString(16).padStart(2, '0')).join('')
-}

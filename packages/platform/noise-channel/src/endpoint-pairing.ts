@@ -7,6 +7,7 @@ import {
   sealPairingTransport,
   writePairingMessage2,
 } from './wasm.ts'
+import { concatBytes, hexPrefix } from './bytes.ts'
 
 const INVITATION_VERSION = 1
 const KEY_BYTES = 32
@@ -80,7 +81,7 @@ export class SnowDesktopEndpointPairingOwner {
         desktopPublic: desktop.publicKey,
         psk,
       }),
-      desktopFingerprint: `snow-${hex(desktop.publicKey, 16)}`,
+      desktopFingerprint: `snow-${hexPrefix(desktop.publicKey, 16)}`,
     }
   }
 
@@ -149,7 +150,7 @@ export class SnowDesktopEndpointPairingOwner {
       message3: state.message3,
       plaintext: new TextEncoder().encode(JSON.stringify(grant)),
     })
-    state.reconnectState = concat(state.desktopPrivate, state.desktopPublic, state.mobilePublic)
+    state.reconnectState = concatBytes(state.desktopPrivate, state.desktopPublic, state.mobilePublic)
     wipe(state.ephemeralPrivate, state.psk, state.message1, state.message2, state.message3, state.handshakeHash)
     return sealed
   }
@@ -300,20 +301,6 @@ function wipe(...values: Array<Uint8Array | undefined>): void {
   for (const value of values) value?.fill(0)
 }
 
-function concat(...parts: Uint8Array[]): Uint8Array {
-  const value = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0))
-  let offset = 0
-  for (const part of parts) {
-    value.set(part, offset)
-    offset += part.byteLength
-  }
-  return value
-}
-
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index])
-}
-
-function hex(bytes: Uint8Array, length: number): string {
-  return [...bytes.slice(0, length)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }

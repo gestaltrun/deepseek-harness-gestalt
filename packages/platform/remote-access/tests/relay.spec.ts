@@ -79,6 +79,51 @@ const CONFIG = {
 afterEach(() => { vi.useRealTimers() })
 
 describe('RemoteRelayProvider', () => {
+  it('rejects malformed or diverged endpoint-owned credential digests', async () => {
+    const routeStore = new SharedRouteStore()
+    const platform = new RemoteRelayProvider(new Context(), {
+      instanceId: parseRelayInstanceId('platform-digest-validation'),
+      routeStore, coordinator: new SharedCoordinator(), config: CONFIG,
+    })
+    const routeId = parseRelayRouteId('route-digest-validation')
+    await expect(platform.activateCredentialDigest(routeId, 'desktop', Uint8Array.of(1)))
+      .rejects.toThrow('must contain 32 bytes')
+    await expect(platform.registerPairingCredentialDigests(
+      routeId, parseRelayPairingSelector('pairing-validation'),
+      Uint8Array.of(1), new Uint8Array(32).fill(2),
+    )).rejects.toThrow('must each contain 32 bytes')
+    const shared = new Uint8Array(32).fill(3)
+    await expect(platform.registerPairingCredentialDigests(
+      routeId, parseRelayPairingSelector('pairing-validation'), shared, shared,
+    )).rejects.toThrow('must be distinct')
+    await expect(platform.revokeCredentialDigest(routeId, 'desktop', Uint8Array.of(1)))
+      .rejects.toThrow('must contain 32 bytes')
+
+    vi.spyOn(routeStore, 'issue').mockResolvedValueOnce(2)
+    await expect(platform.activateCredentialDigest(
+      routeId, 'desktop', new Uint8Array(32).fill(4), parseRelayPairingSelector('pairing-diverged'),
+    )).rejects.toMatchObject({ code: 'RELAY_ROUTE_REVOKED' })
+    await platform.dispose()
+  })
+
+  it('rejects an expired signed attachment before directory publication', async () => {
+    const routeStore = new SharedRouteStore()
+    const platform = provider('platform-expired-proof', routeStore, new SharedCoordinator(), 2)
+    const routeId = parseRelayRouteId('route-expired-proof')
+    const grant = await rotateCredential(platform, routeId)
+    const credentialPublicKey = await deriveRelayCredentialPublicKey(grant.credential)
+    const proof = await signRelayAttachmentChallenge(grant.credential, {
+      type: 'attach-challenge-response', transportVersion: 1, routeId,
+      attachmentId: parseRelayAttachmentId('desktop-expired-proof'), endpoint: 'desktop', credentialPublicKey,
+      challengeId: parseRelayAttachChallengeId('challenge-expired-proof'),
+      nonce: new Uint8Array(32).fill(1), expiresAt: 1,
+    })
+
+    await expect(platform.attach({ message: proof, deliver: async () => {} }))
+      .rejects.toMatchObject({ code: 'RELAY_ATTACHMENT_REJECTED' })
+    await platform.dispose()
+  })
+
   it('issues independent endpoint authority only while a route remains active', async () => {
     let entropy = 0
     const platform = new RemoteRelayProvider(new Context(), {
@@ -168,6 +213,46 @@ describe('RemoteRelayProvider', () => {
     expect(await coordinator.locate(routeId, attachmentId)).toMatchObject({ attachmentId })
     await attachment.close()
     await platform.dispose()
+  })
+
+  it('projects the development selector and drops a stale peer-update revision', async () => {
+    const routeStore = new SharedRouteStore()
+    const coordinator = new SharedCoordinator()
+    const instanceId = parseRelayInstanceId('platform-development-peer')
+    const platform = new RemoteRelayProvider(new Context(), {
+      instanceId, routeStore, coordinator, config: CONFIG, randomBytes: uniqueRandomBytes(3),
+    })
+    const routeId = parseRelayRouteId('route-development-peer')
+    const desktopGrant = await rotateCredential(platform, routeId, 'desktop')
+    const mobileGrant = await issueCredential(platform, routeId, 'mobile')
+    const mobile = await platform.attach({
+      message: {
+        type: 'attach', transportVersion: 1, routeId,
+        attachmentId: parseRelayAttachmentId('mobile-development-peer'), endpoint: 'mobile',
+        credential: mobileGrant.credential,
+      },
+      deliver: async () => {},
+    })
+    const delivered = vi.fn()
+    let ready: RelayReadyMessage | undefined
+    const desktopAttachmentId = parseRelayAttachmentId('desktop-development-peer')
+    const desktop = await platform.attach({
+      message: {
+        type: 'attach', transportVersion: 1, routeId,
+        attachmentId: desktopAttachmentId, endpoint: 'desktop', credential: desktopGrant.credential,
+      },
+      deliver: delivered,
+      announce: async (message) => { ready = message },
+    })
+    expect(ready?.peers[0]?.pairingSelector).toBe('development-keyless-pairing')
+    const entry = await coordinator.locate(routeId, desktopAttachmentId)
+    if (entry === undefined) throw new Error('Desktop directory entry is unavailable')
+    await coordinator.send(instanceId, {
+      type: 'peer-update', transportVersion: 1, routeId, attachmentId: desktopAttachmentId, peers: [],
+      targetConnectionToken: entry.connectionToken, revision: entry.revision + 1,
+    })
+    expect(delivered).not.toHaveBeenCalled()
+    await Promise.all([desktop.close(), mobile.close(), platform.dispose()])
   })
 
   it('projects two credential-bound Mobile peers and replaces one selector with fresh attachment state', async () => {
@@ -1668,10 +1753,7 @@ class SharedRouteStore implements RelayRouteStore {
     const revision = (current?.revision ?? 0) + 1
     const authorities = new Map(current?.authorities ?? [])
     for (const [digest, owner] of authorities) if (owner.endpoint === endpoint) authorities.delete(digest)
-    authorities.set(Buffer.from(credentialDigest).toString('hex'), {
-      endpoint,
-      ...(endpoint === 'mobile' ? { pairingSelector: parseRelayPairingSelector('test-pairing') } : {}),
-    })
+    authorities.set(Buffer.from(credentialDigest).toString('hex'), { endpoint })
     this.routes.set(routeId, { authorities, revision, revoked: false })
     return revision
   }
@@ -1686,9 +1768,7 @@ class SharedRouteStore implements RelayRouteStore {
     if (current === undefined || current.revoked) return undefined
     current.authorities.set(Buffer.from(credentialDigest).toString('hex'), {
       endpoint,
-      ...(endpoint !== 'mobile'
-        ? {}
-        : { pairingSelector: pairingSelector ?? parseRelayPairingSelector('test-pairing') }),
+      ...(pairingSelector === undefined ? {} : { pairingSelector }),
     })
     return current.revision
   }

@@ -63,6 +63,7 @@ export class PostgresRelayRouteStore implements RelayRouteStore {
           WHERE database_identity = $1 AND route_id = $2 AND endpoint = $3`,
         [this.databaseIdentity, routeId, endpoint],
       )
+      await this.assertAuthorityAbsent(client, routeId, endpoint)
       await this.insertAuthority(client, routeId, endpoint, credentialDigest)
       return revision
     })
@@ -145,6 +146,7 @@ export class PostgresRelayRouteStore implements RelayRouteStore {
           WHERE database_identity = $1 AND route_id = $2 AND endpoint = $3 AND digest = $4`,
         [this.databaseIdentity, routeId, endpoint, Buffer.from(credentialDigest)],
       )
+      await this.assertAuthorityAbsent(client, routeId, endpoint, credentialDigest)
       return revision
     })
   }
@@ -159,6 +161,7 @@ export class PostgresRelayRouteStore implements RelayRouteStore {
           WHERE database_identity = $1 AND route_id = $2`,
         [this.databaseIdentity, routeId],
       )
+      await this.assertAuthorityAbsent(client, routeId)
       return revision
     })
   }
@@ -233,6 +236,32 @@ export class PostgresRelayRouteStore implements RelayRouteStore {
       [this.databaseIdentity, routeId, endpoint, Buffer.from(credentialDigest), pairingSelector ?? null],
     )
   }
+
+  private async assertAuthorityAbsent(
+    client: PlatformSqlClient,
+    routeId: RelayRouteId,
+    endpoint?: 'mobile' | 'desktop',
+    credentialDigest?: Uint8Array,
+  ): Promise<void> {
+    const filters = ['database_identity = $1', 'route_id = $2']
+    const values: unknown[] = [this.databaseIdentity, routeId]
+    if (endpoint !== undefined) {
+      filters.push(`endpoint = $${String(values.length + 1)}`)
+      values.push(endpoint)
+    }
+    if (credentialDigest !== undefined) {
+      filters.push(`digest = $${String(values.length + 1)}`)
+      values.push(Buffer.from(credentialDigest))
+    }
+    const retained = await client.query(
+      `SELECT 1 AS retained
+         FROM remote_access_route_authorities
+        WHERE ${filters.join(' AND ')}
+        LIMIT 1`,
+      values,
+    )
+    if (retained.rows.length > 0) throw new Error('Relay authority deletion did not quiesce the requested owner')
+  }
 }
 
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -240,5 +269,10 @@ function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
 }
 
 function asRouteRow(value: Record<string, unknown> | undefined): RouteRow | undefined {
-  return value as RouteRow | undefined
+  if (value === undefined) return undefined
+  if (!Number.isSafeInteger(value.revision) || (value.revision as number) < 1
+    || typeof value.revoked !== 'boolean') {
+    throw new TypeError('Relay route row is invalid')
+  }
+  return { revision: value.revision as number, revoked: value.revoked }
 }

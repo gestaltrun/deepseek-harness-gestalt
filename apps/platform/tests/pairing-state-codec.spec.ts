@@ -49,6 +49,21 @@ describe('pairing transaction codec', () => {
     expect(JSON.stringify(encoded)).not.toContain('relayCredential')
     expect(decodePairingTransactionState(encoded).endpointPublicationRevocations.get(pendingPairingId))
       .toMatchObject({ desktopRevoked: true, mobileRevoked: false, authorityRevoked: false })
+
+    const equal = structuredClone(encoded) as Record<string, unknown>
+    const revocations = equal.endpointPublicationRevocations
+    if (!Array.isArray(revocations) || !Array.isArray(revocations[0])) throw new Error('revocation fixture is invalid')
+    const revocation = revocations[0][1] as Record<string, unknown>
+    revocation.credentialDigest = revocation.desktopCredentialDigest
+    expect(() => decodePairingTransactionState(equal)).toThrow('credential digests must be distinct')
+
+    const short = structuredClone(encoded) as Record<string, unknown>
+    const shortRevocations = short.endpointPublicationRevocations
+    if (!Array.isArray(shortRevocations) || !Array.isArray(shortRevocations[0])) {
+      throw new Error('revocation fixture is invalid')
+    }
+    ;(shortRevocations[0][1] as Record<string, unknown>).credentialDigest = { $b: 'AQ' }
+    expect(() => decodePairingTransactionState(short)).toThrow('must contain 32 bytes')
   })
 
   it('preserves bytes, orphan cleanup identity, and quota windows', () => {
@@ -156,6 +171,11 @@ describe('pairing transaction codec', () => {
       desktopInstallationId: parseInstallationId('desktop-one'),
       keyReference: parsePersonalPairingKeyReference('key-one'),
       cleanup: { resource: Uint8Array.of(1) },
+      endpointPendingPairingId: parsePendingPairingId('pending-endpoint-one'),
+      endpointRouteId: parseRelayRouteId('route-endpoint-one'),
+      endpointDesktopCredentialDigest: new Uint8Array(32).fill(1),
+      endpointCredentialDigest: new Uint8Array(32).fill(2),
+      endpointRelayRevision: 1,
     })
     state.completions.set(parsePairingCompletionId('completion-one'), {
       accountId: 'account-one',
@@ -189,6 +209,23 @@ describe('pairing transaction codec', () => {
     if (!Array.isArray(pairings) || !Array.isArray(pairings[0])) throw new Error('encoded pairing fixture is invalid')
     Reflect.set(pairings[0][1] as object, 'mobileGrant', { credential: 'legacy-bearer' })
     expect(() => decodePairingTransactionState(legacy)).toThrow('unsupported fields')
+
+    const invalidDigest = structuredClone(encoded) as Record<string, unknown>
+    const invalidPairings = invalidDigest.pairings
+    if (!Array.isArray(invalidPairings) || !Array.isArray(invalidPairings[0])) {
+      throw new Error('encoded pairing fixture is invalid')
+    }
+    const invalidPairing = invalidPairings[0][1] as Record<string, unknown>
+    invalidPairing.endpointCredentialDigest = invalidPairing.endpointDesktopCredentialDigest
+    expect(() => decodePairingTransactionState(invalidDigest)).toThrow('credential digests must be distinct')
+
+    const invalidRevision = structuredClone(encoded) as Record<string, unknown>
+    const revisionPairings = invalidRevision.pairings
+    if (!Array.isArray(revisionPairings) || !Array.isArray(revisionPairings[0])) {
+      throw new Error('encoded pairing fixture is invalid')
+    }
+    ;(revisionPairings[0][1] as Record<string, unknown>).endpointRelayRevision = 0
+    expect(() => decodePairingTransactionState(invalidRevision)).toThrow('positive safe integer')
     expect(decoded.completions.get(parsePairingCompletionId('completion-one'))?.view.device.platform).toBe('android')
     expect(decoded.pending.get(parsePendingPairingId('pending-one'))).toMatchObject({
       awaitingFinish: true,

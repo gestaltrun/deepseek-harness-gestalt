@@ -332,6 +332,29 @@ describe('RemoteAccessHttpTransport', () => {
   })
 
   it.each([
+    [{ stage: 'awaiting-desktop', pendingPairingId: 'pending-one' }, 'awaiting-desktop'],
+    [{ stage: 'awaiting-authority', pendingPairingId: 'pending-one' }, 'awaiting-authority'],
+    [{ stage: 'rejected', pendingPairingId: 'pending-one' }, 'rejected'],
+  ])('parses the endpoint Mobile %s stage', async (value, stage) => {
+    await expect(transport(value).client.getEndpointPairingStatus({
+      authentication, completionId: parsePairingCompletionId('completion-one'),
+    })).resolves.toEqual({ stage, pendingPairingId: 'pending-one' })
+  })
+
+  it('rejects invalid endpoint mailbox response stages and fixed key bytes', async () => {
+    await expect(transport([{ pendingPairingId: 'pending-one', challengeId: 'challenge-one',
+      stage: 'invalid', message1: 'AQ', device: { name: 'Phone', platform: 'ios' } }])
+      .client.listEndpointPending(authentication)).rejects.toThrow('Desktop stage is invalid')
+    await expect(transport({ pendingPairingId: 'pending-one', stage: 'invalid' })
+      .client.getEndpointPairingStatus({
+        authentication, completionId: parsePairingCompletionId('completion-one'),
+      })).rejects.toThrow('Mobile stage is invalid')
+    await expect(transport({ ...challenge, desktopStaticPublicKey: 'AQ' }).client.createChallenge({
+      authentication, rendezvousId: parsePairingRendezvousId('rendezvous-one'),
+    })).rejects.toThrow('Desktop public key must contain 32 bytes')
+  })
+
+  it.each([
     [null, 'Pairing Challenge response must be an object'],
     [{ ...challenge, oneTimeLink: '' }, 'oneTimeLink'],
     [{ ...challenge, qrPayload: '' }, 'qrPayload'],

@@ -39,7 +39,11 @@ describe('Desktop Settings Remote Access composition', () => {
         })),
       },
       handshake: handshakeFixture(),
-      relay: { revokeRoute },
+      relay: {
+        revokeRoute,
+        registerPairingCredentialDigests: vi.fn(async () => 1),
+        revokeCredentialDigest: vi.fn(async () => {}),
+      },
       authority: new MemoryPersonalPairingAuthorityStore(),
       randomBytes: size => new Uint8Array(size),
       randomId: kind => `${kind}-settings-route`,

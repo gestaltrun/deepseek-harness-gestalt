@@ -9,6 +9,7 @@ import {
   parseRelayAttachmentId,
   parseRelayAttachChallengeId,
   parseRelayCredential,
+  parseRelayCredentialPublicKey,
   parseRelayPairingSelector,
   parseRelayRouteId,
   REMOTE_PROTOCOL_LIMITS,
@@ -184,6 +185,12 @@ describe('Relay Transport Protocol codec', () => {
   })
 
   it('rejects malformed transport fields with stable errors', () => {
+    expect(() => parseRelayCredentialPublicKey('short')).toThrow('canonical base64url SPKI')
+    const invalidEndpoint = new TextEncoder().encode(JSON.stringify({
+      type: 'attach-challenge', transportVersion: 1, routeId: 'route', attachmentId: 'mobile',
+      endpoint: 'relay', credentialPublicKey: 'A'.repeat(64),
+    }))
+    expect(() => decodeRelayMessage(invalidEndpoint)).toThrow('Relay endpoint must be mobile or desktop')
     const attach = {
       type: 'attach', transportVersion: 1, routeId: 'route', attachmentId: 'mobile', endpoint: 'mobile',
       credential: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',

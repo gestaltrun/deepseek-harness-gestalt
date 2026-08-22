@@ -172,6 +172,21 @@ function dispatch(
     return { rows: [], rowCount: 1 }
   }
   if (text.includes('from remote_access_mobile_pairings') && text.includes('pending_pairing_id')) {
+    if (text.includes('where database_identity = $1 and account_id = $2 and desktop_installation_id = $3')) {
+      const identity = asString(values[0], 'database identity')
+      const account = asString(values[1], 'account id')
+      const desktop = asString(values[2], 'desktop installation')
+      const row = [...live.mobile.entries()].find(([key, candidate]) => key.startsWith(`${identity}\n`)
+        && candidate.account_id === account && candidate.desktop_installation_id === desktop)?.[1]
+      return row === undefined ? { rows: [], rowCount: 0 } : { rows: [{ pending_pairing_id: row.pending_pairing_id }], rowCount: 1 }
+    }
+    if (text.includes('where database_identity = $1 and pairing_id = $2')) {
+      const identity = asString(values[0], 'database identity')
+      const pairingId = asString(values[1], 'pairing id')
+      const row = [...live.mobile.entries()].find(([key, candidate]) => key.startsWith(`${identity}\n`)
+        && candidate.pairing_id === pairingId)?.[1]
+      return row === undefined ? { rows: [], rowCount: 0 } : { rows: [{ pending_pairing_id: row.pending_pairing_id }], rowCount: 1 }
+    }
     const row = live.mobile.get(`${asString(values[0], 'database identity')}\n${asString(values[1], 'pending pairing id')}`)
     return row === undefined ? { rows: [], rowCount: 0 } : { rows: [{ ...row }], rowCount: 1 }
   }
@@ -235,6 +250,15 @@ function dispatch(
     return authority === undefined
       ? { rows: [], rowCount: 0 }
       : { rows: [{ pairing_selector: authority.pairing_selector }], rowCount: 1 }
+  }
+  if (text.includes('select 1 as retained from remote_access_route_authorities')) {
+    const prefix = `${routeKey(values[0], values[1])}\n`
+    const endpoint = values.length >= 3 ? asString(values[2], 'endpoint') : undefined
+    const digest = values.length >= 4 ? digestKey(values[3]) : undefined
+    const retained = [...live.authorities.entries()].some(([key, record]) => key.startsWith(prefix)
+      && (endpoint === undefined || record.endpoint === endpoint)
+      && (digest === undefined || record.digest === digest))
+    return retained ? { rows: [{ retained: 1 }], rowCount: 1 } : { rows: [], rowCount: 0 }
   }
   if (text.includes('delete from remote_access_route_authorities') && text.includes('digest')) {
     live.authorities.delete(

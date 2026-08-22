@@ -10,6 +10,8 @@ import {
   RemoteAccessError,
   type DesktopRemoteAccessAuthority,
   type MobilePairingAuthority,
+  parsePendingPairingId,
+  parsePersonalPairingId,
   type PendingPairingId,
   type PersonalPairingAuthorityStore,
   type PersonalPairingId,
@@ -203,6 +205,14 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
         WHERE database_identity = $1 AND account_id = $2 AND desktop_installation_id = $3`,
       [this.databaseIdentity, accountId, desktopInstallationId],
     )
+    const retained = await this.pool.query(
+      `SELECT pending_pairing_id
+         FROM remote_access_mobile_pairings
+        WHERE database_identity = $1 AND account_id = $2 AND desktop_installation_id = $3
+        LIMIT 1`,
+      [this.databaseIdentity, accountId, desktopInstallationId],
+    )
+    if (retained.rows.length > 0) throw new Error('pairing disable left Mobile authority registered')
     return [...revoking].map(parseRelayRouteId)
   }
 
@@ -303,6 +313,14 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
         WHERE database_identity = $1 AND pairing_id = $2`,
       [this.databaseIdentity, pairingId],
     )
+    const retained = await this.pool.query(
+      `SELECT pending_pairing_id
+         FROM remote_access_mobile_pairings
+        WHERE database_identity = $1 AND pairing_id = $2
+        LIMIT 1`,
+      [this.databaseIdentity, pairingId],
+    )
+    if (retained.rows.length > 0) throw new Error('pairing revocation left Mobile authority registered')
   }
 }
 
@@ -319,8 +337,8 @@ function mobileFromRow(row: MobileRow): MobilePairingAuthority {
     accountId: parsePlatformAccountId(row.account_id),
     desktopInstallationId: parseInstallationId(row.desktop_installation_id),
     mobileInstallationId: parseInstallationId(row.mobile_installation_id),
-    pendingPairingId: row.pending_pairing_id as PendingPairingId,
-    pairingId: row.pairing_id as PersonalPairingId,
+    pendingPairingId: parsePendingPairingId(row.pending_pairing_id),
+    pairingId: parsePersonalPairingId(row.pairing_id),
     ...(row.sealed_relay_authority === null
       ? {}
       : { sealedRelayAuthority: Uint8Array.from(row.sealed_relay_authority) }),

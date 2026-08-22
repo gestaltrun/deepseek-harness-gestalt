@@ -8,6 +8,8 @@ import { readFile } from 'node:fs/promises'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import {
   type EndpointPairingConfirmation,
+  parsePairingChallengeId,
+  parsePendingPairingId,
   parsePersonalPairingId,
   type RelayCredentialGrant,
   type PairingChallengeId,
@@ -90,7 +92,8 @@ export class EncryptedDesktopSnowPairingStore {
       const reconnectState = new Uint8Array(Buffer.from(record.state, 'base64url'))
       if (reconnectState.byteLength !== 96) throw new TypeError('Desktop Snow reconnect state must contain 96 bytes')
       const grant = record.desktopGrant as Record<string, unknown>
-      if (grant.endpoint !== 'desktop' || !Number.isSafeInteger(grant.revision)) {
+      if (grant.endpoint !== 'desktop' || !Number.isSafeInteger(grant.revision)
+        || (grant.revision as number) < 1) {
         throw new TypeError('Desktop Snow Relay grant is invalid')
       }
       return {
@@ -105,21 +108,21 @@ export class EncryptedDesktopSnowPairingStore {
     const challenges = boundedArray(document.challenges, 'challenges').map((item) => {
       const record = recordValue(item, 'challenge')
       return {
-        challengeId: record.challengeId as PairingChallengeId,
+        challengeId: parsePairingChallengeId(record.challengeId),
         recovery: decodeRecovery(record.recovery),
       }
     })
     const pending = boundedArray(document.pending, 'pending').map((item) => {
       const record = recordValue(item, 'pending')
       return {
-        pendingPairingId: record.pendingPairingId as PendingPairingId,
+        pendingPairingId: parsePendingPairingId(record.pendingPairingId),
         recovery: decodeRecovery(record.recovery),
       }
     })
     const confirmations = boundedArray(document.confirmations, 'confirmations').map((item) => {
       const record = recordValue(item, 'confirmation')
       return {
-        pendingPairingId: record.pendingPairingId as PendingPairingId,
+        pendingPairingId: parsePendingPairingId(record.pendingPairingId),
         transaction: decodeConfirmation(record.transaction),
       }
     })
@@ -490,6 +493,9 @@ function decodeConfirmation(value: unknown): DesktopSnowConfirmationTransaction 
   const record = recordValue(value, 'confirmation transaction')
   const desktopCredentialDigest = decodeFixedBytes(record.desktopCredentialDigest, 32, 'Desktop credential digest')
   const mobileCredentialDigest = decodeFixedBytes(record.mobileCredentialDigest, 32, 'Mobile credential digest')
+  if (bytesEqual(desktopCredentialDigest, mobileCredentialDigest)) {
+    throw new TypeError('Desktop and Mobile credential digests must be distinct')
+  }
   const transaction: DesktopSnowConfirmationTransaction = {
     desktopCredential: parseRelayCredential(record.desktopCredential),
     desktopCredentialDigest,
@@ -532,6 +538,10 @@ function decodeFixedBytes(value: unknown, length: number, name: string): Uint8Ar
   const decoded = decodeBytes(value, name)
   if (decoded.byteLength !== length) throw new TypeError(`Desktop Snow ${name} must contain ${String(length)} bytes`)
   return decoded
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  return left.every((byte, index) => byte === right[index])
 }
 
 function cloneConfirmation(transaction: DesktopSnowConfirmationTransaction): DesktopSnowConfirmationTransaction {

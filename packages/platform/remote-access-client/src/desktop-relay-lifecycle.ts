@@ -20,6 +20,20 @@ export interface DesktopRelayLifecycle {
   getState?(): { connected: boolean; stopReason?: DesktopRelayStopReason }
 }
 
+type DesktopRelayEndpointLifecycleOptions = Omit<RemoteRelayEndpointOptions,
+'endpoint' | 'route' | 'onCiphertext' | 'onPeerAttachments'> & {
+  onPeerAttachments?: (
+    message: RelayReadyMessage | RelayPeerUpdateMessage,
+    pairingSelector: RelayPairingSelector,
+  ) => void | Promise<void>
+  onCiphertext?: (
+    ciphertext: Uint8Array,
+    sourceAttachmentId: RelayAttachmentId,
+    localAttachmentId: RelayAttachmentId,
+    pairingSelector: RelayPairingSelector,
+  ) => void | Promise<void>
+}
+
 /** Observable fail-closed Relay lifecycle used before production crypto/provider approval. */
 export class FailClosedDesktopRelayLifecycle implements DesktopRelayLifecycle {
   private stopReason: DesktopRelayStopReason | undefined
@@ -46,32 +60,10 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
   private stopReason: DesktopRelayStopReason | undefined
   private serial: Promise<unknown> = Promise.resolve()
   private running = false
-  private readonly options: Omit<RemoteRelayEndpointOptions, 'endpoint' | 'route' | 'onCiphertext' | 'onPeerAttachments'> & {
-    onPeerAttachments?: (
-      message: RelayReadyMessage | RelayPeerUpdateMessage,
-      pairingSelector: RelayPairingSelector,
-    ) => void | Promise<void>
-    onCiphertext?: (
-      ciphertext: Uint8Array,
-      sourceAttachmentId: RelayAttachmentId,
-      localAttachmentId: RelayAttachmentId,
-      pairingSelector: RelayPairingSelector,
-    ) => void | Promise<void>
-  }
+  private readonly options: DesktopRelayEndpointLifecycleOptions
 
   /** @param options - Desktop endpoint adapters other than route authority. */
-  constructor(options: Omit<RemoteRelayEndpointOptions, 'endpoint' | 'route' | 'onCiphertext' | 'onPeerAttachments'> & {
-    onPeerAttachments?: (
-      message: RelayReadyMessage | RelayPeerUpdateMessage,
-      pairingSelector: RelayPairingSelector,
-    ) => void | Promise<void>
-    onCiphertext?: (
-      ciphertext: Uint8Array,
-      sourceAttachmentId: RelayAttachmentId,
-      localAttachmentId: RelayAttachmentId,
-      pairingSelector: RelayPairingSelector,
-    ) => void | Promise<void>
-  }) {
+  constructor(options: DesktopRelayEndpointLifecycleOptions) {
     this.options = options
   }
 
@@ -106,12 +98,15 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
       endpoint: 'desktop',
       route: () => Promise.resolve(grant),
       onPeerAttachments: async (message: RelayReadyMessage | RelayPeerUpdateMessage) => {
+        /* v8 ignore next -- the controller drops stopped-socket frames; this guard owns a callback already queued at retirement. */
         if (token.retired || this.endpoints.get(selector)?.token !== token) return
         localAttachmentId = message.attachmentId
         await this.options.onPeerAttachments?.(message, selector)
       },
       onCiphertext: async (ciphertext, sourceAttachmentId) => {
+        /* v8 ignore next -- the controller drops stopped-socket frames; this guard owns a callback already queued at retirement. */
         if (token.retired || this.endpoints.get(selector)?.token !== token) return
+        /* v8 ignore next -- ready assigns the attachment id before the controller can dispatch ciphertext. */
         if (localAttachmentId === undefined) throw new Error('Desktop Relay has no local attachment identity')
         await this.options.onCiphertext?.(ciphertext, sourceAttachmentId, localAttachmentId, selector)
       },
@@ -129,10 +124,26 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
     })
   }
   async stop(reason: DesktopRelayStopReason = 'quit'): Promise<void> {
+    this.running = false
+    const preempted = Promise.allSettled(
+      [...this.endpoints.values()].map(async ({ controller }) => { await controller.stop(reason) }),
+    )
     await this.exclusive(async () => {
-      this.running = false
       try {
-        await Promise.all([...this.endpoints.values()].map(async ({ controller }) => { await controller.stop(reason) }))
+        const settled = [
+          ...await preempted,
+          ...await Promise.allSettled(
+            [...this.endpoints.values()].map(async ({ controller }) => { await controller.stop(reason) }),
+          ),
+        ]
+        const failures: unknown[] = []
+        for (const result of settled) {
+          if (result.status === 'rejected' && !failures.includes(result.reason as unknown)) {
+            failures.push(result.reason as unknown)
+          }
+        }
+        if (failures.length === 1) throw failures[0]
+        if (failures.length > 1) throw new AggregateError(failures, 'Desktop Relay stop failed')
       } finally { this.stopReason = reason }
     })
   }
@@ -158,6 +169,7 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
   ): Promise<void> {
     await this.exclusive(async () => {
       const record = this.endpoints.get(pairingSelector)
+      /* v8 ignore next -- retirement deletes the record before setting any replacement; retained records are never retired. */
       if (record === undefined || record.token.retired) throw new Error('Desktop Relay pairing authority is unavailable')
       await record.controller.sendCiphertext(targetAttachmentId, ciphertext)
     })
@@ -168,6 +180,7 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
     reason: DesktopRelayStopReason,
   ): Promise<void> {
     record.token.retired = true
+    /* v8 ignore else -- only the owning serialized operation can replace this map entry. */
     if (this.endpoints.get(selector) === record) this.endpoints.delete(selector)
     await record.controller.stop(reason)
   }

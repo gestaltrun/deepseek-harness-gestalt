@@ -105,6 +105,7 @@ describe('OSS remote attachment durable metadata', () => {
       now: 1,
       quota: {
         id: parseAttachmentBlobReservationId('quota-capacity'),
+        expiresAt: Number.MAX_SAFE_INTEGER,
         release: async () => { throw new Error('quota cleanup unavailable') },
       },
     })).rejects.toMatchObject({ code: 'PLATFORM_CAPACITY', retryAfter: 7 })
@@ -166,7 +167,11 @@ describe('OSS remote attachment durable metadata', () => {
         pairingId: parsePersonalPairingId('pairing-commit'),
         ciphertext: Uint8Array.of(1),
         now: 1,
-        quota: { id: parseAttachmentBlobReservationId('quota-commit'), release },
+        quota: {
+          id: parseAttachmentBlobReservationId('quota-commit'),
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          release,
+        },
       })).rejects.toThrow('COMMIT outcome is unknown')
       expect(objectKey).toMatch(/^remote-attachments\/commit-fixture\/[0-9a-f]{64}$/)
       expect(deleteObject).not.toHaveBeenCalled()

@@ -25,6 +25,7 @@ describe('operated remote attachment authority', () => {
     const ownsConfirmedPairing = vi.fn(async () => true)
     const admitAttachmentBlob = vi.fn(async () => ({
       reservationId: parseAttachmentBlobReservationId('quota-authorized'),
+      expiresAt: 999_999,
     }))
     const releaseAttachmentBlob = vi.fn(async () => {})
     const authority = new OperatedRemoteAttachmentAuthority(
@@ -37,6 +38,7 @@ describe('operated remote attachment authority', () => {
     expect(authenticated.pairingId).toBe(pairingId)
     const quota = await authenticated.admit(17)
     expect(quota.id).toBe('quota-authorized')
+    expect(quota.expiresAt).toBe(999_999)
     await quota.release()
     await quota.release()
     expect(currentInstallation).toHaveBeenCalledWith({

@@ -1,5 +1,6 @@
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
+  parseAttachmentBlobReservationId,
   parseDevicePrincipalId,
   parsePairingChallengeId,
   parsePairingCompletionId,
@@ -112,7 +113,7 @@ describe('pairing transaction codec', () => {
       cleanup,
     })
     state.accountChallengeAt.set('account-one', [10, 20])
-    state.blobs.set('blob-1', { accountId: 'account-one', bytes: 32 })
+    state.blobs.set('blob-1', { accountId: 'account-one', bytes: 32, expiresAt: 1_787_027_200_000 })
     state.blobSequence.next = 4
     const decoded = decodePairingTransactionState(
       JSON.parse(JSON.stringify(encodePairingTransactionState(state))) as unknown,
@@ -123,6 +124,7 @@ describe('pairing transaction codec', () => {
     const [orphanCleanup, orphan] = [...decoded.orphanPendingCleanups][0] ?? []
     expect(orphanCleanup).toBe(orphan?.cleanup)
     expect(decoded.accountChallengeAt.get('account-one')).toEqual([10, 20])
+    expect(decoded.blobs.get(parseAttachmentBlobReservationId('blob-1'))?.expiresAt).toBe(1_787_027_200_000)
     expect(decoded.blobSequence.next).toBe(4)
   })
 

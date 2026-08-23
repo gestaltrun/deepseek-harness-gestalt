@@ -152,6 +152,13 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     const capability = parseAttachmentCapability(randomBytes(32).toString('base64url'))
     const capabilityDigest = digest(capability)
     const expiresAt = input.now + this.capabilityLifetimeMs
+    if (input.quota !== undefined
+      && (!Number.isSafeInteger(input.quota.expiresAt) || input.quota.expiresAt < expiresAt)) {
+      try { await input.quota.release() } catch (cleanupError) {
+        console.error('[platform] PostgreSQL attachment quota cleanup after invalid lease failed:', cleanupError)
+      }
+      throw new TypeError('PostgreSQL attachment quota lease expires before blob authority')
+    }
     const lockIdentity = publishIntentLockIdentity(this.databaseIdentity, capabilityDigest)
     const client = await this.pool.connect()
     let lockHeld = false

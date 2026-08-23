@@ -763,11 +763,16 @@ function decodeDevice(value: unknown): CompletionReplayRecord['view']['device'] 
   }
 }
 
-function decodeBlob(value: unknown): { accountId: string; bytes: number } {
+function decodeBlob(value: unknown): { accountId: string; bytes: number; expiresAt?: number } {
   const record = asRecord(value, 'blob reservation')
+  const expiresAt = record.expiresAt === undefined
+    ? undefined
+    : asSafeInteger(record.expiresAt, 'blob.expiresAt')
+  if (expiresAt !== undefined && expiresAt <= 0) throw new TypeError('blob.expiresAt must be positive')
   return {
     accountId: asPlainString(record.accountId, 'blob.accountId'),
     bytes: asSafeInteger(record.bytes, 'blob.bytes'),
+    ...(expiresAt === undefined ? {} : { expiresAt }),
   }
 }
 

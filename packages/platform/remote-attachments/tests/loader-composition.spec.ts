@@ -69,7 +69,9 @@ function testAuthority(): unknown {
           if (typeof value !== 'string') throw new Error('pairing header is required')
           return {
             pairingId: parsePersonalPairingId(value),
-            admit: async () => ({ id: 'loader-quota', release: async () => {} }),
+            admit: async () => ({
+              id: 'loader-quota', expiresAt: Number.MAX_SAFE_INTEGER, release: async () => {},
+            }),
           }
         },
       })

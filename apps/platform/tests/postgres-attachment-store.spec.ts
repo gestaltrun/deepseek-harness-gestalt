@@ -219,7 +219,7 @@ describe('PostgreSQL remote attachment durable rows', () => {
         pairingId,
         ciphertext: Uint8Array.of(1, 2),
         now: 100,
-        quota: { id: reservationId, release: inputRelease },
+        quota: { id: reservationId, expiresAt: Number.MAX_SAFE_INTEGER, release: inputRelease },
       })
 
       if (outcome === 'committed' || outcome === 'intent-commit-unknown') {

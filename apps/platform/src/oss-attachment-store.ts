@@ -212,6 +212,13 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     const capabilityDigest = digest(capability)
     const objectKey = `${this.objectPrefix}/${capabilityDigest.toString('hex')}`
     const expiresAt = input.now + this.capabilityLifetimeMs
+    if (input.quota !== undefined
+      && (!Number.isSafeInteger(input.quota.expiresAt) || input.quota.expiresAt < expiresAt)) {
+      try { await input.quota.release() } catch (cleanupError) {
+        console.error('[platform] attachment quota cleanup after invalid lease failed:', cleanupError)
+      }
+      throw new TypeError('OSS attachment quota lease expires before blob authority')
+    }
     let objectWritten = false
     try {
       const cleanup = await this.reservePublishIntent({

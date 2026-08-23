@@ -1509,10 +1509,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'input', description: 'owning Desktop authorization and pending identity.' }],
       },
       {
-        signature: 'abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: AttachmentBlobReservationId }>',
+        signature: 'abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }>',
         description: 'Reserve one expiring ciphertext blob against the open-registration ceilings.',
         parameters: [{ name: 'input', description: 'current-installation authorization and declared ciphertext size.' }],
-        returns: 'opaque reservation id released by {@link releaseAttachmentBlob}.',
+        returns: 'opaque reservation id plus its durable absolute lease expiry.',
         throws: ['RemoteAccessError `QUOTA` or `PLATFORM_CAPACITY` with `retryAfter` seconds.', 'TypeError when `bytes` is not a non-negative integer.'],
       },
       {
@@ -4851,7 +4851,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RemoteAttachmentQuotaReservation',
-    declaration: 'export interface RemoteAttachmentQuotaReservation {\n    id: AttachmentBlobReservationId;\n    release(): Promise<void>;\n}',
+    declaration: 'export interface RemoteAttachmentQuotaReservation {\n    id: AttachmentBlobReservationId;\n    expiresAt: number;\n    release(): Promise<void>;\n}',
   },
   {
     name: 'RemoteRelayAttachment',

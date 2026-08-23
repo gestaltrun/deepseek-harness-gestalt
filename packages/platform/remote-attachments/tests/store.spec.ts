@@ -83,7 +83,7 @@ describe('Remote attachment blob store', () => {
     const release = vi.fn(async () => {})
     const completed = await service.publish({
       pairingId: pairingA, ciphertext: Uint8Array.of(1), now,
-      quota: { id: quotaId('quota-complete'), release },
+      quota: { id: quotaId('quota-complete'), expiresAt: Number.MAX_SAFE_INTEGER, release },
     })
     const completedClaim = await service.consume({ pairingId: pairingA, capability: completed.capability, now })
     await completedClaim.complete()
@@ -91,7 +91,7 @@ describe('Remote attachment blob store', () => {
 
     const retryable = await service.publish({
       pairingId: pairingA, ciphertext: Uint8Array.of(2), now,
-      quota: { id: quotaId('quota-retryable'), release },
+      quota: { id: quotaId('quota-retryable'), expiresAt: Number.MAX_SAFE_INTEGER, release },
     })
     const retryableClaim = await service.consume({ pairingId: pairingA, capability: retryable.capability, now })
     await retryableClaim.abandon(now)
@@ -101,14 +101,14 @@ describe('Remote attachment blob store', () => {
 
     const expired = await service.publish({
       pairingId: pairingA, ciphertext: Uint8Array.of(3), now,
-      quota: { id: quotaId('quota-expired'), release },
+      quota: { id: quotaId('quota-expired'), expiresAt: Number.MAX_SAFE_INTEGER, release },
     })
     const expiredClaim = await service.consume({ pairingId: pairingA, capability: expired.capability, now })
     await expiredClaim.abandon(now + 1_000)
 
     const revoked = await service.publish({
       pairingId: pairingA, ciphertext: Uint8Array.of(4), now,
-      quota: { id: quotaId('quota-revoked'), release },
+      quota: { id: quotaId('quota-revoked'), expiresAt: Number.MAX_SAFE_INTEGER, release },
     })
     await service.revoke({ pairingId: pairingA, capability: revoked.capability })
 
@@ -139,7 +139,7 @@ describe('Remote attachment blob store', () => {
       pairingId: pairingA,
       ciphertext: Uint8Array.of(1),
       now,
-      quota: { id: quotaId('quota-inspect-expired'), release },
+      quota: { id: quotaId('quota-inspect-expired'), expiresAt: Number.MAX_SAFE_INTEGER, release },
     })
 
     await expect(service.inspect({ pairingId: pairingA, capability: grant.capability, now: now + 1_000 }))
@@ -166,7 +166,7 @@ describe('Remote attachment blob store', () => {
     const release = vi.fn(async () => {})
     await expect(service.publish({
       pairingId: pairingA, ciphertext: new Uint8Array(0), now,
-      quota: { id: quotaId('quota-empty'), release },
+      quota: { id: quotaId('quota-empty'), expiresAt: Number.MAX_SAFE_INTEGER, release },
     }))
       .rejects.toMatchObject({ code: 'ATTACHMENT_EMPTY' })
     expect(release).toHaveBeenCalledOnce()
@@ -177,12 +177,25 @@ describe('Remote attachment blob store', () => {
     const release = vi.fn(async () => {})
     await expect(service.publish({
       pairingId: pairingA, ciphertext: new Uint8Array(9), now,
-      quota: { id: quotaId('quota-oversize'), release },
+      quota: { id: quotaId('quota-oversize'), expiresAt: Number.MAX_SAFE_INTEGER, release },
     }))
       .rejects.toMatchObject({ code: 'ATTACHMENT_LIMIT_EXCEEDED' })
     expect(release).toHaveBeenCalledOnce()
     await expect(service.publish({ pairingId: pairingA, ciphertext: new Uint8Array(8), now }))
       .resolves.toMatchObject({ byteLength: 8 })
+  })
+
+  it('rejects a quota lease that could expire while blob authority remains active', async () => {
+    const service = store()
+    const release = vi.fn(async () => {})
+    await expect(service.publish({
+      pairingId: pairingA,
+      ciphertext: Uint8Array.of(1),
+      now,
+      quota: { id: quotaId('quota-short-lease'), expiresAt: now + 999, release },
+    })).rejects.toThrow('quota lease expires before blob authority')
+    expect(release).toHaveBeenCalledOnce()
+    expect(service.observe()).toHaveLength(0)
   })
 
   it('fails explicitly at retained-blob capacity after sweeping expired entries', async () => {
@@ -192,7 +205,7 @@ describe('Remote attachment blob store', () => {
     const release = vi.fn(async () => {})
     await expect(service.publish({
       pairingId: pairingA, ciphertext: Uint8Array.of(3), now,
-      quota: { id: quotaId('quota-capacity'), release },
+      quota: { id: quotaId('quota-capacity'), expiresAt: Number.MAX_SAFE_INTEGER, release },
     }))
       .rejects.toMatchObject({ code: 'ATTACHMENT_CAPACITY' })
     expect(release).toHaveBeenCalledOnce()
@@ -262,7 +275,10 @@ describe('Remote attachment blob store', () => {
       pairingId: pairingA,
       ciphertext: Uint8Array.of(1),
       now,
-      quota: { id: quotaId('quota-dispose'), release: async () => { throw new Error('quota backend unavailable') } },
+      quota: {
+        id: quotaId('quota-dispose'), expiresAt: Number.MAX_SAFE_INTEGER,
+        release: async () => { throw new Error('quota backend unavailable') },
+      },
     })
 
     await service.dispose()
@@ -283,7 +299,7 @@ describe('Remote attachment blob store', () => {
       pairingId: pairingA,
       ciphertext: Uint8Array.of(1),
       now,
-      quota: { id: quotaId('quota-expired-awaited'), release },
+      quota: { id: quotaId('quota-expired-awaited'), expiresAt: Number.MAX_SAFE_INTEGER, release },
     })
 
     let expiredSettled = false

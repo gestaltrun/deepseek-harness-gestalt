@@ -42,10 +42,11 @@ export class OperatedRemoteAttachmentAuthority implements RemoteAttachmentAuthor
     return {
       pairingId,
       admit: async (bytes) => {
-        const { reservationId } = await this.remoteAccess.admitAttachmentBlob({ owner, bytes })
+        const { reservationId, expiresAt } = await this.remoteAccess.admitAttachmentBlob({ owner, bytes })
         let released = false
         return {
           id: reservationId,
+          expiresAt,
           release: async () => {
             if (released) return
             await this.remoteAccess.releaseAttachmentBlob({ owner, reservationId })

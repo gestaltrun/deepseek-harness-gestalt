@@ -158,6 +158,7 @@ export async function launchOperatedPlatform(
       handshake: endpointOnlyHandshake(),
       relay,
       authority: remoteAccess.authority,
+      attachmentReservationLifetimeMs: config.remoteAttachments.capabilityLifetimeMs * 2,
       pairingLinkOrigin: `${environment.origin}/pair`,
     })
     const quotaCleanup = personalPairing.attachmentReservationCleanup()

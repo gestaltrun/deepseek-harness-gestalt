@@ -59,7 +59,9 @@ export interface RemoteAttachmentConsumption {
 /** Account-complete blob quota reservation owned by one retained attachment. */
 export interface RemoteAttachmentQuotaReservation {
   id: AttachmentBlobReservationId
-  /** Release the durable quota reservation exactly once. */
+  /** Durable Account quota lease; a blob authority must not remain active after this instant. */
+  expiresAt: number
+  /** Release the durable quota reservation idempotently. */
   release(): Promise<void>
 }
 
@@ -243,6 +245,12 @@ export class RemoteAttachmentStoreProvider extends RemoteAttachmentStoreService 
       await input.quota?.release()
       throw new RemoteAttachmentError('ATTACHMENT_LIMIT_EXCEEDED', 'Remote attachment exceeds the per-blob byte ceiling')
     }
+    const expiresAt = input.now + this.capabilityLifetimeMs
+    if (input.quota !== undefined
+      && (!Number.isSafeInteger(input.quota.expiresAt) || input.quota.expiresAt < expiresAt)) {
+      await input.quota.release()
+      throw new TypeError('Remote attachment quota lease expires before blob authority')
+    }
     await this.queueSweep(input.now)
     if (this.entries.size >= this.maxRetainedBlobs) {
       await input.quota?.release()
@@ -252,7 +260,7 @@ export class RemoteAttachmentStoreProvider extends RemoteAttachmentStoreService 
     const entry: StoredEntry = {
       pairingId: input.pairingId,
       ciphertext: input.ciphertext.slice(),
-      expiresAt: input.now + this.capabilityLifetimeMs,
+      expiresAt,
       ...(input.quota === undefined ? {} : { quota: input.quota }),
     }
     this.entries.set(capability, entry)

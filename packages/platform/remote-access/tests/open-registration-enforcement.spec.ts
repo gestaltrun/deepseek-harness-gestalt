@@ -6,6 +6,7 @@ import {
   ACCOUNT_DAILY_QUOTA_WINDOW_MS,
   MemoryPersonalPairingAuthorityStore,
   MemoryPlatformCapacityGate,
+  MAX_ATTACHMENT_RESERVATION_LIFETIME_MS,
   OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
   OPEN_REGISTRATION_QUOTAS,
   PAIRING_CHALLENGE_QUOTA_WINDOW_MS,
@@ -214,6 +215,31 @@ describe('open-registration enforcement', () => {
 
   })
 
+  it('expires durable blob reservations before admitting replacement capacity', async () => {
+    const now = { value: NOW }
+    const provider = uniqueProvider(now, undefined, undefined, 'lease-', 100)
+    const owner = authentication('desktop-lease', 'account-lease')
+    const reservations = await Promise.all(Array.from(
+      { length: OPEN_REGISTRATION_QUOTAS.concurrentBlobs },
+      async () => await provider.admitAttachmentBlob({ owner, bytes: 1 }),
+    ))
+    expect(reservations.every(reservation => reservation.expiresAt === NOW + 100)).toBe(true)
+    await expect(provider.admitAttachmentBlob({ owner, bytes: 1 })).rejects.toMatchObject({ code: 'QUOTA' })
+
+    now.value += 100
+    await expect(provider.admitAttachmentBlob({ owner, bytes: 1 })).resolves.toMatchObject({ expiresAt: NOW + 200 })
+    const first = reservations[0]
+    if (first === undefined) throw new Error('blob lease fixture requires one reservation')
+    await expect(provider.attachmentReservationCleanup().release(first.reservationId)).resolves.toBeUndefined()
+    expect(() => uniqueProvider(
+      now,
+      undefined,
+      undefined,
+      'invalid-lease-',
+      MAX_ATTACHMENT_RESERVATION_LIFETIME_MS + 1,
+    )).toThrow('reservation lifetime exceeds the protocol safety ceiling')
+  })
+
   it('sheds new pairing and blob acquisition at capacity while an established pairing remains listed', async () => {
     const gate = new MemoryPlatformCapacityGate(1, 4_500)
     const provider = uniqueProvider({ value: NOW }, gate)
@@ -305,6 +331,7 @@ function uniqueProvider(
   capacity?: MemoryPlatformCapacityGate,
   authority?: MemoryPersonalPairingAuthorityStore,
   idPrefix = '',
+  attachmentReservationLifetimeMs?: number,
 ) {
   let id = 0
   return new PersonalPairingProvider(new Context(), {
@@ -331,6 +358,7 @@ function uniqueProvider(
     handshake: handshakeProvider(),
     authority: authority ?? new MemoryPersonalPairingAuthorityStore(),
     clock: { now: () => now.value },
+    ...(attachmentReservationLifetimeMs === undefined ? {} : { attachmentReservationLifetimeMs }),
     randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index + 1),
     randomId: kind => `${kind}-${idPrefix}${String(++id)}`,
     pairingLinkOrigin: 'https://platform.example.com/pair',

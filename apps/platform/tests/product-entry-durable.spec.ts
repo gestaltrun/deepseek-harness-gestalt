@@ -6,14 +6,16 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import { parseAccountProofJti, parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
+  PersonalPairingProvider,
   parseAttachmentBlobReservationId,
   parsePendingPairingId,
   parsePersonalPairingId,
   parseRelayCredentialFingerprint,
   parseRelayConnectionToken,
   parseRelayInstanceId,
+  type PairingHandshakeProvider,
 } from '@deepseek-ai/dsh-remote-access'
 import { parseRelayAttachmentId, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
 import { apply as applyRemoteAttachmentsHttp } from '@deepseek-ai/dsh-remote-attachments/http'
@@ -270,7 +272,9 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       authenticate: async () => ({
         pairingId,
         admit: async () => ({
-          id: parseAttachmentBlobReservationId('fixed-base-unused'), release: async () => {},
+          id: parseAttachmentBlobReservationId('fixed-base-unused'),
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          release: async () => {},
         }),
       }),
     })
@@ -299,13 +303,21 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     const firstOrigin = await startAttachmentHttp(bridge, {
       authenticate: async () => ({
         pairingId,
-        admit: async () => ({ id: parseAttachmentBlobReservationId('fixed-base-first'), release: async () => {} }),
+        admit: async () => ({
+          id: parseAttachmentBlobReservationId('fixed-base-first'),
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          release: async () => {},
+        }),
       }),
     })
     const secondOrigin = await startAttachmentHttp(bridge, {
       authenticate: async () => ({
         pairingId,
-        admit: async () => ({ id: parseAttachmentBlobReservationId('fixed-base-second'), release: async () => {} }),
+        admit: async () => ({
+          id: parseAttachmentBlobReservationId('fixed-base-second'),
+          expiresAt: Number.MAX_SAFE_INTEGER,
+          release: async () => {},
+        }),
       }),
     })
     const atomicResponses = await Promise.all([firstOrigin, secondOrigin].map(async origin => await fetch(
@@ -393,7 +405,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
         pairingId,
         ciphertext: Uint8Array.of(4, 9),
         now: Date.now(),
-        quota: { id: reservationId, release: async () => {} },
+        quota: { id: reservationId, expiresAt: Number.MAX_SAFE_INTEGER, release: async () => {} },
       })
       fault.arm()
       const delivered = await store.consume({ pairingId, capability: grant.capability, now: Date.now() })
@@ -501,7 +513,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       pairingId,
       ciphertext: Uint8Array.of(7),
       now: 100,
-      quota: { id: reservationId, release: async () => {} },
+      quota: { id: reservationId, expiresAt: Number.MAX_SAFE_INTEGER, release: async () => {} },
     })
     cleanupUnavailable = true
 
@@ -585,7 +597,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       pairingId,
       ciphertext: Uint8Array.of(1),
       now: 100,
-      quota: { id: reservationId, release: async () => {} },
+      quota: { id: reservationId, expiresAt: Number.MAX_SAFE_INTEGER, release: async () => {} },
     })
 
     const grant = await store.publish({ pairingId, ciphertext: Uint8Array.of(2), now: 200 })
@@ -639,7 +651,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       pairingId,
       ciphertext: Uint8Array.of(3),
       now: 100,
-      quota: { id: reservationId, release: async () => {} },
+      quota: { id: reservationId, expiresAt: Number.MAX_SAFE_INTEGER, release: async () => {} },
     })).rejects.toThrow('PostgreSQL attachment publish outcome is uncertain')
 
     const beforeRestart = await pool.query(
@@ -675,6 +687,80 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
            WHERE database_identity = $1) AS releases`,
       [databaseIdentity],
     )).rows).toEqual([{ intents: 0, releases: 0 }])
+  }, 60_000)
+
+  it('expires durable Account quota after recovery INSERT rollback, unreadable outcome, and cleanup failure', async () => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const databaseIdentity = 'attachment-recovery-lease-fixture'
+    const pairingState = new PostgresPersonalPairingAuthorityStore(databaseIdentity, pool)
+    await pairingState.migrate()
+    const now = { value: 100 }
+    const firstContext = new Context()
+    const restartContext = new Context()
+    cleanups.push(async () => { await firstContext.fiber.dispose(); await restartContext.fiber.dispose() })
+    const accountId = parsePlatformAccountId('account-recovery-lease')
+    const installationId = parseInstallationId('desktop-recovery-lease')
+    const owner = {
+      accessToken: 'recovery-lease-access',
+      proof: { jti: parseAccountProofJti('recovery-lease-proof'), issuedAt: 1, signature: 'signature' },
+    }
+    const providerOptions = {
+      account: { currentInstallation: async () => ({
+        account: { id: accountId, githubId: 1, githubLogin: 'recovery', avatarUrl: 'https://avatars.example/recovery' },
+        installation: { id: installationId, kind: 'desktop' as const,
+          presentation: { name: 'Recovery Desktop', platform: 'linux' as const } },
+      }) },
+      handshake: disabledPairingHandshake(),
+      authority: pairingState,
+      clock: { now: () => now.value },
+      attachmentReservationLifetimeMs: 100,
+      pairingLinkOrigin: 'https://platform.example/pair',
+    }
+    const firstProvider = new PersonalPairingProvider(firstContext, providerOptions)
+    const reservation = await firstProvider.admitAttachmentBlob({ owner, bytes: 1 })
+    expect(reservation.expiresAt).toBe(200)
+    const cleanup = vi.fn(async () => { throw new Error('quota cleanup unavailable') })
+    const store = new PostgresRemoteAttachmentStore(
+      firstContext,
+      databaseIdentity,
+      postgresPublishFaultPool(pool, 'recovery-rollback-readback-fail'),
+      {
+        maxBlobBytes: 1024,
+        capabilityLifetimeMs: 100,
+        maxRetainedBlobs: 2,
+        quotaCleanup: { release: async () => {} },
+      },
+    )
+    await store.migrate()
+    await expect(store.publish({
+      pairingId: parsePersonalPairingId('pairing-recovery-lease'),
+      ciphertext: Uint8Array.of(5),
+      now: 100,
+      quota: { id: reservation.reservationId, expiresAt: reservation.expiresAt, release: cleanup },
+    })).rejects.toThrow('PostgreSQL attachment publish outcome is uncertain')
+    expect(cleanup).toHaveBeenCalledOnce()
+    expect(await pairingState.runPairingTransaction(
+      state => Promise.resolve(state.blobs.has(reservation.reservationId)),
+    )).toBe(true)
+    expect((await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM remote_attachment_postgres_publish_intents
+           WHERE database_identity = $1) AS intents,
+         (SELECT COUNT(*)::int FROM remote_attachment_blobs WHERE database_identity = $1) AS blobs,
+         (SELECT COUNT(*)::int FROM remote_attachment_quota_releases
+           WHERE database_identity = $1) AS releases`,
+      [databaseIdentity],
+    )).rows).toEqual([{ intents: 0, blobs: 0, releases: 0 }])
+
+    await firstContext.fiber.dispose()
+    now.value = 200
+    const restarted = new PersonalPairingProvider(restartContext, providerOptions)
+    await restarted.admitAttachmentBlob({ owner, bytes: 1 })
+    expect(await pairingState.runPairingTransaction(
+      state => Promise.resolve(state.blobs.has(reservation.reservationId)),
+    )).toBe(false)
   }, 60_000)
 
   it('claims one OSS capability atomically across operated Platform instances', async () => {
@@ -763,11 +849,19 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     await store.migrate()
     await store.publish({
       pairingId: pairingA, ciphertext: Uint8Array.of(1), now,
-      quota: { id: parseAttachmentBlobReservationId('quota-sweep-a'), release: async () => {} },
+      quota: {
+        id: parseAttachmentBlobReservationId('quota-sweep-a'),
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        release: async () => {},
+      },
     })
     await store.publish({
       pairingId: pairingB, ciphertext: Uint8Array.of(2), now,
-      quota: { id: parseAttachmentBlobReservationId('quota-sweep-b'), release: async () => {} },
+      quota: {
+        id: parseAttachmentBlobReservationId('quota-sweep-b'),
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        release: async () => {},
+      },
     })
 
     active = [pairingA]
@@ -1126,6 +1220,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     const authority = new OperatedRemoteAttachmentAuthority(account, pairings, {
       admitAttachmentBlob: async () => ({
         reservationId: parseAttachmentBlobReservationId('attachment-http-quota'),
+        expiresAt: Number.MAX_SAFE_INTEGER,
       }),
       releaseAttachmentBlob: async () => {},
     })
@@ -1448,7 +1543,20 @@ function memoryOssClient(objects = new Map<string, Uint8Array>()): OssObjectClie
 
 type LegacySettlementFailure = 'delete-fail' | 'commit-unknown' | 'crash'
 
+function disabledPairingHandshake(): PairingHandshakeProvider {
+  const unavailable = (): Promise<never> => Promise.reject(new Error('pairing handshake is unavailable'))
+  return {
+    createChallenge: unavailable,
+    completeChallenge: unavailable,
+    activatePairing: unavailable,
+    destroyChallenge: () => {},
+    destroyPendingPairing: () => {},
+    destroyPairing: () => {},
+  }
+}
+
 type PostgresPublishFailure =
+  | 'recovery-rollback-readback-fail'
   | 'crash-after-intent'
   | 'intent-rollback-readback-fail'
   | 'main-rollback-readback-fail'
@@ -1462,6 +1570,7 @@ function postgresPublishFaultPool(base: pg.Pool, failure: PostgresPublishFailure
       let publisher = false
       let transactionNumber = 0
       let backendPid: number | undefined
+      let recoveryReadbackMustFail = false
       let intentReadbackMustFail = false
       let mainReadbackMustFail = false
       let released = false
@@ -1478,6 +1587,16 @@ function postgresPublishFaultPool(base: pg.Pool, failure: PostgresPublishFailure
             return result
           }
           if (publisher && sql === 'BEGIN') transactionNumber += 1
+          if (publisher && transactionNumber === 1
+            && failure === 'recovery-rollback-readback-fail'
+            && sql.includes('INSERT INTO remote_attachment_postgres_publish_intents')) {
+            recoveryReadbackMustFail = true
+            throw new Error('recovery transaction rolled back')
+          }
+          if (publisher && recoveryReadbackMustFail
+            && sql.includes('FROM remote_attachment_postgres_publish_intents')) {
+            throw new Error('recovery readback unavailable')
+          }
           if (publisher && transactionNumber === 2
             && failure === 'intent-rollback-readback-fail'
             && sql.includes("SET stage = 'intent'")) {

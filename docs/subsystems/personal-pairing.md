@@ -187,11 +187,11 @@ abstract rejectPairing(input: { desktop: PairingAccountAuthentication pendingPai
 /**
  * Reserve one expiring ciphertext blob against the open-registration ceilings.
  * @param input - current-installation authorization and declared ciphertext size.
- * @returns opaque reservation id released by {@link releaseAttachmentBlob}.
+ * @returns opaque reservation id plus its durable absolute lease expiry.
  * @throws RemoteAccessError `QUOTA` or `PLATFORM_CAPACITY` with `retryAfter` seconds.
  * @throws TypeError when `bytes` is not a non-negative integer.
  */
-abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: AttachmentBlobReservationId }>
+abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }>
 
 /**
  * Release one blob reservation after receipt, expiry, or revocation.

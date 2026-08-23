@@ -607,7 +607,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
     let admitted = false
     const admit = vi.fn(async () => {
       admitted = true
-      return { id: parseAttachmentBlobReservationId('quota-exact'), release }
+      return { id: parseAttachmentBlobReservationId('quota-exact'), expiresAt: Number.MAX_SAFE_INTEGER, release }
     })
     const { routes, store } = await start({ store: { maxBlobBytes: 8 }, admit })
     const uploadRoute = routes.get('/v1/remote-attachments')
@@ -690,6 +690,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
     const { routes } = await start({
       admit: async () => ({
         id: parseAttachmentBlobReservationId('quota-read-failure'),
+        expiresAt: Number.MAX_SAFE_INTEGER,
         release: async () => { throw new Error('quota cleanup failed') },
       }),
     })
@@ -893,7 +894,9 @@ async function start(options: {
         return {
           pairingId: parsePersonalPairingId(value),
           admit: options.admit ?? (async () => ({
-            id: parseAttachmentBlobReservationId(crypto.randomUUID()), release: async () => {},
+            id: parseAttachmentBlobReservationId(crypto.randomUUID()),
+            expiresAt: Number.MAX_SAFE_INTEGER,
+            release: async () => {},
           })),
         }
       },

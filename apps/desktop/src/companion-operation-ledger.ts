@@ -3,12 +3,23 @@
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
-import type { PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
-import type {
-  CompanionOperation, CompanionOperationId, CompanionResult,
+import { parsePersonalPairingId, type PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import {
+  createCompanionNegotiationChannel,
+  createCompanionVersionOffer,
+  decodeCompanionMessage,
+  negotiateCompanionProtocol,
+  parseCompanionOperationId,
+  type CompanionOperation, type CompanionOperationId, type CompanionResult,
 } from '@deepseek-ai/dsh-remote-protocol'
 
 const MAX_RECORDS = 256
+const RECORD_TTL_MS = 7 * 24 * 60 * 60 * 1_000
+const PERSISTED_RESULT_PROTOCOL = negotiateCompanionProtocol(
+  createCompanionNegotiationChannel(),
+  createCompanionVersionOffer('mobile'),
+  createCompanionVersionOffer('desktop'),
+)
 
 interface PersistedOperationRecord {
   pairingId: PersonalPairingId
@@ -50,6 +61,8 @@ export class FileDesktopCompanionOperationStore implements DesktopCompanionOpera
 /** Serialized prepared/committed mutation transactions for one Desktop installation. */
 export class DesktopCompanionOperationLedger {
   private readonly records = new Map<string, PersistedOperationRecord>()
+  private readonly pendingCommits = new Map<string, PersistedOperationRecord>()
+  private readonly inFlight = new Map<string, { fingerprint: string; result: Promise<CompanionResult> }>()
   private persistence: Promise<void> = Promise.resolve()
 
   private constructor(
@@ -87,30 +100,96 @@ export class DesktopCompanionOperationLedger {
   ): Promise<CompanionResult> {
     const key = recordKey(pairingId, operation.operationId)
     const fingerprint = operationFingerprint(operation)
+    const running = this.inFlight.get(key)
+    if (running !== undefined) {
+      if (running.fingerprint !== fingerprint) throw new Error('Desktop Companion operation id collision')
+      return structuredClone(await running.result)
+    }
+    const result = this.executeOwned(key, pairingId, operation, fingerprint, effect)
+    this.inFlight.set(key, { fingerprint, result })
+    try {
+      return structuredClone(await result)
+    } finally {
+      if (this.inFlight.get(key)?.result === result) this.inFlight.delete(key)
+    }
+  }
+
+  private async executeOwned(
+    key: string,
+    pairingId: PersonalPairingId,
+    operation: CompanionOperation,
+    fingerprint: string,
+    effect: () => Promise<CompanionResult>,
+  ): Promise<CompanionResult> {
+    await this.flushPendingCommits()
+    const beforePreparation = [...this.records.entries()].map(([recordKeyValue, record]) => [
+      recordKeyValue, cloneRecord(record),
+    ] as const)
+    this.pruneExpired()
     const existing = this.records.get(key)
     if (existing !== undefined) {
       if (existing.fingerprint !== fingerprint) throw new Error('Desktop Companion operation id collision')
       if (existing.result !== undefined) return structuredClone(existing.result)
     } else {
+      this.evictTerminalRecords()
       if (this.records.size >= MAX_RECORDS) throw new Error('Desktop Companion operation ledger capacity exceeded')
       this.records.set(key, {
         pairingId, operationId: operation.operationId, fingerprint, updatedAt: this.now(),
       })
-      await this.persist()
+    }
+    if (!sameRecords(beforePreparation, this.records)) {
+      try {
+        await this.persist()
+      } catch (error) {
+        this.replaceRecords(beforePreparation)
+        throw error
+      }
     }
     const result = await effect()
     const prepared = this.records.get(key)
     if (prepared === undefined || prepared.fingerprint !== fingerprint) {
       throw new Error('Desktop Companion operation transaction was replaced')
     }
-    this.records.set(key, { ...prepared, updatedAt: this.now(), result: structuredClone(result) })
-    await this.persist()
-    return result
+    const committed = { ...prepared, updatedAt: this.now(), result: structuredClone(result) }
+    this.pendingCommits.set(key, committed)
+    await this.flushPendingCommits()
+    return structuredClone(committed.result)
   }
 
-  private async persist(): Promise<void> {
+  private async flushPendingCommits(): Promise<void> {
+    if (this.pendingCommits.size === 0) return
+    const snapshot = new Map(this.records)
+    for (const [key, record] of this.pendingCommits) snapshot.set(key, record)
+    await this.persist([...snapshot.values()])
+    this.replaceRecords([...snapshot.entries()])
+    this.pendingCommits.clear()
+  }
+
+  private pruneExpired(): void {
+    const now = this.now()
+    for (const [key, record] of this.records) {
+      if (now >= record.updatedAt && now - record.updatedAt >= RECORD_TTL_MS) this.records.delete(key)
+    }
+  }
+
+  private evictTerminalRecords(): void {
+    while (this.records.size >= MAX_RECORDS) {
+      const terminal = [...this.records.entries()].filter(entry => entry[1].result !== undefined)
+        .sort((left, right) => left[1].updatedAt - right[1].updatedAt)[0]
+      if (terminal === undefined) return
+      this.records.delete(terminal[0])
+    }
+  }
+
+  private replaceRecords(records: readonly (readonly [string, PersistedOperationRecord])[]): void {
+    this.records.clear()
+    for (const [key, record] of records) this.records.set(key, cloneRecord(record))
+  }
+
+  private async persist(records: readonly PersistedOperationRecord[] = [...this.records.values()]): Promise<void> {
+    const snapshot = records.map(cloneRecord)
     const save = this.persistence.then(async () => {
-      await this.store.save([...this.records.values()].map(cloneRecord))
+      await this.store.save(snapshot)
     })
     this.persistence = save.catch(() => {})
     await save
@@ -140,22 +219,44 @@ function parseRecord(value: unknown): PersistedOperationRecord {
   if (Object.keys(value).length !== keys.length || Object.keys(value).some(key => !keys.includes(key))) {
     throw new TypeError('Desktop Companion operation record contains unsupported fields')
   }
-  if (typeof value.pairingId !== 'string' || value.pairingId === ''
-    || typeof value.operationId !== 'string' || value.operationId === ''
-    || typeof value.fingerprint !== 'string' || !/^[0-9a-f]{64}$/u.test(value.fingerprint)
+  if (typeof value.fingerprint !== 'string' || !/^[0-9a-f]{64}$/u.test(value.fingerprint)
     || !Number.isSafeInteger(value.updatedAt) || (value.updatedAt as number) < 0) {
     throw new TypeError('Desktop Companion operation record is invalid')
   }
-  if (value.result !== undefined && !isRecord(value.result)) {
-    throw new TypeError('Desktop Companion operation result must be an object')
+  const pairingId = parsePersonalPairingId(value.pairingId)
+  const operationId = parseCompanionOperationId(value.operationId)
+  const result = value.result === undefined ? undefined : parseResult(value.result)
+  if (result !== undefined && result.operationId !== operationId) {
+    throw new TypeError('Desktop Companion operation result operationId must match its record')
   }
   return {
-    pairingId: value.pairingId as PersonalPairingId,
-    operationId: value.operationId as CompanionOperationId,
+    pairingId,
+    operationId,
     fingerprint: value.fingerprint,
     updatedAt: value.updatedAt as number,
-    ...(value.result === undefined ? {} : { result: value.result as unknown as CompanionResult }),
+    ...(result === undefined ? {} : { result }),
   }
+}
+
+function parseResult(value: unknown): CompanionResult {
+  const message = decodeCompanionMessage(PERSISTED_RESULT_PROTOCOL, new TextEncoder().encode(JSON.stringify({
+    applicationVersion: PERSISTED_RESULT_PROTOCOL.major,
+    type: 'result',
+    result: value,
+  })))
+  if (message.type !== 'result') throw new TypeError('Desktop Companion operation result is invalid')
+  return message.result
+}
+
+function sameRecords(
+  before: readonly (readonly [string, PersistedOperationRecord])[],
+  after: ReadonlyMap<string, PersistedOperationRecord>,
+): boolean {
+  if (before.length !== after.size) return false
+  return before.every(([key, record]) => {
+    const current = after.get(key)
+    return current !== undefined && JSON.stringify(current) === JSON.stringify(record)
+  })
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -19,7 +19,9 @@ import {
   parseRelayPairingSelector,
   parseRelayRouteId,
   REMOTE_PROTOCOL_LIMITS,
+  type CompanionOperationFailedResult,
   type CompanionSearchSessionsOperation,
+  type CompanionSessionSearchResult,
   type CompanionProjection,
   type CompanionResult,
 } from '@deepseek-ai/dsh-remote-protocol'
@@ -38,6 +40,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import { DesktopCompanionProductOwner } from '../src/companion-product.ts'
+import type { DesktopCompanionOperationOutput, DesktopCompanionPairingDependencies } from '../src/companion-product.ts'
 import {
   DesktopCompanionOperationLedger, FileDesktopCompanionOperationStore,
 } from '../src/companion-operation-ledger.ts'
@@ -92,8 +95,8 @@ describe('assembled Desktop Companion Host search', () => {
       sendCiphertext: async (_target, ciphertext) => {
         const opened = channels.desktop.open(ciphertext)
         if (opened.type !== 'operation') throw new Error('assembled Desktop expected a Companion operation')
-        const output = await owner.handle(opened.operation as never, pairingDependencies(owner, channels))
-        for (const item of Array.isArray(output) ? output : [output]) {
+        const output = await owner.handle(opened.operation, pairingDependencies(owner, channels))
+        for (const item of isResultList(output) ? output : [output]) {
           const receiver = receiverRef.current
           if (receiver === undefined) throw new Error('assembled Mobile receiver is not installed')
           receiver.receive(channels.desktop.seal(isProjection(item)
@@ -126,18 +129,16 @@ describe('assembled Desktop Companion Host search', () => {
         generation: channels.generation, desktopRevision: 1,
       },
     }))
-    await expect.poll(() => ({
-      ids: surface.getSnapshot().sessions.ids,
-      failures: received.filter(result => result.type === 'operation-failed'),
-    })).toEqual({ ids: expect.arrayContaining([assembled.sessionId]), failures: [] })
+    await expect.poll(() => surface.getSnapshot().sessions.ids.includes(assembled.sessionId)).toBe(true)
+    expect(received.filter(result => result.type === 'operation-failed')).toEqual([])
     surface.loadOlder(assembled.sessionId)
     await expect.poll(() => ({
-      ready: (surface.getSnapshot().conversations[assembled.sessionId as never]?.nodes.length ?? 0) > 0,
+      ready: (surface.getSnapshot().conversations[assembled.sessionId]?.nodes.length ?? 0) > 0,
       failures: received.filter(result => result.type === 'operation-failed'),
       transportFailures,
     })).toEqual({ ready: true, failures: [], transportFailures: [] })
 
-    surface.submit(assembled.sessionId, 'submitted through Companion v3')
+    await surface.submit(assembled.sessionId, 'submitted through Companion v3')
     await expect.poll(() => assembled.session.events.some(event => event.type === 'user/message'
       && JSON.stringify(event.data).includes('submitted through Companion v3'))).toBe(true)
     surface.cancel(assembled.sessionId)
@@ -156,9 +157,9 @@ describe('assembled Desktop Companion Host search', () => {
     await expect.poll(() => owner.pendingInteractions(assembled.sessionId as never, channels.attachmentKey)
       .some(pending => pending.kind === 'question')).toBe(true)
     surface.loadOlder(assembled.sessionId)
-    await expect.poll(() => surface.getSnapshot().conversations[assembled.sessionId as never]?.pending
+    await expect.poll(() => surface.getSnapshot().conversations[assembled.sessionId]?.pending
       .some(pending => pending.kind === 'question') ?? false).toBe(true)
-    const question = surface.getSnapshot().conversations[assembled.sessionId as never]?.pending
+    const question = surface.getSnapshot().conversations[assembled.sessionId]?.pending
       .find(pending => pending.kind === 'question')
     if (question === undefined || question.kind !== 'question') throw new Error('assembled Ask User wait was not projected')
     await expect(question.respond({
@@ -174,9 +175,9 @@ describe('assembled Desktop Companion Host search', () => {
     await expect.poll(() => owner.pendingInteractions(assembled.sessionId as never, channels.attachmentKey)
       .some(pending => pending.kind === 'approval')).toBe(true)
     surface.loadOlder(assembled.sessionId)
-    await expect.poll(() => surface.getSnapshot().conversations[assembled.sessionId as never]?.pending
+    await expect.poll(() => surface.getSnapshot().conversations[assembled.sessionId]?.pending
       .some(pending => pending.kind === 'approval') ?? false).toBe(true)
-    const approvalWait = surface.getSnapshot().conversations[assembled.sessionId as never]?.pending
+    const approvalWait = surface.getSnapshot().conversations[assembled.sessionId]?.pending
       .find(pending => pending.kind === 'approval')
     if (approvalWait === undefined || approvalWait.kind !== 'approval') throw new Error('assembled Approval wait was not projected')
     await expect(approvalWait.respond({
@@ -332,7 +333,7 @@ async function startDesktopHost(
 ): Promise<{
   url: string
   root: string
-  sessionId: string
+  sessionId: Session['id']
   session: Session
   image: ImageAttachmentRef
   cancelled: { value: number }
@@ -435,9 +436,15 @@ async function startHttpCarrier(handler: { fetch(request: Request): Promise<Resp
       }
       const reader = fetchResponse.body.getReader()
       while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        response.write(Buffer.from(value))
+        const readResult: unknown = await reader.read()
+        if (!isRecord(readResult) || typeof readResult.done !== 'boolean') {
+          throw new Error('assembled Host stream returned an invalid read result')
+        }
+        if (readResult.done) break
+        if (!(readResult.value instanceof Uint8Array)) {
+          throw new Error('assembled Host stream returned an invalid byte chunk')
+        }
+        response.write(Buffer.from(readResult.value))
       }
       response.end()
     })().catch((error: unknown) => {
@@ -549,7 +556,7 @@ function connectedRuntime(): CompanionForegroundRuntime {
 function pairingDependencies(
   owner: DesktopCompanionProductOwner,
   channels: Awaited<ReturnType<typeof snowProductChannels>>,
-) {
+): DesktopCompanionPairingDependencies {
   const attachmentKey = channels.attachmentKey.slice()
   return {
     pairingId: parsePersonalPairingId(channels.pairingSelector),
@@ -570,18 +577,26 @@ function isProjection(value: CompanionProjection | CompanionResult): value is Co
     || value.type === 'surface-snapshot' || value.type === 'conversation-snapshot'
 }
 
+function isResultList(value: DesktopCompanionOperationOutput): value is readonly CompanionResult[] {
+  return Array.isArray(value)
+}
+
 function isOperationResult(value: unknown, operationId: unknown): boolean {
   return typeof value === 'object' && value !== null && 'operationId' in value
     && value.operationId === operationId
 }
 
-async function search(owner: DesktopCompanionProductOwner, query: string, operationId: string) {
+async function search(
+  owner: DesktopCompanionProductOwner,
+  query: string,
+  operationId: string,
+): Promise<CompanionSessionSearchResult | CompanionOperationFailedResult> {
   const operation: CompanionSearchSessionsOperation = {
     type: 'search-sessions',
     operationId: parseCompanionOperationId(operationId),
     query,
   }
-  return await owner.handle(operation, {
+  const output = await owner.handle(operation, {
     pairingId: parsePersonalPairingId('desktop-companion-assembled-pairing'),
     attachmentKey: new Uint8Array(32),
     now: Date.now,
@@ -593,4 +608,13 @@ async function search(owner: DesktopCompanionProductOwner, query: string, operat
     resolveInteraction: () => undefined,
     pendingInteractions: () => [],
   })
+  if (isResultList(output) || isProjection(output)
+    || (output.type !== 'session-search' && output.type !== 'operation-failed')) {
+    throw new Error('assembled search returned an invalid output kind')
+  }
+  return output
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

@@ -562,7 +562,9 @@ function parseProjection(value: unknown): CompanionProjection {
   if (record.type === 'conversation-snapshot') {
     exactKeys(
       record,
-      ['type', 'operationId', 'generation', 'desktopRevision', 'sessionId', 'conversation'],
+      record.beforeSeq === undefined
+        ? ['type', 'operationId', 'generation', 'desktopRevision', 'sessionId', 'conversation']
+        : ['type', 'operationId', 'generation', 'desktopRevision', 'sessionId', 'beforeSeq', 'conversation'],
       'Companion conversation-snapshot projection',
     )
     return {
@@ -571,6 +573,9 @@ function parseProjection(value: unknown): CompanionProjection {
       generation: positiveSafeInteger(record.generation, 'Companion conversation generation'),
       desktopRevision: positiveSafeInteger(record.desktopRevision, 'Companion conversation desktopRevision'),
       sessionId: parseCompanionSessionId(record.sessionId),
+      ...(record.beforeSeq === undefined ? {} : {
+        beforeSeq: nonNegativeSafeInteger(record.beforeSeq, 'Companion conversation beforeSeq'),
+      }),
       conversation: record.conversation,
     }
   }
@@ -671,19 +676,16 @@ function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProject
     if (typeof session.running !== 'boolean' || typeof session.blank !== 'boolean') {
       invalid('Companion Session running and blank must be boolean')
     }
-    if (session.pendingInteraction !== undefined && session.pendingInteraction !== 'approval'
-      && session.pendingInteraction !== 'plan-review' && session.pendingInteraction !== 'question') {
-      invalid('Companion Session pendingInteraction is unsupported')
-    }
+    const pendingInteraction = parsePendingInteraction(session.pendingInteraction)
     return {
       sessionId: parseCompanionSessionId(session.sessionId),
       displayTitle: session.displayTitle,
-      ...session.cwd === undefined ? {} : { cwd: session.cwd as string },
+      ...session.cwd === undefined ? {} : { cwd: session.cwd },
       running: session.running,
       blank: session.blank,
       updatedAt: nonNegativeSafeInteger(session.updatedAt, 'Companion Session updatedAt'),
-      ...session.pendingInteraction === undefined ? {} : {
-        pendingInteraction: session.pendingInteraction as 'approval' | 'plan-review' | 'question',
+      ...pendingInteraction === undefined ? {} : {
+        pendingInteraction,
       },
     }
   })
@@ -730,6 +732,11 @@ function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProject
     workspaces,
     hasMore: record.hasMore,
   }
+}
+
+function parsePendingInteraction(value: unknown): 'approval' | 'plan-review' | 'question' | undefined {
+  if (value === undefined || value === 'approval' || value === 'plan-review' || value === 'question') return value
+  return invalid('Companion Session pendingInteraction is unsupported')
 }
 
 function parseMediaType(value: unknown, name: string): string {

@@ -14,6 +14,8 @@ Companion major 3 和 2 是当前及紧邻的前一应用版本。双方 endpoin
 
 Major 3 新增有界 Session 与 Workspace 发现、完整 conversation page projection、Session history、prompt 提交、取消、Approval 与 Ask User settlement，以及按内容寻址的历史图片读取。图片字节以有序 32 KiB 分片传输，共用一个摘要且最多 512 个分片；Mobile endpoint 只接受与原 operation、Session、attachment、media type、generation、index、count 和 digest 全部匹配的分片。catalog 继续包含 attachment offer、权威 `search-sessions`、重连用的 `query-operation-status`、Desktop confirmation、attachment rejection、关联的 `session-search`、类型化 `operation-failed` 与 `status` 应答。`foreground-sync` 在认证解密后携带正数 physical-connection generation 与 Desktop revision；原始字节不能解码为同步 authority。解码会拒绝不支持的 operation、额外字段、格式错误的按内容寻址 attachment id 与超限值。
 
+conversation projection 会回显 history 请求中可选的 exclusive `beforeSeq`。cursor 缺失时替换 tail；cursor 存在时标识由 Mobile 进行连续性校验并 prepend 的旧 page。
+
 ## Endpoint attachment cipher
 
 `deriveCompanionAttachmentKey`、`sealCompanionAttachment`、`openCompanionAttachment` 与 `hashCompanionCiphertext` 以 HKDF-SHA-256 密钥派生和 AES-256-GCM 实现加密 attachment 传输的 endpoint 侧。密封载荷是 `iv(12) ‖ ciphertext ‖ tag(16)`（`COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES` = 28）。两个 endpoint 链接这些函数；Platform blob store 只接收 `sealCompanionAttachment` 的输出及其 SHA-256，永不派生密钥。密钥材料由 Personal Pairing 层提供。100 MiB blob 上限是密文限制；Mobile 会拒绝加上该开销后无法放入上限的明文。

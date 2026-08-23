@@ -106,7 +106,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     })
     await screen.findByRole('treeitem', { name: /Guarded Session/ })
 
-    expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'New ungrouped Session' })).toBeNull()
     fireEvent.click(screen.getByRole('treeitem', { name: /Guarded Session/ }))
     expect(screen.getByRole('button', { name: 'Allow once' }).hasAttribute('disabled')).toBe(false)
     firstChannel.mutations.settle.mockResolvedValueOnce({ accepted: false, reason: 'not-pending' })
@@ -118,7 +118,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       sessionId: 'guarded-session', interactionId: 'guarded-approval',
     }))
     fireEvent.click(screen.getByRole('button', { name: 'Load earlier' }))
-    expect(firstChannel.mutations.loadOlder).toHaveBeenCalledWith('guarded-session')
+    expect(firstChannel.mutations.loadOlder).toHaveBeenCalledWith('guarded-session', 2)
     firstResync.acceptValidatedDesktopResync({
       type: 'desktop-resync', version: 1, authenticated: true, desktopName: 'Guarded Desktop',
       sessions: guardedSessions(),
@@ -177,14 +177,9 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       sessions: guardedSessions(), workspaces: [], conversations: [],
     })
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(true)
-    })
+    await waitFor(() => { expect(screen.queryByRole('button', { name: 'New ungrouped Session' })).toBeNull() })
     expect(visibleMutationControls()).toMatchInlineSnapshot(`
-      [
-        "button:New ungrouped Session:disabled",
-        "button:New Session in Work:disabled",
-      ]
+      []
     `)
 
     fireEvent.click(screen.getByRole('treeitem', { name: /Guarded Session/ }))
@@ -280,8 +275,10 @@ function guardedConversation(complete = false): ValidatedDesktopSurfaceResync['c
 function connectionChannel(attachmentCompletion: Promise<void>) {
   const mutations = {
     create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(),
-    submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(),
-    cancel: vi.fn<MobileCompanionConnectionChannel['mutations']['cancel']>(),
+    submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(() => ({
+      operationId: parseCompanionOperationId('submit-snapshot'), completion: Promise.resolve(),
+    })),
+    cancel: vi.fn<MobileCompanionConnectionChannel['mutations']['cancel']>(() => parseCompanionOperationId('cancel-snapshot')),
     attach: vi.fn<MobileCompanionConnectionChannel['mutations']['attach']>(() => ({
       operationId: parseCompanionOperationId('mobile-snapshot-attachment'),
       completion: attachmentCompletion,
@@ -289,7 +286,7 @@ function connectionChannel(attachmentCompletion: Promise<void>) {
     search: vi.fn<MobileCompanionConnectionChannel['mutations']['search']>(() => (
       parseCompanionOperationId('mobile-snapshot-search')
     )),
-    loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(),
+    loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(() => parseCompanionOperationId('history-snapshot')),
     settle: vi.fn<MobileCompanionConnectionChannel['mutations']['settle']>(),
   }
   return {

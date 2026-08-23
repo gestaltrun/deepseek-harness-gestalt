@@ -63,25 +63,25 @@ describe('MobileCompanionSurface', () => {
     expect(surface.mayMutate()).toBe(false)
   })
 
-  it('binds projection, content, and mutation channels to one physical connection generation', () => {
+  it('binds projection, content, and mutation channels to one physical connection generation', async () => {
     const runtime = connectedRuntime()
     const firstChannel = connectionChannel()
     const surface = new MobileCompanionSurface(runtime)
     const first = surface.bindAuthenticatedConnection(firstChannel)
     if (first === undefined) throw new Error('expected Desktop resync receiver')
     first.acceptValidatedDesktopResync(projection('session-first', 'First'))
-    surface.submit('session-first', 'continue')
+    await surface.submit('session-first', 'continue')
 
     runtime.forgetConnection()
     runtime.markConnectionOpen()
     first.acceptValidatedDesktopResync(projection('session-stale', 'Stale'))
-    expect(() => { surface.submit('session-first', 'stale') }).toThrow('requires foreground synchronization')
+    await expect(surface.submit('session-first', 'stale')).rejects.toThrow('requires foreground synchronization')
 
     const replacementChannel = connectionChannel()
     const replacement = surface.bindAuthenticatedConnection(replacementChannel)
     if (replacement === undefined) throw new Error('expected replacement resync receiver')
     replacement.acceptValidatedDesktopResync(projection('session-replacement', 'Replacement'))
-    surface.submit('session-replacement', 'current')
+    await surface.submit('session-replacement', 'current')
 
     expect(firstChannel.mutations.submit).toHaveBeenCalledTimes(1)
     expect(firstChannel.mutations.submit).toHaveBeenCalledWith('session-first', 'continue')
@@ -104,7 +104,7 @@ describe('MobileCompanionSurface', () => {
     const replacement = surface.bindAuthenticatedConnection(replacementChannel)
     if (replacement === undefined) throw new Error('expected replacement resync receiver')
     const dispose = runtime.subscribe(() => {
-      if (runtime.getState().synchronized) surface.submit('session-two', 'during synchronized publication')
+      if (runtime.getState().synchronized) void surface.submit('session-two', 'during synchronized publication')
     })
     replacement.acceptValidatedDesktopResync(projection('session-two', 'Two'))
     dispose()
@@ -203,9 +203,16 @@ describe('MobileCompanionSurface', () => {
     const surface = new MobileCompanionSurface(runtime)
     const first = surface.bindAuthenticatedConnection(firstChannel)
     if (first === undefined) throw new Error('expected Desktop resync receiver')
-    first.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    const baseline = projection('session-one', 'One')
+    first.acceptValidatedDesktopResync({
+      ...baseline,
+      conversations: baseline.conversations.map(conversation => ({
+        ...conversation,
+        nodes: [{ kind: 'user', seq: 8, time: 1, content: [], source: {} }],
+      })),
+    })
     surface.loadOlder('session-one')
-    expect(firstChannel.mutations.loadOlder).toHaveBeenCalledWith('session-one')
+    expect(firstChannel.mutations.loadOlder).toHaveBeenCalledWith('session-one', 8)
 
     runtime.forgetConnection()
     runtime.markConnectionOpen()
@@ -244,6 +251,32 @@ describe('MobileCompanionSurface', () => {
       status: 'error',
       error: { kind: 'http', code: 'HOST_HTTP_STATUS', status: 400 },
     })
+  })
+
+  it('surfaces correlated prompt and history failures', async () => {
+    const runtime = connectedRuntime()
+    const channel = connectionChannel()
+    const surface = new MobileCompanionSurface(runtime)
+    const resync = surface.bindAuthenticatedConnection(channel)
+    if (resync === undefined) throw new Error('expected current generation receiver')
+    resync.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected current generation result receiver')
+
+    const submission = surface.submit('session-one', 'failing prompt')
+    results.acceptValidatedCompanionResult({
+      type: 'operation-failed', operationId: parseCompanionOperationId('submit-default'),
+      failure: { kind: 'business', code: 'prompt-refused', message: 'Desktop rejected the prompt' },
+    })
+    await submission
+    expect(surface.getSnapshot().operationFailure?.message).toBe('Desktop rejected the prompt')
+
+    surface.loadOlder('session-one')
+    results.acceptValidatedCompanionResult({
+      type: 'operation-failed', operationId: parseCompanionOperationId('history-default'),
+      failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'History timed out' },
+    })
+    expect(surface.getSnapshot().operationFailure?.message).toBe('History timed out')
   })
 
   it('correlates attachment rejection, Host failure, and uncertain delivery instead of discarding them', async () => {
@@ -454,8 +487,12 @@ function connectionChannel(options?: {
 }) {
   const mutations = {
     create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(),
-    submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(),
-    cancel: vi.fn<MobileCompanionConnectionChannel['mutations']['cancel']>(),
+    submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(() => ({
+      operationId: parseCompanionOperationId('submit-default'), completion: Promise.resolve(),
+    })),
+    cancel: vi.fn<MobileCompanionConnectionChannel['mutations']['cancel']>(() => (
+      parseCompanionOperationId('cancel-default')
+    )),
     attach: vi.fn<MobileCompanionConnectionChannel['mutations']['attach']>(() => ({
       operationId: parseCompanionOperationId(options?.attachmentOperationId ?? 'attachment-default'),
       completion: options?.attachmentCompletion ?? Promise.resolve(),
@@ -463,7 +500,9 @@ function connectionChannel(options?: {
     search: vi.fn<MobileCompanionConnectionChannel['mutations']['search']>(() => (
       parseCompanionOperationId('search-needle')
     )),
-    loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(),
+    loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(() => (
+      parseCompanionOperationId('history-default')
+    )),
     settle: vi.fn<MobileCompanionConnectionChannel['mutations']['settle']>(),
   }
   return {

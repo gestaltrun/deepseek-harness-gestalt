@@ -168,7 +168,7 @@ export class DesktopSnowRelayChannelOwner {
         if (!this.isCurrent(current, pairingSelector, projected)) {
           throw new Error('Desktop Relay rejected a stale Companion operation result')
         }
-        const outputs = Array.isArray(output) ? output : [output]
+        const outputs = isCompanionResultList(output) ? output : [output]
         for (const item of outputs) {
           if (!this.isCurrent(current, pairingSelector, projected)) {
             throw new Error('Desktop Relay rejected a stale Companion operation result')
@@ -230,6 +230,12 @@ function isCompanionProjection(
 ): value is CompanionProjection {
   return value.type === 'foreground-sync' || value.type === 'transcript-page'
     || value.type === 'surface-snapshot' || value.type === 'conversation-snapshot'
+}
+
+function isCompanionResultList(
+  value: CompanionResult | CompanionProjection | readonly CompanionResult[],
+): value is readonly CompanionResult[] {
+  return Array.isArray(value)
 }
 
 /**

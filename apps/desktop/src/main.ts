@@ -29,6 +29,8 @@ import {
   parseCompanionOperationId,
   REMOTE_PROTOCOL_LIMITS,
   type CompanionOperation,
+  type CompanionResult,
+  type CompanionSessionSearchResult,
   type RelayPairingSelector,
   type CompanionSearchSessionsOperation,
 } from '@deepseek-ai/dsh-remote-protocol'
@@ -549,14 +551,14 @@ async function finishSmoke(target: BrowserWindow, hostUrl: string): Promise<void
   const searchDeadline = Date.now() + 10_000
   while (
     Date.now() < searchDeadline
-    && (hitEvidence.type !== 'session-search'
+    && (!isSessionSearchResult(hitEvidence)
       || hitEvidence.items.every(item => item.sessionId !== sessionId || !item.snippet.includes(needle)))
   ) {
     await new Promise(resolve => setTimeout(resolve, 50))
     hitEvidence = await companionProduct.handle(hitOperation, dependencies)
   }
   smokeLog(`companion entry search hit ${JSON.stringify(hitEvidence)}`)
-  if (hitEvidence.type !== 'session-search'
+  if (!isSessionSearchResult(hitEvidence)
     || hitEvidence.items.every(item => item.sessionId !== sessionId || !item.snippet.includes(needle))) {
     console.error('dsh desktop smoke: Companion entry indexed search failed', hitEvidence)
     requestShutdown(1)
@@ -568,7 +570,7 @@ async function finishSmoke(target: BrowserWindow, hostUrl: string): Promise<void
     query: 'desktop-companion-smoke-no-hit',
   }, dependencies)
   smokeLog(`companion entry search no-hit ${JSON.stringify(noHitEvidence)}`)
-  if (noHitEvidence.type !== 'session-search' || noHitEvidence.items.length !== 0) {
+  if (!isSessionSearchResult(noHitEvidence) || noHitEvidence.items.length !== 0) {
     console.error('dsh desktop smoke: Companion entry no-hit search failed', noHitEvidence)
     requestShutdown(1)
     return
@@ -762,4 +764,16 @@ function escapeHtml(value: string): string {
     if (ch === '"') return '&quot;'
     return '&#39;'
   })
+}
+
+function isSessionSearchResult(
+  output: DesktopCompanionOperationOutput,
+): output is CompanionSessionSearchResult {
+  return !isCompanionResultList(output) && output.type === 'session-search'
+}
+
+function isCompanionResultList(
+  output: DesktopCompanionOperationOutput,
+): output is readonly CompanionResult[] {
+  return Array.isArray(output)
 }

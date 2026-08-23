@@ -82,6 +82,8 @@ export interface MobileCompanionSurfaceSnapshot {
   readonly search: MobileCompanionSearchSnapshot
   /** Latest selected-file transfer and its correlated Desktop outcome. */
   readonly attachment: MobileCompanionAttachmentSnapshot
+  /** Latest correlated non-attachment product failure. */
+  readonly operationFailure?: CompanionHostFailure | undefined
 }
 
 /** One selected-file transfer started by the encrypted Companion channel. */
@@ -90,14 +92,19 @@ interface MobileCompanionAttachmentSubmission {
   readonly completion: Promise<void>
 }
 
+interface MobileCompanionMutationSubmission {
+  readonly operationId: CompanionOperationId
+  readonly completion: Promise<void>
+}
+
 /** Encrypted mutations owned by one authenticated physical connection. */
 export interface MobileCompanionMutationChannel {
   create(input: { workspace?: string }): void
-  submit(sessionId: string, text: string): void
-  cancel(sessionId: string): void
+  submit(sessionId: string, text: string): MobileCompanionMutationSubmission
+  cancel(sessionId: string): CompanionOperationId
   attach(sessionId: string, file: File): MobileCompanionAttachmentSubmission
   search(query: string): CompanionOperationId
-  loadOlder(sessionId: string): void
+  loadOlder(sessionId: string, beforeSeq?: number): CompanionOperationId
   settle(settlement: MobilePendingSettlement): Promise<MobilePendingSettlementReceipt>
 }
 
@@ -134,6 +141,7 @@ export class MobileCompanionSurface {
   }
   #searchOperationId: CompanionOperationId | undefined
   #attachmentOperationId: CompanionOperationId | undefined
+  readonly #operations = new Map<CompanionOperationId, 'submit' | 'cancel' | 'history'>()
 
   /** @param runtime - current physical-connection synchronization authority. */
   constructor(runtime: CompanionForegroundRuntime) { this.#runtime = runtime }
@@ -144,6 +152,12 @@ export class MobileCompanionSurface {
   subscribe(listener: () => void): () => void {
     this.#listeners.add(listener)
     return () => { this.#listeners.delete(listener) }
+  }
+
+  /** Publish one authenticated product failure not owned by search or attachment state. */
+  acceptOperationFailure(failure: CompanionHostFailure): void {
+    this.#snapshot = { ...this.#snapshot, operationFailure: failure }
+    this.publish()
   }
 
   /** @returns whether current synchronization and its bound encrypted channel admit mutations. */
@@ -196,12 +210,15 @@ export class MobileCompanionSurface {
     this.transmit('session-create', (channel) => { channel.mutations.create(input) })
   }
 
-  readonly submit = (sessionId: string, text: string): void => {
-    this.transmit('prompt', (channel) => { channel.mutations.submit(sessionId, text) })
+  readonly submit = async (sessionId: string, text: string): Promise<void> => {
+    const submission = this.transmit('prompt', channel => channel.mutations.submit(sessionId, text))
+    this.#operations.set(submission.operationId, 'submit')
+    await submission.completion
   }
 
   readonly cancel = (sessionId: string): void => {
-    this.transmit('cancel', (channel) => { channel.mutations.cancel(sessionId) })
+    const operationId = this.transmit('cancel', channel => channel.mutations.cancel(sessionId))
+    this.#operations.set(operationId, 'cancel')
   }
 
   readonly attach = (sessionId: string, file: File): void => {
@@ -255,7 +272,10 @@ export class MobileCompanionSurface {
   }
 
   readonly loadOlder = (sessionId: string): void => {
-    this.transmit('history', (channel) => { channel.mutations.loadOlder(sessionId) })
+    const conversation = this.#snapshot.conversations[sessionId as SessionId]
+    const beforeSeq = conversation === undefined ? undefined : oldestNodeSeq(conversation)
+    const operationId = this.transmit('history', channel => channel.mutations.loadOlder(sessionId, beforeSeq))
+    this.#operations.set(operationId, 'history')
   }
 
   readonly loadImage = async (sessionId: string, attachment: ImageAttachmentRef): Promise<string> => {
@@ -303,6 +323,16 @@ export class MobileCompanionSurface {
           hasMore: this.#snapshot.search.hasMore,
           error: result.failure,
         },
+      }
+      this.publish()
+      return
+    }
+    const operation = this.#operations.get(result.operationId)
+    if (operation !== undefined && (result.type === 'confirmed' || result.type === 'operation-failed')) {
+      this.#operations.delete(result.operationId)
+      this.#snapshot = {
+        ...this.#snapshot,
+        operationFailure: result.type === 'operation-failed' ? result.failure : undefined,
       }
       this.publish()
       return
@@ -383,4 +413,13 @@ export class MobileCompanionSurface {
       console.error('[companion-surface] subscriber failures:', new AggregateError(errors))
     }
   }
+}
+
+function oldestNodeSeq(conversation: ConversationSnapshot): number | undefined {
+  let oldest: number | undefined
+  for (const node of conversation.nodes) {
+    if (!Number.isSafeInteger(node.seq) || node.seq < 0) continue
+    if (oldest === undefined || node.seq < oldest) oldest = node.seq
+  }
+  return oldest
 }

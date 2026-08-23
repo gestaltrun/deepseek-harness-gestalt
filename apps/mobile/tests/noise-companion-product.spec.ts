@@ -66,11 +66,12 @@ describe('Mobile Snow Companion product channel', () => {
       attachmentKeys: { attachmentKeyMaterial: () => undefined },
       platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
     })
-    product.submit('session-refresh', 'next prompt')
+    const submission = product.submit('session-refresh', 'next prompt')
     const submit = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
     product.acceptResult({
       type: 'confirmed', operationId: submit.operationId as never, committedAt: 1, outcome: 'accepted',
     })
+    await expect(submission.completion).resolves.toBeUndefined()
     await vi.waitFor(() => {
       expect(seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type))
         .toEqual(['submit-prompt', 'load-history', 'refresh-surface'])
@@ -85,6 +86,30 @@ describe('Mobile Snow Companion product channel', () => {
       expect(seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type).slice(-3))
         .toEqual(['cancel-session', 'load-history', 'refresh-surface'])
     })
+  })
+
+  it('rejects prompt completion with the correlated Desktop failure', async () => {
+    const runtime = synchronizedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    const seal = vi.fn((_message: unknown) => Uint8Array.of(1))
+    connection.connect({
+      channel: { seal } as never,
+      targetAttachmentId: parseRelayAttachmentId('desktop-submit-failure'),
+      pairingSelector: parseRelayPairingSelector('pairing-submit-failure'),
+      generation: 3,
+    })
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection,
+      installation: { authorizeCurrentInstallation: vi.fn() },
+      attachmentKeys: { attachmentKeyMaterial: () => undefined },
+      platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
+    })
+    const submission = product.submit('session-submit-failure', 'will fail')
+    product.acceptResult({
+      type: 'operation-failed', operationId: submission.operationId,
+      failure: { kind: 'business', code: 'prompt-refused', message: 'Desktop rejected the prompt' },
+    })
+    await expect(submission.completion).rejects.toThrow('Desktop rejected the prompt')
   })
 
   it('assembles and verifies exact historical image bytes', async () => {

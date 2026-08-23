@@ -10,6 +10,7 @@ import {
   REMOTE_PROTOCOL_LIMITS,
   type CompanionOperation,
   type CompanionOperationId,
+  type CompanionHostFailure,
   type CompanionResult,
   type RelayAttachmentId,
   type RelayPairingSelector,
@@ -67,11 +68,18 @@ export interface MobileSnowCompanionProductOptions {
   platformOrigin: string
   sendCiphertext(targetAttachmentId: RelayAttachmentId, ciphertext: Uint8Array): Promise<void>
   reportFailure?(error: unknown): void
+  reportOperationFailure?(failure: CompanionHostFailure): void
 }
 
 /** Stable Mobile UI adapter whose every send revalidates current foreground generation. */
 export class MobileSnowCompanionProductChannel implements MobileCompanionMutationChannel {
   private readonly refreshAfterConfirmation = new Map<CompanionOperationId, string>()
+  private readonly confirmations = new Map<CompanionOperationId, {
+    active: ActiveMobileSnowChannel
+    sessionId: string
+    resolve(): void
+    reject(error: unknown): void
+  }>()
   private readonly settlements = new Map<CompanionOperationId, {
     active: ActiveMobileSnowChannel
     sessionId: string
@@ -97,23 +105,34 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
 
   create(): never { throw new Error('Companion Session creation is unavailable in this protocol version') }
 
-  submit(sessionId: string, text: string): void {
+  submit(sessionId: string, text: string): { operationId: CompanionOperationId; completion: Promise<void> } {
     const operationIdValue = operationId()
-    this.refreshAfterConfirmation.set(operationIdValue, sessionId)
-    this.sendDetached({
+    const operation: CompanionOperation = {
       type: 'submit-prompt',
       operationId: operationIdValue,
       sessionId: parseCompanionSessionId(sessionId),
       text,
+    }
+    const active = this.requireActive()
+    const permit = this.options.runtime.bindCompanionMutationPermit('prompt')
+    if (permit === undefined) throw new Error('Companion prompt has no current connection generation')
+    const completion = new Promise<void>((resolve, reject) => {
+      this.confirmations.set(operationIdValue, { active, sessionId, resolve, reject })
+      void this.sendCurrent(active, { type: 'operation', operation }, permit).catch((error: unknown) => {
+        this.confirmations.delete(operationIdValue)
+        reject(asError(error, 'Companion prompt send failed'))
+      })
     })
+    return { operationId: operationIdValue, completion }
   }
 
-  cancel(sessionId: string): void {
+  cancel(sessionId: string): CompanionOperationId {
     const operationIdValue = operationId()
     this.refreshAfterConfirmation.set(operationIdValue, sessionId)
     this.sendDetached({
       type: 'cancel-session', operationId: operationIdValue, sessionId: parseCompanionSessionId(sessionId),
     })
+    return operationIdValue
   }
 
   attach(sessionId: string, file: File): { operationId: ReturnType<typeof parseCompanionOperationId>; completion: Promise<void> } {
@@ -151,15 +170,20 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
   }
 
   /** Request the current Desktop Session and Workspace baseline after foreground synchronization. */
-  refreshSurface(): void {
-    this.sendDetached({ type: 'refresh-surface', operationId: operationId() })
+  refreshSurface(): CompanionOperationId {
+    const operationIdValue = operationId()
+    this.sendDetached({ type: 'refresh-surface', operationId: operationIdValue })
+    return operationIdValue
   }
 
-  loadOlder(sessionId: string): void {
+  loadOlder(sessionId: string, beforeSeq?: number): CompanionOperationId {
+    const operationIdValue = operationId()
     this.sendDetached({
-      type: 'load-history', operationId: operationId(), sessionId: parseCompanionSessionId(sessionId),
+      type: 'load-history', operationId: operationIdValue, sessionId: parseCompanionSessionId(sessionId),
+      ...(beforeSeq === undefined ? {} : { beforeSeq }),
       maxMessages: REMOTE_PROTOCOL_LIMITS.historyPageMessages,
     })
+    return operationIdValue
   }
 
   settle(settlement: MobilePendingSettlement): Promise<MobilePendingSettlementReceipt> {
@@ -181,7 +205,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
       }
       void this.sendCurrent(active, { type: 'operation', operation }, permit).catch((error: unknown) => {
         this.settlements.delete(operationIdValue)
-        reject(error)
+        reject(asError(error, 'Companion interaction send failed'))
       })
     })
   }
@@ -207,7 +231,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
       }
       void this.sendCurrent(active, { type: 'operation', operation }, permit).catch((error: unknown) => {
         this.images.delete(operationIdValue)
-        reject(error)
+        reject(asError(error, 'Companion image send failed'))
       })
     })
   }
@@ -215,7 +239,12 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
   /** Accept one result already authenticated by the current physical Snow receiver. */
   acceptResult(result: CompanionResult): void {
     if (result.type === 'operation-failed') {
-      this.refreshAfterConfirmation.delete(result.operationId)
+      const detached = this.refreshAfterConfirmation.delete(result.operationId)
+      const confirmation = this.confirmations.get(result.operationId)
+      if (confirmation !== undefined) {
+        this.confirmations.delete(result.operationId)
+        confirmation.reject(new Error(result.failure.message))
+      }
       const image = this.images.get(result.operationId)
       if (image !== undefined) {
         this.images.delete(result.operationId)
@@ -226,9 +255,23 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
         this.settlements.delete(result.operationId)
         settlement.reject(new Error(result.failure.message))
       }
+      if (!detached && confirmation === undefined && image === undefined && settlement === undefined) {
+        this.options.reportOperationFailure?.(result.failure)
+      }
       return
     }
     if (result.type === 'confirmed') {
+      const confirmation = this.confirmations.get(result.operationId)
+      if (confirmation !== undefined) {
+        this.confirmations.delete(result.operationId)
+        if (this.options.connection.current() !== confirmation.active) {
+          confirmation.reject(new Error('Companion confirmation belongs to a stale connection generation'))
+          return
+        }
+        confirmation.resolve()
+        this.queueRefresh(confirmation.sessionId)
+        return
+      }
       const sessionId = this.refreshAfterConfirmation.get(result.operationId)
       if (sessionId === undefined) return
       this.refreshAfterConfirmation.delete(result.operationId)
@@ -268,7 +311,10 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     pending.chunks.push(decodeProtocolBase64Url(result.data, REMOTE_PROTOCOL_LIMITS.imageChunkBytes, 'Companion image chunk'))
     if (pending.chunks.length !== result.count) return
     this.images.delete(result.operationId)
-    void finishImage(pending).then(pending.resolve, pending.reject)
+    void finishImage(pending).then(
+      (value) => { pending.resolve(value) },
+      (error: unknown) => { pending.reject(asError(error, 'Companion image verification failed')) },
+    )
   }
 
   private sendDetached(operation: CompanionOperation): void {
@@ -315,14 +361,20 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     const error = new Error('Companion operation belongs to a disconnected connection generation')
     for (const pending of this.settlements.values()) pending.reject(error)
     for (const pending of this.images.values()) pending.reject(error)
+    for (const pending of this.confirmations.values()) pending.reject(error)
     this.settlements.clear()
     this.images.clear()
+    this.confirmations.clear()
     this.refreshAfterConfirmation.clear()
   }
 }
 
 function operationId(): ReturnType<typeof parseCompanionOperationId> {
   return parseCompanionOperationId(crypto.randomUUID())
+}
+
+function asError(value: unknown, fallback: string): Error {
+  return value instanceof Error ? value : new Error(fallback, { cause: value })
 }
 
 function interactionSettlement(

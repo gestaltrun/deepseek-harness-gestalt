@@ -223,6 +223,7 @@ async function mountMobileProduct(): Promise<void> {
         await relay.sendCiphertext(targetAttachmentId, ciphertext)
       },
       reportFailure: (error) => { console.error('[mobile-companion] encrypted operation failed:', error) },
+      reportOperationFailure: (failure) => { companionSurface?.acceptOperationFailure(failure) },
     })
     companionChannel = productChannel
     companionConnectionChannel = {

@@ -158,11 +158,10 @@ export class DesktopCompanionProductOwner {
     })
     return await this.ledger.execute(dependencies.pairingId, operation, async () => {
       const output = await execute()
-      if (Array.isArray(output) || output.type === 'surface-snapshot' || output.type === 'conversation-snapshot'
-        || output.type === 'transcript-page' || output.type === 'foreground-sync') {
+      if (isCompanionResultList(output) || isCompanionProjectionOutput(output)) {
         throw new Error('Desktop Companion mutation produced a projection')
       }
-      return output as CompanionResult
+      return output
     })
   }
 
@@ -247,8 +246,9 @@ async function refreshSurface(
   if (!sessionResponse.ok) return operationFailed(operation, normalizeFailure(sessionResponse.failure))
   if (!workspaceResponse.ok) return operationFailed(operation, normalizeFailure(workspaceResponse.failure))
   const sessions = parseSurfaceSessions(sessionResponse.value)
+  if (sessions === undefined) return invalidHostResult(operation, 'surface baseline')
   const workspaces = parseSurfaceWorkspaces(workspaceResponse.value, new Set(sessions.map(session => session.sessionId)))
-  if (sessions === undefined || workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
+  if (workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
   return {
     type: 'surface-snapshot', operationId: operation.operationId,
     generation: dependencies.generation, desktopRevision: dependencies.desktopRevision,
@@ -261,20 +261,29 @@ async function loadHistory(
   operation: Extract<CompanionProductOperation, { type: 'load-history' }>,
   dependencies: CompanionProductOperationDependencies,
 ): Promise<CompanionProjection | CompanionOperationFailedResult> {
-  const response = await dependencies.host.call('session.history', {
-    sessionId: operation.sessionId,
-    ...(operation.beforeSeq === undefined ? {} : { beforeSeq: operation.beforeSeq }),
-    maxMessages: operation.maxMessages,
-  })
+  const [response, sessionsResponse] = await Promise.all([
+    dependencies.host.call('session.history', {
+      sessionId: operation.sessionId,
+      ...(operation.beforeSeq === undefined ? {} : { beforeSeq: operation.beforeSeq }),
+      maxMessages: operation.maxMessages,
+    }),
+    dependencies.host.call('session.list', {}),
+  ])
   if (!response.ok) return operationFailed(operation, normalizeFailure(response.failure))
+  if (!sessionsResponse.ok) return operationFailed(operation, normalizeFailure(sessionsResponse.failure))
+  const sessions = parseSurfaceSessions(sessionsResponse.value)
+  const session = sessions?.find(candidate => candidate.sessionId === operation.sessionId)
+  if (session === undefined) return invalidHostResult(operation, 'history Session status')
   const conversation = parseConversationHistory(
-    response.value, operation.sessionId, dependencies.pendingInteractions(operation.sessionId),
+    response.value, operation.sessionId, dependencies.pendingInteractions(operation.sessionId), session.running,
   )
   if (conversation === undefined) return invalidHostResult(operation, 'history')
   return {
     type: 'conversation-snapshot', operationId: operation.operationId,
     generation: dependencies.generation, desktopRevision: dependencies.desktopRevision,
-    sessionId: operation.sessionId, conversation,
+    sessionId: operation.sessionId,
+    ...(operation.beforeSeq === undefined ? {} : { beforeSeq: operation.beforeSeq }),
+    conversation,
   }
 }
 
@@ -299,7 +308,7 @@ async function settleInteraction(
     || (operation.settlement.kind === 'approval' ? pending.kind !== 'approval' : pending.kind !== 'question')) {
     return { type: 'interaction-receipt', operationId: operation.operationId, accepted: false, reason: 'not-pending' }
   }
-  const respond = dependencies.host.respond
+  const respond = dependencies.host.respond?.bind(dependencies.host)
   if (respond === undefined) return operationFailed(operation, {
     kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Host interaction response is unavailable',
   })
@@ -511,18 +520,30 @@ function parseConversationHistory(
   value: unknown,
   sessionId: CompanionSessionId,
   pending: readonly unknown[],
+  running: boolean,
 ): Record<string, unknown> | undefined {
   if (!isRecord(value) || !Array.isArray(value.events) || typeof value.hasMore !== 'boolean') return undefined
   const nodes: Array<Record<string, unknown>> = []
   const calls = new Map<string, { name: string; argsRaw: string; time: number; view: unknown }>()
+  const steps = new Map<number, number>()
   for (const entryValue of value.events) {
     if (!isRecord(entryValue) || !isRecord(entryValue.event)) return undefined
     const event = entryValue.event
     if (!Number.isSafeInteger(event.seq) || typeof event.time !== 'number' || !isRecord(event.data)) return undefined
     if (event.type === 'user/message') {
       if (!Array.isArray(event.data.content)) return undefined
-      nodes.push({ kind: event.data.source && isRecord(event.data.source) && event.data.source.kind === 'user' ? 'user' : 'context',
-        seq: event.seq, time: event.time, content: event.data.content, source: event.data.source ?? {} })
+      const source = event.data.source ?? {}
+      const sourceKind = isRecord(source) ? source.kind : undefined
+      if (sourceKind === 'user') {
+        nodes.push({ kind: 'user', seq: event.seq, time: event.time, content: event.data.content, source })
+      } else if (sourceKind === 'steering' && typeof event.data.id === 'string') {
+        nodes.push({
+          kind: 'steering', messageId: event.data.id, seq: event.seq, time: event.time,
+          content: event.data.content, source,
+        })
+      } else {
+        nodes.push({ kind: 'unknown', seq: event.seq, time: event.time, type: event.type, data: event.data })
+      }
     } else if (event.type === 'assistant/message') {
       const message = event.data.message
       if (!isRecord(message) || !Array.isArray(message.content)) return undefined
@@ -551,15 +572,35 @@ function parseConversationHistory(
         call: call === undefined ? null : { name: call.name, argsRaw: call.argsRaw },
         callTime: call?.time ?? null, content: message.content,
         isError: event.data.isError === true, callView: call?.view ?? null,
+        ...(isRecord(event.data.error) && typeof event.data.error.name === 'string'
+          && typeof event.data.error.code === 'string' ? { error: event.data.error } : {}),
+        ...(event.data.meta === undefined ? {} : { meta: event.data.meta }),
         resultView: entryValue.view ?? null, subCalls: [],
       })
+    } else if (event.type === 'step/start') {
+      if (!Number.isSafeInteger(event.data.turn) || !Number.isSafeInteger(event.data.step)) return undefined
+      steps.set(event.data.turn as number, event.data.step as number)
+    } else if (event.type === 'turn/end') {
+      if (!Number.isSafeInteger(event.data.turn) || !isRecord(event.data.reason)) return undefined
+      const turn = event.data.turn as number
+      if (event.data.reason.kind === 'error') {
+        const error = event.data.reason.error
+        if (!isRecord(error) || typeof error.message !== 'string') return undefined
+        nodes.push({
+          kind: 'turn-error', seq: event.seq, time: event.time, turn, step: steps.get(turn) ?? 0,
+          message: error.message,
+          ...(typeof error.code === 'string' ? { code: error.code } : {}),
+        })
+      } else if (event.data.reason.kind === 'max-tokens') {
+        nodes.push({ kind: 'turn-max-tokens', seq: event.seq, time: event.time, turn, step: steps.get(turn) ?? 0 })
+      }
     }
   }
   return {
     sessionId,
     nodes,
     turnTimings: [], turnEnds: [], partial: null, runningCalls: [], pending, queue: [],
-    running: false, subagent: null, composerPhase: nodes.length === 0 ? 'pristine' : 'active',
+    running, subagent: null, composerPhase: nodes.length === 0 && !running ? 'pristine' : 'active',
     removed: false, openState: 'open', openError: null, hasMore: value.hasMore,
     loadingOlder: false, promptError: null, blank: nodes.length === 0, lastAgentError: null,
   }
@@ -593,6 +634,19 @@ function invalidHostResult(
 function isLedgerMutation(operation: CompanionProductOperation): boolean {
   return operation.type === 'submit-prompt' || operation.type === 'cancel-session'
     || operation.type === 'settle-interaction' || operation.type === 'offer-attachment'
+}
+
+function isCompanionResultList(
+  output: DesktopCompanionOperationOutput,
+): output is readonly CompanionResult[] {
+  return Array.isArray(output)
+}
+
+function isCompanionProjectionOutput(
+  output: CompanionResult | CompanionProjection,
+): output is CompanionProjection {
+  return output.type === 'surface-snapshot' || output.type === 'conversation-snapshot'
+    || output.type === 'transcript-page' || output.type === 'foreground-sync'
 }
 
 function attachmentRejected(

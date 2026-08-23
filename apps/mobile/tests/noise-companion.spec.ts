@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parseRelayCredential, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  parseCompanionOperationId, parseCompanionSessionId, parseRelayCredential, parseRelayRouteId,
+} from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionForegroundRuntime, companionMayMutate } from '../src/companion-lifecycle.ts'
 import { MobileNoiseCompanionReceiver } from '../src/noise-companion.ts'
+import type { MobileCompanionProjectionDto } from '../src/companion-projection.ts'
 
 describe('Mobile Noise Companion receiver', () => {
   it('grants mutation authority only after authenticated generation-matching synchronization', () => {
@@ -59,7 +62,7 @@ describe('Mobile Noise Companion receiver', () => {
 
   it('requests and applies v3 surface and conversation projections on the synchronized receiver', () => {
     const runtime = connectedRuntime()
-    const acceptValidatedDesktopResync = vi.fn()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
     const refreshSurface = vi.fn()
     const messages = [
       {
@@ -84,12 +87,25 @@ describe('Mobile Noise Companion receiver', () => {
       {
         type: 'projection' as const,
         projection: {
-          type: 'conversation-snapshot' as const, operationId: 'history-v3' as never,
-          generation: 2, desktopRevision: 7, sessionId: 'session-v3' as never,
+          type: 'conversation-snapshot' as const, operationId: parseCompanionOperationId('history-v3'),
+          generation: 2, desktopRevision: 7, sessionId: parseCompanionSessionId('session-v3'),
           conversation: {
-            sessionId: 'session-v3', nodes: [], turnTimings: [], turnEnds: [], partial: null,
+            sessionId: 'session-v3', nodes: [{ kind: 'user', seq: 5, time: 5, content: [], source: {} }], turnTimings: [], turnEnds: [], partial: null,
             runningCalls: [], pending: [], queue: [], running: false, subagent: null,
             composerPhase: 'active', removed: false, openState: 'open', openError: null,
+            hasMore: false, loadingOlder: false, promptError: null, blank: false, lastAgentError: null,
+          },
+        },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'conversation-snapshot' as const, operationId: parseCompanionOperationId('history-older-v3'),
+          generation: 2, desktopRevision: 7, sessionId: parseCompanionSessionId('session-v3'), beforeSeq: 5,
+          conversation: {
+            sessionId: 'session-v3', nodes: [{ kind: 'user', seq: 2, time: 2, content: [], source: {} }],
+            turnTimings: [], turnEnds: [], partial: null, runningCalls: [], pending: [], queue: [], running: false,
+            subagent: null, composerPhase: 'active', removed: false, openState: 'open', openError: null,
             hasMore: false, loadingOlder: false, promptError: null, blank: false, lastAgentError: null,
           },
         },
@@ -102,12 +118,13 @@ describe('Mobile Noise Companion receiver', () => {
     receiver.receive(Uint8Array.of(1))
     receiver.receive(Uint8Array.of(2))
     receiver.receive(Uint8Array.of(3))
+    receiver.receive(Uint8Array.of(4))
     expect(refreshSurface).toHaveBeenCalledOnce()
-    expect(acceptValidatedDesktopResync).toHaveBeenLastCalledWith(expect.objectContaining({
-      desktopName: 'Authenticated Desktop',
-      sessions: expect.objectContaining({ ids: ['session-v3'] }),
-      conversations: [expect.objectContaining({ sessionId: 'session-v3' })],
-    }))
+    const resync = acceptValidatedDesktopResync.mock.lastCall?.[0]
+    expect(resync?.desktopName).toBe('Authenticated Desktop')
+    expect(resync?.sessions.ids).toEqual(['session-v3'])
+    expect(resync?.conversations.map(conversation => conversation.sessionId)).toEqual(['session-v3'])
+    expect(resync?.conversations[0]?.nodes.map(node => node.seq)).toEqual([2, 5])
   })
 })
 

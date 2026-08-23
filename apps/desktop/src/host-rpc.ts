@@ -144,8 +144,8 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
       if (!isRecord(value) || typeof value.accepted !== 'boolean') {
         throw new Error('Desktop Host interaction receipt was invalid')
       }
-      if (value.accepted === true && Object.keys(value).length === 1) return { accepted: true }
-      if (value.accepted === false && Object.keys(value).length === 2
+      if (value.accepted && Object.keys(value).length === 1) return { accepted: true }
+      if (!value.accepted && Object.keys(value).length === 2
         && (value.reason === 'not-pending' || value.reason === 'bad-response')) {
         return { accepted: false, reason: value.reason }
       }
@@ -159,9 +159,15 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
       let buffer = ''
       try {
         while (true) {
-          const { done, value } = await reader.read()
-          if (done) return
-          buffer += decoder.decode(value, { stream: true })
+          const readResult: unknown = await reader.read()
+          if (!isRecord(readResult) || typeof readResult.done !== 'boolean') {
+            throw new Error('Desktop Host interaction stream returned an invalid read result')
+          }
+          if (readResult.done) return
+          if (!(readResult.value instanceof Uint8Array)) {
+            throw new Error('Desktop Host interaction stream returned an invalid byte chunk')
+          }
+          buffer += decoder.decode(readResult.value, { stream: true })
           if (new TextEncoder().encode(buffer).byteLength > REMOTE_PROTOCOL_LIMITS.companionMessageBytes) {
             throw new Error('Desktop Host interaction stream frame exceeded its byte ceiling')
           }

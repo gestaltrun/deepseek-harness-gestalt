@@ -125,7 +125,14 @@ export class MobileNoiseCompanionReceiver {
     if (!isRecord(projection.conversation) || projection.conversation.sessionId !== projection.sessionId) {
       throw new Error('Authenticated Companion conversation projection is invalid')
     }
-    this.conversations.set(projection.sessionId, projection.conversation as unknown as MobileConversationProjectionDto)
+    const conversation = projection.conversation as unknown as MobileConversationProjectionDto
+    if (projection.beforeSeq === undefined) {
+      this.conversations.set(projection.sessionId, conversation)
+    } else {
+      const current = this.conversations.get(projection.sessionId)
+      if (current === undefined) throw new Error('Authenticated older Companion page has no current conversation')
+      this.conversations.set(projection.sessionId, prependConversationPage(current, conversation, projection.beforeSeq))
+    }
     this.publishSurface()
   }
 
@@ -159,4 +166,36 @@ function emptySessions(): MobileCompanionProjectionDto['sessions'] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function prependConversationPage(
+  current: MobileConversationProjectionDto,
+  older: MobileConversationProjectionDto,
+  beforeSeq: number,
+): MobileConversationProjectionDto {
+  if (older.sessionId !== current.sessionId || older.nodes.some(node => nodeSeq(node) >= beforeSeq)) {
+    throw new Error('Authenticated older Companion page is discontinuous')
+  }
+  const currentSeqs = new Set(current.nodes.map(nodeSeq))
+  if (older.nodes.some(node => currentSeqs.has(nodeSeq(node)))) {
+    throw new Error('Authenticated older Companion page repeats a current node')
+  }
+  return {
+    ...current,
+    nodes: [...older.nodes, ...current.nodes],
+    hasMore: older.hasMore,
+    pending: older.pending,
+    running: older.running,
+    composerPhase: older.composerPhase,
+    promptError: older.promptError,
+    lastAgentError: older.lastAgentError,
+    loadingOlder: false,
+  }
+}
+
+function nodeSeq(node: unknown): number {
+  if (!isRecord(node) || !Number.isSafeInteger(node.seq) || (node.seq as number) < 0) {
+    throw new Error('Authenticated Companion conversation node has an invalid seq')
+  }
+  return node.seq as number
 }

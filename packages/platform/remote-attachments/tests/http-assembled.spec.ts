@@ -87,6 +87,11 @@ describe('Remote attachment HTTP assembled transfer', () => {
       pairingId: pairingA,
       attachmentKey,
       now: () => offer.expiresAt - 1,
+      generation: 1,
+      desktopRevision: 1,
+      desktopName: 'Assembled Desktop',
+      resolveInteraction: () => undefined,
+      pendingInteractions: () => [],
       downloadAttachment: async current => await downloadCompanionAttachment(current, {
         pairingId: pairingA,
         origin,

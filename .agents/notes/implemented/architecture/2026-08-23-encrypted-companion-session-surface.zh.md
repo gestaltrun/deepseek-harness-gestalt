@@ -10,15 +10,15 @@ Status: implemented
 
 ## Decision
 
-Encrypted Companion Protocol major 3 是配对 endpoint 之间的 allowlist。Desktop 投影有界 Session 与 Workspace 行及完整 conversation page；Mobile 发送带不透明 operation correlation 的 history、prompt、取消、Approval、Ask User 与图片读取 operation。每项 mutation 都经 pairing-scoped 持久 ledger 执行。Desktop owner 只调用具名 Web Host 方法，并把 HTTP、wire、业务与超时失败转换为关联的协议 result；它永不接受任意 Host RPC 名称或 payload。
+Encrypted Companion Protocol major 3 是配对 endpoint 之间的 allowlist。Desktop 投影有界 Session 与 Workspace 行及完整 conversation page；Mobile 发送带不透明 operation correlation 的 history、prompt、取消、Approval、Ask User 与图片读取 operation。每项 mutation 都经 pairing-scoped 持久 ledger 执行。同一 operation 的并发重试共享一次 Host effect；commit save 失败会保留 terminal result 供持久化重试；记录在七天后过期；容量不足时先驱逐最旧 terminal 记录，再拒绝 unresolved work。持久记录会解析品牌化 identity 与完整 v3 result，并要求 record 与 result 的 operation id 一致。Desktop owner 只调用具名 Web Host 方法，并把 HTTP、wire、业务与超时失败转换为关联的协议 result；它永不接受任意 Host RPC 名称或 payload。
 
-一个物理 Snow generation 拥有 Mobile decoder、mutation adapter、content adapter 与共享 `MobileCompanionSurface` 绑定。replacement 会使待处理 settlement 与图片工作失效。确认后的 prompt、取消与 interaction mutation 会请求一次有界的权威 history 与列表刷新，而不是增加另一条 live transport。待处理 Host rpc id 留在 Desktop；Mobile 接收 pairing-private HMAC interaction id，并在本地重建共享 `PendingWait` responder。
+一个物理 Snow generation 拥有 Mobile decoder、mutation adapter、content adapter 与共享 `MobileCompanionSurface` 绑定。replacement 会使待处理 settlement、prompt confirmation 与图片工作失效。composer 会等待 Desktop prompt confirmation；关联失败会 reject 该 Promise 并保持可见。tail history response 会替换 conversation；`loadOlder` 则把最旧可见 sequence 作为 `beforeSeq` 发送，并 prepend 通过连续性校验的 page。Desktop 会随每次 history response 刷新真实 Host running 状态，因此共享 Stop 控件反映权威状态。确认后的 prompt、取消与 interaction mutation 会请求一次有界的权威 history 与列表刷新，而不是增加另一条 live transport。待处理 Host rpc id 留在 Desktop；Mobile 接收 pairing-private HMAC interaction id，并在本地重建共享 `PendingWait` responder。Session 创建不属于 major 3，因此 shipped entry 不提供 New Session handler。
 
 历史图片使用 Session 的按内容寻址 attachment id。Desktop 经 Host attachment 方法读取确切字节，把最多 16 MiB 拆成有序 32 KiB 协议分片，并重复同一个 SHA-256 摘要。Mobile 会关联每个分片的 operation、Session、attachment、media type、generation、index、count 与 digest，全部通过后才向共享 `ImageGallery` 返回 data URL。loopback RPC 对普通方法保留 60 KiB 响应上限，只对 `session.attachment` 使用 operated attachment deadline 与固定的最大图片响应上限。
 
 ## Verification
 
-Desktop assembled 测试启动真实文件 Session persistence、Workspace storage、attachment storage、Host API 与随机端口 HTTP，建立 endpoint-owned XKpsk3 与 fresh IK Snow channel，再把发现、history、prompt、取消、Host Ask User 与 Approval settlement，以及多分片图片字节送入 `MobileCompanionSurface`。codec 测试拒绝可选字段错误、额外字段、格式错误的 attachment id 与超限值。Mobile 测试固定 operation correlation、digest 校验、generation replacement、关联失败 settlement 与 mutation 后刷新。产品证据不使用 `prototype-companion`、5173/5174 端口、Memory authority 或 keyless 密码实现。
+Desktop assembled 测试启动真实文件 Session persistence、Workspace storage、attachment storage、Host API 与随机端口 HTTP，建立 endpoint-owned XKpsk3 与 fresh IK Snow channel，再把发现、history、prompt、取消、Host Ask User 与 Approval settlement，以及多分片图片字节送入 `MobileCompanionSurface`。codec 测试拒绝可选字段错误、额外字段、格式错误的 attachment id 与超限值。Mobile 测试固定 operation correlation、history prepend 连续性、digest 校验、generation replacement、等待 prompt 失败、关联失败 settlement、隐藏的创建控件与 mutation 后刷新。产品证据不使用 `prototype-companion`、5173/5174 端口、Memory authority 或 keyless 密码实现。
 
 ## Alternatives considered
 

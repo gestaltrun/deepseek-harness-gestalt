@@ -98,6 +98,8 @@
     "apps/mobile/src/companion-mutation.ts",
     "apps/mobile/src/companion-attachment.ts",
     "apps/desktop/src/companion-attachments.ts",
+    "apps/desktop/src/companion-interactions.ts",
+    "apps/desktop/src/companion-operation-ledger.ts",
     "apps/desktop/src/companion-product.ts",
     "apps/desktop/src/host-rpc.ts",
     "apps/platform/src/production-env.ts",

@@ -79,7 +79,7 @@ function MobileEntry({
       canMutate: companionSurface.mayMutate(),
       search: projection.search,
       attachment: projection.attachment,
-      onCreate: companionSurface.create,
+      operationFailure: projection.operationFailure,
       onSubmit: companionSurface.submit,
       onCancel: companionSurface.cancel,
       onLoadOlder: companionSurface.loadOlder,

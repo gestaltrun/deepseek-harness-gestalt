@@ -1,6 +1,9 @@
 /** Mobile composition over Desktop-owned Session list and conversation projections. */
 
 import type {
+  CompanionHostFailure,
+} from '@deepseek-ai/dsh-remote-protocol'
+import type {
   ConversationSnapshot, SessionId, SessionListState, WorkspaceView,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -35,6 +38,8 @@ export interface MobileCompanionPresentation {
   search: MobileCompanionSearchSnapshot
   /** Latest selected-file transfer and its correlated Desktop outcome. */
   attachment: MobileCompanionAttachmentSnapshot
+  /** Latest non-attachment mutation or refresh failure. */
+  operationFailure?: CompanionHostFailure | undefined
   /** Create one Desktop-default Session when mutation authority is available. */
   onCreate?: ((input: { workspace?: string }) => void) | undefined
   /** Submit a prompt through Desktop authority when transport is available. */

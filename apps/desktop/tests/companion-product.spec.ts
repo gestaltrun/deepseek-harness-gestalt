@@ -51,8 +51,12 @@ describe('Desktop Companion product operations', () => {
   })
 
   it('projects Host history into the shared conversation carrier', async () => {
-    const dependencies = baseDependencies(hostRpc(async (method) => {
+    const dependencies = baseDependencies(hostRpc(async (method, payload) => {
+      if (method === 'session.list') return { ok: true, value: { items: [{
+        sessionId: 'session-product', updatedAt: 30, running: true, blank: false,
+      }] } }
       expect(method).toBe('session.history')
+      expect(payload).toEqual({ sessionId, beforeSeq: 10, maxMessages: 20 })
       return { ok: true, value: {
         events: [
           { event: { type: 'user/message', seq: 1, time: 10, data: {
@@ -64,18 +68,28 @@ describe('Desktop Companion product operations', () => {
               source: { kind: 'assistant' },
             },
           } } },
+          { event: { type: 'user/message', seq: 3, time: 25, data: {
+            id: 'message-steering', content: [{ type: 'text', text: 'redirect' }],
+            source: { kind: 'steering' },
+          } } },
+          { event: { type: 'turn/end', seq: 4, time: 30, data: {
+            turn: 1, reason: { kind: 'error', error: { message: 'model failed', code: 'MODEL_FAILED' } },
+          } } },
         ],
         hasMore: false,
       } }
     }))
-    const operation = op({ type: 'load-history', sessionId, maxMessages: 20 })
+    const operation = op({ type: 'load-history', sessionId, beforeSeq: 10, maxMessages: 20 })
     await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toMatchObject({
-      type: 'conversation-snapshot', operationId: operation.operationId, sessionId,
+      type: 'conversation-snapshot', operationId: operation.operationId, sessionId, beforeSeq: 10,
       conversation: {
         nodes: [
           { kind: 'user', seq: 1, content: [{ type: 'text', text: 'hello' }] },
           { kind: 'assistant', seq: 2, blocks: [{ kind: 'text', text: 'world' }] },
+          { kind: 'steering', seq: 3, content: [{ type: 'text', text: 'redirect' }] },
+          { kind: 'turn-error', seq: 4, message: 'model failed', code: 'MODEL_FAILED' },
         ],
+        running: true,
         hasMore: false,
       },
     })

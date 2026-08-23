@@ -323,6 +323,8 @@ export interface CompanionConversationSnapshotProjection {
   generation: number
   desktopRevision: number
   sessionId: CompanionSessionId
+  /** Exclusive upper event-sequence bound for an older page; absent for an authoritative tail replacement. */
+  beforeSeq?: number
   /** Merge-extensible presentation data, bounded structurally by the protocol decoder. */
   conversation: unknown
 }

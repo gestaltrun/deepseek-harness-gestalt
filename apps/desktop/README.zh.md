@@ -28,6 +28,8 @@ Schedule 交付为 `session-local`：只有原 Session 处于 live 状态时才�
 
 锁定的 Web Host 快照包含一些 Desktop 默认不激活的包。默认配置不设置任何 MCP server；Cordis 自修改与 Code Mode / PTC preset 仍可选择，但都不是默认 preset；standard preset 中的 `subagent_codex` 与 `subagent_claude_code` 模板保持关闭；Web 能力提供 `web_search`，但不提供 `web_fetch`。production HMR 保持关闭。浏览器 `dsh web` 仍让 `session-query-sqlite` 使用 `openAt: never`；Desktop 专用 overlay 则选择 `openAt: first-search`，并把派生索引放在 `DSH_HOME/session-search.sqlite`，因此 Companion 搜索会委托给权威 `session.search`，而不是扫描 Mobile 缓存。Desktop Host 会针对当前 Web Host loopback origin 安装 `DesktopCompanionProductOwner`，在 Web Host 重启时替换该 RPC，并在关闭前移除。该 owner 只暴露 Companion 批准的 Session 与 Workspace 发现、conversation history、prompt、取消、当前 Approval 与 Ask User settlement、attachment 准入、图片读取与搜索 operation；它不会透传任意 Host RPC。普通响应保留固定的 60 KiB Companion 上限；`session.attachment` 则使用 operated attachment deadline，以及按协议最大摘要校验图片结果配置的独立响应上限。Companion 文件准入经 `AttachmentStore.saveFile` 持久保存确切字节，追加只写入日志的 `session/attachment-admitted` 引用，不会把文件字节或文件名占位文本加入模型历史。同一 operation id 与元数据的重试返回已记录引用；冲突复用会失败。headless、ACP 与 JSON-RPC example 是其他应用组合，不是 Desktop 插件。
 
+Pairing-scoped Companion operation ledger 会 single-flight 并发重试，在运行另一项 Host effect 前重试保存失败的 terminal result，七天后淘汰记录，并在达到容量时驱逐最旧 terminal 记录而保留 unresolved work。其持久 codec 会解析品牌化 pairing 与 operation id 及完整 v3 result，并拒绝 record/result operation id 不一致。
+
 ## 开发
 
 ```sh

@@ -362,8 +362,13 @@ export class MobilePairingController implements MobilePairingActions {
     await transaction
   }
 
-  async completeLink(link: string): Promise<void> {
-    await this.exclusive(async () => { await this.completeLinkOwned(link) })
+  async completeLink(link: string, signal?: AbortSignal): Promise<void> {
+    requirePairingSignal(signal)
+    await this.exclusive(async () => {
+      requirePairingSignal(signal)
+      await this.completeLinkOwned(link, signal)
+      requirePairingSignal(signal)
+    })
   }
 
   async scanQr(video: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
@@ -375,8 +380,9 @@ export class MobilePairingController implements MobilePairingActions {
         this.publish({ status: 'ready', error: errorMessage(error) })
         throw error
       }
+      requirePairingSignal(signal)
       this.assertActiveAccount()
-      await this.completeLinkOwned(payload)
+      await this.completeLinkOwned(payload, signal)
     })
   }
 
@@ -388,7 +394,8 @@ export class MobilePairingController implements MobilePairingActions {
     })
   }
 
-  private async prepareAttempt(link: string): Promise<PreparedMobilePairingAttempt> {
+  private async prepareAttempt(link: string, signal?: AbortSignal): Promise<PreparedMobilePairingAttempt> {
+    requirePairingSignal(signal)
     const endpoint = parseEndpointInvitation(link)
     if (endpoint !== undefined) {
       if (this.now() >= endpoint.expiresAt) throw new Error('Personal Pairing invitation expired')
@@ -396,6 +403,7 @@ export class MobilePairingController implements MobilePairingActions {
         throw new Error('Endpoint-owned Personal Pairing handshake is unavailable')
       }
       const message1 = await this.options.handshake.beginEndpointInvitation(endpoint.payload)
+      requirePairingSignal(signal)
       const attempt: PreparedMobilePairingAttempt = {
         link, expiresAt: endpoint.expiresAt, accountId: this.requireAccountId(),
         completionId: `snow-${crypto.randomUUID()}` as PairingCompletionId,
@@ -403,11 +411,13 @@ export class MobilePairingController implements MobilePairingActions {
       }
       this.attempt = attempt
       await this.checkpointEndpointAttempt(attempt)
+      requirePairingSignal(signal)
       return attempt
     }
     const invitation = parsePairingInvitationLink(link)
     if (this.now() >= invitation.expiresAt) throw new Error('Personal Pairing invitation expired')
     const prepared = await this.options.handshake.begin(link)
+    requirePairingSignal(signal)
     const attempt = {
       link,
       expiresAt: invitation.expiresAt,
@@ -420,22 +430,26 @@ export class MobilePairingController implements MobilePairingActions {
     return attempt
   }
 
-  private async runAttempt(attempt: PreparedMobilePairingAttempt): Promise<void> {
+  private async runAttempt(attempt: PreparedMobilePairingAttempt, signal?: AbortSignal): Promise<void> {
     this.publish({ status: 'completing' })
     try {
       const authentication = await this.options.installation.authorizeCurrentInstallation()
+      requirePairingSignal(signal)
       this.assertActiveAccount()
       attempt.transmission = 'possibly-committed'
       attempt.replayExpiresAt = this.now() + PAIRING_REPLAY_RETENTION_MS
       if (attempt.endpointChallengeId !== undefined) {
         await this.checkpointEndpointAttempt(attempt)
+        requirePairingSignal(signal)
         const pending = await this.options.transport.submitEndpointMessage1({
           authentication, challengeId: attempt.endpointChallengeId, completionId: attempt.completionId,
           message1: attempt.mobileHandshake,
         })
+        requirePairingSignal(signal)
         this.assertActiveAccount()
         attempt.transmission = 'pending'
         await this.checkpointEndpointAttempt(attempt)
+        requirePairingSignal(signal)
         this.publish({ status: 'completing' })
         this.scheduleEndpointStatus(attempt.completionId)
         void pending
@@ -447,20 +461,25 @@ export class MobilePairingController implements MobilePairingActions {
         oneTimeLink: attempt.link,
         mobileHandshake: attempt.mobileHandshake,
       })
+      requirePairingSignal(signal)
       this.assertActiveAccount()
       attempt.pendingProjection = completion
       attempt.transmission = 'pending'
       await this.options.handshake.acceptDesktopHandshake(completion.desktopHandshake)
+      requirePairingSignal(signal)
       this.assertActiveAccount()
       const mobileFinish = this.options.handshake.exportFinishMessage?.()
       let finished = completion
       if (mobileFinish !== undefined) {
         try {
+          const finishAuthentication = await this.options.installation.authorizeCurrentInstallation()
+          requirePairingSignal(signal)
           finished = await this.options.transport.finishChallenge({
-            authentication: await this.options.installation.authorizeCurrentInstallation(),
+            authentication: finishAuthentication,
             pendingPairingId: completion.pendingPairingId,
             mobileFinish,
           })
+          requirePairingSignal(signal)
         } finally {
           mobileFinish.fill(0)
         }
@@ -652,7 +671,7 @@ export class MobilePairingController implements MobilePairingActions {
     return attempt.confirmed
   }
 
-  private completeLinkOwned(link: string): Promise<void> {
+  private completeLinkOwned(link: string, signal?: AbortSignal): Promise<void> {
     const retained = this.currentAttempt()
     if (retained !== undefined && retained.link !== link) {
       throw new Error('Retry the retained Personal Pairing attempt before using another invitation')
@@ -660,12 +679,14 @@ export class MobilePairingController implements MobilePairingActions {
     return (async () => {
       let attempt: PreparedMobilePairingAttempt
       try {
-        attempt = retained ?? await this.prepareAttempt(link)
+        attempt = retained ?? await this.prepareAttempt(link, signal)
+        requirePairingSignal(signal)
       } catch (error) {
         this.publish({ status: 'ready', error: errorMessage(error) })
         throw error
       }
-      await this.runAttempt(attempt)
+      await this.runAttempt(attempt, signal)
+      requirePairingSignal(signal)
     })()
   }
 
@@ -855,6 +876,10 @@ async function settleOwnedCleanup(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function requirePairingSignal(signal: AbortSignal | undefined): void {
+  signal?.throwIfAborted()
 }
 
 function throwIfCameraAborted(signal: AbortSignal | undefined): void {

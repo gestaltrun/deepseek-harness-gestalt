@@ -148,20 +148,26 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
   private pending: MobileEndpointPairingRecovery | undefined
   private accountId: PlatformAccountId | undefined
   private persistence: Promise<void> = Promise.resolve()
+  private selection: Promise<void> = Promise.resolve()
 
   constructor(private readonly store?: MobilePairingStateStore) {}
 
   async selectAccount(accountId: PlatformAccountId): Promise<void> {
-    if (this.accountId === accountId) return
-    this.clearMemory()
-    this.accountId = accountId
-    const state = await this.store?.load(accountId) ?? { active: [] }
-    for (const record of state.active) {
-      this.attachmentKeys.set(record.pairingId, record.attachmentKey.slice())
-      if (record.reconnectState !== undefined) this.reconnectStates.set(record.pairingId, record.reconnectState.slice())
-      if (record.grant !== undefined) this.grants.set(record.pairingId, { ...record.grant })
-    }
-    this.pending = state.pending === undefined ? undefined : cloneEndpointRecovery(state.pending)
+    const selected = this.selection.then(async () => {
+      if (this.accountId === accountId) return
+      await this.persistence
+      const state = await this.store?.load(accountId) ?? { active: [] }
+      this.clearMemory()
+      this.accountId = accountId
+      for (const record of state.active) {
+        this.attachmentKeys.set(record.pairingId, record.attachmentKey.slice())
+        if (record.reconnectState !== undefined) this.reconnectStates.set(record.pairingId, record.reconnectState.slice())
+        if (record.grant !== undefined) this.grants.set(record.pairingId, { ...record.grant })
+      }
+      this.pending = state.pending === undefined ? undefined : cloneEndpointRecovery(state.pending)
+    })
+    this.selection = selected.then(() => undefined, () => undefined)
+    await selected
   }
 
   /**

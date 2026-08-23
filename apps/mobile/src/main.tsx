@@ -263,9 +263,7 @@ async function mountMobileProduct(): Promise<void> {
         companionSurface?.trackHistoryRefresh(sessionId, submission)
       },
       trackSurfaceRefresh: (submission) => { companionSurface?.trackSurfaceRefresh(submission) },
-      recoveredResult: (result) => {
-        companionSurface?.bindValidatedCompanionResults()?.acceptValidatedCompanionResult(result)
-      },
+      recoveredReceipt: (receipt) => { companionSurface?.acceptRecoveredOperation(receipt) },
     })
     companionChannel = productChannel
     companionConnectionChannel = {
@@ -328,16 +326,16 @@ async function mountMobileProduct(): Promise<void> {
     pairing = {
       getSnapshot: () => pairingController.getSnapshot(),
       subscribe: listener => pairingController.subscribe(listener),
-      completeLink: async (link) => { await pairingController.completeLink(link) },
+      completeLink: async (link, signal) => { await pairingController.completeLink(link, signal) },
       scanQr: async (video, signal) => { await pairingController.scanQr(video, signal) },
       retryPairing: async () => { await pairingController.retryPairing() },
       activate: async () => {
         await pairingController.activate()
         await installRetainedProjectionCache()
-        companionDeepLinkBinding?.setReady(true)
+        await companionDeepLinkBinding?.setReady(true)
       },
       deactivate: async () => {
-        companionDeepLinkBinding?.setReady(false)
+        await companionDeepLinkBinding?.setReady(false)
         await releaseProjectionAuthority(false)
         await pairingController.deactivate()
       },
@@ -347,8 +345,14 @@ async function mountMobileProduct(): Promise<void> {
       },
     }
     companionDeepLinkBinding = bindMobilePairingDeepLinks(
-      async (link) => { await pairing.completeLink(link) },
-      { onError: (error) => { console.error('[mobile-companion] pairing deep link failed:', error) } },
+      async (link, signal) => { await pairing.completeLink(link, signal) },
+      {
+        onError: (error) => { console.error('[mobile-companion] pairing deep link failed:', error) },
+        isTerminalError: () => {
+          const status = pairing.getSnapshot().status
+          return status === 'ready' || status === 'unavailable'
+        },
+      },
     )
     let selectedAccountId: string | undefined
     companionAccountDisposer = installation.subscribe(() => {
@@ -356,8 +360,10 @@ async function mountMobileProduct(): Promise<void> {
       const accountId = snapshot.status === 'signed-in' ? snapshot.account?.id : undefined
       if (accountId === selectedAccountId) return
       selectedAccountId = accountId
-      companionDeepLinkBinding?.setReady(false)
-      void releaseProjectionAuthority(false).catch((error: unknown) => {
+      void (async () => {
+        await companionDeepLinkBinding?.setReady(false)
+        await releaseProjectionAuthority(false)
+      })().catch((error: unknown) => {
         console.error('[companion-cache] Account authority release failed:', error)
       })
     })

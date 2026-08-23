@@ -281,7 +281,7 @@ describe('Mobile Snow Companion product channel', () => {
     }
     connection.connect(active)
     const receipts = settlement()
-    const recoveredResult = vi.fn()
+    const recoveredReceipt = vi.fn()
     let firstSend = true
     const product = new MobileSnowCompanionProductChannel({
       runtime, connection, operationSettlement: receipts,
@@ -293,7 +293,7 @@ describe('Mobile Snow Companion product channel', () => {
         firstSend = false
         connection.disconnect()
       },
-      recoveredResult,
+      recoveredReceipt,
     })
 
     const prompt = product.submit(sid('session-reconcile'), 'continue once')
@@ -312,8 +312,8 @@ describe('Mobile Snow Companion product channel', () => {
     await expect(reconciliation).resolves.toEqual([
       expect.objectContaining({ operationId: prompt.operationId, status: 'committed', kind: 'prompt' }),
     ])
-    expect(recoveredResult).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'confirmed', operationId: prompt.operationId,
+    expect(recoveredReceipt).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'committed', operationId: prompt.operationId,
     }))
   })
 

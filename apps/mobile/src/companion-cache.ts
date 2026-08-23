@@ -219,6 +219,10 @@ export interface CompanionOperationReceipt {
  * transcript of one Desktop coexist.
  */
 export interface CompanionCacheStore {
+  /** Reserve bounded capacity before a mutation can leave the device. */
+  reserveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void>
+  /** Remove a pre-send reservation when the transport proves nothing left the device. */
+  deleteReceipt(desktopId: CompanionDesktopId, operationId: CompanionOperationId): Promise<void>
   /**
    * @param desktopId - Paired Desktop whose row is written.
    * @param kind - admitted content kind of the row.
@@ -412,6 +416,26 @@ export class InMemoryCompanionCacheStore implements CompanionCacheStore {
     return Promise.resolve()
   }
 
+  reserveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void> {
+    const prefix = desktopPrefix(desktopId)
+    const key = `${prefix}${receipt.operationId}`
+    if (!this.#receipts.has(key)) {
+      const owned = [...this.#receipts.entries()].filter(([candidate]) => candidate.startsWith(prefix))
+      if (owned.length >= COMPANION_CACHE_RECEIPT_LIMIT) {
+        const terminal = owned.find(([, row]) => row.status !== 'unknown')
+        if (terminal === undefined) requireReceiptCapacity(owned.length, false)
+        else this.#receipts.delete(terminal[0])
+      }
+    }
+    this.#receipts.set(key, receipt)
+    return Promise.resolve()
+  }
+
+  deleteReceipt(desktopId: CompanionDesktopId, operationId: CompanionOperationId): Promise<void> {
+    this.#receipts.delete(`${desktopPrefix(desktopId)}${operationId}`)
+    return Promise.resolve()
+  }
+
   saveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void> {
     const key = `${desktopPrefix(desktopId)}${receipt.operationId}`
     requireReceiptCapacity(
@@ -483,6 +507,46 @@ export class IndexedDbCompanionCacheStore implements CompanionCacheStore {
     })
   }
 
+  async reserveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void> {
+    const database = await this.#database
+    await new Promise<void>((resolve, reject) => {
+      const key = `${desktopPrefix(desktopId)}${receipt.operationId}`
+      let limitError: Error | undefined
+      const transaction = database.transaction('receipts', 'readwrite')
+      const store = transaction.objectStore('receipts')
+      const keysRequest = store.getAllKeys(desktopRange(desktopId))
+      const rowsRequest = store.getAll(desktopRange(desktopId))
+      const reserve = (): void => {
+        if (keysRequest.readyState !== 'done' || rowsRequest.readyState !== 'done') return
+        if (!keysRequest.result.includes(key) && keysRequest.result.length >= COMPANION_CACHE_RECEIPT_LIMIT) {
+          const terminalIndex = rowsRequest.result.findIndex((row: unknown) => (
+            parseCompanionOperationReceipt(row).status !== 'unknown'
+          ))
+          if (terminalIndex < 0) {
+            try { requireReceiptCapacity(keysRequest.result.length, false) } catch (error) {
+              limitError = error instanceof Error ? error : new Error(String(error))
+            }
+            transaction.abort()
+            return
+          }
+          const terminalKey = keysRequest.result[terminalIndex]
+          if (terminalKey === undefined) throw new Error('Companion cache terminal receipt key is unavailable')
+          store.delete(terminalKey)
+        }
+        store.put(receipt, key)
+      }
+      keysRequest.onsuccess = reserve
+      rowsRequest.onsuccess = reserve
+      transaction.oncomplete = () => { resolve() }
+      transaction.onabort = () => { reject(limitError ?? transaction.error ?? new Error('Companion cache receipt reservation failed')) }
+      transaction.onerror = () => { reject(limitError ?? transaction.error ?? new Error('Companion cache receipt reservation failed')) }
+    })
+  }
+
+  async deleteReceipt(desktopId: CompanionDesktopId, operationId: CompanionOperationId): Promise<void> {
+    await this.writeDelete('receipts', `${desktopPrefix(desktopId)}${operationId}`)
+  }
+
   async saveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void> {
     const database = await this.#database
     await new Promise<void>((resolve, reject) => {
@@ -550,6 +614,16 @@ export class IndexedDbCompanionCacheStore implements CompanionCacheStore {
       transaction.objectStore(store).put(value, key)
       transaction.oncomplete = () => { resolve() }
       transaction.onerror = () => { reject(transaction.error ?? new Error('Companion cache IndexedDB write failed')) }
+    })
+  }
+
+  private async writeDelete(store: 'content' | 'receipts', key: string): Promise<void> {
+    const database = await this.#database
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(store, 'readwrite')
+      transaction.objectStore(store).delete(key)
+      transaction.oncomplete = () => { resolve() }
+      transaction.onerror = () => { reject(transaction.error ?? new Error('Companion cache IndexedDB delete failed')) }
     })
   }
 }
@@ -696,6 +770,10 @@ export class CompanionUncertainOperationSettlement {
     if (existing?.status === 'committed') {
       return existing
     }
+    await this.#store.reserveReceipt(this.#desktopId, {
+      operationId: mutation.operationId, status: 'not-submitted', kind: mutation.kind,
+      ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+    })
     let transmissionReceipt: Promise<void> | undefined
     let outcome: CompanionMutationOutcome
     try {
@@ -712,11 +790,13 @@ export class CompanionUncertainOperationSettlement {
     } catch (error) {
       // The transmission acknowledgment write must settle before its rejection
       // escapes; otherwise the promise rejects unobserved.
-      await transmissionReceipt
+      if (transmissionReceipt === undefined) await this.#store.deleteReceipt(this.#desktopId, mutation.operationId)
+      else await transmissionReceipt
       throw error
     }
     await transmissionReceipt
-    if (!outcome.known && transmissionReceipt === undefined) {
+    if (transmissionReceipt === undefined) {
+      await this.#store.deleteReceipt(this.#desktopId, mutation.operationId)
       throw new Error('Companion transport reported an unknown outcome without acknowledging transmission')
     }
     const receipt: CompanionOperationReceipt = outcome.known
@@ -741,13 +821,16 @@ export class CompanionUncertainOperationSettlement {
    */
   async reconcileUnknown(transport: CompanionMutationTransport): Promise<readonly CompanionOperationReceipt[]> {
     const rows = await this.#store.loadReceipts(this.#desktopId)
+    const reconciled: CompanionOperationReceipt[] = []
     for (const row of rows) {
       if (row.status !== 'unknown') continue
       const answer = await transport.queryStatus(row.operationId)
-      await this.#store.saveReceipt(this.#desktopId, answer.committed
+      const next: CompanionOperationReceipt = answer.committed
         ? { ...row, status: 'committed', original: answer.original }
-        : { ...row, status: 'not-submitted' })
+        : { ...row, status: 'not-submitted' }
+      await this.#store.saveReceipt(this.#desktopId, next)
+      reconciled.push(next)
     }
-    return await this.#store.loadReceipts(this.#desktopId)
+    return reconciled
   }
 }

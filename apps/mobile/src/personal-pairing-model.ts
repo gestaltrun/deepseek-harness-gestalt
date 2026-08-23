@@ -21,7 +21,7 @@ export interface MobilePairingActions {
   /** Subscribe to pairing transitions. */
   subscribe(listener: () => void): () => void
   /** Complete the exact high-entropy link produced by Desktop. */
-  completeLink(link: string): void | Promise<void>
+  completeLink(link: string, signal?: AbortSignal): void | Promise<void>
   /** Open the browser camera scanner and complete its exact payload. */
   scanQr(video: HTMLVideoElement, signal?: AbortSignal): void | Promise<void>
   /** Retry the retained completion attempt without regenerating handshake material. */

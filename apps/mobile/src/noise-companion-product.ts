@@ -92,7 +92,7 @@ export interface MobileSnowCompanionProductOptions {
   trackHistoryRefresh?(sessionId: SessionId, submission: MobileCompanionTrackedSubmission): void
   trackSurfaceRefresh?(submission: MobileCompanionTrackedSubmission): void
   /** Apply one durable reconnect outcome to the current Mobile presentation. */
-  recoveredResult?(result: CompanionResult): void
+  recoveredReceipt?(receipt: CompanionOperationReceipt): void
   /** Durable receipt owner selected for the authenticated Account and pairing. */
   operationSettlement?: CompanionUncertainOperationSettlement
 }
@@ -383,10 +383,10 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     })
     for (const row of rows) {
       if (row.status === 'committed' && row.original !== undefined) {
-        this.options.recoveredResult?.(row.original)
+        this.options.recoveredReceipt?.(row)
         this.refreshRecovered(row)
       } else if (row.status === 'not-submitted') {
-        this.options.recoveredResult?.({ type: 'status', operationId: row.operationId, absent: true })
+        this.options.recoveredReceipt?.(row)
       }
     }
     return rows

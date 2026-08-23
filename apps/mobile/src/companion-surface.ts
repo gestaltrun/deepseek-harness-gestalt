@@ -10,6 +10,7 @@ import type {
   CompanionSessionId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionAttachmentDeliveryUncertainError } from './companion-attachment.ts'
+import type { CompanionOperationReceipt } from './companion-cache.ts'
 import { companionMayMutate, type CompanionForegroundRuntime } from './companion-lifecycle.ts'
 import { requireCompanionMutation, type CompanionMutationName } from './companion-mutation.ts'
 import {
@@ -102,7 +103,7 @@ export interface MobileCompanionOperationFailure {
   /** Exact request correlation from the encrypted Companion protocol. */
   readonly operationId: CompanionOperationId
   /** Product operation class that owns presentation of this failure. */
-  readonly operation: 'create' | 'cancel' | 'history' | 'refresh'
+  readonly operation: 'create' | 'prompt' | 'cancel' | 'interaction' | 'history' | 'refresh'
   /** Session scope for cancel and history; refresh is Desktop-wide. */
   readonly sessionId?: SessionId | undefined
   /** Stable Host failure projected for display. */
@@ -499,6 +500,42 @@ export class MobileCompanionSurface {
     }
   }
 
+  /** Apply a durable reconnect outcome without relying on retired connection-local maps. */
+  acceptRecoveredOperation(receipt: CompanionOperationReceipt): void {
+    if (receipt.kind === 'attachment') {
+      this.#attachmentOperationId = receipt.operationId
+      this.acceptCurrentCompanionResult(receipt.status === 'committed' && receipt.original !== undefined
+        ? receipt.original
+        : { type: 'status', operationId: receipt.operationId, absent: true })
+      return
+    }
+    const operation = recoveredFailureOperation(receipt.kind)
+    if (operation === undefined) return
+    const sessionId = receipt.sessionId === undefined ? undefined : localSessionId(receipt.sessionId)
+    if (receipt.status === 'committed' && receipt.original?.type === 'operation-failed') {
+      this.#snapshot = {
+        ...this.#snapshot,
+        operationFailure: {
+          operationId: receipt.operationId, operation, sessionId, failure: receipt.original.failure,
+        },
+      }
+    } else if (receipt.status === 'not-submitted') {
+      this.#snapshot = {
+        ...this.#snapshot,
+        operationFailure: {
+          operationId: receipt.operationId, operation, sessionId,
+          failure: {
+            kind: 'business', code: 'companion-not-submitted',
+            message: 'Desktop reports that the Companion operation was not submitted.',
+          },
+        },
+      }
+    } else {
+      this.#snapshot = { ...this.#snapshot, operationFailure: this.failureAfterSuccess(operation, sessionId) }
+    }
+    this.publish()
+  }
+
   private acceptCurrentCompanionResult(result: CompanionResult): void {
     if (result.type === 'status' && 'committed' in result) {
       this.acceptCurrentCompanionResult(result.committed)
@@ -766,4 +803,14 @@ function oldestNodeSeq(conversation: ConversationSnapshot): number | undefined {
     if (oldest === undefined || node.seq < oldest) oldest = node.seq
   }
   return oldest
+}
+
+function recoveredFailureOperation(
+  kind: CompanionOperationReceipt['kind'],
+): MobileCompanionOperationFailure['operation'] | undefined {
+  if (kind === 'session-create') return 'create'
+  if (kind === 'prompt') return 'prompt'
+  if (kind === 'cancel') return 'cancel'
+  if (kind === 'approval' || kind === 'question') return 'interaction'
+  return undefined
 }

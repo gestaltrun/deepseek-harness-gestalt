@@ -78,4 +78,24 @@ describe('Companion push absence gate', () => {
   it('finds no Companion push product residue in the repository', () => {
     expect(collectCompanionPushResidue(join(import.meta.dirname, '..'))).toEqual([])
   }, 15_000)
+
+  it('ignores Gradle build caches while retaining native source enforcement', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-companion-no-push-gradle-cache-'))
+    roots.push(root)
+    const files: Record<string, string> = {
+      'apps/mobile/android/.gradle/8.10/fileHashes/google-services-index.bin': 'FCM cache index',
+      'apps/mobile/android/app/build/intermediates/lint-cache/google-services.xml': '<fcmToken />',
+      'apps/mobile/android/app/src/main/google-services.json': '{}',
+      'apps/mobile/android/app/src/main/Notifications.kt': 'val service = "APNs"',
+    }
+    for (const [file, contents] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, file)), { recursive: true })
+      writeFileSync(join(root, file), contents)
+    }
+
+    expect(collectCompanionPushResidue(root)).toEqual([
+      'apps/mobile/android/app/src/main/Notifications.kt:1: contains forbidden Companion push product token APNs.',
+      'apps/mobile/android/app/src/main/google-services.json: contains forbidden Companion push product path google-services.json.',
+    ])
+  })
 })

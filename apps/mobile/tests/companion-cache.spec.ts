@@ -168,15 +168,35 @@ describe('Companion Cache', () => {
       )
     }
     expect((await store.loadReceipts(desktopA)).length).toBe(limit)
+    let overflowSends = 0
     await expect(settlement.transmit(
       { kind: 'prompt', operationId: parseCompanionOperationId('op-cap-overflow') },
-      outcomeTransport({ known: false }),
+      recordingTransport(() => { overflowSends += 1 }, { known: false }),
       ready,
     )).rejects.toThrow(new RegExp(`exceeds the ${String(limit)}-row ceiling`))
+    expect(overflowSends).toBe(0)
     await expect(store.saveReceipt(desktopA, {
       operationId: parseCompanionOperationId('op-cap-0'),
       status: 'not-submitted',
     })).resolves.toBeUndefined()
+  })
+
+  it('evicts a terminal receipt before sending a future mutation at capacity', async () => {
+    const store = new InMemoryCompanionCacheStore()
+    const settlement = new CompanionUncertainOperationSettlement(store, desktopA)
+    const limit = REMOTE_PROTOCOL_LIMITS.containerValues
+    for (let index = 0; index < limit; index += 1) {
+      await store.saveReceipt(desktopA, {
+        operationId: parseCompanionOperationId(`terminal-${String(index)}`),
+        status: 'not-submitted',
+      })
+    }
+    const transport = recordingTransport(undefined, { known: true, result: confirmed('future-operation') })
+    await expect(settlement.transmit(
+      { kind: 'prompt', operationId: parseCompanionOperationId('future-operation') }, transport, ready,
+    )).resolves.toMatchObject({ status: 'committed' })
+    expect(transport.sends).toBe(1)
+    expect(await store.loadReceipts(desktopA)).toHaveLength(limit)
   })
 
   it('persists sealed rows through the IndexedDB store with metadata and transcript coexisting', async () => {
@@ -396,6 +416,7 @@ describe('Companion Cache', () => {
     expect(settled).toEqual([{
       operationId: parseCompanionOperationId('op-reconcile'), status: 'committed', original, kind: 'prompt',
     }])
+    await expect(settlement.reconcileUnknown(statusTransport({ committed: false }))).resolves.toEqual([])
 
     await settlement.transmit(
       { kind: 'approval', operationId: parseCompanionOperationId('op-absent') },

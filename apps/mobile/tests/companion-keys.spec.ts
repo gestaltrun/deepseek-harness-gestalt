@@ -13,6 +13,39 @@ const MATERIAL = Uint8Array.from({ length: 32 }, (_, index) => index + 3)
 const OTHER = Uint8Array.from({ length: 32 }, (_, index) => 200 - index)
 
 describe('PairingCompanionKeyVault', () => {
+  it('serializes concurrent Account loads so an older result cannot replace the active Account', async () => {
+    const accountA = parsePlatformAccountId('account-concurrent-a')
+    const accountB = parsePlatformAccountId('account-concurrent-b')
+    const pairingA = parsePersonalPairingId('pairing-concurrent-a')
+    const pairingB = parsePersonalPairingId('pairing-concurrent-b')
+    let releaseA: (() => void) | undefined
+    const blockedA = new Promise<void>((resolve) => { releaseA = resolve })
+    const saves: Array<{ accountId: string; pairings: string[] }> = []
+    const store = {
+      load: vi.fn(async (accountId: string) => {
+        if (accountId === accountA) await blockedA
+        return { active: [{
+          pairingId: accountId === accountA ? pairingA : pairingB,
+          attachmentKey: accountId === accountA ? MATERIAL : OTHER,
+        }] }
+      }),
+      save: vi.fn(async (accountId: string, document: { active: Array<{ pairingId: string }> }) => {
+        saves.push({ accountId, pairings: document.active.map(row => row.pairingId) })
+      }),
+    }
+    const vault = new PairingCompanionKeyVault(store as never)
+    const selectingA = vault.selectAccount(accountA)
+    const selectingB = vault.selectAccount(accountB)
+    releaseA?.()
+    await Promise.all([selectingA, selectingB])
+
+    expect(vault.attachmentKeyMaterial(pairingA)).toBeUndefined()
+    expect(vault.attachmentKeyMaterial(pairingB)).toEqual(OTHER)
+    vault.retain(pairingB, MATERIAL)
+    await vault.flush()
+    expect(saves).toEqual([{ accountId: accountB, pairings: [pairingB] }])
+  })
+
   it('restores account-scoped Snow reconnect state and Mobile-only Relay authority', async () => {
     const store = new IndexedDbMobilePairingStateStore(`mobile-pairing-${crypto.randomUUID()}`)
     const accountId = parsePlatformAccountId('account-one')

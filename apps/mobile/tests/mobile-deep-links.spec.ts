@@ -14,12 +14,18 @@ describe('Mobile pairing deep links', () => {
         },
       },
     })
-    binding.setReady(true)
-    await vi.waitFor(() => { expect(complete).toHaveBeenCalledWith('https://www.gestaltrun.com/pair/launch') })
+    await binding.setReady(true)
+    await vi.waitFor(() => {
+      expect(complete).toHaveBeenCalledWith('https://www.gestaltrun.com/pair/launch', expect.any(AbortSignal))
+    })
     listener?.({
       url: 'deepseek-gestalt://pair?link=https%3A%2F%2Fwww.gestaltrun.com%2Fpair%2Fforeground',
     })
-    await vi.waitFor(() => { expect(complete).toHaveBeenLastCalledWith('https://www.gestaltrun.com/pair/foreground') })
+    await vi.waitFor(() => {
+      expect(complete).toHaveBeenLastCalledWith(
+        'https://www.gestaltrun.com/pair/foreground', expect.any(AbortSignal),
+      )
+    })
     await binding.dispose()
     expect(complete.mock.calls.map(call => call[0])).toEqual([
       'https://www.gestaltrun.com/pair/launch',
@@ -37,7 +43,7 @@ describe('Mobile pairing deep links', () => {
       },
       onError,
     })
-    binding.setReady(true)
+    await binding.setReady(true)
     await vi.waitFor(() => { expect(onError).toHaveBeenCalled() })
     await binding.dispose()
     expect(remove).toHaveBeenCalledOnce()
@@ -60,9 +66,45 @@ describe('Mobile pairing deep links', () => {
     listener?.({ url: link })
     await Promise.resolve()
     expect(complete).not.toHaveBeenCalled()
-    binding.setReady(true)
+    await binding.setReady(true)
     await vi.waitFor(() => { expect(complete).toHaveBeenCalledOnce() })
-    expect(complete).toHaveBeenCalledWith('https://www.gestaltrun.com/pair/cold')
+    expect(complete).toHaveBeenCalledWith('https://www.gestaltrun.com/pair/cold', expect.any(AbortSignal))
+    await binding.dispose()
+  })
+
+  it('aborts a stale ready lease, waits for it, and retries the same URL under the next lease', async () => {
+    let listener: ((event: { url: string }) => void) | undefined
+    let firstSignal: AbortSignal | undefined
+    const complete = vi.fn(async (_link: string, signal: AbortSignal) => {
+      if (complete.mock.calls.length > 1) return
+      firstSignal = signal
+      await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          reject(signal.reason instanceof Error ? signal.reason : new Error('pairing lease aborted'))
+        }, { once: true })
+      })
+    })
+    const binding = bindMobilePairingDeepLinks(complete, {
+      app: {
+        getLaunchUrl: async () => undefined,
+        addListener: async (_name, callback) => {
+          listener = callback
+          return { remove: async () => {} }
+        },
+      },
+    })
+    await binding.setReady(true)
+    listener?.({ url: 'https://www.gestaltrun.com/pair/retry-lease' })
+    await vi.waitFor(() => { expect(complete).toHaveBeenCalledOnce() })
+    await binding.setReady(false)
+    expect(firstSignal?.aborted).toBe(true)
+
+    await binding.setReady(true)
+    await vi.waitFor(() => { expect(complete).toHaveBeenCalledTimes(2) })
+    expect(complete.mock.calls.map(call => call[0])).toEqual([
+      'https://www.gestaltrun.com/pair/retry-lease',
+      'https://www.gestaltrun.com/pair/retry-lease',
+    ])
     await binding.dispose()
   })
 })

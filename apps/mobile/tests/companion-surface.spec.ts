@@ -119,6 +119,46 @@ describe('MobileCompanionSurface', () => {
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
   })
 
+  it('applies recovered mutation outcomes after replacement cleared in-memory correlation', async () => {
+    const runtime = connectedRuntime()
+    const firstChannel = connectionChannel()
+    firstChannel.mutations.cancel.mockReturnValueOnce(tracked(
+      'cancel-recovered', Promise.reject(new Error('connection lost')),
+    ))
+    const surface = new MobileCompanionSurface(runtime)
+    const first = surface.bindAuthenticatedConnection(firstChannel)
+    if (first === undefined) throw new Error('expected first receiver')
+    first.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    surface.cancel(sid('session-one'))
+    await vi.waitFor(() => { expect(surface.getSnapshot().operationFailure?.failure.code).toBe('companion-send-failed') })
+
+    runtime.forgetConnection()
+    runtime.markConnectionOpen()
+    const replacement = surface.bindAuthenticatedConnection(connectionChannel())
+    if (replacement === undefined) throw new Error('expected replacement receiver')
+    replacement.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    surface.acceptRecoveredOperation({
+      operationId: parseCompanionOperationId('cancel-recovered'), status: 'committed', kind: 'cancel',
+      sessionId: parseCompanionSessionId('session-one'),
+      original: {
+        type: 'confirmed', operationId: parseCompanionOperationId('cancel-recovered'),
+        committedAt: 1, outcome: 'accepted',
+      },
+    })
+    expect(surface.getSnapshot().operationFailure).toBeUndefined()
+
+    surface.acceptRecoveredOperation({
+      operationId: parseCompanionOperationId('create-recovered'), status: 'committed', kind: 'session-create',
+      original: {
+        type: 'operation-failed', operationId: parseCompanionOperationId('create-recovered'),
+        failure: { kind: 'business', code: 'workspace-missing', message: 'Workspace was removed' },
+      },
+    })
+    expect(surface.getSnapshot().operationFailure).toMatchObject({
+      operation: 'create', failure: { code: 'workspace-missing', message: 'Workspace was removed' },
+    })
+  })
+
   it('publishes synchronized replacement state only after the new channel is authoritative', () => {
     const runtime = connectedRuntime()
     const firstChannel = connectionChannel()

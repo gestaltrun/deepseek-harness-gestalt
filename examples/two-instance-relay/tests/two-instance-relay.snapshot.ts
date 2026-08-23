@@ -24,7 +24,7 @@ describe('two-instance Remote Relay Snow assembled path', () => {
       ROUND_TRIP encrypted=true relayBusinessValue=false outcome=accepted
       PAIRING_ACTIVITY online=true lastAccessCurrent=true
       LIFECYCLE observed=quit offline=true retainedCiphertextValues=0
-      PAIRING_DISCONNECT online=false lastAccessPreserved=true
+      PAIRING_DISCONNECT online=false lastAccessMonotonic=true
       AUTHORITY disableInstance=platform-replacement routeOffline=true
       "
     `)

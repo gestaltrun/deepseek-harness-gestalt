@@ -526,10 +526,13 @@ function parseConversationHistory(
   const nodes: Array<Record<string, unknown>> = []
   const calls = new Map<string, { name: string; argsRaw: string; time: number; view: unknown }>()
   const steps = new Map<number, number>()
+  const retryAttempts = new Map<string, number>()
+  const retryTurns = new Set<number>()
+  const closedTurns = new Set<number>()
   for (const entryValue of value.events) {
     if (!isRecord(entryValue) || !isRecord(entryValue.event)) return undefined
     const event = entryValue.event
-    if (!Number.isSafeInteger(event.seq) || typeof event.time !== 'number' || !isRecord(event.data)) return undefined
+    if (!isSafeInteger(event.seq) || typeof event.time !== 'number' || !isRecord(event.data)) return undefined
     if (event.type === 'user/message') {
       if (!Array.isArray(event.data.content)) return undefined
       const source = event.data.source ?? {}
@@ -578,11 +581,30 @@ function parseConversationHistory(
         resultView: entryValue.view ?? null, subCalls: [],
       })
     } else if (event.type === 'step/start') {
-      if (!Number.isSafeInteger(event.data.turn) || !Number.isSafeInteger(event.data.step)) return undefined
-      steps.set(event.data.turn as number, event.data.step as number)
+      if (!isSafeInteger(event.data.turn) || !isSafeInteger(event.data.step)) return undefined
+      steps.set(event.data.turn, event.data.step)
+    } else if (event.type === 'llm/retry') {
+      const retry = parseModelRetry(event.data, event.seq, event.time)
+      if (retry === undefined) return undefined
+      const retryKey = modelRetryKey(retry.retryId, retry.retry)
+      if (retryAttempts.has(retryKey)) return undefined
+      retryAttempts.set(retryKey, nodes.length)
+      retryTurns.add(retry.turn)
+      nodes.push(retry)
+    } else if (event.type === 'llm/retry-started') {
+      if (typeof event.data.retryId !== 'string' || event.data.retryId === ''
+        || !isSafeInteger(event.data.turn) || !isSafeInteger(event.data.step)
+        || !isSafeInteger(event.data.retry)) return undefined
+      const index = retryAttempts.get(modelRetryKey(event.data.retryId, event.data.retry))
+      if (index === undefined) return undefined
+      const retry = nodes[index]
+      if (retry?.kind !== 'model-retry' || retry.turn !== event.data.turn || retry.step !== event.data.step
+        || retry.retryState !== 'scheduled') return undefined
+      nodes[index] = { ...retry, retryState: 'started' }
     } else if (event.type === 'turn/end') {
-      if (!Number.isSafeInteger(event.data.turn) || !isRecord(event.data.reason)) return undefined
-      const turn = event.data.turn as number
+      if (!isSafeInteger(event.data.turn) || !isRecord(event.data.reason)) return undefined
+      const turn = event.data.turn
+      closedTurns.add(turn)
       if (event.data.reason.kind === 'error') {
         const error = event.data.reason.error
         if (!isRecord(error) || typeof error.message !== 'string') return undefined
@@ -596,14 +618,61 @@ function parseConversationHistory(
       }
     }
   }
+  const visibleNodes = nodes.flatMap((node) => {
+    if (node.kind === 'turn-error' && retryTurns.has(node.turn as number)) return []
+    if (node.kind === 'model-retry' && node.retryState === 'scheduled' && closedTurns.has(node.turn as number)) {
+      return [{ ...node, retryState: 'cancelled' }]
+    }
+    return [node]
+  })
   return {
     sessionId,
-    nodes,
+    nodes: visibleNodes,
     turnTimings: [], turnEnds: [], partial: null, runningCalls: [], pending, queue: [],
     running, subagent: null, composerPhase: nodes.length === 0 && !running ? 'pristine' : 'active',
     removed: false, openState: 'open', openError: null, hasMore: value.hasMore,
     loadingOlder: false, promptError: null, blank: nodes.length === 0, lastAgentError: null,
   }
+}
+
+interface ProjectedModelRetry extends Record<string, unknown> {
+  kind: 'model-retry'
+  retryId: string
+  turn: number
+  step: number
+  retry: number
+  retryState: 'scheduled' | 'started' | 'cancelled'
+}
+
+function parseModelRetry(
+  data: Record<string, unknown>,
+  seq: number,
+  time: number,
+): ProjectedModelRetry | undefined {
+  if (typeof data.retryId !== 'string' || data.retryId === ''
+    || !isSafeInteger(data.turn) || !isSafeInteger(data.step)
+    || typeof data.provider !== 'string' || data.provider === ''
+    || (data.mode !== 'normal' && data.mode !== 'always')
+    || typeof data.policyKey !== 'string' || data.policyKey === ''
+    || !isSafeInteger(data.retry) || !isSafeInteger(data.delayMs)
+    || !isRecord(data.failure) || typeof data.failure.code !== 'string'
+    || typeof data.failure.message !== 'string') return undefined
+  if (data.mode === 'normal' && !isSafeInteger(data.maxRetries)) return undefined
+  return {
+    kind: 'model-retry', seq, time, retryState: 'scheduled',
+    retryId: data.retryId, turn: data.turn, step: data.step,
+    provider: data.provider, mode: data.mode, policyKey: data.policyKey,
+    retry: data.retry, ...(data.mode === 'normal' ? { maxRetries: data.maxRetries } : {}),
+    delayMs: data.delayMs, failure: data.failure,
+  }
+}
+
+function modelRetryKey(retryId: string, retry: number): string {
+  return `${retryId}\0${String(retry)}`
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value)
 }
 
 function assistantBlock(value: unknown): Record<string, unknown> {

@@ -100,6 +100,7 @@ export function MobileBrowse({
           loadImage={attachment => loadImage(open.id, attachment)}
           cwd={open.cwd}
           mutationEnabled={canMutate}
+          operationFailure={operationFailure}
           {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(open.id, text) })}
           {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(open.id) } })}
           {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(open.id, file) } })}
@@ -113,6 +114,7 @@ export function MobileBrowse({
           <button type="button" className={css.back} onClick={() => { setOpenId(undefined) }}>{locale === 'zh' ? '返回' : 'Back'}</button>
           <h1>{open.displayTitle}</h1>
         </header>
+        {operationFailure !== undefined && <p role="alert">{operationFailure.message}</p>}
         <p className={css.summary}>{locale === 'zh' ? '尚未加载此 Session 的对话。' : 'This Session conversation is not loaded.'}</p>
       </section>
     )

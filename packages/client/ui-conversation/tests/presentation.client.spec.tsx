@@ -71,6 +71,7 @@ describe('public conversation presentation seam', () => {
     await waitFor(() => { expect(onSubmit).toHaveBeenCalledWith('submit me') })
     expect((input as HTMLTextAreaElement).value).toBe('submit me')
     expect(document.querySelector('[data-input-backdrop]')?.textContent).toContain('submit me')
+    expect((await screen.findByRole('alert')).textContent).toContain('Desktop refused')
   })
 
   it('settles a synchronous transport refusal and re-enables the retained draft', async () => {

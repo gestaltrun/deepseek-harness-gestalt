@@ -124,18 +124,23 @@ export interface InputBarPresentationProps {
   onStop?: (() => void) | undefined
   onKeyDown?: KeyboardEventHandler<HTMLTextAreaElement> | undefined
   onPaste?: ClipboardEventHandler<HTMLTextAreaElement> | undefined
+  /** Latest composer-owned informational or failure notice. */
+  notice?: { readonly level: 'info' | 'error'; readonly text: string } | undefined
   t: TranslateNS<'conversation'>
 }
 
 /** Narrow InputBar using the same editor and primary-action implementations as Desktop. */
 export function InputBarPresentation({
   draft, phase, running, busy, disabled = false, placeholder,
-  onDraftChange, onSubmit, onStop, onKeyDown, onPaste, t,
+  onDraftChange, onSubmit, onStop, onKeyDown, onPaste, notice, t,
 }: InputBarPresentationProps): ReactNode {
   const locked = disabled || busy
   const primaryStops = running
   return (
     <div className={css.root}>
+      {notice !== undefined && (
+        <div className={css.notice} role={notice.level === 'error' ? 'alert' : 'status'}>{notice.text}</div>
+      )}
       <div className={css.card} data-composer-card>
         <InputBarEditor
           draft={draft}

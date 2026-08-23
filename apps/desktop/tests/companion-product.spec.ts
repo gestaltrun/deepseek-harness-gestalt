@@ -95,6 +95,43 @@ describe('Desktop Companion product operations', () => {
     })
   })
 
+  it('projects model retries and suppresses the retry-owned terminal turn error', async () => {
+    const dependencies = baseDependencies(hostRpc(async (method) => {
+      if (method === 'session.list') return { ok: true, value: { items: [{
+        sessionId: 'session-product', updatedAt: 50, running: false, blank: false,
+      }] } }
+      expect(method).toBe('session.history')
+      return { ok: true, value: {
+        events: [
+          { event: { type: 'step/start', seq: 1, time: 10, data: { turn: 1, step: 1 } } },
+          { event: { type: 'turn/end', seq: 2, time: 20, data: {
+            turn: 1, reason: { kind: 'error', error: { message: 'temporary', code: 'RATE_LIMIT' } },
+          } } },
+          { event: { type: 'llm/retry', seq: 3, time: 30, data: {
+            retryId: 'retry-product', turn: 1, step: 1, provider: 'deepseek', mode: 'normal',
+            policyKey: 'normal', retry: 1, maxRetries: 2, delayMs: 500,
+            failure: { message: 'temporary', code: 'RATE_LIMIT' },
+          } } },
+          { event: { type: 'llm/retry-started', seq: 4, time: 40, data: {
+            retryId: 'retry-product', turn: 1, step: 1, retry: 1,
+          } } },
+        ],
+        hasMore: false,
+      } }
+    }))
+    const operation = op({ type: 'load-history', sessionId, maxMessages: 20 })
+
+    await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toMatchObject({
+      type: 'conversation-snapshot',
+      conversation: {
+        nodes: [{
+          kind: 'model-retry', seq: 3, retryId: 'retry-product', retryState: 'started',
+          failure: { message: 'temporary', code: 'RATE_LIMIT' },
+        }],
+      },
+    })
+  })
+
   it('submits and cancels through exact Host methods with correlated receipts', async () => {
     const calls: Array<[string, Record<string, unknown>]> = []
     const dependencies = baseDependencies(hostRpc(async (method, payload) => {

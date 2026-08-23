@@ -132,6 +132,19 @@ describe('Mobile Companion browse projection', () => {
     expect(screen.getByText('尚未加载此 Session 的对话。')).toBeTruthy()
   })
 
+  it('keeps a correlated operation failure visible in the opened conversation', () => {
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces,
+      conversations: { [alphaId]: conversation() }, ...browsePresentation,
+      operationFailure: {
+        kind: 'business', code: 'prompt-refused', message: 'Desktop rejected the prompt',
+      },
+    }))
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }))
+    expect(screen.getByRole('alert').textContent).toContain('Desktop rejected the prompt')
+  })
+
   it('targets real Workspace ids and disables creation before foreground synchronization', () => {
     const onCreate = vi.fn()
     const view = render(createElement(MobileBrowse, {

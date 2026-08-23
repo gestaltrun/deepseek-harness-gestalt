@@ -199,21 +199,25 @@ function settleEffects(
   machine: InputMachine,
   effects: readonly InputEffect[],
   publish: () => void,
+  publishNotice: (notice: Extract<InputEffect, { type: 'notice' }> | undefined) => void,
   onSubmit: ConversationComposerProps['onSubmit'],
 ): void {
   for (const effect of effects) {
     /* v8 ignore next -- the standalone adapter has no claim owner, so its only non-empty effect is default-sink. */
     if (effect.type !== 'default-sink') continue
+    publishNotice(undefined)
     void Promise.resolve().then(() => onSubmit(effect.draft)).then(
       () => {
-        machine.dispatch({ type: 'submit-settled', attempt: effect.attempt, ok: true })
+        const settled = machine.dispatch({ type: 'submit-settled', attempt: effect.attempt, ok: true })
+        publishNotice(settled.find(candidate => candidate.type === 'notice'))
         publish()
       },
       (cause: unknown) => {
-        machine.dispatch({
+        const settled = machine.dispatch({
           type: 'submit-settled', attempt: effect.attempt, ok: false,
           message: cause instanceof Error ? cause.message : String(cause),
         })
+        publishNotice(settled.find(candidate => candidate.type === 'notice'))
         publish()
       },
     )
@@ -231,11 +235,12 @@ export function ConversationComposer({ snapshot, onSubmit, onCancel, t, disabled
   const machine = machineRef.current ?? new InputMachine()
   machineRef.current = machine
   const [input, setInput] = useState<InputState>(() => machine.state)
+  const [notice, setNotice] = useState<Extract<InputEffect, { type: 'notice' }>>()
   const publish = useCallback(() => { setInput(machine.state) }, [machine])
   const dispatch = useCallback((event: Parameters<InputMachine['dispatch']>[0]) => {
     const effects = machine.dispatch(event)
     publish()
-    settleEffects(machine, effects, publish, onSubmit)
+    settleEffects(machine, effects, publish, setNotice, onSubmit)
   }, [machine, onSubmit, publish])
   const composing = useRef(false)
   const submit = useCallback(() => { dispatch({ type: 'enter', mode: 'queue' }) }, [dispatch])
@@ -284,6 +289,7 @@ export function ConversationComposer({ snapshot, onSubmit, onCancel, t, disabled
         onStop={onCancel}
         onKeyDown={onKeyDown}
         onPaste={onPaste}
+        notice={notice}
         t={t}
       />
     </div>

@@ -212,7 +212,24 @@ describe('MobileCompanionSurface', () => {
       })),
     })
     surface.loadOlder('session-one')
+    surface.loadOlder('session-one')
     expect(firstChannel.mutations.loadOlder).toHaveBeenCalledWith('session-one', 8)
+    expect(firstChannel.mutations.loadOlder).toHaveBeenCalledOnce()
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
+
+    first.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(false)
+    surface.loadOlder('session-one')
+    expect(firstChannel.mutations.loadOlder).toHaveBeenCalledTimes(2)
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
+
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected current generation result receiver')
+    results.acceptValidatedCompanionResult({
+      type: 'operation-failed', operationId: parseCompanionOperationId('history-default'),
+      failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'History timed out' },
+    })
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(false)
 
     runtime.forgetConnection()
     runtime.markConnectionOpen()

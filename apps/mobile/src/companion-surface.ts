@@ -141,7 +141,9 @@ export class MobileCompanionSurface {
   }
   #searchOperationId: CompanionOperationId | undefined
   #attachmentOperationId: CompanionOperationId | undefined
-  readonly #operations = new Map<CompanionOperationId, 'submit' | 'cancel' | 'history'>()
+  readonly #operations = new Map<CompanionOperationId, 'submit' | 'cancel'>()
+  readonly #historyOperations = new Map<CompanionOperationId, SessionId>()
+  readonly #historyInFlight = new Map<SessionId, CompanionOperationId>()
 
   /** @param runtime - current physical-connection synchronization authority. */
   constructor(runtime: CompanionForegroundRuntime) { this.#runtime = runtime }
@@ -180,6 +182,13 @@ export class MobileCompanionSurface {
           message,
           settlement => this.settlePending(active, settlement),
         )
+        const completedHistory: Array<readonly [SessionId, CompanionOperationId]> = []
+        for (const sessionId of projection.sessions.ids) {
+          const conversation = projection.conversations[sessionId]
+          const operationId = this.#historyInFlight.get(sessionId)
+          if (conversation?.loadingOlder !== false || operationId === undefined) continue
+          completedHistory.push([sessionId, operationId])
+        }
         const previousConnection = this.#activeConnection
         const previousSnapshot = this.#snapshot
         this.#activeConnection = active
@@ -187,6 +196,7 @@ export class MobileCompanionSurface {
           ...projection,
           search: previousSnapshot.search,
           attachment: previousSnapshot.attachment,
+          operationFailure: completedHistory.length > 0 ? undefined : previousSnapshot.operationFailure,
         }
         let accepted: boolean
         try {
@@ -200,6 +210,10 @@ export class MobileCompanionSurface {
           this.#activeConnection = previousConnection
           this.#snapshot = previousSnapshot
           return
+        }
+        for (const [sessionId, operationId] of completedHistory) {
+          this.#historyInFlight.delete(sessionId)
+          this.#historyOperations.delete(operationId)
         }
         this.publish()
       },
@@ -272,10 +286,16 @@ export class MobileCompanionSurface {
   }
 
   readonly loadOlder = (sessionId: string): void => {
-    const conversation = this.#snapshot.conversations[sessionId as SessionId]
+    this.requireActive('history')
+    const parsedSessionId = sessionId as SessionId
+    if (this.#historyInFlight.has(parsedSessionId)) return
+    const conversation = this.#snapshot.conversations[parsedSessionId]
     const beforeSeq = conversation === undefined ? undefined : oldestNodeSeq(conversation)
     const operationId = this.transmit('history', channel => channel.mutations.loadOlder(sessionId, beforeSeq))
-    this.#operations.set(operationId, 'history')
+    this.#historyOperations.set(operationId, parsedSessionId)
+    this.#historyInFlight.set(parsedSessionId, operationId)
+    this.setHistoryLoading(parsedSessionId, true)
+    this.publish()
   }
 
   readonly loadImage = async (sessionId: string, attachment: ImageAttachmentRef): Promise<string> => {
@@ -337,6 +357,18 @@ export class MobileCompanionSurface {
       this.publish()
       return
     }
+    const historySessionId = this.#historyOperations.get(result.operationId)
+    if (historySessionId !== undefined && (result.type === 'confirmed' || result.type === 'operation-failed')) {
+      this.#historyOperations.delete(result.operationId)
+      this.#historyInFlight.delete(historySessionId)
+      this.setHistoryLoading(historySessionId, false)
+      this.#snapshot = {
+        ...this.#snapshot,
+        operationFailure: result.type === 'operation-failed' ? result.failure : undefined,
+      }
+      this.publish()
+      return
+    }
     if (result.operationId !== this.#attachmentOperationId) return
     this.#attachmentOperationId = undefined
     if (result.type === 'confirmed') {
@@ -379,6 +411,18 @@ export class MobileCompanionSurface {
   ): T {
     const active = this.requireActive(kind)
     return send(active.channel)
+  }
+
+  private setHistoryLoading(sessionId: SessionId, loadingOlder: boolean): void {
+    const conversation = this.#snapshot.conversations[sessionId]
+    if (conversation === undefined || conversation.loadingOlder === loadingOlder) return
+    this.#snapshot = {
+      ...this.#snapshot,
+      conversations: {
+        ...this.#snapshot.conversations,
+        [sessionId]: { ...conversation, loadingOlder },
+      },
+    }
   }
 
   private requireActive(kind: CompanionMutationName): ActiveConnection {

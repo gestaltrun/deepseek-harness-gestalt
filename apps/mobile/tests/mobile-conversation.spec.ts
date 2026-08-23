@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement } from 'react'
+import { createElement, useState } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import {
   EMPTY_CHAT_SNAPSHOT,
@@ -88,6 +88,26 @@ describe('Mobile shared Session presentation', () => {
     }))
     fireEvent.click(screen.getByRole('button', { name: 'Load earlier' }))
     expect(onLoadOlder).toHaveBeenCalledOnce()
+  })
+
+  it('disables history paging immediately after the first click', () => {
+    const onLoadOlder = vi.fn()
+    function HistoryHarness() {
+      const [loadingOlder, setLoadingOlder] = useState(false)
+      return createElement(MobileConversation, {
+        title: 'History', onBack: () => {}, locale: 'en', loadImage: imageLoader,
+        snapshot: snapshot([], { hasMore: true, loadingOlder }), mutationEnabled: true,
+        onLoadOlder: () => { onLoadOlder(); setLoadingOlder(true) },
+      })
+    }
+    render(createElement(HistoryHarness))
+
+    const load = screen.getByRole('button', { name: 'Load earlier' })
+    fireEvent.click(load)
+    fireEvent.click(load)
+
+    expect(onLoadOlder).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: 'Loading history…' }).hasAttribute('disabled')).toBe(true)
   })
 
   it('renders Desktop-authoritative Markdown, code, diff, unknown Tool, and failures through shared Web components', () => {

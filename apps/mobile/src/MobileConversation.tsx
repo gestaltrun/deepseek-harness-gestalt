@@ -3,6 +3,7 @@ import type {
   ConversationSnapshot, PendingWait,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { CompanionHostFailure } from '@deepseek-ai/dsh-remote-protocol'
 import {
   AssistantMarkdown,
   ConversationApproval,
@@ -46,6 +47,8 @@ export interface MobileConversationProps {
   onLoadOlder?: (() => void) | undefined
   /** Whether current foreground synchronization admits mutations. */
   mutationEnabled?: boolean | undefined
+  /** Latest correlated Companion operation failure. */
+  operationFailure?: CompanionHostFailure | undefined
 }
 
 /** Phone conversation using Desktop-authoritative projections and exported DSH Web presentation. */
@@ -63,6 +66,7 @@ export function MobileConversation({
   onAttach,
   onLoadOlder,
   mutationEnabled = false,
+  operationFailure,
 }: MobileConversationProps): ReactNode {
   const attachmentInput = useRef<HTMLInputElement>(null)
   const t = useMemo(() => conversationPresentationTranslate(locale), [locale])
@@ -90,6 +94,7 @@ export function MobileConversation({
         <button type="button" className={css.back} onClick={onBack}>{locale === 'zh' ? '返回' : 'Back'}</button>
         <h1>{title}</h1>
       </header>
+      {operationFailure !== undefined && <p role="alert">{operationFailure.message}</p>}
       <div className={css.blocks} data-conversation-scroll="">
         {snapshot.openState === 'loading' && <p role="status">{t('chat.loadingHistory')}</p>}
         {snapshot.openState === 'error' && snapshot.openError !== null && (

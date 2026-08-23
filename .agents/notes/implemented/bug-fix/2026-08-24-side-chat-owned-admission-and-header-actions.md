@@ -16,7 +16,7 @@ Feature-owned operations never fall through to ordinary Session RPCs. Side Chat 
 
 Provisional summaries carry an explicit marker. Side Chat classifiers recognize that marker or the reserved title, while descendant indexing excludes the marker until the Host publishes the Session. Durable origin and parent fields become authoritative after publication.
 
-The shared composer plus button opens every registered `/` trigger source in the existing grouped menu. Side Chat keeps title and breadcrumb navigation absent, then contributes the rendered child's descendant catalog as its first header action, followed by background jobs and schedules. Descendant selection retargets the explicit Side Chat renderer instead of calling the shell-level subagent opener; the tab retains its root child id for live-handle disposal. Job and schedule lists render through viewport portals whose right edge follows the trigger and whose left edge is clamped to the viewport.
+The shared composer plus button opens every registered `/` trigger source in the existing grouped menu. Side Chat keeps title and breadcrumb navigation absent, then contributes the rendered child's descendant catalog as its first header action, followed by background jobs and schedules. Descendant selection retargets the explicit Side Chat renderer instead of calling the shell-level subagent opener; the tab retains its root child id for live-handle disposal. Job and schedule lists render through viewport portals whose right edge follows the trigger and whose left edge is clamped to the viewport. Both use the primitives package's anchored-position and outside-pointer hooks, which treat the trigger root and its portal as one owned surface.
 
 ## Alternatives considered
 

@@ -16,7 +16,7 @@ Side Chat 复用标准 Session 对话 UI，但其子 Agent 归 subagent routing 
 
 临时摘要携带显式标记。Side Chat 分类器会识别该标记或保留标题，而后代索引会在 Host 发布 Session 之前排除该标记。发布后，持久 origin 与 parent 字段成为权威事实。
 
-共享 composer 的加号按钮会在既有分组菜单中打开 `/` trigger 下的所有已注册 source。Side Chat 继续省略标题和面包屑导航，并把当前渲染 child 的下级目录作为第一个头部操作，后面依次是后台任务与定时任务。选择下级会重定向显式 Side Chat renderer，而不是调用外壳级 subagent 打开器；标签页会保留根 child id，用于释放在线句柄。后台任务和定时任务列表通过 viewport portal 渲染，右边缘跟随触发器，左边缘钳制在 viewport 内。
+共享 composer 的加号按钮会在既有分组菜单中打开 `/` trigger 下的所有已注册 source。Side Chat 继续省略标题和面包屑导航，并把当前渲染 child 的下级目录作为第一个头部操作，后面依次是后台任务与定时任务。选择下级会重定向显式 Side Chat renderer，而不是调用外壳级 subagent 打开器；标签页会保留根 child id，用于释放在线句柄。后台任务和定时任务列表通过 viewport portal 渲染，右边缘跟随触发器，左边缘钳制在 viewport 内。两者共用 primitives 包的锚定位置与外部指针钩子，将触发器根节点与其 portal 视为同一个自有表面。
 
 ## Alternatives considered
 

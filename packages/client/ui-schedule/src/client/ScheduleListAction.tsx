@@ -9,6 +9,8 @@ import {
   IconPlayOutline16,
   IconTrashOutline16,
   StateDot,
+  useAnchoredPosition,
+  useDismissOnOutsidePointer,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ScheduleActions } from './slots.ts'
@@ -94,7 +96,6 @@ export function ScheduleListAction({
 }: ScheduleListActionProps) {
   const schedules = useProjection('schedules')
   const [open, setOpen] = useState(false)
-  const [popoverPosition, setPopoverPosition] = useState<CSSProperties>()
   const [now, setNow] = useState(() => Date.now())
   const [confirming, setConfirming] = useState<ScheduleProjectionItem['id'] | null>(null)
   const [pending, setPending] = useState<ScheduleProjectionItem['id'] | null>(null)
@@ -107,38 +108,22 @@ export function ScheduleListAction({
   const active = useMemo(() => schedules?.filter(schedule => !schedule.paused) ?? [], [schedules])
   const next = useMemo(() => [...active].sort((left, right) =>
     Date.parse(left.scheduledAt) - Date.parse(right.scheduledAt))[0], [active])
+  const popoverPosition = useAnchoredPosition({
+    open,
+    anchorRef: triggerRef,
+    panelRef: popoverRef,
+    gap: 5,
+    margin: POPOVER_MARGIN,
+    align: 'end',
+    width: POPOVER_WIDTH,
+  })
+  useDismissOnOutsidePointer(rootRef, open, setOpen, popoverRef)
 
   useEffect(() => {
     if (!open) return
     setNow(Date.now())
     const timer = setInterval(() => { setNow(Date.now()) }, 30_000)
     return () => { clearInterval(timer) }
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    const closeOutside = (event: PointerEvent): void => {
-      if (!(event.target instanceof Node)) return
-      if (rootRef.current?.contains(event.target) || popoverRef.current?.contains(event.target)) return
-      setOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOutside)
-    return () => { document.removeEventListener('pointerdown', closeOutside) }
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    const place = (): void => {
-      const trigger = triggerRef.current
-      if (trigger !== null) setPopoverPosition(schedulePopoverPosition(trigger))
-    }
-    place()
-    window.addEventListener('resize', place)
-    document.addEventListener('scroll', place, true)
-    return () => {
-      window.removeEventListener('resize', place)
-      document.removeEventListener('scroll', place, true)
-    }
   }, [open])
 
   useEffect(() => {
@@ -185,8 +170,6 @@ export function ScheduleListAction({
         aria-expanded={open}
         aria-label={countLabel}
         onClick={() => {
-          const trigger = triggerRef.current
-          if (trigger !== null) setPopoverPosition(schedulePopoverPosition(trigger))
           setOpen(value => !value)
         }}
       >
@@ -195,7 +178,7 @@ export function ScheduleListAction({
         {next === undefined ? null : <time className={css.next}>{target(next.scheduledAt)}</time>}
         <IconChevronDownOutline14 className={open ? css.chevronOpen : undefined} />
       </button>
-      {open && popoverPosition !== undefined
+      {open && popoverPosition !== null
         ? createPortal((
           <section ref={popoverRef} className={css.popover} style={popoverPosition} aria-label={t('list.aria')}>
             <header className={css.header}>

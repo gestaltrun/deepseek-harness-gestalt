@@ -8,6 +8,7 @@ import {
   parseRelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionForegroundRuntime } from '../src/companion-lifecycle.ts'
+import type { MobileCompanionTrackedSubmission } from '../src/companion-surface.ts'
 import {
   MobileSnowCompanionConnection,
   MobileSnowCompanionProductChannel,
@@ -60,11 +61,15 @@ describe('Mobile Snow Companion product channel', () => {
       pairingSelector: parseRelayPairingSelector('pairing-refresh'),
       generation: 3,
     })
+    const trackHistoryRefresh = vi.fn<(sessionId: string, submission: MobileCompanionTrackedSubmission) => void>()
+    const trackSurfaceRefresh = vi.fn<(submission: MobileCompanionTrackedSubmission) => void>()
     const product = new MobileSnowCompanionProductChannel({
       runtime, connection,
       installation: { authorizeCurrentInstallation: vi.fn() },
       attachmentKeys: { attachmentKeyMaterial: () => undefined },
       platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
+      trackHistoryRefresh,
+      trackSurfaceRefresh,
     })
     const submission = product.submit('session-refresh', 'next prompt')
     const submit = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
@@ -76,6 +81,13 @@ describe('Mobile Snow Companion product channel', () => {
       expect(seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type))
         .toEqual(['submit-prompt', 'load-history', 'refresh-surface'])
     })
+    expect(trackHistoryRefresh).toHaveBeenCalledOnce()
+    expect(trackHistoryRefresh.mock.lastCall?.[0]).toBe('session-refresh')
+    expect(typeof trackHistoryRefresh.mock.lastCall?.[1].operationId).toBe('string')
+    await expect(trackHistoryRefresh.mock.lastCall?.[1].completion).resolves.toBeUndefined()
+    expect(trackSurfaceRefresh).toHaveBeenCalledOnce()
+    expect(typeof trackSurfaceRefresh.mock.lastCall?.[0].operationId).toBe('string')
+    await expect(trackSurfaceRefresh.mock.lastCall?.[0].completion).resolves.toBeUndefined()
 
     product.cancel('session-refresh')
     const cancel = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
@@ -205,11 +217,11 @@ describe('Mobile Snow Companion product channel', () => {
       sendCiphertext,
     })
 
-    const searchId = product.search('indexed needle')
+    const search = product.search('indexed needle')
     await vi.waitFor(() => { expect(sendCiphertext).toHaveBeenCalledOnce() })
     expect(seal).toHaveBeenCalledWith({
       type: 'operation',
-      operation: { type: 'search-sessions', operationId: searchId, query: 'indexed needle' },
+      operation: { type: 'search-sessions', operationId: search.operationId, query: 'indexed needle' },
     })
     const attachment = product.attach('session-current', new File([Uint8Array.of(1, 2, 3)], 'real.bin'))
     await attachment.completion
@@ -248,10 +260,9 @@ describe('Mobile Snow Companion product channel', () => {
       sendCiphertext: async () => { connection.disconnect() },
       reportFailure: failure,
     })
-    product.search('replacement race')
-    await vi.waitFor(() => { expect(failure).toHaveBeenCalledWith(expect.objectContaining({
-      message: 'Companion Snow channel was replaced',
-    })) })
+    const search = product.search('replacement race')
+    await expect(search.completion).rejects.toThrow('Companion Snow channel was replaced')
+    expect(failure).not.toHaveBeenCalled()
   })
 })
 

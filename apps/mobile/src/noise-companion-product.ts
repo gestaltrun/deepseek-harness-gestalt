@@ -20,7 +20,10 @@ import { transferSelectedCompanionAttachment } from './companion-attachment.ts'
 import type { CompanionForegroundRuntime } from './companion-lifecycle.ts'
 import type { PairingCompanionKeyVault } from './companion-keys.ts'
 import type { MobilePendingSettlement, MobilePendingSettlementReceipt } from './companion-projection.ts'
-import type { MobileCompanionMutationChannel } from './companion-surface.ts'
+import type {
+  MobileCompanionMutationChannel,
+  MobileCompanionTrackedSubmission,
+} from './companion-surface.ts'
 
 interface ActiveMobileSnowChannel {
   channel: SnowCompanionProtocolChannel
@@ -67,6 +70,8 @@ export interface MobileSnowCompanionProductOptions {
   platformOrigin: string
   sendCiphertext(targetAttachmentId: RelayAttachmentId, ciphertext: Uint8Array): Promise<void>
   reportFailure?(error: unknown): void
+  trackHistoryRefresh?(sessionId: string, submission: MobileCompanionTrackedSubmission): void
+  trackSurfaceRefresh?(submission: MobileCompanionTrackedSubmission): void
 }
 
 /** Stable Mobile UI adapter whose every send revalidates current foreground generation. */
@@ -124,13 +129,14 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     return { operationId: operationIdValue, completion }
   }
 
-  cancel(sessionId: string): CompanionOperationId {
+  cancel(sessionId: string): MobileCompanionTrackedSubmission {
     const operationIdValue = operationId()
     this.refreshAfterConfirmation.set(operationIdValue, sessionId)
-    this.sendDetached({
+    const submission = this.sendTracked({
       type: 'cancel-session', operationId: operationIdValue, sessionId: parseCompanionSessionId(sessionId),
     })
-    return operationIdValue
+    void submission.completion.catch(() => { this.refreshAfterConfirmation.delete(operationIdValue) })
+    return submission
   }
 
   attach(sessionId: string, file: File): { operationId: ReturnType<typeof parseCompanionOperationId>; completion: Promise<void> } {
@@ -161,27 +167,24 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     return { operationId: operationIdValue, completion }
   }
 
-  search(query: string): ReturnType<typeof parseCompanionOperationId> {
+  search(query: string): MobileCompanionTrackedSubmission {
     const operationIdValue = operationId()
-    this.sendDetached({ type: 'search-sessions', operationId: operationIdValue, query })
-    return operationIdValue
+    return this.sendTracked({ type: 'search-sessions', operationId: operationIdValue, query })
   }
 
   /** Request the current Desktop Session and Workspace baseline after foreground synchronization. */
-  refreshSurface(): CompanionOperationId {
+  refreshSurface(): MobileCompanionTrackedSubmission {
     const operationIdValue = operationId()
-    this.sendDetached({ type: 'refresh-surface', operationId: operationIdValue })
-    return operationIdValue
+    return this.sendTracked({ type: 'refresh-surface', operationId: operationIdValue })
   }
 
-  loadOlder(sessionId: string, beforeSeq?: number): CompanionOperationId {
+  loadOlder(sessionId: string, beforeSeq?: number): MobileCompanionTrackedSubmission {
     const operationIdValue = operationId()
-    this.sendDetached({
+    return this.sendTracked({
       type: 'load-history', operationId: operationIdValue, sessionId: parseCompanionSessionId(sessionId),
       ...(beforeSeq === undefined ? {} : { beforeSeq }),
       maxMessages: REMOTE_PROTOCOL_LIMITS.historyPageMessages,
     })
-    return operationIdValue
   }
 
   settle(settlement: MobilePendingSettlement): Promise<MobilePendingSettlementReceipt> {
@@ -312,13 +315,14 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     )
   }
 
-  private sendDetached(operation: CompanionOperation): void {
+  private sendTracked(operation: CompanionOperation): MobileCompanionTrackedSubmission {
     const permit = this.options.runtime.bindCompanionMutationPermit('other-mutation')
     if (permit === undefined) throw new Error('Companion operation has no current connection generation')
     const active = this.requireActive()
-    void this.sendCurrent(active, { type: 'operation', operation }, permit).catch((error: unknown) => {
-      this.options.reportFailure?.(error)
-    })
+    return {
+      operationId: operation.operationId,
+      completion: this.sendCurrent(active, { type: 'operation', operation }, permit),
+    }
   }
 
   private async sendCurrent(
@@ -344,12 +348,20 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
   private queueRefresh(sessionId: string): void {
     queueMicrotask(() => {
       try {
-        this.loadOlder(sessionId)
-        this.refreshSurface()
+        const history = this.loadOlder(sessionId)
+        if (this.options.trackHistoryRefresh === undefined) this.reportUntracked(history)
+        else this.options.trackHistoryRefresh(sessionId, history)
+        const surface = this.refreshSurface()
+        if (this.options.trackSurfaceRefresh === undefined) this.reportUntracked(surface)
+        else this.options.trackSurfaceRefresh(surface)
       } catch (error) {
         this.options.reportFailure?.(error)
       }
     })
+  }
+
+  private reportUntracked(submission: MobileCompanionTrackedSubmission): void {
+    void submission.completion.catch((error: unknown) => { this.options.reportFailure?.(error) })
   }
 
   private rejectPending(): void {

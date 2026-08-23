@@ -90,6 +90,33 @@ describe('MobileCompanionSurface', () => {
     expect(surface.getSnapshot().sessions.ids).toEqual(['session-replacement'])
   })
 
+  it('clears old-generation history ownership when a replacement is accepted', () => {
+    const runtime = connectedRuntime()
+    const firstChannel = connectionChannel()
+    const surface = new MobileCompanionSurface(runtime)
+    const first = surface.bindAuthenticatedConnection(firstChannel)
+    if (first === undefined) throw new Error('expected first generation receiver')
+    first.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    surface.loadOlder('session-one')
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
+
+    runtime.forgetConnection()
+    runtime.markConnectionOpen()
+    const replacementChannel = connectionChannel()
+    const replacement = surface.bindAuthenticatedConnection(replacementChannel)
+    if (replacement === undefined) throw new Error('expected replacement generation receiver')
+    replacement.acceptValidatedDesktopResync(projection('session-one', 'One'))
+
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(false)
+    surface.loadOlder('session-one')
+    expect(replacementChannel.mutations.loadOlder).toHaveBeenCalledOnce()
+    first.acceptValidatedCompanionProjection({
+      type: 'conversation-snapshot', operationId: parseCompanionOperationId('history-default'),
+      sessionId: parseCompanionSessionId('session-one'),
+    })
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
+  })
+
   it('publishes synchronized replacement state only after the new channel is authoritative', () => {
     const runtime = connectedRuntime()
     const firstChannel = connectionChannel()
@@ -201,8 +228,8 @@ describe('MobileCompanionSurface', () => {
     const runtime = connectedRuntime()
     const firstChannel = connectionChannel()
     firstChannel.mutations.loadOlder
-      .mockReturnValueOnce(parseCompanionOperationId('history-a'))
-      .mockReturnValueOnce(parseCompanionOperationId('history-b'))
+      .mockReturnValueOnce(tracked('history-a'))
+      .mockReturnValueOnce(tracked('history-b'))
     const surface = new MobileCompanionSurface(runtime)
     const first = surface.bindAuthenticatedConnection(firstChannel)
     if (first === undefined) throw new Error('expected Desktop resync receiver')
@@ -261,6 +288,26 @@ describe('MobileCompanionSurface', () => {
     expect(() => { surface.loadOlder('session-one') }).toThrow('requires foreground synchronization')
   })
 
+  it('clears and surfaces a history transport rejection', async () => {
+    const runtime = connectedRuntime()
+    const channel = connectionChannel({ historyCompletion: Promise.reject(new Error('relay send rejected')) })
+    const surface = new MobileCompanionSurface(runtime)
+    const resync = surface.bindAuthenticatedConnection(channel)
+    if (resync === undefined) throw new Error('expected current generation receiver')
+    resync.acceptValidatedDesktopResync(projection('session-one', 'One'))
+
+    surface.loadOlder('session-one')
+    await vi.waitFor(() => {
+      expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(false)
+    })
+    expect(surface.getSnapshot().operationFailure).toMatchObject({
+      operation: 'history', sessionId: 'session-one',
+      failure: { code: 'companion-send-failed' },
+    })
+    surface.loadOlder('session-one')
+    expect(channel.mutations.loadOlder).toHaveBeenCalledTimes(2)
+  })
+
   it('projects only Desktop-authoritative search hits and stable Host failures', () => {
     const runtime = connectedRuntime()
     const channel = connectionChannel()
@@ -305,7 +352,7 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected current generation result receiver')
 
-    surface.trackSurfaceRefresh(parseCompanionOperationId('refresh-a'))
+    surface.trackSurfaceRefresh(tracked('refresh-a'))
     results.acceptValidatedCompanionResult({
       type: 'operation-failed', operationId: parseCompanionOperationId('refresh-a'),
       failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'Refresh timed out' },
@@ -558,6 +605,7 @@ function connectedRuntime(): CompanionForegroundRuntime {
 function connectionChannel(options?: {
   attachmentOperationId?: string
   attachmentCompletion?: Promise<void>
+  historyCompletion?: Promise<void>
 }) {
   const mutations = {
     create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(),
@@ -565,17 +613,17 @@ function connectionChannel(options?: {
       operationId: parseCompanionOperationId('submit-default'), completion: Promise.resolve(),
     })),
     cancel: vi.fn<MobileCompanionConnectionChannel['mutations']['cancel']>(() => (
-      parseCompanionOperationId('cancel-default')
+      tracked('cancel-default')
     )),
     attach: vi.fn<MobileCompanionConnectionChannel['mutations']['attach']>(() => ({
       operationId: parseCompanionOperationId(options?.attachmentOperationId ?? 'attachment-default'),
       completion: options?.attachmentCompletion ?? Promise.resolve(),
     })),
     search: vi.fn<MobileCompanionConnectionChannel['mutations']['search']>(() => (
-      parseCompanionOperationId('search-needle')
+      tracked('search-needle')
     )),
     loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(() => (
-      parseCompanionOperationId('history-default')
+      tracked('history-default', options?.historyCompletion)
     )),
     settle: vi.fn<MobileCompanionConnectionChannel['mutations']['settle']>(),
   }
@@ -583,6 +631,10 @@ function connectionChannel(options?: {
     mutations,
     content: { loadImage: vi.fn(async () => 'data:image/gif;base64,R0lGODlhAQABAAAAACw=') },
   } satisfies MobileCompanionConnectionChannel
+}
+
+function tracked(id: string, completion: Promise<void> = Promise.resolve()) {
+  return { operationId: parseCompanionOperationId(id), completion }
 }
 
 function projection(id: string, title: string, pending = false): ValidatedDesktopSurfaceResync {

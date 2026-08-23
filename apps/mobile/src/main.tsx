@@ -204,8 +204,8 @@ async function mountMobileProduct(): Promise<void> {
             ? undefined
             : companionSurface?.bindAuthenticatedConnection(companionConnectionChannel),
           () => {
-            const operationId = companionChannel?.refreshSurface()
-            if (operationId !== undefined) companionSurface?.trackSurfaceRefresh(operationId)
+            const submission = companionChannel?.refreshSurface()
+            if (submission !== undefined) companionSurface?.trackSurfaceRefresh(submission)
           },
         )
       },
@@ -226,6 +226,10 @@ async function mountMobileProduct(): Promise<void> {
         await relay.sendCiphertext(targetAttachmentId, ciphertext)
       },
       reportFailure: (error) => { console.error('[mobile-companion] encrypted operation failed:', error) },
+      trackHistoryRefresh: (sessionId, submission) => {
+        companionSurface?.trackHistoryRefresh(sessionId, submission)
+      },
+      trackSurfaceRefresh: (submission) => { companionSurface?.trackSurfaceRefresh(submission) },
     })
     companionChannel = productChannel
     companionConnectionChannel = {

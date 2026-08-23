@@ -278,15 +278,19 @@ function connectionChannel(attachmentCompletion: Promise<void>) {
     submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(() => ({
       operationId: parseCompanionOperationId('submit-snapshot'), completion: Promise.resolve(),
     })),
-    cancel: vi.fn<MobileCompanionConnectionChannel['mutations']['cancel']>(() => parseCompanionOperationId('cancel-snapshot')),
+    cancel: vi.fn<MobileCompanionConnectionChannel['mutations']['cancel']>(() => ({
+      operationId: parseCompanionOperationId('cancel-snapshot'), completion: Promise.resolve(),
+    })),
     attach: vi.fn<MobileCompanionConnectionChannel['mutations']['attach']>(() => ({
       operationId: parseCompanionOperationId('mobile-snapshot-attachment'),
       completion: attachmentCompletion,
     })),
     search: vi.fn<MobileCompanionConnectionChannel['mutations']['search']>(() => (
-      parseCompanionOperationId('mobile-snapshot-search')
+      { operationId: parseCompanionOperationId('mobile-snapshot-search'), completion: Promise.resolve() }
     )),
-    loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(() => parseCompanionOperationId('history-snapshot')),
+    loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(() => ({
+      operationId: parseCompanionOperationId('history-snapshot'), completion: Promise.resolve(),
+    })),
     settle: vi.fn<MobileCompanionConnectionChannel['mutations']['settle']>(),
   }
   return {

@@ -70,13 +70,13 @@ describe('Host HTTP failure Companion projection', () => {
     const mutations: MobileCompanionMutationChannel = {
       create: vi.fn(),
       submit: vi.fn(),
-      cancel: vi.fn(),
+      cancel: vi.fn(() => ({ operationId, completion: Promise.resolve() })),
       attach: vi.fn(() => ({
         operationId: parseCompanionOperationId('unused-attachment'),
         completion: Promise.resolve(),
       })),
-      search: vi.fn(() => operationId),
-      loadOlder: vi.fn(),
+      search: vi.fn(() => ({ operationId, completion: Promise.resolve() })),
+      loadOlder: vi.fn(() => ({ operationId, completion: Promise.resolve() })),
       settle: vi.fn(),
     }
     const disposeRuntime = installCompanionRuntime(runtime)

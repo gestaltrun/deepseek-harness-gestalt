@@ -63,9 +63,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /**
      * The right details column, shown when the layout opens it. Occupants are
      * additive list entries: ui-conversation's DetailsPanel (`id: 'tool'`)
-     * declares the tool-details seat, and Browser Dock (`id: 'browser'`)
-     * covers the column while that Session's Dock is open. Absent an occupant
-     * the column renders nothing.
+     * declares the tool-details seat. Official Browser chrome lives in the
+     * workbench sidebar, not here. Absent an occupant the column renders nothing.
      *
      * No owner props: the framework injects the session id and hooks for the
      * `session` scope, and `ctx.layout` owns whether the column is open.

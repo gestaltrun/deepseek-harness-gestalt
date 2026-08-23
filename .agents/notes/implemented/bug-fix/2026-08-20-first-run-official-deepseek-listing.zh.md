@@ -14,11 +14,9 @@ Status: implemented
 
 `configured` 仍只看占用或 secret slot。首次运行渲染是另一条列表谓词 `listedProviderRows`。
 
-整分节官方行在以下任一成立时出现在列表中：占用、联接报告 `credential.configured === true`、`dismissedSetup`，或从未写入的分节（`user` 缺失）。取消设置分节根会留下 `user: {}`，这是删除残余；没有已存凭据时不出现在列表中。
+整分节官方行在占用或联接报告 `credential.configured === true` 时出现在列表中。取消设置分节根会留下 `user: {}`，这是删除残余；没有已存凭据时不出现在列表中。首次运行不再列出从未写入的官方行；该翻转见 [首次运行不预置官方 DeepSeek](2026-08-22-first-run-does-not-mint-official-deepseek.md)。
 
-只有在联接中没有其他行可以提供服务、且官方凭据尚未存储时，才提供设置卡片。已经有可用提供方时，从未写入的官方行是普通「编辑」行，既不隐藏，也不自动打开卡片。关闭设置卡片仍通过 `dismissedSetup` 在本会话内保留该行。
-
-凭据引导弹窗保持注册。它只写入 credential-ref，因此列表必须把已描述的凭据当成足以保留官方行。
+只有在已列出的官方行还没有存储凭据、且联接中没有其他行可以提供服务时，才提供设置卡片。删除会在页面重新联接之前把 `settings.mutate` 的应答折进共享 describe mirror，因为 `ensure` 不会对已经 ready 的 mirror 再读一次。
 
 ## Alternatives considered
 
@@ -30,8 +28,8 @@ Status: implemented
 
 ## Consequences
 
-没有可用提供方的首次运行用户仍能在 Models 上到达官方密钥字段，通过引导弹窗或设置卡片。弹窗写入 `DEEPSEEK_API_KEY` 后，Models 在没有用户层写入的情况下显示官方「编辑」行。删除且没有已存凭据后，无论是否另有可用提供方，官方 DeepSeek 都不出现在列表中。联接对从未写入的分节和残留空对象都仍报告 `configured: false`。
+删除且没有已存凭据后，官方 DeepSeek 在同一会话内也不出现在列表中。联接对从未写入的分节和残留空对象都仍报告 `configured: false`。
 
 ## Testing
 
-`packages/client/ui-settings-models/tests/store.client.spec.ts` 钉住空用户层且 `secrets` 为空时未配置，同时仍联接 `DEEPSEEK_API_KEY`。`packages/client/ui-settings-models/tests/components.client.spec.tsx` 钉住 `listedProviderRows` 对从未写入的首次运行、残留 `{}`、残留上已存凭据和 `dismissedSetup` 的结果，以及对应的挂载设置卡片、删除后列表，以及另一可用提供方旁边的从未写入官方行。无密钥的 `apps/web/tests/onboarding-deepseek-config.e2e.ts` 与 `apps/web/tests/onboarding-usable-provider.e2e.ts` 泳道经引导弹窗写入密钥，再断言 Models 行。
+`packages/client/ui-settings-models/tests/store.client.spec.ts` 钉住空用户层且 `secrets` 为空时未配置，同时仍联接 `DEEPSEEK_API_KEY`，并钉住在下一次联接前把 mutate 应答折进 describe mirror。`packages/client/ui-settings-models/tests/components.client.spec.tsx` 钉住残留 `{}` 不出现在列表中，以及删除后同一访问内该行消失。

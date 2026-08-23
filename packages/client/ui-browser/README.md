@@ -2,19 +2,17 @@
 
 English | [中文](README.zh.md)
 
-Session-owned Browser Dock and collapsed tab preview. The plugin occupies `details` as `id: 'browser'` at order 10 while this Session owns tabs and `dockOpen` is true, and occupies `conversation.browser.preview` otherwise. Live Workspace facts arrive through `useProjection('browserWorkspace')`. Mutations go through the generated `remote.browserWorkspace` namespace.
+Session-owned official Browser chrome and collapsed tab preview. [`dsh-client-ui-workbench`](../ui-workbench/README.md) imports the page chrome directly and mounts it inside the snapshot `browser` tab. This plugin occupies `conversation.browser.preview` and registers settings section `id: 'browser'`. Live Workspace facts arrive through `useProjection('browserWorkspace')`; mutations use the generated `remote.browserWorkspace` namespace and request the shared `api-remotes/client` helper from the module table.
 
-The expanded Dock has no Profile switch or Agent-status row. Tabs occupy the top row and the collapse control stays at its right edge. The toolbar shows refresh, the persistent Profile name or shared-identity label next to the address field, and take-control or return-to-Agent for the current tab. The viewport shows the latest screenshot and page text. The active tab's label, address, and screenshot follow the Binder-committed page after `navigate` and after Refresh. A still-blank first tab can remain `about:blank` until that navigate. The first Agent tab opens the Dock; later Agent activity does not reopen it after the human collapses it.
+The collapsed preview is a layered summary of the same official pages. ChatView paints it in the right gutter of the conversation scrollport and hides that rail when the gutter is narrower than 240px. Clicking a back layer focuses that tab with its listed revision; clicking the current layer reveals the workbench tab. A listed-revision `BROWSER_REVISION_CONFLICT` on a background chip observes that tab once and retries, or shows the failure. Ordinary MCP tool rows stay in conversation history.
 
-The collapsed preview is a one-line layered summary of the same Dock, not a second Dock. It has no outer shell or footer. Clicking a back layer focuses that tab with its listed revision; clicking the current layer opens the Dock. A listed-revision `BROWSER_REVISION_CONFLICT` on a background chip observes that tab once and retries, or shows the failure. The preview is hidden while the Dock is visible. Ordinary MCP tool rows stay in conversation history. Selecting a `browser_*` tool row focuses the listed tab and does not change `dockOpen` ([decision](../../../.agents/notes/implemented/feature/2026-08-20-chat-browser-tool-focus-dock.md)).
+Settings section `id: 'browser'` under namespace `ui-browser` holds a named persistent Profile roster and the default create identity (`shared` / `temporary` / `persistent`) that `browser_create` and sidebar `+ → Browser` use when the model or user omits `profile`. The page does not create Browser Workspaces.
 
-The occupant-specific details range is 420/640/960 px. Session switch restores per-Session visibility, width, instances, tabs, current control owner, and each tab's last committed revision from the Workspace projection. Focus and close send that listed revision for the addressed tab. A `BROWSER_REVISION_CONFLICT` on that row observes the tab once and retries, or shows the failure.
-
-The behavior is specified by the [Browser Dock Agent Note](../../../.agents/notes/implemented/feature/2026-08-19-browser-dock.md).
+The behavior is specified by the [workbench official browser Agent Note](../../../.agents/notes/implemented/feature/2026-08-21-workbench-official-browser.md) and the [Browser Dock Agent Note](../../../.agents/notes/implemented/feature/2026-08-19-browser-dock.md).
 
 ## Model Experience
 
-None, as this human-facing Dock chrome adds no tools, messages, prompts, or provider requests; page operations stay on `dsh-tool-browser`.
+None, as this human-facing chrome adds no tools, messages, prompts, or provider requests; page operations stay on `dsh-tool-browser`.
 
 #### KV Cache effect
 
@@ -22,5 +20,6 @@ None; the package never assembles or sends provider requests.
 
 ## Known Limitations and Deferred Work
 
-- **Screenshot viewport, not a live WebContentsView** — the Dock renders observe and screenshot facts from the Session-owned Runtime; it does not embed a second BrowserView.
+- **Desktop presents the Runtime window; `dsh web` stays screenshot-plus-text** — `window.dshDesktop.browserPresent` places the same official `webContents` over the chrome viewport. Settings and the sidebar `+` menu mount in a native overlay view above that page; that overlay document does not present or conceal pages. The refresh control spins while observe or navigate is in flight. A committed Chromium net error keeps the error document in that live view. Browser `dsh web` has no Host window and still paints observe/screenshot facts.
 - **Keyless web and headless Runtimes stay deterministic** — browser `dsh web` and headless keep `dsh-browser-runtime-deterministic`. Desktop Host owns in-process Electron `webContents` and points the overlay HTTP client at that loopback origin.
+- **Profile settings do not create tabs** — the Browser section writes the roster and default identity only.

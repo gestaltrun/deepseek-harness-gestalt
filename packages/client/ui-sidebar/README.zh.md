@@ -14,7 +14,7 @@ New Session 会启动运行时的页面局部前端 Session Intent。运行时�
 
 栏内的滚动条是一种指针可供性：只要指针不在栏内，外壳就把 ui-theme 的[滚动条间接层](../ui-theme/README.md)重新绑定为 `transparent`；指针离开后滑块再保留 2 秒，因此没人指向的列表不会带着滚动条。避免行位移的空间预留属于滚动区域本身（[ui-workspace](../ui-workspace/README.md)），所以显示滑块不会引起重排。
 
-页脚同一行：左侧 `sidebar.settings`，右侧可选的 `sidebar.footer.action`（轨道上动作叠在 Settings 上方）。ui-settings 注册触发行和设置面板。`sidebar.brand` 是一条 chain，回退为 HARNESS 字标。浏览器组合里 `sidebar.chrome.drag` 是空列表。
+页脚同一行：左侧 `sidebar.settings`，右侧可选的 `sidebar.footer.action`（轨道上动作叠在 Settings 上方）。ui-settings 注册触发行和设置面板。Desktop 原生 overlay 文档只渲染 `sidebar.settings`。`sidebar.brand` 是一条 chain，回退为 HARNESS 字标。浏览器组合里 `sidebar.chrome.drag` 是空列表。
 
 `/client` 导出表层只包含插件主体（`apply`／`inject`）及约定类型；SidebarRoot、行组件和树派生仍由 slot 注册封装在包内。
 

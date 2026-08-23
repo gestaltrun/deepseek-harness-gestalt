@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// Assembled Browser Dock snapshot: boots the real built client bundles against
+// Assembled Browser snapshot: boots the real built client bundles against
 // the keyless FixtureApiClient and pins the collapsed preview the fixture
-// Session's last `browser/workspace` snapshot restores, then the expanded Dock
-// chrome after open and after Refresh (navigate of the committed page).
+// Session's last `browser/workspace` snapshot restores, then the workbench
+// page chrome after open and after Refresh (navigate of the committed page).
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
@@ -27,17 +27,13 @@ function previewShape(root: Element): string {
   ].join('\n')
 }
 
-function dockShape(root: Document | Element): string {
-  const dock = root.querySelector('[data-browser-dock]')
-  if (dock === null) return 'dock=hidden'
-  const tabs = [...dock.querySelectorAll('[role="tab"]')].map(tab => (
-    `tab=${tab.getAttribute('aria-selected') === 'true' ? 'current' : 'back'} ${tab.textContent?.trim() ?? ''}`
-  ))
-  const address = dock.querySelector('input')
-  const img = dock.querySelector('img')
+function pageShape(root: Document | Element): string {
+  const page = root.querySelector('[data-browser-page]')
+  if (page === null) return 'page=hidden'
+  const address = page.querySelector('input')
+  const img = page.querySelector('img')
   return [
-    'dock=shown',
-    ...tabs,
+    'page=shown',
     `address=${address instanceof HTMLInputElement ? address.value : ''}`,
     `screenshot=${img?.getAttribute('alt') ?? 'none'}`,
   ].join('\n')
@@ -65,24 +61,24 @@ describe('assembled Browser Dock preview', () => {
     await expect(shape).toMatchFileSnapshot(PREVIEW_EXPECTED)
   })
 
-  it('keeps Dock chrome on the committed page after open and Refresh, not about:blank', async () => {
+  it('keeps workbench page chrome on the committed page after open and Refresh, not about:blank', async () => {
     mountAssembledApp()
     await openFixtureSession()
     fireEvent.click(await screen.findByRole('button', { name: 'Expand Example Domain' }, { timeout: 10_000 }))
     const opened = await waitFor(() => {
-      const shape = dockShape(document)
-      expect(shape).not.toBe('dock=hidden')
+      const shape = pageShape(document)
+      expect(shape).not.toBe('page=hidden')
       expect(shape).not.toContain('about:blank')
       return shape
     }, { timeout: 10_000 })
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     const refreshed = await waitFor(() => {
-      const shape = dockShape(document)
-      expect(shape).toContain('address=example.test')
+      const shape = pageShape(document)
+      expect(shape).toContain('address=https://example.test/')
       expect(shape).not.toContain('about:blank')
       return shape
     }, { timeout: 10_000 })
-    const shape = ['after-open', opened, 'after-refresh', refreshed].join('\n')
+    const shape = `${['after-open', opened, 'after-refresh', refreshed].join('\n')}\n`
     if (REFRESHING_GOLDEN) {
       mkdirSync(dirname(DOCK_EXPECTED), { recursive: true })
       writeFileSync(DOCK_EXPECTED, shape)

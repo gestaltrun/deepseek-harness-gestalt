@@ -13,6 +13,10 @@
     - button "Agent presets":
       - img
       - text: Agent presets
+    - button "Browser":
+      - img
+      - text: Browser
+    - button "Side card"
   - button "Open configuration file"
   - button "Close":
     - img

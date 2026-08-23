@@ -77,6 +77,12 @@ describe('BrowserRelayEndpointSocket', () => {
       'ws://platform.example/relay', new AbortController().signal, { maxBytes: 4, maxMessages: 1 },
     )).rejects.toThrow('must use WSS')
 
+    const loopback = await BrowserRelayEndpointSocket.connect(
+      'ws://127.0.0.1:5174/v1/remote-access/relay', new AbortController().signal, { maxBytes: 4, maxMessages: 1 },
+    )
+    expect(instances.at(-1)?.url.href).toBe('ws://127.0.0.1:5174/v1/remote-access/relay')
+    await loopback.close()
+
     openMode = 'error'
     await expect(BrowserRelayEndpointSocket.connect(
       'wss://platform.example/error', new AbortController().signal, { maxBytes: 4, maxMessages: 1 },

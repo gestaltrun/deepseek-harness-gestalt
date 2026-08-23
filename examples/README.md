@@ -27,3 +27,7 @@ An opt-in Web overlay for durable, Session-local reminders. It supports positive
 ## acp-agent
 
 An Agent Client Protocol automation server for programmatic clients, with session, permission, and cancellation support. See the [ACP example reference](acp-agent/README.md).
+
+## local-companion-platform
+
+A loopback two-instance Platform that mounts Account HTTP, keyless Personal Pairing, and Relay WSS behind one TLS origin so Mobile and Desktop can exercise the assembled Companion path without touching production listen. See the [local companion Platform reference](local-companion-platform/README.md).

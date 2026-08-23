@@ -24,8 +24,12 @@ interface FakeOptions {
   readonly loadDelayMs?: number
   readonly captureDelayMs?: number
   readonly captureEmpty?: boolean
+  readonly captureFailures?: number
+  readonly captureFailureMessage?: string
   readonly crashOnLoad?: boolean
-  readonly failLoad?: boolean
+  readonly failLoad?: boolean | 'primitive' | 'null' | 'net' | 'net-chrome-error'
+  /** Reject loadURL with ERR_ABORTED after committing the requested URL. */
+  readonly abortLoadThenCommit?: boolean | 'errno' | 'message'
   readonly failExecute?: boolean
   readonly executeNonString?: boolean
   readonly failFlush?: boolean
@@ -85,6 +89,7 @@ class FakeWebContents implements ElectronWebContents {
   destroyed = false
   focused = false
   stopped = false
+  captureAttempts = 0
   readonly inputEvents: string[] = []
   private loadWait: (() => void) | undefined
   private readonly listeners = new Set<() => void>()
@@ -108,6 +113,49 @@ class FakeWebContents implements ElectronWebContents {
   }
   async loadURL(url: string): Promise<void> {
     if (this.options.failLoad === true) throw new Error('load failed')
+    if (this.options.failLoad === 'primitive' && url !== 'about:blank') throw 3
+    if (this.options.failLoad === 'null' && url !== 'about:blank') throw null
+    if ((this.options.failLoad === 'net' || this.options.failLoad === 'net-chrome-error') && url !== 'about:blank') {
+      if (this.options.failLoad === 'net-chrome-error') {
+        this.href = 'chrome-error://chromewebdata/'
+        this.heading = ''
+        this.page.url = this.href
+        this.page.title = ''
+        this.page.text = ''
+      } else {
+        this.href = url
+        this.heading = titleFor(url)
+        this.page.url = url
+        this.page.title = this.heading
+        this.page.text = ''
+      }
+      const error = new Error(`ERR_CONNECTION_CLOSED (-100) loading '${url}'`) as Error & {
+        code: string
+        errno: number
+      }
+      error.code = 'ERR_CONNECTION_CLOSED'
+      error.errno = -100
+      throw error
+    }
+    if (this.options.abortLoadThenCommit !== undefined && this.options.abortLoadThenCommit !== false && url !== 'about:blank') {
+      const identity = identityFrom(this.session.partition)
+      this.href = `${url}${url.includes('?') ? '&' : '?'}sei=1`
+      this.heading = titleFor(url)
+      this.page.url = this.href
+      this.page.title = this.heading
+      this.page.text = textFor(url, identity)
+      const kind = this.options.abortLoadThenCommit
+      if (kind === 'errno') {
+        throw Object.assign(new Error('redirected'), { errno: -3 })
+      }
+      if (kind === 'message') {
+        throw new Error(`ERR_ABORTED (-3) loading '${this.href}'`)
+      }
+      const error = new Error(`ERR_ABORTED (-3) loading '${this.href}'`) as Error & { code: string; errno: number }
+      error.code = 'ERR_ABORTED'
+      error.errno = -3
+      throw error
+    }
     if (this.options.loadDelayMs !== undefined && url !== 'about:blank') {
       await new Promise<void>((resolve) => {
         this.loadWait = resolve
@@ -131,6 +179,10 @@ class FakeWebContents implements ElectronWebContents {
     this.page.text += event.keyCode
   }
   async capturePage(): Promise<ElectronNativeImage> {
+    this.captureAttempts += 1
+    if (this.captureAttempts <= (this.options.captureFailures ?? 0)) {
+      throw new Error(this.options.captureFailureMessage ?? 'UnknownVizError')
+    }
     if (this.options.captureDelayMs !== undefined) {
       await new Promise(resolve => setTimeout(resolve, this.options.captureDelayMs))
     }
@@ -171,16 +223,46 @@ class FakeWebContents implements ElectronWebContents {
   emitCrash(): void {
     for (const listener of [...this.listeners]) listener()
   }
+  windowOpenHandler: ((details: { readonly url: string }) => { readonly action: 'allow' | 'deny' }) | undefined
+  setWindowOpenHandler(
+    handler: (details: { readonly url: string }) => { readonly action: 'allow' | 'deny' },
+  ): void {
+    this.windowOpenHandler = handler
+  }
 }
 
 class FakeBrowserWindow implements ElectronBrowserWindow {
   destroyed = false
+  shown = false
+  showInactiveCalls = 0
+  raiseCalls = 0
+  parent: unknown = null
+  bounds: { x: number; y: number; width: number; height: number } | undefined
   readonly webContents: FakeWebContents
   constructor(webContents: FakeWebContents) {
     this.webContents = webContents
   }
   isDestroyed(): boolean {
     return this.destroyed
+  }
+  setBounds(bounds: { x: number; y: number; width: number; height: number }): void {
+    this.bounds = bounds
+  }
+  show(): void {
+    this.shown = true
+  }
+  showInactive(): void {
+    this.shown = true
+    this.showInactiveCalls += 1
+  }
+  hide(): void {
+    this.shown = false
+  }
+  setParentWindow(parent: unknown): void {
+    this.parent = parent
+  }
+  raise(): void {
+    this.raiseCalls += 1
   }
   destroy(): void {
     this.destroyed = true

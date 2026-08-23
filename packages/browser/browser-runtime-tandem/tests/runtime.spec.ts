@@ -309,7 +309,6 @@ describe('Tandem Browser Runtime public lifecycle', () => {
       title: 'New Tab',
       text: '',
       focused: false,
-      controlOwner: 'agent',
       chrome: {
         kind: 'temporary',
         partition: 'session-tandem-test-tmp-1',
@@ -351,17 +350,17 @@ describe('Tandem Browser Runtime public lifecycle', () => {
     await assertJoined(pidFile)
   })
 
-  it('rejects a stale Agent mutation after human input and covers both arrival orders', async () => {
+  it('serializes synthetic input with navigation in both arrival orders', async () => {
     const { ctx } = await setup()
     const created = await ctx.browserRuntime.create({ profile: 'temporary' })
     const identities = created.target
 
-    const humanFirst = await Promise.allSettled([
+    const inputFirst = await Promise.allSettled([
       ctx.browserRuntime.input({
         target: created.target,
         expectedRevision: 0,
         url: 'https://example.test/',
-        text: 'typed by human',
+        text: 'synthetic input',
       }),
       ctx.browserRuntime.navigate({
         target: created.target,
@@ -369,88 +368,52 @@ describe('Tandem Browser Runtime public lifecycle', () => {
         url: 'https://login.test/',
       }),
     ])
-    expect(humanFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
-    const humanFirstFulfilled = humanFirst.find(result => result.status === 'fulfilled')
-    expect(humanFirstFulfilled?.status === 'fulfilled' ? humanFirstFulfilled.value : undefined).toMatchObject({
+    expect(inputFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    const inputFirstFulfilled = inputFirst.find(result => result.status === 'fulfilled')
+    expect(inputFirstFulfilled?.status === 'fulfilled' ? inputFirstFulfilled.value : undefined).toMatchObject({
       status: 'open',
       revision: 1,
       url: 'https://example.test/',
-      text: 'typed by human',
-      controlOwner: 'human',
+      text: 'synthetic input',
       target: identities,
     })
-    const humanFirstRejected = humanFirst.find(result => result.status === 'rejected')
-    if (humanFirstRejected?.status !== 'rejected') throw new Error('expected a revision conflict')
-    if (!(humanFirstRejected.reason instanceof BrowserRuntimeError)) throw new Error('expected BrowserRuntimeError')
-    expect(humanFirstRejected.reason.code).toBe('BROWSER_REVISION_CONFLICT')
-    expect(humanFirstRejected.reason.message).toMatch(/current 1; observe again before mutating/)
-    const afterHuman = await ctx.browserRuntime.observe({ target: created.target })
-    expect(afterHuman).toMatchObject({
+    const inputFirstRejected = inputFirst.find(result => result.status === 'rejected')
+    if (inputFirstRejected?.status !== 'rejected') throw new Error('expected a revision conflict')
+    if (!(inputFirstRejected.reason instanceof BrowserRuntimeError)) throw new Error('expected BrowserRuntimeError')
+    expect(inputFirstRejected.reason.code).toBe('BROWSER_REVISION_CONFLICT')
+    expect(inputFirstRejected.reason.message).toMatch(/current 1; observe again before mutating/)
+    const afterInput = await ctx.browserRuntime.observe({ target: created.target })
+    expect(afterInput).toMatchObject({
       status: 'open',
       revision: 1,
       url: 'https://example.test/',
-      controlOwner: 'human',
       target: identities,
     })
     await expect(ctx.browserRuntime.focus({ target: created.target, expectedRevision: 0 }))
       .rejects.toMatchObject({ code: 'BROWSER_REVISION_CONFLICT' })
 
-    const taken = await ctx.browserRuntime.takeover({
-      target: created.target,
-      expectedRevision: afterHuman.revision,
-    })
-    expect(taken).toMatchObject({ revision: 2, controlOwner: 'human', target: identities })
-    const returned = await ctx.browserRuntime.returnControl({
-      target: created.target,
-      expectedRevision: taken.revision,
-    })
-    expect(returned).toMatchObject({ revision: 3, controlOwner: 'agent', target: identities })
-
-    const resynced = await ctx.browserRuntime.observe({ target: created.target })
-    expect(resynced).toMatchObject({
-      status: 'open',
-      revision: 1,
-      url: 'https://example.test/',
-      controlOwner: 'agent',
-      target: identities,
-    })
-
-    const agentFirst = await Promise.allSettled([
+    const navigateFirst = await Promise.allSettled([
       ctx.browserRuntime.navigate({
         target: created.target,
-        expectedRevision: resynced.revision,
+        expectedRevision: afterInput.revision,
         url: 'https://login.test/',
       }),
       ctx.browserRuntime.input({
         target: created.target,
-        expectedRevision: resynced.revision,
-        text: 'later human',
+        expectedRevision: afterInput.revision,
+        text: 'later input',
       }),
     ])
-    expect(agentFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
-    const agentFirstRejected = agentFirst.find(result => result.status === 'rejected')
-    expect(agentFirstRejected?.status === 'rejected' ? agentFirstRejected.reason : undefined).toMatchObject({
+    expect(navigateFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    const navigateFirstRejected = navigateFirst.find(result => result.status === 'rejected')
+    expect(navigateFirstRejected?.status === 'rejected' ? navigateFirstRejected.reason : undefined).toMatchObject({
       code: 'BROWSER_REVISION_CONFLICT',
     })
-    const afterAgentFirst = await ctx.browserRuntime.observe({ target: created.target })
-    expect(afterAgentFirst).toMatchObject({
+    const afterNavigate = await ctx.browserRuntime.observe({ target: created.target })
+    expect(afterNavigate).toMatchObject({
       status: 'open',
       revision: 2,
       url: 'https://login.test/',
-      controlOwner: 'agent',
-      target: identities,
-    })
-
-    const clickOnly = await ctx.browserRuntime.input({
-      target: created.target,
-      expectedRevision: afterAgentFirst.revision,
-    })
-    expect(clickOnly).toMatchObject({
-      revision: 3,
-      url: 'https://login.test/',
-      title: 'Loaded page',
-      text: 'Signed in as .\nidentity=',
-      controlOwner: 'human',
       target: identities,
     })
   })
@@ -660,11 +623,7 @@ describe('Tandem Browser Runtime public lifecycle', () => {
       .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
     await expect(ctx.browserRuntime.focus({ target, expectedRevision: 0, signal: controller.signal }))
       .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
-    await expect(ctx.browserRuntime.input({ target, expectedRevision: 0, signal: controller.signal }))
-      .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
-    await expect(ctx.browserRuntime.takeover({ target, expectedRevision: 0, signal: controller.signal }))
-      .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
-    await expect(ctx.browserRuntime.returnControl({ target, expectedRevision: 0, signal: controller.signal }))
+    await expect(ctx.browserRuntime.input({ target, expectedRevision: 0, text: 'x', signal: controller.signal }))
       .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
     await expect(ctx.browserRuntime.close({ target, expectedRevision: 0, signal: controller.signal }))
       .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
@@ -1240,7 +1199,6 @@ describe('Tandem Browser Runtime teardown ownership', () => {
       revision: 1,
       reason: 'crashed' as const,
       reconnecting: false,
-      controlOwner: 'agent' as const,
     }
     await expect(runtime.reconnect(created as never, unavailable as never)).resolves.toBeUndefined()
     const projected = runtime.scheduleRecovery('crashed', true)

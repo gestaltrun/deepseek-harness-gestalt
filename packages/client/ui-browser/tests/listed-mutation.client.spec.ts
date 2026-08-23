@@ -53,7 +53,6 @@ describe('listed-tab mutation recovery', () => {
       revision: 5,
       reason: 'crashed',
       reconnecting: true,
-      controlOwner: 'agent',
     })
     await expect(recoverListedMutation(mutate, observe, TARGET, 2)).resolves.toBe('retried')
     expect(mutate).toHaveBeenLastCalledWith(TARGET, 5)

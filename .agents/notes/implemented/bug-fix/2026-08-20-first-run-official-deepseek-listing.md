@@ -14,11 +14,9 @@ Always listing the mounted official adapter reverses the shipped delete rule: af
 
 `configured` keeps the occupancy-or-secret-slot rule. First-run rendering is a separate list predicate, `listedProviderRows`.
 
-The list includes a whole-section official row when any of these hold: occupancy, a described `credential.configured === true`, `dismissedSetup`, or a never-written section (`user` absent). Unsetting the section root leaves `user: {}`, which is the delete residual and stays off the list unless a credential is already stored.
+The list includes a whole-section official row when occupancy or a described `credential.configured === true` holds. Unsetting the section root leaves `user: {}`, which is the delete residual and stays off the list unless a credential is already stored. First-run no longer lists a never-written official row; that reversal lives in [First-run does not mint official DeepSeek](2026-08-22-first-run-does-not-mint-official-deepseek.md).
 
-The setup card is offered only while no other joined row can serve requests **and** the official credential is not yet stored. A never-written official row on an already-usable page is an ordinary Edit row, not a hidden row and not an auto-opened card. Closing the setup card still keeps the row for the rest of the session through `dismissedSetup`.
-
-The credential onboarding dialog stays registered. It writes the credential-ref only, so listing must treat the described credential as enough to keep the official row.
+The setup card is offered only while a listed official row has no stored credential **and** no other joined row can serve requests. Delete folds the `settings.mutate` answer into the shared describe mirror before the page rejoins, because `ensure` will not re-read a mirror that is already ready.
 
 ## Alternatives considered
 
@@ -30,8 +28,8 @@ The credential onboarding dialog stays registered. It writes the credential-ref 
 
 ## Consequences
 
-A first-run user with no usable provider still reaches the official key field on Models, through the onboarding dialog or the setup card. After the dialog stores `DEEPSEEK_API_KEY`, Models shows the official Edit row without a user-layer write. After delete with no stored credential, official DeepSeek stays off the list whether or not another provider is usable. The join still reports `configured: false` for both the never-written section and the leftover empty object.
+After delete with no stored credential, official DeepSeek stays off the list in the same session. The join still reports `configured: false` for both the never-written section and the leftover empty object.
 
 ## Testing
 
-`packages/client/ui-settings-models/tests/store.client.spec.ts` pins an empty user layer and empty `secrets` as unconfigured while still joining `DEEPSEEK_API_KEY`. `packages/client/ui-settings-models/tests/components.client.spec.tsx` pins `listedProviderRows` for never-written first-run, leftover `{}`, a stored credential on leftover `{}`, and `dismissedSetup`, plus the matching mounted setup-card, post-delete list, and never-written official row beside another usable provider. The keyless `apps/web/tests/onboarding-deepseek-config.e2e.ts` and `apps/web/tests/onboarding-usable-provider.e2e.ts` lanes enter the key through the onboarding dialog and then assert the Models row.
+`packages/client/ui-settings-models/tests/store.client.spec.ts` pins an empty user layer and empty `secrets` as unconfigured while still joining `DEEPSEEK_API_KEY`, and folding a mutate answer into the describe mirror before the next join. `packages/client/ui-settings-models/tests/components.client.spec.tsx` pins leftover `{}` staying off the list and delete hiding the row in the same visit.

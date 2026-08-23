@@ -1,4 +1,4 @@
-# Agent Note: 浏览器控制权仲裁
+# Agent Note: Browser 修订号仲裁
 
 Status: implemented
 
@@ -6,27 +6,27 @@ Status: implemented
 
 ## 问题
 
-用户可能需要在 Agent 正在驱动的同一个真实标签页上输入、点击、处理验证码或确认登录。如果没有共享修订号和明确的控制权所有者，基于过期观察的 Agent 写入会覆盖人工操作，或丢失 Session、Profile、浏览器实例与标签页。
+人与 Agent 驱动的操作可能影响同一个真实标签页。如果没有共享修订号，基于过期观察的 Agent 写入会覆盖更新的页面状态，或丢失调用方所依赖的 Session、Profile、浏览器实例与标签页身份。
 
 ## 决策
 
-人工指针与键盘输入以及 Agent 命令都针对同一个 Browser Workspace 标签页。可观察的打开与不可用页面状态携带 `controlOwner`（`agent` | `human`）以及后续写入必须匹配的修订号。`controlOwner` 是报告的所有权。锁是修订号：`observe` 之后，匹配当前修订号的 Agent `navigate` 或 `focus` 会在不调用 `returnControl` 的情况下收回该标签页。`input` 记录一次人工写入、递增修订号，并把 `controlOwner` 设为 `human`。`takeover` 在不改变页面内容的情况下记录人工所有权。`returnControl` 记录 Agent 所有权。接管与交还过程中，Session、Profile、浏览器实例与标签页身份保持不变。
+每个打开或不可用页面状态都携带后续写入必须匹配的修订号。Provider 串行执行每次写入，并以 `BROWSER_REVISION_CONFLICT` 拒绝过期的 `expectedRevision`；冲突会写出当前修订号，并要求 Agent 重新 observe。`navigate`、`focus`、Agent 合成 `input` 与 `close` 推进修订号，`observe` 与 `screenshot` 只读。写入过程中，Session、Profile、浏览器实例与标签页身份保持稳定。
 
-Provider 串行执行每次写入，并以 `BROWSER_REVISION_CONFLICT` 拒绝过期的 `expectedRevision`。冲突消息会写出当前修订号，并要求 Agent 重新 observe。Agent 的 `navigate` 与 `focus` 会把 `controlOwner` 设为 `agent`。Browser 工具不设置 `ask` 或权限分类器；本工单不增加审批产品。只有后续组合挂上现有审批与权限能力时，那些能力才会生效。
+`dsh-browser-workspace` 把每个标签页的最新修订号持久化到 Session 的 `browser/workspace` 快照，供 Session 切换与重新加载后恢复乐观并发事实。Browser 工具不设置 `ask` 或权限分类器；只有组合挂上现有审批与权限能力时，那些能力才会生效。
 
-`dsh-browser-workspace` 把每个标签页的当前控制权所有者持久化到 Session 的 `browser/workspace` 快照，供 Dock 在 Session 切换与重新加载后恢复。Dock 读取该所有者，并提供接管与交还智能体。延迟 Consumer 把 `controlOwner` 渲染进普通工具结果，并新增 `browser_input`、`browser_takeover` 与 `browser_return_control`，不引入第二种工具卡格式。等待、运行、完成与连接丢失事实仍由现有工具结果和 `unavailable` 状态报告。
+报告式所有权及其接管、交还操作已由[删除报告式 Browser 控制权与 Workspace Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.md)取代。Desktop 直接页面交互与 Runtime 状态相互独立；修订号仍是唯一并发机制。
 
 ## 考虑过的替代方案
 
-**不做修订号检查，后写覆盖。** 否决，因为迟到的 Agent 命令会静默覆盖人工登录或验证码答案。
+**不做修订号检查，后写覆盖。** 否决，因为迟到的 Agent 或 Workbench 命令会静默覆盖更新的页面或 Provider 恢复状态。
 
-**给人工另开一个浏览器实例或转移页面。** 否决，因为工单要求接管与交还后仍保留完全相同的 Session、Profile、浏览器实例与标签页。
+**给每个写入方另开一个浏览器实例或转移页面。** 否决，因为调用方需要在写入序列中持续寻址完全相同的 Session、Profile、浏览器实例与标签页。
 
-**为 Dock 再加一种工具卡或所有权事件流。** 否决，因为 Dock UI 属于后续工单，现有普通工具结果与 Session Workspace 快照已经携带真实的控制权与可用性事实。
+**在页面状态之外使用单独的写入版本。** 否决，因为页面状态与 Session Workspace 快照已经携带所有写入方都会观察和提交的修订号。
 
 ## 后果
 
-人与 Agent 可以共享一个标签页而不丢失身份。过期的 Agent 写入会明确失败，并强制重新观察。Session 快照会持久化当前控制权所有者，供 Dock 使用。发布仍属于后续工单。
+过期写入会明确失败，并强制重新观察。Session 快照保留 Workbench 与工具写入需要的修订号，不报告控制权所有者。
 
 ## 验证
 

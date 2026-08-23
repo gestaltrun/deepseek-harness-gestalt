@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const browserOpen = vi.hoisted(() => vi.fn<(options: { url: string }) => Promise<void>>())
 
 vi.mock('@capacitor/browser', () => ({ Browser: { open: browserOpen } }))
+vi.mock('@capacitor/core', () => ({
+  Capacitor: { isNativePlatform: () => true },
+}))
 
 afterEach(() => {
   cleanup()

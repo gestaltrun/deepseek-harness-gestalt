@@ -163,7 +163,6 @@ describe('keyed toolview hole through the real machinery', () => {
       tabId: 'tab-1',
     }
     const focus = vi.fn(() => Promise.resolve({ ok: true, value: {} }))
-    const setDock = vi.fn(() => Promise.resolve({ ok: true, value: {} }))
     const args = JSON.stringify({
       target,
       expectedRevision: 1,
@@ -171,12 +170,9 @@ describe('keyed toolview hole through the real machinery', () => {
     })
     const b = await bench(
       [toolResult(3, 'nav-1', 'browser_navigate', args)],
-      { browserWorkspace: { focus, setDock } },
+      { browserWorkspace: { focus } },
     )
     b.runtime.sessions.binding(SID)?.session.projections.set('browserWorkspace', {
-      dockOpen: false,
-      dockWidth: 720,
-      userCollapsed: true,
       activeWorkspaceId: target.workspaceId,
       workspaces: [{
         workspaceId: target.workspaceId,
@@ -185,7 +181,7 @@ describe('keyed toolview hole through the real machinery', () => {
         browsers: [{
           browserId: target.browserId,
           activeTabId: target.tabId,
-          tabs: [{ tabId: target.tabId, controlOwner: 'agent', revision: 7 }],
+          tabs: [{ tabId: target.tabId, revision: 7 }],
         }],
       }],
     })
@@ -195,7 +191,6 @@ describe('keyed toolview hole through the real machinery', () => {
     )
     expect(b.layout.openDetails).toHaveBeenCalledTimes(1)
     expect(focus).toHaveBeenCalledWith(SID, target, 7)
-    expect(setDock).not.toHaveBeenCalled()
     await b.runtime.dispose()
   })
 
@@ -217,9 +212,6 @@ describe('keyed toolview hole through the real machinery', () => {
       { browserWorkspace: { focus } },
     )
     b.runtime.sessions.binding(SID)?.session.projections.set('browserWorkspace', {
-      dockOpen: true,
-      dockWidth: 720,
-      userCollapsed: false,
       activeWorkspaceId: target.workspaceId,
       workspaces: [{
         workspaceId: target.workspaceId,
@@ -228,7 +220,7 @@ describe('keyed toolview hole through the real machinery', () => {
         browsers: [{
           browserId: target.browserId,
           activeTabId: 'other',
-          tabs: [{ tabId: 'other', controlOwner: 'agent', revision: 1 }],
+          tabs: [{ tabId: 'other', revision: 1 }],
         }],
       }],
     })

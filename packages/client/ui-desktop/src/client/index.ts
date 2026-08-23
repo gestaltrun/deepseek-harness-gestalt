@@ -6,10 +6,12 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { BrandSeat } from './BrandSeat.tsx'
 import { DragStrip } from './DragStrip.tsx'
 import { UpdateControl } from './UpdateControl.tsx'
 import { AccountControl } from './AccountControl.tsx'
+import { DesktopChromeOverlay } from './DesktopChromeOverlay.tsx'
 import { bindDesktopUpdater, createUpdaterSource } from './status-source.ts'
 import { bindDesktopAccount, createDesktopAccountSource } from './account-source.ts'
 import { bindDesktopPairing, createDesktopPairingSource } from './pairing-source.ts'
@@ -81,4 +83,10 @@ export function apply(ctx: ClientContext): void {
     },
     UpdateControl,
   ))
+  if (typeof document !== 'undefined' && document.documentElement.hasAttribute('data-dsh-desktop-overlay')) {
+    ctx.slots.inject('shell.overlay', () => ctx.slots.register(
+      { name: 'shell.overlay', id: 'desktop-chrome-overlay' },
+      DesktopChromeOverlay,
+    ))
+  }
 }

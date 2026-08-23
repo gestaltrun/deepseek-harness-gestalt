@@ -8,6 +8,20 @@ body,
   margin: 0;
 }
 
+#root {
+  background: var(--dsw-alias-bg-base);
+}
+
+html[data-dsh-desktop-overlay],
+html[data-dsh-desktop-overlay] body,
+html[data-dsh-desktop-overlay] #root {
+  background: transparent;
+}
+
+html[data-dsh-desktop-overlay] [data-dsh-boot] {
+  display: none;
+}
+
 body {
   font-family: var(
     --dsw-font-family,

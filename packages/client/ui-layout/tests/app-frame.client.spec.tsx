@@ -10,6 +10,8 @@
  * engine, so the frame width comes from a mocked getBoundingClientRect and
  * resizes are driven through the ResizeObserver stub.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
@@ -135,11 +137,23 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  document.documentElement.removeAttribute('data-dsh-desktop-overlay')
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
 describe('AppFrame', () => {
+  it('paints only the sidebar and shell overlay slots on the overlay document', () => {
+    document.documentElement.setAttribute('data-dsh-desktop-overlay', '')
+    const { slotCalls, queryByTestId, container } = mountFrame()
+    expect(queryByTestId('center-content')).toBeNull()
+    expect(queryByTestId('details-content')).toBeNull()
+    expect(queryByTestId('sidebar-content')).toBeTruthy()
+    expect(slotCalls.map(c => c.key)).toEqual(['sidebar', 'shell.overlay'])
+    expect(slotCalls[0]!.props).toEqual({ collapsed: false, width: 280 })
+    expect(container.firstElementChild?.hasAttribute('data-dsh-desktop-overlay-root')).toBe(true)
+  })
+
   it('renders three tracks from store state', () => {
     const { frame } = mountFrame()
     expect(tracks(frame)).toEqual([280, 0])
@@ -259,9 +273,25 @@ describe('AppFrame', () => {
     act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 0])
     expect(instance.getSnapshot().details).toBe(640)
+    expect(frame.hasAttribute('data-details-overlay')).toBe(true)
+    expect(frame.hasAttribute('data-details-collapsed')).toBe(false)
+    expect(frame.querySelector('[data-overlay]')?.getAttribute('style')).toContain('640px')
     frameWidth = 2000
     act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 640])
+    expect(frame.hasAttribute('data-details-overlay')).toBe(false)
+  })
+
+  it('overlays details on the default Desktop width so Browser Dock chrome stays reachable', () => {
+    frameWidth = 1280
+    const { frame, layout } = mountFrame()
+    const browserRange = { minimum: 420, default: 640, maximum: 960 }
+    act(() => { layout.openDetails(browserRange) })
+    expect(tracks(frame)).toEqual([280, 0])
+    expect(frame.hasAttribute('data-details-overlay')).toBe(true)
+    expect(frame.hasAttribute('data-details-collapsed')).toBe(false)
+    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(2)
+    expect(frame.querySelector('[data-overlay]')?.getAttribute('style')).toContain('640px')
   })
 
   it('drag base is the rendered (concession-clamped) width, not the preference', () => {
@@ -424,5 +454,15 @@ describe('AppFrame — unmount with an in-flight resize frame', () => {
     frameWidth = 1250
     act(() => { fireResize?.(); fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 330])
+  })
+})
+
+describe('AppFrame desktop chrome CSS', () => {
+  it('insets the center column under macOS and Windows chrome markers', () => {
+    const css = readFileSync(join(process.cwd(), 'packages/client/ui-layout/src/client/AppFrame.module.css'), 'utf8')
+    const mac = /\.frame:has\(\[data-desktop-chrome='mac'\]\) \.centerCol\s*\{(?<body>[^}]+)\}/.exec(css)?.groups?.body ?? ''
+    const win = /\.frame:has\(\[data-desktop-chrome='win'\]\) \.centerCol\s*\{(?<body>[^}]+)\}/.exec(css)?.groups?.body ?? ''
+    expect(mac).toContain('padding-top: var(--dsh-window-chrome-height)')
+    expect(win).toContain('padding-top: 36px')
   })
 })

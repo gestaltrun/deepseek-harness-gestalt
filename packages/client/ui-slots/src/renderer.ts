@@ -171,6 +171,10 @@ export interface SlotRendererHost {
      * undefined while no current session resolves.
      */
     provideInfo: HostObservable<SessionMaybeProvideInfo>
+    /** Resolve one explicit Session bundle without changing the shell selection. */
+    provideInfoFor?(sessionId: string): SessionMaybeProvideInfo
+    /** Open one explicitly rendered Session window without changing the shell selection. */
+    openForRender?(sessionId: string): void
   }
   /** Workspace-side standard-kit sources. */
   workspaces: {
@@ -185,7 +189,7 @@ export interface SlotRendererHost {
   locale?: LocaleFace | undefined
 }
 
-/** The installation contract: runtime owns install()/renderSlot(); ui-renderer implements rendering. */
+/** The installation contract: runtime owns installation and render authority; ui-renderer implements React rendering. */
 export interface SlotRenderer {
   /**
    * Render the root slot tree over the host API (the only ctx-level entry).
@@ -194,6 +198,15 @@ export interface SlotRenderer {
    * @returns the rendered tree.
    */
   renderRoot(host: SlotRendererHost, ownerProps: object): ReactNode
+  /**
+   * Render one declared non-root slot under an explicit Session binding.
+   * @param host - the installing service's host API.
+   * @param slotKey - declared non-root Session slot.
+   * @param sessionId - exact Session identity supplying the standard props.
+   * @param ownerProps - owner props for the target slot.
+   * @returns the rendered tree.
+   */
+  renderSession?(host: SlotRendererHost, slotKey: string, sessionId: string, ownerProps: object): ReactNode
 }
 
 /** Thrown when a retained renderSlot binding is invoked after its declaring entry was disposed. */

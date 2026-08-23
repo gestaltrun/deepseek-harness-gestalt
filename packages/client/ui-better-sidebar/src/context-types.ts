@@ -24,6 +24,7 @@
  * need them — e.g. the `ws` upgrade hook in src/index.ts).
  */
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
+import type { SessionAdmissionAdapter } from '@deepseek-ai/dsh-client-runtime/client'
 import type { BetterSidebarService } from './client/service.ts'
 
 /** Repository Cordis Context plus the structural services used by this pinned snapshot. */
@@ -142,6 +143,8 @@ export interface SidebarSessionSummary {
   parentId?: string
   /** Whether the session's agent is currently running. */
   running?: boolean
+  /** Whether the durable Session has no accepted user turn yet. */
+  blank?: boolean
 }
 
 /** One healthy subagent catalog child row (structural mirror of the runtime). */
@@ -184,12 +187,6 @@ export interface SidebarSessionEvent {
   seq: number
   time: number
   data: Record<string, unknown>
-}
-
-/** One history row: the durable event plus an optional tool presentation view. */
-export interface SidebarHistoryEntry {
-  event: SidebarSessionEvent
-  view?: unknown
 }
 
 /** Lifecycle status set of one background job (closed wire union). */
@@ -302,39 +299,6 @@ export interface SidebarSessionPersistenceService {
   }>
 }
 
-/** RPC result slot mirror (`RpcResult<T>` on the wire). */
-export type SidebarRpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-/** Unary response mirror (`RpcResponse<T>` on the wire). */
-export interface SidebarRpcResponse<T> {
-  rpcId: unknown
-  result: SidebarRpcResult<T>
-}
-
-/** The generic session-history RPC face the Side Chat transcript polls
- *  (subagent.history verifies subagent-catalog membership, which our custom
- *  side-thread children do not have — the generic session.history reads any
- *  durable log directly). */
-export interface SidebarSessionHistoryRpc {
-  history(
-    payload: { sessionId: string; beforeSeq?: number; maxMessages?: number },
-    signal?: AbortSignal,
-  ): Promise<SidebarRpcResponse<{ events: SidebarHistoryEntry[]; hasMore: boolean }>>
-}
-
-/** The wire face the Subagent activity summary needs (subset of `ctx.connection`). */
-export interface SidebarConnectionHandle {
-  api: {
-    sessions: SidebarSessionHistoryRpc
-    subagents: {
-      history(
-        payload: SidebarSubagentAddress & { beforeSeq?: number; maxMessages?: number },
-        signal?: AbortSignal,
-      ): Promise<SidebarRpcResponse<{ events: SidebarHistoryEntry[]; hasMore: boolean }>>
-    }
-  }
-}
-
 /** The client session list snapshot the sidebar subscribes to. */
 export interface SidebarSessionList {
   current: string | undefined
@@ -400,6 +364,13 @@ export interface SidebarSessionsService {
    * Refresh one direct-child catalog.
    */
   refreshSubagents?(parentSessionId: string): Promise<void>
+  /** Register one feature-owned prompt/cancel route for exact Session identities. */
+  registerAdmissionAdapter?(adapter: SessionAdmissionAdapter): () => void
+}
+
+/** Explicit-Session mounting face provided by ui-renderer. */
+export interface SidebarUiRenderer {
+  mountSession(container: HTMLElement, slotKey: string, sessionId: string, ownerProps?: object): () => void
 }
 
 /**
@@ -518,7 +489,6 @@ export interface SidebarAgent {
 export interface SidebarContextServices {
     webServer: SidebarWebServer
     sessions: SidebarSessionStore & SidebarSessionsService
-    connection: SidebarConnectionHandle
     webRuntime: SidebarWebRuntime
     slots: SidebarSlotsService
     workspaces: SidebarWorkspacesService
@@ -538,6 +508,8 @@ export interface SidebarContextServices {
      * `window.__DSH_MODULES__` page global; the loader keeps that fallback.
      */
     modules: { import(specifier: string): Promise<unknown> }
+    /** Canonical slot renderer used to mount a Side Chat thread without changing shell selection. */
+    uiRenderer: SidebarUiRenderer
     /**
      * The host background-job registry (`ctx.get('jobs')`; optional — the
      * sidebar routes degrade to a 503 when the deployment lacks it).

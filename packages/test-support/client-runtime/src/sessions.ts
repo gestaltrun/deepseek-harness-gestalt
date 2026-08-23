@@ -348,6 +348,14 @@ export class TestSessions implements ISessions {
     return (id === undefined ? undefined : this.provideInfo(id)) ?? this.channel.maybeInfo
   }
 
+  /** Resolve one explicit renderer bundle without changing the fixture current Session. */
+  provideInfoFor(sessionId: SessionId): SessionMaybeProvideInfo {
+    return this.maybeProvideInfo(sessionId)
+  }
+
+  /** Fixture sessions are already resident; explicit rendering needs no additional open step. */
+  openForRender(_sessionId: SessionId): void {}
+
   /**
    * Resolve (mint on first touch) the session-scoped Cordis context through
    * the production `createScope`, so real `scopeOf`/scope-addressed services

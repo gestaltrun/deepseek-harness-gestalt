@@ -6,6 +6,8 @@
 
 产品组合挂载本包与 [`dsh-client-ui-workbench`](../ui-workbench/README.zh.md)。适配层启用快照浏览器标签，并发布 [`dsh-client-ui-browser`](../ui-browser/README.zh.md) 的官方 chrome；沙箱 iframe 仍是独立安装时的回退。不要为了改产品行为去改快照源码。
 
+Side Chat 标签页以子会话 id 挂载本仓已声明的 `conversation` slot。因此，标准会话头、已注册的对话/轨迹视图、会话头操作、transcript 与 InputBar 都和主会话复用同一批组件。标签页外壳只保留线程生命周期、切换与提升控制；继承的 seed 事件保持持久化，但不会出现在该子会话自有的 transcript 中。session scope 的 subagent 谱系、schedule 与后台任务都按子会话 id 解析。workbench terminal 标签页仍由自身的 `SessionScope` 确定范围，不会因嵌入式会话而重定向。
+
 ## 模型体验
 
 ### Side Chat

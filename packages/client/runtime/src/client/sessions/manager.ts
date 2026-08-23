@@ -22,6 +22,7 @@ import { Notifier } from './notifier.ts'
 import { ProjectionValueStore } from './projection-store.ts'
 import { Session } from './session.ts'
 import type { SessionRemotes } from './remotes.ts'
+import type { SessionAdmissionAdapter } from '../contract/sessions.ts'
 
 /**
  * List arrival lifecycle, orthogonal to the pull-activity `state` axis:
@@ -170,6 +171,7 @@ export class SessionManager {
     restoredSelection?: SessionId,
     restoredAddress?: SubagentAddress,
     private readonly conversation?: ConversationRuntime,
+    private readonly admissionFor?: (sessionId: SessionId) => SessionAdmissionAdapter | undefined,
   ) {
     this.selected = restoredSelection
     if (restoredAddress !== undefined) this.addresses.set(restoredAddress.childSessionId, restoredAddress)
@@ -318,6 +320,7 @@ export class SessionManager {
         this.recordMutation({ kind: 'engaged', sessionId: engaged.sessionId })
       },
       projections: this.projectionStore(sessionId),
+      admission: () => this.admissionFor?.(sessionId),
       ...this.conversation === undefined ? {} : { conversation: this.conversation },
     })
   }

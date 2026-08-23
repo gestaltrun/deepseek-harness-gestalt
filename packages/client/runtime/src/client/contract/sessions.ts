@@ -9,7 +9,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {
-  RpcResult, SessionId, SubagentAddress,
+  PromptContentPart, RpcResult, SessionId, SubagentAddress,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { HostObservable, SessionMaybeProvideInfo } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AgentContext } from '../agents/scope.ts'
@@ -22,12 +22,37 @@ import type { ObservableSnapshot } from './store.ts'
 
 export type { AgentContext } from '../agents/scope.ts'
 
+/** Feature-owned admission behavior for a Session that is not served by the stock wire routes. */
+export interface SessionAdmissionAdapter {
+  /** Stable registration identity used for duplicate detection and diagnostics. */
+  readonly id: string
+  /** Whether this adapter owns admission for the exact Session identity. */
+  handles(sessionId: SessionId): boolean
+  /** Admit one prompt with the caller-selected queue posture. */
+  prompt(
+    sessionId: SessionId,
+    content: PromptContentPart[],
+    mode: 'queue' | 'steer',
+    signal?: AbortSignal,
+  ): Promise<RpcResult<{ accepted: true }>>
+  /** Stop the Session current turn while preserving queued work. */
+  cancel(sessionId: SessionId): Promise<RpcResult<{ accepted: true }>>
+  /** Hide inherited fork seed events from the rendered conversation window. */
+  readonly historyScope?: 'owned-suffix' | undefined
+}
+
 /** The sessions-service face injected as `ctx.sessions`. */
 export interface ISessions {
   /** The useSessions standard feed (list rows + current selection; read face — writes stay inside the domain). */
   readonly list: ObservableSnapshot<SessionListState>
   /** Atomic current-session provide projection (the renderer host's `sessions.provideInfo` feed). */
   readonly currentProvideInfo: HostObservable<SessionMaybeProvideInfo>
+  /** Resolve one explicit Session standard-props bundle without changing current selection. */
+  provideInfoFor?(sessionId: SessionId): SessionMaybeProvideInfo
+  /** Open one explicitly rendered Session window without changing current selection. */
+  openForRender?(sessionId: SessionId): void
+  /** Register one feature-owned Session admission adapter. */
+  registerAdmissionAdapter?(adapter: SessionAdmissionAdapter): () => void
   /**
    * The `session.search` result bound the wire schema fixes, exposed to
    * presentation as injected data. Not per-connection state: every transport

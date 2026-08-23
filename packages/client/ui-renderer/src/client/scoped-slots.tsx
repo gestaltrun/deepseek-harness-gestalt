@@ -905,5 +905,21 @@ export function createSlotRenderer(): SlotRenderer {
         </HostContext.Provider>
       )
     },
+    renderSession(host, slotKey, sessionId, ownerProps) {
+      return (
+        <HostContext.Provider value={host}>
+          <SessionProvider sessionId={sessionId}>
+            {() => (
+              <SlotErrorBoundary
+                slotKey={slotKey}
+                onEntryError={(error) => { console.error(`explicit Session slot '${slotKey}' crashed:`, error) }}
+              >
+                <SlotOutlet slotKey={slotKey} ownerProps={ownerProps} />
+              </SlotErrorBoundary>
+            )}
+          </SessionProvider>
+        </HostContext.Provider>
+      )
+    },
   }
 }

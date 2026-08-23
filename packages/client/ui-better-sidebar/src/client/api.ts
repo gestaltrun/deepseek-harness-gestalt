@@ -8,8 +8,15 @@
  */
 import { encodeHtmlUrl } from '../html-route.ts'
 import type { LastActivity } from '../subagent-activity.ts'
-import type { SidechatThreadInfo } from '../sidechat-core.ts'
 import type { BrowserProbeResult } from './browser.ts'
+
+/** Side Chat ids learned before their list summary reaches the browser. */
+const sidechatSessionIds = new Set<string>()
+
+/** Whether this browser has created or reattached the exact Side Chat Session. */
+export function isKnownSidechatSession(sessionId: string): boolean {
+  return sidechatSessionIds.has(sessionId)
+}
 
 /** One wire failure. */
 export class SidebarApiError extends Error {
@@ -259,20 +266,20 @@ export const api = {
   /** Create a Side Chat thread: a child session seeded with the parent's
    *  full log up to now. Empty question = immediate create (Codex-style):
    *  the thread opens empty, the first prompt carries the boundary. */
-  sidechatStart: (sessionId: string, question?: string) =>
-    call<{ childId: string }>('sidechat.start', { sessionId, question: question ?? '' }),
-  /** Deliver one follow-up message to a Side Chat thread. */
-  sidechatPrompt: (childId: string, text: string) =>
-    call<{ accepted: true }>('sidechat.prompt', { childId, text }),
+  sidechatStart: async (sessionId: string, question?: string) => {
+    const result = await call<{ childId: string }>('sidechat.start', { sessionId, question: question ?? '' })
+    sidechatSessionIds.add(result.childId)
+    return result
+  },
+  /** Deliver one queued or steering message to a Side Chat thread. */
+  sidechatPrompt: (childId: string, text: string, mode: 'queue' | 'steer', signal?: AbortSignal) =>
+    call<{ accepted: true }>('sidechat.prompt', { childId, text, mode }, signal),
   /** Abort a Side Chat thread's running turn (queued work is preserved). */
   sidechatCancel: (childId: string) =>
     call<{ accepted: true }>('sidechat.cancel', { childId }),
   /** Release a Side Chat thread's live agent (history stays persisted). */
   sidechatDispose: (childId: string) =>
     call<{ accepted: true }>('sidechat.dispose', { childId }),
-  /** Live state + agent identity (provider/model/preset) of a thread. */
-  sidechatInfo: (childId: string) =>
-    call<SidechatThreadInfo>('sidechat.info', { childId }),
   /** The effective terminal shell and its display name (plugin-global). */
   shellGet: () =>
     call<{ shell: string; name: string }>('shell.get', {}),

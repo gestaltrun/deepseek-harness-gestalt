@@ -225,4 +225,29 @@ async resolveByPath(path: string): Promise<Workspace | undefined>
 Types: [SessionId](core.zh.md)
 
 Source: [`packages/workspace/workspace/src/index.ts`](../../packages/workspace/workspace/src/index.ts)
+
+<a id="workspace-events"></a>
+
+### `workspace/*` events
+
+<a id="workspacesession-archived--parallel"></a>
+
+#### `workspace/session-archived` — parallel
+
+Awaited process-resource cleanup after one Session is durably archived. Idempotent archive requests repeat the cleanup opportunity without rewriting the archive set.
+
+```ts cordis-catalog
+/**
+ * Awaited process-resource cleanup after one Session is durably archived.
+ * Idempotent archive requests repeat the cleanup opportunity without
+ * rewriting the archive set.
+ * @param sessionId - Session whose process-local resources must close.
+ * @mode parallel
+ */
+'workspace/session-archived'(sessionId: SessionId): Promise<void> | void
+```
+
+Types: [SessionId](core.zh.md)
+
+Source: [`packages/workspace/workspace/src/index.ts`](../../packages/workspace/workspace/src/index.ts)
 <!-- END GENERATED cordis-surface -->

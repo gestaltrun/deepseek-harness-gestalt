@@ -60,7 +60,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           READINESS: ${{ github.event.pull_request.draft && 'draft' || 'ready' }}
-        run: pnpm --silent run ci:plan -- --event "$GITHUB_EVENT_NAME" --readiness "$READINESS" --base "$BASE_SHA" --head "$HEAD_SHA"
+        run: pnpm --silent run ci:plan --event "$GITHUB_EVENT_NAME" --readiness "$READINESS" --base "$BASE_SHA" --head "$HEAD_SHA"
 
       - name: Validate pull request metadata
         env:

@@ -17,9 +17,9 @@ GitHub shares one number space across issues and pull requests. Resolve an ambig
 
 ## Supported pull-request creation
 
-Use `pnpm pr:create -- --issue <number> --kind <kind/*> --area <area/*> --title "..." --body-file <path> --base <branch>` from the branch to publish. The command verifies the Issue in the `origin` repository, computes the same CI plan used by preflight, creates a Draft PR with exactly one explicit kind, unions explicit areas with every planner-selected area, and appends an informational same-repository Issue reference. Repeat `--area` for cross-cutting intent that the current risk catalog cannot infer.
+Use `pnpm pr:create --issue <number> --kind <kind/*> --area <area/*> --title "..." --body-file <path> --base <branch>` from the branch to publish. The command verifies the Issue in the `origin` repository, computes the same CI plan used by preflight, creates a Draft PR with exactly one explicit kind, unions explicit areas with every planner-selected area, and appends an informational same-repository Issue reference. Repeat `--area` for cross-cutting intent that the current risk catalog cannot infer.
 
-Use `pnpm ci:plan -- --event pull_request --readiness draft --base <branch> --head HEAD` to inspect the versioned plan without creating a PR. Unknown refs, paths, events, or repository inputs select exhaustive evidence and record the escalation reason.
+Use `pnpm ci:plan --event pull_request --readiness draft --base <branch> --head HEAD` to inspect the versioned plan without creating a PR. Unknown refs, paths, events, or repository inputs select exhaustive evidence and record the escalation reason.
 
 ## Workflow deployment
 

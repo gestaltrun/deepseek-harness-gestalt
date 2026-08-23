@@ -93,7 +93,7 @@ describe('CI plan', () => {
     expect(plan.escalationReasons).toContain('invalid-risk-catalog')
   })
 
-  it('renders the same local plan twice and degrades an unavailable ref instead of narrowing evidence', () => {
+  it('resolves the same local plan from the repository root and a nested directory', () => {
     const root = resolve(import.meta.dirname, '..')
     const args = [
       '--event', 'pull_request',
@@ -103,10 +103,12 @@ describe('CI plan', () => {
     ]
     const first = renderCiPlan(args, root)
 
-    expect(first).toBe(renderCiPlan(args, root))
     expect(first).toBe(renderCiPlan(args, resolve(root, 'scripts')))
     expect(JSON.parse(first)).toMatchObject({ formatVersion: 1, level: 'exhaustive' })
+  })
 
+  it('degrades an unavailable ref instead of narrowing evidence', () => {
+    const root = resolve(import.meta.dirname, '..')
     const unavailable = JSON.parse(renderCiPlan([
       '--event', 'pull_request',
       '--readiness', 'ready',

@@ -60,6 +60,10 @@ describe('CI workflow', () => {
       throw new TypeError('preflight metadata step must define an environment')
     }
     expect(metadata.env.DSH_REQUIRED_PR_AREAS).toBe('${{ steps.plan.outputs.affected_areas }}')
+    const planner = preflightSteps.find(step => isRecord(step) && step.name === 'Compute CI plan')
+    expect(planner).toMatchObject({
+      run: 'pnpm --silent run ci:plan --event "$GITHUB_EVENT_NAME" --readiness "$READINESS" --base "$BASE_SHA" --head "$HEAD_SHA"',
+    })
     expect(preflightSteps).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'Validate pull request metadata' }),
       expect.objectContaining({ name: 'Validate generated state and repository constraints' }),

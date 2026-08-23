@@ -17,9 +17,9 @@ GitHub Issues 和 PR（Pull Request）共享同一编号空间。遇到含义不
 
 ## 受支持的 PR 创建流程
 
-在待发布分支中运行 `pnpm pr:create -- --issue <number> --kind <kind/*> --area <area/*> --title "..." --body-file <path> --base <branch>`。该命令会验证 `origin` 仓库中的 Issue、计算与 preflight 相同的 CI plan，并创建 Draft PR；PR 只含一个显式 kind，area 是显式 area 与 planner 所选 area 的并集，正文还会追加一个同仓库 Issue 的信息型引用。对于当前风险目录无法推断的跨领域意图，可以重复传入 `--area`。
+在待发布分支中运行 `pnpm pr:create --issue <number> --kind <kind/*> --area <area/*> --title "..." --body-file <path> --base <branch>`。该命令会验证 `origin` 仓库中的 Issue、计算与 preflight 相同的 CI plan，并创建 Draft PR；PR 只含一个显式 kind，area 是显式 area 与 planner 所选 area 的并集，正文还会追加一个同仓库 Issue 的信息型引用。对于当前风险目录无法推断的跨领域意图，可以重复传入 `--area`。
 
-运行 `pnpm ci:plan -- --event pull_request --readiness draft --base <branch> --head HEAD` 可以只检查版本化 plan 而不创建 PR。未知 ref、路径、事件或仓库输入会选择穷尽证据，并记录升级原因。
+运行 `pnpm ci:plan --event pull_request --readiness draft --base <branch> --head HEAD` 可以只检查版本化 plan 而不创建 PR。未知 ref、路径、事件或仓库输入会选择穷尽证据，并记录升级原因。
 
 ## 工作流部署
 

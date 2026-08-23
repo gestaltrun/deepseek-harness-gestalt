@@ -4,7 +4,13 @@ import {
   openDevelopmentCompanionMessage,
   sealDevelopmentCompanionMessage,
 } from '@deepseek-ai/dsh-remote-access-client'
-import { parseCompanionTranscriptEntryId, parseRelayAttachmentId } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  parseCompanionTranscriptEntryId,
+  parseRelayAttachmentId,
+  parseRelayCredential,
+  parseRelayRouteId,
+} from '@deepseek-ai/dsh-remote-protocol'
+import { CompanionForegroundRuntime, installCompanionRuntime } from '../src/companion-lifecycle.ts'
 import {
   DevelopmentCompanionClient,
   DevelopmentCompanionSessionStore,
@@ -49,6 +55,20 @@ describe('Development keyless Companion client', () => {
       parseRelayAttachmentId('desktop-development-keyless'),
     )
     const dispose = installDevelopmentCompanionClient(client)
+    const runtime = new CompanionForegroundRuntime({
+      relay: { start: async () => {}, stop: async () => {}, isConnected: () => true },
+    })
+    const disposeRuntime = installCompanionRuntime(runtime)
+    runtime.configure({
+      routeId: parseRelayRouteId('route-development-keyless'),
+      endpoint: 'mobile',
+      credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      revision: 1,
+    })
+    await runtime.start()
+    runtime.bindValidatedDesktopResync()?.acceptValidatedDesktopResync({
+      type: 'desktop-resync', version: 1, authenticated: true,
+    })
     try {
       await client.createSession({
         operationId: 'operation-create',
@@ -99,6 +119,7 @@ describe('Development keyless Companion client', () => {
       await client.receive(Uint8Array.of(1))
     } finally {
       dispose()
+      disposeRuntime()
     }
   })
 

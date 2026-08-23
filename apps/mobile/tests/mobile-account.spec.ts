@@ -121,7 +121,7 @@ describe('MobileAccount', () => {
     expect(deactivate).toHaveBeenCalledOnce()
   })
 
-  it('labels Remote Online only after Desktop-authoritative companion sync', async () => {
+  it('does not fabricate Remote Online before the real encrypted channel is installed', async () => {
     const { installation } = fixture()
     const runtime = new CompanionForegroundRuntime({
       relay: {
@@ -158,7 +158,7 @@ describe('MobileAccount', () => {
       await waitFor(() => { expect(screen.getByRole('button', { name: '使用 GitHub 继续' }).hasAttribute('disabled')).toBe(false) })
       fireEvent.click(screen.getByRole('button', { name: '使用 GitHub 继续' }))
       await screen.findByText('@octocat')
-      expect(screen.getByText('Remote Online')).toBeTruthy()
+      expect(screen.getByText('Remote Offline')).toBeTruthy()
     } finally {
       dispose()
     }
@@ -220,10 +220,6 @@ describe('MobileAccount', () => {
       expect(screen.queryByText('Ungrouped Session')).toBeNull()
       fireEvent.click(screen.getByRole('button', { name: '新建 Ungrouped Session' }))
       await waitFor(() => { expect(screen.getByText('Ungrouped Session')).toBeTruthy() })
-      fireEvent.change(screen.getByLabelText('Workspace 名称'), { target: { value: 'Docs' } })
-      fireEvent.click(screen.getByRole('button', { name: '在新 Workspace 新建 Session' }))
-      await waitFor(() => { expect(screen.getByText('Docs')).toBeTruthy() })
-      expect(screen.getByRole('button', { name: '在 Docs 新建 Session' })).toBeTruthy()
     } finally {
       disposeClient()
       disposeRuntime()

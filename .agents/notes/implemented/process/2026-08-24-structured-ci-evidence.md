@@ -16,7 +16,7 @@ Automatic retry is an explicit command wrapper, not a workflow-wide retry. It pe
 
 `ci:metrics` computes one repeatable baseline from complete workflow and job timestamps. It excludes aggregate and observational jobs from lane samples and excludes incomplete, cancelled, skipped, or stale runs from the run population. It publishes the included and excluded run ids beside success rate and p50/p95 queue, execution, and first-conclusion durations.
 
-The 2026-08-24 baseline queried the latest 20 main CI runs. Runs 32667140424, 32666575103, and 32665585148 were valid samples: success rate was 66.7%; queue p50/p95 was 11/24 seconds; execution p50/p95 was 691/718 seconds; and first valid conclusion p50/p95 was 22/43 seconds. The small valid population is retained as evidence of prior cancellation and supersession noise, not filled with invalid samples.
+The 2026-08-24 baseline queried the latest 20 main CI runs. Runs 32667140424, 32666575103, 32665585148, 32664797140, 32664516987, and 32663145844 were valid samples: success rate was 33.3%; queue p50/p95 was 3/24 seconds; execution p50/p95 was 13/718 seconds; and first valid conclusion p50/p95 was 16/43 seconds. The execution distribution includes fast valid failures instead of hiding them as downstream skips. The small valid population is retained as evidence of prior cancellation and supersession noise, not filled with invalid samples.
 
 ## Alternatives considered
 

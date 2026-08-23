@@ -69,6 +69,7 @@ describe('CI metrics', () => {
     const metrics = computeCiMetrics([
       run(5, 'failure', [
         job('preflight', 'failure', '2026-08-24T00:00:01.000Z', '2026-08-24T00:00:03.000Z'),
+        job('coverage', 'skipped', '2026-08-24T00:00:03.000Z', '2026-08-24T00:00:03.000Z'),
         job('all checks passed', 'failure', '2026-08-24T00:00:03.000Z', '2026-08-24T00:00:04.000Z'),
       ]),
     ])

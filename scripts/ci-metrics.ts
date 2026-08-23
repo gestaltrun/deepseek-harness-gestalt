@@ -76,21 +76,24 @@ export function computeCiMetrics(runs: readonly CiMetricRun[]): CiMetrics {
     const requiredJobs = run.jobs.filter(job =>
       !isBookkeepingJob(job.name)
       && !OBSERVATIONAL_JOB_NAMES.has(job.name))
-    if (requiredJobs.length === 0
-      || requiredJobs.some(job => job.status !== 'completed'
-        || job.conclusion === null
-        || job.startedAt === null
-        || job.completedAt === null
-        || EXCLUDED_RUN_CONCLUSIONS.has(job.conclusion))) {
+    const validJobs = requiredJobs.filter(job =>
+      job.status === 'completed'
+      && job.conclusion !== null
+      && job.startedAt !== null
+      && job.completedAt !== null
+      && !EXCLUDED_RUN_CONCLUSIONS.has(job.conclusion))
+    const hasFailure = validJobs.some(job => job.conclusion !== 'success')
+    if (requiredJobs.length === 0 || validJobs.length === 0
+      || (validJobs.length !== requiredJobs.length && !hasFailure)) {
       excludedRunIds.push(run.databaseId)
       continue
     }
     const createdAt = timestamp(run.createdAt)
-    const startedAt = requiredJobs.map((job) => {
+    const startedAt = validJobs.map((job) => {
       if (job.startedAt === null) throw new Error(`CI run ${String(run.databaseId)} has a required job without startedAt`)
       return timestamp(job.startedAt)
     }).sort((left, right) => left - right)
-    const completedAt = requiredJobs.map((job) => {
+    const completedAt = validJobs.map((job) => {
       if (job.completedAt === null) throw new Error(`CI run ${String(run.databaseId)} has a required job without completedAt`)
       return timestamp(job.completedAt)
     }).sort((left, right) => left - right)
@@ -101,7 +104,7 @@ export function computeCiMetrics(runs: readonly CiMetricRun[]): CiMetrics {
       throw new Error(`CI run ${String(run.databaseId)} has no required job timestamps`)
     }
     includedRunIds.push(run.databaseId)
-    if (requiredJobs.every(job => job.conclusion === 'success')) successfulRuns += 1
+    if (!hasFailure && validJobs.length === requiredJobs.length) successfulRuns += 1
     queue.push(firstStartedAt - createdAt)
     execution.push(lastCompletedAt - firstStartedAt)
     firstConclusion.push(firstCompletedAt - createdAt)

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
-  BrowserPageState, BrowserWorkspaceProjection,
+  BrowserPageState, BrowserTarget, BrowserWorkspaceProjection,
 } from '@deepseek-ai/dsh-browser-workspace/client'
 import { listBrowserWorkspacePages } from '@deepseek-ai/dsh-browser-workspace/client'
 import { BrowserPageChrome } from '@deepseek-ai/dsh-client-ui-browser/client'
@@ -43,6 +43,7 @@ interface SessionListFace {
 
 interface WorkbenchBrowserCreateFace {
   ensureOfficial?: (tabId: string) => void
+  recoverOfficial?: (tabId: string, target: BrowserTarget) => Promise<BrowserPageState | undefined>
 }
 
 /**
@@ -83,6 +84,10 @@ export function OfficialBrowserTab({ ctx, tab, scope, visible }: OfficialBrowser
   }, [sidebar, tab.id])
 
   const workbench = ctx.get('workbenchBrowser') as WorkbenchBrowserCreateFace | undefined
+  const onMissingTarget = useCallback(
+    (target: BrowserTarget) => workbench?.recoverOfficial?.(tab.id, target),
+    [tab.id, workbench],
+  )
   const actions = useMemo(() => {
     const remote = ctx.get('remote.browserWorkspace') as BrowserWorkspaceRemoteFace | undefined
     return remote === undefined ? undefined : bindBrowserWorkspace(remote, sessionId)
@@ -105,6 +110,7 @@ export function OfficialBrowserTab({ ctx, tab, scope, visible }: OfficialBrowser
       t={t}
       {...(visible === undefined ? {} : { visible })}
       onCommittedPage={onCommittedPage}
+      onMissingTarget={onMissingTarget}
     />
   )
 }

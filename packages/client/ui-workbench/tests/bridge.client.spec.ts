@@ -30,7 +30,7 @@ function page(): BrowserPageState {
   }
 }
 
-function projection(hasPage = true): BrowserWorkspaceProjection {
+function projection(hasPage = true, revision = 3): BrowserWorkspaceProjection {
   return {
     activeWorkspaceId: hasPage ? TARGET.workspaceId : null,
     workspaces: hasPage ? [{
@@ -40,7 +40,7 @@ function projection(hasPage = true): BrowserWorkspaceProjection {
       browsers: [{
         browserId: TARGET.browserId,
         activeTabId: TARGET.tabId,
-        tabs: [{ tabId: TARGET.tabId, revision: 3 }],
+        tabs: [{ tabId: TARGET.tabId, revision }],
       }],
     }] : [],
   }
@@ -119,6 +119,82 @@ describe('OfficialBrowserBridge', () => {
     })
   })
 
+  it('replaces a missing Runtime target in the same sidebar tab and retains its Profile', async () => {
+    const meta = officialTabMeta(TARGET, { kind: 'persistent', name: 'retained' })
+    const replacement = {
+      ...page(),
+      target: { ...TARGET, tabId: 'replacement' as BrowserTarget['tabId'] },
+      chrome: { kind: 'persistent' as const, name: 'retained' as never, partition: 'persist:retained' },
+    }
+    const b = bench({ tabs: [{ id: 'browser:1', type: 'browser', meta }] })
+    vi.mocked(b.remote.create).mockResolvedValueOnce(replacement)
+
+    await b.bridge.recoverOfficial('browser:1', TARGET)
+
+    await vi.waitFor(() => {
+      expect(b.remote.create).toHaveBeenCalledWith({ profile: 'persistent', name: 'retained' })
+    })
+    expect(b.sidebar.updateTab).toHaveBeenNthCalledWith(1, 'browser:1', {
+      meta: { profile: { kind: 'persistent', name: 'retained' } },
+    })
+    expect(b.sidebar.updateTab).toHaveBeenLastCalledWith('browser:1', {
+      title: 'Example',
+      meta: officialTabMeta(replacement.target, { kind: 'persistent', name: 'retained' }),
+    })
+    expect(b.sidebar.closeTab).not.toHaveBeenCalled()
+  })
+
+  it('ignores recovery after the Session, tab, binding, or addressed target changed', async () => {
+    const b = bench({ tabs: [{ id: 'browser:1', type: 'browser', meta: officialTabMeta(TARGET) }] })
+    b.setSession(undefined)
+    await expect(b.bridge.recoverOfficial('browser:1', TARGET)).resolves.toBeUndefined()
+    b.setSession(SESSION)
+    await expect(b.bridge.recoverOfficial('missing', TARGET)).resolves.toBeUndefined()
+    b.setState(state([{ id: 'browser:1', type: 'browser' }]))
+    await expect(b.bridge.recoverOfficial('browser:1', TARGET)).resolves.toBeUndefined()
+    b.setState(state([{ id: 'browser:1', type: 'browser', meta: officialTabMeta(TARGET) }]))
+    await expect(b.bridge.recoverOfficial('browser:1', {
+      ...TARGET,
+      tabId: 'other' as BrowserTarget['tabId'],
+    })).resolves.toBeUndefined()
+    expect(b.remote.create).not.toHaveBeenCalled()
+  })
+
+  it('serializes recovery, preserves a shared Profile, and drains a queued reconcile', async () => {
+    let settle!: (value: BrowserPageState) => void
+    const meta = officialTabMeta(TARGET, { kind: 'shared' })
+    const b = bench({ tabs: [{ id: 'browser:1', type: 'browser', meta }] })
+    vi.mocked(b.remote.create).mockReturnValue(new Promise((resolve) => { settle = resolve }))
+    const recovering = b.bridge.recoverOfficial('browser:1', TARGET)
+    b.bridge.tick()
+    await expect(b.bridge.recoverOfficial('browser:1', TARGET)).resolves.toBeUndefined()
+    expect(b.remote.create).toHaveBeenCalledWith({ profile: 'shared' })
+    settle({ ...page(), chrome: { kind: 'shared', partition: 'persist:shared' } })
+    await recovering
+    await vi.waitFor(() => { expect(b.sidebar.updateTab).toHaveBeenCalledTimes(2) })
+  })
+
+  it('uses the current default when persisted tab metadata has no Profile', async () => {
+    const b = bench({
+      tabs: [{ id: 'browser:1', type: 'browser', meta: officialTabMeta(TARGET) }],
+    })
+    await b.bridge.recoverOfficial('browser:1', TARGET)
+    expect(b.sidebar.updateTab).toHaveBeenNthCalledWith(1, 'browser:1', { meta: {} })
+    expect(b.remote.create).toHaveBeenCalledWith({ profile: 'persistent', name: 'test' })
+  })
+
+  it('does not overwrite a different binding installed during recovery handoff', async () => {
+    const second = { ...TARGET, tabId: 'second' as BrowserTarget['tabId'] }
+    const b = bench({
+      tabs: [{ id: 'browser:1', type: 'browser', meta: officialTabMeta(TARGET) }],
+    })
+    vi.mocked(b.sidebar.updateTab).mockImplementationOnce(() => {
+      b.setState(state([{ id: 'browser:1', type: 'browser', meta: officialTabMeta(second) }]))
+    })
+    await b.bridge.recoverOfficial('browser:1', TARGET)
+    expect(b.remote.create).not.toHaveBeenCalled()
+  })
+
   it('closes an official page after its previously bound sidebar tab disappears', async () => {
     const meta = officialTabMeta(TARGET)
     const b = bench({ tabs: [{ id: 'browser:1', type: 'browser', meta }] })
@@ -129,6 +205,53 @@ describe('OfficialBrowserBridge', () => {
     await vi.waitFor(() => {
       expect(b.remote.close).toHaveBeenCalledWith(TARGET, 3)
     })
+  })
+
+  it('observes and retries when closing a tab with a stale listed revision', async () => {
+    const meta = officialTabMeta(TARGET)
+    const b = bench({
+      projection: projection(true, 1),
+      tabs: [{ id: 'browser:1', type: 'browser', meta }],
+    })
+    b.bridge.tick()
+    await Promise.resolve()
+    vi.mocked(b.remote.close)
+      .mockRejectedValueOnce(Object.assign(new Error('browser revision conflict'), {
+        code: 'BROWSER_REVISION_CONFLICT',
+      }))
+      .mockImplementationOnce(async () => { b.setProjection(projection(false)) })
+    vi.mocked(b.remote.observe).mockResolvedValueOnce(page())
+    b.setState(state([]))
+
+    b.bridge.tick()
+
+    await vi.waitFor(() => {
+      expect(b.remote.close).toHaveBeenNthCalledWith(1, TARGET, 1)
+      expect(b.remote.close).toHaveBeenNthCalledWith(2, TARGET, 3)
+    })
+    expect(b.remote.observe).toHaveBeenCalledWith(TARGET)
+    b.bridge.tick()
+    await Promise.resolve()
+    expect(b.sidebar.openTab).not.toHaveBeenCalled()
+  })
+
+  it('retains close intent across a transient failure instead of reopening the tab', async () => {
+    const b = bench({
+      tabs: [{ id: 'browser:1', type: 'browser', meta: officialTabMeta(TARGET) }],
+    })
+    b.bridge.tick()
+    await Promise.resolve()
+    vi.mocked(b.remote.close)
+      .mockRejectedValueOnce(new Error('runtime unavailable'))
+      .mockImplementationOnce(async () => { b.setProjection(projection(false)) })
+    b.setState(state([]))
+
+    b.bridge.tick()
+    await vi.waitFor(() => { expect(b.remote.close).toHaveBeenCalledOnce() })
+    b.bridge.tick()
+
+    await vi.waitFor(() => { expect(b.remote.close).toHaveBeenCalledTimes(2) })
+    expect(b.sidebar.openTab).not.toHaveBeenCalled()
   })
 
   it('reveals and activates the matching current Session tab', () => {
@@ -227,6 +350,7 @@ describe('OfficialBrowserBridge', () => {
     await vi.waitFor(() => { expect(b.remote.close).toHaveBeenCalledOnce() })
     b.bridge.tick()
     settleClose()
-    await vi.waitFor(() => { expect(b.sidebar.openTab).toHaveBeenCalledWith({ type: 'browser' }) })
+    await vi.waitFor(() => { expect(b.remote.close).toHaveBeenCalledTimes(2) })
+    expect(b.sidebar.openTab).not.toHaveBeenCalled()
   })
 })

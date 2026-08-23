@@ -61,4 +61,4 @@ The hoisted deploy includes workspace packages without pnpm's linked virtual dep
 
 - **Packaged extraResources Node + dsh snapshot is assembled by the release workflow** — `gestalt:dev` runs the workspace source tree.
 - **Windows Authenticode is absent** — SmartScreen warns; the updater still runs.
-- **External release evidence remains** — the exact Snow/WASM implementation requires independent security review, and the shipped flow requires physical Desktop plus WKWebView/Android WebView evidence. Local Vite, test certificates, and `prototype-companion` are not product acceptance.
+- **Companion release evidence is repository-owned** — Node 22 and 24 plus iOS Simulator WKWebView and Android Emulator WebView execute the exact checked-in Snow JS/WASM package and its bounded attack cases. The assembled Desktop/Mobile product flow remains the acceptance surface; local Vite, test certificates, and `prototype-companion` are not product acceptance.

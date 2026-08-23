@@ -61,4 +61,4 @@ hoisted deploy 会纳入工作区包，但不带 pnpm 的链接式虚拟依赖�
 
 - **安装包里的 Node + dsh 快照由发布 workflow 组装** — `gestalt:dev` 跑的是工作区源码树。
 - **没有 Windows Authenticode** — SmartScreen 会警告；更新器仍会运行。
-- **仍缺外部发布证据** — 确切的 Snow/WASM 实现需要独立安全评审，发布链路还需要物理 Desktop 加 WKWebView/Android WebView 证据。本地 Vite、测试证书与 `prototype-companion` 不是产品验收。
+- **Companion 发布证据由仓库门禁持有** — Node 22 与 24、iOS Simulator WKWebView 和 Android Emulator WebView 会执行仓库内确切的 Snow JS/WASM 包及其有界攻击用例。验收表面仍是组装后的 Desktop/Mobile 产品链路；本地 Vite、测试证书与 `prototype-companion` 不是产品验收。

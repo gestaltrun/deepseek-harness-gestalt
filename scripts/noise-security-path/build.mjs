@@ -1,7 +1,7 @@
 /** Build the reviewed Snow adapter and its browser-target WebAssembly module. */
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -49,3 +49,7 @@ declare const init: (
 export default init
 `)
 writeFileSync(declarationPath, declaration)
+
+for (const file of ['dsh_noise_channel.js', 'dsh_noise_channel_bg.wasm']) {
+  copyFileSync(join(repositoryRoot, 'packages/platform/noise-channel/pkg', file), join(pkg, file))
+}

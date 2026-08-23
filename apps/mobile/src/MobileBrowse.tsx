@@ -34,7 +34,7 @@ export interface MobileBrowseProps {
   /** Product theme inherited by shared detail components. */
   theme: 'light' | 'dark'
   /** Session-authorized historical-image loader. */
-  loadImage: (sessionId: string, attachment: ImageAttachmentRef) => Promise<string>
+  loadImage: (sessionId: SessionId, attachment: ImageAttachmentRef) => Promise<string>
   /** Whether the current foreground synchronization admits mutations. */
   canMutate: boolean
   /** Latest non-attachment mutation or refresh failure. */
@@ -44,13 +44,13 @@ export interface MobileBrowseProps {
   /** Optional create handler used by Workspace and global create actions. */
   onCreate?: ((input: { workspace?: string }) => void) | undefined
   /** Submit one prompt to the selected Desktop Session. */
-  onSubmit?: ((sessionId: string, text: string) => void | Promise<void>) | undefined
+  onSubmit?: ((sessionId: SessionId, text: string) => void | Promise<void>) | undefined
   /** Cancel one active Desktop Session. */
-  onCancel?: ((sessionId: string) => void) | undefined
+  onCancel?: ((sessionId: SessionId) => void) | undefined
   /** Select an attachment for the opened Session. */
-  onAttach?: ((sessionId: string, file: File) => void) | undefined
+  onAttach?: ((sessionId: SessionId, file: File) => void) | undefined
   /** Load older history for one selected Session. */
-  onLoadOlder?: ((sessionId: string) => void) | undefined
+  onLoadOlder?: ((sessionId: SessionId) => void) | undefined
   /** Desktop-authoritative full-text Session search state. */
   search: MobileCompanionSearchSnapshot
   /** Request one full-text Session search from Desktop. */
@@ -135,7 +135,7 @@ export function MobileBrowse({
           >
             <input
               type="search"
-              aria-label="搜索 Desktop Sessions"
+              aria-label={locale === 'zh' ? '搜索 Desktop Sessions' : 'Search Desktop Sessions'}
               value={searchDraft}
               disabled={!canMutate}
               onChange={(event) => { setSearchDraft(event.target.value) }}
@@ -151,7 +151,9 @@ export function MobileBrowse({
           </button>
         )}
       </header>
-      {searchActive && <AuthoritativeSearchResults search={search} sessions={sessions} onOpen={openSession} />}
+      {searchActive && (
+        <AuthoritativeSearchResults search={search} sessions={sessions} locale={locale} onOpen={openSession} />
+      )}
       {!searchActive && groups.map((group) => {
         const label = group.workspaceId === undefined ? tw('group.ungrouped') : group.label
         return (
@@ -187,20 +189,31 @@ export function MobileBrowse({
 function AuthoritativeSearchResults({
   search,
   sessions,
+  locale,
   onOpen,
 }: {
   search: MobileCompanionSearchSnapshot
   sessions: SessionListState
+  locale: ConversationPresentationLocale
   onOpen: (id: SessionId) => void
 }): ReactNode {
+  const text = locale === 'zh'
+    ? {
+      label: 'Desktop 搜索结果', loading: '正在搜索 Desktop Session 内容…',
+      empty: '没有匹配的 Session', more: '结果较多，请缩小搜索范围。',
+    }
+    : {
+      label: 'Desktop search results', loading: 'Searching Desktop Session content…',
+      empty: 'No matching Sessions', more: 'More results are available. Narrow the search.',
+    }
   return (
-    <section className={css.group} aria-label="Desktop 搜索结果">
-      <h2>Desktop 搜索结果</h2>
-      {search.status === 'loading' && <p>正在搜索 Desktop Session 内容…</p>}
-      {search.status !== 'loading' && search.items.length === 0 && <p>没有匹配的 Session</p>}
+    <section className={css.group} aria-label={text.label}>
+      <h2>{text.label}</h2>
+      {search.status === 'loading' && <p>{text.loading}</p>}
+      {search.status !== 'loading' && search.items.length === 0 && <p>{text.empty}</p>}
       <ul className={css.sessions}>
         {search.items.map((hit) => {
-          const sessionId = hit.sessionId as unknown as SessionId
+          const sessionId = hit.sessionId
           return (
             <li key={hit.sessionId} className={css.searchResult}>
               <button
@@ -215,7 +228,7 @@ function AuthoritativeSearchResults({
           )
         })}
       </ul>
-      {search.hasMore && <p>结果较多，请缩小搜索范围。</p>}
+      {search.hasMore && <p>{text.more}</p>}
     </section>
   )
 }

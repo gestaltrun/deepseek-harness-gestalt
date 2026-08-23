@@ -29,7 +29,7 @@ export interface MobileCompanionPresentation {
   /** Opened Desktop conversation projections keyed by Session id. */
   conversations: CompanionConversationMap
   /** Read one authorized historical image from the selected Session. */
-  loadImage: (sessionId: string, attachment: ImageAttachmentRef) => Promise<string>
+  loadImage: (sessionId: SessionId, attachment: ImageAttachmentRef) => Promise<string>
   /** Whether current foreground synchronization admits mutation controls. */
   canMutate: boolean
   /** Current Desktop-authoritative full-text search state. */
@@ -41,13 +41,13 @@ export interface MobileCompanionPresentation {
   /** Create one Desktop-default Session when mutation authority is available. */
   onCreate?: ((input: { workspace?: string }) => void) | undefined
   /** Submit a prompt through Desktop authority when transport is available. */
-  onSubmit?: ((sessionId: string, text: string) => void | Promise<void>) | undefined
+  onSubmit?: ((sessionId: SessionId, text: string) => void | Promise<void>) | undefined
   /** Cancel a running Desktop Session when transport is available. */
-  onCancel?: ((sessionId: string) => void) | undefined
+  onCancel?: ((sessionId: SessionId) => void) | undefined
   /** Load the preceding authoritative history window. */
-  onLoadOlder?: ((sessionId: string) => void) | undefined
+  onLoadOlder?: ((sessionId: SessionId) => void) | undefined
   /** Select an attachment for encrypted transfer through Desktop. */
-  onAttach?: ((sessionId: string, file: File) => void) | undefined
+  onAttach?: ((sessionId: SessionId, file: File) => void) | undefined
   /** Request one full-text Session search from Desktop. */
   onSearch?: ((query: string) => void) | undefined
 }

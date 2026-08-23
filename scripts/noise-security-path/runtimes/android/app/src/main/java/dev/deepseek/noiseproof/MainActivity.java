@@ -59,8 +59,11 @@ public final class MainActivity extends Activity {
         private boolean isProofAsset(String path) {
             return path.equals("/web/index.html")
                 || path.equals("/web/proof.js")
+                || path.equals("/web/shipped-proof.js")
                 || path.equals("/pkg/dsh_noise_security_path_proof.js")
-                || path.equals("/pkg/dsh_noise_security_path_proof_bg.wasm");
+                || path.equals("/pkg/dsh_noise_security_path_proof_bg.wasm")
+                || path.equals("/pkg/dsh_noise_channel.js")
+                || path.equals("/pkg/dsh_noise_channel_bg.wasm");
         }
 
         @Override

@@ -26,6 +26,9 @@ import type {
   MobileCompanionConnectionChannel, ValidatedDesktopSurfaceResync,
 } from '../src/companion-surface.ts'
 import { fixedMobilePresentationClock } from '../src/mobile-clock.ts'
+import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+
+const sid = (value: string): SessionId => value as SessionId
 
 const environment = loadOperatedPlatformEnvironment({
   environment: 'production', origin: 'https://platform.fixture.example',
@@ -134,7 +137,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
 
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected current Companion result receiver')
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' }), {
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search Desktop Sessions' }), {
       target: { value: 'authoritative' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
@@ -148,11 +151,11 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       hasMore: false,
     })
     await screen.findByText('Desktop-only authoritative hit')
-    expect(screen.getByRole('region', { name: 'Desktop 搜索结果' }).textContent).toMatchInlineSnapshot(
-      '"Desktop 搜索结果uncached-authoritative-sessionDesktop-only authoritative hit"',
+    expect(screen.getByRole('region', { name: 'Desktop search results' }).textContent).toMatchInlineSnapshot(
+      '"Desktop search resultsuncached-authoritative-sessionDesktop-only authoritative hit"',
     )
     surface.search('')
-    surface.attach('guarded-session', selectedFile())
+    surface.attach(sid('guarded-session'), selectedFile())
     results.acceptValidatedCompanionResult({
       type: 'attachment-rejected',
       operationId: parseCompanionOperationId('mobile-snapshot-attachment'),
@@ -160,7 +163,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     })
     expect((await screen.findByRole('alert')).textContent)
       .toBe('Desktop rejected the attachment: hash-mismatch')
-    surface.attach('guarded-session', selectedFile())
+    surface.attach(sid('guarded-session'), selectedFile())
     rejectAttachment?.(new CompanionAttachmentDeliveryUncertainError(
       parseCompanionOperationId('mobile-snapshot-attachment'),
       new Error('connection replaced'),

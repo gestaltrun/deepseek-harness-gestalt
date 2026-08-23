@@ -2,7 +2,7 @@
 
 import { createHash, randomBytes } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import type { PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import { parsePersonalPairingId, type PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
   RemoteAttachmentError,
   RemoteAttachmentStoreService,
@@ -30,10 +30,10 @@ CREATE INDEX IF NOT EXISTS remote_attachment_blobs_expiry
 `
 
 interface AttachmentRow {
-  capability_digest: Buffer | Uint8Array
-  pairing_id: string
-  ciphertext: Buffer | Uint8Array
-  expires_at: string | number
+  capability_digest: Uint8Array
+  pairing_id: PersonalPairingId
+  ciphertext: Uint8Array
+  expires_at: number
 }
 
 /** Deployment bounds for the operated PostgreSQL attachment store. */
@@ -153,7 +153,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
           FOR UPDATE`,
         [this.databaseIdentity, digest(input.capability)],
       )
-      const row = attachmentRow(selected.rows[0])
+      const row = attachmentRow(selected.rows[0], this.maxBlobBytes)
       if (row === undefined) return
       if (row.pairing_id !== input.pairingId) throw pairingMismatch()
       await client.query(
@@ -172,13 +172,13 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
       [this.databaseIdentity],
     )
     return selected.rows.map((value) => {
-      const row = attachmentRow(value)
+      const row = attachmentRow(value, this.maxBlobBytes)
       if (row === undefined) throw new TypeError('PostgreSQL remote attachment row is invalid')
       return {
         capabilityDigest: new Uint8Array(row.capability_digest),
-        pairingId: row.pairing_id as PersonalPairingId,
+        pairingId: row.pairing_id,
         ciphertext: new Uint8Array(row.ciphertext),
-        expiresAt: Number(row.expires_at),
+        expiresAt: row.expires_at,
       }
     })
   }
@@ -194,11 +194,11 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
         WHERE database_identity = $1 AND capability_digest = $2${lock ? ' FOR UPDATE' : ''}`,
       [this.databaseIdentity, digest(input.capability)],
     )
-    const row = attachmentRow(selected.rows[0])
+    const row = attachmentRow(selected.rows[0], this.maxBlobBytes)
     if (row === undefined) {
       throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability is unknown, consumed, or revoked')
     }
-    if (input.now >= Number(row.expires_at)) {
+    if (input.now >= row.expires_at) {
       await client.query(
         'DELETE FROM remote_attachment_blobs WHERE database_identity = $1 AND capability_digest = $2',
         [this.databaseIdentity, digest(input.capability)],
@@ -235,11 +235,28 @@ function digest(capability: AttachmentCapability): Buffer {
   return createHash('sha256').update(capability).digest()
 }
 
-function attachmentRow(value: Record<string, unknown> | undefined): AttachmentRow | undefined {
+function attachmentRow(
+  value: Record<string, unknown> | undefined,
+  maxBlobBytes: number,
+): AttachmentRow | undefined {
   if (value === undefined || !(value.capability_digest instanceof Uint8Array)
     || !(value.ciphertext instanceof Uint8Array) || typeof value.pairing_id !== 'string'
     || (typeof value.expires_at !== 'string' && typeof value.expires_at !== 'number')) return undefined
-  return value as unknown as AttachmentRow
+  const expiresAt = Number(value.expires_at)
+  if (value.capability_digest.byteLength !== 32
+    || value.ciphertext.byteLength === 0 || value.ciphertext.byteLength > maxBlobBytes
+    || !Number.isSafeInteger(expiresAt) || expiresAt <= 0) return undefined
+  try {
+    return {
+      capability_digest: value.capability_digest,
+      pairing_id: parsePersonalPairingId(value.pairing_id),
+      ciphertext: value.ciphertext,
+      expires_at: expiresAt,
+    }
+  } catch {
+    /* A malformed durable pairing id makes the whole row unusable. */
+    return undefined
+  }
 }
 
 function pairingMismatch(): RemoteAttachmentError {

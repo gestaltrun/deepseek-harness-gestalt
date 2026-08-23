@@ -213,6 +213,24 @@ describe('Mobile Companion browse projection', () => {
     }))
     expect(screen.getByRole('alert').textContent).toContain('HTTP 400')
   })
+
+  it('renders authoritative search controls and status entirely in English', () => {
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
+      ...browsePresentation,
+      locale: 'en',
+      search: {
+        query: 'needle', status: 'loading', items: [], hasMore: true,
+      },
+      onSearch: vi.fn(),
+    }))
+
+    expect(screen.getByRole('searchbox', { name: 'Search Desktop Sessions' })).toBeTruthy()
+    expect(screen.getByRole('region', { name: 'Desktop search results' })).toBeTruthy()
+    expect(screen.getByText('Searching Desktop Session content…')).toBeTruthy()
+    expect(screen.getByText('More results are available. Narrow the search.')).toBeTruthy()
+    expect(screen.queryByText(/搜索|正在|结果较多/u)).toBeNull()
+  })
 })
 
 function fixedClock(now: number): MobilePresentationClock {

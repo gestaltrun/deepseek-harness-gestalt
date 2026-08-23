@@ -23,6 +23,8 @@ const grant = {
   revision: 1,
 }
 
+const sid = (value: string): SessionId => value as SessionId
+
 describe('MobileCompanionSurface', () => {
   it('round-trips an explicit JSON projection without Maps, classes, or callbacks', () => {
     const dto = projection('session-one', 'One', true)
@@ -70,18 +72,18 @@ describe('MobileCompanionSurface', () => {
     const first = surface.bindAuthenticatedConnection(firstChannel)
     if (first === undefined) throw new Error('expected Desktop resync receiver')
     first.acceptValidatedDesktopResync(projection('session-first', 'First'))
-    await surface.submit('session-first', 'continue')
+    await surface.submit(sid('session-first'), 'continue')
 
     runtime.forgetConnection()
     runtime.markConnectionOpen()
     first.acceptValidatedDesktopResync(projection('session-stale', 'Stale'))
-    await expect(surface.submit('session-first', 'stale')).rejects.toThrow('requires foreground synchronization')
+    await expect(surface.submit(sid('session-first'), 'stale')).rejects.toThrow('requires foreground synchronization')
 
     const replacementChannel = connectionChannel()
     const replacement = surface.bindAuthenticatedConnection(replacementChannel)
     if (replacement === undefined) throw new Error('expected replacement resync receiver')
     replacement.acceptValidatedDesktopResync(projection('session-replacement', 'Replacement'))
-    await surface.submit('session-replacement', 'current')
+    await surface.submit(sid('session-replacement'), 'current')
 
     expect(firstChannel.mutations.submit).toHaveBeenCalledTimes(1)
     expect(firstChannel.mutations.submit).toHaveBeenCalledWith('session-first', 'continue')
@@ -97,7 +99,7 @@ describe('MobileCompanionSurface', () => {
     const first = surface.bindAuthenticatedConnection(firstChannel)
     if (first === undefined) throw new Error('expected first generation receiver')
     first.acceptValidatedDesktopResync(projection('session-one', 'One'))
-    surface.loadOlder('session-one')
+    surface.loadOlder(sid('session-one'))
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
 
     runtime.forgetConnection()
@@ -108,7 +110,7 @@ describe('MobileCompanionSurface', () => {
     replacement.acceptValidatedDesktopResync(projection('session-one', 'One'))
 
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(false)
-    surface.loadOlder('session-one')
+    surface.loadOlder(sid('session-one'))
     expect(replacementChannel.mutations.loadOlder).toHaveBeenCalledOnce()
     first.acceptValidatedCompanionProjection({
       type: 'conversation-snapshot', operationId: parseCompanionOperationId('history-default'),
@@ -131,7 +133,7 @@ describe('MobileCompanionSurface', () => {
     const replacement = surface.bindAuthenticatedConnection(replacementChannel)
     if (replacement === undefined) throw new Error('expected replacement resync receiver')
     const dispose = runtime.subscribe(() => {
-      if (runtime.getState().synchronized) void surface.submit('session-two', 'during synchronized publication')
+      if (runtime.getState().synchronized) void surface.submit(sid('session-two'), 'during synchronized publication')
     })
     replacement.acceptValidatedDesktopResync(projection('session-two', 'Two'))
     dispose()
@@ -241,15 +243,15 @@ describe('MobileCompanionSurface', () => {
         nodes: [{ kind: 'user', seq: 8, time: 1, content: [], source: {} }],
       })),
     })
-    surface.loadOlder('session-one')
-    surface.loadOlder('session-one')
+    surface.loadOlder(sid('session-one'))
+    surface.loadOlder(sid('session-one'))
     expect(firstChannel.mutations.loadOlder).toHaveBeenCalledWith('session-one', 8)
     expect(firstChannel.mutations.loadOlder).toHaveBeenCalledOnce()
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
 
     first.acceptValidatedDesktopResync(projection('session-one', 'One'))
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
-    surface.loadOlder('session-one')
+    surface.loadOlder(sid('session-one'))
     expect(firstChannel.mutations.loadOlder).toHaveBeenCalledOnce()
     first.acceptValidatedCompanionProjection({
       type: 'conversation-snapshot', operationId: parseCompanionOperationId('history-a'),
@@ -261,7 +263,7 @@ describe('MobileCompanionSurface', () => {
       sessionId: parseCompanionSessionId('session-one'), beforeSeq: 8,
     })
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(false)
-    surface.loadOlder('session-one')
+    surface.loadOlder(sid('session-one'))
     expect(firstChannel.mutations.loadOlder).toHaveBeenCalledTimes(2)
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
 
@@ -285,7 +287,7 @@ describe('MobileCompanionSurface', () => {
 
     runtime.forgetConnection()
     runtime.markConnectionOpen()
-    expect(() => { surface.loadOlder('session-one') }).toThrow('requires foreground synchronization')
+    expect(() => { surface.loadOlder(sid('session-one')) }).toThrow('requires foreground synchronization')
   })
 
   it('clears and surfaces a history transport rejection', async () => {
@@ -296,7 +298,7 @@ describe('MobileCompanionSurface', () => {
     if (resync === undefined) throw new Error('expected current generation receiver')
     resync.acceptValidatedDesktopResync(projection('session-one', 'One'))
 
-    surface.loadOlder('session-one')
+    surface.loadOlder(sid('session-one'))
     await vi.waitFor(() => {
       expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(false)
     })
@@ -304,7 +306,7 @@ describe('MobileCompanionSurface', () => {
       operation: 'history', sessionId: 'session-one',
       failure: { code: 'companion-send-failed' },
     })
-    surface.loadOlder('session-one')
+    surface.loadOlder(sid('session-one'))
     expect(channel.mutations.loadOlder).toHaveBeenCalledTimes(2)
   })
 
@@ -361,7 +363,7 @@ describe('MobileCompanionSurface', () => {
       operationId: 'refresh-a', operation: 'refresh', failure: { message: 'Refresh timed out' },
     })
 
-    surface.cancel('session-one')
+    surface.cancel(sid('session-one'))
     results.acceptValidatedCompanionResult({
       type: 'operation-failed', operationId: parseCompanionOperationId('cancel-default'),
       failure: { kind: 'business', code: 'cancel-refused', message: 'Cancel refused' },
@@ -382,7 +384,7 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected current generation result receiver')
 
-    const submission = surface.submit('session-one', 'failing prompt')
+    const submission = surface.submit(sid('session-one'), 'failing prompt')
     results.acceptValidatedCompanionResult({
       type: 'operation-failed', operationId: parseCompanionOperationId('submit-default'),
       failure: { kind: 'business', code: 'prompt-refused', message: 'Desktop rejected the prompt' },
@@ -390,7 +392,7 @@ describe('MobileCompanionSurface', () => {
     await submission
     expect(surface.getSnapshot().operationFailure).toBeUndefined()
 
-    surface.loadOlder('session-one')
+    surface.loadOlder(sid('session-one'))
     results.acceptValidatedCompanionResult({
       type: 'operation-failed', operationId: parseCompanionOperationId('history-default'),
       failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'History timed out' },
@@ -415,7 +417,7 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected current generation result receiver')
 
-    surface.attach('session-one', selectedFile())
+    surface.attach(sid('session-one'), selectedFile())
     expect(surface.getSnapshot().attachment).toEqual({
       operationId: 'attachment-visible', status: 'sending',
     })
@@ -431,7 +433,7 @@ describe('MobileCompanionSurface', () => {
       message: 'Desktop rejected the attachment: hash-mismatch',
     })
 
-    surface.attach('session-one', selectedFile())
+    surface.attach(sid('session-one'), selectedFile())
     results.acceptValidatedCompanionResult({
       type: 'operation-failed',
       operationId: parseCompanionOperationId('attachment-visible'),
@@ -443,7 +445,7 @@ describe('MobileCompanionSurface', () => {
       message: 'Desktop Host returned HTTP 400',
     })
 
-    surface.attach('session-one', selectedFile())
+    surface.attach(sid('session-one'), selectedFile())
     rejectCompletion?.(new CompanionAttachmentDeliveryUncertainError(
       parseCompanionOperationId('attachment-visible'),
       new Error('connection replaced'),
@@ -475,8 +477,8 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected current generation result receiver')
 
-    surface.attach('session-one', selectedFile())
-    expect(() => { surface.attach('session-one', selectedFile()) })
+    surface.attach(sid('session-one'), selectedFile())
+    expect(() => { surface.attach(sid('session-one'), selectedFile()) })
       .toThrow('Attachment operation attachment-old must be resolved before selecting another file')
     expect(channel.mutations.attach).toHaveBeenCalledOnce()
     results.acceptValidatedCompanionResult({
@@ -485,7 +487,7 @@ describe('MobileCompanionSurface', () => {
       reason: 'expired',
     })
 
-    surface.attach('session-one', selectedFile())
+    surface.attach(sid('session-one'), selectedFile())
     expect(surface.getSnapshot().attachment).toEqual({
       operationId: 'attachment-new', status: 'sending',
     })
@@ -529,14 +531,14 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected current generation result receiver')
 
-    surface.attach('session-one', selectedFile())
+    surface.attach(sid('session-one'), selectedFile())
     rejectCompletion?.(new CompanionAttachmentDeliveryUncertainError(
       parseCompanionOperationId('attachment-uncertain'),
       new Error('connection replaced'),
     ))
     await Promise.resolve()
 
-    expect(() => { surface.attach('session-one', selectedFile()) })
+    expect(() => { surface.attach(sid('session-one'), selectedFile()) })
       .toThrow('Attachment operation attachment-uncertain must be resolved before selecting another file')
     expect(channel.mutations.attach).toHaveBeenCalledOnce()
     results.acceptValidatedCompanionResult({
@@ -544,7 +546,7 @@ describe('MobileCompanionSurface', () => {
       operationId: parseCompanionOperationId('attachment-uncertain'),
       absent: true,
     })
-    surface.attach('session-one', selectedFile())
+    surface.attach(sid('session-one'), selectedFile())
     expect(channel.mutations.attach).toHaveBeenCalledTimes(2)
     expect(surface.getSnapshot().attachment).toEqual({
       operationId: 'attachment-after-reconcile', status: 'sending',

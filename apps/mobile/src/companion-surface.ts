@@ -8,7 +8,6 @@ import type {
   CompanionOperationId,
   CompanionResult,
   CompanionSessionId,
-  CompanionSessionSearchItem,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionAttachmentDeliveryUncertainError } from './companion-attachment.ts'
 import { companionMayMutate, type CompanionForegroundRuntime } from './companion-lifecycle.ts'
@@ -48,18 +47,26 @@ export interface ValidatedCompanionResultReceiver {
 }
 
 /** Desktop-authoritative search state; Mobile never synthesizes substring hits. */
+export interface MobileCompanionSearchItem {
+  /** Session identity converted from the authenticated protocol value. */
+  readonly sessionId: SessionId
+  /** Desktop-authoritative full-text result excerpt. */
+  readonly snippet: string
+}
+
+/** Desktop-authoritative search state; Mobile never synthesizes substring hits. */
 export type MobileCompanionSearchSnapshot =
   | { readonly query: ''; readonly status: 'idle'; readonly items: readonly []; readonly hasMore: false }
   | {
     readonly query: string
     readonly status: 'loading' | 'ready'
-    readonly items: readonly CompanionSessionSearchItem[]
+    readonly items: readonly MobileCompanionSearchItem[]
     readonly hasMore: boolean
   }
   | {
     readonly query: string
     readonly status: 'error'
-    readonly items: readonly CompanionSessionSearchItem[]
+    readonly items: readonly MobileCompanionSearchItem[]
     readonly hasMore: boolean
     readonly error: CompanionHostFailure
   }
@@ -130,17 +137,17 @@ export interface MobileCompanionTrackedSubmission {
 /** Encrypted mutations owned by one authenticated physical connection. */
 export interface MobileCompanionMutationChannel {
   create(input: { workspace?: string }): void
-  submit(sessionId: string, text: string): MobileCompanionMutationSubmission
-  cancel(sessionId: string): MobileCompanionTrackedSubmission
-  attach(sessionId: string, file: File): MobileCompanionAttachmentSubmission
+  submit(sessionId: SessionId, text: string): MobileCompanionMutationSubmission
+  cancel(sessionId: SessionId): MobileCompanionTrackedSubmission
+  attach(sessionId: SessionId, file: File): MobileCompanionAttachmentSubmission
   search(query: string): MobileCompanionTrackedSubmission
-  loadOlder(sessionId: string, beforeSeq?: number): MobileCompanionTrackedSubmission
+  loadOlder(sessionId: SessionId, beforeSeq?: number): MobileCompanionTrackedSubmission
   settle(settlement: MobilePendingSettlement): Promise<MobilePendingSettlementReceipt>
 }
 
 /** Authenticated content reads owned by one physical connection. */
 interface MobileCompanionContentChannel {
-  loadImage(sessionId: string, attachment: ImageAttachmentRef): Promise<string>
+  loadImage(sessionId: SessionId, attachment: ImageAttachmentRef): Promise<string>
 }
 
 /** Content and mutation adapters installed atomically with one decoder receiver. */
@@ -216,9 +223,9 @@ export class MobileCompanionSurface {
    * @param sessionId - exact Session refreshed after the mutation.
    * @param submission - protocol id and send completion for the history request.
    */
-  trackHistoryRefresh(sessionId: string, submission: MobileCompanionTrackedSubmission): void {
+  trackHistoryRefresh(sessionId: SessionId, submission: MobileCompanionTrackedSubmission): void {
     this.requireActive('history')
-    this.registerHistory(sessionId as SessionId, undefined, submission)
+    this.registerHistory(sessionId, undefined, submission)
   }
 
   /** @returns whether current synchronization and its bound encrypted channel admit mutations. */
@@ -296,28 +303,27 @@ export class MobileCompanionSurface {
     this.transmit('session-create', (channel) => { channel.mutations.create(input) })
   }
 
-  readonly submit = async (sessionId: string, text: string): Promise<void> => {
+  readonly submit = async (sessionId: SessionId, text: string): Promise<void> => {
     const submission = this.transmit('prompt', channel => channel.mutations.submit(sessionId, text))
-    this.#operations.set(submission.operationId, { kind: 'submit', sessionId: sessionId as SessionId })
+    this.#operations.set(submission.operationId, { kind: 'submit', sessionId })
     await submission.completion
   }
 
-  readonly cancel = (sessionId: string): void => {
+  readonly cancel = (sessionId: SessionId): void => {
     const submission = this.transmit('cancel', channel => channel.mutations.cancel(sessionId))
-    const parsedSessionId = sessionId as SessionId
-    this.#operations.set(submission.operationId, { kind: 'cancel', sessionId: parsedSessionId })
+    this.#operations.set(submission.operationId, { kind: 'cancel', sessionId })
     void submission.completion.catch(() => {
       if (this.#operations.get(submission.operationId)?.kind !== 'cancel') return
       this.#operations.delete(submission.operationId)
       this.#snapshot = {
         ...this.#snapshot,
-        operationFailure: this.sendFailure('cancel', submission.operationId, parsedSessionId),
+        operationFailure: this.sendFailure('cancel', submission.operationId, sessionId),
       }
       this.publish()
     })
   }
 
-  readonly attach = (sessionId: string, file: File): void => {
+  readonly attach = (sessionId: SessionId, file: File): void => {
     if (this.#attachmentOperationId !== undefined) {
       throw new Error(`Attachment operation ${this.#attachmentOperationId} must be resolved before selecting another file`)
     }
@@ -383,17 +389,16 @@ export class MobileCompanionSurface {
     })
   }
 
-  readonly loadOlder = (sessionId: string): void => {
+  readonly loadOlder = (sessionId: SessionId): void => {
     this.requireActive('history')
-    const parsedSessionId = sessionId as SessionId
-    if (this.#historyInFlight.has(parsedSessionId)) return
-    const conversation = this.#snapshot.conversations[parsedSessionId]
+    if (this.#historyInFlight.has(sessionId)) return
+    const conversation = this.#snapshot.conversations[sessionId]
     const beforeSeq = conversation === undefined ? undefined : oldestNodeSeq(conversation)
     const submission = this.transmit('history', channel => channel.mutations.loadOlder(sessionId, beforeSeq))
-    this.registerHistory(parsedSessionId, beforeSeq, submission)
+    this.registerHistory(sessionId, beforeSeq, submission)
   }
 
-  readonly loadImage = async (sessionId: string, attachment: ImageAttachmentRef): Promise<string> => {
+  readonly loadImage = async (sessionId: SessionId, attachment: ImageAttachmentRef): Promise<string> => {
     const active = this.requireActive('other-mutation')
     const result = await active.channel.content.loadImage(sessionId, attachment)
     if (this.#activeConnection?.token !== active.token || !companionMayMutate(this.#runtime.getState())) {
@@ -421,7 +426,7 @@ export class MobileCompanionSurface {
         search: {
           query: this.#snapshot.search.query,
           status: 'ready',
-          items: result.items.map(item => ({ ...item })),
+          items: result.items.map(item => ({ ...item, sessionId: localSessionId(item.sessionId) })),
           hasMore: result.hasMore,
         },
       }
@@ -547,7 +552,7 @@ export class MobileCompanionSurface {
       return
     }
     const pending = this.#historyOperations.get(projection.operationId)
-    if (pending === undefined || String(projection.sessionId) !== pending.sessionId
+    if (pending === undefined || localSessionId(projection.sessionId) !== pending.sessionId
       || projection.beforeSeq !== pending.beforeSeq
       || this.#historyInFlight.get(pending.sessionId)?.operationId !== projection.operationId) return
     this.#historyOperations.delete(projection.operationId)
@@ -655,6 +660,10 @@ function companionSendFailure(): CompanionHostFailure {
     code: 'companion-send-failed',
     message: 'Companion encrypted operation could not be sent',
   }
+}
+
+function localSessionId(value: CompanionSessionId): SessionId {
+  return value as unknown as SessionId
 }
 
 function oldestNodeSeq(conversation: ConversationSnapshot): number | undefined {

@@ -14,7 +14,7 @@ docker build -f apps/platform/Dockerfile -t dsh-platform .
 
 发布：Actions → Platform Image → Run workflow → 勾选 **push**。部署：Actions → Platform Deploy；工作流先校验 Environment `production` 中的名称，仅在勾选 **deploy** 时才把镜像应用到两台 ECS。ECS 将主机 80 映射到容器 8080，供 ALB 443 转发到 VPC 80。应用步骤使用 Docker `json-file` 轮转（`20m` × `3` 个文件），容器 stdout/stderr 不会占满主机磁盘。同时运行 LoongCollector（`dsh-loongcollector`），把 `dsh-platform` 的 stdout/stderr 送到杭州 SLS 项目 `gestalt` 的 Logstore `application`。采集器以用户自定义机器组标识 `gestalt-platform` 注册，并从加固模式 ECS 元数据读取阿里云账号 ID，空则回退 `PLATFORM_SLS_ACCOUNT_ID`。在该 Logstore 的 Docker 标准输出 Logtail 配置里绑定这个机器组。ECS SSH 与运行密钥放在 Environment `production`。
 
-部署会为每台 ECS 提供不同的 `PLATFORM_RELAY_INSTANCE_ID`，并通过 `PLATFORM_RELAY_*` 变量提供正数的容量、确认等待、directory TTL、heartbeat timeout、ciphertext buffer、连接数、待投递数与 attach timeout。PostgreSQL 同时拥有共享的加密附件表：Platform 实例以事务处理一次性 capability digest、密文、pairing id、过期与容量，但不会收到端点密钥或明文。附件 HTTP 会鉴别当前 Mobile Installation 与确切的已确认 pairing selector；selector 本身没有 authority。应用会在监听前校验完整配置。
+部署会为每台 ECS 提供不同的 `PLATFORM_RELAY_INSTANCE_ID`，并通过 `PLATFORM_RELAY_*` 变量提供正数的容量、确认等待、directory TTL、heartbeat timeout、ciphertext buffer、连接数、待投递数与 attach timeout。PostgreSQL 同时拥有共享的加密附件表：Platform 实例以事务处理一次性 capability digest、密文、pairing id、过期与容量，但不会收到端点密钥或明文。每次读取持久行时都会校验 digest 长度、品牌化 pairing id、非空且有界的密文，以及正数安全整数 expiry，校验通过后该行才能进入产品 authority。附件 HTTP 会鉴别当前 Mobile Installation 与确切的已确认 pairing selector；selector 本身没有 authority。应用会在监听前校验完整配置。
 
 ## 已知限制与暂缓事项
 

@@ -1,4 +1,5 @@
 import init, { run_proof_json } from '../pkg/dsh_noise_security_path_proof.js'
+import { initShipped, runShippedImplementationProof } from './shipped-proof.js'
 
 const output = document.querySelector('#report')
 const runtime = new URLSearchParams(location.search).get('runtime') ?? 'WebView'
@@ -22,10 +23,14 @@ function fail(error) {
 try {
   if (androidBridge !== undefined) androidBridge.reportProgress('script loaded')
   await init()
+  await initShipped()
   if (androidBridge !== undefined) androidBridge.reportProgress('WASM initialized')
-  const report = run_proof_json(runtime)
+  const report = JSON.parse(run_proof_json(runtime))
+  report.shippedImplementation = runShippedImplementationProof()
+  report.allPass = report.allPass === true
+    && Object.values(report.shippedImplementation).every(value => value === true)
   if (androidBridge !== undefined) androidBridge.reportProgress('proof completed')
-  publish(report)
+  publish(JSON.stringify(report))
 } catch (error) {
   fail(error)
 }

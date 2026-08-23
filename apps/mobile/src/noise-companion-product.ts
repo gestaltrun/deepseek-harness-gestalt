@@ -15,6 +15,7 @@ import {
   type RelayPairingSelector,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SnowCompanionProtocolChannel } from '@deepseek-ai/dsh-noise-channel'
 import { transferSelectedCompanionAttachment } from './companion-attachment.ts'
 import type { CompanionForegroundRuntime } from './companion-lifecycle.ts'
@@ -40,7 +41,8 @@ export class MobileSnowCompanionConnection {
   /** Publish one completed current-generation IK channel. */
   connect(active: ActiveMobileSnowChannel): void {
     if (this.active !== undefined && this.active !== active) {
-      for (const listener of this.invalidated) listener()
+      this.active = undefined
+      this.publishInvalidated()
     }
     this.active = active
   }
@@ -48,7 +50,7 @@ export class MobileSnowCompanionConnection {
   /** Invalidate the channel before its Snow transport is disposed. */
   disconnect(): void {
     this.active = undefined
-    for (const listener of this.invalidated) listener()
+    this.publishInvalidated()
   }
 
   /** @returns the exact current physical channel, or undefined while disconnected. */
@@ -58,6 +60,16 @@ export class MobileSnowCompanionConnection {
   onInvalidated(listener: () => void): () => void {
     this.invalidated.add(listener)
     return () => { this.invalidated.delete(listener) }
+  }
+
+  private publishInvalidated(): void {
+    const failures: unknown[] = []
+    for (const listener of [...this.invalidated]) {
+      try { listener() } catch (error) { failures.push(error) }
+    }
+    if (failures.length > 0) {
+      console.error('[mobile-companion] connection invalidation subscriber failures:', new AggregateError(failures))
+    }
   }
 }
 
@@ -70,22 +82,22 @@ export interface MobileSnowCompanionProductOptions {
   platformOrigin: string
   sendCiphertext(targetAttachmentId: RelayAttachmentId, ciphertext: Uint8Array): Promise<void>
   reportFailure?(error: unknown): void
-  trackHistoryRefresh?(sessionId: string, submission: MobileCompanionTrackedSubmission): void
+  trackHistoryRefresh?(sessionId: SessionId, submission: MobileCompanionTrackedSubmission): void
   trackSurfaceRefresh?(submission: MobileCompanionTrackedSubmission): void
 }
 
 /** Stable Mobile UI adapter whose every send revalidates current foreground generation. */
 export class MobileSnowCompanionProductChannel implements MobileCompanionMutationChannel {
-  private readonly refreshAfterConfirmation = new Map<CompanionOperationId, string>()
+  private readonly refreshAfterConfirmation = new Map<CompanionOperationId, SessionId>()
   private readonly confirmations = new Map<CompanionOperationId, {
     active: ActiveMobileSnowChannel
-    sessionId: string
+    sessionId: SessionId
     resolve(): void
     reject(error: unknown): void
   }>()
   private readonly settlements = new Map<CompanionOperationId, {
     active: ActiveMobileSnowChannel
-    sessionId: string
+    sessionId: SessionId
     resolve(receipt: MobilePendingSettlementReceipt): void
     reject(error: unknown): void
   }>()
@@ -108,7 +120,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
 
   create(): never { throw new Error('Companion Session creation is unavailable in this protocol version') }
 
-  submit(sessionId: string, text: string): { operationId: CompanionOperationId; completion: Promise<void> } {
+  submit(sessionId: SessionId, text: string): { operationId: CompanionOperationId; completion: Promise<void> } {
     const operationIdValue = operationId()
     const operation: CompanionOperation = {
       type: 'submit-prompt',
@@ -129,7 +141,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     return { operationId: operationIdValue, completion }
   }
 
-  cancel(sessionId: string): MobileCompanionTrackedSubmission {
+  cancel(sessionId: SessionId): MobileCompanionTrackedSubmission {
     const operationIdValue = operationId()
     this.refreshAfterConfirmation.set(operationIdValue, sessionId)
     const submission = this.sendTracked({
@@ -139,7 +151,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     return submission
   }
 
-  attach(sessionId: string, file: File): { operationId: ReturnType<typeof parseCompanionOperationId>; completion: Promise<void> } {
+  attach(sessionId: SessionId, file: File): { operationId: ReturnType<typeof parseCompanionOperationId>; completion: Promise<void> } {
     const operationIdValue = operationId()
     const permit = this.options.runtime.bindCompanionMutationPermit('attachment')
     if (permit === undefined) throw new Error('Companion attachment has no current connection generation')
@@ -178,7 +190,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     return this.sendTracked({ type: 'refresh-surface', operationId: operationIdValue })
   }
 
-  loadOlder(sessionId: string, beforeSeq?: number): MobileCompanionTrackedSubmission {
+  loadOlder(sessionId: SessionId, beforeSeq?: number): MobileCompanionTrackedSubmission {
     const operationIdValue = operationId()
     return this.sendTracked({
       type: 'load-history', operationId: operationIdValue, sessionId: parseCompanionSessionId(sessionId),
@@ -212,7 +224,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
   }
 
   /** Read and verify exact image bytes projected by the Paired Desktop. */
-  loadImage(sessionId: string, attachment: ImageAttachmentRef): Promise<string> {
+  loadImage(sessionId: SessionId, attachment: ImageAttachmentRef): Promise<string> {
     const active = this.requireActive()
     const operationIdValue = operationId()
     const operation: CompanionOperation = {
@@ -345,23 +357,53 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     return active
   }
 
-  private queueRefresh(sessionId: string): void {
+  private queueRefresh(sessionId: SessionId): void {
     queueMicrotask(() => {
-      try {
-        const history = this.loadOlder(sessionId)
-        if (this.options.trackHistoryRefresh === undefined) this.reportUntracked(history)
-        else this.options.trackHistoryRefresh(sessionId, history)
-        const surface = this.refreshSurface()
-        if (this.options.trackSurfaceRefresh === undefined) this.reportUntracked(surface)
-        else this.options.trackSurfaceRefresh(surface)
-      } catch (error) {
-        this.options.reportFailure?.(error)
-      }
+      this.startRefresh(
+        () => this.loadOlder(sessionId),
+        (submission) => { this.options.trackHistoryRefresh?.(sessionId, submission) },
+        this.options.trackHistoryRefresh !== undefined,
+      )
+      this.startRefresh(
+        () => this.refreshSurface(),
+        (submission) => { this.options.trackSurfaceRefresh?.(submission) },
+        this.options.trackSurfaceRefresh !== undefined,
+      )
     })
   }
 
+  private startRefresh(
+    start: () => MobileCompanionTrackedSubmission,
+    track: (submission: MobileCompanionTrackedSubmission) => void,
+    tracked: boolean,
+  ): void {
+    let submission: MobileCompanionTrackedSubmission
+    try {
+      submission = start()
+    } catch (error) {
+      this.reportFailure(error)
+      return
+    }
+    if (!tracked) {
+      this.reportUntracked(submission)
+      return
+    }
+    try {
+      track(submission)
+    } catch (error) {
+      this.reportUntracked(submission)
+      this.reportFailure(error)
+    }
+  }
+
   private reportUntracked(submission: MobileCompanionTrackedSubmission): void {
-    void submission.completion.catch((error: unknown) => { this.options.reportFailure?.(error) })
+    void submission.completion.catch((error: unknown) => { this.reportFailure(error) })
+  }
+
+  private reportFailure(error: unknown): void {
+    try { this.options.reportFailure?.(error) } catch {
+      console.error('[mobile-companion] product failure reporter threw')
+    }
   }
 
   private rejectPending(): void {

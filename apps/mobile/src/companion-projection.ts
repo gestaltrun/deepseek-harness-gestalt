@@ -129,7 +129,7 @@ export type MobilePendingSettlementReceipt = Awaited<ReturnType<PendingWait['res
 /** Generation-bound interaction response sent to the Paired Desktop. */
 export interface MobilePendingSettlement {
   readonly kind: keyof PendingPayloads
-  readonly sessionId: string
+  readonly sessionId: SessionId
   readonly interactionId: string
   readonly result: MobilePendingSettlementResult
 }
@@ -246,7 +246,7 @@ function adaptConversation(
   const pending = dto.pending.map((wait) => {
     const respond = (result: MobilePendingSettlementResult): Promise<MobilePendingSettlementReceipt> => settle({
       kind: wait.kind,
-      sessionId: wait.sessionId,
+      sessionId: localSessionId(wait.sessionId),
       interactionId: wait.interactionId,
       result,
     })

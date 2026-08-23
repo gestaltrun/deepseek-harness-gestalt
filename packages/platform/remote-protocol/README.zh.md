@@ -12,7 +12,7 @@ Remote Access 的纯 codec 与协商器。本包拥有两个独立版本化的�
 
 Companion major 3 和 2 是当前及紧邻的前一应用版本。双方 endpoint 必须在所选 major 上声明已认证加密、配对密钥隔离与重放保护。协商不受 offer 数组顺序影响，始终选择最高的安全共同 major，因此不安全的共同 major 只能降级到安全的紧邻前一 major。每条逻辑 endpoint 连接拥有一个 negotiation channel。在该 channel 上开始新协商时，会在求值 offer 前让此前的应用 codec token 失效；失败的协商会让 channel 保持未激活，而其他 channel 仍然有效。不存在安全版本交集时，会在编码应用明文前失败，并指出必须更新的 endpoint。
 
-Major 3 新增有界 Session 与 Workspace 发现、完整 conversation page projection、Session history、prompt 提交、取消、Approval 与 Ask User settlement，以及按内容寻址的历史图片读取。图片字节以有序 32 KiB 分片传输，共用一个摘要且最多 512 个分片；Mobile endpoint 只接受与原 operation、Session、attachment、media type、generation、index、count 和 digest 全部匹配的分片。catalog 继续包含 attachment offer、权威 `search-sessions`、重连用的 `query-operation-status`、Desktop confirmation、attachment rejection、关联的 `session-search`、类型化 `operation-failed` 与 `status` 应答。`foreground-sync` 在认证解密后携带正数 physical-connection generation 与 Desktop revision；原始字节不能解码为同步 authority。解码会拒绝不支持的 operation、额外字段、格式错误的按内容寻址 attachment id 与超限值。
+Major 3 新增有界 Session 与 Workspace 发现、完整 conversation page projection、Session history、prompt 提交、取消、Approval 与 Ask User settlement，以及按内容寻址的历史图片读取。图片字节以有序 32 KiB 分片传输，共用一个摘要且最多 512 个分片；Mobile endpoint 只接受与原 operation、Session、attachment、media type、generation、index、count 和 digest 全部匹配的分片。catalog 继续包含 attachment offer、权威 `search-sessions`、重连用的 `query-operation-status`、Desktop confirmation、attachment rejection、关联的 `session-search`、类型化 `operation-failed` 与 `status` 应答。Host failure 会保留 4 种闭合类别之一：HTTP 状态、无效 wire response、类型化业务错误或超时。`foreground-sync` 在认证解密后携带正数 physical-connection generation 与 Desktop revision；原始字节不能解码为同步 authority。解码会拒绝不支持的 operation、额外字段、格式错误的按内容寻址 attachment id 与超限值。
 
 conversation projection 会回显 history 请求中可选的 exclusive `beforeSeq`。cursor 缺失时替换 tail；cursor 存在时标识由 Mobile 进行连续性校验并 prepend 的旧 page。
 
@@ -60,4 +60,4 @@ conversation projection 会回显 history 请求中可选的 exclusive `beforeSe
 ## 已知限制与延后工作
 
 - Session 创建不属于 Companion major 3。Mobile 可以浏览现有 Desktop Session、打开 history、提交、取消、settle 当前 interaction、读取图片字节、搜索及附加文件。
-- 配对 handshake、凭据持久化、challenge lifecycle、token 分发与生产 Companion 消息加密属于服务或经评审的 endpoint 集成，不属于这些 codec。
+- 配对 handshake、凭据持久化、challenge lifecycle 与生产 Companion 消息加密属于服务或经评审的 endpoint 集成，不属于这些 codec。

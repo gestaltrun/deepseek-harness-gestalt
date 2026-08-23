@@ -4,7 +4,7 @@
 
 面向公开远程访问服务的 Desktop 与 Mobile 鉴权 HTTP 传输。每次操作转发一份当前安装的账号证明，并在暴露带品牌的个人配对标识符前校验所有 JSON 响应。`QUOTA` 与 `PLATFORM_CAPACITY` 会把整数秒 `retryAfter` 保留在抛出的 `RemoteAccessError` 上。
 
-HTTP 客户端不实现握手，也不存储配对密钥。产品控制器提供已登录账号的鉴权信息，端点持有的 Snow owner 通过 Platform mailbox 交换不透明握手消息。确认后，Mobile pairing controller 通过密码 adapter 打开封装的 endpoint 专属 Relay authority，并配置 `MobileRelayEndpointLifecycle`；`unpair()` 会调用 `configure(undefined)`，因此该生命周期不再持有 authority。控制器不会收到 Desktop credential。
+HTTP 客户端不实现握手，也不存储配对密钥。产品控制器提供已登录账号的鉴权信息，端点持有的 Snow owner 通过 Platform mailbox 交换不透明握手消息。确认后，Mobile pairing controller 通过密码 adapter 打开封装的 endpoint 专属 Relay authority，并配置 `MobileRelayEndpointLifecycle`；该生命周期可在存活附着上发送，`unpair()` 会调用 `configure(undefined)`，因此该生命周期不再持有 authority。控制器不会收到 Desktop credential。
 
 `RemoteRelayEndpointController` 通过部署的单个 non-sticky Platform endpoint，拥有一条出站 Mobile 或 Desktop WSS 生命周期。每条物理连接都取得新的 attachment id，以公开 SPKI 请求绑定完整元组的挑战，再用可轮换的端点私有 P-256 密钥签名。控制器会等待匹配的 Platform ready acknowledgement，再执行 resync；它为该 attachment generation 发布受抑制的 `onConnectionReady` 与 `onConnectionLost` observation，并把物理 lifecycle 的 abort signal 交给入站 ciphertext owner。Desktop grant 替换会在停止 controller 前使对应 pairing callback 失效；stop 会在排空 socket 前中止 pending callback。socket 丢失后会在已校验的重试延迟后建立新连接；Desktop 在每次 attachment 后发送权威加密 resync。断开期间发送会以 `REMOTE_OFFLINE` 失败，且绝不保留或重放。
 

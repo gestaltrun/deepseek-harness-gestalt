@@ -46,6 +46,15 @@ ALTER TABLE remote_attachment_blobs ADD COLUMN IF NOT EXISTS quota_reservation_i
 ALTER TABLE remote_attachment_blobs ADD COLUMN IF NOT EXISTS claim_token bytea;
 CREATE INDEX IF NOT EXISTS remote_attachment_blobs_expiry
   ON remote_attachment_blobs (database_identity, expires_at);
+CREATE TABLE IF NOT EXISTS remote_attachment_postgres_publish_intents (
+  database_identity text NOT NULL,
+  capability_digest bytea NOT NULL,
+  pairing_id text NOT NULL,
+  ciphertext bytea NOT NULL,
+  expires_at bigint NOT NULL,
+  quota_reservation_id text,
+  PRIMARY KEY (database_identity, capability_digest)
+);
 `
 
 interface AttachmentRow {
@@ -55,6 +64,21 @@ interface AttachmentRow {
   expires_at: number
   quota_reservation_id?: AttachmentBlobReservationId
   claim_token?: Uint8Array
+}
+
+interface PublishIntentRow {
+  capability_digest: Uint8Array
+  pairing_id: PersonalPairingId
+  ciphertext: Uint8Array
+  expires_at: number
+  quota_reservation_id?: AttachmentBlobReservationId
+}
+
+interface PublishInput {
+  pairingId: PersonalPairingId
+  ciphertext: Uint8Array
+  now: number
+  quota?: RemoteAttachmentQuotaReservation
 }
 
 /** Deployment bounds for the operated PostgreSQL attachment store. */
@@ -107,15 +131,11 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     await this.pool.query(SCHEMA)
     const phase = await migrateAttachmentStoragePhase(this.pool, this.databaseIdentity)
     if (phase === 'oss') throw new TypeError('PostgreSQL attachment store cannot start under OSS authority')
+    await this.reconcilePublishIntents()
     await this.flushQuotaReleases()
   }
 
-  override async publish(input: {
-    pairingId: PersonalPairingId
-    ciphertext: Uint8Array
-    now: number
-    quota?: RemoteAttachmentQuotaReservation
-  }): Promise<RemoteAttachmentGrant> {
+  override async publish(input: PublishInput): Promise<RemoteAttachmentGrant> {
     if (input.ciphertext.byteLength === 0) {
       await input.quota?.release()
       throw new RemoteAttachmentError('ATTACHMENT_EMPTY', 'Remote attachment ciphertext must not be empty')
@@ -127,48 +147,69 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     const capability = parseAttachmentCapability(randomBytes(32).toString('base64url'))
     const capabilityDigest = digest(capability)
     const expiresAt = input.now + this.capabilityLifetimeMs
+    const lockIdentity = publishIntentLockIdentity(this.databaseIdentity, capabilityDigest)
+    const client = await this.pool.connect()
+    let lockHeld = false
+    let rejected = false
+    let rejection: unknown
     try {
-      await this.transaction(async (client) => {
-        await this.lockCapacity(client)
-        const retired = await client.query(
-          `DELETE FROM remote_attachment_blobs
-            WHERE database_identity = $1 AND expires_at <= $2
-          RETURNING quota_reservation_id`,
-          [this.databaseIdentity, input.now],
-        )
-        await this.recordQuotaReleases(client, retired.rows)
-        const counted = await client.query(
-          'SELECT COUNT(*)::text AS count FROM remote_attachment_blobs WHERE database_identity = $1',
-          [this.databaseIdentity],
-        )
-        if (Number(counted.rows[0]?.count ?? 0) >= this.maxRetainedBlobs) {
-          throw new RemoteAttachmentError('ATTACHMENT_CAPACITY', 'Remote attachment store is at capacity')
-        }
-        await client.query(
-          `INSERT INTO remote_attachment_blobs (
-             database_identity, capability_digest, pairing_id, ciphertext, expires_at,
-             quota_reservation_id, claim_token
-           ) VALUES ($1,$2,$3,$4,$5,$6,NULL)`,
-          [this.databaseIdentity, capabilityDigest, input.pairingId, Buffer.from(input.ciphertext), expiresAt,
-            input.quota?.id ?? null],
-        )
-      })
-    } catch (error) {
-      let outcome: 'committed' | 'absent'
+      await client.query('SELECT pg_advisory_lock(hashtext($1))', [lockIdentity])
+      lockHeld = true
       try {
-        outcome = await this.readPublishOutcome(capabilityDigest, input, expiresAt)
-      } catch (readbackError) {
-        throw new Error('PostgreSQL attachment publish outcome is uncertain', {
-          cause: new AggregateError([error, readbackError]),
-        })
+        await this.reservePublishIntent(client, capabilityDigest, input, expiresAt)
+      } catch (error) {
+        let outcome: 'reserved' | 'absent'
+        try {
+          outcome = await this.readPublishIntentOutcome(client, capabilityDigest, input, expiresAt)
+        } catch (readbackError) {
+          throw publishOutcomeUncertain(error, readbackError)
+        }
+        if (outcome === 'absent') {
+          try {
+            await this.recordRejectedPublishQuota(client, input.quota?.id)
+          } catch (cleanupError) {
+            throw publishOutcomeUncertain(error, cleanupError)
+          }
+          rejected = true
+          rejection = error
+        }
       }
-      if (outcome === 'committed') {
-        return await this.finishCommittedPublish(capability, input.ciphertext.byteLength, expiresAt)
+      if (!rejected) {
+        try {
+          await this.commitPublishIntent(client, capabilityDigest, input, expiresAt)
+        } catch (error) {
+          let outcome: 'committed' | 'absent'
+          try {
+            outcome = await this.readPublishOutcome(client, capabilityDigest, input, expiresAt)
+          } catch (readbackError) {
+            throw publishOutcomeUncertain(error, readbackError)
+          }
+          if (outcome === 'absent') {
+            try {
+              await this.rejectPublishIntent(client, capabilityDigest, input, expiresAt)
+            } catch (cleanupError) {
+              throw publishOutcomeUncertain(error, cleanupError)
+            }
+            rejected = true
+            rejection = error
+          }
+        }
       }
-      try { await input.quota?.release() } catch (cleanupError) {
-        console.error('[platform] PostgreSQL attachment quota cleanup after publish failure failed:', cleanupError)
+    } finally {
+      try {
+        if (lockHeld) await client.query('SELECT pg_advisory_unlock(hashtext($1))', [lockIdentity])
+      } catch {
+        /* connection release also drops the publish-intent fence */
       }
-      throw error
+      client.release()
+    }
+    if (rejected) {
+      try {
+        await this.flushQuotaReleases()
+      } catch (cleanupError) {
+        console.error('[platform] PostgreSQL attachment quota cleanup after rejected publish failed:', cleanupError)
+      }
+      throw rejection
     }
     return await this.finishCommittedPublish(capability, input.ciphertext.byteLength, expiresAt)
   }
@@ -178,6 +219,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     capability: AttachmentCapability
     now: number
   }): Promise<Uint8Array> {
+    await this.reconcilePublishIntents()
     await this.flushQuotaReleases()
     const outcome = await this.transaction(async (client) => {
       const row = await this.loadRequiredRow(client, input, true)
@@ -207,6 +249,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     capability: AttachmentCapability
     now: number
   }): Promise<RemoteAttachmentConsumption> {
+    await this.reconcilePublishIntents()
     await this.flushQuotaReleases()
     const legacy = await this.tryLegacyConsumption(input)
     if (legacy !== undefined) return legacy
@@ -448,6 +491,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
   }
 
   override async revoke(input: { pairingId: PersonalPairingId; capability: AttachmentCapability }): Promise<void> {
+    await this.reconcilePublishIntents()
     await this.flushQuotaReleases()
     await this.transaction(async (client) => {
       const selected = await client.query(
@@ -472,6 +516,8 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
   }
 
   override async observe(): Promise<readonly RemoteAttachmentBlob[]> {
+    await this.reconcilePublishIntents()
+    await this.flushQuotaReleases()
     const selected = await this.pool.query(
       `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id, claim_token
          FROM remote_attachment_blobs
@@ -514,16 +560,79 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`remote-attachments:${this.databaseIdentity}`])
   }
 
-  private async readPublishOutcome(
+  private async reservePublishIntent(
+    client: PlatformSqlClient,
     capabilityDigest: Uint8Array,
-    input: {
-      pairingId: PersonalPairingId
-      ciphertext: Uint8Array
-      quota?: RemoteAttachmentQuotaReservation
-    },
+    input: PublishInput,
+    expiresAt: number,
+  ): Promise<void> {
+    await this.clientTransaction(client, async () => {
+      await this.lockCapacity(client)
+      await this.reconcilePublishIntentsInTransaction(client)
+      const retired = await client.query(
+        `DELETE FROM remote_attachment_blobs
+          WHERE database_identity = $1 AND expires_at <= $2
+        RETURNING quota_reservation_id`,
+        [this.databaseIdentity, input.now],
+      )
+      await this.recordQuotaReleases(client, retired.rows)
+      const counted = await client.query(
+        `SELECT COUNT(*)::text AS count FROM (
+           SELECT capability_digest FROM remote_attachment_blobs WHERE database_identity = $1
+           UNION
+           SELECT capability_digest FROM remote_attachment_postgres_publish_intents WHERE database_identity = $1
+         ) AS retained`,
+        [this.databaseIdentity],
+      )
+      if (Number(counted.rows[0]?.count ?? 0) >= this.maxRetainedBlobs) {
+        throw new RemoteAttachmentError('ATTACHMENT_CAPACITY', 'Remote attachment store is at capacity')
+      }
+      await client.query(
+        `INSERT INTO remote_attachment_postgres_publish_intents (
+           database_identity, capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id
+         ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [this.databaseIdentity, capabilityDigest, input.pairingId, Buffer.from(input.ciphertext), expiresAt,
+          input.quota?.id ?? null],
+      )
+    })
+  }
+
+  private async commitPublishIntent(
+    client: PlatformSqlClient,
+    capabilityDigest: Uint8Array,
+    input: PublishInput,
+    expiresAt: number,
+  ): Promise<void> {
+    await this.clientTransaction(client, async () => {
+      await this.lockCapacity(client)
+      const intent = await client.query(
+        `DELETE FROM remote_attachment_postgres_publish_intents
+          WHERE database_identity = $1 AND capability_digest = $2 AND pairing_id = $3
+            AND ciphertext = $4 AND expires_at = $5
+            AND quota_reservation_id IS NOT DISTINCT FROM $6
+        RETURNING quota_reservation_id`,
+        [this.databaseIdentity, capabilityDigest, input.pairingId, Buffer.from(input.ciphertext), expiresAt,
+          input.quota?.id ?? null],
+      )
+      if (intent.rowCount !== 1) throw new TypeError('PostgreSQL attachment publish intent is unavailable')
+      await client.query(
+        `INSERT INTO remote_attachment_blobs (
+           database_identity, capability_digest, pairing_id, ciphertext, expires_at,
+           quota_reservation_id, claim_token
+         ) VALUES ($1,$2,$3,$4,$5,$6,NULL)`,
+        [this.databaseIdentity, capabilityDigest, input.pairingId, Buffer.from(input.ciphertext), expiresAt,
+          input.quota?.id ?? null],
+      )
+    })
+  }
+
+  private async readPublishOutcome(
+    client: PlatformSqlClient,
+    capabilityDigest: Uint8Array,
+    input: PublishInput,
     expiresAt: number,
   ): Promise<'committed' | 'absent'> {
-    const selected = await this.pool.query(
+    const selected = await client.query(
       `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id, claim_token
          FROM remote_attachment_blobs
         WHERE database_identity = $1 AND capability_digest = $2`,
@@ -541,6 +650,108 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
       throw new TypeError('PostgreSQL attachment publish readback is invalid')
     }
     return 'committed'
+  }
+
+  private async readPublishIntentOutcome(
+    client: PlatformSqlClient,
+    capabilityDigest: Uint8Array,
+    input: PublishInput,
+    expiresAt: number,
+  ): Promise<'reserved' | 'absent'> {
+    const selected = await client.query(
+      `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id
+         FROM remote_attachment_postgres_publish_intents
+        WHERE database_identity = $1 AND capability_digest = $2`,
+      [this.databaseIdentity, capabilityDigest],
+    )
+    if (selected.rows.length === 0) return 'absent'
+    if (selected.rows.length !== 1) throw new TypeError('PostgreSQL attachment publish-intent readback is invalid')
+    const row = publishIntentRow(selected.rows[0], this.maxBlobBytes)
+    if (row === undefined || !matchesPublish(row, capabilityDigest, input, expiresAt)) {
+      throw new TypeError('PostgreSQL attachment publish-intent readback is invalid')
+    }
+    return 'reserved'
+  }
+
+  private async recordRejectedPublishQuota(
+    client: PlatformSqlClient,
+    reservationId: AttachmentBlobReservationId | undefined,
+  ): Promise<void> {
+    if (reservationId === undefined) return
+    await this.clientTransaction(client, async () => {
+      await recordAttachmentQuotaRelease(client, this.databaseIdentity, reservationId)
+    })
+  }
+
+  private async rejectPublishIntent(
+    client: PlatformSqlClient,
+    capabilityDigest: Uint8Array,
+    input: PublishInput,
+    expiresAt: number,
+  ): Promise<void> {
+    await this.clientTransaction(client, async () => {
+      await this.lockCapacity(client)
+      const removed = await client.query(
+        `DELETE FROM remote_attachment_postgres_publish_intents
+          WHERE database_identity = $1 AND capability_digest = $2 AND pairing_id = $3
+            AND ciphertext = $4 AND expires_at = $5
+            AND quota_reservation_id IS NOT DISTINCT FROM $6
+        RETURNING quota_reservation_id`,
+        [this.databaseIdentity, capabilityDigest, input.pairingId, Buffer.from(input.ciphertext), expiresAt,
+          input.quota?.id ?? null],
+      )
+      if (removed.rowCount !== 1) throw new TypeError('PostgreSQL attachment publish intent is unavailable')
+      await this.recordQuotaReleases(client, removed.rows)
+    })
+  }
+
+  private async reconcilePublishIntents(): Promise<void> {
+    await this.transaction(async (client) => {
+      await this.lockCapacity(client)
+      await this.reconcilePublishIntentsInTransaction(client)
+    })
+  }
+
+  private async reconcilePublishIntentsInTransaction(client: PlatformSqlClient): Promise<void> {
+    const selected = await client.query(
+      `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id
+         FROM remote_attachment_postgres_publish_intents
+        WHERE database_identity = $1
+        ORDER BY expires_at, capability_digest
+        LIMIT $2
+        FOR UPDATE`,
+      [this.databaseIdentity, this.maxRetainedBlobs + 1],
+    )
+    if (selected.rows.length > this.maxRetainedBlobs) {
+      throw new TypeError('PostgreSQL attachment publish-intent capacity is invalid')
+    }
+    const intents = selected.rows.map((row) => {
+      const intent = publishIntentRow(row, this.maxBlobBytes)
+      if (intent === undefined) throw new TypeError('PostgreSQL attachment publish intent is invalid')
+      return intent
+    })
+    for (const intent of intents) {
+      const locked = await client.query(
+        'SELECT pg_try_advisory_xact_lock(hashtext($1)) AS locked',
+        [publishIntentLockIdentity(this.databaseIdentity, intent.capability_digest)],
+      )
+      if (locked.rows[0]?.locked !== true) continue
+      const blob = await client.query(
+        `SELECT capability_digest FROM remote_attachment_blobs
+          WHERE database_identity = $1 AND capability_digest = $2
+          FOR UPDATE`,
+        [this.databaseIdentity, intent.capability_digest],
+      )
+      if (blob.rows.length !== 0) throw new TypeError('PostgreSQL attachment publish intent overlaps a blob')
+      const removed = await client.query(
+        `DELETE FROM remote_attachment_postgres_publish_intents
+          WHERE database_identity = $1 AND capability_digest = $2
+        RETURNING quota_reservation_id`,
+        [this.databaseIdentity, intent.capability_digest],
+      )
+      if (removed.rowCount !== 1) throw new TypeError('PostgreSQL attachment publish intent is unavailable')
+      await this.recordQuotaReleases(client, removed.rows)
+    }
   }
 
   private async finishCommittedPublish(
@@ -572,8 +783,16 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
   private async transaction<T>(operation: (client: PlatformSqlClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect()
     try {
+      return await this.clientTransaction(client, async () => await operation(client))
+    } finally {
+      client.release()
+    }
+  }
+
+  private async clientTransaction<T>(client: PlatformSqlClient, operation: () => Promise<T>): Promise<T> {
+    try {
       await client.query('BEGIN')
-      const result = await operation(client)
+      const result = await operation()
       await client.query('COMMIT')
       return result
     } catch (error) {
@@ -581,8 +800,6 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
         /* rollback after a failed transaction is best-effort */
       }
       throw error
-    } finally {
-      client.release()
     }
   }
 }
@@ -623,6 +840,34 @@ function attachmentRow(
   }
 }
 
+function publishIntentRow(
+  value: Record<string, unknown> | undefined,
+  maxBlobBytes: number,
+): PublishIntentRow | undefined {
+  const row = attachmentRow(value === undefined ? undefined : { ...value, claim_token: null }, maxBlobBytes)
+  if (row === undefined) return undefined
+  return {
+    capability_digest: row.capability_digest,
+    pairing_id: row.pairing_id,
+    ciphertext: row.ciphertext,
+    expires_at: row.expires_at,
+    ...(row.quota_reservation_id === undefined ? {} : { quota_reservation_id: row.quota_reservation_id }),
+  }
+}
+
+function matchesPublish(
+  row: PublishIntentRow,
+  capabilityDigest: Uint8Array,
+  input: PublishInput,
+  expiresAt: number,
+): boolean {
+  return row.pairing_id === input.pairingId
+    && sameBytes(row.capability_digest, capabilityDigest)
+    && sameBytes(row.ciphertext, input.ciphertext)
+    && row.expires_at === expiresAt
+    && row.quota_reservation_id === input.quota?.id
+}
+
 function reservationIds(rows: readonly Record<string, unknown>[]): AttachmentBlobReservationId[] {
   return rows.flatMap(row => typeof row.quota_reservation_id === 'string'
     ? [parseAttachmentBlobReservationId(row.quota_reservation_id)] : [])
@@ -630,6 +875,16 @@ function reservationIds(rows: readonly Record<string, unknown>[]): AttachmentBlo
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.byteLength === right.byteLength && left.every((value, index) => value === right[index])
+}
+
+function publishIntentLockIdentity(databaseIdentity: string, capabilityDigest: Uint8Array): string {
+  return `remote-attachments-publish:${databaseIdentity}:${Buffer.from(capabilityDigest).toString('hex')}`
+}
+
+function publishOutcomeUncertain(operationError: unknown, readbackError: unknown): Error {
+  return new Error('PostgreSQL attachment publish outcome is uncertain', {
+    cause: new AggregateError([operationError, readbackError]),
+  })
 }
 
 function pairingMismatch(): RemoteAttachmentError {

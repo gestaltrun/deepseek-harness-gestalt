@@ -605,6 +605,77 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     await consumption.complete()
   }, 60_000)
 
+  it.each([
+    'crash-after-intent',
+    'main-rollback-readback-fail',
+    'main-committed-readback-fail',
+  ] as const)('reconciles PostgreSQL publish fencing after %s', async (failure) => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const firstContext = new Context()
+    const restartContext = new Context()
+    cleanups.push(async () => { await firstContext.fiber.dispose(); await restartContext.fiber.dispose() })
+    const databaseIdentity = `attachment-publish-fence-${failure}`
+    const pairingId = parsePersonalPairingId(`pairing-publish-fence-${failure}`)
+    const reservationId = parseAttachmentBlobReservationId(`quota-publish-fence-${failure}`)
+    const fault = postgresPublishFaultPool(pool, failure)
+    const first = new PostgresRemoteAttachmentStore(firstContext, databaseIdentity, fault, {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 100,
+      maxRetainedBlobs: 2,
+      quotaCleanup: { release: async () => {} },
+    })
+    await first.migrate()
+    await completeAttachmentStorageCutover(
+      pool,
+      databaseIdentity,
+      'bridge',
+      `remote-attachments/publish-fence-${failure}`,
+      { maxBlobBytes: 1024, quotaCleanup: { release: async () => {} } },
+    )
+    await expect(first.publish({
+      pairingId,
+      ciphertext: Uint8Array.of(3),
+      now: 100,
+      quota: { id: reservationId, release: async () => {} },
+    })).rejects.toThrow('PostgreSQL attachment publish outcome is uncertain')
+
+    const beforeRestart = await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM remote_attachment_postgres_publish_intents
+           WHERE database_identity = $1) AS intents,
+         (SELECT COUNT(*)::int FROM remote_attachment_blobs
+           WHERE database_identity = $1) AS blobs`,
+      [databaseIdentity],
+    )
+    expect(beforeRestart.rows).toEqual([failure === 'main-committed-readback-fail'
+      ? { intents: 0, blobs: 1 }
+      : { intents: 1, blobs: 0 }])
+
+    const released: string[] = []
+    const restarted = new PostgresRemoteAttachmentStore(restartContext, databaseIdentity, pool, {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 100,
+      maxRetainedBlobs: 2,
+      quotaCleanup: { release: async (id) => { released.push(id) } },
+    })
+    await restarted.migrate()
+    if (failure === 'main-committed-readback-fail') {
+      expect(released).toEqual([])
+      await restarted.publish({ pairingId, ciphertext: Uint8Array.of(4), now: 200 })
+    }
+    expect(released).toEqual([reservationId])
+    expect((await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM remote_attachment_postgres_publish_intents
+           WHERE database_identity = $1) AS intents,
+         (SELECT COUNT(*)::int FROM remote_attachment_quota_releases
+           WHERE database_identity = $1) AS releases`,
+      [databaseIdentity],
+    )).rows).toEqual([{ intents: 0, releases: 0 }])
+  }, 60_000)
+
   it('claims one OSS capability atomically across operated Platform instances', async () => {
     const postgres = await startPostgresFixture()
     const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
@@ -977,6 +1048,13 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     ])
     expect(publishers.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(publishers.filter(result => result.status === 'rejected')).toHaveLength(1)
+    expect((await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM remote_attachment_blobs WHERE database_identity = $1) AS blobs,
+         (SELECT COUNT(*)::int FROM remote_attachment_postgres_publish_intents
+           WHERE database_identity = $1) AS intents`,
+      ['attachment-fixture'],
+    )).rows).toEqual([{ blobs: 1, intents: 0 }])
     const capacityGrant = publishers.find(result => result.status === 'fulfilled')
     if (capacityGrant?.status !== 'fulfilled') throw new Error('concurrent capacity did not retain one blob')
     const capacityConsumption = await first.consume({
@@ -1368,6 +1446,69 @@ function memoryOssClient(objects = new Map<string, Uint8Array>()): OssObjectClie
 }
 
 type LegacySettlementFailure = 'delete-fail' | 'commit-unknown' | 'crash'
+
+type PostgresPublishFailure =
+  | 'crash-after-intent'
+  | 'main-rollback-readback-fail'
+  | 'main-committed-readback-fail'
+
+function postgresPublishFaultPool(base: pg.Pool, failure: PostgresPublishFailure): PlatformSqlPool {
+  return {
+    query: async (sql: string, values?: unknown[]) => await base.query(sql, values),
+    connect: async () => {
+      const client = await base.connect()
+      let publisher = false
+      let transactionNumber = 0
+      let backendPid: number | undefined
+      let mainReadbackMustFail = false
+      let released = false
+      return {
+        query: async (sql: string, values?: unknown[]) => {
+          if (sql === 'SELECT pg_advisory_lock(hashtext($1))') {
+            const result = await client.query(sql, values)
+            publisher = true
+            const selected = await client.query('SELECT pg_backend_pid() AS pid')
+            const pid = (selected.rows as Array<Record<string, unknown>>)[0]?.pid
+            if (typeof pid !== 'number') throw new TypeError('publish fixture backend pid is invalid')
+            backendPid = pid
+            if (failure === 'crash-after-intent') client.on('error', () => {})
+            return result
+          }
+          if (publisher && sql === 'BEGIN') transactionNumber += 1
+          if (publisher && transactionNumber === 2
+            && failure === 'main-rollback-readback-fail'
+            && sql.includes('INSERT INTO remote_attachment_blobs')) {
+            mainReadbackMustFail = true
+            throw new Error('main publish transaction rolled back')
+          }
+          if (publisher && transactionNumber === 2
+            && failure === 'main-committed-readback-fail' && sql === 'COMMIT') {
+            await client.query(sql, values)
+            mainReadbackMustFail = true
+            throw new Error('main publish COMMIT outcome is unknown')
+          }
+          if (publisher && mainReadbackMustFail
+            && sql.includes('SELECT capability_digest')
+            && sql.includes('FROM remote_attachment_blobs')) {
+            throw new Error('main publish readback unavailable')
+          }
+          if (publisher && transactionNumber === 1 && failure === 'crash-after-intent' && sql === 'COMMIT') {
+            await client.query(sql, values)
+            if (backendPid === undefined) throw new TypeError('publish fixture backend pid is unavailable')
+            await base.query('SELECT pg_terminate_backend($1)', [backendPid])
+            throw new Error('publisher crashed after durable intent')
+          }
+          return await client.query(sql, values)
+        },
+        release: () => {
+          if (released) return
+          released = true
+          client.release(failure === 'crash-after-intent')
+        },
+      }
+    },
+  }
+}
 
 function legacySettlementFaultPool(
   base: pg.Pool,

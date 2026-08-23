@@ -1,5 +1,5 @@
 /**
- * Pure Browser Dock occupancy helpers over one Session Workspace snapshot.
+ * Pure Browser preview helpers over one Session Workspace snapshot.
  * @module @deepseek-ai/dsh-client-ui-browser/client/model
  */
 
@@ -11,36 +11,27 @@ import type {
   BrowserWorkspaceInstanceRecord,
   BrowserWorkspaceProjection,
   BrowserWorkspaceRecord,
-  BrowserWorkspaceTabRecord,
 } from '@deepseek-ai/dsh-browser-workspace/client'
 
-/** Occupant-specific details range consumed by AppFrame. */
-export const BROWSER_DOCK_WIDTH_RANGE = {
-  minimum: 420,
-  default: 640,
-  maximum: 960,
-} as const
-
-/** One tab the Dock or collapsed preview can address. */
-export interface BrowserDockTab {
+/** One tab the collapsed preview can address. */
+export interface BrowserPreviewTab {
   readonly target: BrowserTarget
-  readonly controlOwner: BrowserWorkspaceTabRecord['controlOwner']
   readonly revision: number
   readonly active: boolean
 }
 
-/** Active Workspace and instance plus every tab the Dock can show. */
-export interface BrowserDockSelection {
+/** Active Workspace and instance plus every tab the preview can show. */
+export interface BrowserPreviewSelection {
   readonly workspace: BrowserWorkspaceRecord
   readonly instance: BrowserWorkspaceInstanceRecord
-  readonly tabs: readonly BrowserDockTab[]
-  readonly activeTab: BrowserDockTab | undefined
+  readonly tabs: readonly BrowserPreviewTab[]
+  readonly activeTab: BrowserPreviewTab | undefined
 }
 
 /**
  * True when this Session owns at least one Browser Workspace tab.
  * @param snapshot - Session-owned Workspace projection, or undefined while loading.
- * @returns whether the Dock or collapsed preview has anything to show.
+ * @returns whether the collapsed preview has anything to show.
  */
 export function hasBrowserTabs(snapshot: BrowserWorkspaceProjection | null | undefined): boolean {
   return (snapshot?.workspaces.length ?? 0) > 0
@@ -51,7 +42,7 @@ export function hasBrowserTabs(snapshot: BrowserWorkspaceProjection | null | und
  * @param snapshot - Session-owned Workspace projection.
  * @returns the active selection, or undefined when no tab exists.
  */
-export function selectBrowserDock(snapshot: BrowserWorkspaceProjection | null | undefined): BrowserDockSelection | undefined {
+export function selectBrowserPreview(snapshot: BrowserWorkspaceProjection | null | undefined): BrowserPreviewSelection | undefined {
   if (snapshot === undefined || snapshot === null) return undefined
   const workspace = namedOrLast(snapshot.workspaces, snapshot.activeWorkspaceId, item => item.workspaceId)
   if (workspace === undefined) return undefined
@@ -64,7 +55,6 @@ export function selectBrowserDock(snapshot: BrowserWorkspaceProjection | null | 
       browserId: instance.browserId,
       tabId: tab.tabId,
     } satisfies BrowserTarget,
-    controlOwner: tab.controlOwner,
     revision: tab.revision,
     active: tab.tabId === instance.activeTabId,
   }))
@@ -81,14 +71,14 @@ export function selectBrowserDock(snapshot: BrowserWorkspaceProjection | null | 
  * @param tabs - Tabs of the active instance.
  * @returns back-to-front layers so the current tab is clickable on top.
  */
-export function stackedBrowserTabs(tabs: readonly BrowserDockTab[]): readonly BrowserDockTab[] {
+export function stackedBrowserTabs(tabs: readonly BrowserPreviewTab[]): readonly BrowserPreviewTab[] {
   const active = tabs.find(tab => tab.active)
   if (active === undefined) return tabs
   return [...tabs.filter(tab => !tab.active), active]
 }
 
 /**
- * Host name shown in the address field, or the raw URL when parsing fails.
+ * Host name shown on tab chips and preview captions, or the raw URL when parsing fails.
  * @param url - Committed page URL.
  * @returns display host or the original URL.
  */
@@ -98,6 +88,26 @@ export function browserAddressHost(url: string): string {
     return host === '' ? url : host
   } catch {
     return url
+  }
+}
+
+/**
+ * Turn an address-bar draft into a Runtime navigate URL.
+ * A string without a scheme receives `https://`. Only `http:`, `https:`, and
+ * `about:` are accepted.
+ * @param draft - Raw address-bar text.
+ * @returns an absolute URL, or undefined when the draft is empty or not a page URL.
+ */
+export function resolveBrowserAddress(draft: string): string | undefined {
+  const trimmed = draft.trim()
+  if (trimmed.length === 0) return undefined
+  const candidate = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed) ? trimmed : `https://${trimmed}`
+  try {
+    const url = new URL(candidate)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:' && url.protocol !== 'about:') return undefined
+    return url.href
+  } catch {
+    return undefined
   }
 }
 
@@ -136,6 +146,16 @@ export function persistentProfileLabel(
 export function screenshotDataUrl(screenshot: BrowserScreenshot | undefined): string | undefined {
   if (screenshot === undefined) return undefined
   return `data:${screenshot.mediaType};base64,${screenshot.data}`
+}
+
+/**
+ * Screenshot src for chrome and preview. `about:blank` captures stay hidden.
+ * @param screenshot - Captured page image.
+ * @returns a data URL, or undefined when there is no paintable capture.
+ */
+export function pageScreenshotSrc(screenshot: BrowserScreenshot | undefined): string | undefined {
+  if (screenshot === undefined || screenshot.url === 'about:blank') return undefined
+  return screenshotDataUrl(screenshot)
 }
 
 /**

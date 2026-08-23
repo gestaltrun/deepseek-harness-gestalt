@@ -1,4 +1,4 @@
-# Agent Note: Browser control arbitration
+# Agent Note: Browser revision arbitration
 
 Status: implemented
 
@@ -6,27 +6,27 @@ English | [中文](2026-08-19-browser-control-arbitration.zh.md)
 
 ## Problem
 
-A user may need to type, click, solve a CAPTCHA, or confirm a login on the same real tab the Agent is driving. Without a shared revision and an explicit control owner, an Agent mutation based on a stale observation can overwrite the human's work or lose the Session, Profile, browser instance, and tab.
+A person and Agent-driven operations may affect the same real tab. Without a shared revision, an Agent mutation based on a stale observation can overwrite a later page state or lose the Session, Profile, browser instance, and tab identity expected by the caller.
 
 ## Decision
 
-Human pointer and keyboard input and Agent commands target the same Browser Workspace tab. Observable open and unavailable page state carry `controlOwner` (`agent` | `human`) plus the revision later mutations must match. `controlOwner` is reported ownership. The lock is the revision: after `observe`, an Agent `navigate` or `focus` that matches the current revision reclaims the tab without `returnControl`. `input` records one human mutation, advances the revision, and sets `controlOwner` to `human`. `takeover` records human ownership without changing page content. `returnControl` records Agent ownership. Session, Profile, browser instance, and tab identities stay the same across takeover and return.
+Every open or unavailable page state carries the revision later mutations must match. Providers serialize every mutation and reject a stale `expectedRevision` with `BROWSER_REVISION_CONFLICT`; the conflict names the current revision and tells the Agent to observe again. `navigate`, `focus`, synthetic Agent `input`, and `close` advance the revision, while `observe` and `screenshot` are read-only. Session, Profile, browser instance, and tab identities stay stable across mutations.
 
-Providers serialize every mutation and reject a stale `expectedRevision` with `BROWSER_REVISION_CONFLICT`. The conflict message names the current revision and tells the Agent to observe again. Agent `navigate` and `focus` set `controlOwner` to `agent`. Browser tools do not set `ask` or a permission classifier; this ticket adds no approval product. Existing approval and permission capabilities apply only when a later composition attaches them.
+`dsh-browser-workspace` persists each tab's latest revision on the Session `browser/workspace` snapshot so Session switch and reload restore the optimistic-concurrency fact. Browser tools do not set `ask` or a permission classifier; existing approval and permission capabilities apply only when a composition attaches them.
 
-`dsh-browser-workspace` persists each tab's current control owner on the Session `browser/workspace` snapshot so the Dock can restore it after Session switch and reload. The Dock reads that owner and offers take-control and return-to-Agent. The deferred Consumer renders `controlOwner` into the ordinary tool result and adds `browser_input`, `browser_takeover`, and `browser_return_control` without a second tool-card format. Waiting, running, complete, and connection-loss facts stay on the existing tool result and `unavailable` state.
+Reported ownership and its takeover/return operations are superseded by [removing reported Browser control and Workspace Dock state](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.md). Direct Desktop page interaction remains independent of Runtime state; revision remains the sole concurrency mechanism.
 
 ## Alternatives considered
 
-**Let last writer win without a revision check.** Rejected because a late Agent command would silently overwrite a human login or CAPTCHA answer.
+**Let last writer win without a revision check.** Rejected because a late Agent or Workbench command would silently overwrite a newer page or Provider recovery state.
 
-**Give the human a second browser instance or transferred page.** Rejected because the ticket requires the exact Session, Profile, browser instance, and tab to survive takeover and return.
+**Give each writer a second browser instance or transferred page.** Rejected because callers need the exact Session, Profile, browser instance, and tab to remain addressable through a mutation sequence.
 
-**Add a second tool-card or ownership event stream for Dock.** Rejected because Dock UI is a later ticket and the existing ordinary tool result plus Session Workspace snapshot already carry truthful ownership and availability facts.
+**Use a separate mutation version outside page state.** Rejected because the page state and Session Workspace snapshot already carry the revision that every writer observes and submits.
 
 ## Consequences
 
-Human and Agent can share one tab without losing identity. A stale Agent mutation fails loudly and forces a fresh observation. Session snapshots persist the current control owner for the Dock. Release remains a later ticket.
+A stale mutation fails loudly and forces a fresh observation. Session snapshots retain the revision required by Workbench and tool mutations without reporting a control owner.
 
 ## Verification
 

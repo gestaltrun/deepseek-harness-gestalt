@@ -27,3 +27,7 @@
 ## acp-agent
 
 面向程序化客户端的 ACP（Agent Client Protocol）自动化服务器，支持会话、权限和取消操作。详见 [ACP 示例参考](acp-agent/README.md)。
+
+## local-companion-platform
+
+在一个 TLS origin 后挂载 Account HTTP、无密钥个人配对和 Relay WSS 的环回双实例 Platform，供 Mobile 与 Desktop 走组装后的 Companion 路径，且不改动生产监听进程。详见[本地 Companion Platform 参考](local-companion-platform/README.md)。

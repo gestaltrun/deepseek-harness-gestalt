@@ -293,12 +293,33 @@ describe('Electron Browser HTTP protocol', () => {
       status: 200,
       body: { ok: true, revision: typedBody.revision + 1 },
     })
+    const urlOnly = await json(server.origin, '/input', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        tabId: firstBody.tab.id,
+        expectedRevision: typedBody.revision,
+        url: 'https://example.test/',
+      }),
+    })
+    expect(urlOnly.status).toBe(409)
     const missingRevision = await json(server.origin, '/input', {
       method: 'POST',
       headers,
       body: JSON.stringify({ tabId: firstBody.tab.id, text: 'x' }),
     })
     expect(missingRevision.status).toBe(400)
+    const emptyInput = await json(server.origin, '/input', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        tabId: firstBody.tab.id,
+        expectedRevision: typedBody.revision + 1,
+        url: '',
+        text: '',
+      }),
+    })
+    expect(emptyInput.status).toBe(400)
     const missingInputTab = await json(server.origin, '/input', {
       method: 'POST',
       headers,
@@ -413,12 +434,12 @@ describe('Electron Browser HTTP protocol', () => {
       headers: { authorization: `Bearer ${token}`, 'x-tab-id': tabId },
     })
     expect(observed).toMatchObject({ status: 200, body: { revision: 2 } })
-    const click = await json(server.origin, '/input', {
+    const emptyInput = await json(server.origin, '/input', {
       method: 'POST',
       headers,
       body: JSON.stringify({ tabId, expectedRevision: 2 }),
     })
-    expect(click).toMatchObject({ status: 200, body: { ok: true, revision: 3 } })
+    expect(emptyInput).toMatchObject({ status: 400, body: { code: 'BROWSER_PROTOCOL' } })
     const busy = await ctx.browserRuntime.create({ profile: 'persistent', name: BrowserProfileName('held') })
     const busyHttp = await json(server.origin, '/sessions/create', {
       method: 'POST',

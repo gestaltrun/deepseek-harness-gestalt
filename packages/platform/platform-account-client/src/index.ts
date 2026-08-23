@@ -60,7 +60,7 @@ export class PlatformAccountHttpTransport implements PlatformAccountTransport {
   constructor(options: PlatformAccountHttpTransportOptions) {
     this.environment = options.environment
     this.origin = options.environment.origin
-    this.fetch = options.fetch ?? globalThis.fetch
+    this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
   beginLogin(input: {
@@ -99,8 +99,8 @@ export class PlatformAccountHttpTransport implements PlatformAccountTransport {
   }
 
   private async request(path: string, init: RequestInit): Promise<Response> {
-    const headers = new Headers(init.headers)
-    if (init.body !== undefined) headers.set('content-type', 'application/json')
+    const headers = headerRecord(init.headers)
+    if (init.body !== undefined) headers['content-type'] = 'application/json'
     const response = await this.fetch(`${this.origin}${path}`, { ...init, headers })
     if (response.ok) return response
     let message = `Platform Account request failed with HTTP ${response.status}`
@@ -468,14 +468,23 @@ export class PlatformAccountInstallation {
     this.publish({ ...withoutError(this.snapshot), privacyAccepted: true })
   }
 
-  /** Restore a current installation session from protected local storage. */
+  /** Restore a current-installation session, or resume a still-valid pending login. */
   async load(): Promise<void> {
     await this.transitions.run(async () => { await this.loadTransition() })
   }
 
   private async loadTransition(): Promise<void> {
     const stored = await this.options.store.loadSession(this.options.environment.environment)
-    if (stored === undefined) return
+    if (stored === undefined) {
+      const pending = await this.options.store.loadPending(this.options.environment.environment)
+      if (pending === undefined) return
+      if (pending.attempt.expiresAt <= this.now()) {
+        await this.options.store.clearPending(this.options.environment.environment)
+        return
+      }
+      this.publish({ status: 'polling', privacyAccepted: true })
+      return
+    }
     if (stored.session.refreshExpiresAt <= this.now()) {
       await this.options.store.clearSession(this.options.environment.environment)
       return
@@ -666,6 +675,10 @@ function base64url(bytes: Uint8Array): string {
   let binary = ''
   for (const byte of bytes) binary += String.fromCharCode(byte)
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
+}
+
+function headerRecord(headers?: HeadersInit): Record<string, string> {
+  return Object.fromEntries(new Headers(headers).entries())
 }
 
 function proofHeaders(accessToken: string, proof: AccountProof): HeadersInit {

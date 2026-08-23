@@ -40,7 +40,6 @@ describe('deterministic Browser Runtime public lifecycle', () => {
       title: 'New Tab',
       text: '',
       focused: false,
-      controlOwner: 'agent',
       chrome: {
         kind: 'temporary',
         partition: 'session-trace-tmp-1',
@@ -116,121 +115,94 @@ describe('deterministic Browser Runtime public lifecycle', () => {
     expect(state).toMatchObject({ status: 'open', revision: 1, url: 'https://one.test/' })
   })
 
-  it('rejects a stale Agent mutation after human input and covers both arrival orders', async () => {
+  it('serializes synthetic input with navigation in both arrival orders', async () => {
     const ctx = new Context()
     await ctx.plugin(BrowserRuntimeDeterministic, {
-      idPrefix: 'handoff',
+      idPrefix: 'input-race',
       pages: [
         { url: 'https://one.test/', title: 'One', text: 'one', screenshotPngBase64: PNG_1X1 },
-        { url: 'https://human.test/', title: 'Human', text: 'human', screenshotPngBase64: PNG_1X1 },
+        { url: 'https://input.test/', title: 'Input', text: 'input', screenshotPngBase64: PNG_1X1 },
       ],
     })
     const created = await ctx.browserRuntime.create({ profile: 'temporary' })
     const identities = created.target
-    const blankClick = await ctx.browserRuntime.input({
-      target: created.target,
-      expectedRevision: created.revision,
+    const inputFirst = await Promise.allSettled([
+      ctx.browserRuntime.input({
+        target: created.target,
+        expectedRevision: created.revision,
+        url: 'https://input.test/',
+        text: 'synthetic input',
+      }),
+      ctx.browserRuntime.navigate({
+        target: created.target,
+        expectedRevision: created.revision,
+        url: 'https://one.test/',
+      }),
+    ])
+    expect(inputFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    const inputFirstRejected = inputFirst.find(result => result.status === 'rejected')
+    expect(inputFirstRejected?.status === 'rejected' ? inputFirstRejected.reason : undefined).toMatchObject({
+      code: 'BROWSER_REVISION_CONFLICT',
     })
-    expect(blankClick).toMatchObject({
+    const afterInput = await ctx.browserRuntime.observe({ target: created.target })
+    expect(afterInput).toMatchObject({
+      status: 'open',
       revision: 1,
-      url: 'about:blank',
-      title: 'New Tab',
-      text: '',
-      controlOwner: 'human',
+      url: 'https://input.test/',
+      text: 'synthetic input',
       target: identities,
     })
-    const returnedToAgent = await ctx.browserRuntime.returnControl({
-      target: created.target,
-      expectedRevision: blankClick.revision,
-    })
 
-    const humanFirst = await Promise.allSettled([
-      ctx.browserRuntime.input({
-        target: created.target,
-        expectedRevision: returnedToAgent.revision,
-        url: 'https://human.test/',
-        text: 'typed by human',
-      }),
+    const navigateFirst = await Promise.allSettled([
       ctx.browserRuntime.navigate({
         target: created.target,
-        expectedRevision: returnedToAgent.revision,
-        url: 'https://one.test/',
-      }),
-    ])
-    expect(humanFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
-    const humanFirstRejected = humanFirst.find(result => result.status === 'rejected')
-    expect(humanFirstRejected?.status === 'rejected' ? humanFirstRejected.reason : undefined).toMatchObject({
-      code: 'BROWSER_REVISION_CONFLICT',
-    })
-    const afterHuman = await ctx.browserRuntime.observe({ target: created.target })
-    expect(afterHuman).toMatchObject({
-      status: 'open',
-      revision: 3,
-      url: 'https://human.test/',
-      text: 'typed by human',
-      controlOwner: 'human',
-      target: identities,
-    })
-    await expect(ctx.browserRuntime.navigate({
-      target: created.target,
-      expectedRevision: 0,
-      url: 'https://one.test/',
-    })).rejects.toMatchObject({ code: 'BROWSER_REVISION_CONFLICT' })
-    const observed = await ctx.browserRuntime.observe({ target: created.target })
-    expect(observed).toEqual(afterHuman)
-
-    const taken = await ctx.browserRuntime.takeover({
-      target: created.target,
-      expectedRevision: observed.revision,
-    })
-    expect(taken).toMatchObject({ revision: 4, controlOwner: 'human', target: identities })
-    const returned = await ctx.browserRuntime.returnControl({
-      target: created.target,
-      expectedRevision: taken.revision,
-    })
-    expect(returned).toMatchObject({ revision: 5, controlOwner: 'agent', target: identities })
-
-    const agentFirst = await Promise.allSettled([
-      ctx.browserRuntime.navigate({
-        target: created.target,
-        expectedRevision: returned.revision,
+        expectedRevision: afterInput.revision,
         url: 'https://one.test/',
       }),
       ctx.browserRuntime.input({
         target: created.target,
-        expectedRevision: returned.revision,
-        text: 'later human',
+        expectedRevision: afterInput.revision,
+        text: 'later input',
       }),
     ])
-    expect(agentFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
-    const agentFirstRejected = agentFirst.find(result => result.status === 'rejected')
-    expect(agentFirstRejected?.status === 'rejected' ? agentFirstRejected.reason : undefined).toMatchObject({
+    expect(navigateFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    const navigateFirstRejected = navigateFirst.find(result => result.status === 'rejected')
+    expect(navigateFirstRejected?.status === 'rejected' ? navigateFirstRejected.reason : undefined).toMatchObject({
       code: 'BROWSER_REVISION_CONFLICT',
     })
-    const afterAgentFirst = await ctx.browserRuntime.observe({ target: created.target })
-    expect(afterAgentFirst).toMatchObject({
+    const afterNavigate = await ctx.browserRuntime.observe({ target: created.target })
+    expect(afterNavigate).toMatchObject({
       status: 'open',
-      revision: 6,
+      revision: 2,
       url: 'https://one.test/',
-      controlOwner: 'agent',
       target: identities,
     })
 
-    const clickOnly = await ctx.browserRuntime.input({
-      target: created.target,
-      expectedRevision: afterAgentFirst.revision,
-    })
-    expect(clickOnly).toMatchObject({
-      revision: 7,
-      url: 'https://one.test/',
-      controlOwner: 'human',
-      target: identities,
-    })
     await expect(ctx.browserRuntime.input({
       target: created.target,
-      expectedRevision: clickOnly.revision,
+      expectedRevision: afterNavigate.revision,
       url: 'https://unknown.test/',
     })).rejects.toMatchObject({ code: 'BROWSER_UNKNOWN_URL' })
+  })
+
+  it('keeps blank-page title on text input and adopts configured facts on URL-only input', async () => {
+    const ctx = new Context()
+    await ctx.plugin(BrowserRuntimeDeterministic, {
+      idPrefix: 'input-fields',
+      pages: [{ url: 'https://input.test/', title: 'Input', text: 'page text', screenshotPngBase64: PNG_1X1 }],
+    })
+    const created = await ctx.browserRuntime.create({ profile: 'temporary' })
+    const typed = await ctx.browserRuntime.input({
+      target: created.target,
+      expectedRevision: created.revision,
+      text: 'typed',
+    })
+    expect(typed).toMatchObject({ title: 'New Tab', text: 'typed' })
+    await expect(ctx.browserRuntime.input({
+      target: created.target,
+      expectedRevision: typed.revision,
+      url: 'https://input.test/',
+    })).resolves.toMatchObject({ title: 'Input', text: 'page text' })
   })
 
   it('restores a named Profile identity after close and isolates two Profiles on one origin', async () => {

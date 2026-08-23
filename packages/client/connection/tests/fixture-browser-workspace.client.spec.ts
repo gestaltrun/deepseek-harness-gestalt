@@ -1,4 +1,4 @@
-/** Fixture Browser Workspace remotes: Dock open/collapse and page observation. */
+/** Fixture Browser Workspace remotes: create, mutate, observe, and close. */
 import { describe, expect, it } from 'vitest'
 import type { SessionId } from '../src/client/api.ts'
 import { createFixtureFaces } from '../src/client/fixture.ts'
@@ -22,41 +22,31 @@ async function callRemote<T>(
 }
 
 describe('createFixtureFaces browserWorkspace remotes', () => {
-  it('opens, observes, takes over, and collapses the Dock for the addressed Session', async () => {
+  it('creates, mutates, observes, and closes a page for the addressed Session', async () => {
     const { rpc } = createFixtureFaces()
-    const opened = await callRemote<{ dockOpen: boolean; dockWidth: number; userCollapsed: boolean }>(
-      rpc, 'browserWorkspace/setDock', { agentId: sid('fx-alpha'), request: { open: true, width: 720 } })
-    expect(opened).toMatchObject({ dockOpen: true, dockWidth: 720, userCollapsed: false })
-
-    const observed = await callRemote<{ status: string; title: string }>(
+    const observed = await callRemote<{ status: string; title: string; revision: number }>(
       rpc, 'browserWorkspace/observe', { agentId: sid('fx-alpha'), target: TARGET })
-    expect(observed).toMatchObject({ status: 'open', title: 'Example Domain' })
+    expect(observed).toMatchObject({ status: 'open', title: 'Example Domain', revision: 1 })
 
     const shot = await callRemote<{ mediaType: string }>(
       rpc, 'browserWorkspace/screenshot', { agentId: sid('fx-alpha'), target: TARGET })
     expect(shot.mediaType).toBe('image/png')
 
-    const taken = await callRemote<{ controlOwner: string }>(
-      rpc, 'browserWorkspace/takeover', { agentId: sid('fx-alpha'), target: TARGET, expectedRevision: 1 })
-    expect(taken.controlOwner).toBe('human')
-
-    const returned = await callRemote<{ controlOwner: string }>(
-      rpc, 'browserWorkspace/returnControl', { agentId: sid('fx-alpha'), target: TARGET, expectedRevision: 2 })
-    expect(returned.controlOwner).toBe('agent')
-
-    const collapsed = await callRemote<{ dockOpen: boolean; userCollapsed: boolean }>(
-      rpc, 'browserWorkspace/setDock', { agentId: sid('fx-alpha'), request: { open: false } })
-    expect(collapsed).toMatchObject({ dockOpen: false, userCollapsed: true })
-
     const focused = await callRemote<{ focused: boolean; revision: number }>(
-      rpc, 'browserWorkspace/focus', { agentId: sid('fx-alpha'), target: TARGET, expectedRevision: 3 })
-    expect(focused).toMatchObject({ focused: true, revision: 4 })
+      rpc, 'browserWorkspace/focus', { agentId: sid('fx-alpha'), target: TARGET, expectedRevision: 1 })
+    expect(focused).toMatchObject({ focused: true, revision: 2 })
+
+    const inputted = await callRemote<{ url: string; revision: number }>(
+      rpc, 'browserWorkspace/input', {
+        agentId: sid('fx-alpha'), target: TARGET, expectedRevision: 2, input: { url: 'https://typed.test/' },
+      })
+    expect(inputted).toMatchObject({ url: 'https://typed.test/', revision: 3 })
 
     const navigated = await callRemote<{ url: string; status: string; revision: number }>(
       rpc, 'browserWorkspace/navigate', {
-        agentId: sid('fx-alpha'), target: TARGET, expectedRevision: 4, url: 'https://login.test/',
+        agentId: sid('fx-alpha'), target: TARGET, expectedRevision: 3, url: 'https://login.test/',
       })
-    expect(navigated).toMatchObject({ status: 'open', url: 'https://login.test/', revision: 5 })
+    expect(navigated).toMatchObject({ status: 'open', url: 'https://login.test/', revision: 4 })
     const afterNavigate = await callRemote<{ url: string; title: string; status: string }>(
       rpc, 'browserWorkspace/observe', { agentId: sid('fx-alpha'), target: TARGET })
     expect(afterNavigate).toMatchObject({ status: 'open', url: 'https://login.test/', title: 'login.test' })
@@ -65,12 +55,19 @@ describe('createFixtureFaces browserWorkspace remotes', () => {
     expect(shotAfterNavigate).toMatchObject({ url: 'https://login.test/', title: 'login.test' })
 
     const closed = await callRemote<{ status: string }>(
-      rpc, 'browserWorkspace/close', { agentId: sid('fx-alpha'), target: TARGET, expectedRevision: 5 })
+      rpc, 'browserWorkspace/close', { agentId: sid('fx-alpha'), target: TARGET, expectedRevision: 4 })
     expect(closed.status).toBe('closed')
 
     const afterClose = await callRemote<{ status: string }>(
       rpc, 'browserWorkspace/observe', { agentId: sid('fx-alpha'), target: TARGET })
     expect(afterClose.status).toBe('closed')
+
+    const created = await callRemote<{ status: string; target: typeof TARGET; revision: number }>(
+      rpc, 'browserWorkspace/create', { agentId: sid('fx-alpha'), request: { profile: 'temporary' } })
+    expect(created).toMatchObject({ status: 'open', target: TARGET, revision: 1 })
+    const afterCreate = await callRemote<{ status: string; revision: number }>(
+      rpc, 'browserWorkspace/observe', { agentId: sid('fx-alpha'), target: TARGET })
+    expect(afterCreate).toMatchObject({ status: 'open', revision: 1 })
   })
 
   it('observes about:blank and unparseable URLs committed by navigate', async () => {

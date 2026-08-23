@@ -47,15 +47,25 @@ export function useBrowserPage(
         const state = await observe(target)
         if (wasCancelled()) return
         const nextPage = openPageOf(state)
-        const nextShot = nextPage === undefined ? undefined : await screenshot(target)
-        if (wasCancelled()) return
         setPage(nextPage)
-        setShot(nextShot)
+        if (nextPage === undefined) {
+          setShot(undefined)
+          return
+        }
+        try {
+          const nextShot = await screenshot(target)
+          if (wasCancelled()) return
+          setShot(nextShot)
+        } catch {
+          // A failed capture must not hide the observed URL; the chrome can
+          // still navigate, and Desktop present does not need the PNG.
+          if (wasCancelled()) return
+          setShot(undefined)
+        }
       } catch {
-        // Observe/screenshot can reject when the Session binding is not yet
-        // on the Remote (fixture restore, or a closed Session). The collapsed
-        // layer stays Untitled until the next tab-identity or listed-revision
-        // change retries.
+        // Observe can reject when the Session binding is not yet on the
+        // Remote, or the Runtime no longer has this tab. The chrome stays
+        // empty until the next tab-identity or listed-revision change retries.
       }
     }
     void load()

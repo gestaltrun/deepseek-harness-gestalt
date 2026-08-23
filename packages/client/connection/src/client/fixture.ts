@@ -598,9 +598,6 @@ function buildAlphaLog(): SessionEvent[] {
   push({
     type: 'browser/workspace',
     data: {
-      dockOpen: false,
-      dockWidth: 720,
-      userCollapsed: true,
       activeWorkspaceId: FX_BROWSER_TARGET.workspaceId,
       workspaces: [{
         workspaceId: FX_BROWSER_TARGET.workspaceId,
@@ -609,7 +606,7 @@ function buildAlphaLog(): SessionEvent[] {
         browsers: [{
           browserId: FX_BROWSER_TARGET.browserId,
           activeTabId: FX_BROWSER_TARGET.tabId,
-          tabs: [{ tabId: FX_BROWSER_TARGET.tabId, controlOwner: 'agent', revision: 1 }],
+          tabs: [{ tabId: FX_BROWSER_TARGET.tabId, revision: 1 }],
         }],
       }],
     },
@@ -1089,7 +1086,7 @@ function projectionValuesOf(log: readonly SessionEvent[]): Record<string, unknow
   values['plan'] = planViewOf(log)
   // Always present (GoalService unit composed): null before create / after clear.
   values['goal'] = backscanGoal(log)
-  // Always present (browser-workspace unit composed): empty Dock before the first snapshot.
+  // Always present (browser-workspace unit composed): no owned pages before the first snapshot.
   values['browserWorkspace'] = backscanBrowserWorkspace(log)
   // Always present (token-meter composed): full-log provider billing.
   values['tokenUsage'] = tokenUsageOf(log)
@@ -1425,9 +1422,6 @@ interface FxGoalProjection {
 
 /** Session-owned Browser Workspace snapshot used by the keyless fixture. */
 interface FxBrowserWorkspace {
-  readonly dockOpen: boolean
-  readonly dockWidth: number
-  readonly userCollapsed: boolean
   readonly workspaces: readonly {
     readonly workspaceId: string
     readonly profileId: string
@@ -1435,16 +1429,13 @@ interface FxBrowserWorkspace {
     readonly browsers: readonly {
       readonly browserId: string
       readonly activeTabId: string | null
-      readonly tabs: readonly { readonly tabId: string; readonly controlOwner: 'agent' | 'human'; readonly revision: number }[]
+      readonly tabs: readonly { readonly tabId: string; readonly revision: number }[]
     }[]
   }[]
   readonly activeWorkspaceId: string | null
 }
 
 const EMPTY_FX_BROWSER_WORKSPACE: FxBrowserWorkspace = {
-  dockOpen: false,
-  dockWidth: 640,
-  userCollapsed: false,
   workspaces: [],
   activeWorkspaceId: null,
 }
@@ -2048,7 +2039,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     },
   }
 
-  const browserPage = (revision: number, controlOwner: 'agent' | 'human' = 'agent') => ({
+  const browserPage = (revision: number) => ({
     status: 'open' as const,
     target: FX_BROWSER_TARGET,
     revision,
@@ -2056,7 +2047,6 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     title: 'Example Domain',
     text: 'A deterministic browser page.',
     focused: true,
-    controlOwner,
     chrome: { kind: 'persistent' as const, name: 'work', partition: 'persist:work' },
     storage: {
       cookies: 'cookies', localStorage: 'local', indexedDb: 'idb', cache: 'cache', serviceWorker: 'sw',
@@ -2090,7 +2080,6 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   const commitTabFacts = (
     id: SessionId,
     expectedRevision: number,
-    controlOwner: 'agent' | 'human',
   ): number => {
     const revision = expectedRevision + 1
     const current = browserWorkspaceOf(id)
@@ -2103,7 +2092,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           ...workspace,
           browsers: [{
             ...instance,
-            tabs: [{ tabId: FX_BROWSER_TARGET.tabId, controlOwner, revision }],
+            tabs: [{ tabId: FX_BROWSER_TARGET.tabId, revision }],
           }],
         }],
       })
@@ -2114,47 +2103,55 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   const openPageOfSession = (
     id: SessionId,
     revision: number,
-    controlOwner: 'agent' | 'human',
   ): ReturnType<typeof browserPage> => {
     const live = livePages.get(id)
     return live === undefined
-      ? browserPage(revision, controlOwner)
-      : { ...live, revision, controlOwner }
-  }
-
-  const setControlOwner = (
-    id: SessionId,
-    expectedRevision: number,
-    controlOwner: 'agent' | 'human',
-  ): RpcResult<ReturnType<typeof browserPage>> => {
-    const missing = requireBrowserSession(id)
-    if (missing !== undefined) return missing
-    const revision = commitTabFacts(id, expectedRevision, controlOwner)
-    const next = openPageOfSession(id, revision, controlOwner)
-    livePages.set(id, next)
-    return { ok: true, value: next }
+      ? browserPage(revision)
+      : { ...live, revision }
   }
 
   const browserRemotes = {
-    setDock(id: SessionId, request: { open: boolean; width?: number }): RpcResult<FxBrowserWorkspace> {
+    create(id: SessionId, _request: unknown): RpcResult<ReturnType<typeof browserPage>> {
       const missing = requireBrowserSession(id)
       if (missing !== undefined) return missing
-      const current = browserWorkspaceOf(id)
-      const width = request.width ?? current.dockWidth
-      return {
-        ok: true,
-        value: commitBrowserWorkspace(id, {
-          ...current,
-          dockOpen: request.open,
-          dockWidth: width,
-          userCollapsed: request.open ? false : true,
-        }),
-      }
+      const page = browserPage(1)
+      commitBrowserWorkspace(id, {
+        activeWorkspaceId: FX_BROWSER_TARGET.workspaceId,
+        workspaces: [{
+          workspaceId: FX_BROWSER_TARGET.workspaceId,
+          profileId: FX_BROWSER_TARGET.profileId,
+          activeBrowserId: FX_BROWSER_TARGET.browserId,
+          browsers: [{
+            browserId: FX_BROWSER_TARGET.browserId,
+            activeTabId: FX_BROWSER_TARGET.tabId,
+            tabs: [{ tabId: FX_BROWSER_TARGET.tabId, revision: page.revision }],
+          }],
+        }],
+      })
+      livePages.set(id, page)
+      return { ok: true, value: page }
     },
     focus(id: SessionId, _target: typeof FX_BROWSER_TARGET, expectedRevision: number): RpcResult<ReturnType<typeof browserPage>> {
       const missing = requireBrowserSession(id)
       if (missing !== undefined) return missing
-      return { ok: true, value: browserPage(expectedRevision + 1) }
+      const revision = commitTabFacts(id, expectedRevision)
+      const next = openPageOfSession(id, revision)
+      livePages.set(id, next)
+      return { ok: true, value: next }
+    },
+    input(
+      id: SessionId,
+      _target: typeof FX_BROWSER_TARGET,
+      expectedRevision: number,
+      input: { readonly url?: string; readonly text?: string },
+    ): RpcResult<ReturnType<typeof browserPage>> {
+      const missing = requireBrowserSession(id)
+      if (missing !== undefined) return missing
+      const revision = commitTabFacts(id, expectedRevision)
+      const current = openPageOfSession(id, revision)
+      const next = input.url === undefined ? current : { ...current, ...chromeFor(input.url) }
+      livePages.set(id, next)
+      return { ok: true, value: next }
     },
     navigate(
       id: SessionId,
@@ -2164,7 +2161,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     ): RpcResult<ReturnType<typeof browserPage>> {
       const missing = requireBrowserSession(id)
       if (missing !== undefined) return missing
-      const revision = commitTabFacts(id, expectedRevision, 'agent')
+      const revision = commitTabFacts(id, expectedRevision)
       const next = { ...browserPage(revision), ...chromeFor(url) }
       livePages.set(id, next)
       return { ok: true, value: next }
@@ -2177,7 +2174,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       if (current.workspaces.length === 0 || tab === undefined) {
         return { ok: true, value: { status: 'closed', target: FX_BROWSER_TARGET, revision: 0 } }
       }
-      return { ok: true, value: openPageOfSession(id, tab.revision, tab.controlOwner) }
+      return { ok: true, value: openPageOfSession(id, tab.revision) }
     },
     screenshot(id: SessionId, _target: typeof FX_BROWSER_TARGET): RpcResult<{
       target: typeof FX_BROWSER_TARGET
@@ -2194,7 +2191,6 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       const page = openPageOfSession(
         id,
         tab?.revision ?? 1,
-        tab?.controlOwner ?? 'agent',
       )
       return {
         ok: true,
@@ -2207,12 +2203,6 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           data: FX_BROWSER_PNG,
         },
       }
-    },
-    takeover(id: SessionId, _target: typeof FX_BROWSER_TARGET, expectedRevision: number): RpcResult<ReturnType<typeof browserPage>> {
-      return setControlOwner(id, expectedRevision, 'human')
-    },
-    returnControl(id: SessionId, _target: typeof FX_BROWSER_TARGET, expectedRevision: number): RpcResult<ReturnType<typeof browserPage>> {
-      return setControlOwner(id, expectedRevision, 'agent')
     },
     close(id: SessionId, _target: typeof FX_BROWSER_TARGET, expectedRevision: number): RpcResult<{ status: 'closed'; target: typeof FX_BROWSER_TARGET; revision: number }> {
       const missing = requireBrowserSession(id)
@@ -3353,10 +3343,11 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           query?: string
           images?: readonly unknown[]
           ref?: { id: string; revision: number }
-          request?: { objective?: string; maxGoalRounds?: number; open?: boolean; width?: number }
+          request?: { objective?: string; maxGoalRounds?: number; profile?: string; name?: string; attach?: unknown }
           target?: typeof FX_BROWSER_TARGET
           expectedRevision?: number
           url?: string
+          input?: { url?: string; text?: string }
         }
       }).args
       const sessionId = (args.agentId ?? args.sessionId ?? '') as SessionId
@@ -3374,13 +3365,12 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         case 'goals/resume': return Promise.resolve(goalRemotes.resume(sessionId, args.ref as FxGoalRef))
         case 'goals/complete': return Promise.resolve(goalRemotes.complete(sessionId, args.ref as FxGoalRef))
         case 'goals/clear': return Promise.resolve(goalRemotes.clear(sessionId, args.ref as FxGoalRef))
-        case 'browserWorkspace/setDock': return Promise.resolve(browserRemotes.setDock(sessionId, args.request as { open: boolean; width?: number }))
+        case 'browserWorkspace/create': return Promise.resolve(browserRemotes.create(sessionId, args.request))
         case 'browserWorkspace/focus': return Promise.resolve(browserRemotes.focus(sessionId, args.target as typeof FX_BROWSER_TARGET, args.expectedRevision as number))
+        case 'browserWorkspace/input': return Promise.resolve(browserRemotes.input(sessionId, args.target as typeof FX_BROWSER_TARGET, args.expectedRevision as number, args.input ?? {}))
         case 'browserWorkspace/navigate': return Promise.resolve(browserRemotes.navigate(sessionId, args.target as typeof FX_BROWSER_TARGET, args.expectedRevision as number, args.url as string))
         case 'browserWorkspace/observe': return Promise.resolve(browserRemotes.observe(sessionId, args.target as typeof FX_BROWSER_TARGET))
         case 'browserWorkspace/screenshot': return Promise.resolve(browserRemotes.screenshot(sessionId, args.target as typeof FX_BROWSER_TARGET))
-        case 'browserWorkspace/takeover': return Promise.resolve(browserRemotes.takeover(sessionId, args.target as typeof FX_BROWSER_TARGET, args.expectedRevision as number))
-        case 'browserWorkspace/returnControl': return Promise.resolve(browserRemotes.returnControl(sessionId, args.target as typeof FX_BROWSER_TARGET, args.expectedRevision as number))
         case 'browserWorkspace/close': return Promise.resolve(browserRemotes.close(sessionId, args.target as typeof FX_BROWSER_TARGET, args.expectedRevision as number))
         default:
           return Promise.reject(new Error(`fixture connection RPC endpoint ${JSON.stringify(endpoint)} is unavailable`))

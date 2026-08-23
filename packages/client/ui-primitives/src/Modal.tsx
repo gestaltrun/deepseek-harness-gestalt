@@ -8,6 +8,7 @@ import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import { IconCloseOutline16 } from './icons/index.tsx'
+import { useOverlayLock } from './overlay-lock.ts'
 import css from './Modal.module.css'
 
 /**
@@ -41,6 +42,7 @@ export function Modal({
   contentClassName?: string
   headless?: boolean
 }) {
+  useOverlayLock(open)
   useEffect(() => {
     if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {

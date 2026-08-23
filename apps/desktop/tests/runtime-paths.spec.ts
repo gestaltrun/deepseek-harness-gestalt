@@ -19,7 +19,9 @@ describe('resolveDesktopRuntime', () => {
     expect(paths.args).toContain('127.0.0.1')
     expect(paths.args).toContain('--port')
     expect(paths.args).toContain('0')
+    expect(paths.args).toContain('--no-open')
     expect(paths.args.indexOf('--patch')).toBeLessThan(paths.args.indexOf('--host'))
+    expect(paths.args.indexOf('--patch')).toBeLessThan(paths.args.indexOf('--no-open'))
     expect(paths.args).not.toContain('--profile')
     expect(paths.args).not.toContain('gestalt')
   })
@@ -33,7 +35,8 @@ describe('resolveDesktopRuntime', () => {
     expect(paths.workspaceRoot).toBeDefined()
     expect(paths.args[paths.args.indexOf('web') + 1]).toBe('--patch')
     expect(paths.args.indexOf('--patch')).toBeLessThan(paths.args.indexOf('--host'))
-    expect(paths.args).toEqual(expect.arrayContaining(['--host', '127.0.0.1', '--port', '0']))
+    expect(paths.args.indexOf('--patch')).toBeLessThan(paths.args.indexOf('--no-open'))
+    expect(paths.args).toEqual(expect.arrayContaining(['--no-open', '--host', '127.0.0.1', '--port', '0']))
   })
 
   it('detects Electron executables so dev spawn can refuse them', () => {

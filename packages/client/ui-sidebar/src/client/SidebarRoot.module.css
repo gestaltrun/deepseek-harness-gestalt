@@ -103,11 +103,11 @@
 /* Desktop chrome reserves the native/caption row above the unchanged
    sidebar controls. */
 .root:has([data-desktop-chrome='mac']) {
-  padding-top: 28px;
+  padding-top: var(--dsh-window-chrome-height);
 }
 
 .root:has([data-desktop-chrome='win']) {
-  padding-top: 42px;
+  padding-top: calc(var(--dsh-window-chrome-height) + 6px);
 }
 
 .collapsed .logoRow {

@@ -1197,11 +1197,15 @@ describe('ChatView', () => {
   })
 
   it('one ResizeObserver owns pinned dynamic-height follow and ignores growth while away', () => {
+    const callbacks: ResizeObserverCallback[] = []
     let notify: (() => void) | undefined
     const observe = vi.fn()
     class ResizeObserverStub {
       constructor(callback: ResizeObserverCallback) {
-        notify = () => { callback([], this as unknown as ResizeObserver) }
+        callbacks.push(callback)
+        notify = () => {
+          for (const cb of callbacks) cb([], this as unknown as ResizeObserver)
+        }
       }
 
       observe = observe
@@ -1222,7 +1226,37 @@ describe('ChatView', () => {
     Object.defineProperty(scroller, 'scrollHeight', { value: 1_400, writable: true })
     act(() => { notify?.() })
     expect(scroller.scrollTop).toBe(200)
-    expect(observe).toHaveBeenCalledTimes(1)
+    expect(observe.mock.calls.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('hides the preview rail when the right gutter cannot host it', () => {
+    const callbacks: ResizeObserverCallback[] = []
+    class ResizeObserverStub {
+      constructor(callback: ResizeObserverCallback) {
+        callbacks.push(callback)
+      }
+
+      observe = vi.fn()
+      disconnect = vi.fn()
+    }
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+    const h = makeHarness({ nodes: [user(1, 'q')] })
+    const view = render(<h.ChatView {...h.props} />)
+    const scroller = view.container.querySelector('[class*="scroll"]') as HTMLDivElement
+    const column = view.container.querySelector('[data-chat-flow]') as HTMLDivElement
+    expect(view.container.querySelector('[data-browser-preview-rail]')).toBeTruthy()
+    Object.defineProperty(scroller, 'clientWidth', { value: 800, configurable: true })
+    Object.defineProperty(column, 'offsetWidth', { value: 640, configurable: true })
+    act(() => {
+      for (const cb of callbacks) cb([], {} as ResizeObserver)
+    })
+    expect(scroller.getAttribute('data-preview-tight')).toBe('')
+    Object.defineProperty(scroller, 'clientWidth', { value: 1400 })
+    act(() => {
+      for (const cb of callbacks) cb([], {} as ResizeObserver)
+    })
+    expect(scroller.getAttribute('data-preview-tight')).toBeNull()
+    vi.unstubAllGlobals()
   })
 
   it('entering the at-bottom threshold does not snap the remaining scroll distance', () => {

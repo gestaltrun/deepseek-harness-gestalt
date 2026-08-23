@@ -2,7 +2,9 @@
  * Three-column shell frame, registered into the built-in 'root' slot (the web
  * shell renders only 'root'). Owns the grid tracks (sidebar | center |
  * details), the drag handles (pointer capture + rAF throttle), the concession
- * chain (columns.ts) under the active details occupant's width range, and the
+ * chain (columns.ts) under the active details occupant's width range, a right
+ * overlay when an open details preference cannot keep the in-flow Session
+ * Surface at CENTER_MIN, and the
  * child-slot render decisions: the sidebar slot renders HERE with live
  * parameters from the concession solve, and the
  * session-aware occupants render in fixed column positions; strict entries
@@ -14,9 +16,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
-import { computeColumns, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
+import { computeColumns, overlayDetailsWidth, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
+
+/** True when this document is the Desktop native overlay renderer. */
+function isDesktopOverlayDocument(): boolean {
+  return document.documentElement.hasAttribute('data-dsh-desktop-overlay')
+}
 
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
@@ -30,8 +37,16 @@ function CenterColumn(props: { children?: ReactNode }) {
 }
 
 /** Details column grid item; width 0 keeps the subtree mounted (never unmount on close). */
-function DetailsColumn(props: { children?: ReactNode }) {
-  return <div className={css.detailsCol}>{props.children}</div>
+function DetailsColumn(props: { children?: ReactNode; overlayWidth: number }) {
+  return (
+    <div
+      className={css.detailsCol}
+      data-overlay={props.overlayWidth > 0 || undefined}
+      style={props.overlayWidth > 0 ? { width: props.overlayWidth } : undefined}
+    >
+      {props.children}
+    </div>
+  )
 }
 
 /**
@@ -91,6 +106,19 @@ export function AppFrame({
   actions,
   renderSlot,
 }: AppFrameProps) {
+  // Overlay document: only the settings seat. Conversation/details would
+  // remount official page present() against the Host chrome live views.
+  if (isDesktopOverlayDocument()) {
+    return (
+      <div data-dsh-desktop-overlay-root="">
+        {renderSlot('sidebar', {
+          collapsed: false,
+          width: SIDEBAR_DEFAULT,
+        })}
+        {renderSlot('shell.overlay', {})}
+      </div>
+    )
+  }
   const panels = useStore(s => s)
   const detailsSession = useSessions((s) => {
     const current = s.current
@@ -140,14 +168,21 @@ export function AppFrame({
   const sidebarPreference = sidebarCollapsed
     ? 0
     : panels.sidebar === 0 ? SIDEBAR_DEFAULT : panels.sidebar
+  const detailsPreference = detailsSession === undefined ? 0 : panels.details
   const cols = computeColumns(
     viewport,
     sidebarPreference,
-    detailsSession === undefined ? 0 : panels.details,
+    detailsPreference,
     panels.detailsRange,
   )
+  const overlayWidth = cols.details === 0
+    ? overlayDetailsWidth(viewport, cols.sidebar, detailsPreference, panels.detailsRange)
+    : 0
+  const detailsVisible = cols.details > 0 || overlayWidth > 0
   const colsRef = useRef(cols)
   colsRef.current = cols
+  const overlayRef = useRef(overlayWidth)
+  overlayRef.current = overlayWidth
 
   // The drag base is the rendered width captured at drag start (grabbing a
   // concession-clamped panel must not jump back to the stored preference);
@@ -159,7 +194,10 @@ export function AppFrame({
   const [dragging, setDragging] = useState(false)
   const onDragEnd = useCallback(() => { setDragging(false) }, [])
   const onSidebarStart = useCallback(() => { sidebarBase.current = colsRef.current.sidebar; setDragging(true) }, [])
-  const onDetailsStart = useCallback(() => { detailsBase.current = colsRef.current.details; setDragging(true) }, [])
+  const onDetailsStart = useCallback(() => {
+    detailsBase.current = colsRef.current.details > 0 ? colsRef.current.details : overlayRef.current
+    setDragging(true)
+  }, [])
   const onSidebarDrag = useCallback((dx: number) => {
     actions.setSidebar(sidebarBase.current + dx)
   }, [actions])
@@ -173,7 +211,8 @@ export function AppFrame({
       className={css.frame}
       style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
-      data-details-collapsed={cols.details === 0 || undefined}
+      data-details-collapsed={detailsVisible ? undefined : true}
+      data-details-overlay={overlayWidth > 0 || undefined}
       data-dragging={dragging || undefined}
     >
       <div className={css.sidebarCol}>
@@ -194,14 +233,22 @@ export function AppFrame({
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
         <CenterColumn>{renderSlot('conversation', {})}</CenterColumn>
-        <DetailsColumn>{renderSlot('details', {})}</DetailsColumn>
+        <DetailsColumn overlayWidth={overlayWidth}>{renderSlot('details', {})}</DetailsColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}
       </div>
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
       {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {cols.details > 0 && <DragHandle side="details" left={viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
+      {detailsVisible && (
+        <DragHandle
+          side="details"
+          left={viewport - (cols.details > 0 ? cols.details : overlayWidth)}
+          onStart={onDetailsStart}
+          onDrag={onDetailsDrag}
+          onEnd={onDragEnd}
+        />
+      )}
     </div>
   )
 }

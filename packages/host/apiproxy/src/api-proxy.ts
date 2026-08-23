@@ -263,59 +263,86 @@ function ok<T>(request: RpcRequest<unknown>, value: T): RpcResponse<T> {
   return { rpcId: request.rpcId, result: { ok: true, value } }
 }
 
+const OFFICIAL_DEEPSEEK_PROVIDER = 'deepseek-official'
+const LLM_DEEPSEEK_SETTINGS_NS = 'llm-deepseek'
+
 /**
- * Build the provider/model catalog over every registered route. Shared by the
+ * Whether the official DeepSeek settings section is user-occupied. `undefined`
+ * means this composition has no settings plane or has not registered that
+ * section, so the catalog keeps advertising the mounted adapter.
+ * @param ctx - host context that may provide `settings`.
+ * @returns occupancy, or unknown when the section is not a settings fact.
+ */
+function officialDeepSeekUserOccupied(ctx: Context): boolean | undefined {
+  const settings = ctx.get('settings')
+  if (settings === undefined) return undefined
+  const descriptor = settings.describe().find(entry => String(entry.ns) === LLM_DEEPSEEK_SETTINGS_NS)
+  if (descriptor === undefined) return undefined
+  const user = descriptor.user
+  if (user === undefined || user === null) return false
+  if (typeof user !== 'object' || Array.isArray(user)) return true
+  return Object.keys(user).length > 0
+}
+
+/**
+ * Build the provider/model catalog over registered routes. Shared by the
  * session-scoped `session.models` and host-scoped `llm.models`. Catalog
  * membership stays advisory: an unlisted session selection remains valid for
  * provider dispatch, but is not injected back into the selector after its
- * owning catalog stops advertising it. Per-provider failures ride `failures`
- * without failing the sound groups; groups that advertise nothing are dropped.
+ * owning catalog stops advertising it. Official DeepSeek stays off the
+ * catalog while its settings section is registered and unoccupied, so first-run
+ * does not offer that adapter as if the user had added it. Per-provider
+ * failures ride `failures` without failing the sound groups; groups that
+ * advertise nothing are dropped.
  */
 async function buildModelCatalog(ctx: Context): Promise<{
   groups: ModelProviderGroup[]
   failures: ModelCatalogFailure[]
 }> {
-  const catalog = await Promise.all(ctx.llm.listProviders().map(async (provider) => {
-    try {
-      const models = await ctx.llm.listModels(provider.id)
-      const entries = await Promise.all(models.map(async (model) => {
-        const resolved = await ctx.llm.resolveModelInfo(provider.id, model.id)
-        const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined
-          ? undefined
-          : {
-            efforts: resolved.reasoning.efforts.map(effort => ({
-              id: effort.id,
-              name: effort.name,
-              ...effort.description === undefined
+  const officialOccupied = officialDeepSeekUserOccupied(ctx)
+  const catalog = await Promise.all(ctx.llm.listProviders()
+    .filter(provider => provider.id !== OFFICIAL_DEEPSEEK_PROVIDER || officialOccupied !== false)
+    .map(async (provider) => {
+      try {
+        const models = await ctx.llm.listModels(provider.id)
+        const entries = await Promise.all(models.map(async (model) => {
+          const resolved = await ctx.llm.resolveModelInfo(provider.id, model.id)
+          const reasoning: ModelReasoning | undefined = resolved.reasoning === undefined
+            ? undefined
+            : {
+              efforts: resolved.reasoning.efforts.map(effort => ({
+                id: effort.id,
+                name: effort.name,
+                ...effort.description === undefined
+                  ? {}
+                  : { description: effort.description },
+              })),
+              ...resolved.reasoning.defaultEffort === undefined
                 ? {}
-                : { description: effort.description },
-            })),
-            ...resolved.reasoning.defaultEffort === undefined
-              ? {}
-              : { defaultEffort: resolved.reasoning.defaultEffort },
+                : { defaultEffort: resolved.reasoning.defaultEffort },
+            }
+          return {
+            id: model.id,
+            name: model.name,
+            ...model.description === undefined ? {} : { description: model.description },
+            ...reasoning === undefined ? {} : { reasoning },
           }
-        return {
-          id: model.id,
-          name: model.name,
-          ...model.description === undefined ? {} : { description: model.description },
-          ...reasoning === undefined ? {} : { reasoning },
+        }))
+        const group: ModelProviderGroup = {
+          id: provider.id,
+          name: provider.name,
+          models: entries,
         }
-      }))
-      const group: ModelProviderGroup = {
-        id: provider.id,
-        name: provider.name,
-        models: entries,
+        return { kind: 'group' as const, group }
+      } catch (error: unknown) {
+        const failure: ModelCatalogFailure = {
+          id: provider.id,
+          name: provider.name,
+          message: error instanceof Error ? error.message : String(error),
+        }
+        return { kind: 'failure' as const, failure }
       }
-      return { kind: 'group' as const, group }
-    } catch (error: unknown) {
-      const failure: ModelCatalogFailure = {
-        id: provider.id,
-        name: provider.name,
-        message: error instanceof Error ? error.message : String(error),
-      }
-      return { kind: 'failure' as const, failure }
-    }
-  }))
+    }))
   return {
     groups: catalog.flatMap(item => item.kind === 'group' ? [item.group] : []).filter(group => group.models.length > 0),
     failures: catalog.flatMap(item => item.kind === 'failure' ? [item.failure] : []),

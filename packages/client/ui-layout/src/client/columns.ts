@@ -67,7 +67,8 @@ export function clampWidth(px: number, min: number, max: number): number {
  * @param sidebar - sidebar width preference in px (0 = closed).
  * @param details - details width preference in px (0 = closed).
  * @param detailsRange - active occupant's details clamp and reopen widths.
- * @returns resolved widths; details 0 means visually closed (never unmounted), while a closed sidebar keeps its compact rail.
+ * @returns resolved widths; details 0 closes the in-flow track without unmounting it. AppFrame may still paint
+ * that occupant as a right overlay when the stored preference is open.
  */
 export function computeColumns(
   viewport: number,
@@ -89,4 +90,29 @@ export function computeColumns(
   // Step 3: auto-close details (derived — preferences untouched); center
   // absorbs any remaining deficit (may drop below CENTER_MIN).
   return { sidebar: s, center: Math.max(0, viewport - s), details: 0 }
+}
+
+/**
+ * Width of a right-edge details overlay when the in-flow track is derived
+ * closed. The overlay may drop below the occupant's minimum so collapse and
+ * chrome stay on-screen; it never exceeds the remaining frame beside the
+ * rendered sidebar.
+ * @param viewport - available frame width in px.
+ * @param sidebarRendered - solved sidebar track width in px.
+ * @param detailsPreference - stored details width in px (0 = closed).
+ * @param detailsRange - active occupant's clamp.
+ * @returns overlay width in px, or 0 when the preference is closed or no
+ *   remaining width exists.
+ */
+export function overlayDetailsWidth(
+  viewport: number,
+  sidebarRendered: number,
+  detailsPreference: number,
+  detailsRange: DetailsWidthRange = DEFAULT_DETAILS_WIDTH_RANGE,
+): number {
+  if (detailsPreference <= 0) return 0
+  const remaining = Math.max(0, viewport - sidebarRendered)
+  if (remaining === 0) return 0
+  const preferred = clampWidth(detailsPreference, detailsRange.minimum, detailsRange.maximum)
+  return Math.min(preferred, remaining)
 }

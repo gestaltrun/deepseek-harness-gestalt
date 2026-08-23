@@ -18,7 +18,7 @@ Focus uses the addressed listing row's revision, the same contract as Dock chrom
 
 When the tab is absent from the listing, details still open and focus is not called. The path does not synthesize a 409 and does not add a second error chrome. A rejected focus is swallowed because details already opened.
 
-When the human collapsed the Dock, this selection still focuses the listed tab so the collapsed preview can highlight it. It never writes `dockOpen` and never calls `setDock`. Later Agent activity already must not steal the Dock open after collapse; this human gesture follows that same rule and does not reopen the pane.
+Selection focuses the listed tab so the collapsed preview can highlight it. Browser Workspace carries no panel presentation state; better-sidebar remains the only authority for whether the panel is open.
 
 The conversation transcript has no separate page-event or link gesture. Those selections, when they exist, share this `openDetails` path. Only `browser_*` tool rows call `selectCall` on click; ordinary tool rows stay inert.
 
@@ -44,4 +44,4 @@ A listed `browser_*` card click opens details and focuses that tab without chang
 
 ## Testing
 
-`packages/client/ui-conversation/tests/browser-tab-focus.client.spec.ts` pins args vs result identity, the listed revision, tab-gone, and a rejected focus. `apply-inject.client.spec.tsx` pins inject-level focus with `userCollapsed: true` and no `setDock`. `packages/client/ui-tool/tests/toolview-slot.client.spec.tsx` clicks a real `browser_navigate` card through the conversation+tool stack and requires `focus(sessionId, target, listedRevision)`. The keyless fixture Session still has one tab, so the assembled browser-dock snapshot cannot exercise two-tab chat selection.
+`packages/client/ui-conversation/tests/browser-tab-focus.client.spec.ts` pins args vs result identity, the listed revision, tab-gone, and a rejected focus. `apply-inject.client.spec.tsx` pins inject-level focus. `packages/client/ui-tool/tests/toolview-slot.client.spec.tsx` clicks a real `browser_navigate` card through the conversation+tool stack and requires `focus(sessionId, target, listedRevision)`. The keyless fixture Session still has one tab, so the assembled snapshot cannot exercise two-tab chat selection.

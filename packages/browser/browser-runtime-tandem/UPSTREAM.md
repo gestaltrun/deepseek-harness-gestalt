@@ -19,5 +19,4 @@ The evaluation that selected Tandem is [.agents/research/2026-08-17-agent-browse
 - The MCP surface exposes 257 tools with no allowlist or tool profiles, which is unsuitable as a per-request default tool surface.
 - `GET /page-content` waits its full internal max-wait window (10 seconds at the pinned revision) whenever a page offers fewer than 1000 text characters; callers need `settleMs`/`timeout`/`minLength` query bounds for bounded observation.
 - The HTTP API binds all interfaces with remote access enabled by default, leaving loopback confinement to each caller.
-- Agent/user ownership and handoff have no explicit event stream.
 - Linux support is best-effort rather than a peer of macOS and Windows.

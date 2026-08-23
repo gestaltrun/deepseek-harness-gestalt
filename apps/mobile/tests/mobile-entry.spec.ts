@@ -40,6 +40,9 @@ vi.mock('@deepseek-ai/dsh-remote-access-client', async (importOriginal) => {
     },
   }
 })
+vi.mock('@capacitor/core', () => ({
+  Capacitor: { isNativePlatform: () => true },
+}))
 
 afterEach(() => {
   cleanup()

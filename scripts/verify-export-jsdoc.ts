@@ -566,10 +566,10 @@ function loadCompilerOptions(scanRoot: string): ts.CompilerOptions {
 }
 
 /**
- * Walk every non-vendored package source file and collect JSDoc-completeness
- * violations for its module-level exports. Returns findings instead of
- * throwing so tests assert on the list; the CLI entry turns a non-empty list
- * into exit 1.
+ * Walk every first-party package source file and collect JSDoc-completeness
+ * violations for its module-level exports. The pinned better-sidebar snapshot
+ * keeps upstream export style. Returns findings instead of throwing so tests
+ * assert on the list; the CLI entry turns a non-empty list into exit 1.
  * @param scanRoot - the repo root to scan; tests pass a fixture dir.
  * @returns every violation, in file order, one human-readable line each.
  */
@@ -577,6 +577,7 @@ export function collectExportJsdocViolations(scanRoot: string = root): string[] 
   const violations: string[] = []
   const rels = globSync('packages/*/*/src/**/*.ts', { cwd: scanRoot })
     .map(path => path.split(sep).join('/'))
+    .filter(rel => !rel.startsWith('packages/client/better-sidebar/') && !rel.endsWith('.d.ts'))
     .sort()
   const program = ts.createProgram(rels.map(rel => resolve(scanRoot, rel)), loadCompilerOptions(scanRoot))
   const checker = program.getTypeChecker()

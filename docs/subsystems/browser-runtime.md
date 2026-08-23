@@ -6,9 +6,9 @@ The Browser Runtime capability separates the provider-neutral [`ctx.browserRunti
 
 ## Identity and state
 
-A `BrowserTarget` contains four opaque branded identities: Profile, Workspace, browser instance, and tab. Callers carry the complete target returned by `create`; none of its string values have caller-visible structure. Open state contains URL, title, text, focus, revision, `controlOwner`, address-field `chrome`, and `storage`. Storage isolation is the Chromium partition named on `chrome.partition`; storage fields stay empty unless a Provider observed them. Temporary chrome omits a label. Shared chrome names the reserved installation-wide identity and must not claim isolation. Closed state is a terminal receipt retaining the target and revision.
+A `BrowserTarget` contains four opaque branded identities: Profile, Workspace, browser instance, and tab. Callers carry the complete target returned by `create`; none of its string values have caller-visible structure. Open state contains URL, title, text, focus, revision, address-field `chrome`, and `storage`. Storage isolation is the Chromium partition named on `chrome.partition`; storage fields stay empty unless a Provider observed them. Temporary chrome omits a label. Shared chrome names the reserved installation-wide identity and must not claim isolation. Closed state is a terminal receipt retaining the target and revision.
 
-An `unavailable` state is the truthful projection of Provider availability loss for an existing target: the Electron Provider commits it when a renderer process crashes, and the Tandem-shaped HTTP client commits it when its loopback server or optional fixture child fails health checks. Both keep the target, last revision, and current control owner, name the loss reason, and flag an in-flight reconnect. It is not the terminal closed receipt; a successful reconnect re-commits open page state for the same target at the next revision, and exhausted reconnects commit `reconnect-failed`.
+An `unavailable` state is the truthful projection of Provider availability loss for an existing target: the Electron Provider commits it when a renderer process crashes, and the Tandem-shaped HTTP client commits it when its loopback server or optional fixture child fails health checks. Both keep the target and last revision, name the loss reason, and flag an in-flight reconnect. It is not the terminal closed receipt; a successful reconnect re-commits open page state for the same target at the next revision, and exhausted reconnects commit `reconnect-failed`.
 
 ```ts type-equiv
 /** Address-field chrome. Temporary Profiles omit a label. Shared chrome names the shared identity and must not claim isolation. */
@@ -27,23 +27,22 @@ interface BrowserUnavailableState {
   readonly revision: number
   readonly reason: 'crashed' | 'unhealthy' | 'reconnect-failed'
   readonly reconnecting: boolean
-  readonly controlOwner: BrowserControlOwner
 }
 ```
 
 ## Concurrency and lifecycle
 
-Providers serialize operations. `create` may attach a new instance to an existing Workspace or a new tab to an existing instance. `navigate`, `focus`, `input`, `takeover`, `returnControl`, and `close` require the last observed revision and reject stale mutations. `controlOwner` is reported ownership. The lock is the revision: after `observe`, an Agent `navigate` or `focus` that matches the current revision reclaims the tab without `returnControl`. Human `input` and `takeover` set `controlOwner` to `human`; `returnControl` and Agent mutations set it to `agent`. `observe` and `screenshot` do not advance the revision. A named persistent Profile restores the same `persist:session-*` partition after close. A shared Profile restores `persist:session-*-shared` and does not take `BROWSER_PROFILE_BUSY`. Temporary Profiles receive ephemeral `session-*` partitions and leave no reusable identity. A second independent writer of the same named Profile rejects with `BROWSER_PROFILE_BUSY`. Teardown stops new admission, drains accepted operations, and closes every open Profile. Session-local ownership, Dock facts, persisted control ownership, and cross-Session isolation live in [`dsh-browser-workspace`](../../packages/browser/browser-workspace).
+Providers serialize operations. `create` may attach a new instance to an existing Workspace or a new tab to an existing instance. `navigate`, `focus`, synthetic Agent `input`, and `close` require the last observed revision and reject stale mutations. The revision is optimistic concurrency control across tools, Workbench chrome, Provider recovery, and cleanup; `observe` and `screenshot` do not advance it. A named persistent Profile restores the same `persist:session-*` partition after close. A shared Profile restores `persist:session-*-shared` and does not take `BROWSER_PROFILE_BUSY`. Temporary Profiles receive ephemeral `session-*` partitions and leave no reusable identity. A second independent writer of the same named Profile rejects with `BROWSER_PROFILE_BUSY`. Teardown stops new admission, drains accepted operations, and closes every open Profile. Session-local instance ownership, Profile-matched reuse, per-tab revision projection, and cross-Session isolation live in [`dsh-browser-workspace`](../../packages/browser/browser-workspace).
 
 The deterministic Provider gives each generation an independent owner token. Its invariant seeds from that generation's authoritative current state on initial load and hot reload, then registers a synchronous pre-commit validator for stable identity, exact revision succession, and terminal closure. A validation failure leaves the previous state authoritative. After commit, the Provider publishes on `browser/runtime-state`; each ordinary observer failure is contained, later observers still run, and asynchronous observers are not awaited.
 
-The Electron Provider owns hidden offscreen `webContents` in this process. It loads only when `process.versions.electron` is set, creates `persist:session-*` partitions for named and shared Profiles and ephemeral `session-*` partitions for temporary Profiles, captures PNG bytes with `webContents.capturePage`, reads page text with `executeJavaScript`, and delivers human text through one insert-or-key path. Chromium persist partitions live at Electron `userData/Partitions/<name>`. A renderer crash commits `unavailable` and recreates the hidden window for the same target. The Desktop Host also binds Tandem's HTTP vocabulary over that engine so the Node Web Host can drive it.
+The Electron Provider owns frameless page `webContents` in this process. It loads only when `process.versions.electron` is set, creates `persist:session-*` partitions for named and shared Profiles and ephemeral `session-*` partitions for temporary Profiles, captures PNG bytes with `webContents.capturePage`, reads page text with `executeJavaScript`, and delivers synthetic Agent text through one insert-or-key path. Chromium persist partitions live at Electron `userData/Partitions/<name>`. A renderer crash commits `unavailable` and recreates the hidden window for the same target. A `loadURL` that rejects `ERR_ABORTED` after a redirect, or a Chromium net error after Chromium painted its error document, commits as an open page and keeps the requested URL when Chromium reports `chrome-error:`. Desktop Host presents the same page as a `WebContentsView` on the Host `contentView`, paints Settings and the sidebar `+` menu in a second transparent overlay `WebContentsView` stacked above that page, and also binds Tandem's HTTP vocabulary over that engine so the Node Web Host can drive it.
 
-The tandem package is a protocol-only HTTP client for that vocabulary at pinned revision `3b613cfd4c299609ca7ca415d638c1b71c6ba5de`. It constrains `baseUrl` to an absolute loopback HTTP origin, reads the bearer token from `tokenFile`, and polls `GET /agent/version` and `GET /status` under `startupTimeoutMs` before admitting work. Each Profile creates one HTTP session (`POST /sessions/create`) on a `persist:session-*` or ephemeral `session-*` partition, projecting DSH-owned opaque identities around tab ids. Human `input` uses `POST /input` with the client's `expectedRevision`. Production Desktop never launches Tandem.app; an optional fixture child exists only for HTTP protocol tests, and `sidecar: false` rejects `command`/`cwd` at plugin load. Malformed responses reject with `BROWSER_PROTOCOL`; a lost or unreachable runtime rejects with `BROWSER_RUNTIME_UNAVAILABLE`. Provenance and upstream-contribution candidates live in the package's [UPSTREAM.md](../../packages/browser/browser-runtime-tandem/UPSTREAM.md).
+The tandem package is a protocol-only HTTP client for that vocabulary at pinned revision `3b613cfd4c299609ca7ca415d638c1b71c6ba5de`. It constrains `baseUrl` to an absolute loopback HTTP origin, reads the bearer token from `tokenFile`, and polls `GET /agent/version` and `GET /status` under `startupTimeoutMs` before admitting work. Each Profile creates one HTTP session (`POST /sessions/create`) on a `persist:session-*` or ephemeral `session-*` partition, projecting DSH-owned opaque identities around tab ids. Synthetic Agent `input` uses `POST /input` with the client's `expectedRevision`. Production Desktop never launches Tandem.app; an optional fixture child exists only for HTTP protocol tests, and `sidecar: false` rejects `command`/`cwd` at plugin load. Malformed responses reject with `BROWSER_PROTOCOL`; a lost or unreachable runtime rejects with `BROWSER_RUNTIME_UNAVAILABLE`. Provenance and upstream-contribution candidates live in the package's [UPSTREAM.md](../../packages/browser/browser-runtime-tandem/UPSTREAM.md).
 
 ## Discovery and replay
 
-The Consumer registers nine deferred ordinary tools. `tool_search` returns schemas without activating tools, and current eligibility remains authoritative. Every operation renders complete Browser facts, including current control ownership, into the durable ordinary tool result. When a calling Agent Session is present and the Workspace binder is composed, created tabs also become Session-owned Workspace facts. Together with logged request headers and `browser/workspace` snapshots, the Session can reconstruct model-visible Browser facts and Session-local Workspace ownership.
+The Consumer registers seven deferred ordinary tools. `tool_search` returns schemas without activating tools, and current eligibility remains authoritative. Every operation renders complete Browser page facts into the durable ordinary tool result. When a calling Agent Session is present and the Workspace binder is composed, created tabs also become Session-owned Workspace facts. Together with logged request headers and `browser/workspace` snapshots, the Session can reconstruct model-visible Browser facts and Session-local Workspace ownership.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -125,42 +124,16 @@ abstract screenshot(request: BrowserObserveRequest): Promise<BrowserScreenshot>
 abstract focus(request: BrowserMutationRequest): Promise<BrowserPageState>
 
 /**
- * Record one human pointer or keyboard mutation after checking its expected revision.
- * @param request - Target, expected revision, optional URL or page text, and cancellation.
- * @returns committed open page whose `controlOwner` is `human` and whose revision replaces
- * the caller's prior revision. Session, Profile, browser instance, and tab identities stay
- * the same. The Agent must observe again before a later mutation.
+ * Apply synthetic Agent input after checking the expected revision.
+ * @param request - Target, expected revision, URL or page text, and cancellation.
+ * @returns committed open page whose revision replaces the caller's prior revision. Session,
+ * Profile, browser instance, and tab identities stay the same.
  * @throws `BrowserRuntimeError` with `BROWSER_ABORTED`, `BROWSER_DISPOSED`, `BROWSER_NOT_FOUND`,
  * `BROWSER_NOT_OPEN`, `BROWSER_REVISION_CONFLICT`, or `BROWSER_UNKNOWN_URL` when the
  * corresponding precondition fails before commit, `BROWSER_PROTOCOL` when the upstream runtime
  * breaks its response protocol, or `BROWSER_RUNTIME_UNAVAILABLE` when it cannot be reached.
  */
 abstract input(request: BrowserInputRequest): Promise<BrowserPageState>
-
-/**
- * Record reported human ownership after checking the expected revision. Identities stay
- * the same. The lock is the revision: a later Agent mutation that observes the current
- * revision may reclaim the tab without `returnControl`.
- * @param request - Target, expected revision, and cancellation signal.
- * @returns committed open page whose `controlOwner` is `human`.
- * @throws `BrowserRuntimeError` with `BROWSER_ABORTED`, `BROWSER_DISPOSED`, `BROWSER_NOT_FOUND`,
- * `BROWSER_NOT_OPEN`, or `BROWSER_REVISION_CONFLICT` when the corresponding precondition fails
- * before commit, `BROWSER_PROTOCOL` when the upstream runtime breaks its response protocol, or
- * `BROWSER_RUNTIME_UNAVAILABLE` when it cannot be reached.
- */
-takeover(request: BrowserMutationRequest): Promise<BrowserPageState>
-
-/**
- * Record reported Agent ownership after checking the expected revision. Identities stay
- * the same. The lock is the revision; this method does not add a second lock.
- * @param request - Target, expected revision, and cancellation signal.
- * @returns committed open page whose `controlOwner` is `agent`.
- * @throws `BrowserRuntimeError` with `BROWSER_ABORTED`, `BROWSER_DISPOSED`, `BROWSER_NOT_FOUND`,
- * `BROWSER_NOT_OPEN`, or `BROWSER_REVISION_CONFLICT` when the corresponding precondition fails
- * before commit, `BROWSER_PROTOCOL` when the upstream runtime breaks its response protocol, or
- * `BROWSER_RUNTIME_UNAVAILABLE` when it cannot be reached.
- */
-returnControl(request: BrowserMutationRequest): Promise<BrowserPageState>
 
 /**
  * Close the addressed tab after checking its expected revision. Temporary Profiles discard
@@ -175,13 +148,13 @@ returnControl(request: BrowserMutationRequest): Promise<BrowserPageState>
 abstract close(request: BrowserMutationRequest): Promise<BrowserClosedState>
 ```
 
-Source: [`packages/browser/browser-runtime/src/index.ts:112`](../../packages/browser/browser-runtime/src/index.ts)
+Source: [`packages/browser/browser-runtime/src/index.ts:108`](../../packages/browser/browser-runtime/src/index.ts)
 
 <a id="ctxbrowserworkspace--browserworkspacebinder"></a>
 
 ### `ctx.browserWorkspace` — `BrowserWorkspaceBinder`
 
-Bind Browser Runtime identities to one Session log and project Dock plus instance and tab ownership from durable Session facts.
+Bind Browser Runtime identities to one Session log and project instance and tab ownership from durable Session facts.
 
 ```ts cordis-catalog
 /**
@@ -190,21 +163,6 @@ Bind Browser Runtime identities to one Session log and project Dock plus instanc
  * @returns the last logged snapshot, or the empty Workspace.
  */
 snapshot(session: Session): BrowserWorkspaceProjection
-
-/**
- * Record Dock visibility and preferred width for one Session.
- * @param request - Session, open flag, and optional width.
- * @returns the committed Workspace snapshot.
- */
-setDock(request: BrowserWorkspaceDockRequest): BrowserWorkspaceProjection
-
-/**
- * Record Dock visibility and width for the Session named on the wire.
- * @param sessionId - Owning Session identity.
- * @param request - Open flag and optional preferred width.
- * @returns the committed Workspace snapshot.
- */
-@Remote('setDock') remoteSetDock(sessionId: SessionId, request: BrowserWorkspaceDockMutation): BrowserWorkspaceProjection
 
 /**
  * Observe one Session-owned tab named on the wire.
@@ -243,32 +201,14 @@ setDock(request: BrowserWorkspaceDockRequest): BrowserWorkspaceProjection
 @Remote('navigate') remoteNavigate( sessionId: SessionId, target: BrowserTarget, expectedRevision: number, url: string, ): Promise<BrowserPageState>
 
 /**
- * Record one human mutation on a Session-owned tab named on the wire.
+ * Send one Agent-specified synthetic input to a Session-owned tab named on the wire.
  * @param sessionId - Owning Session identity.
  * @param target - Complete tab identity.
  * @param expectedRevision - Latest revision returned by a browser operation.
- * @param input - Optional URL or text produced by the human gesture.
- * @returns the committed open page whose `controlOwner` is `human`.
+ * @param input - URL or text supplied by the Agent.
+ * @returns the committed open page.
  */
 @Remote('input') remoteInput( sessionId: SessionId, target: BrowserTarget, expectedRevision: number, input: { readonly url?: string; readonly text?: string }, ): Promise<BrowserPageState>
-
-/**
- * Record reported human ownership of one Session-owned tab named on the wire.
- * @param sessionId - Owning Session identity.
- * @param target - Complete tab identity.
- * @param expectedRevision - Latest revision returned by a browser operation.
- * @returns the committed open page whose `controlOwner` is `human`.
- */
-@Remote('takeover') remoteTakeover(sessionId: SessionId, target: BrowserTarget, expectedRevision: number): Promise<BrowserPageState>
-
-/**
- * Record reported Agent ownership of one Session-owned tab named on the wire.
- * @param sessionId - Owning Session identity.
- * @param target - Complete tab identity.
- * @param expectedRevision - Latest revision returned by a browser operation.
- * @returns the committed open page whose `controlOwner` is `agent`.
- */
-@Remote('returnControl') remoteReturnControl( sessionId: SessionId, target: BrowserTarget, expectedRevision: number, ): Promise<BrowserPageState>
 
 /**
  * Close one Session-owned tab named on the wire.
@@ -278,6 +218,14 @@ setDock(request: BrowserWorkspaceDockRequest): BrowserWorkspaceProjection
  * @returns the terminal close receipt.
  */
 @Remote('close') remoteClose(sessionId: SessionId, target: BrowserTarget, expectedRevision: number): Promise<BrowserClosedState>
+
+/**
+ * Create one tab in the Session named on the wire.
+ * @param sessionId - Owning Session identity.
+ * @param request - Wire create identity and optional attach.
+ * @returns the committed open page.
+ */
+@Remote('create') remoteCreate(sessionId: SessionId, request: BrowserWorkspaceCreateRemoteRequest): Promise<BrowserPageState>
 
 /**
  * Create one tab in the Session's Browser Workspace.
@@ -316,25 +264,11 @@ async screenshot(request: BrowserWorkspaceObserveRequest): Promise<BrowserScreen
 async focus(request: BrowserWorkspaceMutationRequest): Promise<BrowserPageState>
 
 /**
- * Record one human pointer or keyboard mutation on a Session-owned tab.
+ * Send one Agent-specified synthetic input to a Session-owned tab.
  * @param request - Session-bound input request.
- * @returns the committed open page whose `controlOwner` is `human`.
+ * @returns the committed open page.
  */
 async input(request: BrowserWorkspaceInputRequest): Promise<BrowserPageState>
-
-/**
- * Record reported human ownership of one Session-owned tab.
- * @param request - Session-bound mutation request.
- * @returns the committed open page whose `controlOwner` is `human`.
- */
-async takeover(request: BrowserWorkspaceMutationRequest): Promise<BrowserPageState>
-
-/**
- * Record reported Agent ownership of one Session-owned tab.
- * @param request - Session-bound mutation request.
- * @returns the committed open page whose `controlOwner` is `agent`.
- */
-async returnControl(request: BrowserWorkspaceMutationRequest): Promise<BrowserPageState>
 
 /**
  * Close one Session-owned tab and drop it from the Session Workspace.
@@ -352,7 +286,7 @@ async cleanup(session: Session): Promise<void>
 
 Types: [Session](session.md) · [SessionId](core.md)
 
-Source: [`packages/browser/browser-workspace/src/index.ts:98`](../../packages/browser/browser-workspace/src/index.ts)
+Source: [`packages/browser/browser-workspace/src/index.ts:101`](../../packages/browser/browser-workspace/src/index.ts)
 
 <a id="browser-events"></a>
 
@@ -375,5 +309,5 @@ Post-commit Browser Runtime lifecycle notification. Providers contain synchronou
 'browser/runtime-state'(state: BrowserRuntimeState): void
 ```
 
-Source: [`packages/browser/browser-runtime/src/index.ts:102`](../../packages/browser/browser-runtime/src/index.ts)
+Source: [`packages/browser/browser-runtime/src/index.ts:98`](../../packages/browser/browser-runtime/src/index.ts)
 <!-- END GENERATED cordis-surface -->

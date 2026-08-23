@@ -26,8 +26,8 @@ This extends the Session-owned listing in the [Session-owned Browser Workspace A
 
 ## Consequences
 
-A revision-advancing mutation writes `browser/workspace` even when `controlOwner` is unchanged. The keyless fixture Session still has one tab, so the assembled Dock snapshot cannot exercise two-tab focus or close.
+A revision-advancing mutation writes `browser/workspace`. The keyless fixture Session still has one tab, so the assembled snapshot cannot exercise two-tab focus or close.
 
 ## Testing
 
-`packages/browser/browser-workspace/tests/workspace.spec.ts` pins listed revisions on a two-tab focus and close. `packages/client/ui-browser/tests/browser-dock.client.spec.tsx` and `browser-preview.client.spec.tsx` assert the addressed listing revision. The [Dock navigate chrome Agent Note](2026-08-20-dock-navigate-chrome.md) owns re-observing the active tab when that listed revision advances. `apps/web/tests/browser-dock.snapshot.ts` pins the restored preview and the expanded Dock chrome after open and Refresh. The headless `browser-runtime` and `browser-runtime-tandem` stream-json snapshots now carry per-tab revision on every `browser/workspace` event.
+`packages/browser/browser-workspace/tests/workspace.spec.ts` pins listed revisions on a two-tab focus and close. `packages/client/ui-browser/tests/model.client.spec.ts` and `browser-preview.client.spec.tsx` assert the addressed listing revision. The [Dock navigate chrome Agent Note](2026-08-20-dock-navigate-chrome.md) owns re-observing the active tab when that listed revision advances. `apps/web/tests/browser-dock.snapshot.ts` pins the restored preview and the expanded Dock chrome after open and Refresh. The headless `browser-runtime` and `browser-runtime-tandem` stream-json snapshots now carry per-tab revision on every `browser/workspace` event.

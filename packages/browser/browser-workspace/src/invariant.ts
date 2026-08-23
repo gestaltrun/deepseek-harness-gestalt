@@ -16,11 +16,6 @@ export const inject = ['invariants']
 function validateSnapshot(value: unknown, fail: InvariantFailure): void {
   if (typeof value !== 'object' || value === null) fail('browser/workspace must be an object')
   const snapshot = value as BrowserWorkspaceProjection
-  if (typeof snapshot.dockOpen !== 'boolean') fail('browser/workspace dockOpen must be a boolean')
-  if (!Number.isSafeInteger(snapshot.dockWidth) || snapshot.dockWidth < 1) {
-    fail('browser/workspace dockWidth must be a positive safe integer')
-  }
-  if (typeof snapshot.userCollapsed !== 'boolean') fail('browser/workspace userCollapsed must be a boolean')
   if (!Array.isArray(snapshot.workspaces)) fail('browser/workspace workspaces must be an array')
   const workspaceIds = new Set<string>()
   for (const rawWorkspace of snapshot.workspaces) {
@@ -51,9 +46,6 @@ function validateSnapshot(value: unknown, fail: InvariantFailure): void {
         const tab = rawTab as Record<string, unknown>
         if (typeof tab.tabId !== 'string' || tab.tabId.length === 0) {
           fail('browser/workspace tabId must be a non-empty string')
-        }
-        if (tab.controlOwner !== 'agent' && tab.controlOwner !== 'human') {
-          fail('browser/workspace controlOwner must be agent or human')
         }
         if (typeof tab.revision !== 'number' || !Number.isSafeInteger(tab.revision) || tab.revision < 0) {
           fail('browser/workspace revision must be a non-negative safe integer')

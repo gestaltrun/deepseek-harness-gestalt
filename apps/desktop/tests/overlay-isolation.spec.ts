@@ -31,6 +31,7 @@ describe('Desktop overlay isolation', () => {
     expect(desktop).not.toMatch(/^\s+command:/m)
     expect(desktop).not.toMatch(/^\s+cwd:/m)
     expect(desktop).not.toMatch(/DSH_TANDEM_BIN/)
+    expect(desktop).toMatch(/id: web-runtime[\s\S]*openBrowser: false/)
   })
 
   it('composes Schedule through the Desktop profile path after its required services', () => {
@@ -68,6 +69,8 @@ describe('Desktop overlay isolation', () => {
       expect(desktop).toMatch(/@deepseek-ai\/dsh-browser-runtime-tandem/)
       expect(desktop).toMatch(/sidecar: false/)
       expect(desktop).toMatch(/disabled: true/)
+      expect(desktop).toMatch(/openBrowser: false/)
+      expect(web).toMatch(/openBrowser: !!js ctx\.webStartup\.openBrowser/)
     } finally {
       rmSync(home, { recursive: true, force: true })
     }

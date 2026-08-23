@@ -90,7 +90,7 @@ describe('CI workflow', () => {
     }
     const job = workflow.jobs['sandbox-e2e']
     if (!Array.isArray(job.steps)) throw new TypeError('sandbox-e2e must define steps')
-    const checkout = job.steps.find(
+    const checkout = (job.steps as unknown[]).find(
       step => isRecord(step) && typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'),
     )
 

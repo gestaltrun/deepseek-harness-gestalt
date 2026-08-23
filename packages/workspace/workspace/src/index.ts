@@ -68,6 +68,17 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     workspaceRegistry: WorkspaceRegistry
   }
+
+  interface Events {
+    /**
+     * Awaited process-resource cleanup after one Session is durably archived.
+     * Idempotent archive requests repeat the cleanup opportunity without
+     * rewriting the archive set.
+     * @param sessionId - Session whose process-local resources must close.
+     * @mode parallel
+     */
+    'workspace/session-archived'(sessionId: SessionId): Promise<void> | void
+  }
 }
 
 interface BootstrapGroup {
@@ -245,12 +256,14 @@ export class WorkspaceRegistry extends Service {
     return this.enqueueOperation(async () => {
       // The chain slot serializes against every other registry write, so this
       // check-then-write pair cannot interleave with another archive.
-      if (this.requireState().archivedSessionIds.includes(sessionId)) return
-      if (!(await this.sessionKnown(sessionId))) {
-        throw new WorkspaceUnknownSessionError(sessionId)
+      if (!this.requireState().archivedSessionIds.includes(sessionId)) {
+        if (!(await this.sessionKnown(sessionId))) {
+          throw new WorkspaceUnknownSessionError(sessionId)
+        }
+        const state = this.requireState()
+        await this.setState({ ...state, archivedSessionIds: [...state.archivedSessionIds, sessionId] })
       }
-      const state = this.requireState()
-      await this.setState({ ...state, archivedSessionIds: [...state.archivedSessionIds, sessionId] })
+      await this.ctx.parallel('workspace/session-archived', sessionId)
     })
   }
 

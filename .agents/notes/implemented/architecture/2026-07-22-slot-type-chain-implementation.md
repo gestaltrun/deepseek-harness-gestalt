@@ -12,11 +12,11 @@ The page is composed at runtime from independently loaded plugins, so the UI nee
 
 ## Decision
 
-One sentence: **the ui-renderer renders only `'root'`; a plugin composes UI through a single `register` call that simultaneously occupies a slot, declares+authorizes its child slots, declares its store, and injects its business face; components are pure functions whose props arrive in four shares, each auto-derived from its single source of truth.**
+One sentence: **the ui-renderer's application assembly renders `'root'`; a plugin composes UI through a single `register` call that simultaneously occupies a slot, declares+authorizes its child slots, declares its store, and injects its business face; components are pure functions whose props arrive in four shares, each auto-derived from its single source of truth.** A feature shell may mount a declared non-root Session slot through the framework's [explicit Session mount](2026-08-23-explicit-session-slot-mounts.md), without adding another definition or component-import API.
 
 ### 'root' is the only a-priori slot
 
-`SlotRegistry` (client runtime) declares `'root'` at construction — single/root, `owner: {}` — and its `SlotMap` merge lives in the runtime package. The ui-renderer's entire assembly is `ctx.slots.renderSlot('root', {})`: the only ctx-level render entry; any other key, a missing renderer, or an unregistered root fails loud (no fallback).
+`SlotRegistry` (client runtime) declares `'root'` at construction — single/root, `owner: {}` — and its `SlotMap` merge lives in the runtime package. The ui-renderer's application assembly is `ctx.slots.renderSlot('root', {})`; any other key passed to that method, a missing renderer, or an unregistered root fails loud (no fallback). `renderSessionSlot()` is the separate framework entry for an explicit non-root Session mount and validates the target declaration and scope.
 
 ### register is the single API; children = declaration + authorization + runtime spec
 
@@ -90,7 +90,7 @@ Hooks are framework-made only: `useSession`, `useSessions`, `useWorkspaces`, `us
 
 ### Tree context and the renderer contract
 
-`SessionProvider` is a framework component **delivered as a standard-kit seat**: an entry whose `children` declare a session-scope slot receives it as a prop (type in ui-slots, value injected by the renderer) — components never value-import it. It is self-wired (it reads the runtime's current-session state internally; the assembler passes nothing), render-prop shaped — `children(sessionId)` with an `empty` branch, remounting under `key={sessionId}`. `BindingContext` is machinery-internal; business components see zero React contexts. Inject factories execute inside the outlet on purpose (per-entry error boundaries catch them; a crashing registrant blacks out only its own entry while assembly errors rethrow); the outlet reads tree context as a machinery-only implicit parameter — the "identity from the register closure, situation from the tree position" split.
+`SessionProvider` is a framework component **delivered as a standard-kit seat**: an entry whose `children` declare a session-scope slot receives it as a prop (type in ui-slots, value injected by the renderer) — components never value-import it. It follows the runtime's current Session when the assembler passes no identity; an explicit Session mount supplies an id without moving shell selection. Both forms are render-prop shaped — `children(sessionId)` with an `empty` branch, remounting under `key={sessionId}`. `BindingContext` is machinery-internal; business components see zero React contexts. Inject factories execute inside the outlet on purpose (per-entry error boundaries catch them; a crashing registrant blacks out only its own entry while assembly errors rethrow); the outlet reads tree context as a machinery-only implicit parameter — the "identity from the register closure, situation from the tree position" split.
 
 Rendering lives behind an installation contract so the runtime stays React-free: `SlotRenderer` (interface in ui-slots, implementation `createSlotRenderer()` in ui-renderer) is installed once at shell boot via `ctx.slots.install(...)`; double install and render-before-install throw. Ownership bookkeeping is a single `Map<key, entry>` in the service — ledger, slots, contributions, render bindings, and store instances all live and die on the one entry axis, which closes the stale-authority window across plugin reloads by construction (a disposed entry's captured `renderSlot` throws a stale-authorization error on entry).
 

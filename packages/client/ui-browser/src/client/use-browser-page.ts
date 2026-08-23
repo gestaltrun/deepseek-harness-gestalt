@@ -20,6 +20,7 @@ export interface BrowserPageFacts {
  * @param screenshot - Session-bound screenshot remote.
  * @param listedRevision - Binder-committed revision for this tab, or undefined
  *   while none is selected. A later revision re-observes the same tab.
+ * @param onMissingTarget - Optional recovery for a projected target absent from the current Runtime.
  * @returns the latest open page and screenshot, if any.
  */
 export function useBrowserPage(
@@ -27,6 +28,7 @@ export function useBrowserPage(
   observe: (target: BrowserTarget) => Promise<BrowserRuntimeState>,
   screenshot: (target: BrowserTarget) => Promise<BrowserScreenshot>,
   listedRevision?: number,
+  onMissingTarget?: (target: BrowserTarget) => BrowserPageState | undefined | Promise<BrowserPageState | undefined>,
 ): BrowserPageFacts {
   const [page, setPage] = useState<BrowserPageState | undefined>()
   const [shot, setShot] = useState<BrowserScreenshot | undefined>()
@@ -62,15 +64,33 @@ export function useBrowserPage(
           if (wasCancelled()) return
           setShot(undefined)
         }
-      } catch {
-        // Observe can reject when the Session binding is not yet on the
-        // Remote, or the Runtime no longer has this tab. The chrome stays
-        // empty until the next tab-identity or listed-revision change retries.
+      } catch (error) {
+        // Only a missing Runtime target invokes replacement. Other failures
+        // leave the chrome empty until the target or listing revision changes.
+        if (wasCancelled() || !isBrowserTargetMissing(error)) return
+        const recovered = await onMissingTarget?.(target)
+        if (wasCancelled() || recovered === undefined) return
+        setPage(recovered)
+        try {
+          const nextShot = await screenshot(recovered.target)
+          if (!wasCancelled()) setShot(nextShot)
+        } catch {
+          if (!wasCancelled()) setShot(undefined)
+        }
       }
     }
     void load()
     return () => { cancelled = true }
-  }, [observe, screenshot, tabKey, listedRevision])
+  }, [observe, screenshot, tabKey, listedRevision, onMissingTarget])
 
   return { page, screenshot: shot }
+}
+
+const TARGET_MISSING = /BROWSER_NOT_FOUND|browser target is not present/i
+
+/** True when observe rejected because the current Runtime does not own the projected target. */
+function isBrowserTargetMissing(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  if ('code' in error && error.code === 'BROWSER_NOT_FOUND') return true
+  return error instanceof Error && TARGET_MISSING.test(error.message)
 }

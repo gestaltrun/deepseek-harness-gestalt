@@ -99,6 +99,52 @@ describe('createFixtureFaces browserWorkspace remotes', () => {
     expect(observed).toMatchObject({ status: 'open', title: 'Example Domain' })
   })
 
+  it('retains the projection while simulating a Runtime restart until create replaces the page', async () => {
+    const { rpc } = createFixtureFaces({ browserRuntimeRestart: true })
+    const missing = await rpc.call('/api', 'browserWorkspace/observe', {
+      args: { sessionId: sid('fx-alpha'), target: TARGET },
+    })
+    expect(missing).toMatchObject({
+      ok: false,
+      error: { code: 'internal', message: 'browser target is not present' },
+    })
+    const created = await callRemote<{ status: string; url: string }>(
+      rpc,
+      'browserWorkspace/create',
+      { sessionId: sid('fx-alpha'), request: { profile: 'shared' } },
+    )
+    expect(created).toMatchObject({ status: 'open', url: 'about:blank' })
+    const observed = await callRemote<{ status: string; url: string }>(
+      rpc,
+      'browserWorkspace/observe',
+      { sessionId: sid('fx-alpha'), target: TARGET },
+    )
+    expect(observed).toMatchObject({ status: 'open', url: 'about:blank' })
+  })
+
+  it('exposes the live revision after a stale projected close is rejected', async () => {
+    const { rpc } = createFixtureFaces({ browserCloseRevisionConflict: true })
+    const conflict = await rpc.call('/api', 'browserWorkspace/close', {
+      args: { sessionId: sid('fx-alpha'), target: TARGET, expectedRevision: 1 },
+    })
+    expect(conflict.ok).toBe(false)
+    if (conflict.ok) throw new Error('expected stale close conflict')
+    expect(conflict.error.code).toBe('internal')
+    expect(conflict.error.message).toContain('BROWSER_REVISION_CONFLICT')
+    const observed = await callRemote<{ status: string; revision: number }>(
+      rpc,
+      'browserWorkspace/observe',
+      { sessionId: sid('fx-alpha'), target: TARGET },
+    )
+    expect(observed).toMatchObject({ status: 'open', revision: 3 })
+    const closed = await callRemote<{ status: string; revision: number }>(
+      rpc,
+      'browserWorkspace/close',
+      { sessionId: sid('fx-alpha'), target: TARGET, expectedRevision: observed.revision },
+    )
+    expect(closed).toMatchObject({ status: 'closed', revision: 4 })
+  })
+
   it('rejects an unknown Session', async () => {
     const { rpc } = createFixtureFaces()
     const missing = await rpc.call('/api', 'browserWorkspace/observe', {

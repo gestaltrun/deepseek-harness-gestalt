@@ -125,9 +125,9 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
       throw new RemoteAttachmentError('ATTACHMENT_LIMIT_EXCEEDED', 'Remote attachment exceeds the per-blob byte ceiling')
     }
     const capability = parseAttachmentCapability(randomBytes(32).toString('base64url'))
+    const capabilityDigest = digest(capability)
     const expiresAt = input.now + this.capabilityLifetimeMs
     try {
-      await this.flushQuotaReleases()
       await this.transaction(async (client) => {
         await this.lockCapacity(client)
         const retired = await client.query(
@@ -149,18 +149,28 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
              database_identity, capability_digest, pairing_id, ciphertext, expires_at,
              quota_reservation_id, claim_token
            ) VALUES ($1,$2,$3,$4,$5,$6,NULL)`,
-          [this.databaseIdentity, digest(capability), input.pairingId, Buffer.from(input.ciphertext), expiresAt,
+          [this.databaseIdentity, capabilityDigest, input.pairingId, Buffer.from(input.ciphertext), expiresAt,
             input.quota?.id ?? null],
         )
       })
     } catch (error) {
+      let outcome: 'committed' | 'absent'
+      try {
+        outcome = await this.readPublishOutcome(capabilityDigest, input, expiresAt)
+      } catch (readbackError) {
+        throw new Error('PostgreSQL attachment publish outcome is uncertain', {
+          cause: new AggregateError([error, readbackError]),
+        })
+      }
+      if (outcome === 'committed') {
+        return await this.finishCommittedPublish(capability, input.ciphertext.byteLength, expiresAt)
+      }
       try { await input.quota?.release() } catch (cleanupError) {
         console.error('[platform] PostgreSQL attachment quota cleanup after publish failure failed:', cleanupError)
       }
       throw error
     }
-    await this.flushQuotaReleases()
-    return { capability, byteLength: input.ciphertext.byteLength, expiresAt }
+    return await this.finishCommittedPublish(capability, input.ciphertext.byteLength, expiresAt)
   }
 
   override async inspect(input: {
@@ -504,6 +514,48 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`remote-attachments:${this.databaseIdentity}`])
   }
 
+  private async readPublishOutcome(
+    capabilityDigest: Uint8Array,
+    input: {
+      pairingId: PersonalPairingId
+      ciphertext: Uint8Array
+      quota?: RemoteAttachmentQuotaReservation
+    },
+    expiresAt: number,
+  ): Promise<'committed' | 'absent'> {
+    const selected = await this.pool.query(
+      `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id, claim_token
+         FROM remote_attachment_blobs
+        WHERE database_identity = $1 AND capability_digest = $2`,
+      [this.databaseIdentity, capabilityDigest],
+    )
+    if (selected.rows.length === 0) return 'absent'
+    if (selected.rows.length !== 1) throw new TypeError('PostgreSQL attachment publish readback is invalid')
+    const row = attachmentRow(selected.rows[0], this.maxBlobBytes)
+    if (row === undefined
+      || row.pairing_id !== input.pairingId
+      || !sameBytes(row.capability_digest, capabilityDigest)
+      || !sameBytes(row.ciphertext, input.ciphertext)
+      || row.expires_at !== expiresAt
+      || row.quota_reservation_id !== input.quota?.id) {
+      throw new TypeError('PostgreSQL attachment publish readback is invalid')
+    }
+    return 'committed'
+  }
+
+  private async finishCommittedPublish(
+    capability: AttachmentCapability,
+    byteLength: number,
+    expiresAt: number,
+  ): Promise<RemoteAttachmentGrant> {
+    try {
+      await this.flushQuotaReleases()
+    } catch (cleanupError) {
+      console.error('[platform] PostgreSQL attachment quota cleanup after committed publish failed:', cleanupError)
+    }
+    return { capability, byteLength, expiresAt }
+  }
+
   private async recordQuotaReleases(
     client: PlatformSqlClient,
     rows: readonly Record<string, unknown>[],
@@ -574,6 +626,10 @@ function attachmentRow(
 function reservationIds(rows: readonly Record<string, unknown>[]): AttachmentBlobReservationId[] {
   return rows.flatMap(row => typeof row.quota_reservation_id === 'string'
     ? [parseAttachmentBlobReservationId(row.quota_reservation_id)] : [])
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength && left.every((value, index) => value === right[index])
 }
 
 function pairingMismatch(): RemoteAttachmentError {

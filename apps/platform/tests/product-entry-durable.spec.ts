@@ -465,7 +465,6 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
   )
 
   it.each([
-    'publish-retire',
     'expired-consume',
     'complete',
     'expired-abandon',
@@ -508,9 +507,6 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
 
     let removal: Promise<unknown>
     switch (operation) {
-      case 'publish-retire':
-        removal = store.publish({ pairingId, ciphertext: Uint8Array.of(8), now: 200 })
-        break
       case 'expired-consume':
         removal = store.consume({ pairingId, capability: grant.capability, now: 200 })
         break
@@ -554,6 +550,59 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       'SELECT COUNT(*)::int AS count FROM remote_attachment_quota_releases WHERE database_identity = $1',
       [databaseIdentity],
     )).rows).toEqual([{ count: 0 }])
+  }, 60_000)
+
+  it('returns a committed publish while retaining failed retired-quota cleanup for the next operation', async () => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const context = new Context()
+    cleanups.push(async () => { await context.fiber.dispose() })
+    const databaseIdentity = 'attachment-publish-quota-outbox'
+    const pairingId = parsePersonalPairingId('pairing-publish-quota-outbox')
+    const reservationId = parseAttachmentBlobReservationId('quota-publish-outbox')
+    let cleanupAttempts = 0
+    const store = new PostgresRemoteAttachmentStore(context, databaseIdentity, pool, {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 100,
+      maxRetainedBlobs: 4,
+      quotaCleanup: {
+        release: async () => {
+          cleanupAttempts += 1
+          if (cleanupAttempts === 1) throw new Error('quota cleanup unavailable')
+        },
+      },
+    })
+    await store.migrate()
+    await completeAttachmentStorageCutover(
+      pool,
+      databaseIdentity,
+      'bridge',
+      'remote-attachments/publish-quota-outbox',
+      { maxBlobBytes: 1024, quotaCleanup: { release: async () => {} } },
+    )
+    await store.publish({
+      pairingId,
+      ciphertext: Uint8Array.of(1),
+      now: 100,
+      quota: { id: reservationId, release: async () => {} },
+    })
+
+    const grant = await store.publish({ pairingId, ciphertext: Uint8Array.of(2), now: 200 })
+    expect(grant).toMatchObject({ byteLength: 1, expiresAt: 300 })
+    expect((await pool.query(
+      'SELECT reservation_id FROM remote_attachment_quota_releases WHERE database_identity = $1',
+      [databaseIdentity],
+    )).rows).toEqual([{ reservation_id: reservationId }])
+
+    const consumption = await store.consume({ pairingId, capability: grant.capability, now: 201 })
+    expect(consumption.ciphertext).toEqual(Uint8Array.of(2))
+    expect(cleanupAttempts).toBe(2)
+    expect((await pool.query(
+      'SELECT COUNT(*)::int AS count FROM remote_attachment_quota_releases WHERE database_identity = $1',
+      [databaseIdentity],
+    )).rows).toEqual([{ count: 0 }])
+    await consumption.complete()
   }, 60_000)
 
   it('claims one OSS capability atomically across operated Platform instances', async () => {

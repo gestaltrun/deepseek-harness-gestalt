@@ -14,6 +14,12 @@ export function sidechatThreadIdOf(tab: SidebarTab): string | undefined {
   return typeof meta?.threadId === 'string' ? meta.threadId : undefined
 }
 
+/** Root Side Chat identity whose live handle belongs to this navigable tab. */
+export function sidechatRootThreadIdOf(tab: SidebarTab): string | undefined {
+  const meta = tab.meta as { rootThreadId?: unknown } | undefined
+  return typeof meta?.rootThreadId === 'string' ? meta.rootThreadId : sidechatThreadIdOf(tab)
+}
+
 function threadDisplayTitle(title: string): string {
   if (title === SIDE_NEW_THREAD_TITLE) return t('sideChatUntitled')
   return title.startsWith(SIDE_LABEL_PREFIX) ? title.slice(SIDE_LABEL_PREFIX.length) : title
@@ -32,10 +38,16 @@ export function SideChatView(props: {
     useCallback(() => ctx.sessions.list.getSnapshot(), [ctx]),
   )
   const threadId = sidechatThreadIdOf(tab)
+  const rootThreadId = sidechatRootThreadIdOf(tab)
   const provisional = (tab.meta as { provisional?: unknown } | undefined)?.provisional === true
   const summary = threadId === undefined ? undefined : list.byId[threadId]
   const published = summary?.blank === false
   const conversationHost = useRef<HTMLDivElement | null>(null)
+  const openSession = useCallback((sessionId: string): void => {
+    ctx.betterSidebar?.updateTab(tab.id, {
+      meta: { threadId: sessionId, ...(rootThreadId === undefined ? {} : { rootThreadId }) },
+    })
+  }, [ctx.betterSidebar, rootThreadId, tab.id])
 
   useEffect(() => {
     if (threadId === undefined || !provisional || published) return
@@ -72,8 +84,8 @@ export function SideChatView(props: {
   useEffect(() => {
     const host = conversationHost.current
     if (host === null || threadId === undefined) return
-    return ctx.uiRenderer.mountSession(host, 'conversation', threadId, { renderMode: 'sidechat' })
-  }, [ctx.uiRenderer, threadId])
+    return ctx.uiRenderer.mountSession(host, 'conversation', threadId, { renderMode: 'sidechat', openSession })
+  }, [ctx.uiRenderer, openSession, threadId])
 
   if (threadId === undefined) return null
 

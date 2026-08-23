@@ -124,6 +124,7 @@ describe('SubagentHeaderLineage', () => {
     const actionProps = {
       sessionId: side,
       renderMode: 'sidechat',
+      openSession: vi.fn(),
       useSessions: <T,>(select: (snapshot: SessionListState) => T): T => select(state),
       openChild: vi.fn(),
       refresh: vi.fn(),
@@ -132,7 +133,12 @@ describe('SubagentHeaderLineage', () => {
     } as unknown as SubagentHeaderActionProps
 
     const view = render(<SubagentHeaderAction {...actionProps} />)
-    expect(screen.getByRole('button', { name: '1 个子代理' })).toBeTruthy()
+    const trigger = screen.getByRole('button', { name: '1 个子代理' })
+    expect(trigger).toBeTruthy()
+    hoverCatalog(trigger)
+    fireEvent.click(screen.getByRole('treeitem', { name: /nested/ }))
+    expect(actionProps.openChild).not.toHaveBeenCalled()
+    expect(actionProps.openSession).toHaveBeenCalledWith(child)
 
     view.rerender(<SubagentHeaderAction {...actionProps} renderMode={undefined} />)
     expect(screen.queryByRole('button', { name: '1 个子代理' })).toBeNull()

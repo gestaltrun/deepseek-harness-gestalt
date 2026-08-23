@@ -14,7 +14,7 @@ Side Chat reuses the canonical Session conversation UI but its child Agent is ow
 
 Provisional summaries carry an explicit marker. Side Chat classifiers recognize that marker or the reserved title, while descendant indexing excludes the marker until the Host publishes the Session. Durable origin and parent fields become authoritative after publication.
 
-The shared composer plus button opens every registered `/` trigger source in the existing grouped menu. Side Chat keeps title and breadcrumb navigation absent, then contributes the rendered child's descendant catalog as its first header action, followed by background jobs and schedules. Job and schedule lists render through viewport portals whose right edge follows the trigger and whose left edge is clamped to the viewport.
+The shared composer plus button opens every registered `/` trigger source in the existing grouped menu. Side Chat keeps title and breadcrumb navigation absent, then contributes the rendered child's descendant catalog as its first header action, followed by background jobs and schedules. Descendant selection retargets the explicit Side Chat renderer instead of calling the shell-level subagent opener; the tab retains its root child id for live-handle disposal. Job and schedule lists render through viewport portals whose right edge follows the trigger and whose left edge is clamped to the viewport.
 
 ## Alternatives considered
 
@@ -28,8 +28,8 @@ The shared composer plus button opens every registered `/` trigger source in the
 
 ## Consequences
 
-Side Chat has one canonical conversation component tree and one feature-owned admission path. Opening a tab is topology-neutral until first submission; model and catalog interaction do not publish a Session. Permission changes remain synchronized with the direct parent, and queue edits and steering reach the live child inbox. Compact headers expose only the rendered child's descendants, and task lists remain visible at narrow sidebar widths. Each new feature-owned Session operation must extend the adapter and its owning route together rather than falling back to generic RPCs.
+Side Chat has one canonical conversation component tree and one feature-owned admission path. Opening a tab is topology-neutral until first submission; model and catalog interaction do not publish a Session. Permission changes remain synchronized with the direct parent, and queue edits and steering reach the live child inbox. Compact headers expose only the rendered child's descendants; selecting one keeps the shell's main Session and the Side Chat tab intact, while task lists remain visible at narrow sidebar widths. Each new feature-owned Session operation must extend the adapter and its owning route together rather than falling back to generic RPCs.
 
 ## Testing
 
-Runtime and package tests pin adapter routing, provisional topology exclusion, grouped trigger launch, model selection, queue steering, permission synchronization, child-scoped header actions, and viewport popover placement. The assembled Web replay opens a provisional Side Chat, reads a seeded skill before child creation, submits the first message, changes the model, synchronizes permission to parent and child, and verifies the child transcript.
+Runtime and package tests pin adapter routing, provisional topology exclusion, grouped trigger launch, model selection, queue steering, permission synchronization, child-scoped header actions, local descendant retargeting, root-handle disposal, and viewport popover placement. The assembled Web replay opens a provisional Side Chat, reads a seeded skill before child creation, submits the first message, changes the model, synchronizes permission to parent and child, and verifies the child transcript.

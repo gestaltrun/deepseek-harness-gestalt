@@ -27,7 +27,8 @@ import type { HeroShellProps } from '../src/client/skeleton/EmptyHero.tsx'
 import { InputBar } from '../src/client/skeleton/InputBar.tsx'
 import type { InputBarProps } from '../src/client/skeleton/InputBar.tsx'
 import type {
-  ComposerBarOwnerProps, ConversationHeaderLineageOwnerProps,
+  ComposerBarOwnerProps, ConversationHeaderActionOwnerProps, ConversationHeaderLineageOwnerProps,
+  ConversationSessionHeaderOwnerProps,
 } from '../src/client/contract/slots.ts'
 import type { ViewTab } from '../src/client/contract/views.ts'
 
@@ -105,6 +106,8 @@ function mount(
     viewTabs?: ViewTab[]
     /** Render the canonical conversation inside the Side Chat shell. */
     renderMode?: 'sidechat'
+    /** Retarget callback supplied by an explicit secondary renderer. */
+    openSession?: (sessionId: SessionId) => void
   } = {},
 ) {
   const root = sid('root')
@@ -144,6 +147,7 @@ function mount(
   const open = vi.fn()
   const slotCalls: string[] = []
   const lineageOwners: ConversationHeaderLineageOwnerProps[] = []
+  const actionOwners: ConversationHeaderActionOwnerProps[] = []
   const viewTabs = options.viewTabs ?? [
     { id: 'chat', label: 'Chat' },
     { id: 'trajectory', label: 'Trajectory' },
@@ -166,7 +170,11 @@ function mount(
       lineageOwners.push(owner as ConversationHeaderLineageOwnerProps)
       return opts?.fallback ?? null
     }
+    if (key === 'conversation.session.header.actions') {
+      actionOwners.push(owner)
+    }
     if (key === 'conversation.session.header') {
+      const headerOwner = owner as ConversationSessionHeaderOwnerProps
       return (
         <ConversationSessionHeader
           sessionId={SID}
@@ -183,7 +191,8 @@ function mount(
           views={views}
           open={open}
           t={t}
-          renderMode={options.renderMode}
+          renderMode={headerOwner.renderMode}
+          openSession={headerOwner.openSession}
         />
       )
     }
@@ -277,10 +286,11 @@ function mount(
     selectWorkspace: retargetWorkspace,
     t,
     renderMode: options.renderMode,
+    openSession: options.openSession,
   }
   const view = render(<ConversationRoot {...props} />)
   return {
-    view, chat, sink, retargetWorkspace, session, slotCalls, lineageOwners, seatOwners, open,
+    view, chat, sink, retargetWorkspace, session, slotCalls, lineageOwners, actionOwners, seatOwners, open,
     pickerOwner: () => pickerOwner,
     rerender: () => { view.rerender(<ConversationRoot {...props} />) },
   }
@@ -362,9 +372,11 @@ describe('ConversationRoot resident composer', () => {
   })
 
   it('keeps Side Chat view tabs and actions without rendering Session navigation', () => {
+    const openSession = vi.fn()
     const b = mount(conversationSnapshot(), undefined, undefined, {
       summaryOrigin: 'subagent',
       renderMode: 'sidechat',
+      openSession,
     })
 
     expect(b.view.queryByRole('navigation', { name: '会话层级' })).toBeNull()
@@ -373,6 +385,7 @@ describe('ConversationRoot resident composer', () => {
     expect(b.slotCalls).not.toContain('conversation.session.header.lineage')
     expect(b.slotCalls).toContain('conversation.session.header.actions')
     expect(b.slotCalls).toContain('conversation.session.header.utilities')
+    expect(b.actionOwners.at(-1)).toMatchObject({ renderMode: 'sidechat', openSession })
   })
 
   it('keeps intermediate subagent breadcrumbs at the compact title size', () => {

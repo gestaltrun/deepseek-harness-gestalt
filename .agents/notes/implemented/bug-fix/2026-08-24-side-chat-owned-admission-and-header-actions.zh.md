@@ -14,7 +14,7 @@ Side Chat 复用标准 Session 对话 UI，但其子 Agent 归 subagent routing 
 
 临时摘要携带显式标记。Side Chat 分类器会识别该标记或保留标题，而后代索引会在 Host 发布 Session 之前排除该标记。发布后，持久 origin 与 parent 字段成为权威事实。
 
-共享 composer 的加号按钮会在既有分组菜单中打开 `/` trigger 下的所有已注册 source。Side Chat 继续省略标题和面包屑导航，并把当前渲染 child 的下级目录作为第一个头部操作，后面依次是后台任务与定时任务。后台任务和定时任务列表通过 viewport portal 渲染，右边缘跟随触发器，左边缘钳制在 viewport 内。
+共享 composer 的加号按钮会在既有分组菜单中打开 `/` trigger 下的所有已注册 source。Side Chat 继续省略标题和面包屑导航，并把当前渲染 child 的下级目录作为第一个头部操作，后面依次是后台任务与定时任务。选择下级会重定向显式 Side Chat renderer，而不是调用外壳级 subagent 打开器；标签页会保留根 child id，用于释放在线句柄。后台任务和定时任务列表通过 viewport portal 渲染，右边缘跟随触发器，左边缘钳制在 viewport 内。
 
 ## Alternatives considered
 
@@ -28,8 +28,8 @@ Side Chat 复用标准 Session 对话 UI，但其子 Agent 归 subagent routing 
 
 ## Consequences
 
-Side Chat 只有一棵标准对话组件树和一条功能自有准入路径。打开标签页在首次提交前不会改变拓扑；模型与 catalog 交互也不会发布 Session。权限变更与直接父会话保持同步，queue 编辑与 steering 会到达在线 child inbox。紧凑头部只展示当前渲染 child 的下级，任务列表在窄侧栏中仍完整可见。新增的功能自有 Session 操作必须同时扩展适配器及其归属路由，不能回退到通用 RPC。
+Side Chat 只有一棵标准对话组件树和一条功能自有准入路径。打开标签页在首次提交前不会改变拓扑；模型与 catalog 交互也不会发布 Session。权限变更与直接父会话保持同步，queue 编辑与 steering 会到达在线 child inbox。紧凑头部只展示当前渲染 child 的下级；选择下级时外壳主 Session 与 Side Chat 标签页都保持不变，任务列表在窄侧栏中仍完整可见。新增的功能自有 Session 操作必须同时扩展适配器及其归属路由，不能回退到通用 RPC。
 
 ## Testing
 
-运行时与包级测试固定适配器路由、临时拓扑排除、分组 trigger launcher、模型选择、queue steering、权限同步、child-scoped 头部操作与 viewport 弹层位置。装配后的 Web replay 会打开临时 Side Chat，在创建 child 前读取预置 skill，提交首条消息，切换模型，将权限同步到父会话与子会话，并验证子会话 transcript。
+运行时与包级测试固定适配器路由、临时拓扑排除、分组 trigger launcher、模型选择、queue steering、权限同步、child-scoped 头部操作、本地下级重定向、根句柄释放与 viewport 弹层位置。装配后的 Web replay 会打开临时 Side Chat，在创建 child 前读取预置 skill，提交首条消息，切换模型，将权限同步到父会话与子会话，并验证子会话 transcript。

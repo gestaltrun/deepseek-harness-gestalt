@@ -18,7 +18,7 @@ import { lazyChunkComponent } from '../lazy-chunk.tsx'
 import { GitView } from '../GitView.tsx'
 import { DiffTab } from '../DiffTab.tsx'
 import { SubagentView } from '../SubagentView.tsx'
-import { SideChatView, sidechatThreadIdOf } from '../SideChatView.tsx'
+import { SideChatView, sidechatRootThreadIdOf, sidechatThreadIdOf } from '../SideChatView.tsx'
 import { api } from '../api.ts'
 import { BrowserView } from '../BrowserView.tsx'
 import { IconTerminalOutline16, IconDiffOutline16, IconGlobeOutline16 } from '../icons.tsx'
@@ -195,7 +195,7 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
       // Closing the tab releases the thread's live agent while its Session
       // and history remain persisted.
       onClose: (tab) => {
-        const threadId = sidechatThreadIdOf(tab)
+        const threadId = sidechatRootThreadIdOf(tab)
         if (threadId !== undefined) {
           void api.sidechatDispose(threadId).catch(() => {})
         }

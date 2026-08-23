@@ -84,12 +84,14 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     kind: 'single',
     scope: 'session-maybe',
     summary: 'The whole center column, across both the no-session hero and a live conversation.',
-    doc: 'The whole center column, across both the no-session hero and a live\nconversation. OCCUPIED by ui-conversation\'s ConversationRoot, which\ndeclares the session body, composer, and input seats inside it —\nregistering here replaces the entire conversation surface (and removes\nevery seat it declares) rather than adding to it.\n\nCurrent-session-optional: the occupant owns both states without\nchanging its React identity, so it keeps its own state across a session\nswitch. It receives no owner props; session facts arrive through the\nframework hooks of the `session-maybe` scope.',
+    doc: 'The whole center column, across both the no-session hero and a live\nconversation. OCCUPIED by ui-conversation\'s ConversationRoot, which\ndeclares the session body, composer, and input seats inside it —\nregistering here replaces the entire conversation surface (and removes\nevery seat it declares) rather than adding to it.\n\nCurrent-session-optional: the occupant owns both states without\nchanging its React identity, so it keeps its own state across a session\nswitch. Optional owner props control an explicit secondary renderer;\nsession facts arrive through the framework hooks of the\n`session-maybe` scope.',
     registerOptions: [],
     ownerProps: [
-      '/** Conversation owner share: business state and actions belong to the registrant. */\nexport interface ConvOwnerProps {\n  /** Side Chat renders the same conversation registration without blank-session Hero chrome. */\n  renderMode?: \'sidechat\' | undefined\n}',
+      '/** Conversation owner share: business state and actions belong to the registrant. */\nexport interface ConvOwnerProps {\n  /** Side Chat renders the same conversation registration without blank-session Hero chrome. */\n  renderMode?: \'sidechat\' | undefined\n  /** Retarget an explicitly mounted conversation without changing the shell\'s selected Session. */\n  openSession?: ((sessionId: SessionId) => void) | undefined\n}',
     ],
-    ownerPropsReferences: [],
+    ownerPropsReferences: [
+      'SessionId',
+    ],
     standardProps: [
       'useSessions: SnapshotSelectorHook<SessionListState>',
       'useWorkspaces: SnapshotSelectorHook<import(\'./workspaces/service.ts\').WorkspaceListState>',
@@ -108,7 +110,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation\', () => ctx.slots.register(\n      { name: \'conversation\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-layout/src/client/index.ts:62',
+    source: 'packages/client/ui-layout/src/client/index.ts:63',
   },
   {
     key: 'conversation.browser.preview',
@@ -970,9 +972,11 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     doc: 'The strip above the session\'s scrollport: title, view tabs, and the\naction row. Taking this seat means rendering all three yourself, and it\nalso collapses `conversation.session.header.actions` — that additive\nseat is declared by whoever occupies this one, so replacing the header\ntakes every action entry down with it.',
     registerOptions: [],
     ownerProps: [
-      '/** Owner share selecting ordinary or Side Chat header posture. */\nexport interface ConversationSessionHeaderOwnerProps {\n  /** Side Chat keeps canonical Session chrome visible before its first prompt. */\n  renderMode?: \'sidechat\' | undefined\n}',
+      '/** Owner share selecting ordinary or Side Chat header posture. */\nexport interface ConversationSessionHeaderOwnerProps {\n  /** Side Chat keeps canonical Session chrome visible before its first prompt. */\n  renderMode?: \'sidechat\' | undefined\n  /** Retarget the explicit secondary renderer while preserving shell selection. */\n  openSession?: ((sessionId: SessionId) => void) | undefined\n}',
     ],
-    ownerPropsReferences: [],
+    ownerPropsReferences: [
+      'SessionId',
+    ],
     standardProps: [
       'useSessions: SnapshotSelectorHook<SessionListState>',
       'useWorkspaces: SnapshotSelectorHook<import(\'./workspaces/service.ts\').WorkspaceListState>',
@@ -1020,9 +1024,11 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Header actions derive their state from the standard session/global kit. */\nexport interface ConversationHeaderActionOwnerProps {\n  /** Side Chat suppresses context labels while retaining Session-owned actions. */\n  renderMode?: \'sidechat\' | undefined\n}',
+      '/** Header actions derive their state from the standard session/global kit. */\nexport interface ConversationHeaderActionOwnerProps {\n  /** Side Chat suppresses context labels while retaining Session-owned actions. */\n  renderMode?: \'sidechat\' | undefined\n  /** Retarget the explicit secondary renderer while preserving shell selection. */\n  openSession?: ((sessionId: SessionId) => void) | undefined\n}',
     ],
-    ownerPropsReferences: [],
+    ownerPropsReferences: [
+      'SessionId',
+    ],
     standardProps: [
       'useSessions: SnapshotSelectorHook<SessionListState>',
       'useWorkspaces: SnapshotSelectorHook<import(\'./workspaces/service.ts\').WorkspaceListState>',
@@ -1106,9 +1112,11 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Header actions derive their state from the standard session/global kit. */\nexport interface ConversationHeaderActionOwnerProps {\n  /** Side Chat suppresses context labels while retaining Session-owned actions. */\n  renderMode?: \'sidechat\' | undefined\n}',
+      '/** Header actions derive their state from the standard session/global kit. */\nexport interface ConversationHeaderActionOwnerProps {\n  /** Side Chat suppresses context labels while retaining Session-owned actions. */\n  renderMode?: \'sidechat\' | undefined\n  /** Retarget the explicit secondary renderer while preserving shell selection. */\n  openSession?: ((sessionId: SessionId) => void) | undefined\n}',
     ],
-    ownerPropsReferences: [],
+    ownerPropsReferences: [
+      'SessionId',
+    ],
     standardProps: [
       'useSessions: SnapshotSelectorHook<SessionListState>',
       'useWorkspaces: SnapshotSelectorHook<import(\'./workspaces/service.ts\').WorkspaceListState>',
@@ -1278,7 +1286,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'details\', () => ctx.slots.register(\n      { name: \'details\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-layout/src/client/index.ts:72',
+    source: 'packages/client/ui-layout/src/client/index.ts:73',
   },
   {
     key: 'root',
@@ -1743,7 +1751,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'shell.overlay\', () => ctx.slots.register(\n      { name: \'shell.overlay\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-layout/src/client/index.ts:83',
+    source: 'packages/client/ui-layout/src/client/index.ts:84',
   },
   {
     key: 'sidebar',

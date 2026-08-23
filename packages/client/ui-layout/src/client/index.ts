@@ -7,7 +7,7 @@
  * with the runtime sessions service. A second effect seats the theme
  * presenter, which projects ctx.theme snapshots onto document.body.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 import type { PanelActions } from './service.ts'
 import { AppFrame } from './AppFrame.tsx'
@@ -56,8 +56,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      *
      * Current-session-optional: the occupant owns both states without
      * changing its React identity, so it keeps its own state across a session
-     * switch. It receives no owner props; session facts arrive through the
-     * framework hooks of the `session-maybe` scope.
+     * switch. Optional owner props control an explicit secondary renderer;
+     * session facts arrive through the framework hooks of the
+     * `session-maybe` scope.
      */
     'conversation': { kind: 'single'; scope: 'session-maybe'; owner: ConvOwnerProps }
     /**
@@ -102,6 +103,8 @@ export interface SidebarOwnerProps {
 export interface ConvOwnerProps {
   /** Side Chat renders the same conversation registration without blank-session Hero chrome. */
   renderMode?: 'sidechat' | undefined
+  /** Retarget an explicitly mounted conversation without changing the shell's selected Session. */
+  openSession?: ((sessionId: SessionId) => void) | undefined
 }
 
 /** Details owner share: empty — sessionId arrives as a framework-standard prop. */

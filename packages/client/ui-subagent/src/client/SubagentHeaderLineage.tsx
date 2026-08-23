@@ -858,15 +858,18 @@ export function SubagentHeaderLineage({
 
 /** Render only the descendants rooted at the explicitly mounted Side Chat Session. */
 export function SubagentHeaderAction({
-  renderMode, sessionId, useSessions, openChild, refresh, setCatalogOpen, t,
+  renderMode, openSession, sessionId, useSessions, refresh, setCatalogOpen, t,
 }: SubagentHeaderActionProps) {
   if (renderMode !== 'sidechat') return null
+  const openEmbeddedChild = (address: SubagentAddress): void => {
+    openSession?.(address.childSessionId)
+  }
   return (
     <CatalogDropdown
       rootSessionId={sessionId}
       variant="count"
       useSessions={useSessions}
-      openChild={openChild}
+      openChild={openEmbeddedChild}
       refresh={refresh}
       setCatalogOpen={setCatalogOpen}
       t={t}

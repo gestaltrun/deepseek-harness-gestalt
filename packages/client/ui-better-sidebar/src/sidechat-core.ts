@@ -243,11 +243,6 @@ export function buildSidechatInheritance(events: readonly SidechatLogEvent[]): S
   return { seed, snapshot: null }
 }
 
-/** The seed half of {@link buildSidechatInheritance} (test convenience). */
-export function sidechatSeed(events: readonly SidechatLogEvent[]): SeedEvent[] {
-  return buildSidechatInheritance(events).seed
-}
-
 /**
  * Structured text snapshot of the parent's OPEN turn (from its `turn/start`
  * to the log tail): the accumulated assistant/reasoning output verbatim

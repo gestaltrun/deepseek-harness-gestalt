@@ -47,10 +47,7 @@ import { requireString, SidebarError } from './wire.ts'
 
 /** The four Side Chat routes of the sidebar API (wire method names). */
 export interface SidechatRoutes {
-  /** Create a side thread child seeded with the parent's log up to now.
-   *  `question` is optional: empty creates an EMPTY thread (Codex-style
-   *  immediate create); the first `sidechat.prompt` then carries the
-   *  boundary + snapshot and earns the thread its real label. */
+  /** Create an empty side thread child seeded with the parent's log up to now. */
   'sidechat.start'(payload: unknown): Promise<{ childId: string }>
   /** Deliver one queued or steering message to a thread (live, or cold-resumed). */
   'sidechat.prompt'(payload: unknown): Promise<{ accepted: true }>
@@ -172,8 +169,6 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
   const rawRoutes: SidechatRoutes = {
     'sidechat.start': async (payload: unknown) => {
       const sessionId = requireString(payload, 'sessionId')
-      const rawQuestion = (payload as { question?: unknown }).question
-      const question = typeof rawQuestion === 'string' ? rawQuestion.trim() : ''
       const parent = liveThreadAgent(ctx, sessionId)
       if (parent === undefined) {
         throw new SidebarError('sidechat-error', `parent session "${sessionId}" is not running`, 409)
@@ -187,7 +182,6 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
         resolvePresetId(parentSession.header, parentSession.events),
       )
       const childId = `session-${randomUUID()}` as SessionId
-      const label = question === '' ? SIDE_NEW_THREAD_TITLE : sideLabel(question)
       // Honest catalog citizenship: the durable descriptor keeps the thread
       // a HEALTHY row in the host's subagents.list — a cold child without
       // one is deterministically rendered as a 'corrupt' diagnostic. The
@@ -196,7 +190,7 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
       const descriptor = snapshotSubagentDescriptor({
         mode: 'continuable',
         provider: 'sidechat',
-        label,
+        label: SIDE_NEW_THREAD_TITLE,
         ...(parent.options.provider === undefined ? {} : { agentProvider: parent.options.provider }),
         ...(parent.options.model === undefined ? {} : { agentModel: parent.options.model }),
       })
@@ -236,24 +230,13 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
       // Pin the thread label so the client can identify its threads by
       // title prefix (the rename is a live-session op, no RPC fence).
       const titles = ctx.get('sessionTitle') as SidebarSessionTitleService | undefined
-      const pinTitle = (label: string): void => {
-        if (titles === undefined) return
+      if (inheritance.snapshot !== null) pendingSnapshots.set(childId, inheritance.snapshot)
+      if (titles !== undefined) {
         try {
-          titles.rename(handle.agent.session, label)
+          titles.rename(handle.agent.session, SIDE_NEW_THREAD_TITLE)
         } catch {
           // Keep the auto-generated title; the thread stays usable.
         }
-      }
-      if (question === '') {
-        // Codex-style immediate create: no prompt yet — the composer owns
-        // the first message; the snapshot waits for it.
-        if (inheritance.snapshot !== null) pendingSnapshots.set(childId, inheritance.snapshot)
-        pinTitle(SIDE_NEW_THREAD_TITLE)
-      } else {
-        const promptParts = [SIDE_BOUNDARY_PROMPT]
-        if (inheritance.snapshot !== null) promptParts.push(inheritance.snapshot)
-        admitFirstContact(handle.agent, promptParts.join('\n\n'), question)
-        pinTitle(sideLabel(question))
       }
       return { childId }
     },

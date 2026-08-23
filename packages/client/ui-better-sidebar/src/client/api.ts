@@ -263,11 +263,9 @@ export const api = {
    */
   subagentsLive: (rootSessionId: string, signal?: AbortSignal) =>
     call<SubagentLiveResult>('subagents.live', { rootSessionId }, signal),
-  /** Create a Side Chat thread: a child session seeded with the parent's
-   *  full log up to now. Empty question = immediate create (Codex-style):
-   *  the thread opens empty, the first prompt carries the boundary. */
-  sidechatStart: async (sessionId: string, question?: string) => {
-    const result = await call<{ childId: string }>('sidechat.start', { sessionId, question: question ?? '' })
+  /** Create an empty Side Chat thread seeded with the parent's log up to now. */
+  sidechatStart: async (sessionId: string) => {
+    const result = await call<{ childId: string }>('sidechat.start', { sessionId })
     sidechatSessionIds.add(result.childId)
     return result
   },

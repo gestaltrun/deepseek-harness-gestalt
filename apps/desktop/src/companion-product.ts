@@ -271,8 +271,7 @@ async function loadHistory(
   ])
   if (!response.ok) return operationFailed(operation, normalizeFailure(response.failure))
   if (!sessionsResponse.ok) return operationFailed(operation, normalizeFailure(sessionsResponse.failure))
-  const sessions = parseSurfaceSessions(sessionsResponse.value)
-  const session = sessions?.find(candidate => candidate.sessionId === operation.sessionId)
+  const session = parseSurfaceSession(sessionsResponse.value, operation.sessionId)
   if (session === undefined) return invalidHostResult(operation, 'history Session status')
   const conversation = parseConversationHistory(
     response.value, operation.sessionId, dependencies.pendingInteractions(operation.sessionId), session.running,
@@ -463,20 +462,43 @@ function parseSurfaceSessions(value: unknown): Array<{
     updatedAt: number
   }> = []
   for (const itemValue of value.items.slice(0, REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)) {
-    if (!isRecord(itemValue) || typeof itemValue.sessionId !== 'string'
-      || typeof itemValue.updatedAt !== 'number' || !Number.isSafeInteger(itemValue.updatedAt)
-      || typeof itemValue.running !== 'boolean' || typeof itemValue.blank !== 'boolean') return undefined
-    let sessionId: CompanionSessionId
-    try { sessionId = parseCompanionSessionId(itemValue.sessionId) } catch { return undefined }
-    const title = projectionTitle(itemValue.projections) ?? itemValue.sessionId
-    if (typeof itemValue.cwd !== 'string' && itemValue.cwd !== undefined) return undefined
-    sessions.push({
-      sessionId, displayTitle: title,
-      ...(itemValue.cwd === undefined ? {} : { cwd: itemValue.cwd }),
-      running: itemValue.running, blank: itemValue.blank, updatedAt: itemValue.updatedAt,
-    })
+    const session = parseSurfaceSessionRow(itemValue)
+    if (session === undefined) return undefined
+    sessions.push(session)
   }
   return sessions
+}
+
+function parseSurfaceSession(
+  value: unknown,
+  target: CompanionSessionId,
+): ReturnType<typeof parseSurfaceSessionRow> {
+  if (!isRecord(value) || !Array.isArray(value.items)) return undefined
+  const items = value.items as unknown[]
+  const candidate = items.find(item => isRecord(item) && item.sessionId === target)
+  return parseSurfaceSessionRow(candidate)
+}
+
+function parseSurfaceSessionRow(itemValue: unknown): {
+  sessionId: CompanionSessionId
+  displayTitle: string
+  cwd?: string
+  running: boolean
+  blank: boolean
+  updatedAt: number
+} | undefined {
+  if (!isRecord(itemValue) || typeof itemValue.sessionId !== 'string'
+    || typeof itemValue.updatedAt !== 'number' || !Number.isSafeInteger(itemValue.updatedAt)
+    || typeof itemValue.running !== 'boolean' || typeof itemValue.blank !== 'boolean') return undefined
+  let sessionId: CompanionSessionId
+  try { sessionId = parseCompanionSessionId(itemValue.sessionId) } catch { return undefined }
+  const title = projectionTitle(itemValue.projections) ?? itemValue.sessionId
+  if (typeof itemValue.cwd !== 'string' && itemValue.cwd !== undefined) return undefined
+  return {
+    sessionId, displayTitle: title,
+    ...(itemValue.cwd === undefined ? {} : { cwd: itemValue.cwd }),
+    running: itemValue.running, blank: itemValue.blank, updatedAt: itemValue.updatedAt,
+  }
 }
 
 function projectionTitle(value: unknown): string | undefined {

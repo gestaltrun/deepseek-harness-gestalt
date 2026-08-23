@@ -36,6 +36,8 @@ const environment = loadOperatedPlatformEnvironment({
   githubClientId: 'mobile-fixture', credentialReference: 'credentials://fixture',
   databaseIdentity: 'database-fixture', identityNamespace: 'namespace-fixture',
 })
+const installationIdentity = crypto.randomUUID()
+const installationPlatform = crypto.getRandomValues(new Uint8Array(1))[0]! % 2 === 0 ? 'ios' : 'android'
 
 const attempt: LoginAttemptView = {
   id: 'attempt-mobile-snapshot' as never,
@@ -227,9 +229,12 @@ function installationWithCompletedLogin(): PlatformAccountInstallation {
   }
   return new PlatformAccountInstallation({
     environment,
-    installationId: parseInstallationId('mobile-snapshot'),
+    installationId: parseInstallationId(`mobile-${installationIdentity}`),
     installationKind: 'mobile',
-    presentation: parseMobileInstallationPresentation({ name: 'Snapshot phone', platform: 'ios' }),
+    presentation: parseMobileInstallationPresentation({
+      name: `Mobile ${installationIdentity}`,
+      platform: installationPlatform,
+    }),
     transport,
     store: new MemoryInstallationAccountStore(),
     systemBrowser: { open: vi.fn() },

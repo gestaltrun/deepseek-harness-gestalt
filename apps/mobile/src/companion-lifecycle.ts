@@ -158,6 +158,22 @@ export class CompanionForegroundRuntime {
     this.publish()
   }
 
+  /** Invalidate authenticated peer work while retaining the current foreground Relay socket. */
+  invalidateAuthenticatedPeer(): void {
+    this.activeConnectionGeneration = undefined
+    this.state = { ...this.state, synchronized: false }
+    this.publish()
+  }
+
+  /** Establish a fresh generation after IK authenticates a replacement peer on the same Relay socket. */
+  markAuthenticatedPeer(): void {
+    if (!this.granted || !this.state.foreground || !this.state.socketOpen) return
+    this.connectionGeneration += 1
+    this.activeConnectionGeneration = this.connectionGeneration
+    this.state = { ...this.state, synchronized: false }
+    this.publish()
+  }
+
   /**
    * Bind Desktop resynchronization to the current physical connection generation.
    * Raw Relay ciphertext must never receive or call this receiver.

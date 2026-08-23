@@ -10,7 +10,7 @@ Mobile Companion 需要查找只存在于 Paired Desktop 索引中的 Session �
 
 ## 决策
 
-Desktop 专用 composition 以 `openAt: first-search` 激活 `session-query-sqlite`，并把派生索引放在 `DSH_HOME/session-search.sqlite`；浏览器 `dsh web` 仍使用仓库默认的 `openAt: never`。Companion 的 `search-sessions` operation 调用 Web Host 的 `session.search` 方法。Mobile 会直接渲染每个关联的 `session-search` Session id/snippet 对，包括 Companion Cache 中不存在的命中，并且绝不会加入缓存中的标题、Workspace、摘要、transcript 或子串匹配。
+Desktop 专用 composition 以 `openAt: first-search` 激活 `session-query-sqlite`，并把派生索引放在 `DSH_HOME/session-search.sqlite`；浏览器 `dsh web` 仍使用仓库默认的 `openAt: never`。Companion 的 `search-sessions` operation 调用 Web Host 的 `session.search` 方法。Mobile 会直接渲染每个关联的 `session-search` Session id/snippet 对，包括有界 Session baseline 与 Companion Cache 中不存在的命中，并且绝不会加入缓存中的标题、Workspace、摘要、transcript 或子串匹配。选择这类命中会立即打开以其 id 寻址的详情并请求 history；Desktop 会从完整 Host `session.list` response 的确切行解析其 running state，而不是只查询有界 baseline projection。
 
 Encrypted Companion Protocol 以 `operation-failed` 作为无损 Host 失败 result。它的闭合类别包括 HTTP 状态、无效 wire response、类型化业务错误和超时。HTTP 失败保留包括 400 在内的数值状态；业务失败保留有界 code 与 message；每个失败都携带发起 operation id。Desktop loopback client 会在非 2xx response header 到达时立即结算，使 response body 累计与绝对墙钟 deadline 都不能替换已知状态。它会校验成功 RPC 的 envelope 与回显 id；其可配置 response accumulator 不能超过 60 KiB Companion 应用 message 上限，累计超限会销毁 response，并产生无效 wire failure。这些预期失败会作为值返回，而不是抛出。Mobile surface 只通过绑定到 decoder 物理连接 generation 的 receiver 接受 result。它会把搜索 result 与当前搜索 operation 关联，并且只拥有 mutation channel 返回的一个尚未结算的 attachment operation id。sending 或 uncertain attachment 会阻止再次选择文件，直到确认、拒绝、失败或对账 status 释放该 id；其他 attachment id 的所有 result 都不会生效。attachment send completion 可以发布保留该 id 以便对账的 uncertain 状态。搜索与 attachment 失败会成为可见 alert；断开、替换或进入后台会让旧 decoder receiver 失效。
 
@@ -32,4 +32,4 @@ Desktop Host 会在发布的 Web Host 报告 loopback origin 后安装 `DesktopC
 
 ## 后果
 
-Mobile 搜索质量、可见性与 snippet 来自与 Web Session 搜索相同的 Desktop 权威，并且不要求存在匹配的缓存 Session。attachment 拒绝、attachment Host 失败与 uncertain delivery 会保持关联且可见。Host 400、格式错误的响应、业务拒绝、绝对 deadline 超时或陈旧 decoder result 会保持显式或失效，而不会消失或修改替换后的状态。Desktop 会承担派生索引存储与首次搜索启动成本；浏览器 `dsh web` 不承担。经过评审的加密 channel 仍负责安装 Mobile operation 发送方与按 generation 绑定的解码 result receiver，因此发布的 endpoint、协议与 adapter 证据本身不能证明运营中的产品链路。
+Mobile 搜索质量、可见性、snippet 与详情导航来自与 Web Session 搜索相同的 Desktop 权威，并且不要求存在匹配的 baseline 或缓存 Session。attachment 拒绝、attachment Host 失败与 uncertain delivery 会保持关联且可见。Host 400、格式错误的响应、业务拒绝、绝对 deadline 超时或陈旧 decoder result 会保持显式或失效，而不会消失或修改替换后的状态。Desktop 会承担派生索引存储与首次搜索启动成本；浏览器 `dsh web` 不承担。经过评审的加密 channel 仍负责安装 Mobile operation 发送方与按 generation 绑定的解码 result receiver，因此发布的 endpoint、协议与 adapter 证据本身不能证明运营中的产品链路。

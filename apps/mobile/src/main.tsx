@@ -149,13 +149,13 @@ async function mountMobileProduct(): Promise<void> {
         const peer = ready.peers[0]
         if (peer === undefined || ready.peers.length !== 1) {
           clearNoiseConnection()
-          companionRuntime()?.forgetConnection()
+          companionRuntime()?.invalidateAuthenticatedPeer()
           if (ready.peers.length > 1) throw new Error('Mobile Relay has multiple Desktop pairing peers')
           return
         }
         if (peer.generation === connectionGeneration || peer.generation === pendingGeneration) return
         clearNoiseConnection()
-        companionRuntime()?.forgetConnection()
+        companionRuntime()?.invalidateAuthenticatedPeer()
         const reconnectState = attachmentKeys.reconnectState(parsePersonalPairingId(peer.pairingSelector))
         if (reconnectState === undefined) throw new Error('Mobile Relay peer has no retained Snow pairing state')
         pendingGeneration = peer.generation
@@ -189,6 +189,7 @@ async function mountMobileProduct(): Promise<void> {
           pairingSelector,
           generation: connectionGeneration,
         })
+        companionRuntime()?.markAuthenticatedPeer()
         receiver = new MobileNoiseCompanionReceiver(
           channel,
           connectionGeneration,

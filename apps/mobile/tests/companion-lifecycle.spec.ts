@@ -186,6 +186,27 @@ describe('Companion foreground lifecycle', () => {
     expect(companionMayMutate(runtime.getState())).toBe(true)
   })
 
+  it('replaces an authenticated peer without closing or reopening its Relay socket', () => {
+    const runtime = new CompanionForegroundRuntime()
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const first = runtime.bindValidatedDesktopResync()
+    if (first === undefined) throw new Error('expected first peer resync receiver')
+    first.acceptValidatedDesktopResync(validatedResync)
+
+    runtime.invalidateAuthenticatedPeer()
+    expect(runtime.getState()).toMatchObject({ socketOpen: true, synchronized: false })
+    first.acceptValidatedDesktopResync(validatedResync)
+    expect(companionMayMutate(runtime.getState())).toBe(false)
+
+    runtime.markAuthenticatedPeer()
+    const replacement = runtime.bindValidatedDesktopResync()
+    if (replacement === undefined) throw new Error('expected same-socket replacement resync receiver')
+    replacement.acceptValidatedDesktopResync(validatedResync)
+    expect(runtime.getState()).toMatchObject({ socketOpen: true, synchronized: true })
+    expect(companionMayMutate(runtime.getState())).toBe(true)
+  })
+
   it('invalidates a mutation permit across backgrounding and physical replacement', async () => {
     const runtime = new CompanionForegroundRuntime()
     runtime.configure(grant)

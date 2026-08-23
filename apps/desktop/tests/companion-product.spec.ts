@@ -95,6 +95,32 @@ describe('Desktop Companion product operations', () => {
     })
   })
 
+  it('loads an authoritative search hit beyond the bounded surface baseline', async () => {
+    const target = parseCompanionSessionId('session-beyond-baseline')
+    const items = Array.from(
+      { length: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows },
+      (_, index) => ({
+        sessionId: `session-visible-${String(index)}`,
+        updatedAt: index,
+        running: false,
+        blank: false,
+      }),
+    )
+    items.push({ sessionId: target, updatedAt: 100, running: true, blank: false })
+    const dependencies = baseDependencies(hostRpc(async (method) => {
+      if (method === 'session.list') return { ok: true, value: { items } }
+      expect(method).toBe('session.history')
+      return { ok: true, value: { events: [], hasMore: false } }
+    }))
+    const operation = op({ type: 'load-history', sessionId: target, maxMessages: 20 })
+
+    await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toMatchObject({
+      type: 'conversation-snapshot',
+      sessionId: target,
+      conversation: { running: true },
+    })
+  })
+
   it('projects model retries and suppresses the retry-owned terminal turn error', async () => {
     const dependencies = baseDependencies(hostRpc(async (method) => {
       if (method === 'session.list') return { ok: true, value: { items: [{

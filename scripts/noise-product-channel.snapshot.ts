@@ -58,11 +58,16 @@ async function attachmentProof(
 describe('Snow product channel runnable snapshot', () => {
   it('executes endpoint mailbox pairing, sealed authority, real Relay attach, IK, and authenticated sync', async () => {
     initializeSnowChannel(readFileSync(new URL('../packages/platform/noise-channel/pkg/dsh_noise_channel_bg.wasm', import.meta.url)))
+    const fixtureIdentity = crypto.randomUUID()
+    const desktopInstallation = `desktop-${fixtureIdentity}`
+    const mobileInstallation = `mobile-${fixtureIdentity}`
+    const mobileName = `Mobile ${fixtureIdentity}`
+    const mobilePlatform = (crypto.getRandomValues(new Uint8Array(1))[0] ?? 0) % 2 === 0 ? 'ios' : 'android'
     const ctx = new Context()
     const routeStore = new SnapshotRouteStore()
     const coordinator = new SnapshotCoordinator()
     const relay = new RemoteRelayProvider(ctx, {
-      instanceId: parseRelayInstanceId('snapshot-platform'),
+      instanceId: parseRelayInstanceId(`platform-${crypto.randomUUID()}`),
       routeStore,
       coordinator,
       config: {
@@ -72,7 +77,6 @@ describe('Snow product channel runnable snapshot', () => {
       },
       randomBytes: size => new Uint8Array(size).fill(17),
     })
-    let sequence = 0
     const pairing = new PersonalPairingProvider(ctx, {
       account: {
         currentInstallation: ({ accessToken }) => {
@@ -85,7 +89,7 @@ describe('Snow product channel runnable snapshot', () => {
             installation: kind === 'mobile'
               ? {
                 id: parseInstallationId(installation), kind,
-                presentation: { name: 'Snapshot phone', platform: 'ios' },
+                presentation: { name: mobileName, platform: mobilePlatform },
               }
               : { id: parseInstallationId(installation), kind: 'desktop' as const, presentation: { name: 'Test Desktop', platform: 'linux' as const } },
           })
@@ -95,17 +99,17 @@ describe('Snow product channel runnable snapshot', () => {
       relay,
       authority: new MemoryPersonalPairingAuthorityStore(),
       randomBytes: size => new Uint8Array(size).fill(29),
-      randomId: kind => `${kind}-snapshot-${String(++sequence)}`,
+      randomId: kind => `${kind}-${crypto.randomUUID()}`,
       pairingLinkOrigin: 'https://platform.example/pair',
     })
-    const desktopAuthentication = authentication('desktop', 'desktop-snapshot')
-    const mobileAuthentication = authentication('mobile', 'mobile-snapshot')
+    const desktopAuthentication = authentication('desktop', desktopInstallation)
+    const mobileAuthentication = authentication('mobile', mobileInstallation)
     await pairing.setMobileAccess({ desktop: desktopAuthentication, enabled: true })
 
     const expiresAt = Date.now() + 60_000
     const route = await pairing.createEndpointChallenge({
       desktop: desktopAuthentication,
-      rendezvousId: 'rendezvous-snapshot' as never,
+      rendezvousId: `rendezvous-${crypto.randomUUID()}` as never,
       clientIp: '192.0.2.1',
       expiresAt,
     })
@@ -113,7 +117,7 @@ describe('Snow product channel runnable snapshot', () => {
     const invitation = await desktop.createInvitation(expiresAt)
     const mobile = new SnowMobileHandshakeClient()
     const message1 = await mobile.beginEndpointInvitation(invitation.invitationPayload)
-    const completionId = 'completion-snapshot' as never
+    const completionId = `completion-${crypto.randomUUID()}` as never
     const pending = await pairing.submitEndpointMessage1({
       mobile: mobileAuthentication,
       challengeId: route.challengeId,
@@ -163,8 +167,8 @@ describe('Snow product channel runnable snapshot', () => {
     const openedGrant = await mobile.openRelayAuthority(mobileStatus.sealedRelayAuthority)
     const openedAttachmentKey = mobile.exportAttachmentKey()
 
-    const mobileAttachmentId = parseRelayAttachmentId('mobile-snapshot')
-    const desktopAttachmentId = parseRelayAttachmentId('desktop-snapshot')
+    const mobileAttachmentId = parseRelayAttachmentId(`mobile-${crypto.randomUUID()}`)
+    const desktopAttachmentId = parseRelayAttachmentId(`desktop-${crypto.randomUUID()}`)
     let livePeerUpdate = false
     const mobileAttachment = await relay.attach({
       message: await attachmentProof(openedGrant.credential, openedGrant.routeId, mobileAttachmentId, 'mobile'),

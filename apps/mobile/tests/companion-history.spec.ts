@@ -172,6 +172,7 @@ describe('Mobile Companion browse projection', () => {
 
   it('renders Desktop-authoritative hits even when the Companion Cache lacks the Session', () => {
     const onSearch = vi.fn()
+    const onLoadOlder = vi.fn()
     const { rerender } = render(createElement(MobileBrowse, {
       desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
       ...browsePresentation,
@@ -185,12 +186,17 @@ describe('Mobile Companion browse projection', () => {
         hasMore: false,
       },
       onSearch,
+      onLoadOlder,
     }))
     expect(screen.queryByText('Alpha')).toBeNull()
     expect(screen.getByText('Desktop indexed needle')).toBeTruthy()
     expect(screen.getByText('Authoritative uncached needle')).toBeTruthy()
     expect(screen.getByText('s-uncached')).toBeTruthy()
     expect(screen.queryByText('needle in local title')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /s-uncached/u }))
+    expect(onLoadOlder).toHaveBeenCalledWith('s-uncached')
+    expect(screen.getByRole('heading', { name: 's-uncached' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '返回' }))
     fireEvent.change(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' }), {
       target: { value: 'next query' },
     })
@@ -210,6 +216,7 @@ describe('Mobile Companion browse projection', () => {
         },
       },
       onSearch,
+      onLoadOlder,
     }))
     expect(screen.getByRole('alert').textContent).toContain('HTTP 400')
   })

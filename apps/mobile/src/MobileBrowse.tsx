@@ -81,6 +81,10 @@ export function MobileBrowse({
     () => clock.getSnapshot(),
   )
   const open = openId === undefined ? undefined : sessions.byId[openId]
+  const openSearchHit = openId === undefined
+    ? undefined
+    : search.items.find(item => item.sessionId === openId)
+  const openTitle = open?.displayTitle ?? openSearchHit?.sessionId
   const conversation = openId === undefined ? undefined : conversations[openId]
   const detailFailure = operationFailure !== undefined
     && (operationFailure.operation === 'refresh' || operationFailure.sessionId === openId)
@@ -91,23 +95,23 @@ export function MobileBrowse({
     if (conversations[id] === undefined) onLoadOlder?.(id)
   }
 
-  if (open !== undefined) {
+  if (openId !== undefined && openTitle !== undefined) {
     if (conversation !== undefined) {
       return (
         <MobileConversation
-          title={open.displayTitle}
+          title={openTitle}
           onBack={() => { setOpenId(undefined) }}
           snapshot={conversation}
           locale={locale}
           theme={theme}
-          loadImage={attachment => loadImage(open.id, attachment)}
-          cwd={open.cwd}
+          loadImage={attachment => loadImage(openId, attachment)}
+          cwd={open?.cwd}
           mutationEnabled={canMutate}
           operationFailure={detailFailure}
-          {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(open.id, text) })}
-          {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(open.id) } })}
-          {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(open.id, file) } })}
-          {...(onLoadOlder === undefined ? {} : { onLoadOlder: () => { onLoadOlder(open.id) } })}
+          {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(openId, text) })}
+          {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(openId) } })}
+          {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(openId, file) } })}
+          {...(onLoadOlder === undefined ? {} : { onLoadOlder: () => { onLoadOlder(openId) } })}
         />
       )
     }
@@ -115,7 +119,7 @@ export function MobileBrowse({
       <section className={css.page} data-mobile-browse="conversation" data-theme={theme} lang={locale === 'zh' ? 'zh-CN' : 'en'}>
         <header className={css.header}>
           <button type="button" className={css.back} onClick={() => { setOpenId(undefined) }}>{locale === 'zh' ? '返回' : 'Back'}</button>
-          <h1>{open.displayTitle}</h1>
+          <h1>{openTitle}</h1>
         </header>
         {detailFailure !== undefined && <p role="alert">{detailFailure.message}</p>}
         <p className={css.summary}>{locale === 'zh' ? '尚未加载此 Session 的对话。' : 'This Session conversation is not loaded.'}</p>
@@ -152,7 +156,7 @@ export function MobileBrowse({
         )}
       </header>
       {searchActive && (
-        <AuthoritativeSearchResults search={search} sessions={sessions} locale={locale} onOpen={openSession} />
+        <AuthoritativeSearchResults search={search} locale={locale} onOpen={openSession} />
       )}
       {!searchActive && groups.map((group) => {
         const label = group.workspaceId === undefined ? tw('group.ungrouped') : group.label
@@ -188,12 +192,10 @@ export function MobileBrowse({
 
 function AuthoritativeSearchResults({
   search,
-  sessions,
   locale,
   onOpen,
 }: {
   search: MobileCompanionSearchSnapshot
-  sessions: SessionListState
   locale: ConversationPresentationLocale
   onOpen: (id: SessionId) => void
 }): ReactNode {
@@ -218,7 +220,6 @@ function AuthoritativeSearchResults({
             <li key={hit.sessionId} className={css.searchResult}>
               <button
                 type="button"
-                disabled={sessions.byId[sessionId] === undefined}
                 onClick={() => { onOpen(sessionId) }}
               >
                 <strong>{hit.sessionId}</strong>

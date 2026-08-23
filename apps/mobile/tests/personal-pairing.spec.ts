@@ -407,24 +407,37 @@ describe('MobilePairingController', () => {
 
   it('retains durable pairing authority across restart until Platform revocation succeeds', async () => {
     const pairingId = parsePersonalPairingId('pairing-revoke-retry')
+    const grant = {
+      routeId: parseRelayRouteId('route-revoke-retry'),
+      endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'),
+      revision: 1,
+    }
     const transport = transportFixture()
     transport.revokeMobilePersonalPairing
       .mockRejectedValueOnce(new Error('Platform revoke failed'))
       .mockResolvedValueOnce(undefined)
     let retainedPairingId: PersonalPairingId | undefined = pairingId
+    let retainedGrant: typeof grant | undefined = grant
     const attachmentKeys = {
       retain: vi.fn(),
       retainedPairingId: vi.fn(() => retainedPairingId),
+      relayAuthority: vi.fn(() => retainedGrant),
       selectAccount: vi.fn(),
-      wipe: vi.fn(() => { retainedPairingId = undefined }),
+      wipe: vi.fn(() => {
+        retainedPairingId = undefined
+        retainedGrant = undefined
+      }),
       flush: vi.fn(),
     }
+    const relay = { configure: vi.fn(), start: vi.fn(), stop: vi.fn() }
     const handshake = { begin: vi.fn(), acceptDesktopHandshake: vi.fn(), wipe: vi.fn() }
     const firstController = new MobilePairingController({
       installation: installationFixture(),
       transport,
       handshake,
       attachmentKeys,
+      relay,
       scanner: { scan: vi.fn() },
     })
     await firstController.activate()
@@ -442,9 +455,11 @@ describe('MobilePairingController', () => {
       transport,
       handshake,
       attachmentKeys,
+      relay,
       scanner: { scan: vi.fn() },
     })
     await restartedController.activate()
+    expect(restartedController.getSnapshot()).toEqual({ status: 'paired' })
     await expect(restartedController.unpair()).resolves.toBeUndefined()
     expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledTimes(2)
     expect(transport.revokeMobilePersonalPairing).toHaveBeenLastCalledWith(expect.objectContaining({ pairingId }))

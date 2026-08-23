@@ -324,6 +324,9 @@ export class MobilePairingController implements MobilePairingActions {
       await this.options.relay.configure(restoredGrant)
       await this.options.relay.start()
     }
+    if (this.attempt === undefined && this.pairingId !== undefined && restoredGrant !== undefined) {
+      this.publish({ status: 'paired' })
+    }
   }
 
   async unpair(): Promise<void> {

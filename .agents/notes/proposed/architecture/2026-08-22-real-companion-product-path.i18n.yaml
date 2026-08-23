@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-22-real-companion-product-path.md
 2026-08-22-real-companion-product-path.md: b5006ee1fdfdae8c1e7b5b24d100cfb73900ffc5
-2026-08-22-real-companion-product-path.zh.md: 3d592482df3669bcf0e9ec37f56b7d5ecb009326
+2026-08-22-real-companion-product-path.zh.md: 9ac3230852136cf9843ce534bde5169e7aa4e9b5

@@ -195,6 +195,10 @@ export interface ConversationComposerProps {
 }
 
 /** Execute InputMachine effects for the standalone composer. */
+function isNotice(effect: InputEffect): effect is Extract<InputEffect, { type: 'notice' }> {
+  return effect.type === 'notice'
+}
+
 function settleEffects(
   machine: InputMachine,
   effects: readonly InputEffect[],
@@ -209,7 +213,7 @@ function settleEffects(
     void Promise.resolve().then(() => onSubmit(effect.draft)).then(
       () => {
         const settled = machine.dispatch({ type: 'submit-settled', attempt: effect.attempt, ok: true })
-        publishNotice(settled.find(candidate => candidate.type === 'notice'))
+        publishNotice(settled.find(isNotice))
         publish()
       },
       (cause: unknown) => {
@@ -217,7 +221,7 @@ function settleEffects(
           type: 'submit-settled', attempt: effect.attempt, ok: false,
           message: cause instanceof Error ? cause.message : String(cause),
         })
-        publishNotice(settled.find(candidate => candidate.type === 'notice'))
+        publishNotice(settled.find(isNotice))
         publish()
       },
     )

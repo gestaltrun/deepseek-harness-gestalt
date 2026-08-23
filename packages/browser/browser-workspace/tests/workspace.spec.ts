@@ -10,6 +10,12 @@ import * as BrowserWorkspaceInvariant from '../src/invariant.ts'
 import { EMPTY_BROWSER_WORKSPACE, foldBrowserWorkspace } from '../src/fold.ts'
 import { listBrowserWorkspacePages } from '../src/pages.ts'
 
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    'workspace/session-archived'(sessionId: SessionId): Promise<void> | void
+  }
+}
+
 const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const PAGES = [
   { url: 'https://alpha.test/', title: 'Alpha', text: 'alpha', screenshotPngBase64: PNG_1X1 },
@@ -109,7 +115,7 @@ describe('Session-owned Browser Workspace', () => {
     const secondSnapshot = ctx.browserWorkspace.snapshot(second)
     expect(secondSnapshot.workspaces).toHaveLength(1)
     expect(secondSnapshot.workspaces[0]?.browsers[0]?.tabs).toEqual([
-      { tabId: other.target.tabId, revision: 1 },
+      { tabId: other.target.tabId, revision: 1, url: 'https://beta.test/' },
     ])
     expect(JSON.stringify(secondSnapshot)).not.toContain(work.target.tabId)
 
@@ -141,7 +147,7 @@ describe('Session-owned Browser Workspace', () => {
     const afterInactiveClose = ctx.browserWorkspace.snapshot(first)
     const remainingWork = afterInactiveClose.workspaces.find(item => item.workspaceId === work.target.workspaceId)
     expect(remainingWork?.browsers[0]?.tabs).toEqual([
-      { tabId: secondTab.target.tabId, revision: 3 },
+      { tabId: secondTab.target.tabId, revision: 3, url: 'https://beta.test/' },
     ])
     expect(remainingWork?.browsers[0]?.activeTabId).toBe(secondTab.target.tabId)
     await ctx.browserWorkspace.close({ session: first, target: secondTab.target, expectedRevision: focused.revision + 1 })
@@ -343,15 +349,23 @@ describe('Session-owned Browser Workspace', () => {
 
   })
 
-  it('closes leftover live tabs when the owning Session leaves the store', async () => {
+  it('closes leftover live tabs but retains recovery records when the owning Session leaves the store', async () => {
     const ctx = await harness()
     const leftover = ctx.sessions.prepare(SessionId('session-cleanup'))
     const detach = ctx.sessions.enter(leftover)
     ctx.sessions.announce(leftover)
-    const live = await ctx.browserWorkspace.create({ session: leftover, profile: 'temporary' })
+    const created = await ctx.browserWorkspace.create({ session: leftover, profile: 'temporary' })
+    const live = await ctx.browserWorkspace.navigate({
+      session: leftover,
+      target: created.target,
+      expectedRevision: created.revision,
+      url: 'https://alpha.test/',
+    })
     detach()
     await expect.poll(() => ctx.browserRuntime.observe({ target: live.target })).toMatchObject({ status: 'closed' })
-    expect(ctx.browserWorkspace.snapshot(leftover).workspaces).toEqual([])
+    expect(listBrowserWorkspacePages(ctx.browserWorkspace.snapshot(leftover))).toEqual([
+      { target: live.target, revision: live.revision, url: 'https://alpha.test/' },
+    ])
 
     const observer = ctx.browserRuntime.observe.bind(ctx.browserRuntime)
     ctx.browserRuntime.observe = async (request) => {
@@ -372,8 +386,12 @@ describe('Session-owned Browser Workspace', () => {
         }],
       }],
     })
-    await ctx.browserWorkspace.cleanup(failing)
+    await expect(ctx.browserWorkspace.cleanup(failing))
+      .rejects.toThrow('failed to close every archived Session tab')
+    expect(ctx.browserWorkspace.snapshot(failing).workspaces).toHaveLength(1)
     ctx.browserRuntime.observe = observer
+    await ctx.browserWorkspace.cleanup(failing)
+    expect(ctx.browserWorkspace.snapshot(failing)).toEqual(EMPTY_BROWSER_WORKSPACE)
 
     const alreadyClosed = ctx.sessions.create(SessionId('session-already-closed'))
     alreadyClosed.append('browser/workspace', {
@@ -393,6 +411,37 @@ describe('Session-owned Browser Workspace', () => {
     expect(ctx.browserWorkspace.snapshot(alreadyClosed).workspaces).toEqual([])
   })
 
+  it('closes every live tab when its Session is archived', async () => {
+    const ctx = await harness()
+    const session = ctx.sessions.create(SessionId('session-archive-cleanup'))
+    const first = await ctx.browserWorkspace.create({ session, profile: 'temporary' })
+    const second = await ctx.browserWorkspace.create({ session, profile: 'shared' })
+
+    await ctx.parallel('workspace/session-archived', session.id)
+
+    await expect(ctx.browserRuntime.observe({ target: first.target }))
+      .resolves.toMatchObject({ status: 'closed' })
+    await expect(ctx.browserRuntime.observe({ target: second.target }))
+      .resolves.toMatchObject({ status: 'closed' })
+    expect(ctx.browserWorkspace.snapshot(session)).toEqual(EMPTY_BROWSER_WORKSPACE)
+  })
+
+  it('persists the last non-blank page URL for restart recovery', async () => {
+    const ctx = await harness()
+    const session = ctx.sessions.create(SessionId('session-url-recovery'))
+    const created = await ctx.browserWorkspace.create({ session, profile: 'shared' })
+    const navigated = await ctx.browserWorkspace.navigate({
+      session,
+      target: created.target,
+      expectedRevision: created.revision,
+      url: 'https://alpha.test/',
+    })
+
+    expect(listBrowserWorkspacePages(ctx.browserWorkspace.snapshot(session))).toEqual([
+      { target: created.target, revision: navigated.revision, url: 'https://alpha.test/' },
+    ])
+  })
+
   it('focuses and closes a background tab with that tab\'s listed revision', async () => {
     const ctx = await harness()
     const session = ctx.sessions.create(SessionId('session-tab-revision'))
@@ -410,8 +459,8 @@ describe('Session-owned Browser Workspace', () => {
     })
     const listed = ctx.browserWorkspace.snapshot(session).workspaces[0]?.browsers[0]?.tabs
     expect(listed).toEqual([
-      { tabId: first.target.tabId, revision: 1 },
-      { tabId: second.target.tabId, revision: 1 },
+      { tabId: first.target.tabId, revision: 1, url: 'https://alpha.test/' },
+      { tabId: second.target.tabId, revision: 1, url: 'https://beta.test/' },
     ])
     const firstRevision = listed?.[0]?.revision
     const secondRevision = listed?.[1]?.revision
@@ -459,7 +508,7 @@ describe('Session-owned Browser Workspace', () => {
     expect(bumped.revision).toBe(1)
     const listed = ctx.browserWorkspace.snapshot(session).workspaces[0]?.browsers[0]?.tabs
     expect(listed).toEqual([
-      { tabId: first.target.tabId, revision: 1 },
+      { tabId: first.target.tabId, revision: 1, url: 'https://alpha.test/' },
       { tabId: second.target.tabId, revision: 0 },
     ])
     const firstRevision = listed?.[0]?.revision
@@ -523,7 +572,7 @@ describe('Session-owned Browser Workspace', () => {
       url: 'https://alpha.test/',
     })
     expect(ctx.browserWorkspace.snapshot(session).workspaces[0]?.browsers[0]?.tabs).toEqual([
-      { tabId: created.target.tabId, revision: 1 },
+      { tabId: created.target.tabId, revision: 1, url: 'https://alpha.test/' },
     ])
 
     const inputted = await ctx.browserWorkspace.input({
@@ -537,7 +586,7 @@ describe('Session-owned Browser Workspace', () => {
       target: created.target,
     })
     expect(ctx.browserWorkspace.snapshot(session).workspaces[0]?.browsers[0]?.tabs).toEqual([
-      { tabId: created.target.tabId, revision: 2 },
+      { tabId: created.target.tabId, revision: 2, url: 'https://alpha.test/' },
     ])
     await expect(ctx.browserWorkspace.navigate({
       session,

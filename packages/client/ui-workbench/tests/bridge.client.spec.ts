@@ -30,7 +30,11 @@ function page(): BrowserPageState {
   }
 }
 
-function projection(hasPage = true, revision = 3): BrowserWorkspaceProjection {
+function projection(
+  hasPage = true,
+  revision = 3,
+  url?: string,
+): BrowserWorkspaceProjection {
   return {
     activeWorkspaceId: hasPage ? TARGET.workspaceId : null,
     workspaces: hasPage ? [{
@@ -40,7 +44,7 @@ function projection(hasPage = true, revision = 3): BrowserWorkspaceProjection {
       browsers: [{
         browserId: TARGET.browserId,
         activeTabId: TARGET.tabId,
-        tabs: [{ tabId: TARGET.tabId, revision }],
+        tabs: [{ tabId: TARGET.tabId, revision, ...(url === undefined ? {} : { url }) }],
       }],
     }] : [],
   }
@@ -142,6 +146,41 @@ describe('OfficialBrowserBridge', () => {
       meta: officialTabMeta(replacement.target, { kind: 'persistent', name: 'retained' }),
     })
     expect(b.sidebar.closeTab).not.toHaveBeenCalled()
+  })
+
+  it('restores the last projected URL after replacing a missing Runtime target', async () => {
+    const meta = officialTabMeta(TARGET, { kind: 'persistent', name: 'retained' })
+    const replacement = {
+      ...page(),
+      target: { ...TARGET, tabId: 'replacement' as BrowserTarget['tabId'] },
+      revision: 0,
+      url: 'about:blank',
+      title: 'New Tab',
+    }
+    const restored = {
+      ...replacement,
+      revision: 1,
+      url: 'https://alpha.test/path',
+      title: 'Alpha',
+    }
+    const b = bench({
+      projection: projection(true, 3, restored.url),
+      tabs: [{ id: 'browser:1', type: 'browser', meta }],
+    })
+    vi.mocked(b.remote.create).mockResolvedValueOnce(replacement)
+    vi.mocked(b.remote.refresh).mockResolvedValueOnce(restored)
+
+    await expect(b.bridge.recoverOfficial('browser:1', TARGET)).resolves.toEqual(restored)
+
+    expect(b.remote.refresh).toHaveBeenCalledWith(
+      replacement.target,
+      replacement.revision,
+      restored.url,
+    )
+    expect(b.sidebar.updateTab).toHaveBeenLastCalledWith('browser:1', {
+      title: 'Alpha',
+      meta: officialTabMeta(restored.target, { kind: 'persistent', name: 'test' }),
+    })
   })
 
   it('ignores recovery after the Session, tab, binding, or addressed target changed', async () => {

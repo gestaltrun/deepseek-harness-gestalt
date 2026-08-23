@@ -1,8 +1,4 @@
 after-restart
 page=shown
-address=about:blank
-screenshot=none
-after-address
-page=shown
 address=https://example.test/
 screenshot=Example Domain

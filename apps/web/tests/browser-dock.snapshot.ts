@@ -88,25 +88,17 @@ describe('assembled Browser Dock preview', () => {
     await expect(shape).toMatchFileSnapshot(DOCK_EXPECTED)
   })
 
-  it('replaces a projected page that the restarted Runtime no longer owns', async () => {
+  it('replaces a projected page and restores its URL after the Runtime restarts', async () => {
     mountAssembledApp('?fixture&fixtureBrowser=restart')
     await openFixtureSession()
     fireEvent.click(await screen.findByRole('button', { name: 'Expand Untitled' }, { timeout: 10_000 }))
     const recovered = await waitFor(() => {
       const shape = pageShape(document)
-      expect(shape).toContain('address=about:blank')
-      return shape
-    }, { timeout: 10_000 })
-    const address = screen.getByRole('textbox', { name: 'Address' })
-    fireEvent.change(address, { target: { value: 'example.test' } })
-    fireEvent.submit(address.closest('form')!)
-    const navigated = await waitFor(() => {
-      const shape = pageShape(document)
       expect(shape).toContain('address=https://example.test/')
       expect(shape).toContain('screenshot=Example Domain')
       return shape
     }, { timeout: 10_000 })
-    const shape = `${['after-restart', recovered, 'after-address', navigated].join('\n')}\n`
+    const shape = `${['after-restart', recovered].join('\n')}\n`
     if (REFRESHING_GOLDEN) {
       mkdirSync(dirname(RESTART_EXPECTED), { recursive: true })
       writeFileSync(RESTART_EXPECTED, shape)

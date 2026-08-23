@@ -53,6 +53,7 @@ function createRequestForTab(
 interface MissingTargetRecovery {
   readonly missingTarget: BrowserTarget
   readonly request: BrowserWorkspaceCreateRemoteRequest
+  readonly url?: string
 }
 
 /**
@@ -114,6 +115,8 @@ export class OfficialBrowserBridge {
     const bound = tab === undefined ? undefined : officialTargetOf(tab.meta)
     if (tab === undefined || bound === undefined) return
     if (officialTargetKey(bound) !== officialTargetKey(missingTarget)) return
+    const remembered = listBrowserWorkspacePages(this.deps.projectionOf(snapshot.sessionId))
+      .find(page => officialTargetKey(page.target) === officialTargetKey(missingTarget))
     const profile = officialProfileOf(tab.meta)
     const request = createRequestForTab(tab.meta, this.deps.createRequest)
     this.recovering.add(tabId)
@@ -122,7 +125,11 @@ export class OfficialBrowserBridge {
     })
     this.known.delete(tabId)
     try {
-      return await this.createOfficialOnce(tabId, { missingTarget, request })
+      return await this.createOfficialOnce(tabId, {
+        missingTarget,
+        request,
+        ...(remembered?.url === undefined ? {} : { url: remembered.url }),
+      })
     } finally {
       this.recovering.delete(tabId)
       if (this.queued && !this.running && this.recovering.size === 0) {
@@ -254,13 +261,17 @@ export class OfficialBrowserBridge {
     ) return
     try {
       const request = recovery?.request ?? createRequestForTab(tab.meta, this.deps.createRequest)
-      const created = await this.deps.bindRemote(sessionId as SessionId).create(request)
+      const remote = this.deps.bindRemote(sessionId as SessionId)
+      const created = await remote.create(request)
+      const committed = recovery?.url === undefined
+        ? created
+        : await remote.refresh(created.target, created.revision, recovery.url)
       this.deps.sidebar.updateTab(tabId, {
-        meta: officialTabMeta(created.target, officialProfileFromChrome(created.chrome)),
-        ...(created.title.trim() === '' ? {} : { title: created.title }),
+        meta: officialTabMeta(committed.target, officialProfileFromChrome(committed.chrome)),
+        ...(committed.title.trim() === '' ? {} : { title: committed.title }),
       })
-      this.known.set(tabId, officialTargetKey(created.target))
-      return created
+      this.known.set(tabId, officialTargetKey(committed.target))
+      return committed
     } catch {
       // Create can reject when the Session or Runtime is gone; the empty
       // sidebar tab stays until the user closes it or a later tick retries.

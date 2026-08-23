@@ -66,9 +66,6 @@ export type BrowserDockWidth = number
 /** Kind of Browser Profile storage a Provider committed. */
 export type BrowserProfileKind = 'temporary' | 'persistent' | 'shared'
 
-/** Who last recorded ownership of one open or unavailable Browser Workspace tab. The lock is the revision, not this field. */
-export type BrowserControlOwner = 'agent' | 'human'
-
 /** Address-field chrome. Temporary Profiles omit a label. Shared chrome names the shared identity and must not claim isolation. */
 export interface BrowserProfileChrome {
   readonly kind: BrowserProfileKind
@@ -97,7 +94,6 @@ export interface BrowserPageState {
   readonly title: string
   readonly text: string
   readonly focused: boolean
-  readonly controlOwner: BrowserControlOwner
   readonly chrome: BrowserProfileChrome
   readonly storage: BrowserProfileStorage
 }
@@ -116,7 +112,6 @@ export interface BrowserUnavailableState {
   readonly revision: number
   readonly reason: 'crashed' | 'unhealthy' | 'reconnect-failed'
   readonly reconnecting: boolean
-  readonly controlOwner: BrowserControlOwner
 }
 
 /** Observable Browser Runtime state. */
@@ -172,15 +167,11 @@ export interface BrowserNavigateRequest extends BrowserMutationRequest {
   readonly url: string
 }
 
-/**
- * Human pointer or keyboard mutation against one open tab. Omitting `url` and
- * `text` still advances the revision and records reported human ownership, which
- * is how a click or keypress without a URL change stays visible to a later Agent.
- */
-export interface BrowserInputRequest extends BrowserMutationRequest {
-  readonly url?: string
-  readonly text?: string
-}
+/** Synthetic Agent input against one open tab. At least one input value is required. */
+export type BrowserInputRequest = BrowserMutationRequest & (
+  | { readonly url: string; readonly text?: string }
+  | { readonly url?: never; readonly text: string }
+)
 
 /** Read-only request for one browser target. */
 export interface BrowserObserveRequest {

@@ -11,6 +11,9 @@ import { NodeRelayEndpointSocket } from '@deepseek-ai/dsh-remote-access-client/n
 import type { RelayEndpointSocket } from '@deepseek-ai/dsh-remote-access-client'
 import {
   createDesktopRemoteRelay,
+  DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID,
+  DEVELOPMENT_KEYLESS_MOBILE_ATTACHMENT_ID,
+  DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT,
   loadDesktopRemoteRelayConfig,
 } from '../src/remote-relay.ts'
 
@@ -95,12 +98,10 @@ describe('Desktop Remote Relay composition', () => {
     expect(connect).not.toHaveBeenCalled()
   })
 
-  it('uses the production Node adapter and rejects ciphertext without a product crypto owner', async () => {
+  it('uses the production Node adapter and replies to inbound ciphertext with the development sync frame', async () => {
     const first = new ReadySocket()
-    const second = new ReadySocket()
     const connect = vi.spyOn(NodeRelayEndpointSocket, 'connect')
       .mockResolvedValueOnce(first as never)
-      .mockResolvedValueOnce(second as never)
     const relay = createDesktopRemoteRelay({
       environment: DEVELOPMENT,
       source: { ...SOURCE, DSH_REMOTE_RELAY_RECONNECT_DELAY_MS: '1' },
@@ -112,19 +113,51 @@ describe('Desktop Remote Relay composition', () => {
     })
 
     await relay.start()
+    expect(connect.mock.calls[0]?.[3]).toBeUndefined()
     expect(relay.getState?.()).toEqual({ connected: true })
-    const attachmentId = first.attachmentId
-    if (attachmentId === undefined) throw new Error('fixture did not observe attach')
+    expect(first.attachmentId).toBe(DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID)
+    expect(first.decoded()).toEqual([
+      expect.objectContaining({ type: 'attach', attachmentId: DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID }),
+      expect.objectContaining({
+        type: 'ciphertext',
+        targetAttachmentId: DEVELOPMENT_KEYLESS_MOBILE_ATTACHMENT_ID,
+        ciphertext: DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT,
+      }),
+    ])
     first.receive(encodeRelayMessage({
       type: 'ciphertext', transportVersion: 1,
       routeId: parseRelayRouteId('route-development'),
       sourceAttachmentId: parseRelayAttachmentId('mobile-development'),
-      targetAttachmentId: attachmentId,
-      ciphertext: Uint8Array.of(1),
+      targetAttachmentId: DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID,
+      ciphertext: Uint8Array.of(7),
     }))
-    await vi.waitFor(() => { expect(connect).toHaveBeenCalledTimes(2) })
+    await vi.waitFor(() => { expect(first.decoded()).toHaveLength(3) })
+    expect(first.decoded()[2]).toMatchObject({
+      type: 'ciphertext',
+      targetAttachmentId: 'mobile-development',
+      ciphertext: DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT,
+    })
+    expect(connect).toHaveBeenCalledOnce()
     await relay.stop('quit')
     expect(relay.getState?.()).toEqual({ connected: false, stopReason: 'quit' })
+    connect.mockRestore()
+  })
+
+  it('accepts the bundled certificate on a loopback development WSS listen', async () => {
+    const socket = new ReadySocket()
+    const connect = vi.spyOn(NodeRelayEndpointSocket, 'connect').mockResolvedValueOnce(socket as never)
+    const relay = createDesktopRemoteRelay({
+      environment: DEVELOPMENT,
+      source: { ...SOURCE, DSH_REMOTE_RELAY_WSS_URL: 'wss://127.0.0.1:8443/v1/remote-access/relay' },
+    })
+    await relay.configure?.({
+      routeId: parseRelayRouteId('route-loopback'),
+      credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      revision: 1,
+    })
+    await relay.start()
+    expect(connect.mock.calls[0]?.[3]).toEqual({ rejectUnauthorized: false })
+    await relay.stop('quit')
     connect.mockRestore()
   })
 })
@@ -132,15 +165,21 @@ describe('Desktop Remote Relay composition', () => {
 class ReadySocket implements RelayEndpointSocket {
   private readonly values: Uint8Array[] = []
   private readonly waiters: Array<(value: IteratorResult<Uint8Array>) => void> = []
+  private readonly outbound: Uint8Array[] = []
   attachmentId: ReturnType<typeof parseRelayAttachmentId> | undefined
 
   async send(value: Uint8Array): Promise<void> {
+    this.outbound.push(value)
     const message = decodeRelayMessage(value)
     if (message.type !== 'attach') return
     this.attachmentId = message.attachmentId
     this.receive(encodeRelayMessage({
       type: 'ready', transportVersion: 1, attachmentId: message.attachmentId,
     }))
+  }
+
+  decoded(): ReturnType<typeof decodeRelayMessage>[] {
+    return this.outbound.map(value => decodeRelayMessage(value))
   }
 
   messages(): AsyncIterable<Uint8Array> {

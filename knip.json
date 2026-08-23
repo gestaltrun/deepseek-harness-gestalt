@@ -23,7 +23,8 @@
   ],
   "ignoreWorkspaces": [
     "vendor/*",
-    "python/sdk-runtime"
+    "python/sdk-runtime",
+    "packages/client/better-sidebar"
   ],
   "ignoreDependencies": [
     "@yarnpkg/cli-dist",
@@ -86,6 +87,11 @@
         "two-instance-relay/start.ts",
         "personal-pairing/start.ts",
         "personal-pairing/src/provider.ts",
+        "local-companion-platform/start.ts",
+        "local-companion-platform/src/listen.ts",
+        "local-companion-platform/tests/fixtures/listen-driver.ts",
+        "local-companion-platform/tests/fixtures/desktop-challenge.ts",
+        "local-companion-platform/tests/fixtures/desktop-confirm.ts",
         "*/tests/**/*.e2e.ts",
         "*/tests/**/*.snapshot.ts"
       ],
@@ -739,6 +745,11 @@
       "ignoreDependencies": [
         "@modelcontextprotocol/server-everything",
         "@modelcontextprotocol/server-filesystem"
+      ]
+    },
+    "packages/client/ui-workbench": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-client-better-sidebar"
       ]
     },
     "packages/client/web": {

@@ -135,6 +135,16 @@ describe('ModelsSettingsStore', () => {
       })
   })
 
+  it('folds a mutate answer into the describe mirror before the next join', async () => {
+    const { face, mirror } = api()
+    const store = new ModelsSettingsStore(face, settingsSchema, mirror)
+    await store.load()
+    expect(store.store.getSnapshot().namespaces.get('llm-deepseek')?.user).toBeUndefined()
+    store.acceptWrite({ ...DEEPSEEK_NS, user: {} })
+    await store.load()
+    expect(store.store.getSnapshot().namespaces.get('llm-deepseek')?.user).toEqual({})
+  })
+
   it('does not treat an empty leftover DeepSeek user section as configured', async () => {
     const { face, mirror } = api({
       describeSettings: () => Promise.resolve(ok({

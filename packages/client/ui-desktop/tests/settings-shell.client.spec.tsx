@@ -49,6 +49,9 @@ describe('Desktop Settings shell Mobile Access placement', () => {
     if (shell === undefined) throw new Error('Settings shell was not registered')
     const Shell = shell.component as ComponentType<Record<string, unknown>>
     const injected = assembled.shellInject()
+    // This assertion exercises section placement in the in-page shell. The
+    // Desktop overlay transport has separate Host/overlay integration specs.
+    delete (window.dshDesktop as unknown as Record<string, unknown>).chromeOverlayShow
     render(
       <Shell
         wide
@@ -225,5 +228,11 @@ function bridge(account: DesktopAccountSnapshot, pairing: DesktopPairingSnapshot
     pairingReject: vi.fn(),
     pairingRevoke: vi.fn(),
     onPairingSnapshot: vi.fn(() => () => {}),
+    chromeOverlayShow: async () => {},
+    chromeOverlayHide: async () => {},
+    chromeOverlayGetState: async () => null,
+    chromeOverlayResult: () => {},
+    onChromeOverlayState: () => () => {},
+    onChromeOverlayResult: () => () => {},
   }
 }

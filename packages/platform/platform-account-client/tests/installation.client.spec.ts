@@ -334,6 +334,62 @@ describe('PlatformAccountInstallation', () => {
     expect(installation.getSnapshot().account).toEqual(restored.account)
   })
 
+  it('resumes a still-valid pending login as polling when no session exists', async () => {
+    const store = new MemoryInstallationAccountStore()
+    const pair = await webcrypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['sign', 'verify'],
+    )
+    await store.savePending('development', {
+      attempt: { ...ATTEMPT, expiresAt: 2_000 },
+      privateKey: pair.privateKey,
+    })
+    const installation = new PlatformAccountInstallation({
+      environment: DEVELOPMENT,
+      installationId: parseInstallationId('pending-resume'),
+      installationKind: 'mobile',
+      transport: transport([]),
+      store,
+      systemBrowser: { open: vi.fn() },
+      crypto: webcrypto as Crypto,
+      now: () => 1_000,
+    })
+
+    await installation.load()
+
+    expect(installation.getSnapshot()).toMatchObject({ status: 'polling', privacyAccepted: true })
+    expect(await store.loadPending('development')).toMatchObject({ attempt: { expiresAt: 2_000 } })
+  })
+
+  it('clears an expired pending login without publishing polling', async () => {
+    const store = new MemoryInstallationAccountStore()
+    const pair = await webcrypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['sign', 'verify'],
+    )
+    await store.savePending('development', {
+      attempt: { ...ATTEMPT, expiresAt: 999 },
+      privateKey: pair.privateKey,
+    })
+    const installation = new PlatformAccountInstallation({
+      environment: DEVELOPMENT,
+      installationId: parseInstallationId('pending-expired'),
+      installationKind: 'mobile',
+      transport: transport([]),
+      store,
+      systemBrowser: { open: vi.fn() },
+      crypto: webcrypto as Crypto,
+      now: () => 1_000,
+    })
+
+    await installation.load()
+
+    expect(installation.getSnapshot().status).toBe('idle')
+    expect(await store.loadPending('development')).toBeUndefined()
+  })
+
   it('rotates an expired access token during restoration and persists the replacement', async () => {
     const store = new MemoryInstallationAccountStore()
     const expired = session('account-a', 'octocat', 999)
@@ -578,6 +634,22 @@ describe('AccountLifecycleTransitions', () => {
 
 describe('PlatformAccountHttpTransport', () => {
   const proof = { jti: parseAccountProofJti('proof'), issuedAt: 123, signature: 'signature' }
+
+  it('keeps the default Fetch implementation callable after method extraction', async () => {
+    const impl = {
+      async fetch(this: unknown) {
+        if (this == null) throw new TypeError('Illegal invocation')
+        return new Response(JSON.stringify(ATTEMPT), { status: 200, headers: { 'content-type': 'application/json' } })
+      },
+    }
+    vi.stubGlobal('fetch', impl.fetch.bind(impl))
+    const transport = new PlatformAccountHttpTransport({ environment: DEVELOPMENT })
+    await expect(transport.beginLogin({
+      installationId: parseInstallationId('mobile-1'),
+      installationKind: 'mobile',
+      publicKey: {},
+    })).resolves.toEqual(ATTEMPT)
+  })
 
   it('routes every operation to the selected environment with JSON and proof headers', async () => {
     const calls: Array<[string, RequestInit]> = []

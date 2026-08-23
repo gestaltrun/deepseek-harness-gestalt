@@ -1,0 +1,17 @@
+# Long-running listen is tests/fixtures/listen-driver.ts. This Loader leaf is the
+# keyless Account + pairing + two-instance Relay acceptance scenario.
+- id: local-companion-platform-scenario
+  name: './start.ts'
+  config:
+    attachTimeoutMs: 1000
+    capacityRetryAfterMs: 100
+    deliveryAckTimeoutMs: 500
+    directoryTtlMs: 2000
+    heartbeatIntervalMs: 50
+    heartbeatTimeoutMs: 1000
+    inboundMaxBytes: 262144
+    inboundMaxMessages: 16
+    maxBufferedCiphertextBytes: 131070
+    maxConnections: 16
+    maxPendingDeliveries: 16
+    reconnectDelayMs: 10

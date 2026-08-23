@@ -13,18 +13,17 @@
     - button "Agent 预设":
       - img
       - text: Agent 预设
+    - button "浏览器":
+      - img
+      - text: 浏览器
+    - button "侧边卡片"
   - button "打开配置文件"
   - button "关闭":
     - img
     - text: 关闭
   - heading "模型" [level=2]
   - paragraph: 填入各提供方的 API 密钥即可使用其模型。
-  - list:
-    - listitem:
-      - text: DeepSeek
-      - img "API 密钥缺失"
-      - button "编辑 DeepSeek (deepseek-official)": 编辑
-      - button "删除 DeepSeek (deepseek-official)": 删除
+  - list
   - text: 提供方
   - combobox "提供方":
     - option "amazon-bedrock"

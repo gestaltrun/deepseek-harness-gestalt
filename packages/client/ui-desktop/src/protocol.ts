@@ -52,6 +52,81 @@ export const PAIRING_REJECT = 'pairing:reject'
 export const PAIRING_REVOKE = 'pairing:revoke'
 /** IPC event pushed for every Mobile Access or pairing transition. */
 export const PAIRING_SNAPSHOT_CHANGED = 'pairing:snapshot-changed'
+/** IPC / preload channel: place one official page over the sidebar viewport. */
+export const BROWSER_PRESENT = 'browser:present'
+/** IPC / preload channel: hide one official page when its tab is not visible. */
+export const BROWSER_CONCEAL = 'browser:conceal'
+/** IPC / preload channel: show Settings or the sidebar + menu in the native overlay view. */
+export const CHROME_OVERLAY_SHOW = 'chrome:overlayShow'
+/** IPC / preload channel: hide the native overlay view. */
+export const CHROME_OVERLAY_HIDE = 'chrome:overlayHide'
+/** IPC / preload channel: read the overlay request the Host last accepted. */
+export const CHROME_OVERLAY_GET_STATE = 'chrome:overlayGetState'
+/** IPC event the Host pushes into the overlay document. */
+export const CHROME_OVERLAY_STATE = 'chrome:overlay-state'
+/** IPC event the overlay document sends after select or dismiss. */
+export const CHROME_OVERLAY_RESULT = 'chrome:overlay-result'
+/** Query parameter that boots the Session Surface as the native overlay document. */
+export const DESKTOP_OVERLAY_PARAM = 'dsh-desktop-overlay'
+
+/** Official page identity sent with present and conceal. */
+export interface DesktopBrowserPresentTarget {
+  readonly profileId: string
+  readonly workspaceId: string
+  readonly browserId: string
+  readonly tabId: string
+}
+
+/** Chrome viewport rectangle in CSS pixels relative to the Host content. */
+export interface DesktopBrowserPresentBounds {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
+/** Renderer request to show one official page in the sidebar viewport. */
+export interface DesktopBrowserPresentRequest {
+  readonly target: DesktopBrowserPresentTarget
+  readonly bounds: DesktopBrowserPresentBounds
+}
+
+/** One row in a native overlay menu. Icons are tab-descriptor ids. */
+export interface ChromeOverlayMenuItem {
+  readonly id: string
+  readonly label: string
+  readonly disabled?: boolean
+  readonly icon?: string
+}
+
+/** Content-relative rectangle for a native overlay menu anchor. */
+export interface ChromeOverlayAnchor {
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
+/** Host-chrome request that the overlay document paints. */
+export type ChromeOverlayShowRequest =
+  | {
+    readonly kind: 'menu'
+    readonly requestId: string
+    readonly items: readonly ChromeOverlayMenuItem[]
+    readonly anchor: ChromeOverlayAnchor
+    readonly align?: 'start' | 'end'
+    readonly side?: 'bottom' | 'top' | 'right'
+  }
+  | {
+    readonly kind: 'settings'
+    readonly requestId: string
+    readonly sectionId?: string
+  }
+
+/** Overlay document reply after the user picks a row or dismisses. */
+export type ChromeOverlayResult =
+  | { readonly type: 'close'; readonly requestId: string }
+  | { readonly type: 'select'; readonly requestId: string; readonly id: string }
 
 /** Updater lifecycle the Update Control renders. */
 export type UpdaterPhase =
@@ -180,6 +255,32 @@ export interface DesktopBridge {
   readonly pairingRevoke: (pairingId: PersonalPairingId) => Promise<DesktopPairingSnapshot>
   /** Subscribe to Mobile Access and Personal Pairing transitions. */
   readonly onPairingSnapshot: (listener: (snapshot: DesktopPairingSnapshot) => void) => () => void
+  /** Place one official Runtime page over the sidebar viewport. */
+  readonly browserPresent?: (request: DesktopBrowserPresentRequest) => Promise<void>
+  /** Hide one official Runtime page when its tab is not visible. */
+  readonly browserConceal?: (target: DesktopBrowserPresentTarget) => Promise<void>
+  /** Paint Settings or the sidebar + menu in the native overlay view. */
+  readonly chromeOverlayShow: (request: ChromeOverlayShowRequest) => Promise<void>
+  /** Hide the native overlay view. */
+  readonly chromeOverlayHide: () => Promise<void>
+  /** Read the overlay request the Host last accepted. */
+  readonly chromeOverlayGetState: () => Promise<ChromeOverlayShowRequest | null>
+  /** Tell the Host chrome document the overlay closed or selected a row. */
+  readonly chromeOverlayResult: (result: ChromeOverlayResult) => void
+  /**
+   * Subscribe to overlay paint requests (overlay document).
+   * @param listener - called with the live request, or null when hidden.
+   * @returns unsubscribe.
+   */
+  readonly onChromeOverlayState: (
+    listener: (state: ChromeOverlayShowRequest | null) => void,
+  ) => () => void
+  /**
+   * Subscribe to overlay replies (Host chrome document).
+   * @param listener - called after select or dismiss.
+   * @returns unsubscribe.
+   */
+  readonly onChromeOverlayResult: (listener: (result: ChromeOverlayResult) => void) => () => void
 }
 
 declare global {

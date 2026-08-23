@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这是 `ctx.browserRuntime` 的模型 Consumer。它把 `browser_create`、`browser_navigate`、`browser_observe`、`browser_screenshot`、`browser_focus`、`browser_input`、`browser_takeover`、`browser_return_control` 与 `browser_close` 注册为普通延迟工具。
+这是 `ctx.browserRuntime` 的模型 Consumer。它把 `browser_create`、`browser_navigate`、`browser_observe`、`browser_screenshot`、`browser_focus`、`browser_input` 与 `browser_close` 注册为普通延迟工具。`browser_input` 发送 Agent 合成输入，并要求提供非空 URL 或文本。
 
 ## 配置
 
@@ -16,7 +16,7 @@
 
 #### 模型看到什么
 
-初始工具列表省略全部九个 Browser 工具，并包含普通 `tool_search` schema。搜索浏览器能力会在持久结果中返回精确 schema；后续请求依据当前合资格的 deferred 定义重新验证这些名称。每个操作结果都把 Profile、Workspace、浏览器、标签页、修订号、页面、截图、焦点、关闭、可用性、控制权所有者、chrome 与 storage 事实——包括未标注的临时 Profile、保留名共享 Profile，以及携带原因、重连标志与当前控制权所有者的 `unavailable` 状态——完整渲染为 JSON 文本。省略 `browser_create` 的 `profile` 会打开该共享 Profile。
+初始工具列表省略全部七个 Browser 工具，并包含普通 `tool_search` schema。搜索浏览器能力会在持久结果中返回精确 schema；后续请求依据当前合资格的 deferred 定义重新验证这些名称。每个操作结果都把 Profile、Workspace、浏览器、标签页、修订号、页面、截图、焦点、关闭、可用性、chrome 与 storage 事实——包括未标注的临时 Profile、保留名共享 Profile，以及携带原因与重连标志的 `unavailable` 状态——完整渲染为 JSON 文本。省略 `browser_create` 的 `profile` 会使用 `ui-browser` 设置页的默认身份；在该页改掉之前，默认仍是共享 Profile。组合 Session Binder 后，省略 attach 会复用匹配保留 Profile 上已打开的浏览器实例。
 
 #### Token 影响
 

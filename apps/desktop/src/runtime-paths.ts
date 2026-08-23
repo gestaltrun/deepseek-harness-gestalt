@@ -21,6 +21,17 @@ export interface DesktopRuntimePaths {
 }
 
 /**
+ * Web Host argv after the dsh entry. `--patch` stays ahead of app flags.
+ * `--no-open` keeps the OS default browser closed: Desktop Host already
+ * loads the Session Surface in its own window.
+ * @param patch - Desktop overlay path.
+ * @returns `web --patch … --no-open --host 127.0.0.1 --port 0`.
+ */
+function webHostArgs(patch: string): string[] {
+  return ['web', '--patch', patch, '--no-open', '--host', '127.0.0.1', '--port', '0']
+}
+
+/**
  * Resolve spawn paths.
  * @param options.packaged - Electron `app.isPackaged`.
  * @param options.resourcesPath - `process.resourcesPath` when packaged.
@@ -38,7 +49,7 @@ export function resolveDesktopRuntime(options: {
       : join(options.resourcesPath, 'node', 'bin', 'node')
     const dsh = join(options.resourcesPath, 'dsh', 'lib', 'bin.js')
     const patch = join(options.resourcesPath, 'cordis.patch.yml')
-    return { node, args: [dsh, 'web', '--patch', patch, '--host', '127.0.0.1', '--port', '0'], patch }
+    return { node, args: [dsh, ...webHostArgs(patch)], patch }
   }
   const here = dirname(fileURLToPath(options.moduleUrl))
   const repoRoot = join(here, '..', '..', '..')
@@ -50,7 +61,7 @@ export function resolveDesktopRuntime(options: {
   const tsx = pathToFileURL(join(repoRoot, 'node_modules', 'tsx', 'dist', 'esm', 'index.mjs')).href
   return {
     node,
-    args: ['--import', tsx, bin, 'web', '--patch', patch, '--host', '127.0.0.1', '--port', '0'],
+    args: ['--import', tsx, bin, ...webHostArgs(patch)],
     patch,
     workspaceRoot: repoRoot,
   }

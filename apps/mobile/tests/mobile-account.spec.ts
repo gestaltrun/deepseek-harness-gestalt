@@ -15,10 +15,28 @@ import {
   PlatformAccountInstallation,
   type PlatformAccountTransport,
 } from '@deepseek-ai/dsh-platform-account-client'
+import {
+  negotiateDevelopmentCompanionProtocol,
+  openDevelopmentCompanionMessage,
+  sealDevelopmentCompanionMessage,
+} from '@deepseek-ai/dsh-remote-access-client'
+import { parseRelayAttachmentId, parseRelayCredential, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
 import { MobileAccount } from '../src/MobileAccount.tsx'
+import {
+  CompanionForegroundRuntime,
+  installCompanionRuntime,
+} from '../src/companion-push.ts'
+import {
+  DevelopmentCompanionClient,
+  DevelopmentCompanionSessionStore,
+  installDevelopmentCompanionClient,
+} from '../src/development-keyless-companion.ts'
 import type { MobilePairingActions } from '../src/MobilePairing.tsx'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  installDevelopmentCompanionClient()
+})
 
 const ENVIRONMENT = selectPlatformEnvironment(validatePlatformEnvironmentPair({
   development: {
@@ -95,11 +113,117 @@ describe('MobileAccount', () => {
     await screen.findByText('@octocat')
     expect(screen.getByText('当前安装')).toBeTruthy()
     expect(screen.getByText('independent review pending')).toBeTruthy()
+    expect(screen.getByText('Remote Offline')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: '退出此安装' }))
     await waitFor(() => { expect(api.signOut).toHaveBeenCalledOnce() })
     await screen.findByRole('button', { name: '使用 GitHub 继续' })
     expect(deactivate).toHaveBeenCalledOnce()
+  })
+
+  it('labels Remote Online only after Desktop-authoritative companion sync', async () => {
+    const { installation } = fixture()
+    const runtime = new CompanionForegroundRuntime({
+      relay: {
+        start: async () => {},
+        stop: async () => {},
+        isConnected: () => true,
+      },
+    })
+    const dispose = installCompanionRuntime(runtime)
+    runtime.configure({
+      routeId: parseRelayRouteId('route-browse'),
+      endpoint: 'mobile',
+      credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      revision: 1,
+    })
+    await runtime.start()
+    runtime.synchronize()
+    const paired = { status: 'paired' } as const
+    const pairing: MobilePairingActions = {
+      getSnapshot: () => paired,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      activate: vi.fn().mockResolvedValue(undefined),
+      deactivate: vi.fn().mockResolvedValue(undefined),
+      unpair: vi.fn().mockResolvedValue(undefined),
+    }
+    try {
+      render(createElement(MobileAccount, { installation, pairing }))
+      fireEvent.click(screen.getByRole('checkbox'))
+      await waitFor(() => { expect(screen.getByRole('button', { name: '使用 GitHub 继续' }).hasAttribute('disabled')).toBe(false) })
+      fireEvent.click(screen.getByRole('button', { name: '使用 GitHub 继续' }))
+      await screen.findByText('@octocat')
+      expect(screen.getByText('Remote Online')).toBeTruthy()
+    } finally {
+      dispose()
+    }
+  })
+
+  it('creates a Session row only after Desktop confirms the Companion operation', async () => {
+    const { installation } = fixture()
+    const runtime = new CompanionForegroundRuntime({
+      relay: { start: async () => {}, stop: async () => {}, isConnected: () => true },
+    })
+    const disposeRuntime = installCompanionRuntime(runtime)
+    runtime.configure({
+      routeId: parseRelayRouteId('route-create'),
+      endpoint: 'mobile',
+      credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      revision: 1,
+    })
+    await runtime.start()
+    runtime.synchronize()
+    const store = new DevelopmentCompanionSessionStore()
+    const desktop = negotiateDevelopmentCompanionProtocol()
+    const client = new DevelopmentCompanionClient(
+      store,
+      async (_target, ciphertext) => {
+        const inbound = await openDevelopmentCompanionMessage(desktop, ciphertext)
+        if (inbound.type !== 'operation') return
+        await client.receive(await sealDevelopmentCompanionMessage(desktop, {
+          type: 'result',
+          result: {
+            type: 'confirmed',
+            operationId: inbound.operation.operationId,
+            committedAt: 1,
+            outcome: 'accepted',
+          },
+        }))
+      },
+      parseRelayAttachmentId('desktop-development-keyless'),
+    )
+    const disposeClient = installDevelopmentCompanionClient(client)
+    const paired = { status: 'paired' } as const
+    const pairing: MobilePairingActions = {
+      getSnapshot: () => paired,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      activate: vi.fn().mockResolvedValue(undefined),
+      deactivate: vi.fn().mockResolvedValue(undefined),
+      unpair: vi.fn().mockResolvedValue(undefined),
+    }
+    try {
+      render(createElement(MobileAccount, { installation, pairing }))
+      fireEvent.click(screen.getByRole('checkbox'))
+      await waitFor(() => { expect(screen.getByRole('button', { name: '使用 GitHub 继续' }).hasAttribute('disabled')).toBe(false) })
+      fireEvent.click(screen.getByRole('button', { name: '使用 GitHub 继续' }))
+      await screen.findByText('@octocat')
+      expect(screen.queryByText('Ungrouped Session')).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: '新建 Ungrouped Session' }))
+      await waitFor(() => { expect(screen.getByText('Ungrouped Session')).toBeTruthy() })
+      fireEvent.change(screen.getByLabelText('Workspace 名称'), { target: { value: 'Docs' } })
+      fireEvent.click(screen.getByRole('button', { name: '在新 Workspace 新建 Session' }))
+      await waitFor(() => { expect(screen.getByText('Docs')).toBeTruthy() })
+      expect(screen.getByRole('button', { name: '在 Docs 新建 Session' })).toBeTruthy()
+    } finally {
+      disposeClient()
+      disposeRuntime()
+    }
   })
 })
 

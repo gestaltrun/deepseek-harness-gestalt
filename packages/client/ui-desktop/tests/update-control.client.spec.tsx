@@ -161,6 +161,12 @@ describe('UpdateControl', () => {
       pairingGetSnapshot: vi.fn(), pairingSetEnabled: vi.fn(), pairingCreateChallenge: vi.fn(),
       pairingCancelChallenge: vi.fn(), pairingConfirm: vi.fn(), pairingReject: vi.fn(), pairingRevoke: vi.fn(),
       onPairingSnapshot: () => () => {},
+      chromeOverlayShow: async () => {},
+      chromeOverlayHide: async () => {},
+      chromeOverlayGetState: async () => null,
+      chromeOverlayResult: () => {},
+      onChromeOverlayState: () => () => {},
+      onChromeOverlayResult: () => () => {},
     }
     render(
       <UpdateControl
@@ -206,6 +212,12 @@ function mountBridge(bridge?: Partial<DesktopBridge>): DesktopBridge {
     pairingGetSnapshot: vi.fn(), pairingSetEnabled: vi.fn(), pairingCreateChallenge: vi.fn(),
     pairingCancelChallenge: vi.fn(), pairingConfirm: vi.fn(), pairingReject: vi.fn(), pairingRevoke: vi.fn(),
     onPairingSnapshot: () => () => {},
+    chromeOverlayShow: async () => {},
+    chromeOverlayHide: async () => {},
+    chromeOverlayGetState: async () => null,
+    chromeOverlayResult: () => {},
+    onChromeOverlayState: () => () => {},
+    onChromeOverlayResult: () => () => {},
     ...bridge,
   }
   window.dshDesktop = desktop

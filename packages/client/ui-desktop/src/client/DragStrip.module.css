@@ -1,3 +1,7 @@
+:global(:root) {
+  --dsh-window-chrome-height: 36px;
+}
+
 .strip {
   position: fixed;
   z-index: 7;
@@ -6,7 +10,7 @@
   left: 0;
   display: flex;
   align-items: stretch;
-  height: 36px;
+  height: var(--dsh-window-chrome-height);
   background: var(--dsw-specific-sidebar-fill);
   -webkit-app-region: drag;
 }
@@ -16,9 +20,9 @@
   position: fixed;
   z-index: 5;
   top: 0;
-  right: 0;
+  right: var(--dsh-sidebar-width, 0px);
   left: 0;
-  height: 28px;
+  height: var(--dsh-window-chrome-height);
   background: var(--dsw-specific-sidebar-fill);
   -webkit-app-region: drag;
 }
@@ -36,13 +40,13 @@
 
 .caption {
   width: 46px;
-  height: 36px;
+  height: var(--dsh-window-chrome-height);
   border: none;
   background: transparent;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
   font-size: 14px;
-  line-height: 36px;
+  line-height: var(--dsh-window-chrome-height);
 }
 
 .caption:hover {

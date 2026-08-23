@@ -3,6 +3,12 @@ import { RemoteProtocolError } from './errors.ts'
 import { parseAttachmentCapability } from './relay.ts'
 import { REMOTE_PROTOCOL_LIMITS } from './limits.ts'
 import type {
+  CompanionAnswerAskUserOperation,
+  CompanionApprovalTranscriptEntry,
+  CompanionAskUserTranscriptEntry,
+  CompanionImageTranscriptEntry,
+  CompanionInteractionId,
+  CompanionInteractionSettlement,
   CompanionMessage,
   CompanionOperation,
   CompanionOperationId,
@@ -10,6 +16,8 @@ import type {
   CompanionResult,
   CompanionSecurityCapability,
   CompanionSessionId,
+  CompanionSettleApprovalOperation,
+  CompanionTranscriptEntry,
   CompanionTranscriptEntryId,
   CompanionTextTranscriptEntry,
   CompanionVersionDescriptor,
@@ -188,6 +196,15 @@ export function parseCompanionTranscriptEntryId(value: unknown): CompanionTransc
 }
 
 /**
+ * Parse one Desktop-authorized interaction id at the encrypted wire boundary.
+ * @param value - untrusted protocol-native identifier.
+ * @returns branded approval or Ask User identifier.
+ */
+export function parseCompanionInteractionId(value: unknown): CompanionInteractionId {
+  return parseIdentifier(value, 'Companion interactionId') as CompanionInteractionId
+}
+
+/**
  * Encode approved application plaintext after Companion negotiation succeeds.
  * @param protocol - successful security-preserving negotiation.
  * @param message - approved operation, projection, or result.
@@ -286,6 +303,17 @@ function parseOperation(value: unknown): CompanionOperation {
       operationId: parseCompanionOperationId(record.operationId),
     }
   }
+  if (record.type === 'create-session') return parseCreateSession(record)
+  if (record.type === 'cancel-prompt') {
+    exactKeys(record, ['type', 'operationId', 'sessionId'], 'Companion cancel-prompt operation')
+    return {
+      type: 'cancel-prompt',
+      operationId: parseCompanionOperationId(record.operationId),
+      sessionId: parseCompanionSessionId(record.sessionId),
+    }
+  }
+  if (record.type === 'settle-approval') return parseSettleApproval(record)
+  if (record.type === 'answer-ask-user') return parseAnswerAskUser(record)
   if (record.type !== 'submit-prompt') invalid('Companion operation type is unsupported')
   exactKeys(record, ['type', 'operationId', 'sessionId', 'text'], 'Companion submit-prompt operation')
   if (typeof record.text !== 'string' || record.text.length === 0) invalid('Companion prompt text must be non-empty')
@@ -294,6 +322,59 @@ function parseOperation(value: unknown): CompanionOperation {
     operationId: parseCompanionOperationId(record.operationId),
     sessionId: parseCompanionSessionId(record.sessionId),
     text: record.text,
+  }
+}
+
+function parseSettleApproval(record: Record<string, unknown>): CompanionSettleApprovalOperation {
+  exactKeysAllowing(
+    record,
+    ['type', 'operationId', 'sessionId', 'interactionId', 'decision'],
+    ['persistent'],
+    'Companion settle-approval operation',
+  )
+  const decision = nonEmptyString(record.decision, 'Companion settle-approval decision')
+  if (record.persistent !== undefined && typeof record.persistent !== 'boolean') {
+    invalid('Companion settle-approval persistent must be a boolean')
+  }
+  return {
+    type: 'settle-approval',
+    operationId: parseCompanionOperationId(record.operationId),
+    sessionId: parseCompanionSessionId(record.sessionId),
+    interactionId: parseCompanionInteractionId(record.interactionId),
+    decision,
+    ...(record.persistent === undefined ? {} : { persistent: record.persistent }),
+  }
+}
+
+function parseAnswerAskUser(record: Record<string, unknown>): CompanionAnswerAskUserOperation {
+  exactKeys(record, ['type', 'operationId', 'sessionId', 'interactionId', 'decision'], 'Companion answer-ask-user operation')
+  return {
+    type: 'answer-ask-user',
+    operationId: parseCompanionOperationId(record.operationId),
+    sessionId: parseCompanionSessionId(record.sessionId),
+    interactionId: parseCompanionInteractionId(record.interactionId),
+    decision: nonEmptyString(record.decision, 'Companion answer-ask-user decision'),
+  }
+}
+
+function parseCreateSession(record: Record<string, unknown>): CompanionOperation {
+  if (record.workspace === undefined) {
+    exactKeys(record, ['type', 'operationId', 'sessionId', 'title'], 'Companion create-session operation')
+  } else {
+    exactKeys(record, ['type', 'operationId', 'sessionId', 'title', 'workspace'], 'Companion create-session operation')
+    if (typeof record.workspace !== 'string' || record.workspace.length === 0) {
+      invalid('Companion create-session workspace must be a non-empty string')
+    }
+  }
+  if (typeof record.title !== 'string' || record.title.length === 0) {
+    invalid('Companion create-session title must be a non-empty string')
+  }
+  return {
+    type: 'create-session',
+    operationId: parseCompanionOperationId(record.operationId),
+    sessionId: parseCompanionSessionId(record.sessionId),
+    title: record.title,
+    ...(record.workspace === undefined ? {} : { workspace: record.workspace }),
   }
 }
 
@@ -344,21 +425,39 @@ function parseStatusResult(record: Record<string, unknown>): CompanionResult {
 function parseProjection(value: unknown): CompanionProjection {
   const record = object(value, 'Companion projection')
   if (record.type !== 'transcript-page') invalid('Companion projection type is unsupported')
-  exactKeys(record, ['type', 'sessionId', 'entries'], 'Companion transcript-page projection')
+  exactKeysAllowing(record, ['type', 'sessionId', 'entries'], ['streaming'], 'Companion transcript-page projection')
   if (!Array.isArray(record.entries)) invalid('Companion transcript entries must be an array')
   if (record.entries.length > REMOTE_PROTOCOL_LIMITS.transcriptPageEntries) {
     throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion transcript page exceeds its entry ceiling')
+  }
+  if (record.streaming !== undefined && record.streaming !== true && record.streaming !== false) {
+    invalid('Companion transcript streaming must be a boolean')
   }
   return {
     type: 'transcript-page',
     sessionId: parseCompanionSessionId(record.sessionId),
     entries: record.entries.map(parseTranscriptEntry),
+    ...(record.streaming === undefined ? {} : { streaming: record.streaming }),
   }
 }
 
-function parseTranscriptEntry(value: unknown): CompanionTextTranscriptEntry {
+function parseTranscriptEntry(value: unknown): CompanionTranscriptEntry {
   const record = object(value, 'Companion transcript entry')
-  if (record.type !== 'text') invalid('Companion transcript entry type is unsupported')
+  switch (record.type) {
+    case 'text':
+      return parseTextTranscriptEntry(record)
+    case 'image':
+      return parseImageTranscriptEntry(record)
+    case 'approval':
+      return parseApprovalTranscriptEntry(record)
+    case 'ask-user':
+      return parseAskUserTranscriptEntry(record)
+    default:
+      invalid('Companion transcript entry type is unsupported')
+  }
+}
+
+function parseTextTranscriptEntry(record: Record<string, unknown>): CompanionTextTranscriptEntry {
   exactKeys(record, ['type', 'entryId', 'role', 'text'], 'Companion text transcript entry')
   if (record.role !== 'user' && record.role !== 'assistant') invalid('Companion transcript role is unsupported')
   if (typeof record.text !== 'string') invalid('Companion transcript text must be a string')
@@ -367,6 +466,76 @@ function parseTranscriptEntry(value: unknown): CompanionTextTranscriptEntry {
     entryId: parseCompanionTranscriptEntryId(record.entryId),
     role: record.role,
     text: record.text,
+  }
+}
+
+function parseImageTranscriptEntry(record: Record<string, unknown>): CompanionImageTranscriptEntry {
+  exactKeys(record, ['type', 'entryId', 'fileName', 'alt'], 'Companion image transcript entry')
+  return {
+    type: 'image',
+    entryId: parseCompanionTranscriptEntryId(record.entryId),
+    fileName: nonEmptyString(record.fileName, 'Companion image fileName'),
+    alt: nonEmptyString(record.alt, 'Companion image alt'),
+  }
+}
+
+function parseApprovalTranscriptEntry(record: Record<string, unknown>): CompanionApprovalTranscriptEntry {
+  exactKeysAllowing(
+    record,
+    ['type', 'entryId', 'interactionId', 'summary', 'authorized'],
+    ['cwd', 'diff', 'terminal', 'settled'],
+    'Companion approval transcript entry',
+  )
+  const authorized = parseAuthorizedDecisions(record.authorized, 'Companion approval authorized')
+  return {
+    type: 'approval',
+    entryId: parseCompanionTranscriptEntryId(record.entryId),
+    interactionId: parseCompanionInteractionId(record.interactionId),
+    summary: nonEmptyString(record.summary, 'Companion approval summary'),
+    authorized,
+    ...(record.cwd === undefined ? {} : { cwd: nonEmptyString(record.cwd, 'Companion approval cwd') }),
+    ...(record.diff === undefined ? {} : { diff: nonEmptyString(record.diff, 'Companion approval diff') }),
+    ...(record.terminal === undefined ? {} : { terminal: nonEmptyString(record.terminal, 'Companion approval terminal') }),
+    ...(record.settled === undefined ? {} : { settled: parseSettlement(record.settled, authorized) }),
+  }
+}
+
+function parseAskUserTranscriptEntry(record: Record<string, unknown>): CompanionAskUserTranscriptEntry {
+  exactKeysAllowing(
+    record,
+    ['type', 'entryId', 'interactionId', 'summary', 'authorized'],
+    ['settled'],
+    'Companion ask-user transcript entry',
+  )
+  const authorized = parseAuthorizedDecisions(record.authorized, 'Companion ask-user authorized')
+  return {
+    type: 'ask-user',
+    entryId: parseCompanionTranscriptEntryId(record.entryId),
+    interactionId: parseCompanionInteractionId(record.interactionId),
+    summary: nonEmptyString(record.summary, 'Companion ask-user summary'),
+    authorized,
+    ...(record.settled === undefined ? {} : { settled: parseSettlement(record.settled, authorized) }),
+  }
+}
+
+function parseAuthorizedDecisions(value: unknown, name: string): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0) invalid(`${name} must be a non-empty array`)
+  const authorized = value.map((decision, index) => nonEmptyString(decision, `${name}[${String(index)}]`))
+  if (new Set(authorized).size !== authorized.length) invalid(`${name} must be unique`)
+  return authorized
+}
+
+function parseSettlement(value: unknown, authorized: readonly string[]): CompanionInteractionSettlement {
+  const record = object(value, 'Companion interaction settlement')
+  exactKeysAllowing(record, ['decision'], ['persistent'], 'Companion interaction settlement')
+  const decision = nonEmptyString(record.decision, 'Companion settled decision')
+  if (!authorized.includes(decision)) invalid('Companion settled decision must be one of the authorized decisions')
+  if (record.persistent !== undefined && typeof record.persistent !== 'boolean') {
+    invalid('Companion settled persistent must be a boolean')
+  }
+  return {
+    decision,
+    ...(record.persistent === undefined ? {} : { persistent: record.persistent }),
   }
 }
 
@@ -407,11 +576,25 @@ function object(value: unknown, name: string): Record<string, unknown> {
 }
 
 function exactKeys(record: Record<string, unknown>, keys: readonly unknown[], name: string): void {
-  const supported = keys.filter((key): key is string => typeof key === 'string')
+  exactKeysAllowing(record, keys.filter((key): key is string => typeof key === 'string'), [], name)
+}
+
+function exactKeysAllowing(
+  record: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+  name: string,
+): void {
   const actual = Object.keys(record)
-  if (actual.length !== supported.length || actual.some(key => !supported.includes(key))) {
+  if (required.some(key => !actual.includes(key))) invalid(`${name} contains unsupported fields`)
+  if (actual.some(key => !required.includes(key) && !optional.includes(key))) {
     invalid(`${name} contains unsupported fields`)
   }
+}
+
+function nonEmptyString(value: unknown, name: string): string {
+  if (typeof value !== 'string' || value.length === 0) invalid(`${name} must be a non-empty string`)
+  return value
 }
 
 function parseIdentifier(value: unknown, name: string): string {

@@ -10,13 +10,15 @@ A Session can open a Browser Profile, but the Runtime still treats Workspaces, i
 
 ## Decision
 
-`dsh-browser-workspace` binds Browser Runtime identities to one Session log. Each Session independently owns zero or more Workspaces. Each Workspace uses one Browser Profile and contains multiple browser instances and tabs. `browser/workspace` is a log-only, last-wins whole-value Session event. The fold restores Dock open/width, instances, active instance, tabs, each tab's last committed revision, and active tab after Session switch and reload.
+`dsh-browser-workspace` binds Browser Runtime identities to one Session log. Each Session independently owns zero or more Workspaces. Each Workspace uses one Browser Profile and contains multiple browser instances and tabs. `browser/workspace` is a log-only, last-wins whole-value Session event. The fold restores instances, active instance, tabs, each tab's last committed revision, and active tab after Session switch and reload.
+
+Browser Runtime pages remain live process state. When retained-Profile matching reaches a logged target that the current Runtime reports as `BROWSER_NOT_FOUND`, the Binder forgets that target and continues matching and creation; other observe failures remain fatal. A Runtime process restart therefore replaces missing pages on the next create instead of treating logged ownership as proof that a page is live.
 
 Runtime `create` may attach a new instance to an existing Workspace or a new tab to an existing instance. Named Profiles still reject a second independent writer with `BROWSER_PROFILE_BUSY`; attaching to an already-open named Profile is the same writer adding another instance or tab. The Consumer routes through the Binder when a calling Agent Session is present and the Binder is composed. Cross-Session page transfer is rejected with `BROWSER_TRANSFER_UNSUPPORTED`. Attach to another live Session's Workspace or instance is also `BROWSER_TRANSFER_UNSUPPORTED`; attach unknown to this Session is `BROWSER_SESSION_MISMATCH`. Session disposal returns leftover-tab cleanup and forgets those tabs from the Session snapshot.
 
 Headless Browser Runtime snapshots stay Binder-free because they prove Consumer discovery and rendered Runtime facts, not Session isolation. Session-local ownership is claimed only where the Binder is composed.
 
-Dock chrome lives in `dsh-client-ui-browser`. Dock open, width, `userCollapsed`, each tab's current control owner, and each tab's last committed revision are Session facts so projection can restore them. Per-tab revision on that listing is owned by the [Dock tab revision Agent Note](../bug-fix/2026-08-20-dock-tab-revision.md). Human and Agent control of one tab lives in the [browser control arbitration Agent Note](2026-08-19-browser-control-arbitration.md). The first Agent tab opens the Dock; later Agent activity does not reopen it after the human collapses it.
+Each tab's last committed revision is a Session fact so projection restores optimistic concurrency; the [tab revision Agent Note](../bug-fix/2026-08-20-dock-tab-revision.md) owns that listing rule. Workbench panel visibility and width belong to better-sidebar. The [reported Browser control and Dock-state removal](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.md) owns the reduced payload and implicit matching-Profile reuse.
 
 ## Alternatives considered
 
@@ -24,11 +26,11 @@ Dock chrome lives in `dsh-client-ui-browser`. Dock open, width, `userCollapsed`,
 
 **Add a second account or page-transfer service.** Rejected because the ticket forbids cross-Session transfer and a second identity concept.
 
-**Treat Dock open/width as client-only layout store state.** Rejected because each Session must independently remember those facts after switch and reload, including before Dock UI exists.
+**Persist Workbench panel geometry in the Browser payload.** Rejected because better-sidebar already owns per-Session presentation state; a second authority can disagree after switch or reload.
 
 ## Consequences
 
-Two Sessions can own isolated Workspaces over the same Runtime. Reload reconstructs Dock, tab ownership, current control owner, and each tab's last committed revision from the Session log. Named Profiles remain isolated identities. Release remains a later ticket.
+Two Sessions can own isolated Workspaces over the same Runtime. Reload reconstructs tab ownership and each tab's last committed revision from the Session log. A Runtime process restart prunes missing targets during the next retained-Profile create. Named Profiles remain isolated identities.
 
 ## Verification
 

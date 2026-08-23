@@ -98,6 +98,12 @@ export function installDesktopBridgeFixture(platform: 'darwin' | 'win32'): Deskt
       listener(pairing)
       return () => { pairingListeners.delete(listener) }
     },
+    chromeOverlayShow: async () => {},
+    chromeOverlayHide: async () => {},
+    chromeOverlayGetState: async () => null,
+    chromeOverlayResult: () => {},
+    onChromeOverlayState: () => () => {},
+    onChromeOverlayResult: () => () => {},
   }
 
   Object.defineProperty(globalThis, 'dshDesktop', {

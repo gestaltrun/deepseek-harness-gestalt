@@ -12,7 +12,7 @@ Pull-request CI cannot produce a result when a job resolves to an unprovisioned 
 
 The three primary Node 24 Linux jobs resolve to `ubuntu-latest` by default, and the native Windows job resolves to `windows-latest` by default. The `DSH_CI_FAILOVER_LINUX` and `DSH_CI_FAILOVER_WINDOWS` repository variables still select the platform-specific self-hosted pools for trusted non-Dependabot pull requests. The [failover runbook](2026-07-26-ci-failover-runbook.md) owns that operation.
 
-Standard-runner defaults bound process fan-out: Linux static work uses four top-level workers, coverage uses two top-level workers and two instrumented workers, consumer checks use four top-level workers and eight snapshot workers, and native Windows uses two top-level gate workers, one coverage worker, and one publint worker ([two-gate-worker default](2026-08-20-hosted-windows-two-gate-workers.md)). The self-hosted branches retain their pool-specific higher limits.
+Standard-runner defaults bound process fan-out: Linux static work uses four top-level workers, coverage uses two top-level workers and two instrumented workers, consumer checks use four top-level workers and eight snapshot workers, and native Windows uses one top-level gate worker, one coverage worker, and one publint worker ([serial-gate decision](2026-08-23-hosted-windows-serial-gates.md)). The self-hosted branches retain their pool-specific inner-worker limits.
 
 Custom larger-runner labels remain only in manually dispatched benchmark matrices. [CI workflow tests](../../../../scripts/ci-workflow.spec.ts) require standard default labels for the pull-request jobs and reject custom larger-runner labels in those selectors.
 

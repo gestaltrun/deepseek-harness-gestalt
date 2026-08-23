@@ -34,7 +34,9 @@ The browser side of the dsh web GUI: shell boot, browser-host communication, sha
 | [`ui-subagent/`](ui-subagent/README.md) | Provides subagent navigation, child transcript states, and inline references. |
 | [`ui-jobs/`](ui-jobs/README.md) | Lists this session's background jobs in the conversation header. |
 | [`ui-schedule/`](ui-schedule/README.md) | Presents and manages this session's durable reminders in the conversation header. |
-| [`ui-browser/`](ui-browser/README.md) | Presents the Session-owned Browser Dock and collapsed tab preview. |
+| [`ui-browser/`](ui-browser/README.md) | Presents official Browser page chrome, the collapsed tab preview, and Browser Profile settings. |
+| [`better-sidebar/`](better-sidebar/README.md) | Pinned DSH-better-sidebar snapshot: right sidebar and bottom-panel workbench. |
+| [`ui-workbench/`](ui-workbench/README.md) | Binds official Browser pages to the snapshot sidebar `browser` tab. |
 | [`ui-model-selection/`](ui-model-selection/README.md) | Provides model selection in conversation surfaces. |
 | [`ui-permission/`](ui-permission-presets/README.md) | Configures default permissions and switches the current session's access. |
 | [`ui-plan/`](ui-plan/README.md) | Presents active plan-mode status and its exit control. |

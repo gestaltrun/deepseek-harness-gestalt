@@ -1,6 +1,6 @@
 /**
- * Resolve a `browser_*` tool call's Dock tab and focus it from the Session
- * listing revision. Chat selection never writes `dockOpen`.
+ * Resolve a `browser_*` tool call's page and focus it from the Session
+ * listing revision.
  */
 import type { ConversationSnapshot, ToolCallBlock } from '@deepseek-ai/dsh-client-runtime/client'
 import { findToolCall } from './tool-node-reader.ts'
@@ -90,9 +90,9 @@ export function listedBrowserTabRevision(
 }
 
 /**
- * Focus the listed Dock tab for a selected `browser_*` call when that tab
+ * Focus the listed Browser tab for a selected `browser_*` call when that tab
  * still exists. Does not call focus when the tab is gone, the Remote is
- * absent, or the payload names no target. Never writes `dockOpen`.
+ * absent, or the payload names no target.
  * @param input.snapshot - current Conversation snapshot.
  * @param input.listing - `browserWorkspace` projection value.
  * @param input.callId - selected tool call, when the selection names one.

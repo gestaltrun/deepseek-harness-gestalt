@@ -1,0 +1,160 @@
+/* Official page chrome: address bar and screenshot viewport. */
+
+.root {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--dsw-alias-bg-base);
+}
+
+.actionError {
+  flex: none;
+  padding: 0 10px 6px;
+  font: var(--dsw-font-xxxs-11);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.toolbar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+}
+
+.tool {
+  display: grid;
+  flex: none;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font: var(--dsw-font-xxxs-11);
+  white-space: nowrap;
+}
+
+.tool:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tool[data-busy] :global(svg) {
+  animation: dsh-browser-refresh 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool[data-busy] :global(svg) {
+    animation: none;
+  }
+}
+
+@keyframes dsh-browser-refresh {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.address {
+  display: flex;
+  box-sizing: border-box;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+.profile {
+  flex: none;
+  max-width: 96px;
+  overflow: hidden;
+  font: var(--dsw-font-xxxs-strong-11);
+  color: var(--dsw-alias-label-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.url {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  appearance: none;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  caret-color: var(--dsw-alias-label-primary);
+  cursor: text;
+  font: var(--dsw-font-xxs-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewport {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--dsw-alias-bg-base);
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.screenshot {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  object-position: top center;
+}
+
+.text {
+  position: absolute;
+  inset: auto 12px 12px;
+  max-height: 40%;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--dsw-alias-bg-base) 88%, transparent);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xxs-12);
+  white-space: pre-wrap;
+}
+
+.empty {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+  font: var(--dsw-font-xs-13);
+  color: var(--dsw-alias-label-tertiary);
+}

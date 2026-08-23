@@ -5,9 +5,6 @@ import { applyBrowserWorkspaceProjection, EMPTY_BROWSER_WORKSPACE, foldBrowserWo
 import type { BrowserWorkspaceProjection } from '../src/client.ts'
 
 const SNAPSHOT: BrowserWorkspaceProjection = {
-  dockOpen: true,
-  dockWidth: 720,
-  userCollapsed: false,
   activeWorkspaceId: BrowserWorkspaceId('ws-1'),
   workspaces: [{
     workspaceId: BrowserWorkspaceId('ws-1'),
@@ -16,7 +13,7 @@ const SNAPSHOT: BrowserWorkspaceProjection = {
     browsers: [{
       browserId: BrowserInstanceId('browser-1'),
       activeTabId: BrowserTabId('tab-1'),
-      tabs: [{ tabId: BrowserTabId('tab-1'), controlOwner: 'agent', revision: 0 }],
+      tabs: [{ tabId: BrowserTabId('tab-1'), revision: 0 }],
     }],
   }],
 }
@@ -27,7 +24,7 @@ describe('Browser Workspace fold', () => {
     expect(foldBrowserWorkspace(session.events)).toBe(EMPTY_BROWSER_WORKSPACE)
     session.append('browser/workspace', SNAPSHOT)
     expect(foldBrowserWorkspace(session.events)).toEqual(SNAPSHOT)
-    const later = { ...SNAPSHOT, dockOpen: false, dockWidth: 480 }
+    const later = { ...SNAPSHOT, activeWorkspaceId: null }
     session.append('browser/workspace', later)
     expect(foldBrowserWorkspace(session.events)).toEqual(later)
     expect(foldBrowserWorkspace(session.events, 0)).toBe(EMPTY_BROWSER_WORKSPACE)

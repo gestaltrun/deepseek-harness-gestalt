@@ -6,13 +6,16 @@ import { appendFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, ipcMain, powerMonitor, safeStorage, shell,
-  type IpcMainEvent,
+  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, powerMonitor, safeStorage, shell,
+  type IpcMainEvent, type IpcMainInvokeEvent,
 } from 'electron'
 import {
   ACCOUNT_ACCEPT_PRIVACY, ACCOUNT_BEGIN_LOGIN, ACCOUNT_GET_SNAPSHOT,
   ACCOUNT_SIGN_OUT, ACCOUNT_SNAPSHOT_CHANGED,
   PAIRING_CANCEL_CHALLENGE, PAIRING_CONFIRM, PAIRING_CREATE_CHALLENGE,
+  BROWSER_CONCEAL, BROWSER_PRESENT,
+  CHROME_OVERLAY_GET_STATE, CHROME_OVERLAY_HIDE, CHROME_OVERLAY_RESULT,
+  CHROME_OVERLAY_SHOW, CHROME_OVERLAY_STATE,
   PAIRING_GET_SNAPSHOT, PAIRING_REJECT, PAIRING_REVOKE, PAIRING_SET_ENABLED, PAIRING_SNAPSHOT_CHANGED,
   UPDATER_CHECK_NOW, UPDATER_DOWNLOAD_NOW, UPDATER_GET_STATUS,
   UPDATER_QUIT_AND_INSTALL, UPDATER_STATUS_CHANGED,
@@ -50,7 +53,14 @@ import {
 import { DesktopPairingKeyVault } from './pairing-keys.ts'
 import { disposeDesktopOwners } from './shutdown.ts'
 import { startDesktopBrowserRuntime, type DesktopBrowserRuntime } from './browser-runtime.ts'
+import { parseBrowserPresentRequest, parseBrowserPresentTarget } from './browser-present.ts'
+import {
+  hideChromeOverlayView, isOverlaySender, overlayUrlFromHost, parseChromeOverlayResult,
+  parseChromeOverlayShow, prepareChromeOverlayView, showChromeOverlayView,
+  syncChromeOverlayBounds,
+} from './chrome-overlay.ts'
 import { createDesktopRemoteRelay } from './remote-relay.ts'
+import { createLoopbackListenFetch, isLoopbackListenUrl, openDesktopAuthorizationUrl } from './loopback-listen-trust.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const PRELOAD = join(here, 'preload.cjs')
@@ -64,6 +74,9 @@ function smokeLog(line: string): void {
 let host: RunningWebHost | undefined
 let browserRuntime: DesktopBrowserRuntime | undefined
 let window: BrowserWindow | undefined
+let overlayView: WebContentsView | undefined
+let overlayOpen: ReturnType<typeof parseChromeOverlayShow>
+let overlayReady: Promise<WebContentsView> | undefined
 let updater: AutoUpdaterLifecycle | undefined
 let respawned = false
 let shuttingDown = false
@@ -164,6 +177,7 @@ async function boot(): Promise<void> {
       await finishSmoke(window)
       return
     }
+    void ensureChromeOverlay(window, host.url)
   } catch (error) {
     smokeLog('error ' + (error instanceof Error ? error.message : String(error)))
     await showError(window, error)
@@ -209,6 +223,7 @@ async function focusOrReopen(): Promise<void> {
   window = createWindow()
   try {
     await window.loadURL(host.url)
+    void ensureChromeOverlay(window, host.url)
   } catch (error) {
     await showError(window, error)
   }
@@ -256,6 +271,14 @@ function createWindow(): BrowserWindow {
     )
   })
   guardNavigation(target)
+  target.on('resize', () => {
+    if (overlayView !== undefined) syncChromeOverlayBounds(target, overlayView)
+  })
+  target.on('closed', () => {
+    overlayView = undefined
+    overlayReady = undefined
+    overlayOpen = undefined
+  })
   return target
 }
 
@@ -330,6 +353,7 @@ async function onHostExit(exited: RunningWebHost): Promise<void> {
       host = await startHost()
       observeHostExit(host)
       await window.loadURL(host.url)
+      void ensureChromeOverlay(window, host.url)
     } catch (error) {
       await showError(window, error)
     }
@@ -476,7 +500,12 @@ function installIpc(): void {
   ipcMain.on(WINDOW_CLOSE, (_event: IpcMainEvent) => { window?.close() })
   ipcMain.handle(ACCOUNT_GET_SNAPSHOT, () => account.getSnapshot())
   ipcMain.handle(ACCOUNT_ACCEPT_PRIVACY, () => account.acceptPrivacy())
-  ipcMain.handle(ACCOUNT_BEGIN_LOGIN, () => account.beginLogin())
+  ipcMain.handle(ACCOUNT_BEGIN_LOGIN, () => {
+    void account.beginLogin().catch((error: unknown) => {
+      console.error('[desktop-account] beginLogin failed:', error)
+    })
+    return account.getSnapshot()
+  })
   ipcMain.handle(ACCOUNT_SIGN_OUT, async () => {
     const snapshot = await account.signOut()
     await pairing.deactivate('mobile-access-disabled')
@@ -492,6 +521,82 @@ function installIpc(): void {
     rejectPairingFromIpc(pairing, pendingPairingId))
   ipcMain.handle(PAIRING_REVOKE, (_event, pairingId: unknown) =>
     revokePairingFromIpc(pairing, pairingId))
+  ipcMain.handle(BROWSER_PRESENT, (_event, raw: unknown) => {
+    const request = parseBrowserPresentRequest(raw)
+    if (request === undefined || window === undefined || browserRuntime === undefined) return
+    browserRuntime.present(request.target, request.bounds, window)
+    if (overlayOpen !== undefined && overlayView !== undefined) {
+      showChromeOverlayView(window, overlayView)
+    }
+  })
+  ipcMain.handle(BROWSER_CONCEAL, (_event, raw: unknown) => {
+    const target = parseBrowserPresentTarget(raw)
+    if (target === undefined || browserRuntime === undefined) return
+    browserRuntime.conceal(target)
+  })
+  ipcMain.handle(CHROME_OVERLAY_SHOW, (event, raw: unknown) => showNativeOverlay(event, raw))
+  ipcMain.handle(CHROME_OVERLAY_HIDE, (event) => {
+    if (isOverlaySender(event.sender.id, overlayView?.webContents.id)) return
+    dismissNativeOverlay()
+  })
+  ipcMain.handle(CHROME_OVERLAY_GET_STATE, () => overlayOpen ?? null)
+  ipcMain.on(CHROME_OVERLAY_RESULT, (event: IpcMainEvent, raw: unknown) => {
+    if (!isOverlaySender(event.sender.id, overlayView?.webContents.id)) return
+    const result = parseChromeOverlayResult(raw)
+    if (result === undefined) return
+    dismissNativeOverlay(result)
+  })
+}
+
+function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Promise<WebContentsView> {
+  if (overlayReady !== undefined) return overlayReady
+  overlayReady = (async () => {
+    const view = new WebContentsView({
+      webPreferences: {
+        preload: PRELOAD,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    })
+    prepareChromeOverlayView(view)
+    target.contentView.addChildView(view)
+    syncChromeOverlayBounds(target, view)
+    await view.webContents.loadURL(overlayUrlFromHost(hostUrl))
+    overlayView = view
+    if (overlayOpen !== undefined) {
+      view.webContents.send(CHROME_OVERLAY_STATE, overlayOpen)
+      showChromeOverlayView(target, view)
+    }
+    return view
+  })()
+  return overlayReady
+}
+
+async function showNativeOverlay(event: IpcMainInvokeEvent, raw: unknown): Promise<void> {
+  if (window === undefined || host === undefined) return
+  if (isOverlaySender(event.sender.id, overlayView?.webContents.id)) return
+  const request = parseChromeOverlayShow(raw)
+  if (request === undefined) return
+  overlayOpen = request
+  const view = await ensureChromeOverlay(window, host.url)
+  if (window.isDestroyed()) return
+  view.webContents.send(CHROME_OVERLAY_STATE, request)
+  showChromeOverlayView(window, view)
+}
+
+function dismissNativeOverlay(result?: ReturnType<typeof parseChromeOverlayResult>): void {
+  const closed = overlayOpen
+  overlayOpen = undefined
+  if (overlayView !== undefined) {
+    hideChromeOverlayView(overlayView)
+    overlayView.webContents.send(CHROME_OVERLAY_STATE, null)
+  }
+  const reply = result ?? (closed === undefined ? undefined : { type: 'close' as const, requestId: closed.requestId })
+  if (reply !== undefined && window !== undefined && !window.isDestroyed()) {
+    window.webContents.send(CHROME_OVERLAY_RESULT, reply)
+  }
+  browserRuntime?.raisePresented()
 }
 
 function installMenu(): void {
@@ -543,19 +648,32 @@ function pushPairingSnapshot(snapshot: ReturnType<DesktopPairingActions['getSnap
 }
 
 function createDesktopAccount(environment: SelectedPlatformEnvironment): DesktopAccountActions {
-  const transport = new PlatformAccountHttpTransport({ environment })
+  const fetch = createLoopbackListenFetch(environment.origin)
+  const transport = new PlatformAccountHttpTransport({
+    environment,
+    ...(fetch === undefined ? {} : { fetch }),
+  })
   const store = new EncryptedDesktopAccountStore(
     join(app.getPath('userData'), `platform-account-${environment.databaseIdentity}.bin`),
-    {
-      encrypt: value => safeStorage.encryptString(value),
-      decrypt: value => safeStorage.decryptString(Buffer.from(value)),
-    },
+    isLoopbackListenUrl(environment.origin)
+      ? {
+        encrypt: value => Buffer.from(value),
+        decrypt: value => Buffer.from(value).toString('utf8'),
+      }
+      : {
+        encrypt: value => safeStorage.encryptString(value),
+        decrypt: value => safeStorage.decryptString(Buffer.from(value)),
+      },
   )
   return new DesktopAccountController({
     environment,
     transport,
     store,
-    systemBrowser: { open: async (url) => { await shell.openExternal(url) } },
+    systemBrowser: {
+      open: async (url) => {
+        await openDesktopAuthorizationUrl(url, async (target) => { await shell.openExternal(target) })
+      },
+    },
   })
 }
 
@@ -568,9 +686,13 @@ function createDesktopPairing(
   if (environment.environment !== 'development' || process.env.DSH_PERSONAL_PAIRING_KEYLESS !== '1') {
     return new UnavailableDesktopPairingController(`${unavailableReason} Development proof mode is disabled.`, relay)
   }
+  const fetch = createLoopbackListenFetch(environment.origin)
   return new DesktopPairingController({
     account: currentAccount,
-    transport: new RemoteAccessHttpTransport({ environment }),
+    transport: new RemoteAccessHttpTransport({
+      environment,
+      ...(fetch === undefined ? {} : { fetch }),
+    }),
     relay,
     pairingKeys: new DesktopPairingKeyVault(),
   })

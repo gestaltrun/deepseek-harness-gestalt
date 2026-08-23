@@ -32,3 +32,13 @@
         processGraceMs: 1000
         sidecar: false
         # Production Desktop never launches a second Electron. command/cwd stay unset.
+
+# Desktop Host already loads the Session Surface. Replace web-runtime config so
+# `openBrowser` is false even if spawn argv omits `--no-open`. Browser `dsh web`
+# keeps the command default.
+- id: web-runtime
+  config:
+    openBrowser: false
+    printUrl: true
+    surfaceContext: true
+    trustedHosts: !!js ctx.webStartup.trustedHosts

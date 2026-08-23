@@ -180,10 +180,10 @@ export class DesktopAccountController implements DesktopAccountActions {
       })
       record.pending = attempt
       record.pendingPrivateKey = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
-      await this.options.store.save(record)
       await this.options.systemBrowser.open(attempt.authorizationUrl)
       this.publish({ status: 'polling', privacyAccepted: true })
       this.schedulePoll()
+      await this.options.store.save(record)
     } catch (error) {
       this.fail(error)
       throw error

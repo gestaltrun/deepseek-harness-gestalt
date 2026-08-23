@@ -6,14 +6,15 @@ import type {
   BrowserWorkspaceProjection,
 } from '@deepseek-ai/dsh-browser-workspace/client'
 import {
-  BROWSER_DOCK_WIDTH_RANGE,
   browserAddressHost,
+  resolveBrowserAddress,
   browserTabTitle,
   hasBrowserTabs,
   openPageOf,
+  pageScreenshotSrc,
   persistentProfileLabel,
   screenshotDataUrl,
-  selectBrowserDock,
+  selectBrowserPreview,
   stackedBrowserTabs,
 } from '../src/client/model.ts'
 
@@ -41,7 +42,6 @@ function page(overrides: Partial<BrowserPageState> = {}): BrowserPageState {
     title: ' Alpha ',
     text: 'page text',
     focused: true,
-    controlOwner: 'agent',
     chrome: { kind: 'temporary', partition: 'tmp' },
     storage: STORAGE,
     ...overrides,
@@ -50,9 +50,6 @@ function page(overrides: Partial<BrowserPageState> = {}): BrowserPageState {
 
 function snapshot(overrides: Partial<BrowserWorkspaceProjection> = {}): BrowserWorkspaceProjection {
   return {
-    dockOpen: true,
-    dockWidth: 720,
-    userCollapsed: false,
     activeWorkspaceId: TARGET.workspaceId,
     workspaces: [{
       workspaceId: TARGET.workspaceId,
@@ -62,8 +59,8 @@ function snapshot(overrides: Partial<BrowserWorkspaceProjection> = {}): BrowserW
         browserId: TARGET.browserId,
         activeTabId: TARGET.tabId,
         tabs: [
-          { tabId: 'tab-0' as BrowserTarget['tabId'], controlOwner: 'human', revision: 1 },
-          { tabId: TARGET.tabId, controlOwner: 'agent', revision: 2 },
+          { tabId: 'tab-0' as BrowserTarget['tabId'], revision: 1 },
+          { tabId: TARGET.tabId, revision: 2 },
         ],
       }],
     }],
@@ -71,7 +68,7 @@ function snapshot(overrides: Partial<BrowserWorkspaceProjection> = {}): BrowserW
   }
 }
 
-describe('Browser Dock occupancy helpers', () => {
+describe('Browser preview helpers', () => {
   it('requires at least one Workspace before occupancy', () => {
     expect(hasBrowserTabs(undefined)).toBe(false)
     expect(hasBrowserTabs(null)).toBe(false)
@@ -80,12 +77,12 @@ describe('Browser Dock occupancy helpers', () => {
   })
 
   it('selects the named Workspace, instance, and active tab, falling back to the last of each', () => {
-    const named = selectBrowserDock(snapshot())
+    const named = selectBrowserPreview(snapshot())
     expect(named?.activeTab?.target).toEqual(TARGET)
     expect(named?.tabs.map(tab => tab.revision)).toEqual([1, 2])
     expect(named?.tabs.map(tab => tab.active)).toEqual([false, true])
 
-    const unnamed = selectBrowserDock(snapshot({
+    const unnamed = selectBrowserPreview(snapshot({
       activeWorkspaceId: null,
       workspaces: [{
         workspaceId: TARGET.workspaceId,
@@ -94,14 +91,14 @@ describe('Browser Dock occupancy helpers', () => {
         browsers: [{
           browserId: TARGET.browserId,
           activeTabId: null,
-          tabs: [{ tabId: TARGET.tabId, controlOwner: 'agent', revision: 2 }],
+          tabs: [{ tabId: TARGET.tabId, revision: 2 }],
         }],
       }],
     }))
     expect(unnamed?.activeTab?.target.tabId).toBe(TARGET.tabId)
-    expect(selectBrowserDock(undefined)).toBeUndefined()
-    expect(selectBrowserDock(snapshot({ workspaces: [] }))).toBeUndefined()
-    expect(selectBrowserDock(snapshot({
+    expect(selectBrowserPreview(undefined)).toBeUndefined()
+    expect(selectBrowserPreview(snapshot({ workspaces: [] }))).toBeUndefined()
+    expect(selectBrowserPreview(snapshot({
       workspaces: [{
         workspaceId: TARGET.workspaceId,
         profileId: TARGET.profileId,
@@ -112,7 +109,7 @@ describe('Browser Dock occupancy helpers', () => {
   })
 
   it('stacks inactive tabs behind the current tab', () => {
-    const tabs = selectBrowserDock(snapshot())!.tabs
+    const tabs = selectBrowserPreview(snapshot())!.tabs
     expect(stackedBrowserTabs(tabs).map(tab => tab.active)).toEqual([false, true])
     expect(stackedBrowserTabs([])).toEqual([])
   })
@@ -121,6 +118,12 @@ describe('Browser Dock occupancy helpers', () => {
     expect(browserAddressHost('https://alpha.test/path')).toBe('alpha.test')
     expect(browserAddressHost('not a url')).toBe('not a url')
     expect(browserAddressHost('about:blank')).toBe('about:blank')
+    expect(resolveBrowserAddress('')).toBeUndefined()
+    expect(resolveBrowserAddress('example.com')).toBe('https://example.com/')
+    expect(resolveBrowserAddress('https://alpha.test/path')).toBe('https://alpha.test/path')
+    expect(resolveBrowserAddress('about:blank')).toBe('about:blank')
+    expect(resolveBrowserAddress('javascript:alert(1)')).toBeUndefined()
+    expect(resolveBrowserAddress('https://[')).toBeUndefined()
     expect(browserTabTitle(page(), 'Untitled')).toBe('Alpha')
     expect(browserTabTitle(page({ title: '   ' }), 'Untitled')).toBe('alpha.test')
     expect(browserTabTitle(undefined, 'Untitled')).toBe('Untitled')
@@ -141,11 +144,11 @@ describe('Browser Dock occupancy helpers', () => {
     }
     expect(screenshotDataUrl(shot)).toBe('data:image/png;base64,abc')
     expect(screenshotDataUrl(undefined)).toBeUndefined()
+    expect(pageScreenshotSrc(shot)).toBe('data:image/png;base64,abc')
+    expect(pageScreenshotSrc({ ...shot, url: 'about:blank' })).toBeUndefined()
+    expect(pageScreenshotSrc(undefined)).toBeUndefined()
     expect(openPageOf(page())).toEqual(page())
     expect(openPageOf({ status: 'closed', target: TARGET, revision: 2 })).toBeUndefined()
   })
 
-  it('keeps the occupant-specific details range at 420/640/960', () => {
-    expect(BROWSER_DOCK_WIDTH_RANGE).toEqual({ minimum: 420, default: 640, maximum: 960 })
-  })
 })

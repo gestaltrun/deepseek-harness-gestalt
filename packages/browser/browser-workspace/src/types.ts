@@ -5,9 +5,10 @@
  */
 
 import type {
-  BrowserControlOwner,
+  BrowserCreateAttach,
   BrowserInstanceId,
   BrowserProfileId,
+  BrowserTarget,
   BrowserTabId,
   BrowserWorkspaceId,
 } from '@deepseek-ai/dsh-browser-runtime'
@@ -15,7 +16,6 @@ import type {
 /** One open tab retained by a Session-owned browser instance. */
 export interface BrowserWorkspaceTabRecord {
   readonly tabId: BrowserTabId
-  readonly controlOwner: BrowserControlOwner
   /** Last Runtime revision the Binder committed for this tab, including Runtime-internal bumps. */
   readonly revision: number
 }
@@ -37,22 +37,24 @@ export interface BrowserWorkspaceRecord {
 
 /** Whole Session-owned Browser Workspace projection. */
 export interface BrowserWorkspaceProjection {
-  readonly dockOpen: boolean
-  readonly dockWidth: number
-  /**
-   * True after the human collapses the Dock. The first Agent tab may open
-   * the Dock; later Agent activity must not reopen it while this is true.
-   */
-  readonly userCollapsed: boolean
   readonly workspaces: readonly BrowserWorkspaceRecord[]
   readonly activeWorkspaceId: BrowserWorkspaceId | null
 }
 
-/** Wire payload for one Session-owned Dock mutation. */
-export interface BrowserWorkspaceDockMutation {
-  readonly open: boolean
-  readonly width?: number
+/** One Session-owned page flattened from the Workspace hierarchy. */
+export interface BrowserWorkspacePage {
+  readonly target: BrowserTarget
+  readonly revision: number
 }
+
+/**
+ * Wire payload for one Session-owned create. AbortSignal stays off the wire;
+ * attach is optional and names a Workspace or instance this Session already owns.
+ */
+export type BrowserWorkspaceCreateRemoteRequest =
+  | { readonly profile: 'temporary'; readonly attach?: BrowserCreateAttach }
+  | { readonly profile: 'persistent'; readonly name: string; readonly attach?: BrowserCreateAttach }
+  | { readonly profile: 'shared'; readonly attach?: BrowserCreateAttach }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
@@ -68,9 +70,9 @@ declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /**
      * Whole Session-owned Browser Workspace snapshot. Log-only, last-wins.
-     * Carries dock visibility and width plus every owned instance, tab,
-     * current control owner, and per-tab revision so Session switch, reload,
-     * and replay restore the same Workspace without exposing another Session's tabs.
+     * Carries every owned instance, tab, and per-tab revision so Session
+     * switch, reload, and replay restore the same Workspace without exposing
+     * another Session's tabs.
      */
     'browser/workspace': BrowserWorkspaceProjection
   }

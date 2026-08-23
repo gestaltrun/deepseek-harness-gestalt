@@ -179,6 +179,11 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-browser-runtime-deterministic': ['lib/runtime-state-*.js'],
   '@deepseek-ai/dsh-browser-runtime-electron': ['lib/runtime-state-*.js', 'lib/testing.js', 'lib/host-seam.js'],
   '@deepseek-ai/dsh-browser-runtime-tandem': ['lib/runtime-state-*.js', 'THIRD_PARTY_NOTICES.md', 'UPSTREAM.md'],
+  '@deepseek-ai/dsh-client-better-sidebar': [
+    'lib/client-terminal.js',
+    'lib/client-editor.js',
+    'lib/client-mermaid.js',
+  ],
 }
 
 function sameStringList(actual: readonly string[] | undefined, expected: readonly string[]): boolean {

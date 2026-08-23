@@ -20,8 +20,6 @@ import {
   enqueueBrowserRuntimeOperation,
   labeledBrowserProfileName,
   openBrowserPagesForProfile,
-  bindBrowserControlMutation,
-  mutateBrowserControlOwner,
   requireExpectedBrowserRevision,
   requireExpectedOpenBrowserPage,
   requireOpenBrowserPage,
@@ -34,7 +32,6 @@ import {
   sameBrowserWorkspace,
   browserProfileStorage,
   browserTargetFor,
-  withBrowserControlOwner,
 } from '@deepseek-ai/dsh-browser-runtime'
 
 describe('Browser Runtime public vocabulary', () => {
@@ -154,7 +151,6 @@ describe('Browser Runtime public vocabulary', () => {
       title: '',
       text: '',
       focused: false,
-      controlOwner: 'agent',
       chrome: { kind: 'shared', name: BrowserProfileName('shared'), partition: 'persist:session-tandem-shared' },
       storage: { cookies: '', localStorage: '', indexedDb: '', cache: '', serviceWorker: '' },
     }], BrowserProfileId('tandem-profile-shared'), undefined)).toBe(2)
@@ -193,7 +189,6 @@ describe('Browser Runtime public vocabulary', () => {
         title: 'New Tab',
         text: '',
         focused: false,
-        controlOwner: 'agent',
         chrome: { kind: 'temporary', partition: 'session-tandem-work' },
         storage: browserProfileStorage(''),
       }], work.profileId, {
@@ -246,7 +241,6 @@ describe('Browser Runtime shared Provider helpers', () => {
       title: '',
       text: '',
       focused: false,
-      controlOwner: 'agent' as const,
       chrome: {
         kind: 'persistent' as const,
         name: BrowserProfileName('work'),
@@ -285,7 +279,6 @@ describe('Browser Runtime shared Provider helpers', () => {
       title: '',
       text: '',
       focused: false,
-      controlOwner: 'agent' as const,
       chrome: { kind: 'temporary' as const, partition: 'session-tmp-1' },
       storage: {
         cookies: '',
@@ -307,39 +300,6 @@ describe('Browser Runtime shared Provider helpers', () => {
     expect(() => {
       requireExpectedOpenBrowserPage(open, 1)
     }).toThrow(BrowserRuntimeError)
-    expect(withBrowserControlOwner(open, 'human')).toMatchObject({ revision: 1, controlOwner: 'human' })
-    await expect(mutateBrowserControlOwner(
-      operation => Promise.resolve(operation()),
-      () => open,
-      (state, revision) => {
-        if (state.revision !== revision) throw new BrowserRuntimeError('stale', 'BROWSER_REVISION_CONFLICT')
-      },
-      state => state,
-      { target, expectedRevision: 0 },
-      'human',
-    )).resolves.toMatchObject({ revision: 1, controlOwner: 'human' })
-    const assign = bindBrowserControlMutation(
-      operation => Promise.resolve(operation()),
-      () => open,
-      (state, revision) => {
-        if (state.revision !== revision) throw new BrowserRuntimeError('stale', 'BROWSER_REVISION_CONFLICT')
-      },
-      state => state,
-    )
-    await expect(assign({ target, expectedRevision: 0 }, 'agent')).resolves.toMatchObject({
-      revision: 1,
-      controlOwner: 'agent',
-    })
-    const aborted = new AbortController()
-    aborted.abort('cancelled')
-    await expect(mutateBrowserControlOwner(
-      operation => Promise.resolve(operation()),
-      () => open,
-      () => undefined,
-      state => state,
-      { target, expectedRevision: 0, signal: aborted.signal },
-      'human',
-    )).rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
     expect(() => {
       requireOpenBrowserPage({ status: 'closed', target, revision: 1 })
     }).toThrow(BrowserRuntimeError)

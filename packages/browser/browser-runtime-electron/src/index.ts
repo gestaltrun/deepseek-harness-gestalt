@@ -45,6 +45,7 @@ import {
   type ElectronBrowserWindow,
   type ElectronHost,
   type ElectronSession,
+  type ElectronWindowBounds,
 } from './electron.ts'
 import { electronTestHost } from './host-seam.ts'
 import {
@@ -59,6 +60,7 @@ const PAGE_TEXT_SCRIPT = `(() => {
   const root = document.body ?? document.documentElement
   return root === null ? '' : (root.innerText ?? '')
 })()`
+const NEXT_ANIMATION_FRAME_SCRIPT = 'new Promise(resolve => requestAnimationFrame(() => resolve()))'
 const FOCUSED_EDITABLE_SCRIPT = `(() => {
   const active = document.activeElement
   return active instanceof HTMLInputElement
@@ -82,13 +84,60 @@ const INSERT_TEXT_SCRIPT = `(text) => {
   }
 }`
 
+function sameWindowBounds(left: ElectronWindowBounds, right: ElectronWindowBounds): boolean {
+  return left.x === right.x
+    && left.y === right.y
+    && left.width === right.width
+    && left.height === right.height
+}
+
+/** True when Chromium aborted a loadURL because a later navigation superseded it. */
+function isAbortedNavigation(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const record = error as { code?: unknown; errno?: unknown; message?: unknown }
+  if (record.code === 'ERR_ABORTED' || record.errno === -3) return true
+  return typeof record.message === 'string' && record.message.includes('ERR_ABORTED')
+}
+
+/** True when Chromium has not created the hidden page's first Viz surface yet. */
+function isTransientCaptureError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && Reflect.get(error, 'message') === 'UnknownVizError'
+}
+
+const CHROMIUM_NET_ERROR = /\bERR_[A-Z0-9_]+\b/
+
+/** True when loadURL rejected after Chromium committed a net-error document. */
+function isCommittedLoadError(error: unknown): boolean {
+  if (isAbortedNavigation(error)) return true
+  if (typeof error !== 'object' || error === null) return false
+  const record = error as { code?: unknown; message?: unknown }
+  if (typeof record.code === 'string' && /^ERR_[A-Z0-9_]+$/.test(record.code)) return true
+  return typeof record.message === 'string' && CHROMIUM_NET_ERROR.test(record.message)
+}
+
+/** True when Chromium replaced the address with its interstitial error document. */
+function isChromeErrorUrl(url: string): boolean {
+  return url.startsWith('chrome-error:')
+}
+
+/**
+ * Address-bar URL after a committed load.
+ * Chromium may report `chrome-error:` while the requested URL stays in the bar.
+ */
+function pageDisplayUrl(observed: string, fallback: string): string {
+  if (observed === '' || isChromeErrorUrl(observed)) return fallback
+  return observed
+}
+
 /** Process and lifecycle configuration for one in-process Electron runtime. */
 export interface Config {
   /** Prefix for DSH-owned opaque Profile, Workspace, and browser identities. */
   idPrefix?: string
-  /** Hidden window width used for offscreen capture. */
+  /** Hidden window width used for capture while the page is not presented. */
   viewportWidth?: number
-  /** Hidden window height used for offscreen capture. */
+  /** Hidden window height used for capture while the page is not presented. */
   viewportHeight?: number
   /** Bound on each Chromium navigation or content read. */
   requestTimeoutMs?: number
@@ -173,6 +222,11 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
   private host: ElectronHost | undefined
   private temporarySeq = 0
   private readonly recovering = new Set<string>()
+  private presented: {
+    readonly key: string
+    readonly tab: OpenTab
+    readonly bounds: ElectronWindowBounds
+  } | undefined
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
@@ -232,10 +286,6 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
     requireExpectedBrowserRevision(state, revision)
   }
 
-  /** Commit one next open page after a control-owner mutation. */
-  protected override commitPage(state: BrowserPageState): BrowserPageState {
-    return this.commit(state)
-  }
   /* jscpd:ignore-end */
 
   /** Resolve the open Electron Profile for one addressed target. */
@@ -280,7 +330,14 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
     try {
       return await operation(combined)
     } catch (error) {
-      if (window !== undefined && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+      const callerAborted = signal?.aborted === true
+      const timedOut = deadline.aborted && !callerAborted
+      if (
+        (callerAborted || timedOut)
+        && window !== undefined
+        && !window.isDestroyed()
+        && !window.webContents.isDestroyed()
+      ) {
         window.webContents.stop()
       }
       if (signal?.aborted) assertBrowserNotAborted(signal)
@@ -311,7 +368,12 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
     try {
       return await Promise.race([operation, aborted])
     } catch (error) {
-      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      if (
+        error instanceof BrowserRuntimeError
+        && error.code === 'BROWSER_ABORTED'
+        && !window.isDestroyed()
+        && !window.webContents.isDestroyed()
+      ) {
         window.webContents.stop()
       }
       await operation.then(() => undefined, () => undefined)
@@ -324,22 +386,87 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
     return host.session.fromPartition(chrome.partition)
   }
 
-  /** Open one hidden offscreen window in the Profile partition. */
+  /**
+   * Place one open page over the Desktop sidebar viewport.
+   * A missing tab is a no-op so a stale renderer attach cannot throw.
+   * Repeating the same target and bounds does not show, focus, or activate.
+   * @param target - Session-owned tab identity.
+   * @param bounds - Content-relative DIP rectangle of the chrome viewport.
+   * @param parent - Desktop Host `BrowserWindow`.
+   */
+  present(target: BrowserTarget, bounds: ElectronWindowBounds, parent: unknown): void {
+    const tab = this.profiles.get(target.profileId)?.tabs.get(target.tabId)
+    if (tab === undefined || tab.window.isDestroyed()) return
+    const key = browserTargetKey(target)
+    if (
+      this.presented?.key === key
+      && sameWindowBounds(this.presented.bounds, bounds)
+    ) return
+    if (this.presented !== undefined && this.presented.key !== key) {
+      this.concealWindow(this.presented.tab.window)
+    }
+    tab.window.setBounds(bounds)
+    tab.window.setParentWindow(parent)
+    tab.window.setBounds(bounds)
+    if (this.presented?.key !== key) tab.window.showInactive()
+    this.presented = { key, tab, bounds }
+  }
+
+  /**
+   * Hide the presented page when it matches `target`.
+   * @param target - Tab that is leaving the visible viewport.
+   */
+  conceal(target: BrowserTarget): void {
+    if (this.presented?.key !== browserTargetKey(target)) return
+    this.concealWindow(this.presented.tab.window)
+    this.presented = undefined
+  }
+
+  /**
+   * Put the presented page above Host chrome after a menu or dialog closes.
+   * A missing presentation is a no-op.
+   */
+  raisePresented(): void {
+    this.presented?.tab.window.raise()
+  }
+
+  /** Open one page window in the Profile partition. */
   private createWindow(profile: OpenProfile, host: ElectronHost): ElectronBrowserWindow {
-    return new host.BrowserWindow({
+    const window = new host.BrowserWindow({
       show: false,
+      frame: false,
+      skipTaskbar: true,
+      hasShadow: false,
+      roundedCorners: false,
       width: this.config.viewportWidth,
       height: this.config.viewportHeight,
       paintWhenInitiallyHidden: true,
       webPreferences: {
         partition: profile.chrome.partition,
-        offscreen: true,
+        offscreen: false,
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
         backgroundThrottling: false,
       },
     })
+    window.webContents.setWindowOpenHandler?.((details) => {
+      if (
+        details.url.length > 0
+        && !window.isDestroyed()
+        && !window.webContents.isDestroyed()
+      ) {
+        void window.webContents.loadURL(details.url).then(() => undefined, () => undefined)
+      }
+      return { action: 'deny' }
+    })
+    return window
+  }
+
+  /** Hide one page window without destroying its contents. */
+  private concealWindow(window: ElectronBrowserWindow): void {
+    if (window.isDestroyed()) return
+    window.hide()
   }
 
   /** Watch renderer-process loss and project an unavailable state. */
@@ -364,6 +491,7 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
 
   /** Destroy one hidden window without throwing after Chromium already closed it. */
   private destroyTab(tab: OpenTab): void {
+    if (this.presented?.tab === tab) this.presented = undefined
     tab.stopCrashWatch()
     if (tab.window.isDestroyed()) return
     tab.window.destroy()
@@ -372,21 +500,30 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
   /** Read URL, title, and visible text from one hidden contents. */
   private async observeContents(window: ElectronBrowserWindow, signal: AbortSignal | undefined): Promise<ObservedPage> {
     return this.withTimeout(signal, window, async (combined) => {
+      const url = window.webContents.getURL()
+      const title = window.webContents.getTitle()
+      if (isChromeErrorUrl(url)) {
+        return Object.freeze({ url, title, text: '' })
+      }
       const text = await this.raceContents(window, window.webContents.executeJavaScript(PAGE_TEXT_SCRIPT), combined)
       return Object.freeze({
-        url: window.webContents.getURL(),
-        title: window.webContents.getTitle(),
+        url,
+        title,
         text: textValue(text, 'page text'),
       })
     })
   }
 
   /** Re-read one open page without advancing its DSH revision. */
-  private async page(state: BrowserPageState, signal: AbortSignal | undefined): Promise<BrowserPageState> {
+  private async page(
+    state: BrowserPageState,
+    signal: AbortSignal | undefined,
+    fallbackUrl = state.url,
+  ): Promise<BrowserPageState> {
     const observed = await this.observeContents(this.openTab(state.target).window, signal)
     return Object.freeze({
       ...state,
-      url: observed.url,
+      url: pageDisplayUrl(observed.url, fallbackUrl),
       title: observed.title,
       text: observed.text,
       storage: EMPTY_BROWSER_PROFILE_STORAGE,
@@ -396,14 +533,33 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
   /** Navigate one hidden contents and wait for the first successful load. */
   private async load(window: ElectronBrowserWindow, url: string, signal: AbortSignal | undefined): Promise<void> {
     await this.withTimeout(signal, window, async (combined) => {
-      await this.raceContents(window, window.webContents.loadURL(url), combined)
+      try {
+        await this.raceContents(window, window.webContents.loadURL(url), combined)
+      } catch (error) {
+        if (combined.aborted) throw error
+        if (!isCommittedLoadError(error)) throw error
+      }
     })
   }
 
-  /** Capture one PNG screenshot of the hidden contents. */
+  /** Capture one PNG screenshot, retrying one pre-first-frame compositor miss. */
   private async capture(window: ElectronBrowserWindow, signal: AbortSignal | undefined): Promise<string> {
     return this.withTimeout(signal, window, async (combined) => {
-      const image = await this.raceContents(window, window.webContents.capturePage(), combined)
+      const capturePage = async () => (
+        await this.raceContents(window, window.webContents.capturePage(), combined)
+      )
+      let image: Awaited<ReturnType<typeof capturePage>>
+      try {
+        image = await capturePage()
+      } catch (error) {
+        if (!isTransientCaptureError(error)) throw error
+        await this.raceContents(
+          window,
+          window.webContents.executeJavaScript(NEXT_ANIMATION_FRAME_SCRIPT),
+          combined,
+        )
+        image = await capturePage()
+      }
       const bytes = image.toPNG()
       if (bytes.byteLength === 0) {
         throw new BrowserRuntimeError('Electron screenshot response must be image/png', 'BROWSER_PROTOCOL')
@@ -446,7 +602,6 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
         revision: open.revision + 1,
         reason,
         reconnecting: true,
-        controlOwner: open.controlOwner,
       })
       : undefined
     const recovery = this.queue.then(async () => {
@@ -458,7 +613,6 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
         revision: current.revision + 1,
         reason,
         reconnecting: true,
-        controlOwner: open.controlOwner,
       })
       await this.reconnect(open, unavailable)
     })
@@ -485,7 +639,7 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
       profile.tabs.set(lastOpen.target.tabId, tab)
       await this.load(window, lastOpen.url, undefined)
       const restored = await this.page(lastOpen, undefined)
-      this.commit({ ...restored, revision: unavailable.revision + 1, focused: false, controlOwner: lastOpen.controlOwner })
+      this.commit({ ...restored, revision: unavailable.revision + 1, focused: false })
     } catch (error) {
       this.ctx.logger.warn('browser-runtime-electron: reconnect attempts exhausted')
       this.ctx.logger.warn(error)
@@ -559,7 +713,6 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
           title: observed.title,
           text: observed.text,
           focused: false,
-          controlOwner: 'agent',
           chrome: created.chrome,
           storage: EMPTY_BROWSER_PROFILE_STORAGE,
         })
@@ -581,8 +734,11 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
       const state = this.openPage(request.target)
       this.expectRevision(state, request.expectedRevision)
       await this.load(this.openTab(request.target).window, request.url, request.signal)
-      const page = await this.page(state, request.signal)
-      return this.commit({ ...page, revision: state.revision + 1, controlOwner: 'agent' })
+      const page = await this.page(state, request.signal, request.url)
+      return this.commit({
+        ...page,
+        revision: state.revision + 1,
+      })
     })
   }
 
@@ -630,7 +786,7 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
       const state = this.openPage(request.target)
       this.expectRevision(state, request.expectedRevision)
       this.openTab(request.target).window.webContents.focus()
-      return this.commit({ ...state, revision: state.revision + 1, focused: true, controlOwner: 'agent' })
+      return this.commit({ ...state, revision: state.revision + 1, focused: true })
     })
   }
 
@@ -644,17 +800,20 @@ export class ElectronBrowserRuntime extends BrowserRuntime {
       if (request.url !== undefined) await this.load(window, request.url, request.signal)
       window.webContents.focus()
       if (request.text !== undefined) await this.typeIntoPage(window, request.text, request.signal)
-      const page = await this.page(state, request.signal)
+      const page = await this.page(
+        state,
+        request.signal,
+        request.url !== undefined ? request.url : state.url,
+      )
       return this.commit({
         ...page,
         revision: state.revision + 1,
-        controlOwner: 'human',
       })
     })
   }
 
   /**
-   * Deliver human text through one path: an insert script when an input,
+   * Deliver synthetic Agent text through one path: an insert script when an input,
    * textarea, or contentEditable is focused; otherwise `char` input events.
    * A newline is U+000A in a focused editable control. A focused single-line
    * input receives that character only when the control accepts it. With no
@@ -736,6 +895,7 @@ export type {
   ElectronBrowserWindowOptions,
   ElectronHost,
   ElectronSessionModule,
+  ElectronWindowBounds,
 } from './electron.ts'
 export { listenElectronBrowserHttp } from './http.ts'
 export type { ElectronBrowserHttpServer } from './http.ts'

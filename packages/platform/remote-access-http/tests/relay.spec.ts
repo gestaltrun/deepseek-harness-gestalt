@@ -197,18 +197,22 @@ describe('RelayWebSocketConsumer', () => {
 
   it('cancels and drains in-flight attach work when the deadline closes the socket', async () => {
     let attachSignal: AbortSignal | undefined
+    let markAttachStarted: (() => void) | undefined
+    const attachStarted = new Promise<void>((resolve) => { markAttachStarted = resolve })
     const relay = relayFixture(attachmentFixture())
     relay.attach.mockImplementationOnce(async (input) => {
       attachSignal = input.signal
+      markAttachStarted?.()
       await new Promise<void>((resolve) => {
         if (input.signal?.aborted) resolve()
         else input.signal?.addEventListener('abort', () => { resolve() }, { once: true })
       })
       throw new RemoteRelayError('REMOTE_OFFLINE', 'cancelled')
     })
-    const endpoint = await start(relay, 10)
+    const endpoint = await start(relay)
     const socket = await connect(endpoint.url)
     await sendAttach(socket)
+    await attachStarted
     await once(socket, 'close')
     expect(attachSignal?.aborted).toBe(true)
     await endpoint.consumer.close()

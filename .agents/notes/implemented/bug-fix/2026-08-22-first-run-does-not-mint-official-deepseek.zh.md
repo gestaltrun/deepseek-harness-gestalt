@@ -10,7 +10,7 @@ Status: implemented
 
 用户需要「添加提供方」里的目录 `deepseek`。他们不希望首次运行预置官方 DeepSeek。
 
-这翻转了 [首次运行官方 DeepSeek 列表](2026-08-20-first-run-official-deepseek-listing.md) 中从未写入即列出的规则。占用、残留 `user: {}` 以及删除折入仍在该记录中。
+这翻转了 [首次运行官方 DeepSeek 列表](2026-08-20-first-run-official-deepseek-listing.zh.md) 中从未写入即列出的规则。占用、残留 `user: {}` 以及删除折入仍在该记录中。
 
 ## Decision
 

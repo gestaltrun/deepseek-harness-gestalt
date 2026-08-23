@@ -10,9 +10,11 @@ Version 1 exposes only route attachment, opaque ciphertext forwarding, heartbeat
 
 ## Encrypted Companion Protocol
 
-Companion majors 2 and 1 are the current and immediately preceding application versions. Both endpoints must advertise authenticated encryption, pairing-key separation, and replay protection at the selected major. Negotiation selects the highest safe shared major regardless of offer-array order, so an unsafe shared major can fall back only to a safe immediately preceding major. Each logical endpoint connection owns a negotiation channel. Starting a negotiation on that channel invalidates its prior application-codec token before the offers are evaluated; a failed attempt leaves the channel inactive, while other channels remain valid. No safe version overlap fails with an endpoint-specific update requirement before application plaintext can be encoded.
+Companion majors 3 and 2 are the current and immediately preceding application versions. Both endpoints must advertise authenticated encryption, pairing-key separation, and replay protection at the selected major. Negotiation selects the highest safe shared major regardless of offer-array order, so an unsafe shared major can fall back only to a safe immediately preceding major. Each logical endpoint connection owns a negotiation channel. Starting a negotiation on that channel invalidates its prior application-codec token before the offers are evaluated; a failed attempt leaves the channel inactive, while other channels remain valid. No safe version overlap fails with an endpoint-specific update requirement before application plaintext can be encoded.
 
-The implemented catalog contains bounded transcript-page (optional `streaming`, plus `text`, `image`, `approval`, and `ask-user` entries) and versioned `foreground-sync` projections; Session-creation, prompt-submission, prompt-cancellation, attachment-offer, `settle-approval`, `answer-ask-user`, authoritative `search-sessions`, and reconnect `query-operation-status` operations; Desktop-confirmed, attachment-rejection, correlated `session-search`, `operation-failed`, and `status` results. `foreground-sync` carries the positive physical-connection generation and Desktop revision after authenticated decryption; a raw byte cannot decode as synchronization authority. The attachment offer carries only a one-time blob capability, ciphertext SHA-256, exact ciphertext byte count, capability expiry, and bounded file name. Image entries carry only `fileName` and `alt`; plaintext attachment bytes stay off the Relay frame. An `approval` or `ask-user` entry names one branded `interactionId` and the Desktop-authorized decisions; a present `settled` decision must be one of those decisions. Session search carries at most 20 unique Session/snippet pairs with 240 Unicode code points per snippet. Host failures preserve one of four closed categories: HTTP status, invalid wire response, typed business error, or timeout. Every identifier is branded by this protocol rather than imported from a Harness domain package. Unsupported operations and projection fields fail during decoding. A committed `status` answer embeds the confirmed result of the same operation id; an absent answer is only `{ absent: true }`.
+Major 3 adds bounded Session and Workspace discovery, complete conversation-page projections, Session history, prompt submission, cancellation, Approval and Ask User settlement, and content-addressed historical-image reads. Image bytes travel as ordered 32 KiB chunks with one shared digest and at most 512 chunks; a Mobile endpoint accepts them only for the originating operation, Session, attachment, media type, generation, index, count, and digest. The catalog retains attachment offers, authoritative `search-sessions`, reconnect `query-operation-status`, Desktop confirmations, attachment rejections, correlated `session-search`, typed `operation-failed`, and `status` answers. Host failures preserve one of four closed categories: HTTP status, invalid wire response, typed business error, or timeout. `foreground-sync` carries the positive physical-connection generation and Desktop revision after authenticated decryption; a raw byte cannot decode as synchronization authority. Unsupported operations, extra fields, malformed content-addressed attachment ids, and limit overflow fail during decoding.
+
+A conversation projection echoes the optional exclusive `beforeSeq` from its history request. An absent cursor replaces the tail; a present cursor identifies an older page that Mobile continuity-checks and prepends.
 
 ## Endpoint attachment cipher
 
@@ -31,6 +33,10 @@ The implemented catalog contains bounded transcript-page (optional `streaming`, 
 | Companion application before encryption | 61,440 bytes (60 KiB) |
 | Complete encoded transcript-page message | 49,152 bytes (48 KiB) |
 | Transcript page | 50 entries |
+| Session history request | 20 messages |
+| Session or Workspace discovery page | 20 rows |
+| Historical image chunk | 32,768 decoded bytes |
+| Historical image result | 512 chunks |
 | Session search query | 500 UTF-16 code units |
 | Session search result | 20 unique Sessions |
 | Session search snippet | 240 Unicode code points |
@@ -53,5 +59,6 @@ None.
 
 ## Known Limitations and Deferred Work
 
+- Session creation is not part of Companion major 3. Mobile can browse, open history, submit, cancel, settle current interactions, read image bytes, search, and attach files to an existing Desktop Session.
 - Pairing handshakes, credential persistence, challenge lifecycle, and production Companion message encryption belong to service or reviewed endpoint integrations, not these codecs.
 - The current Companion catalog proves Session creation, prompt submission and cancellation, attachment offers, approval and Ask User settlement, authoritative Session search, operation-status query, transcript and foreground synchronization projections, and the confirmed, attachment-rejected, session-search, operation-failed, and status result kinds. Discovery of remote Workspaces still belongs to a later catalog slice.

@@ -10,7 +10,7 @@ Desktop chrome Web E2E 在组装后的 client apply 之前安装 `window.dshDesk
 
 ## 决策
 
-`packages/client/ui-desktop/tests/desktop-bridge-fixture.client.ts` 拥有惰性 Desktop Host preload。`installDesktopBridgeFixture` 的返回类型是 `DesktopBridge`，因此缺少必需成员时类型检查失败。Account 与 Pairing 订阅在 subscribe 时立即投递应答前的 `unavailable` 快照；unsubscribe 移除监听器，使后续惰性动词不再通知它。`apps/web/tests/desktop-chrome.e2e.ts` 动态导入该函数并交给 Playwright `addInitScript`，因此 host 类型检查程序不会加载 `packages/client/*/src`。[web GUI 浏览器 e2e 车道](2026-07-24-web-gui-browser-e2e-lane.md) 仍拥有组装回放车道；本说明拥有这份带类型的 fixture。
+`packages/client/ui-desktop/tests/desktop-bridge-fixture.client.ts` 拥有惰性 Desktop Host preload。`installDesktopBridgeFixture` 的返回类型是 `DesktopBridge`，因此缺少必需成员时类型检查失败。Account 与 Pairing 订阅在 subscribe 时立即投递应答前的 `unavailable` 快照；unsubscribe 移除监听器，使后续惰性动词不再通知它。`apps/web/tests/desktop-chrome.e2e.ts` 动态导入该函数并交给 Playwright `addInitScript`，因此 host 类型检查程序不会加载 `packages/client/*/src`。[web GUI 浏览器 e2e 车道](2026-07-24-web-gui-browser-e2e-lane.zh.md) 仍拥有组装回放车道；本说明拥有这份带类型的 fixture。
 
 ## 考虑过的替代方案
 

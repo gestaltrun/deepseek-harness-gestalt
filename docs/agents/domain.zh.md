@@ -8,7 +8,7 @@ Matt 工程 skills（技能）在探索代码库或实现 ticket 前读取本仓
 
 1. 阅读根目录的 [CONTEXT-MAP.md](../../CONTEXT-MAP.md)。
 2. 阅读其中映射到当前工作范围的每个 `CONTEXT.md`。
-3. 阅读 [`.agents/notes/`](../../.agents/notes/README.md) 下适用于当前工作的活跃 Agent Note。
+3. 阅读 [`.agents/notes/`](../../.agents/notes/README.zh.md) 下适用于当前工作的活跃 Agent Note。
 4. 阅读仓库指令要求的架构、子系统或包参考文档。
 
 某个范围没有映射的 context 文档时，直接继续。只有当工作建立了持久术语或职责归属时，才通过 `domain-modeling` 添加 context。
@@ -29,7 +29,7 @@ Matt 工程 skills（技能）在探索代码库或实现 ticket 前读取本仓
 
 每份 context 文档拥有一个产品或子系统的术语。`CONTEXT-MAP.md` 将 agent 引导到相关 context 文档，无需每个包都拥有一份。
 
-DeepSeek Harness 使用 Agent Note，而不是 `docs/adr/`。不要创建并行的 ADR 层级。需要记录新决策时，遵循 [`.agents/notes/README.md`](../../.agents/notes/README.md)。
+DeepSeek Harness 使用 Agent Note，而不是 `docs/adr/`。不要创建并行的 ADR 层级。需要记录新决策时，遵循 [`.agents/notes/README.md`](../../.agents/notes/README.zh.md)。
 
 ## 术语
 

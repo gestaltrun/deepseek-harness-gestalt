@@ -24,7 +24,7 @@ tool-eligibility:
 
 #### 模型看到什么
 
-模型只接收 preset、匹配 Workspace 与匹配 Session [工具 schema](../../../docs/tool-catalog.md#deepseek-aidsh-tools) 的精确正向并集。Code Mode 保留的 `run_code` 传输仍是呈现基础设施；资格会过滤其生成 SDK 投影的末端工具。
+模型只接收 preset、匹配 Workspace 与匹配 Session [工具 schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tools) 的精确正向并集。Code Mode 保留的 `run_code` 传输仍是呈现基础设施；资格会过滤其生成 SDK 投影的末端工具。
 
 #### Token 影响
 

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-18-stateless-two-instance-remote-relay.md
 2026-08-18-stateless-two-instance-remote-relay.md: 5fbe1e122a3f5ab40385aaf418339d714c03a860
-2026-08-18-stateless-two-instance-remote-relay.zh.md: 2308bb6c1d3f3848d22efc1a5317d3d008328131
+2026-08-18-stateless-two-instance-remote-relay.zh.md: 9963a35e57ba22573d8672f92c4359815acaa4c7

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-21-zero-clone-duplication-gate.md
 2026-08-21-zero-clone-duplication-gate.md: 4cde1962043e1143d133046408d4786bac14d60d
-2026-08-21-zero-clone-duplication-gate.zh.md: 95a35b248328a6b49e7fe239fac842b3ac1ef881
+2026-08-21-zero-clone-duplication-gate.zh.md: fad9feea368a0559e86b1a93eb03d78c37debd14

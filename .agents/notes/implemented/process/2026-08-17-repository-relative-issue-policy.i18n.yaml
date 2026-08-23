@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-17-repository-relative-issue-policy.md
 2026-08-17-repository-relative-issue-policy.md: f4ccd2c540327c01918b8fb5137888d488237619
-2026-08-17-repository-relative-issue-policy.zh.md: e4ad4c27b05f66de416383c3d7548bd629b7d130
+2026-08-17-repository-relative-issue-policy.zh.md: 00cfdf2da99add4881d2e5d40ad433fd8f6da0c7

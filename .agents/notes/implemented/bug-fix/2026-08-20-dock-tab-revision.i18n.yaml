@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-dock-tab-revision.md
 2026-08-20-dock-tab-revision.md: a2e6be01cdfc5491b5dcce1a601d80127fd7f0df
-2026-08-20-dock-tab-revision.zh.md: 7e9ba5dbde96476a9d76bbf3bedab305616e000b
+2026-08-20-dock-tab-revision.zh.md: ed517802ff8d733cd8a89c7fb54526ca557835d9

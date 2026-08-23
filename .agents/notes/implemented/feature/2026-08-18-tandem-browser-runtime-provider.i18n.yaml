@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-18-tandem-browser-runtime-provider.md
 2026-08-18-tandem-browser-runtime-provider.md: 4dd5c0e7ec2fd74d90bfe52c6963db8b15c8d7b2
-2026-08-18-tandem-browser-runtime-provider.zh.md: f36e7e6b7a9064df2646705c1088eb28a5be5bd9
+2026-08-18-tandem-browser-runtime-provider.zh.md: 491d41d9a859727a12a98306d1d83bc105019dce

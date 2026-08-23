@@ -138,6 +138,7 @@ describe('Development keyless Companion authority', () => {
         byteLength: 1,
         expiresAt: 1,
         fileName: 'note.txt',
+        mediaType: 'text/plain',
       },
     }))
     await expect(openDevelopmentCompanionMessage(protocol, expired[0]!)).resolves.toMatchObject({
@@ -156,6 +157,7 @@ describe('Development keyless Companion authority', () => {
         byteLength: 1,
         expiresAt: 3_000_000_000_000,
         fileName: 'shot.png',
+        mediaType: 'image/png',
       },
     }))
     expect(attach).toHaveLength(2)

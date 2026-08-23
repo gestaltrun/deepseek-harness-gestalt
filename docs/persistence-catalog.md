@@ -255,7 +255,7 @@ Source: [`packages/core/session/src/types.ts:277`](../packages/core/session/src/
 'browser/workspace': BrowserWorkspaceProjection
 ```
 
-Source: [`packages/browser/browser-workspace/src/types.ts:77`](../packages/browser/browser-workspace/src/types.ts)
+Source: [`packages/browser/browser-workspace/src/types.ts:82`](../packages/browser/browser-workspace/src/types.ts)
 
 ### `command/*`
 
@@ -549,7 +549,7 @@ Source: [`packages/interaction/permission-presets/src/index.ts:50`](../packages/
 'plan/mode': { active: boolean }
 ```
 
-Source: [`packages/plan/plan-mode/src/index.ts:54`](../packages/plan/plan-mode/src/index.ts)
+Source: [`packages/plan/plan-mode/src/index.ts:53`](../packages/plan/plan-mode/src/index.ts)
 
 ### `request/*`
 

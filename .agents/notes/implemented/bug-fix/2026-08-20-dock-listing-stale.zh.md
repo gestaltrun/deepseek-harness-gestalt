@@ -14,9 +14,9 @@ Binder 对已关闭标签页的 `observe` 也会留下列表行，因此幽灵�
 
 Binder 监听 `browser/runtime-state`，并对已持有且未关闭的标签页 `recordFacts`，使内部前进进入列表。已关闭的 Runtime-state 通知不写入事实；对已关闭标签页的 `observe` 会遗忘该行，因此幽灵标签页会消失。
 
-Dock 与预览把列表行上的 `BROWSER_REVISION_CONFLICT` 视为可恢复：对该标签页 observe 一次，并用观察到的修订号重试；若失败不是冲突，或重试仍失败，则展示 `dock.actionFailed`。observe 到已关闭时不重试，因为 Binder 已经遗忘该行。列表修订号前进时重新观察活动标签页界面，仍由 [Dock 导航 chrome Agent Note](2026-08-20-dock-navigate-chrome.md) 持有；本决策持有后台标签页与修订号冲突恢复。
+Dock 与预览把列表行上的 `BROWSER_REVISION_CONFLICT` 视为可恢复：对该标签页 observe 一次，并用观察到的修订号重试；若失败不是冲突，或重试仍失败，则展示 `dock.actionFailed`。observe 到已关闭时不重试，因为 Binder 已经遗忘该行。列表修订号前进时重新观察活动标签页界面，仍由 [Dock 导航 chrome Agent Note](2026-08-20-dock-navigate-chrome.zh.md) 持有；本决策持有后台标签页与修订号冲突恢复。
 
-这扩展了 [Dock 标签页修订号 Agent Note](2026-08-20-dock-tab-revision.md) 中的列表。
+这扩展了 [Dock 标签页修订号 Agent Note](2026-08-20-dock-tab-revision.zh.md) 中的列表。
 
 ## 考虑过的替代方案
 

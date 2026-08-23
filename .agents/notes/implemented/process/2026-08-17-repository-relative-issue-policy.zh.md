@@ -18,7 +18,7 @@ GitHub App installation 权限与用户 ProjectV2 权限彼此独立。把仓库
 
 个人账号 tracker 保持禁用组织 Project 生命周期投影。支持用户 ProjectV2 需要单独的用户授权设计，不能把它表示成 installation token 兼容性。
 
-部署启用投影后，[事件驱动的评审状态决策](2026-08-10-event-directed-pr-review-status.md)继续负责生命周期事件和状态迁移语义。
+部署启用投影后，[事件驱动的评审状态决策](2026-08-10-event-directed-pr-review-status.zh.md)继续负责生命周期事件和状态迁移语义。
 
 ## 验证
 

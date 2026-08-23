@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-first-run-official-deepseek-listing.md
 2026-08-20-first-run-official-deepseek-listing.md: 7d243da059854fee984a3e0964d0e139701ea040
-2026-08-20-first-run-official-deepseek-listing.zh.md: b7d6d6df5030499ca4916a6bd36d788ad366e248
+2026-08-20-first-run-official-deepseek-listing.zh.md: c92567efc1fd5f8746c85a0f700676cfbd78439f

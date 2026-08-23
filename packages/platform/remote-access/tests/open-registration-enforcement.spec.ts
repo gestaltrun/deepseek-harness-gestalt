@@ -240,6 +240,29 @@ describe('open-registration enforcement', () => {
     )).toThrow('reservation lifetime exceeds the protocol safety ceiling')
   })
 
+  it('migrates a legacy durable blob reservation to the bounded lease', async () => {
+    const now = { value: NOW }
+    const authority = new MemoryPersonalPairingAuthorityStore()
+    const reservationId = parseAttachmentBlobReservationId('legacy-lease')
+    await authority.runPairingTransaction((state) => {
+      state.blobs.set(reservationId, { accountId: 'account-legacy-lease', bytes: 1 })
+      return Promise.resolve()
+    })
+    const provider = uniqueProvider(now, undefined, authority, 'legacy-lease-', 100)
+    const owner = authentication('desktop-legacy-lease', 'account-legacy-lease')
+
+    await provider.setMobileAccess({ desktop: owner, enabled: true })
+    await expect(authority.runPairingTransaction(state => Promise.resolve(
+      state.blobs.get(reservationId)?.expiresAt,
+    ))).resolves.toBe(NOW + 100)
+
+    now.value += 100
+    await provider.setMobileAccess({ desktop: owner, enabled: false })
+    await expect(authority.runPairingTransaction(state => Promise.resolve(
+      state.blobs.has(reservationId),
+    ))).resolves.toBe(false)
+  })
+
   it('sheds new pairing and blob acquisition at capacity while an established pairing remains listed', async () => {
     const gate = new MemoryPlatformCapacityGate(1, 4_500)
     const provider = uniqueProvider({ value: NOW }, gate)

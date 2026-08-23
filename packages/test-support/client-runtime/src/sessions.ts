@@ -5,6 +5,7 @@ import { createScope, scopeOf, SessionProvideChannel } from '@deepseek-ai/dsh-cl
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
   AgentContext, ConversationSnapshot, ISessions, ObservableSnapshot, ProjectionsFace, SessionFace, SessionId,
+  SessionModelRoute,
   SessionListState, SessionProvideDescriptor, SessionSearchResultItem, SessionSummary, SnapshotStore,
   SubagentAddress,
 } from '@deepseek-ai/dsh-client-runtime/client'
@@ -355,6 +356,21 @@ export class TestSessions implements ISessions {
 
   /** Fixture sessions are already resident; explicit rendering needs no additional open step. */
   openForRender(_sessionId: SessionId): void {}
+
+  /** Tests install feature model routes on their own purpose-built session doubles. */
+  modelRoute(_sessionId: SessionId): SessionModelRoute | undefined {
+    return undefined
+  }
+
+  /** Generic renderer fixtures do not synthesize provisional Host identities. */
+  stageProvisional(_descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+    title: string
+  }): () => void {
+    return () => {}
+  }
 
   /**
    * Resolve (mint on first touch) the session-scoped Cordis context through

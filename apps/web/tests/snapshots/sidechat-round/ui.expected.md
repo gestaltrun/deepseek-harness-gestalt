@@ -8,17 +8,7 @@
   - img
 - button "New tab":
   - img
-- button "Switch thread / new":
-  - img
-- button "Save as new session — Promote this thread to a top-level session in the main session list":
-  - img
 - banner:
-  - navigation "Session hierarchy":
-    - button "Reply with a one-sentence description"
-    - text: /
-    - 'button "Switch subagent: Side: New thread"': "Side: New thread"
-  - img
-  - text: Standard mode
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"
@@ -47,8 +37,8 @@
 - button "Commands":
   - img
 - 'button "Access mode, current: Workspace Write"': Workspace Write
-- button "Select model":
-  - text: Select model
+- button "Select model, current DeepSeek-V4-Flash":
+  - text: DeepSeek-V4-Flash
   - img
 - button "6% of context used"
 - button "Send message" [disabled]

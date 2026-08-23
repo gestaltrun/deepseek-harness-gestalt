@@ -60,8 +60,21 @@ describe('CI workflow', () => {
   it('makes optional dependencies mandatory for master standby installs', () => {
     const workflow = loadWorkflow('.github/workflows/ci-master.yml')
     if (!isRecord(workflow.env)) throw new TypeError('ci-master workflow must define environment variables')
+    if (!isRecord(workflow.jobs)) throw new TypeError('ci-master workflow must define jobs')
 
     expect(workflow.env.PNPM_CONFIG_OPTIONAL).toBe('true')
+    for (const jobName of ['serial-linux-selfhosted', 'serial-windows']) {
+      const job = workflow.jobs[jobName]
+      if (!isRecord(job) || !Array.isArray(job.steps)) {
+        throw new TypeError(`ci-master workflow must define ${jobName} steps`)
+      }
+      const install = (job.steps as unknown[]).find(
+        step => isRecord(step) && step.name === 'Install (immutable)',
+      )
+      expect(install, `${jobName} must rebuild persistent node_modules with optional dependencies`).toMatchObject({
+        run: 'pnpm install --frozen-lockfile --force',
+      })
+    }
   })
 
   it('isolates every pnpm action setup destination per runner', () => {

@@ -4,7 +4,7 @@
  * node test environment can import it.
  *
  * A side thread is a child session the plugin creates ITSELF with a custom
- * seed — the parent session's FULL event log up to the click moment
+ * seed — the parent session's FULL event log up to the first-submit moment
  * (completed turns, the unanswered user message, and — when the parent is
  * mid-turn — the in-progress assistant output and tool activity). The log
  * model forbids open-turn seeds, so an in-flight parent turn is copied
@@ -16,15 +16,12 @@
  * the open turn and carrying the partial content as a structured text
  * snapshot inside the boundary prompt.
  */
-import type { SidebarSessionSummary } from './context-types.ts'
-
-/** The durable thread-label prefix (also the row filter in the client list). */
+/** The durable thread-label prefix used to identify Side Chat Sessions. */
 export const SIDE_LABEL_PREFIX = 'Side: '
 
-/** The pinned label of a freshly created thread that no prompt has reached
- *  yet (Codex-style immediate create: the tab opens an EMPTY thread, the
- *  first composer message carries the boundary and earns the real label).
- *  The client renders it localized; the prefix keeps the row filter honest. */
+/** The historical placeholder label of a persisted empty thread created by
+ *  builds that published the child before its first prompt. The client renders
+ *  it localized; the prefix keeps the row filter honest. */
 export const SIDE_NEW_THREAD_TITLE = 'Side: New thread'
 
 /** Maximum code points kept in a durable thread label (matches subagent labels). */
@@ -207,7 +204,7 @@ const SNAPSHOT_TOTAL_CAP = 8000
 
 /**
  * Build the side-thread inheritance for one parent log: the full event log
- * up to the click moment, honestly closed when it ends inside an open turn.
+ * up to the first-submit moment, honestly closed when it ends inside an open turn.
  */
 export function buildSidechatInheritance(events: readonly SidechatLogEvent[]): SidechatInheritance {
   if (events.length === 0) return { seed: [], snapshot: null }
@@ -314,35 +311,6 @@ export function buildOpenTurnSnapshot(events: readonly SidechatLogEvent[]): stri
   return body.length > SNAPSHOT_TOTAL_CAP
     ? `Parent session in-progress turn (reference only):\n\n${body.slice(0, SNAPSHOT_TOTAL_CAP)}…`
     : `Parent session in-progress turn (reference only):\n\n${body}`
-}
-
-/** One side-thread row in the client's thread list. */
-export interface SideThreadRow {
-  id: string
-  /** The durable thread title ('Side: …'). */
-  title: string
-  /** Whether the thread's agent is currently running. */
-  running: boolean
-}
-
-/**
- * Derive the side threads of one parent session from the client session list:
- * durable `origin: 'subagent'` children of the parent whose pinned title
- * carries the thread label prefix (our creation path pins it via
- * sessionTitle.rename; dsh-sidechain threads share the convention, so they
- * are visible here too).
- */
-export function sideThreadRows(
-  byId: Readonly<Record<string, SidebarSessionSummary>>,
-  sessionId: string,
-): SideThreadRow[] {
-  const rows: SideThreadRow[] = []
-  for (const summary of Object.values(byId)) {
-    if (summary.origin !== 'subagent' || summary.parentId !== sessionId) continue
-    if (!summary.displayTitle.startsWith(SIDE_LABEL_PREFIX)) continue
-    rows.push({ id: summary.id, title: summary.displayTitle, running: summary.running === true })
-  }
-  return rows
 }
 
 /** Truncate + prefix a question into a durable thread label. */

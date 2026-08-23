@@ -6,9 +6,9 @@
  * either entry is what the other shows next.
  */
 import type {
-  IApiClient, ModelCatalogFailure, ModelProviderGroup, ModelSelection, SessionId, SessionModels,
+  ModelCatalogFailure, ModelProviderGroup, ModelSelection, SessionModels,
 } from '@deepseek-ai/dsh-api-remotes/client'
-import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionModelRoute, SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 
 /** Directory snapshot both entries render from. */
@@ -45,15 +45,9 @@ export class ModelDirectory {
   private disposed = false
 
   /**
-   * @param sessions - the session wire face (captured from the plugin's root connection).
-   * @param sessionId - the owning session.
-   * @param available - whether this session may use Agent-bound model RPCs.
+   * @param route - ordinary or feature-owned model routing for this Session.
    */
-  constructor(
-    private readonly sessions: Pick<IApiClient['sessions'], 'models' | 'selectModel'>,
-    private readonly sessionId: SessionId,
-    private readonly available: () => boolean,
-  ) {}
+  constructor(private readonly route: SessionModelRoute | undefined) {}
 
   /**
    * Refresh the advisory directory (both entries call this on open).
@@ -61,10 +55,10 @@ export class ModelDirectory {
    * @returns the fresh directory value.
    */
   async load(): Promise<SessionModels> {
-    this.assertAvailable()
+    const route = this.requireRoute()
     const generation = ++this.generation
     this.store.update((s) => { s.status = 'loading'; s.error = null })
-    const { result } = await this.sessions.models({ sessionId: this.sessionId })
+    const result = await route.models()
     if (this.disposed || generation !== this.generation) {
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
       return result.value
@@ -92,17 +86,10 @@ export class ModelDirectory {
    * @param selection - provider, provider-owned model id, and optional adapter-owned effort.
  */
   async select(selection: ModelSelection): Promise<void> {
-    this.assertAvailable()
+    const route = this.requireRoute()
     const generation = ++this.generation
     this.store.update((s) => { s.status = 'selecting'; s.error = null })
-    const { result } = await this.sessions.selectModel({
-      sessionId: this.sessionId,
-      provider: selection.provider,
-      model: selection.model,
-      ...selection.reasoningEffort === undefined
-        ? {}
-        : { reasoningEffort: selection.reasoningEffort },
-    })
+    const result = await route.selectModel(selection)
     if (this.disposed || generation !== this.generation) {
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
       return
@@ -137,7 +124,7 @@ export class ModelDirectory {
       s.status = 'idle'
       s.error = null
     })
-    if (!this.available()) return
+    if (this.route === undefined) return
     void this.load().catch(() => { /* the next menu open remains the explicit retry surface */ })
   }
 
@@ -146,9 +133,10 @@ export class ModelDirectory {
     this.disposed = true
   }
 
-  private assertAvailable(): void {
-    if (!this.available()) {
+  private requireRoute(): SessionModelRoute {
+    if (this.route === undefined) {
       throw new Error('model selection is unavailable for addressed subagent sessions')
     }
+    return this.route
   }
 }

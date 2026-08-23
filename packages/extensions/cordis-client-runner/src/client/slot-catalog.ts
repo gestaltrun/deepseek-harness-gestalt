@@ -1020,7 +1020,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Header actions derive their state from the standard session/global kit. */\nexport interface ConversationHeaderActionOwnerProps {}',
+      '/** Header actions derive their state from the standard session/global kit. */\nexport interface ConversationHeaderActionOwnerProps {\n  /** Side Chat suppresses context labels while retaining Session-owned actions. */\n  renderMode?: \'sidechat\' | undefined\n}',
     ],
     ownerPropsReferences: [],
     standardProps: [
@@ -1105,7 +1105,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Header actions derive their state from the standard session/global kit. */\nexport interface ConversationHeaderActionOwnerProps {}',
+      '/** Header actions derive their state from the standard session/global kit. */\nexport interface ConversationHeaderActionOwnerProps {\n  /** Side Chat suppresses context labels while retaining Session-owned actions. */\n  renderMode?: \'sidechat\' | undefined\n}',
     ],
     ownerPropsReferences: [],
     standardProps: [

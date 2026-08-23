@@ -343,7 +343,10 @@ export interface ConversationSessionHeaderOwnerProps {
 }
 
 /** Header actions derive their state from the standard session/global kit. */
-export interface ConversationHeaderActionOwnerProps {}
+export interface ConversationHeaderActionOwnerProps {
+  /** Side Chat suppresses context labels while retaining Session-owned actions. */
+  renderMode?: 'sidechat' | undefined
+}
 
 /** Plain breadcrumb data handed to the optional lineage renderer. */
 export interface ConversationHeaderLineageOwnerProps {

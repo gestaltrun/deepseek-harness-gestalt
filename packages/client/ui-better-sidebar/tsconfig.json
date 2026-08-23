@@ -25,6 +25,9 @@
       "path": "../locale"
     },
     {
+      "path": "../connection"
+    },
+    {
       "path": "../modules"
     },
     {
@@ -68,6 +71,9 @@
     },
     {
       "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../api/remotes/tsconfig.client.json"
     }
   ]
 }

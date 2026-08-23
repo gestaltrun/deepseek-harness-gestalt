@@ -13,13 +13,13 @@ const GCM_TAG_BYTES = 16
 export const COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES = IV_BYTES + GCM_TAG_BYTES
 
 /**
- * Derive one AES-256-GCM attachment key from Personal Pairing key material.
- * @param pairingKey - secret bytes supplied by the Personal Pairing layer.
+ * Derive one AES-256-GCM content key from a Personal Pairing attachment key.
+ * @param attachmentKey - secret bytes supplied by the Personal Pairing layer.
  * @returns endpoint-local AES-GCM key; never crosses a wire.
  */
-export async function deriveCompanionAttachmentKey(pairingKey: Uint8Array): Promise<CryptoKey> {
-  if (pairingKey.byteLength < 32) throw new TypeError('Companion attachment pairing key must be at least 32 bytes')
-  const hkdf = await crypto.subtle.importKey('raw', localBytes(pairingKey), 'HKDF', false, ['deriveKey'])
+export async function deriveCompanionAttachmentKey(attachmentKey: Uint8Array): Promise<CryptoKey> {
+  if (attachmentKey.byteLength < 32) throw new TypeError('Companion attachment key must be at least 32 bytes')
+  const hkdf = await crypto.subtle.importKey('raw', localBytes(attachmentKey), 'HKDF', false, ['deriveKey'])
   return await crypto.subtle.deriveKey(
     { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new TextEncoder().encode(HKDF_INFO) },
     hkdf,

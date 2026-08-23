@@ -80,6 +80,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/platform/platform-account-core': { kind: 'none', reason: 'Platform identity provider; Account state never enters a model request.' },
   'packages/platform/platform-account-http': { kind: 'none', reason: 'Platform identity HTTP consumer; Account state never enters a model request.' },
   'packages/platform/platform-account-client': { kind: 'none', reason: 'Desktop and Mobile identity client; Account state never enters a model request.' },
+  'packages/platform/noise-channel': { kind: 'none', reason: 'Pairing and encrypted Companion transport state never enter a model request.' },
   'packages/platform/remote-protocol': { kind: 'none', reason: 'Remote transport metadata and device origin never enter a model request.' },
   'packages/platform/remote-access': { kind: 'none', reason: 'Pairing metadata and Device Principal origin never enter a model request.' },
   'packages/platform/remote-access-client': { kind: 'none', reason: 'Remote Access transport values never enter a model request.' },

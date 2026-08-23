@@ -20,7 +20,7 @@ store 插件（`name: '@deepseek-ai/dsh-remote-attachments'`）把这些边界�
 
 ## 配对 seam
 
-`RemoteAttachmentAuthority.authenticate({ headers })` 把一个 HTTPS 请求映射到恰好一个 `PersonalPairingId`。Personal Pairing 层（issue #31）拥有生产实现；它永远看不到 attachment 字节。缺失 authority 服务会使插件加载响亮失败。
+`RemoteAttachmentAuthority.authenticate({ headers })` 把一个 HTTPS 请求映射到恰好一个 `PersonalPairingId`。实际运行的 Platform 实现会依据 PostgreSQL 校验当前 Mobile Installation 证明与确切的已确认 pairing selector；selector 本身没有 authority。它永远看不到 attachment 明文。缺失 authority 服务会使插件加载响亮失败。
 
 ## 模型体验
 
@@ -32,6 +32,5 @@ store 插件（`name: '@deepseek-ai/dsh-remote-attachments'`）把这些边界�
 
 ## 已知限制与延后工作
 
-- 进程内 store 匹配单进程 Platform 部署；多实例 Platform 需要具有相同 `RemoteAttachmentStoreService` 语义的共享 store。
-- 生产 `RemoteAttachmentAuthority` 随 Personal Pairing（#31）到来；测试使用基于 header 的开发 authority。
-- Desktop 把 consume 的 HTTP 403/404/410/413 映射为协议原生拒绝原因，并在下载时发送 pairing id；把该下载与 `submit` 回调接入产品 Session 路径属于双实例 Companion 收尾（#27）。
+- `RemoteAttachmentStoreProvider` 仅保留为包测试 fixture。实际运行的 Platform 挂载 PostgreSQL 实现，其事务化 capability digest、过期、容量、consume 与 revoke 状态在多个 Platform 实例之间共享。
+- Desktop 把 consume 的 HTTP 403/404/410/413 映射为协议原生拒绝原因，只在哈希校验后解密，并通过 Session 范围的 Host 文件 RPC 准入确切字节。

@@ -20,7 +20,7 @@ CI 的 `scripts/run-web-snapshots.ts` 先用相互独立的 Vitest 调用串行�
 
 对 PR 而言，门禁仅在 Linux 消费方 job 中运行：这些场景面向 POSIX，其他 PR job 不安装 Chromium。自托管的默认分支 Linux 串行热备也包含该比较，而 macOS 和 Windows 串行 job 仍不使用浏览器（不存在托管的 Linux 串行聚合）。PR 的 `all checks passed` 已依赖消费方 job，因此浏览器比较失败会阻止合并，无需新增 branch-protection check 名称。
 
-完整本地 replay 中，6-worker 浏览器命令耗时约 65–71 秒。12-worker 对比约为 50 秒，因此把浏览器 worker 预算减半只增加约 15–20 秒，而不是让墙钟时间翻倍。门禁调度器会在 `built-package-invariants` 成功后立即启动浏览器快照，并发运行彼此独立的门禁，因此既不需要专用 job 超时，也不需要手动制定 YAML 顺序规则。
+完整本地 replay 中，6-worker 浏览器命令耗时约 65–71 秒。12-worker 对比约为 50 秒，因此把浏览器 worker 预算减半只增加约 15–20 秒，而不是让墙钟时间翻倍。门禁调度器在 `built-package-invariants` 之后运行编译产物快照，并在该快照结束后才启动浏览器门禁。这个顺序在 HMR 预检临时改写并恢复客户端 bundle 时保护完整构建产物的摘要；其他彼此独立的消费方仍可并发运行。
 
 ## 曾考虑的替代方案
 

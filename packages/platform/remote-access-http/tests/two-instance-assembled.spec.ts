@@ -1,6 +1,6 @@
 /** REAL Loader composition: two Platform Instances share test adapters and one TLS endpoint. */
 
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
@@ -27,37 +27,47 @@ import {
   PersonalPairingProvider,
   parsePairingCompletionId,
   parsePairingRendezvousId,
-  parsePersonalPairingKeyReference,
   parseRelayInstanceId,
+  type PairingHandshakeProvider,
+  type PersonalPairingId,
+  type RelayCredentialGrant,
   type RelayRouteStore,
 } from '@deepseek-ai/dsh-remote-access'
 import { RemoteRelayProvider } from '@deepseek-ai/dsh-remote-access/relay-provider'
 import {
   RemoteAccessHttpTransport,
   RemoteRelayEndpointController,
+  type RelayEndpointSocket,
 } from '@deepseek-ai/dsh-remote-access-client'
 import { DesktopRelayEndpointLifecycle } from '@deepseek-ai/dsh-remote-access-client/desktop-relay-lifecycle'
 import { NodeRelayEndpointSocket } from '@deepseek-ai/dsh-remote-access-client/node-relay-socket'
 import { RedisRelayCoordinator, type RelayRedisClient } from '@deepseek-ai/dsh-remote-access-redis'
 import {
-  createCompanionNegotiationChannel,
-  createCompanionVersionOffer,
-  decodeCompanionMessage,
+  deriveRelayCredentialDigest,
   decodeRelayMessage,
-  encodeCompanionMessage,
+  deriveRelayCredentialPublicKey,
   encodeRelayMessage,
-  negotiateCompanionProtocol,
+  generateRelayCredential,
   parseCompanionOperationId,
   parseCompanionSessionId,
-  parseCompanionTranscriptEntryId,
   parseRelayAttachmentId,
+  parseRelayPairingSelector,
   parseRelayCredential,
-  parseRelayRouteId,
   REMOTE_PROTOCOL_LIMITS,
   type RelayAttachmentId,
   type RelayCiphertextMessage,
+  type RelayPairingSelector,
   type RelayRouteId,
+  signRelayAttachmentChallenge,
 } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  initializeSnowChannel,
+  SnowDesktopAttachmentOwner,
+  SnowDesktopEndpointPairingOwner,
+  SnowMobileAttachmentOwner,
+  SnowMobileHandshakeClient,
+  type SnowCompanionProtocolChannel,
+} from '@deepseek-ai/dsh-noise-channel'
 import WebSocket from 'ws'
 import * as RemoteAccessHttp from '../src/index.ts'
 import * as RemoteAccessRelay from '../src/relay.ts'
@@ -138,51 +148,64 @@ describe('two Loader-booted Platform Instances', () => {
     const acquired: string[] = []
     const endpoint = await withPhase('listen TLS endpoint', startNonStickyTlsEndpoint([instanceA, instanceB], acquired))
     const desktopAuth = authentication('desktop', 'desktop-assembled')
-    const mobileAuth = authentication('mobile', 'mobile-assembled')
+    const firstMobileAuth = authentication('mobile', 'mobile-assembled-one')
+    const secondMobileAuth = authentication('mobile', 'mobile-assembled-two')
+    const observedPlatformBodies: string[] = []
     const desktopTransport = new RemoteAccessHttpTransport({
       environment: ENVIRONMENT,
-      fetch: rewriteFetch(ORIGIN, instanceA.port),
+      fetch: rewriteFetch(ORIGIN, instanceA.port, observedPlatformBodies),
     })
-    const mobileTransport = new RemoteAccessHttpTransport({
+    const firstMobileTransport = new RemoteAccessHttpTransport({
       environment: ENVIRONMENT,
-      fetch: rewriteFetch(ORIGIN, instanceB.port),
+      fetch: rewriteFetch(ORIGIN, instanceB.port, observedPlatformBodies),
+    })
+    const secondMobileTransport = new RemoteAccessHttpTransport({
+      environment: ENVIRONMENT,
+      fetch: rewriteFetch(ORIGIN, instanceA.port, observedPlatformBodies),
     })
 
     const enabled = await withPhase('enable Mobile Access', desktopTransport.setMobileAccess({
       authentication: desktopAuth, enabled: true,
     }))
     expect(enabled.enabled).toBe(true)
-    if (enabled.relay === undefined) throw new Error('Desktop enable did not issue Relay authority')
-    const challenge = await withPhase('create challenge', desktopTransport.createChallenge({
-      authentication: desktopAuth, rendezvousId: parsePairingRendezvousId('rendezvous-assembled'),
-    }))
-    const pending = await withPhase('complete challenge', mobileTransport.completeChallenge({
-      authentication: mobileAuth,
-      completionId: parsePairingCompletionId('completion-assembled'),
-      oneTimeLink: challenge.oneTimeLink,
-      device: { name: 'Assembled phone', platform: 'ios' },
-      mobileHandshake: Uint8Array.of(5),
-    }))
-    await withPhase('confirm pairing', desktopTransport.confirmPairing({
-      authentication: desktopAuth, pendingPairingId: pending.pendingPairingId,
-    }))
-    const mobileStatus = await withPhase('read sealed grant on instance B', mobileTransport.getMobilePairingStatus({
-      authentication: mobileAuth, pendingPairingId: pending.pendingPairingId,
-    }))
-    if (mobileStatus.status !== 'paired' || mobileStatus.sealedRelayAuthority === undefined) {
-      throw new Error('Mobile status on the second instance did not carry sealed Relay authority')
+    expect(enabled.relay).toBeUndefined()
+    initializeSnowChannel(await readFile(new URL('../../noise-channel/pkg/dsh_noise_channel_bg.wasm', import.meta.url)))
+    const firstPairing = await pairEndpointThroughHttp({
+      suffix: 'one', desktopTransport, mobileTransport: firstMobileTransport,
+      desktopAuth, mobileAuth: firstMobileAuth,
+    })
+    const secondPairing = await pairEndpointThroughHttp({
+      suffix: 'two', desktopTransport, mobileTransport: secondMobileTransport,
+      desktopAuth, mobileAuth: secondMobileAuth,
+    })
+    const routeId = firstPairing.desktopGrant.routeId
+    expect(secondPairing.desktopGrant.routeId).toBe(routeId)
+    expect(new Set([
+      firstPairing.desktopGrant.credential, firstPairing.mobileGrant.credential,
+      secondPairing.desktopGrant.credential, secondPairing.mobileGrant.credential,
+    ]).size).toBe(4)
+    expect(firstPairing.desktopGrant.pairingSelector).not.toBe(secondPairing.desktopGrant.pairingSelector)
+    const platformObservation = observedPlatformBodies.join('\n')
+    const platformStateObservation = await shared.authority.runPairingTransaction(state => Promise.resolve(JSON.stringify({
+      endpointMailbox: state.endpointMailbox,
+      endpointPublications: [...state.endpointPublications],
+      endpointPublicationRevocations: [...state.endpointPublicationRevocations],
+      pairings: [...state.pairings],
+    })))
+    for (const pkcs8Sentinel of [
+      firstPairing.desktopGrant.credential, firstPairing.mobileGrant.credential,
+      secondPairing.desktopGrant.credential, secondPairing.mobileGrant.credential,
+    ]) {
+      expect(platformObservation).not.toContain(pkcs8Sentinel)
+      expect(platformStateObservation).not.toContain(pkcs8Sentinel)
     }
-    const mobileGrant = parseSealedGrant(mobileStatus.sealedRelayAuthority)
-    const routeId = enabled.relay.routeId
-    expect(mobileGrant.routeId).toBe(routeId)
-    expect(mobileGrant.credential).not.toBe(enabled.relay.credential)
 
     const rejected = await withPhase('reject route-id-only attach', attachWithCredential(
       endpoint.url,
       routeId,
       parseRelayAttachmentId('intruder-assembled'),
       'desktop',
-      parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      await generateRelayCredential(),
     ))
     expect(rejected).toMatchObject({ type: 'error', code: 'RELAY_ATTACHMENT_REJECTED' })
     const direct = await withPhase('direct WebServer attach', attachWithCredential(
@@ -190,37 +213,39 @@ describe('two Loader-booted Platform Instances', () => {
       routeId,
       parseRelayAttachmentId('direct-assembled'),
       'desktop',
-      parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      await generateRelayCredential(),
     ))
     expect(direct).toMatchObject({ type: 'error', code: 'RELAY_ATTACHMENT_REJECTED' })
     acquired.length = 0
     endpoint.resetAcquisition()
 
-    const cipher = new AssembledCipher()
-    const mobileProtocol = negotiateCompanionProtocol(
-      createCompanionNegotiationChannel(),
-      createCompanionVersionOffer('mobile'),
-      createCompanionVersionOffer('desktop'),
-    )
-    const desktopProtocol = negotiateCompanionProtocol(
-      createCompanionNegotiationChannel(),
-      createCompanionVersionOffer('mobile'),
-      createCompanionVersionOffer('desktop'),
-    )
-    const mobileAttachmentId = parseRelayAttachmentId('mobile-assembled')
+    const firstMobileAttachmentId = parseRelayAttachmentId('mobile-assembled-one')
+    const secondMobileAttachmentId = parseRelayAttachmentId('mobile-assembled-two')
     let desktopAttachmentId = parseRelayAttachmentId('desktop-assembled-0')
     let desktopGeneration = 0
-    let projectionRevision = 0
-    let mobileProjection: { revision: number; text: string } | undefined
     const failover = deferred<'resync'>()
-    const accepted = deferred<'accepted'>()
-    const offline = deferred<string>()
+    const firstSynchronized = deferred<undefined>()
+    const secondSynchronized = deferred<undefined>()
+    const firstAccepted = deferred<'accepted'>()
+    const secondAccepted = deferred<'accepted'>()
+    const firstOffline = deferred<string>()
+    const clientErrors: string[] = []
+    const synchronizationCounts = new Map<RelayPairingSelector, number>()
+    const desktopPeerGenerations = new Map<RelayPairingSelector, number>()
+    const desktopProjections = new Map<RelayPairingSelector, Parameters<SnowMobileAttachmentOwner['begin']>[0]>()
+    const desktopChannels = new Map<RelayPairingSelector, SnowCompanionProtocolChannel>()
     const connectEndpoint = async (signal: AbortSignal) => await NodeRelayEndpointSocket.connect(
       endpoint.url,
       signal,
       { maxBytes: CLIENT.inboundMaxBytes, maxMessages: CLIENT.inboundMaxMessages },
       { rejectUnauthorized: false },
     )
+    const pairingBySelector = new Map([
+      [firstPairing.desktopGrant.pairingSelector, firstPairing],
+      [secondPairing.desktopGrant.pairingSelector, secondPairing],
+    ])
+    const desktopOwner = new SnowDesktopAttachmentOwner(selector =>
+      pairingBySelector.get(selector)?.desktopPairing.exportReconnectState())
     const desktop = new DesktopRelayEndpointLifecycle({
       attachmentId: () => {
         desktopGeneration += 1
@@ -231,90 +256,106 @@ describe('two Loader-booted Platform Instances', () => {
       attachTimeoutMs: CLIENT.attachTimeoutMs,
       heartbeatIntervalMs: CLIENT.heartbeatIntervalMs,
       reconnectDelayMs: CLIENT.reconnectDelayMs,
-      resynchronize: async (send) => {
-        projectionRevision += 1
-        await send(mobileAttachmentId, cipher.seal(encodeCompanionMessage(desktopProtocol, {
-          type: 'projection',
-          projection: {
-            type: 'transcript-page',
-            sessionId: parseCompanionSessionId('session-assembled'),
-            entries: [{
-              type: 'text',
-              entryId: parseCompanionTranscriptEntryId(`resync-${String(projectionRevision)}`),
-              role: 'assistant',
-              text: `desktop authoritative revision ${String(projectionRevision)}`,
-            }],
-          },
-        })))
+      resynchronize: async () => {},
+      onPeerAttachments: (update, pairingSelector) => {
+        const peer = update.peers.find(candidate => candidate.pairingSelector === pairingSelector)
+        const previousGeneration = desktopPeerGenerations.get(pairingSelector)
+        if (peer !== undefined && previousGeneration !== undefined && previousGeneration !== peer.generation) {
+          desktopChannels.get(pairingSelector)?.dispose()
+          desktopChannels.delete(pairingSelector)
+        }
+        if (peer !== undefined) desktopPeerGenerations.set(pairingSelector, peer.generation)
+        desktopProjections.set(pairingSelector, update)
       },
-      onCiphertext: async (ciphertext, sourceAttachmentId) => {
-        const message = decodeCompanionMessage(desktopProtocol, cipher.open(ciphertext))
+      onCiphertext: async (ciphertext, sourceAttachmentId, localAttachmentId, pairingSelector) => {
+        let channel = desktopChannels.get(pairingSelector)
+        if (channel === undefined) {
+          const projection = desktopProjections.get(pairingSelector)
+          if (projection === undefined) throw new Error('Desktop Snow IK has no Relay peer projection')
+          const accepted = await desktopOwner.accept(
+            ciphertext, sourceAttachmentId, projection.routeId, localAttachmentId,
+          )
+          const peer = projection.peers.find(candidate => candidate.attachmentId === sourceAttachmentId)
+          if (peer?.generation !== accepted.generation || peer.pairingSelector !== pairingSelector) {
+            throw new Error('Desktop Snow IK did not match the live pairing projection')
+          }
+          channel = accepted.channel
+          desktopChannels.set(pairingSelector, channel)
+          await desktop.sendCiphertext(pairingSelector, accepted.targetAttachmentId, accepted.payload)
+          await desktop.sendCiphertext(pairingSelector, accepted.targetAttachmentId, channel.seal({
+            type: 'projection',
+            projection: { type: 'foreground-sync', desktopName: 'Assembled Desktop', generation: accepted.generation, desktopRevision: 1 },
+          }))
+          const count = (synchronizationCounts.get(pairingSelector) ?? 0) + 1
+          synchronizationCounts.set(pairingSelector, count)
+          if (count > 1) failover.resolve('resync')
+          return
+        }
+        const message = channel.open(ciphertext)
         if (message.type !== 'operation') return
-        await desktop.sendCiphertext(sourceAttachmentId, cipher.seal(encodeCompanionMessage(desktopProtocol, {
+        await desktop.sendCiphertext(pairingSelector, sourceAttachmentId, channel.seal({
           type: 'result',
           result: {
-            type: 'confirmed',
-            operationId: message.operation.operationId,
-            committedAt: 1_787_027_200_000,
-            outcome: 'accepted',
+            type: 'confirmed', operationId: message.operation.operationId,
+            committedAt: 1_787_027_200_000, outcome: 'accepted',
           },
-        })))
+        }))
       },
-    })
-    const mobile = new RemoteRelayEndpointController({
-      endpoint: 'mobile',
-      route: async () => mobileGrant,
-      attachmentId: () => mobileAttachmentId,
-      connect: connectEndpoint,
-      attachTimeoutMs: CLIENT.attachTimeoutMs,
-      heartbeatIntervalMs: CLIENT.heartbeatIntervalMs,
-      reconnectDelayMs: CLIENT.reconnectDelayMs,
-      onCiphertext: async (ciphertext) => {
-        const message = decodeCompanionMessage(mobileProtocol, cipher.open(ciphertext))
-        if (message.type === 'result' && message.result.type === 'confirmed') {
-          accepted.resolve(message.result.outcome)
-        }
-        if (message.type === 'projection') {
-          const entry = message.projection.entries[0]
-          if (entry?.type === 'text') {
-            const revision = Number(entry.entryId.replace('resync-', ''))
-            mobileProjection = { revision, text: entry.text }
-            if (revision === 2) failover.resolve('resync')
-          }
+      onConnectionLost: (attachmentId) => {
+        for (const [pairingSelector, projection] of desktopProjections) {
+          if (projection.attachmentId !== attachmentId) continue
+          desktopChannels.get(pairingSelector)?.dispose()
+          desktopChannels.delete(pairingSelector)
+          desktopProjections.delete(pairingSelector)
+          desktopPeerGenerations.delete(pairingSelector)
         }
       },
-      onTransportError: (error) => {
-        if (error.code === 'REMOTE_OFFLINE') offline.resolve(error.code)
-      },
+      onTransportError: (error) => { clientErrors.push(`desktop:${error.code}:${error.message}`) },
     })
-    cleanups.push(async () => { await mobile.stop() })
+    const firstMobile = createSnowMobileAttachment({
+      pairing: firstPairing, attachmentId: firstMobileAttachmentId, connect: connectEndpoint,
+      synchronized: firstSynchronized, accepted: firstAccepted, offline: firstOffline, errors: clientErrors,
+    })
+    const secondMobile = createSnowMobileAttachment({
+      pairing: secondPairing, attachmentId: secondMobileAttachmentId, connect: connectEndpoint,
+      synchronized: secondSynchronized, accepted: secondAccepted, errors: clientErrors,
+    })
+    cleanups.push(async () => { await firstMobile.controller.stop() })
+    cleanups.push(async () => { await secondMobile.controller.stop() })
     cleanups.push(async () => { await desktop.stop('quit') })
 
-    await withPhase('mobile start', mobile.start())
-    await withPhase('mobile directory', waitForDirectory(shared.coordinator, routeId, mobileAttachmentId))
-    desktop.configure(enabled.relay)
+    await withPhase('first Mobile start', firstMobile.controller.start())
+    await withPhase('first Mobile directory', waitForDirectory(shared.coordinator, routeId, firstMobileAttachmentId))
+    await desktop.configure(firstPairing.desktopGrant)
     await withPhase('desktop start', desktop.start())
-    await withPhase('desktop directory', waitForDirectory(shared.coordinator, routeId, desktopAttachmentId))
+    await withPhase('first pairing synchronization', firstSynchronized.promise, () => clientErrors.join(','))
+
+    await withPhase('second Mobile start', secondMobile.controller.start())
+    await withPhase('second Mobile directory', waitForDirectory(shared.coordinator, routeId, secondMobileAttachmentId))
+    await desktop.synchronize([firstPairing.desktopGrant, secondPairing.desktopGrant])
+    await withPhase('second pairing synchronization', secondSynchronized.promise, () => clientErrors.join(','))
     expect(new URL(endpoint.url).protocol).toBe('wss:')
     expect(new URL(endpoint.url).pathname).toBe('/v1/remote-access/relay')
-    expect(acquired[0]).not.toBe(acquired[1])
-    expect(new Set(acquired.slice(0, 2))).toEqual(new Set(['platform-a', 'platform-b']))
+    expect(new Set(acquired)).toEqual(new Set(['platform-a', 'platform-b']))
+    expect(new Set([
+      firstMobileAttachmentId, secondMobileAttachmentId,
+      ...[...desktopProjections.values()].map(update => update.attachmentId),
+    ]).size).toBe(4)
 
-    await mobile.sendCiphertext(desktopAttachmentId, cipher.seal(encodeCompanionMessage(mobileProtocol, {
+    await firstMobile.send({
       type: 'operation',
       operation: {
-        type: 'submit-prompt',
-        operationId: parseCompanionOperationId('operation-assembled'),
+        type: 'submit-prompt', operationId: parseCompanionOperationId('operation-assembled-one'),
         sessionId: parseCompanionSessionId('session-assembled'),
         text: PROMPT,
       },
-    })))
-    expect(await withPhase('encrypted round trip', accepted.promise)).toBe('accepted')
+    })
+    expect(await withPhase('encrypted round trip', firstAccepted.promise)).toBe('accepted')
     const forwarded = publishedCiphertextFrames(bus.published)
     expect(forwarded.length).toBeGreaterThan(0)
     for (const frame of forwarded) {
       expect(frame.type).toBe('ciphertext')
-      expect(ciphertextCarriesCompanionPrompt(frame.ciphertext, mobileProtocol)).toBe(false)
+      expect(new TextDecoder().decode(frame.ciphertext)).not.toContain(PROMPT)
     }
     bus.assertNoRetainedCiphertextFrames()
 
@@ -326,28 +367,29 @@ describe('two Loader-booted Platform Instances', () => {
     )
     expect(desktopGeneration).toBeGreaterThan(1)
     expect(replacement.instanceId).toBe('platform-a')
-    expect(mobileProjection).toEqual({
-      revision: 2, text: 'desktop authoritative revision 2',
-    })
 
-    let restarted = false
-    for (const reason of ['window-close', 'sleep', 'mobile-access-disabled', 'quit'] as const) {
-      if (restarted) await desktop.start()
-      const attachment = desktopAttachmentId
-      await desktop.stop(reason)
-      await waitUntil(async () => await shared.coordinator.locate(routeId, attachment) === undefined)
-      restarted = true
-    }
-    await withPhase(
-      'offline ciphertext send',
-      mobile.sendCiphertext(desktopAttachmentId, cipher.seal(Uint8Array.of(1))),
-    )
-    expect(await withPhase('offline observation', offline.promise)).toBe('REMOTE_OFFLINE')
+    const secondEpoch = secondMobile.epoch()
+    await desktopTransport.revokePersonalPairing({
+      authentication: desktopAuth, pairingId: firstPairing.pairingId,
+    })
+    await desktop.synchronize([secondPairing.desktopGrant])
+    expect(await withPhase('first pairing revocation', firstOffline.promise))
+      .toMatch(/RELAY_ATTACHMENT_REJECTED|RELAY_ROUTE_REVOKED|REMOTE_OFFLINE/u)
+    await firstMobile.controller.stop()
+    await waitUntil(() => secondMobile.ready() && secondMobile.epoch() > secondEpoch)
+    await secondMobile.send({
+      type: 'operation',
+      operation: {
+        type: 'submit-prompt', operationId: parseCompanionOperationId('operation-assembled-two'),
+        sessionId: parseCompanionSessionId('session-assembled'), text: 'second phone remains independent',
+      },
+    })
+    expect(await withPhase('second pairing after independent revocation', secondAccepted.promise)).toBe('accepted')
     bus.assertNoRetainedCiphertextFrames()
 
     await desktopTransport.setMobileAccess({ authentication: desktopAuth, enabled: false })
-    await waitUntil(async () => await shared.coordinator.locate(routeId, mobileAttachmentId) === undefined)
-    expect(await shared.coordinator.locate(routeId, mobileAttachmentId)).toBeUndefined()
+    await waitUntil(async () => await shared.coordinator.locate(routeId, secondMobileAttachmentId) === undefined)
+    expect(await shared.coordinator.locate(routeId, secondMobileAttachmentId)).toBeUndefined()
   })
 })
 
@@ -363,6 +405,162 @@ interface InstanceHandle {
   port: number
   available: boolean
   dispose(): Promise<void>
+}
+
+type PairingScopedGrant = RelayCredentialGrant & { pairingSelector: RelayPairingSelector }
+
+interface AssembledEndpointPairing {
+  pairingId: PersonalPairingId
+  desktopPairing: SnowDesktopEndpointPairingOwner
+  mobilePairing: SnowMobileHandshakeClient
+  desktopGrant: PairingScopedGrant
+  mobileGrant: PairingScopedGrant
+}
+
+async function pairEndpointThroughHttp(input: {
+  suffix: string
+  desktopTransport: RemoteAccessHttpTransport
+  mobileTransport: RemoteAccessHttpTransport
+  desktopAuth: ReturnType<typeof authentication>
+  mobileAuth: ReturnType<typeof authentication>
+}): Promise<AssembledEndpointPairing> {
+  const expiresAt = Date.now() + 60_000
+  const challenge = await input.desktopTransport.createEndpointChallenge({
+    authentication: input.desktopAuth,
+    rendezvousId: parsePairingRendezvousId(`rendezvous-${input.suffix}`),
+    expiresAt,
+  })
+  expect(new URL(challenge.routingLink).searchParams.has('payload')).toBe(false)
+  const desktopPairing = new SnowDesktopEndpointPairingOwner()
+  const invitation = await desktopPairing.createInvitation(expiresAt)
+  const mobilePairing = new SnowMobileHandshakeClient()
+  const message1 = await mobilePairing.beginEndpointInvitation(invitation.invitationPayload)
+  const completionId = parsePairingCompletionId(`completion-${input.suffix}`)
+  const pending = await input.mobileTransport.submitEndpointMessage1({
+    authentication: input.mobileAuth,
+    challengeId: challenge.challengeId,
+    completionId,
+    message1,
+  })
+  const message2 = await desktopPairing.acceptMessage1(message1)
+  await input.desktopTransport.submitEndpointMessage2({
+    authentication: input.desktopAuth,
+    pendingPairingId: pending.pendingPairingId,
+    message2,
+  })
+  await mobilePairing.acceptDesktopHandshake(message2)
+  const message3 = mobilePairing.exportFinishMessage()
+  await input.mobileTransport.submitEndpointMessage3({
+    authentication: input.mobileAuth, completionId, message3,
+  })
+  await desktopPairing.finishMessage3(message3)
+  const desktopCredential = await generateRelayCredential()
+  const mobileCredential = await generateRelayCredential()
+  const confirmation = await input.desktopTransport.confirmEndpointPairing({
+    authentication: input.desktopAuth,
+    pendingPairingId: pending.pendingPairingId,
+    desktopCredentialDigest: await deriveRelayCredentialDigest(desktopCredential),
+    mobileCredentialDigest: await deriveRelayCredentialDigest(mobileCredential),
+  })
+  const pairingSelector = parseRelayPairingSelector(confirmation.pairing.id)
+  const desktopGrant: PairingScopedGrant = {
+    routeId: confirmation.routeId, endpoint: 'desktop', credential: desktopCredential,
+    revision: confirmation.relayRevision, pairingSelector,
+  }
+  const sealedRelayAuthority = await desktopPairing.sealMobileRelayAuthority({
+    routeId: confirmation.routeId, endpoint: 'mobile', credential: mobileCredential,
+    revision: confirmation.relayRevision, pairingSelector,
+  }, new Uint8Array(32).fill(31))
+  await input.desktopTransport.deliverEndpointRelayAuthority({
+    authentication: input.desktopAuth,
+    pendingPairingId: pending.pendingPairingId,
+    sealedRelayAuthority,
+  })
+  const status = await input.mobileTransport.getEndpointPairingStatus({
+    authentication: input.mobileAuth, completionId,
+  })
+  if (status.stage !== 'confirmed') throw new Error('Mobile endpoint mailbox did not receive sealed Relay authority')
+  const mobileGrant = await mobilePairing.openRelayAuthority(status.sealedRelayAuthority)
+  if (mobileGrant.pairingSelector === undefined) throw new Error('Mobile Relay authority omitted its pairing selector')
+  return {
+    pairingId: confirmation.pairing.id,
+    desktopPairing,
+    mobilePairing,
+    desktopGrant,
+    mobileGrant: { ...mobileGrant, pairingSelector: mobileGrant.pairingSelector },
+  }
+}
+
+function createSnowMobileAttachment(input: {
+  pairing: AssembledEndpointPairing
+  attachmentId: RelayAttachmentId
+  connect: (signal: AbortSignal) => Promise<RelayEndpointSocket>
+  synchronized: ReturnType<typeof deferred<undefined>>
+  accepted: ReturnType<typeof deferred<'accepted'>>
+  offline?: ReturnType<typeof deferred<string>>
+  errors: string[]
+}) {
+  const owner = new SnowMobileAttachmentOwner(
+    input.pairing.mobilePairing.exportReconnectState(), input.pairing.mobileGrant.pairingSelector,
+  )
+  let channel: SnowCompanionProtocolChannel | undefined
+  let targetAttachmentId: RelayAttachmentId | undefined
+  let peerGeneration: number | undefined
+  let epoch = 0
+  const controller = new RemoteRelayEndpointController({
+    endpoint: 'mobile',
+    route: () => Promise.resolve(input.pairing.mobileGrant),
+    attachmentId: () => input.attachmentId,
+    connect: input.connect,
+    attachTimeoutMs: CLIENT.attachTimeoutMs,
+    heartbeatIntervalMs: CLIENT.heartbeatIntervalMs,
+    reconnectDelayMs: CLIENT.reconnectDelayMs,
+    onPeerAttachments: async (update) => {
+      const peer = update.peers.find(candidate =>
+        candidate.pairingSelector === input.pairing.mobileGrant.pairingSelector)
+      if (peer === undefined || peerGeneration === peer.generation) return
+      channel?.dispose()
+      channel = undefined
+      peerGeneration = peer.generation
+      const begun = await owner.begin(update)
+      targetAttachmentId = begun.targetAttachmentId
+      await controller.sendCiphertext(begun.targetAttachmentId, begun.payload)
+    },
+    onCiphertext: (ciphertext, sourceAttachmentId) => {
+      if (channel === undefined) {
+        channel = owner.finish(ciphertext, sourceAttachmentId)
+        return
+      }
+      const message = channel.open(ciphertext)
+      if (message.type === 'projection' && message.projection.type === 'foreground-sync') {
+        epoch += 1
+        input.synchronized.resolve(undefined)
+      }
+      if (message.type === 'result' && message.result.type === 'confirmed') {
+        input.accepted.resolve(message.result.outcome)
+      }
+    },
+    onTransportError: (error) => {
+      input.errors.push(`mobile:${input.attachmentId}:${error.code}:${error.message}`)
+      input.offline?.resolve(error.code)
+    },
+    onConnectionLost: () => {
+      owner.cancel()
+      channel?.dispose()
+      channel = undefined
+      targetAttachmentId = undefined
+      peerGeneration = undefined
+    },
+  })
+  return {
+    controller,
+    epoch: () => epoch,
+    ready: () => channel !== undefined && targetAttachmentId !== undefined,
+    async send(message: Parameters<SnowCompanionProtocolChannel['seal']>[0]): Promise<void> {
+      if (channel === undefined || targetAttachmentId === undefined) throw new Error('Mobile Snow channel is unavailable')
+      await controller.sendCiphertext(targetAttachmentId, channel.seal(message))
+    },
+  }
 }
 
 async function loadInstance(id: string, shared: SharedAdapters, entropy: number): Promise<InstanceHandle> {
@@ -381,6 +579,7 @@ async function loadInstance(id: string, shared: SharedAdapters, entropy: number)
     '  config:',
     "    path: '/v1/remote-access/relay'",
     '    attachTimeoutMs: 1000',
+    '    maxPendingChallenges: 16',
     '',
   ].join('\n'))
   const context = new Context()
@@ -454,26 +653,17 @@ function instanceProvider(id: string, shared: SharedAdapters, entropy: number): 
                 githubLogin: 'assembled',
                 avatarUrl: 'https://avatars.example/assembled',
               },
-              installation: { id: parseInstallationId(installation), kind },
+              installation: kind === 'mobile'
+                ? {
+                  id: parseInstallationId(installation),
+                  kind,
+                  presentation: { name: `${installation} installation`, platform: 'ios' },
+                }
+                : { id: parseInstallationId(installation), kind: 'desktop' as const, presentation: { name: 'Test Desktop', platform: 'linux' as const } },
             }
           },
         },
-        handshake: {
-          createChallenge: async () => ({ desktopFingerprint: 'desktop-assembled', state: Uint8Array.of(1) }),
-          completeChallenge: async () => ({
-            handshakeHash: new Uint8Array(32),
-            desktopHandshake: Uint8Array.of(2),
-            pendingPairingKey: Uint8Array.of(3),
-          }),
-          activatePairing: async () => ({
-            keyReference: parsePersonalPairingKeyReference('assembled-active'),
-            activePairingKey: Uint8Array.of(4),
-          }),
-          sealMobileRelayAuthority: async ({ grant }) => new TextEncoder().encode(JSON.stringify(grant)),
-          destroyChallenge: () => {},
-          destroyPendingPairing: () => {},
-          destroyPairing: () => {},
-        },
+        handshake: endpointOnlyHandshake(),
         relay,
         authority: shared.authority,
         randomBytes: size => new Uint8Array(size).fill(41),
@@ -481,6 +671,18 @@ function instanceProvider(id: string, shared: SharedAdapters, entropy: number): 
         pairingLinkOrigin: 'https://platform.example/pair',
       })
     },
+  }
+}
+
+function endpointOnlyHandshake(): PairingHandshakeProvider {
+  const unavailable = () => Promise.reject(new Error('Assembled product path forbids Platform pairing cryptography'))
+  return {
+    createChallenge: unavailable,
+    completeChallenge: unavailable,
+    activatePairing: unavailable,
+    destroyChallenge: () => {},
+    destroyPendingPairing: () => {},
+    destroyPairing: () => {},
   }
 }
 
@@ -566,10 +768,16 @@ async function attachWithCredential(
 ): Promise<ReturnType<typeof decodeRelayMessage>> {
   const socket = new WebSocket(url, url.startsWith('wss:') ? { rejectUnauthorized: false } : undefined)
   await once(socket, 'open')
-  const received = once(socket, 'message') as Promise<[WebSocket.RawData]>
+  const challengeMessage = once(socket, 'message') as Promise<[WebSocket.RawData]>
   socket.send(encodeRelayMessage({
-    type: 'attach', transportVersion: 1, routeId, attachmentId, endpoint, credential,
+    type: 'attach-challenge', transportVersion: 1, routeId, attachmentId, endpoint,
+    credentialPublicKey: await deriveRelayCredentialPublicKey(credential),
   }))
+  const [challengeData] = await challengeMessage
+  const challenge = decodeRelayMessage(bytes(challengeData))
+  if (challenge.type !== 'attach-challenge-response') throw new Error('Relay did not issue an attach challenge')
+  const received = once(socket, 'message') as Promise<[WebSocket.RawData]>
+  socket.send(encodeRelayMessage(await signRelayAttachmentChallenge(credential, challenge)))
   const [data] = await received
   socket.close()
   return decodeRelayMessage(bytes(data))
@@ -582,21 +790,13 @@ function authentication(kind: 'desktop' | 'mobile', id: string) {
   }
 }
 
-function rewriteFetch(origin: string, port: number): typeof fetch {
+function rewriteFetch(origin: string, port: number, observedBodies: string[]): typeof fetch {
   return async (input, init = {}) => {
     const source = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
     const headers = new Headers(init.headers)
     headers.set('origin', origin)
+    if (typeof init.body === 'string') observedBodies.push(init.body)
     return fetch(`http://127.0.0.1:${String(port)}${source.pathname}${source.search}`, { ...init, headers })
-  }
-}
-
-function parseSealedGrant(value: Uint8Array) {
-  const decoded = JSON.parse(new TextDecoder().decode(value)) as Record<string, unknown>
-  return {
-    routeId: parseRelayRouteId(decoded.routeId),
-    credential: parseRelayCredential(decoded.credential),
-    revision: decoded.revision as number,
   }
 }
 
@@ -613,25 +813,6 @@ function publishedCiphertextFrames(published: readonly string[]): RelayCiphertex
   return frames
 }
 
-function ciphertextCarriesCompanionPrompt(
-  ciphertext: Uint8Array,
-  protocol: ReturnType<typeof negotiateCompanionProtocol>,
-): boolean {
-  const text = new TextDecoder().decode(ciphertext)
-  if (text.includes(PROMPT)) return true
-  try {
-    const message = decodeCompanionMessage(protocol, ciphertext)
-    return JSON.stringify(message).includes(PROMPT)
-  } catch {
-    try {
-      const parsed: unknown = JSON.parse(text)
-      return typeof parsed === 'object' && parsed !== null && JSON.stringify(parsed).includes(PROMPT)
-    } catch {
-      return false
-    }
-  }
-}
-
 async function waitForDirectory(
   coordinator: RedisRelayCoordinator,
   routeId: RelayRouteId,
@@ -646,10 +827,13 @@ async function waitForDirectory(
   return found
 }
 
-function withPhase<T>(phase: string, operation: Promise<T>): Promise<T> {
+function withPhase<T>(phase: string, operation: Promise<T>, diagnostics: () => string = () => ''): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => { reject(new Error(`two-instance assembled phase timed out: ${phase}`)) }, 10_000)
+    timer = setTimeout(() => {
+      const detail = diagnostics()
+      reject(new Error(`two-instance assembled phase timed out: ${phase}${detail === '' ? '' : ` (${detail})`}`))
+    }, 10_000)
   })
   return Promise.race([operation, timeout]).finally(() => { clearTimeout(timer) })
 }
@@ -674,54 +858,62 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   return { promise, resolve }
 }
 
-class AssembledCipher {
-  private readonly key = Buffer.alloc(32, 29)
-  private counter = 0
-
-  seal(plaintext: Uint8Array): Uint8Array {
-    this.counter += 1
-    const nonce = Buffer.alloc(12)
-    nonce.writeUInt32BE(this.counter, 8)
-    const cipher = createCipheriv('aes-256-gcm', this.key, nonce)
-    const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()])
-    return new Uint8Array(Buffer.concat([nonce, encrypted, cipher.getAuthTag()]))
-  }
-
-  open(sealed: Uint8Array): Uint8Array {
-    const nonce = sealed.slice(0, 12)
-    const tag = sealed.slice(sealed.byteLength - 16)
-    const encrypted = sealed.slice(12, sealed.byteLength - 16)
-    const decipher = createDecipheriv('aes-256-gcm', this.key, nonce)
-    decipher.setAuthTag(tag)
-    return new Uint8Array(Buffer.concat([decipher.update(encrypted), decipher.final()]))
-  }
-}
-
 class AssembledRouteStore implements RelayRouteStore {
-  private readonly rows = new Map<string, { revision: number; revoked: boolean; owners: Map<string, 'mobile' | 'desktop'> }>()
+  private readonly rows = new Map<string, {
+    revision: number
+    revoked: boolean
+    owners: Map<string, { endpoint: 'mobile' | 'desktop'; pairingSelector?: RelayPairingSelector }>
+  }>()
 
   async rotate(routeId: RelayRouteId, endpoint: 'mobile' | 'desktop', digest: Uint8Array): Promise<number> {
     const current = this.rows.get(routeId)
     const revision = (current?.revision ?? 0) + 1
     const owners = new Map(current?.owners ?? [])
-    for (const [encoded, owner] of owners) if (owner === endpoint) owners.delete(encoded)
-    owners.set(Buffer.from(digest).toString('hex'), endpoint)
+    for (const [encoded, owner] of owners) if (owner.endpoint === endpoint) owners.delete(encoded)
+    owners.set(Buffer.from(digest).toString('hex'), { endpoint })
     this.rows.set(routeId, { revision, revoked: false, owners })
     return revision
   }
 
-  async issue(routeId: RelayRouteId, endpoint: 'mobile' | 'desktop', digest: Uint8Array): Promise<number | undefined> {
+  async issue(
+    routeId: RelayRouteId,
+    endpoint: 'mobile' | 'desktop',
+    digest: Uint8Array,
+    pairingSelector?: RelayPairingSelector,
+  ): Promise<number | undefined> {
     const current = this.rows.get(routeId)
     if (current === undefined || current.revoked) return undefined
-    current.owners.set(Buffer.from(digest).toString('hex'), endpoint)
+    current.owners.set(Buffer.from(digest).toString('hex'), {
+      endpoint, ...(pairingSelector === undefined ? {} : { pairingSelector }),
+    })
     return current.revision
   }
 
-  async authorize(routeId: RelayRouteId, endpoint: 'mobile' | 'desktop', digest: Uint8Array): Promise<number | undefined> {
+  async registerPairing(
+    routeId: RelayRouteId,
+    pairingSelector: RelayPairingSelector,
+    desktopDigest: Uint8Array,
+    mobileDigest: Uint8Array,
+  ): Promise<number> {
     const current = this.rows.get(routeId)
-    return current !== undefined && !current.revoked
-      && current.owners.get(Buffer.from(digest).toString('hex')) === endpoint
-      ? current.revision : undefined
+    const revision = current === undefined || current.revoked ? (current?.revision ?? 0) + 1 : current.revision
+    const owners = current === undefined || current.revoked
+      ? new Map<string, { endpoint: 'mobile' | 'desktop'; pairingSelector?: RelayPairingSelector }>()
+      : new Map(current.owners)
+    owners.set(Buffer.from(desktopDigest).toString('hex'), { endpoint: 'desktop', pairingSelector })
+    owners.set(Buffer.from(mobileDigest).toString('hex'), { endpoint: 'mobile', pairingSelector })
+    this.rows.set(routeId, { revision, revoked: false, owners })
+    return revision
+  }
+
+  async authorize(routeId: RelayRouteId, endpoint: 'mobile' | 'desktop', digest: Uint8Array) {
+    const current = this.rows.get(routeId)
+    const authority = current?.owners.get(Buffer.from(digest).toString('hex'))
+    return current !== undefined && !current.revoked && authority?.endpoint === endpoint
+      ? { revision: current.revision, ...(authority.pairingSelector === undefined
+        ? {}
+        : { pairingSelector: authority.pairingSelector }) }
+      : undefined
   }
 
   async revokeCredential(routeId: RelayRouteId, endpoint: 'mobile' | 'desktop', digest: Uint8Array): Promise<number> {
@@ -729,7 +921,7 @@ class AssembledRouteStore implements RelayRouteStore {
     const revision = (current?.revision ?? 0) + 1
     const owners = new Map(current?.owners ?? [])
     const encoded = Buffer.from(digest).toString('hex')
-    if (owners.get(encoded) === endpoint) owners.delete(encoded)
+    if (owners.get(encoded)?.endpoint === endpoint) owners.delete(encoded)
     this.rows.set(routeId, { revision, revoked: current?.revoked ?? true, owners })
     return revision
   }
@@ -744,27 +936,43 @@ class AssembledRouteStore implements RelayRouteStore {
 class AssembledRedisBus {
   readonly published: string[] = []
   private readonly values = new Map<string, { value: string; expiresAt?: number }>()
+  private readonly sets = new Map<string, Set<string>>()
   private readonly subscriptions = new Map<string, Set<(message: string) => void>>()
 
   client(): RelayRedisClient {
     const client: RelayRedisClient = {
       get: async key => this.read(key),
+      sMembers: async key => [...(this.sets.get(key) ?? [])],
       set: async (key, value, options) => {
         this.write(key, value, options.PX)
         return 'OK'
       },
-      eval: async (_script, options) => {
+      eval: async (script, options) => {
         const key = options.keys[0]
         if (key === undefined) return 0
+        if (script.includes("redis.call('SET', KEYS[1], ARGV[1]")) {
+          this.write(key, options.arguments[0] as string, Number(options.arguments[1]))
+          const routeKey = options.keys[1] as string
+          const members = this.sets.get(routeKey) ?? new Set()
+          members.add(options.arguments[2] as string)
+          this.sets.set(routeKey, members)
+          return 1
+        }
         const value = this.read(key)
         if (value === null) return 0
         const record = JSON.parse(value) as { connectionToken?: string }
         if (record.connectionToken !== options.arguments[0]) return 0
-        const replacement = options.arguments[1]
-        if (replacement === undefined) this.values.delete(key)
-        else {
+        if (script.includes("redis.call('SREM'")) {
+          this.values.delete(key)
+          this.sets.get(options.keys[1] as string)?.delete(options.arguments[1] as string)
+        } else {
+          const replacement = options.arguments[1] as string
           const ttl = options.arguments[2]
           this.write(key, replacement, ttl === undefined ? undefined : Number(ttl))
+          const routeKey = options.keys[1] as string
+          const members = this.sets.get(routeKey) ?? new Set()
+          members.add(options.arguments[3] as string)
+          this.sets.set(routeKey, members)
         }
         return 1
       },

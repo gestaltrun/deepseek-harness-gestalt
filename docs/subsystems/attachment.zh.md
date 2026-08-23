@@ -133,7 +133,22 @@ abstract saveImage(input: SaveImageAttachment): Promise<ImageAttachmentRef>
  * @throws the signal reason when aborted, or a storage error when verification fails.
  */
 abstract readImage(ref: ImageAttachmentRef, signal?: AbortSignal): Promise<StoredImageAttachment>
+
+/**
+ * Validate and durably commit one immutable generic file.
+ * @param input - exact bytes plus bounded display metadata.
+ * @returns a content-addressed reference after durable publication.
+ */
+saveFile(input: SaveFileAttachment): Promise<FileAttachmentRef>
+
+/**
+ * Read one generic file and verify its digest and metadata.
+ * @param ref - durable reference from a Session event.
+ * @param signal - optional cancellation for backend reads.
+ * @returns verified exact bytes and canonical reference.
+ */
+readFile(ref: FileAttachmentRef, signal?: AbortSignal): Promise<StoredFileAttachment>
 ```
 
-Source: [`packages/attachment/attachment/src/index.ts:33`](../../packages/attachment/attachment/src/index.ts)
+Source: [`packages/attachment/attachment/src/index.ts:39`](../../packages/attachment/attachment/src/index.ts)
 <!-- END GENERATED cordis-surface -->

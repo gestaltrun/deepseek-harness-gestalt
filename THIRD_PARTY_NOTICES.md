@@ -37,6 +37,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`@babel/code-frame`](https://github.com/babel/babel) | MIT |
 | [`@capacitor/browser`](https://github.com/ionic-team/capacitor-plugins) | MIT |
 | [`@capacitor/core`](https://github.com/ionic-team/capacitor) | MIT |
+| [`@capacitor/device`](https://github.com/ionic-team/capacitor-plugins) | MIT |
 | [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi) | MIT |
 | [`@joplin/turndown-plugin-gfm`](https://github.com/laurent22/joplin-turndown-plugin-gfm) | MIT |
 | [`@jridgewell/gen-mapping`](https://github.com/jridgewell/sourcemaps) | MIT |
@@ -53,6 +54,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`@tanstack/react-virtual`](https://github.com/TanStack/virtual) | MIT |
 | [`@types/mdast`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@vscode/ripgrep`](https://github.com/microsoft/vscode-ripgrep) | MIT |
+| [`@zxing/browser`](https://github.com/zxing-js/browser) | MIT |
 | [`ajv`](https://github.com/ajv-validator/ajv) | MIT |
 | [`anser`](https://github.com/IonicaBizau/anser) | MIT |
 | [`chokidar`](https://github.com/paulmillr/chokidar) | MIT |

@@ -322,4 +322,21 @@ describe('Mobile shared Session presentation', () => {
     expect(onCancel).not.toHaveBeenCalled()
     expect(onSubmit).not.toHaveBeenCalled()
   })
+
+  it('passes the real selected File to the encrypted attachment callback', () => {
+    const onAttach = vi.fn()
+    const file = new File([Uint8Array.of(0, 255, 1)], 'actual.bin', { type: 'application/octet-stream' })
+    render(createElement(MobileConversation, {
+      title: 'Attachment',
+      onBack: () => {},
+      locale: 'zh',
+      snapshot: snapshot([]),
+      loadImage: imageLoader,
+      onSubmit: () => {},
+      onAttach,
+      mutationEnabled: true,
+    }))
+    fireEvent.change(screen.getByLabelText('添加附件'), { target: { files: [file] } })
+    expect(onAttach).toHaveBeenCalledWith(file)
+  })
 })

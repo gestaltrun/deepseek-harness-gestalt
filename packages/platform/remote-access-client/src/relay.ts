@@ -3,9 +3,14 @@
 import { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
 import {
   decodeRelayMessage,
+  deriveRelayCredentialPublicKey,
   encodeRelayMessage,
+  signRelayAttachmentChallenge,
   type RelayAttachmentId,
   type RelayCredential,
+  type RelayReadyMessage,
+  type RelayAttachChallengeMessage,
+  type RelayPeerUpdateMessage,
   type RelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 
@@ -42,9 +47,15 @@ export interface RemoteRelayEndpointOptions {
     send: (targetAttachmentId: RelayAttachmentId, ciphertext: Uint8Array) => Promise<void>,
   ) => Promise<void>
   /** Endpoint-owned ciphertext receiver. */
-  onCiphertext?: (ciphertext: Uint8Array, sourceAttachmentId: RelayAttachmentId) => void | Promise<void>
+  onCiphertext?: (
+    ciphertext: Uint8Array,
+    sourceAttachmentId: RelayAttachmentId,
+    signal: AbortSignal,
+  ) => void | Promise<void>
   /** Observer invoked after Platform acknowledges one physical attachment. */
   onConnectionReady?: (attachmentId: RelayAttachmentId) => void
+  /** Route-bound opposite attachments authenticated by Relay credential records. */
+  onPeerAttachments?: (message: RelayReadyMessage | RelayPeerUpdateMessage) => void | Promise<void>
   /** Observer invoked whenever an acknowledged physical attachment ends. */
   onConnectionLost?: (attachmentId: RelayAttachmentId) => void
   /** Content-free transport error observer. */
@@ -204,18 +215,22 @@ export class RemoteRelayEndpointController {
     let attached = false
     const heartbeatAbort = new AbortController()
     try {
+      const credentialPublicKey = await deriveRelayCredentialPublicKey(route.credential)
       await socket.send(encodeRelayMessage({
-        type: 'attach', transportVersion: 1,
+        type: 'attach-challenge', transportVersion: 1,
         routeId: route.routeId,
         attachmentId: connection.attachmentId,
         endpoint: this.options.endpoint,
-        credential: route.credential,
+        credentialPublicKey,
       }))
-      await this.awaitReady(connection, iterator, signal)
+      const challenge = await this.awaitAttachChallenge(connection, credentialPublicKey, iterator, signal)
+      await socket.send(encodeRelayMessage(await signRelayAttachmentChallenge(route.credential, challenge)))
+      const ready = await this.awaitReady(connection, iterator, signal)
       /* v8 ignore next -- stop can win only in the microtask gap after the acknowledged wait settles. */
       if (isAborted(signal)) return
       owner.connection = connection
       attached = true
+      await this.options.onPeerAttachments?.(ready)
       this.observeConnection(this.options.onConnectionReady, connection.attachmentId)
       if (this.options.endpoint === 'desktop') {
         await this.options.resynchronize?.((target, ciphertext) => this.sendCiphertext(target, ciphertext))
@@ -228,7 +243,7 @@ export class RemoteRelayEndpointController {
       while (!isAborted(signal)) {
         const next = await iterator.next()
         if (next.done || isAborted(signal)) break
-        await this.receive(connection, next.value)
+        await this.receive(connection, next.value, signal)
       }
     } finally {
       heartbeatAbort.abort()
@@ -248,7 +263,7 @@ export class RemoteRelayEndpointController {
     connection: ActiveConnection,
     iterator: AsyncIterator<Uint8Array>,
     signal: AbortSignal,
-  ): Promise<void> {
+  ): Promise<RelayReadyMessage> {
     const next = await withTimeout(
       iterator.next(),
       this.options.attachTimeoutMs,
@@ -260,9 +275,31 @@ export class RemoteRelayEndpointController {
     if (message.type === 'error') {
       throw new RemoteRelayError(message.code, `Remote Relay returned ${message.code}`, message.retryAfterMs)
     }
-    if (message.type !== 'ready' || message.attachmentId !== connection.attachmentId) {
+    if (message.type !== 'ready' || message.routeId !== connection.routeId
+      || message.attachmentId !== connection.attachmentId) {
       throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay endpoint received an invalid attachment acknowledgement')
     }
+    return message
+  }
+
+  private async awaitAttachChallenge(
+    connection: ActiveConnection,
+    credentialPublicKey: Awaited<ReturnType<typeof deriveRelayCredentialPublicKey>>,
+    iterator: AsyncIterator<Uint8Array>,
+    signal: AbortSignal,
+  ): Promise<RelayAttachChallengeMessage> {
+    const next = await withTimeout(iterator.next(), this.options.attachTimeoutMs, signal,
+      () => new RemoteRelayError('REMOTE_OFFLINE', 'Platform did not issue a Relay attachment challenge'))
+    if (next.done) throw new RemoteRelayError('REMOTE_OFFLINE', 'Relay socket closed before attachment challenge')
+    const message = decodeRelayMessage(next.value)
+    if (message.type === 'error') throw new RemoteRelayError(message.code, `Remote Relay returned ${message.code}`, message.retryAfterMs)
+    if (message.type !== 'attach-challenge-response' || message.routeId !== connection.routeId
+      || message.attachmentId !== connection.attachmentId || message.endpoint !== this.options.endpoint
+      || message.credentialPublicKey !== credentialPublicKey
+      || message.expiresAt <= (this.options.clock?.now() ?? Date.now())) {
+      throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay endpoint received an invalid attachment challenge')
+    }
+    return message
   }
 
   private async heartbeat(owner: LifecycleOwner, connection: ActiveConnection, signal: AbortSignal): Promise<void> {
@@ -277,13 +314,20 @@ export class RemoteRelayEndpointController {
     }
   }
 
-  private async receive(connection: ActiveConnection, encoded: Uint8Array): Promise<void> {
+  private async receive(connection: ActiveConnection, encoded: Uint8Array, signal: AbortSignal): Promise<void> {
     const message = decodeRelayMessage(encoded)
     if (message.type === 'ciphertext') {
       if (message.routeId !== connection.routeId || message.targetAttachmentId !== connection.attachmentId) {
         throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay ciphertext does not belong to this attachment')
       }
-      await this.options.onCiphertext?.(message.ciphertext, message.sourceAttachmentId)
+      await this.options.onCiphertext?.(message.ciphertext, message.sourceAttachmentId, signal)
+      return
+    }
+    if (message.type === 'peer-update') {
+      if (message.routeId !== connection.routeId || message.attachmentId !== connection.attachmentId) {
+        throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay peer update does not belong to this attachment')
+      }
+      await this.options.onPeerAttachments?.(message)
       return
     }
     if (message.type === 'error') {

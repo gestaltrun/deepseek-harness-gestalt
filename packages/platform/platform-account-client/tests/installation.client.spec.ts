@@ -97,6 +97,7 @@ describe('PlatformAccountInstallation', () => {
       environment: DEVELOPMENT,
       installationId: parseInstallationId('subscriber-containment'),
       installationKind: 'mobile',
+      presentation: { name: 'Subscriber installation', platform: 'ios' },
       transport: transport([]),
       store: new MemoryInstallationAccountStore(),
       systemBrowser: { open: vi.fn() },
@@ -120,6 +121,7 @@ describe('PlatformAccountInstallation', () => {
       environment: DEVELOPMENT,
       installationId: parseInstallationId('mismatch'),
       installationKind: 'mobile',
+      presentation: { name: 'Mismatch installation', platform: 'android' },
       transport: transport([], PRODUCTION),
       store: new MemoryInstallationAccountStore(),
       systemBrowser: { open: vi.fn() },
@@ -129,6 +131,7 @@ describe('PlatformAccountInstallation', () => {
       environment: DEVELOPMENT,
       installationId: parseInstallationId('unprepared'),
       installationKind: 'mobile',
+      presentation: { name: 'Unprepared installation', platform: 'ios' },
       transport: transport([]),
       store: new MemoryInstallationAccountStore(),
       systemBrowser: { open: vi.fn() },
@@ -142,7 +145,7 @@ describe('PlatformAccountInstallation', () => {
     const installation = new PlatformAccountInstallation({
       environment: DEVELOPMENT,
       installationId: parseInstallationId('desktop-fresh'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api,
       store: new MemoryInstallationAccountStore(),
       systemBrowser: { open: vi.fn() },
@@ -158,10 +161,19 @@ describe('PlatformAccountInstallation', () => {
 
   it.each(['desktop', 'mobile'] as const)('shows bilingual privacy before %s authorization', async (kind) => {
     const openSystemBrowser = vi.fn()
+    const identity = kind === 'mobile'
+      ? {
+        installationKind: 'mobile' as const,
+        presentation: { name: 'Privacy test installation', platform: 'ios' as const },
+      }
+      : {
+        installationKind: 'desktop' as const,
+        presentation: { name: 'Privacy test Desktop', platform: 'linux' as const },
+      }
     const installation = new PlatformAccountInstallation({
       environment: DEVELOPMENT,
       installationId: parseInstallationId(`${kind}-1`),
-      installationKind: kind,
+      ...identity,
       transport: transport([session('account-a', 'octocat')]),
       store: new MemoryInstallationAccountStore(),
       systemBrowser: { open: openSystemBrowser },
@@ -180,6 +192,7 @@ describe('PlatformAccountInstallation', () => {
       environment: PRODUCTION,
       installationId: parseInstallationId('mobile-2'),
       installationKind: 'mobile',
+      presentation: { name: 'Second mobile installation', platform: 'android' },
       transport: transport([session('account-a', 'octocat'), session('account-b', 'hubot')], PRODUCTION),
       store,
       systemBrowser: { open: vi.fn() },
@@ -206,7 +219,7 @@ describe('PlatformAccountInstallation', () => {
     const installation = new PlatformAccountInstallation({
       environment: DEVELOPMENT,
       installationId: parseInstallationId('desktop-2'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api,
       store,
       systemBrowser: { open: vi.fn() },
@@ -229,6 +242,7 @@ describe('PlatformAccountInstallation', () => {
       environment: DEVELOPMENT,
       installationId: parseInstallationId('mobile-authority'),
       installationKind: 'mobile',
+      presentation: { name: 'Authority installation', platform: 'ios' },
       transport: api,
       store,
       systemBrowser: { open: vi.fn() },
@@ -252,6 +266,7 @@ describe('PlatformAccountInstallation', () => {
       environment: DEVELOPMENT,
       installationId: parseInstallationId('missing-authority'),
       installationKind: 'mobile',
+      presentation: { name: 'Missing authority installation', platform: 'android' },
       transport: api,
       store: emptyStore,
       systemBrowser: { open: vi.fn() },
@@ -272,7 +287,7 @@ describe('PlatformAccountInstallation', () => {
     const expired = new PlatformAccountInstallation({
       environment: DEVELOPMENT,
       installationId: parseInstallationId('expired-authority'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api,
       store: expiredStore,
       systemBrowser: { open: vi.fn() },
@@ -293,7 +308,7 @@ describe('PlatformAccountInstallation', () => {
     const refreshing = new PlatformAccountInstallation({
       environment: DEVELOPMENT,
       installationId: parseInstallationId('refresh-authority'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api,
       store: refreshingStore,
       systemBrowser: { open: vi.fn() },
@@ -320,7 +335,7 @@ describe('PlatformAccountInstallation', () => {
     const installation = new PlatformAccountInstallation({
       environment: DEVELOPMENT,
       installationId: parseInstallationId('desktop-restored'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api,
       store,
       systemBrowser: { open: vi.fn() },
@@ -350,6 +365,7 @@ describe('PlatformAccountInstallation', () => {
       environment: PRODUCTION,
       installationId: parseInstallationId('mobile-restored'),
       installationKind: 'mobile',
+      presentation: { name: 'Restored installation', platform: 'ios' },
       transport: Object.assign(api, { environment: PRODUCTION }),
       store,
       systemBrowser: { open: vi.fn() },
@@ -378,7 +394,7 @@ describe('PlatformAccountInstallation', () => {
     const installation = new PlatformAccountInstallation({
       environment: DEVELOPMENT,
       installationId: parseInstallationId('desktop-revoked'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api,
       store,
       systemBrowser: { open: vi.fn() },
@@ -397,6 +413,7 @@ describe('PlatformAccountInstallation', () => {
     const api = transport([session('account-a', 'octocat')])
     const installation = new PlatformAccountInstallation({
       environment: DEVELOPMENT, installationId: parseInstallationId('mobile-errors'), installationKind: 'mobile',
+      presentation: { name: 'Error installation', platform: 'android' },
       transport: api, store, systemBrowser: { open: vi.fn() }, crypto: webcrypto as Crypto,
     })
     await expect(installation.pollLogin()).rejects.toThrow('no login attempt')
@@ -427,7 +444,7 @@ describe('PlatformAccountInstallation', () => {
     const api = transport([])
     vi.mocked(api.current).mockRejectedValueOnce(new Error('network unavailable'))
     const installation = new PlatformAccountInstallation({
-      environment: DEVELOPMENT, installationId: parseInstallationId('desktop-failure'), installationKind: 'desktop',
+      environment: DEVELOPMENT, installationId: parseInstallationId('desktop-failure'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api, store, systemBrowser: { open: vi.fn() }, crypto: webcrypto as Crypto, now: () => 1_000,
     })
     const listener = vi.fn()
@@ -451,7 +468,7 @@ describe('PlatformAccountInstallation', () => {
     )
     await store.saveSession({ environment: 'development', session: { ...expired, refreshExpiresAt: 1 }, privateKey: pair.privateKey })
     const installation = new PlatformAccountInstallation({
-      environment: DEVELOPMENT, installationId: parseInstallationId('desktop-defaults'), installationKind: 'desktop',
+      environment: DEVELOPMENT, installationId: parseInstallationId('desktop-defaults'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: transport([]), store, systemBrowser: { open: vi.fn() },
     })
     await installation.load()
@@ -462,7 +479,7 @@ describe('PlatformAccountInstallation', () => {
     const api = transport([])
     vi.mocked(api.beginLogin).mockRejectedValueOnce(new Error('login unavailable'))
     const installation = new PlatformAccountInstallation({
-      environment: DEVELOPMENT, installationId: parseInstallationId('desktop-login-error'), installationKind: 'desktop',
+      environment: DEVELOPMENT, installationId: parseInstallationId('desktop-login-error'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api, store: new MemoryInstallationAccountStore(), systemBrowser: { open: vi.fn() },
       crypto: webcrypto as Crypto,
     })
@@ -476,6 +493,7 @@ describe('PlatformAccountInstallation', () => {
   it('publishes an asynchronous native browser failure after direct invocation', async () => {
     const installation = new PlatformAccountInstallation({
       environment: DEVELOPMENT, installationId: parseInstallationId('browser-failure'), installationKind: 'mobile',
+      presentation: { name: 'Browser failure installation', platform: 'ios' },
       transport: transport([]), store: new MemoryInstallationAccountStore(),
       systemBrowser: { open: vi.fn(async () => { throw new Error('native browser failed') }) },
       crypto: webcrypto as Crypto,
@@ -492,7 +510,7 @@ describe('PlatformAccountInstallation', () => {
     const store = new MemoryInstallationAccountStore()
     const api = transport([session('account-a', 'octocat')])
     const installation = new PlatformAccountInstallation({
-      environment: DEVELOPMENT, installationId: parseInstallationId('desktop-signout-error'), installationKind: 'desktop',
+      environment: DEVELOPMENT, installationId: parseInstallationId('desktop-signout-error'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api, store, systemBrowser: { open: vi.fn() }, crypto: webcrypto as Crypto,
     })
     installation.acceptPrivacy()
@@ -519,6 +537,7 @@ describe('PlatformAccountInstallation', () => {
     vi.mocked(api.current).mockResolvedValue(replacement.account)
     const installation = new PlatformAccountInstallation({
       environment: DEVELOPMENT, installationId: parseInstallationId('strict-mode'), installationKind: 'mobile',
+      presentation: { name: 'Strict mode installation', platform: 'android' },
       transport: api, store, systemBrowser: { open: vi.fn() }, crypto: webcrypto as Crypto, now: () => 1_000,
     })
 
@@ -545,7 +564,7 @@ describe('PlatformAccountInstallation', () => {
     const refresh = deferred<AccountSessionView>()
     vi.mocked(api.refresh).mockImplementation(async () => refresh.promise)
     const installation = new PlatformAccountInstallation({
-      environment: DEVELOPMENT, installationId: parseInstallationId('refresh-signout'), installationKind: 'desktop',
+      environment: DEVELOPMENT, installationId: parseInstallationId('refresh-signout'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: api, store, systemBrowser: { open: vi.fn() }, crypto: webcrypto as Crypto, now: () => 1_000,
     })
 
@@ -600,7 +619,12 @@ describe('PlatformAccountHttpTransport', () => {
       environment: PRODUCTION,
       fetch,
     })
-    await transport.beginLogin({ installationId: parseInstallationId('mobile-1'), installationKind: 'mobile', publicKey: {} })
+    await transport.beginLogin({
+      installationId: parseInstallationId('mobile-1'),
+      installationKind: 'mobile',
+      presentation: { name: 'Transport mobile installation', platform: 'ios' },
+      publicKey: {},
+    })
     await transport.pollLogin({ attemptId: parseLoginAttemptId('attempt'), pollingToken: 'poll', proof })
     await transport.refresh({ refreshToken: 'refresh', proof })
     await transport.current({ accessToken: 'access', proof })
@@ -668,7 +692,7 @@ describe('PlatformAccountHttpTransport', () => {
       fetch: vi.fn(async () => json({})),
     })
     await expect(transport.beginLogin({
-      installationId: parseInstallationId('malformed'), installationKind: 'desktop', publicKey: {},
+      installationId: parseInstallationId('malformed'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: {},
     })).rejects.toThrow('attemptId')
     await expect(transport.pollLogin({
       attemptId: parseLoginAttemptId('malformed'), pollingToken: 'poll', proof,
@@ -689,7 +713,10 @@ describe('PlatformAccountHttpTransport', () => {
       environment: DEVELOPMENT, fetch: vi.fn(async () => json({ ...ATTEMPT, authorizationUrl: 'http://github.example' })),
     })
     await expect(insecureAttempt.beginLogin({
-      installationId: parseInstallationId('insecure'), installationKind: 'mobile', publicKey: {},
+      installationId: parseInstallationId('insecure'),
+      installationKind: 'mobile',
+      presentation: { name: 'Insecure mobile installation', platform: 'android' },
+      publicKey: {},
     })).rejects.toThrow('must use HTTPS')
   })
 })

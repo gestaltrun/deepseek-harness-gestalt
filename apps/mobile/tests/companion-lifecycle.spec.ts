@@ -186,6 +186,37 @@ describe('Companion foreground lifecycle', () => {
     expect(companionMayMutate(runtime.getState())).toBe(true)
   })
 
+  it('invalidates a mutation permit across backgrounding and physical replacement', async () => {
+    const runtime = new CompanionForegroundRuntime()
+    runtime.configure(grant)
+    expect(runtime.bindCompanionMutationPermit('attachment')).toBeUndefined()
+    runtime.markConnectionOpen()
+    const permit = runtime.bindCompanionMutationPermit('attachment')
+    const resync = runtime.bindValidatedDesktopResync()
+    if (permit === undefined || resync === undefined) throw new Error('expected current generation authority')
+    expect(() => { permit.requireCurrent() }).toThrow(/foreground synchronization/)
+    resync.acceptValidatedDesktopResync(validatedResync)
+    expect(() => { permit.requireCurrent() }).not.toThrow()
+
+    await runtime.setForeground(false)
+    expect(permit.isCurrent()).toBe(false)
+    expect(() => { permit.requireCurrent() }).toThrow(/connection generation/)
+
+    await runtime.setForeground(true)
+    runtime.markConnectionOpen()
+    const replacement = runtime.bindValidatedDesktopResync()
+    if (replacement === undefined) throw new Error('expected replacement generation authority')
+    replacement.acceptValidatedDesktopResync(validatedResync)
+    expect(() => { permit.requireCurrent() }).toThrow(/connection generation/)
+
+    const replacementPermit = runtime.bindCompanionMutationPermit('attachment')
+    if (replacementPermit === undefined) throw new Error('expected replacement mutation permit')
+    expect(() => { replacementPermit.requireCurrent() }).not.toThrow()
+    runtime.configure({ ...grant, revision: 2 })
+    expect(replacementPermit.isCurrent()).toBe(false)
+    expect(() => { replacementPermit.requireCurrent() }).toThrow(/connection generation/)
+  })
+
   it('removes a Capacitor listener that resolves after dispose starts', async () => {
     let resolveHandle: ((handle: { remove: () => Promise<void> }) => void) | undefined
     const remove = vi.fn(async () => {})

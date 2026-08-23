@@ -26,6 +26,7 @@ const browsePresentation = {
   loadImage: () => Promise.resolve('data:image/gif;base64,R0lGODlhAQABAAAAACw='),
   canMutate: true,
   clock: fixedClock(10_000),
+  search: { query: '', status: 'idle', items: [], hasMore: false } as const,
 }
 
 function conversation(): ConversationSnapshot {
@@ -148,6 +149,50 @@ describe('Mobile Companion browse projection', () => {
     }))
     expect(screen.getByRole('button', { name: '在 Work 新建 Session' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '新建 Ungrouped Session' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('renders Desktop-authoritative hits even when the Companion Cache lacks the Session', () => {
+    const onSearch = vi.fn()
+    const { rerender } = render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
+      ...browsePresentation,
+      search: {
+        query: 'needle',
+        status: 'ready',
+        items: [
+          { sessionId: 'alpha' as never, snippet: 'Desktop indexed needle' },
+          { sessionId: 's-uncached' as never, snippet: 'Authoritative uncached needle' },
+        ],
+        hasMore: false,
+      },
+      onSearch,
+    }))
+    expect(screen.queryByText('Alpha')).toBeNull()
+    expect(screen.getByText('Desktop indexed needle')).toBeTruthy()
+    expect(screen.getByText('Authoritative uncached needle')).toBeTruthy()
+    expect(screen.getByText('s-uncached')).toBeTruthy()
+    expect(screen.queryByText('needle in local title')).toBeNull()
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' }), {
+      target: { value: 'next query' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    expect(onSearch).toHaveBeenCalledWith('next query')
+
+    rerender(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
+      ...browsePresentation,
+      search: {
+        query: 'bad request',
+        status: 'error',
+        items: [],
+        hasMore: false,
+        error: {
+          kind: 'http', code: 'HOST_HTTP_STATUS', message: 'Desktop Host returned HTTP 400', status: 400,
+        },
+      },
+      onSearch,
+    }))
+    expect(screen.getByRole('alert').textContent).toContain('HTTP 400')
   })
 })
 

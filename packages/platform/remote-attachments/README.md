@@ -20,7 +20,7 @@ The `remote-attachments-http` plugin (`@deepseek-ai/dsh-remote-attachments/http`
 
 ## Pairing seam
 
-`RemoteAttachmentAuthority.authenticate({ headers })` maps one HTTPS request to exactly one `PersonalPairingId`. The Personal Pairing layer (issue #31) owns the production implementation; it never sees attachment bytes. A missing authority service fails plugin load loudly.
+`RemoteAttachmentAuthority.authenticate({ headers })` maps one HTTPS request to exactly one `PersonalPairingId`. The operated Platform implementation verifies the current Mobile Installation proof and exact confirmed pairing selector against PostgreSQL; a selector alone grants no authority. It never sees attachment plaintext. A missing authority service fails plugin load loudly.
 
 ## Model Experience
 
@@ -32,6 +32,5 @@ None.
 
 ## Known Limitations and Deferred Work
 
-- The in-process store matches the single-process Platform deployment; a multi-instance Platform needs a shared store with the same `RemoteAttachmentStoreService` semantics.
-- The production `RemoteAttachmentAuthority` arrives with Personal Pairing (#31); tests use a header-based development authority.
-- Desktop maps consume HTTP 403/404/410/413 onto protocol-native rejection reasons and sends the pairing id on download; wiring that download and the `submit` callback into the product Session path belongs to the two-instance Companion completion (#27).
+- `RemoteAttachmentStoreProvider` remains a fixture for package tests. The operated Platform mounts the PostgreSQL implementation, whose transactional capability digest, expiry, capacity, consume, and revoke state is shared across Platform instances.
+- Desktop maps consume HTTP 403/404/410/413 onto protocol-native rejection reasons, decrypts only after hash verification, and admits exact bytes through the Session-scoped Host file RPC.

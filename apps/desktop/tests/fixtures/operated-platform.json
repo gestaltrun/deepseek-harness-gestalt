@@ -1,0 +1,10 @@
+{
+  "environment": "production",
+  "origin": "https://platform.fixture.example",
+  "callbackUrl": "https://platform.fixture.example/v1/account/oauth/github/callback",
+  "githubClientId": "desktop-packaged-fixture",
+  "credentialReference": "credentials://github-oauth/desktop-packaged-fixture",
+  "databaseIdentity": "desktop-packaged-fixture",
+  "identityNamespace": "desktop-packaged-fixture",
+  "companionAttachmentHostTimeoutMs": 120000
+}

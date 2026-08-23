@@ -6,6 +6,14 @@
     - id: ui-desktop
       name: '@deepseek-ai/dsh-client-ui-desktop'
 
+# DeepSeek Gestalt owns authoritative Companion search and therefore activates
+# the derived full-text index in its Desktop-only layer. Browser `dsh web`
+# retains the base opt-in stance.
+- id: session-query-sqlite
+  config:
+    path: !!js dshHomePath('session-search.sqlite')
+    openAt: first-search
+
 # The Desktop Host owns in-process Electron webContents and publishes Tandem's
 # HTTP vocabulary on a loopback origin. When both Host env vars are absent
 # (CI / `dsh web` / keyless Desktop snapshots), this is an intentionally

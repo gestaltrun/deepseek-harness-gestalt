@@ -10,6 +10,7 @@
   "dependencies": {
     "@capacitor/browser": "^8.0.4",
     "@capacitor/core": "^8.5.0",
+    "@capacitor/device": "^8.0.3",
     "@deepseek-ai/dsh-attachment": "workspace:^",
     "@deepseek-ai/dsh-client-runtime": "workspace:^",
     "@deepseek-ai/dsh-client-ui-attachment": "workspace:^",
@@ -24,7 +25,9 @@
     "@deepseek-ai/dsh-platform-account-client": "workspace:^",
     "@deepseek-ai/dsh-remote-access": "workspace:^",
     "@deepseek-ai/dsh-remote-access-client": "workspace:^",
+    "@deepseek-ai/dsh-noise-channel": "workspace:^",
     "@deepseek-ai/dsh-remote-protocol": "workspace:^",
+    "@zxing/browser": "^0.2.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

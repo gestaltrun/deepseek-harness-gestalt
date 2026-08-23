@@ -4,10 +4,9 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
-  parseAttachmentCapability,
   REMOTE_PROTOCOL_LIMITS,
   type AttachmentCapability,
 } from '@deepseek-ai/dsh-remote-protocol'
@@ -33,7 +32,8 @@ export class RemoteAttachmentError extends Error {
 
 /** Capability, ciphertext, and pairing scope retained for one not-yet-consumed blob. */
 export interface RemoteAttachmentBlob {
-  capability: AttachmentCapability
+  /** SHA-256 digest of the bearer capability; the retained state never exposes the bearer itself. */
+  capabilityDigest: Uint8Array
   pairingId: PersonalPairingId
   ciphertext: Uint8Array
   expiresAt: number
@@ -98,7 +98,7 @@ export abstract class RemoteAttachmentStoreService extends Service {
    * Project every retained blob for Platform-side operations.
    * @returns copies of ciphertext and metadata only; no plaintext exists on this side of the boundary.
    */
-  abstract observe(): readonly RemoteAttachmentBlob[]
+  abstract observe(): readonly RemoteAttachmentBlob[] | Promise<readonly RemoteAttachmentBlob[]>
 }
 
 interface StoredEntry {
@@ -258,7 +258,7 @@ export class RemoteAttachmentStoreProvider extends RemoteAttachmentStoreService 
 
   override observe(): readonly RemoteAttachmentBlob[] {
     return [...this.entries].map(([capability, entry]) => ({
-      capability: parseAttachmentCapability(capability),
+      capabilityDigest: new Uint8Array(createHash('sha256').update(capability).digest()),
       pairingId: entry.pairingId,
       ciphertext: entry.ciphertext.slice(),
       expiresAt: entry.expiresAt,

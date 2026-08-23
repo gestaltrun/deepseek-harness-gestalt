@@ -127,7 +127,7 @@ describe('real Platform Account HTTP composition', () => {
     const installation = new PlatformAccountInstallation({
       environment: ENVIRONMENT,
       installationId: parseInstallationId('assembled-desktop'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport,
       store,
       systemBrowser: { open: opened },
@@ -219,7 +219,7 @@ describe('real Platform Account HTTP composition', () => {
     const desktop = new PlatformAccountInstallation({
       environment: ENVIRONMENT,
       installationId: parseInstallationId('two-installation-desktop'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport,
       store: desktopStore,
       systemBrowser: { open: () => {} },
@@ -230,6 +230,7 @@ describe('real Platform Account HTTP composition', () => {
       environment: ENVIRONMENT,
       installationId: parseInstallationId('two-installation-mobile'),
       installationKind: 'mobile',
+      presentation: { name: 'Two-installation mobile', platform: 'android' },
       transport,
       store: new MemoryInstallationAccountStore(),
       systemBrowser: { open: () => {} },
@@ -329,7 +330,7 @@ describe('real Platform Account HTTP composition', () => {
     const installation = new PlatformAccountInstallation({
       environment: ENVIRONMENT,
       installationId: parseInstallationId('cross-environment-desktop'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       transport: developmentTransport,
       store: new MemoryInstallationAccountStore(),
       systemBrowser: { open: () => {} },

@@ -18,10 +18,20 @@ export const REMOTE_PROTOCOL_LIMITS = {
   transcriptPageBytes: 48 * 1_024,
   /** Maximum transcript entries in one approved Companion projection. */
   transcriptPageEntries: 50,
+  /** Maximum UTF-16 code units in one authoritative Session search query. */
+  sessionSearchQueryCharacters: 500,
+  /** Maximum Session/snippet pairs in one authoritative search result. */
+  sessionSearchResults: 20,
+  /** Maximum Unicode code points in one authoritative search snippet. */
+  sessionSearchSnippetCodePoints: 240,
+  /** Maximum UTF-8 bytes in one Host failure diagnostic displayed by Mobile. */
+  hostFailureMessageBytes: 4 * 1_024,
   /** Maximum ciphertext bytes retained by the Platform for one Companion attachment blob. */
   attachmentBlobBytes: 100 * 1_024 * 1_024,
   /** Default lifetime of one Companion attachment capability and its retained blob. */
   attachmentCapabilityLifetimeMs: 15 * 60 * 1000,
   /** Maximum UTF-8 bytes in one Companion attachment file name. */
   attachmentFileNameBytes: 255,
+  /** Maximum UTF-8 bytes in one Companion attachment media type. */
+  attachmentMediaTypeBytes: 127,
 } as const

@@ -18,4 +18,4 @@ macOS chrome 在未改动的 DSH 侧栏标题行和中间 Session 内容上方�
 
 - **没有 `window.dshDesktop` 时插件空转** — 手机配对账号状态、Update Control 与 Window Chrome 不渲染，各自 source 保持初始状态。
 - **组装后的 Desktop Web E2E 安装 `installDesktopBridgeFixture`** — 该 fixture 缺少必需 preload 成员时类型检查失败，而不是浏览器超时（[带类型的 DesktopBridge fixture](../../../.agents/notes/implemented/testing/2026-08-21-typed-desktop-bridge-e2e-fixture.md)）。
-- **产品配对保持 fail-closed** — 在独立 Noise review 接纳经过评审的 handshake adapter 前，Host 会报告 Mobile Access unavailable。
+- **产品配对由端点持有** — Host 挂载不透明 mailbox、端点 Snow owner、持久 key vault、密封 Mobile authority 投递和真实 Relay 生命周期。独立评审与 WebView 真机运行仍是发布证据。

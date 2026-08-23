@@ -92,6 +92,7 @@ describe('DesktopAccountController', () => {
     const store = new MemoryDesktopStore()
     const save = vi.spyOn(store, 'save')
     const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
       environment: ENVIRONMENT,
       transport: platform(),
       store,
@@ -114,6 +115,7 @@ describe('DesktopAccountController', () => {
   it('contains a throwing subscriber and still notifies later subscribers', async () => {
     const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
     const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
       environment: ENVIRONMENT,
       transport: platform(),
       store: new MemoryDesktopStore(),
@@ -160,6 +162,7 @@ describe('DesktopAccountController', () => {
     }
     const scheduled: Array<() => void> = []
     const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
       environment: ENVIRONMENT,
       transport,
       store,
@@ -194,6 +197,7 @@ describe('DesktopAccountController', () => {
     const scheduled: Array<() => void> = []
     let authorizationUrl = ''
     const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
       environment: ENVIRONMENT,
       transport: service,
       store,
@@ -232,6 +236,7 @@ describe('DesktopAccountController', () => {
     const scheduled: Array<() => void> = []
     let authorizationUrl = ''
     const controller = new DesktopAccountController({
+      presentation: { name: 'Test Desktop', platform: 'linux' as const },
       environment: ENVIRONMENT,
       transport: service,
       store,
@@ -264,17 +269,25 @@ describe('DesktopAccountController', () => {
 })
 
 describe('Desktop Platform environment composition', () => {
-  it('fails before composition for missing, unknown, or cross-environment deployment identities', () => {
+  it('loads only the complete operated identity and rejects legacy environment selection', () => {
     const source = desktopEnvironmentSource()
-    expect(loadDesktopPlatformEnvironment(source)).toEqual(ENVIRONMENT)
-    expect(() => loadDesktopPlatformEnvironment({ ...source, DSH_PLATFORM_ENV: undefined }))
-      .toThrow('must be development or production')
-    expect(() => loadDesktopPlatformEnvironment({ ...source, DSH_PLATFORM_ENV: 'preview' }))
-      .toThrow('must be development or production')
+    expect(loadDesktopPlatformEnvironment(source)).toMatchObject({
+      environment: 'production',
+      origin: 'https://platform.example.com',
+      callbackUrl: 'https://platform.example.com/v1/account/oauth/github/callback',
+      companionAttachmentHostTimeoutMs: 120_000,
+    })
+    expect(() => loadDesktopPlatformEnvironment({ ...source, origin: undefined }))
+      .toThrow('production origin is required')
+    expect(() => loadDesktopPlatformEnvironment({ ...source, environment: undefined }))
+      .toThrow('environment must be production')
+    expect(() => loadDesktopPlatformEnvironment({ ...source, companionAttachmentHostTimeoutMs: 0 }))
+      .toThrow('positive safe integer')
     expect(() => loadDesktopPlatformEnvironment({
       ...source,
-      DSH_PLATFORM_PRODUCTION_DATABASE_IDENTITY: source.DSH_PLATFORM_DEVELOPMENT_DATABASE_IDENTITY,
-    })).toThrow('distinct databaseIdentity')
+      origin: 'https://localhost',
+    })).toThrow('must not use a local host')
+    expect(() => loadDesktopPlatformEnvironment([])).toThrow('must be an object')
   })
 })
 
@@ -370,20 +383,15 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   return { promise, resolve }
 }
 
-function desktopEnvironmentSource(): NodeJS.ProcessEnv {
+function desktopEnvironmentSource(): Record<string, unknown> {
   return {
-    DSH_PLATFORM_ENV: 'development',
-    DSH_PLATFORM_DEVELOPMENT_ORIGIN: 'https://platform.dev.example.com',
-    DSH_PLATFORM_DEVELOPMENT_CALLBACK_URL: 'https://platform.dev.example.com/v1/account/oauth/github/callback',
-    DSH_PLATFORM_DEVELOPMENT_GITHUB_CLIENT_ID: 'desktop-development',
-    DSH_PLATFORM_DEVELOPMENT_CREDENTIAL_REFERENCE: 'credentials://development',
-    DSH_PLATFORM_DEVELOPMENT_DATABASE_IDENTITY: 'database-development',
-    DSH_PLATFORM_DEVELOPMENT_IDENTITY_NAMESPACE: 'gestalt-development',
-    DSH_PLATFORM_PRODUCTION_ORIGIN: 'https://platform.example.com',
-    DSH_PLATFORM_PRODUCTION_CALLBACK_URL: 'https://platform.example.com/v1/account/oauth/github/callback',
-    DSH_PLATFORM_PRODUCTION_GITHUB_CLIENT_ID: 'desktop-production',
-    DSH_PLATFORM_PRODUCTION_CREDENTIAL_REFERENCE: 'credentials://production',
-    DSH_PLATFORM_PRODUCTION_DATABASE_IDENTITY: 'database-production',
-    DSH_PLATFORM_PRODUCTION_IDENTITY_NAMESPACE: 'gestalt-production',
+    environment: 'production',
+    origin: 'https://platform.example.com',
+    callbackUrl: 'https://platform.example.com/v1/account/oauth/github/callback',
+    githubClientId: 'desktop-production',
+    credentialReference: 'credentials://production',
+    databaseIdentity: 'database-production',
+    identityNamespace: 'gestalt-production',
+    companionAttachmentHostTimeoutMs: 120_000,
   }
 }

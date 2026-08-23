@@ -2,7 +2,12 @@
 
 import { registerPlugin } from '@capacitor/core'
 import type { RelayCredentialGrant } from '@deepseek-ai/dsh-remote-access'
-import type { CompanionConnectionState } from './companion-mutation.ts'
+import {
+  requireCompanionMutation,
+  type CompanionConnectionState,
+  type CompanionMutationName,
+  type CompanionMutationPermit,
+} from './companion-mutation.ts'
 
 export {
   companionMayMutate,
@@ -108,18 +113,17 @@ export class CompanionForegroundRuntime {
   }
 
   /**
-   * Set or drop pairing-delivered Relay authority. Clearing the grant is
-   * synchronous so a later visibility `start()` cannot attach.
+   * Set or drop pairing-delivered Relay authority. Every authority change
+   * synchronously invalidates the current connection generation; clearing the
+   * grant also prevents a later visibility `start()` from attaching.
    * @param grant - Mobile-specific authority, or `undefined` to drop it.
    */
   configure(grant?: RelayCredentialGrant): void {
     this.granted = grant !== undefined
     this.relay?.configure?.(grant)
-    if (grant === undefined) {
-      this.activeConnectionGeneration = undefined
-      this.state = { ...this.state, socketOpen: false, synchronized: false }
-      this.publish()
-    }
+    this.activeConnectionGeneration = undefined
+    this.state = { ...this.state, socketOpen: false, synchronized: false }
+    this.publish()
   }
 
   /**
@@ -169,6 +173,30 @@ export class CompanionForegroundRuntime {
         this.state = markCompanionSynchronized(this.state)
         this.publish()
         return this.state.synchronized
+      },
+    }
+  }
+
+  /**
+   * Bind dynamic mutation authority to the current physical connection generation.
+   * Long-running controllers must re-check it after every external await.
+   * @param mutation - operation named in a foreground-synchronization refusal.
+   * @returns generation permit, or `undefined` while no physical connection is active.
+   */
+  bindCompanionMutationPermit(mutation: CompanionMutationName): CompanionMutationPermit | undefined {
+    const generation = this.activeConnectionGeneration
+    if (generation === undefined || !this.state.socketOpen) return undefined
+    const isCurrent = (): boolean => this.granted
+      && this.activeConnectionGeneration === generation
+      && this.state.foreground
+      && this.state.socketOpen
+    return {
+      isCurrent,
+      requireCurrent: () => {
+        if (!isCurrent()) {
+          throw new Error(`Companion ${mutation} connection generation is no longer current`)
+        }
+        requireCompanionMutation(this.state, mutation)
       },
     }
   }

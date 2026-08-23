@@ -18,8 +18,6 @@ export interface MobileEntryComposition {
   pairing?: MobilePairingActions
   /** Current physical-connection synchronization authority. */
   companion: CompanionForegroundRuntime
-  /** Keyless projection evidence; production omits this and consumes authenticated resync. */
-  presentation?: MobileCompanionPresentation | undefined
   /** Injectable presentation clock; production defaults to the live system clock. */
   clock?: MobilePresentationClock | undefined
 }
@@ -79,16 +77,20 @@ function MobileEntry({
       conversations: projection.conversations,
       loadImage: companionSurface.loadImage,
       canMutate: companionSurface.mayMutate(),
+      search: projection.search,
+      attachment: projection.attachment,
       onCreate: companionSurface.create,
       onSubmit: companionSurface.submit,
       onCancel: companionSurface.cancel,
       onLoadOlder: companionSurface.loadOlder,
+      onAttach: companionSurface.attach,
+      onSearch: companionSurface.search,
     }
   return (
     <MobileAccount
       installation={composition.installation}
       {...(composition.pairing === undefined ? {} : { pairing: composition.pairing })}
-      companion={composition.presentation ?? authenticated}
+      companion={authenticated}
       locale={locale}
       theme={theme}
       clock={clock}

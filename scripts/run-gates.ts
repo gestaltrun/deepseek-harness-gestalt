@@ -241,6 +241,7 @@ export function gatesForMode(selected: Mode): Gate[] {
     case 'check-all':
       return [
         pnpmScript('companion-no-push', 'verify-companion-no-push', { label: 'Companion push absence' }),
+        pnpmScript('companion-product-entry', 'verify-companion-product-entry', { label: 'Companion product entry' }),
         pnpmScript('runtime-closure', 'verify-runtime-closure', { label: 'runtime closure' }),
         pnpmScript('cordis-config', 'verify-cordis-config', { label: 'Cordis config' }),
         pnpmScript('client-domain-graph', 'verify-client-domain-graph', { label: 'client domain graph' }),
@@ -266,6 +267,7 @@ export function gatesForMode(selected: Mode): Gate[] {
 function ciSharedStaticGates(): Gate[] {
   return [
     pnpmScript('companion-no-push', 'verify-companion-no-push', { label: 'Companion push absence' }),
+    pnpmScript('companion-product-entry', 'verify-companion-product-entry', { label: 'Companion product entry' }),
     pnpmScript('runtime-closure', 'verify-runtime-closure', { label: 'runtime closure' }),
     pnpmScript('constraints', 'constraints'),
     pnpmScript('dsh-package-licenses', 'verify-dsh-package-licenses', { label: 'DSH package licenses' }),
@@ -426,7 +428,9 @@ function ciConsumerGates(): Gate[] {
       needs: validatedBuild,
     }),
     snapshotGate(validatedBuild),
-    webSnapshotGate(validatedBuild),
+    // The HMR browser owner temporarily rewrites client artifacts before restoring them.
+    // Finish digest-verifying snapshots before that mutation starts.
+    webSnapshotGate(['snapshot']),
     pnpmScript('doc-typecheck', 'doc-typecheck:contracts-ready', {
       needs: validatedBuild,
       env: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },

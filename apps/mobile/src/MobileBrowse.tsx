@@ -1,9 +1,10 @@
-import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   COMPANION_HISTORY_PAGE_SIZE,
   pageCompanionHistory,
   type CompanionConversationMap,
 } from './companion-history.ts'
+import type { MobileCompanionSearchSnapshot } from './companion-surface.ts'
 import { MobileConversation } from './MobileConversation.tsx'
 import type {
   SessionId, SessionListState, WorkspaceView,
@@ -44,17 +45,26 @@ export interface MobileBrowseProps {
   onSubmit?: ((sessionId: string, text: string) => void | Promise<void>) | undefined
   /** Cancel one active Desktop Session. */
   onCancel?: ((sessionId: string) => void) | undefined
+  /** Select an attachment for the opened Session. */
+  onAttach?: ((sessionId: string, file: File) => void) | undefined
   /** Load older history for one selected Session. */
   onLoadOlder?: ((sessionId: string) => void) | undefined
+  /** Desktop-authoritative full-text Session search state. */
+  search: MobileCompanionSearchSnapshot
+  /** Request one full-text Session search from Desktop. */
+  onSearch?: ((query: string) => void) | undefined
 }
 
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
   desktopName, connection, sessions, workspaces, conversations, locale, theme, loadImage,
-  canMutate, clock, onCreate, onSubmit, onCancel, onLoadOlder,
+  canMutate, clock, onCreate, onSubmit, onCancel, onAttach, onLoadOlder, search, onSearch,
 }: MobileBrowseProps): ReactNode {
   const [openId, setOpenId] = useState<SessionId>()
   const [page, setPage] = useState(0)
+  const [searchDraft, setSearchDraft] = useState(search.query)
+  useEffect(() => { setSearchDraft(search.query) }, [search.query])
+  const searchActive = search.query !== ''
   const paged = useMemo(
     () => pageCompanionHistory(sessions, workspaces, page, COMPANION_HISTORY_PAGE_SIZE),
     [sessions, workspaces, page],
@@ -85,6 +95,7 @@ export function MobileBrowse({
           mutationEnabled={canMutate}
           {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(open.id, text) })}
           {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(open.id) } })}
+          {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(open.id, file) } })}
           {...(onLoadOlder === undefined ? {} : { onLoadOlder: () => { onLoadOlder(open.id) } })}
         />
       )
@@ -105,13 +116,30 @@ export function MobileBrowse({
       <header className={css.header}>
         <p className={css.desktop}>{desktopName}</p>
         <p className={css.connection} data-connection={connection}>{connection === 'online' ? 'Remote Online' : 'Remote Offline'}</p>
+        {onSearch !== undefined && (
+          <form
+            className={css.search}
+            onSubmit={(event) => { event.preventDefault(); onSearch(searchDraft) }}
+          >
+            <input
+              type="search"
+              aria-label="搜索 Desktop Sessions"
+              value={searchDraft}
+              disabled={!canMutate}
+              onChange={(event) => { setSearchDraft(event.target.value) }}
+            />
+            <button type="submit" disabled={!canMutate}>{locale === 'zh' ? '搜索' : 'Search'}</button>
+          </form>
+        )}
+        {search.status === 'error' && <p role="alert">{search.error.message}</p>}
         {onCreate !== undefined && (
           <button type="button" disabled={!canMutate} onClick={() => { if (canMutate) onCreate({}) }}>
             {locale === 'zh' ? '新建 Ungrouped Session' : 'New ungrouped Session'}
           </button>
         )}
       </header>
-      {groups.map((group) => {
+      {searchActive && <AuthoritativeSearchResults search={search} sessions={sessions} onOpen={setOpenId} />}
+      {!searchActive && groups.map((group) => {
         const label = group.workspaceId === undefined ? tw('group.ungrouped') : group.label
         return (
           <section key={group.key} className={css.group} aria-label={label}>
@@ -134,11 +162,47 @@ export function MobileBrowse({
           </section>
         )
       })}
-      {paged.spilled > 0 && (
+      {!searchActive && paged.spilled > 0 && (
         <button type="button" className={css.more} onClick={() => { setPage(current => current + 1) }}>
           {locale === 'zh' ? `加载更多（还有 ${paged.spilled}）` : `Load more (${paged.spilled} remaining)`}
         </button>
       )}
+    </section>
+  )
+}
+
+function AuthoritativeSearchResults({
+  search,
+  sessions,
+  onOpen,
+}: {
+  search: MobileCompanionSearchSnapshot
+  sessions: SessionListState
+  onOpen: (id: SessionId) => void
+}): ReactNode {
+  return (
+    <section className={css.group} aria-label="Desktop 搜索结果">
+      <h2>Desktop 搜索结果</h2>
+      {search.status === 'loading' && <p>正在搜索 Desktop Session 内容…</p>}
+      {search.status !== 'loading' && search.items.length === 0 && <p>没有匹配的 Session</p>}
+      <ul className={css.sessions}>
+        {search.items.map((hit) => {
+          const sessionId = hit.sessionId as unknown as SessionId
+          return (
+            <li key={hit.sessionId} className={css.searchResult}>
+              <button
+                type="button"
+                disabled={sessions.byId[sessionId] === undefined}
+                onClick={() => { onOpen(sessionId) }}
+              >
+                <strong>{hit.sessionId}</strong>
+                <span>{hit.snippet}</span>
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      {search.hasMore && <p>结果较多，请缩小搜索范围。</p>}
     </section>
   )
 }

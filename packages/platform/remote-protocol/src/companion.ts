@@ -3,6 +3,7 @@ import { RemoteProtocolError } from './errors.ts'
 import { parseAttachmentCapability } from './relay.ts'
 import { REMOTE_PROTOCOL_LIMITS } from './limits.ts'
 import type {
+  CompanionHostFailure,
   CompanionMessage,
   CompanionOperation,
   CompanionOperationId,
@@ -199,6 +200,7 @@ export function encodeCompanionMessage(
 ): Uint8Array {
   requireNegotiated(protocol)
   if (message.type === 'projection'
+    && message.projection.type === 'transcript-page'
     && message.projection.entries.length > REMOTE_PROTOCOL_LIMITS.transcriptPageEntries) {
     throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion transcript page exceeds its entry ceiling')
   }
@@ -252,7 +254,7 @@ function parseOperation(value: unknown): CompanionOperation {
   if (record.type === 'offer-attachment') {
     exactKeys(
       record,
-      ['type', 'operationId', 'sessionId', 'capability', 'ciphertextSha256', 'byteLength', 'expiresAt', 'fileName'],
+      ['type', 'operationId', 'sessionId', 'capability', 'ciphertextSha256', 'byteLength', 'expiresAt', 'fileName', 'mediaType'],
       'Companion offer-attachment operation',
     )
     if (typeof record.ciphertextSha256 !== 'string' || !/^[0-9a-f]{64}$/u.test(record.ciphertextSha256)) {
@@ -263,6 +265,10 @@ function parseOperation(value: unknown): CompanionOperation {
     }
     if (new TextEncoder().encode(record.fileName).byteLength > REMOTE_PROTOCOL_LIMITS.attachmentFileNameBytes) {
       invalid('Companion attachment fileName exceeds its byte ceiling')
+    }
+    if (typeof record.mediaType !== 'string' || !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(record.mediaType)
+      || new TextEncoder().encode(record.mediaType).byteLength > REMOTE_PROTOCOL_LIMITS.attachmentMediaTypeBytes) {
+      invalid('Companion attachment mediaType is invalid')
     }
     const byteLength = positiveSafeInteger(record.byteLength, 'Companion attachment byteLength')
     if (byteLength > REMOTE_PROTOCOL_LIMITS.attachmentBlobBytes) {
@@ -277,6 +283,19 @@ function parseOperation(value: unknown): CompanionOperation {
       byteLength,
       expiresAt: positiveSafeInteger(record.expiresAt, 'Companion attachment expiresAt'),
       fileName: record.fileName,
+      mediaType: record.mediaType,
+    }
+  }
+  if (record.type === 'search-sessions') {
+    exactKeys(record, ['type', 'operationId', 'query'], 'Companion search-sessions operation')
+    if (typeof record.query !== 'string' || record.query.trim() === '' || record.query.includes('\0')
+      || record.query.length > REMOTE_PROTOCOL_LIMITS.sessionSearchQueryCharacters) {
+      invalid('Companion Session search query must be non-blank, NUL-free, and within its character ceiling')
+    }
+    return {
+      type: 'search-sessions',
+      operationId: parseCompanionOperationId(record.operationId),
+      query: record.query,
     }
   }
   if (record.type === 'query-operation-status') {
@@ -311,6 +330,39 @@ function parseResult(value: unknown): CompanionResult {
       reason: record.reason,
     }
   }
+  if (record.type === 'session-search') {
+    exactKeys(record, ['type', 'operationId', 'items', 'hasMore'], 'Companion session-search result')
+    if (!Array.isArray(record.items) || record.items.length > REMOTE_PROTOCOL_LIMITS.sessionSearchResults) {
+      invalid('Companion Session search items must be an array within its result ceiling')
+    }
+    if (typeof record.hasMore !== 'boolean') invalid('Companion Session search hasMore must be boolean')
+    const items = record.items.map((item) => {
+      const hit = object(item, 'Companion Session search item')
+      exactKeys(hit, ['sessionId', 'snippet'], 'Companion Session search item')
+      if (typeof hit.snippet !== 'string'
+        || countUnicodeCodePoints(hit.snippet) > REMOTE_PROTOCOL_LIMITS.sessionSearchSnippetCodePoints) {
+        invalid('Companion Session search snippet exceeds its code-point ceiling')
+      }
+      return { sessionId: parseCompanionSessionId(hit.sessionId), snippet: hit.snippet }
+    })
+    if (new Set(items.map(item => item.sessionId)).size !== items.length) {
+      invalid('Companion Session search results must contain unique Session ids')
+    }
+    return {
+      type: 'session-search',
+      operationId: parseCompanionOperationId(record.operationId),
+      items,
+      hasMore: record.hasMore,
+    }
+  }
+  if (record.type === 'operation-failed') {
+    exactKeys(record, ['type', 'operationId', 'failure'], 'Companion operation-failed result')
+    return {
+      type: 'operation-failed',
+      operationId: parseCompanionOperationId(record.operationId),
+      failure: parseHostFailure(record.failure),
+    }
+  }
   if (record.type === 'status') return parseStatusResult(record)
   if (record.type !== 'confirmed') invalid('Companion result type is unsupported')
   exactKeys(record, ['type', 'operationId', 'committedAt', 'outcome'], 'Companion confirmed result')
@@ -321,6 +373,47 @@ function parseResult(value: unknown): CompanionResult {
     committedAt: positiveSafeInteger(record.committedAt, 'Companion committedAt'),
     outcome: 'accepted',
   }
+}
+
+function parseHostFailure(value: unknown): CompanionHostFailure {
+  const failure = object(value, 'Companion Host failure')
+  if (typeof failure.message !== 'string' || failure.message.length === 0
+    || new TextEncoder().encode(failure.message).byteLength > REMOTE_PROTOCOL_LIMITS.hostFailureMessageBytes) {
+    invalid('Companion Host failure message must be non-empty and within its byte ceiling')
+  }
+  switch (failure.kind) {
+    case 'http': {
+      exactKeys(failure, ['kind', 'code', 'message', 'status'], 'Companion Host HTTP failure')
+      if (failure.code !== 'HOST_HTTP_STATUS') invalid('Companion Host HTTP failure code is unsupported')
+      if (!Number.isSafeInteger(failure.status) || (failure.status as number) < 100 || (failure.status as number) > 599) {
+        invalid('Companion Host HTTP status must be from 100 through 599')
+      }
+      return { kind: 'http', code: 'HOST_HTTP_STATUS', message: failure.message, status: failure.status as number }
+    }
+    case 'wire':
+      exactKeys(failure, ['kind', 'code', 'message'], 'Companion Host wire failure')
+      if (failure.code !== 'HOST_WIRE_INVALID') invalid('Companion Host wire failure code is unsupported')
+      return { kind: 'wire', code: 'HOST_WIRE_INVALID', message: failure.message }
+    case 'business':
+      exactKeys(failure, ['kind', 'code', 'message'], 'Companion Host business failure')
+      return {
+        kind: 'business',
+        code: parseIdentifier(failure.code, 'Companion Host business failure code'),
+        message: failure.message,
+      }
+    case 'timeout':
+      exactKeys(failure, ['kind', 'code', 'message'], 'Companion Host timeout failure')
+      if (failure.code !== 'HOST_TIMEOUT') invalid('Companion Host timeout failure code is unsupported')
+      return { kind: 'timeout', code: 'HOST_TIMEOUT', message: failure.message }
+    default:
+      invalid('Companion Host failure kind is unsupported')
+  }
+}
+
+function countUnicodeCodePoints(value: string): number {
+  let count = 0
+  for (const _codePoint of value) count++
+  return count
 }
 
 function parseStatusResult(record: Record<string, unknown>): CompanionResult {
@@ -343,6 +436,18 @@ function parseStatusResult(record: Record<string, unknown>): CompanionResult {
 
 function parseProjection(value: unknown): CompanionProjection {
   const record = object(value, 'Companion projection')
+  if (record.type === 'foreground-sync') {
+    exactKeys(record, ['type', 'desktopName', 'generation', 'desktopRevision'], 'Companion foreground-sync projection')
+    if (typeof record.desktopName !== 'string' || record.desktopName.trim() === '' || record.desktopName.length > 128) {
+      invalid('Companion foreground-sync desktopName must contain 1-128 characters')
+    }
+    return {
+      type: 'foreground-sync',
+      desktopName: record.desktopName,
+      generation: positiveSafeInteger(record.generation, 'Companion foreground-sync generation'),
+      desktopRevision: positiveSafeInteger(record.desktopRevision, 'Companion foreground-sync desktopRevision'),
+    }
+  }
   if (record.type !== 'transcript-page') invalid('Companion projection type is unsupported')
   exactKeys(record, ['type', 'sessionId', 'entries'], 'Companion transcript-page projection')
   if (!Array.isArray(record.entries)) invalid('Companion transcript entries must be an array')

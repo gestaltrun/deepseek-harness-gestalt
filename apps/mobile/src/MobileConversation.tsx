@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { useMemo, useRef, type ReactNode } from 'react'
 import type {
   ConversationSnapshot, PendingWait,
 } from '@deepseek-ai/dsh-client-runtime/client'
@@ -40,6 +40,8 @@ export interface MobileConversationProps {
   onSubmit?: ((text: string) => void | Promise<void>) | undefined
   /** Cancel active execution through Desktop cancellation. */
   onCancel?: (() => void) | undefined
+  /** Select an attachment for encrypted transfer through Desktop. */
+  onAttach?: ((file: File) => void) | undefined
   /** Load the preceding Desktop-authoritative history window. */
   onLoadOlder?: (() => void) | undefined
   /** Whether current foreground synchronization admits mutations. */
@@ -58,9 +60,11 @@ export function MobileConversation({
   home,
   onSubmit,
   onCancel,
+  onAttach,
   onLoadOlder,
   mutationEnabled = false,
 }: MobileConversationProps): ReactNode {
+  const attachmentInput = useRef<HTMLInputElement>(null)
   const t = useMemo(() => conversationPresentationTranslate(locale), [locale])
   const tq = useMemo(() => questionPresentationTranslate(locale), [locale])
   const imageLabels = useMemo(() => messageImageLabels(t), [t])
@@ -73,7 +77,6 @@ export function MobileConversation({
   )
   const question = snapshot.pending.find((wait): wait is PendingWait<'question'> => wait.kind === 'question')
   const approval = snapshot.pending.find((wait): wait is PendingWait<'approval'> => wait.kind === 'approval')
-
   return (
     <section
       className={css.page}
@@ -132,6 +135,27 @@ export function MobileConversation({
                 disabled={!mutationEnabled}
               />
               : null}
+        {onAttach !== undefined && (
+          <>
+            <input
+              ref={attachmentInput}
+              type="file"
+              aria-label={locale === 'zh' ? '添加附件' : 'Add attachment'}
+              hidden
+              disabled={!mutationEnabled}
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file !== undefined && mutationEnabled) onAttach(file)
+                event.target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              disabled={!mutationEnabled}
+              onClick={() => { if (mutationEnabled) attachmentInput.current?.click() }}
+            >{locale === 'zh' ? '添加附件' : 'Add attachment'}</button>
+          </>
+        )}
       </div>
     </section>
   )

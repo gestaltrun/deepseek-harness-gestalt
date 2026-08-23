@@ -65,7 +65,7 @@ export function apply(ctx: Context, config: Config): void {
     async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       try {
         if (handleCors(req, res, origin)) return
-        if (req.method !== 'POST') throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Remote Attachments route requires POST')
+        if (req.method !== 'POST') throw new RemoteAttachmentHttpError(405, 'METHOD_NOT_ALLOWED', 'Remote Attachments route requires POST')
         await handle(req, res, await ctx.remoteAttachmentAuthority.authenticate({ headers: req.headers }))
       } catch (error) {
         answerError(res, error)
@@ -76,7 +76,7 @@ export function apply(ctx: Context, config: Config): void {
     path: '/v1/remote-attachments',
     handler: route(async (req, res, pairingId) => {
       const ciphertext = await readBounded(req, store.maxBlobBytes, () =>
-        new HttpError(413, 'ATTACHMENT_LIMIT_EXCEEDED', 'Remote attachment exceeds the per-blob byte ceiling'))
+        new RemoteAttachmentHttpError(413, 'ATTACHMENT_LIMIT_EXCEEDED', 'Remote attachment exceeds the per-blob byte ceiling'))
       const grant = await store.publish({ pairingId, ciphertext: new Uint8Array(ciphertext), now: Date.now() })
       answerJson(res, 201, {
         capability: grant.capability,
@@ -108,18 +108,18 @@ export function apply(ctx: Context, config: Config): void {
 }
 
 function parseCapability(value: unknown): AttachmentCapability {
-  if (typeof value !== 'string') throw new HttpError(400, 'BODY_INVALID', 'capability must be a string')
+  if (typeof value !== 'string') throw new RemoteAttachmentHttpError(400, 'BODY_INVALID', 'capability must be a string')
   try {
     return parseAttachmentCapability(value)
   } catch {
-    throw new HttpError(400, 'BODY_INVALID', 'capability must be 43 canonical base64url characters')
+    throw new RemoteAttachmentHttpError(400, 'BODY_INVALID', 'capability must be 43 canonical base64url characters')
   }
 }
 
 async function readBounded(
   req: IncomingMessage,
   limit: number,
-  exceed: () => HttpError,
+  exceed: () => RemoteAttachmentHttpError,
 ): Promise<Buffer> {
   const declared = Number(req.headers['content-length'] ?? 0)
   if (declared > limit) throw exceed()
@@ -136,15 +136,15 @@ async function readBounded(
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
   const body = await readBounded(req, MAX_JSON_BYTES, () =>
-    new HttpError(413, 'BODY_TOO_LARGE', 'Remote Attachments body is too large'))
+    new RemoteAttachmentHttpError(413, 'BODY_TOO_LARGE', 'Remote Attachments body is too large'))
   let value: unknown
   try {
     value = JSON.parse(body.toString('utf8')) as unknown
   } catch {
-    throw new HttpError(400, 'BODY_INVALID', 'Remote Attachments body must be JSON')
+    throw new RemoteAttachmentHttpError(400, 'BODY_INVALID', 'Remote Attachments body must be JSON')
   }
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new HttpError(400, 'BODY_INVALID', 'Remote Attachments body must be an object')
+    throw new RemoteAttachmentHttpError(400, 'BODY_INVALID', 'Remote Attachments body must be an object')
   }
   return value as Record<string, unknown>
 }
@@ -153,7 +153,7 @@ function handleCors(req: IncomingMessage, res: ServerResponse, allowedOrigin: st
   const requestOrigin = req.headers.origin
   if (requestOrigin !== undefined) {
     if (parseRequestOrigin(requestOrigin) !== allowedOrigin) {
-      throw new HttpError(403, 'ORIGIN_DENIED', 'Remote Attachments request origin is not trusted')
+      throw new RemoteAttachmentHttpError(403, 'ORIGIN_DENIED', 'Remote Attachments request origin is not trusted')
     }
     res.setHeader('access-control-allow-origin', allowedOrigin)
     res.setHeader('vary', 'Origin')
@@ -161,7 +161,7 @@ function handleCors(req: IncomingMessage, res: ServerResponse, allowedOrigin: st
   if (req.method !== 'OPTIONS') return false
   res.writeHead(204, {
     'access-control-allow-methods': 'POST,OPTIONS',
-    'access-control-allow-headers': 'content-type,authorization',
+    'access-control-allow-headers': 'authorization,content-type,x-gestalt-pairing-selector,x-gestalt-proof-jti,x-gestalt-proof-issued-at,x-gestalt-proof-signature',
     'access-control-max-age': '600',
   })
   res.end()
@@ -215,18 +215,28 @@ function writeOctetStream(res: ServerResponse, ciphertext: Uint8Array): Promise<
 }
 
 function toFailureView(error: unknown): { status: number; body: { error: { code: string; message: string } } } {
-  if (error instanceof RemoteAttachmentError) {
-    return { status: STORE_FAILURE_STATUS[error.code], body: { error: { code: error.code, message: error.message } } }
+  const storeError = remoteAttachmentFailure(error)
+  if (storeError !== undefined) {
+    return { status: STORE_FAILURE_STATUS[storeError.code], body: { error: storeError } }
   }
-  if (error instanceof HttpError) {
+  if (error instanceof RemoteAttachmentHttpError) {
     return { status: error.status, body: { error: { code: error.code, message: error.message } } }
   }
   return { status: 500, body: { error: { code: 'INTERNAL_ERROR', message: 'Remote Attachments request failed' } } }
 }
 
-class HttpError extends Error {
+function remoteAttachmentFailure(error: unknown): { code: RemoteAttachmentErrorCode; message: string } | undefined {
+  if (error instanceof RemoteAttachmentError) return { code: error.code, message: error.message }
+  if (typeof error !== 'object' || error === null || !('code' in error) || !('message' in error)) return undefined
+  const { code, message } = error
+  if (typeof code !== 'string' || !(code in STORE_FAILURE_STATUS) || typeof message !== 'string') return undefined
+  return { code: code as RemoteAttachmentErrorCode, message }
+}
+
+/** HTTP admission failure that an injected attachment authority may return to the route. */
+export class RemoteAttachmentHttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
     super(message)
-    this.name = 'HttpError'
+    this.name = 'RemoteAttachmentHttpError'
   }
 }

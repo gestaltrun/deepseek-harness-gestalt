@@ -186,6 +186,8 @@ export function developmentCompanionPresentation(): MobileCompanionPresentation 
     ...adapted,
     connection: 'offline',
     canMutate: true,
+    search: { query: '', status: 'idle', items: [], hasMore: false },
+    attachment: { status: 'idle' },
     onSubmit: (sessionId, text) => {
       if (sessionId !== SESSION_ID || text.trim() === '') {
         return Promise.reject(new Error('development prompt is outside the input evidence Session'))

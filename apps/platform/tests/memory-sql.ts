@@ -15,6 +15,9 @@ interface MobileRow {
   account_id: string
   desktop_installation_id: string
   mobile_installation_id: string
+  credential_fingerprint: string | null
+  last_access_at: number | null
+  presence_leases: Record<string, number>
   sealed_relay_authority: Buffer | null
 }
 
@@ -28,7 +31,7 @@ interface Tables {
   desktops: Map<string, DesktopRow>
   mobile: Map<string, MobileRow>
   routes: Map<string, RouteRow>
-  authorities: Map<string, { endpoint: string; digest: string }>
+  authorities: Map<string, { endpoint: string; digest: string; pairing_selector: string | null }>
 }
 
 /** Exclusive in-memory pool that understands the store SQL. */
@@ -80,6 +83,7 @@ function cloneTables(tables: Tables): Tables {
       key,
       {
         ...row,
+        presence_leases: { ...row.presence_leases },
         sealed_relay_authority: row.sealed_relay_authority === null ? null : Buffer.from(row.sealed_relay_authority),
       },
     ])),
@@ -96,7 +100,7 @@ function dispatch(
   setSnapshot: (next: Tables | undefined) => void,
 ): { rows: never[] | Array<Record<string, unknown>>; rowCount: number } {
   const text = collapse(sql)
-  if (text.startsWith('create table') || text.startsWith('create unique index')) {
+  if (text.startsWith('create table') || text.startsWith('create unique index') || text.startsWith('alter table')) {
     return { rows: [], rowCount: 0 }
   }
   if (text === 'begin') {
@@ -166,14 +170,68 @@ function dispatch(
         account_id: asString(values[3], 'account id'),
         desktop_installation_id: asString(values[4], 'desktop installation'),
         mobile_installation_id: asString(values[5], 'mobile installation'),
-        sealed_relay_authority: values[6] === null || values[6] === undefined ? null : Buffer.from(values[6] as Buffer),
+        credential_fingerprint: values[6] === null || values[6] === undefined
+          ? null
+          : asString(values[6], 'credential fingerprint'),
+        last_access_at: values[7] === null || values[7] === undefined ? null : asNumber(values[7], 'last access'),
+        presence_leases: {},
+        sealed_relay_authority: values[8] === null || values[8] === undefined ? null : Buffer.from(values[8] as Buffer),
       })
     }
     return { rows: [], rowCount: 1 }
   }
   if (text.includes('from remote_access_mobile_pairings') && text.includes('pending_pairing_id')) {
+    if (text.includes('where database_identity = $1 and account_id = $2 and desktop_installation_id = $3')) {
+      const identity = asString(values[0], 'database identity')
+      const account = asString(values[1], 'account id')
+      const desktop = asString(values[2], 'desktop installation')
+      const row = [...live.mobile.entries()].find(([key, candidate]) => key.startsWith(`${identity}\n`)
+        && candidate.account_id === account && candidate.desktop_installation_id === desktop)?.[1]
+      return row === undefined ? { rows: [], rowCount: 0 } : { rows: [{ pending_pairing_id: row.pending_pairing_id }], rowCount: 1 }
+    }
+    if (text.includes('where database_identity = $1 and pairing_id = $2')) {
+      const identity = asString(values[0], 'database identity')
+      const pairingId = asString(values[1], 'pairing id')
+      const row = [...live.mobile.entries()].find(([key, candidate]) => key.startsWith(`${identity}\n`)
+        && candidate.pairing_id === pairingId)?.[1]
+      return row === undefined ? { rows: [], rowCount: 0 } : { rows: [{ pending_pairing_id: row.pending_pairing_id }], rowCount: 1 }
+    }
     const row = live.mobile.get(`${asString(values[0], 'database identity')}\n${asString(values[1], 'pending pairing id')}`)
     return row === undefined ? { rows: [], rowCount: 0 } : { rows: [{ ...row }], rowCount: 1 }
+  }
+  if (text.includes('returning last_access_at, presence_leases')) {
+    const identity = asString(values[0], 'database identity')
+    const pairingId = asString(values[1], 'pairing id')
+    const row = [...live.mobile.entries()].find(([key, candidate]) =>
+      key.startsWith(`${identity}\n`) && candidate.pairing_id === pairingId)?.[1]
+    if (row !== undefined) prunePresenceLeases(row, asNumber(values[2], 'observed at'))
+    return row === undefined
+      ? { rows: [], rowCount: 0 }
+      : { rows: [{ last_access_at: row.last_access_at, presence_leases: { ...row.presence_leases } }], rowCount: 1 }
+  }
+  if (text.includes('update remote_access_mobile_pairings') && text.includes('jsonb_build_object')) {
+    const identity = asString(values[0], 'database identity')
+    const fingerprint = asString(values[1], 'credential fingerprint')
+    for (const [key, row] of live.mobile) {
+      if (!key.startsWith(`${identity}\n`) || row.credential_fingerprint !== fingerprint) continue
+      prunePresenceLeases(row, asNumber(values[4], 'observed at'))
+      const connectionToken = asString(values[2], 'connection token')
+      const expiresAt = asNumber(values[3], 'lease expiry')
+      row.presence_leases[connectionToken] = Math.max(row.presence_leases[connectionToken] ?? expiresAt, expiresAt)
+      const accessedAt = asNumber(values[4], 'last access')
+      row.last_access_at = Math.max(row.last_access_at ?? accessedAt, accessedAt)
+    }
+    return { rows: [], rowCount: 1 }
+  }
+  if (text.includes('update remote_access_mobile_pairings') && text.includes('entry.key <>')) {
+    const identity = asString(values[0], 'database identity')
+    const fingerprint = asString(values[1], 'credential fingerprint')
+    for (const [key, row] of live.mobile) {
+      if (!key.startsWith(`${identity}\n`) || row.credential_fingerprint !== fingerprint) continue
+      prunePresenceLeases(row, asNumber(values[3], 'observed at'))
+      Reflect.deleteProperty(row.presence_leases, asString(values[2], 'connection token'))
+    }
+    return { rows: [], rowCount: 1 }
   }
   if (text.includes('delete from remote_access_mobile_pairings') && text.includes('desktop_installation_id')) {
     const identity = asString(values[0], 'database identity')
@@ -209,13 +267,41 @@ function dispatch(
     const digest = digestKey(values[3])
     live.authorities.set(
       `${routeKey(values[0], values[1])}\n${asString(values[2], 'endpoint')}\n${digest}`,
-      { endpoint: asString(values[2], 'endpoint'), digest },
+      {
+        endpoint: asString(values[2], 'endpoint'),
+        digest,
+        pairing_selector: values[4] === null || values[4] === undefined
+          ? null
+          : asString(values[4], 'pairing selector'),
+      },
     )
     return { rows: [], rowCount: 1 }
   }
-  if (text.includes('select 1 from remote_access_route_authorities')) {
+  if (text.includes('select endpoint, pairing_selector from remote_access_route_authorities')) {
+    const prefix = `${routeKey(values[0], values[1])}\n`
+    const digest = digestKey(values[2])
+    const authority = [...live.authorities.entries()].find(
+      ([key, record]) => key.startsWith(prefix) && record.digest === digest,
+    )?.[1]
+    return authority === undefined
+      ? { rows: [], rowCount: 0 }
+      : { rows: [{ endpoint: authority.endpoint, pairing_selector: authority.pairing_selector }], rowCount: 1 }
+  }
+  if (text.includes('select pairing_selector from remote_access_route_authorities')) {
     const key = `${routeKey(values[0], values[1])}\n${asString(values[2], 'endpoint')}\n${digestKey(values[3])}`
-    return live.authorities.has(key) ? { rows: [{ '?column?': 1 }], rowCount: 1 } : { rows: [], rowCount: 0 }
+    const authority = live.authorities.get(key)
+    return authority === undefined
+      ? { rows: [], rowCount: 0 }
+      : { rows: [{ pairing_selector: authority.pairing_selector }], rowCount: 1 }
+  }
+  if (text.includes('select 1 as retained from remote_access_route_authorities')) {
+    const prefix = `${routeKey(values[0], values[1])}\n`
+    const endpoint = values.length >= 3 ? asString(values[2], 'endpoint') : undefined
+    const digest = values.length >= 4 ? digestKey(values[3]) : undefined
+    const retained = [...live.authorities.entries()].some(([key, record]) => key.startsWith(prefix)
+      && (endpoint === undefined || record.endpoint === endpoint)
+      && (digest === undefined || record.digest === digest))
+    return retained ? { rows: [{ retained: 1 }], rowCount: 1 } : { rows: [], rowCount: 0 }
   }
   if (text.includes('delete from remote_access_route_authorities') && text.includes('digest')) {
     live.authorities.delete(
@@ -272,6 +358,12 @@ function desktopKey(identity: unknown, accessKey: unknown): string {
 
 function routeKey(identity: unknown, routeId: unknown): string {
   return `${asString(identity, 'database identity')}\n${asString(routeId, 'route id')}`
+}
+
+function prunePresenceLeases(row: MobileRow, observedAt: number): void {
+  for (const [token, expiresAt] of Object.entries(row.presence_leases)) {
+    if (expiresAt <= observedAt) Reflect.deleteProperty(row.presence_leases, token)
+  }
 }
 
 function digestKey(value: unknown): string {

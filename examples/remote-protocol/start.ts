@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv } from 'node:crypto'
+import { createCipheriv, createDecipheriv, randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   createCompanionNegotiationChannel,
@@ -33,8 +33,8 @@ export async function apply(_ctx: Context): Promise<void> {
 
   const cipher = new KeylessHarnessCipher()
   const routeId = parseRelayRouteId('route-keyless')
-  const mobileAttachment = parseRelayAttachmentId('mobile-keyless')
-  const desktopAttachment = parseRelayAttachmentId('desktop-keyless')
+  const mobileAttachment = parseRelayAttachmentId(`mobile-${randomUUID()}`)
+  const desktopAttachment = parseRelayAttachmentId(`desktop-${randomUUID()}`)
   const mobileOffer = createCompanionVersionOffer('mobile')
   const desktopOffer = createCompanionVersionOffer('desktop')
   const mobileChannel = createCompanionNegotiationChannel()
@@ -120,6 +120,7 @@ export async function apply(_ctx: Context): Promise<void> {
       byteLength: sealedAttachment.ciphertext.byteLength,
       expiresAt: 1_787_027_200_000,
       fileName: 'notes.txt',
+      mediaType: 'text/plain',
     },
   } as const
   const offerFrame = forward(
@@ -154,6 +155,70 @@ export async function apply(_ctx: Context): Promise<void> {
   )))
   if (mobileRejection.type !== 'result') throw new Error('Mobile did not receive the rejection')
   console.log(`ATTACHMENT platformPlaintext=${String(includesPlaintext)} hashVerified=${String(verified)} submitted=${String(submitted)} controlFrameBytes=${String(offerFrame.byteLength)} rejectionReason=${mobileRejection.result.type === 'attachment-rejected' ? mobileRejection.result.reason : 'unknown'}`)
+
+  const searchOperation = {
+    type: 'operation' as const,
+    operation: {
+      type: 'search-sessions' as const,
+      operationId: parseCompanionOperationId('operation-search'),
+      query: 'attachment receipt',
+    },
+  }
+  const desktopSearch = decodeCompanionMessage(desktopProtocol, cipher.open(forward(
+    routeId,
+    mobileAttachment,
+    desktopAttachment,
+    cipher.seal(encodeCompanionMessage(mobileProtocol, searchOperation)),
+  )))
+  if (desktopSearch.type !== 'operation' || desktopSearch.operation.type !== 'search-sessions') {
+    throw new Error('Desktop did not receive the authoritative Session search')
+  }
+  const searchResult = {
+    type: 'result' as const,
+    result: {
+      type: 'session-search' as const,
+      operationId: desktopSearch.operation.operationId,
+      items: [{
+        sessionId: parseCompanionSessionId('session-keyless'),
+        snippet: 'attachment receipt from Desktop index',
+      }],
+      hasMore: false,
+    },
+  }
+  const mobileSearch = decodeCompanionMessage(mobileProtocol, cipher.open(forward(
+    routeId,
+    desktopAttachment,
+    mobileAttachment,
+    cipher.seal(encodeCompanionMessage(desktopProtocol, searchResult)),
+  )))
+  if (mobileSearch.type !== 'result' || mobileSearch.result.type !== 'session-search') {
+    throw new Error('Mobile did not receive the authoritative Session search result')
+  }
+  console.log(`SESSION_SEARCH authority=desktop hits=${String(mobileSearch.result.items.length)} hasMore=${String(mobileSearch.result.hasMore)}`)
+
+  const host400 = {
+    type: 'result' as const,
+    result: {
+      type: 'operation-failed' as const,
+      operationId: desktopSearch.operation.operationId,
+      failure: {
+        kind: 'http' as const,
+        code: 'HOST_HTTP_STATUS' as const,
+        message: 'Desktop Host returned HTTP 400',
+        status: 400,
+      },
+    },
+  }
+  const mobileHost400 = decodeCompanionMessage(mobileProtocol, cipher.open(forward(
+    routeId,
+    desktopAttachment,
+    mobileAttachment,
+    cipher.seal(encodeCompanionMessage(desktopProtocol, host400)),
+  )))
+  if (mobileHost400.type !== 'result' || mobileHost400.result.type !== 'operation-failed') {
+    throw new Error('Mobile did not receive the Host HTTP failure')
+  }
+  console.log(`HOST_FAILURE kind=${mobileHost400.result.failure.kind} code=${mobileHost400.result.failure.code} status=${mobileHost400.result.failure.kind === 'http' ? String(mobileHost400.result.failure.status) : 'none'}`)
 
   const statusQuery = {
     type: 'operation',

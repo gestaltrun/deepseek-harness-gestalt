@@ -3,8 +3,8 @@ import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   parseInstallationId,
-  selectPlatformEnvironment,
-  validatePlatformEnvironmentPair,
+  parseMobileInstallationPresentation,
+  loadOperatedPlatformEnvironment,
   type AccountSessionView,
   type LoginAttemptView,
 } from '@deepseek-ai/dsh-platform-account'
@@ -13,28 +13,26 @@ import {
   PlatformAccountInstallation,
   type PlatformAccountTransport,
 } from '@deepseek-ai/dsh-platform-account-client'
-import { parseRelayCredential, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  parseCompanionOperationId,
+  parseCompanionSessionId,
+  parseRelayCredential,
+  parseRelayRouteId,
+} from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionForegroundRuntime, installCompanionRuntime } from '../src/companion-lifecycle.ts'
+import { CompanionAttachmentDeliveryUncertainError } from '../src/companion-attachment.ts'
 import { mountMobileEntry } from '../src/mobile-entry.tsx'
 import type {
   MobileCompanionConnectionChannel, ValidatedDesktopSurfaceResync,
 } from '../src/companion-surface.ts'
 import { fixedMobilePresentationClock } from '../src/mobile-clock.ts'
 
-const environment = selectPlatformEnvironment(validatePlatformEnvironmentPair({
-  development: {
-    environment: 'development', origin: 'https://dev.example',
-    callbackUrl: 'https://dev.example/v1/account/oauth/github/callback',
-    githubClientId: 'mobile-development', credentialReference: 'credentials://development',
-    databaseIdentity: 'database-development', identityNamespace: 'namespace-development',
-  },
-  production: {
-    environment: 'production', origin: 'https://prod.example',
-    callbackUrl: 'https://prod.example/v1/account/oauth/github/callback',
-    githubClientId: 'mobile-production', credentialReference: 'credentials://production',
-    databaseIdentity: 'database-production', identityNamespace: 'namespace-production',
-  },
-}), 'development')
+const environment = loadOperatedPlatformEnvironment({
+  environment: 'production', origin: 'https://platform.fixture.example',
+  callbackUrl: 'https://platform.fixture.example/v1/account/oauth/github/callback',
+  githubClientId: 'mobile-fixture', credentialReference: 'credentials://fixture',
+  databaseIdentity: 'database-fixture', identityNamespace: 'namespace-fixture',
+})
 
 const attempt: LoginAttemptView = {
   id: 'attempt-mobile-snapshot' as never,
@@ -49,8 +47,8 @@ const accountSession: AccountSessionView = {
   account: {
     id: 'account-mobile-snapshot' as never,
     githubId: 583231,
-    githubLogin: 'octocat',
-    avatarUrl: 'https://avatars.example/octocat',
+    githubLogin: 'fixture-account',
+    avatarUrl: 'https://avatars.example/fixture-account',
   },
   accessToken: 'access-mobile-snapshot',
   refreshToken: 'refresh-mobile-snapshot',
@@ -67,6 +65,8 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     const installation = installationWithCompletedLogin()
     const root = document.createElement('div')
     document.body.append(root)
+    let rejectAttachment: ((reason: unknown) => void) | undefined
+    const attachmentCompletion = new Promise<void>((_resolve, reject) => { rejectAttachment = reject })
 
     const mounted = mountMobileEntry(root, {
       installation,
@@ -79,7 +79,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     const login = screen.getByRole('button', { name: '使用 GitHub 继续' })
     await waitFor(() => { expect(login.hasAttribute('disabled')).toBe(false) })
     fireEvent.click(login)
-    await screen.findByText('@octocat')
+    await screen.findByText('@fixture-account')
 
     runtime.configure({
       routeId: parseRelayRouteId('route-mobile-snapshot'),
@@ -88,7 +88,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       revision: 1,
     })
     runtime.markConnectionOpen()
-    const firstChannel = connectionChannel()
+    const firstChannel = connectionChannel(attachmentCompletion)
     const firstResync = surface.bindAuthenticatedConnection(firstChannel)
     if (firstResync === undefined) throw new Error('expected first Desktop surface resync receiver')
     firstResync.acceptValidatedDesktopResync({
@@ -131,6 +131,44 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     await screen.findByText('Older page')
     expect(screen.queryByRole('button', { name: 'Load earlier' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected current Companion result receiver')
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' }), {
+      target: { value: 'authoritative' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    results.acceptValidatedCompanionResult({
+      type: 'session-search',
+      operationId: parseCompanionOperationId('mobile-snapshot-search'),
+      items: [{
+        sessionId: parseCompanionSessionId('uncached-authoritative-session'),
+        snippet: 'Desktop-only authoritative hit',
+      }],
+      hasMore: false,
+    })
+    await screen.findByText('Desktop-only authoritative hit')
+    expect(screen.getByRole('region', { name: 'Desktop 搜索结果' }).textContent).toMatchInlineSnapshot(
+      '"Desktop 搜索结果uncached-authoritative-sessionDesktop-only authoritative hit"',
+    )
+    surface.search('')
+    surface.attach('guarded-session', selectedFile())
+    results.acceptValidatedCompanionResult({
+      type: 'attachment-rejected',
+      operationId: parseCompanionOperationId('mobile-snapshot-attachment'),
+      reason: 'hash-mismatch',
+    })
+    expect((await screen.findByRole('alert')).textContent)
+      .toBe('Desktop rejected the attachment: hash-mismatch')
+    surface.attach('guarded-session', selectedFile())
+    rejectAttachment?.(new CompanionAttachmentDeliveryUncertainError(
+      parseCompanionOperationId('mobile-snapshot-attachment'),
+      new Error('connection replaced'),
+    ))
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent)
+        .toBe('Attachment delivery is uncertain; reconnect to reconcile it before retrying.')
+    })
 
     runtime.forgetConnection()
     runtime.markConnectionOpen()
@@ -193,6 +231,7 @@ function installationWithCompletedLogin(): PlatformAccountInstallation {
     environment,
     installationId: parseInstallationId('mobile-snapshot'),
     installationKind: 'mobile',
+    presentation: parseMobileInstallationPresentation({ name: 'Snapshot phone', platform: 'ios' }),
     transport,
     store: new MemoryInstallationAccountStore(),
     systemBrowser: { open: vi.fn() },
@@ -238,12 +277,18 @@ function guardedConversation(complete = false): ValidatedDesktopSurfaceResync['c
   }
 }
 
-function connectionChannel() {
+function connectionChannel(attachmentCompletion: Promise<void>) {
   const mutations = {
     create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(),
     submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(),
     cancel: vi.fn<MobileCompanionConnectionChannel['mutations']['cancel']>(),
-    attach: vi.fn<MobileCompanionConnectionChannel['mutations']['attach']>(),
+    attach: vi.fn<MobileCompanionConnectionChannel['mutations']['attach']>(() => ({
+      operationId: parseCompanionOperationId('mobile-snapshot-attachment'),
+      completion: attachmentCompletion,
+    })),
+    search: vi.fn<MobileCompanionConnectionChannel['mutations']['search']>(() => (
+      parseCompanionOperationId('mobile-snapshot-search')
+    )),
     loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(),
     settle: vi.fn<MobileCompanionConnectionChannel['mutations']['settle']>(),
   }
@@ -251,6 +296,10 @@ function connectionChannel() {
     mutations,
     content: { loadImage: vi.fn(async () => 'data:image/gif;base64,R0lGODlhAQABAAAAACw=') },
   } satisfies MobileCompanionConnectionChannel
+}
+
+function selectedFile(): File {
+  return { name: 'visible.txt', arrayBuffer: async () => new ArrayBuffer(0) } as File
 }
 
 function visibleMutationControls(): string[] {

@@ -353,10 +353,12 @@ export interface Config {
   maxImagePixels?: number
   /** Maximum intrinsic width and maximum intrinsic height accepted for one image. */
   maxImageDimension?: number
+  /** Maximum exact bytes accepted for one generic file. */
+  maxFileBytes?: number
 }
 ```
 
-Source: [`packages/attachment/attachment-local/src/index.ts:31`](../packages/attachment/attachment-local/src/index.ts)
+Source: [`packages/attachment/attachment-local/src/index.ts:37`](../packages/attachment/attachment-local/src/index.ts)
 
 <a id="deepseek-aidsh-bash-local"></a>
 
@@ -1668,11 +1670,11 @@ export interface AccountBackend {
   countActiveInstallations(accountId: PlatformAccountId, kind: InstallationKind): Promise<number>
   /** Read the Account bound to one GitHub subject inside an identity namespace. */
   findAccountByIdentity(identityNamespace: string, providerSubject: number): Promise<AccountRecord | undefined>
-  /** Read the live session bound to one installation, when present. */
-  findActiveSessionByInstallation(
+  /** Report whether one installation already owns a live session without decoding its obsolete payload. */
+  hasActiveSessionByInstallation(
     identityNamespace: string,
     installationId: InstallationId,
-  ): Promise<SessionRecord | undefined>
+  ): Promise<boolean>
 }
 
 /** Shared invalidation channel used by every Platform Instance. */
@@ -1719,6 +1721,8 @@ export interface LoginAttemptRecord {
   installationId: InstallationId
   /** Desktop or Mobile installation class. */
   installationKind: InstallationKind
+  /** Device-owned presentation committed with this attempt. */
+  presentation?: InstallationPresentation
   /** Installation P-256 public key. */
   publicKey: JsonWebKey
   /** Random OAuth state bound to the attempt. */
@@ -1765,6 +1769,8 @@ export interface SessionRecord {
   installationId: InstallationId
   /** Desktop or Mobile installation class. */
   installationKind: InstallationKind
+  /** Device-owned presentation present on every Installation session. */
+  presentation?: InstallationPresentation
   /** Installation P-256 public key. */
   publicKey: JsonWebKey
   /** Monotonic refresh-token generation. */
@@ -1784,9 +1790,9 @@ export interface AccountRecord extends PlatformAccountView {
 }
 ```
 
-Depends on: [`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.md) · [`InstallationId`](subsystems/platform-account.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.md) · [`PlatformAccountId`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountView`](subsystems/platform-account.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
+Depends on: [`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.md) · [`InstallationId`](subsystems/platform-account.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.md) · [`PlatformAccountId`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountView`](subsystems/platform-account.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
 
-Source: [`packages/platform/platform-account-core/src/index.ts:491`](../packages/platform/platform-account-core/src/index.ts)
+Source: [`packages/platform/platform-account-core/src/index.ts:506`](../packages/platform/platform-account-core/src/index.ts)
 
 <a id="deepseek-aidsh-platform-account-http"></a>
 
@@ -1802,7 +1808,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/platform/platform-account-http/src/index.ts:28`](../packages/platform/platform-account-http/src/index.ts)
+Source: [`packages/platform/platform-account-http/src/index.ts:30`](../packages/platform/platform-account-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 
@@ -3706,6 +3712,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-llm-mock-server` ([`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts))
 - `@deepseek-ai/dsh-loader-smoke` ([`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts))
 - `@deepseek-ai/dsh-native-command` ([`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts))
+- `@deepseek-ai/dsh-noise-channel` ([`packages/platform/noise-channel/src/index.ts`](../packages/platform/noise-channel/src/index.ts))
 - `@deepseek-ai/dsh-output-retention` ([`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts))
 - `@deepseek-ai/dsh-platform-account-client` ([`packages/platform/platform-account-client/src/index.ts`](../packages/platform/platform-account-client/src/index.ts))
 - `@deepseek-ai/dsh-remote-access-client` ([`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts))

@@ -151,6 +151,13 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-client-ui-theme': ['lib/styles'],
   // Remote Access keeps browser-safe public protocol surfaces separate from
   // host-only provider and Node WebSocket adapters.
+  '@deepseek-ai/dsh-noise-channel': [
+    'pkg/dsh_noise_channel.d.ts',
+    'pkg/dsh_noise_channel.js',
+    'pkg/dsh_noise_channel_bg.wasm',
+    'pkg/dsh_noise_channel_bg.wasm.d.ts',
+    'THIRD_PARTY_NOTICES.txt',
+  ],
   '@deepseek-ai/dsh-remote-access': ['lib/relay-provider.js'],
   '@deepseek-ai/dsh-remote-access-client': ['lib/desktop-relay-lifecycle.js', 'lib/node-relay-socket.js'],
   '@deepseek-ai/dsh-remote-access-http': ['lib/relay.js'],

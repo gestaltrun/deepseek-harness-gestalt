@@ -52,6 +52,7 @@
     { "path": "./packages/client/ui-slots" },
     { "path": "./packages/platform/platform-account" },
     { "path": "./packages/platform/platform-account-client" },
+    { "path": "./packages/platform/noise-channel" },
     { "path": "./packages/platform/remote-access-client" },
     { "path": "./packages/client/ui-attachment" },
     { "path": "./packages/client/ui-primitives" },

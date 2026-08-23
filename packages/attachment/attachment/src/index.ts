@@ -5,6 +5,9 @@ import { AttachmentError } from './error.ts'
 import type {
   ImageAttachmentLimits,
   ImageAttachmentRef,
+  FileAttachmentRef,
+  SaveFileAttachment,
+  StoredFileAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
 } from './types.ts'
@@ -19,6 +22,9 @@ export type {
   ImageAttachmentLimits,
   ImageAttachmentRef,
   ImageMediaType,
+  FileAttachmentRef,
+  SaveFileAttachment,
+  StoredFileAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
 } from './types.ts'
@@ -37,6 +43,9 @@ export abstract class AttachmentStore extends Service {
 
   /** Deployment-resolved image policy used by authoritative and fast-path validation. */
   abstract readonly imageLimits: ImageAttachmentLimits
+
+  /** Deployment-resolved exact byte ceiling for one generic file. */
+  readonly maxFileBytes: number = 100 * 1024 * 1024
 
   /**
    * Validate one image without persisting it.
@@ -90,6 +99,28 @@ export abstract class AttachmentStore extends Service {
    * @throws the signal reason when aborted, or a storage error when verification fails.
    */
   abstract readImage(ref: ImageAttachmentRef, signal?: AbortSignal): Promise<StoredImageAttachment>
+
+  /**
+   * Validate and durably commit one immutable generic file.
+   * @param input - exact bytes plus bounded display metadata.
+   * @returns a content-addressed reference after durable publication.
+   */
+  saveFile(input: SaveFileAttachment): Promise<FileAttachmentRef> {
+    void input
+    return Promise.reject(new AttachmentError('Generic file attachment storage is not composed.', 'ATTACHMENT_WRITE_FAILED'))
+  }
+
+  /**
+   * Read one generic file and verify its digest and metadata.
+   * @param ref - durable reference from a Session event.
+   * @param signal - optional cancellation for backend reads.
+   * @returns verified exact bytes and canonical reference.
+   */
+  readFile(ref: FileAttachmentRef, signal?: AbortSignal): Promise<StoredFileAttachment> {
+    void ref
+    void signal
+    return Promise.reject(new AttachmentError('Generic file attachment storage is not composed.', 'ATTACHMENT_READ_FAILED'))
+  }
 }
 
 export default AttachmentStore

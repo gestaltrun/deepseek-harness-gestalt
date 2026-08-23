@@ -6,7 +6,10 @@ import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
   deriveCompanionAttachmentKey,
   openCompanionAttachment,
+  parseCompanionOperationId,
+  parseCompanionSessionId,
   sealCompanionAttachment,
+  type CompanionOfferAttachmentOperation,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { RemoteAttachmentStoreProvider, type RemoteAttachmentStoreOptions } from '../src/index.ts'
 import { apply } from '../src/http.ts'
@@ -14,10 +17,12 @@ import {
   downloadCompanionAttachment,
   receiveCompanionAttachment,
 } from '../../../../apps/desktop/src/companion-attachments.ts'
+import { handleCompanionProductOperation } from '../../../../apps/desktop/src/companion-product.ts'
 import {
   COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES,
   buildCompanionAttachmentOffer,
   sealCompanionAttachment as mobileSeal,
+  transferSelectedCompanionAttachment,
 } from '../../../../apps/mobile/src/companion-attachment.ts'
 
 interface RegisteredRoute {
@@ -30,53 +35,74 @@ const closeServers: Array<() => Promise<void>> = []
 afterEach(async () => { await Promise.all(closeServers.splice(0).map(close => close())) })
 
 const pairingA = parsePersonalPairingId('pairing-a')
-const pairingKey = crypto.getRandomValues(new Uint8Array(32))
-const PLAINTEXT = 'attachment plaintext for session submission'
-const ready = { foreground: true, socketOpen: true, synchronized: true }
+const attachmentKey = crypto.getRandomValues(new Uint8Array(32))
+const ready = { isCurrent: () => true, requireCurrent: () => {} }
 
 describe('Remote attachment HTTP assembled transfer', () => {
-  it('moves one encrypted attachment end to end while Platform retains only ciphertext and metadata', async () => {
+  it.each([
+    ['binary', 'archive.bin', Uint8Array.of(0, 255, 1, 128, 64, 32)],
+    ['image', 'pixel.png', Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10)],
+    ['text', 'notes.txt', new TextEncoder().encode('attachment plaintext for session submission')],
+  ])('moves selected %s bytes through real HTTP and submits exact bytes while Platform retains only ciphertext', async (
+    kind,
+    fileName,
+    plaintext,
+  ) => {
     const { origin, store, responses } = await start()
-    const plaintext = new TextEncoder().encode(PLAINTEXT)
-
-    const sealed = await mobileSeal(pairingKey, plaintext, ready)
-    expect(sealed.ciphertext).not.toEqual(plaintext)
-    const upload = await fetch(`${origin}/v1/remote-attachments`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
-      body: sealed.ciphertext,
+    const sent: CompanionOfferAttachmentOperation[] = []
+    const offer = await transferSelectedCompanionAttachment({
+      name: fileName,
+      type: kind === 'image' ? 'image/png' : kind === 'text' ? 'text/plain' : 'application/octet-stream',
+      arrayBuffer: async () => plaintext.slice().buffer,
+    }, {
+      attachmentKey,
+      origin: 'https://platform.example',
+      authorizationHeaders: { 'x-test-pairing': 'pairing-a' },
+      operationId: parseCompanionOperationId(`operation-${kind}`),
+      sessionId: parseCompanionSessionId('session-one'),
+      permit: ready,
+      fetch: async (url, init) => {
+        const requested = new URL(url instanceof Request ? url.url : url)
+        return await fetch(new URL(requested.pathname, origin), init)
+      },
+      send: async (current) => { sent.push(current) },
     })
-    expect(upload.status).toBe(201)
-    const grant = await upload.json() as Record<string, unknown>
-    expect(Object.keys(grant).sort()).toEqual(['byteLength', 'capability', 'expiresAt'])
+    expect(sent).toEqual([offer])
+    expect(JSON.stringify(offer)).not.toContain(Buffer.from(plaintext).toString('base64'))
 
     const [retained] = store.observe()
     if (retained === undefined) throw new Error('uploaded blob was not retained')
     expect(containsBytes(retained.ciphertext, plaintext)).toBe(false)
     expect(retained.pairingId).toBe(pairingA)
 
-    const offer = buildCompanionAttachmentOffer({
-      capability: grant.capability as never,
-      ciphertextSha256: sealed.ciphertextSha256,
-      byteLength: grant.byteLength as number,
-      expiresAt: grant.expiresAt as number,
-      fileName: 'notes.txt',
-    }, 'operation-one' as never, 'session-one' as never, ready)
-
-    const submitted: Array<{ fileName: string; plaintext: Uint8Array }> = []
-    const received = await receiveCompanionAttachment(offer, {
+    const submitted: Array<{
+      sessionId: string
+      operationId: string
+      fileName: string
+      mediaType: string
+      plaintext: Uint8Array
+    }> = []
+    const result = await handleCompanionProductOperation(offer, {
+      host: { call: async () => { throw new Error('attachment must not become a Host prompt') } },
       pairingId: pairingA,
-      pairingKey,
-      now: (grant.expiresAt as number) - 1,
-      download: async current => await downloadCompanionAttachment(current, {
+      attachmentKey,
+      now: () => offer.expiresAt - 1,
+      downloadAttachment: async current => await downloadCompanionAttachment(current, {
         pairingId: pairingA,
         origin,
         headers: { 'x-test-pairing': 'pairing-a' },
       }),
-      submit: async (attachment) => { submitted.push(attachment) },
+      submitAttachment: async (attachment) => {
+        submitted.push(attachment)
+        return { ok: true, value: { accepted: true } }
+      },
     })
-    expect(received).toEqual({ fileName: 'notes.txt', byteLength: plaintext.byteLength })
-    expect(submitted[0]?.plaintext).toEqual(plaintext)
+    expect(result).toMatchObject({ type: 'confirmed', operationId: offer.operationId })
+    expect(submitted).toEqual([{
+      sessionId: offer.sessionId, operationId: offer.operationId,
+      fileName, mediaType: offer.mediaType, plaintext,
+    }])
+    expect(JSON.stringify(submitted)).not.toContain(`Attached: ${fileName}`)
     expect(store.observe()).toHaveLength(0)
     for (const served of responses) {
       expect(containsBytes(served, plaintext)).toBe(false)
@@ -85,7 +111,8 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
   it('fails explicitly on cross-pairing consume, hash mismatch, interruption, expiry, and limit violations', async () => {
     const { origin } = await start()
-    const sealed = await mobileSeal(pairingKey, new TextEncoder().encode('second transfer'), ready)
+    const permit = { isCurrent: () => true, requireCurrent: () => {} }
+    const sealed = await mobileSeal(attachmentKey, new TextEncoder().encode('second transfer'), permit)
 
     const upload = await fetch(`${origin}/v1/remote-attachments`, {
       method: 'POST',
@@ -99,7 +126,8 @@ describe('Remote attachment HTTP assembled transfer', () => {
       byteLength: grant.byteLength,
       expiresAt: grant.expiresAt,
       fileName: 'notes.txt',
-    }, 'operation-two' as never, 'session-one' as never, ready)
+      mediaType: 'text/plain',
+    }, 'operation-two' as never, 'session-one' as never, permit)
 
     const crossPairing = await fetch(`${origin}/v1/remote-attachments/consume`, {
       method: 'POST',
@@ -111,7 +139,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
     await expect(receiveCompanionAttachment({ ...offer, ciphertextSha256: '0'.repeat(64) }, {
       pairingId: pairingA,
-      pairingKey,
+      attachmentKey,
       now: grant.expiresAt - 1,
       download: async () => sealed.ciphertext,
       submit: () => { throw new Error('hash mismatch must never submit') },
@@ -119,7 +147,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
     await expect(receiveCompanionAttachment(offer, {
       pairingId: pairingA,
-      pairingKey,
+      attachmentKey,
       now: grant.expiresAt - 1,
       download: () => Promise.reject(new Error('socket hang up')),
       submit: () => { throw new Error('interrupted transfer must never submit') },
@@ -127,7 +155,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
     await expect(receiveCompanionAttachment(offer, {
       pairingId: pairingA,
-      pairingKey,
+      attachmentKey,
       now: grant.expiresAt,
       download: async () => sealed.ciphertext,
       submit: () => { throw new Error('expired capability must never submit') },
@@ -160,7 +188,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
   it('removes the blob and capability after revocation before any consume', async () => {
     const { origin, store } = await start()
-    const sealed = await mobileSeal(pairingKey, Uint8Array.of(1, 2, 3), ready)
+    const sealed = await mobileSeal(attachmentKey, Uint8Array.of(1, 2, 3), ready)
     const upload = await fetch(`${origin}/v1/remote-attachments`, {
       method: 'POST',
       headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
@@ -184,7 +212,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
   it('rejects cross-pairing revocation without deleting the blob', async () => {
     const { origin, store } = await start()
-    const sealed = await mobileSeal(pairingKey, Uint8Array.of(1, 2, 3), ready)
+    const sealed = await mobileSeal(attachmentKey, Uint8Array.of(1, 2, 3), ready)
     const upload = await fetch(`${origin}/v1/remote-attachments`, {
       method: 'POST',
       headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
@@ -204,7 +232,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
   it('accepts plaintext that seals to the ciphertext ceiling and rejects one extra byte before encrypting', async () => {
     const limit = 64
     const { origin } = await start({ store: { maxBlobBytes: limit } })
-    const accepted = await mobileSeal(pairingKey, new Uint8Array(limit - COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES), ready, limit)
+    const accepted = await mobileSeal(attachmentKey, new Uint8Array(limit - COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES), ready, limit)
     expect(accepted.ciphertext.byteLength).toBe(limit)
     const upload = await fetch(`${origin}/v1/remote-attachments`, {
       method: 'POST',
@@ -212,13 +240,13 @@ describe('Remote attachment HTTP assembled transfer', () => {
       body: accepted.ciphertext,
     })
     expect(upload.status).toBe(201)
-    await expect(mobileSeal(pairingKey, new Uint8Array(limit - COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES + 1), ready, limit))
+    await expect(mobileSeal(attachmentKey, new Uint8Array(limit - COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES + 1), ready, limit))
       .rejects.toThrow('ciphertext blob ceiling')
   })
 
   it('keeps the blob when consume fails mid-write so a second consume succeeds', async () => {
     const { routes, store } = await start()
-    const sealed = await mobileSeal(pairingKey, Uint8Array.of(9, 8, 7), ready)
+    const sealed = await mobileSeal(attachmentKey, Uint8Array.of(9, 8, 7), ready)
     const uploadRoute = routes.get('/v1/remote-attachments')
     if (uploadRoute === undefined) throw new Error('upload route was not registered')
     const uploadResponse = stubResponse()
@@ -260,7 +288,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
   it('leaves a finished consume body intact when delete-after-finish fails, so a later consume still delivers the blob', async () => {
     const { routes, store } = await start()
-    const sealed = await mobileSeal(pairingKey, Uint8Array.of(4, 5, 6), ready)
+    const sealed = await mobileSeal(attachmentKey, Uint8Array.of(4, 5, 6), ready)
     const uploadRoute = routes.get('/v1/remote-attachments')
     if (uploadRoute === undefined) throw new Error('upload route was not registered')
     const uploadResponse = stubResponse()
@@ -297,7 +325,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
   })
 
   it('keeps a foreign pairing key unable to open another pairing seal', async () => {
-    const key = await deriveCompanionAttachmentKey(pairingKey)
+    const key = await deriveCompanionAttachmentKey(attachmentKey)
     const sealed = await sealCompanionAttachment(key, new TextEncoder().encode('pairing secret'))
     await expect(openCompanionAttachment(
       await deriveCompanionAttachmentKey(crypto.getRandomValues(new Uint8Array(32))),
@@ -361,7 +389,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
   it('maps expiry, capacity, and unexpected failures to explicit HTTP statuses', async () => {
     const shortLived = await start({ store: { capabilityLifetimeMs: 1 } })
-    const sealed = await mobileSeal(pairingKey, Uint8Array.of(1, 2, 3), ready)
+    const sealed = await mobileSeal(attachmentKey, Uint8Array.of(1, 2, 3), ready)
     const upload = await fetch(`${shortLived.origin}/v1/remote-attachments`, {
       method: 'POST',
       headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
@@ -378,13 +406,13 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(await errorBody(expired)).toMatchObject({ code: 'ATTACHMENT_EXPIRED' })
 
     const crowded = await start({ store: { maxRetainedBlobs: 1 } })
-    const first = await mobileSeal(pairingKey, Uint8Array.of(1), ready)
+    const first = await mobileSeal(attachmentKey, Uint8Array.of(1), ready)
     await fetch(`${crowded.origin}/v1/remote-attachments`, {
       method: 'POST',
       headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
       body: first.ciphertext,
     })
-    const second = await mobileSeal(pairingKey, Uint8Array.of(2), ready)
+    const second = await mobileSeal(attachmentKey, Uint8Array.of(2), ready)
     const overCapacity = await fetch(`${crowded.origin}/v1/remote-attachments`, {
       method: 'POST',
       headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
@@ -404,7 +432,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
   it('accepts non-Buffer stream chunks at the HTTP boundary', async () => {
     const { routes } = await start()
-    const sealed = await mobileSeal(pairingKey, new TextEncoder().encode('streamed plaintext'), ready)
+    const sealed = await mobileSeal(attachmentKey, new TextEncoder().encode('streamed plaintext'), ready)
     const uploadRoute = routes.get('/v1/remote-attachments')
     if (uploadRoute === undefined) throw new Error('upload route was not registered')
     const uploadResponse = stubResponse()

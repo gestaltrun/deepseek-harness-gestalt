@@ -124,10 +124,17 @@ describe('AccountControl', () => {
     renderControl(signedIn, {
       status: 'ready', enabled: true,
       pairings: [{
-        id: parsePersonalPairingId('pairing-2'), deviceName: 'Bob tablet', platform: 'android', pairedAt: 1, lastAccessAt: 1, online: true,
+        id: parsePersonalPairingId('pairing-2'), deviceName: 'Bob tablet', platform: 'android', pairedAt: 1_000, lastAccessAt: 2_000, online: true,
       }],
     })
+    expect(screen.getByText('Bob tablet')).toBeTruthy()
+    expect(screen.getByText('android')).toBeTruthy()
     expect(screen.getByText('online')).toBeTruthy()
+    const times = [...document.querySelectorAll('time')]
+    expect(times.map(time => time.getAttribute('datetime'))).toEqual([
+      new Date(1_000).toISOString(),
+      new Date(2_000).toISOString(),
+    ])
   })
 
   it('projects every Account state and renders nothing without the Desktop bridge', () => {

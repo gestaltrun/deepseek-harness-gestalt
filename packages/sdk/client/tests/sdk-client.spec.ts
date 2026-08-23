@@ -519,6 +519,16 @@ describe('pure helpers', () => {
   it('finalResponse reads the last assistant message and tolerates absence', () => {
     expect(finalResponse([])).toBe('')
     expect(finalResponse([{ type: 'turn/start', seq: 0, time: 0, data: { turn: 0 } } as never])).toBe('')
+    expect(finalResponse([{
+      type: 'session/attachment-admitted', seq: 0, time: 0,
+      data: {
+        attachment: {
+          attachmentId: 'sha256:file', mediaType: 'application/octet-stream', bytes: 1,
+          sha256: 'a'.repeat(64), name: 'file.bin',
+        },
+        operationId: 'operation-sdk-log-only', source: 'companion',
+      },
+    } as never])).toBe('')
     expect(finalResponse([
       { type: 'assistant/message', seq: 0, time: 0, data: { message: { content: [{ type: 'text', text: 'first' }] } } } as never,
       { type: 'assistant/message', seq: 1, time: 0, data: { message: { content: [{ type: 'text', text: 'a' }, { type: 'tool-call' }, { type: 'text', text: 'b' }] } } } as never,

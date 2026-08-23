@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parseRelayCredential, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  parseCompanionOperationId,
+  parseCompanionSessionId,
+  parseRelayCredential,
+  parseRelayRouteId,
+} from '@deepseek-ai/dsh-remote-protocol'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import { CompanionAttachmentDeliveryUncertainError } from '../src/companion-attachment.ts'
 import { CompanionForegroundRuntime } from '../src/companion-lifecycle.ts'
 import {
   MobileCompanionSurface,
@@ -205,6 +211,234 @@ describe('MobileCompanionSurface', () => {
     runtime.markConnectionOpen()
     expect(() => { surface.loadOlder('session-one') }).toThrow('requires foreground synchronization')
   })
+
+  it('projects only Desktop-authoritative search hits and stable Host failures', () => {
+    const runtime = connectedRuntime()
+    const channel = connectionChannel()
+    const surface = new MobileCompanionSurface(runtime)
+    const resync = surface.bindAuthenticatedConnection(channel)
+    if (resync === undefined) throw new Error('expected Desktop resync receiver')
+    resync.acceptValidatedDesktopResync(projection('session-hit', 'Indexed'))
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected Companion result receiver')
+    surface.search('needle')
+    expect(surface.getSnapshot().search).toEqual({ query: 'needle', status: 'loading', items: [], hasMore: false })
+    results.acceptValidatedCompanionResult({
+      type: 'session-search',
+      operationId: parseCompanionOperationId('search-needle'),
+      items: [{ sessionId: parseCompanionSessionId('session-hit'), snippet: 'Desktop indexed needle' }],
+      hasMore: false,
+    })
+    expect(surface.getSnapshot().search).toEqual({
+      query: 'needle',
+      status: 'ready',
+      items: [{ sessionId: 'session-hit', snippet: 'Desktop indexed needle' }],
+      hasMore: false,
+    })
+    results.acceptValidatedCompanionResult({
+      type: 'operation-failed',
+      operationId: parseCompanionOperationId('search-needle'),
+      failure: { kind: 'http', code: 'HOST_HTTP_STATUS', message: 'Desktop Host returned HTTP 400', status: 400 },
+    })
+    expect(surface.getSnapshot().search).toMatchObject({
+      status: 'error',
+      error: { kind: 'http', code: 'HOST_HTTP_STATUS', status: 400 },
+    })
+  })
+
+  it('correlates attachment rejection, Host failure, and uncertain delivery instead of discarding them', async () => {
+    const runtime = connectedRuntime()
+    let rejectCompletion: ((reason: unknown) => void) | undefined
+    const completion = new Promise<void>((_resolve, reject) => { rejectCompletion = reject })
+    const channel = connectionChannel({
+      attachmentOperationId: 'attachment-visible',
+      attachmentCompletion: completion,
+    })
+    const surface = new MobileCompanionSurface(runtime)
+    const resync = surface.bindAuthenticatedConnection(channel)
+    if (resync === undefined) throw new Error('expected current generation receiver')
+    resync.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected current generation result receiver')
+
+    surface.attach('session-one', selectedFile())
+    expect(surface.getSnapshot().attachment).toEqual({
+      operationId: 'attachment-visible', status: 'sending',
+    })
+    results.acceptValidatedCompanionResult({
+      type: 'attachment-rejected',
+      operationId: parseCompanionOperationId('attachment-visible'),
+      reason: 'hash-mismatch',
+    })
+    expect(surface.getSnapshot().attachment).toEqual({
+      operationId: 'attachment-visible',
+      status: 'rejected',
+      reason: 'hash-mismatch',
+      message: 'Desktop rejected the attachment: hash-mismatch',
+    })
+
+    surface.attach('session-one', selectedFile())
+    results.acceptValidatedCompanionResult({
+      type: 'operation-failed',
+      operationId: parseCompanionOperationId('attachment-visible'),
+      failure: { kind: 'http', code: 'HOST_HTTP_STATUS', message: 'Desktop Host returned HTTP 400', status: 400 },
+    })
+    expect(surface.getSnapshot().attachment).toEqual({
+      operationId: 'attachment-visible',
+      status: 'failed',
+      message: 'Desktop Host returned HTTP 400',
+    })
+
+    surface.attach('session-one', selectedFile())
+    rejectCompletion?.(new CompanionAttachmentDeliveryUncertainError(
+      parseCompanionOperationId('attachment-visible'),
+      new Error('connection replaced'),
+    ))
+    await Promise.resolve()
+    expect(surface.getSnapshot().attachment).toEqual({
+      operationId: 'attachment-visible',
+      status: 'uncertain',
+      message: 'Attachment delivery is uncertain; reconnect to reconcile it before retrying.',
+    })
+  })
+
+  it('owns one attachment operation and ignores an old result after the next file starts', () => {
+    const runtime = connectedRuntime()
+    const channel = connectionChannel()
+    channel.mutations.attach
+      .mockReturnValueOnce({
+        operationId: parseCompanionOperationId('attachment-old'),
+        completion: new Promise<void>(() => {}),
+      })
+      .mockReturnValueOnce({
+        operationId: parseCompanionOperationId('attachment-new'),
+        completion: new Promise<void>(() => {}),
+      })
+    const surface = new MobileCompanionSurface(runtime)
+    const resync = surface.bindAuthenticatedConnection(channel)
+    if (resync === undefined) throw new Error('expected current generation receiver')
+    resync.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected current generation result receiver')
+
+    surface.attach('session-one', selectedFile())
+    expect(() => { surface.attach('session-one', selectedFile()) })
+      .toThrow('Attachment operation attachment-old must be resolved before selecting another file')
+    expect(channel.mutations.attach).toHaveBeenCalledOnce()
+    results.acceptValidatedCompanionResult({
+      type: 'attachment-rejected',
+      operationId: parseCompanionOperationId('attachment-old'),
+      reason: 'expired',
+    })
+
+    surface.attach('session-one', selectedFile())
+    expect(surface.getSnapshot().attachment).toEqual({
+      operationId: 'attachment-new', status: 'sending',
+    })
+    results.acceptValidatedCompanionResult({
+      type: 'confirmed',
+      operationId: parseCompanionOperationId('attachment-old'),
+      committedAt: 1,
+      outcome: 'accepted',
+    })
+    expect(surface.getSnapshot().attachment).toEqual({
+      operationId: 'attachment-new', status: 'sending',
+    })
+    results.acceptValidatedCompanionResult({
+      type: 'confirmed',
+      operationId: parseCompanionOperationId('attachment-new'),
+      committedAt: 2,
+      outcome: 'accepted',
+    })
+    expect(surface.getSnapshot().attachment).toEqual({
+      operationId: 'attachment-new', status: 'accepted',
+    })
+  })
+
+  it('requires an uncertain attachment receipt to reconcile before another file starts', async () => {
+    const runtime = connectedRuntime()
+    let rejectCompletion: ((reason: unknown) => void) | undefined
+    const channel = connectionChannel()
+    channel.mutations.attach
+      .mockReturnValueOnce({
+        operationId: parseCompanionOperationId('attachment-uncertain'),
+        completion: new Promise<void>((_resolve, reject) => { rejectCompletion = reject }),
+      })
+      .mockReturnValueOnce({
+        operationId: parseCompanionOperationId('attachment-after-reconcile'),
+        completion: new Promise<void>(() => {}),
+      })
+    const surface = new MobileCompanionSurface(runtime)
+    const resync = surface.bindAuthenticatedConnection(channel)
+    if (resync === undefined) throw new Error('expected current generation receiver')
+    resync.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected current generation result receiver')
+
+    surface.attach('session-one', selectedFile())
+    rejectCompletion?.(new CompanionAttachmentDeliveryUncertainError(
+      parseCompanionOperationId('attachment-uncertain'),
+      new Error('connection replaced'),
+    ))
+    await Promise.resolve()
+
+    expect(() => { surface.attach('session-one', selectedFile()) })
+      .toThrow('Attachment operation attachment-uncertain must be resolved before selecting another file')
+    expect(channel.mutations.attach).toHaveBeenCalledOnce()
+    results.acceptValidatedCompanionResult({
+      type: 'status',
+      operationId: parseCompanionOperationId('attachment-uncertain'),
+      absent: true,
+    })
+    surface.attach('session-one', selectedFile())
+    expect(channel.mutations.attach).toHaveBeenCalledTimes(2)
+    expect(surface.getSnapshot().attachment).toEqual({
+      operationId: 'attachment-after-reconcile', status: 'sending',
+    })
+  })
+
+  it('rejects decoded search results from a replaced connection generation', () => {
+    const runtime = connectedRuntime()
+    const surface = new MobileCompanionSurface(runtime)
+    const firstResync = surface.bindAuthenticatedConnection(connectionChannel())
+    if (firstResync === undefined) throw new Error('expected first generation receiver')
+    firstResync.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    const firstResults = surface.bindValidatedCompanionResults()
+    if (firstResults === undefined) throw new Error('expected first generation result receiver')
+    surface.search('needle')
+
+    runtime.forgetConnection()
+    runtime.markConnectionOpen()
+    const replacementResync = surface.bindAuthenticatedConnection(connectionChannel())
+    if (replacementResync === undefined) throw new Error('expected replacement generation receiver')
+    replacementResync.acceptValidatedDesktopResync(projection('session-two', 'Two'))
+    const replacementResults = surface.bindValidatedCompanionResults()
+    if (replacementResults === undefined) throw new Error('expected replacement generation result receiver')
+    surface.search('replacement')
+
+    firstResults.acceptValidatedCompanionResult({
+      type: 'session-search',
+      operationId: parseCompanionOperationId('search-needle'),
+      items: [{ sessionId: parseCompanionSessionId('stale-hit'), snippet: 'stale decoder result' }],
+      hasMore: false,
+    })
+    expect(surface.getSnapshot().search).toEqual({
+      query: 'replacement', status: 'loading', items: [], hasMore: false,
+    })
+
+    replacementResults.acceptValidatedCompanionResult({
+      type: 'session-search',
+      operationId: parseCompanionOperationId('search-needle'),
+      items: [{ sessionId: parseCompanionSessionId('current-hit'), snippet: 'current decoder result' }],
+      hasMore: false,
+    })
+    expect(surface.getSnapshot().search).toEqual({
+      query: 'replacement',
+      status: 'ready',
+      items: [{ sessionId: 'current-hit', snippet: 'current decoder result' }],
+      hasMore: false,
+    })
+  })
 })
 
 function connectedRuntime(): CompanionForegroundRuntime {
@@ -214,12 +448,21 @@ function connectedRuntime(): CompanionForegroundRuntime {
   return runtime
 }
 
-function connectionChannel() {
+function connectionChannel(options?: {
+  attachmentOperationId?: string
+  attachmentCompletion?: Promise<void>
+}) {
   const mutations = {
     create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(),
     submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(),
     cancel: vi.fn<MobileCompanionConnectionChannel['mutations']['cancel']>(),
-    attach: vi.fn<MobileCompanionConnectionChannel['mutations']['attach']>(),
+    attach: vi.fn<MobileCompanionConnectionChannel['mutations']['attach']>(() => ({
+      operationId: parseCompanionOperationId(options?.attachmentOperationId ?? 'attachment-default'),
+      completion: options?.attachmentCompletion ?? Promise.resolve(),
+    })),
+    search: vi.fn<MobileCompanionConnectionChannel['mutations']['search']>(() => (
+      parseCompanionOperationId('search-needle')
+    )),
     loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(),
     settle: vi.fn<MobileCompanionConnectionChannel['mutations']['settle']>(),
   }
@@ -277,4 +520,8 @@ function projection(id: string, title: string, pending = false): ValidatedDeskto
       lastAgentError: null,
     }],
   }
+}
+
+function selectedFile(): File {
+  return { name: 'notes.txt', arrayBuffer: async () => new ArrayBuffer(0) } as File
 }

@@ -28,6 +28,16 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+.search {
+  display: flex;
+  gap: 8px;
+}
+
+.search input {
+  min-width: 0;
+  flex: 1;
+}
+
 .back {
   align-self: flex-start;
   margin-bottom: 8px;
@@ -42,6 +52,27 @@
   font: var(--dsw-font-s-13);
 }
 
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sessions button {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+}
+
+.searchResult {
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
 .summary,
 .transcript {
   margin: 0;

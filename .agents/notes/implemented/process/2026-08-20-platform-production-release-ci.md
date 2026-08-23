@@ -10,11 +10,11 @@ The Platform listen process and its GitHub Actions workflows need one operated e
 
 ## Decision
 
-The operated Platform is production only. [`apps/platform/src/production-env.ts`](../../../../apps/platform/src/production-env.ts) names the listen-process secrets, treats an unset `PLATFORM_ENVIRONMENT` as production, and refuses any other selection before `loadPlatformEnvironment` runs. Dummy development identities remain in [`boot.ts`](../../../../apps/platform/src/boot.ts) so the client pair validator still rejects a shared identity; they are not a second listen process.
+The operated Platform is production only. [`apps/platform/src/production-env.ts`](../../../../apps/platform/src/production-env.ts) names the listen-process secrets, treats an unset `PLATFORM_ENVIRONMENT` as production, and refuses any other selection before [`boot.ts`](../../../../apps/platform/src/boot.ts) loads one complete operated identity. The listen entry has no development identity or fallback credential, database, or namespace.
 
 GitHub Actions uses Environment `production` only. [Platform Image](../../../../.github/workflows/platform-image.yml) builds on pull requests and matching master pushes, and pushes to GHCR only on `workflow_dispatch` with `inputs.push`. [Platform Deploy](../../../../.github/workflows/platform-deploy.yml) always validates the production and ECS names through [`production-env-cli.ts`](../../../../apps/platform/src/production-env-cli.ts) (`node --experimental-strip-types`) and SSHes only when `inputs.deploy` is true. The CLI entry is not bundled into `boot.mjs`.
 
-Desktop and Mobile continue to parse a complete pair ([Account installation sessions](../feature/2026-08-17-platform-account-installation-sessions.md)). That pair-isolation rule does not require a live development Platform.
+Desktop and Mobile parse the same single production identity and reject localhost before product work ([operated Companion Platform identity](../architecture/2026-08-22-operated-companion-platform-identity.md)). Generic environment-pair validation remains available to bounded capability tests, not product entries.
 
 ## Alternatives considered
 

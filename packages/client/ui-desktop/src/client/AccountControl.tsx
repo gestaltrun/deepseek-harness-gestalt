@@ -101,6 +101,12 @@ function PairingPanel({ desktop, snapshot, t }: {
           <strong>{pairing.deviceName}</strong>
           <span>{pairing.platform}</span>
           <span>{pairing.online ? 'online' : 'offline'}</span>
+          <span>Paired <time dateTime={new Date(pairing.pairedAt).toISOString()}>{new Date(pairing.pairedAt).toLocaleString()}</time></span>
+          <span>
+            Last access <time dateTime={new Date(pairing.lastAccessAt).toISOString()}>
+              {new Date(pairing.lastAccessAt).toLocaleString()}
+            </time>
+          </span>
           <Button variant="outline" onClick={() => { void desktop.pairingRevoke(pairing.id) }}>{t('pairing.revoke')}</Button>
         </div>
       ))}

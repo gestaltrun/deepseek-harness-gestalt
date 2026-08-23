@@ -12,7 +12,7 @@ interface DesktopPairingKeyAccess {
    * @param pairingId - confirmed Personal Pairing identity.
    * @returns copy of at least 32 bytes, or undefined when the pairing holds no retained key.
    */
-  pairingKeyMaterial(pairingId: PersonalPairingId): Uint8Array | undefined
+  attachmentKeyMaterial(pairingId: PersonalPairingId): Uint8Array | undefined
 }
 
 /**
@@ -83,7 +83,7 @@ export class DesktopPairingKeyVault implements DesktopPairingKeyAccess {
   }
 
   /** @param pairingId - confirmed Personal Pairing identity. @returns copy of the retained key material. */
-  pairingKeyMaterial(pairingId: PersonalPairingId): Uint8Array | undefined {
+  attachmentKeyMaterial(pairingId: PersonalPairingId): Uint8Array | undefined {
     return this.active.get(pairingId)?.slice()
   }
 }

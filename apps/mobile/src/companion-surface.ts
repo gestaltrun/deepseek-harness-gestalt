@@ -47,7 +47,7 @@ export interface ValidatedCompanionResultReceiver {
 }
 
 /** Desktop-authoritative search state; Mobile never synthesizes substring hits. */
-export interface MobileCompanionSearchItem {
+interface MobileCompanionSearchItem {
   /** Session identity converted from the authenticated protocol value. */
   readonly sessionId: SessionId
   /** Desktop-authoritative full-text result excerpt. */

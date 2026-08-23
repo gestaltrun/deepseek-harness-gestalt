@@ -101,7 +101,7 @@ jobs:
         run: echo "PNPM_CONFIG_STORE_DIR=$HOME/.local/share/pnpm/store" >> "$GITHUB_ENV"
 
       - name: Install (immutable)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --force
 
       # The persistent VM image owns Playwright's Linux system packages; this
       # step also proves that browser provisioning remains usable for failover.
@@ -198,7 +198,7 @@ jobs:
 
       - name: Install (immutable)
         shell: pwsh
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --force
 
       - name: Run complete unsharded Windows gate inventory serially
         shell: pwsh

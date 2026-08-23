@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-platform-account-core",
   "description": "Platform Account provider with GitHub OAuth, signed polling, P-256 proof, rotation, and invalidation",
-  "version": "0.1.0-rc.8",
+  "version": "0.1.1-rc.2",
   "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",

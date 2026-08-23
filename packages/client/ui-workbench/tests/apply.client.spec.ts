@@ -70,7 +70,7 @@ describe('ui-workbench host apply', () => {
   it('fails loud when the snapshot row disappears before it registers', async () => {
     const ctx = new Context()
     new SettingsService(ctx)
-    const entries: { options: { id: string } }[] = [{ options: { id: 'better-sidebar' } }]
+    const entries: { options: { id: string } }[] = [{ options: { id: 'ui-better-sidebar' } }]
     ctx.provide('loader', { entries: () => entries })
     setImmediate(() => {
       entries.splice(0, entries.length)
@@ -83,7 +83,7 @@ describe('ui-workbench host apply', () => {
     const settings = new SettingsService(ctx)
     ctx.provide('loader', {
       entries: () => [{
-        options: { id: 'better-sidebar', name: '@deepseek-ai/dsh-client-better-sidebar' },
+        options: { id: 'ui-better-sidebar', name: '@deepseek-ai/dsh-client-ui-better-sidebar' },
         fiber: {
           async await() {
             settings.values.set(NS, { tabsEnabled: { editor: true } })
@@ -103,7 +103,7 @@ describe('ui-workbench host apply', () => {
     const settings = new SettingsService(ctx)
     ctx.provide('loader', {
       entries: () => [{
-        options: { id: 'web-ui-better-sidebar', name: '@deepseek-ai/dsh-client-better-sidebar' },
+        options: { id: 'web-ui-better-sidebar', name: '@deepseek-ai/dsh-client-ui-better-sidebar' },
         fiber: {
           async await() {
             settings.values.set(NS, {})
@@ -122,7 +122,7 @@ describe('ui-workbench host apply', () => {
     const ctx = new Context()
     const settings = new SettingsService(ctx)
     const entry: { options: { id: string }; fiber?: { await(): Promise<void> } } = {
-      options: { id: 'better-sidebar' },
+      options: { id: 'ui-better-sidebar' },
     }
     ctx.provide('loader', { entries: () => [entry] })
     setImmediate(() => {

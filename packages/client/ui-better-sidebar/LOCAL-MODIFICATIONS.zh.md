@@ -2,7 +2,7 @@
 
 相对 [UPSTREAM.md](UPSTREAM.md) 所钉提交的每一处分歧。产品行为属于 `@deepseek-ai/dsh-client-ui-workbench`，不属于这里。
 
-1. **工作区包清单** — `package.json` / `tsconfig.json` / `tsconfig.dts.json` / 本文件 / `UPSTREAM.md` 由本仓持有。上游 `package.json` 名 `dsh-better-sidebar` 收成 `@deepseek-ai/dsh-client-better-sidebar`；版本跟随 monorepo 根。清单把上游运行时依赖映射为工作区 peer 与开发依赖，而 `react-icons` 仍作为打包依赖。`tsconfig.json` 的 project references 使用本仓路径（`../../core/session`，不是 `../../session/session`）。快照不是 `tsconfig.client.json` 工程：那些 references 会把宿主 `Context` 合并拉进客户端程序。
+1. **工作区包清单** — `package.json` / `tsconfig.json` / `tsconfig.dts.json` / 本文件 / `UPSTREAM.md` 由本仓持有。上游 `package.json` 名 `dsh-better-sidebar` 收成 `@deepseek-ai/dsh-client-ui-better-sidebar`；上游插件 id、Cordis 名称与设置命名空间仍为 `dsh-better-sidebar`，工作区版本跟随 monorepo 根。清单把上游运行时依赖映射为工作区 peer 与开发依赖，而 `react-icons` 仍作为打包依赖。`tsconfig.json` 的 project references 使用本仓路径（`../../core/session`，不是 `../../session/session`）。快照不是 `tsconfig.client.json` 工程：那些 references 会把宿主 `Context` 合并拉进客户端程序。
 2. **`src/config.ts`** — `import z from 'schemastery'` 改为 `import z from '@deepseek-ai/schemastery'`。
 3. **`src/context-types.ts`** — 快照从 `@deepseek-ai/cordis` 导入 `Context`，并通过本地 `CordisContext & SidebarContextServices` 交叉类型携带结构化服务接口。仓库 Cordis augmentation 只增加 `betterSidebar`，因此快照镜像不会与能力所有包的声明冲突。
 4. **`src/invariant.ts`** — 按本仓 invariant 门禁重写 companion（`PACKAGE_NAME` 与本工作区包名一致）。

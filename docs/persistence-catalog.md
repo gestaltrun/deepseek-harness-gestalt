@@ -255,7 +255,7 @@ Source: [`packages/core/session/src/types.ts:277`](../packages/core/session/src/
 'browser/workspace': BrowserWorkspaceProjection
 ```
 
-Source: [`packages/browser/browser-workspace/src/types.ts:77`](../packages/browser/browser-workspace/src/types.ts)
+Source: [`packages/browser/browser-workspace/src/types.ts:82`](../packages/browser/browser-workspace/src/types.ts)
 
 ### `command/*`
 

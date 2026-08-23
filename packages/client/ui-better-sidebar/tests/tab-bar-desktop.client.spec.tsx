@@ -68,7 +68,7 @@ describe('TabBar Desktop + menu', () => {
     expect(dragSpace?.nextElementSibling).toBeNull()
 
     const source = readFileSync(
-      join(process.cwd(), 'packages/client/better-sidebar/src/client/sidebar.module.css'),
+      join(process.cwd(), 'packages/client/ui-better-sidebar/src/client/sidebar.module.css'),
       'utf8',
     )
     const rule = /\.windowDragSpace\s*\{(?<body>[^}]+)\}/.exec(source)?.groups?.body ?? ''

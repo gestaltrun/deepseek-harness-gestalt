@@ -35,7 +35,7 @@ dsh web GUI 的浏览器侧：shell 启动、浏览器与宿主通信、共享 U
 | [`ui-jobs/`](ui-jobs/README.zh.md) | 在会话标题栏列出当前会话的后台任务。 |
 | [`ui-schedule/`](ui-schedule/README.zh.md) | 在会话标题栏展示并管理当前 Session 的持久化提醒。 |
 | [`ui-browser/`](ui-browser/README.zh.md) | 展示官方 Browser 页面 chrome、收起后的标签页预览，以及 Browser Profile 设置。 |
-| [`better-sidebar/`](better-sidebar/README.zh.md) | 钉死的 DSH-better-sidebar 快照：右侧栏与底部面板工作台。 |
+| [`ui-better-sidebar/`](ui-better-sidebar/README.zh.md) | 钉死的 DSH-better-sidebar 快照：右侧栏与底部面板工作台。 |
 | [`ui-workbench/`](ui-workbench/README.zh.md) | 把官方 Browser 页面绑到快照侧栏的 `browser` 标签。 |
 | [`ui-model-selection/`](ui-model-selection/README.zh.md) | 在对话界面中提供模型选择。 |
 | [`ui-permission/`](ui-permission-presets/README.zh.md) | 配置默认权限并切换当前会话的访问模式。 |

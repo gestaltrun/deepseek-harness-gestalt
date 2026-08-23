@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-browser-runtime-deterministic",
   "description": "Deterministic keyless Browser Runtime Provider for temporary and named persistent Profiles",
-  "version": "0.1.0-rc.8",
+  "version": "0.1.1-rc.2",
   "publishConfig": {
     "access": "public"
   },

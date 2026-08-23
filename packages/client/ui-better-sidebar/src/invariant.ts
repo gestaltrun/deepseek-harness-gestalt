@@ -1,16 +1,16 @@
 /**
- * Package-owned invariant companion for `@deepseek-ai/dsh-client-better-sidebar`.
- * @module @deepseek-ai/dsh-client-better-sidebar/invariant
+ * Package-owned invariant companion for `@deepseek-ai/dsh-client-ui-better-sidebar`.
+ * @module @deepseek-ai/dsh-client-ui-better-sidebar/invariant
  */
 
 /* jscpd:ignore-start */
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-client-better-sidebar'
+const PACKAGE_NAME = '@deepseek-ai/dsh-client-ui-better-sidebar'
 
 /** Cordis companion plugin name. */
-export const name = 'client-better-sidebar-invariant'
+export const name = 'client-ui-better-sidebar-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 

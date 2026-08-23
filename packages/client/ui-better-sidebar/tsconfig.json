@@ -61,6 +61,9 @@
       "path": "../../settings/settings"
     },
     {
+      "path": "../../subagent/subagent"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

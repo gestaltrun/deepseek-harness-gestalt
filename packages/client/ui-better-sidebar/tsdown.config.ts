@@ -367,7 +367,7 @@ const nodeLibrary: UserConfig = {
 }
 
 const clientBundles: UserConfig[] = [
-  clientBundle('@deepseek-ai/dsh-client-better-sidebar', 'client.js'),
+  clientBundle('@deepseek-ai/dsh-client-ui-better-sidebar', 'client.js'),
   ...CHUNKS.map(chunkBundle),
 ]
 

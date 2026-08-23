@@ -1,16 +1,18 @@
 import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
-  captureStableAria, compareOrRefreshGolden, launchWebScaffold, watchConsole,
+  assertFixtureInventory, captureStableAria, compareOrRefreshGolden, launchWebScaffold, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
 import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const FIXTURE = fileURLToPath(new URL('./snapshots/live-interactions/session.jsonl', import.meta.url))
-const EXPECTED = fileURLToPath(new URL('./snapshots/sidechat-round/ui.expected.md', import.meta.url))
+const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/sidechat-round', import.meta.url))
+const EXPECTED = join(SNAPSHOT_DIR, 'ui.expected.md')
 const MODE = webSnapshotMode()
 const PROMPT = 'Reply with a one-sentence description of event sourcing, then stop.'
 const SIDE_BOUNDARY_PREFIX = 'Side conversation boundary'
@@ -89,4 +91,8 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   }, 90_000)
+
+  it('keeps the fixture inventory closed', async () => {
+    await assertFixtureInventory(SNAPSHOT_DIR, ['ui.expected.md'])
+  })
 })

@@ -16,6 +16,8 @@ pull-request workflow 从 `workflow validity` 开始；该 job 使用维护中�
 
 仓库 workflow 测试补充导致零 job 故障的 job 构造限制：job 级 `env` 值不得引用 `runner`。需要 `runner.temp` 的值属于 step 级 `env` 或 step 命令，因为这两处在 GitHub 分配 runner 后解析。测试会执行一个无效 fixture 并扫描所有 workflow，使同类回归在本地和 CI 中失败。
 
+Desktop Release workflow 测试还要求 dispatch 默认版本与 `apps/desktop/package.json` 相同。GitHub 可以接受默认输入已过期的 workflow，但准备 job 会在打包前拒绝该 dispatch，因此版本一致性属于 workflow 有效性的一部分。
+
 ## 考虑过的替代方案
 
 **只依赖 push 后的 GitHub 解析。** 拒绝，因为无效 workflow 会禁用自身检查，并产生没有可操作日志的零 job 故障。

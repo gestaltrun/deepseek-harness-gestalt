@@ -16,6 +16,8 @@ The pull-request workflow starts with `workflow validity`, which runs the mainta
 
 The repository workflow test supplements actionlint with the job-construction restriction that caused the zero-job failure: job-level `env` values cannot reference `runner`. Values that need `runner.temp` belong in step-level `env` or step commands, after GitHub allocates the runner. The test exercises an invalid fixture and scans every workflow so a recurrence fails locally and in CI.
 
+The Desktop Release workflow test also requires the dispatch default version to equal `apps/desktop/package.json`. GitHub can accept a workflow whose default input is stale, but the preparation job rejects that dispatch before packaging, so version alignment is part of workflow validity.
+
 ## Alternatives considered
 
 **Rely only on GitHub parsing after push.** Rejected because an invalid workflow disables its own checks and produces a zero-job failure without an actionable log.

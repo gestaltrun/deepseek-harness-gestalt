@@ -26,4 +26,4 @@ The pull-request workflow admits all evidence jobs through one `preflight` job. 
 
 ## Consequences
 
-Every pull request receives one inspectable plan before expensive work starts. Planner or repository uncertainty increases evidence instead of reducing it. Adding a new change surface requires extending the risk catalog and its plan fixtures; adding a new generated projection requires adding its check to the preflight gate inventory. Later routing changes may consume narrower plan levels without changing this fail-closed input and evidence-key contract.
+Every pull request receives one inspectable plan before expensive work starts. Planner or repository uncertainty increases evidence instead of reducing it. Adding a new change surface requires extending the risk catalog and its plan fixtures; adding a new generated projection requires adding its check to the preflight gate inventory. The [Draft impact decision](2026-08-24-draft-impacted-evidence.md) owns the narrower plan level without changing this fail-closed input and evidence-key contract.

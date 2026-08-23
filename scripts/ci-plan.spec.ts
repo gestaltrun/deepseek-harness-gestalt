@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { planCi, renderCiPlan, renderGitHubOutputs, type CiPlanInput } from './ci-plan.ts'
+import { collectPackageGraph } from './package-graph.ts'
 
 const completeInput: CiPlanInput = {
   event: 'pull_request',
@@ -10,6 +12,7 @@ const completeInput: CiPlanInput = {
   headSha: '2222222222222222222222222222222222222222',
   changedPaths: ['.github/workflows/ci.yml', 'scripts/ci-plan.ts'],
   dependencyGraphDigest: 'dependency-graph',
+  dependencyGraph: [],
   riskCatalog: {
     formatVersion: 1,
     rules: [
@@ -33,6 +36,8 @@ describe('CI plan', () => {
       formatVersion: 1,
       level: 'exhaustive',
       affectedAreas: ['area/infra'],
+      directPackages: [],
+      affectedPackages: [],
       escalationReasons: ['workflow-or-planner-change'],
     })
     expect(plan.evidenceKey).toMatch(/^[a-f0-9]{64}$/u)
@@ -57,6 +62,7 @@ describe('CI plan', () => {
       baseSha: null,
       changedPaths: null,
       dependencyGraphDigest: null,
+      dependencyGraph: null,
     })
 
     expect(plan.level).toBe('exhaustive')
@@ -66,6 +72,126 @@ describe('CI plan', () => {
       'unavailable-dependency-graph',
     ])
     expect(plan.lanes).toHaveLength(9)
+  })
+
+  it('selects changed packages, reverse consumers, and changed-source coverage for a Draft', () => {
+    const plan = planCi({
+      ...completeInput,
+      changedPaths: [
+        'packages/core/session/src/index.ts',
+        'packages/core/session/tests/index.spec.ts',
+      ],
+      dependencyGraph: [
+        { short: 'session', name: '@deepseek-ai/dsh-session', group: 'core', rel: 'packages/core/session', deps: [] },
+        { short: 'agent', name: '@deepseek-ai/dsh-agent', group: 'core', rel: 'packages/core/agent', deps: ['session'] },
+        { short: 'unrelated', name: '@deepseek-ai/dsh-unrelated', group: 'core', rel: 'packages/core/unrelated', deps: [] },
+      ],
+      riskCatalog: {
+        formatVersion: 1,
+        rules: [{ pattern: 'packages/core/**', area: 'area/session' }],
+      },
+    })
+
+    expect(plan).toMatchObject({
+      level: 'impacted',
+      directPackages: ['session'],
+      affectedPackages: ['agent', 'session'],
+      changedSources: ['packages/core/session/src/index.ts'],
+    })
+    expect(plan.lanes.map(lane => lane.id)).toEqual(['draft-impact'])
+  })
+
+  it('adds assembled snapshots for Draft GUI and model-visible paths', () => {
+    const plan = planCi({
+      ...completeInput,
+      changedPaths: ['packages/client/ui-browser/src/index.tsx'],
+      dependencyGraph: [{
+        short: 'client-ui-browser',
+        name: '@deepseek-ai/dsh-client-ui-browser',
+        group: 'client',
+        rel: 'packages/client/ui-browser',
+        deps: [],
+      }],
+      riskCatalog: {
+        formatVersion: 1,
+        rules: [{ pattern: 'packages/client/**', area: 'area/web' }],
+      },
+    })
+
+    expect(plan.level).toBe('impacted')
+    expect(plan.lanes.map(lane => lane.id)).toEqual(['draft-impact', 'consumers'])
+  })
+
+  it('selects static documentation evidence for a known documentation-only Draft', () => {
+    const plan = planCi({
+      ...completeInput,
+      changedPaths: ['docs/testing.md'],
+      dependencyGraph: [],
+      riskCatalog: {
+        formatVersion: 1,
+        rules: [{ pattern: 'docs/**', area: 'area/infra' }],
+      },
+    })
+
+    expect(plan.level).toBe('impacted')
+    expect(plan.lanes.map(lane => lane.id)).toEqual(['static'])
+    expect(plan.affectedAreas).toEqual(['area/infra'])
+  })
+
+  it.each([
+    ['ready review', { readiness: 'ready' as const }],
+    ['session lifecycle', { changedPaths: ['packages/core/session/src/index.ts'] }],
+    ['unknown path', { changedPaths: ['future/new-surface.ts'] }],
+  ])('escalates %s to exhaustive evidence', (_label, override) => {
+    const plan = planCi({
+      ...completeInput,
+      dependencyGraph: [{
+        short: 'session',
+        name: '@deepseek-ai/dsh-session',
+        group: 'core',
+        rel: 'packages/core/session',
+        deps: [],
+      }],
+      riskCatalog: {
+        formatVersion: 1,
+        rules: [{
+          pattern: 'packages/core/session/**',
+          area: 'area/session',
+          escalation: 'session-lifecycle-change',
+        }],
+      },
+      ...override,
+    })
+
+    expect(plan.level).toBe('exhaustive')
+    expect(plan.lanes).toHaveLength(9)
+  })
+
+  it('escalates a cross-domain Draft while ignoring documentation-only area overlap', () => {
+    const graph = [
+      { short: 'llm', name: '@deepseek-ai/dsh-llm', group: 'llm', rel: 'packages/llm/llm', deps: [] },
+      { short: 'web', name: '@deepseek-ai/dsh-web', group: 'web', rel: 'packages/web/web', deps: [] },
+    ]
+    const riskCatalog = {
+      formatVersion: 1,
+      rules: [
+        { pattern: 'packages/llm/**', area: 'area/llm' as const },
+        { pattern: 'packages/web/**', area: 'area/web' as const },
+        { pattern: '.agents/**', area: 'area/infra' as const },
+      ],
+    }
+    expect(planCi({
+      ...completeInput,
+      changedPaths: ['.agents/notes/note.md', 'packages/llm/llm/src/index.ts'],
+      dependencyGraph: graph,
+      riskCatalog,
+    }).level).toBe('impacted')
+    expect(planCi({
+      ...completeInput,
+      changedPaths: ['packages/llm/llm/src/index.ts', 'packages/web/web/src/index.ts'],
+      dependencyGraph: graph,
+      riskCatalog,
+    }).escalationReasons).toContain('cross-domain-change')
   })
 
   it('fails closed for an unrecognized event and path', () => {
@@ -80,6 +206,21 @@ describe('CI plan', () => {
     expect(plan.escalationReasons).toEqual(['unknown-event', 'unknown-path'])
   })
 
+  it('fails closed when a package path is absent from the current graph', () => {
+    const plan = planCi({
+      ...completeInput,
+      changedPaths: ['packages/core/removed/src/index.ts'],
+      dependencyGraph: [],
+      riskCatalog: {
+        formatVersion: 1,
+        rules: [{ pattern: 'packages/core/**', area: 'area/session' }],
+      },
+    })
+
+    expect(plan.level).toBe('exhaustive')
+    expect(plan.escalationReasons).toContain('unresolved-package-path')
+  })
+
   it('fails closed for an unsupported risk-catalog version', () => {
     const riskCatalog = completeInput.riskCatalog
     if (riskCatalog === null) throw new TypeError('fixture must define a risk catalog')
@@ -91,6 +232,21 @@ describe('CI plan', () => {
     expect(plan.level).toBe('exhaustive')
     expect(plan.affectedAreas).toEqual([])
     expect(plan.escalationReasons).toContain('invalid-risk-catalog')
+  })
+
+  it('classifies every current package group without an unknown-path escalation', () => {
+    const root = resolve(import.meta.dirname, '..')
+    const graph = collectPackageGraph(root, [], 'ci-plan-spec')
+    const riskCatalog = JSON.parse(readFileSync(resolve(root, 'scripts/ci-risk-catalog.json'), 'utf8')) as CiPlanInput['riskCatalog']
+    for (const pkg of graph) {
+      const plan = planCi({
+        ...completeInput,
+        changedPaths: [`${pkg.rel}/README.md`],
+        dependencyGraph: graph,
+        riskCatalog,
+      })
+      expect(plan.escalationReasons, pkg.rel).not.toContain('unknown-path')
+    }
   })
 
   it('resolves the same local plan from the repository root and a nested directory', () => {
@@ -127,6 +283,8 @@ describe('CI plan', () => {
       'level=exhaustive',
       'lanes=["static","coverage","consumers","node-compat","python-sdk","python-runtime","windows-wine","windows-native","electron-macos"]',
       'affected_areas=["area/infra"]',
+      'affected_packages=[]',
+      'changed_sources=[]',
       'escalation_reasons=["workflow-or-planner-change"]',
       `evidence_key=${plan.evidenceKey}`,
       '',

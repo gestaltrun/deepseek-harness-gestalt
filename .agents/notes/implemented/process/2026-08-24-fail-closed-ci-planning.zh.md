@@ -26,4 +26,4 @@ pull-request workflow 通过单一 `preflight` job 准入所有证据 job。昂�
 
 ## 结果
 
-每个 pull request 都会在昂贵工作开始前获得一个可检查的 plan。planner 或仓库存在不确定性时，证据会增加而不会减少。新增变更面必须扩展风险目录及对应 plan fixture；新增生成投影必须把检查加入 preflight gate 清单。后续路由变更可以消费更窄的 plan level，而无需改变本次确定的故障关闭输入与 evidence-key contract。
+每个 pull request 都会在昂贵工作开始前获得一个可检查的 plan。planner 或仓库存在不确定性时，证据会增加而不会减少。新增变更面必须扩展风险目录及对应 plan fixture；新增生成投影必须把检查加入 preflight gate 清单。[Draft 影响面决策](2026-08-24-draft-impacted-evidence.zh.md)负责更窄的 plan level，而不改变本次确定的故障关闭输入与 evidence-key contract。

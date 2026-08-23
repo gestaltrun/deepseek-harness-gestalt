@@ -262,11 +262,11 @@ export class MobileCompanionSurface {
     }
   }
 
-  /** Drop the current authority immediately, optionally deleting its serialized cache afterward. */
+  /** Drop the current authority after its serialized cache is deleted when requested. */
   async releaseProjectionCache(deleteStored: boolean): Promise<void> {
     const cache = this.#projectionCache
-    this.setProjectionCache(undefined)
     if (deleteStored && cache !== undefined) await cache.destroy()
+    if (cache === this.#projectionCache) this.setProjectionCache(undefined)
   }
 
   /**

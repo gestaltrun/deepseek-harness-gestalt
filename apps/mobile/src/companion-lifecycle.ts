@@ -1,6 +1,6 @@
 /** Foreground Relay lifecycle and Desktop-authoritative synchronization. */
 
-import { registerPlugin } from '@capacitor/core'
+import { App } from '@capacitor/app'
 import type { RelayCredentialGrant } from '@deepseek-ai/dsh-remote-access'
 import {
   requireCompanionMutation,
@@ -34,13 +34,6 @@ export interface CompanionRelayLifecycle {
   start(): Promise<void>
   stop(): Promise<void>
   isConnected(): boolean
-}
-
-interface CapacitorAppPlugin {
-  addListener(
-    eventName: 'appStateChange',
-    listenerFunc: (state: { isActive: boolean }) => void,
-  ): Promise<{ remove: () => Promise<void> }>
 }
 
 let installed: CompanionForegroundRuntime | undefined
@@ -327,6 +320,5 @@ export function bindCompanionProcessVisibility(
 function listenCapacitorAppState(
   listener: (active: boolean) => void,
 ): Promise<{ remove: () => Promise<void> }> {
-  const App = registerPlugin<CapacitorAppPlugin>('App')
   return App.addListener('appStateChange', (state) => { listener(state.isActive) })
 }

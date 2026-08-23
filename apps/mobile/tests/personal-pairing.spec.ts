@@ -7,6 +7,7 @@ import {
   parsePairingCompletionId,
   parsePendingPairingId,
   parsePersonalPairingId,
+  type PersonalPairingId,
 } from '@deepseek-ai/dsh-remote-access'
 import { parseRelayCredential, parseRelayPairingSelector, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
 import {
@@ -404,11 +405,57 @@ describe('MobilePairingController', () => {
     })
   })
 
-  it('retains the confirmed pairing id until Platform revocation can be retried', async () => {
+  it('retains durable pairing authority across restart until Platform revocation succeeds', async () => {
     const pairingId = parsePersonalPairingId('pairing-revoke-retry')
     const transport = transportFixture()
     transport.revokeMobilePersonalPairing
       .mockRejectedValueOnce(new Error('Platform revoke failed'))
+      .mockResolvedValueOnce(undefined)
+    let retainedPairingId: PersonalPairingId | undefined = pairingId
+    const attachmentKeys = {
+      retain: vi.fn(),
+      retainedPairingId: vi.fn(() => retainedPairingId),
+      selectAccount: vi.fn(),
+      wipe: vi.fn(() => { retainedPairingId = undefined }),
+      flush: vi.fn(),
+    }
+    const handshake = { begin: vi.fn(), acceptDesktopHandshake: vi.fn(), wipe: vi.fn() }
+    const firstController = new MobilePairingController({
+      installation: installationFixture(),
+      transport,
+      handshake,
+      attachmentKeys,
+      scanner: { scan: vi.fn() },
+    })
+    await firstController.activate()
+
+    await expect(firstController.unpair()).rejects.toThrow('Mobile Personal Pairing unpair failed')
+    expect(firstController.getSnapshot()).toEqual({
+      status: 'unpair-failed', error: 'Mobile Personal Pairing unpair failed',
+    })
+    expect(handshake.wipe).not.toHaveBeenCalled()
+    expect(attachmentKeys.wipe).not.toHaveBeenCalled()
+    expect(attachmentKeys.flush).not.toHaveBeenCalled()
+
+    const restartedController = new MobilePairingController({
+      installation: installationFixture(),
+      transport,
+      handshake,
+      attachmentKeys,
+      scanner: { scan: vi.fn() },
+    })
+    await restartedController.activate()
+    await expect(restartedController.unpair()).resolves.toBeUndefined()
+    expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledTimes(2)
+    expect(transport.revokeMobilePersonalPairing).toHaveBeenLastCalledWith(expect.objectContaining({ pairingId }))
+    expect(attachmentKeys.wipe).toHaveBeenCalledOnce()
+    expect(restartedController.getSnapshot()).toEqual({ status: 'ready' })
+  })
+
+  it('keeps unpair retryable until pairing-owned projection deletion succeeds', async () => {
+    const pairingId = parsePersonalPairingId('pairing-cache-retry')
+    const releaseProjectionAuthority = vi.fn()
+      .mockRejectedValueOnce(new Error('projection delete failed'))
       .mockResolvedValueOnce(undefined)
     const attachmentKeys = {
       retain: vi.fn(),
@@ -417,11 +464,13 @@ describe('MobilePairingController', () => {
       wipe: vi.fn(),
       flush: vi.fn(),
     }
+    const handshake = { begin: vi.fn(), acceptDesktopHandshake: vi.fn(), wipe: vi.fn() }
     const controller = new MobilePairingController({
       installation: installationFixture(),
-      transport,
-      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn(), wipe: vi.fn() },
+      transport: transportFixture(),
+      handshake,
       attachmentKeys,
+      releaseProjectionAuthority,
       scanner: { scan: vi.fn() },
     })
     await controller.activate()
@@ -430,9 +479,13 @@ describe('MobilePairingController', () => {
     expect(controller.getSnapshot()).toEqual({
       status: 'unpair-failed', error: 'Mobile Personal Pairing unpair failed',
     })
+    expect(handshake.wipe).not.toHaveBeenCalled()
+    expect(attachmentKeys.wipe).not.toHaveBeenCalled()
+
     await expect(controller.unpair()).resolves.toBeUndefined()
-    expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledTimes(2)
-    expect(transport.revokeMobilePersonalPairing).toHaveBeenLastCalledWith(expect.objectContaining({ pairingId }))
+    expect(releaseProjectionAuthority).toHaveBeenCalledTimes(2)
+    expect(handshake.wipe).toHaveBeenCalledOnce()
+    expect(attachmentKeys.wipe).toHaveBeenCalledOnce()
     expect(controller.getSnapshot()).toEqual({ status: 'ready' })
   })
 

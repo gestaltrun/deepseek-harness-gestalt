@@ -719,6 +719,30 @@ describe('MobileCompanionSurface', () => {
     })
   })
 
+  it('retains projection ownership until serialized cache destruction can be retried', async () => {
+    const runtime = new CompanionForegroundRuntime()
+    const cached = projection('session-cached', 'Cached')
+    const cache = {
+      save: vi.fn(async () => {}),
+      restore: vi.fn(async () => cached),
+      clearContent: vi.fn(async () => {}),
+      destroy: vi.fn()
+        .mockRejectedValueOnce(new Error('protected cache destroy failed'))
+        .mockResolvedValueOnce(undefined),
+    }
+    const surface = new MobileCompanionSurface(runtime)
+    surface.setProjectionCache(cache)
+    await surface.restoreProjectionCache()
+
+    await expect(surface.releaseProjectionCache(true)).rejects.toThrow('protected cache destroy failed')
+    await expect(surface.restoreProjectionCache()).resolves.toBe(true)
+    expect(surface.getSnapshot().sessions.ids).toEqual(['session-cached'])
+
+    await expect(surface.releaseProjectionCache(true)).resolves.toBeUndefined()
+    expect(cache.destroy).toHaveBeenCalledTimes(2)
+    expect(surface.getSnapshot().sessions.ids).toEqual([])
+  })
+
   it('seals accepted projections and clears offline cache without deleting pairing state', async () => {
     const runtime = connectedRuntime()
     const cache = {

@@ -246,6 +246,8 @@ export interface MobilePairingControllerOptions {
   companion?: MobilePairingLifecycleOwner
   /** Optional retention sink receiving confirmed pairing key material for pairing-scoped consumers. */
   attachmentKeys?: MobilePairingKeyRetention
+  /** Delete the pairing-owned projection only after Platform revocation succeeds. */
+  releaseProjectionAuthority?: () => Promise<void>
   schedule?: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   pollIntervalMs?: number
   now?: () => number
@@ -327,9 +329,15 @@ export class MobilePairingController implements MobilePairingActions {
   async unpair(): Promise<void> {
     await this.exclusive(async () => {
       this.assertActiveAccount()
-      this.attempt?.mobileHandshake.fill(0)
-      this.clearAttempt()
-      const operations: Array<() => void | Promise<void>> = [
+      const settleStage = async (operations: ReadonlyArray<() => void | Promise<void>>): Promise<void> => {
+        try {
+          await settleOwnedCleanup(operations, 'Mobile Personal Pairing unpair failed')
+        } catch (error) {
+          this.publish({ status: 'unpair-failed', error: errorMessage(error) })
+          throw error
+        }
+      }
+      await settleStage([
         async () => {
           if (this.pairingId === undefined) return
           await this.options.transport.revokeMobilePersonalPairing({
@@ -337,6 +345,13 @@ export class MobilePairingController implements MobilePairingActions {
             pairingId: this.pairingId,
           })
         },
+      ])
+      await settleStage([
+        () => this.options.releaseProjectionAuthority?.(),
+      ])
+      this.attempt?.mobileHandshake.fill(0)
+      this.clearAttempt()
+      const operations: Array<() => void | Promise<void>> = [
         () => this.options.handshake.wipe?.(),
         () => this.options.attachmentKeys?.wipe(),
         () => this.options.attachmentKeys?.flush?.(),
@@ -348,12 +363,7 @@ export class MobilePairingController implements MobilePairingActions {
           () => this.options.relay?.stop(),
         )
       }
-      try {
-        await settleOwnedCleanup(operations, 'Mobile Personal Pairing unpair failed')
-      } catch (error) {
-        this.publish({ status: 'unpair-failed', error: errorMessage(error) })
-        throw error
-      }
+      await settleStage(operations)
       this.pairingId = undefined
       this.publish({ status: 'ready' })
     })

@@ -277,6 +277,7 @@ async function mountMobileProduct(): Promise<void> {
       scanner: new NativeMobilePairingQrScanner(),
       relay: companion,
       companion,
+      releaseProjectionAuthority: async () => { await releaseProjectionAuthority(true) },
     })
     const selectProjectionCache = (
       owner: string,
@@ -290,11 +291,13 @@ async function mountMobileProduct(): Promise<void> {
     }
     const releaseProjectionAuthority = async (deleteStored: boolean): Promise<void> => {
       if (projectionOwner === undefined && projectionCache === undefined) return
-      projectionOwner = undefined
-      projectionCache = undefined
+      const releasedCache = projectionCache
       productChannel.setOperationSettlement(undefined)
       companionRuntime()?.invalidateAuthenticatedPeer()
       await companionSurface?.releaseProjectionCache(deleteStored)
+      if (projectionCache !== releasedCache) return
+      projectionOwner = undefined
+      projectionCache = undefined
     }
     const installRetainedProjectionCache = async (): Promise<void> => {
       const accountSnapshot = installation.getSnapshot()
@@ -336,7 +339,6 @@ async function mountMobileProduct(): Promise<void> {
       },
       unpair: async () => {
         await pairingController.unpair()
-        await releaseProjectionAuthority(true)
       },
     }
     let selectedAccountId: string | undefined

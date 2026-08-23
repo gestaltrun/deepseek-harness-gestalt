@@ -26,6 +26,7 @@
     "clean": "tsx scripts/clean.ts",
     "change-scope": "tsx scripts/change-scope.ts",
     "ci:plan": "tsx scripts/ci-plan.ts",
+    "ci:metrics": "tsx scripts/ci-metrics.ts",
     "pr:create": "tsx scripts/create-pull-request.ts",
     "typecheck": "npm run build:lib:host && npm run typecheck:contracts-ready",
     "typecheck:contracts-ready": "tsc -b tsconfig.client.json",

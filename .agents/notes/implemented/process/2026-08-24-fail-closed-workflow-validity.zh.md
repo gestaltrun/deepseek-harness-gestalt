@@ -10,7 +10,7 @@ job 构造字段引用仅在 runner 分配后才存在的上下文时，GitHub �
 
 ## 决策
 
-pull-request workflow 从 `workflow validity` 开始；该 job 使用维护中的 actionlint 镜像检查所有 workflow，其他 pull-request 证据 job 只有在它成功后才可运行，required aggregate 也包含它。
+pull-request 的 `preflight` job 使用维护中的 actionlint 镜像检查所有 workflow，其他 pull-request 证据 job 只有在它成功后才可运行，required aggregate 也包含它。
 
 `.github/actionlint.yaml` 声明仓库自有 runner 标签，并且只忽略有意禁用的 macOS reference job。其他 workflow 诊断必须在无忽略项的情况下通过 actionlint。
 
@@ -28,4 +28,4 @@ Desktop Release workflow 测试还要求 dispatch 默认版本与 `apps/desktop/
 
 ## 结果
 
-pull request 会先运行一个短 hosted job，再分配昂贵证据 job。workflow lint 失败会阻断 required verdict，并指出无效文件与位置。仓库特有的上下文限制保留为显式测试，而不是静默 actionlint 忽略项。Desktop Release 手动 dry run 仍是 GitHub 接受 dispatch 和 Desktop Bundle 打包路径的端到端证明；workflow validation 不会发布 release。
+pull request 会先运行一个短 hosted preflight，再分配昂贵证据 job。workflow lint 失败会阻断 required verdict，并指出无效文件与位置。仓库特有的上下文限制保留为显式测试，而不是静默 actionlint 忽略项。Desktop Release 手动 dry run 仍是 GitHub 接受 dispatch 和 Desktop Bundle 打包路径的端到端证明；workflow validation 不会发布 release。

@@ -10,7 +10,7 @@ GitHub rejects a workflow before allocating any job when a job-construction fiel
 
 ## Decision
 
-The pull-request workflow starts with `workflow validity`, which runs the maintained actionlint image against every workflow before any other pull-request evidence job is admitted. Every other CI job depends on this result, and the required aggregate includes it.
+The pull-request `preflight` job runs the maintained actionlint image against every workflow before any other pull-request evidence job is admitted. Every other CI job depends on this result, and the required aggregate includes it.
 
 `.github/actionlint.yaml` declares repository-owned runner labels and only the intentional disabled macOS reference job exception. Workflow files otherwise satisfy actionlint without ignored diagnostics.
 
@@ -28,4 +28,4 @@ The Desktop Release workflow test also requires the dispatch default version to 
 
 ## Consequences
 
-Pull requests spend one short hosted job before allocating expensive evidence jobs. A workflow-lint failure blocks the required verdict and names the invalid file and location. Repository-specific context restrictions remain explicit tests rather than silent actionlint suppressions. A manual Desktop Release dry run remains the end-to-end proof that GitHub accepts the dispatch and Desktop Bundle packaging path; workflow validation does not publish a release.
+Pull requests spend one short hosted preflight before allocating expensive evidence jobs. A workflow-lint failure blocks the required verdict and names the invalid file and location. Repository-specific context restrictions remain explicit tests rather than silent actionlint suppressions. A manual Desktop Release dry run remains the end-to-end proof that GitHub accepts the dispatch and Desktop Bundle packaging path; workflow validation does not publish a release.

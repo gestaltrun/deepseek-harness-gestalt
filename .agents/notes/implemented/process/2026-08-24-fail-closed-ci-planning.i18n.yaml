@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-24-fail-closed-ci-planning.md
+2026-08-24-fail-closed-ci-planning.md: af5a5c9da77b91c0b78e85027bedfe7af0ab3b50
+2026-08-24-fail-closed-ci-planning.zh.md: d02e1a7706fc61d3a3f7ee89047176d18a9ccae3

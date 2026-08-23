@@ -370,11 +370,21 @@ export function validateIssue(issue) {
 
 /**
  * Validate PR metadata and its referenced Issues.
- * @param {{authorType: string, labels: string[], references: ReturnType<typeof parseReferences>, issues: Map<number, {priority: string|null}>}} input PR snapshot.
+ * @param {{authorType: string, labels: string[], references: ReturnType<typeof parseReferences>, issues: Map<number, {priority: string|null}>, requiredAreas?: string[]}} input PR snapshot.
  * @returns {string[]} Validation errors.
  */
 export function validatePullRequest(input) {
   if (!requiresPullRequestPolicy(input)) return []
+  return validatePullRequestMetadata(input)
+}
+
+/**
+ * Validate PR metadata without applying Draft or review-activity activation.
+ * @param {{authorType: string, labels: string[], references: ReturnType<typeof parseReferences>, issues: Map<number, {priority: string|null}>, requiredAreas?: string[]}} input PR snapshot.
+ * @returns {string[]} Validation errors.
+ */
+export function validatePullRequestMetadata(input) {
+  if (input.authorType === 'Bot' || input.authorType === 'App') return []
   const errors = []
   const kinds = input.labels.filter((label) => PR_KINDS.has(label))
   const unknownKinds = input.labels.filter(
@@ -396,6 +406,8 @@ export function validatePullRequest(input) {
   if (sourceLabels.length > 0) errors.push(`source/* 仅用于 Issue：${sourceLabels.join(', ')}`)
   if (priorities.length > 1) errors.push(`PR 最多有一个 p0–p3，当前为 ${priorities.length}`)
   if (areas.length === 0) errors.push('PR 必须至少有一个 area/*')
+  const missingAreas = (input.requiredAreas ?? []).filter((area) => !areas.includes(area))
+  if (missingAreas.length > 0) errors.push(`PR 缺少相关 area/*：${missingAreas.join(', ')}`)
   for (const number of input.references.all) {
     if (!input.issues.has(number)) errors.push(`#${number} 不是同仓库 Issue`)
   }
@@ -701,6 +713,26 @@ async function pullRequestSnapshot(number) {
   }
 }
 
+async function pullRequestMetadataSnapshot(number) {
+  const pull = await pullRequestReadApi(repositoryApiPath(`/pulls/${number}`))
+  const snapshot = {
+    number,
+    isDraft: pull.draft,
+    authorType: pull.user?.type ?? 'User',
+    reviewRequestCount: 0,
+    reviewCount: 0,
+    labels: pull.labels.map((label) => label.name),
+    references: { all: [], resolving: [], related: [] },
+    issues: new Map(),
+  }
+  if (snapshot.authorType === 'Bot' || snapshot.authorType === 'App') return snapshot
+  const resolving = await resolvingReferencesSnapshot(number, pull, pullRequestReadApi)
+  return {
+    ...snapshot,
+    ...resolving,
+  }
+}
+
 async function lifecyclePullRequestSnapshot(number) {
   const pull = await api(repositoryApiPath(`/pulls/${number}`))
   return resolvingReferencesSnapshot(number, pull)
@@ -736,6 +768,29 @@ async function runPullRequestCheck(event) {
   process.stdout.write('Issue policy 通过。\n')
 }
 
+async function runPullRequestMetadataCheck(event) {
+  const pull = await pullRequestMetadataSnapshot(event.pull_request.number)
+  const errors = validatePullRequestMetadata({
+    ...pull,
+    requiredAreas: requiredPullRequestAreas(),
+  })
+  if (errors.length > 0) {
+    for (const error of errors) process.stdout.write(`::error::${error}\n`)
+    throw new Error(`PR metadata 未通过，共 ${errors.length} 项`)
+  }
+  process.stdout.write('PR metadata 通过。\n')
+}
+
+function requiredPullRequestAreas(environment = process.env) {
+  const raw = environment.DSH_REQUIRED_PR_AREAS
+  if (raw === undefined || raw === '') return []
+  const parsed = JSON.parse(raw)
+  if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== 'string' || !value.startsWith('area/'))) {
+    throw new Error('DSH_REQUIRED_PR_AREAS 必须为 area/* 字符串数组')
+  }
+  return [...new Set(parsed)].sort()
+}
+
 async function runLifecycle(eventName, event) {
   validateLifecycleDeployment()
   if (eventName === 'issues') {
@@ -769,9 +824,10 @@ function readEvent() {
 async function main(argv) {
   const [command] = argv
   if (command === 'pr') await runPullRequestCheck(readEvent())
+  else if (command === 'pr-metadata') await runPullRequestMetadataCheck(readEvent())
   else if (command === 'lifecycle') await runLifecycle(process.env.GITHUB_EVENT_NAME, readEvent())
   else if (command === 'deployment') validateLifecycleDeployment()
-  else throw new Error('用法：policy.mjs pr|lifecycle|deployment')
+  else throw new Error('用法：policy.mjs pr|pr-metadata|lifecycle|deployment')
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -607,6 +607,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
 
   it.each([
     'crash-after-intent',
+    'intent-rollback-readback-fail',
     'main-rollback-readback-fail',
     'main-committed-readback-fail',
   ] as const)('reconciles PostgreSQL publish fencing after %s', async (failure) => {
@@ -1449,6 +1450,7 @@ type LegacySettlementFailure = 'delete-fail' | 'commit-unknown' | 'crash'
 
 type PostgresPublishFailure =
   | 'crash-after-intent'
+  | 'intent-rollback-readback-fail'
   | 'main-rollback-readback-fail'
   | 'main-committed-readback-fail'
 
@@ -1460,6 +1462,7 @@ function postgresPublishFaultPool(base: pg.Pool, failure: PostgresPublishFailure
       let publisher = false
       let transactionNumber = 0
       let backendPid: number | undefined
+      let intentReadbackMustFail = false
       let mainReadbackMustFail = false
       let released = false
       return {
@@ -1476,12 +1479,22 @@ function postgresPublishFaultPool(base: pg.Pool, failure: PostgresPublishFailure
           }
           if (publisher && sql === 'BEGIN') transactionNumber += 1
           if (publisher && transactionNumber === 2
+            && failure === 'intent-rollback-readback-fail'
+            && sql.includes("SET stage = 'intent'")) {
+            intentReadbackMustFail = true
+            throw new Error('intent transaction rolled back')
+          }
+          if (publisher && intentReadbackMustFail
+            && sql.includes('FROM remote_attachment_postgres_publish_intents')) {
+            throw new Error('intent readback unavailable')
+          }
+          if (publisher && transactionNumber === 3
             && failure === 'main-rollback-readback-fail'
             && sql.includes('INSERT INTO remote_attachment_blobs')) {
             mainReadbackMustFail = true
             throw new Error('main publish transaction rolled back')
           }
-          if (publisher && transactionNumber === 2
+          if (publisher && transactionNumber === 3
             && failure === 'main-committed-readback-fail' && sql === 'COMMIT') {
             await client.query(sql, values)
             mainReadbackMustFail = true
@@ -1492,7 +1505,7 @@ function postgresPublishFaultPool(base: pg.Pool, failure: PostgresPublishFailure
             && sql.includes('FROM remote_attachment_blobs')) {
             throw new Error('main publish readback unavailable')
           }
-          if (publisher && transactionNumber === 1 && failure === 'crash-after-intent' && sql === 'COMMIT') {
+          if (publisher && transactionNumber === 2 && failure === 'crash-after-intent' && sql === 'COMMIT') {
             await client.query(sql, values)
             if (backendPid === undefined) throw new TypeError('publish fixture backend pid is unavailable')
             await base.query('SELECT pg_terminate_backend($1)', [backendPid])

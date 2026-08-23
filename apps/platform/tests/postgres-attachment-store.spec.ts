@@ -32,6 +32,7 @@ describe('PostgreSQL remote attachment durable rows', () => {
         if (sql.includes('SELECT phase FROM remote_attachment_storage_phase')) {
           return { rows: [{ phase: 'legacy' }], rowCount: 1 }
         }
+        if (sql.includes('remote_attachment_postgres_publish_intents')) return { rows: [], rowCount: 0 }
         if (sql.includes('SELECT capability_digest')) return { rows: [row], rowCount: 1 }
         if (sql.includes('DELETE FROM remote_attachment_blobs')) {
           return { rows: [{ quota_reservation_id: 'quota-expired' }], rowCount: 1 }
@@ -71,7 +72,13 @@ describe('PostgreSQL remote attachment durable rows', () => {
     expect(release).toHaveBeenCalledTimes(1)
   })
 
-  it.each(['committed', 'absent', 'readback-fail', 'intent-commit-unknown'] as const)(
+  it.each([
+    'committed',
+    'absent',
+    'readback-fail',
+    'intent-commit-unknown',
+    'recovery-rollback-readback-fail',
+  ] as const)(
     'resolves an unknown publish transaction outcome when durable state is %s',
     async (outcome) => {
       const context = new Context()
@@ -83,10 +90,12 @@ describe('PostgreSQL remote attachment durable rows', () => {
       let transactionStage = 0
       let pendingIntent: Record<string, unknown> | undefined
       let durableIntent: Record<string, unknown> | undefined
+      let pendingIntentStage = false
       let pendingBlob: Record<string, unknown> | undefined
       let durableBlob: Record<string, unknown> | undefined
       let pendingOutbox = false
       let durableOutbox = false
+      let recoveryReadbackMustFail = false
       const client = {
         query: async (sql: string, values?: unknown[]) => {
           if (sql === 'BEGIN') {
@@ -98,6 +107,7 @@ describe('PostgreSQL remote attachment durable rows', () => {
           }
           if (sql.includes('SELECT capability_digest')
             && sql.includes('FROM remote_attachment_postgres_publish_intents')) {
+            if (recoveryReadbackMustFail) throw new Error('recovery readback unavailable')
             return {
               rows: durableIntent === undefined ? [] : [durableIntent],
               rowCount: durableIntent === undefined ? 0 : 1,
@@ -106,11 +116,19 @@ describe('PostgreSQL remote attachment durable rows', () => {
           if (sql.includes('DELETE FROM remote_attachment_blobs')) return { rows: [], rowCount: 0 }
           if (sql.includes('SELECT COUNT(*)::text')) return { rows: [{ count: '0' }], rowCount: 1 }
           if (sql.includes('INSERT INTO remote_attachment_postgres_publish_intents')) {
+            if (outcome === 'recovery-rollback-readback-fail') {
+              recoveryReadbackMustFail = true
+              throw new Error('recovery transaction rolled back')
+            }
             pendingIntent = {
               capability_digest: values?.[1], pairing_id: values?.[2], ciphertext: values?.[3],
-              expires_at: values?.[4], quota_reservation_id: values?.[5],
+              expires_at: values?.[4], quota_reservation_id: values?.[5], stage: 'recovery',
             }
             return { rows: [], rowCount: 1 }
+          }
+          if (sql.includes('UPDATE remote_attachment_postgres_publish_intents')) {
+            pendingIntentStage = true
+            return { rows: [], rowCount: durableIntent === undefined ? 0 : 1 }
           }
           if (sql.includes('DELETE FROM remote_attachment_postgres_publish_intents')) {
             return {
@@ -144,10 +162,17 @@ describe('PostgreSQL remote attachment durable rows', () => {
             if (transactionStage === 1) {
               durableIntent = pendingIntent
               pendingIntent = undefined
-              if (outcome === 'intent-commit-unknown') throw new Error('intent COMMIT outcome is unknown')
               return { rows: [], rowCount: 0 }
             }
             if (transactionStage === 2) {
+              if (pendingIntentStage && durableIntent !== undefined) durableIntent.stage = 'intent'
+              pendingIntentStage = false
+              if (outcome === 'intent-commit-unknown') {
+                throw new Error('intent COMMIT outcome is unknown')
+              }
+              return { rows: [], rowCount: 0 }
+            }
+            if (transactionStage === 3) {
               if (outcome === 'intent-commit-unknown') {
                 durableIntent = undefined
                 durableBlob = pendingBlob
@@ -159,7 +184,7 @@ describe('PostgreSQL remote attachment durable rows', () => {
               }
               throw new Error('publish COMMIT outcome is unknown')
             }
-            if (transactionStage === 3) {
+            if (transactionStage === 4) {
               durableIntent = undefined
               durableOutbox = pendingOutbox
               return { rows: [], rowCount: 0 }
@@ -205,9 +230,13 @@ describe('PostgreSQL remote attachment durable rows', () => {
         await expect(publishing).rejects.toThrow('publish COMMIT outcome is unknown')
         expect(inputRelease).not.toHaveBeenCalled()
         expect(durableRelease).toHaveBeenCalledTimes(1)
-      } else {
+      } else if (outcome === 'readback-fail') {
         await expect(publishing).rejects.toThrow('PostgreSQL attachment publish outcome is uncertain')
         expect(inputRelease).not.toHaveBeenCalled()
+        expect(durableRelease).not.toHaveBeenCalled()
+      } else {
+        await expect(publishing).rejects.toThrow('PostgreSQL attachment publish outcome is uncertain')
+        expect(inputRelease).toHaveBeenCalledTimes(1)
         expect(durableRelease).not.toHaveBeenCalled()
       }
     },

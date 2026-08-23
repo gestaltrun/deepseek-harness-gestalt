@@ -30,7 +30,7 @@ import {
 } from '@deepseek-ai/dsh-agent'
 import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {
   Context,
   SidebarAgentPresetsService,
@@ -52,7 +52,7 @@ import { requireString, SidebarError } from './wire.ts'
 /** Side Chat routes of the sidebar API (wire method names). */
 export interface SidechatRoutes {
   /** Create a child from the parent state at first-submit time and admit that prompt. */
-  'sidechat.start'(payload: unknown): Promise<{ childId: string; accepted: true }>
+  'sidechat.start'(payload: unknown): Promise<{ childId: SessionId; accepted: true }>
   /** Deliver one queued or steering message to a thread (live, or cold-resumed). */
   'sidechat.prompt'(payload: unknown): Promise<{ accepted: true }>
   /** Read the draft, live child, or parent model selection and route availability. */
@@ -99,15 +99,14 @@ function queueActionOf(payload: unknown): SidechatQueueAction {
 }
 
 /** Apply one canonical queue mutation to the Side Chat's live Agent. */
-function updateThreadQueue(agent: Agent, itemId: string, action: SidechatQueueAction): void {
-  const id = MessageId(itemId)
-  const target = agent.inbox.nextTurn.some(message => message.id === id)
+function updateThreadQueue(agent: Agent, itemId: MessageId, action: SidechatQueueAction): void {
+  const target = agent.inbox.nextTurn.some(message => message.id === itemId)
     ? 'next-turn'
-    : agent.inbox.nextStep.some(message => message.id === id) ? 'next-step' : undefined
+    : agent.inbox.nextStep.some(message => message.id === itemId) ? 'next-step' : undefined
   const messages = target === 'next-turn'
     ? agent.inbox.nextTurn
     : target === 'next-step' ? agent.inbox.nextStep : undefined
-  const message = messages?.find(candidate => candidate.id === id)
+  const message = messages?.find(candidate => candidate.id === itemId)
   if (target === undefined || message === undefined) {
     throw new SidebarError('queue-item-not-found', 'queued item is no longer pending', 409)
   }
@@ -115,10 +114,10 @@ function updateThreadQueue(agent: Agent, itemId: string, action: SidechatQueueAc
     throw new SidebarError('steer-unavailable', 'current turn no longer accepts steering', 409)
   }
   if (action.kind === 'edit') {
-    agent.inbox.replace(id, freezeMessage({ ...message, content: action.content }))
+    agent.inbox.replace(itemId, freezeMessage({ ...message, content: action.content }))
     return
   }
-  agent.inbox.remove(id)
+  agent.inbox.remove(itemId)
   if (action.kind === 'steer') agent.steer(message)
 }
 
@@ -234,7 +233,7 @@ async function composeChildSetup(
  *  recorded preset wins, newest selection event first). */
 async function composePersistedSetup(
   ctx: Context,
-  childId: string,
+  childId: SessionId,
 ): Promise<AgentSetup> {
   const persistence = ctx.get('sessionPersistence') as SidebarSessionPersistenceService | undefined
   if (persistence === undefined) {
@@ -283,7 +282,7 @@ function admitFirstContact(agent: Agent, injectionText: string, question: string
 }
 
 /** The live thread agent, or undefined (cold — the caller resumes). */
-function liveThreadAgent(ctx: Context, childId: string): Agent | undefined {
+function liveThreadAgent(ctx: Context, childId: SessionId): Agent | undefined {
   const agents = ctx.get('agents') as { get(id: string): Agent | undefined } | undefined
   return agents?.get(childId)
 }
@@ -293,9 +292,9 @@ function liveThreadAgent(ctx: Context, childId: string): Agent | undefined {
  *  names the /sidebar/api dispatcher looks up (`api[method]`). */
 export function buildSidechatApi(ctx: Context): SidechatApi {
   /** Disposers of thread agents created by this activation. */
-  const threadDisposers = new Map<string, () => Promise<void>>()
+  const threadDisposers = new Map<SessionId, () => Promise<void>>()
   /** Mutable selections installed into live Side Chat Agent scopes. */
-  const threadSelections = new Map<string, ModelSelectionRef>()
+  const threadSelections = new Map<SessionId, ModelSelectionRef>()
   const inFlight = new Set<Promise<void>>()
   let stopping = false
   let teardown: Promise<void> | undefined
@@ -311,8 +310,8 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
 
   const rawRoutes: SidechatRoutes = {
     'sidechat.start': async (payload: unknown) => {
-      const sessionId = requireString(payload, 'sessionId')
-      const childId = requireString(payload, 'childId') as SessionId
+      const sessionId = SessionId(requireString(payload, 'sessionId'))
+      const childId = SessionId(requireString(payload, 'childId'))
       const text = requireString(payload, 'text').trim()
       if (text === '') throw new SidebarError('bad-request', 'text is required')
       const parent = liveThreadAgent(ctx, sessionId)
@@ -397,7 +396,7 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
     },
 
     'sidechat.prompt': async (payload: unknown) => {
-      const childId = requireString(payload, 'childId')
+      const childId = SessionId(requireString(payload, 'childId'))
       const text = requireString(payload, 'text').trim()
       const rawMode = requireString(payload, 'mode')
       if (rawMode !== 'queue' && rawMode !== 'steer') {
@@ -448,9 +447,9 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
     },
 
     'sidechat.model': async (payload: unknown) => {
-      const childId = requireString(payload, 'childId')
+      const childId = SessionId(requireString(payload, 'childId'))
       const parentSessionId = typeof (payload as { parentSessionId?: unknown }).parentSessionId === 'string'
-        ? (payload as { parentSessionId: string }).parentSessionId
+        ? SessionId((payload as { parentSessionId: string }).parentSessionId)
         : undefined
       const retained = threadSelections.get(childId)?.current
       const agent = liveThreadAgent(ctx, childId)
@@ -468,7 +467,7 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
     },
 
     'sidechat.selectModel': async (payload: unknown) => {
-      const childId = requireString(payload, 'childId')
+      const childId = SessionId(requireString(payload, 'childId'))
       const requested = modelSelectionOf((payload as { selection?: unknown }).selection)
       if (requested === undefined) throw new SidebarError('bad-request', 'selection is required')
       const selected = await resolveModelSelection(ctx, requested)
@@ -509,7 +508,7 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
     },
 
     'sidechat.cancel': async (payload: unknown) => {
-      const childId = requireString(payload, 'childId')
+      const childId = SessionId(requireString(payload, 'childId'))
       const agent = liveThreadAgent(ctx, childId)
       if (agent !== undefined) {
         agent.cancel({ kind: 'user' }, { keepInbox: true })
@@ -518,8 +517,8 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
     },
 
     'sidechat.updateQueue': async (payload: unknown) => {
-      const childId = requireString(payload, 'childId')
-      const itemId = requireString(payload, 'itemId')
+      const childId = SessionId(requireString(payload, 'childId'))
+      const itemId = MessageId(requireString(payload, 'itemId'))
       const agent = liveThreadAgent(ctx, childId)
       if (agent === undefined) {
         throw new SidebarError('queue-item-not-found', 'queued item is no longer pending', 409)
@@ -529,8 +528,8 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
     },
 
     'sidechat.permission': async (payload: unknown) => {
-      const childId = requireString(payload, 'childId')
-      const parentSessionId = requireString(payload, 'parentSessionId')
+      const childId = SessionId(requireString(payload, 'childId'))
+      const parentSessionId = SessionId(requireString(payload, 'parentSessionId'))
       const preset = requireString(payload, 'preset')
       const permissions = ctx.get('permissionPresets') as SidechatPermissionService | undefined
       if (permissions === undefined) {
@@ -542,11 +541,6 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
       const parent = liveThreadAgent(ctx, parentSessionId)
       if (parent === undefined) {
         throw new SidebarError('sidechat-error', `parent session "${parentSessionId}" is not running`, 409)
-      }
-      const provisional = (payload as { provisional?: unknown }).provisional === true
-      if (provisional) {
-        permissions.setAgent(parent, preset)
-        return { selected: preset }
       }
       const child = liveThreadAgent(ctx, childId)
       if (child === undefined) {
@@ -561,7 +555,7 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
     },
 
     'sidechat.dispose': async (payload: unknown) => {
-      const childId = requireString(payload, 'childId')
+      const childId = SessionId(requireString(payload, 'childId'))
       threadSelections.delete(childId)
       const dispose = threadDisposers.get(childId)
       if (dispose !== undefined) {

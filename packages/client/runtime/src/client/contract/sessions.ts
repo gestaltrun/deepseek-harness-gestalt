@@ -58,6 +58,8 @@ export interface SessionAdmissionAdapter {
   ): Promise<RpcResult<{ accepted: true }>>
   /** Execute one supported human command through the feature's ownership route. */
   command?(sessionId: SessionId, line: string): Promise<RemoteResult<{ matched: boolean }>>
+  /** Whether the ordinary command catalog and executor may address this Session. */
+  commandCatalogSessionId?(sessionId: SessionId): SessionId | undefined
   /** Session whose skill catalog describes this feature-owned Session; omission hides skills. */
   skillCatalogSessionId?(sessionId: SessionId): SessionId | undefined
   /** Feature-owned model route; omission hides model selection for handled Sessions. */
@@ -80,6 +82,8 @@ export interface ISessions {
   registerAdmissionAdapter?(adapter: SessionAdmissionAdapter): () => void
   /** Route model inspection and selection for one ordinary or feature-owned Session. */
   modelRoute(sessionId: SessionId): SessionModelRoute | undefined
+  /** Resolve the safe ordinary-command address; omission hides commands for a feature-owned Session. */
+  commandCatalogSessionId(sessionId: SessionId): SessionId | undefined
   /** Resolve the safe read-only skill catalog address for an ordinary or feature-owned Session. */
   skillCatalogSessionId(sessionId: SessionId): SessionId | undefined
   /** Project a client-only Session identity until its feature publishes the Host Session. */

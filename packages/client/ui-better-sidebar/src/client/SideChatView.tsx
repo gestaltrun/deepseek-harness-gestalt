@@ -1,5 +1,6 @@
 /** Side Chat tab shell over the canonical explicit-Session conversation renderer. */
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { Context } from '../context-types.ts'
 import { SIDE_LABEL_PREFIX, SIDE_NEW_THREAD_TITLE } from '../sidechat-core.ts'
 import { registerSidechatDraft } from './api.ts'
@@ -9,9 +10,9 @@ import type { SidebarTab } from './state.ts'
 import css from './SideChatView.module.css'
 
 /** The thread a tab is bound to (durable in tab.meta across refreshes). */
-export function sidechatThreadIdOf(tab: SidebarTab): string | undefined {
+export function sidechatThreadIdOf(tab: SidebarTab): SessionId | undefined {
   const meta = tab.meta as { threadId?: unknown } | undefined
-  return typeof meta?.threadId === 'string' ? meta.threadId : undefined
+  return typeof meta?.threadId === 'string' ? meta.threadId as SessionId : undefined
 }
 
 /** Root Side Chat identity whose live handle belongs to this navigable tab. */

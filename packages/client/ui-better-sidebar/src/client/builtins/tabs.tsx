@@ -8,6 +8,7 @@
  * (the old standalone explorer merged into it).
  */
 import { IconBranchOutline16, IconCodeOutline16, IconFolderOpen16, IconNewChatOutline16, IconPanelLeftOutline16, IconThinkOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { Context } from '../../context-types.ts'
 import { allLeaves, isAgentTabId, type SidebarState } from '../state.ts'
 import { t } from '../locales.ts'
@@ -181,7 +182,7 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
       // Every side conversation reserves a client identity. The first prompt,
       // not opening the tab, publishes the Host Session under that identity.
       createTab: () => {
-        const threadId = `session-${crypto.randomUUID()}`
+        const threadId = `session-${crypto.randomUUID()}` as SessionId
         return { tab: {
           id: `sidechat:${threadId}`,
           type: 'sidechat',

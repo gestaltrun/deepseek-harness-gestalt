@@ -14,13 +14,13 @@
  * services off a per-call argument. Draft chip visuals derive from
  * the lexicon scan; this source implements no reference codec.
  *
- * Catalog fetches are cached per session (the small twin of the ui-commands
- * directory): the per-keystroke candidates re-poll filters a settled
- * snapshot locally, so one session costs one RPC. The scope-birth warm hook
- * prewarms the session's key; a preset switch drops that one key (the
- * catalog is the preset's, and a blank session may switch after the warm);
- * connection/reset clears everything — the host
- * catalog may differ across generations. A shared in-flight fetch
+ * Catalog fetches are cached per rendered session (the small twin of the
+ * ui-commands directory) together with the resolved catalog Session: the
+ * per-keystroke candidates re-poll filters a settled snapshot locally, and
+ * a feature-owned Session refetches when its catalog address changes. The
+ * scope-birth warm hook prewarms the session's key; a preset switch drops
+ * entries rendered by or addressed to that Session; connection/reset clears
+ * everything — the host catalog may differ across generations. A shared in-flight fetch
  * deliberately outlives any single menu interaction: closing the menu must
  * not kill the prewarm other consumers will hit, so it carries its own
  * abort (fired only on invalidation/teardown) while a candidates caller
@@ -47,6 +47,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** One session's catalog fetch: the shared promise plus its own abort handle. */
 interface CatalogFetch {
+  /** Catalog identity resolved when this fetch began. */
+  readonly catalogSessionId: SessionId
   readonly promise: Promise<readonly SkillEntry[]>
   readonly abort: AbortController
   /** Settled catalog for synchronous lexicon reads (unset while in flight or on failure). */
@@ -92,14 +94,19 @@ export function apply(ctx: ClientContext): void {
     const catalogSessionId = sessions.skillCatalogSessionId(sessionId)
     if (catalogSessionId === undefined) return Promise.resolve([])
     const existing = fetches.get(sessionId)
-    if (existing !== undefined) return existing.promise
+    if (existing?.catalogSessionId === catalogSessionId) return existing.promise
+    if (existing !== undefined) {
+      fetches.delete(sessionId)
+      existing.abort.abort()
+      notifyLexicon(sessionId)
+    }
     const abort = new AbortController()
     const promise = (async () => {
       const { result } = await skills.list({ sessionId: catalogSessionId }, abort.signal)
       if (!result.ok) throw new Error(`skill.list failed: ${result.error.code}: ${result.error.message}`)
       return result.value.skills
     })()
-    const entry: CatalogFetch = { promise, abort }
+    const entry: CatalogFetch = { catalogSessionId, promise, abort }
     fetches.set(sessionId, entry)
     promise.then(
       // Settled snapshot backs the synchronous lexicon reads.
@@ -116,11 +123,12 @@ export function apply(ctx: ClientContext): void {
   }
 
   const invalidate = (key: SessionId): void => {
-    const entry = fetches.get(key)
-    if (entry === undefined) return
-    fetches.delete(key)
-    entry.abort.abort()
-    notifyLexicon(key)
+    for (const [sessionId, entry] of [...fetches]) {
+      if (sessionId !== key && entry.catalogSessionId !== key) continue
+      fetches.delete(sessionId)
+      entry.abort.abort()
+      notifyLexicon(sessionId)
+    }
   }
 
   const clearAll = (): void => {
@@ -154,7 +162,10 @@ export function apply(ctx: ClientContext): void {
       fetchCatalog(session.sessionId).catch(() => {})
     },
     lexicon(session) {
-      return fetches.get(session.sessionId)?.settled?.map(skill => skill.name)
+      const entry = fetches.get(session.sessionId)
+      const catalogSessionId = sessions.skillCatalogSessionId(session.sessionId)
+      if (entry === undefined || entry.catalogSessionId !== catalogSessionId) return undefined
+      return entry.settled?.map(skill => skill.name)
     },
     subscribeLexicon(session, listener) {
       const key = session.sessionId

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-20-chat-browser-tool-focus-dock.md
 2026-08-20-chat-browser-tool-focus-dock.md: 972f959003e2e22e805d132edf2111e6b41ccf5e
-2026-08-20-chat-browser-tool-focus-dock.zh.md: 7b0954f02f0e96511f8aa225e963352755e4d7f3
+2026-08-20-chat-browser-tool-focus-dock.zh.md: 294087c6b60a7cad91c6f05b80769a86690339ef

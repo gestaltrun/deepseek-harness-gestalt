@@ -14,7 +14,7 @@ Status: implemented
 
 `configured` 仍只看占用或 secret slot。首次运行渲染是另一条列表谓词 `listedProviderRows`。
 
-整分节官方行在占用或联接报告 `credential.configured === true` 时出现在列表中。取消设置分节根会留下 `user: {}`，这是删除残余；没有已存凭据时不出现在列表中。首次运行不再列出从未写入的官方行；该翻转见 [首次运行不预置官方 DeepSeek](2026-08-22-first-run-does-not-mint-official-deepseek.md)。
+整分节官方行在占用或联接报告 `credential.configured === true` 时出现在列表中。取消设置分节根会留下 `user: {}`，这是删除残余；没有已存凭据时不出现在列表中。首次运行不再列出从未写入的官方行；该翻转见 [首次运行不预置官方 DeepSeek](2026-08-22-first-run-does-not-mint-official-deepseek.zh.md)。
 
 只有在已列出的官方行还没有存储凭据、且联接中没有其他行可以提供服务时，才提供设置卡片。删除会在页面重新联接之前把 `settings.mutate` 的应答折进共享 describe mirror，因为 `ensure` 不会对已经 ready 的 mirror 再读一次。
 

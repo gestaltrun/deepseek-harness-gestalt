@@ -6,7 +6,7 @@
 
 ## 登录与会话生命周期
 
-安装在创建五分钟 `LoginAttemptView` 前接受唯一规范的双语隐私说明。Mobile 会先准备登录尝试，再允许点击授权按钮；按钮的用户激活会直接调用 Capacitor Browser 适配器，Desktop 则委托 Electron `shell.openExternal`。系统浏览器使用带 S256 PKCE、随机 state、无 OAuth scope 的 Authorization Code，并返回唯一固定的 HTTPS Platform 回调。应用不会收到回调凭证或携带令牌的自定义 URL；只有 P-256 `AccountProof` 兑换单次使用的签名轮询令牌后，`LoginPollResult` 才会完成。
+Installation 在创建五分钟 `LoginAttemptView` 前接受唯一规范的双语隐私说明。Mobile 将 Device adapter 返回的名称及 iOS 或 Android 平台绑定到该 attempt，Platform 再把该展示随 Account Session 持久化；`currentInstallation()` 的调用方只有证明 Mobile Installation 密钥后才能获得它。Mobile 会先准备 attempt，再允许点击授权按钮；按钮的用户激活会直接调用 Capacitor Browser adapter，Desktop 则委托 Electron `shell.openExternal`。系统浏览器使用带 S256 PKCE、随机 state、无 OAuth scope 的 Authorization Code，并返回唯一固定的 HTTPS Platform 回调。应用不会收到回调凭证或携带 token 的自定义 URL；只有 P-256 `AccountProof` 兑换单次使用的签名轮询 token 后，`LoginPollResult` 才会完成。
 
 `AccountSessionView` 包含 15 分钟访问令牌和有效期最多 30 天的轮换刷新令牌。只有完整 15 分钟访问期限能落在该绝对限制内时才接受刷新；过晚的请求会在消费证明或轮换令牌前被拒绝。当前账号读取、刷新和退出都通过品牌化的单次证明 JTI 来证明持有安装密钥。不透明 `AccountSessionId` 是 Platform 实例之间共享的失效身份。
 
@@ -33,11 +33,11 @@ Platform Account capability. Providers own OAuth, installation-key binding, toke
 ```ts cordis-catalog
 /**
  * Start one GitHub Authorization Code attempt for an installation key.
- * @param input - installation identity, kind, and public P-256 JWK.
+ * @param input - installation identity, Mobile presentation when applicable, and public P-256 JWK.
  * @returns the system-browser URL and signed polling capability.
  * @throws AccountError `PLATFORM_CAPACITY` with `retryAfter` when the shared watermark is shedding.
  */
-abstract beginLogin(input: { installationId: InstallationId installationKind: 'desktop' | 'mobile' publicKey: JsonWebKey }): Promise<LoginAttemptView>
+abstract beginLogin(input: InstallationLoginIdentity & { publicKey: JsonWebKey }): Promise<LoginAttemptView>
 
 /**
  * Settle the fixed HTTPS GitHub callback; provider credentials never leave the provider.
@@ -72,7 +72,7 @@ abstract current(input: { accessToken: string; proof: AccountProof }): Promise<P
 /**
  * Authenticate the Account and Installation identity bound to one current session.
  * @param input - access token and proof from the session's Installation key.
- * @returns provider-owned Account id, Installation id, and Installation kind.
+ * @returns provider-owned Account and Installation identity, including authenticated Mobile presentation.
  */
 abstract currentInstallation(input: { accessToken: string proof: AccountProof }): Promise<AuthenticatedInstallationView>
 

@@ -20,7 +20,7 @@ Schedule 贡献独立的 `schedules` Session projection，其中按创建顺序�
 
 Web app bundle 包含 A 版 Session 标题栏入口，顺序为 30，紧接在后台任务之后。它仅在 Host 挂载 Schedule Remote 贡献时激活，并在 projection 为空时保持缺席。触发器计数包含 scheduled 与 overdue 记录，并排除 paused 记录。任务板保持创建顺序，展示 scheduled、overdue 与 paused 行，并提供 pause、resume 与 delete。delete 需要行内二次确认。任务板没有创建表单；创建仍通过面向模型的 `schedule_create` 完成。
 
-任务板不是投递回执。提醒的 assistant 输出仍只按照[对话式投递决策](../simplification/2026-08-09-conversational-schedule-delivery.md)，作为普通后续对话轮次到达。任务板只说明 Schedule 当前保留什么、投递是否暂停，绝不说明模型回答是否成功或用户是否已读。它部分扩展了[持久 Schedule 决策](2026-08-05-durable-web-schedule.md)，但不改变其 Session-local 投递边界。
+任务板不是投递回执。提醒的 assistant 输出仍只按照[对话式投递决策](../simplification/2026-08-09-conversational-schedule-delivery.zh.md)，作为普通后续对话轮次到达。任务板只说明 Schedule 当前保留什么、投递是否暂停，绝不说明模型回答是否成功或用户是否已读。它部分扩展了[持久 Schedule 决策](2026-08-05-durable-web-schedule.zh.md)，但不改变其 Session-local 投递边界。
 
 ## 考虑过的替代方案
 

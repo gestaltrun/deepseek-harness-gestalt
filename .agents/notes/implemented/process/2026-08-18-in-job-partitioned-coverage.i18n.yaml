@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-18-in-job-partitioned-coverage.md
 2026-08-18-in-job-partitioned-coverage.md: 7aa6b180b7880c2d9272ccceb3e190b4f666eaf1
-2026-08-18-in-job-partitioned-coverage.zh.md: bd57c772c6e9fad85668e99798af1c24ed08061d
+2026-08-18-in-job-partitioned-coverage.zh.md: 17a4a15245a216f72dbbcfa8cd976906ef0dbb99

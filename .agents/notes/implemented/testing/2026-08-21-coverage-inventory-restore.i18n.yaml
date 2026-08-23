@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-08-21-coverage-inventory-restore.md
 2026-08-21-coverage-inventory-restore.md: 07ac3e74f08f57674dac37558d4313ce1663049a
-2026-08-21-coverage-inventory-restore.zh.md: a619aad98062857193de8c24efb17cf4e97e1f8b
+2026-08-21-coverage-inventory-restore.zh.md: de24ed34c1fc5f8445defdf36baec8c1d01567f6

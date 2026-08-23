@@ -14,12 +14,13 @@ import {
   WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_COPY, WELCOME_NOTICE_SETTINGS_NAMESPACE,
   WELCOME_NOTICE_VERSION,
 } from './scaffold.ts'
-import { ZH_BROWSER_LOCALE, saveFailureShot } from './support.ts'
+import { ZH_BROWSER_LOCALE, connectFreshWorkspaceZh, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/onboarding-deepseek-config', import.meta.url))
 const WELCOME_EXPECTED = join(SNAPSHOT_DIR, 'welcome.expected.md')
 const MISSING_EXPECTED = join(SNAPSHOT_DIR, 'missing.expected.md')
 const MODELS_EXPECTED = join(SNAPSHOT_DIR, 'models.expected.md')
+const CUSTOM_MODELS_EXPECTED = join(SNAPSHOT_DIR, 'custom-models.expected.md')
 const MODE = webSnapshotMode()
 const CONFIGURE_STEP = '配置模型即可开始使用'
 
@@ -167,10 +168,85 @@ describe.skipIf(MODE === 'record')('web e2e: first-run configure-models onboardi
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 
+  it('persists arbitrary DeepSeek models and falls back after the selected model is removed', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-onboarding-deepseek-models'))
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    const settings = page.getByRole('dialog', { name: '设置' })
+    await settings.waitFor({ timeout: 10_000 })
+    await settings.getByRole('button', { name: '模型' }).click()
+
+    await settings.getByRole('button', { name: '添加提供方' }).click()
+    const provider = settings.getByLabel('提供方')
+    await provider.selectOption('deepseek')
+    const secret = `dsh_deepseek_models_${randomBytes(12).toString('hex')}`
+    await settings.getByRole('textbox', { name: 'API 密钥', exact: true }).fill(secret)
+    await settings.getByText('自定义设置').click()
+    for (const [index, id, name] of [
+      [1, 'deepseek-v4-flash', 'DeepSeek-V4-Flash'],
+      [2, 'deepseek-v4-pro', 'DeepSeek-V4-Pro'],
+      [3, 'deepseek-v4-flash-vision-exp', 'DeepSeek-V4-Flash-Vision-Exp'],
+    ] as const) {
+      await settings.getByRole('button', { name: '添加模型' }).click()
+      await settings.getByLabel(`模型 ID ${String(index)}`).fill(id)
+      await settings.getByLabel(`显示名称 ${String(index)}`).fill(name)
+    }
+    await settings.getByRole('button', { name: '保存', exact: true }).click()
+    await settings.getByText('已保存 deepseek。', { exact: true }).waitFor({ timeout: 15_000 })
+
+    await page.keyboard.press('Escape')
+    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'model-fallback-e2e')
+    const modelTrigger = page.getByRole('button', { name: /^选择模型/ })
+    await modelTrigger.click()
+    await page.getByRole('menuitem', { name: /模型/ }).click()
+    await page.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash', exact: true }).click()
+
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    await settings.waitFor({ timeout: 10_000 })
+    await settings.getByRole('button', { name: '模型' }).click()
+
+    const deepSeek = settings.getByText('deepseek', { exact: true }).first()
+    await deepSeek.locator('xpath=ancestor::li').getByRole('button', { name: '编辑' }).click()
+    await settings.getByText('自定义设置').click()
+    await settings.getByRole('button', { name: /删除模型/ }).first().click()
+    await settings.getByRole('button', { name: '添加模型' }).click()
+    const customModelId = settings.getByLabel('模型 ID 3')
+    await customModelId.fill('private-preview')
+    await settings.getByLabel('显示名称 3').fill('Private Preview')
+    await settings.getByRole('button', { name: '容量 3' }).click()
+    await settings.getByLabel('上下文窗口 3').fill('131072')
+    await settings.getByLabel(/^最大输出 token(?: 数)? 3$/).fill('64K')
+
+    await compareOrRefreshGolden(
+      CUSTOM_MODELS_EXPECTED,
+      await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd),
+      MODE,
+    )
+    await settings.getByRole('button', { name: '保存', exact: true }).click()
+    await customModelId.waitFor({ state: 'detached', timeout: 15_000 })
+
+    const document = await readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8')
+    expect(document).toContain('id: deepseek-v4-pro')
+    expect(document).toContain('id: deepseek-v4-flash-vision-exp')
+    expect(document).toContain('id: private-preview')
+    expect(document).toContain('name: Private Preview')
+    expect(document).toContain('contextWindow: 131072')
+    expect(document).toContain('maxTokens: 64000')
+    expect(document).not.toMatch(/^\s*- id: deepseek-v4-flash$/m)
+
+    await page.keyboard.press('Escape')
+    await modelTrigger.click()
+    await page.getByRole('menuitem', { name: /模型/ }).click()
+    expect(await page.getByText('deepseek-v4-flash', { exact: true }).count()).toBe(0)
+    await page.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash-Vision-Exp' }).waitFor({ timeout: 10_000 })
+    await page.getByRole('menuitemradio', { name: 'Private Preview' }).waitFor({ timeout: 10_000 })
+    expect(tripwire.warnings).toEqual([])
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
   it('keeps the fixture inventory closed', async () => {
     await assertFixtureInventory(
       SNAPSHOT_DIR,
-      ['welcome.expected.md', 'missing.expected.md', 'models.expected.md'],
+      ['welcome.expected.md', 'missing.expected.md', 'models.expected.md', 'custom-models.expected.md'],
     )
   })
 })

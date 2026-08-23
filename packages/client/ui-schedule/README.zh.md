@@ -8,7 +8,7 @@
 
 本包只读取独立的 `schedules` Session projection。它不在浏览器中折叠 `schedule/change`，也不从 transcript 或工具调用渲染推断提醒状态。Client 时钟根据 `scheduledAt` 推导等待中或待补跑展示；持久化的 `paused` 标志来自 projection。Escape 会关闭任务板并将焦点还给触发器，点击外部会关闭任务板，空 projection 会在入口消失前关闭任务板。
 
-行为由 [Session Schedule 任务板 Agent Note](../../../.agents/notes/implemented/feature/2026-08-17-session-schedule-board.md) 规定。
+行为由 [Session Schedule 任务板 Agent Note](../../../.agents/notes/implemented/feature/2026-08-17-session-schedule-board.zh.md) 规定。
 
 ## 模型体验
 

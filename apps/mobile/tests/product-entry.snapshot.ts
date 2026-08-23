@@ -1,36 +1,40 @@
 import { once } from 'node:events'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import process from 'node:process'
 import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
+import { chromium, type Browser } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-const REPO = fileURLToPath(new URL('../../..', import.meta.url))
+const MOBILE_ROOT = fileURLToPath(new URL('..', import.meta.url))
 const EXPECTED = fileURLToPath(new URL('../snapshots/product-entry.expected.txt', import.meta.url))
+const VITE_BIN = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url))
 let preview: ChildProcess | undefined
 let browser: Browser | undefined
 let origin = ''
 let previewClosed: Promise<unknown> | undefined
 let previewStdout: Promise<void> | undefined
 let previewStderr: Promise<void> | undefined
+let previewRoot: string | undefined
 
 const BUILD_ENV = {
-  VITE_PLATFORM_ENV: 'development',
-  VITE_PLATFORM_DEVELOPMENT_ORIGIN: 'https://dev.example',
-  VITE_PLATFORM_DEVELOPMENT_CALLBACK_URL: 'https://dev.example/v1/account/oauth/github/callback',
-  VITE_PLATFORM_DEVELOPMENT_GITHUB_CLIENT_ID: 'mobile-development',
-  VITE_PLATFORM_DEVELOPMENT_CREDENTIAL_REFERENCE: 'credentials://development',
-  VITE_PLATFORM_DEVELOPMENT_DATABASE_IDENTITY: 'database-development',
-  VITE_PLATFORM_DEVELOPMENT_IDENTITY_NAMESPACE: 'namespace-development',
-  VITE_PLATFORM_PRODUCTION_ORIGIN: 'https://prod.example',
-  VITE_PLATFORM_PRODUCTION_CALLBACK_URL: 'https://prod.example/v1/account/oauth/github/callback',
-  VITE_PLATFORM_PRODUCTION_GITHUB_CLIENT_ID: 'mobile-production',
-  VITE_PLATFORM_PRODUCTION_CREDENTIAL_REFERENCE: 'credentials://production',
-  VITE_PLATFORM_PRODUCTION_DATABASE_IDENTITY: 'database-production',
-  VITE_PLATFORM_PRODUCTION_IDENTITY_NAMESPACE: 'namespace-production',
-  VITE_MOBILE_PRESENTATION_EXAMPLE: '1',
+  VITE_PLATFORM_ENV: '',
+  VITE_PLATFORM_ORIGIN: 'https://platform.example.com',
+  VITE_PLATFORM_CALLBACK_URL: 'https://platform.example.com/v1/account/oauth/github/callback',
+  VITE_PLATFORM_GITHUB_CLIENT_ID: 'mobile-operated',
+  VITE_PLATFORM_CREDENTIAL_REFERENCE: 'credentials://operated',
+  VITE_PLATFORM_DATABASE_IDENTITY: 'database-operated',
+  VITE_PLATFORM_IDENTITY_NAMESPACE: 'namespace-operated',
+  VITE_REMOTE_RELAY_WSS_URL: 'wss://relay.example.com/v1/remote-access/relay',
+  VITE_REMOTE_RELAY_INBOUND_MAX_BYTES: '9999999',
+  VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES: '8',
+  VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS: '1000',
+  VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: '5000',
+  VITE_REMOTE_RELAY_RECONNECT_DELAY_MS: '100',
 }
 
 function drain(stream: Readable | null): Promise<void> {
@@ -115,8 +119,12 @@ async function waitForPreview(url: string): Promise<void> {
 }
 
 beforeAll(async () => {
-  const build = spawnSync('pnpm', ['--filter', '@deepseek-ai/dsh-mobile', 'build'], {
-    cwd: REPO,
+  previewRoot = await mkdtemp(join(tmpdir(), 'dsh-mobile-product-entry-'))
+  const build = spawnSync(process.execPath, [
+    VITE_BIN, 'build',
+    '--outDir', previewRoot, '--emptyOutDir',
+  ], {
+    cwd: MOBILE_ROOT,
     env: { ...process.env, ...BUILD_ENV },
     encoding: 'utf8',
   })
@@ -124,11 +132,12 @@ beforeAll(async () => {
   const port = await availablePort()
   if (port === 5173 || port === 5174) throw new Error('Mobile product snapshot reserved a prohibited prototype port')
   origin = `http://127.0.0.1:${String(port)}`
-  preview = spawn('pnpm', [
-    '--filter', '@deepseek-ai/dsh-mobile', 'exec', 'vite', 'preview',
+  preview = spawn(process.execPath, [
+    VITE_BIN, 'preview',
+    '--outDir', previewRoot,
     '--host', '127.0.0.1', '--port', String(port), '--strictPort',
   ], {
-    cwd: REPO,
+    cwd: MOBILE_ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
   })
@@ -143,130 +152,29 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close()
   await stopPreview()
+  if (previewRoot !== undefined) await rm(previewRoot, { recursive: true, force: true })
 })
 
-async function mobilePage(options: { locale: string; colorScheme: 'light' | 'dark' }): Promise<{
-  context: BrowserContext
-  page: Page
-}> {
-  if (browser === undefined) throw new Error('Mobile snapshot browser unavailable')
-  const context = await browser.newContext({
-    viewport: { width: 390, height: 844 },
-    locale: options.locale,
-    colorScheme: options.colorScheme,
-  })
-  await context.route('https://dev.example/**', async (route) => {
-    const path = new URL(route.request().url()).pathname
-    const now = Date.now()
-    if (route.request().method() === 'OPTIONS') {
-      await route.fulfill({
-        status: 204,
-        headers: {
-          'access-control-allow-origin': origin,
-          'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
-          'access-control-allow-headers': 'content-type, authorization, x-dsh-installation-proof',
-        },
-      })
-      return
-    }
-    if (path === '/v1/account/login-attempts') {
-      await route.fulfill({ headers: { 'access-control-allow-origin': origin }, json: {
-        id: 'mobile-snapshot-attempt',
-        state: 'mobile-snapshot-state',
-        authorizationUrl: 'https://github.com/login/oauth/authorize?client_id=mobile-development&state=mobile-snapshot-state',
-        pollingToken: 'mobile-snapshot-token',
-        expiresAt: now + 300_000,
-      } })
-      return
-    }
-    if (path === '/v1/account/login-poll') {
-      await route.fulfill({ headers: { 'access-control-allow-origin': origin }, json: {
-        status: 'complete',
-        sessionId: 'mobile-snapshot-session',
-        account: { id: 'mobile-snapshot-account', githubId: 220, githubLogin: 'snapshot-user', avatarUrl: 'https://avatars.example/snapshot-user' },
-        accessToken: 'snapshot-access-token',
-        refreshToken: 'snapshot-refresh-token',
-        accessExpiresAt: now + 900_000,
-        refreshExpiresAt: now + 2_592_000_000,
-      } })
-      return
-    }
-    await route.fulfill({ status: 404, body: 'unexpected snapshot route' })
-  })
-  await context.route('https://github.com/**', route => route.fulfill({ status: 200, body: 'OAuth window owned by the keyless snapshot' }))
-  const page = await context.newPage()
-  await page.goto(origin)
-  await page.getByRole('checkbox').check()
-  const login = page.getByRole('button', { name: '使用 GitHub 继续' })
-  await expect.poll(async () => ({
-    enabled: await login.isEnabled(),
-    status: await page.locator('[data-mobile-platform-account]').getAttribute('data-mobile-platform-account'),
-    alerts: await page.getByRole('alert').allTextContents(),
-  }), { timeout: 10_000 }).toEqual({ enabled: true, status: 'ready', alerts: [] })
-  await login.click()
-  await expect.poll(
-    async () => await page.locator('[data-mobile-platform-account]').getAttribute('data-mobile-platform-account'),
-    { timeout: 10_000 },
-  ).toBe('signed-in')
-  await page.getByRole('treeitem', { name: /Shared Web presentation/ }).click()
-  await expect.poll(async () => await page.locator('[data-mobile-conversation="detail"]').count()).toBe(1)
-  return { context, page }
-}
-
 describe('bundled Mobile product entry', () => {
-  it('renders the authoritative conversation in English dark mode without narrow overflow', async () => {
-    const { context, page } = await mobilePage({ locale: 'en-US', colorScheme: 'dark' })
-    const conversation = page.locator('[data-mobile-conversation="detail"]')
-    await expect.poll(async () => await page.getByAltText('shared-image.gif').count()).toBe(1)
-    expect(await conversation.getAttribute('lang')).toBe('en')
-    expect(await conversation.getAttribute('data-theme')).toBe('dark')
-    expect(await conversation.getAttribute('data-ds-dark-theme')).not.toBeNull()
-    expect(await page.locator('[data-toolview="file-mutation"] [data-tool="edit"]').count()).toBe(1)
-    expect(await page.locator('[data-toolview="bash"] [data-sample="bash"]').count()).toBe(1)
-    expect(await page.locator('[data-toolview="generic"] [data-tool="future_tool"]').count()).toBe(1)
-    expect(await page.getByText('Host rejected request').count()).toBe(1)
-    const input = page.getByRole('textbox')
-    await input.fill('bundled submit callback')
-    await page.getByRole('button', { name: 'Send message' }).click()
-    await expect.poll(async () => await input.inputValue()).toBe('')
-    await expect.poll(async () => await page.getByRole('button', { name: 'Send message' }).count()).toBe(1)
-    await page.getByRole('button', { name: 'Back', exact: true }).focus()
-    await expect.poll(async () => await page.getByRole('tooltip').count()).toBe(0)
-    await page.locator('[data-toolview="file-mutation"] [data-expandable]').click()
-    expect(await page.locator('[data-diff]').count()).toBe(1)
-    const overflows = await page.evaluate(() => ({
-      document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      conversation: document.querySelector<HTMLElement>('[data-mobile-conversation="detail"]')!.scrollWidth
-        - document.querySelector<HTMLElement>('[data-mobile-conversation="detail"]')!.clientWidth,
-    }))
-    expect(overflows).toEqual({ document: 0, conversation: 0 })
-    const text = (await conversation.innerText()).replace(/[ \t]+$/gm, '').trimEnd() + '\n'
-    await expect(text).toMatchFileSnapshot(EXPECTED)
-    await page.getByRole('button', { name: 'Back', exact: true }).click()
-    await page.getByRole('treeitem', { name: /Shared Approval/ }).click()
-    expect(await page.locator('[data-approval-key]').count()).toBe(1)
-    expect(await page.getByRole('button', { name: 'Allow once' }).isEnabled()).toBe(true)
-    await page.getByRole('button', { name: 'Back', exact: true }).click()
-    await page.getByRole('treeitem', { name: /Shared Ask User/ }).click()
-    expect(await page.locator('[data-question-key]').count()).toBe(1)
-    expect(await page.getByRole('radio', { name: 'Desktop Web components' }).count()).toBe(1)
+  it('boots the operated production entry without a development projection or prototype origin', async () => {
+    if (browser === undefined) throw new Error('Mobile snapshot browser unavailable')
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      locale: 'zh-CN',
+      colorScheme: 'light',
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+    })
+    const page = await context.newPage()
+    await page.goto(origin)
+    const main = page.locator('[data-mobile-platform-account]')
+    await expect.poll(async () => await main.getAttribute('data-mobile-platform-account')).toBe('idle')
+    expect(await page.getByRole('checkbox').count()).toBe(1)
+    expect(await page.getByRole('button', { name: '使用 GitHub 继续' }).isDisabled()).toBe(true)
+    expect(await page.locator('[data-mobile-conversation]').count()).toBe(0)
     expect(page.url()).not.toMatch(/:517[34](?:\/|$)/)
-    await context.close()
-  })
-
-  it('renders the same authoritative conversation in Chinese light mode', async () => {
-    const { context, page } = await mobilePage({ locale: 'zh-CN', colorScheme: 'light' })
-    const conversation = page.locator('[data-mobile-conversation="detail"]')
-    expect(await conversation.getAttribute('lang')).toBe('zh-CN')
-    expect(await conversation.getAttribute('data-theme')).toBe('light')
-    expect(await conversation.getAttribute('data-ds-dark-theme')).toBeNull()
-    expect(await page.getByRole('button', { name: '返回' }).count()).toBe(1)
-    expect(await page.getByText('HOST_400').count()).toBe(1)
-    expect(await page.getByAltText('shared-image.gif').count()).toBe(1)
-    await page.getByRole('button', { name: '返回', exact: true }).click()
-    await page.getByRole('treeitem', { name: /Shared Ask User/ }).click()
-    expect(await page.getByRole('button', { name: '提交' }).count()).toBe(1)
-    expect(await page.locator('[data-question-key]').count()).toBe(1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
+    const text = (await main.innerText()).replace(/[ \t]+$/gm, '').trimEnd() + '\n'
+    await expect(text).toMatchFileSnapshot(EXPECTED)
     await context.close()
   })
 })

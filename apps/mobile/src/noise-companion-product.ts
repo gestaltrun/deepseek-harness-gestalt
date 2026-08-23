@@ -3,12 +3,18 @@
 import type { PlatformAccountInstallation } from '@deepseek-ai/dsh-platform-account-client'
 import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
+  decodeProtocolBase64Url,
   parseCompanionOperationId,
+  parseCompanionInteractionId,
   parseCompanionSessionId,
+  REMOTE_PROTOCOL_LIMITS,
   type CompanionOperation,
+  type CompanionOperationId,
+  type CompanionResult,
   type RelayAttachmentId,
   type RelayPairingSelector,
 } from '@deepseek-ai/dsh-remote-protocol'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { SnowCompanionProtocolChannel } from '@deepseek-ai/dsh-noise-channel'
 import { transferSelectedCompanionAttachment } from './companion-attachment.ts'
 import type { CompanionForegroundRuntime } from './companion-lifecycle.ts'
@@ -26,17 +32,30 @@ interface ActiveMobileSnowChannel {
 /** Mutable physical-connection owner shared by the Relay callbacks and the stable React adapter. */
 export class MobileSnowCompanionConnection {
   private active: ActiveMobileSnowChannel | undefined
+  private readonly invalidated = new Set<() => void>()
 
   /** Publish one completed current-generation IK channel. */
   connect(active: ActiveMobileSnowChannel): void {
+    if (this.active !== undefined && this.active !== active) {
+      for (const listener of this.invalidated) listener()
+    }
     this.active = active
   }
 
   /** Invalidate the channel before its Snow transport is disposed. */
-  disconnect(): void { this.active = undefined }
+  disconnect(): void {
+    this.active = undefined
+    for (const listener of this.invalidated) listener()
+  }
 
   /** @returns the exact current physical channel, or undefined while disconnected. */
   current(): ActiveMobileSnowChannel | undefined { return this.active }
+
+  /** @param listener - pending product work invalidated by connection loss. */
+  onInvalidated(listener: () => void): () => void {
+    this.invalidated.add(listener)
+    return () => { this.invalidated.delete(listener) }
+  }
 }
 
 /** Product dependencies that never leave endpoint-owned authority inside Platform. */
@@ -52,8 +71,27 @@ export interface MobileSnowCompanionProductOptions {
 
 /** Stable Mobile UI adapter whose every send revalidates current foreground generation. */
 export class MobileSnowCompanionProductChannel implements MobileCompanionMutationChannel {
+  private readonly settlements = new Map<CompanionOperationId, {
+    active: ActiveMobileSnowChannel
+    resolve(receipt: MobilePendingSettlementReceipt): void
+    reject(error: unknown): void
+  }>()
+  private readonly images = new Map<CompanionOperationId, {
+    active: ActiveMobileSnowChannel
+    sessionId: string
+    attachmentId: string
+    mediaType: string
+    sha256?: string
+    count?: number
+    chunks: Uint8Array[]
+    resolve(dataUrl: string): void
+    reject(error: unknown): void
+  }>()
+
   /** @param options - current lifecycle, endpoint key vault, Account proof owner, and Relay sender. */
-  constructor(private readonly options: MobileSnowCompanionProductOptions) {}
+  constructor(private readonly options: MobileSnowCompanionProductOptions) {
+    options.connection.onInvalidated(() => { this.rejectPending() })
+  }
 
   create(): never { throw new Error('Companion Session creation is unavailable in this protocol version') }
 
@@ -66,7 +104,11 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     })
   }
 
-  cancel(): never { throw new Error('Companion cancellation is unavailable in this protocol version') }
+  cancel(sessionId: string): void {
+    this.sendDetached({
+      type: 'cancel-session', operationId: operationId(), sessionId: parseCompanionSessionId(sessionId),
+    })
+  }
 
   attach(sessionId: string, file: File): { operationId: ReturnType<typeof parseCompanionOperationId>; completion: Promise<void> } {
     const operationIdValue = operationId()
@@ -102,12 +144,101 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     return operationIdValue
   }
 
-  loadOlder(): never {
-    throw new Error('Companion history paging is unavailable in this protocol version')
+  /** Request the current Desktop Session and Workspace baseline after foreground synchronization. */
+  refreshSurface(): void {
+    this.sendDetached({ type: 'refresh-surface', operationId: operationId() })
   }
 
-  settle(_settlement: MobilePendingSettlement): Promise<MobilePendingSettlementReceipt> {
-    return Promise.reject(new Error('Companion interaction settlement is unavailable in this protocol version'))
+  loadOlder(sessionId: string): void {
+    this.sendDetached({
+      type: 'load-history', operationId: operationId(), sessionId: parseCompanionSessionId(sessionId),
+      maxMessages: REMOTE_PROTOCOL_LIMITS.historyPageMessages,
+    })
+  }
+
+  settle(settlement: MobilePendingSettlement): Promise<MobilePendingSettlementReceipt> {
+    const active = this.requireActive()
+    const operationIdValue = operationId()
+    const operation: CompanionOperation = {
+      type: 'settle-interaction', operationId: operationIdValue,
+      sessionId: parseCompanionSessionId(settlement.sessionId),
+      interactionId: parseCompanionInteractionId(settlement.interactionId),
+      settlement: interactionSettlement(settlement),
+    }
+    return new Promise<MobilePendingSettlementReceipt>((resolve, reject) => {
+      this.settlements.set(operationIdValue, { active, resolve, reject })
+      const permit = this.options.runtime.bindCompanionMutationPermit(settlement.kind)
+      if (permit === undefined) {
+        this.settlements.delete(operationIdValue)
+        reject(new Error('Companion interaction has no current connection generation'))
+        return
+      }
+      void this.sendCurrent(active, { type: 'operation', operation }, permit).catch((error: unknown) => {
+        this.settlements.delete(operationIdValue)
+        reject(error)
+      })
+    })
+  }
+
+  /** Read and verify exact image bytes projected by the Paired Desktop. */
+  loadImage(sessionId: string, attachment: ImageAttachmentRef): Promise<string> {
+    const active = this.requireActive()
+    const operationIdValue = operationId()
+    const operation: CompanionOperation = {
+      type: 'read-image', operationId: operationIdValue,
+      sessionId: parseCompanionSessionId(sessionId), attachmentId: String(attachment.attachmentId),
+    }
+    return new Promise<string>((resolve, reject) => {
+      this.images.set(operationIdValue, {
+        active, sessionId, attachmentId: String(attachment.attachmentId), mediaType: attachment.mediaType,
+        chunks: [], resolve, reject,
+      })
+      const permit = this.options.runtime.bindCompanionMutationPermit('other-mutation')
+      if (permit === undefined) {
+        this.images.delete(operationIdValue)
+        reject(new Error('Companion image has no current connection generation'))
+        return
+      }
+      void this.sendCurrent(active, { type: 'operation', operation }, permit).catch((error: unknown) => {
+        this.images.delete(operationIdValue)
+        reject(error)
+      })
+    })
+  }
+
+  /** Accept one result already authenticated by the current physical Snow receiver. */
+  acceptResult(result: CompanionResult): void {
+    if (result.type === 'interaction-receipt') {
+      const pending = this.settlements.get(result.operationId)
+      if (pending === undefined) return
+      this.settlements.delete(result.operationId)
+      if (this.options.connection.current() !== pending.active) {
+        pending.reject(new Error('Companion interaction receipt belongs to a stale connection generation'))
+        return
+      }
+      if (result.accepted) pending.resolve({ accepted: true })
+      else if (result.reason !== undefined) pending.resolve({ accepted: false, reason: result.reason })
+      else pending.reject(new Error('Companion interaction receipt omitted its rejection reason'))
+      return
+    }
+    if (result.type !== 'image-chunk') return
+    const pending = this.images.get(result.operationId)
+    if (pending === undefined) return
+    if (this.options.connection.current() !== pending.active
+      || result.sessionId !== pending.sessionId || result.attachmentId !== pending.attachmentId
+      || result.mediaType !== pending.mediaType || result.index !== pending.chunks.length
+      || (pending.count !== undefined && pending.count !== result.count)
+      || (pending.sha256 !== undefined && pending.sha256 !== result.sha256)) {
+      this.images.delete(result.operationId)
+      pending.reject(new Error('Companion image result did not match its current request'))
+      return
+    }
+    pending.count = result.count
+    pending.sha256 = result.sha256
+    pending.chunks.push(decodeProtocolBase64Url(result.data, REMOTE_PROTOCOL_LIMITS.imageChunkBytes, 'Companion image chunk'))
+    if (pending.chunks.length !== result.count) return
+    this.images.delete(result.operationId)
+    void finishImage(pending).then(pending.resolve, pending.reject)
   }
 
   private sendDetached(operation: CompanionOperation): void {
@@ -138,10 +269,79 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     if (active === undefined) throw new Error('Companion Snow channel is unavailable')
     return active
   }
+
+  private rejectPending(): void {
+    const error = new Error('Companion operation belongs to a disconnected connection generation')
+    for (const pending of this.settlements.values()) pending.reject(error)
+    for (const pending of this.images.values()) pending.reject(error)
+    this.settlements.clear()
+    this.images.clear()
+  }
 }
 
 function operationId(): ReturnType<typeof parseCompanionOperationId> {
   return parseCompanionOperationId(crypto.randomUUID())
+}
+
+function interactionSettlement(
+  settlement: MobilePendingSettlement,
+): Extract<CompanionOperation, { type: 'settle-interaction' }>['settlement'] {
+  const result = settlement.result
+  if (settlement.kind === 'approval') {
+    if (!result.ok || !isRecord(result.value)
+      || (result.value.outcome !== 'allowed-once' && result.value.outcome !== 'rejected')) {
+      throw new TypeError('Companion Approval settlement result is invalid')
+    }
+    return { kind: 'approval', outcome: result.value.outcome }
+  }
+  if (!result.ok) {
+    if (result.error.code !== 'cancelled') throw new TypeError('Companion Ask User cancellation is invalid')
+    return { kind: 'question-cancelled' }
+  }
+  if (!isRecord(result.value) || !isRecord(result.value.answer) || !Array.isArray(result.value.answer.answers)) {
+    throw new TypeError('Companion Ask User settlement result is invalid')
+  }
+  return {
+    kind: 'question',
+    answers: result.value.answer.answers.map((value) => {
+      if (!isRecord(value) || typeof value.id !== 'string' || !Array.isArray(value.selected)
+        || value.selected.some(item => typeof item !== 'string')
+        || (value.custom !== undefined && typeof value.custom !== 'string')) {
+        throw new TypeError('Companion Ask User answer is invalid')
+      }
+      return {
+        id: value.id,
+        selected: value.selected as string[],
+        ...(value.custom === undefined ? {} : { custom: value.custom }),
+      }
+    }),
+  }
+}
+
+async function finishImage(pending: {
+  mediaType: string
+  sha256?: string
+  chunks: Uint8Array[]
+}): Promise<string> {
+  const length = pending.chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
+  const bytes = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of pending.chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  const sha256 = [...digest].map(byte => byte.toString(16).padStart(2, '0')).join('')
+  if (pending.sha256 === undefined || sha256 !== pending.sha256) {
+    throw new Error('Companion image digest verification failed')
+  }
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return `data:${pending.mediaType};base64,${btoa(binary)}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function authorizationHeaders(

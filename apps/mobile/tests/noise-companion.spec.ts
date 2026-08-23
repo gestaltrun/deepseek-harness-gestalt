@@ -56,6 +56,59 @@ describe('Mobile Noise Companion receiver', () => {
     }, 2, runtime, () => undefined)
     expect(() => missing.receive(Uint8Array.of(4))).toThrow('no active Mobile surface')
   })
+
+  it('requests and applies v3 surface and conversation projections on the synchronized receiver', () => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn()
+    const refreshSurface = vi.fn()
+    const messages = [
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'foreground-sync' as const, desktopName: 'Authenticated Desktop',
+          generation: 2, desktopRevision: 7,
+        },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'surface-snapshot' as const, operationId: 'surface-v3' as never,
+          generation: 2, desktopRevision: 7, desktopName: 'Authenticated Desktop', hasMore: false,
+          sessions: [{
+            sessionId: 'session-v3' as never, displayTitle: 'Real session', running: false,
+            blank: false, updatedAt: 1,
+          }],
+          workspaces: [],
+        },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'conversation-snapshot' as const, operationId: 'history-v3' as never,
+          generation: 2, desktopRevision: 7, sessionId: 'session-v3' as never,
+          conversation: {
+            sessionId: 'session-v3', nodes: [], turnTimings: [], turnEnds: [], partial: null,
+            runningCalls: [], pending: [], queue: [], running: false, subagent: null,
+            composerPhase: 'active', removed: false, openState: 'open', openError: null,
+            hasMore: false, loadingOlder: false, promptError: null, blank: false, lastAgentError: null,
+          },
+        },
+      },
+    ]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      () => ({ acceptValidatedDesktopResync }), refreshSurface,
+    )
+    receiver.receive(Uint8Array.of(1))
+    receiver.receive(Uint8Array.of(2))
+    receiver.receive(Uint8Array.of(3))
+    expect(refreshSurface).toHaveBeenCalledOnce()
+    expect(acceptValidatedDesktopResync).toHaveBeenLastCalledWith(expect.objectContaining({
+      desktopName: 'Authenticated Desktop',
+      sessions: expect.objectContaining({ ids: ['session-v3'] }),
+      conversations: [expect.objectContaining({ sessionId: 'session-v3' })],
+    }))
+  })
 })
 
 function connectedRuntime(): CompanionForegroundRuntime {

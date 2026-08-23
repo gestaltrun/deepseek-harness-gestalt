@@ -80,6 +80,10 @@ export function MobileBrowse({
   )
   const open = openId === undefined ? undefined : sessions.byId[openId]
   const conversation = openId === undefined ? undefined : conversations[openId]
+  const openSession = (id: SessionId): void => {
+    setOpenId(id)
+    if (conversations[id] === undefined) onLoadOlder?.(id)
+  }
 
   if (open !== undefined) {
     if (conversation !== undefined) {
@@ -138,7 +142,7 @@ export function MobileBrowse({
           </button>
         )}
       </header>
-      {searchActive && <AuthoritativeSearchResults search={search} sessions={sessions} onOpen={setOpenId} />}
+      {searchActive && <AuthoritativeSearchResults search={search} sessions={sessions} onOpen={openSession} />}
       {!searchActive && groups.map((group) => {
         const label = group.workspaceId === undefined ? tw('group.ungrouped') : group.label
         return (
@@ -156,7 +160,7 @@ export function MobileBrowse({
               nodes={group.sessions}
               currentId={openId}
               now={now}
-              onOpen={setOpenId}
+              onOpen={openSession}
               t={tw}
             />
           </section>

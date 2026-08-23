@@ -1,9 +1,15 @@
 /** Mobile projection of authenticated Companion messages from one Snow IK attachment. */
 
 import type { SnowCompanionProtocolChannel } from '@deepseek-ai/dsh-noise-channel'
-import type { CompanionResult } from '@deepseek-ai/dsh-remote-protocol'
+import type {
+  CompanionConversationSnapshotProjection,
+  CompanionResult,
+  CompanionSurfaceSnapshotProjection,
+} from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionForegroundRuntime } from './companion-lifecycle.ts'
-import type { MobileCompanionProjectionDto } from './companion-projection.ts'
+import type {
+  MobileCompanionProjectionDto, MobileConversationProjectionDto,
+} from './companion-projection.ts'
 
 interface MobileCompanionResultReceiver {
   /** @param result - decoded result authenticated by this physical channel. */
@@ -17,6 +23,12 @@ interface MobileCompanionSurfaceReceiver {
 
 /** Decrypts one physical connection's Companion frames before granting foreground synchronization. */
 export class MobileNoiseCompanionReceiver {
+  private activeSurface: MobileCompanionSurfaceReceiver | undefined
+  private desktopName: string | undefined
+  private desktopRevision: number | undefined
+  private sessions: MobileCompanionProjectionDto['sessions'] = emptySessions()
+  private workspaces: MobileCompanionProjectionDto['workspaces'] = []
+  private readonly conversations = new Map<string, MobileConversationProjectionDto>()
   /**
    * @param channel - completed attachment-bound IK and Companion codec.
    * @param generation - physical connection generation bound into the IK prologue.
@@ -28,6 +40,7 @@ export class MobileNoiseCompanionReceiver {
     private readonly runtime: CompanionForegroundRuntime,
     private readonly resultReceiver?: () => MobileCompanionResultReceiver | undefined,
     private readonly surfaceReceiver?: () => MobileCompanionSurfaceReceiver | undefined,
+    private readonly refreshSurface?: () => void,
   ) {
     if (!Number.isSafeInteger(generation) || generation <= 0) {
       throw new TypeError('Mobile Noise Companion generation must be a positive safe integer')
@@ -47,23 +60,33 @@ export class MobileNoiseCompanionReceiver {
       receiver.acceptValidatedCompanionResult(message.result)
       return message
     }
-    if (message.type !== 'projection' || message.projection.type !== 'foreground-sync') return message
+    if (message.type !== 'projection') return message
+    if (message.projection.type === 'surface-snapshot') {
+      this.acceptSurface(message.projection)
+      return message
+    }
+    if (message.projection.type === 'conversation-snapshot') {
+      this.acceptConversation(message.projection)
+      return message
+    }
+    if (message.projection.type !== 'foreground-sync') return message
     if (message.projection.generation !== this.generation) {
       throw new Error('Authenticated foreground synchronization belongs to another connection generation')
     }
     if (this.surfaceReceiver !== undefined) {
       const surface = this.surfaceReceiver()
       if (surface === undefined) throw new Error('Authenticated foreground synchronization has no Mobile surface')
+      this.activeSurface = surface
+      this.desktopName = message.projection.desktopName
+      this.desktopRevision = message.projection.desktopRevision
       surface.acceptValidatedDesktopResync({
         type: 'desktop-resync', version: 1, authenticated: true,
         desktopName: message.projection.desktopName,
-        sessions: {
-          ids: [], byId: {}, current: null, phase: 'ready',
-          subagentsByParent: {}, jobsBySession: {}, currentAddress: null,
-        },
+        sessions: this.sessions,
         workspaces: [],
         conversations: [],
       })
+      this.refreshSurface?.()
       return message
     }
     const receiver = this.runtime.bindValidatedDesktopResync()
@@ -76,4 +99,64 @@ export class MobileNoiseCompanionReceiver {
     }
     return message
   }
+
+  private acceptSurface(projection: CompanionSurfaceSnapshotProjection): void {
+    this.requireProjectionGeneration(projection.generation, projection.desktopRevision)
+    this.desktopName = projection.desktopName
+    const byId = Object.fromEntries(projection.sessions.map(session => [session.sessionId, {
+      id: session.sessionId,
+      displayTitle: session.displayTitle,
+      ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+      running: session.running,
+      ...(session.pendingInteraction === undefined ? {} : { pendingInteraction: session.pendingInteraction }),
+      blank: session.blank,
+      updatedAt: session.updatedAt,
+    }]))
+    this.sessions = {
+      ids: projection.sessions.map(session => session.sessionId), byId, current: null, phase: 'ready',
+      subagentsByParent: {}, jobsBySession: {}, currentAddress: null,
+    }
+    this.workspaces = projection.workspaces.map(workspace => ({ ...workspace }))
+    this.publishSurface()
+  }
+
+  private acceptConversation(projection: CompanionConversationSnapshotProjection): void {
+    this.requireProjectionGeneration(projection.generation, projection.desktopRevision)
+    if (!isRecord(projection.conversation) || projection.conversation.sessionId !== projection.sessionId) {
+      throw new Error('Authenticated Companion conversation projection is invalid')
+    }
+    this.conversations.set(projection.sessionId, projection.conversation as unknown as MobileConversationProjectionDto)
+    this.publishSurface()
+  }
+
+  private requireProjectionGeneration(generation: number, desktopRevision: number): void {
+    if (generation !== this.generation) throw new Error('Authenticated Companion projection belongs to another connection generation')
+    if (this.activeSurface === undefined || this.desktopRevision === undefined) {
+      throw new Error('Authenticated Companion projection arrived before foreground synchronization')
+    }
+    if (desktopRevision < this.desktopRevision) throw new Error('Authenticated Companion projection has a stale Desktop revision')
+    this.desktopRevision = desktopRevision
+  }
+
+  private publishSurface(): void {
+    if (this.activeSurface === undefined || this.desktopName === undefined) {
+      throw new Error('Authenticated Companion projection has no active Mobile surface')
+    }
+    this.activeSurface.acceptValidatedDesktopResync({
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: this.desktopName, sessions: this.sessions, workspaces: this.workspaces,
+      conversations: [...this.conversations.values()],
+    })
+  }
+}
+
+function emptySessions(): MobileCompanionProjectionDto['sessions'] {
+  return {
+    ids: [], byId: {}, current: null, phase: 'ready',
+    subagentsByParent: {}, jobsBySession: {}, currentAddress: null,
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

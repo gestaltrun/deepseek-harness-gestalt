@@ -40,7 +40,6 @@ import {
 } from './noise-companion-product.ts'
 import type {
   MobileCompanionConnectionChannel,
-  MobileCompanionMutationChannel,
   MobileCompanionSurface,
 } from './companion-surface.ts'
 import type { MobilePairingActions } from './MobilePairing.tsx'
@@ -104,7 +103,7 @@ async function mountMobileProduct(): Promise<void> {
     unpair: pairingUnavailable,
   }
   let companion: CompanionForegroundRuntime
-  let companionChannel: MobileCompanionMutationChannel | undefined
+  let companionChannel: MobileSnowCompanionProductChannel | undefined
   let companionConnectionChannel: MobileCompanionConnectionChannel | undefined
   if (environment.environment === 'production') {
     const relayUrl = requiredWss(import.meta.env.VITE_REMOTE_RELAY_WSS_URL)
@@ -195,10 +194,16 @@ async function mountMobileProduct(): Promise<void> {
           channel,
           connectionGeneration,
           companion,
-          () => companionSurface?.bindValidatedCompanionResults(),
+          () => ({
+            acceptValidatedCompanionResult: (result) => {
+              companionChannel?.acceptResult(result)
+              companionSurface?.bindValidatedCompanionResults()?.acceptValidatedCompanionResult(result)
+            },
+          }),
           () => companionConnectionChannel === undefined
             ? undefined
             : companionSurface?.bindAuthenticatedConnection(companionConnectionChannel),
+          () => { companionChannel?.refreshSurface() },
         )
       },
       onConnectionReady: () => { companionRuntime()?.markConnectionOpen() },
@@ -208,7 +213,7 @@ async function mountMobileProduct(): Promise<void> {
     companion = new CompanionForegroundRuntime({ relay })
     installCompanionRuntime(companion)
     companionVisibilityDisposer = bindCompanionProcessVisibility(companion)
-    companionChannel = new MobileSnowCompanionProductChannel({
+    const productChannel = new MobileSnowCompanionProductChannel({
       runtime: companion,
       connection: productConnection,
       installation,
@@ -219,12 +224,11 @@ async function mountMobileProduct(): Promise<void> {
       },
       reportFailure: (error) => { console.error('[mobile-companion] encrypted operation failed:', error) },
     })
+    companionChannel = productChannel
     companionConnectionChannel = {
-      mutations: companionChannel,
+      mutations: productChannel,
       content: {
-        loadImage: () => Promise.reject(new Error(
-          'Companion historical image loading is unavailable in this protocol version',
-        )),
+        loadImage: async (sessionId, attachment) => await productChannel.loadImage(sessionId, attachment),
       },
     }
     pairing = new MobilePairingController({
@@ -257,7 +261,6 @@ async function mountMobileProduct(): Promise<void> {
     installation,
     pairing,
     companion,
-    ...(companionChannel === undefined ? {} : { companionChannel }),
   })
   companionSurface = mounted.companionSurface
 }

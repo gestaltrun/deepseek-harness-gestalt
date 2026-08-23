@@ -36,7 +36,7 @@ type JsonProjection<Value> =
             : never
 
 /** JSON Session row consumed by the local shared-presentation adapter. */
-interface MobileSessionSummaryDto {
+export interface MobileSessionSummaryDto {
   readonly id: string
   readonly title?: string
   readonly displayTitle: string
@@ -53,7 +53,7 @@ interface MobileSessionSummaryDto {
 }
 
 /** JSON Session list; nullable wire fields replace JavaScript `undefined`. */
-interface MobileSessionListDto {
+export interface MobileSessionListDto {
   readonly ids: readonly string[]
   readonly byId: Readonly<Record<string, MobileSessionSummaryDto>>
   readonly current: string | null
@@ -64,7 +64,7 @@ interface MobileSessionListDto {
 }
 
 /** JSON Workspace row used by shared Desktop grouping. */
-interface MobileWorkspaceDto {
+export interface MobileWorkspaceDto {
   readonly workspaceId: string
   readonly path: string
   readonly title: string
@@ -74,7 +74,7 @@ interface MobileWorkspaceDto {
 }
 
 /** Pending interaction data carries identity and domain payload, never a responder. */
-type MobilePendingInteractionDto = {
+export type MobilePendingInteractionDto = {
   [Kind in keyof PendingPayloads]: {
     readonly kind: Kind
     readonly interactionId: string
@@ -84,7 +84,7 @@ type MobilePendingInteractionDto = {
 }[keyof PendingPayloads]
 
 /** JSON conversation state needed by the shared narrow presentation. */
-interface MobileConversationProjectionDto {
+export interface MobileConversationProjectionDto {
   readonly sessionId: string
   readonly nodes: JsonProjection<readonly ConversationNode[]>
   readonly turnTimings: readonly (readonly [number, {

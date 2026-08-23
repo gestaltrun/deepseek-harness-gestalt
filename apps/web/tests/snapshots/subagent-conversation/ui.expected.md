@@ -8,9 +8,6 @@
       - img
   - img
   - text: Standard mode
-  - button "1 subagent":
-    - text: 1 subagent
-    - img
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"

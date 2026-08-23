@@ -4,7 +4,7 @@
     - text: /
     - 'button "Switch subagent: event-sourcing researcher"': event-sourcing researcher
     - text: /
-    - button "example editor" [disabled]
+    - 'button "Switch subagent: example editor"': example editor
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"

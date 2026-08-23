@@ -27,6 +27,7 @@ import { launchOperatedPlatform } from '../src/launch.ts'
 import {
   completeAttachmentStorageCutover,
   migrateAttachmentStoragePhase,
+  releasePendingAttachmentQuota,
 } from '../src/attachment-storage-phase.ts'
 import { OssRemoteAttachmentStore } from '../src/oss-attachment-store.ts'
 import type { OssObjectClient } from '../src/oss-client.ts'
@@ -462,6 +463,98 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     },
     60_000,
   )
+
+  it.each([
+    'publish-retire',
+    'expired-consume',
+    'complete',
+    'expired-abandon',
+    'revoke',
+    'expired-inspect',
+  ] as const)('retains a retryable quota release after %s metadata removal', async (operation) => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const context = new Context()
+    cleanups.push(async () => { await context.fiber.dispose() })
+    const databaseIdentity = `attachment-quota-outbox-${operation}`
+    const pairingId = parsePersonalPairingId(`pairing-quota-outbox-${operation}`)
+    const reservationId = parseAttachmentBlobReservationId(`quota-outbox-${operation}`)
+    let cleanupUnavailable = false
+    const failedCleanup = vi.fn(async () => {
+      if (cleanupUnavailable) throw new Error('quota cleanup unavailable')
+    })
+    const store = new PostgresRemoteAttachmentStore(context, databaseIdentity, pool, {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 100,
+      maxRetainedBlobs: 4,
+      quotaCleanup: { release: failedCleanup },
+    })
+    await store.migrate()
+    await completeAttachmentStorageCutover(
+      pool,
+      databaseIdentity,
+      'bridge',
+      `remote-attachments/quota-outbox-${operation}`,
+      { maxBlobBytes: 1024, quotaCleanup: { release: async () => {} } },
+    )
+    const grant = await store.publish({
+      pairingId,
+      ciphertext: Uint8Array.of(7),
+      now: 100,
+      quota: { id: reservationId, release: async () => {} },
+    })
+    cleanupUnavailable = true
+
+    let removal: Promise<unknown>
+    switch (operation) {
+      case 'publish-retire':
+        removal = store.publish({ pairingId, ciphertext: Uint8Array.of(8), now: 200 })
+        break
+      case 'expired-consume':
+        removal = store.consume({ pairingId, capability: grant.capability, now: 200 })
+        break
+      case 'complete': {
+        const consumption = await store.consume({ pairingId, capability: grant.capability, now: 101 })
+        removal = consumption.complete()
+        break
+      }
+      case 'expired-abandon': {
+        const consumption = await store.consume({ pairingId, capability: grant.capability, now: 101 })
+        removal = consumption.abandon(200)
+        break
+      }
+      case 'revoke':
+        removal = store.revoke({ pairingId, capability: grant.capability })
+        break
+      case 'expired-inspect':
+        removal = store.inspect({ pairingId, capability: grant.capability, now: 200 })
+        break
+    }
+    await expect(removal).rejects.toThrow('quota cleanup unavailable')
+
+    const capabilityDigest = createHash('sha256').update(grant.capability).digest()
+    const retained = await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM remote_attachment_blobs
+           WHERE database_identity = $1 AND capability_digest = $2) AS blobs,
+         (SELECT COUNT(*)::int FROM remote_attachment_quota_releases
+           WHERE database_identity = $1 AND reservation_id = $3) AS releases`,
+      [databaseIdentity, capabilityDigest, reservationId],
+    )
+    expect(retained.rows).toEqual([{ blobs: 0, releases: 1 }])
+    expect(failedCleanup).toHaveBeenCalledTimes(1)
+
+    const recovered: string[] = []
+    await releasePendingAttachmentQuota(pool, databaseIdentity, {
+      release: async (id) => { recovered.push(id) },
+    })
+    expect(recovered).toEqual([reservationId])
+    expect((await pool.query(
+      'SELECT COUNT(*)::int AS count FROM remote_attachment_quota_releases WHERE database_identity = $1',
+      [databaseIdentity],
+    )).rows).toEqual([{ count: 0 }])
+  }, 60_000)
 
   it('claims one OSS capability atomically across operated Platform instances', async () => {
     const postgres = await startPostgresFixture()

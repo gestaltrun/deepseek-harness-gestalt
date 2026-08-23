@@ -107,6 +107,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     await this.pool.query(SCHEMA)
     const phase = await migrateAttachmentStoragePhase(this.pool, this.databaseIdentity)
     if (phase === 'oss') throw new TypeError('PostgreSQL attachment store cannot start under OSS authority')
+    await this.flushQuotaReleases()
   }
 
   override async publish(input: {
@@ -126,7 +127,8 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     const capability = parseAttachmentCapability(randomBytes(32).toString('base64url'))
     const expiresAt = input.now + this.capabilityLifetimeMs
     try {
-      const expired = await this.transaction(async (client) => {
+      await this.flushQuotaReleases()
+      await this.transaction(async (client) => {
         await this.lockCapacity(client)
         const retired = await client.query(
           `DELETE FROM remote_attachment_blobs
@@ -134,6 +136,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
           RETURNING quota_reservation_id`,
           [this.databaseIdentity, input.now],
         )
+        await this.recordQuotaReleases(client, retired.rows)
         const counted = await client.query(
           'SELECT COUNT(*)::text AS count FROM remote_attachment_blobs WHERE database_identity = $1',
           [this.databaseIdentity],
@@ -149,16 +152,14 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
           [this.databaseIdentity, digest(capability), input.pairingId, Buffer.from(input.ciphertext), expiresAt,
             input.quota?.id ?? null],
         )
-        return retired.rows.flatMap(row => typeof row.quota_reservation_id === 'string'
-          ? [parseAttachmentBlobReservationId(row.quota_reservation_id)] : [])
       })
-      await this.releaseReservations(expired)
     } catch (error) {
       try { await input.quota?.release() } catch (cleanupError) {
         console.error('[platform] PostgreSQL attachment quota cleanup after publish failure failed:', cleanupError)
       }
       throw error
     }
+    await this.flushQuotaReleases()
     return { capability, byteLength: input.ciphertext.byteLength, expiresAt }
   }
 
@@ -167,7 +168,24 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     capability: AttachmentCapability
     now: number
   }): Promise<Uint8Array> {
-    const row = await this.requireRow(this.pool, input)
+    await this.flushQuotaReleases()
+    const outcome = await this.transaction(async (client) => {
+      const row = await this.loadRequiredRow(client, input, true)
+      if (input.now < row.expires_at) return { kind: 'available' as const, row }
+      const removed = await client.query(
+        `DELETE FROM remote_attachment_blobs
+          WHERE database_identity = $1 AND capability_digest = $2
+        RETURNING quota_reservation_id`,
+        [this.databaseIdentity, digest(input.capability)],
+      )
+      await this.recordQuotaReleases(client, removed.rows)
+      return { kind: 'expired' as const }
+    })
+    if (outcome.kind === 'expired') {
+      await this.flushQuotaReleases()
+      throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
+    }
+    const { row } = outcome
     if (row.claim_token !== undefined) {
       throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability is already in use')
     }
@@ -179,6 +197,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     capability: AttachmentCapability
     now: number
   }): Promise<RemoteAttachmentConsumption> {
+    await this.flushQuotaReleases()
     const legacy = await this.tryLegacyConsumption(input)
     if (legacy !== undefined) return legacy
     const token = randomBytes(32)
@@ -191,7 +210,8 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
           RETURNING quota_reservation_id`,
           [this.databaseIdentity, digest(input.capability)],
         )
-        return { kind: 'expired' as const, reservationIds: reservationIds(removed.rows) }
+        await this.recordQuotaReleases(client, removed.rows)
+        return { kind: 'expired' as const }
       }
       const phase = await readAttachmentStoragePhase(client, this.databaseIdentity)
       if (phase === 'legacy') throw new TypeError('legacy attachment consume did not hold the phase barrier')
@@ -210,7 +230,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
       return { kind: 'claimed' as const, row }
     })
     if (outcome.kind === 'expired') {
-      await this.releaseReservations(outcome.reservationIds)
+      await this.flushQuotaReleases()
       throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
     }
     const { row } = outcome
@@ -220,13 +240,16 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
       complete: async () => {
         if (settled) return
         settled = true
-        const removed = await this.pool.query(
-          `DELETE FROM remote_attachment_blobs
-            WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3
-          RETURNING quota_reservation_id`,
-          [this.databaseIdentity, row.capability_digest, token],
-        )
-        await this.releaseReservations(reservationIds(removed.rows))
+        await this.transaction(async (client) => {
+          const removed = await client.query(
+            `DELETE FROM remote_attachment_blobs
+              WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3
+            RETURNING quota_reservation_id`,
+            [this.databaseIdentity, row.capability_digest, token],
+          )
+          await this.recordQuotaReleases(client, removed.rows)
+        })
+        await this.flushQuotaReleases()
       },
       abandon: async (now) => {
         if (settled) return
@@ -239,13 +262,16 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
           )
           return
         }
-        const removed = await this.pool.query(
-          `DELETE FROM remote_attachment_blobs
-            WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3
-          RETURNING quota_reservation_id`,
-          [this.databaseIdentity, row.capability_digest, token],
-        )
-        await this.releaseReservations(reservationIds(removed.rows))
+        await this.transaction(async (client) => {
+          const removed = await client.query(
+            `DELETE FROM remote_attachment_blobs
+              WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3
+            RETURNING quota_reservation_id`,
+            [this.databaseIdentity, row.capability_digest, token],
+          )
+          await this.recordQuotaReleases(client, removed.rows)
+        })
+        await this.flushQuotaReleases()
       },
     }
   }
@@ -412,7 +438,8 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
   }
 
   override async revoke(input: { pairingId: PersonalPairingId; capability: AttachmentCapability }): Promise<void> {
-    const reservationIdsToRelease = await this.transaction(async (client) => {
+    await this.flushQuotaReleases()
+    await this.transaction(async (client) => {
       const selected = await client.query(
         `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id, claim_token
            FROM remote_attachment_blobs
@@ -421,7 +448,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
         [this.databaseIdentity, digest(input.capability)],
       )
       const row = attachmentRow(selected.rows[0], this.maxBlobBytes)
-      if (row === undefined) return []
+      if (row === undefined) return
       if (row.pairing_id !== input.pairingId) throw pairingMismatch()
       const removed = await client.query(
         `DELETE FROM remote_attachment_blobs
@@ -429,9 +456,9 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
         RETURNING quota_reservation_id`,
         [this.databaseIdentity, digest(input.capability)],
       )
-      return reservationIds(removed.rows)
+      await this.recordQuotaReleases(client, removed.rows)
     })
-    await this.releaseReservations(reservationIdsToRelease)
+    await this.flushQuotaReleases()
   }
 
   override async observe(): Promise<readonly RemoteAttachmentBlob[]> {
@@ -452,25 +479,6 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
         expiresAt: row.expires_at,
       }
     })
-  }
-
-  private async requireRow(
-    client: PlatformSqlClient,
-    input: { pairingId: PersonalPairingId; capability: AttachmentCapability; now: number },
-    lock = false,
-  ): Promise<AttachmentRow> {
-    const row = await this.loadRequiredRow(client, input, lock)
-    if (input.now >= row.expires_at) {
-      const removed = await client.query(
-        `DELETE FROM remote_attachment_blobs
-          WHERE database_identity = $1 AND capability_digest = $2
-        RETURNING quota_reservation_id`,
-        [this.databaseIdentity, digest(input.capability)],
-      )
-      await this.releaseReservations(reservationIds(removed.rows))
-      throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
-    }
-    return row
   }
 
   private async loadRequiredRow(
@@ -496,15 +504,17 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`remote-attachments:${this.databaseIdentity}`])
   }
 
-  private async releaseReservations(reservationIdsToRelease: readonly AttachmentBlobReservationId[]): Promise<void> {
-    const results = await Promise.allSettled(reservationIdsToRelease.map(async (reservationId) => {
-      await this.quotaCleanup.release(reservationId)
-    }))
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        console.error('[platform] PostgreSQL attachment quota cleanup failed:', result.reason)
-      }
+  private async recordQuotaReleases(
+    client: PlatformSqlClient,
+    rows: readonly Record<string, unknown>[],
+  ): Promise<void> {
+    for (const reservationId of reservationIds(rows)) {
+      await recordAttachmentQuotaRelease(client, this.databaseIdentity, reservationId)
     }
+  }
+
+  private async flushQuotaReleases(): Promise<void> {
+    await releasePendingAttachmentQuota(this.pool, this.databaseIdentity, this.quotaCleanup)
   }
 
   private async transaction<T>(operation: (client: PlatformSqlClient) => Promise<T>): Promise<T> {

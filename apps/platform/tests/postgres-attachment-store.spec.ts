@@ -17,6 +17,7 @@ describe('PostgreSQL remote attachment durable rows', () => {
     contexts.push(context)
     const statements: string[] = []
     const release = vi.fn(async () => {})
+    let quotaReleasePending = false
     const row = {
       capability_digest: new Uint8Array(32),
       pairing_id: 'pairing-expired',
@@ -35,14 +36,22 @@ describe('PostgreSQL remote attachment durable rows', () => {
         if (sql.includes('DELETE FROM remote_attachment_blobs')) {
           return { rows: [{ quota_reservation_id: 'quota-expired' }], rowCount: 1 }
         }
+        if (sql.includes('INSERT INTO remote_attachment_quota_releases')) quotaReleasePending = true
         return { rows: [], rowCount: 0 }
       },
       release: () => {},
     }
     const pool = {
-      query: async (sql: string) => sql.includes('SELECT reservation_id AS quota_reservation_id')
-        ? { rows: [{ quota_reservation_id: 'quota-expired' }], rowCount: 1 }
-        : { rows: [], rowCount: 0 },
+      query: async (sql: string) => {
+        if (sql.includes('SELECT reservation_id AS quota_reservation_id')) {
+          return {
+            rows: quotaReleasePending ? [{ quota_reservation_id: 'quota-expired' }] : [],
+            rowCount: quotaReleasePending ? 1 : 0,
+          }
+        }
+        if (sql.includes('DELETE FROM remote_attachment_quota_releases')) quotaReleasePending = false
+        return { rows: [], rowCount: 0 }
+      },
       connect: async () => client,
     } as unknown as PlatformSqlPool
     const store = new PostgresRemoteAttachmentStore(context, 'expired-fixture', pool, {

@@ -18,6 +18,24 @@ export const REMOTE_PROTOCOL_LIMITS = {
   transcriptPageBytes: 48 * 1_024,
   /** Maximum transcript entries in one approved Companion projection. */
   transcriptPageEntries: 50,
+  /** Maximum UTF-8 bytes in one submitted prompt. */
+  promptTextBytes: 60 * 1_024,
+  /** Maximum message count requested in one Mobile history window. */
+  historyPageMessages: 20,
+  /** Maximum Session rows in one browse projection. */
+  surfaceSessionRows: 20,
+  /** Maximum Workspace rows in one browse projection. */
+  surfaceWorkspaceRows: 20,
+  /** Maximum pending questions in one settlement. */
+  interactionQuestions: 8,
+  /** Maximum selected option labels in one question answer. */
+  interactionSelections: 8,
+  /** Maximum UTF-8 bytes in one interaction string. */
+  interactionStringBytes: 4 * 1_024,
+  /** Maximum decoded bytes in one historical image result chunk. */
+  imageChunkBytes: 32 * 1_024,
+  /** Maximum chunks in one historical image result. */
+  imageChunks: 512,
   /** Maximum UTF-16 code units in one authoritative Session search query. */
   sessionSearchQueryCharacters: 500,
   /** Maximum Session/snippet pairs in one authoritative search result. */

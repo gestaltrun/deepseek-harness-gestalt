@@ -22,6 +22,9 @@ export type AttachmentCapability = Branded<'AttachmentCapability'>
 /** Protocol-native identifier for one Desktop-authoritative operation. */
 export type CompanionOperationId = Branded<'CompanionOperationId'>
 
+/** Pairing-private identity of one pending Approval or Ask User request. */
+export type CompanionInteractionId = Branded<'CompanionInteractionId'>
+
 /** Protocol-native identifier for an approved Session projection or operation target. */
 export type CompanionSessionId = Branded<'CompanionSessionId'>
 
@@ -36,7 +39,7 @@ export type CompanionSecurityCapability =
 
 /** One supported Companion major and the security properties it preserves. */
 export interface CompanionVersionDescriptor {
-  major: 1 | 2
+  major: 1 | 2 | 3
   capabilities: readonly CompanionSecurityCapability[]
 }
 
@@ -81,6 +84,54 @@ export interface CompanionSearchSessionsOperation {
   query: string
 }
 
+/** Refresh the bounded Desktop-authoritative Session and Workspace projection. */
+export interface CompanionRefreshSurfaceOperation {
+  type: 'refresh-surface'
+  operationId: CompanionOperationId
+}
+
+/** Load one bounded Desktop-authoritative history window. */
+export interface CompanionLoadHistoryOperation {
+  type: 'load-history'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
+  beforeSeq?: number
+  maxMessages: number
+}
+
+/** Cancel the active turn of one Desktop Session. */
+export interface CompanionCancelSessionOperation {
+  type: 'cancel-session'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
+}
+
+/** Read exact historical image bytes after Desktop Session authorization. */
+export interface CompanionReadImageOperation {
+  type: 'read-image'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
+  attachmentId: string
+}
+
+/** Human response to a pending Desktop-owned interaction. */
+export type CompanionInteractionSettlement =
+  | { kind: 'approval'; outcome: 'allowed-once' | 'rejected' }
+  | {
+    kind: 'question'
+    answers: readonly { id: string; selected: readonly string[]; custom?: string }[]
+  }
+  | { kind: 'question-cancelled' }
+
+/** Settle one exact pending interaction projected by the Paired Desktop. */
+export interface CompanionSettleInteractionOperation {
+  type: 'settle-interaction'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
+  interactionId: CompanionInteractionId
+  settlement: CompanionInteractionSettlement
+}
+
 /**
  * Stable explicit Companion attachment rejection reasons; never carry application data.
  *
@@ -107,6 +158,11 @@ export type CompanionOperation =
   | CompanionOfferAttachmentOperation
   | CompanionSearchSessionsOperation
   | CompanionQueryOperationStatusOperation
+  | CompanionRefreshSurfaceOperation
+  | CompanionLoadHistoryOperation
+  | CompanionCancelSessionOperation
+  | CompanionReadImageOperation
+  | CompanionSettleInteractionOperation
 
 /** Desktop-authoritative mutation result. */
 export interface CompanionConfirmedResult {
@@ -153,6 +209,29 @@ export interface CompanionOperationFailedResult {
   failure: CompanionHostFailure
 }
 
+/** One ordered chunk of Desktop-authorized historical image bytes. */
+export interface CompanionImageChunkResult {
+  type: 'image-chunk'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
+  attachmentId: string
+  mediaType: string
+  index: number
+  count: number
+  /** Lowercase hexadecimal SHA-256 of the complete image. */
+  sha256: string
+  /** Canonical unpadded base64url bytes for this chunk. */
+  data: string
+}
+
+/** Carrier receipt for a pairing-private Approval or Ask User response. */
+export interface CompanionInteractionReceiptResult {
+  type: 'interaction-receipt'
+  operationId: CompanionOperationId
+  accepted: boolean
+  reason?: 'not-pending' | 'bad-response'
+}
+
 /** Reconnect answer returning the original committed result for one operation id. */
 export interface CompanionCommittedStatusResult {
   type: 'status'
@@ -173,6 +252,8 @@ export type CompanionResult =
   | CompanionAttachmentRejectedResult
   | CompanionSessionSearchResult
   | CompanionOperationFailedResult
+  | CompanionImageChunkResult
+  | CompanionInteractionReceiptResult
   | CompanionCommittedStatusResult
   | CompanionAbsentStatusResult
 
@@ -202,8 +283,56 @@ export interface CompanionForegroundSyncProjection {
   desktopRevision: number
 }
 
+/** One bounded Session row in the Mobile Companion browse projection. */
+export interface CompanionSessionSummaryProjection {
+  sessionId: CompanionSessionId
+  displayTitle: string
+  cwd?: string
+  running: boolean
+  blank: boolean
+  updatedAt: number
+  pendingInteraction?: 'approval' | 'plan-review' | 'question'
+}
+
+/** One bounded Workspace row containing only Session ids present in this page. */
+export interface CompanionWorkspaceProjection {
+  workspaceId: string
+  path: string
+  title: string
+  sessionIds: readonly CompanionSessionId[]
+  createdAt: string
+  updatedAt: string
+}
+
+/** Desktop-authoritative browse baseline correlated to one foreground refresh. */
+export interface CompanionSurfaceSnapshotProjection {
+  type: 'surface-snapshot'
+  operationId: CompanionOperationId
+  generation: number
+  desktopRevision: number
+  desktopName: string
+  sessions: readonly CompanionSessionSummaryProjection[]
+  workspaces: readonly CompanionWorkspaceProjection[]
+  hasMore: boolean
+}
+
+/** JSON conversation carrier reconstructed into shared Web presentation values by Mobile. */
+export interface CompanionConversationSnapshotProjection {
+  type: 'conversation-snapshot'
+  operationId: CompanionOperationId
+  generation: number
+  desktopRevision: number
+  sessionId: CompanionSessionId
+  /** Merge-extensible presentation data, bounded structurally by the protocol decoder. */
+  conversation: unknown
+}
+
 /** Projections in the first implemented Companion codec slice. */
-export type CompanionProjection = CompanionTranscriptPageProjection | CompanionForegroundSyncProjection
+export type CompanionProjection =
+  | CompanionTranscriptPageProjection
+  | CompanionForegroundSyncProjection
+  | CompanionSurfaceSnapshotProjection
+  | CompanionConversationSnapshotProjection
 
 /** Version-tagged encrypted application plaintext before endpoint encryption. */
 export type CompanionMessage =

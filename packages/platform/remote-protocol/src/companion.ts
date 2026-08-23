@@ -1,9 +1,11 @@
-import { decodeProtocolJson, encodeProtocolJson } from './boundary.ts'
+import { decodeProtocolBase64Url, decodeProtocolJson, encodeProtocolJson } from './boundary.ts'
 import { RemoteProtocolError } from './errors.ts'
 import { parseAttachmentCapability } from './relay.ts'
 import { REMOTE_PROTOCOL_LIMITS } from './limits.ts'
 import type {
   CompanionHostFailure,
+  CompanionInteractionId,
+  CompanionInteractionSettlement,
   CompanionMessage,
   CompanionOperation,
   CompanionOperationId,
@@ -30,7 +32,7 @@ export const REQUIRED_COMPANION_SECURITY_CAPABILITIES = [
 /** Successful application-version negotiation required by Companion application codecs. */
 export interface NegotiatedCompanionProtocol {
   /** Selected current or immediately preceding application major. */
-  readonly major: 1 | 2
+  readonly major: 1 | 2 | 3
 }
 
 /** Logical endpoint connection whose latest negotiation owns one active codec capability. */
@@ -64,7 +66,7 @@ export function createCompanionNegotiationChannel(): CompanionNegotiationChannel
  */
 export function createCompanionVersionOffer(
   endpoint: 'mobile' | 'desktop',
-  majors: readonly (1 | 2)[] = [2, 1],
+  majors: readonly (1 | 2 | 3)[] = [3, 2],
 ): CompanionVersionOffer {
   if (majors.length === 0 || new Set(majors).size !== majors.length) {
     throw new RemoteProtocolError('REMOTE_PROTOCOL_INVALID_MESSAGE', 'Companion version offer majors must be non-empty and unique')
@@ -131,7 +133,7 @@ export function negotiateCompanionProtocol(
     throw new RemoteProtocolError('REMOTE_PROTOCOL_INVALID_MESSAGE', 'Companion version offers use the wrong endpoints')
   }
   let unsafeEndpoint: 'mobile' | 'desktop' | undefined
-  for (const major of [2, 1] as const) {
+  for (const major of [3, 2, 1] as const) {
     const mobileVersion = mobile.versions.find(version => version.major === major)
     const desktopVersion = desktop.versions.find(version => version.major === major)
     if (mobileVersion === undefined || desktopVersion === undefined) continue
@@ -177,6 +179,15 @@ export function parseCompanionOperationId(value: unknown): CompanionOperationId 
  */
 export function parseCompanionSessionId(value: unknown): CompanionSessionId {
   return parseIdentifier(value, 'Companion sessionId') as CompanionSessionId
+}
+
+/**
+ * Parse one pairing-private pending-interaction identity.
+ * @param value - untrusted protocol-native identifier.
+ * @returns branded interaction identifier.
+ */
+export function parseCompanionInteractionId(value: unknown): CompanionInteractionId {
+  return parseIdentifier(value, 'Companion interactionId') as CompanionInteractionId
 }
 
 /**
@@ -305,9 +316,60 @@ function parseOperation(value: unknown): CompanionOperation {
       operationId: parseCompanionOperationId(record.operationId),
     }
   }
+  if (record.type === 'refresh-surface') {
+    exactKeys(record, ['type', 'operationId'], 'Companion refresh-surface operation')
+    return { type: 'refresh-surface', operationId: parseCompanionOperationId(record.operationId) }
+  }
+  if (record.type === 'load-history') {
+    exactKeys(record, ['type', 'operationId', 'sessionId', 'beforeSeq', 'maxMessages'], 'Companion load-history operation')
+    const maxMessages = positiveSafeInteger(record.maxMessages, 'Companion history maxMessages')
+    if (maxMessages > REMOTE_PROTOCOL_LIMITS.historyPageMessages) {
+      throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion history request exceeds its message ceiling')
+    }
+    const beforeSeq = record.beforeSeq === undefined
+      ? undefined
+      : nonNegativeSafeInteger(record.beforeSeq, 'Companion history beforeSeq')
+    return {
+      type: 'load-history',
+      operationId: parseCompanionOperationId(record.operationId),
+      sessionId: parseCompanionSessionId(record.sessionId),
+      ...beforeSeq === undefined ? {} : { beforeSeq },
+      maxMessages,
+    }
+  }
+  if (record.type === 'cancel-session') {
+    exactKeys(record, ['type', 'operationId', 'sessionId'], 'Companion cancel-session operation')
+    return {
+      type: 'cancel-session',
+      operationId: parseCompanionOperationId(record.operationId),
+      sessionId: parseCompanionSessionId(record.sessionId),
+    }
+  }
+  if (record.type === 'read-image') {
+    exactKeys(record, ['type', 'operationId', 'sessionId', 'attachmentId'], 'Companion read-image operation')
+    return {
+      type: 'read-image',
+      operationId: parseCompanionOperationId(record.operationId),
+      sessionId: parseCompanionSessionId(record.sessionId),
+      attachmentId: parseIdentifier(record.attachmentId, 'Companion image attachmentId'),
+    }
+  }
+  if (record.type === 'settle-interaction') {
+    exactKeys(record, ['type', 'operationId', 'sessionId', 'interactionId', 'settlement'], 'Companion settle-interaction operation')
+    return {
+      type: 'settle-interaction',
+      operationId: parseCompanionOperationId(record.operationId),
+      sessionId: parseCompanionSessionId(record.sessionId),
+      interactionId: parseCompanionInteractionId(record.interactionId),
+      settlement: parseInteractionSettlement(record.settlement),
+    }
+  }
   if (record.type !== 'submit-prompt') invalid('Companion operation type is unsupported')
   exactKeys(record, ['type', 'operationId', 'sessionId', 'text'], 'Companion submit-prompt operation')
-  if (typeof record.text !== 'string' || record.text.length === 0) invalid('Companion prompt text must be non-empty')
+  if (typeof record.text !== 'string' || record.text.trim() === ''
+    || new TextEncoder().encode(record.text).byteLength > REMOTE_PROTOCOL_LIMITS.promptTextBytes) {
+    invalid('Companion prompt text must be non-blank and within its byte ceiling')
+  }
   return {
     type: 'submit-prompt',
     operationId: parseCompanionOperationId(record.operationId),
@@ -318,6 +380,51 @@ function parseOperation(value: unknown): CompanionOperation {
 
 function parseResult(value: unknown): CompanionResult {
   const record = object(value, 'Companion result')
+  if (record.type === 'image-chunk') {
+    exactKeys(
+      record,
+      ['type', 'operationId', 'sessionId', 'attachmentId', 'mediaType', 'index', 'count', 'sha256', 'data'],
+      'Companion image-chunk result',
+    )
+    const count = positiveSafeInteger(record.count, 'Companion image chunk count')
+    if (count > REMOTE_PROTOCOL_LIMITS.imageChunks) {
+      throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion image result exceeds its chunk ceiling')
+    }
+    const index = nonNegativeSafeInteger(record.index, 'Companion image chunk index')
+    if (index >= count) invalid('Companion image chunk index must be less than count')
+    if (typeof record.sha256 !== 'string' || !/^[0-9a-f]{64}$/u.test(record.sha256)) {
+      invalid('Companion image sha256 must be lowercase hexadecimal')
+    }
+    const mediaType = parseMediaType(record.mediaType, 'Companion image mediaType')
+    decodeProtocolBase64Url(record.data, REMOTE_PROTOCOL_LIMITS.imageChunkBytes, 'Companion image chunk data')
+    return {
+      type: 'image-chunk',
+      operationId: parseCompanionOperationId(record.operationId),
+      sessionId: parseCompanionSessionId(record.sessionId),
+      attachmentId: parseIdentifier(record.attachmentId, 'Companion image attachmentId'),
+      mediaType,
+      index,
+      count,
+      sha256: record.sha256,
+      data: record.data as string,
+    }
+  }
+  if (record.type === 'interaction-receipt') {
+    const keys = record.accepted === true
+      ? ['type', 'operationId', 'accepted']
+      : ['type', 'operationId', 'accepted', 'reason']
+    exactKeys(record, keys, 'Companion interaction-receipt result')
+    if (record.accepted === true) {
+      return { type: 'interaction-receipt', operationId: parseCompanionOperationId(record.operationId), accepted: true }
+    }
+    if (record.accepted !== false || (record.reason !== 'not-pending' && record.reason !== 'bad-response')) {
+      invalid('Companion interaction receipt is invalid')
+    }
+    return {
+      type: 'interaction-receipt', operationId: parseCompanionOperationId(record.operationId),
+      accepted: false, reason: record.reason,
+    }
+  }
   if (record.type === 'attachment-rejected') {
     exactKeys(record, ['type', 'operationId', 'reason'], 'Companion attachment-rejected result')
     if (record.reason !== 'cross-pairing' && record.reason !== 'hash-mismatch' && record.reason !== 'expired'
@@ -448,6 +555,22 @@ function parseProjection(value: unknown): CompanionProjection {
       desktopRevision: positiveSafeInteger(record.desktopRevision, 'Companion foreground-sync desktopRevision'),
     }
   }
+  if (record.type === 'surface-snapshot') return parseSurfaceSnapshot(record)
+  if (record.type === 'conversation-snapshot') {
+    exactKeys(
+      record,
+      ['type', 'operationId', 'generation', 'desktopRevision', 'sessionId', 'conversation'],
+      'Companion conversation-snapshot projection',
+    )
+    return {
+      type: 'conversation-snapshot',
+      operationId: parseCompanionOperationId(record.operationId),
+      generation: positiveSafeInteger(record.generation, 'Companion conversation generation'),
+      desktopRevision: positiveSafeInteger(record.desktopRevision, 'Companion conversation desktopRevision'),
+      sessionId: parseCompanionSessionId(record.sessionId),
+      conversation: record.conversation,
+    }
+  }
   if (record.type !== 'transcript-page') invalid('Companion projection type is unsupported')
   exactKeys(record, ['type', 'sessionId', 'entries'], 'Companion transcript-page projection')
   if (!Array.isArray(record.entries)) invalid('Companion transcript entries must be an array')
@@ -475,6 +598,153 @@ function parseTranscriptEntry(value: unknown): CompanionTextTranscriptEntry {
   }
 }
 
+function parseInteractionSettlement(value: unknown): CompanionInteractionSettlement {
+  const settlement = object(value, 'Companion interaction settlement')
+  if (settlement.kind === 'approval') {
+    exactKeys(settlement, ['kind', 'outcome'], 'Companion Approval settlement')
+    if (settlement.outcome !== 'allowed-once' && settlement.outcome !== 'rejected') {
+      invalid('Companion Approval outcome is unsupported')
+    }
+    return { kind: 'approval', outcome: settlement.outcome }
+  }
+  if (settlement.kind === 'question-cancelled') {
+    exactKeys(settlement, ['kind'], 'Companion Ask User cancellation')
+    return { kind: 'question-cancelled' }
+  }
+  if (settlement.kind !== 'question') invalid('Companion interaction settlement kind is unsupported')
+  exactKeys(settlement, ['kind', 'answers'], 'Companion Ask User settlement')
+  if (!Array.isArray(settlement.answers) || settlement.answers.length === 0
+    || settlement.answers.length > REMOTE_PROTOCOL_LIMITS.interactionQuestions) {
+    invalid('Companion Ask User answers must be a non-empty bounded array')
+  }
+  const ids = new Set<string>()
+  const answers = settlement.answers.map((valueAnswer) => {
+    const answer = object(valueAnswer, 'Companion Ask User answer')
+    const keys = answer.custom === undefined ? ['id', 'selected'] : ['id', 'selected', 'custom']
+    exactKeys(answer, keys, 'Companion Ask User answer')
+    const id = parseInteractionString(answer.id, 'Companion Ask User answer id')
+    if (ids.has(id)) invalid('Companion Ask User answer ids must be unique')
+    ids.add(id)
+    if (!Array.isArray(answer.selected) || answer.selected.length > REMOTE_PROTOCOL_LIMITS.interactionSelections) {
+      invalid('Companion Ask User selections exceed their item ceiling')
+    }
+    const selected = answer.selected.map(selection =>
+      parseInteractionString(selection, 'Companion Ask User selected label'))
+    if (new Set(selected).size !== selected.length) invalid('Companion Ask User selected labels must be unique')
+    const custom = answer.custom === undefined
+      ? undefined
+      : parseInteractionString(answer.custom, 'Companion Ask User custom answer')
+    return { id, selected, ...custom === undefined ? {} : { custom } }
+  })
+  return { kind: 'question', answers }
+}
+
+function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProjection {
+  exactKeys(
+    record,
+    ['type', 'operationId', 'generation', 'desktopRevision', 'desktopName', 'sessions', 'workspaces', 'hasMore'],
+    'Companion surface-snapshot projection',
+  )
+  if (typeof record.desktopName !== 'string' || record.desktopName.trim() === '' || record.desktopName.length > 128) {
+    invalid('Companion surface desktopName must contain 1-128 characters')
+  }
+  if (!Array.isArray(record.sessions) || record.sessions.length > REMOTE_PROTOCOL_LIMITS.surfaceSessionRows) {
+    throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion surface exceeds its Session row ceiling')
+  }
+  if (!Array.isArray(record.workspaces) || record.workspaces.length > REMOTE_PROTOCOL_LIMITS.surfaceWorkspaceRows) {
+    throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion surface exceeds its Workspace row ceiling')
+  }
+  if (typeof record.hasMore !== 'boolean') invalid('Companion surface hasMore must be boolean')
+  const sessions = record.sessions.map((valueSession) => {
+    const session = object(valueSession, 'Companion Session summary')
+    const keys = [
+      'sessionId', 'displayTitle', 'cwd', 'running', 'blank', 'updatedAt', 'pendingInteraction',
+    ].filter(key => session[key] !== undefined)
+    exactKeys(session, keys, 'Companion Session summary')
+    if (typeof session.displayTitle !== 'string' || session.displayTitle.trim() === '') {
+      invalid('Companion Session displayTitle must be non-blank')
+    }
+    if (session.cwd !== undefined && typeof session.cwd !== 'string') invalid('Companion Session cwd must be a string')
+    if (typeof session.running !== 'boolean' || typeof session.blank !== 'boolean') {
+      invalid('Companion Session running and blank must be boolean')
+    }
+    if (session.pendingInteraction !== undefined && session.pendingInteraction !== 'approval'
+      && session.pendingInteraction !== 'plan-review' && session.pendingInteraction !== 'question') {
+      invalid('Companion Session pendingInteraction is unsupported')
+    }
+    return {
+      sessionId: parseCompanionSessionId(session.sessionId),
+      displayTitle: session.displayTitle,
+      ...session.cwd === undefined ? {} : { cwd: session.cwd as string },
+      running: session.running,
+      blank: session.blank,
+      updatedAt: nonNegativeSafeInteger(session.updatedAt, 'Companion Session updatedAt'),
+      ...session.pendingInteraction === undefined ? {} : {
+        pendingInteraction: session.pendingInteraction as 'approval' | 'plan-review' | 'question',
+      },
+    }
+  })
+  if (new Set(sessions.map(session => session.sessionId)).size !== sessions.length) {
+    invalid('Companion surface Session ids must be unique')
+  }
+  const visibleIds = new Set(sessions.map(session => session.sessionId))
+  const workspaces = record.workspaces.map((valueWorkspace) => {
+    const workspace = object(valueWorkspace, 'Companion Workspace projection')
+    exactKeys(
+      workspace,
+      ['workspaceId', 'path', 'title', 'sessionIds', 'createdAt', 'updatedAt'],
+      'Companion Workspace projection',
+    )
+    const workspaceId = parseIdentifier(workspace.workspaceId, 'Companion Workspace id')
+    for (const key of ['path', 'title', 'createdAt', 'updatedAt'] as const) {
+      if (typeof workspace[key] !== 'string' || workspace[key].length === 0) {
+        invalid(`Companion Workspace ${key} must be non-empty`)
+      }
+    }
+    if (!Array.isArray(workspace.sessionIds) || workspace.sessionIds.length > REMOTE_PROTOCOL_LIMITS.surfaceSessionRows) {
+      invalid('Companion Workspace sessionIds exceed the current surface page')
+    }
+    const sessionIds = workspace.sessionIds.map(parseCompanionSessionId)
+    if (new Set(sessionIds).size !== sessionIds.length || sessionIds.some(id => !visibleIds.has(id))) {
+      invalid('Companion Workspace sessionIds must be unique ids from the current surface page')
+    }
+    return {
+      workspaceId,
+      path: workspace.path as string,
+      title: workspace.title as string,
+      sessionIds,
+      createdAt: workspace.createdAt as string,
+      updatedAt: workspace.updatedAt as string,
+    }
+  })
+  return {
+    type: 'surface-snapshot',
+    operationId: parseCompanionOperationId(record.operationId),
+    generation: positiveSafeInteger(record.generation, 'Companion surface generation'),
+    desktopRevision: positiveSafeInteger(record.desktopRevision, 'Companion surface desktopRevision'),
+    desktopName: record.desktopName,
+    sessions,
+    workspaces,
+    hasMore: record.hasMore,
+  }
+}
+
+function parseMediaType(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(value)
+    || new TextEncoder().encode(value).byteLength > REMOTE_PROTOCOL_LIMITS.attachmentMediaTypeBytes) {
+    invalid(`${name} is invalid`)
+  }
+  return value
+}
+
+function parseInteractionString(value: unknown, name: string): string {
+  if (typeof value !== 'string' || value.length === 0
+    || new TextEncoder().encode(value).byteLength > REMOTE_PROTOCOL_LIMITS.interactionStringBytes) {
+    invalid(`${name} must be non-empty and within its byte ceiling`)
+  }
+  return value
+}
+
 function hasRequiredCapabilities(version: CompanionVersionDescriptor): boolean {
   return REQUIRED_COMPANION_SECURITY_CAPABILITIES.every(capability => version.capabilities.includes(capability))
 }
@@ -482,7 +752,7 @@ function hasRequiredCapabilities(version: CompanionVersionDescriptor): boolean {
 function parseVersionDescriptor(value: unknown): CompanionVersionDescriptor {
   const record = object(value, 'Companion version descriptor')
   exactKeys(record, ['major', 'capabilities'], 'Companion version descriptor')
-  if (record.major !== 1 && record.major !== 2) invalid('Companion major must be current or immediately preceding')
+  if (record.major !== 1 && record.major !== 2 && record.major !== 3) invalid('Companion major must be supported')
   if (!Array.isArray(record.capabilities)) invalid('Companion capabilities must be an array')
   const capabilities = record.capabilities.map(parseSecurityCapability)
   if (new Set(capabilities).size !== capabilities.length) invalid('Companion security capabilities must be unique')
@@ -529,6 +799,11 @@ function parseIdentifier(value: unknown, name: string): string {
 
 function positiveSafeInteger(value: unknown, name: string): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) invalid(`${name} must be a positive safe integer`)
+  return value as number
+}
+
+function nonNegativeSafeInteger(value: unknown, name: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) invalid(`${name} must be a non-negative safe integer`)
   return value as number
 }
 

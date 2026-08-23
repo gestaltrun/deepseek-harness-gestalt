@@ -100,10 +100,10 @@ describe('Encrypted Companion Protocol codec', () => {
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
     )
     for (const value of [
-      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', desktopName: '', generation: 1, desktopRevision: 1 } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'x'.repeat(129), generation: 1, desktopRevision: 1 } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 0, desktopRevision: 1 } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 1, desktopRevision: 0 } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'foreground-sync', desktopName: '', generation: 1, desktopRevision: 1 } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'x'.repeat(129), generation: 1, desktopRevision: 1 } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 0, desktopRevision: 1 } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 1, desktopRevision: 0 } },
     ]) {
       expect(() => decodeCompanionMessage(negotiated, json(value))).toThrow(
         expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
@@ -125,11 +125,11 @@ describe('Encrypted Companion Protocol codec', () => {
       outcome: 'accepted',
     } as const
     const forged = [
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried, committed: original } },
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried, absent: false } },
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried } },
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried, committed: original, absent: true } },
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried, committed: { type: 'confirmed', operationId: queried, committedAt: 0, outcome: 'accepted' } } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried, committed: original } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried, absent: false } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried, committed: original, absent: true } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried, committed: { type: 'confirmed', operationId: queried, committedAt: 0, outcome: 'accepted' } } },
     ]
     for (const message of forged) {
       expect(() => decodeCompanionMessage(negotiated, json(message))).toThrow(
@@ -329,12 +329,12 @@ describe('Encrypted Companion Protocol codec', () => {
     expect(() => encodeCompanionMessage(negotiated, tooManyEntries)).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
     )
-    expect(() => decodeCompanionMessage(negotiated, json({ applicationVersion: 2, ...tooManyEntries }))).toThrow(
+    expect(() => decodeCompanionMessage(negotiated, json({ applicationVersion: negotiated.major, ...tooManyEntries }))).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
     )
 
     const oneByteOverflow = transcriptPageWithEncodedBytes(negotiated, 1, (48 * 1_024) + 1)
-    const oneByteOverflowWire = json({ applicationVersion: 2, ...oneByteOverflow })
+    const oneByteOverflowWire = json({ applicationVersion: negotiated.major, ...oneByteOverflow })
     expect(oneByteOverflowWire).toHaveLength((48 * 1_024) + 1)
     expect(() => encodeCompanionMessage(negotiated, oneByteOverflow)).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
@@ -361,11 +361,14 @@ describe('Encrypted Companion Protocol codec', () => {
         }],
       },
     }
-    expect(new TextEncoder().encode(JSON.stringify({ applicationVersion: 2, ...multibyteOverflow })).byteLength).toBeGreaterThan(48 * 1_024)
+    expect(new TextEncoder().encode(JSON.stringify({
+      applicationVersion: negotiated.major,
+      ...multibyteOverflow,
+    })).byteLength).toBeGreaterThan(48 * 1_024)
     expect(() => encodeCompanionMessage(negotiated, multibyteOverflow)).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
     )
-    expect(() => decodeCompanionMessage(negotiated, json({ applicationVersion: 2, ...multibyteOverflow }))).toThrow(
+    expect(() => decodeCompanionMessage(negotiated, json({ applicationVersion: negotiated.major, ...multibyteOverflow }))).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
     )
   })
@@ -388,7 +391,7 @@ describe('Encrypted Companion Protocol codec', () => {
       { endpoint: 'mobile', versions: [null] },
       { endpoint: 'mobile', versions: [{ major: 1, wrong: [] }] },
       { endpoint: 'mobile', versions: [{ major: 0, capabilities: [] }] },
-      { endpoint: 'mobile', versions: [{ major: 3, capabilities: [] }] },
+      { endpoint: 'mobile', versions: [{ major: 4, capabilities: [] }] },
       { endpoint: 'mobile', versions: [{ major: 1, capabilities: null }] },
       { endpoint: 'mobile', versions: [{ major: 1, capabilities: ['replay-protection', 'replay-protection'] }] },
       { endpoint: 'mobile', versions: [{ major: 1, capabilities: ['plaintext'] }] },
@@ -448,28 +451,28 @@ describe('Encrypted Companion Protocol codec', () => {
       [],
       'message',
       { applicationVersion: 1, type: 'operation', operation: baseOperation },
-      { applicationVersion: 2, type: 'host-request', operation: baseOperation },
-      { applicationVersion: 2, type: 'operation', result: baseOperation },
-      { applicationVersion: 2, type: 'operation', operation: null },
-      { applicationVersion: 2, type: 'operation', operation: { ...baseOperation, type: 'terminal-input' } },
-      { applicationVersion: 2, type: 'operation', operation: { ...baseOperation, extra: true } },
-      { applicationVersion: 2, type: 'operation', operation: { ...baseOperation, text: '' } },
-      { applicationVersion: 2, type: 'operation', operation: { ...baseOperation, text: 1 } },
-      { applicationVersion: 2, type: 'result', result: null },
-      { applicationVersion: 2, type: 'result', result: { type: 'pending' } },
-      { applicationVersion: 2, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1, outcome: 'accepted', extra: true } },
-      { applicationVersion: 2, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1, outcome: 'unknown' } },
-      { applicationVersion: 2, type: 'result', result: { type: 'confirmed', operationId, committedAt: -1, outcome: 'accepted' } },
-      { applicationVersion: 2, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1.5, outcome: 'accepted' } },
-      { applicationVersion: 2, type: 'projection', projection: null },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'workspace-admin' } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: null } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [], extra: true } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [null] } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'tool', entryId: 'entry', role: 'assistant', text: '' }] } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'assistant', text: '', extra: true }] } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'system', text: '' }] } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'user', text: 1 }] } },
+      { applicationVersion: negotiated.major, type: 'host-request', operation: baseOperation },
+      { applicationVersion: negotiated.major, type: 'operation', result: baseOperation },
+      { applicationVersion: negotiated.major, type: 'operation', operation: null },
+      { applicationVersion: negotiated.major, type: 'operation', operation: { ...baseOperation, type: 'terminal-input' } },
+      { applicationVersion: negotiated.major, type: 'operation', operation: { ...baseOperation, extra: true } },
+      { applicationVersion: negotiated.major, type: 'operation', operation: { ...baseOperation, text: '' } },
+      { applicationVersion: negotiated.major, type: 'operation', operation: { ...baseOperation, text: 1 } },
+      { applicationVersion: negotiated.major, type: 'result', result: null },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'pending' } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1, outcome: 'accepted', extra: true } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1, outcome: 'unknown' } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: -1, outcome: 'accepted' } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1.5, outcome: 'accepted' } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: null },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'workspace-admin' } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: null } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [], extra: true } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [null] } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'tool', entryId: 'entry', role: 'assistant', text: '' }] } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'assistant', text: '', extra: true }] } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'system', text: '' }] } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'user', text: 1 }] } },
     ]
     for (const value of malformed) {
       expect(() => decodeCompanionMessage(negotiated, json(value))).toThrow(
@@ -482,7 +485,7 @@ describe('Encrypted Companion Protocol codec', () => {
       (_, index) => ({ type: 'text', entryId: `entry-${String(index)}`, role: 'assistant', text: '' }),
     )
     expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
+      applicationVersion: negotiated.major,
       type: 'projection',
       projection: { type: 'transcript-page', sessionId, entries: oversizedEntries },
     }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }))
@@ -502,7 +505,7 @@ describe('Encrypted Companion Protocol codec', () => {
       negotiated,
       REMOTE_PROTOCOL_LIMITS.companionMessageBytes + 1,
     )
-    const oneByteOverflowWire = json({ applicationVersion: 2, ...oneByteOverflow })
+    const oneByteOverflowWire = json({ applicationVersion: negotiated.major, ...oneByteOverflow })
     expect(oneByteOverflowWire).toHaveLength((60 * 1_024) + 1)
     expect(() => encodeCompanionMessage(negotiated, oneByteOverflow)).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
@@ -516,7 +519,7 @@ describe('Encrypted Companion Protocol codec', () => {
     multibyteBase.operation.text = '界'.repeat(
       Math.floor((REMOTE_PROTOCOL_LIMITS.companionMessageBytes - (multibyteBaseBytes - 1)) / 3) + 1,
     )
-    const multibyteWire = json({ applicationVersion: 2, ...multibyteBase })
+    const multibyteWire = json({ applicationVersion: negotiated.major, ...multibyteBase })
     expect(multibyteWire.byteLength).toBeGreaterThan(REMOTE_PROTOCOL_LIMITS.companionMessageBytes)
     expect(multibyteBase.operation.text.length).toBeLessThan(REMOTE_PROTOCOL_LIMITS.companionMessageBytes)
     expect(() => encodeCompanionMessage(negotiated, multibyteBase)).toThrow(
@@ -528,7 +531,7 @@ describe('Encrypted Companion Protocol codec', () => {
 
     const manyValues = Array.from({ length: 17 }, () => Array.from({ length: 256 }, () => null))
     expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2, type: 'operation', operation: { type: 'submit-prompt', operationId: 'operation', sessionId: 'session', text: 'x', extra: manyValues },
+      applicationVersion: negotiated.major, type: 'operation', operation: { type: 'submit-prompt', operationId: 'operation', sessionId: 'session', text: 'x', extra: manyValues },
     }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }))
   })
 

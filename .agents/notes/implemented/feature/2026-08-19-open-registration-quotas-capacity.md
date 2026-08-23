@@ -16,9 +16,9 @@ Remote Access owns pairing and blob ceilings and implements `MemoryPlatformCapac
 
 Hourly challenge, concurrent blob, and daily upload windows live in `PersonalPairingTransactionState` beside the fifty-pairing snapshot, so two providers that share one `PersonalPairingAuthorityStore` enforce one Account-complete limit. `createChallenge` requires a non-empty `clientIp`; Pairing Challenge HTTP supplies only `req.socket.remoteAddress`. `x-forwarded-for` is ignored because clients can spoof it; a trusted-proxy mapping remains deployment work. HTTP `QUOTA` and `PLATFORM_CAPACITY` map to status 429, JSON `retryAfter` seconds, and a `Retry-After` header. HTTP `admit-blob` rejects a negative `bytes` field with status 400. Relay `tryAcquire` holds one watermark slot for a new attachment, transfers the hold on replacement, and releases on close or failed attach.
 
-Per-counter storage and completeness: installations are `AccountBackend` rows counted inside `consumeAuthorizedAttempt`; fifty pairings, hourly Account and IP challenges, concurrent blobs, and daily upload bytes are shared-store transaction maps; twenty connections are a per-process `connections` map keyed after backend session resolution; the capacity gate is an optional constructor injection. `apps/platform` boot constructs `PlatformAccount` without a `capacity` field and does not mount Remote Access or Relay, so that composition never sheds.
+Per-counter storage and completeness: installations are `AccountBackend` rows counted inside `consumeAuthorizedAttempt`; fifty pairings, hourly Account and IP challenges, concurrent blobs, and daily upload bytes are shared-store transaction maps; twenty connections are a per-process `connections` map keyed after backend session resolution; the capacity gate is an optional constructor injection. `apps/platform` mounts Account, Remote Access, Relay, and encrypted attachments without passing the optional shared capacity gate to Account or Personal Pairing. The OSS attachment store and Relay still enforce their configured aggregate capacity and retry delay.
 
-The implementation includes no allowlist, account-count ceiling, autoscale, or operator-disable console. Blob HTTP operations are quota admission only; encrypted attachment transfer remains owned by the [Mobile Companion proposal](../../proposed/feature/2026-08-17-mobile-companion.md).
+The implementation includes no allowlist, account-count ceiling, autoscale, or operator-disable console. Product attachment HTTP invokes `admitAttachmentBlob` before OSS publish and releases the durable reservation after consume, expiry, pairing revocation, or explicit revoke; the [operated OSS decision](../architecture/2026-08-23-operated-oss-attachment-authority.md) owns byte storage and cleanup.
 
 ## Alternatives considered
 
@@ -32,17 +32,17 @@ The implementation includes no allowlist, account-count ceiling, autoscale, or o
 
 **Keep hourly and blob windows on the provider instance.** Two providers sharing one authority store would then double every window. Shared transaction maps match the fifty-pairing count.
 
-**Share a Redis connection counter for the twenty-connection cap.** The twenty-connection cap is an Account-process map because `apps/platform` still boots Account without pairing or Relay. A deployment-shared counter is remaining two-instance evidence.
+**Share a Redis connection counter for the twenty-connection cap.** The twenty-connection cap remains an Account-process map. A deployment-shared counter is remaining two-instance evidence.
 
 **Treat quota numbers as cordis.yml Config.** The Companion proposal fixed those integers as security invariants. Only the live WSS watermark and capacity retry delay stay deployment-validated Config.
 
 **Shed established streams or disconnect live attachments at capacity.** The two-instance deployment preserves existing connections and rejects new acquisition until an operator expands capacity.
 
-**Implement product blob storage here.** That protocol belongs to the encrypted-attachment capability. Declared-size admission still enforces the open-registration ceilings.
+**Implement product blob storage here.** That protocol belongs to the [operated encrypted-attachment capability](../architecture/2026-08-23-operated-oss-attachment-authority.md). Declared-size admission still enforces the open-registration ceilings.
 
 ## Consequences
 
-Open registration can stay open without an allowlist, while one Account or IP cannot unbounded-retain installations, pairings, or blobs. Operators still have to expand the two purchased instances by hand; CloudMonitor dashboards, a production shared capacity gate, a trusted-proxy client IP, a cross-instance connection counter, and the real blob product path remain deployment or follow-up work. A cold Account instance that has not yet seen `pollLogin` still enforces the twenty-connection cap after `getSession` binds the session, and rejects unknown ids. Per-installation live, pending, and retained pairing caps stay in force beside the Account-wide quotas; an Installation can hit `PAIRING_RESOURCE_LIMIT` before `QUOTA` when cleanup-failed tombstones fill the sixteen-record cap.
+Open registration can stay open without an allowlist, while one Account or IP cannot unbounded-retain installations, pairings, or blobs. Operators still have to expand the two purchased instances by hand; CloudMonitor dashboards, a production shared capacity gate, a trusted-proxy client IP, and a cross-instance connection counter remain deployment work. A cold Account instance that has not yet seen `pollLogin` still enforces the twenty-connection cap after `getSession` binds the session, and rejects unknown ids. Per-installation live, pending, and retained pairing caps stay in force beside the Account-wide quotas; an Installation can hit `PAIRING_RESOURCE_LIMIT` before `QUOTA` when cleanup-failed tombstones fill the sixteen-record cap.
 
 ## Testing
 

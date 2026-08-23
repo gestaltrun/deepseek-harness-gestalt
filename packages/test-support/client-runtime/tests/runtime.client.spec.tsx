@@ -156,6 +156,17 @@ describe('sessions', () => {
     const runtime = await runtimeWithFrame()
     await runtime.sessions.add({ id: 's1' })
 
+    runtime.sessions.openForRender('s1' as SessionId)
+    expect(runtime.sessions.modelRoute('s1' as SessionId)).toBeUndefined()
+    expect(runtime.sessions.provideInfoFor('s1' as SessionId)).toBe(runtime.sessions.provideInfo('s1'))
+    const unstage = runtime.sessions.stageProvisional({
+      sessionId: 'provisional' as SessionId,
+      parentSessionId: 's1' as SessionId,
+      origin: 'subagent',
+      title: 'Side: New thread',
+    })
+    unstage()
+
     const info = runtime.sessions.provideInfo('s1')!
     expect(info.sessionId).toBe('s1')
     expect(info.hooks['session']).toBeDefined() // the built-in useSession source

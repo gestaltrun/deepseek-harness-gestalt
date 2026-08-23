@@ -204,6 +204,7 @@ export const EVENT_SCOPE_PAGE: Record<string, string> = {
   'tools': 'tools.md',
   'webserver': 'web-server.md',
   'workflow': 'workflow.md',
+  'workspace': 'workspace.md',
 }
 
 /**
@@ -338,10 +339,13 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   PairingRendezvousId: 'personal-pairing.md',
   PendingPairingId: 'personal-pairing.md',
   PersonalPairingId: 'personal-pairing.md',
+  AttachmentBlobReservationId: 'personal-pairing.md',
   PersonalPairingView: 'personal-pairing.md',
   AttachmentCapability: 'personal-pairing.md',
   RemoteAttachmentBlob: 'personal-pairing.md',
+  RemoteAttachmentConsumption: 'personal-pairing.md',
   RemoteAttachmentGrant: 'personal-pairing.md',
+  RemoteAttachmentQuotaReservation: 'personal-pairing.md',
   RelayAttachMessage: 'personal-pairing.md',
   RelayCiphertextMessage: 'personal-pairing.md',
   RelayCredentialGrant: 'personal-pairing.md',

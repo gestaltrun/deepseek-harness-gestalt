@@ -187,18 +187,18 @@ abstract rejectPairing(input: { desktop: PairingAccountAuthentication pendingPai
 /**
  * Reserve one expiring ciphertext blob against the open-registration ceilings.
  * @param input - current-installation authorization and declared ciphertext size.
- * @returns opaque reservation id released by {@link releaseAttachmentBlob}.
+ * @returns opaque reservation id plus its durable absolute lease expiry.
  * @throws RemoteAccessError `QUOTA` or `PLATFORM_CAPACITY` with `retryAfter` seconds.
  * @throws TypeError when `bytes` is not a non-negative integer.
  */
-abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: string }>
+abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }>
 
 /**
  * Release one blob reservation after receipt, expiry, or revocation.
  * @param input - current-installation authorization and reservation id.
  * @throws TypeError when the reservation is missing or owned by another Account.
  */
-abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: string }): Promise<void>
+abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: AttachmentBlobReservationId }): Promise<void>
 ```
 
 Source: [`packages/platform/remote-access/src/index.ts`](../../packages/platform/remote-access/src/index.ts)
@@ -213,9 +213,9 @@ Pairing scope seam: the Personal Pairing layer authenticates one HTTPS request t
 /**
  * Authenticate one attachment request to its owning Personal Pairing.
  * @param input - complete untrusted request headers.
- * @returns the Personal Pairing whose scope governs the capability.
+ * @returns pairing authority plus Account-complete blob admission.
  */
-authenticate(input: { headers: IncomingHttpHeaders }): Promise<PersonalPairingId>
+authenticate(input: { headers: IncomingHttpHeaders }): Promise<{ pairingId: PersonalPairingId admit(bytes: number): Promise<RemoteAttachmentQuotaReservation> }>
 ```
 
 Source: [`packages/platform/remote-attachments/src/http.ts`](../../packages/platform/remote-attachments/src/http.ts)
@@ -232,7 +232,7 @@ Platform attachment blob store: retains ciphertext and metadata only, bounded pe
  * @param input - owning Personal Pairing, endpoint-encrypted ciphertext, and current time.
  * @returns the capability grant Mobile forwards to Desktop.
  */
-abstract publish(input: { pairingId: PersonalPairingId; ciphertext: Uint8Array; now: number }): Promise<RemoteAttachmentGrant>
+abstract publish(input: { pairingId: PersonalPairingId ciphertext: Uint8Array now: number quota?: RemoteAttachmentQuotaReservation }): Promise<RemoteAttachmentGrant>
 
 /**
  * Return a copy of one retained ciphertext without consuming the capability.
@@ -242,11 +242,11 @@ abstract publish(input: { pairingId: PersonalPairingId; ciphertext: Uint8Array; 
 abstract inspect(input: { pairingId: PersonalPairingId; capability: AttachmentCapability; now: number }): Promise<Uint8Array>
 
 /**
- * Exchange one capability for its ciphertext exactly once, then remove both.
+ * Exclusively claim one capability for a single HTTP response.
  * @param input - requesting Personal Pairing, one-time capability, and current time.
- * @returns a copy of the retained ciphertext bytes.
+ * @returns claimed ciphertext plus delivery settlement operations.
  */
-abstract consume(input: { pairingId: PersonalPairingId; capability: AttachmentCapability; now: number }): Promise<Uint8Array>
+abstract consume(input: { pairingId: PersonalPairingId capability: AttachmentCapability now: number }): Promise<RemoteAttachmentConsumption>
 
 /**
  * Remove one blob and its capability regardless of remaining lifetime.

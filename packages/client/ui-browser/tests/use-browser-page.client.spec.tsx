@@ -40,8 +40,17 @@ function Probe(props: {
   listedRevision?: number
   observe: (target: BrowserTarget) => Promise<BrowserRuntimeState>
   screenshot: (target: BrowserTarget) => Promise<BrowserScreenshot>
+  onMissingTarget?: (
+    target: BrowserTarget,
+  ) => BrowserPageState | undefined | Promise<BrowserPageState | undefined>
 }) {
-  const facts = useBrowserPage(props.target, props.observe, props.screenshot, props.listedRevision)
+  const facts = useBrowserPage(
+    props.target,
+    props.observe,
+    props.screenshot,
+    props.listedRevision,
+    props.onMissingTarget,
+  )
   return (
     <div>
       <span data-testid="title">{facts.page?.title ?? 'none'}</span>
@@ -154,5 +163,127 @@ describe('useBrowserPage', () => {
     const view = render(<Probe target={TARGET} observe={observe} screenshot={screenshot} />)
     await waitFor(() => { expect(view.getByTestId('title').textContent).toBe('none') })
     expect(screenshot).not.toHaveBeenCalled()
+  })
+
+  it('reports a missing Runtime target without treating other observe failures as missing', async () => {
+    const missing = vi.fn()
+    const screenshot = vi.fn(async () => {
+      throw new Error('screenshot must not run')
+    })
+    const observe = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('browser target is not present'), {
+        code: 'BROWSER_NOT_FOUND',
+      }))
+      .mockRejectedValueOnce(new Error('runtime unavailable'))
+    const view = render(
+      <Probe target={TARGET} observe={observe} screenshot={screenshot} onMissingTarget={missing} />,
+    )
+    await waitFor(() => { expect(missing).toHaveBeenCalledWith(TARGET) })
+    view.rerender(
+      <Probe
+        target={TARGET}
+        listedRevision={2}
+        observe={observe}
+        screenshot={screenshot}
+        onMissingTarget={missing}
+      />,
+    )
+    await waitFor(() => { expect(observe).toHaveBeenCalledTimes(2) })
+    expect(missing).toHaveBeenCalledOnce()
+    expect(screenshot).not.toHaveBeenCalled()
+  })
+
+  it('publishes recovered page facts and captures the replacement target', async () => {
+    const replacement = page({ revision: 0, url: 'about:blank', title: 'New Tab' })
+    const observe = vi.fn().mockRejectedValue(new Error('browser target is not present'))
+    const screenshot = vi.fn(async () => ({
+      target: TARGET, revision: 0, url: 'about:blank', title: 'New Tab',
+      mediaType: 'image/png' as const, data: 'blank',
+    }))
+    const recover = vi.fn(async () => replacement)
+    const view = render(
+      <Probe target={TARGET} observe={observe} screenshot={screenshot} onMissingTarget={recover} />,
+    )
+    await waitFor(() => { expect(view.getByTestId('url').textContent).toBe('about:blank') })
+    expect(view.getByTestId('shot').textContent).toBe('yes')
+    expect(screenshot).toHaveBeenCalledWith(replacement.target)
+  })
+
+  it('keeps a recovered page when its screenshot fails and ignores non-Error rejections', async () => {
+    const observe = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'BROWSER_NOT_FOUND' }))
+      .mockRejectedValueOnce('runtime unavailable')
+    const screenshot = vi.fn().mockRejectedValue(new Error('capture failed'))
+    const recover = vi.fn(async () => page())
+    const view = render(
+      <Probe target={TARGET} listedRevision={1} observe={observe} screenshot={screenshot} onMissingTarget={recover} />,
+    )
+    await waitFor(() => { expect(view.getByTestId('title').textContent).toBe('Alpha') })
+    expect(view.getByTestId('shot').textContent).toBe('none')
+    view.rerender(
+      <Probe target={TARGET} listedRevision={2} observe={observe} screenshot={screenshot} onMissingTarget={recover} />,
+    )
+    await waitFor(() => { expect(observe).toHaveBeenCalledTimes(2) })
+    expect(recover).toHaveBeenCalledOnce()
+  })
+
+  it('discards a recovered page after unmount', async () => {
+    let settleRecovery!: (value: BrowserPageState) => void
+    const observe = vi.fn().mockRejectedValue(new Error('browser target is not present'))
+    const screenshot = vi.fn()
+    const recover = vi.fn(() => new Promise<BrowserPageState>((resolve) => { settleRecovery = resolve }))
+    const view = render(
+      <Probe target={TARGET} observe={observe} screenshot={screenshot} onMissingTarget={recover} />,
+    )
+    await waitFor(() => { expect(recover).toHaveBeenCalled() })
+    view.unmount()
+    settleRecovery(page())
+    await Promise.resolve()
+    expect(screenshot).not.toHaveBeenCalled()
+  })
+
+  it('discards a late recovered screenshot after unmount', async () => {
+    let settleScreenshot!: (value: BrowserScreenshot) => void
+    const observe = vi.fn().mockRejectedValue(new Error('browser target is not present'))
+    const screenshot = vi.fn(() => new Promise<BrowserScreenshot>((resolve) => {
+      settleScreenshot = resolve
+    }))
+    const view = render(
+      <Probe
+        target={TARGET}
+        observe={observe}
+        screenshot={screenshot}
+        onMissingTarget={async () => page()}
+      />,
+    )
+    await waitFor(() => { expect(screenshot).toHaveBeenCalled() })
+    view.unmount()
+    settleScreenshot({
+      target: TARGET, revision: 1, url: 'https://alpha.test/', title: 'Alpha',
+      mediaType: 'image/png', data: 'abc',
+    })
+    await Promise.resolve()
+    expect(view.queryByTestId('shot')).toBeNull()
+  })
+
+  it('discards a late recovered screenshot rejection after unmount', async () => {
+    let rejectScreenshot!: (error: Error) => void
+    const observe = vi.fn().mockRejectedValue(new Error('browser target is not present'))
+    const screenshot = vi.fn(() => new Promise<BrowserScreenshot>((_resolve, reject) => {
+      rejectScreenshot = reject
+    }))
+    const view = render(
+      <Probe
+        target={TARGET}
+        observe={observe}
+        screenshot={screenshot}
+        onMissingTarget={async () => page()}
+      />,
+    )
+    await waitFor(() => { expect(screenshot).toHaveBeenCalled() })
+    view.unmount()
+    rejectScreenshot(new Error('capture failed'))
+    await Promise.resolve()
+    expect(view.queryByTestId('shot')).toBeNull()
   })
 })

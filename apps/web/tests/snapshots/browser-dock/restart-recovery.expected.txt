@@ -1,0 +1,4 @@
+after-restart
+page=shown
+address=https://example.test/
+screenshot=Example Domain

@@ -250,14 +250,14 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```ts persistence-catalog
 /**
  * Whole Session-owned Browser Workspace snapshot. Log-only, last-wins.
- * Carries every owned instance, tab, and per-tab revision so Session
- * switch, reload, and replay restore the same Workspace without exposing
- * another Session's tabs.
+ * Carries every owned instance, tab, per-tab revision, and last non-blank
+ * URL so Session switch, reload, and replay restore the same Workspace
+ * without exposing another Session's tabs.
  */
 'browser/workspace': BrowserWorkspaceProjection
 ```
 
-来源：[`packages/browser/browser-workspace/src/types.ts:82`](../packages/browser/browser-workspace/src/types.ts)
+来源：[`packages/browser/browser-workspace/src/types.ts:86`](../packages/browser/browser-workspace/src/types.ts)
 
 ### `command/*`
 

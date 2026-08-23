@@ -16,6 +16,7 @@ import type {
 import {
   parseRelayPairingSelector,
   parseRelayRouteId,
+  REMOTE_PROTOCOL_LIMITS,
   type RelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type {
@@ -58,6 +59,8 @@ export const MAX_ACTIVE_PAIRING_CHALLENGES_PER_INSTALLATION = 4
 export const MAX_PENDING_PAIRINGS_PER_INSTALLATION = 4
 /** Maximum live and replay-retained lifecycle records owned by one authenticated Installation. */
 export const MAX_RETAINED_PAIRING_RECORDS_PER_INSTALLATION = 16
+/** Maximum admission-to-expiry lease for one Account blob reservation. */
+export const MAX_ATTACHMENT_RESERVATION_LIFETIME_MS = 2 * REMOTE_PROTOCOL_LIMITS.attachmentCapabilityLifetimeMs
 /** Pairing protocol major carried by every challenge in this implementation. */
 export const PERSONAL_PAIRING_PROTOCOL_MAJOR = 1
 
@@ -73,6 +76,13 @@ export type PendingPairingId = Branded<'PendingPairingId'>
 export type DevicePrincipalId = Branded<'DevicePrincipalId'>
 /** Opaque identity for one confirmed Personal Pairing. */
 export type PersonalPairingId = Branded<'PersonalPairingId'>
+/** Opaque identifier for one Account-complete attachment quota reservation. */
+export type AttachmentBlobReservationId = Branded<'AttachmentBlobReservationId'>
+/** Provider-private authority for idempotent cleanup of durable attachment quota. */
+export interface AttachmentBlobReservationCleanup {
+  /** @param reservationId - branded id retained only beside attachment metadata. */
+  release(reservationId: AttachmentBlobReservationId): Promise<void>
+}
 /** Opaque provider reference for one active Personal Pairing key. */
 export type PersonalPairingKeyReference = Branded<'PersonalPairingKeyReference'>
 /** Opaque reference to crypto-provider state for one challenge. */
@@ -221,6 +231,8 @@ export interface PersonalPairingProviderOptions {
   ownsAuthority?: boolean
   /** Clock used for fixed challenge expiry and deterministic assembled scenarios. */
   clock?: { now(): number }
+  /** Lease covering bounded upload admission plus the configured attachment capability lifetime. */
+  attachmentReservationLifetimeMs?: number
   /** Cryptographic random source; production defaults to Web Crypto. */
   randomBytes?: (size: number) => Uint8Array
   /** Opaque id source for challenge and pairing records. */
@@ -393,7 +405,7 @@ export interface PersonalPairingTransactionState {
   orphanPendingCleanups: Map<CleanupRecord<PendingPairingKey>, OrphanPendingCleanupRecord>
   accountChallengeAt: Map<string, number[]>
   ipChallengeAt: Map<string, number[]>
-  blobs: Map<string, { accountId: string; bytes: number }>
+  blobs: Map<AttachmentBlobReservationId, { accountId: string; bytes: number; expiresAt?: number }>
   blobUploads: Map<string, Array<{ at: number; bytes: number }>>
   blobSequence: { next: number }
 }
@@ -803,14 +815,14 @@ export abstract class RemoteAccessService extends Service {
   /**
    * Reserve one expiring ciphertext blob against the open-registration ceilings.
    * @param input - current-installation authorization and declared ciphertext size.
-   * @returns opaque reservation id released by {@link releaseAttachmentBlob}.
+   * @returns opaque reservation id plus its durable absolute lease expiry.
    * @throws RemoteAccessError `QUOTA` or `PLATFORM_CAPACITY` with `retryAfter` seconds.
    * @throws TypeError when `bytes` is not a non-negative integer.
    */
   abstract admitAttachmentBlob(input: {
     owner: PairingAccountAuthentication
     bytes: number
-  }): Promise<{ reservationId: string }>
+  }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }>
 
   /**
    * Release one blob reservation after receipt, expiry, or revocation.
@@ -819,7 +831,7 @@ export abstract class RemoteAccessService extends Service {
    */
   abstract releaseAttachmentBlob(input: {
     owner: PairingAccountAuthentication
-    reservationId: string
+    reservationId: AttachmentBlobReservationId
   }): Promise<void>
 
 }
@@ -924,6 +936,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
   private readonly randomBytes: (size: number) => Uint8Array
   private readonly randomId: NonNullable<PersonalPairingProviderOptions['randomId']>
   private readonly schedule: NonNullable<PersonalPairingProviderOptions['schedule']>
+  private readonly attachmentReservationLifetimeMs: number
   private readonly pairingLinkOrigin: string
   private readonly authority: PersonalPairingAuthorityStore
   private readonly ownsAuthority: boolean
@@ -949,6 +962,13 @@ export class PersonalPairingProvider extends RemoteAccessService {
     this.authority = options.authority
     this.ownsAuthority = options.ownsAuthority === true
     this.clock = options.clock ?? { now: () => Date.now() }
+    this.attachmentReservationLifetimeMs = options.attachmentReservationLifetimeMs
+      ?? MAX_ATTACHMENT_RESERVATION_LIFETIME_MS
+    if (!Number.isSafeInteger(this.attachmentReservationLifetimeMs)
+      || this.attachmentReservationLifetimeMs <= 0
+      || this.attachmentReservationLifetimeMs > MAX_ATTACHMENT_RESERVATION_LIFETIME_MS) {
+      throw new TypeError('Attachment reservation lifetime exceeds the protocol safety ceiling')
+    }
     this.randomBytes = options.randomBytes ?? secureRandomBytes
     this.randomId = options.randomId ?? (kind => `${kind}-${crypto.randomUUID()}`)
     this.schedule = options.schedule ?? ((task, delayMs) => setTimeout(task, delayMs))
@@ -1949,9 +1969,10 @@ export class PersonalPairingProvider extends RemoteAccessService {
   async admitAttachmentBlob(input: {
     owner: PairingAccountAuthentication
     bytes: number
-  }): Promise<{ reservationId: string }> {
+  }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }> {
     return this.exclusive(async () => {
       const { account } = await this.authenticateOwner(input.owner)
+      this.evictExpiredBlobReservations()
       this.assertCapacity()
       if (!Number.isSafeInteger(input.bytes) || input.bytes < 0) {
         throw new TypeError('Attachment blob size must be a non-negative integer')
@@ -1984,17 +2005,18 @@ export class PersonalPairingProvider extends RemoteAccessService {
         )
       }
       this.blobSequence.next += 1
-      const reservationId = `blob-${String(this.blobSequence.next)}`
-      this.blobs.set(reservationId, { accountId: account.id, bytes: input.bytes })
+      const reservationId = parseAttachmentBlobReservationId(`blob-${String(this.blobSequence.next)}`)
+      const expiresAt = now + this.attachmentReservationLifetimeMs
+      this.blobs.set(reservationId, { accountId: account.id, bytes: input.bytes, expiresAt })
       uploads.push({ at: now, bytes: input.bytes })
       this.blobUploads.set(account.id, uploads)
-      return { reservationId }
+      return { reservationId, expiresAt }
     })
   }
 
   async releaseAttachmentBlob(input: {
     owner: PairingAccountAuthentication
-    reservationId: string
+    reservationId: AttachmentBlobReservationId
   }): Promise<void> {
     await this.exclusive(async () => {
       const { account } = await this.authenticateOwner(input.owner)
@@ -2003,6 +2025,20 @@ export class PersonalPairingProvider extends RemoteAccessService {
         throw new TypeError('Attachment blob reservation is invalid')
       }
       this.blobs.delete(input.reservationId)
+    })
+  }
+
+  /**
+   * Create the provider-private cleanup authority for durable attachment metadata.
+   * @returns cleanup capability owned by the durable attachment store.
+   */
+  attachmentReservationCleanup(): AttachmentBlobReservationCleanup {
+    return { release: async (reservationId) => { await this.releaseAttachmentReservation(reservationId) } }
+  }
+
+  private async releaseAttachmentReservation(reservationId: AttachmentBlobReservationId): Promise<void> {
+    await this.exclusive(() => {
+      this.blobs.delete(reservationId)
     })
   }
 
@@ -2266,6 +2302,17 @@ export class PersonalPairingProvider extends RemoteAccessService {
     }
   }
 
+  private evictExpiredBlobReservations(): void {
+    const now = this.clock.now()
+    for (const [reservationId, blob] of this.blobs) {
+      if (blob.expiresAt === undefined) {
+        blob.expiresAt = now + this.attachmentReservationLifetimeMs
+      } else if (blob.expiresAt <= now) {
+        this.blobs.delete(reservationId)
+      }
+    }
+  }
+
   private assertEndpointRetainedCapacity(
     state: EndpointOwnedPairingMailboxState,
     accountId: string,
@@ -2352,6 +2399,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
         return await this.authority.runPairingTransaction(async (state) => {
           this.transactionState = state
           try {
+            this.evictExpiredBlobReservations()
             return await operation()
           } finally {
             this.transactionState = undefined
@@ -2756,6 +2804,15 @@ export function parseDevicePrincipalId(value: unknown): DevicePrincipalId {
  */
 export function parsePersonalPairingId(value: unknown): PersonalPairingId {
   return nonEmpty(value, 'Personal Pairing id') as PersonalPairingId
+}
+
+/**
+ * Parse an attachment quota reservation id at a durable or random-source boundary.
+ * @param value - untrusted reservation identifier.
+ * @returns branded non-empty reservation id.
+ */
+export function parseAttachmentBlobReservationId(value: unknown): AttachmentBlobReservationId {
+  return nonEmpty(value, 'Attachment blob reservation id') as AttachmentBlobReservationId
 }
 
 /**

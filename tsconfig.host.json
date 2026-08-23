@@ -104,6 +104,7 @@
     "apps/desktop/src/companion-operation-ledger.ts",
     "apps/desktop/src/companion-product.ts",
     "apps/desktop/src/host-rpc.ts",
+    "apps/platform/src/oss-config.ts",
     "apps/platform/src/production-env.ts",
     "apps/platform/src/production-env-cli.ts",
     "apps/platform/tests/production-env.spec.ts",

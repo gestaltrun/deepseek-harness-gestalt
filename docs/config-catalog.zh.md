@@ -1957,7 +1957,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/remote-access-http/src/index.ts:28`](../packages/platform/remote-access-http/src/index.ts)
+来源：[`packages/platform/remote-access-http/src/index.ts:29`](../packages/platform/remote-access-http/src/index.ts)
 
 <a id="deepseek-aidsh-remote-attachments"></a>
 
@@ -1977,7 +1977,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/remote-attachments/src/index.ts:111`](../packages/platform/remote-attachments/src/index.ts)
+来源：[`packages/platform/remote-attachments/src/index.ts:138`](../packages/platform/remote-attachments/src/index.ts)
 
 <a id="deepseek-aidsh-repeat-tool-reminder"></a>
 

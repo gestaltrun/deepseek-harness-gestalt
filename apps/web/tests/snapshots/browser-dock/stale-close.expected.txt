@@ -1,0 +1,2 @@
+page=hidden
+browser-tab=hidden

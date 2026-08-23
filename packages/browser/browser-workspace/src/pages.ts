@@ -27,6 +27,7 @@ export function listBrowserWorkspacePages(
             tabId: tab.tabId,
           } satisfies BrowserTarget,
           revision: tab.revision,
+          ...(tab.url === undefined ? {} : { url: tab.url }),
         })
       }
     }

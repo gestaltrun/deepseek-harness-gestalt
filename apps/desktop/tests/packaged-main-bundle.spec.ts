@@ -53,7 +53,7 @@ describe('packaged Desktop main bundle', () => {
     expect(source).not.toMatch(/import\s+['"]@deepseek-ai\//)
     expect(source).toMatch(/from\s+['"]electron['"]/)
     expect(source).toMatch(/import\s*\(\s*['"]electron-updater['"]\s*\)/)
-    expect(source).toMatch(/from\s+['"]ws['"]/)
+    expect(source).not.toMatch(/from\s+['"]ws['"]/)
     expect(source).toContain('companion entry search')
     expect(source).not.toContain('DSH_PLATFORM_ORIGIN')
     expect(JSON.parse(readFileSync(join(desktop, 'out', 'operated-platform.json'), 'utf8'))).toEqual({

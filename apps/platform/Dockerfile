@@ -4,7 +4,7 @@ FROM node:24-bookworm-slim
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin platform
 WORKDIR /app
-RUN npm install pg@8.23.0 redis@6.2.1 --omit=dev
+RUN npm install ali-oss@6.23.0 pg@8.23.0 redis@6.2.1 --omit=dev
 COPY --chown=platform:platform dist ./dist
 COPY --chown=platform:platform public ./public
 USER platform

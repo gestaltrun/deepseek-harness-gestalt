@@ -65,100 +65,116 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  */
 export function ConversationSessionHeader({
   sessionId, useSession, useSessions, useStore, actions,
-  renderSlot, views, open, t,
+  renderSlot, views, open, t, renderMode,
 }: ConversationSessionHeaderProps) {
   useSyncExternalStore(views.subscribe, views.version)
   const tabs = views.list()
   const selectedId = useStore(s => s.view)
   const active = resolveActiveView(tabs, selectedId)
-  const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)
+  const sidechat = renderMode === 'sidechat'
+  const ancestry = useSessions(
+    s => sidechat ? [] : deriveAncestry(s, sessionId),
+    equalBreadcrumbs,
+  )
   const composerPhase = useSession(s => s.composerPhase)
   const blank = useSession(s => s.blank)
-  const hideChrome = blank && composerPhase === 'blank'
+  const hideChrome = !sidechat && blank && composerPhase === 'blank'
+  const actionOwner = sidechat ? { renderMode } : {}
+  const actionsView = (
+    <div className={css.headerActions}>
+      {renderSlot('conversation.session.header.actions', actionOwner)}
+    </div>
+  )
+  const utilitiesView = (
+    <div className={css.headerUtilities}>
+      {renderSlot('conversation.session.header.utilities', actionOwner)}
+    </div>
+  )
+  const tabsView = tabs.length > 1 && (
+    <div className={css.tabs} role="tablist">
+      {tabs.map(viewTab => (
+        <button
+          key={viewTab.id}
+          type="button"
+          role="tab"
+          aria-selected={viewTab.id === active?.id}
+          className={clsx(css.tab, viewTab.id === active?.id && css.tabActive)}
+          onClick={() => { actions.setView(viewTab.id) }}
+        >
+          {viewTab.label}
+        </button>
+      ))}
+    </div>
+  )
 
   return (
     <header
-      className={clsx(css.header, hideChrome && css.headerHidden)}
+      className={clsx(css.header, sidechat && css.headerSidechat, hideChrome && css.headerHidden)}
       aria-hidden={hideChrome || undefined}
     >
       {!hideChrome && (
-        <>
-          <div className={css.titleRow}>
-            <div className={css.titleCluster}>
-              <nav className={css.crumbs} aria-label={t('session.hierarchy')}>
-                {ancestry.map((summary, index) => {
-                  const last = index === ancestry.length - 1
-                  const title = (
-                    <button
-                      type="button"
-                      className={clsx(
-                        css.crumb,
-                        summary.subagent && css.crumbSubagent,
-                        last && css.crumbCurrent,
-                      )}
-                      disabled={last}
-                      onClick={() => { open(summary.id) }}
-                    >
-                      {summary.displayTitle}
-                    </button>
-                  )
-                  const lineage = last || summary.subagent
-                  const lineageOwner = {
-                    lineageSessionId: summary.id,
-                    displayTitle: summary.displayTitle,
-                    ...last ? {} : { openTitle: () => { open(summary.id) } },
-                  }
-                  return (
-                    <span key={summary.id} className={css.crumbSeg}>
-                      {index > 0 && <span className={css.crumbSep}>/</span>}
-                      {lineage
-                        ? summary.subagent
-                          ? renderSlot(
-                            'conversation.session.header.lineage',
-                            lineageOwner,
-                            { fallback: title },
-                          )
-                          : (
-                            <>
-                              {title}
-                              {renderSlot(
+        sidechat
+          ? <div className={css.sidechatNavRow}>{tabsView}{actionsView}{utilitiesView}</div>
+          : (
+            <>
+              <div className={css.titleRow}>
+                <div className={css.titleCluster}>
+                  <nav className={css.crumbs} aria-label={t('session.hierarchy')}>
+                    {ancestry.map((summary, index) => {
+                      const last = index === ancestry.length - 1
+                      const title = (
+                        <button
+                          type="button"
+                          className={clsx(
+                            css.crumb,
+                            summary.subagent && css.crumbSubagent,
+                            last && css.crumbCurrent,
+                          )}
+                          disabled={last}
+                          onClick={() => { open(summary.id) }}
+                        >
+                          {summary.displayTitle}
+                        </button>
+                      )
+                      const lineage = last || summary.subagent
+                      const lineageOwner = {
+                        lineageSessionId: summary.id,
+                        displayTitle: summary.displayTitle,
+                        ...last ? {} : { openTitle: () => { open(summary.id) } },
+                      }
+                      return (
+                        <span key={summary.id} className={css.crumbSeg}>
+                          {index > 0 && <span className={css.crumbSep}>/</span>}
+                          {lineage
+                            ? summary.subagent
+                              ? renderSlot(
                                 'conversation.session.header.lineage',
                                 lineageOwner,
-                                { fallback: null },
-                              )}
-                            </>
-                          )
-                        : title}
-                    </span>
-                  )
-                })}
-                {ancestry.length === 0 && <span className={css.crumbCurrent}>{sessionId}</span>}
-              </nav>
-              <div className={css.headerActions}>
-                {renderSlot('conversation.session.header.actions', {})}
+                                { fallback: title },
+                              )
+                              : (
+                                <>
+                                  {title}
+                                  {renderSlot(
+                                    'conversation.session.header.lineage',
+                                    lineageOwner,
+                                    { fallback: null },
+                                  )}
+                                </>
+                              )
+                            : title}
+                        </span>
+                      )
+                    })}
+                    {ancestry.length === 0 && <span className={css.crumbCurrent}>{sessionId}</span>}
+                  </nav>
+                  {actionsView}
+                </div>
+                {utilitiesView}
               </div>
-            </div>
-            <div className={css.headerUtilities}>
-              {renderSlot('conversation.session.header.utilities', {})}
-            </div>
-          </div>
-          {tabs.length > 1 && (
-            <div className={css.tabs} role="tablist">
-              {tabs.map(viewTab => (
-                <button
-                  key={viewTab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={viewTab.id === active?.id}
-                  className={clsx(css.tab, viewTab.id === active?.id && css.tabActive)}
-                  onClick={() => { actions.setView(viewTab.id) }}
-                >
-                  {viewTab.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </>
+              {tabsView}
+            </>
+          )
       )}
     </header>
   )
@@ -173,6 +189,7 @@ export function ConversationSessionHeader({
 export function ConversationSession({
   sessionId, useSession, useInput, inputActions, useStore, actions,
   renderSlot, views, bindDraftMirror, bindAnnotationMirror, restoreAnnotationDraft, releaseSessionImages,
+  renderMode,
 }: ConversationSessionProps) {
   useSyncExternalStore(views.subscribe, views.version)
   const tabs = views.list()
@@ -206,7 +223,7 @@ export function ConversationSession({
     releaseSessionImages(sessionId)
   }, [releaseSessionImages, sessionId])
 
-  if (blank && composerPhase === 'blank') return null
+  if (renderMode !== 'sidechat' && blank && composerPhase === 'blank') return null
   return (
     <div className={css.viewArea}>
       {active !== undefined && renderSlot('conversation.view', {

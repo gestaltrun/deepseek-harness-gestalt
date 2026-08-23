@@ -14,6 +14,14 @@ on:
         required: true
         type: boolean
         default: false
+      attachment_storage:
+        description: Deploy the PostgreSQL atomic bridge first; enable OSS only in a later completed deployment
+        required: true
+        type: choice
+        options:
+          - postgres
+          - oss
+        default: postgres
 
 concurrency:
   group: platform-deploy
@@ -56,6 +64,11 @@ jobs:
           PLATFORM_REDIS_HOST: ${{ vars.PLATFORM_REDIS_HOST }}
           PLATFORM_REDIS_USER: ${{ secrets.PLATFORM_REDIS_USER }}
           PLATFORM_REDIS_PASSWORD: ${{ secrets.PLATFORM_REDIS_PASSWORD }}
+          PLATFORM_OSS_ENDPOINT: ${{ vars.PLATFORM_OSS_ENDPOINT }}
+          PLATFORM_OSS_BUCKET: ${{ vars.PLATFORM_OSS_BUCKET }}
+          PLATFORM_OSS_AUTH: ${{ vars.PLATFORM_OSS_AUTH }}
+          PLATFORM_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_OSS_OBJECT_PREFIX }}
+          PLATFORM_OSS_TIMEOUT_MS: '10000'
           PLATFORM_RELAY_REDIS_KEY_PREFIX: ${{ vars.PLATFORM_RELAY_REDIS_KEY_PREFIX }}
           PLATFORM_RELAY_INSTANCE_ID: relay-validation
           PLATFORM_RELAY_CAPACITY_RETRY_AFTER_MS: '1000'
@@ -70,6 +83,9 @@ jobs:
           PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES: '104857600'
           PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS: '900000'
           PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS: '10000'
+          PLATFORM_REMOTE_ATTACHMENT_STORAGE: ${{ inputs.attachment_storage }}
+          PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS: '60000'
+          PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY: '8'
           PLATFORM_TOKEN_SIGNING_KEY: ${{ secrets.PLATFORM_TOKEN_SIGNING_KEY }}
           PLATFORM_POLLING_SIGNING_KEY: ${{ secrets.PLATFORM_POLLING_SIGNING_KEY }}
           PLATFORM_ECS_SSH_KEY: ${{ secrets.PLATFORM_ECS_SSH_KEY }}
@@ -116,11 +132,17 @@ jobs:
           PLATFORM_REDIS_HOST: ${{ vars.PLATFORM_REDIS_HOST }}
           PLATFORM_REDIS_USER: ${{ secrets.PLATFORM_REDIS_USER }}
           PLATFORM_REDIS_PASSWORD: ${{ secrets.PLATFORM_REDIS_PASSWORD }}
+          PLATFORM_OSS_ENDPOINT: ${{ vars.PLATFORM_OSS_ENDPOINT }}
+          PLATFORM_OSS_BUCKET: ${{ vars.PLATFORM_OSS_BUCKET }}
+          PLATFORM_OSS_AUTH: ${{ vars.PLATFORM_OSS_AUTH }}
+          PLATFORM_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_OSS_OBJECT_PREFIX }}
+          PLATFORM_OSS_TIMEOUT_MS: '10000'
           PLATFORM_RELAY_REDIS_KEY_PREFIX: ${{ vars.PLATFORM_RELAY_REDIS_KEY_PREFIX }}
           PLATFORM_REDIS_TLS: '1'
           PLATFORM_TOKEN_SIGNING_KEY: ${{ secrets.PLATFORM_TOKEN_SIGNING_KEY }}
           PLATFORM_POLLING_SIGNING_KEY: ${{ secrets.PLATFORM_POLLING_SIGNING_KEY }}
           PLATFORM_SLS_ACCOUNT_ID: ${{ vars.PLATFORM_SLS_ACCOUNT_ID }}
+          PLATFORM_REMOTE_ATTACHMENT_STORAGE: ${{ inputs.attachment_storage }}
         run: |
           set -euo pipefail
           install -m 600 /dev/null /tmp/ecs.pem
@@ -129,14 +151,21 @@ jobs:
           for host in "${hosts[@]}"; do
             host="${host// /}"
             relay_instance="relay-${host//./-}"
-            echo "deploy ${host}"
+            echo "expand ${host}"
             ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
               'dnf -y install docker >/dev/null 2>&1 || yum -y install docker >/dev/null 2>&1; systemctl enable --now docker'
             gzip -dc /tmp/platform.tar.gz | ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" 'docker load'
             ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              "docker rm -f dsh-platform >/dev/null 2>&1 || true; docker run -d --name dsh-platform --restart unless-stopped \
+              "set -euo pipefail; if [ $(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE") = oss ]; then docker run --rm --network host \
+                -e PLATFORM_OSS_ENDPOINT=$(printf %q "$PLATFORM_OSS_ENDPOINT") \
+                -e PLATFORM_OSS_BUCKET=$(printf %q "$PLATFORM_OSS_BUCKET") \
+                -e PLATFORM_OSS_AUTH=$(printf %q "$PLATFORM_OSS_AUTH") \
+                -e PLATFORM_OSS_OBJECT_PREFIX=$(printf %q "$PLATFORM_OSS_OBJECT_PREFIX") \
+                -e PLATFORM_OSS_TIMEOUT_MS=$(printf %q "$PLATFORM_OSS_TIMEOUT_MS") \
+                ${IMAGE} node dist/oss-lifecycle-cli.mjs; fi; \
+               docker rm -f dsh-platform-candidate >/dev/null 2>&1 || true; docker run -d --name dsh-platform-candidate --restart no \
                 --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
-                -p 80:8080 \
+                -p 127.0.0.1:18080:8080 \
                 -e PLATFORM_ENVIRONMENT=production \
                 -e PLATFORM_ORIGIN=$(printf %q "$PLATFORM_ORIGIN") \
                 -e PLATFORM_GITHUB_CALLBACK=$(printf %q "$PLATFORM_GITHUB_CALLBACK") \
@@ -152,6 +181,11 @@ jobs:
                 -e PLATFORM_REDIS_HOST=$(printf %q "$PLATFORM_REDIS_HOST") \
                 -e PLATFORM_REDIS_USER=$(printf %q "$PLATFORM_REDIS_USER") \
                 -e PLATFORM_REDIS_PASSWORD=$(printf %q "$PLATFORM_REDIS_PASSWORD") \
+                -e PLATFORM_OSS_ENDPOINT=$(printf %q "$PLATFORM_OSS_ENDPOINT") \
+                -e PLATFORM_OSS_BUCKET=$(printf %q "$PLATFORM_OSS_BUCKET") \
+                -e PLATFORM_OSS_AUTH=$(printf %q "$PLATFORM_OSS_AUTH") \
+                -e PLATFORM_OSS_OBJECT_PREFIX=$(printf %q "$PLATFORM_OSS_OBJECT_PREFIX") \
+                -e PLATFORM_OSS_TIMEOUT_MS=10000 \
                 -e PLATFORM_RELAY_REDIS_KEY_PREFIX=$(printf %q "$PLATFORM_RELAY_REDIS_KEY_PREFIX") \
                 -e PLATFORM_REDIS_TLS=1 \
                 -e PLATFORM_RELAY_INSTANCE_ID=$(printf %q "$relay_instance") \
@@ -167,9 +201,18 @@ jobs:
                 -e PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES=104857600 \
                 -e PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS=900000 \
                 -e PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS=10000 \
+                -e PLATFORM_REMOTE_ATTACHMENT_STORAGE=$(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE") \
+                -e PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS=60000 \
+                -e PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY=8 \
                 -e PLATFORM_TOKEN_SIGNING_KEY=$(printf %q "$PLATFORM_TOKEN_SIGNING_KEY") \
                 -e PLATFORM_POLLING_SIGNING_KEY=$(printf %q "$PLATFORM_POLLING_SIGNING_KEY") \
-                ${IMAGE}"
+                ${IMAGE}; \
+               ready=0; for attempt in \$(seq 1 30); do \
+                 if body=\$(curl -fsS --max-time 2 http://127.0.0.1:18080/readyz) \
+                   && printf '%s' \"\$body\" | grep -Fq '\"attachmentStorage\":\"'$(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE")'\"'; then ready=1; break; fi; sleep 1; \
+               done; test \"\$ready\" = 1; \
+               install -m 600 /dev/null /run/dsh-platform-candidate.env; \
+               docker inspect dsh-platform-candidate --format '{{range .Config.Env}}{{println .}}{{end}}' > /run/dsh-platform-candidate.env"
             ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
               "set -euo pipefail
                token=\$(curl -fsS --max-time 5 -X PUT http://100.100.100.200/latest/api/token -H 'X-aliyun-ecs-metadata-token-ttl-seconds:60' || true)
@@ -188,5 +231,90 @@ jobs:
                  --env ALIYUN_LOGTAIL_USER_ID=\"\$account\" \\
                  --env ALIYUN_LOGTAIL_USER_DEFINED_ID=gestalt-platform \\
                  aliyun-observability-release-registry.cn-hangzhou.cr.aliyuncs.com/loongcollector/loongcollector:v3.0.12.0-25723a1-aliyun"
+          done
+
+          for host in "${hosts[@]}"; do
+            host="${host// /}"
+            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
+              'set -euo pipefail; docker inspect dsh-platform >/dev/null; ! docker inspect dsh-platform-rollback >/dev/null 2>&1; curl -fsS --max-time 5 http://127.0.0.1:80/readyz >/dev/null'
+          done
+          if [ "$PLATFORM_REMOTE_ATTACHMENT_STORAGE" = oss ]; then
+            for host in "${hosts[@]}"; do
+              host="${host// /}"
+              ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
+                "set -euo pipefail; body=\$(curl -fsS --max-time 5 http://127.0.0.1:80/readyz); \
+                 printf '%s' \"\$body\" | grep -Eq '\"attachmentStorage\":\"(postgres|oss)\"'"
+            done
+          fi
+
+          rollback_platform() {
+            set +e
+            rollback_failed=0
+            for rollback_host in "${hosts[@]}"; do
+              rollback_host="${rollback_host// /}"
+              ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${rollback_host}" \
+                "if docker inspect dsh-platform-rollback >/dev/null 2>&1; then \
+                   docker stop --time 60 dsh-platform >/dev/null 2>&1 || true; \
+                   docker rm -f dsh-platform >/dev/null 2>&1 || true; \
+                   docker rename dsh-platform-rollback dsh-platform && docker start dsh-platform; \
+                 fi; docker rm -f dsh-platform-candidate >/dev/null 2>&1 || true; \
+                 rm -f /run/dsh-platform-candidate.env" || rollback_failed=1
+            done
+            return "$rollback_failed"
+          }
+          on_deploy_error() {
+            status=$?
+            trap - ERR
+            rollback_platform || echo 'platform: one or more hosts failed to restore the predecessor' >&2
+            exit "$status"
+          }
+          trap on_deploy_error ERR
+
+          # Each graceful rolling replacement keeps the other host serving. The shared authority
+          # remains in the predecessor-compatible phase until every replacement is healthy.
+          for host in "${hosts[@]}"; do
+            host="${host// /}"
+            echo "rolling replacement keeps the other host serving: ${host}"
+            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
+              "set -euo pipefail; \
+               docker rename dsh-platform dsh-platform-rollback; \
+               docker stop --time 60 dsh-platform-rollback; \
+               docker rm -f dsh-platform-candidate >/dev/null; \
+               docker run -d --name dsh-platform --restart unless-stopped \
+                 --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
+                 -p 80:8080 --env-file /run/dsh-platform-candidate.env ${IMAGE}; \
+               ready=0; for attempt in \$(seq 1 30); do \
+                 if body=\$(curl -fsS --max-time 2 http://127.0.0.1:80/readyz) \
+                   && printf '%s' \"\$body\" | grep -Fq '\"attachmentStorage\":\"'$(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE")'\"'; then ready=1; break; fi; sleep 1; \
+               done; test \"\$ready\" = 1"
+          done
+          trap - ERR
+
+          # A stopped rollback container is removed on every host before the irreversible phase
+          # transition. A partial cleanup leaves one active generation in the prior compatible mode.
+          rollback_cleanup_failed=0
+          for host in "${hosts[@]}"; do
+            host="${host// /}"
+            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
+              'set -euo pipefail; docker rm dsh-platform-rollback >/dev/null' || rollback_cleanup_failed=1
+          done
+          if [ "$rollback_cleanup_failed" != 0 ]; then
+            for host in "${hosts[@]}"; do
+              host="${host// /}"
+              ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
+                'rm -f /run/dsh-platform-candidate.env' || true
+            done
+            exit 1
+          fi
+
+          cutover_host="${hosts[0]// /}"
+          ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${cutover_host}" \
+            "set -euo pipefail; docker run --rm --network host \
+               --env-file /run/dsh-platform-candidate.env ${IMAGE} \
+               node dist/attachment-storage-cutover-cli.mjs"
+          for host in "${hosts[@]}"; do
+            host="${host// /}"
+            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
+              'rm -f /run/dsh-platform-candidate.env'
           done
           rm -f /tmp/ecs.pem /tmp/platform.tar.gz

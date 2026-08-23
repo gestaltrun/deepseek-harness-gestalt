@@ -55,6 +55,7 @@ import {
 import { mobileSystemBrowser } from './system-browser.ts'
 import { loadMobilePlatformEnvironment } from './platform-environment.ts'
 import { MobileCompanionProjectionCacheRuntime } from './companion-cache-runtime.ts'
+import { launchMobileProduct } from './mobile-product-launch.ts'
 import './root.css'
 
 const environment = loadMobilePlatformEnvironment(import.meta.env)
@@ -76,7 +77,7 @@ export function disposeCompanionVisibility(): Promise<void> {
 }
 
 /** Settles after the native Installation presentation is bound and the Mobile product surface mounts. */
-export const mobileProductStarted = mountMobileProduct()
+export const mobileProductStarted = launchMobileProduct(mountMobileProduct)
 
 async function mountMobileProduct(): Promise<void> {
   const protectedStorage = new CapacitorMobileProtectedStorage()

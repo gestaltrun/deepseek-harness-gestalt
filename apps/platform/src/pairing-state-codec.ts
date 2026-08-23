@@ -3,6 +3,7 @@
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   PERSONAL_PAIRING_PROTOCOL_MAJOR,
+  parseAttachmentBlobReservationId,
   parseDevicePrincipalId,
   parsePairingChallengeId,
   parsePairingCompletionId,
@@ -143,7 +144,7 @@ function decodePairingTransactionFields(
     orphanPendingCleanups: orphans,
     accountChallengeAt: decodeNumberListMap(record.accountChallengeAt, 'accountChallengeAt'),
     ipChallengeAt: decodeNumberListMap(record.ipChallengeAt, 'ipChallengeAt'),
-    blobs: decodeMap(record.blobs, 'blobs', asPlainString, decodeBlob),
+    blobs: decodeMap(record.blobs, 'blobs', parseAttachmentBlobReservationId, decodeBlob),
     blobUploads: decodeMap(record.blobUploads, 'blobUploads', asPlainString, decodeBlobUploads),
     blobSequence: { next: asSafeInteger(asRecord(record.blobSequence, 'blobSequence').next, 'blobSequence.next') },
   }
@@ -762,11 +763,16 @@ function decodeDevice(value: unknown): CompletionReplayRecord['view']['device'] 
   }
 }
 
-function decodeBlob(value: unknown): { accountId: string; bytes: number } {
+function decodeBlob(value: unknown): { accountId: string; bytes: number; expiresAt?: number } {
   const record = asRecord(value, 'blob reservation')
+  const expiresAt = record.expiresAt === undefined
+    ? undefined
+    : asSafeInteger(record.expiresAt, 'blob.expiresAt')
+  if (expiresAt !== undefined && expiresAt <= 0) throw new TypeError('blob.expiresAt must be positive')
   return {
     accountId: asPlainString(record.accountId, 'blob.accountId'),
     bytes: asSafeInteger(record.bytes, 'blob.bytes'),
+    ...(expiresAt === undefined ? {} : { expiresAt }),
   }
 }
 

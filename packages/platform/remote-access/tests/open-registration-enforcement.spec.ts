@@ -6,15 +6,18 @@ import {
   ACCOUNT_DAILY_QUOTA_WINDOW_MS,
   MemoryPersonalPairingAuthorityStore,
   MemoryPlatformCapacityGate,
+  MAX_ATTACHMENT_RESERVATION_LIFETIME_MS,
   OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
   OPEN_REGISTRATION_QUOTAS,
   PAIRING_CHALLENGE_QUOTA_WINDOW_MS,
   PAIRING_REPLAY_RETENTION_MS,
   PersonalPairingProvider,
+  parseAttachmentBlobReservationId,
   parsePairingCompletionId,
   parsePairingRendezvousId,
   retryAfterSecondsUntil,
   type PairingHandshakeProvider,
+  type AttachmentBlobReservationId,
 } from '../src/index.ts'
 
 const NOW = Date.parse('2026-08-19T10:00:00.000Z')
@@ -146,7 +149,7 @@ describe('open-registration enforcement', () => {
     const provider = uniqueProvider(now)
     const owner = authentication('desktop-installation', 'account-one')
     await provider.setMobileAccess({ desktop: owner, enabled: true })
-    const held: string[] = []
+    const held: AttachmentBlobReservationId[] = []
     for (let index = 0; index < OPEN_REGISTRATION_QUOTAS.concurrentBlobs; index += 1) {
       held.push((await provider.admitAttachmentBlob({ owner, bytes: 1 })).reservationId)
     }
@@ -154,12 +157,18 @@ describe('open-registration enforcement', () => {
       code: 'QUOTA',
       retryAfter: OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
     })
-    await provider.releaseAttachmentBlob({ owner, reservationId: held[0] as string })
+    const firstHeld = held[0]
+    if (firstHeld === undefined) throw new Error('attachment reservation was not retained')
+    await provider.releaseAttachmentBlob({ owner, reservationId: firstHeld })
     const exactLimit = await provider.admitAttachmentBlob({
       owner,
       bytes: OPEN_REGISTRATION_QUOTAS.blobBytes,
     })
     expect(exactLimit.reservationId.length).toBeGreaterThan(0)
+    const cleanup = provider.attachmentReservationCleanup()
+    await cleanup.release(exactLimit.reservationId)
+    await cleanup.release(exactLimit.reservationId)
+    expect(() => parseAttachmentBlobReservationId('')).toThrow(TypeError)
     await expect(provider.admitAttachmentBlob({
       owner,
       bytes: OPEN_REGISTRATION_QUOTAS.blobBytes + 1,
@@ -200,8 +209,35 @@ describe('open-registration enforcement', () => {
     const afterDailyWindow = await daily.admitAttachmentBlob({ owner, bytes: 1 })
     expect(afterDailyWindow.reservationId.length).toBeGreaterThan(0)
     await expect(daily.admitAttachmentBlob({ owner, bytes: -1 })).rejects.toBeInstanceOf(TypeError)
-    await expect(daily.releaseAttachmentBlob({ owner, reservationId: 'missing' })).rejects.toBeInstanceOf(TypeError)
+    await expect(daily.releaseAttachmentBlob({
+      owner, reservationId: parseAttachmentBlobReservationId('missing'),
+    })).rejects.toBeInstanceOf(TypeError)
 
+  })
+
+  it('expires durable blob reservations before admitting replacement capacity', async () => {
+    const now = { value: NOW }
+    const provider = uniqueProvider(now, undefined, undefined, 'lease-', 100)
+    const owner = authentication('desktop-lease', 'account-lease')
+    const reservations = await Promise.all(Array.from(
+      { length: OPEN_REGISTRATION_QUOTAS.concurrentBlobs },
+      async () => await provider.admitAttachmentBlob({ owner, bytes: 1 }),
+    ))
+    expect(reservations.every(reservation => reservation.expiresAt === NOW + 100)).toBe(true)
+    await expect(provider.admitAttachmentBlob({ owner, bytes: 1 })).rejects.toMatchObject({ code: 'QUOTA' })
+
+    now.value += 100
+    await expect(provider.admitAttachmentBlob({ owner, bytes: 1 })).resolves.toMatchObject({ expiresAt: NOW + 200 })
+    const first = reservations[0]
+    if (first === undefined) throw new Error('blob lease fixture requires one reservation')
+    await expect(provider.attachmentReservationCleanup().release(first.reservationId)).resolves.toBeUndefined()
+    expect(() => uniqueProvider(
+      now,
+      undefined,
+      undefined,
+      'invalid-lease-',
+      MAX_ATTACHMENT_RESERVATION_LIFETIME_MS + 1,
+    )).toThrow('reservation lifetime exceeds the protocol safety ceiling')
   })
 
   it('sheds new pairing and blob acquisition at capacity while an established pairing remains listed', async () => {
@@ -259,7 +295,7 @@ describe('open-registration enforcement', () => {
       retryAfter: Math.ceil(PAIRING_CHALLENGE_QUOTA_WINDOW_MS / 1_000),
     })
 
-    const held: string[] = []
+    const held: AttachmentBlobReservationId[] = []
     for (let index = 0; index < OPEN_REGISTRATION_QUOTAS.concurrentBlobs; index += 1) {
       held.push((await first.admitAttachmentBlob({ owner: desktopA, bytes: 1 })).reservationId)
     }
@@ -267,7 +303,9 @@ describe('open-registration enforcement', () => {
       code: 'QUOTA',
       retryAfter: OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
     })
-    await first.releaseAttachmentBlob({ owner: desktopA, reservationId: held[0] as string })
+    const firstReservation = held[0]
+    if (firstReservation === undefined) throw new Error('attachment reservation was not retained')
+    await first.releaseAttachmentBlob({ owner: desktopA, reservationId: firstReservation })
 
   })
 
@@ -293,6 +331,7 @@ function uniqueProvider(
   capacity?: MemoryPlatformCapacityGate,
   authority?: MemoryPersonalPairingAuthorityStore,
   idPrefix = '',
+  attachmentReservationLifetimeMs?: number,
 ) {
   let id = 0
   return new PersonalPairingProvider(new Context(), {
@@ -319,6 +358,7 @@ function uniqueProvider(
     handshake: handshakeProvider(),
     authority: authority ?? new MemoryPersonalPairingAuthorityStore(),
     clock: { now: () => now.value },
+    ...(attachmentReservationLifetimeMs === undefined ? {} : { attachmentReservationLifetimeMs }),
     randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index + 1),
     randomId: kind => `${kind}-${idPrefix}${String(++id)}`,
     pairingLinkOrigin: 'https://platform.example.com/pair',

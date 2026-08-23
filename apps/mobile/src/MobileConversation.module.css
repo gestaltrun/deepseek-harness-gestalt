@@ -1,8 +1,20 @@
 .page {
+  /* Public conversation components normally inherit these geometry values
+     from Desktop ConversationRoot. Mobile owns the equivalent narrow shell,
+     so it binds the same card, gutter, and long-draft caps locally. */
+  --dsh-chat-content-width: 748px;
+  --dsh-composer-card-max-width: calc(var(--dsh-chat-content-width) + 32px);
+  --dsh-composer-side-clearance: 16px;
+  --dsh-composer-text-max-height: 336px;
+
   box-sizing: border-box;
+  position: fixed;
+  z-index: 10;
+  inset: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  min-height: min(100dvh, 860px);
+  height: 100dvh;
+  min-height: 0;
   width: 100%;
   max-width: 430px;
   margin: 0 auto;

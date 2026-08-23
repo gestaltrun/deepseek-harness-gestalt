@@ -17,6 +17,12 @@ import WorkspaceRegistry, {
 } from '../src/index.ts'
 import type { WorkspaceDomainState, WorkspaceRecord } from '../src/index.ts'
 
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    'workspace/session-archived'(sessionId: SessionId): Promise<void> | void
+  }
+}
+
 const DOMAIN_VERSION = 2
 
 const header = (id: string, cwd?: string, createdAt = 0): SessionHeader => ({
@@ -873,6 +879,36 @@ describe('workspace mutation and status', () => {
 })
 
 describe('registry-global session archive', () => {
+  it('awaits Session resource cleanup on first and repeated archive requests', async () => {
+    const dir = await makeDir('archive-cleanup')
+    const result = await harness({ sessions: [header('archived', dir, 100)] })
+    const cleaned: SessionId[] = []
+    result.ctx.on('workspace/session-archived', async (sessionId) => {
+      await Promise.resolve()
+      cleaned.push(sessionId)
+    })
+
+    await result.registry.archiveSession(SessionId('archived'))
+    await result.registry.archiveSession(SessionId('archived'))
+
+    expect(cleaned).toEqual([SessionId('archived'), SessionId('archived')])
+  })
+
+  it('keeps the archive durable and retries resource cleanup after a listener failure', async () => {
+    const dir = await makeDir('archive-cleanup-retry')
+    const result = await harness({ sessions: [header('archived', dir, 100)] })
+    let attempts = 0
+    result.ctx.on('workspace/session-archived', () => {
+      attempts += 1
+      if (attempts === 1) throw new Error('cleanup failed')
+    })
+
+    await expect(result.registry.archiveSession(SessionId('archived'))).rejects.toBeDefined()
+    expect(result.registry.archivedSessionIds).toEqual([SessionId('archived')])
+    await expect(result.registry.archiveSession(SessionId('archived'))).resolves.toBeUndefined()
+    expect(attempts).toBe(2)
+  })
+
   it('archives durably in order, idempotently skips repeats, and leaves accounting untouched', async () => {
     const dir = await makeDir('archive-home')
     const result = await harness({ sessions: [header('kept', dir, 100), header('gone', dir, 200)] })

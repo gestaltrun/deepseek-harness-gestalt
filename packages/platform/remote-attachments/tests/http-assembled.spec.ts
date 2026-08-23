@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import { parseAttachmentBlobReservationId, parsePersonalPairingId, RemoteAccessError } from '@deepseek-ai/dsh-remote-access'
 import {
   deriveCompanionAttachmentKey,
   openCompanionAttachment,
@@ -11,7 +11,12 @@ import {
   sealCompanionAttachment,
   type CompanionOfferAttachmentOperation,
 } from '@deepseek-ai/dsh-remote-protocol'
-import { RemoteAttachmentStoreProvider, type RemoteAttachmentStoreOptions } from '../src/index.ts'
+import {
+  RemoteAttachmentError,
+  RemoteAttachmentStoreProvider,
+  type RemoteAttachmentQuotaReservation,
+  type RemoteAttachmentStoreOptions,
+} from '../src/index.ts'
 import { apply } from '../src/http.ts'
 import {
   downloadCompanionAttachment,
@@ -291,7 +296,66 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(store.observe()).toHaveLength(0)
   })
 
-  it('leaves a finished consume body intact when delete-after-finish fails, so a later consume still delivers the blob', async () => {
+  it('abandons a claimed blob when the response closes before finish', async () => {
+    const { routes, store } = await start()
+    const uploadRoute = routes.get('/v1/remote-attachments')
+    const consumeRoute = routes.get('/v1/remote-attachments/consume')
+    if (uploadRoute === undefined || consumeRoute === undefined) throw new Error('attachment routes were not registered')
+    const upload = stubResponse()
+    await uploadRoute.handler(
+      streamingRequest({ 'x-test-pairing': 'pairing-a' }, [Uint8Array.of(1, 2, 3)]),
+      upload.res,
+    )
+    const grant = JSON.parse(new TextDecoder().decode(concatBytes(upload.body))) as { capability: string }
+
+    await consumeRoute.handler(
+      streamingRequest(
+        { 'x-test-pairing': 'pairing-a' },
+        [new TextEncoder().encode(JSON.stringify({ capability: grant.capability }))],
+      ),
+      prematurelyClosedResponse().res,
+    )
+
+    expect(store.observe()).toHaveLength(1)
+    await consumeRoute.handler(
+      streamingRequest(
+        { 'x-test-pairing': 'pairing-a' },
+        [new TextEncoder().encode(JSON.stringify({ capability: grant.capability }))],
+      ),
+      closedAfterFinishResponse().res,
+    )
+    expect(store.observe()).toHaveLength(0)
+  })
+
+  it('admits only one concurrent HTTP consume while the winning response remains in flight', async () => {
+    const { routes } = await start()
+    const sealed = await mobileSeal(attachmentKey, Uint8Array.of(3, 2, 1), ready)
+    const uploadRoute = routes.get('/v1/remote-attachments')
+    const consumeRoute = routes.get('/v1/remote-attachments/consume')
+    if (uploadRoute === undefined || consumeRoute === undefined) throw new Error('attachment routes were not registered')
+    const upload = stubResponse()
+    await uploadRoute.handler(
+      streamingRequest({ 'x-test-pairing': 'pairing-a' }, [sealed.ciphertext]),
+      upload.res,
+    )
+    const grant = JSON.parse(new TextDecoder().decode(concatBytes(upload.body))) as { capability: string }
+    const request = (): IncomingMessage => streamingRequest(
+      { 'x-test-pairing': 'pairing-a' },
+      [new TextEncoder().encode(JSON.stringify({ capability: grant.capability }))],
+    )
+    const first = heldResponse()
+    const firstConsume = consumeRoute.handler(request(), first.res)
+    await first.written
+    const second = stubResponse()
+    await consumeRoute.handler(request(), second.res)
+
+    const statuses = [first.status, second.status].sort()
+    first.finish()
+    await firstConsume
+    expect(statuses).toEqual([200, 404])
+  })
+
+  it('never replays a delivered body when consume settlement cleanup fails', async () => {
     const { routes, store } = await start()
     const sealed = await mobileSeal(attachmentKey, Uint8Array.of(4, 5, 6), ready)
     const uploadRoute = routes.get('/v1/remote-attachments')
@@ -304,7 +368,11 @@ describe('Remote attachment HTTP assembled transfer', () => {
     const grant = JSON.parse(new TextDecoder().decode(concatBytes(uploadResponse.body))) as { capability: string }
     const consumeRoute = routes.get('/v1/remote-attachments/consume')
     if (consumeRoute === undefined) throw new Error('consume route was not registered')
-    vi.spyOn(store, 'revoke').mockRejectedValueOnce(new Error('delete after finish failed'))
+    const consume = store.consume.bind(store)
+    vi.spyOn(store, 'consume').mockImplementationOnce(async (input) => {
+      const claimed = await consume(input)
+      return { ...claimed, complete: async () => { throw new Error('settlement cleanup failed') } }
+    })
     const first = stubResponse()
     await consumeRoute.handler(
       streamingRequest(
@@ -315,7 +383,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
     )
     expect(first.status).toBe(200)
     expect(concatBytes(first.body)).toEqual(sealed.ciphertext)
-    expect(store.observe()).toHaveLength(1)
+    expect(store.observe()).toHaveLength(0)
     const retry = stubResponse()
     await consumeRoute.handler(
       streamingRequest(
@@ -324,8 +392,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
       ),
       retry.res,
     )
-    expect(retry.status).toBe(200)
-    expect(concatBytes(retry.body)).toEqual(sealed.ciphertext)
+    expect(retry.status).toBe(404)
     expect(store.observe()).toHaveLength(0)
   })
 
@@ -390,6 +457,29 @@ describe('Remote attachment HTTP assembled transfer', () => {
     const oversized = await consume(JSON.stringify({ capability: 'A'.repeat(43), padding: 'x'.repeat(8 * 1_024) }))
     expect(oversized.status).toBe(413)
     expect(await errorBody(oversized)).toMatchObject({ code: 'BODY_TOO_LARGE' })
+
+    const { routes } = await start()
+    const consumeRoute = routes.get('/v1/remote-attachments/consume')
+    if (consumeRoute === undefined) throw new Error('consume route was not registered')
+    const missingLength = stubResponse()
+    await consumeRoute.handler(
+      streamingRequest(
+        { 'x-test-pairing': 'pairing-a' },
+        [new TextEncoder().encode(JSON.stringify({ capability: 'A'.repeat(43) }))],
+        { contentLength: false },
+      ),
+      missingLength.res,
+    )
+    expect(missingLength.status).toBe(404)
+    const streamedOversize = stubResponse()
+    await consumeRoute.handler(
+      streamingRequest(
+        { 'x-test-pairing': 'pairing-a', 'content-length': '1' },
+        [new Uint8Array(5 * 1_024)],
+      ),
+      streamedOversize.res,
+    )
+    expect(streamedOversize.status).toBe(413)
   })
 
   it('maps expiry, capacity, and unexpected failures to explicit HTTP statuses', async () => {
@@ -435,6 +525,56 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(await errorBody(exploded)).toMatchObject({ code: 'INTERNAL_ERROR' })
   })
 
+  it('admits the product upload through Remote Access quota and preserves capacity retry guidance', async () => {
+    const admit = vi.fn(async () => {
+      throw new RemoteAccessError('PLATFORM_CAPACITY', 'Platform attachment capacity is full', 7)
+    })
+    const { origin } = await start({ admit })
+    const response = await fetch(`${origin}/v1/remote-attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
+      body: Uint8Array.of(1, 2, 3),
+    })
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBe('7')
+    expect(await errorBody(response)).toMatchObject({ code: 'PLATFORM_CAPACITY' })
+    expect(admit).toHaveBeenCalledWith(3)
+  })
+
+  it('preserves non-capacity Remote Access failures as conflicts', async () => {
+    const { origin } = await start({
+      admit: async () => {
+        throw new RemoteAccessError('PAIRING_PENDING_INVALID', 'Pairing is unavailable')
+      },
+    })
+    const response = await fetch(`${origin}/v1/remote-attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
+      body: Uint8Array.of(1),
+    })
+
+    expect(response.status).toBe(409)
+    expect(await errorBody(response)).toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+  })
+
+  it.each([
+    ['class error', new RemoteAttachmentError('PLATFORM_CAPACITY', 'Attachment capacity is full', 9)],
+    ['structural error', { code: 'ATTACHMENT_EMPTY', message: 'Attachment body is empty' }],
+  ])('projects a %s from a durable store', async (_label, failure) => {
+    const { origin, store } = await start()
+    vi.spyOn(store, 'publish').mockRejectedValueOnce(failure)
+    const response = await fetch(`${origin}/v1/remote-attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
+      body: Uint8Array.of(1),
+    })
+
+    expect(response.status).toBe(failure instanceof RemoteAttachmentError ? 429 : 400)
+    expect(await errorBody(response)).toMatchObject({ code: failure.code })
+    if (failure instanceof RemoteAttachmentError) expect(response.headers.get('retry-after')).toBe('9')
+  })
+
   it('accepts non-Buffer stream chunks at the HTTP boundary', async () => {
     const { routes } = await start()
     const sealed = await mobileSeal(attachmentKey, new TextEncoder().encode('streamed plaintext'), ready)
@@ -462,16 +602,112 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(concatBytes(consumeResponse.body)).toEqual(sealed.ciphertext)
   })
 
-  it('bounds an upload stream without a trusted content-length inside the loop', async () => {
-    const { routes } = await start({ store: { maxBlobBytes: 8 } })
+  it('requires a positive exact upload content-length before quota admission or body reads', async () => {
+    const release = vi.fn(async () => {})
+    let admitted = false
+    const admit = vi.fn(async () => {
+      admitted = true
+      return { id: parseAttachmentBlobReservationId('quota-exact'), expiresAt: Number.MAX_SAFE_INTEGER, release }
+    })
+    const { routes, store } = await start({ store: { maxBlobBytes: 8 }, admit })
+    const uploadRoute = routes.get('/v1/remote-attachments')
+    if (uploadRoute === undefined) throw new Error('upload route was not registered')
+
+    const missing = stubResponse()
+    let missingPulled = false
+    await uploadRoute.handler(
+      streamingRequest(
+        { 'x-test-pairing': 'pairing-a' },
+        [Uint8Array.of(1)],
+        { contentLength: false, onPull: () => { missingPulled = true } },
+      ),
+      missing.res,
+    )
+    expect(missing.status).toBe(411)
+    expect(missingPulled).toBe(false)
+    expect(admit).not.toHaveBeenCalled()
+
+    const empty = stubResponse()
+    await uploadRoute.handler(
+      streamingRequest({ 'x-test-pairing': 'pairing-a' }, [], { contentLength: false }),
+      empty.res,
+    )
+    expect(empty.status).toBe(411)
+
+    const zero = stubResponse()
+    await uploadRoute.handler(
+      streamingRequest({ 'x-test-pairing': 'pairing-a', 'content-length': '0' }, []),
+      zero.res,
+    )
+    expect(zero.status).toBe(400)
+    expect(admit).not.toHaveBeenCalled()
+
+    const invalidLengths: Array<string | string[]> = [['1', '2'], '+1', '9007199254740992']
+    for (const invalidLength of invalidLengths) {
+      const invalid = stubResponse()
+      const request = streamingRequest({ 'x-test-pairing': 'pairing-a' }, [Uint8Array.of(1)])
+      Object.assign(request.headers, { 'content-length': invalidLength })
+      await uploadRoute.handler(
+        request,
+        invalid.res,
+      )
+      expect(invalid.status).toBe(400)
+    }
+
+    const short = stubResponse()
+    await uploadRoute.handler(
+      streamingRequest(
+        { 'x-test-pairing': 'pairing-a', 'content-length': '3' },
+        [Uint8Array.of(1, 2)],
+        { onPull: () => { expect(admitted).toBe(true) } },
+      ),
+      short.res,
+    )
+    expect(short.status).toBe(400)
+    expect(admit).toHaveBeenCalledWith(3)
+    expect(release).toHaveBeenCalledOnce()
+    expect(store.observe()).toHaveLength(0)
+
+    const long = stubResponse()
+    await uploadRoute.handler(
+      streamingRequest({ 'x-test-pairing': 'pairing-a', 'content-length': '2' }, [Uint8Array.of(1, 2, 3)]),
+      long.res,
+    )
+    expect(long.status).toBe(400)
+    expect(release).toHaveBeenCalledTimes(2)
+
+    const tooLarge = stubResponse()
+    await uploadRoute.handler(
+      streamingRequest({ 'x-test-pairing': 'pairing-a', 'content-length': '9' }, [new Uint8Array(9)]),
+      tooLarge.res,
+    )
+    expect(tooLarge.status).toBe(413)
+    expect(admit).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves an upload read failure when rejected-body quota cleanup also fails', async () => {
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { routes } = await start({
+      admit: async () => ({
+        id: parseAttachmentBlobReservationId('quota-read-failure'),
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        release: async () => { throw new Error('quota cleanup failed') },
+      }),
+    })
     const uploadRoute = routes.get('/v1/remote-attachments')
     if (uploadRoute === undefined) throw new Error('upload route was not registered')
     const response = stubResponse()
     await uploadRoute.handler(
-      streamingRequest({ 'x-test-pairing': 'pairing-a' }, [new Uint8Array(4), new Uint8Array(6)]),
+      streamingRequest({ 'x-test-pairing': 'pairing-a', 'content-length': '2' }, [Uint8Array.of(1)]),
       response.res,
     )
-    expect(response.status).toBe(413)
+
+    expect(response.status).toBe(400)
+    expect(reported).toHaveBeenCalledWith(
+      '[remote-attachments-http] quota release after rejected upload failed:',
+      expect.objectContaining({ message: 'quota cleanup failed' }),
+    )
+    reported.mockRestore()
   })
 
   it('fails loud when the configured browser origin is not a URL', () => {
@@ -494,12 +730,23 @@ function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
   return false
 }
 
-function streamingRequest(headers: Record<string, string>, chunks: Uint8Array[]): IncomingMessage {
+function streamingRequest(
+  headers: IncomingMessage['headers'],
+  chunks: Uint8Array[],
+  options: { contentLength?: boolean; onPull?: () => void } = {},
+): IncomingMessage {
+  const requestHeaders: IncomingMessage['headers'] = { ...headers }
+  if (options.contentLength !== false && requestHeaders['content-length'] === undefined) {
+    requestHeaders['content-length'] = String(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+  }
   return {
-    headers,
+    headers: requestHeaders,
     method: 'POST',
     async * [Symbol.asyncIterator]() {
-      for (const chunk of chunks) yield chunk
+      for (const chunk of chunks) {
+        options.onPull?.()
+        yield chunk
+      }
     },
   } as unknown as IncomingMessage
 }
@@ -553,6 +800,61 @@ function failingResponse(failure: unknown = new Error('mid-write failure')): { r
   return { res: emitter as unknown as ServerResponse }
 }
 
+function prematurelyClosedResponse(): { res: ServerResponse } {
+  const emitter = new EventEmitter()
+  Object.assign(emitter, {
+    writableFinished: false,
+    writeHead() { return emitter },
+    setHeader() { return emitter },
+    end() { queueMicrotask(() => { emitter.emit('close') }); return emitter },
+  })
+  Object.defineProperty(emitter, 'headersSent', { get() { return true } })
+  return { res: emitter as unknown as ServerResponse }
+}
+
+function closedAfterFinishResponse(): { res: ServerResponse } {
+  const state = { writableFinished: false }
+  const emitter = new EventEmitter()
+  Object.assign(emitter, {
+    writeHead() { return emitter },
+    setHeader() { return emitter },
+    end() {
+      state.writableFinished = true
+      queueMicrotask(() => { emitter.emit('close') })
+      return emitter
+    },
+  })
+  Object.defineProperty(emitter, 'headersSent', { get() { return true } })
+  Object.defineProperty(emitter, 'writableFinished', { get() { return state.writableFinished } })
+  return { res: emitter as unknown as ServerResponse }
+}
+
+function heldResponse(): {
+  res: ServerResponse
+  status: number
+  written: Promise<void>
+  finish(): void
+} {
+  let resolveWritten!: () => void
+  const written = new Promise<void>((resolve) => { resolveWritten = resolve })
+  const holder: { status: number; res: ServerResponse; written: Promise<void>; finish(): void } = {
+    status: 0,
+    res: undefined as never,
+    written,
+    finish: () => {},
+  }
+  const emitter = new EventEmitter()
+  Object.assign(emitter, {
+    writeHead(status: number) { holder.status = status; return emitter },
+    setHeader() { return emitter },
+    end() { resolveWritten(); return emitter },
+  })
+  Object.defineProperty(emitter, 'headersSent', { get() { return holder.status !== 0 } })
+  holder.finish = () => { emitter.emit('finish') }
+  holder.res = emitter as unknown as ServerResponse
+  return holder
+}
+
 function concatBytes(chunks: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0))
   let offset = 0
@@ -563,7 +865,10 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
   return out
 }
 
-async function start(options: { store?: Partial<RemoteAttachmentStoreOptions> } = {}): Promise<{
+async function start(options: {
+  store?: Partial<RemoteAttachmentStoreOptions>
+  admit?: (bytes: number) => Promise<RemoteAttachmentQuotaReservation>
+} = {}): Promise<{
   origin: string
   store: RemoteAttachmentStoreProvider
   responses: Uint8Array[]
@@ -586,7 +891,14 @@ async function start(options: { store?: Partial<RemoteAttachmentStoreOptions> } 
         const value = headers['x-test-pairing'] ?? headers['x-gestalt-pairing-id']
         if (typeof value !== 'string') throw new Error('pairing header is required')
         if (value === 'explode') throw new Error('authority exploded')
-        return parsePersonalPairingId(value)
+        return {
+          pairingId: parsePersonalPairingId(value),
+          admit: options.admit ?? (async () => ({
+            id: parseAttachmentBlobReservationId(crypto.randomUUID()),
+            expiresAt: Number.MAX_SAFE_INTEGER,
+            release: async () => {},
+          })),
+        }
       },
     },
     webServer: {
@@ -623,7 +935,7 @@ async function start(options: { store?: Partial<RemoteAttachmentStoreOptions> } 
     await new Promise<void>((resolve, reject) => {
       http.close((error) => { if (error === undefined) resolve(); else reject(error) })
     })
-    store.dispose()
+    await store.dispose()
   })
   return { origin: `http://127.0.0.1:${String(address.port)}`, store, responses, routes }
 }

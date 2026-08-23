@@ -236,7 +236,7 @@ jobs:
           for host in "${hosts[@]}"; do
             host="${host// /}"
             ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              'set -euo pipefail; docker inspect dsh-platform >/dev/null; curl -fsS --max-time 5 http://127.0.0.1:80/readyz >/dev/null'
+              'set -euo pipefail; docker inspect dsh-platform >/dev/null; ! docker inspect dsh-platform-rollback >/dev/null 2>&1; curl -fsS --max-time 5 http://127.0.0.1:80/readyz >/dev/null'
           done
           if [ "$PLATFORM_REMOTE_ATTACHMENT_STORAGE" = oss ]; then
             for host in "${hosts[@]}"; do
@@ -249,34 +249,37 @@ jobs:
 
           rollback_platform() {
             set +e
+            rollback_failed=0
             for rollback_host in "${hosts[@]}"; do
               rollback_host="${rollback_host// /}"
               ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${rollback_host}" \
                 "if docker inspect dsh-platform-rollback >/dev/null 2>&1; then \
+                   docker stop --time 60 dsh-platform >/dev/null 2>&1 || true; \
                    docker rm -f dsh-platform >/dev/null 2>&1 || true; \
                    docker rename dsh-platform-rollback dsh-platform && docker start dsh-platform; \
                  fi; docker rm -f dsh-platform-candidate >/dev/null 2>&1 || true; \
-                 rm -f /run/dsh-platform-candidate.env" || true
+                 rm -f /run/dsh-platform-candidate.env" || rollback_failed=1
             done
+            return "$rollback_failed"
           }
-          trap rollback_platform ERR
+          on_deploy_error() {
+            status=$?
+            trap - ERR
+            rollback_platform || echo 'platform: one or more hosts failed to restore the predecessor' >&2
+            exit "$status"
+          }
+          trap on_deploy_error ERR
 
-          # Contract begins only after every candidate is ready. Stop every predecessor before
-          # any replacement receives product traffic, so inspect-write-revoke and atomic consumers never overlap.
+          # Each graceful rolling replacement keeps the other host serving. The shared authority
+          # remains in the predecessor-compatible phase until every replacement is healthy.
           for host in "${hosts[@]}"; do
             host="${host// /}"
+            echo "rolling replacement keeps the other host serving: ${host}"
             ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              "set -euo pipefail; docker rm -f dsh-platform-rollback >/dev/null 2>&1 || true; \
-               if docker inspect dsh-platform >/dev/null 2>&1; then \
-                 docker rename dsh-platform dsh-platform-rollback; docker stop dsh-platform-rollback; \
-               fi"
-          done
-
-          for host in "${hosts[@]}"; do
-            host="${host// /}"
-            echo "contract ${host}"
-            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              "set -euo pipefail; docker rm -f dsh-platform-candidate >/dev/null; \
+              "set -euo pipefail; \
+               docker rename dsh-platform dsh-platform-rollback; \
+               docker stop --time 60 dsh-platform-rollback; \
+               docker rm -f dsh-platform-candidate >/dev/null; \
                docker run -d --name dsh-platform --restart unless-stopped \
                  --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
                  -p 80:8080 --env-file /run/dsh-platform-candidate.env ${IMAGE}; \
@@ -285,11 +288,33 @@ jobs:
                    && printf '%s' \"\$body\" | grep -Fq '\"attachmentStorage\":\"'$(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE")'\"'; then ready=1; break; fi; sleep 1; \
                done; test \"\$ready\" = 1"
           done
+          trap - ERR
 
+          # A stopped rollback container is removed on every host before the irreversible phase
+          # transition. A partial cleanup leaves one active generation in the prior compatible mode.
+          rollback_cleanup_failed=0
           for host in "${hosts[@]}"; do
             host="${host// /}"
             ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              'docker rm -f dsh-platform-rollback >/dev/null 2>&1 || true; rm -f /run/dsh-platform-candidate.env'
+              'set -euo pipefail; docker rm dsh-platform-rollback >/dev/null' || rollback_cleanup_failed=1
           done
-          trap - ERR
+          if [ "$rollback_cleanup_failed" != 0 ]; then
+            for host in "${hosts[@]}"; do
+              host="${host// /}"
+              ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
+                'rm -f /run/dsh-platform-candidate.env' || true
+            done
+            exit 1
+          fi
+
+          cutover_host="${hosts[0]// /}"
+          ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${cutover_host}" \
+            "set -euo pipefail; docker run --rm --network host \
+               --env-file /run/dsh-platform-candidate.env ${IMAGE} \
+               node dist/attachment-storage-cutover-cli.mjs"
+          for host in "${hosts[@]}"; do
+            host="${host// /}"
+            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
+              'rm -f /run/dsh-platform-candidate.env'
+          done
           rm -f /tmp/ecs.pem /tmp/platform.tar.gz

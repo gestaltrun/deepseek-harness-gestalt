@@ -11,6 +11,57 @@ afterEach(async () => {
 })
 
 describe('OSS remote attachment durable metadata', () => {
+  it('rejects a retired object key that is not bound to its returned digest', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const putObject = vi.fn(async () => {})
+    const deleteObject = vi.fn(async () => {})
+    const client = {
+      query: async (sql: string) => {
+        if (sql.includes('DELETE FROM remote_attachment_objects')) {
+          return {
+            rows: [{
+              capability_digest: new Uint8Array(32),
+              object_key: 'remote-attachments/retire-fixture/not-the-digest',
+              quota_reservation_id: null,
+            }],
+            rowCount: 1,
+          }
+        }
+        if (sql.includes('SELECT COUNT(*)')) return { rows: [{ count: '0' }], rowCount: 1 }
+        return { rows: [], rowCount: 0 }
+      },
+      release: () => {},
+    }
+    const pool = {
+      query: async () => ({ rows: [], rowCount: 0 }),
+      connect: async () => client,
+    } as unknown as PlatformSqlPool
+    const store = new OssRemoteAttachmentStore(context, 'retire-fixture', pool, {
+      putObject,
+      getObject: async () => Uint8Array.of(1),
+      deleteObject,
+    }, {
+      maxBlobBytes: 4,
+      capabilityLifetimeMs: 100,
+      maxRetainedBlobs: 1,
+      objectPrefix: 'remote-attachments/retire-fixture',
+      sweepIntervalMs: 60_000,
+      cleanupConcurrency: 1,
+      capacityRetryAfterSeconds: 1,
+      quotaCleanup: { release: async () => {} },
+      inactivePairingIds: async () => [],
+    })
+
+    await expect(store.publish({
+      pairingId: parsePersonalPairingId('pairing-retire'),
+      ciphertext: Uint8Array.of(1),
+      now: 1,
+    })).rejects.toThrow('OSS remote attachment cleanup row is invalid')
+    expect(putObject).not.toHaveBeenCalled()
+    expect(deleteObject).not.toHaveBeenCalled()
+  })
+
   it('preserves the capacity failure when quota cleanup also fails', async () => {
     const context = new Context()
     contexts.push(context)

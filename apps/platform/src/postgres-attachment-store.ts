@@ -23,6 +23,10 @@ import {
   type AttachmentCapability,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { PlatformSqlClient, PlatformSqlPool } from './postgres-pairing-store.ts'
+import {
+  migrateAttachmentStoragePhase,
+  readAttachmentStoragePhase,
+} from './attachment-storage-phase.ts'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS remote_attachment_blobs (
@@ -96,7 +100,11 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
   }
 
   /** Create the shared ciphertext table before HTTP routes mount. */
-  async migrate(): Promise<void> { await this.pool.query(SCHEMA) }
+  async migrate(): Promise<void> {
+    await this.pool.query(SCHEMA)
+    const phase = await migrateAttachmentStoragePhase(this.pool, this.databaseIdentity)
+    if (phase === 'oss') throw new TypeError('PostgreSQL attachment store cannot start under OSS authority')
+  }
 
   override async publish(input: {
     pairingId: PersonalPairingId
@@ -169,8 +177,20 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     now: number
   }): Promise<RemoteAttachmentConsumption> {
     const token = randomBytes(32)
-    const row = await this.transaction(async (client) => {
-      const row = await this.requireRow(client, input, true)
+    const outcome = await this.transaction(async (client) => {
+      const row = await this.loadRequiredRow(client, input, true)
+      if (input.now >= row.expires_at) {
+        const removed = await client.query(
+          `DELETE FROM remote_attachment_blobs
+            WHERE database_identity = $1 AND capability_digest = $2
+          RETURNING quota_reservation_id`,
+          [this.databaseIdentity, digest(input.capability)],
+        )
+        return { kind: 'expired' as const, reservationIds: reservationIds(removed.rows) }
+      }
+      const phase = await readAttachmentStoragePhase(client, this.databaseIdentity)
+      if (phase === 'legacy') return { kind: 'legacy' as const, row }
+      if (phase === 'oss') throw new TypeError('PostgreSQL attachment store cannot consume under OSS authority')
       if (row.claim_token !== undefined) {
         throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability is already in use')
       }
@@ -182,8 +202,14 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
       if (claimed.rowCount !== 1) {
         throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability was already consumed')
       }
-      return row
+      return { kind: 'claimed' as const, row }
     })
+    if (outcome.kind === 'expired') {
+      await this.releaseReservations(outcome.reservationIds)
+      throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
+    }
+    if (outcome.kind === 'legacy') return this.legacyConsumption(outcome.row)
+    const { row } = outcome
     let settled = false
     return {
       ciphertext: new Uint8Array(row.ciphertext),
@@ -214,6 +240,36 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
             WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3
           RETURNING quota_reservation_id`,
           [this.databaseIdentity, row.capability_digest, token],
+        )
+        await this.releaseReservations(reservationIds(removed.rows))
+      },
+    }
+  }
+
+  private legacyConsumption(row: AttachmentRow): RemoteAttachmentConsumption {
+    let settled = false
+    return {
+      ciphertext: new Uint8Array(row.ciphertext),
+      complete: async () => {
+        if (settled) return
+        settled = true
+        const removed = await this.pool.query(
+          `DELETE FROM remote_attachment_blobs
+            WHERE database_identity = $1 AND capability_digest = $2
+          RETURNING quota_reservation_id`,
+          [this.databaseIdentity, row.capability_digest],
+        )
+        await this.releaseReservations(reservationIds(removed.rows))
+      },
+      abandon: async (now) => {
+        if (settled) return
+        settled = true
+        if (now < row.expires_at) return
+        const removed = await this.pool.query(
+          `DELETE FROM remote_attachment_blobs
+            WHERE database_identity = $1 AND capability_digest = $2
+          RETURNING quota_reservation_id`,
+          [this.databaseIdentity, row.capability_digest],
         )
         await this.releaseReservations(reservationIds(removed.rows))
       },
@@ -268,16 +324,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     input: { pairingId: PersonalPairingId; capability: AttachmentCapability; now: number },
     lock = false,
   ): Promise<AttachmentRow> {
-    const selected = await client.query(
-      `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id, claim_token
-         FROM remote_attachment_blobs
-        WHERE database_identity = $1 AND capability_digest = $2${lock ? ' FOR UPDATE' : ''}`,
-      [this.databaseIdentity, digest(input.capability)],
-    )
-    const row = attachmentRow(selected.rows[0], this.maxBlobBytes)
-    if (row === undefined) {
-      throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability is unknown, consumed, or revoked')
-    }
+    const row = await this.loadRequiredRow(client, input, lock)
     if (input.now >= row.expires_at) {
       const removed = await client.query(
         `DELETE FROM remote_attachment_blobs
@@ -287,6 +334,24 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
       )
       await this.releaseReservations(reservationIds(removed.rows))
       throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
+    }
+    return row
+  }
+
+  private async loadRequiredRow(
+    client: PlatformSqlClient,
+    input: { pairingId: PersonalPairingId; capability: AttachmentCapability },
+    lock: boolean,
+  ): Promise<AttachmentRow> {
+    const selected = await client.query(
+      `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id, claim_token
+         FROM remote_attachment_blobs
+        WHERE database_identity = $1 AND capability_digest = $2${lock ? ' FOR UPDATE' : ''}`,
+      [this.databaseIdentity, digest(input.capability)],
+    )
+    const row = attachmentRow(selected.rows[0], this.maxBlobBytes)
+    if (row === undefined) {
+      throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability is unknown, consumed, or revoked')
     }
     if (row.pairing_id !== input.pairingId) throw pairingMismatch()
     return row

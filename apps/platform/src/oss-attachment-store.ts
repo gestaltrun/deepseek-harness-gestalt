@@ -25,6 +25,11 @@ import {
 import type { OssObjectClient } from './oss-client.ts'
 import { validateOssObjectPrefix } from './oss-config.ts'
 import type { PlatformSqlClient, PlatformSqlPool } from './postgres-pairing-store.ts'
+import {
+  migrateAttachmentStoragePhase,
+  readAttachmentStoragePhase,
+  removeAttachmentStorageLegacyDuplicates,
+} from './attachment-storage-phase.ts'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS remote_attachment_blobs (
@@ -181,6 +186,8 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
   /** Create additive compatibility state and start active expiry and revocation cleanup. */
   async migrate(): Promise<void> {
     await this.pool.query(SCHEMA)
+    const phase = await migrateAttachmentStoragePhase(this.pool, this.databaseIdentity)
+    if (phase === 'legacy') throw new TypeError('OSS attachment store requires completed PostgreSQL bridge authority')
     await this.sweep()
     this.armSweep()
   }
@@ -405,6 +412,9 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     quotaReservationId?: AttachmentBlobReservationId
   }): Promise<void> {
     await this.transaction(async (client) => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`remote-attachments:${this.databaseIdentity}`])
+      const phase = await readAttachmentStoragePhase(client, this.databaseIdentity)
+      if (phase === 'legacy') throw new TypeError('OSS attachment publish requires bridge or OSS authority')
       const intent = await client.query(
         `DELETE FROM remote_attachment_publish_intents
           WHERE database_identity = $1 AND capability_digest = $2
@@ -419,17 +429,19 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
         `INSERT INTO remote_attachment_objects (
            database_identity, capability_digest, pairing_id, object_key, byte_length, expires_at,
            quota_reservation_id, legacy_authority, claim_token
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,true,NULL)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL)`,
         [this.databaseIdentity, input.capabilityDigest, input.pairingId, input.objectKey,
-          input.ciphertext.byteLength, input.expiresAt, input.quotaReservationId ?? null],
+          input.ciphertext.byteLength, input.expiresAt, input.quotaReservationId ?? null, phase === 'bridge'],
       )
-      await client.query(
-        `INSERT INTO remote_attachment_blobs (
-           database_identity, capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id
-         ) VALUES ($1,$2,$3,$4,$5,$6)`,
-        [this.databaseIdentity, input.capabilityDigest, input.pairingId,
-          Buffer.from(input.ciphertext), input.expiresAt, input.quotaReservationId ?? null],
-      )
+      if (phase === 'bridge') {
+        await client.query(
+          `INSERT INTO remote_attachment_blobs (
+             database_identity, capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id
+           ) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [this.databaseIdentity, input.capabilityDigest, input.pairingId,
+            Buffer.from(input.ciphertext), input.expiresAt, input.quotaReservationId ?? null],
+        )
+      }
     })
   }
 
@@ -650,6 +662,9 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     now: number,
     inactivePairingIds: readonly PersonalPairingId[] = [],
   ): Promise<CleanupBatch> {
+    if (await readAttachmentStoragePhase(client, this.databaseIdentity) === 'oss') {
+      await removeAttachmentStorageLegacyDuplicates(client, this.databaseIdentity, this.objectPrefix)
+    }
     const retirePairings = inactivePairingIds.length > 0
     const objects = await client.query(
       `DELETE FROM remote_attachment_objects AS object
@@ -661,7 +676,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
                WHERE legacy.database_identity = object.database_identity
                  AND legacy.capability_digest = object.capability_digest
             )))
-       RETURNING object_key, quota_reservation_id`,
+       RETURNING capability_digest, object_key, quota_reservation_id`,
       [this.databaseIdentity, now, retirePairings, inactivePairingIds],
     )
     const legacy = await client.query(
@@ -675,7 +690,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
       `DELETE FROM remote_attachment_publish_intents
         WHERE database_identity = $1
           AND (expires_at <= $2 OR ($3::boolean AND pairing_id = ANY($4::text[])))
-       RETURNING object_key, quota_reservation_id`,
+       RETURNING capability_digest, object_key, quota_reservation_id`,
       [this.databaseIdentity, now, retirePairings, inactivePairingIds],
     )
     const reservationIds = new Set<AttachmentBlobReservationId>()
@@ -686,10 +701,20 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     }
     for (const reservationId of reservationIds) await this.recordQuotaCleanup(client, reservationId)
     return {
-      objectKeys: [...objects.rows, ...intents.rows]
-        .flatMap(row => typeof row.object_key === 'string' ? [row.object_key] : []),
+      objectKeys: this.cleanupObjectKeys([...objects.rows, ...intents.rows]),
       quotaReservationIds: [...reservationIds],
     }
+  }
+
+  private cleanupObjectKeys(rows: readonly Record<string, unknown>[]): string[] {
+    return rows.map((row) => {
+      if (!(row.capability_digest instanceof Uint8Array) || row.capability_digest.byteLength !== 32
+        || typeof row.object_key !== 'string'
+        || row.object_key !== `${this.objectPrefix}/${Buffer.from(row.capability_digest).toString('hex')}`) {
+        throw new TypeError('OSS remote attachment cleanup row is invalid')
+      }
+      return row.object_key
+    })
   }
 
   private async expireAndThrow(capability: AttachmentCapability): Promise<never> {
@@ -795,7 +820,6 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
         ...(typeof value.quota_reservation_id === 'string'
           ? { quota_reservation_id: parseAttachmentBlobReservationId(value.quota_reservation_id) }
           : {}),
-        ...(value.claim_token instanceof Uint8Array ? { claim_token: value.claim_token } : {}),
         ...(value.claim_token instanceof Uint8Array ? { claim_token: value.claim_token } : {}),
       }
     } catch {

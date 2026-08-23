@@ -1,5 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
-import { afterEach, describe, expect, it } from 'vitest'
+import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import { parseAttachmentCapability } from '@deepseek-ai/dsh-remote-protocol'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PostgresRemoteAttachmentStore } from '../src/postgres-attachment-store.ts'
 import type { PlatformSqlPool } from '../src/postgres-pairing-store.ts'
 
@@ -10,6 +12,51 @@ afterEach(async () => {
 })
 
 describe('PostgreSQL remote attachment durable rows', () => {
+  it('commits expired ciphertext removal before releasing its quota reservation', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const statements: string[] = []
+    const release = vi.fn(async () => {})
+    const row = {
+      capability_digest: new Uint8Array(32),
+      pairing_id: 'pairing-expired',
+      ciphertext: Uint8Array.of(1),
+      expires_at: 100,
+      quota_reservation_id: 'quota-expired',
+      claim_token: null,
+    }
+    const client = {
+      query: async (sql: string) => {
+        statements.push(sql)
+        if (sql.includes('SELECT capability_digest')) return { rows: [row], rowCount: 1 }
+        if (sql.includes('DELETE FROM remote_attachment_blobs')) {
+          return { rows: [{ quota_reservation_id: 'quota-expired' }], rowCount: 1 }
+        }
+        return { rows: [], rowCount: 0 }
+      },
+      release: () => {},
+    }
+    const pool = {
+      query: async () => ({ rows: [], rowCount: 0 }),
+      connect: async () => client,
+    } as unknown as PlatformSqlPool
+    const store = new PostgresRemoteAttachmentStore(context, 'expired-fixture', pool, {
+      maxBlobBytes: 4,
+      capabilityLifetimeMs: 100,
+      maxRetainedBlobs: 1,
+      quotaCleanup: { release },
+    })
+
+    await expect(store.consume({
+      pairingId: parsePersonalPairingId('pairing-expired'),
+      capability: parseAttachmentCapability('A'.repeat(43)),
+      now: 100,
+    })).rejects.toMatchObject({ code: 'ATTACHMENT_EXPIRED' })
+    expect(statements).toContain('COMMIT')
+    expect(statements).not.toContain('ROLLBACK')
+    expect(release).toHaveBeenCalledTimes(1)
+  })
+
   it.each([
     ['capability digest length', { capability_digest: new Uint8Array(31) }],
     ['empty ciphertext', { ciphertext: new Uint8Array() }],

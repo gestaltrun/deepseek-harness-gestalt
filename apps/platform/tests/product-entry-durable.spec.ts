@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { generateKeyPairSync } from 'node:crypto'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
@@ -24,6 +24,10 @@ import { createClient } from 'redis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connectRedis } from '../src/redis-bus.ts'
 import { launchOperatedPlatform } from '../src/launch.ts'
+import {
+  completeAttachmentStorageCutover,
+  migrateAttachmentStoragePhase,
+} from '../src/attachment-storage-phase.ts'
 import { OssRemoteAttachmentStore } from '../src/oss-attachment-store.ts'
 import type { OssObjectClient } from '../src/oss-client.ts'
 import { PostgresRemoteAttachmentStore } from '../src/postgres-attachment-store.ts'
@@ -31,8 +35,9 @@ import { PostgresPersonalPairingAuthorityStore } from '../src/postgres-pairing-s
 import { OperatedRemoteAttachmentAuthority } from '../src/remote-attachment-authority.ts'
 import {
   FIXED_BASE_ATTACHMENT_CONSUMER_SHA,
-  runFixedBaseAttachmentConsume,
-} from './fixtures/fixed-base-b2e93-remote-attachment-consumer.ts'
+  FIXED_BASE_ATTACHMENT_HTTP_SOURCE_SHA256,
+  buildFixedBaseAttachmentHttp,
+} from './fixtures/fixed-base-b2e93/build.ts'
 
 const durableProgramsAvailable = commandAvailable('initdb')
   && commandAvailable('postgres')
@@ -63,6 +68,12 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       quotaCleanup: { release: async () => {} },
     })
     await oldStore.migrate()
+    await completeAttachmentStorageCutover(
+      pool,
+      'attachment-rolling-fixture',
+      'bridge',
+      'remote-attachments/rolling-fixture',
+    )
     const now = Date.now()
     const oldGrant = await oldStore.publish({ pairingId: pairing, ciphertext: Uint8Array.of(1, 2), now })
     const objects = new Map<string, Uint8Array>()
@@ -106,6 +117,105 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     await atomicWinner.value.complete()
   }, 60_000)
 
+  it('removes only bridge duplicates and publishes object-only ciphertext after OSS cutover', async () => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const postgresContext = new Context()
+    const ossContext = new Context()
+    const refusedContext = new Context()
+    cleanups.push(async () => {
+      await postgresContext.fiber.dispose()
+      await ossContext.fiber.dispose()
+      await refusedContext.fiber.dispose()
+    })
+    const databaseIdentity = 'attachment-oss-cutover-fixture'
+    const objectPrefix = 'remote-attachments/oss-cutover-fixture'
+    const pairingId = parsePersonalPairingId('pairing-oss-cutover')
+    const now = Date.now()
+    const bridge = new PostgresRemoteAttachmentStore(postgresContext, databaseIdentity, pool, {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 1_000,
+      maxRetainedBlobs: 8,
+      quotaCleanup: { release: async () => {} },
+    })
+    await bridge.migrate()
+    const legacyOnly = await bridge.publish({ pairingId, ciphertext: Uint8Array.of(1), now })
+    await completeAttachmentStorageCutover(pool, databaseIdentity, 'bridge', objectPrefix)
+    const objects = new Map<string, Uint8Array>()
+    const oss = new OssRemoteAttachmentStore(ossContext, databaseIdentity, pool, memoryOssClient(objects), {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 1_000,
+      maxRetainedBlobs: 8,
+      objectPrefix,
+      sweepIntervalMs: 60_000,
+      cleanupConcurrency: 1,
+      capacityRetryAfterSeconds: 1,
+      quotaCleanup: { release: async () => {} },
+      inactivePairingIds: async () => [],
+    })
+    await oss.migrate()
+    const duplicate = await oss.publish({ pairingId, ciphertext: Uint8Array.of(2), now: now + 1 })
+    expect((await pool.query(
+      'SELECT COUNT(*)::int AS count FROM remote_attachment_blobs WHERE database_identity = $1',
+      [databaseIdentity],
+    )).rows).toEqual([{ count: 2 }])
+    const activeClaim = Buffer.alloc(32, 9)
+    await pool.query(
+      'UPDATE remote_attachment_objects SET claim_token = $2 WHERE database_identity = $1',
+      [databaseIdentity, activeClaim],
+    )
+    await pool.query(
+      `UPDATE remote_attachment_blobs SET claim_token = $2
+        WHERE database_identity = $1 AND capability_digest IN (
+          SELECT capability_digest FROM remote_attachment_objects WHERE database_identity = $1
+        )`,
+      [databaseIdentity, activeClaim],
+    )
+
+    await completeAttachmentStorageCutover(pool, databaseIdentity, 'oss', objectPrefix)
+    expect((await pool.query(
+      `SELECT legacy_authority FROM remote_attachment_objects
+        WHERE database_identity = $1 ORDER BY expires_at`,
+      [databaseIdentity],
+    )).rows).toEqual([{ legacy_authority: true }])
+    await pool.query(
+      'UPDATE remote_attachment_objects SET claim_token = NULL WHERE database_identity = $1',
+      [databaseIdentity],
+    )
+    await pool.query(
+      'UPDATE remote_attachment_blobs SET claim_token = NULL WHERE database_identity = $1',
+      [databaseIdentity],
+    )
+    await expect(oss.inspect({ pairingId, capability: legacyOnly.capability, now: now + 2 }))
+      .resolves.toEqual(Uint8Array.of(1))
+    await expect(oss.inspect({ pairingId, capability: duplicate.capability, now: now + 2 }))
+      .resolves.toEqual(Uint8Array.of(2))
+
+    const objectOnly = await oss.publish({ pairingId, ciphertext: Uint8Array.of(3), now: now + 3 })
+    const persisted = await pool.query<{ blobs: number; objects: number }>(
+      `SELECT
+         (SELECT COUNT(*)::int FROM remote_attachment_blobs WHERE database_identity = $1) AS blobs,
+         (SELECT COUNT(*)::int FROM remote_attachment_objects WHERE database_identity = $1) AS objects`,
+      [databaseIdentity],
+    )
+    expect(persisted.rows).toEqual([{ blobs: 1, objects: 2 }])
+    expect((await pool.query(
+      'SELECT legacy_authority FROM remote_attachment_objects WHERE database_identity = $1 ORDER BY expires_at',
+      [databaseIdentity],
+    )).rows).toEqual([{ legacy_authority: false }, { legacy_authority: false }])
+    await expect(oss.inspect({ pairingId, capability: objectOnly.capability, now: now + 4 }))
+      .resolves.toEqual(Uint8Array.of(3))
+
+    const refused = new PostgresRemoteAttachmentStore(refusedContext, databaseIdentity, pool, {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 1_000,
+      maxRetainedBlobs: 8,
+      quotaCleanup: { release: async () => {} },
+    })
+    await expect(refused.migrate()).rejects.toThrow('OSS authority')
+  }, 60_000)
+
   it('proves the fixed-base HTTP consumer must be drained before the atomic bridge contract', async () => {
     const postgres = await startPostgresFixture()
     const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
@@ -115,7 +225,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     const pairingId = parsePersonalPairingId('pairing-fixed-base-overlap')
     const bridge = new PostgresRemoteAttachmentStore(context, 'attachment-fixed-base-overlap', pool, {
       maxBlobBytes: 1024,
-      capabilityLifetimeMs: 1_000,
+      capabilityLifetimeMs: 60_000,
       maxRetainedBlobs: 4,
       quotaCleanup: { release: async () => {} },
     })
@@ -126,31 +236,29 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     const inspected = new Promise<void>((resolve) => { reportInspected = resolve })
     let releaseFixedBase!: () => void
     const fixedBaseMayWrite = new Promise<void>((resolve) => { releaseFixedBase = resolve })
-    const predecessor = createHttpServer((req, res) => {
-      void (async () => {
-        const chunks: Buffer[] = []
-        for await (const chunk of req) chunks.push(Buffer.from(chunk as Uint8Array))
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { capability: string }
-        await runFixedBaseAttachmentConsume({
-          store: bridge,
-          pairingId,
-          capability: body.capability as typeof grant.capability,
-          response: res,
-          now: Date.now(),
-          inspected: async () => { reportInspected(); await fixedBaseMayWrite },
-        })
-      })().catch(() => { if (!res.headersSent) res.writeHead(500).end() })
-    })
-    await new Promise<void>((resolve) => { predecessor.listen(0, '127.0.0.1', resolve) })
-    cleanups.push(async () => {
-      await new Promise<void>((resolve, reject) => predecessor.close((error) => { if (error === undefined) resolve(); else reject(error) }))
-    })
-    const address = predecessor.address()
-    if (address === null || typeof address === 'string') throw new Error('fixed-base HTTP artifact did not bind')
-    const fixedBaseResponse = fetch(`http://127.0.0.1:${String(address.port)}/v1/remote-attachments/consume`, {
+    const artifact = await buildFixedBaseAttachmentHttp()
+    cleanups.push(async () => { await artifact.dispose() })
+    const inspect = bridge.inspect.bind(bridge)
+    bridge.inspect = async (input) => {
+      const value = await inspect(input)
+      reportInspected()
+      await fixedBaseMayWrite
+      return value
+    }
+    const predecessorOrigin = await startAttachmentHttpWith(
+      (context, config) => { artifact.apply(context, config) },
+      bridge,
+      { authenticate: async () => pairingId },
+    )
+    const fixedBaseResponse = fetch(`${predecessorOrigin}/v1/remote-attachments/consume`, {
       method: 'POST', body: JSON.stringify({ capability: grant.capability }),
     })
-    await inspected
+    await Promise.race([
+      inspected,
+      fixedBaseResponse.then(async (response) => {
+        throw new Error(`fixed-base HTTP exited before inspect: ${String(response.status)} ${await response.clone().text()}`)
+      }),
+    ])
 
     const bridgeOrigin = await startAttachmentHttp(bridge, {
       authenticate: async () => ({
@@ -166,10 +274,38 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     releaseFixedBase()
     const oldResponse = await fixedBaseResponse
 
-    expect(FIXED_BASE_ATTACHMENT_CONSUMER_SHA).toBe('b2e93d3c835')
+    const fixedBaseSource = await readFile(new URL('./fixtures/fixed-base-b2e93/http.ts.fixture', import.meta.url))
+    expect(FIXED_BASE_ATTACHMENT_CONSUMER_SHA).toBe('b2e93d3c835043ffb204942bbfe122d67eb2ebae')
+    expect(createHash('sha256').update(fixedBaseSource).digest('hex'))
+      .toBe(FIXED_BASE_ATTACHMENT_HTTP_SOURCE_SHA256)
     expect([oldResponse.status, bridgeResponse.status]).toEqual([200, 200])
     expect(new Uint8Array(await oldResponse.arrayBuffer())).toEqual(ciphertext)
     expect(new Uint8Array(await bridgeResponse.arrayBuffer())).toEqual(ciphertext)
+
+    await completeAttachmentStorageCutover(
+      pool,
+      'attachment-fixed-base-overlap',
+      'bridge',
+      'remote-attachments/fixed-base-overlap',
+    )
+    const atomicGrant = await bridge.publish({ pairingId, ciphertext, now: Date.now() })
+    const firstOrigin = await startAttachmentHttp(bridge, {
+      authenticate: async () => ({
+        pairingId,
+        admit: async () => ({ id: parseAttachmentBlobReservationId('fixed-base-first'), release: async () => {} }),
+      }),
+    })
+    const secondOrigin = await startAttachmentHttp(bridge, {
+      authenticate: async () => ({
+        pairingId,
+        admit: async () => ({ id: parseAttachmentBlobReservationId('fixed-base-second'), release: async () => {} }),
+      }),
+    })
+    const atomicResponses = await Promise.all([firstOrigin, secondOrigin].map(async origin => await fetch(
+      `${origin}/v1/remote-attachments/consume`,
+      { method: 'POST', body: JSON.stringify({ capability: atomicGrant.capability }) },
+    )))
+    expect(atomicResponses.map(response => response.status).sort()).toEqual([200, 404])
   }, 60_000)
 
   it('claims one OSS capability atomically across operated Platform instances', async () => {
@@ -194,6 +330,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     }
     const first = new OssRemoteAttachmentStore(firstContext, 'attachment-atomic-fixture', pool, memoryOssClient(objects), options)
     const second = new OssRemoteAttachmentStore(secondContext, 'attachment-atomic-fixture', pool, memoryOssClient(objects), options)
+    await prepareBridgePhase(pool, 'attachment-atomic-fixture', options.objectPrefix)
     await first.migrate()
     const grant = await first.publish({ pairingId: pairing, ciphertext: Uint8Array.of(5, 6), now: 100 })
 
@@ -253,6 +390,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
         return { unref: () => {}, cancel: () => {} }
       },
     })
+    await prepareBridgePhase(pool, 'attachment-sweep-fixture', 'remote-attachments/sweep-fixture')
     await store.migrate()
     await store.publish({
       pairingId: pairingA, ciphertext: Uint8Array.of(1), now,
@@ -303,6 +441,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       clock: { now: () => 100 },
       schedule: () => ({ unref: () => {}, cancel: () => {} }),
     })
+    await prepareBridgePhase(pool, 'intent-restart-fixture', prefix)
     await first.migrate()
     objects.set(objectKey, Uint8Array.of(4, 2))
     await pool.query(
@@ -365,6 +504,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       },
       schedule: (handler) => { tick = handler; return { unref: () => {}, cancel: () => {} } },
     })
+    await prepareBridgePhase(pool, 'sweep-dispose-fixture', 'remote-attachments/sweep-dispose')
     await store.migrate()
     await store.publish({ pairingId, ciphertext: Uint8Array.of(1), now: 100 })
     blockSweep = true
@@ -417,6 +557,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       clock: { now: () => 100 },
       schedule: () => ({ unref: () => {}, cancel: () => {} }),
     })
+    await prepareBridgePhase(pool, 'attachment-nonblocking-fixture', 'remote-attachments/nonblocking-fixture')
     await store.migrate()
     await store.publish({ pairingId: pairing, ciphertext: Uint8Array.of(1), now: 100 })
     const replacement = await store.publish({ pairingId: pairing, ciphertext: Uint8Array.of(2), now: 110 })
@@ -450,6 +591,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     }
     const first = new OssRemoteAttachmentStore(firstContext, 'oss-fixture', pool, objectClient, options)
     const second = new OssRemoteAttachmentStore(secondContext, 'oss-fixture', pool, objectClient, options)
+    await prepareBridgePhase(pool, 'oss-fixture', options.objectPrefix)
     await first.migrate()
     const pairing = parsePersonalPairingId('pairing-shared-oss')
     const otherPairing = parsePersonalPairingId('pairing-other-oss')
@@ -496,6 +638,12 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     const first = new PostgresRemoteAttachmentStore(firstContext, 'attachment-fixture', pool, options)
     const second = new PostgresRemoteAttachmentStore(secondContext, 'attachment-fixture', pool, options)
     await first.migrate()
+    await completeAttachmentStorageCutover(
+      pool,
+      'attachment-fixture',
+      'bridge',
+      'remote-attachments/postgres-fixture',
+    )
     const pairing = parsePersonalPairingId('pairing-shared-attachment')
     const otherPairing = parsePersonalPairingId('pairing-other-attachment')
     const grant = await first.publish({ pairingId: pairing, ciphertext: Uint8Array.of(1, 2, 3), now: 100 })
@@ -575,6 +723,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     const second = new OssRemoteAttachmentStore(
       secondContext, 'attachment-http-fixture', pool, memoryOssClient(objects), options,
     )
+    await prepareBridgePhase(pool, 'attachment-http-fixture', options.objectPrefix)
     await first.migrate()
     await pairings.confirmMobilePairing({
       accountId,
@@ -650,6 +799,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
         login: 'durable-fixture-account',
         avatar_url: 'https://avatars.example/durable-fixture-account',
       }))
+    await prepareBridgePhase(pool, 'product-entry-fixture', 'remote-attachments/fixture')
     const running = await launchOperatedPlatform({
       env: operatedFixtureEnv(),
       publicIndex: join(import.meta.dirname, '..', 'public', 'index.html'),
@@ -762,6 +912,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     })
     await redisObserver.connect()
     cleanups.push(async () => { await redisObserver.quit() })
+    await prepareBridgePhase(postgresObserver, 'postgres', 'remote-attachments/fixture')
     const child = spawn(process.execPath, [
       '--import', 'tsx/esm',
       '--import', join(import.meta.dirname, 'fixtures', 'oss-metadata-fetch.ts'),
@@ -849,9 +1000,26 @@ function operatedFixtureEnv(): NodeJS.Dict<string> {
   }
 }
 
+async function prepareBridgePhase(
+  pool: pg.Pool,
+  databaseIdentity: string,
+  objectPrefix: string,
+): Promise<void> {
+  await migrateAttachmentStoragePhase(pool, databaseIdentity)
+  await completeAttachmentStorageCutover(pool, databaseIdentity, 'bridge', objectPrefix)
+}
+
 async function startAttachmentHttp(
   store: RemoteAttachmentStoreService,
   authority: RemoteAttachmentAuthority,
+): Promise<string> {
+  return await startAttachmentHttpWith(applyRemoteAttachmentsHttp, store, authority)
+}
+
+async function startAttachmentHttpWith(
+  apply: (context: Context, config: { origin: string }) => void,
+  store: RemoteAttachmentStoreService,
+  authority: unknown,
 ): Promise<string> {
   const routes = new Map<string, {
     handler(req: IncomingMessage, res: ServerResponse): Promise<void>
@@ -867,7 +1035,7 @@ async function startAttachmentHttp(
     },
     effect(register: () => () => void) { register() },
   } as unknown as Context
-  applyRemoteAttachmentsHttp(context, { origin: 'https://mobile.example' })
+  apply(context, { origin: 'https://mobile.example' })
   const server = createHttpServer((req, res) => {
     const route = routes.get(new URL(req.url ?? '/', 'http://localhost').pathname)
     if (route === undefined) { res.writeHead(404).end(); return }

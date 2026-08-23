@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(import.meta.dirname, '..')
 const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
 const nativeWindowsPnpmDestination = '${{ runner.temp }}/setup-pnpm-js'
-const prAfterPreflight = "needs.preflight.result == 'success' && github.event_name == 'pull_request'"
+const evidenceAfterPreflight = "needs.preflight.result == 'success'"
 
 describe('CI workflow', () => {
   it('rejects runner-only contexts before job construction', () => {
@@ -92,9 +92,9 @@ describe('CI workflow', () => {
       if (!isRecord(job)) throw new TypeError(`CI job ${jobName} must be an object`)
       const needs = typeof job.needs === 'string' ? [job.needs] : job.needs
       expect(needs, `${jobName} must wait for preflight`).toContain('preflight')
-      if (jobName !== 'all-checks-passed') {
+      if (jobName !== 'all-checks-passed' && jobName !== 'candidate-verdict') {
         expect(job.if, `${jobName} must not run after invalid preflight input`)
-          .toContain(prAfterPreflight)
+          .toContain(evidenceAfterPreflight)
       }
     }
   })
@@ -141,14 +141,14 @@ describe('CI workflow', () => {
       throw new TypeError('CI workflow must define Draft impact, consumers, and aggregate jobs')
     }
     expect(draftImpact.if).toBe(
-      `${prAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'draft-impact')`,
+      `${evidenceAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'draft-impact')`,
     )
     expect(draftImpact.steps).toContainEqual(expect.objectContaining({
       name: 'Run changed packages and reverse consumers',
       run: 'pnpm ci:impact --base "$BASE_SHA" --head "$HEAD_SHA"',
     }))
     expect(consumers.if).toBe(
-      `${prAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'consumers')`,
+      `${evidenceAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'consumers')`,
     )
     const verdict = (aggregate.steps as unknown[]).find(step =>
       isRecord(step) && step.name === 'Validate selected required jobs')
@@ -159,6 +159,67 @@ describe('CI workflow', () => {
     expect(verdict.run).toContain("lanes.includes('draft-impact')")
     expect(verdict.run).toContain("lanes.includes('static')")
     expect(verdict.run).toContain("lanes.includes('consumers')")
+  })
+
+  it('proves the Merge Queue candidate tree through one fail-closed verdict', () => {
+    const workflow = loadWorkflow('.github/workflows/ci.yml')
+    if (!isRecord(workflow.on) || !isRecord(workflow.jobs)) {
+      throw new TypeError('CI workflow must define event routing and jobs')
+    }
+    const preflight = workflowJob(workflow, 'preflight')
+    const candidate = workflowJob(workflow, 'candidate-verdict')
+    if (!Array.isArray(preflight.steps) || !Array.isArray(candidate.needs)
+      || !Array.isArray(candidate.steps)) {
+      throw new TypeError('candidate workflow must define preflight and verdict structure')
+    }
+    const preflightSteps = preflight.steps as unknown[]
+    const candidateSteps = candidate.steps as unknown[]
+    const candidateNeeds = (candidate.needs as unknown[]).filter(
+      (job): job is string => typeof job === 'string',
+    )
+    if (candidateNeeds.length !== candidate.needs.length) {
+      throw new TypeError('candidate dependencies must be job id strings')
+    }
+
+    expect(Object.keys(workflow.on).sort()).toEqual(['merge_group', 'pull_request'])
+    const planner = preflightSteps.find(step => isRecord(step) && step.name === 'Compute CI plan')
+    const metadata = preflightSteps.find(step => isRecord(step) && step.name === 'Validate pull request metadata')
+    expect(planner).toMatchObject({
+      env: {
+        BASE_SHA: "${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}",
+        HEAD_SHA: "${{ github.event_name == 'merge_group' && github.event.merge_group.head_sha || github.event.pull_request.head.sha }}",
+        READINESS: "${{ github.event_name == 'merge_group' && 'ready' || (github.event.pull_request.draft && 'draft' || 'ready') }}",
+      },
+    })
+    expect(metadata).toMatchObject({ if: "github.event_name == 'pull_request'" })
+
+    expect(candidate).toMatchObject({
+      name: 'candidate verdict',
+      'runs-on': 'ubuntu-latest',
+      if: "always() && github.event_name == 'merge_group'",
+    })
+    expect(candidateNeeds).toEqual([
+      'preflight',
+      'draft-impact',
+      'node-24',
+      'node-24-coverage',
+      'node-24-consumers',
+      'node-compat',
+      'python-sdk',
+      'python-runtime',
+      'windows',
+      'windows-native-verdict',
+      'electron-runtime-e2e-macos',
+    ])
+    const verdict = candidateSteps.find(step => isRecord(step) && step.name === 'Validate the exhaustive candidate tree')
+    if (!isRecord(verdict) || typeof verdict.run !== 'string') {
+      throw new TypeError('candidate verdict must define its fail-closed command')
+    }
+    expect(verdict.run).toContain("level !== 'exhaustive'")
+    for (const job of candidateNeeds.filter(job => job !== 'draft-impact')) {
+      expect(verdict.run, `candidate verdict must require ${job}`).toContain(`'${job}'`)
+    }
+    expect(verdict.run).toContain("results[job]?.result !== 'success'")
   })
 
   it('makes optional dependencies mandatory for master standby installs', () => {
@@ -322,7 +383,7 @@ describe('CI workflow', () => {
     // Required PR job: Wine on ubuntu-latest, runs wine-windows-gates.sh.
     expect(windows['runs-on']).toBe('ubuntu-latest')
     expect(windows.name).toBe('windows node 24 / wine blocking')
-    expect(windows.if).toContain(prAfterPreflight)
+    expect(windows.if).toContain(evidenceAfterPreflight)
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
 
     const nativePartitions = [windowsNativeCore, windowsNativeCoverage, windowsNativeStatic]
@@ -331,7 +392,8 @@ describe('CI workflow', () => {
       expect(partition['runs-on']).toContain('DSH_CI_FAILOVER_WINDOWS')
       expect(partition['runs-on']).not.toContain('DSH_CI_FAILOVER_LINUX')
       expect(partition['runs-on']).toContain('dsh-win-ci')
-      expect(partition.if).toContain(prAfterPreflight)
+      expect(partition['runs-on']).toContain('windows-latest')
+      expect(partition.if).toContain(evidenceAfterPreflight)
       expect(partition['timeout-minutes']).toBe(20)
     }
     expect(windowsNativeCore['runs-on']).toContain('windows-latest')
@@ -402,7 +464,7 @@ describe('CI workflow', () => {
     if (!isRecord(macosElectron) || !Array.isArray(macosElectron.steps)) {
       throw new TypeError('CI workflow must define electron-runtime-e2e-macos')
     }
-    expect(macosElectron.if).toContain(prAfterPreflight)
+    expect(macosElectron.if).toContain(evidenceAfterPreflight)
     expect(macosElectron['runs-on']).toBe('macos-latest')
     expect(macosElectron.name).toBe('macos electron runtime e2e')
     const macosCommands = macosElectron.steps.filter((step): step is Record<string, unknown> & { run: string } => (
@@ -460,13 +522,14 @@ describe('CI workflow', () => {
 
     // The exact event sets are what keep master-only jobs out of the PR check
     // panel: ci-master triggers only on push(master) + workflow_dispatch and
-    // never on pull_request; ci.yml is exactly pull_request-only. Assert the
-    // full sets so losing the wrong event, or gaining an extra one, fails.
+    // never on pull_request; ci.yml owns PR feedback plus Merge Queue proof.
+    // Assert the full sets so losing the wrong event, or gaining an extra one,
+    // fails.
     if (!isRecord(workflow.on) || !isRecord(prWorkflow.on)) {
       throw new TypeError('both CI workflows must define on')
     }
     expect(Object.keys(workflow.on).sort()).toEqual(['push', 'workflow_dispatch'])
-    expect(Object.keys(prWorkflow.on)).toEqual(['pull_request'])
+    expect(Object.keys(prWorkflow.on).sort()).toEqual(['merge_group', 'pull_request'])
 
     // Neither drill may carry a job-level group: it would not exempt the job
     // from run-scoped cancellation.
@@ -528,7 +591,7 @@ describe('CI workflow', () => {
     }
 
     expect(pythonRuntime).toMatchObject({
-      if: `${prAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'python-runtime')`,
+      if: `${evidenceAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'python-runtime')`,
       name: 'python runtime / release-shaped Linux x64',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: {

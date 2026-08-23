@@ -74,6 +74,29 @@ describe('CI plan', () => {
     expect(plan.lanes).toHaveLength(9)
   })
 
+  it('requires every exhaustive lane for the Merge Queue candidate tree', () => {
+    const plan = planCi({
+      ...completeInput,
+      event: 'merge_group',
+      readiness: 'ready',
+    })
+
+    expect(plan.level).toBe('exhaustive')
+    expect(plan.lanes).toHaveLength(9)
+    expect(plan.lanes.every(lane => lane.classification === 'required')).toBe(true)
+    expect(plan.lanes.map(lane => lane.id)).toEqual([
+      'static',
+      'coverage',
+      'consumers',
+      'node-compat',
+      'python-sdk',
+      'python-runtime',
+      'windows-wine',
+      'windows-native',
+      'electron-macos',
+    ])
+  })
+
   it('selects changed packages, reverse consumers, and changed-source coverage for a Draft', () => {
     const plan = planCi({
       ...completeInput,

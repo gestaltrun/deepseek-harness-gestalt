@@ -6,7 +6,7 @@ English | [中文](platform-account.zh.md)
 
 ## Login and session lifecycle
 
-An Installation accepts the canonical bilingual privacy notice before it creates a five-minute `LoginAttemptView`. Mobile prepares the attempt before the authorization button can be pressed, then the button's user activation directly calls the Capacitor Browser adapter; Desktop delegates to Electron `shell.openExternal`. The system browser uses Authorization Code with S256 PKCE, random state, no OAuth scope, and one fixed HTTPS Platform callback. The application receives no callback credential or token-bearing custom URL; `LoginPollResult` completes only when a P-256 `AccountProof` redeems the single-use signed polling token.
+An Installation accepts the canonical bilingual privacy notice before it creates a five-minute `LoginAttemptView`. Mobile binds the name and iOS or Android platform returned by its Device adapter to the attempt, then Platform persists that presentation with the Account Session; a caller of `currentInstallation()` receives it only after proving the Mobile Installation key. Mobile prepares the attempt before the authorization button can be pressed, then the button's user activation directly calls the Capacitor Browser adapter; Desktop delegates to Electron `shell.openExternal`. The system browser uses Authorization Code with S256 PKCE, random state, no OAuth scope, and one fixed HTTPS Platform callback. The application receives no callback credential or token-bearing custom URL; `LoginPollResult` completes only when a P-256 `AccountProof` redeems the single-use signed polling token.
 
 `AccountSessionView` contains a 15-minute access token and a rotating refresh token valid for at most 30 days. A refresh is accepted only when its complete 15-minute access lifetime fits inside that absolute limit; late rejection occurs before proof consumption or token rotation. Every current-account read, refresh, and sign-out proves possession of the Installation key with a branded single-use proof JTI. The opaque `AccountSessionId` is the invalidation identity shared across Platform Instances.
 
@@ -33,11 +33,11 @@ Platform Account capability. Providers own OAuth, installation-key binding, toke
 ```ts cordis-catalog
 /**
  * Start one GitHub Authorization Code attempt for an installation key.
- * @param input - installation identity, kind, and public P-256 JWK.
+ * @param input - installation identity, Mobile presentation when applicable, and public P-256 JWK.
  * @returns the system-browser URL and signed polling capability.
  * @throws AccountError `PLATFORM_CAPACITY` with `retryAfter` when the shared watermark is shedding.
  */
-abstract beginLogin(input: { installationId: InstallationId installationKind: 'desktop' | 'mobile' publicKey: JsonWebKey }): Promise<LoginAttemptView>
+abstract beginLogin(input: InstallationLoginIdentity & { publicKey: JsonWebKey }): Promise<LoginAttemptView>
 
 /**
  * Settle the fixed HTTPS GitHub callback; provider credentials never leave the provider.
@@ -72,7 +72,7 @@ abstract current(input: { accessToken: string; proof: AccountProof }): Promise<P
 /**
  * Authenticate the Account and Installation identity bound to one current session.
  * @param input - access token and proof from the session's Installation key.
- * @returns provider-owned Account id, Installation id, and Installation kind.
+ * @returns provider-owned Account and Installation identity, including authenticated Mobile presentation.
  */
 abstract currentInstallation(input: { accessToken: string proof: AccountProof }): Promise<AuthenticatedInstallationView>
 

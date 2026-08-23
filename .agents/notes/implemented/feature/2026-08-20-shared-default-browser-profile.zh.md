@@ -14,7 +14,7 @@ Status: implemented
 
 传入 `profile: "persistent"` 并带名称时，仍打开该隔离的命名 Profile。命名持久 Profile 的第二个独立写入方仍以 `BROWSER_PROFILE_BUSY` 拒绝。传入 `profile: "temporary"` 仍铸造一次性、无标签的身份。保留名 `shared` 不能作为持久 Profile 名。
 
-这是本 Desktop 安装的共享 Chromium 身份。它不从系统 Chrome 或 Safari Profile 导入 cookie。[持久 Browser Profile Agent Note](2026-08-19-persistent-browser-profiles.md) 仍持有命名隔离、命名 Profile 的单写入方，以及临时身份的丢弃。
+这是本 Desktop 安装的共享 Chromium 身份。它不从系统 Chrome 或 Safari Profile 导入 cookie。[持久 Browser Profile Agent Note](2026-08-19-persistent-browser-profiles.zh.md) 仍持有命名隔离、命名 Profile 的单写入方，以及临时身份的丢弃。
 
 ## 考虑过的替代方案
 

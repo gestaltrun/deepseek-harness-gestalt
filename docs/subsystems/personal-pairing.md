@@ -2,7 +2,7 @@
 
 English | [中文](personal-pairing.zh.md)
 
-[`@deepseek-ai/dsh-remote-access`](../../packages/platform/remote-access/README.md) owns Mobile Access enablement, Pairing Challenge consumption, pending handshake confirmation, Personal Pairing identity, and Companion-only Device Principal authority. It calls `ctx.platformAccount.currentInstallation()` to authenticate each Account Session's installation id and kind, then compares opaque Platform Account ids; it never reads Account storage or GitHub fields and never trusts a caller-supplied installation identity.
+[`@deepseek-ai/dsh-remote-access`](../../packages/platform/remote-access/README.md) owns Mobile Access enablement, Pairing Challenge consumption, pending handshake confirmation, Personal Pairing identity, and Companion-only Device Principal authority. It calls `ctx.platformAccount.currentInstallation()` to authenticate each Account Session's Installation id, kind, and Mobile presentation, then compares opaque Platform Account ids. Pairing completion accepts no device fields: pending and confirmed records use only the authenticated Mobile Installation presentation.
 
 ## Challenge and confirmation lifecycle
 
@@ -10,7 +10,7 @@ Mobile Access is false for each Desktop Installation until the Desktop Settings 
 
 The Mobile completion consumes the invitation only after the same-account endpoint mailbox binds message 1 to the retained routing challenge. Desktop and Mobile exchange opaque XKpsk3 messages through Platform, compare six words derived from their local transcript, and remain pending until Desktop confirmation. Each endpoint generates its own P-256 Relay signing credential; Platform atomically registers distinct public-key digests under the new pairing selector and grants a branded Device Principal whose authority is exactly `companion-surface`.
 
-Mutations are serialized. Expiry, cancellation, rejection, disablement, and one successful completion commit terminal state before another mutation can observe the capability. Crypto-resource destruction is independently retryable: a failed cleanup never repeats handshake completion or pairing activation, and provider disposal attempts every challenge, pending key, active key, and cleanup record. Challenge expiry is scheduled at creation rather than waiting for another completion request. Opaque generated ids and activated key references are checked before insertion, so a collision cannot replace an existing record or abandon a newly allocated key.
+Mutations are serialized. Expiry, cancellation, rejection, disablement, and one successful completion commit terminal state before another mutation can observe the capability. Completion replay requires a fixed-size digest match over the authenticated Account, Mobile Installation, all invitation fields, and Mobile handshake bytes; changing any content under the same completion id is a collision. Pairing transaction format version 1 records that digest obligation. An unversioned document preserves confirmed pairings and digest-bound replay; completion or pending records without a digest become terminal cleanup records and cannot replay. Unknown explicit versions and malformed versioned documents are rejected. Crypto-resource destruction is independently retryable: a failed cleanup never repeats handshake completion or pairing activation, and provider disposal attempts every challenge, pending key, active key, and cleanup record. Challenge expiry is scheduled at creation rather than waiting for another completion request. Opaque generated ids and activated key references are checked before insertion, so a collision cannot replace an existing record or abandon a newly allocated key.
 
 ## Cryptographic adapter
 
@@ -18,7 +18,7 @@ Product entrypoints keep Snow pairing and reconnect state in Desktop safeStorage
 
 ## Multi-instance Relay
 
-`ctx.remoteRelay` authenticates each fresh attachment with a one-time P-256 challenge proof bound to the route, endpoint, pairing selector, attachment id, public key, nonce, and expiry. `RelayRouteStore` persists only unique public-key digests, selectors, monotonic revision, and revocation state. `remote-access-redis` carries directory metadata, content-free invalidation, and bounded ciphertext Pub/Sub only; it creates no offline queue. A target on another Platform Instance receives the same opaque Relay frame, while a missing target returns `REMOTE_OFFLINE` immediately.
+`ctx.remoteRelay` authenticates each fresh attachment with a one-time P-256 challenge proof bound to the route, endpoint, pairing selector, attachment id, public key, nonce, and expiry. `RelayRouteStore` persists only unique public-key digests, selectors, monotonic revision, and revocation state. Mobile presence stores one expiring lease per authenticated connection token; exact-token close cannot clear another instance's live attachment, and missing cleanup becomes offline at lease expiry. `lastAccessAt` advances only on authenticated attach, heartbeat, or ciphertext access. `remote-access-redis` carries directory metadata, content-free invalidation, and bounded ciphertext Pub/Sub only; it creates no offline queue. A target on another Platform Instance receives the same opaque Relay frame, while a missing target returns `REMOTE_OFFLINE` immediately.
 
 Mobile and Desktop connect outward through one non-sticky TLS endpoint. Instance loss starts a fresh connection and Snow IK generation; Desktop sends authenticated foreground synchronization after attachment, and no live socket is migrated. The assembled test boots two independent Loader-owned Platform/WebServer/HTTP compositions, reaches each published WSS upgrade handler through a non-sticky endpoint, confirms two independently keyed phones, and proves one pairing remains usable after the other is revoked. Its memory stores and localhost certificate are deterministic test adapters, not operated-environment acceptance; physical WebView evidence and independent review remain release blockers.
 
@@ -58,10 +58,10 @@ abstract createEndpointChallenge(input: { desktop: PairingAccountAuthentication 
 abstract cancelEndpointChallenge(input: { desktop: PairingAccountAuthentication challengeId: PairingChallengeId }): Promise<void>
 
 /** Submit Mobile XKpsk3 message 1 to the authenticated Desktop mailbox.
- * @param input - Mobile authorization, challenge/completion identities, installation metadata, and opaque message.
+ * @param input - Mobile authorization, challenge/completion identities, and opaque message.
  * @returns stable pending identity.
  */
-abstract submitEndpointMessage1(input: { mobile: PairingAccountAuthentication challengeId: PairingChallengeId completionId: PairingCompletionId device: PairingDeviceDescription message1: Uint8Array }): Promise<{ pendingPairingId: PendingPairingId }>
+abstract submitEndpointMessage1(input: { mobile: PairingAccountAuthentication challengeId: PairingChallengeId completionId: PairingCompletionId message1: Uint8Array }): Promise<{ pendingPairingId: PendingPairingId }>
 
 /** Read endpoint-owned pending work for this Desktop.
  * @param desktop - authenticated Desktop installation.
@@ -124,10 +124,10 @@ abstract reissueDesktopRelayAuthority(desktop: PairingAccountAuthentication): Pr
 
 /**
  * Complete the same-account cryptographic exchange without granting authority.
- * @param input - Mobile authorization, invitation, device metadata, and handshake bytes.
+ * @param input - Mobile authorization, invitation, and handshake bytes.
  * @returns pending result shown on both installations before Desktop confirmation.
  */
-abstract completeChallenge(input: { mobile: PairingAccountAuthentication completionId: PairingCompletionId oneTimeLink: string device: PairingDeviceDescription mobileHandshake: Uint8Array }): Promise<PairingCompletionView>
+abstract completeChallenge(input: { mobile: PairingAccountAuthentication completionId: PairingCompletionId oneTimeLink: string mobileHandshake: Uint8Array }): Promise<PairingCompletionView>
 
 /**
  * Finish a three-message pairing handshake before Desktop confirmation.
@@ -201,7 +201,7 @@ abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes:
 abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: string }): Promise<void>
 ```
 
-Source: [`packages/platform/remote-access/src/index.ts:511`](../../packages/platform/remote-access/src/index.ts)
+Source: [`packages/platform/remote-access/src/index.ts:577`](../../packages/platform/remote-access/src/index.ts)
 
 <a id="ctxremoteattachmentauthority--remoteattachmentauthority"></a>
 
@@ -259,7 +259,7 @@ abstract revoke(input: { pairingId: PersonalPairingId; capability: AttachmentCap
  * Project every retained blob for Platform-side operations.
  * @returns copies of ciphertext and metadata only; no plaintext exists on this side of the boundary.
  */
-abstract observe(): readonly RemoteAttachmentBlob[]
+abstract observe(): readonly RemoteAttachmentBlob[] | Promise<readonly RemoteAttachmentBlob[]>
 ```
 
 Source: [`packages/platform/remote-attachments/src/index.ts:59`](../../packages/platform/remote-attachments/src/index.ts)
@@ -320,5 +320,5 @@ abstract revokeRoute(routeId: RelayRouteId): Promise<void>
 abstract attach(input: { message: RelayAttachMessage deliver: (message: RelayCiphertextMessage | RelayPeerUpdateMessage) => Promise<void> close?: () => void | Promise<void> signal?: AbortSignal announce?: (message: RelayReadyMessage) => Promise<void> }): Promise<RemoteRelayAttachment>
 ```
 
-Source: [`packages/platform/remote-access/src/relay.ts:174`](../../packages/platform/remote-access/src/relay.ts)
+Source: [`packages/platform/remote-access/src/relay.ts:193`](../../packages/platform/remote-access/src/relay.ts)
 <!-- END GENERATED cordis-surface -->

@@ -50,7 +50,7 @@ The Consumer registers seven deferred ordinary tools. `tool_search` returns sche
 
 ## Cordis API
 
-Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — this section is byte-identical in both language sides of the page. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
 <a id="ctxbrowserruntime--browserruntime-abstract-seam"></a>
 
@@ -148,7 +148,7 @@ abstract input(request: BrowserInputRequest): Promise<BrowserPageState>
 abstract close(request: BrowserMutationRequest): Promise<BrowserClosedState>
 ```
 
-Source: [`packages/browser/browser-runtime/src/index.ts:108`](../../packages/browser/browser-runtime/src/index.ts)
+Source: [`packages/browser/browser-runtime/src/index.ts`](../../packages/browser/browser-runtime/src/index.ts)
 
 <a id="ctxbrowserworkspace--browserworkspacebinder"></a>
 
@@ -286,7 +286,7 @@ async cleanup(session: Session): Promise<void>
 
 Types: [Session](session.md) · [SessionId](core.md)
 
-Source: [`packages/browser/browser-workspace/src/index.ts:101`](../../packages/browser/browser-workspace/src/index.ts)
+Source: [`packages/browser/browser-workspace/src/index.ts`](../../packages/browser/browser-workspace/src/index.ts)
 
 <a id="browser-events"></a>
 
@@ -309,5 +309,5 @@ Post-commit Browser Runtime lifecycle notification. Providers contain synchronou
 'browser/runtime-state'(state: BrowserRuntimeState): void
 ```
 
-Source: [`packages/browser/browser-runtime/src/index.ts:98`](../../packages/browser/browser-runtime/src/index.ts)
+Source: [`packages/browser/browser-runtime/src/index.ts`](../../packages/browser/browser-runtime/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -33,7 +33,7 @@ const SOURCE_GLOBS = ['packages/*/*/src/**/*.ts', 'packages/*/*/src/**/*.tsx']
 
 /** Pinned upstream snapshot: product slots stay on first-party packages. */
 function isPinnedWorkbenchSnapshot(rel: string): boolean {
-  return rel.startsWith('packages/client/better-sidebar/')
+  return rel.startsWith('packages/client/ui-better-sidebar/')
 }
 
 /** Slot cardinalities the contract allows. */

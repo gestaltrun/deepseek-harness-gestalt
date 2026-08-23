@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-persistent-browser-profiles.md
 2026-08-19-persistent-browser-profiles.md: e456e35c7282069c982d056686a42b1468b84c52
-2026-08-19-persistent-browser-profiles.zh.md: 9818f8bb987ee8fbaf3526e3b12436ea1b1792d0
+2026-08-19-persistent-browser-profiles.zh.md: 11cb1dfc15a84e47c95c372278ae3e574dae1d1a

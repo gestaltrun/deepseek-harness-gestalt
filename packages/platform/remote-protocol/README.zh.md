@@ -10,9 +10,11 @@ Remote Access 的纯 codec 与协商器。本包拥有两个独立版本化的�
 
 ## Encrypted Companion Protocol
 
-Companion major 2 和 1 是当前及紧邻的前一应用版本。双方 endpoint 必须在所选 major 上声明已认证加密、配对密钥隔离与重放保护。协商不受 offer 数组顺序影响，始终选择最高的安全共同 major，因此不安全的共同 major 只能降级到安全的紧邻前一 major。每条逻辑 endpoint 连接拥有一个 negotiation channel。在该 channel 上开始新协商时，会在求值 offer 前让此前的应用 codec token 失效；失败的协商会让 channel 保持未激活，而其他 channel 仍然有效。不存在安全版本交集时，会在编码应用明文前失败，并指出必须更新的 endpoint。
+Companion major 3 和 2 是当前及紧邻的前一应用版本。双方 endpoint 必须在所选 major 上声明已认证加密、配对密钥隔离与重放保护。协商不受 offer 数组顺序影响，始终选择最高的安全共同 major，因此不安全的共同 major 只能降级到安全的紧邻前一 major。每条逻辑 endpoint 连接拥有一个 negotiation channel。在该 channel 上开始新协商时，会在求值 offer 前让此前的应用 codec token 失效；失败的协商会让 channel 保持未激活，而其他 channel 仍然有效。不存在安全版本交集时，会在编码应用明文前失败，并指出必须更新的 endpoint。
 
-已实现 catalog 包含有界 transcript-page projection（可选 `streaming`，以及 `text`、`image`、`approval` 与 `ask-user` 条目）、版本化 `foreground-sync` projection、Session 创建 operation、prompt 提交 operation、prompt 取消 operation、attachment offer operation、`settle-approval` 与 `answer-ask-user` operation、重连用的 `query-operation-status` operation、Desktop-confirmed result、attachment 拒绝 result，以及 `status` 应答——为被查询的 operation id 返回原始 committed 结果，或显式声明其未提交任何内容。`foreground-sync` 在认证解密后携带正数 physical-connection generation 与 Desktop revision；原始字节不能解码为同步 authority。attachment offer operation 是加密 attachment 传输的有界控制消息：只携带一次性 blob capability、密文 SHA-256、精确密文字节数、capability 过期时间与有界文件名。image 条目只携带 `fileName` 与 `alt`；附件明文字节不进入 Relay frame。`approval` 或 `ask-user` 条目命名一个品牌化 `interactionId` 以及 Desktop 已授权的决定；若存在 `settled`，其 decision 必须是这些决定之一。每个标识符由本协议自行品牌化，不从 Harness 领域包导入。解码时会拒绝不支持的 operation 与 projection 字段。committed 的 `status` 应答内嵌同一 operation id 的 confirmed 结果；absent 应答仅为 `{ absent: true }`。
+Major 3 新增有界 Session 与 Workspace 发现、完整 conversation page projection、Session history、prompt 提交、取消、Approval 与 Ask User settlement，以及按内容寻址的历史图片读取。图片字节以有序 32 KiB 分片传输，共用一个摘要且最多 512 个分片；Mobile endpoint 只接受与原 operation、Session、attachment、media type、generation、index、count 和 digest 全部匹配的分片。catalog 继续包含 attachment offer、权威 `search-sessions`、重连用的 `query-operation-status`、Desktop confirmation、attachment rejection、关联的 `session-search`、类型化 `operation-failed` 与 `status` 应答。Host failure 会保留 4 种闭合类别之一：HTTP 状态、无效 wire response、类型化业务错误或超时。`foreground-sync` 在认证解密后携带正数 physical-connection generation 与 Desktop revision；原始字节不能解码为同步 authority。解码会拒绝不支持的 operation、额外字段、格式错误的按内容寻址 attachment id 与超限值。
+
+conversation projection 会回显 history 请求中可选的 exclusive `beforeSeq`。cursor 缺失时替换 tail；cursor 存在时标识由 Mobile 进行连续性校验并 prepend 的旧 page。
 
 ## Endpoint attachment cipher
 
@@ -31,6 +33,14 @@ Companion major 2 和 1 是当前及紧邻的前一应用版本。双方 endpoin
 | 加密前 Companion 应用数据 | 61,440 字节（60 KiB） |
 | 完整编码 transcript-page 消息 | 49,152 字节（48 KiB） |
 | Transcript page | 50 条 |
+| Session history 请求 | 20 条消息 |
+| Session 或 Workspace 发现页 | 20 行 |
+| 历史图片分片 | 32,768 个解码后字节 |
+| 历史图片结果 | 512 个分片 |
+| Session 搜索查询 | 500 个 UTF-16 code unit |
+| Session 搜索结果 | 20 个唯一 Session |
+| Session 搜索 snippet | 240 个 Unicode code point |
+| Host 失败消息 | 4,096 个 UTF-8 字节 |
 | 保留的 attachment blob | 104,857,600 密文字节（100 MiB） |
 | Attachment capability 生命周期 | 900,000 毫秒（15 分钟） |
 | Attachment 文件名 | 255 UTF-8 字节 |
@@ -49,5 +59,5 @@ Companion major 2 和 1 是当前及紧邻的前一应用版本。双方 endpoin
 
 ## 已知限制与延后工作
 
-- 当前 Companion catalog 证明 Session 创建、prompt 提交与取消、attachment offer、审批与 Ask User 结算、operation-status 查询、含 image 与交互卡片的 transcript projection，以及 confirmed、attachment-rejected 与 status 三种 result。远程 Workspace 发现仍属于后续 catalog 切片。
+- Session 创建不属于 Companion major 3。Mobile 可以浏览现有 Desktop Session、打开 history、提交、取消、settle 当前 interaction、读取图片字节、搜索及附加文件。
 - 配对 handshake、凭据持久化、challenge lifecycle 与生产 Companion 消息加密属于服务或经评审的 endpoint 集成，不属于这些 codec。

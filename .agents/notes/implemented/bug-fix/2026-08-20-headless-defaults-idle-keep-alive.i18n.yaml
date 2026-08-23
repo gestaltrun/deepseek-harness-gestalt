@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-headless-defaults-idle-keep-alive.md
 2026-08-20-headless-defaults-idle-keep-alive.md: 3ce44caeecf44e6f80b8adccbe06541efa05f356
-2026-08-20-headless-defaults-idle-keep-alive.zh.md: 5786582c97f6a50c1e0e61b904816c305024b8a3
+2026-08-20-headless-defaults-idle-keep-alive.zh.md: 94d5174f3d47ee42611c45683624619fcd2a1099

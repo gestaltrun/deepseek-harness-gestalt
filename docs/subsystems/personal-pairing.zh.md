@@ -2,7 +2,7 @@
 
 [English](personal-pairing.md) | 中文
 
-[`@deepseek-ai/dsh-remote-access`](../../packages/platform/remote-access/README.md) 拥有手机访问开关、配对挑战消费、待确认握手确认、个人配对身份与仅限 Companion 的设备主体权限。它调用 `ctx.platformAccount.currentInstallation()` 鉴别每个账号会话的安装 id 与类型，再比较不透明的平台账号 id；它从不读取账号存储或 GitHub 字段，也不信任调用方自行提供的安装身份。
+[`@deepseek-ai/dsh-remote-access`](../../packages/platform/remote-access/README.md) 拥有 Mobile Access 开关、Pairing Challenge 消费、待确认握手确认、Personal Pairing 身份与仅限 Companion 的 Device Principal authority。它调用 `ctx.platformAccount.currentInstallation()` 鉴别每个 Account Session 的 Installation id、类型与 Mobile 展示，再比较不透明的 Platform Account id。配对完成不接受设备字段：待确认与已确认记录只使用已鉴别 Mobile Installation 展示。
 
 ## 挑战与确认生命周期
 
@@ -10,7 +10,7 @@
 
 同账号端点 mailbox 把 message 1 绑定到保留的路由挑战后，Mobile 才消费邀请。Desktop 与 Mobile 通过 Platform 交换不透明 XKpsk3 消息，比较由本地 transcript 派生的六个认证词，并在 Desktop 确认前保持待确认。两个端点分别生成自己的 P-256 Relay 签名凭据；Platform 在新 pairing selector 下原子登记不同的公钥摘要，并授予带品牌的设备主体，其权限严格等于 `companion-surface`。
 
-变更串行执行。过期、取消、拒绝、关闭手机访问与一次成功完成都会先提交终态，使另一项变更无法再观察该能力。密码资源销毁可以独立重试：清理失败不会重复完成握手或激活配对，提供方释放资源时会尝试处理每项挑战、待确认密钥、活跃密钥与清理记录。挑战创建时就调度过期任务，不会等待另一项完成请求。不透明生成 id 与已激活密钥引用都会在插入前判重，因此碰撞不能覆盖既有记录，也不能遗弃新分配的密钥。
+变更串行执行。过期、取消、拒绝、关闭手机访问与一次成功完成都会先提交终态，使另一项变更无法再观察该能力。完成重放要求已鉴别账号、Mobile Installation、全部邀请字段与 Mobile 握手字节的定长 digest 相符；同一完成 id 下任一内容变化都属于碰撞。配对事务格式版本 1 记录这项 digest 要求。无版本文档会保留已确认配对与受 digest 约束的重放记录；缺少 digest 的完成或待确认记录会转为终态清理记录，不能重放。系统拒绝未知的显式版本与格式错误的带版本文档。密码资源销毁可以独立重试：清理失败不会重复完成握手或激活配对，提供方释放资源时会尝试处理每项挑战、待确认密钥、活跃密钥与清理记录。挑战创建时就调度过期任务，不会等待另一项完成请求。不透明生成 id 与已激活密钥引用都会在插入前判重，因此碰撞不能覆盖既有记录，也不能遗弃新分配的密钥。
 
 ## 密码适配器
 
@@ -18,7 +18,7 @@
 
 ## 多实例 Relay
 
-`ctx.remoteRelay` 使用一次性 P-256 challenge proof 鉴权每个新 attachment；proof 绑定 route、端点、pairing selector、attachment id、公钥、nonce 与过期时间。`RelayRouteStore` 只持久化唯一公钥摘要、selector、单调 revision 与撤销状态。`remote-access-redis` 只承载目录元数据、不含内容的失效通知与有界密文 Pub/Sub；它不创建离线 queue。位于另一 Platform Instance 的目标会收到同一个不透明 Relay frame，目标缺失则立即返回 `REMOTE_OFFLINE`。
+`ctx.remoteRelay` 使用一次性 P-256 challenge proof 鉴权每个新 attachment；proof 绑定 route、端点、pairing selector、attachment id、公钥、nonce 与过期时间。`RelayRouteStore` 只持久化唯一公钥摘要、selector、单调 revision 与撤销状态。Mobile presence 为每个已鉴别连接 token 保存一条过期 lease；精确 token close 无法清除另一实例的在线 attachment，缺失清理也会在 lease 到期后转为离线。`lastAccessAt` 只在已鉴别 attach、heartbeat 或 ciphertext 访问时推进。`remote-access-redis` 只承载目录元数据、不含内容的失效通知与有界密文 Pub/Sub；它不创建离线 queue。位于另一 Platform Instance 的目标会收到同一个不透明 Relay frame，目标缺失则立即返回 `REMOTE_OFFLINE`。
 
 Mobile 与 Desktop 通过一个 non-sticky TLS endpoint 向外连接。实例丢失会建立新连接与 Snow IK generation；Desktop 在 attachment 后发送已认证的前台同步，不迁移在线 socket。组装测试启动两套由独立 Loader 持有的 Platform／WebServer／HTTP composition，经 non-sticky endpoint 到达各自发布的 WSS upgrade handler，确认两台密钥独立的手机，并证明撤销一项配对后另一项仍可使用。其中的内存存储与 localhost 证书是确定性测试适配器，不是已运营环境验收；物理 WebView 证据和独立评审仍是 release blocker。
 
@@ -58,10 +58,10 @@ abstract createEndpointChallenge(input: { desktop: PairingAccountAuthentication 
 abstract cancelEndpointChallenge(input: { desktop: PairingAccountAuthentication challengeId: PairingChallengeId }): Promise<void>
 
 /** Submit Mobile XKpsk3 message 1 to the authenticated Desktop mailbox.
- * @param input - Mobile authorization, challenge/completion identities, installation metadata, and opaque message.
+ * @param input - Mobile authorization, challenge/completion identities, and opaque message.
  * @returns stable pending identity.
  */
-abstract submitEndpointMessage1(input: { mobile: PairingAccountAuthentication challengeId: PairingChallengeId completionId: PairingCompletionId device: PairingDeviceDescription message1: Uint8Array }): Promise<{ pendingPairingId: PendingPairingId }>
+abstract submitEndpointMessage1(input: { mobile: PairingAccountAuthentication challengeId: PairingChallengeId completionId: PairingCompletionId message1: Uint8Array }): Promise<{ pendingPairingId: PendingPairingId }>
 
 /** Read endpoint-owned pending work for this Desktop.
  * @param desktop - authenticated Desktop installation.
@@ -124,10 +124,10 @@ abstract reissueDesktopRelayAuthority(desktop: PairingAccountAuthentication): Pr
 
 /**
  * Complete the same-account cryptographic exchange without granting authority.
- * @param input - Mobile authorization, invitation, device metadata, and handshake bytes.
+ * @param input - Mobile authorization, invitation, and handshake bytes.
  * @returns pending result shown on both installations before Desktop confirmation.
  */
-abstract completeChallenge(input: { mobile: PairingAccountAuthentication completionId: PairingCompletionId oneTimeLink: string device: PairingDeviceDescription mobileHandshake: Uint8Array }): Promise<PairingCompletionView>
+abstract completeChallenge(input: { mobile: PairingAccountAuthentication completionId: PairingCompletionId oneTimeLink: string mobileHandshake: Uint8Array }): Promise<PairingCompletionView>
 
 /**
  * Finish a three-message pairing handshake before Desktop confirmation.
@@ -201,7 +201,7 @@ abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes:
 abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: string }): Promise<void>
 ```
 
-Source: [`packages/platform/remote-access/src/index.ts:511`](../../packages/platform/remote-access/src/index.ts)
+Source: [`packages/platform/remote-access/src/index.ts:577`](../../packages/platform/remote-access/src/index.ts)
 
 <a id="ctxremoteattachmentauthority--remoteattachmentauthority"></a>
 
@@ -259,7 +259,7 @@ abstract revoke(input: { pairingId: PersonalPairingId; capability: AttachmentCap
  * Project every retained blob for Platform-side operations.
  * @returns copies of ciphertext and metadata only; no plaintext exists on this side of the boundary.
  */
-abstract observe(): readonly RemoteAttachmentBlob[]
+abstract observe(): readonly RemoteAttachmentBlob[] | Promise<readonly RemoteAttachmentBlob[]>
 ```
 
 Source: [`packages/platform/remote-attachments/src/index.ts:59`](../../packages/platform/remote-attachments/src/index.ts)
@@ -320,5 +320,5 @@ abstract revokeRoute(routeId: RelayRouteId): Promise<void>
 abstract attach(input: { message: RelayAttachMessage deliver: (message: RelayCiphertextMessage | RelayPeerUpdateMessage) => Promise<void> close?: () => void | Promise<void> signal?: AbortSignal announce?: (message: RelayReadyMessage) => Promise<void> }): Promise<RemoteRelayAttachment>
 ```
 
-Source: [`packages/platform/remote-access/src/relay.ts:174`](../../packages/platform/remote-access/src/relay.ts)
+Source: [`packages/platform/remote-access/src/relay.ts:193`](../../packages/platform/remote-access/src/relay.ts)
 <!-- END GENERATED cordis-surface -->

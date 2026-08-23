@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-DeepSeek Gestalt 是 Desktop Host：Electron 拥有窗口、应用菜单、进程寿命和更新检查。启动时拉起捆绑的官方 Node 加上锁死的 `dsh web` Web Host（`--host 127.0.0.1 --port 0 --no-open`），并打开该环回 URL。Desktop Host 已经拥有窗口，因此 spawn 与叠加层都让操作系统默认浏览器保持关闭（[Desktop Web Host `--no-open`](../bug-fix/2026-08-22-desktop-web-host-no-open.md)）。Web Host 保留全部 Host 能力，包括原生选目录。
+DeepSeek Gestalt 是 Desktop Host：Electron 拥有窗口、应用菜单、进程寿命和更新检查。启动时拉起捆绑的官方 Node 加上锁死的 `dsh web` Web Host（`--host 127.0.0.1 --port 0 --no-open`），并打开该环回 URL。Desktop Host 已经拥有窗口，因此 spawn 与叠加层都让操作系统默认浏览器保持关闭（[Desktop Web Host `--no-open`](../bug-fix/2026-08-22-desktop-web-host-no-open.zh.md)）。Web Host 保留全部 Host 能力，包括原生选目录。
 
 Electron 在退出阶段继续监管 Web Host。窗口退出、终止信号和 smoke 结束都会取消尚未完成的启动、停止子进程，并等待进程退出后才终止 Desktop Host；主动关闭不会触发一次性崩溃重启。可信主窗口停留在当前环回 origin，普通网页链接交给系统浏览器，并拒绝其他导航和所有新 Electron 窗口。
 
@@ -26,7 +26,7 @@ Update Control 只在可操作的更新阶段和发现版本后的 error 阶段�
 
 锁定 Web Host 快照中存在某个包，并不表示相应能力已经激活。Desktop 不配置任何 MCP server；Cordis 自修改与 Code Mode preset 可供选择但不是默认值；standard preset 保留关闭的 Codex 与 Claude Code subagent 模板；Web 能力提供搜索但不提供 fetch。production HMR 保持关闭；因为 `session-query-sqlite` 使用 `openAt: never`，全文 Session 搜索仍需显式启用。headless、ACP 与 JSON-RPC example 是其他应用组合，不是 Desktop 插件。
 
-Window Chrome 在 Desktop 侧栏、中间 Session 内容与顶部 Workbench 上统一使用一条 36px 行。在 macOS 上，侧栏与中间区域围绕 traffic lights 构成连续拖拽区。Workbench 只用 `+` 后可伸缩的未占用空间拖动窗口；标签、控件与标签投放仍可交互。Windows 使用同一行，把三个 caption 按钮设为不可拖拽区域，并把中间 Session 栏同步下移 36px，使 Session 顶栏留在拖拽条下方（[Windows Desktop Session 顶栏下移](../bug-fix/2026-08-22-windows-desktop-session-header-inset.md)）。纯浏览器 Web 保留紧凑的 34px Workbench 标签栏，且不渲染窗口拖拽空间。未支持平台的开发运行保留系统窗口框架。
+Window Chrome 在 Desktop 侧栏、中间 Session 内容与顶部 Workbench 上统一使用一条 36px 行。在 macOS 上，侧栏与中间区域围绕 traffic lights 构成连续拖拽区。Workbench 只用 `+` 后可伸缩的未占用空间拖动窗口；标签、控件与标签投放仍可交互。Windows 使用同一行，把三个 caption 按钮设为不可拖拽区域，并把中间 Session 栏同步下移 36px，使 Session 顶栏留在拖拽条下方（[Windows Desktop Session 顶栏下移](../bug-fix/2026-08-22-windows-desktop-session-header-inset.zh.md)）。纯浏览器 Web 保留紧凑的 34px Workbench 标签栏，且不渲染窗口拖拽空间。未支持平台的开发运行保留系统窗口框架。
 
 右侧和底部 Workbench 在关闭时保留各自的偏好尺寸，但只在可见时独立占用布局空间。拖动底部 Workbench 不会应用已关闭右侧 Workbench 保留的宽度，窄屏浮动抽屉也不占用布局空间。
 

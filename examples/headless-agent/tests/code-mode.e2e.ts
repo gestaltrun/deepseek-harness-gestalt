@@ -267,7 +267,7 @@ describe('Code Mode typed values: keyless real-worker contracts', () => {
     await ctx.plugin(ToolCordis)
     const agent = {
       id: SessionId('code-mode-cordis'),
-      session: { append: vi.fn() },
+      session: { append: vi.fn(), deriveMessages: () => [] },
     } as unknown as Agent
 
     const value = completion(await runCode(ctx, `

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-07-29-web-details-session-lifecycle.md
 2026-07-29-web-details-session-lifecycle.md: bc09b5043439cf34d783dd91f8213618bb6258a9
-2026-07-29-web-details-session-lifecycle.zh.md: ee27126d05f1cc30642d79cbabe6fb8d61523836
+2026-07-29-web-details-session-lifecycle.zh.md: 4ef2ae5ed840ce9b4d43da5ca25a6a5dfdb00e42

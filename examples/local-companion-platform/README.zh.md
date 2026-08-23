@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-环回双实例 Platform：在一个 TLS origin 后挂载 Account HTTP、无密钥个人配对和 Relay WSS。[`apps/platform`](../../apps/platform/README.md) 的生产监听保持 fail-closed，且永不导入 `DevelopmentKeylessPairingHandshakeProvider`。
+环回双实例 Platform：在一个 TLS origin 后挂载 Account HTTP、无密钥个人配对和 Relay WSS。[`apps/platform`](../../apps/platform/README.zh.md) 的生产监听保持 fail-closed，且永不导入 `DevelopmentKeylessPairingHandshakeProvider`。
 
 TLS 前端绑定 `127.0.0.1`，并使用捆绑的 [`two-instance-relay` localhost 证书](../two-instance-relay/fixtures/localhost-cert.pem)。`/v1/*` 与 `/v1/remote-access/relay` 在两个进程内实例间轮换，这些实例共享内存中的 Account、配对权威和 Relay 路由存储。该组成里的 GitHub 授权打开同一 origin 上的 `/v1/account/oauth/github/development-complete`，以 `octocat` 完成后再回到页面 origin，使 Desktop 与 Mobile 得到同一个 Platform Account。`LOCAL_COMPANION_PAGE_ORIGIN` 把其余路径反代到 Mobile Vite，让浏览上下文 origin 与受信任的 Platform origin 一致。
 

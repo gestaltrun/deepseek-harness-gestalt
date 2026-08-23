@@ -1977,7 +1977,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/remote-attachments/src/index.ts:138`](../packages/platform/remote-attachments/src/index.ts)
+来源：[`packages/platform/remote-attachments/src/index.ts:140`](../packages/platform/remote-attachments/src/index.ts)
 
 <a id="deepseek-aidsh-repeat-tool-reminder"></a>
 

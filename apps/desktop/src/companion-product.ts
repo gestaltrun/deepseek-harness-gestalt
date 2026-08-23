@@ -89,6 +89,7 @@ export class DesktopCompanionProductOwner {
   private installed: { readonly rpc: DesktopHostRpc } | undefined
   private ledger: DesktopCompanionOperationLedger | undefined
   private readonly interactions = new DesktopCompanionInteractionRegistry()
+  private readonly surfaceDiscovery = new DesktopCompanionSurfaceDiscovery()
 
   /** @param hostOptions - response bound and request deadline for every Web Host generation. */
   constructor(private readonly hostOptions: DesktopHostRpcOptions) {}
@@ -106,6 +107,7 @@ export class DesktopCompanionProductOwner {
     const cancellation = new AbortController()
     const installed = { rpc, cancellation }
     this.interactions.clear()
+    this.surfaceDiscovery.clear()
     this.installed = installed
     if (rpc.watchInteractions !== undefined) {
       void rpc.watchInteractions(cancellation.signal, (envelope) => { this.interactions.accept(envelope) })
@@ -118,6 +120,7 @@ export class DesktopCompanionProductOwner {
       if (this.installed === installed) {
         this.installed = undefined
         this.interactions.clear()
+        this.surfaceDiscovery.clear()
       }
     }
   }
@@ -151,7 +154,9 @@ export class DesktopCompanionProductOwner {
         kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Web Host is not available',
       })
     }
-    const execute = async () => await handleCompanionProductOperation(operation, { ...dependencies, host })
+    const execute = async () => operation.type === 'refresh-surface'
+      ? await this.surfaceDiscovery.refresh(operation, { ...dependencies, host })
+      : await handleCompanionProductOperation(operation, { ...dependencies, host })
     if (!isLedgerMutation(operation)) return await execute()
     if (this.ledger === undefined) return operationFailed(operation, {
       kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Companion operation ledger is unavailable',
@@ -211,7 +216,7 @@ export async function handleCompanionProductOperation(
     case 'search-sessions':
       return await searchSessions(operation, dependencies.host)
     case 'refresh-surface':
-      return await refreshSurface(operation, dependencies)
+      return await new DesktopCompanionSurfaceDiscovery().refresh(operation, dependencies)
     case 'load-history':
       return await loadHistory(operation, dependencies)
     case 'submit-prompt':
@@ -235,28 +240,103 @@ export async function handleCompanionProductOperation(
   }
 }
 
-async function refreshSurface(
-  operation: Extract<CompanionProductOperation, { type: 'refresh-surface' }>,
-  dependencies: CompanionProductOperationDependencies,
-): Promise<CompanionProjection | CompanionOperationFailedResult> {
-  const [sessionResponse, workspaceResponse] = await Promise.all([
-    dependencies.host.call('session.list', {}),
-    dependencies.host.call('workspace.list', {}),
-  ])
-  if (!sessionResponse.ok) return operationFailed(operation, normalizeFailure(sessionResponse.failure))
-  if (!workspaceResponse.ok) return operationFailed(operation, normalizeFailure(workspaceResponse.failure))
-  const sessions = parseSurfaceSessions(sessionResponse.value, operation.offset)
-  if (sessions === undefined) return invalidHostResult(operation, 'surface baseline')
-  const workspaces = parseSurfaceWorkspaces(workspaceResponse.value, new Set(sessions.map(session => session.sessionId)))
-  if (workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
-  return {
-    type: 'surface-snapshot', operationId: operation.operationId,
-    generation: dependencies.generation, desktopRevision: dependencies.desktopRevision,
-    desktopName: dependencies.desktopName,
-    offset: operation.offset,
-    sessions,
-    workspaces,
-    hasMore: surfaceHasMore(sessionResponse.value, operation.offset, sessions.length),
+interface DesktopSurfaceAuthoritySnapshot {
+  readonly generation: number
+  readonly desktopRevision: number
+  readonly sessionValue: unknown
+  readonly workspaceValue: unknown
+}
+
+interface DesktopSurfaceDiscoveryState {
+  readonly epoch: number
+  readonly nextOffset: number
+  readonly snapshot: DesktopSurfaceAuthoritySnapshot
+}
+
+/** Per-pairing stable authority snapshot for one complete paged Mobile discovery. */
+export class DesktopCompanionSurfaceDiscovery {
+  private readonly epochs = new Map<PersonalPairingId, number>()
+  private readonly states = new Map<PersonalPairingId, DesktopSurfaceDiscoveryState>()
+
+  /** Retire every incomplete discovery when the installed Host authority changes. */
+  clear(): void {
+    this.epochs.clear()
+    this.states.clear()
+  }
+
+  /**
+   * Project one page from a stable Session and Workspace authority snapshot.
+   * @param operation - validated page offset and correlation.
+   * @param dependencies - current pairing, Host, and physical generation.
+   * @returns the correlated page or a fail-closed Host result.
+   */
+  async refresh(
+    operation: Extract<CompanionProductOperation, { type: 'refresh-surface' }>,
+    dependencies: CompanionProductOperationDependencies,
+  ): Promise<CompanionProjection | CompanionOperationFailedResult> {
+    if (operation.offset === 0) return await this.start(operation, dependencies)
+    const state = this.states.get(dependencies.pairingId)
+    if (state === undefined || state.nextOffset !== operation.offset
+      || state.snapshot.generation !== dependencies.generation
+      || state.snapshot.desktopRevision !== dependencies.desktopRevision) {
+      return invalidHostResult(operation, 'surface discovery cursor')
+    }
+    return this.project(operation, dependencies, state.epoch, state.snapshot)
+  }
+
+  private async start(
+    operation: Extract<CompanionProductOperation, { type: 'refresh-surface' }>,
+    dependencies: CompanionProductOperationDependencies,
+  ): Promise<CompanionProjection | CompanionOperationFailedResult> {
+    const epoch = (this.epochs.get(dependencies.pairingId) ?? 0) + 1
+    this.epochs.set(dependencies.pairingId, epoch)
+    this.states.delete(dependencies.pairingId)
+    const [sessionResponse, workspaceResponse] = await Promise.all([
+      dependencies.host.call('session.list', {}),
+      dependencies.host.call('workspace.list', {}),
+    ])
+    if (!sessionResponse.ok) return operationFailed(operation, normalizeFailure(sessionResponse.failure))
+    if (!workspaceResponse.ok) return operationFailed(operation, normalizeFailure(workspaceResponse.failure))
+    const snapshot: DesktopSurfaceAuthoritySnapshot = {
+      generation: dependencies.generation,
+      desktopRevision: dependencies.desktopRevision,
+      sessionValue: sessionResponse.value,
+      workspaceValue: workspaceResponse.value,
+    }
+    return this.project(operation, dependencies, epoch, snapshot)
+  }
+
+  private project(
+    operation: Extract<CompanionProductOperation, { type: 'refresh-surface' }>,
+    dependencies: CompanionProductOperationDependencies,
+    epoch: number,
+    snapshot: DesktopSurfaceAuthoritySnapshot,
+  ): CompanionProjection | CompanionOperationFailedResult {
+    const sessions = parseSurfaceSessions(snapshot.sessionValue, operation.offset)
+    if (sessions === undefined) return invalidHostResult(operation, 'surface baseline')
+    const workspaces = parseSurfaceWorkspaces(snapshot.workspaceValue, new Set(sessions.map(session => session.sessionId)))
+    if (workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
+    const hasMore = surfaceHasMore(snapshot.sessionValue, operation.offset, sessions.length)
+    if (this.epochs.get(dependencies.pairingId) === epoch) {
+      if (hasMore) {
+        this.states.set(dependencies.pairingId, {
+          epoch,
+          nextOffset: operation.offset + sessions.length,
+          snapshot,
+        })
+      } else {
+        this.states.delete(dependencies.pairingId)
+      }
+    }
+    return {
+      type: 'surface-snapshot', operationId: operation.operationId,
+      generation: dependencies.generation, desktopRevision: dependencies.desktopRevision,
+      desktopName: dependencies.desktopName,
+      offset: operation.offset,
+      sessions,
+      workspaces,
+      hasMore,
+    }
   }
 }
 

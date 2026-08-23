@@ -13,6 +13,7 @@ import {
   type CompanionOperation,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
+  DesktopCompanionSurfaceDiscovery,
   DesktopCompanionProductOwner,
   handleCompanionProductOperation,
 } from '../src/companion-product.ts'
@@ -52,14 +53,18 @@ describe('Desktop Companion product operations', () => {
   })
 
   it('projects a later Session page with exact hasMore and Workspace membership', async () => {
-    const items = Array.from({ length: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows + 1 }, (_, index) => ({
+    let items = Array.from({ length: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows + 1 }, (_, index) => ({
       sessionId: `session-${String(index)}`,
       updatedAt: index,
       running: false,
       blank: false,
     }))
+    let sessionListCalls = 0
     const dependencies = baseDependencies(hostRpc(async (method) => {
-      if (method === 'session.list') return { ok: true, value: { items } }
+      if (method === 'session.list') {
+        sessionListCalls += 1
+        return { ok: true, value: { items } }
+      }
       if (method === 'workspace.list') return { ok: true, value: {
         items: items.map((item, index) => ({
           workspaceId: `workspace-${String(index)}`, path: `/work/${String(index)}`, title: `Work ${String(index)}`,
@@ -70,9 +75,18 @@ describe('Desktop Companion product operations', () => {
       } }
       throw new Error(`unexpected Host method ${method}`)
     }))
-    const operation = op({ type: 'refresh-surface', offset: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows })
+    const discovery = new DesktopCompanionSurfaceDiscovery()
+    await expect(discovery.refresh(op({ type: 'refresh-surface', offset: 0 }), dependencies)).resolves.toMatchObject({
+      offset: 0,
+      hasMore: true,
+    })
+    items = [{ sessionId: 'session-new', updatedAt: 100, running: false, blank: false }, ...items]
+    const operation = {
+      ...op({ type: 'refresh-surface', offset: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows }),
+      operationId: parseCompanionOperationId('operation-refresh-surface-page-two'),
+    }
 
-    await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toMatchObject({
+    await expect(discovery.refresh(operation, dependencies)).resolves.toMatchObject({
       type: 'surface-snapshot',
       offset: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows,
       hasMore: false,
@@ -82,6 +96,7 @@ describe('Desktop Companion product operations', () => {
         sessionIds: [`session-${String(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)}`],
       }],
     })
+    expect(sessionListCalls).toBe(1)
   })
 
   it('projects Host history into the shared conversation carrier', async () => {

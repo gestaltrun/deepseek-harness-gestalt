@@ -129,6 +129,8 @@ export class SessionManager {
    *  same store so history-baseline seeding and frames converge on one row set. */
   private readonly projectionStores = new Map<SessionId, ProjectionValueStore>()
   private summaries: SessionSummary[] = []
+  /** Renderer-only rows retained across list refreshes until Host publication. */
+  private readonly provisionalSummaries = new Map<SessionId, SessionSummary>()
   private listState: 'idle' | 'loading' | 'error' = 'idle'
   /** Arrival phase; the pending → ready edge fires on the first successful pull (see SessionListPhase). */
   private listPhase: SessionListPhase = 'pending'
@@ -325,6 +327,46 @@ export class SessionManager {
     })
   }
 
+  /**
+   * Project a feature-owned draft identity without creating a Host Session.
+   * @param descriptor - provisional identity and its parent lineage.
+   */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+  }): void {
+    if (this.provisionalSummaries.has(descriptor.sessionId)) return
+    const summary: SessionSummary = {
+      sessionId: descriptor.sessionId,
+      parentSessionId: descriptor.parentSessionId,
+      origin: descriptor.origin,
+      updatedAt: Date.now(),
+      running: false,
+      blank: true,
+    }
+    this.provisionalSummaries.set(descriptor.sessionId, summary)
+    this.recordMutation({ kind: 'upsert', summary })
+  }
+
+  /**
+   * Remove a renderer-only identity; published Host Sessions are untouched.
+   * @param sessionId - provisional identity to remove.
+   */
+  dropProvisional(sessionId: SessionId): void {
+    if (!this.provisionalSummaries.delete(sessionId)) return
+    this.recordMutation({ kind: 'remove', sessionId })
+  }
+
+  /**
+   * Whether explicit rendering must avoid a Host history request for this identity.
+   * @param sessionId - possible provisional identity.
+   * @returns true while the identity has no published Host Session.
+   */
+  isProvisional(sessionId: SessionId): boolean {
+    return this.provisionalSummaries.has(sessionId)
+  }
+
   /** Rebuild every resident Session after one coalesced registry transaction. */
   rebuildConversationRegistry(): void {
     for (const session of this.sessions.values()) session.rebuildConversationRegistry()
@@ -451,18 +493,26 @@ export class SessionManager {
       try {
         const { result } = await this.api.sessions.list({})
         if (result.ok) {
+          for (const summary of result.value.items) {
+            this.provisionalSummaries.delete(summary.sessionId)
+          }
           const baseline = this.listPhase === 'pending'
             ? result.value.items
             : mergeOrderedBaseline(established, result.value.items, summary => summary.sessionId)
+          const provisional = [...this.provisionalSummaries.values()]
+          const visibleBaseline = [
+            ...provisional,
+            ...baseline.filter(summary => !this.provisionalSummaries.has(summary.sessionId)),
+          ]
           // Seed first observations from the pull-time baseline BEFORE replaying
           // in-flight mutations, then reconcile the reminders after EVERY
           // replayed mutation: an edge that happens entirely between mutations
           // (baseline idle → running → idle) must still arm, which a single
           // sync on the folded result would collapse away.
-          for (const s of baseline) {
+          for (const s of visibleBaseline) {
             if (!this.prevRunning.has(s.sessionId)) this.prevRunning.set(s.sessionId, s.running)
           }
-          let summaries = baseline
+          let summaries = visibleBaseline
           for (const mutation of mutations) {
             summaries = applyMutation(summaries, mutation)
             this.summaries = summaries
@@ -799,6 +849,7 @@ export class SessionManager {
     const frame = envelope.payload
     switch (frame.type) {
       case 'host/session-added': {
+        this.provisionalSummaries.delete(frame.sessionId)
         this.mergeSummary({
           sessionId: frame.sessionId, updatedAt: Date.now(), running: false, blank: frame.blank,
           ...(frame.parentSessionId !== undefined ? { parentSessionId: frame.parentSessionId } : {}),

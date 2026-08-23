@@ -94,6 +94,39 @@ describe('list store projection', () => {
     await Promise.resolve()
     expect(b.svc.list.getSnapshot().ids).toContain('s2')
   })
+
+  it('keeps a provisional feature Session renderer-only until Host publication', async () => {
+    const b = bench()
+    await feedList(b, [{ id: 'parent' }])
+    const release = b.svc.stageProvisional({
+      sessionId: sid('draft'),
+      parentSessionId: sid('parent'),
+      origin: 'subagent',
+    })
+    await Promise.resolve()
+
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
+      id: 'draft', parentId: 'parent', origin: 'subagent', blank: true,
+    })
+    expect(b.svc.provideInfoFor(sid('draft')).sessionId).toBe(sid('draft'))
+    b.svc.openForRender(sid('draft'))
+    expect(b.api.callsOf('session.history')).toEqual([])
+
+    await feedList(b, [{ id: 'parent' }])
+    expect(b.svc.list.getSnapshot().ids).toContain(sid('draft'))
+
+    b.svc.handleHostEnvelope({
+      rpcId: 'published' as never,
+      payload: {
+        type: 'host/session-added', sessionId: sid('draft'), blank: false,
+        parentSessionId: sid('parent'), origin: 'subagent',
+      } as never,
+    })
+    await Promise.resolve()
+    release()
+    await Promise.resolve()
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({ blank: false })
+  })
 })
 
 describe('search', () => {

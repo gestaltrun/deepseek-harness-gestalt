@@ -9,7 +9,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {
-  PromptContentPart, RpcResult, SessionId, SubagentAddress,
+  ModelSelection, PromptContentPart, RpcResult, SessionId, SessionModels, SubagentAddress,
 } from '@deepseek-ai/dsh-api-remotes/client'
 import type { HostObservable, SessionMaybeProvideInfo } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AgentContext } from '../agents/scope.ts'
@@ -21,6 +21,17 @@ import type { SessionFace } from './session.ts'
 import type { ObservableSnapshot } from './store.ts'
 
 export type { AgentContext } from '../agents/scope.ts'
+
+/** Model inspection and selection routed for one exact Session identity. */
+export interface SessionModelRoute {
+  /** Read the current selection and advisory catalog. */
+  models(signal?: AbortSignal): Promise<RpcResult<SessionModels>>
+  /** Validate and select the next request model. */
+  selectModel(
+    selection: ModelSelection,
+    signal?: AbortSignal,
+  ): Promise<RpcResult<{ selected: ModelSelection }>>
+}
 
 /** Feature-owned admission behavior for a Session that is not served by the stock wire routes. */
 export interface SessionAdmissionAdapter {
@@ -37,6 +48,8 @@ export interface SessionAdmissionAdapter {
   ): Promise<RpcResult<{ accepted: true }>>
   /** Stop the Session current turn while preserving queued work. */
   cancel(sessionId: SessionId): Promise<RpcResult<{ accepted: true }>>
+  /** Feature-owned model route; omission hides model selection for handled Sessions. */
+  modelRoute?(sessionId: SessionId): SessionModelRoute | undefined
   /** Hide inherited fork seed events from the rendered conversation window. */
   readonly historyScope?: 'owned-suffix' | undefined
 }
@@ -53,6 +66,14 @@ export interface ISessions {
   openForRender?(sessionId: SessionId): void
   /** Register one feature-owned Session admission adapter. */
   registerAdmissionAdapter?(adapter: SessionAdmissionAdapter): () => void
+  /** Route model inspection and selection for one ordinary or feature-owned Session. */
+  modelRoute(sessionId: SessionId): SessionModelRoute | undefined
+  /** Project a client-only Session identity until its feature publishes the Host Session. */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+  }): () => void
   /**
    * The `session.search` result bound the wire schema fixes, exposed to
    * presentation as injected data. Not per-connection state: every transport

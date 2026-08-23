@@ -24,6 +24,7 @@
  * need them — e.g. the `ws` upgrade hook in src/index.ts).
  */
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { SessionAdmissionAdapter } from '@deepseek-ai/dsh-client-runtime/client'
 import type { BetterSidebarService } from './client/service.ts'
 
@@ -325,23 +326,6 @@ export interface SidebarSessionsService {
    */
   open?(id: string): void
   /**
-   * Fork a session from a completed-turn prefix of the source and resolve
-   * the child session id (mirror of the runtime ISessions.fork — throws on
-   * failure). The Side Chat "save as new session" action uses this to
-   * promote a hidden side thread into a top-level session.
-   */
-  fork?(opts: { sessionId: string; atSeq?: number; increaseTitle?: boolean }): Promise<string>
-  /**
-   * Resolve the stable session binding of one listed session (mirror of the
-   * runtime ISessions.binding); the saved-session rename uses the face's
-   * behavior verbs.
-   */
-  binding?(id: string): {
-    session: {
-      rename(title: string): Promise<unknown>
-    }
-  } | undefined
-  /**
    * Resolve an Agent-scoped context view for one session (mirror of the
    * runtime ISessions.scope) — the ticket `ctx.conversation.input.for`
    * requires to reach that session's composer.
@@ -364,6 +348,12 @@ export interface SidebarSessionsService {
    * Refresh one direct-child catalog.
    */
   refreshSubagents?(parentSessionId: string): Promise<void>
+  /** Project a renderer-only Side Chat identity until its first prompt publishes it. */
+  stageProvisional(descriptor: {
+    sessionId: string
+    parentSessionId: string
+    origin: 'subagent'
+  }): () => void
   /** Register one feature-owned prompt/cancel route for exact Session identities. */
   registerAdmissionAdapter?(adapter: SessionAdmissionAdapter): () => void
 }
@@ -490,6 +480,7 @@ export interface SidebarContextServices {
     webServer: SidebarWebServer
     sessions: SidebarSessionStore & SidebarSessionsService
     webRuntime: SidebarWebRuntime
+    connection: ConnectionHandle
     slots: SidebarSlotsService
     workspaces: SidebarWorkspacesService
     settings: SidebarSettingsService

@@ -88,6 +88,8 @@ export interface CompanionSearchSessionsOperation {
 export interface CompanionRefreshSurfaceOperation {
   type: 'refresh-surface'
   operationId: CompanionOperationId
+  /** Zero-based row offset into the complete Desktop Session list. */
+  offset: number
 }
 
 /** Load one bounded Desktop-authoritative history window. */
@@ -311,6 +313,8 @@ export interface CompanionSurfaceSnapshotProjection {
   generation: number
   desktopRevision: number
   desktopName: string
+  /** Zero-based offset of the first Session row in this page. */
+  offset: number
   sessions: readonly CompanionSessionSummaryProjection[]
   workspaces: readonly CompanionWorkspaceProjection[]
   hasMore: boolean

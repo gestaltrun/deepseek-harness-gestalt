@@ -41,13 +41,44 @@ describe('Desktop Companion product operations', () => {
       }], archivedSessionIds: [] } }
       throw new Error(`unexpected Host method ${method}`)
     }))
-    const operation = op({ type: 'refresh-surface' })
+    const operation = op({ type: 'refresh-surface', offset: 0 })
     await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toMatchObject({
       type: 'surface-snapshot', operationId: operation.operationId,
+      offset: 0,
       sessions: [{ sessionId, displayTitle: 'Real session', cwd: '/work' }],
       workspaces: [{ workspaceId: 'workspace-product', sessionIds: [sessionId] }],
     })
     expect(calls).toEqual(['session.list', 'workspace.list'])
+  })
+
+  it('projects a later Session page with exact hasMore and Workspace membership', async () => {
+    const items = Array.from({ length: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows + 1 }, (_, index) => ({
+      sessionId: `session-${String(index)}`,
+      updatedAt: index,
+      running: false,
+      blank: false,
+    }))
+    const dependencies = baseDependencies(hostRpc(async (method) => {
+      if (method === 'session.list') return { ok: true, value: { items } }
+      if (method === 'workspace.list') return { ok: true, value: { items: [{
+        workspaceId: 'workspace-paged', path: '/work', title: 'Work',
+        sessionIds: items.map(item => item.sessionId),
+        createdAt: '2026-08-23T00:00:00.000Z', updatedAt: '2026-08-23T00:00:00.000Z',
+      }], archivedSessionIds: [] } }
+      throw new Error(`unexpected Host method ${method}`)
+    }))
+    const operation = op({ type: 'refresh-surface', offset: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows })
+
+    await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toMatchObject({
+      type: 'surface-snapshot',
+      offset: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows,
+      hasMore: false,
+      sessions: [{ sessionId: `session-${String(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)}` }],
+      workspaces: [{
+        workspaceId: 'workspace-paged',
+        sessionIds: [`session-${String(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)}`],
+      }],
+    })
   })
 
   it('projects Host history into the shared conversation carrier', async () => {

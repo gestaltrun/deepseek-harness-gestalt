@@ -23,7 +23,7 @@ describe('Encrypted Companion Protocol v3 product surface', () => {
     const operationId = parseCompanionOperationId('surface-1')
     const sessionId = parseCompanionSessionId('session-1')
     for (const message of [
-      { type: 'operation', operation: { type: 'refresh-surface', operationId } },
+      { type: 'operation', operation: { type: 'refresh-surface', operationId, offset: 0 } },
       { type: 'operation', operation: { type: 'load-history', operationId, sessionId, maxMessages: 20 } },
       { type: 'operation', operation: { type: 'load-history', operationId, sessionId, beforeSeq: 41, maxMessages: 20 } },
       { type: 'operation', operation: { type: 'cancel-session', operationId, sessionId } },
@@ -69,7 +69,7 @@ describe('Encrypted Companion Protocol v3 product surface', () => {
       type: 'projection',
       projection: {
         type: 'surface-snapshot', operationId, generation: 2, desktopRevision: 7,
-        desktopName: 'Studio Mac', hasMore: false,
+        desktopName: 'Studio Mac', offset: 0, hasMore: false,
         sessions: [{
           sessionId, displayTitle: 'Session one', cwd: '/work', running: false,
           blank: false, updatedAt: 123, pendingInteraction: 'approval',
@@ -240,6 +240,7 @@ function hostileV3Cases(): Array<{ name: string; message: Record<string, unknown
     { name: 'answer selected type', message: question([answer({ selected: [1] })]) },
     { name: 'answer custom empty', message: question([answer({ custom: '' })]) },
     { name: 'surface desktopName type', message: surfaceMessage({}, { desktopName: 1 }) },
+    { name: 'surface negative offset', message: surfaceMessage({}, { offset: -1 }) },
     { name: 'surface desktopName blank', message: surfaceMessage({}, { desktopName: ' ' }) },
     { name: 'surface desktopName length', message: surfaceMessage({}, { desktopName: 'x'.repeat(129) }) },
     { name: 'surface sessions type', message: surfaceMessage({}, { sessions: {} }) },
@@ -314,7 +315,7 @@ function surfaceMessage(
     type: 'projection',
     projection: {
       type: 'surface-snapshot', operationId: 'hostile-operation', generation: 1, desktopRevision: 1,
-      desktopName: 'Desktop', sessions: [surfaceSession(sessionOverrides)],
+      desktopName: 'Desktop', offset: 0, sessions: [surfaceSession(sessionOverrides)],
       workspaces: [surfaceWorkspace(workspaceOverrides)], hasMore: false,
       ...projectionOverrides,
     },

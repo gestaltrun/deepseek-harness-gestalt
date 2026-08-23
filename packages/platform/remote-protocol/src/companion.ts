@@ -318,8 +318,12 @@ function parseOperation(value: unknown): CompanionOperation {
     }
   }
   if (record.type === 'refresh-surface') {
-    exactKeys(record, ['type', 'operationId'], 'Companion refresh-surface operation')
-    return { type: 'refresh-surface', operationId: parseCompanionOperationId(record.operationId) }
+    exactKeys(record, ['type', 'operationId', 'offset'], 'Companion refresh-surface operation')
+    return {
+      type: 'refresh-surface',
+      operationId: parseCompanionOperationId(record.operationId),
+      offset: nonNegativeSafeInteger(record.offset, 'Companion surface offset'),
+    }
   }
   if (record.type === 'load-history') {
     exactKeys(record, record.beforeSeq === undefined
@@ -650,7 +654,7 @@ function parseInteractionSettlement(value: unknown): CompanionInteractionSettlem
 function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProjection {
   exactKeys(
     record,
-    ['type', 'operationId', 'generation', 'desktopRevision', 'desktopName', 'sessions', 'workspaces', 'hasMore'],
+    ['type', 'operationId', 'generation', 'desktopRevision', 'desktopName', 'offset', 'sessions', 'workspaces', 'hasMore'],
     'Companion surface-snapshot projection',
   )
   if (typeof record.desktopName !== 'string' || record.desktopName.trim() === '' || record.desktopName.length > 128) {
@@ -728,6 +732,7 @@ function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProject
     generation: positiveSafeInteger(record.generation, 'Companion surface generation'),
     desktopRevision: positiveSafeInteger(record.desktopRevision, 'Companion surface desktopRevision'),
     desktopName: record.desktopName,
+    offset: nonNegativeSafeInteger(record.offset, 'Companion surface offset'),
     sessions,
     workspaces,
     hasMore: record.hasMore,

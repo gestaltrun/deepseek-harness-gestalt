@@ -203,8 +203,8 @@ async function mountMobileProduct(): Promise<void> {
           () => companionConnectionChannel === undefined
             ? undefined
             : companionSurface?.bindAuthenticatedConnection(companionConnectionChannel),
-          () => {
-            const submission = companionChannel?.refreshSurface()
+          (offset) => {
+            const submission = companionChannel?.refreshSurface(offset)
             if (submission !== undefined) companionSurface?.trackSurfaceRefresh(submission)
           },
         )

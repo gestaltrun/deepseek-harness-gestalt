@@ -77,8 +77,8 @@ describe('Remote Protocol keyless assembled path', () => {
       type: 'ciphertext',
       transportVersion: 1,
       routeId: parseRelayRouteId('route-near-limit'),
-      sourceAttachmentId: parseRelayAttachmentId('mobile-near-limit'),
-      targetAttachmentId: parseRelayAttachmentId('desktop-near-limit'),
+      sourceAttachmentId: parseRelayAttachmentId(`mobile-${crypto.randomUUID()}`),
+      targetAttachmentId: parseRelayAttachmentId(`desktop-${crypto.randomUUID()}`),
       ciphertext,
     })
     expect(relayFrame.byteLength).toBeLessThanOrEqual(REMOTE_PROTOCOL_LIMITS.relayMessageBytes)

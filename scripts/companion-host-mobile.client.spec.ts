@@ -173,6 +173,8 @@ const environment = selectPlatformEnvironment(validatePlatformEnvironmentPair({
     databaseIdentity: 'database-production', identityNamespace: 'namespace-production',
   },
 }), 'development')
+const installationIdentity = crypto.randomUUID()
+const installationPlatform = (crypto.getRandomValues(new Uint8Array(1))[0] ?? 0) % 2 === 0 ? 'ios' : 'android'
 
 const attempt: LoginAttemptView = {
   id: 'attempt-host-400' as never,
@@ -209,9 +211,9 @@ function installationWithCompletedLogin(): PlatformAccountInstallation {
   }
   return new PlatformAccountInstallation({
     environment,
-    installationId: parseInstallationId('mobile-host-400'),
+    installationId: parseInstallationId(`mobile-${installationIdentity}`),
     installationKind: 'mobile',
-    presentation: { name: 'Host 400 test phone', platform: 'ios' },
+    presentation: { name: `Mobile ${installationIdentity}`, platform: installationPlatform },
     transport,
     store: new MemoryInstallationAccountStore(),
     systemBrowser: { open: vi.fn() },

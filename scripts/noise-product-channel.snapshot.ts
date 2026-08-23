@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest'
 import {
   MemoryPersonalPairingAuthorityStore,
   PersonalPairingProvider,
+  parsePairingCompletionId,
+  parsePairingRendezvousId,
   parseRelayInstanceId,
   type PairingHandshakeProvider,
   type RelayCoordinationEvent,
@@ -109,7 +111,7 @@ describe('Snow product channel runnable snapshot', () => {
     const expiresAt = Date.now() + 60_000
     const route = await pairing.createEndpointChallenge({
       desktop: desktopAuthentication,
-      rendezvousId: `rendezvous-${crypto.randomUUID()}` as never,
+      rendezvousId: parsePairingRendezvousId(`rendezvous-${crypto.randomUUID()}`),
       clientIp: '192.0.2.1',
       expiresAt,
     })
@@ -117,7 +119,7 @@ describe('Snow product channel runnable snapshot', () => {
     const invitation = await desktop.createInvitation(expiresAt)
     const mobile = new SnowMobileHandshakeClient()
     const message1 = await mobile.beginEndpointInvitation(invitation.invitationPayload)
-    const completionId = `completion-${crypto.randomUUID()}` as never
+    const completionId = parsePairingCompletionId(`completion-${crypto.randomUUID()}`)
     const pending = await pairing.submitEndpointMessage1({
       mobile: mobileAuthentication,
       challengeId: route.challengeId,

@@ -77,7 +77,7 @@ describe('Mobile Noise Companion receiver', () => {
         type: 'projection' as const,
         projection: {
           type: 'surface-snapshot' as const, operationId: 'surface-v3' as never,
-          generation: 2, desktopRevision: 7, desktopName: 'Authenticated Desktop', hasMore: false,
+          generation: 2, desktopRevision: 7, desktopName: 'Authenticated Desktop', offset: 0, hasMore: false,
           sessions: [{
             sessionId: 'session-v3' as never, displayTitle: 'Real session', running: false,
             blank: false, updatedAt: 1,
@@ -121,6 +121,7 @@ describe('Mobile Noise Companion receiver', () => {
     receiver.receive(Uint8Array.of(3))
     receiver.receive(Uint8Array.of(4))
     expect(refreshSurface).toHaveBeenCalledOnce()
+    expect(refreshSurface).toHaveBeenCalledWith(0)
     const resync = acceptValidatedDesktopResync.mock.lastCall?.[0]
     expect(resync?.desktopName).toBe('Authenticated Desktop')
     expect(resync?.sessions.ids).toEqual(['session-v3'])
@@ -133,7 +134,68 @@ describe('Mobile Noise Companion receiver', () => {
       type: 'conversation-snapshot', operationId: 'history-older-v3', sessionId: 'session-v3', beforeSeq: 5,
     }))
   })
+
+  it('loads every contiguous surface page and merges Workspace membership', () => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    const refreshSurface = vi.fn()
+    const messages = [
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'foreground-sync' as const,
+          desktopName: 'Paged Desktop', generation: 2, desktopRevision: 7,
+        },
+      },
+      surfacePage(0, 'session-first', true),
+      surfacePage(1, 'session-second', false),
+    ]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection: vi.fn() }),
+      refreshSurface,
+    )
+
+    receiver.receive(Uint8Array.of(1))
+    receiver.receive(Uint8Array.of(2))
+    receiver.receive(Uint8Array.of(3))
+
+    expect(refreshSurface.mock.calls).toEqual([[0], [1]])
+    const resync = acceptValidatedDesktopResync.mock.lastCall?.[0]
+    expect(resync?.sessions.ids).toEqual(['session-first', 'session-second'])
+    expect(resync?.workspaces[0]?.sessionIds).toEqual(['session-first', 'session-second'])
+  })
 })
+
+function surfacePage(offset: number, sessionId: string, hasMore: boolean) {
+  return {
+    type: 'projection' as const,
+    projection: {
+      type: 'surface-snapshot' as const,
+      operationId: parseCompanionOperationId(`surface-${String(offset)}`),
+      generation: 2,
+      desktopRevision: 7,
+      desktopName: 'Paged Desktop',
+      offset,
+      hasMore,
+      sessions: [{
+        sessionId: parseCompanionSessionId(sessionId),
+        displayTitle: sessionId,
+        running: false,
+        blank: false,
+        updatedAt: offset,
+      }],
+      workspaces: [{
+        workspaceId: 'workspace-paged',
+        path: '/work',
+        title: 'Work',
+        sessionIds: [parseCompanionSessionId(sessionId)],
+        createdAt: '2026-08-23T00:00:00.000Z',
+        updatedAt: '2026-08-23T00:00:00.000Z',
+      }],
+    },
+  }
+}
 
 function connectedRuntime(): CompanionForegroundRuntime {
   const runtime = new CompanionForegroundRuntime()

@@ -245,7 +245,7 @@ async function refreshSurface(
   ])
   if (!sessionResponse.ok) return operationFailed(operation, normalizeFailure(sessionResponse.failure))
   if (!workspaceResponse.ok) return operationFailed(operation, normalizeFailure(workspaceResponse.failure))
-  const sessions = parseSurfaceSessions(sessionResponse.value)
+  const sessions = parseSurfaceSessions(sessionResponse.value, operation.offset)
   if (sessions === undefined) return invalidHostResult(operation, 'surface baseline')
   const workspaces = parseSurfaceWorkspaces(workspaceResponse.value, new Set(sessions.map(session => session.sessionId)))
   if (workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
@@ -253,7 +253,10 @@ async function refreshSurface(
     type: 'surface-snapshot', operationId: operation.operationId,
     generation: dependencies.generation, desktopRevision: dependencies.desktopRevision,
     desktopName: dependencies.desktopName,
-    sessions, workspaces, hasMore: sessions.length === REMOTE_PROTOCOL_LIMITS.surfaceSessionRows,
+    offset: operation.offset,
+    sessions,
+    workspaces,
+    hasMore: surfaceHasMore(sessionResponse.value, operation.offset, sessions.length),
   }
 }
 
@@ -444,7 +447,7 @@ function parseSearchValue(value: unknown): Omit<CompanionSessionSearchResult, 't
   return { items, hasMore: value.hasMore }
 }
 
-function parseSurfaceSessions(value: unknown): Array<{
+function parseSurfaceSessions(value: unknown, offset = 0): Array<{
   sessionId: CompanionSessionId
   displayTitle: string
   cwd?: string
@@ -461,12 +464,16 @@ function parseSurfaceSessions(value: unknown): Array<{
     blank: boolean
     updatedAt: number
   }> = []
-  for (const itemValue of value.items.slice(0, REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)) {
+  for (const itemValue of value.items.slice(offset, offset + REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)) {
     const session = parseSurfaceSessionRow(itemValue)
     if (session === undefined) return undefined
     sessions.push(session)
   }
   return sessions
+}
+
+function surfaceHasMore(value: unknown, offset: number, pageLength: number): boolean {
+  return isRecord(value) && Array.isArray(value.items) && value.items.length > offset + pageLength
 }
 
 function parseSurfaceSession(

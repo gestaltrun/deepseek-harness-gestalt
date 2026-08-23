@@ -185,9 +185,9 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
   }
 
   /** Request the current Desktop Session and Workspace baseline after foreground synchronization. */
-  refreshSurface(): MobileCompanionTrackedSubmission {
+  refreshSurface(offset = 0): MobileCompanionTrackedSubmission {
     const operationIdValue = operationId()
-    return this.sendTracked({ type: 'refresh-surface', operationId: operationIdValue })
+    return this.sendTracked({ type: 'refresh-surface', operationId: operationIdValue, offset })
   }
 
   loadOlder(sessionId: SessionId, beforeSeq?: number): MobileCompanionTrackedSubmission {

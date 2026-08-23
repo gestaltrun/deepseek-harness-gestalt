@@ -44,7 +44,7 @@ export class MobileNoiseCompanionReceiver {
     private readonly runtime: CompanionForegroundRuntime,
     private readonly resultReceiver?: () => MobileCompanionResultReceiver | undefined,
     private readonly surfaceReceiver?: () => MobileCompanionSurfaceReceiver | undefined,
-    private readonly refreshSurface?: () => void,
+    private readonly refreshSurface?: (offset: number) => void,
   ) {
     if (!Number.isSafeInteger(generation) || generation <= 0) {
       throw new TypeError('Mobile Noise Companion generation must be a positive safe integer')
@@ -90,7 +90,7 @@ export class MobileNoiseCompanionReceiver {
         workspaces: [],
         conversations: [],
       })
-      this.refreshSurface?.()
+      this.refreshSurface?.(0)
       return message
     }
     const receiver = this.runtime.bindValidatedDesktopResync()
@@ -107,7 +107,10 @@ export class MobileNoiseCompanionReceiver {
   private acceptSurface(projection: CompanionSurfaceSnapshotProjection): void {
     this.requireProjectionGeneration(projection.generation, projection.desktopRevision)
     this.desktopName = projection.desktopName
-    const byId = Object.fromEntries(projection.sessions.map(session => [session.sessionId, {
+    if (projection.offset !== this.sessions.ids.length && projection.offset !== 0) {
+      throw new Error('Authenticated Companion surface page is not contiguous')
+    }
+    const pageById = Object.fromEntries(projection.sessions.map(session => [session.sessionId, {
       id: session.sessionId,
       displayTitle: session.displayTitle,
       ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
@@ -116,13 +119,22 @@ export class MobileNoiseCompanionReceiver {
       blank: session.blank,
       updatedAt: session.updatedAt,
     }]))
+    const pageIds = projection.sessions.map(session => session.sessionId)
+    if (projection.offset !== 0 && pageIds.some(id => this.sessions.byId[id] !== undefined)) {
+      throw new Error('Authenticated Companion surface page repeated a Session id')
+    }
     this.sessions = {
-      ids: projection.sessions.map(session => session.sessionId), byId, current: null, phase: 'ready',
+      ids: projection.offset === 0 ? pageIds : [...this.sessions.ids, ...pageIds],
+      byId: projection.offset === 0 ? pageById : { ...this.sessions.byId, ...pageById },
+      current: null, phase: 'ready',
       subagentsByParent: {}, jobsBySession: {}, currentAddress: null,
     }
-    this.workspaces = projection.workspaces.map(workspace => ({ ...workspace }))
+    this.workspaces = projection.offset === 0
+      ? projection.workspaces.map(workspace => ({ ...workspace }))
+      : mergeWorkspacePage(this.workspaces, projection.workspaces)
     this.publishSurface()
     this.activeSurface?.acceptValidatedCompanionProjection(projection)
+    if (projection.hasMore) this.refreshSurface?.(this.sessions.ids.length)
   }
 
   private acceptConversation(projection: CompanionConversationSnapshotProjection): void {
@@ -161,6 +173,22 @@ export class MobileNoiseCompanionReceiver {
       conversations: [...this.conversations.values()],
     })
   }
+}
+
+function mergeWorkspacePage(
+  current: MobileCompanionProjectionDto['workspaces'],
+  page: CompanionSurfaceSnapshotProjection['workspaces'],
+): MobileCompanionProjectionDto['workspaces'] {
+  const merged = current.map(workspace => ({ ...workspace, sessionIds: [...workspace.sessionIds] }))
+  for (const workspace of page) {
+    const existing = merged.find(candidate => candidate.workspaceId === workspace.workspaceId)
+    if (existing === undefined) {
+      merged.push({ ...workspace, sessionIds: [...workspace.sessionIds] })
+      continue
+    }
+    existing.sessionIds.push(...workspace.sessionIds)
+  }
+  return merged
 }
 
 function emptySessions(): MobileCompanionProjectionDto['sessions'] {

@@ -17,7 +17,7 @@ import {
   type CompanionResult,
   type CompanionTranscriptEntry,
 } from '@deepseek-ai/dsh-remote-protocol'
-import { companionRuntime } from './companion-push.ts'
+import { companionRuntime } from './companion-lifecycle.ts'
 import {
   CompanionCache,
   IndexedDbCompanionCacheStore,
@@ -81,7 +81,7 @@ export class DevelopmentCompanionSessionStore {
       title: input.title,
       ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
       devicePrincipalId: 'current-mobile',
-    })
+    }, companionRuntime()?.getState())
     if (!next.created) return
     this.committed.add(input.operationId)
     this.sessions = next.sessions.map(session => (
@@ -180,12 +180,11 @@ export class DevelopmentCompanionClient {
   }
 
   /**
-   * Open a one-byte sync or a sealed Companion reply.
-   * @param ciphertext - inbound Desktop frame, or omitted when a test injects resync.
+   * Open a sealed Companion reply while ignoring the retired keyless sync marker.
+   * @param ciphertext - inbound Desktop frame, or omitted by a legacy fixture.
    */
   async receive(ciphertext?: Uint8Array): Promise<void> {
     if (ciphertext === undefined || isDevelopmentKeylessSyncCiphertext(ciphertext)) {
-      companionRuntime()?.synchronize()
       return
     }
     const message = await openDevelopmentCompanionMessage(this.protocol, ciphertext)

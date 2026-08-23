@@ -25,7 +25,7 @@ import { MobileAccount } from '../src/MobileAccount.tsx'
 import {
   CompanionForegroundRuntime,
   installCompanionRuntime,
-} from '../src/companion-push.ts'
+} from '../src/companion-lifecycle.ts'
 import {
   DevelopmentCompanionClient,
   DevelopmentCompanionSessionStore,
@@ -138,7 +138,9 @@ describe('MobileAccount', () => {
       revision: 1,
     })
     await runtime.start()
-    runtime.synchronize()
+    runtime.bindValidatedDesktopResync()?.acceptValidatedDesktopResync({
+      type: 'desktop-resync', version: 1, authenticated: true,
+    })
     const paired = { status: 'paired' } as const
     const pairing: MobilePairingActions = {
       getSnapshot: () => paired,
@@ -175,7 +177,9 @@ describe('MobileAccount', () => {
       revision: 1,
     })
     await runtime.start()
-    runtime.synchronize()
+    runtime.bindValidatedDesktopResync()?.acceptValidatedDesktopResync({
+      type: 'desktop-resync', version: 1, authenticated: true,
+    })
     const store = new DevelopmentCompanionSessionStore()
     const desktop = negotiateDevelopmentCompanionProtocol()
     const client = new DevelopmentCompanionClient(

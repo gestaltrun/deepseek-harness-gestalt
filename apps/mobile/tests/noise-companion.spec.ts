@@ -63,7 +63,7 @@ describe('Mobile Noise Companion receiver', () => {
   it('requests and applies v3 surface and conversation projections on the synchronized receiver', () => {
     const runtime = connectedRuntime()
     const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
-    const acceptValidatedCompanionProjection = vi.fn()
+    const acceptValidatedCompanionProjection = vi.fn(() => true)
     const refreshSurface = vi.fn()
     const messages = [
       {
@@ -152,7 +152,7 @@ describe('Mobile Noise Companion receiver', () => {
     ]
     const receiver = new MobileNoiseCompanionReceiver(
       { open: () => messages.shift()! }, 2, runtime, undefined,
-      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection: vi.fn() }),
+      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection: vi.fn(() => true) }),
       refreshSurface,
     )
 
@@ -165,14 +165,58 @@ describe('Mobile Noise Companion receiver', () => {
     expect(resync?.sessions.ids).toEqual(['session-first', 'session-second'])
     expect(resync?.workspaces[0]?.sessionIds).toEqual(['session-first', 'session-second'])
   })
+
+  it('drops an older page before a replacement baseline mutates aggregate state', () => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    let expected = 'scan-a-0'
+    const acceptValidatedCompanionProjection = vi.fn((projection: { operationId: string }) => (
+      projection.operationId === expected
+    ))
+    const refreshSurface = vi.fn()
+    const messages = [
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'foreground-sync' as const,
+          desktopName: 'Paged Desktop', generation: 2, desktopRevision: 7,
+        },
+      },
+      surfacePage(0, 'scan-a-first', true, 'scan-a-0'),
+      surfacePage(1, 'scan-a-second', true, 'scan-a-1'),
+      surfacePage(0, 'scan-b-first', true, 'scan-b-0'),
+      surfacePage(2, 'scan-a-stale', false, 'scan-a-2'),
+      surfacePage(1, 'scan-b-second', false, 'scan-b-1'),
+    ]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection }),
+      refreshSurface,
+    )
+
+    receiver.receive(Uint8Array.of(1))
+    receiver.receive(Uint8Array.of(2))
+    expected = 'scan-a-1'
+    receiver.receive(Uint8Array.of(3))
+    expected = 'scan-b-0'
+    receiver.receive(Uint8Array.of(4))
+    expected = 'scan-b-1'
+    receiver.receive(Uint8Array.of(5))
+    receiver.receive(Uint8Array.of(6))
+
+    const resync = acceptValidatedDesktopResync.mock.lastCall?.[0]
+    expect(resync?.sessions.ids).toEqual(['scan-b-first', 'scan-b-second'])
+    expect(resync?.workspaces[0]?.sessionIds).toEqual(['scan-b-first', 'scan-b-second'])
+    expect(refreshSurface.mock.calls).toEqual([[0], [1], [2], [1]])
+  })
 })
 
-function surfacePage(offset: number, sessionId: string, hasMore: boolean) {
+function surfacePage(offset: number, sessionId: string, hasMore: boolean, operationId = `surface-${String(offset)}`) {
   return {
     type: 'projection' as const,
     projection: {
       type: 'surface-snapshot' as const,
-      operationId: parseCompanionOperationId(`surface-${String(offset)}`),
+      operationId: parseCompanionOperationId(operationId),
       generation: 2,
       desktopRevision: 7,
       desktopName: 'Paged Desktop',

@@ -60,11 +60,14 @@ describe('Desktop Companion product operations', () => {
     }))
     const dependencies = baseDependencies(hostRpc(async (method) => {
       if (method === 'session.list') return { ok: true, value: { items } }
-      if (method === 'workspace.list') return { ok: true, value: { items: [{
-        workspaceId: 'workspace-paged', path: '/work', title: 'Work',
-        sessionIds: items.map(item => item.sessionId),
-        createdAt: '2026-08-23T00:00:00.000Z', updatedAt: '2026-08-23T00:00:00.000Z',
-      }], archivedSessionIds: [] } }
+      if (method === 'workspace.list') return { ok: true, value: {
+        items: items.map((item, index) => ({
+          workspaceId: `workspace-${String(index)}`, path: `/work/${String(index)}`, title: `Work ${String(index)}`,
+          sessionIds: [item.sessionId],
+          createdAt: '2026-08-23T00:00:00.000Z', updatedAt: '2026-08-23T00:00:00.000Z',
+        })),
+        archivedSessionIds: [],
+      } }
       throw new Error(`unexpected Host method ${method}`)
     }))
     const operation = op({ type: 'refresh-surface', offset: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows })
@@ -75,7 +78,7 @@ describe('Desktop Companion product operations', () => {
       hasMore: false,
       sessions: [{ sessionId: `session-${String(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)}` }],
       workspaces: [{
-        workspaceId: 'workspace-paged',
+        workspaceId: `workspace-${String(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)}`,
         sessionIds: [`session-${String(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)}`],
       }],
     })

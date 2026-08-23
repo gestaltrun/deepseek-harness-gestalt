@@ -93,6 +93,7 @@ describe('assembled Desktop Companion Host search', () => {
       platformOrigin: 'https://operated-platform.test',
       reportFailure: (error) => { transportFailures.push(error) },
       sendCiphertext: async (_target, ciphertext) => {
+        await Promise.resolve()
         const opened = channels.desktop.open(ciphertext)
         if (opened.type !== 'operation') throw new Error('assembled Desktop expected a Companion operation')
         const output = await owner.handle(opened.operation, pairingDependencies(owner, channels))
@@ -119,7 +120,7 @@ describe('assembled Desktop Companion Host search', () => {
         },
       }),
       () => surface.bindAuthenticatedConnection(connectionChannel),
-      () => { product.refreshSurface() },
+      () => { surface.trackSurfaceRefresh(product.refreshSurface()) },
     )
     receiverRef.current = receiver
     receiver.receive(channels.desktop.seal({

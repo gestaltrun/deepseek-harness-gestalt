@@ -527,7 +527,7 @@ function parseSurfaceWorkspaces(
 }> | undefined {
   if (!isRecord(value) || !Array.isArray(value.items)) return undefined
   const workspaces = []
-  for (const itemValue of value.items.slice(0, REMOTE_PROTOCOL_LIMITS.surfaceWorkspaceRows)) {
+  for (const itemValue of value.items) {
     if (!isRecord(itemValue) || typeof itemValue.workspaceId !== 'string' || typeof itemValue.path !== 'string'
       || typeof itemValue.title !== 'string' || !Array.isArray(itemValue.sessionIds)
       || typeof itemValue.createdAt !== 'string' || typeof itemValue.updatedAt !== 'string') return undefined
@@ -537,10 +537,12 @@ function parseSurfaceWorkspaces(
       try { parsed = parseCompanionSessionId(id) } catch { return undefined }
       if (visible.has(parsed)) sessionIds.push(parsed)
     }
+    if (sessionIds.length === 0) continue
     workspaces.push({
       workspaceId: itemValue.workspaceId, path: itemValue.path, title: itemValue.title,
       sessionIds, createdAt: itemValue.createdAt, updatedAt: itemValue.updatedAt,
     })
+    if (workspaces.length > REMOTE_PROTOCOL_LIMITS.surfaceWorkspaceRows) return undefined
   }
   return workspaces
 }

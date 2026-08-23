@@ -19,10 +19,10 @@ interface MobileCompanionResultReceiver {
 interface MobileCompanionSurfaceReceiver {
   /** @param message - authenticated Desktop surface baseline for this physical channel. */
   acceptValidatedDesktopResync(message: MobileCompanionProjectionDto): void
-  /** @param projection - authenticated projection correlation applied after its aggregate state. */
+  /** @param projection - authenticated projection correlation checked before aggregate state changes. */
   acceptValidatedCompanionProjection(
     projection: CompanionConversationSnapshotProjection | CompanionSurfaceSnapshotProjection,
-  ): void
+  ): boolean
 }
 
 /** Decrypts one physical connection's Companion frames before granting foreground synchronization. */
@@ -106,6 +106,7 @@ export class MobileNoiseCompanionReceiver {
 
   private acceptSurface(projection: CompanionSurfaceSnapshotProjection): void {
     this.requireProjectionGeneration(projection.generation, projection.desktopRevision)
+    if (this.activeSurface?.acceptValidatedCompanionProjection(projection) !== true) return
     this.desktopName = projection.desktopName
     if (projection.offset !== this.sessions.ids.length && projection.offset !== 0) {
       throw new Error('Authenticated Companion surface page is not contiguous')
@@ -133,12 +134,12 @@ export class MobileNoiseCompanionReceiver {
       ? projection.workspaces.map(workspace => ({ ...workspace }))
       : mergeWorkspacePage(this.workspaces, projection.workspaces)
     this.publishSurface()
-    this.activeSurface?.acceptValidatedCompanionProjection(projection)
     if (projection.hasMore) this.refreshSurface?.(this.sessions.ids.length)
   }
 
   private acceptConversation(projection: CompanionConversationSnapshotProjection): void {
     this.requireProjectionGeneration(projection.generation, projection.desktopRevision)
+    if (this.activeSurface?.acceptValidatedCompanionProjection(projection) !== true) return
     if (!isRecord(projection.conversation) || projection.conversation.sessionId !== projection.sessionId) {
       throw new Error('Authenticated Companion conversation projection is invalid')
     }
@@ -151,7 +152,6 @@ export class MobileNoiseCompanionReceiver {
       this.conversations.set(projection.sessionId, prependConversationPage(current, conversation, projection.beforeSeq))
     }
     this.publishSurface()
-    this.activeSurface?.acceptValidatedCompanionProjection(projection)
   }
 
   private requireProjectionGeneration(generation: number, desktopRevision: number): void {

@@ -37,7 +37,7 @@ export interface ValidatedDesktopSurfaceResyncReceiver {
   /** @param message - decoded projection authenticated for this receiver's physical connection. */
   acceptValidatedDesktopResync(message: ValidatedDesktopSurfaceResync): void
   /** @param projection - exact authenticated projection applied to the aggregate Mobile state. */
-  acceptValidatedCompanionProjection(projection: ValidatedCompanionProjectionReceipt): void
+  acceptValidatedCompanionProjection(projection: ValidatedCompanionProjectionReceipt): boolean
 }
 
 /** Result receiver owned by one authenticated physical connection generation. */
@@ -293,8 +293,8 @@ export class MobileCompanionSurface {
         this.publish()
       },
       acceptValidatedCompanionProjection: (projection) => {
-        if (this.#activeConnection?.token !== token || !companionMayMutate(this.#runtime.getState())) return
-        this.acceptCurrentCompanionProjection(projection)
+        if (this.#activeConnection?.token !== token || !companionMayMutate(this.#runtime.getState())) return false
+        return this.acceptCurrentCompanionProjection(projection)
       },
     }
   }
@@ -543,18 +543,17 @@ export class MobileCompanionSurface {
 
   private acceptCurrentCompanionProjection(
     projection: ValidatedCompanionProjectionReceipt,
-  ): void {
+  ): boolean {
     if (projection.type === 'surface-snapshot') {
-      if (projection.operationId !== this.#refreshOperationId) return
+      if (projection.operationId !== this.#refreshOperationId) return false
       this.#refreshOperationId = undefined
       this.#snapshot = { ...this.#snapshot, operationFailure: this.failureAfterSuccess('refresh') }
-      this.publish()
-      return
+      return true
     }
     const pending = this.#historyOperations.get(projection.operationId)
     if (pending === undefined || localSessionId(projection.sessionId) !== pending.sessionId
       || projection.beforeSeq !== pending.beforeSeq
-      || this.#historyInFlight.get(pending.sessionId)?.operationId !== projection.operationId) return
+      || this.#historyInFlight.get(pending.sessionId)?.operationId !== projection.operationId) return false
     this.#historyOperations.delete(projection.operationId)
     this.#historyInFlight.delete(pending.sessionId)
     this.setHistoryLoading(pending.sessionId, false)
@@ -562,7 +561,7 @@ export class MobileCompanionSurface {
       ...this.#snapshot,
       operationFailure: this.failureAfterSuccess('history', pending.sessionId),
     }
-    this.publish()
+    return true
   }
 
   private failureAfterSuccess(

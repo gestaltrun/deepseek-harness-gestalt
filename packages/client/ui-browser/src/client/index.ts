@@ -25,6 +25,7 @@ import {
 
 export type { BrowserPageChromeActions, BrowserPreviewActions } from './slots.ts'
 export { unwrapRemote } from './slots.ts'
+export { recoverListedMutation } from './listed-mutation.ts'
 export { BrowserPageChrome } from './BrowserPageChrome.tsx'
 export type { BrowserPageChromeProps } from './BrowserPageChrome.tsx'
 export type { BrowserKey } from './locales.ts'

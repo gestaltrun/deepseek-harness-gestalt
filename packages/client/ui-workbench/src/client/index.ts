@@ -4,7 +4,9 @@
  */
 import { createElement, type ReactElement } from 'react'
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
-import type { BrowserWorkspaceCreateRemoteRequest, BrowserWorkspaceProjection } from '@deepseek-ai/dsh-browser-workspace/client'
+import type {
+  BrowserPageState, BrowserTarget, BrowserWorkspaceCreateRemoteRequest, BrowserWorkspaceProjection,
+} from '@deepseek-ai/dsh-browser-workspace/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
@@ -36,6 +38,8 @@ export interface WorkbenchBrowserFace {
   createRequest: () => BrowserWorkspaceCreateRemoteRequest
   /** Bind an empty snapshot tab to a new official page. */
   ensureOfficial: (tabId: string) => void
+  /** Replace one projected page that the current Runtime no longer owns. */
+  recoverOfficial: (tabId: string, target: BrowserTarget) => Promise<BrowserPageState | undefined>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -75,6 +79,10 @@ export function apply(ctx: ClientContext): void {
     ensureOfficial: (tabId) => {
       if (isDesktopOverlayDocument()) return
       bridge.ensureOfficial(tabId)
+    },
+    recoverOfficial: async (tabId, target) => {
+      if (isDesktopOverlayDocument()) return undefined
+      return await bridge.recoverOfficial(tabId, target)
     },
   }
   ctx.provide('workbenchBrowser', face)

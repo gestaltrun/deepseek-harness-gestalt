@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { BrowserPageState, BrowserTarget } from '@deepseek-ai/dsh-browser-workspace/client'
 import { apply as applyClient, inject as clientInject } from '../src/client/index.ts'
 import { isDesktopOverlayDocument } from '../src/desktop-overlay-document.ts'
 
@@ -59,10 +60,18 @@ describe('workbench apply on the overlay document', () => {
     const face = ctx.get('workbenchBrowser') as {
       ensureOfficial: (tabId: string) => void
       createRequest: () => { profile: string }
+      recoverOfficial: (tabId: string, target: BrowserTarget) => Promise<BrowserPageState | undefined>
     }
     expect(typeof face.ensureOfficial).toBe('function')
     expect(typeof face.createRequest).toBe('function')
+    expect(typeof face.recoverOfficial).toBe('function')
     face.ensureOfficial('browser:1')
+    await expect(face.recoverOfficial('browser:1', {
+      profileId: 'p' as BrowserTarget['profileId'],
+      workspaceId: 'w' as BrowserTarget['workspaceId'],
+      browserId: 'b' as BrowserTarget['browserId'],
+      tabId: 't' as BrowserTarget['tabId'],
+    })).resolves.toBeUndefined()
     expect(face.createRequest()).toEqual({ profile: 'shared' })
     expect(create).not.toHaveBeenCalled()
     expect(subscribeState).not.toHaveBeenCalled()

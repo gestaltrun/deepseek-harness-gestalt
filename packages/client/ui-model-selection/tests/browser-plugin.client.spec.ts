@@ -9,7 +9,7 @@
  * Scope disposal drops the directory (HMR safety).
  */
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createScope } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -58,7 +58,7 @@ async function bench() {
   const ctx = new Context()
   let current: ModelSelection = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
   const calls = { models: 0, select: 0 }
-  ctx.provide('connection', { api: { sessions: {
+  const sessionsApi = {
     models: () => {
       calls.models += 1
       return Promise.resolve({
@@ -76,7 +76,8 @@ async function bench() {
       }
       return Promise.resolve({ result: { ok: true as const, value: { selected: current } } })
     },
-  } } })
+  }
+  ctx.provide('connection', { api: { sessions: sessionsApi } })
   // Whether the Host reports an adapter for the current route; the composer
   // block follows this, never catalog membership.
   let routable = true
@@ -112,11 +113,21 @@ async function bench() {
   ctx.provide('locale', localeRuntime)
   const scopes = new Map<SessionId, Context>()
   const addressed = new Set<SessionId>()
+  const modelRoutes = new Map<SessionId, {
+    models(): Promise<{ ok: true; value: { current: ModelSelection; routable: boolean; groups: typeof GROUPS; failures: never[] } }>
+    selectModel(selection: ModelSelection): Promise<{ ok: true; value: { selected: ModelSelection } }>
+  }>()
   ctx.provide('sessions', {
     scope: (id: SessionId) => scopes.get(id),
     subagentAddress: (id: SessionId) => addressed.has(id)
       ? { parentSessionId: sid('parent'), childSessionId: id, mode: 'continuable' as const }
       : undefined,
+    modelRoute: (id: SessionId) => modelRoutes.get(id) ?? (addressed.has(id)
+      ? undefined
+      : {
+        models: async () => (await sessionsApi.models()).result,
+        selectModel: async (selection: ModelSelection) => (await sessionsApi.selectModel(selection)).result,
+      }),
   })
   new TestRemote(ctx)
   const fiber = ctx.plugin({ inject: [...inject], apply })
@@ -134,6 +145,9 @@ async function bench() {
     hostCurrent: () => current,
     setHostCurrent: (selection: ModelSelection) => { current = selection },
     address: (id: SessionId) => { addressed.add(id) },
+    setModelRoute: (id: SessionId, route: NonNullable<ReturnType<typeof modelRoutes.get>>) => {
+      modelRoutes.set(id, route)
+    },
     setRoutable: (next: boolean) => { routable = next },
     blockOf: (key: string) => blocks.get(sid(key)),
   }
@@ -185,6 +199,40 @@ describe('ui-model-selection dual entry', () => {
     expect(options.find((o: SelectOption) => o.label === 'DeepSeek-V4-Pro')).toMatchObject({ active: true })
   })
 
+  it('routes feature-owned Session model selection without calling the ordinary Session wire', async () => {
+    const b = await bench()
+    b.mint('sidechat')
+    const selected: ModelSelection[] = []
+    b.setModelRoute(sid('sidechat'), {
+      models: () => Promise.resolve({
+        ok: true,
+        value: {
+          current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+          routable: true,
+          groups: GROUPS,
+          failures: [],
+        },
+      }),
+      selectModel: (selection) => {
+        selected.push(selection)
+        return Promise.resolve({ ok: true, value: { selected: selection } })
+      },
+    })
+
+    const face = b.seat().inject!(sid('sidechat'))
+    expect(await face.select({
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-pro',
+      reasoningEffort: 'max',
+    })).toBe(true)
+    expect(selected).toEqual([{
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-pro',
+      reasoningEffort: 'max',
+    }])
+    expect(b.calls.select).toBe(0)
+  })
+
   it('a popup selection lands on the seat store — the reverse direction of the same state', async () => {
     const b = await bench()
     b.mint('s1')
@@ -221,10 +269,11 @@ describe('ui-model-selection dual entry', () => {
 
     b.ctx.emit('connection/reset')
     expect(face.directory.getSnapshot()).toMatchObject({ current: null, status: 'loading' })
-    await Promise.resolve()
-    expect(face.directory.getSnapshot()).toMatchObject({
-      current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
-      status: 'ready',
+    await vi.waitFor(() => {
+      expect(face.directory.getSnapshot()).toMatchObject({
+        current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+        status: 'ready',
+      })
     })
   })
 

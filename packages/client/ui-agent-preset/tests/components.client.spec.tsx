@@ -73,6 +73,7 @@ function renderSeat(state: Partial<AgentPresetSeatState> = {}) {
 function renderLabel(
   summary: { blank: boolean; agentPreset?: string } | undefined,
   roster: Partial<AgentPresetSettingsState> = {},
+  renderMode?: 'sidechat',
 ) {
   // The chip and the label read the same roster, metadata included.
   const store = createSnapshotStore<AgentPresetSettingsState>({
@@ -86,6 +87,7 @@ function renderLabel(
     useSessions: bindSnapshotSelector(sessions),
     useAgentPresets: bindSnapshotSelector(store),
     t: (key: keyof typeof en) => en[key],
+    renderMode,
   } as unknown as AgentPresetLabelProps)} />)
   return { load, view }
 }
@@ -366,6 +368,14 @@ describe('the chip introduce cue', () => {
 })
 
 describe('the session-header label', () => {
+  it('renders no mode label in Side Chat', async () => {
+    const { load, view } = renderLabel({ blank: false, agentPreset: 'standard' }, {}, 'sidechat')
+
+    expect(view.container.firstChild).toBeNull()
+    await act(async () => { await Promise.resolve() })
+    expect(load).not.toHaveBeenCalled()
+  })
+
   it('names the preset the session runs, and never offers a switch', async () => {
     const { load } = renderLabel({ blank: false, agentPreset: 'standard' })
 

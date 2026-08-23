@@ -48,19 +48,93 @@ export interface GitIndexBlob {
   content: Buffer
 }
 
-/** Every stage-zero path currently present in the Git index. */
-export function gitIndexPaths(root: string): Set<string> {
-  const paths = new Set<string>()
-  const entries = runGit(root, ['ls-files', '--stage', '-z'], 'listing Git index paths')
+interface GitIndexEntry {
+  objectId: string
+  stage: string
+}
+
+/** Parse every Git index entry once and retain its stage and object id by path. */
+function gitIndexEntries(root: string): Map<string, GitIndexEntry[]> {
+  const entriesByPath = new Map<string, GitIndexEntry[]>()
+  const entries = runGit(root, ['ls-files', '--stage', '-z'], 'listing Git index entries')
     .toString('utf8')
     .split('\0')
     .filter(Boolean)
   for (const entry of entries) {
-    const match = /^\d+ [0-9a-f]+ ([0-3])\t([\s\S]+)$/.exec(entry)
-    if (!match?.[1] || match[2] === undefined) throw new Error('git ls-files --stage returned a malformed entry')
-    if (match[1] === '0') paths.add(match[2])
+    const match = /^\d+ ([0-9a-f]+) ([0-3])\t([\s\S]+)$/.exec(entry)
+    if (!match?.[1] || !match[2] || match[3] === undefined) {
+      throw new Error('git ls-files --stage returned a malformed entry')
+    }
+    const current = entriesByPath.get(match[3]) ?? []
+    current.push({ objectId: match[1], stage: match[2] })
+    entriesByPath.set(match[3], current)
+  }
+  return entriesByPath
+}
+
+/** Every stage-zero path currently present in the Git index. */
+export function gitIndexPaths(root: string): Set<string> {
+  const paths = new Set<string>()
+  for (const [path, entries] of gitIndexEntries(root)) {
+    if (entries.length === 1 && entries[0]?.stage === '0') paths.add(path)
   }
   return paths
+}
+
+/**
+ * Read a selected set of stage-zero index blobs through one Git batch.
+ *
+ * @param root - Repository root.
+ * @param paths - Repository-relative paths to load; absent paths are omitted.
+ * @returns Exact staged bytes keyed by path.
+ * @throws Error when a selected path is unmerged or Git returns malformed batch data.
+ */
+export function readGitIndexBlobs(root: string, paths: Iterable<string>): Map<string, GitIndexBlob> {
+  const requested = new Set(paths)
+  const selected = new Map<string, GitIndexEntry>()
+  const entriesByPath = gitIndexEntries(root)
+  for (const path of requested) {
+    const entries = entriesByPath.get(path)
+    if (entries === undefined) continue
+    if (entries.length !== 1 || entries[0]?.stage !== '0') {
+      throw new Error(`${path} does not have exactly one resolved index entry`)
+    }
+    selected.set(path, entries[0])
+  }
+  const objectIds = [...new Set([...selected.values()].map(entry => entry.objectId))]
+  if (objectIds.length === 0) return new Map()
+  const output = runGit(
+    root,
+    ['cat-file', '--batch'],
+    'reading staged blobs',
+    Buffer.from(`${objectIds.join('\n')}\n`),
+  )
+  const contents = new Map<string, Buffer>()
+  let offset = 0
+  for (const requestedObjectId of objectIds) {
+    const headerEnd = output.indexOf(0x0a, offset)
+    if (headerEnd < 0) throw new Error('git cat-file --batch returned a truncated header')
+    const header = output.subarray(offset, headerEnd).toString('utf8')
+    const match = /^([0-9a-f]+) blob (\d+)$/.exec(header)
+    if (!match?.[1] || !match[2] || match[1] !== requestedObjectId) {
+      throw new Error(`git cat-file --batch returned an invalid header for ${requestedObjectId}`)
+    }
+    const size = Number(match[2])
+    if (!Number.isSafeInteger(size)) throw new Error('git cat-file --batch returned an invalid blob size')
+    const contentStart = headerEnd + 1
+    const contentEnd = contentStart + size
+    if (contentEnd >= output.byteLength || output[contentEnd] !== 0x0a) {
+      throw new Error(`git cat-file --batch returned truncated content for ${requestedObjectId}`)
+    }
+    contents.set(requestedObjectId, output.subarray(contentStart, contentEnd))
+    offset = contentEnd + 1
+  }
+  if (offset !== output.byteLength) throw new Error('git cat-file --batch returned trailing data')
+  return new Map([...selected].map(([path, entry]) => {
+    const content = contents.get(entry.objectId)
+    if (content === undefined) throw new Error(`git cat-file --batch omitted staged ${path}`)
+    return [path, { objectId: entry.objectId, content }] as const
+  }))
 }
 
 /**

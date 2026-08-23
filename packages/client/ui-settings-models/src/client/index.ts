@@ -82,8 +82,6 @@ export function apply(ctx: ClientContext): void {
   const deepSeekOnboardingInjected = (): DeepSeekOnboardingInjected => ({
     controller,
     hooks: { models: controller.store },
-    api: connection.api,
-    schema,
     t,
   })
   // The scope's own memory mode is what keeps a remote browser process-local,
@@ -132,7 +130,7 @@ export function apply(ctx: ClientContext): void {
   }, WelcomeNotice))
   ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
     name: 'settings.onboarding',
-    id: 'deepseek-official',
+    id: 'configure-models',
     order: 0,
     inject: deepSeekOnboardingInjected,
   }, DeepSeekOnboardingDialog))

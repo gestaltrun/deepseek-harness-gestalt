@@ -7,7 +7,8 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import ElectronBrowserRuntime, { listenElectronBrowserHttp } from '@deepseek-ai/dsh-browser-runtime-electron'
-import type { ElectronBrowserHttpServer } from '@deepseek-ai/dsh-browser-runtime-electron'
+import type { ElectronBrowserHttpServer, ElectronWindowBounds } from '@deepseek-ai/dsh-browser-runtime-electron'
+import type { BrowserPresentTarget } from './browser-present.ts'
 
 /** Loopback HTTP origin plus the token file for the Web Host. */
 export interface DesktopBrowserRuntime {
@@ -17,6 +18,12 @@ export interface DesktopBrowserRuntime {
   readonly tokenFile: string
   /** Directory that stores only the loopback API token, not Chromium partitions. */
   readonly tokenDir: string
+  /** Place one official page over the Desktop Host window. */
+  present(target: BrowserPresentTarget, bounds: ElectronWindowBounds, parent: unknown): void
+  /** Hide one official page when its sidebar tab is not visible. */
+  conceal(target: BrowserPresentTarget): void
+  /** Put the presented page above Host chrome after an overlay closes. */
+  raisePresented(): void
   /** Stop the HTTP listener and dispose hidden windows. */
   dispose(): Promise<void>
 }
@@ -44,6 +51,18 @@ export async function startDesktopBrowserRuntime(userData: string): Promise<Desk
       origin: server.origin,
       tokenFile,
       tokenDir,
+      present: (target, bounds, parent) => {
+        const runtime = ctx.browserRuntime as ElectronBrowserRuntime
+        runtime.present(target as never, bounds, parent)
+      },
+      conceal: (target) => {
+        const runtime = ctx.browserRuntime as ElectronBrowserRuntime
+        runtime.conceal(target as never)
+      },
+      raisePresented: () => {
+        const runtime = ctx.browserRuntime as ElectronBrowserRuntime
+        runtime.raisePresented()
+      },
       dispose: async () => {
         await server.close()
         await ctx.fiber.dispose()

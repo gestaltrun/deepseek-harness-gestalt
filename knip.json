@@ -27,7 +27,8 @@
   ],
   "ignoreWorkspaces": [
     "vendor/*",
-    "python/sdk-runtime"
+    "python/sdk-runtime",
+    "packages/client/better-sidebar"
   ],
   "ignoreDependencies": [
     "@yarnpkg/cli-dist",
@@ -743,6 +744,11 @@
       "ignoreDependencies": [
         "@modelcontextprotocol/server-everything",
         "@modelcontextprotocol/server-filesystem"
+      ]
+    },
+    "packages/client/ui-workbench": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-client-better-sidebar"
       ]
     },
     "packages/client/web": {

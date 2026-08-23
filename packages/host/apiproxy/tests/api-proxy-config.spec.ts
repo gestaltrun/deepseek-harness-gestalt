@@ -225,12 +225,12 @@ async function collectHost(
  * @param ns - the namespace whose stored section changed.
  * @returns the expected wrapper frame.
  */
-function forwardedSettings(ns: string): HostFrame {
+function forwardedSettings(ns: string) {
   return {
     type: 'host/remote-event',
     event: 'settings/document-updated',
     // The revision is the Host's own counter, so the matcher is the assertion.
-    args: [ns, expect.any(Number)], // oxlint-disable-line typescript/no-unsafe-assignment
+    args: [ns, expect.any(Number)],
   }
 }
 
@@ -655,6 +655,26 @@ describe('llm domain', () => {
       ],
     }])
     expect(value.failures).toEqual([{ id: 'broken', name: 'Broken', message: 'catalog backend down' }])
+  })
+
+  it('omits official DeepSeek from the catalog while its settings section is unoccupied', async () => {
+    const ctx = await harness()
+    ctx.settings.register(NS, AdapterConfig)
+    ctx.llm.registerAdapter(['deepseek-official'], new CatalogAdapter('DeepSeek', ['deepseek-v4-flash']))
+    ctx.llm.registerAdapter(['openai'], new CatalogAdapter('openai', ['gpt']))
+    const api = createApiProxy(ctx, DEFAULTS)
+    const value = expectOk(await api.llm.models(request({})))
+    expect(value.groups.map(group => group.id)).toEqual(['openai'])
+  })
+
+  it('keeps official DeepSeek in the catalog once its settings section is occupied', async () => {
+    const ctx = await harness()
+    ctx.settings.register(NS, AdapterConfig)
+    await ctx.settings.replace(NS, { apiKeyEnv: 'DEEPSEEK_API_KEY' })
+    ctx.llm.registerAdapter(['deepseek-official'], new CatalogAdapter('DeepSeek', ['deepseek-v4-flash']))
+    const api = createApiProxy(ctx, DEFAULTS)
+    const value = expectOk(await api.llm.models(request({})))
+    expect(value.groups.map(group => group.id)).toEqual(['deepseek-official'])
   })
 
   it('forwards llm/adapters-updated at every topology commit point', async () => {

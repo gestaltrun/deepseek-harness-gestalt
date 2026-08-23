@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it, onTestFailed, vi } from 'vit
 import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-title'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import {
   launchWebScaffold, seedSession, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
@@ -111,6 +112,7 @@ describe('web e2e: a finished turn ends with the files it produced', () => {
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold({ extraOverlayPath: OVERLAY })
+    await scaffold.ctx.settings.update(settingsNamespace('dsh-better-sidebar'), { interceptOpenPath: false })
     await seedSession(scaffold, producedFixture(), SEED_ID)
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
@@ -155,12 +157,8 @@ describe('web e2e: a finished turn ends with the files it produced', () => {
         result: { ok: true, value: { opened: true as const } },
       }))
     try {
-      const [response] = await Promise.all([
-        page.waitForResponse(response => new URL(response.url()).pathname === '/api/host.openPath'),
-        showFolder.click({ clickCount: 1 }),
-      ])
-      expect(response.status()).toBe(200)
-      expect(openPath).toHaveBeenCalledTimes(1)
+      await showFolder.click({ clickCount: 1 })
+      await expect.poll(() => openPath.mock.calls.length, { timeout: 15_000 }).toBe(1)
       expect(openPath.mock.calls[0]![0].payload).toEqual({ path: `${scaffold.workspaceCwd}/.` })
     } finally {
       openPath.mockRestore()

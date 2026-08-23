@@ -169,7 +169,7 @@ export class RemoteAccessHttpTransport implements RemoteAccessTransport {
 
   /** @param options - selected Platform deployment and optional Fetch implementation. */
   constructor(options: RemoteAccessHttpTransportOptions) {
-    this.fetch = options.fetch ?? globalThis.fetch
+    this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis)
     this.endpoint = `${options.environment.origin}/v1/remote-access/personal-pairing`
   }
 

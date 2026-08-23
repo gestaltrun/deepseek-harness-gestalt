@@ -90,6 +90,116 @@ describe('Electron Browser Runtime configuration', () => {
 })
 
 describe('Electron Browser Runtime public lifecycle', () => {
+  it('presents one open page over a parent window and conceals only that page', async () => {
+    const { ctx, host } = await setup()
+    const first = await ctx.browserRuntime.create({ profile: 'temporary' })
+    const second = await ctx.browserRuntime.create({ profile: 'temporary' })
+    const runtime = ctx.browserRuntime as ElectronBrowserRuntime
+    const parent = { id: 'main' }
+    const bounds = { x: 10, y: 20, width: 640, height: 480 }
+    runtime.present(first.target, bounds, parent)
+    runtime.raisePresented()
+    expect(host.windows[0]?.raiseCalls).toBe(1)
+    expect(host.windows[0]?.shown).toBe(true)
+    expect(host.windows[0]?.parent).toBe(parent)
+    expect(host.windows[0]?.bounds).toEqual(bounds)
+    runtime.present(first.target, { ...bounds, width: 641 }, parent)
+    expect(host.windows[0]?.showInactiveCalls).toBe(1)
+    runtime.present(second.target, { ...bounds, x: 11 }, parent)
+    expect(host.windows[0]?.shown).toBe(false)
+    expect(host.windows[0]?.parent).toBe(parent)
+    expect(host.windows[1]?.shown).toBe(true)
+    runtime.conceal(first.target)
+    expect(host.windows[1]?.shown).toBe(true)
+    runtime.conceal(second.target)
+    runtime.raisePresented()
+    expect(host.windows[1]?.raiseCalls).toBe(0)
+    expect(host.windows[1]?.shown).toBe(false)
+    runtime.present(first.target, bounds, parent)
+    runtime.present(first.target, bounds, parent)
+    expect(host.windows[0]?.shown).toBe(true)
+    expect(host.windows[0]?.showInactiveCalls).toBe(2)
+    expect(host.windows[0]?.webContents.focused).toBe(false)
+    runtime.conceal(first.target)
+    runtime.present({ ...first.target, tabId: 'missing' as typeof first.target.tabId }, bounds, parent)
+    expect(host.windows[0]?.shown).toBe(false)
+    runtime.present(second.target, bounds, parent)
+    host.windows[1]!.destroyed = true
+    runtime.conceal(second.target)
+    expect(host.windows[1]?.shown).toBe(true)
+    runtime.present(first.target, bounds, parent)
+    await ctx.browserRuntime.close({ target: first.target, expectedRevision: first.revision })
+    runtime.conceal(first.target)
+    expect(host.windows[0]?.destroyed).toBe(true)
+  })
+
+  it('commits a navigation when Chromium aborts loadURL after a redirect', async () => {
+    for (const abortLoadThenCommit of [true, 'errno', 'message'] as const) {
+      const { ctx, host } = await setup({ abortLoadThenCommit })
+      const created = await ctx.browserRuntime.create({ profile: 'temporary' })
+      const navigated = await ctx.browserRuntime.navigate({
+        target: created.target,
+        expectedRevision: created.revision,
+        url: 'https://www.google.com/search?q=dsh',
+      })
+      expect(navigated.url, String(abortLoadThenCommit)).toBe('https://www.google.com/search?q=dsh&sei=1')
+      expect(host.windows[0]?.webContents.stopped).toBe(false)
+      const handler = host.windows[0]?.webContents.windowOpenHandler
+      expect(handler?.({ url: '' })).toEqual({ action: 'deny' })
+      expect(handler?.({ url: 'https://example.test/' })).toEqual({ action: 'deny' })
+    }
+    const plain = await setup()
+    const opened = await plain.ctx.browserRuntime.create({ profile: 'temporary' })
+    expect(plain.host.windows[0]?.webContents.windowOpenHandler?.({ url: 'https://example.test/' }))
+      .toEqual({ action: 'deny' })
+    expect(opened.status).toBe('open')
+  })
+
+  it('commits a navigation when Chromium paints a net-error document', async () => {
+    const closed = await setup({ failLoad: 'net' })
+    const created = await closed.ctx.browserRuntime.create({ profile: 'temporary' })
+    const navigated = await closed.ctx.browserRuntime.navigate({
+      target: created.target,
+      expectedRevision: created.revision,
+      url: 'https://www.biadu.com/',
+    })
+    expect(navigated).toMatchObject({
+      status: 'open',
+      url: 'https://www.biadu.com/',
+      revision: created.revision + 1,
+    })
+
+    const interstitial = await setup({ failLoad: 'net-chrome-error' })
+    const blank = await interstitial.ctx.browserRuntime.create({ profile: 'temporary' })
+    const failed = await interstitial.ctx.browserRuntime.navigate({
+      target: blank.target,
+      expectedRevision: blank.revision,
+      url: 'https://missing.example/',
+    })
+    expect(failed.url).toBe('https://missing.example/')
+    expect(failed.status).toBe('open')
+  })
+
+  it('rejects a navigation whose loadURL throws a non-object', async () => {
+    const { ctx } = await setup({ failLoad: 'primitive' })
+    const created = await ctx.browserRuntime.create({ profile: 'temporary' })
+    await expect(ctx.browserRuntime.navigate({
+      target: created.target,
+      expectedRevision: created.revision,
+      url: 'https://example.test/',
+    })).rejects.toMatchObject({ code: 'BROWSER_RUNTIME_UNAVAILABLE' })
+  })
+
+  it('rejects a navigation whose loadURL throws null', async () => {
+    const { ctx } = await setup({ failLoad: 'null' })
+    const created = await ctx.browserRuntime.create({ profile: 'temporary' })
+    await expect(ctx.browserRuntime.navigate({
+      target: created.target,
+      expectedRevision: created.revision,
+      url: 'https://example.test/',
+    })).rejects.toMatchObject({ code: 'BROWSER_RUNTIME_UNAVAILABLE' })
+  })
+
   it('runs one temporary Profile through create, navigate, observe, screenshot, focus, and close', async () => {
     const { ctx, host } = await setup()
     const created = await ctx.browserRuntime.create({ profile: 'temporary' })
@@ -105,7 +215,6 @@ describe('Electron Browser Runtime public lifecycle', () => {
       url: 'about:blank',
       title: 'New Tab',
       focused: false,
-      controlOwner: 'agent',
       chrome: { kind: 'temporary', partition: 'session-electron-test-tmp-1' },
     })
     expect(created.chrome).not.toHaveProperty('name')
@@ -121,7 +230,6 @@ describe('Electron Browser Runtime public lifecycle', () => {
       url: 'https://example.test/',
       title: 'Example Domain',
       text: 'An Electron protocol page.',
-      controlOwner: 'agent',
     })
     await expect(ctx.browserRuntime.observe({ target: created.target })).resolves.toEqual(navigated)
     await expect(ctx.browserRuntime.screenshot({ target: created.target })).resolves.toMatchObject({
@@ -133,7 +241,7 @@ describe('Electron Browser Runtime public lifecycle', () => {
       data: PNG_1X1_BASE64,
     })
     const focused = await ctx.browserRuntime.focus({ target: created.target, expectedRevision: 1 })
-    expect(focused).toMatchObject({ revision: 2, focused: true, controlOwner: 'agent' })
+    expect(focused).toMatchObject({ revision: 2, focused: true })
     const closed = await ctx.browserRuntime.close({ target: created.target, expectedRevision: 2 })
     expect(closed).toEqual({ status: 'closed', target: created.target, revision: 3 })
     await expect(ctx.browserRuntime.observe({ target: created.target })).resolves.toEqual(closed)
@@ -141,17 +249,37 @@ describe('Electron Browser Runtime public lifecycle', () => {
     expect(host.windows.every(window => window.destroyed)).toBe(true)
   })
 
-  it('rejects a stale Agent mutation after human input and covers both arrival orders', async () => {
+  it('retries one hidden-page compositor bootstrap miss after an animation frame', async () => {
+    const { ctx, host } = await setup({ captureFailures: 1 })
+    const created = await ctx.browserRuntime.create({ profile: 'temporary' })
+
+    await expect(ctx.browserRuntime.screenshot({ target: created.target })).resolves.toMatchObject({
+      mediaType: 'image/png',
+      data: PNG_1X1_BASE64,
+    })
+    expect(host.windows[0]?.webContents.captureAttempts).toBe(2)
+  })
+
+  it('does not retry a non-compositor screenshot failure', async () => {
+    const { ctx, host } = await setup({ captureFailures: 1, captureFailureMessage: 'capture failed' })
+    const created = await ctx.browserRuntime.create({ profile: 'temporary' })
+
+    await expect(ctx.browserRuntime.screenshot({ target: created.target }))
+      .rejects.toMatchObject({ code: 'BROWSER_RUNTIME_UNAVAILABLE', message: /capture failed/ })
+    expect(host.windows[0]?.webContents.captureAttempts).toBe(1)
+  })
+
+  it('serializes synthetic input with navigation in both arrival orders', async () => {
     const { ctx } = await setup()
     const created = await ctx.browserRuntime.create({ profile: 'temporary' })
     const identities = created.target
 
-    const humanFirst = await Promise.allSettled([
+    const inputFirst = await Promise.allSettled([
       ctx.browserRuntime.input({
         target: created.target,
         expectedRevision: 0,
         url: 'https://example.test/',
-        text: 'typed by human',
+        text: 'synthetic input',
       }),
       ctx.browserRuntime.navigate({
         target: created.target,
@@ -159,40 +287,38 @@ describe('Electron Browser Runtime public lifecycle', () => {
         url: 'https://login.test/',
       }),
     ])
-    expect(humanFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
-    const humanFirstFulfilled = humanFirst.find(result => result.status === 'fulfilled')
-    expect(humanFirstFulfilled?.status === 'fulfilled' ? humanFirstFulfilled.value : undefined).toMatchObject({
+    expect(inputFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    const inputFirstFulfilled = inputFirst.find(result => result.status === 'fulfilled')
+    expect(inputFirstFulfilled?.status === 'fulfilled' ? inputFirstFulfilled.value : undefined).toMatchObject({
       status: 'open',
       revision: 1,
       url: 'https://example.test/',
-      text: 'An Electron protocol page.typed by human',
-      controlOwner: 'human',
+      text: 'An Electron protocol page.synthetic input',
       target: identities,
     })
-    const afterHuman = await ctx.browserRuntime.observe({ target: created.target })
-    expect(afterHuman).toMatchObject({ revision: 1, controlOwner: 'human', target: identities })
-    const taken = await ctx.browserRuntime.takeover({ target: created.target, expectedRevision: afterHuman.revision })
-    expect(taken).toMatchObject({ revision: 2, controlOwner: 'human' })
-    const returned = await ctx.browserRuntime.returnControl({ target: created.target, expectedRevision: taken.revision })
-    expect(returned).toMatchObject({ revision: 3, controlOwner: 'agent' })
+    const afterInput = await ctx.browserRuntime.observe({ target: created.target })
+    expect(afterInput).toMatchObject({ revision: 1, target: identities })
 
-    const agentFirst = await Promise.allSettled([
+    const navigateFirst = await Promise.allSettled([
       ctx.browserRuntime.navigate({
         target: created.target,
-        expectedRevision: returned.revision,
+        expectedRevision: afterInput.revision,
         url: 'https://login.test/',
       }),
       ctx.browserRuntime.input({
         target: created.target,
-        expectedRevision: returned.revision,
-        text: 'later human',
+        expectedRevision: afterInput.revision,
+        text: 'later input',
       }),
     ])
-    expect(agentFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
-    const afterAgentFirst = await ctx.browserRuntime.observe({ target: created.target })
-    expect(afterAgentFirst).toMatchObject({ revision: 4, url: 'https://login.test/', target: identities })
-    const clickOnly = await ctx.browserRuntime.input({ target: created.target, expectedRevision: afterAgentFirst.revision })
-    expect(clickOnly).toMatchObject({ revision: 5, controlOwner: 'human', target: identities })
+    expect(navigateFirst.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    const afterNavigate = await ctx.browserRuntime.observe({ target: created.target })
+    expect(afterNavigate).toMatchObject({ revision: 2, url: 'https://login.test/', target: identities })
+    await expect(ctx.browserRuntime.input({
+      target: created.target,
+      expectedRevision: afterNavigate.revision,
+      url: 'https://example.test/',
+    })).resolves.toMatchObject({ revision: 3, url: 'https://example.test/' })
   })
 
   it('types through one path and treats newline as U+000A', async () => {
@@ -404,11 +530,7 @@ describe('Electron Browser Runtime public lifecycle', () => {
       .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
     await expect(ctx.browserRuntime.focus({ target, expectedRevision: 0, signal: controller.signal }))
       .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
-    await expect(ctx.browserRuntime.input({ target, expectedRevision: 0, signal: controller.signal }))
-      .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
-    await expect(ctx.browserRuntime.takeover({ target, expectedRevision: 0, signal: controller.signal }))
-      .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
-    await expect(ctx.browserRuntime.returnControl({ target, expectedRevision: 0, signal: controller.signal }))
+    await expect(ctx.browserRuntime.input({ target, expectedRevision: 0, text: 'x', signal: controller.signal }))
       .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
     await expect(ctx.browserRuntime.close({ target, expectedRevision: 0, signal: controller.signal }))
       .rejects.toMatchObject({ code: 'BROWSER_ABORTED' })
@@ -667,7 +789,7 @@ describe('Electron Browser Runtime protocol and recovery', () => {
     expect(runtime.scheduleRecovery(created.target, 'crashed', false)).toMatchObject({ status: 'closed' })
     runtime.states.clear()
     expect(runtime.scheduleRecovery(created.target, 'crashed', false)).toBeUndefined()
-    runtime.states.set('gone', { status: 'unavailable', target: created.target, revision: 1, reason: 'crashed', reconnecting: false, controlOwner: 'agent' })
+    runtime.states.set('gone', { status: 'unavailable', target: created.target, revision: 1, reason: 'crashed', reconnecting: false })
     expect(runtime.scheduleRecovery(created.target, 'crashed', false)).toMatchObject({ status: 'unavailable' })
     const sibling = await setup()
     const first = await sibling.ctx.browserRuntime.create({ profile: 'temporary' })

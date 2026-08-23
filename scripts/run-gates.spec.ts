@@ -374,7 +374,6 @@ describe('Node 24 lane ownership', () => {
     ]) {
       expect(subject.find(item => item.id === id)?.needs).toEqual(['built-package-invariants'])
     }
-    expect(subject.find(item => item.id === 'web-snapshot')?.needs).toEqual(['snapshot'])
     expect(subject.find(item => item.id === 'snapshot')?.env).toEqual({ DSH_EXAMPLE_MODE: 'lib' })
     expect(subject.find(item => item.id === 'doc-typecheck')?.env).toEqual({
       DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1',
@@ -388,6 +387,14 @@ describe('Node 24 lane ownership', () => {
     expect(subject.find(item => item.id === 'web-snapshot')).toMatchObject({
       displayCommand: 'DSH_SNAPSHOT=replay pnpm run test:web:built',
       env: { DSH_SNAPSHOT: 'replay' },
+      needs: [
+        'publint',
+        'lint-and-duplication',
+        'snapshot',
+        'doc-typecheck',
+        'node-next-types',
+        'built-bin-smoke',
+      ],
     })
   })
 })

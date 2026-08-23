@@ -248,14 +248,14 @@ Source: [`packages/core/session/src/types.ts:277`](../packages/core/session/src/
 ```ts persistence-catalog
 /**
  * Whole Session-owned Browser Workspace snapshot. Log-only, last-wins.
- * Carries dock visibility and width plus every owned instance, tab,
- * current control owner, and per-tab revision so Session switch, reload,
- * and replay restore the same Workspace without exposing another Session's tabs.
+ * Carries every owned instance, tab, and per-tab revision so Session
+ * switch, reload, and replay restore the same Workspace without exposing
+ * another Session's tabs.
  */
 'browser/workspace': BrowserWorkspaceProjection
 ```
 
-Source: [`packages/browser/browser-workspace/src/types.ts:75`](../packages/browser/browser-workspace/src/types.ts)
+Source: [`packages/browser/browser-workspace/src/types.ts:77`](../packages/browser/browser-workspace/src/types.ts)
 
 ### `command/*`
 

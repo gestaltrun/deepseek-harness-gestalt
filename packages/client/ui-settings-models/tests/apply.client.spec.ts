@@ -77,14 +77,13 @@ describe('ui-settings-models apply', () => {
       component: WelcomeNotice,
       options: { id: 'welcome-notice', order: -100 },
     })
-    const deepSeek = onboarding.find(entry => entry.options.id === 'deepseek-official')!
+    const deepSeek = onboarding.find(entry => entry.options.id === 'configure-models')!
     expect(deepSeek.component).toBe(DeepSeekOnboardingDialog)
-    expect(deepSeek.options).toMatchObject({ id: 'deepseek-official', order: 0 })
+    expect(deepSeek.options).toMatchObject({ id: 'configure-models', order: 0 })
     const deepSeekInjected = (
       deepSeek.inject as unknown as () => import('../src/client/DeepSeekOnboardingDialog.tsx').DeepSeekOnboardingInjected
     )()
     expect(deepSeekInjected.hooks.models).toBe(injected.controller.store)
-    expect(deepSeekInjected.api).toBeDefined()
 
     const after = await bench()
     await after.ctx.plugin({ inject: [...inject], apply }).await()

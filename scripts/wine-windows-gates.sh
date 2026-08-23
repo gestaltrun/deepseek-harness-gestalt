@@ -165,13 +165,16 @@ EOF
   # (observed on the tree's nested esbuild versions) rename their _tmp_*
   # directory onto a path another racer already claimed, and the loser
   # exits ERR_PNPM_ENOENT although an identical re-install succeeds.
-  # Exactly that signature earns up to two retries on a clean tree — the
-  # snapshot contains no node_modules, so wiping them restores the
-  # pre-install state; any other failure, or the race still standing after
-  # the final attempt, fails loud with the log tail.
+  # Linux taskset pins pnpm to one CPU, preventing the parallel linker race
+  # documented by pnpm/pnpm#12880. Hosts without taskset retain two precise
+  # retries on a clean tree. The snapshot contains no node_modules, so wiping
+  # them restores the pre-install state; any other failure, or the race still
+  # standing after the final attempt, fails loud with the log tail.
+  local -a install_prefix=()
+  if command -v taskset > /dev/null; then install_prefix=(taskset -c 0); fi
   local attempt
   for attempt in 1 2 3; do
-    (cd "$scratch/tree" && pnpm install --frozen-lockfile --ignore-scripts > "$scratch/logs/install.log" 2>&1) \
+    (cd "$scratch/tree" && "${install_prefix[@]}" pnpm install --frozen-lockfile --ignore-scripts > "$scratch/logs/install.log" 2>&1) \
       && return 0
     grep -q 'ERR_PNPM_ENOENT.*rename.*_tmp_' "$scratch/logs/install.log" || break
     (( attempt < 3 )) || break

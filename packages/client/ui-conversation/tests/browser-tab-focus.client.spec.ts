@@ -45,9 +45,6 @@ function navigateResult(overrides: Partial<ToolResultNode> = {}): ToolResultNode
 
 function listing(tabId = TARGET.tabId, revision = LISTED_REVISION) {
   return {
-    dockOpen: false,
-    dockWidth: 720,
-    userCollapsed: true,
     activeWorkspaceId: TARGET.workspaceId,
     workspaces: [{
       workspaceId: TARGET.workspaceId,
@@ -56,7 +53,7 @@ function listing(tabId = TARGET.tabId, revision = LISTED_REVISION) {
       browsers: [{
         browserId: TARGET.browserId,
         activeTabId: tabId,
-        tabs: [{ tabId, controlOwner: 'agent', revision }],
+        tabs: [{ tabId, revision }],
       }],
     }],
   }

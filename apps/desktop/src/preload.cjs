@@ -36,4 +36,20 @@ contextBridge.exposeInMainWorld('dshDesktop', {
     ipcRenderer.on('pairing:snapshot-changed', wrapped)
     return () => { ipcRenderer.removeListener('pairing:snapshot-changed', wrapped) }
   },
+  browserPresent: (request) => ipcRenderer.invoke('browser:present', request),
+  browserConceal: (target) => ipcRenderer.invoke('browser:conceal', target),
+  chromeOverlayShow: (request) => ipcRenderer.invoke('chrome:overlayShow', request),
+  chromeOverlayHide: () => ipcRenderer.invoke('chrome:overlayHide'),
+  chromeOverlayGetState: () => ipcRenderer.invoke('chrome:overlayGetState'),
+  chromeOverlayResult: (result) => { ipcRenderer.send('chrome:overlay-result', result) },
+  onChromeOverlayState: (listener) => {
+    const wrapped = (_event, state) => { listener(state) }
+    ipcRenderer.on('chrome:overlay-state', wrapped)
+    return () => { ipcRenderer.removeListener('chrome:overlay-state', wrapped) }
+  },
+  onChromeOverlayResult: (listener) => {
+    const wrapped = (_event, result) => { listener(result) }
+    ipcRenderer.on('chrome:overlay-result', wrapped)
+    return () => { ipcRenderer.removeListener('chrome:overlay-result', wrapped) }
+  },
 })

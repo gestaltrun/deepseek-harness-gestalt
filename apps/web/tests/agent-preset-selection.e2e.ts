@@ -241,11 +241,15 @@ describe('web e2e: agent-preset selection', () => {
     // skill discovery, so the catalog the composer warmed under the
     // deployment default must not survive the switch.
     await composer.fill('/')
-    await expect.poll(() => menuOptions(page), { timeout: 15_000 })
-      .not.toEqual(expect.arrayContaining([expect.stringContaining(SKILL_NAME)]))
+    await expect.poll(async () => {
+      const options = await menuOptions(page)
+      return {
+        skill: options.some(option => option.includes(SKILL_NAME)),
+        compact: options.some(option => option.startsWith('compact')),
+        plan: options.some(option => option.startsWith('plan')),
+      }
+    }, { timeout: 15_000 }).toEqual({ skill: false, compact: false, plan: false })
     const onMinimal = await menuOptions(page)
-    expect(onMinimal.some(option => option.startsWith('compact'))).toBe(false)
-    expect(onMinimal.some(option => option.startsWith('plan'))).toBe(false)
     // The host-plane commands and the client's own contribution are the
     // floor: they belong to no preset and never move.
     expect(onMinimal.some(option => option.startsWith('goal'))).toBe(true)
@@ -261,11 +265,14 @@ describe('web e2e: agent-preset selection', () => {
     await expect.poll(() => livePreset(scaffold.baseUrl), { timeout: 15_000 }).toBe('standard')
 
     await composer.fill('/')
-    await expect.poll(() => menuOptions(page), { timeout: 15_000 })
-      .toEqual(expect.arrayContaining([expect.stringContaining(SKILL_NAME)]))
-    const onStandard = await menuOptions(page)
-    expect(onStandard.some(option => option.startsWith('compact'))).toBe(true)
-    expect(onStandard.some(option => option.startsWith('plan'))).toBe(true)
+    await expect.poll(async () => {
+      const options = await menuOptions(page)
+      return {
+        skill: options.some(option => option.includes(SKILL_NAME)),
+        compact: options.some(option => option.startsWith('compact')),
+        plan: options.some(option => option.startsWith('plan')),
+      }
+    }, { timeout: 15_000 }).toEqual({ skill: true, compact: true, plan: true })
     await composer.fill('')
   }, 90_000)
 

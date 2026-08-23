@@ -1,10 +1,9 @@
 /**
  * Session-owned Browser Workspace binder. Each Session independently owns
  * zero or more Workspaces; each Workspace uses one Browser Profile and
- * contains multiple browser instances and tabs. Dock visibility, width,
- * each tab's current control owner, and each tab's last committed revision
- * are Session facts for the Dock UI. `browser/runtime-state` also writes
- * those facts for an owned, unclosed tab.
+ * contains multiple browser instances and tabs. Each tab's last committed
+ * revision is a Session fact. `browser/runtime-state` also writes revision
+ * advances for an owned, unclosed tab.
  * @module @deepseek-ai/dsh-browser-workspace
  */
 
@@ -12,26 +11,26 @@ import { Context } from '@deepseek-ai/cordis'
 import { z as zod } from 'zod'
 import type { ZodType } from 'zod'
 import { BrowserRuntimeError } from '@deepseek-ai/dsh-browser-runtime'
-import type {
-  BrowserClosedState,
-  BrowserControlOwner,
-  BrowserCreateAttach,
-  BrowserCreateRequest,
-  BrowserInputRequest,
-  BrowserMutationRequest,
-  BrowserNavigateRequest,
-  BrowserObserveRequest,
-  BrowserPageState,
-  BrowserRuntimeState,
-  BrowserScreenshot,
-  BrowserTarget,
+import {
+  BrowserProfileName,
+  type BrowserClosedState,
+  type BrowserCreateAttach,
+  type BrowserCreateRequest,
+  type BrowserInputRequest,
+  type BrowserMutationRequest,
+  type BrowserNavigateRequest,
+  type BrowserObserveRequest,
+  type BrowserPageState,
+  type BrowserRuntimeState,
+  type BrowserScreenshot,
+  type BrowserTarget,
 } from '@deepseek-ai/dsh-browser-runtime'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { applyBrowserWorkspaceProjection, EMPTY_BROWSER_WORKSPACE, foldBrowserWorkspace } from './fold.ts'
 import type {
-  BrowserWorkspaceDockMutation,
+  BrowserWorkspaceCreateRemoteRequest,
   BrowserWorkspaceInstanceRecord,
   BrowserWorkspaceProjection,
   BrowserWorkspaceRecord,
@@ -40,6 +39,7 @@ import type {
 
 export type * from './types.ts'
 export { applyBrowserWorkspaceProjection, EMPTY_BROWSER_WORKSPACE, foldBrowserWorkspace } from './fold.ts'
+export { listBrowserWorkspacePages } from './pages.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -48,9 +48,6 @@ declare module '@deepseek-ai/cordis' {
 }
 
 const workspaceProjectionSchema = zod.object({
-  dockOpen: zod.boolean(),
-  dockWidth: zod.number().int().positive(),
-  userCollapsed: zod.boolean(),
   workspaces: zod.array(zod.object({
     workspaceId: zod.string().min(1),
     profileId: zod.string().min(1),
@@ -58,7 +55,6 @@ const workspaceProjectionSchema = zod.object({
       browserId: zod.string().min(1),
       tabs: zod.array(zod.object({
         tabId: zod.string().min(1),
-        controlOwner: zod.enum(['agent', 'human']),
         revision: zod.number().int().nonnegative(),
       })),
       activeTabId: zod.string().min(1).nullable(),
@@ -79,24 +75,32 @@ export type BrowserWorkspaceCreateRequest = BrowserCreateRequest & BrowserWorksp
 export type BrowserWorkspaceMutationRequest = BrowserMutationRequest & BrowserWorkspaceSessionRequest
 /** Navigate request bound to one Session. */
 export type BrowserWorkspaceNavigateRequest = BrowserNavigateRequest & BrowserWorkspaceSessionRequest
-/** Human input request bound to one Session. */
+/** Synthetic input request bound to one Session. */
 export type BrowserWorkspaceInputRequest = BrowserInputRequest & BrowserWorkspaceSessionRequest
 /** Observe request bound to one Session. */
 export type BrowserWorkspaceObserveRequest = BrowserObserveRequest & BrowserWorkspaceSessionRequest
 
-/** Dock visibility and width written as Session facts. */
-export interface BrowserWorkspaceDockRequest {
-  readonly session: Session
-  readonly open: boolean
-  readonly width?: number
+/** Reconstruct one Runtime target from its projected ownership records. */
+function targetOf(
+  workspace: BrowserWorkspaceRecord,
+  browser: BrowserWorkspaceInstanceRecord,
+  tab: BrowserWorkspaceTabRecord,
+): BrowserTarget {
+  return {
+    profileId: workspace.profileId,
+    workspaceId: workspace.workspaceId,
+    browserId: browser.browserId,
+    tabId: tab.tabId,
+  }
 }
 
 /**
- * Bind Browser Runtime identities to one Session log and project Dock plus
- * instance and tab ownership from durable Session facts.
+ * Bind Browser Runtime identities to one Session log and project instance and
+ * tab ownership from durable Session facts.
  */
 export class BrowserWorkspaceBinder extends TypertRemoteService {
   static inject = ['browserRuntime', 'sessions']
+  private createTail: Promise<void> = Promise.resolve()
 
   constructor(ctx: Context) {
     super(ctx, 'browserWorkspace')
@@ -109,7 +113,7 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
         init: () => EMPTY_BROWSER_WORKSPACE,
         apply: applyBrowserWorkspaceProjection,
         view: state => state,
-        stateVersion: 2,
+        stateVersion: 3,
       })
     })
   }
@@ -121,45 +125,6 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
    */
   snapshot(session: Session): BrowserWorkspaceProjection {
     return foldBrowserWorkspace(session.events)
-  }
-
-  /**
-   * Record Dock visibility and preferred width for one Session.
-   * @param request - Session, open flag, and optional width.
-   * @returns the committed Workspace snapshot.
-   */
-  setDock(request: BrowserWorkspaceDockRequest): BrowserWorkspaceProjection {
-    const current = this.snapshot(request.session)
-    const width = request.width ?? current.dockWidth
-    if (!Number.isSafeInteger(width) || width < 1) {
-      throw new BrowserRuntimeError('browser Dock width must be a positive safe integer', 'BROWSER_CAPACITY')
-    }
-    if (
-      current.dockOpen === request.open
-      && current.dockWidth === width
-      && current.userCollapsed === !request.open
-    ) return current
-    return this.commit(request.session, {
-      ...current,
-      dockOpen: request.open,
-      dockWidth: width,
-      userCollapsed: !request.open,
-    })
-  }
-
-  /**
-   * Record Dock visibility and width for the Session named on the wire.
-   * @param sessionId - Owning Session identity.
-   * @param request - Open flag and optional preferred width.
-   * @returns the committed Workspace snapshot.
-   */
-  @Remote('setDock')
-  remoteSetDock(sessionId: SessionId, request: BrowserWorkspaceDockMutation): BrowserWorkspaceProjection {
-    return this.setDock({
-      session: this.requireSession(sessionId),
-      open: request.open,
-      ...request.width === undefined ? {} : { width: request.width },
-    })
   }
 
   /**
@@ -216,12 +181,12 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
   }
 
   /**
-   * Record one human mutation on a Session-owned tab named on the wire.
+   * Send one Agent-specified synthetic input to a Session-owned tab named on the wire.
    * @param sessionId - Owning Session identity.
    * @param target - Complete tab identity.
    * @param expectedRevision - Latest revision returned by a browser operation.
-   * @param input - Optional URL or text produced by the human gesture.
-   * @returns the committed open page whose `controlOwner` is `human`.
+   * @param input - URL or text supplied by the Agent.
+   * @returns the committed open page.
    */
   @Remote('input')
   remoteInput(
@@ -230,41 +195,20 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
     expectedRevision: number,
     input: { readonly url?: string; readonly text?: string },
   ): Promise<BrowserPageState> {
-    return this.input({
+    const base = {
       session: this.requireSession(sessionId),
       target,
       expectedRevision,
-      ...input.url === undefined ? {} : { url: input.url },
-      ...input.text === undefined ? {} : { text: input.text },
-    })
-  }
-
-  /**
-   * Record reported human ownership of one Session-owned tab named on the wire.
-   * @param sessionId - Owning Session identity.
-   * @param target - Complete tab identity.
-   * @param expectedRevision - Latest revision returned by a browser operation.
-   * @returns the committed open page whose `controlOwner` is `human`.
-   */
-  @Remote('takeover')
-  remoteTakeover(sessionId: SessionId, target: BrowserTarget, expectedRevision: number): Promise<BrowserPageState> {
-    return this.takeover({ session: this.requireSession(sessionId), target, expectedRevision })
-  }
-
-  /**
-   * Record reported Agent ownership of one Session-owned tab named on the wire.
-   * @param sessionId - Owning Session identity.
-   * @param target - Complete tab identity.
-   * @param expectedRevision - Latest revision returned by a browser operation.
-   * @returns the committed open page whose `controlOwner` is `agent`.
-   */
-  @Remote('returnControl')
-  remoteReturnControl(
-    sessionId: SessionId,
-    target: BrowserTarget,
-    expectedRevision: number,
-  ): Promise<BrowserPageState> {
-    return this.returnControl({ session: this.requireSession(sessionId), target, expectedRevision })
+    }
+    if (input.url !== undefined) {
+      return this.input({
+        ...base,
+        url: input.url,
+        ...input.text === undefined ? {} : { text: input.text },
+      })
+    }
+    if (input.text !== undefined) return this.input({ ...base, text: input.text })
+    throw new BrowserRuntimeError('browser input requires url or text', 'BROWSER_PROTOCOL')
   }
 
   /**
@@ -280,14 +224,42 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
   }
 
   /**
+   * Create one tab in the Session named on the wire.
+   * @param sessionId - Owning Session identity.
+   * @param request - Wire create identity and optional attach.
+   * @returns the committed open page.
+   */
+  @Remote('create')
+  remoteCreate(sessionId: SessionId, request: BrowserWorkspaceCreateRemoteRequest): Promise<BrowserPageState> {
+    return this.create({
+      session: this.requireSession(sessionId),
+      ...request.profile === 'persistent'
+        ? { profile: 'persistent', name: BrowserProfileName(request.name) }
+        : { profile: request.profile },
+      ...request.attach === undefined ? {} : { attach: request.attach },
+    })
+  }
+
+  /**
    * Create one tab in the Session's Browser Workspace.
    * @param request - Session-bound create request.
    * @returns the committed open page.
    */
   async create(request: BrowserWorkspaceCreateRequest): Promise<BrowserPageState> {
+    const result = this.createTail.then(() => this.createOwned(request))
+    this.createTail = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  /** Create after all earlier Binder creates have committed or failed. */
+  private async createOwned(request: BrowserWorkspaceCreateRequest): Promise<BrowserPageState> {
     this.assertCreateAttach(request.session, request.attach)
-    const created = await this.ctx.browserRuntime.create(request)
-    this.adopt(request.session, created.target, created.controlOwner, created.revision)
+    const attach = request.attach ?? await this.findMatchingBrowser(request)
+    const created = await this.ctx.browserRuntime.create({
+      ...request,
+      ...attach === undefined ? {} : { attach },
+    })
+    this.adopt(request.session, created.target, created.revision)
     return created
   }
 
@@ -299,7 +271,7 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
   async navigate(request: BrowserWorkspaceNavigateRequest): Promise<BrowserPageState> {
     this.assertOwned(request.session, request.target)
     const navigated = await this.ctx.browserRuntime.navigate(request)
-    this.recordFacts(request.session, navigated.target, navigated.controlOwner, navigated.revision)
+    this.recordRevision(request.session, navigated.target, navigated.revision)
     return navigated
   }
 
@@ -315,7 +287,7 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
     if (state.status === 'closed') {
       this.forget(request.session, state.target)
     } else {
-      this.recordFacts(request.session, state.target, state.controlOwner, state.revision)
+      this.recordRevision(request.session, state.target, state.revision)
     }
     return state
   }
@@ -338,45 +310,21 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
   async focus(request: BrowserWorkspaceMutationRequest): Promise<BrowserPageState> {
     this.assertOwned(request.session, request.target)
     const focused = await this.ctx.browserRuntime.focus(request)
-    this.recordFacts(request.session, focused.target, focused.controlOwner, focused.revision)
+    this.recordRevision(request.session, focused.target, focused.revision)
     this.activate(request.session, focused.target)
     return focused
   }
 
   /**
-   * Record one human pointer or keyboard mutation on a Session-owned tab.
+   * Send one Agent-specified synthetic input to a Session-owned tab.
    * @param request - Session-bound input request.
-   * @returns the committed open page whose `controlOwner` is `human`.
+   * @returns the committed open page.
    */
   async input(request: BrowserWorkspaceInputRequest): Promise<BrowserPageState> {
     this.assertOwned(request.session, request.target)
     const inputted = await this.ctx.browserRuntime.input(request)
-    this.recordFacts(request.session, inputted.target, inputted.controlOwner, inputted.revision)
+    this.recordRevision(request.session, inputted.target, inputted.revision)
     return inputted
-  }
-
-  /**
-   * Record reported human ownership of one Session-owned tab.
-   * @param request - Session-bound mutation request.
-   * @returns the committed open page whose `controlOwner` is `human`.
-   */
-  async takeover(request: BrowserWorkspaceMutationRequest): Promise<BrowserPageState> {
-    this.assertOwned(request.session, request.target)
-    const taken = await this.ctx.browserRuntime.takeover(request)
-    this.recordFacts(request.session, taken.target, taken.controlOwner, taken.revision)
-    return taken
-  }
-
-  /**
-   * Record reported Agent ownership of one Session-owned tab.
-   * @param request - Session-bound mutation request.
-   * @returns the committed open page whose `controlOwner` is `agent`.
-   */
-  async returnControl(request: BrowserWorkspaceMutationRequest): Promise<BrowserPageState> {
-    this.assertOwned(request.session, request.target)
-    const returned = await this.ctx.browserRuntime.returnControl(request)
-    this.recordFacts(request.session, returned.target, returned.controlOwner, returned.revision)
-    return returned
   }
 
   /**
@@ -400,12 +348,7 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
     for (const workspace of snapshot.workspaces) {
       for (const browser of workspace.browsers) {
         for (const tab of browser.tabs) {
-          const target = {
-            profileId: workspace.profileId,
-            workspaceId: workspace.workspaceId,
-            browserId: browser.browserId,
-            tabId: tab.tabId,
-          }
+          const target = targetOf(workspace, browser, tab)
           try {
             const state = await this.ctx.browserRuntime.observe({ target })
             if (state.status !== 'closed') {
@@ -438,6 +381,48 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
     return this.ctx.sessions.list().find(session => ownsAttach(this.snapshot(session), attach))
   }
 
+  /**
+   * Reuse one open browser instance on the requested retained Profile.
+   * A logged target missing from the current Runtime is forgotten before matching continues.
+   */
+  private async findMatchingBrowser(
+    request: BrowserWorkspaceCreateRequest,
+  ): Promise<BrowserCreateAttach | undefined> {
+    if (request.profile === 'temporary') return undefined
+    const snapshot = this.snapshot(request.session)
+    for (const workspace of snapshot.workspaces) {
+      for (const browser of workspace.browsers) {
+        for (const tab of browser.tabs) {
+          const target = targetOf(workspace, browser, tab)
+          let state: BrowserRuntimeState
+          try {
+            state = await this.ctx.browserRuntime.observe({
+              target,
+              ...request.signal === undefined ? {} : { signal: request.signal },
+            })
+          } catch (error) {
+            if (!(error instanceof BrowserRuntimeError) || error.code !== 'BROWSER_NOT_FOUND') throw error
+            this.forget(request.session, target)
+            continue
+          }
+          if (state.status === 'closed') {
+            this.forget(request.session, state.target)
+            continue
+          }
+          this.recordRevision(request.session, state.target, state.revision)
+          if (state.status === 'open' && matchesCreateProfile(request, state)) {
+            return {
+              kind: 'browser',
+              workspaceId: workspace.workspaceId,
+              browserId: browser.browserId,
+            }
+          }
+        }
+      }
+    }
+    return undefined
+  }
+
   /** Reject a target that another Session owns or that this Session never adopted. */
   private assertOwned(session: Session, target: BrowserTarget): void {
     for (const other of this.ctx.sessions.list()) {
@@ -464,14 +449,10 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
   private adopt(
     session: Session,
     target: BrowserTarget,
-    controlOwner: BrowserControlOwner,
     revision: number,
   ): void {
     const current = this.snapshot(session)
-    const adopted = adoptTarget(current, target, controlOwner, revision)
-    this.commit(session, current.workspaces.length === 0 && !current.userCollapsed
-      ? { ...adopted, dockOpen: true }
-      : adopted)
+    this.commit(session, adoptTarget(current, target, revision))
   }
 
   /**
@@ -483,18 +464,17 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
     if (state.status === 'closed') return
     const session = this.ctx.sessions.list().find(item => ownsTarget(this.snapshot(item), state.target))
     if (session === undefined) return
-    this.recordFacts(session, state.target, state.controlOwner, state.revision)
+    this.recordRevision(session, state.target, state.revision)
   }
 
-  /** Persist the current control owner and revision for one already-owned tab. */
-  private recordFacts(
+  /** Persist the current revision for one already-owned tab. */
+  private recordRevision(
     session: Session,
     target: BrowserTarget,
-    controlOwner: BrowserControlOwner,
     revision: number,
   ): void {
     const current = this.snapshot(session)
-    this.commit(session, recordTabFacts(current, target, controlOwner, revision))
+    this.commit(session, recordTabRevision(current, target, revision))
   }
 
   /** Record the focused tab as the Session's active tab. */
@@ -538,7 +518,6 @@ function ownsAttach(snapshot: BrowserWorkspaceProjection, attach: BrowserCreateA
 function adoptTarget(
   snapshot: BrowserWorkspaceProjection,
   target: BrowserTarget,
-  controlOwner: BrowserControlOwner,
   revision: number,
 ): BrowserWorkspaceProjection {
   const workspaces = snapshot.workspaces.map(workspace => ({
@@ -563,7 +542,7 @@ function adoptTarget(
     browser = { browserId: target.browserId, tabs: [], activeTabId: target.tabId }
     workspace.browsers.push(browser)
   }
-  browser.tabs.push({ tabId: target.tabId, controlOwner, revision })
+  browser.tabs.push({ tabId: target.tabId, revision })
   workspace.activeBrowserId = target.browserId
   browser.activeTabId = target.tabId
   return {
@@ -573,11 +552,10 @@ function adoptTarget(
   }
 }
 
-/** Persist the current control owner and revision for one already-owned tab. */
-function recordTabFacts(
+/** Persist the current revision for one already-owned tab. */
+function recordTabRevision(
   snapshot: BrowserWorkspaceProjection,
   target: BrowserTarget,
-  controlOwner: BrowserControlOwner,
   revision: number,
 ): BrowserWorkspaceProjection {
   return {
@@ -591,7 +569,7 @@ function recordTabFacts(
           return {
             ...browser,
             tabs: browser.tabs.map(tab => (
-              tab.tabId === target.tabId ? { ...tab, controlOwner, revision } : tab
+              tab.tabId === target.tabId ? { ...tab, revision } : tab
             )),
           }
         }),
@@ -662,9 +640,6 @@ function sameSnapshot(left: BrowserWorkspaceProjection, right: BrowserWorkspaceP
 /** Freeze one snapshot so later mutation cannot change the logged value. */
 function freezeSnapshot(snapshot: BrowserWorkspaceProjection): BrowserWorkspaceProjection {
   return Object.freeze({
-    dockOpen: snapshot.dockOpen,
-    dockWidth: snapshot.dockWidth,
-    userCollapsed: snapshot.userCollapsed,
     activeWorkspaceId: snapshot.activeWorkspaceId,
     workspaces: Object.freeze(snapshot.workspaces.map(workspace => Object.freeze({
       workspaceId: workspace.workspaceId,
@@ -675,12 +650,20 @@ function freezeSnapshot(snapshot: BrowserWorkspaceProjection): BrowserWorkspaceP
         activeTabId: browser.activeTabId,
         tabs: Object.freeze(browser.tabs.map(tab => Object.freeze({
           tabId: tab.tabId,
-          controlOwner: tab.controlOwner,
           revision: tab.revision,
         } satisfies BrowserWorkspaceTabRecord))),
       }))),
     }))),
   })
+}
+
+/** Whether one open page belongs to the retained Profile requested by create. */
+function matchesCreateProfile(
+  request: Exclude<BrowserCreateRequest, { readonly profile: 'temporary' }>,
+  state: BrowserPageState,
+): boolean {
+  if (request.profile === 'shared') return state.chrome.kind === 'shared'
+  return state.chrome.kind === 'persistent' && state.chrome.name === request.name
 }
 
 export default BrowserWorkspaceBinder

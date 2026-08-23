@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/browser/browser-runtime-electron/README.md
-README.md: 26e5facaf2b32d54d722bbc917b52cac2fb9b616
-README.zh.md: e1fb50beec1425f2dd856973e8104b8f0f462de0
+README.md: d7297824a370ae704cca1fde8125ca0b219bb177
+README.zh.md: 035689b29183328ff388c7e1939fd6639780aaba

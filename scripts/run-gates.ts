@@ -415,6 +415,14 @@ function ciArtifactGates(): Gate[] {
 function ciConsumerGates(): Gate[] {
   const builtTree = ['build']
   const validatedBuild = ['built-package-invariants']
+  const clientArtifactReaders = [
+    'publint',
+    'lint-and-duplication',
+    'snapshot',
+    'doc-typecheck',
+    'node-next-types',
+    'built-bin-smoke',
+  ]
   return [
     ciBuildGate(),
     pnpmScript('node-compat', 'check:node-compat', {
@@ -428,9 +436,7 @@ function ciConsumerGates(): Gate[] {
       needs: validatedBuild,
     }),
     snapshotGate(validatedBuild),
-    // The HMR browser owner temporarily rewrites client artifacts before restoring them.
-    // Finish digest-verifying snapshots before that mutation starts.
-    webSnapshotGate(['snapshot']),
+    webSnapshotGate(clientArtifactReaders),
     pnpmScript('doc-typecheck', 'doc-typecheck:contracts-ready', {
       needs: validatedBuild,
       env: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },

@@ -1,11 +1,13 @@
 /** CLI entry for partitioned Vitest coverage. */
 import { resolve } from 'node:path'
 import {
+  COVERAGE_PARTITION_CONCURRENCY_ENV,
   COVERAGE_PARTITIONS_ENV,
   COVERAGE_TEST_TIMEOUT_ENV,
   CoveragePartitionCoordinator,
   coverageTestTimeoutArgs,
   forwardedCoverageArgs,
+  parseCoveragePartitionConcurrency,
   parseCoveragePartitionCount,
 } from './coverage-partitions.ts'
 
@@ -13,6 +15,7 @@ const partitions = parseCoveragePartitionCount(process.env[COVERAGE_PARTITIONS_E
 if (partitions === undefined) {
   throw new Error(`${COVERAGE_PARTITIONS_ENV} is required by partitioned coverage.`)
 }
+const maxConcurrency = parseCoveragePartitionConcurrency(process.env[COVERAGE_PARTITION_CONCURRENCY_ENV])
 const pnpmEntrypoint = process.env.npm_execpath
 if (pnpmEntrypoint === undefined || pnpmEntrypoint === '') {
   throw new Error('partitioned coverage must be invoked through a pnpm package script.')
@@ -21,6 +24,7 @@ if (pnpmEntrypoint === undefined || pnpmEntrypoint === '') {
 const coordinator = new CoveragePartitionCoordinator({
   root: resolve(import.meta.dirname, '..'),
   partitions,
+  ...maxConcurrency === undefined ? {} : { maxConcurrency },
   pnpmEntrypoint,
   vitestArgs: [
     ...coverageTestTimeoutArgs(process.env[COVERAGE_TEST_TIMEOUT_ENV]),

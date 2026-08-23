@@ -6,7 +6,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RpcResponse, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import {
-  listedProviderRows, ModelsSection, needsSetup, providerCopy, providerTargetLabel,
+  addableProviderRows, listedProviderRows, ModelsSection, needsSetup, providerCopy, providerTargetLabel,
   removeProviderProfile,
 } from '../src/client/ModelsSection.tsx'
 import type { ModelsSectionInjected, ModelsSectionProps } from '../src/client/ModelsSection.tsx'
@@ -214,9 +214,28 @@ async function mountSection(overrides: Parameters<typeof scriptedFace>[0] = {}) 
 
 /**
  * Mount for a user who cannot reach any provider yet: no credential is stored
- * anywhere, so the whole-section DeepSeek route owns the first-run setup card.
+ * anywhere, so official DeepSeek stays off the list.
  */
 async function mountFirstRun(overrides: Parameters<typeof scriptedFace>[0] = {}) {
+  const scripted = scriptedFace(overrides)
+  scripted.face.settings.describe.mockResolvedValue(ok({
+    writable: true,
+    hasDocument: false,
+    namespaces: wireNamespaces().map(namespace =>
+      namespace.ns === 'llm-deepseek' ? withoutUser(namespace) : namespace),
+  }))
+  scripted.face.credentials.describe.mockImplementation((payload: { refs: string[] }) =>
+    Promise.resolve(ok({
+      credentials: Object.fromEntries(payload.refs.map(ref => [ref, { configured: false, writable: true }])),
+    })))
+  return mountFace(scripted)
+}
+
+/**
+ * Occupied official DeepSeek with no stored credential and no other usable
+ * provider, so the listed row still opens as the setup card.
+ */
+async function mountSetupCard(overrides: Parameters<typeof scriptedFace>[0] = {}) {
   const scripted = scriptedFace(overrides)
   scripted.face.credentials.describe.mockImplementation((payload: { refs: string[] }) =>
     Promise.resolve(ok({
@@ -243,19 +262,14 @@ describe('ModelsSection', () => {
     expect(document.body.textContent).toBe('')
   })
 
-  it('renders the unkeyed whole-section provider as an open setup card in the first-run posture', async () => {
+  it('does not list official DeepSeek in the first-run posture', async () => {
     await mountFirstRun()
-    // Nothing is reachable yet, and DeepSeek has no configured credential and
-    // no stored apiKey → setup card.
-    expect(screen.getByText('DeepSeek')).toBeTruthy()
-    expect(screen.getByLabelText(en.keyInput)).toBeTruthy()
-    expect(screen.getByText('openai')).toBeTruthy()
-    expect(screen.queryByText('Active')).toBeNull()
-    expect(screen.queryByText('Inactive')).toBeNull()
+    expect(screen.queryByText('DeepSeek')).toBeNull()
+    expect(screen.queryByLabelText(en.keyInput)).toBeNull()
     expect(screen.getByText(en.add)).toBeTruthy()
   })
 
-  it('opens the official setup card when the user layer is absent and nothing else is usable', async () => {
+  it('leaves never-written official DeepSeek off the list when nothing else is usable', async () => {
     const scripted = scriptedFace()
     const namespaces = wireNamespaces().map(namespace =>
       namespace.ns === 'llm-deepseek' ? withoutUser(namespace) : namespace)
@@ -273,8 +287,8 @@ describe('ModelsSection', () => {
         credentials: Object.fromEntries(payload.refs.map(ref => [ref, { configured: false, writable: true }])),
       })))
     await mountFace(scripted)
-    expect(screen.getByText('DeepSeek')).toBeTruthy()
-    expect(screen.getByLabelText(en.keyInput)).toBeTruthy()
+    expect(screen.queryByText('DeepSeek')).toBeNull()
+    expect(screen.queryByLabelText(en.keyInput)).toBeNull()
   })
 
   it('leaves official DeepSeek off the list after delete when only the leftover empty user section remains', async () => {
@@ -312,7 +326,7 @@ describe('ModelsSection', () => {
     expect(screen.getByText('openai')).toBeTruthy()
   })
 
-  it('keeps never-written official DeepSeek as a row when another provider is usable', async () => {
+  it('leaves never-written official DeepSeek off the list when another provider is usable', async () => {
     const scripted = scriptedFace()
     const namespaces = wireNamespaces().map(namespace =>
       namespace.ns === 'llm-deepseek' ? withoutUser(namespace) : namespace)
@@ -320,8 +334,9 @@ describe('ModelsSection', () => {
       writable: true, hasDocument: false, namespaces,
     }))
     await mountFace(scripted)
+    expect(screen.queryByText('DeepSeek')).toBeNull()
     expect(screen.queryByLabelText(en.keyInput)).toBeNull()
-    expect(screen.getByRole('button', { name: deepSeekCopy(en.editProvider) })).toBeTruthy()
+    expect(screen.getByText('openai')).toBeTruthy()
   })
 
   it('leaves the unkeyed provider a plain row once another provider is usable', async () => {
@@ -364,7 +379,7 @@ describe('ModelsSection', () => {
   })
 
   it('turns the setup card into a row once the credential reports configured', async () => {
-    const { face } = await mountFirstRun()
+    const { face } = await mountSetupCard()
     face.credentials.describe.mockImplementation((payload: { refs: string[] }) => Promise.resolve(ok({
       credentials: Object.fromEntries(payload.refs.map(ref => [ref, { configured: true, writable: true }])),
     })))
@@ -410,25 +425,78 @@ describe('ModelsSection', () => {
       apiKeyEnv: 'MINIMAX_CN_API_KEY',
       credential: { configured: false, writable: true },
     }
-    const firstRun = new Map<string, SettingsNamespaceView>([
-      ['llm-deepseek', withoutUser(wireNamespaces()[0]!)],
-    ])
-    const leftover = new Map<string, SettingsNamespaceView>([
-      ['llm-deepseek', { ...wireNamespaces()[0]!, user: {} }],
-    ])
-    expect(listedProviderRows([official, other], firstRun, new Set()).map(row => row.entry.provider))
-      .toEqual(['deepseek-official'])
-    expect(listedProviderRows([official, other], leftover, new Set())).toEqual([])
+    expect(listedProviderRows([official, other])).toEqual([])
     expect(listedProviderRows(
       [{ ...official, credential: { configured: true, writable: true } }, other],
-      leftover,
-      new Set(),
     ).map(row => row.entry.provider)).toEqual(['deepseek-official'])
-    expect(listedProviderRows([{ ...official, configured: true }, other], leftover, new Set()).map(row => row.entry.provider))
+    expect(listedProviderRows([{ ...official, configured: true }, other]).map(row => row.entry.provider))
       .toEqual(['deepseek-official'])
-    expect(listedProviderRows([official], firstRun, new Set(['deepseek-official'])).map(row => row.entry.provider))
-      .toEqual(['deepseek-official'])
-    expect(listedProviderRows([official], new Map(), new Set())).toEqual([])
+    expect(listedProviderRows([official])).toEqual([])
+    const catalog: ProviderRow = {
+      entry: {
+        provider: 'deepseek',
+        displayName: 'deepseek',
+        settingsNs: 'llm-pi-ai',
+        settingsPath: ['providers', 'deepseek'],
+        active: true,
+      },
+      configured: true,
+      removable: true,
+      apiKeyEnv: 'DEEPSEEK_API_KEY',
+      credential: { configured: true, writable: true },
+    }
+    expect(listedProviderRows(
+      [{ ...official, credential: { configured: true, writable: true } }, catalog],
+    ).map(row => row.entry.provider)).toEqual(['deepseek'])
+    expect(listedProviderRows(
+      [{ ...official, configured: true, credential: { configured: true, writable: true } }, catalog],
+    ).map(row => row.entry.provider)).toEqual(['deepseek-official', 'deepseek'])
+  })
+
+  it('offers catalog deepseek in add while withholding official DeepSeek', () => {
+    const official: ProviderRow = {
+      entry: {
+        provider: 'deepseek-official',
+        displayName: 'DeepSeek',
+        settingsNs: 'llm-deepseek',
+        settingsPath: [],
+        active: true,
+      },
+      configured: false,
+      removable: true,
+      apiKeyEnv: 'DEEPSEEK_API_KEY',
+      credential: { configured: false, writable: true },
+    }
+    const catalog: ProviderRow = {
+      entry: {
+        provider: 'deepseek',
+        displayName: 'deepseek',
+        settingsNs: 'llm-pi-ai',
+        settingsPath: ['providers', 'deepseek'],
+        active: false,
+      },
+      configured: false,
+      removable: true,
+      apiKeyEnv: undefined,
+      credential: undefined,
+    }
+    const openai: ProviderRow = {
+      entry: {
+        provider: 'openai',
+        displayName: 'openai',
+        settingsNs: 'llm-pi-ai',
+        settingsPath: ['providers', 'openai'],
+        active: false,
+      },
+      configured: false,
+      removable: true,
+      apiKeyEnv: undefined,
+      credential: undefined,
+    }
+    expect(addableProviderRows([official, catalog, openai]).map(row => row.entry.provider))
+      .toEqual(['deepseek', 'openai'])
+    expect(addableProviderRows([catalog, openai]).map(row => row.entry.provider))
+      .toEqual(['deepseek', 'openai'])
   })
 
   it('decides setup need from the joined credential state and the first-run posture', () => {
@@ -471,7 +539,7 @@ describe('ModelsSection', () => {
   })
 
   it('stores a typed key write-only from the setup card without touching settings', async () => {
-    const { set, update, face } = await mountFirstRun()
+    const { set, update, face } = await mountSetupCard()
     const key = screen.getByLabelText<HTMLInputElement>(en.keyInput)
     fireEvent.change(key, { target: { value: '  sk-live  ' } })
     fireEvent.click(screen.getByText(en.apply))
@@ -1119,6 +1187,13 @@ describe('ModelsSection', () => {
     const namespaces = wireNamespaces().map(namespace =>
       namespace.ns === 'llm-deepseek' ? { ...namespace, user: {} } : namespace)
     const { face } = scriptedFace()
+    face.llm.providers.mockResolvedValue(ok({
+      providers: [
+        { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [], active: true },
+        { provider: 'deepseek', displayName: 'deepseek', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'deepseek'], active: false },
+        { provider: 'groq', displayName: 'groq', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'groq'], active: false },
+      ],
+    }))
     face.settings.describe.mockResolvedValue(ok({ writable: true, hasDocument: true, namespaces }))
     const controller = new ModelsSettingsStore(
       face as unknown as WireFace, settingsSchema, new SettingsDescribeMirror(face as never))
@@ -1132,7 +1207,10 @@ describe('ModelsSection', () => {
     />)
     fireEvent.click(screen.getByText(en.add))
     const pick = screen.getByLabelText<HTMLSelectElement>(en.provider)
-    expect([...pick.options].map(option => option.value)).not.toContain('deepseek-official')
+    const values = [...pick.options].map(option => option.value)
+    expect(values).toContain('groq')
+    expect(values).toContain('deepseek')
+    expect(values).not.toContain('deepseek-official')
   })
 
   it('switches the add card target and degrades unknown or broken targets loudly', async () => {
@@ -1215,7 +1293,7 @@ describe('ModelsSection', () => {
   })
 
   it('surfaces a shadowed credential write on the card', async () => {
-    await mountFirstRun({
+    await mountSetupCard({
       set: vi.fn(() => Promise.resolve(fail('credentials: DEEPSEEK_API_KEY is shadowed by the read-only environment', 'credential-rejected'))),
     })
     const key = screen.getByLabelText<HTMLInputElement>(en.keyInput)
@@ -1436,7 +1514,7 @@ describe('ModelsSection', () => {
   it('collapses the setup card on cancel without disturbing another open card', async () => {
     // The regression: the setup card shared the row/add/declare close handler,
     // so cancelling it discarded the add card's draft while staying open itself.
-    await mountFirstRun()
+    await mountSetupCard()
     expect(screen.getAllByLabelText(en.keyInput)).toHaveLength(1)
     fireEvent.click(screen.getByText(en.add))
     await screen.findByLabelText(en.provider)
@@ -1466,7 +1544,19 @@ describe('ModelsSection', () => {
       schema={settingsSchema}
       t={t}
     />)
-    await screen.findByText('DeepSeek')
+    await screen.findByText(en.title)
+  })
+
+  it('hides official DeepSeek after delete even if the first-run setup card was closed', async () => {
+    const leftover = { ...wireNamespaces()[0]!, user: {}, revision: 1 }
+    const scripted = scriptedFace({
+      mutate: vi.fn(() => Promise.resolve(ok(leftover))),
+    })
+    await mountFace(scripted)
+    fireEvent.click(screen.getByRole('button', { name: deepSeekCopy(en.removeProvider) }))
+    const dialog = screen.getByRole('dialog', { name: deepSeekCopy(en.deleteTitle) })
+    fireEvent.click(within(dialog).getByRole('button', { name: deepSeekCopy(en.deleteConfirm) }))
+    await waitFor(() => { expect(screen.queryByText('DeepSeek')).toBeNull() })
   })
 
   it('removes by unsetting the profile path, never by rebuilding the section', async () => {

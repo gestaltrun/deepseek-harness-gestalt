@@ -15,7 +15,7 @@ export async function runElectronRuntimeE2eCases(): Promise<void> {
 }
 
 /**
- * Navigate, observe, screenshot, and transfer control on one temporary Profile.
+ * Navigate, observe, screenshot, and focus one temporary Profile.
  */
 export async function driveRealPage(): Promise<void> {
   const ctx = new Context()
@@ -46,23 +46,11 @@ export async function driveRealPage(): Promise<void> {
     const focused = await ctx.browserRuntime.focus({ target: created.target, expectedRevision: 1 })
     assert.equal(focused.revision, 2)
     assert.equal(focused.focused, true)
-    assert.equal(focused.controlOwner, 'agent')
-    const taken = await ctx.browserRuntime.takeover({ target: created.target, expectedRevision: 2 })
-    assert.equal(taken.revision, 3)
-    assert.equal(taken.controlOwner, 'human')
-    assert.equal(taken.target, created.target)
-    const returned = await ctx.browserRuntime.returnControl({
-      target: created.target,
-      expectedRevision: taken.revision,
-    })
-    assert.equal(returned.revision, 4)
-    assert.equal(returned.controlOwner, 'agent')
-    assert.equal(returned.target, created.target)
     const closed = await ctx.browserRuntime.close({
       target: created.target,
-      expectedRevision: returned.revision,
+      expectedRevision: focused.revision,
     })
-    assert.deepEqual(closed, { status: 'closed', target: created.target, revision: 5 })
+    assert.deepEqual(closed, { status: 'closed', target: created.target, revision: 3 })
   } finally {
     await ctx.fiber.dispose()
   }
@@ -148,6 +136,7 @@ const box = document.getElementById('box')
 const out = document.getElementById('out')
 const sync = () => { out.textContent = box.value }
 box.addEventListener('input', sync)
+box.focus()
 </script>
 </body></html>`)
       return

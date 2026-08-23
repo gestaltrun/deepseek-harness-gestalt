@@ -30,4 +30,4 @@ Active-tab chrome tracks Binder-committed pages after navigate and after Refresh
 
 ## Testing
 
-`packages/client/ui-browser/tests/browser-dock.client.spec.tsx` and `use-browser-page.client.spec.tsx` fail when chrome stays `about:blank` after a `status: open` navigate whose listing revision advanced. `packages/client/connection/tests/fixture-browser-workspace.client.spec.ts` observes the committed URL after navigate. `apps/web/tests/browser-dock.snapshot.ts` pins expanded Dock chrome after open and Refresh against `about:blank`.
+`packages/client/ui-browser/tests/browser-page-chrome.client.spec.tsx` and `use-browser-page.client.spec.tsx` fail when chrome stays `about:blank` after a `status: open` navigate whose listing revision advanced. `packages/client/connection/tests/fixture-browser-workspace.client.spec.ts` observes the committed URL after navigate. `apps/web/tests/browser-dock.snapshot.ts` pins expanded Dock chrome after open and Refresh against `about:blank`.

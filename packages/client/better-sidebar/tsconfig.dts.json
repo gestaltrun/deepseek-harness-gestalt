@@ -1,0 +1,24 @@
+{
+  "extends": "../../../tsconfig.base.client.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    "noCheck": true,
+    "skipLibCheck": true,
+    "composite": false,
+    "incremental": false,
+    "noResolve": true,
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "declarationMap": false,
+    "strict": false,
+    "strictNullChecks": true,
+    "exactOptionalPropertyTypes": false,
+    "noUncheckedIndexedAccess": false,
+    "types": []
+  },
+  "include": [
+    "src"
+  ]
+}

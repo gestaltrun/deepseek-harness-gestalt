@@ -1,8 +1,4 @@
 - img
-- text: Files
-- button "Close":
-  - img
-- img
 - text: Reply with a one-sentence description of …
 - button "Close":
   - img

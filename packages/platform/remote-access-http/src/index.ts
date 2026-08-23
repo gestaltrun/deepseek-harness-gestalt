@@ -6,6 +6,7 @@ import z from '@deepseek-ai/schemastery'
 import { parseAccountProofJti, type AccountProof } from '@deepseek-ai/dsh-platform-account'
 import {
   RemoteAccessError,
+  parseAttachmentBlobReservationId,
   parsePairingChallengeId,
   parsePairingCompletionId,
   parsePairingRendezvousId,
@@ -192,7 +193,7 @@ async function dispatch(
     case 'release-blob':
       await ctx.remoteAccess.releaseAttachmentBlob({
         owner: authentication,
-        reservationId: requiredString(body.reservationId, 'reservationId'),
+        reservationId: parseAttachmentBlobReservationId(requiredString(body.reservationId, 'reservationId')),
       })
       return { completed: true }
     default: throw new HttpError(400, 'OPERATION_INVALID', 'Remote Access operation is invalid')

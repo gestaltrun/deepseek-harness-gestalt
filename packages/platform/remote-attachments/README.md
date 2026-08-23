@@ -14,7 +14,7 @@ The store plugin (`name: '@deepseek-ai/dsh-remote-attachments'`) exposes those b
 
 The `remote-attachments-http` plugin (`@deepseek-ai/dsh-remote-attachments/http`) registers three exact routes over the mounted store and requires `webServer`, `remoteAttachments`, and the `remoteAttachmentAuthority` pairing seam. Its `origin` Config is the trusted browser origin. Disposing the plugin fiber unregisters the routes.
 
-- `POST /v1/remote-attachments` — raw ciphertext body; Account-complete quota admission precedes publish, then the route responds `201` with `{ capability, byteLength, expiresAt }`, `400 ATTACHMENT_EMPTY` for an empty body, `413 ATTACHMENT_LIMIT_EXCEEDED` while streaming, or `429 QUOTA` / `PLATFORM_CAPACITY` with `retryAfter`.
+- `POST /v1/remote-attachments` — raw ciphertext body with a positive exact `Content-Length`; Account-complete quota admission precedes body reads and publish, then the route responds `201` with `{ capability, byteLength, expiresAt }`, `400 ATTACHMENT_EMPTY` or `CONTENT_LENGTH_MISMATCH`, `411 CONTENT_LENGTH_REQUIRED`, `413 ATTACHMENT_LIMIT_EXCEEDED`, or `429 QUOTA` / `PLATFORM_CAPACITY` with `retryAfter`. A rejected or interrupted body releases its reservation.
 - `POST /v1/remote-attachments/consume` — `{ capability }` JSON; atomically claims before writing and responds `200` with raw ciphertext, `403` cross-pairing, `404` unknown or already claimed, or `410` expired. A failed body write abandons the claim for retry; a finished body is never replayed even if settlement cleanup fails.
 - `POST /v1/remote-attachments/revoke` — `{ capability }` JSON; responds `204` after a pairing-scoped revoke, or `403` when the authenticated pairing does not own the capability.
 
@@ -32,5 +32,5 @@ None.
 
 ## Known Limitations and Deferred Work
 
-- `RemoteAttachmentStoreProvider` remains a fixture for package tests. The operated Platform mounts private OSS bytes behind PostgreSQL capability metadata. Its additive schema reads legacy ciphertext rows and compatibility-writes current uploads so old and new instances remain mutually readable during rolling replacement; active sweeps remove expiry and revoked-pairing rows and release quota reservations.
+- `RemoteAttachmentStoreProvider` remains a fixture for package tests. The operated Platform first deploys the PostgreSQL atomic-consume bridge to every host, then enables private OSS bytes in a separate deployment after every predecessor reports bridge mode. The bridge and OSS store share a claim token; active sweeps remove expiry and explicitly inactive pairing candidates and release quota reservations.
 - Desktop maps consume HTTP 403/404/410/413 onto protocol-native rejection reasons, decrypts only after hash verification, and admits exact bytes through the Session-scoped Host file RPC.

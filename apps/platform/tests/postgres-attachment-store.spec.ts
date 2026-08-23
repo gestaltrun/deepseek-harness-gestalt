@@ -36,6 +36,7 @@ describe('PostgreSQL remote attachment durable rows', () => {
       maxBlobBytes: 4,
       capabilityLifetimeMs: 100,
       maxRetainedBlobs: 1,
+      quotaCleanup: { release: async () => {} },
     })
 
     await expect(store.observe()).rejects.toThrow('PostgreSQL remote attachment row is invalid')

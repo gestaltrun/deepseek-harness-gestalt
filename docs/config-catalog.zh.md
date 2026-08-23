@@ -1923,7 +1923,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/remote-access-http/src/index.ts:28`](../packages/platform/remote-access-http/src/index.ts)
+来源：[`packages/platform/remote-access-http/src/index.ts:29`](../packages/platform/remote-access-http/src/index.ts)
 
 <a id="deepseek-aidsh-remote-attachments"></a>
 

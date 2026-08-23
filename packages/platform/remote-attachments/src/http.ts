@@ -83,9 +83,19 @@ export function apply(ctx: Context, config: Config): void {
     kind: 'exact',
     path: '/v1/remote-attachments',
     handler: route(async (req, res, authorization) => {
-      const ciphertext = await readBounded(req, store.maxBlobBytes, () =>
-        new RemoteAttachmentHttpError(413, 'ATTACHMENT_LIMIT_EXCEEDED', 'Remote attachment exceeds the per-blob byte ceiling'))
-      const quota = await authorization.admit(ciphertext.byteLength)
+      const byteLength = parseUploadLength(req.headers['content-length'], store.maxBlobBytes)
+      const quota = await authorization.admit(byteLength)
+      let ciphertext: Buffer
+      try {
+        ciphertext = await readExact(req, byteLength)
+      } catch (error) {
+        try {
+          await quota.release()
+        } catch (cleanupError) {
+          console.error('[remote-attachments-http] quota release after rejected upload failed:', cleanupError)
+        }
+        throw error
+      }
       const grant = await store.publish({
         pairingId: authorization.pairingId,
         ciphertext: new Uint8Array(ciphertext),
@@ -126,6 +136,43 @@ export function apply(ctx: Context, config: Config): void {
       res.writeHead(204).end()
     }),
   }), 'remote-attachments: revoke route')
+}
+
+function parseUploadLength(value: string | string[] | undefined, limit: number): number {
+  if (value === undefined) {
+    throw new RemoteAttachmentHttpError(411, 'CONTENT_LENGTH_REQUIRED', 'Remote attachment upload requires Content-Length')
+  }
+  if (value === '0') {
+    throw new RemoteAttachmentError('ATTACHMENT_EMPTY', 'Remote attachment ciphertext must not be empty')
+  }
+  if (Array.isArray(value) || !/^[1-9]\d*$/.test(value)) {
+    throw new RemoteAttachmentHttpError(400, 'CONTENT_LENGTH_INVALID', 'Remote attachment Content-Length must be a positive integer')
+  }
+  const length = Number(value)
+  if (!Number.isSafeInteger(length)) {
+    throw new RemoteAttachmentHttpError(400, 'CONTENT_LENGTH_INVALID', 'Remote attachment Content-Length must be a positive safe integer')
+  }
+  if (length > limit) {
+    throw new RemoteAttachmentHttpError(413, 'ATTACHMENT_LIMIT_EXCEEDED', 'Remote attachment exceeds the per-blob byte ceiling')
+  }
+  return length
+}
+
+async function readExact(req: IncomingMessage, length: number): Promise<Buffer> {
+  const body = Buffer.allocUnsafe(length)
+  let received = 0
+  for await (const chunk of req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array)
+    if (buffer.byteLength > length - received) {
+      throw new RemoteAttachmentHttpError(400, 'CONTENT_LENGTH_MISMATCH', 'Remote attachment body exceeds Content-Length')
+    }
+    buffer.copy(body, received)
+    received += buffer.byteLength
+  }
+  if (received !== length) {
+    throw new RemoteAttachmentHttpError(400, 'CONTENT_LENGTH_MISMATCH', 'Remote attachment body is shorter than Content-Length')
+  }
+  return body
 }
 
 function parseCapability(value: unknown): AttachmentCapability {
@@ -223,18 +270,26 @@ function answerError(res: ServerResponse, error: unknown): void {
 /** Write one ciphertext body and settle only after the response finishes. */
 function writeOctetStream(res: ServerResponse, ciphertext: Uint8Array): Promise<void> {
   return new Promise((resolve, reject) => {
-    const fail = (error: unknown): void => {
+    const clear = (): void => {
       res.off('error', fail)
       res.off('finish', succeed)
+      res.off('close', closed)
+    }
+    const fail = (error: unknown): void => {
+      clear()
       reject(error instanceof Error ? error : new Error('Remote attachment consume response failed'))
     }
     const succeed = (): void => {
-      res.off('error', fail)
-      res.off('finish', succeed)
+      clear()
       resolve()
+    }
+    const closed = (): void => {
+      if (res.writableFinished) succeed()
+      else fail(new Error('Remote attachment consume response closed before finish'))
     }
     res.once('error', fail)
     res.once('finish', succeed)
+    res.once('close', closed)
     try {
       res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store' })
       res.end(ciphertext)

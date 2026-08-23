@@ -153,6 +153,27 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
     })
   }
 
+  /**
+   * @param pairingIds - bounded attachment-owner candidates from one sweep snapshot.
+   * @returns only candidates that lack confirmed pairing authority at query time.
+   */
+  async filterInactivePairingIds(pairingIds: readonly PersonalPairingId[]): Promise<readonly PersonalPairingId[]> {
+    if (pairingIds.length === 0) return []
+    const result = await this.pool.query(
+      `SELECT candidate.pairing_id
+         FROM unnest($2::text[]) AS candidate(pairing_id)
+         LEFT JOIN remote_access_mobile_pairings AS pairing
+           ON pairing.database_identity = $1 AND pairing.pairing_id = candidate.pairing_id
+        WHERE pairing.pairing_id IS NULL
+        ORDER BY candidate.pairing_id`,
+      [this.databaseIdentity, pairingIds],
+    )
+    return result.rows.map((row) => {
+      if (typeof row.pairing_id !== 'string') throw new TypeError('inactive pairing row is invalid')
+      return parsePersonalPairingId(row.pairing_id)
+    })
+  }
+
   async runPairingTransaction<T>(
     operation: (state: PersonalPairingTransactionState) => Promise<T>,
   ): Promise<T> {

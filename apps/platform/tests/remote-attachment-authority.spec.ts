@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
-import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import { parseAttachmentBlobReservationId, parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { OperatedRemoteAttachmentAuthority } from '../src/remote-attachment-authority.ts'
 
 const pairingId = parsePersonalPairingId('pairing-authorized')
@@ -23,7 +23,9 @@ describe('operated remote attachment authority', () => {
         presentation: { name: 'Real phone', platform: 'ios' as const } },
     }))
     const ownsConfirmedPairing = vi.fn(async () => true)
-    const admitAttachmentBlob = vi.fn(async () => ({ reservationId: 'quota-authorized' }))
+    const admitAttachmentBlob = vi.fn(async () => ({
+      reservationId: parseAttachmentBlobReservationId('quota-authorized'),
+    }))
     const releaseAttachmentBlob = vi.fn(async () => {})
     const authority = new OperatedRemoteAttachmentAuthority(
       { currentInstallation },

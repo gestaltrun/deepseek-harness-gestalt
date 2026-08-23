@@ -73,6 +73,13 @@ export type PendingPairingId = Branded<'PendingPairingId'>
 export type DevicePrincipalId = Branded<'DevicePrincipalId'>
 /** Opaque identity for one confirmed Personal Pairing. */
 export type PersonalPairingId = Branded<'PersonalPairingId'>
+/** Opaque identifier for one Account-complete attachment quota reservation. */
+export type AttachmentBlobReservationId = Branded<'AttachmentBlobReservationId'>
+/** Provider-private authority for idempotent cleanup of durable attachment quota. */
+export interface AttachmentBlobReservationCleanup {
+  /** @param reservationId - branded id retained only beside attachment metadata. */
+  release(reservationId: AttachmentBlobReservationId): Promise<void>
+}
 /** Opaque provider reference for one active Personal Pairing key. */
 export type PersonalPairingKeyReference = Branded<'PersonalPairingKeyReference'>
 /** Opaque reference to crypto-provider state for one challenge. */
@@ -393,7 +400,7 @@ export interface PersonalPairingTransactionState {
   orphanPendingCleanups: Map<CleanupRecord<PendingPairingKey>, OrphanPendingCleanupRecord>
   accountChallengeAt: Map<string, number[]>
   ipChallengeAt: Map<string, number[]>
-  blobs: Map<string, { accountId: string; bytes: number }>
+  blobs: Map<AttachmentBlobReservationId, { accountId: string; bytes: number }>
   blobUploads: Map<string, Array<{ at: number; bytes: number }>>
   blobSequence: { next: number }
 }
@@ -810,7 +817,7 @@ export abstract class RemoteAccessService extends Service {
   abstract admitAttachmentBlob(input: {
     owner: PairingAccountAuthentication
     bytes: number
-  }): Promise<{ reservationId: string }>
+  }): Promise<{ reservationId: AttachmentBlobReservationId }>
 
   /**
    * Release one blob reservation after receipt, expiry, or revocation.
@@ -819,7 +826,7 @@ export abstract class RemoteAccessService extends Service {
    */
   abstract releaseAttachmentBlob(input: {
     owner: PairingAccountAuthentication
-    reservationId: string
+    reservationId: AttachmentBlobReservationId
   }): Promise<void>
 
 }
@@ -1949,7 +1956,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
   async admitAttachmentBlob(input: {
     owner: PairingAccountAuthentication
     bytes: number
-  }): Promise<{ reservationId: string }> {
+  }): Promise<{ reservationId: AttachmentBlobReservationId }> {
     return this.exclusive(async () => {
       const { account } = await this.authenticateOwner(input.owner)
       this.assertCapacity()
@@ -1984,7 +1991,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
         )
       }
       this.blobSequence.next += 1
-      const reservationId = `blob-${String(this.blobSequence.next)}`
+      const reservationId = parseAttachmentBlobReservationId(`blob-${String(this.blobSequence.next)}`)
       this.blobs.set(reservationId, { accountId: account.id, bytes: input.bytes })
       uploads.push({ at: now, bytes: input.bytes })
       this.blobUploads.set(account.id, uploads)
@@ -1994,7 +2001,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
 
   async releaseAttachmentBlob(input: {
     owner: PairingAccountAuthentication
-    reservationId: string
+    reservationId: AttachmentBlobReservationId
   }): Promise<void> {
     await this.exclusive(async () => {
       const { account } = await this.authenticateOwner(input.owner)
@@ -2007,12 +2014,15 @@ export class PersonalPairingProvider extends RemoteAccessService {
   }
 
   /**
-   * Release one durable blob reservation from the Platform-owned attachment cleanup worker.
-   * @param reservationId - opaque reservation retained beside blob metadata.
+   * Create the provider-private cleanup authority for durable attachment metadata.
+   * @returns cleanup capability owned by the durable attachment store.
    */
-  async releaseAttachmentReservation(reservationId: string): Promise<void> {
+  attachmentReservationCleanup(): AttachmentBlobReservationCleanup {
+    return { release: async (reservationId) => { await this.releaseAttachmentReservation(reservationId) } }
+  }
+
+  private async releaseAttachmentReservation(reservationId: AttachmentBlobReservationId): Promise<void> {
     await this.exclusive(() => {
-      if (reservationId === '') throw new TypeError('Attachment blob reservation id must be non-empty')
       this.blobs.delete(reservationId)
     })
   }
@@ -2767,6 +2777,15 @@ export function parseDevicePrincipalId(value: unknown): DevicePrincipalId {
  */
 export function parsePersonalPairingId(value: unknown): PersonalPairingId {
   return nonEmpty(value, 'Personal Pairing id') as PersonalPairingId
+}
+
+/**
+ * Parse an attachment quota reservation id at a durable or random-source boundary.
+ * @param value - untrusted reservation identifier.
+ * @returns branded non-empty reservation id.
+ */
+export function parseAttachmentBlobReservationId(value: unknown): AttachmentBlobReservationId {
+  return nonEmpty(value, 'Attachment blob reservation id') as AttachmentBlobReservationId
 }
 
 /**

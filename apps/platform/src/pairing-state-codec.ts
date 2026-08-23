@@ -3,6 +3,7 @@
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   PERSONAL_PAIRING_PROTOCOL_MAJOR,
+  parseAttachmentBlobReservationId,
   parseDevicePrincipalId,
   parsePairingChallengeId,
   parsePairingCompletionId,
@@ -143,7 +144,7 @@ function decodePairingTransactionFields(
     orphanPendingCleanups: orphans,
     accountChallengeAt: decodeNumberListMap(record.accountChallengeAt, 'accountChallengeAt'),
     ipChallengeAt: decodeNumberListMap(record.ipChallengeAt, 'ipChallengeAt'),
-    blobs: decodeMap(record.blobs, 'blobs', asPlainString, decodeBlob),
+    blobs: decodeMap(record.blobs, 'blobs', parseAttachmentBlobReservationId, decodeBlob),
     blobUploads: decodeMap(record.blobUploads, 'blobUploads', asPlainString, decodeBlobUploads),
     blobSequence: { next: asSafeInteger(asRecord(record.blobSequence, 'blobSequence').next, 'blobSequence.next') },
   }

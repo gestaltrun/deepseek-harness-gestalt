@@ -6,6 +6,7 @@ import {
   MemoryPersonalPairingAuthorityStore,
   PersonalPairingProvider,
   RemoteAccessError,
+  parseAttachmentBlobReservationId,
   parsePairingCompletionId,
   parsePairingRendezvousId,
   parsePendingPairingId,
@@ -281,7 +282,7 @@ describe('Remote Access HTTP assembled flow', () => {
         pendingPairingId: 'pending-one', authenticationWords: [], desktopHandshake: Uint8Array.of(1),
         device: { name: 'phone', platform: 'ios' },
       })),
-      admitAttachmentBlob: vi.fn(async () => ({ reservationId: 'blob-1' })),
+      admitAttachmentBlob: vi.fn(async () => ({ reservationId: parseAttachmentBlobReservationId('blob-1') })),
       releaseAttachmentBlob: vi.fn(),
       createEndpointChallenge: vi.fn(async () => ({
         challengeId: 'endpoint-challenge', expiresAt: 123,

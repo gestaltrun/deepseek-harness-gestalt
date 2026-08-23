@@ -1436,14 +1436,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'input', description: 'owning Desktop authorization and pending identity.' }],
       },
       {
-        signature: 'abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: string }>',
+        signature: 'abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: AttachmentBlobReservationId }>',
         description: 'Reserve one expiring ciphertext blob against the open-registration ceilings.',
         parameters: [{ name: 'input', description: 'current-installation authorization and declared ciphertext size.' }],
         returns: 'opaque reservation id released by {@link releaseAttachmentBlob}.',
         throws: ['RemoteAccessError `QUOTA` or `PLATFORM_CAPACITY` with `retryAfter` seconds.', 'TypeError when `bytes` is not a non-negative integer.'],
       },
       {
-        signature: 'abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: string }): Promise<void>',
+        signature: 'abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: AttachmentBlobReservationId }): Promise<void>',
         description: 'Release one blob reservation after receipt, expiry, or revocation.',
         parameters: [{ name: 'input', description: 'current-installation authorization and reservation id.' }],
         throws: ['TypeError when the reservation is missing or owned by another Account.'],
@@ -3401,6 +3401,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AtScheduleRecord {\n    readonly id: ScheduleId;\n    readonly kind: \'at\';\n    readonly prompt: string;\n    readonly scheduledAt: string;\n}',
   },
   {
+    name: 'AttachmentBlobReservationId',
+    declaration: 'export type AttachmentBlobReservationId = Branded<\'AttachmentBlobReservationId\'>;',
+  },
+  {
     name: 'AttachmentCapability',
     declaration: 'export type AttachmentCapability = Branded<\'AttachmentCapability\'>;',
   },
@@ -4634,7 +4638,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RemoteAttachmentQuotaReservation',
-    declaration: 'export interface RemoteAttachmentQuotaReservation {\n    id: string;\n    release(): Promise<void>;\n}',
+    declaration: 'export interface RemoteAttachmentQuotaReservation {\n    id: AttachmentBlobReservationId;\n    release(): Promise<void>;\n}',
   },
   {
     name: 'RemoteRelayAttachment',

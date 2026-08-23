@@ -37,6 +37,7 @@ export const PLATFORM_PRODUCTION_REQUIRED_ENV = [
   'PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES',
   'PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS',
   'PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS',
+  'PLATFORM_REMOTE_ATTACHMENT_STORAGE',
   'PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS',
   'PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY',
   'PLATFORM_TOKEN_SIGNING_KEY',
@@ -97,6 +98,7 @@ export interface OperatedPlatformConfig {
     attachTimeoutMs: number
   }
   remoteAttachments: {
+    storage: 'postgres' | 'oss'
     maxBlobBytes: number
     capabilityLifetimeMs: number
     maxRetainedBlobs: number
@@ -234,6 +236,7 @@ export function loadOperatedPlatformConfig(
       attachTimeoutMs: positiveIntegerEnv(env, 'PLATFORM_RELAY_ATTACH_TIMEOUT_MS'),
     },
     remoteAttachments: {
+      storage: attachmentStorage(env.PLATFORM_REMOTE_ATTACHMENT_STORAGE),
       maxBlobBytes: boundedPositiveIntegerEnv(
         env, 'PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES', REMOTE_PROTOCOL_LIMITS.attachmentBlobBytes,
       ),
@@ -256,6 +259,11 @@ export function loadOperatedPlatformConfig(
     tokenSigningKey: readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', env),
     pollingSigningKey: readPlatformSigningKey('PLATFORM_POLLING_SIGNING_KEY', env),
   }
+}
+
+function attachmentStorage(value: string | undefined): 'postgres' | 'oss' {
+  if (value === 'postgres' || value === 'oss') return value
+  throw new TypeError('PLATFORM_REMOTE_ATTACHMENT_STORAGE must be postgres or oss')
 }
 
 function operatedIdentity(identity: OperatedPlatformIdentity): OperatedPlatformIdentity {

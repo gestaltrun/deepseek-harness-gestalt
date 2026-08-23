@@ -2,7 +2,13 @@
 
 import { createHash, randomBytes } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import { parsePersonalPairingId, type PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import {
+  parseAttachmentBlobReservationId,
+  parsePersonalPairingId,
+  type AttachmentBlobReservationCleanup,
+  type AttachmentBlobReservationId,
+  type PersonalPairingId,
+} from '@deepseek-ai/dsh-remote-access'
 import {
   RemoteAttachmentError,
   RemoteAttachmentStoreService,
@@ -31,6 +37,7 @@ CREATE TABLE IF NOT EXISTS remote_attachment_blobs (
   PRIMARY KEY (database_identity, capability_digest)
 );
 ALTER TABLE remote_attachment_blobs ADD COLUMN IF NOT EXISTS quota_reservation_id text;
+ALTER TABLE remote_attachment_blobs ADD COLUMN IF NOT EXISTS claim_token bytea;
 CREATE TABLE IF NOT EXISTS remote_attachment_objects (
   database_identity text NOT NULL,
   capability_digest bytea NOT NULL,
@@ -49,6 +56,19 @@ ALTER TABLE remote_attachment_objects ADD COLUMN IF NOT EXISTS legacy_authority 
 ALTER TABLE remote_attachment_objects ADD COLUMN IF NOT EXISTS claim_token bytea;
 CREATE INDEX IF NOT EXISTS remote_attachment_objects_expiry
   ON remote_attachment_objects (database_identity, expires_at);
+CREATE TABLE IF NOT EXISTS remote_attachment_publish_intents (
+  database_identity text NOT NULL,
+  capability_digest bytea NOT NULL,
+  pairing_id text NOT NULL,
+  object_key text NOT NULL,
+  byte_length bigint NOT NULL,
+  expires_at bigint NOT NULL,
+  quota_reservation_id text,
+  PRIMARY KEY (database_identity, capability_digest),
+  UNIQUE (database_identity, object_key)
+);
+CREATE INDEX IF NOT EXISTS remote_attachment_publish_intents_expiry
+  ON remote_attachment_publish_intents (database_identity, expires_at);
 CREATE TABLE IF NOT EXISTS remote_attachment_quota_releases (
   database_identity text NOT NULL,
   reservation_id text NOT NULL,
@@ -62,7 +82,7 @@ interface AttachmentRow {
   object_key: string
   byte_length: number
   expires_at: number
-  quota_reservation_id?: string
+  quota_reservation_id?: AttachmentBlobReservationId
   legacy_authority: boolean
   claim_token?: Uint8Array
 }
@@ -72,12 +92,13 @@ interface LegacyAttachmentRow {
   pairing_id: PersonalPairingId
   ciphertext: Uint8Array
   expires_at: number
-  quota_reservation_id?: string
+  quota_reservation_id?: AttachmentBlobReservationId
+  claim_token?: Uint8Array
 }
 
 interface CleanupBatch {
   objectKeys: string[]
-  quotaReservationIds: string[]
+  quotaReservationIds: AttachmentBlobReservationId[]
 }
 
 type Schedule = (handler: () => void, ms: number) => { unref(): void; cancel(): void }
@@ -91,8 +112,8 @@ export interface OssRemoteAttachmentStoreOptions {
   sweepIntervalMs: number
   cleanupConcurrency: number
   capacityRetryAfterSeconds: number
-  releaseQuotaReservation(reservationId: string): Promise<void>
-  activePairingIds(candidates: readonly PersonalPairingId[]): Promise<readonly PersonalPairingId[]>
+  quotaCleanup: AttachmentBlobReservationCleanup
+  inactivePairingIds(candidates: readonly PersonalPairingId[]): Promise<readonly PersonalPairingId[]>
   clock?: { now(): number }
   schedule?: Schedule
 }
@@ -106,14 +127,15 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
   private readonly sweepIntervalMs: number
   private readonly cleanupConcurrency: number
   private readonly capacityRetryAfterSeconds: number
-  private readonly releaseQuotaReservation: (reservationId: string) => Promise<void>
-  private readonly activePairingIds: (candidates: readonly PersonalPairingId[]) => Promise<readonly PersonalPairingId[]>
+  private readonly quotaCleanup: AttachmentBlobReservationCleanup
+  private readonly inactivePairingIds: (candidates: readonly PersonalPairingId[]) => Promise<readonly PersonalPairingId[]>
   private readonly clock: { now(): number }
   private readonly schedule: Schedule
   private readonly cleanupQueue: Array<{ key: string; kind: 'object' | 'quota' }> = []
   private readonly queuedCleanup = new Set<string>()
   private readonly cleanupWorkers = new Set<Promise<void>>()
   private sweepTimer: ReturnType<Schedule> | undefined
+  private sweepOperation: Promise<void> | undefined
   private disposed = false
 
   /**
@@ -137,8 +159,8 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     this.sweepIntervalMs = positiveInteger(options.sweepIntervalMs, 'sweepIntervalMs')
     this.cleanupConcurrency = positiveInteger(options.cleanupConcurrency, 'cleanupConcurrency')
     this.capacityRetryAfterSeconds = positiveInteger(options.capacityRetryAfterSeconds, 'capacityRetryAfterSeconds')
-    this.releaseQuotaReservation = async (reservationId) => { await options.releaseQuotaReservation(reservationId) }
-    this.activePairingIds = async candidates => await options.activePairingIds(candidates)
+    this.quotaCleanup = options.quotaCleanup
+    this.inactivePairingIds = async candidates => await options.inactivePairingIds(candidates)
     this.clock = options.clock ?? { now: () => Date.now() }
     this.schedule = options.schedule ?? ((handler, ms) => {
       const timer = setTimeout(handler, ms)
@@ -183,23 +205,35 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     const expiresAt = input.now + this.capabilityLifetimeMs
     let objectWritten = false
     try {
-      await this.objects.putObject(objectKey, input.ciphertext, expiresAt)
-      objectWritten = true
-      const cleanup = await this.reserve({
+      const cleanup = await this.reservePublishIntent({
         capabilityDigest,
         pairingId: input.pairingId,
         objectKey,
-        ciphertext: input.ciphertext,
+        byteLength: input.ciphertext.byteLength,
         now: input.now,
         expiresAt,
         ...(input.quota === undefined ? {} : { quotaReservationId: input.quota.id }),
       })
       this.queueCleanup(cleanup)
+      await this.objects.putObject(objectKey, input.ciphertext, expiresAt)
+      objectWritten = true
+      await this.commitPublishIntent({
+        capabilityDigest,
+        pairingId: input.pairingId,
+        objectKey,
+        ciphertext: input.ciphertext,
+        expiresAt,
+        ...(input.quota === undefined ? {} : { quotaReservationId: input.quota.id }),
+      })
     } catch (error) {
       const retained = objectWritten && await this.metadataReferences(capabilityDigest, objectKey)
       if (!retained) {
         if (objectWritten) await this.deleteObjectAfterAuthority(objectKey)
-        await input.quota?.release()
+        try {
+          await input.quota?.release()
+        } catch (cleanupError) {
+          console.error('[platform] attachment quota cleanup after publish failure failed:', cleanupError)
+        }
       }
       throw error
     }
@@ -226,6 +260,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     if (legacyRow === undefined) throw invalidCapability()
     this.requirePairing(legacyRow.pairing_id, input.pairingId)
     if (input.now >= legacyRow.expires_at) return await this.expireAndThrow(input.capability)
+    if (legacyRow.claim_token !== undefined) throw invalidCapability()
     return new Uint8Array(legacyRow.ciphertext)
   }
 
@@ -236,7 +271,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
   }): Promise<RemoteAttachmentConsumption> {
     const capabilityDigest = digest(input.capability)
     const claim = await this.claim(capabilityDigest, input.pairingId, input.now)
-    if (claim.kind === 'legacy') return this.legacyConsumption(capabilityDigest, claim.row)
+    if (claim.kind === 'legacy') return this.legacyConsumption(capabilityDigest, claim.row, claim.token)
     let ciphertext: Uint8Array
     try {
       ciphertext = await this.readCiphertext(claim.row)
@@ -320,14 +355,14 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     return projected
   }
 
-  private async reserve(input: {
+  private async reservePublishIntent(input: {
     capabilityDigest: Buffer
     pairingId: PersonalPairingId
     objectKey: string
-    ciphertext: Uint8Array
+    byteLength: number
     now: number
     expiresAt: number
-    quotaReservationId?: string
+    quotaReservationId?: AttachmentBlobReservationId
   }): Promise<CleanupBatch> {
     return await this.transaction(async (client) => {
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`remote-attachments:${this.databaseIdentity}`])
@@ -337,6 +372,8 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
            SELECT capability_digest FROM remote_attachment_objects WHERE database_identity = $1
            UNION
            SELECT capability_digest FROM remote_attachment_blobs WHERE database_identity = $1
+           UNION
+           SELECT capability_digest FROM remote_attachment_publish_intents WHERE database_identity = $1
          ) AS retained`,
         [this.databaseIdentity],
       )
@@ -347,6 +384,37 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
           this.capacityRetryAfterSeconds,
         )
       }
+      await client.query(
+        `INSERT INTO remote_attachment_publish_intents (
+           database_identity, capability_digest, pairing_id, object_key, byte_length, expires_at,
+           quota_reservation_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [this.databaseIdentity, input.capabilityDigest, input.pairingId, input.objectKey,
+          input.byteLength, input.expiresAt, input.quotaReservationId ?? null],
+      )
+      return cleanup
+    })
+  }
+
+  private async commitPublishIntent(input: {
+    capabilityDigest: Buffer
+    pairingId: PersonalPairingId
+    objectKey: string
+    ciphertext: Uint8Array
+    expiresAt: number
+    quotaReservationId?: AttachmentBlobReservationId
+  }): Promise<void> {
+    await this.transaction(async (client) => {
+      const intent = await client.query(
+        `DELETE FROM remote_attachment_publish_intents
+          WHERE database_identity = $1 AND capability_digest = $2
+            AND pairing_id = $3 AND object_key = $4 AND byte_length = $5 AND expires_at = $6
+            AND quota_reservation_id IS NOT DISTINCT FROM $7
+        RETURNING capability_digest`,
+        [this.databaseIdentity, input.capabilityDigest, input.pairingId, input.objectKey,
+          input.ciphertext.byteLength, input.expiresAt, input.quotaReservationId ?? null],
+      )
+      if (intent.rowCount !== 1) throw new TypeError('OSS attachment publish intent is unavailable')
       await client.query(
         `INSERT INTO remote_attachment_objects (
            database_identity, capability_digest, pairing_id, object_key, byte_length, expires_at,
@@ -362,7 +430,6 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
         [this.databaseIdentity, input.capabilityDigest, input.pairingId,
           Buffer.from(input.ciphertext), input.expiresAt, input.quotaReservationId ?? null],
       )
-      return cleanup
     })
   }
 
@@ -372,7 +439,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     now: number,
   ): Promise<
     { kind: 'object'; row: AttachmentRow; token: Buffer }
-    | { kind: 'legacy'; row: LegacyAttachmentRow }
+    | { kind: 'legacy'; row: LegacyAttachmentRow; token: Buffer }
   > {
     const result = await this.transaction(async (client) => {
       const objectRow = await this.loadObjectRow(client, capabilityDigest, true)
@@ -386,6 +453,15 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
       if (objectRow !== undefined) {
         if (objectRow.claim_token !== undefined) throw invalidCapability()
         const token = randomBytes(32)
+        if (objectRow.legacy_authority) {
+          if (legacyRow === undefined || legacyRow.claim_token !== undefined) throw invalidCapability()
+          const claimedLegacy = await client.query(
+            `UPDATE remote_attachment_blobs SET claim_token = $3
+              WHERE database_identity = $1 AND capability_digest = $2 AND claim_token IS NULL`,
+            [this.databaseIdentity, capabilityDigest, token],
+          )
+          if (claimedLegacy.rowCount !== 1) throw invalidCapability()
+        }
         const updated = await client.query(
           `UPDATE remote_attachment_objects SET claim_token = $3
             WHERE database_identity = $1 AND capability_digest = $2 AND claim_token IS NULL`,
@@ -394,11 +470,15 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
         if (updated.rowCount !== 1) throw invalidCapability()
         return { claimed: { kind: 'object' as const, row: objectRow, token } }
       }
-      await client.query(
-        'DELETE FROM remote_attachment_blobs WHERE database_identity = $1 AND capability_digest = $2',
-        [this.databaseIdentity, capabilityDigest],
+      if (legacyRow?.claim_token !== undefined) throw invalidCapability()
+      const token = randomBytes(32)
+      const claimedLegacy = await client.query(
+        `UPDATE remote_attachment_blobs SET claim_token = $3
+          WHERE database_identity = $1 AND capability_digest = $2 AND claim_token IS NULL`,
+        [this.databaseIdentity, capabilityDigest, token],
       )
-      return { claimed: { kind: 'legacy' as const, row: legacyRow as LegacyAttachmentRow } }
+      if (claimedLegacy.rowCount !== 1) throw invalidCapability()
+      return { claimed: { kind: 'legacy' as const, row: legacyRow as LegacyAttachmentRow, token } }
     })
     if ('expired' in result) {
       await this.finishCleanup(result.expired)
@@ -417,7 +497,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
       const current = await this.loadObjectRow(client, capabilityDigest, true)
       if (current === undefined || !sameBytes(current.claim_token, claim.token)) return { reserved: false, cleanup: emptyCleanup() }
       const legacy = await this.loadLegacyRow(client, capabilityDigest, true)
-      if (legacy === undefined) {
+      if (legacy === undefined || !sameBytes(legacy.claim_token, claim.token)) {
         return { reserved: false, cleanup: await this.deleteCapability(client, capabilityDigest, current, undefined) }
       }
       this.requirePairing(legacy.pairing_id, pairingId)
@@ -434,28 +514,47 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     return outcome.reserved
   }
 
-  private legacyConsumption(capabilityDigest: Buffer, row: LegacyAttachmentRow): RemoteAttachmentConsumption {
+  private legacyConsumption(
+    capabilityDigest: Buffer,
+    row: LegacyAttachmentRow,
+    token: Uint8Array,
+  ): RemoteAttachmentConsumption {
     let settled = false
     return {
       ciphertext: new Uint8Array(row.ciphertext),
       complete: async () => {
         if (settled) return
         settled = true
-        const cleanup = await this.transaction(async client => await this.recordQuotaCleanup(client, row.quota_reservation_id))
+        const cleanup = await this.transaction(async (client) => {
+          const removed = await client.query(
+            `DELETE FROM remote_attachment_blobs
+              WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3`,
+            [this.databaseIdentity, capabilityDigest, token],
+          )
+          return removed.rowCount === 1
+            ? await this.recordQuotaCleanup(client, row.quota_reservation_id)
+            : emptyCleanup()
+        })
         await this.finishCleanup(cleanup)
       },
       abandon: async (now) => {
         if (settled) return
         settled = true
         const cleanup = await this.transaction(async (client) => {
-          if (now >= row.expires_at) return await this.recordQuotaCleanup(client, row.quota_reservation_id)
+          if (now >= row.expires_at) {
+            const removed = await client.query(
+              `DELETE FROM remote_attachment_blobs
+                WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3`,
+              [this.databaseIdentity, capabilityDigest, token],
+            )
+            return removed.rowCount === 1
+              ? await this.recordQuotaCleanup(client, row.quota_reservation_id)
+              : emptyCleanup()
+          }
           await client.query(
-            `INSERT INTO remote_attachment_blobs (
-               database_identity, capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id
-             ) VALUES ($1,$2,$3,$4,$5,$6)
-             ON CONFLICT (database_identity, capability_digest) DO NOTHING`,
-            [this.databaseIdentity, capabilityDigest, row.pairing_id, Buffer.from(row.ciphertext),
-              row.expires_at, row.quota_reservation_id ?? null],
+            `UPDATE remote_attachment_blobs SET claim_token = NULL
+              WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3`,
+            [this.databaseIdentity, capabilityDigest, token],
           )
           return emptyCleanup()
         })
@@ -491,6 +590,12 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
           [this.databaseIdentity, capabilityDigest, current.pairing_id, Buffer.from(ciphertext),
             current.expires_at, current.quota_reservation_id ?? null],
         )
+      } else if (current.legacy_authority) {
+        await client.query(
+          `UPDATE remote_attachment_blobs SET claim_token = NULL
+            WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3`,
+          [this.databaseIdentity, capabilityDigest, claim.token],
+        )
       }
       await client.query(
         `UPDATE remote_attachment_objects SET claim_token = NULL
@@ -524,7 +629,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
 
   private async recordQuotaCleanup(
     client: PlatformSqlClient,
-    reservationId?: string,
+    reservationId?: AttachmentBlobReservationId,
     objectKey?: string,
   ): Promise<CleanupBatch> {
     if (reservationId !== undefined) {
@@ -543,37 +648,46 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
   private async retire(
     client: PlatformSqlClient,
     now: number,
-    activePairingIds?: readonly PersonalPairingId[],
+    inactivePairingIds: readonly PersonalPairingId[] = [],
   ): Promise<CleanupBatch> {
-    const enforcePairings = activePairingIds !== undefined
-    const active = activePairingIds ?? []
+    const retirePairings = inactivePairingIds.length > 0
     const objects = await client.query(
       `DELETE FROM remote_attachment_objects AS object
         WHERE object.database_identity = $1
           AND (object.expires_at <= $2
-            OR ($3::boolean AND NOT (object.pairing_id = ANY($4::text[])))
+            OR ($3::boolean AND object.pairing_id = ANY($4::text[]))
             OR (object.legacy_authority AND object.claim_token IS NULL AND NOT EXISTS (
               SELECT 1 FROM remote_attachment_blobs AS legacy
                WHERE legacy.database_identity = object.database_identity
                  AND legacy.capability_digest = object.capability_digest
             )))
        RETURNING object_key, quota_reservation_id`,
-      [this.databaseIdentity, now, enforcePairings, active],
+      [this.databaseIdentity, now, retirePairings, inactivePairingIds],
     )
     const legacy = await client.query(
       `DELETE FROM remote_attachment_blobs
         WHERE database_identity = $1
-          AND (expires_at <= $2 OR ($3::boolean AND NOT (pairing_id = ANY($4::text[]))))
+          AND (expires_at <= $2 OR ($3::boolean AND pairing_id = ANY($4::text[])))
        RETURNING quota_reservation_id`,
-      [this.databaseIdentity, now, enforcePairings, active],
+      [this.databaseIdentity, now, retirePairings, inactivePairingIds],
     )
-    const reservationIds = new Set<string>()
-    for (const row of [...objects.rows, ...legacy.rows]) {
-      if (typeof row.quota_reservation_id === 'string') reservationIds.add(row.quota_reservation_id)
+    const intents = await client.query(
+      `DELETE FROM remote_attachment_publish_intents
+        WHERE database_identity = $1
+          AND (expires_at <= $2 OR ($3::boolean AND pairing_id = ANY($4::text[])))
+       RETURNING object_key, quota_reservation_id`,
+      [this.databaseIdentity, now, retirePairings, inactivePairingIds],
+    )
+    const reservationIds = new Set<AttachmentBlobReservationId>()
+    for (const row of [...objects.rows, ...legacy.rows, ...intents.rows]) {
+      if (typeof row.quota_reservation_id === 'string') {
+        reservationIds.add(parseAttachmentBlobReservationId(row.quota_reservation_id))
+      }
     }
     for (const reservationId of reservationIds) await this.recordQuotaCleanup(client, reservationId)
     return {
-      objectKeys: objects.rows.flatMap(row => typeof row.object_key === 'string' ? [row.object_key] : []),
+      objectKeys: [...objects.rows, ...intents.rows]
+        .flatMap(row => typeof row.object_key === 'string' ? [row.object_key] : []),
       quotaReservationIds: [...reservationIds],
     }
   }
@@ -601,6 +715,9 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     try {
       const selected = await this.pool.query(
         `SELECT object_key FROM remote_attachment_objects
+          WHERE database_identity = $1 AND capability_digest = $2
+         UNION ALL
+         SELECT object_key FROM remote_attachment_publish_intents
           WHERE database_identity = $1 AND capability_digest = $2`,
         [this.databaseIdentity, capabilityDigest],
       )
@@ -637,7 +754,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     lock: boolean,
   ): Promise<LegacyAttachmentRow | undefined> {
     const selected = await client.query(
-      `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id
+      `SELECT capability_digest, pairing_id, ciphertext, expires_at, quota_reservation_id, claim_token
          FROM remote_attachment_blobs
         WHERE database_identity = $1 AND capability_digest = $2${lock ? ' FOR UPDATE' : ''}`,
       [this.databaseIdentity, capabilityDigest],
@@ -657,7 +774,9 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
       || typeof value.legacy_authority !== 'boolean'
       || (value.claim_token !== null && value.claim_token !== undefined && !(value.claim_token instanceof Uint8Array))
       || (value.quota_reservation_id !== null && value.quota_reservation_id !== undefined
-        && (typeof value.quota_reservation_id !== 'string' || value.quota_reservation_id === ''))) return undefined
+        && (typeof value.quota_reservation_id !== 'string' || value.quota_reservation_id === ''))
+      || (value.claim_token !== null && value.claim_token !== undefined
+        && (!(value.claim_token instanceof Uint8Array) || value.claim_token.byteLength !== 32))) return undefined
     const byteLength = Number(value.byte_length)
     const expiresAt = Number(value.expires_at)
     const expectedKey = `${this.objectPrefix}/${Buffer.from(value.capability_digest).toString('hex')}`
@@ -673,7 +792,10 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
         byte_length: byteLength,
         expires_at: expiresAt,
         legacy_authority: value.legacy_authority,
-        ...(typeof value.quota_reservation_id === 'string' ? { quota_reservation_id: value.quota_reservation_id } : {}),
+        ...(typeof value.quota_reservation_id === 'string'
+          ? { quota_reservation_id: parseAttachmentBlobReservationId(value.quota_reservation_id) }
+          : {}),
+        ...(value.claim_token instanceof Uint8Array ? { claim_token: value.claim_token } : {}),
         ...(value.claim_token instanceof Uint8Array ? { claim_token: value.claim_token } : {}),
       }
     } catch {
@@ -686,7 +808,9 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
       || typeof value.pairing_id !== 'string'
       || (typeof value.expires_at !== 'string' && typeof value.expires_at !== 'number')
       || (value.quota_reservation_id !== null && value.quota_reservation_id !== undefined
-        && (typeof value.quota_reservation_id !== 'string' || value.quota_reservation_id === ''))) return undefined
+        && (typeof value.quota_reservation_id !== 'string' || value.quota_reservation_id === ''))
+      || (value.claim_token !== null && value.claim_token !== undefined
+        && (!(value.claim_token instanceof Uint8Array) || value.claim_token.byteLength !== 32))) return undefined
     const expiresAt = Number(value.expires_at)
     if (value.capability_digest.byteLength !== 32 || value.ciphertext.byteLength === 0
       || value.ciphertext.byteLength > this.maxBlobBytes || !Number.isSafeInteger(expiresAt) || expiresAt <= 0) return undefined
@@ -696,7 +820,10 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
         pairing_id: parsePersonalPairingId(value.pairing_id),
         ciphertext: value.ciphertext,
         expires_at: expiresAt,
-        ...(typeof value.quota_reservation_id === 'string' ? { quota_reservation_id: value.quota_reservation_id } : {}),
+        ...(typeof value.quota_reservation_id === 'string'
+          ? { quota_reservation_id: parseAttachmentBlobReservationId(value.quota_reservation_id) }
+          : {}),
+        ...(value.claim_token instanceof Uint8Array ? { claim_token: value.claim_token } : {}),
       }
     } catch {
       return undefined
@@ -728,9 +855,14 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     if (this.disposed || this.sweepTimer !== undefined) return
     this.sweepTimer = this.schedule(() => {
       this.sweepTimer = undefined
-      void this.sweep().catch((error: unknown) => {
+      const operation = this.sweep()
+      this.sweepOperation = operation
+      void operation.catch((error: unknown) => {
         console.error('[platform] OSS attachment sweep failed:', error)
-      }).finally(() => { this.armSweep() })
+      }).finally(() => {
+        if (this.sweepOperation === operation) this.sweepOperation = undefined
+        this.armSweep()
+      })
     }, this.sweepIntervalMs)
     this.sweepTimer.unref()
   }
@@ -741,6 +873,8 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
          SELECT pairing_id FROM remote_attachment_objects WHERE database_identity = $1
          UNION ALL
          SELECT pairing_id FROM remote_attachment_blobs WHERE database_identity = $1
+         UNION ALL
+         SELECT pairing_id FROM remote_attachment_publish_intents WHERE database_identity = $1
        ) AS retained ORDER BY pairing_id`,
       [this.databaseIdentity],
     )
@@ -748,15 +882,19 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
       if (typeof row.pairing_id !== 'string') throw new TypeError('remote attachment pairing id is invalid')
       return parsePersonalPairingId(row.pairing_id)
     })
-    const active = await this.activePairingIds(pairingIds)
-    const cleanup = await this.transaction(async client => await this.retire(client, this.clock.now(), active))
+    const inactive = await this.inactivePairingIds(pairingIds)
+    const candidateSet = new Set(pairingIds)
+    if (inactive.some(pairingId => !candidateSet.has(pairingId))) {
+      throw new TypeError('inactive attachment pairing id was not a sweep candidate')
+    }
+    const cleanup = await this.transaction(async client => await this.retire(client, this.clock.now(), inactive))
     const pending = await this.pool.query(
       `SELECT reservation_id FROM remote_attachment_quota_releases
         WHERE database_identity = $1 ORDER BY reservation_id`,
       [this.databaseIdentity],
     )
     cleanup.quotaReservationIds.push(...pending.rows.flatMap(row =>
-      typeof row.reservation_id === 'string' ? [row.reservation_id] : []))
+      typeof row.reservation_id === 'string' ? [parseAttachmentBlobReservationId(row.reservation_id)] : []))
     this.queueCleanup(cleanup)
   }
 
@@ -794,7 +932,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
       await this.objects.deleteObject(item.key)
       return
     }
-    await this.releaseQuotaReservation(item.key)
+    await this.quotaCleanup.release(parseAttachmentBlobReservationId(item.key))
     await this.pool.query(
       'DELETE FROM remote_attachment_quota_releases WHERE database_identity = $1 AND reservation_id = $2',
       [this.databaseIdentity, item.key],
@@ -822,6 +960,7 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     this.disposed = true
     this.sweepTimer?.cancel()
     this.sweepTimer = undefined
+    await this.sweepOperation
     this.pumpCleanup()
     while (this.cleanupWorkers.size > 0 || this.cleanupQueue.length > 0) {
       await Promise.allSettled([...this.cleanupWorkers])

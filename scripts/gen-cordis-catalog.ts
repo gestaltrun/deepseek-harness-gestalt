@@ -331,6 +331,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   PairingRendezvousId: 'personal-pairing.md',
   PendingPairingId: 'personal-pairing.md',
   PersonalPairingId: 'personal-pairing.md',
+  AttachmentBlobReservationId: 'personal-pairing.md',
   PersonalPairingView: 'personal-pairing.md',
   AttachmentCapability: 'personal-pairing.md',
   RemoteAttachmentBlob: 'personal-pairing.md',

@@ -191,17 +191,17 @@ abstract rejectPairing(input: { desktop: PairingAccountAuthentication pendingPai
  * @throws RemoteAccessError `QUOTA` or `PLATFORM_CAPACITY` with `retryAfter` seconds.
  * @throws TypeError when `bytes` is not a non-negative integer.
  */
-abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: string }>
+abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes: number }): Promise<{ reservationId: AttachmentBlobReservationId }>
 
 /**
  * Release one blob reservation after receipt, expiry, or revocation.
  * @param input - current-installation authorization and reservation id.
  * @throws TypeError when the reservation is missing or owned by another Account.
  */
-abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: string }): Promise<void>
+abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: AttachmentBlobReservationId }): Promise<void>
 ```
 
-Source: [`packages/platform/remote-access/src/index.ts:577`](../../packages/platform/remote-access/src/index.ts)
+Source: [`packages/platform/remote-access/src/index.ts:584`](../../packages/platform/remote-access/src/index.ts)
 
 <a id="ctxremoteattachmentauthority--remoteattachmentauthority"></a>
 

@@ -51,26 +51,29 @@ export async function createEcsRamRoleOssClient(
       const result = await client.getStream(key)
       const stream: unknown = result.stream
       if (!(stream instanceof Readable)) throw new TypeError('OSS returned an invalid attachment ciphertext stream')
-      const declared = contentLength(result.res.headers)
-      if (declared !== expectedByteLength) {
-        stream.destroy()
-        throw new TypeError('OSS attachment ciphertext length does not match PostgreSQL authority')
-      }
-      const chunks: Buffer[] = []
-      let received = 0
-      for await (const chunk of stream) {
-        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array)
-        received += bytes.byteLength
-        if (received > expectedByteLength) {
-          stream.destroy()
-          throw new TypeError('OSS attachment ciphertext exceeded PostgreSQL authority')
+      try {
+        const declared = contentLength(result.res.headers)
+        if (declared !== expectedByteLength) {
+          throw new TypeError('OSS attachment ciphertext length does not match PostgreSQL authority')
         }
-        chunks.push(bytes)
+        const ciphertext = Buffer.allocUnsafe(expectedByteLength)
+        let received = 0
+        for await (const chunk of stream) {
+          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array)
+          if (bytes.byteLength > expectedByteLength - received) {
+            throw new TypeError('OSS attachment ciphertext exceeded PostgreSQL authority')
+          }
+          bytes.copy(ciphertext, received)
+          received += bytes.byteLength
+        }
+        if (received !== expectedByteLength) {
+          throw new TypeError('OSS attachment ciphertext length does not match PostgreSQL authority')
+        }
+        return new Uint8Array(ciphertext)
+      } catch (error) {
+        stream.destroy()
+        throw error
       }
-      if (received !== expectedByteLength) {
-        throw new TypeError('OSS attachment ciphertext length does not match PostgreSQL authority')
-      }
-      return new Uint8Array(Buffer.concat(chunks, received))
     },
     async deleteObject(key) { await client.delete(key) },
   }

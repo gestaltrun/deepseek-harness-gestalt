@@ -39,6 +39,7 @@ import { RedisAccountInvalidationBus, connectRedis } from './redis-bus.ts'
 import { OperatedRemoteAccessResources } from './remote-access-resources.ts'
 import { OssRemoteAttachmentStore } from './oss-attachment-store.ts'
 import { createEcsRamRoleOssClient, type OssObjectClient } from './oss-client.ts'
+import { PostgresRemoteAttachmentStore } from './postgres-attachment-store.ts'
 import { OperatedRemoteAttachmentAuthority } from './remote-attachment-authority.ts'
 
 type RedisConnection = Awaited<ReturnType<typeof connectRedis>>
@@ -115,7 +116,6 @@ export async function launchOperatedPlatform(
       redisKeyPrefix: config.relayRedisKeyPrefix,
     })
     await remoteAccess.migrate()
-    const oss = await createOss(config.oss)
     const github = new GitHubOAuthIdentityProvider({
       environment,
       credential: { reference: environment.credentialReference, secret: config.githubClientSecret },
@@ -160,21 +160,25 @@ export async function launchOperatedPlatform(
       authority: remoteAccess.authority,
       pairingLinkOrigin: `${environment.origin}/pair`,
     })
-    const remoteAttachments = new OssRemoteAttachmentStore(
-      context,
-      environment.databaseIdentity,
-      postgres,
-      oss,
-      {
+    const quotaCleanup = personalPairing.attachmentReservationCleanup()
+    const remoteAttachments = config.remoteAttachments.storage === 'postgres'
+      ? new PostgresRemoteAttachmentStore(context, environment.databaseIdentity, postgres, {
         ...config.remoteAttachments,
-        objectPrefix: config.oss.objectPrefix,
-        capacityRetryAfterSeconds: Math.max(1, Math.ceil(config.relay.capacityRetryAfterMs / 1_000)),
-        releaseQuotaReservation: async (reservationId) => {
-          await personalPairing.releaseAttachmentReservation(reservationId)
+        quotaCleanup,
+      })
+      : new OssRemoteAttachmentStore(
+        context,
+        environment.databaseIdentity,
+        postgres,
+        await createOss(config.oss),
+        {
+          ...config.remoteAttachments,
+          objectPrefix: config.oss.objectPrefix,
+          capacityRetryAfterSeconds: Math.max(1, Math.ceil(config.relay.capacityRetryAfterMs / 1_000)),
+          quotaCleanup,
+          inactivePairingIds: async pairingIds => await remoteAccess.authority.filterInactivePairingIds(pairingIds),
         },
-        activePairingIds: async pairingIds => await remoteAccess.authority.filterConfirmedPairingIds(pairingIds),
-      },
-    )
+      )
     await remoteAttachments.migrate()
     context.effect(() => context.provide(
       'remoteAttachmentAuthority',
@@ -202,7 +206,7 @@ export async function launchOperatedPlatform(
       attachTimeoutMs: config.relay.attachTimeoutMs,
       maxPendingChallenges: config.relay.maxPendingChallenges,
     })
-    registerHealth(context)
+    registerHealth(context, config.remoteAttachments.storage)
     await context.plugin(FrontendStatic, {
       distIndex: options.publicIndex ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'index.html'),
     })
@@ -240,14 +244,14 @@ function endpointOnlyError(): Error {
   return new Error('Platform-mediated pairing cryptography is disabled; endpoints must use the opaque mailbox')
 }
 
-function registerHealth(context: Context): void {
+function registerHealth(context: Context, attachmentStorage: 'postgres' | 'oss'): void {
   for (const path of ['/healthz', '/readyz']) {
     context.effect(() => context.webServer.register({
       kind: 'exact',
       path,
       handler(_req, res) {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-        res.end(JSON.stringify({ ok: true }))
+        res.end(JSON.stringify({ ok: true, attachmentStorage }))
       },
     }),
     `platform: ${path}`,

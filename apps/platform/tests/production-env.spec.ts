@@ -59,6 +59,7 @@ function completeDeployEnv(): NodeJS.Dict<string> {
     PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES: '104857600',
     PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS: '900000',
     PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS: '10000',
+    PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'oss',
     PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS: '60000',
     PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY: '8',
     PLATFORM_TOKEN_SIGNING_KEY: HEX,
@@ -139,6 +140,7 @@ describe('production and deploy names', () => {
       redis: { host: 'redis.example.test', username: 'gestalt', tls: true },
       relayRedisKeyPrefix: 'gestalt:relay',
       remoteAttachments: {
+        storage: 'oss',
         maxBlobBytes: 104857600,
         capabilityLifetimeMs: 900000,
         maxRetainedBlobs: 10000,
@@ -153,6 +155,12 @@ describe('production and deploy names', () => {
         timeoutMs: 10000,
       },
     })
+    expect(loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'postgres',
+    }).remoteAttachments.storage).toBe('postgres')
+    expect(() => loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'mixed',
+    })).toThrow('PLATFORM_REMOTE_ATTACHMENT_STORAGE')
     expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_ORIGIN: 'https://localhost' }))
       .toThrow('must not use a local host')
     expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_POSTGRES_SSL: 'disable' }))
@@ -217,6 +225,7 @@ describe('production and deploy names', () => {
       'PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES',
       'PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS',
       'PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS',
+      'PLATFORM_REMOTE_ATTACHMENT_STORAGE',
       'PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS',
       'PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY',
       'PLATFORM_TOKEN_SIGNING_KEY',
@@ -299,7 +308,7 @@ describe('operated Platform composition', () => {
     expect(productComposition).toContain('OssRemoteAttachmentStore')
     expect(productComposition).toContain('createEcsRamRoleOssClient')
     expect(dockerfileSource).toContain('ali-oss@6.23.0')
-    expect(productComposition).not.toContain('PostgresRemoteAttachmentStore')
+    expect(productComposition).toContain('PostgresRemoteAttachmentStore')
     expect(productComposition).not.toContain('production-env-cli')
     expect(readFileSync(new URL('../src/production-env.ts', import.meta.url), 'utf8')).not.toContain('process.exit')
   })
@@ -312,6 +321,7 @@ describe('Platform release workflows', () => {
       workflow_dispatch: {
         inputs: {
           deploy: { type: 'boolean', default: false },
+          attachment_storage: { type: 'choice', default: 'postgres' },
         },
       },
     })
@@ -334,9 +344,17 @@ describe('Platform release workflows', () => {
     expect(String(apply.run)).toContain('--log-opt max-size=20m')
     expect(String(apply.run)).toContain('--log-opt max-file=3')
     expect(String(apply.run)).toContain('dist/oss-lifecycle-cli.mjs')
-    expect(String(apply.run).indexOf('dist/oss-lifecycle-cli.mjs'))
-      .toBeLessThan(String(apply.run).indexOf('docker rm -f dsh-platform'))
-    expect(String(apply.run)).toContain('"set -euo pipefail; docker run --rm --network host')
+    expect(String(apply.run)).toContain('dsh-platform-candidate')
+    expect(String(apply.run)).toContain('127.0.0.1:18080/readyz')
+    expect(String(apply.run)).toContain('attachmentStorage')
+    expect(String(apply.run)).toContain('rollback_platform')
+    expect(String(apply.run)).toContain('docker inspect dsh-platform >/dev/null; curl -fsS')
+    expect(String(apply.run)).toContain('if docker inspect dsh-platform-rollback')
+    expect(String(apply.run).indexOf('if docker inspect dsh-platform-rollback'))
+      .toBeLessThan(String(apply.run).indexOf('docker rm -f dsh-platform >/dev/null 2>&1 || true'))
+    expect(String(apply.run)).toContain('Stop every predecessor before')
+    expect(String(apply.run)).toContain('--env-file /run/dsh-platform-candidate.env')
+    expect(String(apply.run)).toContain('PLATFORM_REMOTE_ATTACHMENT_STORAGE')
     expect(String(apply.run)).toContain('dsh-loongcollector')
     expect(String(apply.run)).toContain('gestalt-platform')
     if (!isRecord(apply.env)) throw new TypeError('deploy apply step must define env')

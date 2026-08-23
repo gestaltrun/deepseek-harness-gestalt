@@ -1921,7 +1921,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/platform/remote-access-http/src/index.ts:28`](../packages/platform/remote-access-http/src/index.ts)
+Source: [`packages/platform/remote-access-http/src/index.ts:29`](../packages/platform/remote-access-http/src/index.ts)
 
 <a id="deepseek-aidsh-remote-attachments"></a>
 

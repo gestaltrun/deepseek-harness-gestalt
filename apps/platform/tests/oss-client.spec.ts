@@ -103,6 +103,41 @@ describe('ECS RAM role OSS client', () => {
     expect(pulls).toBe(0)
   })
 
+  it.each([
+    ['malformed header', { headers: { 'content-length': 'nope' }, chunks: [Buffer.from([1, 2, 3])] }],
+    ['short stream', { headers: { 'content-length': '3' }, chunks: [Buffer.from([1, 2])] }],
+    ['long stream', { headers: { 'content-length': '3' }, chunks: [Buffer.from([1, 2]), Buffer.from([3, 4])] }],
+  ])('destroys the OSS response stream on a %s failure', async (_label, fixture) => {
+    const stream = Readable.from(fixture.chunks)
+    const destroy = vi.spyOn(stream, 'destroy')
+    oss.getStream.mockResolvedValueOnce({ stream, res: fixture })
+    const client = await createEcsRamRoleOssClient({
+      endpoint: 'oss-cn-hangzhou-internal.aliyuncs.com', bucket: 'gestalt-secret',
+      auth: 'ecs-ram-role/gestalt-vpc', objectPrefix: 'remote-attachments/test', timeoutMs: 10,
+    }, metadataCredentials)
+
+    await expect(client.getObject('remote/key', 3)).rejects.toThrow()
+    expect(destroy).toHaveBeenCalled()
+  })
+
+  it('destroys a stream that errors after returning a partial ciphertext', async () => {
+    const stream = new Readable({
+      read() {
+        this.push(Buffer.from([1]))
+        this.destroy(new Error('OSS socket failed'))
+      },
+    })
+    const destroy = vi.spyOn(stream, 'destroy')
+    oss.getStream.mockResolvedValueOnce({ stream, res: { headers: { 'content-length': '3' } } })
+    const client = await createEcsRamRoleOssClient({
+      endpoint: 'oss-cn-hangzhou-internal.aliyuncs.com', bucket: 'gestalt-secret',
+      auth: 'ecs-ram-role/gestalt-vpc', objectPrefix: 'remote-attachments/test', timeoutMs: 10,
+    }, metadataCredentials)
+
+    await expect(client.getObject('remote/key', 3)).rejects.toThrow('OSS socket failed')
+    expect(destroy).toHaveBeenCalled()
+  })
+
   it('rejects non-role auth, unsafe endpoints, invalid buckets, metadata failures, and malformed credentials', async () => {
     expect(() => parseEcsRamRole('access-key/plaintext')).toThrow('ECS RAM role')
     expect(() => parseEcsRamRole('ecs-ram-role/')).toThrow('role name')

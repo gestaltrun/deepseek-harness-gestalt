@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
+  parseAttachmentBlobReservationId,
   parsePendingPairingId,
   parsePersonalPairingId,
   parseRelayCredentialFingerprint,
@@ -28,6 +29,10 @@ import type { OssObjectClient } from '../src/oss-client.ts'
 import { PostgresRemoteAttachmentStore } from '../src/postgres-attachment-store.ts'
 import { PostgresPersonalPairingAuthorityStore } from '../src/postgres-pairing-store.ts'
 import { OperatedRemoteAttachmentAuthority } from '../src/remote-attachment-authority.ts'
+import {
+  FIXED_BASE_ATTACHMENT_CONSUMER_SHA,
+  runFixedBaseAttachmentConsume,
+} from './fixtures/fixed-base-b2e93-remote-attachment-consumer.ts'
 
 const durableProgramsAvailable = commandAvailable('initdb')
   && commandAvailable('postgres')
@@ -55,6 +60,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     const pairing = parsePersonalPairingId('pairing-rolling-attachment')
     const oldStore = new PostgresRemoteAttachmentStore(oldContext, 'attachment-rolling-fixture', pool, {
       maxBlobBytes: 1024, capabilityLifetimeMs: 1_000, maxRetainedBlobs: 4,
+      quotaCleanup: { release: async () => {} },
     })
     await oldStore.migrate()
     const now = Date.now()
@@ -68,8 +74,8 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       sweepIntervalMs: 60_000,
       cleanupConcurrency: 2,
       capacityRetryAfterSeconds: 1,
-      releaseQuotaReservation: async () => {},
-      activePairingIds: async () => [pairing],
+      quotaCleanup: { release: async () => {} },
+      inactivePairingIds: async () => [],
     })
     await newStore.migrate()
 
@@ -87,6 +93,83 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     await newConsumption.complete()
     await expect(newStore.consume({ pairingId: pairing, capability: newGrant.capability, now: now + 6 }))
       .rejects.toMatchObject({ code: 'ATTACHMENT_CAPABILITY_INVALID' })
+
+    const atomicGrant = await newStore.publish({ pairingId: pairing, ciphertext: Uint8Array.of(5, 6), now: now + 7 })
+    const atomicConsumers = await Promise.allSettled([
+      oldStore.consume({ pairingId: pairing, capability: atomicGrant.capability, now: now + 8 }),
+      newStore.consume({ pairingId: pairing, capability: atomicGrant.capability, now: now + 8 }),
+    ])
+    expect(atomicConsumers.filter(result => result.status === 'fulfilled')).toHaveLength(1)
+    expect(atomicConsumers.filter(result => result.status === 'rejected')).toHaveLength(1)
+    const atomicWinner = atomicConsumers.find(result => result.status === 'fulfilled')
+    if (atomicWinner?.status !== 'fulfilled') throw new Error('bridge and OSS did not elect one consumer')
+    await atomicWinner.value.complete()
+  }, 60_000)
+
+  it('proves the fixed-base HTTP consumer must be drained before the atomic bridge contract', async () => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const context = new Context()
+    cleanups.push(async () => { await context.fiber.dispose() })
+    const pairingId = parsePersonalPairingId('pairing-fixed-base-overlap')
+    const bridge = new PostgresRemoteAttachmentStore(context, 'attachment-fixed-base-overlap', pool, {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 1_000,
+      maxRetainedBlobs: 4,
+      quotaCleanup: { release: async () => {} },
+    })
+    await bridge.migrate()
+    const ciphertext = Uint8Array.of(8, 6, 7, 5)
+    const grant = await bridge.publish({ pairingId, ciphertext, now: Date.now() })
+    let reportInspected!: () => void
+    const inspected = new Promise<void>((resolve) => { reportInspected = resolve })
+    let releaseFixedBase!: () => void
+    const fixedBaseMayWrite = new Promise<void>((resolve) => { releaseFixedBase = resolve })
+    const predecessor = createHttpServer((req, res) => {
+      void (async () => {
+        const chunks: Buffer[] = []
+        for await (const chunk of req) chunks.push(Buffer.from(chunk as Uint8Array))
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { capability: string }
+        await runFixedBaseAttachmentConsume({
+          store: bridge,
+          pairingId,
+          capability: body.capability as typeof grant.capability,
+          response: res,
+          now: Date.now(),
+          inspected: async () => { reportInspected(); await fixedBaseMayWrite },
+        })
+      })().catch(() => { if (!res.headersSent) res.writeHead(500).end() })
+    })
+    await new Promise<void>((resolve) => { predecessor.listen(0, '127.0.0.1', resolve) })
+    cleanups.push(async () => {
+      await new Promise<void>((resolve, reject) => predecessor.close((error) => { if (error === undefined) resolve(); else reject(error) }))
+    })
+    const address = predecessor.address()
+    if (address === null || typeof address === 'string') throw new Error('fixed-base HTTP artifact did not bind')
+    const fixedBaseResponse = fetch(`http://127.0.0.1:${String(address.port)}/v1/remote-attachments/consume`, {
+      method: 'POST', body: JSON.stringify({ capability: grant.capability }),
+    })
+    await inspected
+
+    const bridgeOrigin = await startAttachmentHttp(bridge, {
+      authenticate: async () => ({
+        pairingId,
+        admit: async () => ({
+          id: parseAttachmentBlobReservationId('fixed-base-unused'), release: async () => {},
+        }),
+      }),
+    })
+    const bridgeResponse = await fetch(`${bridgeOrigin}/v1/remote-attachments/consume`, {
+      method: 'POST', body: JSON.stringify({ capability: grant.capability }),
+    })
+    releaseFixedBase()
+    const oldResponse = await fixedBaseResponse
+
+    expect(FIXED_BASE_ATTACHMENT_CONSUMER_SHA).toBe('b2e93d3c835')
+    expect([oldResponse.status, bridgeResponse.status]).toEqual([200, 200])
+    expect(new Uint8Array(await oldResponse.arrayBuffer())).toEqual(ciphertext)
+    expect(new Uint8Array(await bridgeResponse.arrayBuffer())).toEqual(ciphertext)
   }, 60_000)
 
   it('claims one OSS capability atomically across operated Platform instances', async () => {
@@ -106,8 +189,8 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       sweepIntervalMs: 60_000,
       cleanupConcurrency: 2,
       capacityRetryAfterSeconds: 1,
-      releaseQuotaReservation: async () => {},
-      activePairingIds: async () => [pairing],
+      quotaCleanup: { release: async () => {} },
+      inactivePairingIds: async () => [],
     }
     const first = new OssRemoteAttachmentStore(firstContext, 'attachment-atomic-fixture', pool, memoryOssClient(objects), options)
     const second = new OssRemoteAttachmentStore(secondContext, 'attachment-atomic-fixture', pool, memoryOssClient(objects), options)
@@ -136,12 +219,17 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     cleanups.push(async () => { await context.fiber.dispose() })
     const pairingA = parsePersonalPairingId('pairing-sweep-a')
     const pairingB = parsePersonalPairingId('pairing-sweep-b')
+    const pairingC = parsePersonalPairingId('pairing-sweep-c')
     let active = [pairingA, pairingB]
     let now = 100
     const ticks: Array<() => void> = []
     const objects = new Map<string, Uint8Array>()
     const released: string[] = []
     const sweepCandidates: Array<readonly string[]> = []
+    let releaseCandidateSnapshot!: () => void
+    const candidateSnapshotReleased = new Promise<void>((resolve) => { releaseCandidateSnapshot = resolve })
+    let reportCandidateSnapshot!: () => void
+    const candidateSnapshotReported = new Promise<void>((resolve) => { reportCandidateSnapshot = resolve })
     const store = new OssRemoteAttachmentStore(context, 'attachment-sweep-fixture', pool, memoryOssClient(objects), {
       maxBlobBytes: 1024,
       capabilityLifetimeMs: 10,
@@ -150,10 +238,14 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       sweepIntervalMs: 60_000,
       cleanupConcurrency: 2,
       capacityRetryAfterSeconds: 1,
-      releaseQuotaReservation: async (reservationId) => { released.push(reservationId) },
-      activePairingIds: async (candidates) => {
+      quotaCleanup: { release: async (reservationId) => { released.push(reservationId) } },
+      inactivePairingIds: async (candidates) => {
         sweepCandidates.push(candidates)
-        return candidates.filter(pairingId => active.includes(pairingId))
+        if (candidates.length === 2) {
+          reportCandidateSnapshot()
+          await candidateSnapshotReleased
+        }
+        return candidates.filter(pairingId => !active.includes(pairingId))
       },
       clock: { now: () => now },
       schedule: (handler) => {
@@ -164,16 +256,19 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     await store.migrate()
     await store.publish({
       pairingId: pairingA, ciphertext: Uint8Array.of(1), now,
-      quota: { id: 'quota-sweep-a', release: async () => {} },
+      quota: { id: parseAttachmentBlobReservationId('quota-sweep-a'), release: async () => {} },
     })
     await store.publish({
       pairingId: pairingB, ciphertext: Uint8Array.of(2), now,
-      quota: { id: 'quota-sweep-b', release: async () => {} },
+      quota: { id: parseAttachmentBlobReservationId('quota-sweep-b'), release: async () => {} },
     })
 
     active = [pairingA]
     ticks[0]?.()
-    await vi.waitFor(async () => { expect(await store.observe()).toHaveLength(1) })
+    await candidateSnapshotReported
+    await store.publish({ pairingId: pairingC, ciphertext: Uint8Array.of(3), now })
+    releaseCandidateSnapshot()
+    await vi.waitFor(async () => { expect(await store.observe()).toHaveLength(2) })
     expect(sweepCandidates).toContainEqual([pairingA, pairingB])
     await vi.waitFor(() => { expect(released).toContain('quota-sweep-b') })
     now = 110
@@ -182,6 +277,106 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     await vi.waitFor(async () => { expect(await store.observe()).toHaveLength(0) })
     await vi.waitFor(() => { expect(released).toEqual(expect.arrayContaining(['quota-sweep-a', 'quota-sweep-b'])) })
     expect(objects.size).toBe(0)
+  }, 60_000)
+
+  it('reconciles an expired durable publish intent after a process restart', async () => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const firstContext = new Context()
+    const secondContext = new Context()
+    cleanups.push(async () => { await firstContext.fiber.dispose(); await secondContext.fiber.dispose() })
+    const objects = new Map<string, Uint8Array>()
+    const prefix = 'remote-attachments/intent-restart'
+    const digest = Buffer.alloc(32, 7)
+    const objectKey = `${prefix}/${digest.toString('hex')}`
+    const first = new OssRemoteAttachmentStore(firstContext, 'intent-restart-fixture', pool, memoryOssClient(objects), {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 10,
+      maxRetainedBlobs: 4,
+      objectPrefix: prefix,
+      sweepIntervalMs: 60_000,
+      cleanupConcurrency: 1,
+      capacityRetryAfterSeconds: 1,
+      quotaCleanup: { release: async () => {} },
+      inactivePairingIds: async () => [],
+      clock: { now: () => 100 },
+      schedule: () => ({ unref: () => {}, cancel: () => {} }),
+    })
+    await first.migrate()
+    objects.set(objectKey, Uint8Array.of(4, 2))
+    await pool.query(
+      `INSERT INTO remote_attachment_publish_intents (
+         database_identity, capability_digest, pairing_id, object_key, byte_length, expires_at, quota_reservation_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      ['intent-restart-fixture', digest, 'pairing-intent-restart', objectKey, 2, 110, 'quota-intent-restart'],
+    )
+    await firstContext.fiber.dispose()
+
+    const released: string[] = []
+    const second = new OssRemoteAttachmentStore(secondContext, 'intent-restart-fixture', pool, memoryOssClient(objects), {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 10,
+      maxRetainedBlobs: 4,
+      objectPrefix: prefix,
+      sweepIntervalMs: 60_000,
+      cleanupConcurrency: 1,
+      capacityRetryAfterSeconds: 1,
+      quotaCleanup: { release: async (reservationId) => { released.push(reservationId) } },
+      inactivePairingIds: async () => [],
+      clock: { now: () => 111 },
+      schedule: () => ({ unref: () => {}, cancel: () => {} }),
+    })
+    await second.migrate()
+
+    await vi.waitFor(() => { expect(objects.has(objectKey)).toBe(false) })
+    await vi.waitFor(() => { expect(released).toEqual(['quota-intent-restart']) })
+    const intent = await pool.query(
+      'SELECT capability_digest FROM remote_attachment_publish_intents WHERE database_identity = $1',
+      ['intent-restart-fixture'],
+    )
+    expect(intent.rows).toHaveLength(0)
+  }, 60_000)
+
+  it('waits for an active durable sweep before store disposal becomes quiescent', async () => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const context = new Context()
+    const pairingId = parsePersonalPairingId('pairing-sweep-dispose')
+    let tick!: () => void
+    let blockSweep = false
+    let reportBlocked!: () => void
+    const blocked = new Promise<void>((resolve) => { reportBlocked = resolve })
+    let releaseSweep!: () => void
+    const sweepReleased = new Promise<void>((resolve) => { releaseSweep = resolve })
+    const store = new OssRemoteAttachmentStore(context, 'sweep-dispose-fixture', pool, memoryOssClient(), {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 1_000,
+      maxRetainedBlobs: 4,
+      objectPrefix: 'remote-attachments/sweep-dispose',
+      sweepIntervalMs: 60_000,
+      cleanupConcurrency: 1,
+      capacityRetryAfterSeconds: 1,
+      quotaCleanup: { release: async () => {} },
+      inactivePairingIds: async () => {
+        if (blockSweep) { reportBlocked(); await sweepReleased }
+        return []
+      },
+      schedule: (handler) => { tick = handler; return { unref: () => {}, cancel: () => {} } },
+    })
+    await store.migrate()
+    await store.publish({ pairingId, ciphertext: Uint8Array.of(1), now: 100 })
+    blockSweep = true
+    tick()
+    await blocked
+    let disposed = false
+    const disposing = context.fiber.dispose().then(() => { disposed = true })
+    await Promise.resolve()
+    expect(disposed).toBe(false)
+    releaseSweep()
+    await disposing
+    expect(disposed).toBe(true)
   }, 60_000)
 
   it('does not make a publish wait for expired OSS object deletion', async () => {
@@ -217,8 +412,8 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       sweepIntervalMs: 60_000,
       cleanupConcurrency: 1,
       capacityRetryAfterSeconds: 1,
-      releaseQuotaReservation: async () => {},
-      activePairingIds: async () => [pairing],
+      quotaCleanup: { release: async () => {} },
+      inactivePairingIds: async () => [],
       clock: { now: () => 100 },
       schedule: () => ({ unref: () => {}, cancel: () => {} }),
     })
@@ -250,11 +445,8 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       sweepIntervalMs: 60_000,
       cleanupConcurrency: 2,
       capacityRetryAfterSeconds: 1,
-      releaseQuotaReservation: async () => {},
-      activePairingIds: async () => [
-        parsePersonalPairingId('pairing-shared-oss'),
-        parsePersonalPairingId('pairing-other-oss'),
-      ],
+      quotaCleanup: { release: async () => {} },
+      inactivePairingIds: async () => [],
     }
     const first = new OssRemoteAttachmentStore(firstContext, 'oss-fixture', pool, objectClient, options)
     const second = new OssRemoteAttachmentStore(secondContext, 'oss-fixture', pool, objectClient, options)
@@ -297,7 +489,10 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     const firstContext = new Context()
     const secondContext = new Context()
     cleanups.push(async () => { await firstContext.fiber.dispose(); await secondContext.fiber.dispose() })
-    const options = { maxBlobBytes: 1024, capabilityLifetimeMs: 1_000, maxRetainedBlobs: 1 }
+    const options = {
+      maxBlobBytes: 1024, capabilityLifetimeMs: 1_000, maxRetainedBlobs: 1,
+      quotaCleanup: { release: async () => {} },
+    }
     const first = new PostgresRemoteAttachmentStore(firstContext, 'attachment-fixture', pool, options)
     const second = new PostgresRemoteAttachmentStore(secondContext, 'attachment-fixture', pool, options)
     await first.migrate()
@@ -363,8 +558,8 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       sweepIntervalMs: 60_000,
       cleanupConcurrency: 2,
       capacityRetryAfterSeconds: 1,
-      releaseQuotaReservation: async (reservationId: string) => { quotaReleases.push(reservationId) },
-      activePairingIds: async () => [pairingId],
+      quotaCleanup: { release: async (reservationId: string) => { quotaReleases.push(reservationId) } },
+      inactivePairingIds: async () => [],
     }
     const first = new OssRemoteAttachmentStore(
       firstContext, 'attachment-http-fixture', pool, memoryOssClient(objects), options,
@@ -395,7 +590,9 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       })),
     }
     const authority = new OperatedRemoteAttachmentAuthority(account, pairings, {
-      admitAttachmentBlob: async () => ({ reservationId: 'attachment-http-quota' }),
+      admitAttachmentBlob: async () => ({
+        reservationId: parseAttachmentBlobReservationId('attachment-http-quota'),
+      }),
       releaseAttachmentBlob: async () => {},
     })
     const firstOrigin = await startAttachmentHttp(first, authority)
@@ -418,7 +615,11 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       body: JSON.stringify({ capability: grant.capability }),
     })
     const consumed = await Promise.all([consumeRequest(firstOrigin), consumeRequest(secondOrigin)])
-    expect(consumed.map(response => response.status).sort()).toEqual([200, 404])
+    const statuses = consumed.map(response => response.status).sort()
+    if (statuses[0] !== 200 || statuses[1] !== 404) {
+      throw new Error(`operated attachment consume statuses ${statuses.join(',')}: ${
+        (await Promise.all(consumed.map(async response => await response.clone().text()))).join(' | ')}`)
+    }
     const winner = consumed.find(response => response.status === 200)
     if (winner === undefined) throw new Error('one operated HTTP consume must win')
     expect(new Uint8Array(await winner.arrayBuffer())).toEqual(ciphertext)
@@ -628,6 +829,7 @@ function operatedFixtureEnv(): NodeJS.Dict<string> {
     PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES: '104857600',
     PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS: '900000',
     PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS: '10000',
+    PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'oss',
     PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS: '60000',
     PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY: '8',
     PLATFORM_TOKEN_SIGNING_KEY: 'ab'.repeat(32),

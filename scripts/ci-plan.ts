@@ -135,17 +135,18 @@ export function planCi(input: CiPlanInput): CiPlan {
   const productAreas = [...affectedAreas].filter(area => area !== 'area/infra')
   if (new Set(productAreas).size > 1) addUnique(reasons, 'cross-domain-change')
 
-  const directPackages = normalizedPaths === null || input.dependencyGraph === null
+  const dependencyGraph = input.dependencyGraph
+  const directPackages = normalizedPaths === null || dependencyGraph === null
     ? []
-    : resolveDirectPackages(normalizedPaths, input.dependencyGraph)
-  if (normalizedPaths !== null && input.dependencyGraph !== null
+    : resolveDirectPackages(normalizedPaths, dependencyGraph)
+  if (normalizedPaths !== null && dependencyGraph !== null
     && normalizedPaths.some(path => path.startsWith('packages/')
-      && !input.dependencyGraph.some(pkg => path === pkg.rel || path.startsWith(`${pkg.rel}/`)))) {
+      && !dependencyGraph.some(pkg => path === pkg.rel || path.startsWith(`${pkg.rel}/`)))) {
     addUnique(reasons, 'unresolved-package-path')
   }
-  const affectedPackages = input.dependencyGraph === null
+  const affectedPackages = dependencyGraph === null
     ? []
-    : resolveReverseConsumers(directPackages, input.dependencyGraph)
+    : resolveReverseConsumers(directPackages, dependencyGraph)
   const changedSources = normalizedPaths?.filter(path =>
     /^packages\/[^/]+\/[^/]+\/src\/.*\.(?:[cm]?[jt]sx?)$/u.test(path)
     && !/\.d\.[cm]?[jt]sx?$/u.test(path)) ?? []

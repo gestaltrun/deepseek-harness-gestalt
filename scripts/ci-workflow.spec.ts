@@ -83,6 +83,20 @@ describe('CI workflow', () => {
     }
   })
 
+  it('fetches full history for the Sandbox macOS unit parity suite', () => {
+    const workflow = loadWorkflow('.github/workflows/sandbox.yml')
+    if (!isRecord(workflow.jobs) || !isRecord(workflow.jobs['sandbox-e2e'])) {
+      throw new TypeError('Sandbox workflow must define sandbox-e2e')
+    }
+    const job = workflow.jobs['sandbox-e2e']
+    if (!Array.isArray(job.steps)) throw new TypeError('sandbox-e2e must define steps')
+    const checkout = job.steps.find(
+      step => isRecord(step) && typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'),
+    )
+
+    expect(checkout).toMatchObject({ with: { 'fetch-depth': 0 } })
+  })
+
   it('keeps a required Wine Windows job, a non-blocking native Windows job with failover, and a master-only standby', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const masterWorkflow = loadWorkflow('.github/workflows/ci-master.yml')

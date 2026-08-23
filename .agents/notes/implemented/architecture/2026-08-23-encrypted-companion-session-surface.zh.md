@@ -18,7 +18,7 @@ Encrypted Companion Protocol major 3 是配对 endpoint 之间的 allowlist。De
 
 ## Verification
 
-Desktop assembled 测试启动真实文件 Session persistence、Workspace storage、attachment storage、Host API 与随机端口 HTTP，建立 endpoint-owned XKpsk3 与 fresh IK Snow channel，再把发现、history、prompt、取消、Host Ask User 与 Approval settlement，以及多分片图片字节送入 `MobileCompanionSurface`。codec 测试拒绝可选字段错误、额外字段、格式错误的 attachment id、无效 page offset 与超限值。Mobile 测试固定连续发现分页与 Workspace 合并、operation correlation、history prepend 连续性、digest 校验、generation replacement、等待 prompt 失败、关联失败 settlement、隐藏的创建控件与 mutation 后刷新。产品证据不使用 `prototype-companion`、5173/5174 端口、Memory authority 或 keyless 密码实现。
+Desktop assembled 测试启动真实文件 Session persistence、Workspace storage、attachment storage、Host API 与随机端口 HTTP，建立 endpoint-owned XKpsk3 与 fresh IK Snow channel，再把发现、history、prompt、取消、Host Ask User 与 Approval settlement，以及多分片图片字节送入 `MobileCompanionSurface`。codec 测试拒绝可选字段错误、额外字段、格式错误的 attachment id、无效 page offset 与超限值。Mobile 与 Desktop 测试固定连续发现分页、实时 Host 顺序变化时的 page 顺序稳定性、replacement 跨越期间延迟旧 Host 的拒绝、超出 Host 前二十行的 Workspace 合并、operation correlation、history prepend 连续性、digest 校验、generation replacement、等待 prompt 失败、关联失败 settlement、隐藏的创建控件与 mutation 后刷新。产品证据不使用 `prototype-companion`、5173/5174 端口、Memory authority 或 keyless 密码实现。
 
 ## Alternatives considered
 

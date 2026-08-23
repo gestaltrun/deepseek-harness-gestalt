@@ -248,14 +248,14 @@ interface DesktopSurfaceAuthoritySnapshot {
 }
 
 interface DesktopSurfaceDiscoveryState {
-  readonly epoch: number
+  readonly epoch: symbol
   readonly nextOffset: number
   readonly snapshot: DesktopSurfaceAuthoritySnapshot
 }
 
 /** Per-pairing stable authority snapshot for one complete paged Mobile discovery. */
 export class DesktopCompanionSurfaceDiscovery {
-  private readonly epochs = new Map<PersonalPairingId, number>()
+  private readonly epochs = new Map<PersonalPairingId, symbol>()
   private readonly states = new Map<PersonalPairingId, DesktopSurfaceDiscoveryState>()
 
   /** Retire every incomplete discovery when the installed Host authority changes. */
@@ -288,7 +288,7 @@ export class DesktopCompanionSurfaceDiscovery {
     operation: Extract<CompanionProductOperation, { type: 'refresh-surface' }>,
     dependencies: CompanionProductOperationDependencies,
   ): Promise<CompanionProjection | CompanionOperationFailedResult> {
-    const epoch = (this.epochs.get(dependencies.pairingId) ?? 0) + 1
+    const epoch = Symbol('Desktop Companion surface discovery')
     this.epochs.set(dependencies.pairingId, epoch)
     this.states.delete(dependencies.pairingId)
     const [sessionResponse, workspaceResponse] = await Promise.all([
@@ -309,24 +309,25 @@ export class DesktopCompanionSurfaceDiscovery {
   private project(
     operation: Extract<CompanionProductOperation, { type: 'refresh-surface' }>,
     dependencies: CompanionProductOperationDependencies,
-    epoch: number,
+    epoch: symbol,
     snapshot: DesktopSurfaceAuthoritySnapshot,
   ): CompanionProjection | CompanionOperationFailedResult {
+    if (this.epochs.get(dependencies.pairingId) !== epoch) {
+      return invalidHostResult(operation, 'surface discovery owner')
+    }
     const sessions = parseSurfaceSessions(snapshot.sessionValue, operation.offset)
     if (sessions === undefined) return invalidHostResult(operation, 'surface baseline')
     const workspaces = parseSurfaceWorkspaces(snapshot.workspaceValue, new Set(sessions.map(session => session.sessionId)))
     if (workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
     const hasMore = surfaceHasMore(snapshot.sessionValue, operation.offset, sessions.length)
-    if (this.epochs.get(dependencies.pairingId) === epoch) {
-      if (hasMore) {
-        this.states.set(dependencies.pairingId, {
-          epoch,
-          nextOffset: operation.offset + sessions.length,
-          snapshot,
-        })
-      } else {
-        this.states.delete(dependencies.pairingId)
-      }
+    if (hasMore) {
+      this.states.set(dependencies.pairingId, {
+        epoch,
+        nextOffset: operation.offset + sessions.length,
+        snapshot,
+      })
+    } else {
+      this.states.delete(dependencies.pairingId)
     }
     return {
       type: 'surface-snapshot', operationId: operation.operationId,

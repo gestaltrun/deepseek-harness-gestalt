@@ -99,6 +99,44 @@ describe('Desktop Companion product operations', () => {
     expect(sessionListCalls).toBe(1)
   })
 
+  it('rejects an offset-zero snapshot that returns after Host replacement', async () => {
+    const oldSessions = deferred<DesktopHostRpcResult>()
+    const oldWorkspaces = deferred<DesktopHostRpcResult>()
+    const discovery = new DesktopCompanionSurfaceDiscovery()
+    const oldDependencies = baseDependencies(hostRpc(async method => await (
+      method === 'session.list' ? oldSessions.promise : oldWorkspaces.promise
+    )))
+    const old = discovery.refresh(op({ type: 'refresh-surface', offset: 0 }), oldDependencies)
+
+    discovery.clear()
+    const items = Array.from({ length: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows + 1 }, (_, index) => ({
+      sessionId: `replacement-${String(index)}`, updatedAt: index, running: false, blank: false,
+    }))
+    const replacementDependencies = baseDependencies(hostRpc(async method => method === 'session.list'
+      ? { ok: true, value: { items } }
+      : { ok: true, value: { items: [], archivedSessionIds: [] } }))
+    await discovery.refresh({
+      ...op({ type: 'refresh-surface', offset: 0 }),
+      operationId: parseCompanionOperationId('replacement-page-zero'),
+    }, replacementDependencies)
+    oldSessions.resolve({ ok: true, value: { items: [{
+      sessionId: 'old-host-session', updatedAt: 1, running: false, blank: false,
+    }] } })
+    oldWorkspaces.resolve({ ok: true, value: { items: [], archivedSessionIds: [] } })
+
+    await expect(old).resolves.toMatchObject({
+      type: 'operation-failed',
+      failure: { code: 'HOST_WIRE_INVALID' },
+    })
+    await expect(discovery.refresh({
+      ...op({ type: 'refresh-surface', offset: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows }),
+      operationId: parseCompanionOperationId('replacement-page-one'),
+    }, replacementDependencies)).resolves.toMatchObject({
+      type: 'surface-snapshot',
+      sessions: [{ sessionId: `replacement-${String(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)}` }],
+    })
+  })
+
   it('projects Host history into the shared conversation carrier', async () => {
     const dependencies = baseDependencies(hostRpc(async (method, payload) => {
       if (method === 'session.list') return { ok: true, value: { items: [{
@@ -470,4 +508,10 @@ function baseDependencies(host: DesktopHostRpc) {
 
 function op<T extends Omit<CompanionOperation, 'operationId'>>(operation: T): T & { operationId: ReturnType<typeof parseCompanionOperationId> } {
   return { ...operation, operationId: parseCompanionOperationId(`operation-${operation.type}`) }
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((settle) => { resolve = settle })
+  return { promise, resolve }
 }

@@ -264,7 +264,15 @@
     - id: ui-schedule
       name: '@deepseek-ai/dsh-client-ui-schedule'
 
-    # Browser Dock: expanded details occupant plus collapsed layered preview.
+    # Snapshot workbench (files, editor, terminal, Git, sub-agent, Jobs) plus
+    # the adapter that binds official Browser pages to its browser tab.
+    - id: better-sidebar
+      name: '@deepseek-ai/dsh-client-better-sidebar'
+
+    - id: ui-workbench
+      name: '@deepseek-ai/dsh-client-ui-workbench'
+
+    # Official Browser chrome and collapsed layered preview.
     - id: ui-browser
       name: '@deepseek-ai/dsh-client-ui-browser'
 

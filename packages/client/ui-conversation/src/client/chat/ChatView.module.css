@@ -12,6 +12,7 @@
 }
 
 .scroll {
+  position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -42,6 +43,25 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* Collapsed Browser preview: floats in the empty strip to the right of the
+   centered message column and never participates in the column flow. */
+.previewRail {
+  position: absolute;
+  top: 16px;
+  right: 0;
+  width: 240px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.previewRail > :global(*) {
+  pointer-events: auto;
+}
+
+.scroll[data-preview-tight] .previewRail {
+  display: none;
 }
 
 /* Settled-flow identity boundary. It is neutral today and becomes the natural

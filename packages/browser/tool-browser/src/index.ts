@@ -9,16 +9,20 @@ import {
   BrowserTabId,
   BrowserWorkspaceId,
 } from '@deepseek-ai/dsh-browser-runtime'
-import type { BrowserCreateAttach, BrowserMutationRequest, BrowserPageState, BrowserTarget } from '@deepseek-ai/dsh-browser-runtime'
+import type { BrowserCreateAttach, BrowserInputRequest, BrowserMutationRequest, BrowserTarget } from '@deepseek-ai/dsh-browser-runtime'
 import type { BrowserWorkspaceBinder } from '@deepseek-ai/dsh-browser-workspace'
 import type { Session } from '@deepseek-ai/dsh-session'
+import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { defaultBrowserCreateFromSettings } from './profile-default.ts'
 
 /** Cordis plugin name used by Loader diagnostics. */
 export const name = 'tool-browser'
 /** Browser Runtime and tool registry required by this Consumer. */
 export const inject = ['browserRuntime', 'tools']
+
+const BROWSER_SETTINGS_NAMESPACE = 'ui-browser' as SettingsNamespace
 
 /** Model-facing Browser tool configuration. */
 export interface Config {
@@ -77,7 +81,6 @@ const OPEN_STATE_SCHEMA = {
     title: { type: 'string', required: true },
     text: { type: 'string', required: true },
     focused: { type: 'boolean', required: true },
-    controlOwner: { type: 'string', required: true, enum: ['agent', 'human'] },
     chrome: { ...CHROME_SCHEMA, required: true },
     storage: { ...STORAGE_SCHEMA, required: true },
   },
@@ -102,7 +105,6 @@ const UNAVAILABLE_STATE_SCHEMA = {
     revision: { type: 'integer', required: true },
     reason: { type: 'string', required: true, enum: ['crashed', 'unhealthy', 'reconnect-failed'] },
     reconnecting: { type: 'boolean', required: true },
-    controlOwner: { type: 'string', required: true, enum: ['agent', 'human'] },
   },
 } as const
 
@@ -131,18 +133,6 @@ const TARGET_PARAMETER = {
 /** Complete Browser facts are rendered into the durable ordinary tool result. */
 function renderValue(_args: unknown, value: unknown): ContentBlock[] {
   return [{ type: 'text', text: JSON.stringify(value, null, 2) }]
-}
-
-/** Model-facing `browser_create` profile identities after schema validation. */
-type BrowserCreateProfile = 'temporary' | 'persistent' | 'shared'
-
-/**
- * Map an omitted or explicit profile argument onto one create identity.
- * @param profile - Schema-validated model argument, or undefined when omitted.
- * @returns the named create identity.
- */
-function resolveBrowserCreateProfile(profile: BrowserCreateProfile | undefined): BrowserCreateProfile {
-  return profile === undefined ? 'shared' : profile
 }
 
 /** Convert an optional attach object into a branded Browser Runtime attach request. */
@@ -211,6 +201,7 @@ function mutationFrom(
   }
 }
 
+/** Build one non-empty synthetic input request after Consumer validation. */
 /**
  * Route one Browser Runtime call through the Session binder when both are present.
  * @param ctx - Consumer context that may compose `browserWorkspace`.
@@ -234,30 +225,7 @@ function routeBrowserCall<TRequest, TResult>(
 }
 
 /**
- * Route one control-owner mutation through the Session binder when both are present.
- * @param ctx - Consumer context that may compose `browserWorkspace`.
- * @param exec - Tool execution carrying an optional calling Agent Session.
- * @param method - Runtime and Binder method to invoke.
- * @param args - Target identities and expected revision from the model.
- * @returns the committed open page.
- */
-function routeMutation(
-  ctx: Context,
-  exec: { agent?: { session?: Session }; signal: AbortSignal },
-  method: 'takeover' | 'returnControl',
-  args: { target: { profileId: string; workspaceId: string; browserId: string; tabId: string }; expectedRevision: number },
-): Promise<BrowserPageState> {
-  return routeBrowserCall(
-    ctx,
-    exec,
-    (workspace, request) => workspace[method](request),
-    request => ctx.browserRuntime[method](request),
-    mutationFrom(args, exec.signal),
-  )
-}
-
-/**
- * Register nine deferred Browser Runtime operations without presentation-specific cards.
+ * Register seven deferred Browser Runtime operations without presentation-specific cards.
  * @param ctx - Consumer context with Browser Runtime and tool registry services.
  * @param config - Per-call timeout configuration.
  */
@@ -270,7 +238,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register({
     ...defineTool({
       name: 'browser_create',
-      description: 'Create one shared, temporary, or named persistent Browser Profile, Browser Workspace, browser instance, and tab. Omit profile to reuse the shared installation-wide identity.',
+      description: 'Create one shared, temporary, or named persistent Browser Profile, Browser Workspace, browser instance, and tab. Omit profile to use the Browser settings default (shared unless that page changes it).',
       timeoutMs,
       parameters: {
         profile: { type: 'string', enum: ['temporary', 'persistent', 'shared'], description: 'Omit or shared reuses one identity across Sessions. persistent restores a named isolated Profile. temporary discards identity.' },
@@ -288,10 +256,16 @@ export function apply(ctx: Context, config: Config): void {
       },
       output: { schema: OPEN_STATE_SCHEMA, render: renderValue },
       execute: async (args, exec) => {
-        const profile = resolveBrowserCreateProfile(args.profile)
+        const settingsDefault = defaultBrowserCreateFromSettings(
+          ctx.get('settings')?.get(BROWSER_SETTINGS_NAMESPACE),
+        )
+        const profile = args.profile ?? settingsDefault.kind
         const attach = attachFrom(args.attach)
         if (profile === 'persistent') {
-          if (typeof args.name !== 'string' || args.name.trim().length === 0) {
+          const name = typeof args.name === 'string' && args.name.trim().length > 0
+            ? args.name
+            : settingsDefault.name
+          if (name === undefined || name.trim().length === 0) {
             throw new Error('name must be a non-empty Browser Profile name')
           }
           return routeBrowserCall(
@@ -301,7 +275,7 @@ export function apply(ctx: Context, config: Config): void {
             request => ctx.browserRuntime.create(request),
             {
               profile: 'persistent' as const,
-              name: BrowserProfileName(args.name),
+              name: BrowserProfileName(name),
               ...attach === undefined ? {} : { attach },
               signal: exec.signal,
             },
@@ -432,64 +406,37 @@ export function apply(ctx: Context, config: Config): void {
   ctx.tools.register({
     ...defineTool({
       name: 'browser_input',
-      description: 'Record one human pointer or keyboard mutation on a browser tab using its latest revision.',
+      description: 'Send synthetic Agent input to a browser tab using its latest revision.',
       timeoutMs,
       parameters: {
         target: TARGET_PARAMETER,
         expectedRevision: { type: 'integer', required: true, description: 'Latest revision returned by a browser operation.' },
-        url: { type: 'string', description: 'Optional URL produced by the human mutation.' },
-        text: { type: 'string', description: 'Optional page text produced by the human mutation.' },
+        url: { type: 'string', description: 'Optional URL for the synthetic input.' },
+        text: { type: 'string', description: 'Optional text for the synthetic input.' },
       },
       output: { schema: OPEN_STATE_SCHEMA, render: renderValue },
       execute: async (args, exec) => {
         if (args.url !== undefined && args.url.trim().length === 0) throw new Error('url must be non-empty')
+        if (args.text !== undefined && args.text.trim().length === 0) throw new Error('text must be non-empty')
+        const base = mutationFrom(args, exec.signal)
+        let request: BrowserInputRequest
+        if (args.url === undefined) {
+          if (args.text === undefined) throw new Error('browser_input requires url or text')
+          request = { ...base, text: args.text }
+        } else {
+          request = {
+            ...base,
+            url: args.url,
+            ...args.text === undefined ? {} : { text: args.text },
+          }
+        }
         return routeBrowserCall(
           ctx,
           exec,
           (workspace, request) => workspace.input(request),
           request => ctx.browserRuntime.input(request),
-          {
-            target: targetFrom(args.target),
-            expectedRevision: revision(args.expectedRevision),
-            ...args.url === undefined ? {} : { url: args.url },
-            ...args.text === undefined ? {} : { text: args.text },
-            signal: exec.signal,
-          },
+          request,
         )
-      },
-    }),
-    deferLoading: true,
-  })
-
-  ctx.tools.register({
-    ...defineTool({
-      name: 'browser_takeover',
-      description: 'Record reported human ownership of one browser tab using its latest revision. The lock is the revision; a later Agent mutation that observes the current revision may reclaim the tab.',
-      timeoutMs,
-      parameters: {
-        target: TARGET_PARAMETER,
-        expectedRevision: { type: 'integer', required: true, description: 'Latest revision returned by a browser operation.' },
-      },
-      output: { schema: OPEN_STATE_SCHEMA, render: renderValue },
-      execute: async (args, exec) => {
-        return routeMutation(ctx, exec, 'takeover', args)
-      },
-    }),
-    deferLoading: true,
-  })
-
-  ctx.tools.register({
-    ...defineTool({
-      name: 'browser_return_control',
-      description: 'Record reported Agent ownership of one browser tab using its latest revision. The lock is the revision; this does not add a second lock.',
-      timeoutMs,
-      parameters: {
-        target: TARGET_PARAMETER,
-        expectedRevision: { type: 'integer', required: true, description: 'Latest revision returned by a browser operation.' },
-      },
-      output: { schema: OPEN_STATE_SCHEMA, render: renderValue },
-      execute: async (args, exec) => {
-        return routeMutation(ctx, exec, 'returnControl', args)
       },
     }),
     deferLoading: true,

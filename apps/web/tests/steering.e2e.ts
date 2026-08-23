@@ -86,6 +86,36 @@ async function queueVisibleDraft(page: Page, text: string, ready: Locator): Prom
   }
 }
 
+/** Flush the visible InputBar queue after its preceding submission settles. */
+async function steerVisibleQueue(page: Page): Promise<void> {
+  const pending = page.locator('[data-pending-steering]').filter({ hasText: /BANANA|ORANGE/ })
+  try {
+    await expect.poll(async () => {
+      if (await pending.count() === 2) return true
+      const input = visibleComposer(page)
+      if (await input.count() === 0) return false
+      const box = input.last()
+      const phase = await box.getAttribute('data-phase')
+      if (phase === null || /^(?:submitting|adjudicating)$/.test(phase)) return false
+      if (await box.inputValue() !== '') return false
+      await box.press('Meta+Enter')
+      return await pending.count() === 2
+    }, { timeout: 10_000, interval: 40 }).toBe(true)
+  } catch (error) {
+    const info = await page.evaluate(() => ({
+      textareas: [...document.querySelectorAll('textarea')].map(el => ({
+        visible: el.getClientRects().length > 0,
+        phase: el.getAttribute('data-phase'),
+        value: el.value.slice(0, 80),
+      })),
+      question: document.querySelector('[data-question-key]') !== null,
+      dock: document.querySelector('[data-queue-dock]')?.textContent ?? null,
+      pending: document.querySelectorAll('[data-pending-steering]').length,
+    }))
+    throw new Error(`steerVisibleQueue failed: ${JSON.stringify(info)}`, { cause: error })
+  }
+}
+
 /** Concatenated assistant text deltas — the model-visible reply body. */
 function assistantText(events: SessionEvent[]): string {
   return events
@@ -344,10 +374,9 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
     scaffold = await launchWebScaffold({
       replayFixture: STEER_ALL_FIXTURE,
       replayOverride: STEER_ALL_OVERRIDE,
-      // Call 0's question-tool stream replaces InputBar; 120 ms keeps both
-      // queue rows inside that window on CI (80 ms missed STEER_TWO on
-      // 32467952709).
-      paceMs: 120,
+      // Call 0's question-tool stream replaces InputBar. The test must queue
+      // both rows and issue the empty-draft flush inside that composer window.
+      paceMs: 250,
     })
     scaffold.ctx.on('session/event', (_session, event) => { sessionEvents.push(event) })
     browser = await chromium.launch()
@@ -391,7 +420,7 @@ describe('web e2e: empty-draft Cmd+Enter steers the whole queue', () => {
     // Empty draft + Cmd+Enter: both queued rows steer in FIFO order, the dock
     // empties, and the pending steering renders at the conversation tail.
     // Flush before the question composer hides InputBar.
-    await visibleComposer(page).last().press('Meta+Enter')
+    await steerVisibleQueue(page)
     await expect.poll(
       () => page.locator('[data-pending-steering]').filter({ hasText: /BANANA|ORANGE/ }).count(),
       { timeout: 10_000 },

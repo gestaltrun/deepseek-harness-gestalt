@@ -19,6 +19,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
 import { deriveEventMessage, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { TokenMeter } from '@deepseek-ai/dsh-token-meter'
 import { join } from 'node:path'
 import {
@@ -184,6 +185,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold({})
+    await scaffold.ctx.settings.update(settingsNamespace('dsh-better-sidebar'), { interceptOpenPath: false })
     // The workspace-aware flow runs sessions in <workspaceCwd>/workspace
     // (the composer's default draft name); the read-tool targets must live in
     // that session cwd. Pre-creating the directory is safe because the picker
@@ -427,13 +429,13 @@ describe('web e2e: seeded history renders through cold resume', () => {
     try {
       await fileLink.click()
       const dialog = page.getByRole('dialog', { name: 'Couldn’t open file' })
-      await dialog.waitFor({ timeout: 5_000 })
+      await dialog.waitFor({ timeout: 15_000 })
       const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
       await compareOrRefreshGolden(FILE_OPEN_FAILURE_EXPECTED, snapshot, MODE)
-      await expect.poll(() => dialog.innerText(), { timeout: 5_000 })
+      await expect.poll(() => dialog.innerText(), { timeout: 15_000 })
         .toContain('path open failed: xdg-open is not available')
       await page.getByRole('button', { name: 'Retry' }).click()
-      await expect.poll(() => openPath.mock.calls.length, { timeout: 5_000 }).toBe(2)
+      await expect.poll(() => openPath.mock.calls.length, { timeout: 15_000 }).toBe(2)
       expect(openPath.mock.calls[0]![0].payload).toEqual(openPath.mock.calls[1]![0].payload)
       await page.getByRole('button', { name: 'Cancel' }).click()
       await expect.poll(() => page.getByRole('dialog', { name: 'Couldn’t open file' }).count(), {

@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Model-facing Consumer for `ctx.browserRuntime`. It registers `browser_create`, `browser_navigate`, `browser_observe`, `browser_screenshot`, `browser_focus`, `browser_input`, `browser_takeover`, `browser_return_control`, and `browser_close` as ordinary deferred tools.
+Model-facing Consumer for `ctx.browserRuntime`. It registers `browser_create`, `browser_navigate`, `browser_observe`, `browser_screenshot`, `browser_focus`, `browser_input`, and `browser_close` as ordinary deferred tools. `browser_input` sends synthetic Agent input and requires a non-empty URL or text value.
 
 ## Configuration
 
@@ -16,7 +16,7 @@ Model-facing Consumer for `ctx.browserRuntime`. It registers `browser_create`, `
 
 #### What the model sees
 
-The initial tool list omits all nine Browser tools and includes the ordinary `tool_search` schema. A search for browser capabilities returns the exact schemas in a durable result. Later requests revalidate those names against current eligible deferred definitions. Every operation result renders all Profile, Workspace, browser, tab, revision, page, screenshot, focus, close, availability, control ownership, chrome, and storage facts — including unlabeled temporary Profiles, the reserved shared Profile, and `unavailable` states with their reason, reconnect flag, and current control owner — as JSON text. Omitting `profile` on `browser_create` opens that shared Profile.
+The initial tool list omits all seven Browser tools and includes the ordinary `tool_search` schema. A search for browser capabilities returns the exact schemas in a durable result. Later requests revalidate those names against current eligible deferred definitions. Every operation result renders all Profile, Workspace, browser, tab, revision, page, screenshot, focus, close, availability, chrome, and storage facts — including unlabeled temporary Profiles, the reserved shared Profile, and `unavailable` states with their reason and reconnect flag — as JSON text. Omitting `profile` on `browser_create` uses the `ui-browser` settings default, which is the shared Profile until that page changes it. With the Session Binder composed, an omitted attach reuses an open browser instance on the matching retained Profile.
 
 #### Token effect
 

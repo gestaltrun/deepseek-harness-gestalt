@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-20-chat-browser-tool-focus-dock.md
-2026-08-20-chat-browser-tool-focus-dock.md: 059009019e4462e4e1904dd00935dd9bf2303d96
-2026-08-20-chat-browser-tool-focus-dock.zh.md: bf232790795d3bb91ea2d3553898ed4fca966e54
+2026-08-20-chat-browser-tool-focus-dock.md: 972f959003e2e22e805d132edf2111e6b41ccf5e
+2026-08-20-chat-browser-tool-focus-dock.zh.md: 7b0954f02f0e96511f8aa225e963352755e4d7f3

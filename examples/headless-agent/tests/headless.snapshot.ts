@@ -790,8 +790,6 @@ describe('headless stream-json snapshots', () => {
           'browser_screenshot',
           'browser_focus',
           'browser_input',
-          'browser_takeover',
-          'browser_return_control',
           'browser_close',
         ])
 
@@ -810,9 +808,7 @@ describe('headless stream-json snapshots', () => {
           'browser_input',
           'browser_navigate',
           'browser_observe',
-          'browser_return_control',
           'browser_screenshot',
-          'browser_takeover',
         ])
         const browserValues = resultBlocks.slice(1).map((block) => {
           const content = Array.isArray(block.content) ? block.content as JsonObject[] : []
@@ -820,10 +816,9 @@ describe('headless stream-json snapshots', () => {
           if (typeof text !== 'string') throw new Error('browser result did not retain rendered text')
           return JSON.parse(text) as JsonObject
         })
-        expect(browserValues.map(value => value.revision)).toEqual([0, 1, 1, 1, 2, 3, 4, 5, 6])
+        expect(browserValues.map(value => value.revision)).toEqual([0, 1, 1, 1, 2, 3, 4])
         expect(browserValues[0]).toMatchObject({
           chrome: { kind: 'temporary', partition: 'session-trace-tmp-1' },
-          controlOwner: 'agent',
         })
         expect(browserValues[0]).not.toHaveProperty('chrome.name')
         expect(browserValues[1]).toMatchObject({
@@ -831,14 +826,11 @@ describe('headless stream-json snapshots', () => {
           title: 'Example Domain',
           text: 'A deterministic browser page.',
           chrome: { kind: 'temporary' },
-          controlOwner: 'agent',
         })
         expect(browserValues[3]).toMatchObject({ mediaType: 'image/png' })
-        expect(browserValues[4]).toMatchObject({ focused: true, controlOwner: 'agent' })
-        expect(browserValues[5]).toMatchObject({ controlOwner: 'human', text: 'human typed' })
-        expect(browserValues[6]).toMatchObject({ controlOwner: 'human' })
-        expect(browserValues[7]).toMatchObject({ controlOwner: 'agent' })
-        expect(browserValues[8]).toMatchObject({ status: 'closed' })
+        expect(browserValues[4]).toMatchObject({ focused: true })
+        expect(browserValues[5]).toMatchObject({ text: 'human typed' })
+        expect(browserValues[6]).toMatchObject({ status: 'closed' })
         const renderedFacts = JSON.stringify(browserValues)
         for (const identity of ['trace-tmp-1', 'trace-tmp-1-workspace', 'trace-tmp-1-browser-1', 'trace-tmp-1-tab-1']) {
           expect(renderedFacts).toContain(identity)
@@ -863,8 +855,6 @@ describe('headless stream-json snapshots', () => {
             'browser_screenshot',
             'browser_focus',
             'browser_input',
-            'browser_takeover',
-            'browser_return_control',
             'browser_close',
           ]))
         }
@@ -934,8 +924,6 @@ describe('headless stream-json snapshots', () => {
           'browser_screenshot',
           'browser_focus',
           'browser_input',
-          'browser_takeover',
-          'browser_return_control',
           'browser_close',
         ])
 
@@ -954,9 +942,7 @@ describe('headless stream-json snapshots', () => {
           'browser_input',
           'browser_navigate',
           'browser_observe',
-          'browser_return_control',
           'browser_screenshot',
-          'browser_takeover',
         ])
         const browserValues = resultBlocks.slice(1).map((block) => {
           const content = Array.isArray(block.content) ? block.content as JsonObject[] : []
@@ -964,24 +950,20 @@ describe('headless stream-json snapshots', () => {
           if (typeof text !== 'string') throw new Error('browser result did not retain rendered text')
           return JSON.parse(text) as JsonObject
         })
-        expect(browserValues.map(value => value.revision)).toEqual([0, 1, 1, 1, 2, 3, 4, 5, 6])
+        expect(browserValues.map(value => value.revision)).toEqual([0, 1, 1, 1, 2, 3, 4])
         expect(browserValues[0]).toMatchObject({
           chrome: { kind: 'temporary', partition: 'session-tandem-tmp-1' },
-          controlOwner: 'agent',
         })
         expect(browserValues[1]).toMatchObject({
           url: 'https://example.test/',
           title: 'Example Domain',
           text: 'A real Tandem protocol page.',
           chrome: { kind: 'temporary' },
-          controlOwner: 'agent',
         })
         expect(browserValues[3]).toMatchObject({ mediaType: 'image/png' })
-        expect(browserValues[4]).toMatchObject({ focused: true, controlOwner: 'agent' })
-        expect(browserValues[5]).toMatchObject({ controlOwner: 'human', text: 'human typed' })
-        expect(browserValues[6]).toMatchObject({ controlOwner: 'human' })
-        expect(browserValues[7]).toMatchObject({ controlOwner: 'agent' })
-        expect(browserValues[8]).toMatchObject({ status: 'closed' })
+        expect(browserValues[4]).toMatchObject({ focused: true })
+        expect(browserValues[5]).toMatchObject({ text: 'human typed' })
+        expect(browserValues[6]).toMatchObject({ status: 'closed' })
         const renderedFacts = JSON.stringify(browserValues)
         for (const identity of ['tandem-tmp-1', 'tandem-tmp-1-workspace', 'tandem-tmp-1-browser-1', 'tandem-tmp-1-tab-1']) {
           expect(renderedFacts).toContain(identity)
@@ -1006,8 +988,6 @@ describe('headless stream-json snapshots', () => {
             'browser_screenshot',
             'browser_focus',
             'browser_input',
-            'browser_takeover',
-            'browser_return_control',
             'browser_close',
           ]))
         }

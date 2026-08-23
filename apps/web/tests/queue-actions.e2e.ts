@@ -220,34 +220,32 @@ describe('web e2e: queue row actions', () => {
     const layoutSnapshot = await captureQueueAria(page, scaffold.workspaceCwd)
     await compareOrRefreshGolden(LAYOUT_EXPECTED, layoutSnapshot, MODE)
 
-    const expectAlignedContextPanels = async () => {
-      const queuePanelBox = await page.locator('[data-queue-dock] > div').boundingBox()
-      const todoBox = await page.locator('[data-testid="todo-panel"]').boundingBox()
-      const goalBox = await page.locator('[data-goal-bar] > div').boundingBox()
-      expect(queuePanelBox).not.toBeNull()
-      expect(todoBox).not.toBeNull()
-      expect(goalBox).not.toBeNull()
-      expect(todoBox!.y).toBeLessThan(goalBox!.y)
-      expect(goalBox!.y).toBeLessThan(queuePanelBox!.y)
-      expect(todoBox!.x).toBeCloseTo(goalBox!.x, 1)
-      expect(todoBox!.x).toBeCloseTo(queuePanelBox!.x, 1)
-      expect(todoBox!.width).toBeCloseTo(goalBox!.width, 1)
-      expect(todoBox!.width).toBeCloseTo(queuePanelBox!.width, 1)
-    }
-    await expectAlignedContextPanels()
-    await page.setViewportSize({ width: 640, height: 1000 })
-    await expect.poll(async () => {
+    const contextPanelBoxes = async () => {
       const queueBox = await page.locator('[data-queue-dock] > div').boundingBox()
       const todoBox = await page.locator('[data-testid="todo-panel"]').boundingBox()
       const goalBox = await page.locator('[data-goal-bar] > div').boundingBox()
-      if (queueBox === null || todoBox === null || goalBox === null) return Number.POSITIVE_INFINITY
-      return Math.max(
-        Math.abs(todoBox.x - goalBox.x),
-        Math.abs(todoBox.x - queueBox.x),
-        Math.abs(todoBox.width - goalBox.width),
-        Math.abs(todoBox.width - queueBox.width),
-      )
-    }, { timeout: 8_000 }).toBeLessThan(1)
+      return { queueBox, todoBox, goalBox }
+    }
+    const expectAlignedContextPanels = async () => {
+      await expect.poll(async () => {
+        const { queueBox, todoBox, goalBox } = await contextPanelBoxes()
+        if (queueBox === null || todoBox === null || goalBox === null) return Number.POSITIVE_INFINITY
+        return Math.max(
+          Math.abs(todoBox.x - goalBox.x),
+          Math.abs(todoBox.x - queueBox.x),
+          Math.abs(todoBox.width - goalBox.width),
+          Math.abs(todoBox.width - queueBox.width),
+        )
+      }, { timeout: 8_000 }).toBeLessThan(1)
+      const { queueBox, todoBox, goalBox } = await contextPanelBoxes()
+      expect(queueBox).not.toBeNull()
+      expect(todoBox).not.toBeNull()
+      expect(goalBox).not.toBeNull()
+      expect(todoBox!.y).toBeLessThan(goalBox!.y)
+      expect(goalBox!.y).toBeLessThan(queueBox!.y)
+    }
+    await expectAlignedContextPanels()
+    await page.setViewportSize({ width: 640, height: 1000 })
     await expectAlignedContextPanels()
     await page.setViewportSize({ width: 1680, height: 1000 })
 

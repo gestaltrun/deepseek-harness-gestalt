@@ -322,11 +322,6 @@ export class TandemBrowserRuntime extends BrowserRuntime {
     requireExpectedBrowserRevision(state, revision)
   }
 
-  /** Commit one next open page after a control-owner mutation. */
-  protected override commitPage(state: BrowserPageState): BrowserPageState {
-    return this.commit(state)
-  }
-
   /** Resolve the open Tandem Profile for one addressed target. */
   private openProfile(target: BrowserTarget): OpenProfile {
     const profile = this.profiles.get(target.profileId)
@@ -575,7 +570,6 @@ export class TandemBrowserRuntime extends BrowserRuntime {
         revision: lastOpen.revision + 1,
         reason,
         reconnecting: this.config.reconnectAttempts > 0,
-        controlOwner: lastOpen.controlOwner,
       })
       : undefined
     const recovery = this.queue.then(async () => {
@@ -587,7 +581,6 @@ export class TandemBrowserRuntime extends BrowserRuntime {
         revision: current.revision + 1,
         reason,
         reconnecting: this.config.reconnectAttempts > 0,
-        controlOwner: lastOpen.controlOwner,
       })
       await this.reconnect(lastOpen, unavailable)
     })
@@ -615,7 +608,7 @@ export class TandemBrowserRuntime extends BrowserRuntime {
         const tab = await this.createSession(restoredProfile.sessionName, undefined, lastOpen.url)
         restoredProfile.tabs.set(lastOpen.target.tabId, tab.id)
         const restored = await this.page(lastOpen, undefined)
-        this.commit({ ...restored, revision: unavailable.revision + 1, focused: false, controlOwner: lastOpen.controlOwner })
+        this.commit({ ...restored, revision: unavailable.revision + 1, focused: false })
         return
       } catch (error) {
         lastError = error
@@ -775,7 +768,6 @@ export class TandemBrowserRuntime extends BrowserRuntime {
           title: content?.title || tab.title,
           text: content?.text || (name === undefined ? '' : `identity=${name}`),
           focused: false,
-          controlOwner: 'agent',
           chrome: created.chrome,
           storage: resolveCreateStorage(content),
         })
@@ -817,13 +809,11 @@ export class TandemBrowserRuntime extends BrowserRuntime {
         ...state,
         revision,
         url: stringField(response, 'url', 'navigate'),
-        controlOwner: 'agent' as const,
       })
       const page = await this.pageAfterMutation(state, request.signal, fallback)
       return this.commit({
         ...page,
         revision,
-        controlOwner: 'agent',
       })
     })
   }
@@ -887,7 +877,6 @@ export class TandemBrowserRuntime extends BrowserRuntime {
         ...state,
         revision: numberField(response, 'revision', 'tab focus'),
         focused: true,
-        controlOwner: 'agent',
       })
     })
   }
@@ -911,7 +900,6 @@ export class TandemBrowserRuntime extends BrowserRuntime {
         url: stringField(response, 'url', 'input'),
         title: textField(response, 'title', 'input'),
         text: textField(response, 'text', 'input'),
-        controlOwner: 'human',
       })
     })
   }

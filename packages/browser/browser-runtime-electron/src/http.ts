@@ -116,6 +116,17 @@ function requiredRevision(input: JsonObject): number {
   return value
 }
 
+/** Parse non-empty synthetic Agent input at the HTTP boundary. */
+function inputFields(input: JsonObject):
+  | { readonly url: string; readonly text?: string }
+  | { readonly url?: string; readonly text: string } {
+  const url = typeof input.url === 'string' && input.url.length > 0 ? input.url : undefined
+  const text = typeof input.text === 'string' && input.text.length > 0 ? input.text : undefined
+  if (url !== undefined) return { url, ...(text === undefined ? {} : { text }) }
+  if (text !== undefined) return { text }
+  throw new BrowserRuntimeError('input requires a non-empty url or text', 'BROWSER_PROTOCOL')
+}
+
 /** Read an optional safe-integer revision, or the HTTP tab's last committed value. */
 function optionalRevision(input: JsonObject, fallback: number): number {
   const value = input.expectedRevision
@@ -339,12 +350,12 @@ export async function listenElectronBrowserHttp(options: {
         return
       }
       const clientRevision = requiredRevision(input)
+      const fields = inputFields(input)
       const typed = await mutateOpenPage(options.runtime, found.tab.target, clientRevision, expectedRevision => (
         options.runtime.input({
           target: found.tab.target,
           expectedRevision,
-          ...(typeof input.url === 'string' ? { url: input.url } : {}),
-          ...(typeof input.text === 'string' ? { text: input.text } : {}),
+          ...fields,
         })
       ))
       json(response, 200, {

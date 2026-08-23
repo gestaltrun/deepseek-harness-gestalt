@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-dock-tab-revision.md
-2026-08-20-dock-tab-revision.md: 0ac7bb50eb13d5b1aa8d2f124414685063e48d98
-2026-08-20-dock-tab-revision.zh.md: d69761047259cb70727d21185bfb0e79c2ebecbb
+2026-08-20-dock-tab-revision.md: a2e6be01cdfc5491b5dcce1a601d80127fd7f0df
+2026-08-20-dock-tab-revision.zh.md: 7e9ba5dbde96476a9d76bbf3bedab305616e000b

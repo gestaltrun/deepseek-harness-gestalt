@@ -923,16 +923,17 @@ describe('runScenario', () => {
       { agent: AGENT, mode: 'replay', fixtureFile: closed.fixtureFile },
     )
     expect(result.sessionLogs[1]?.parentSession).toBe(result.sessionId)
+    const rejectionTimeoutMs = 500
     await expect(runScenario(
       {
         steps: [
           ...boot,
           { op: 'promptAndCancel', text: 'hang' },
-          { op: 'waitForSubagentTurnEnd', minimumTurn: 2, timeoutMs: 20 },
+          { op: 'waitForSubagentTurnEnd', minimumTurn: 2, timeoutMs: rejectionTimeoutMs },
         ],
       },
       { agent: AGENT, mode: 'replay', fixtureFile: closed.fixtureFile },
-    )).rejects.toThrow(/subagent child #1 did not persist closed turn 2 within 20ms/)
+    )).rejects.toThrow(`subagent child #1 did not persist closed turn 2 within ${rejectionTimeoutMs}ms`)
 
     const seedOnly = await scenario({
       prompt: 'hang-until-cancel',
@@ -962,17 +963,17 @@ describe('runScenario', () => {
         steps: [
           ...boot,
           { op: 'promptAndCancel', text: 'hang' },
-          { op: 'waitForSubagentTurnEnd', timeoutMs: 20 },
+          { op: 'waitForSubagentTurnEnd', timeoutMs: rejectionTimeoutMs },
         ],
       },
       { agent: AGENT, mode: 'replay', fixtureFile: seedOnly.fixtureFile },
-    )).rejects.toThrow(/subagent child #1 did not persist closed turn 1 within 20ms/)
+    )).rejects.toThrow(`subagent child #1 did not persist closed turn 1 within ${rejectionTimeoutMs}ms`)
 
     const missing = await scenario({})
     await expect(runScenario(
-      { steps: [...boot, { op: 'waitForSubagentTurnEnd', child: 2, timeoutMs: 20 }] },
+      { steps: [...boot, { op: 'waitForSubagentTurnEnd', child: 2, timeoutMs: rejectionTimeoutMs }] },
       { agent: AGENT, mode: 'replay', fixtureFile: missing.fixtureFile },
-    )).rejects.toThrow(/subagent child #2 did not persist closed turn 1 within 20ms/)
+    )).rejects.toThrow(`subagent child #2 did not persist closed turn 1 within ${rejectionTimeoutMs}ms`)
   })
 
   it('waitForTitleAfterTurnEnd times out when the title precedes the boundary', { timeout: 20_000 }, async () => {

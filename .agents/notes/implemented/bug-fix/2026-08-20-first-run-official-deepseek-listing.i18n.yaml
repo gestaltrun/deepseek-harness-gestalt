@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-first-run-official-deepseek-listing.md
-2026-08-20-first-run-official-deepseek-listing.md: baf00c78597bc5095ac80904455a2ebf1765389c
-2026-08-20-first-run-official-deepseek-listing.zh.md: 6c4e719e91b336ae2680c1a0e9cfec84cf725e95
+2026-08-20-first-run-official-deepseek-listing.md: 7d243da059854fee984a3e0964d0e139701ea040
+2026-08-20-first-run-official-deepseek-listing.zh.md: b7d6d6df5030499ca4916a6bd36d788ad366e248

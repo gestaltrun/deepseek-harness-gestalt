@@ -6,5 +6,8 @@ describe('Mobile Vite config', () => {
     const source = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
     expect(source).toContain('tsconfigPaths')
     expect(source).toContain('tsconfig.base.json')
+    expect(source).toContain("'/v1'")
+    expect(source).toContain('secure: false')
+    expect(source).toContain('ws: true')
   })
 })

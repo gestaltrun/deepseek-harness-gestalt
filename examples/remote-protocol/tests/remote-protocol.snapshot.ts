@@ -34,7 +34,7 @@ describe('Remote Protocol keyless assembled path', () => {
     expect(result.stderr).toBe('')
     expect(result.stdout).toMatchInlineSnapshot(`
       "TRANSPORT version=1
-      COMPANION version=2 security=preserved
+      COMPANION version=3 security=preserved
       MOBILE_REQUEST encrypted=true relayPlaintext=false type=submit-prompt
       DESKTOP_RESPONSE confirmed=true outcome=accepted
       ATTACHMENT platformPlaintext=false hashVerified=true submitted=true controlFrameBytes=413 rejectionReason=hash-mismatch

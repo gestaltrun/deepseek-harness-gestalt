@@ -6,7 +6,7 @@ Status: implemented
 
 ## Problem
 
-DeepSeek 默认值无头快照必须在组装后的 one-shot 路径上同时证明两件事：SSE 注释会给 `streamIdleTimeoutMs` 续期，以及适配器默认值（`max_tokens`、`reasoning_effort`）到达提供方。[票级重跑握手笔记](2026-08-20-ci-ticket-rerun-flakes.md) 在请求到达时写出第一条注释，并在 `end` 上立刻结束流、不再延迟。这把 keep-alive 证明从快照里拿掉了，却仍把 `streamIdleTimeoutMs: 150` 架在每一段调度间隙上，包括 TCP 刷出和两次 write 之间的事件循环延迟。负载下的 consumers 车道仍会以 `TIMEOUT` 中止，`dsh-llm-retry` 发出第二次 POST，`requests.length === 1` 在该握手合并后的 PR #179 上再次失败。
+DeepSeek 默认值无头快照必须在组装后的 one-shot 路径上同时证明两件事：SSE 注释会给 `streamIdleTimeoutMs` 续期，以及适配器默认值（`max_tokens`、`reasoning_effort`）到达提供方。[票级重跑握手笔记](2026-08-20-ci-ticket-rerun-flakes.zh.md) 在请求到达时写出第一条注释，并在 `end` 上立刻结束流、不再延迟。这把 keep-alive 证明从快照里拿掉了，却仍把 `streamIdleTimeoutMs: 150` 架在每一段调度间隙上，包括 TCP 刷出和两次 write 之间的事件循环延迟。负载下的 consumers 车道仍会以 `TIMEOUT` 中止，`dsh-llm-retry` 发出第二次 POST，`requests.length === 1` 在该握手合并后的 PR #179 上再次失败。
 
 ## Decision
 
@@ -26,4 +26,4 @@ DeepSeek 默认值无头快照必须在组装后的 one-shot 路径上同时证�
 
 ## Consequences
 
-注释不再续期看门狗，或默认值从 POST 消失时，快照仍会失败。consumers 车道事件循环停几百毫秒时，它不再失败。[票级重跑握手笔记](2026-08-20-ci-ticket-rerun-flakes.md) 里该 fixture 的 150ms 时间表已被取代。
+注释不再续期看门狗，或默认值从 POST 消失时，快照仍会失败。consumers 车道事件循环停几百毫秒时，它不再失败。[票级重跑握手笔记](2026-08-20-ci-ticket-rerun-flakes.zh.md) 里该 fixture 的 150ms 时间表已被取代。

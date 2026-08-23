@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/remote-protocol.md
 remote-protocol.md: 844ffc56de96ee4f5928c5c400413263b7898259
-remote-protocol.zh.md: 539dda9c0cface744ddf2ef4d91fda4c1fd7eebb
+remote-protocol.zh.md: dd4b7ceefd7620aa8c62abb2e564cddbb77c43d7

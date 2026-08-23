@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-官方页面 chrome 挂在快照侧栏的 `browser` 标签类型上。每一个官方 Workspace 页面是一个侧栏标签。侧栏标签条就是页面列表。地址栏可编辑，回车即导航；observe 或 navigate 进行中时，刷新控件为 `aria-busy`。Desktop Host 把同一份 Runtime `webContents` 作为 `WebContentsView` 加到 Host `contentView` 上，用户可以点击、输入和滚动。设置弹层和侧栏 `+` 菜单与 `dsh web` 是同一套 React 组件；在 Electron 里它们挂在第二块透明 `WebContentsView` 上，叠在官方页面之上，`dsh web` 仍用页内面板和菜单。overlay 文档不调和官方页面，也不 present/conceal 实况页。未展示页面会继续挂在透明、屏外、不可聚焦的 `BaseWindow` 上，让 Chromium 持续绘制截图；展示时只把 `WebContentsView` 换挂到 Host，收起时再放回该绘制宿主。`loadURL` 在重定向后拒绝 `ERR_ABORTED`，或在 Chromium 已画出错误文档后拒绝网络错误，都视为已提交的导航，不是崩溃。不用子 `BrowserWindow` 加 `setParentWindow`，因为那条路径在 macOS Electron 41 上会 SIGSEGV。`dsh web` 画截图加文本；`about:blank` 截图不绘制，新建标签显示起始文案。`+ → 浏览器` 与 `browser_create` 都按 `ui-browser` 默认身份创建一个官方页面。Browser Workspace 串行创建，并且只在 Profile 与该身份匹配时复用已经打开的 Session 实例。空的 `+` 标签会调用 `ensureOfficial`；`OfficialBrowserTab` 没有直接创建回退。同一页面按 `ctx` 与 Session id 保留一组 Session 绑定的 Remote 方法，因此侧栏重渲染不会重启 observe 与截图。关掉侧栏标签即关掉该官方页面。
+官方页面 chrome 挂在快照侧栏的 `browser` 标签类型上。每一个官方 Workspace 页面是一个侧栏标签。侧栏标签条就是页面列表。地址栏可编辑，回车即导航；observe 或 navigate 进行中时，刷新控件为 `aria-busy`。Desktop Host 把同一份 Runtime `webContents` 作为 `WebContentsView` 加到 Host `contentView` 上，用户可以点击、输入和滚动。设置弹层和侧栏 `+` 菜单与 `dsh web` 是同一套 React 组件；在 Electron 里它们挂在第二块透明 `WebContentsView` 上，叠在官方页面之上，`dsh web` 仍用页内面板和菜单。overlay 文档不调和官方页面，也不 present/conceal 实况页。未展示页面会继续挂在透明、屏外、不可聚焦的 `BaseWindow` 上，让 Chromium 持续绘制截图；展示时只把 `WebContentsView` 换挂到 Host，收起时再放回该绘制宿主。`loadURL` 在重定向后拒绝 `ERR_ABORTED`，或在 Chromium 已画出错误文档后拒绝网络错误，都视为已提交的导航，不是崩溃。不用子 `BrowserWindow` 加 `setParentWindow`，因为那条路径在 macOS Electron 41 上会 SIGSEGV。`dsh web` 画截图加文本；`about:blank` 截图不绘制，新建标签显示起始文案。`+ → 浏览器` 与 `browser_create` 都按 `ui-browser` 默认身份创建一个官方页面。Browser Workspace 串行创建，并且只在 Profile 与该身份匹配时复用已经打开的 Session 实例。空的 `+` 标签会调用 `ensureOfficial`；`OfficialBrowserTab` 没有直接创建回退。Session 投影保存每个标签最近一次提交的非空白 URL。首次 observe 报告当前 Runtime 不持有投影 target 时，适配层解绑该 target、保留标签的 Profile 身份，通过既有 Browser Workspace create 路径在同一侧栏标签中替换缺失页面，并在发布 replacement 前导航到该 URL。其他 observe 失败保持空态，不创建页面。同一页面按 `ctx` 与 Session id 保留一组 Session 绑定的 Remote 方法，因此侧栏重渲染不会重启 observe 与截图。关掉侧栏标签即关掉该官方页面。关闭 revision 过期时先 observe 一次再重试；临时关闭失败时保留关闭意图，使后续调和重试 Runtime close，而不是重新打开侧栏标签。销毁 live Session 会关闭其进程内页面，但保留投影以供以后恢复。归档 Session 会在归档集合持久化后发出一个 awaited cleanup 事件；Browser Workspace 关闭该 Session 持有的全部 live 页面，并遗忘其 Runtime 身份。
 
 官方 Browser chrome 不占用 `details`。better-sidebar 持有每个 Session 的面板可见性与宽度；Browser Workspace 不存储展示状态。
 
@@ -32,12 +32,12 @@ Status: implemented
 
 ## 后果
 
-产品里只有一个浏览器。ChatView 在右侧留白不够时隐藏预览。窄窗 details 浮层不是 Browser chrome 的依赖。[删除 Browser 控制权与 Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.md)持有展示与创建复用权威。
+产品里只有一个浏览器。ChatView 在右侧留白不够时隐藏预览。窄窗 details 浮层不是 Browser chrome 的依赖。[删除 Browser 控制权与 Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.zh.md)持有展示与创建复用权威。
 
 ## 验证
 
 - `pnpm exec vitest run packages/client/ui-workbench packages/client/ui-browser packages/browser/browser-runtime-electron packages/client/ui-conversation/tests/preview-rail.client.spec.ts packages/client/ui-conversation/tests/chat-view.client.spec.tsx packages/browser/browser-workspace/tests/workspace.spec.ts apps/desktop/tests/browser-present.spec.ts apps/desktop/tests/chrome-overlay.spec.ts packages/client/ui-desktop/tests/desktop-chrome-overlay.client.spec.tsx packages/client/ui-layout/tests/app-frame.client.spec.tsx packages/client/ui-sidebar/tests/sidebar-root.client.spec.tsx`
 - `pnpm run test:electron-runtime-e2e` 在真实 Electron 进程中验证隐藏页面截图与 Profile 隔离。
 - `DSH_COVERAGE_PARTITIONS=4 pnpm run check:ci:coverage` 覆盖全部变更过的 Browser 与工作台分支。
-- `apps/web/tests/browser-dock.snapshot.ts` 固定收起预览，以及打开与刷新后的工作台页面 chrome
+- `apps/web/tests/browser-dock.snapshot.ts` 固定收起预览、打开与刷新后的工作台页面 chrome，以及模拟 Runtime 重启后的页面替换与导航。
 - `pnpm run check:ci:consumers` 会在所有构建态 Client 产物读取者结束后运行 Web 门禁。串行 HMR owner 会先完整恢复 build record 覆盖的产物，再由并行 Web 测试池读取。

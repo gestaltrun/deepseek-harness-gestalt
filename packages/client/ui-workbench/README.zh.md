@@ -2,9 +2,9 @@
 
 [English](README.md) | 中文
 
-与 [`better-sidebar` 快照](../better-sidebar/README.md)平级的本仓适配层。宿主 apply 在命名空间 `dsh-better-sidebar` 尚未注册时加入快照 loader fiber，然后写入 `tabsEnabled.browser: true` 与 `browserInterceptLinks: false`。客户端 half 发布 `workbenchBrowser`，从 module table 请求 `@deepseek-ai/dsh-client-ui-browser/client`，并把每个官方 Workspace 页面绑到一个快照 `browser` 标签。`+ → 浏览器` 再建页面时，由 Browser Workspace 决定是否复用 Profile 匹配的实例；better-sidebar 持有每个 Session 的面板可见状态。Desktop overlay 文档发布该 face，但不调和官方页面。日常产品改动写在这里，不要改快照树。
+与 [`better-sidebar` 快照](../ui-better-sidebar/README.zh.md)平级的本仓适配层。宿主 apply 在命名空间 `dsh-better-sidebar` 尚未注册时加入快照 loader fiber，然后写入 `tabsEnabled.browser: true` 与 `browserInterceptLinks: false`。客户端 half 发布 `workbenchBrowser`，从 module table 请求 `@deepseek-ai/dsh-client-ui-browser/client`，并把每个官方 Workspace 页面绑到一个快照 `browser` 标签。`+ → 浏览器` 再建页面时，由 Browser Workspace 决定是否复用 Profile 匹配的实例。Runtime 重启使投影 target 失效时，适配层保留原侧栏标签及其 Profile 身份，由 Browser Workspace 替换缺失页面。关掉侧栏标签会关闭 Runtime 页面；revision 过期时先 observe 再重试，临时失败时保留关闭意图，不会重新打开标签。better-sidebar 持有每个 Session 的面板可见状态。Desktop overlay 文档发布该 face，但不调和官方页面。日常产品改动写在这里，不要改快照树。
 
-web-app 组合先插入快照行，再插入本适配层，并保留 `id: ui-browser`。占用关系由 [工作台官方浏览器 Agent Note](../../../.agents/notes/implemented/feature/2026-08-21-workbench-official-browser.md) 规定。
+web-app 组合先插入快照行，再插入本适配层，并保留 `id: ui-browser`。占用关系由 [工作台官方浏览器 Agent Note](../../../.agents/notes/implemented/feature/2026-08-21-workbench-official-browser.zh.md) 规定。
 
 ## 模型体验
 

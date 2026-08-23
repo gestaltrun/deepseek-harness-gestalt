@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-18-standard-hosted-primary-ci.md
 2026-08-18-standard-hosted-primary-ci.md: 8d749d89708be8ceaf343f064bed493a33cbd766
-2026-08-18-standard-hosted-primary-ci.zh.md: 5dddbaba856e07abd7529eb1c007fd7a5f63ecce
+2026-08-18-standard-hosted-primary-ci.zh.md: 17d0de3a7680047873457386349bad3fb4276cb7

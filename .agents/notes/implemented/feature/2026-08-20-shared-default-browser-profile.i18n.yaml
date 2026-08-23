@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-20-shared-default-browser-profile.md
 2026-08-20-shared-default-browser-profile.md: 04e0fc1c7f80311b1889e2beac700ec4a1199da2
-2026-08-20-shared-default-browser-profile.zh.md: 6bf96e08b64ec471e1f19a797db51269715e7152
+2026-08-20-shared-default-browser-profile.zh.md: dd1dc374ca5a01939ee04591d92d9dcddcdf69d7

@@ -16,7 +16,7 @@ Desktop 默认窗口宽 1280px。Browser Dock 占用方的详情范围为 420/64
 
 Dock 视口可滚动（`overflow: auto`），并按截图固有尺寸从左上绘制。收起控件在标签条内为 `position: sticky; right: 0`，以免横向溢出的标签盖住它。
 
-官方 Browser chrome 后来离开了 `details`（[工作台官方浏览器 Agent Note](../feature/2026-08-21-workbench-official-browser.md)）。浮层留给其他详情占用方。本决策只持有浮层与可滚动视口。
+官方 Browser chrome 后来离开了 `details`（[工作台官方浏览器 Agent Note](../feature/2026-08-21-workbench-official-browser.zh.md)）。浮层留给其他详情占用方。本决策只持有浮层与可滚动视口。
 
 ## 考虑过的替代方案
 

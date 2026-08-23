@@ -29,8 +29,8 @@ interface SnapshotLoader {
   entries(): Iterable<SnapshotLoaderEntry>
 }
 
-const SNAPSHOT_ENTRY_ID = 'better-sidebar'
-const SNAPSHOT_PACKAGE = '@deepseek-ai/dsh-client-better-sidebar'
+const SNAPSHOT_ENTRY_ID = 'ui-better-sidebar'
+const SNAPSHOT_PACKAGE = '@deepseek-ai/dsh-client-ui-better-sidebar'
 
 /**
  * Whether one loader entry is the pinned workbench snapshot.

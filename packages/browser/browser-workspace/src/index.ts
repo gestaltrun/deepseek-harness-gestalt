@@ -2,8 +2,8 @@
  * Session-owned Browser Workspace binder. Each Session independently owns
  * zero or more Workspaces; each Workspace uses one Browser Profile and
  * contains multiple browser instances and tabs. Each tab's last committed
- * revision is a Session fact. `browser/runtime-state` also writes revision
- * advances for an owned, unclosed tab.
+ * revision and last non-blank URL are Session facts. `browser/runtime-state`
+ * also writes advances for an owned, unclosed tab.
  * @module @deepseek-ai/dsh-browser-workspace
  */
 
@@ -27,6 +27,7 @@ import {
 } from '@deepseek-ai/dsh-browser-runtime'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
+import type {} from '@deepseek-ai/dsh-workspace'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { applyBrowserWorkspaceProjection, EMPTY_BROWSER_WORKSPACE, foldBrowserWorkspace } from './fold.ts'
 import type {
@@ -56,6 +57,7 @@ const workspaceProjectionSchema = zod.object({
       tabs: zod.array(zod.object({
         tabId: zod.string().min(1),
         revision: zod.number().int().nonnegative(),
+        url: zod.string().min(1).optional(),
       })),
       activeTabId: zod.string().min(1).nullable(),
     })),
@@ -104,15 +106,23 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
 
   constructor(ctx: Context) {
     super(ctx, 'browserWorkspace')
-    ctx.on('session/disposed', (session) => { void this.cleanup(session) }, { global: true })
+    ctx.on('session/disposed', (session) => { void this.release(session) }, { global: true })
+    ctx.on('workspace/session-archived', async (sessionId) => {
+      const session = this.ctx.sessions.get(sessionId)
+      if (session === undefined) return
+      await this.cleanup(session)
+    }, { global: true })
     ctx.on('browser/runtime-state', (state) => { this.syncRuntimeState(state) }, { global: true })
     ctx.inject(['sessionProjections'], (projectionCtx) => {
       projectionCtx.sessionProjections.register<'browserWorkspace', BrowserWorkspaceProjection>({
         key: 'browserWorkspace',
-        schema: workspaceProjectionSchema,
+        stateSchema: workspaceProjectionSchema,
         init: () => EMPTY_BROWSER_WORKSPACE,
         apply: applyBrowserWorkspaceProjection,
-        view: state => state,
+        wire: {
+          viewSchema: workspaceProjectionSchema,
+          view: state => state,
+        },
         stateVersion: 3,
       })
     })
@@ -259,7 +269,7 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
       ...request,
       ...attach === undefined ? {} : { attach },
     })
-    this.adopt(request.session, created.target, created.revision)
+    this.adopt(request.session, created)
     return created
   }
 
@@ -271,7 +281,7 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
   async navigate(request: BrowserWorkspaceNavigateRequest): Promise<BrowserPageState> {
     this.assertOwned(request.session, request.target)
     const navigated = await this.ctx.browserRuntime.navigate(request)
-    this.recordRevision(request.session, navigated.target, navigated.revision)
+    this.recordPage(request.session, navigated)
     return navigated
   }
 
@@ -287,7 +297,8 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
     if (state.status === 'closed') {
       this.forget(request.session, state.target)
     } else {
-      this.recordRevision(request.session, state.target, state.revision)
+      if (state.status === 'open') this.recordPage(request.session, state)
+      else this.recordRevision(request.session, state.target, state.revision)
     }
     return state
   }
@@ -310,7 +321,7 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
   async focus(request: BrowserWorkspaceMutationRequest): Promise<BrowserPageState> {
     this.assertOwned(request.session, request.target)
     const focused = await this.ctx.browserRuntime.focus(request)
-    this.recordRevision(request.session, focused.target, focused.revision)
+    this.recordPage(request.session, focused)
     this.activate(request.session, focused.target)
     return focused
   }
@@ -323,7 +334,7 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
   async input(request: BrowserWorkspaceInputRequest): Promise<BrowserPageState> {
     this.assertOwned(request.session, request.target)
     const inputted = await this.ctx.browserRuntime.input(request)
-    this.recordRevision(request.session, inputted.target, inputted.revision)
+    this.recordPage(request.session, inputted)
     return inputted
   }
 
@@ -344,7 +355,18 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
    * @param session - Session whose leftover Runtime tabs must be closed.
    */
   async cleanup(session: Session): Promise<void> {
+    await this.closeOwnedTabs(session, true)
+  }
+
+  /** Close live Runtime tabs while retaining their durable recovery records. */
+  private async release(session: Session): Promise<void> {
+    await this.closeOwnedTabs(session, false)
+  }
+
+  /** Close every projected tab and optionally remove its recovery record. */
+  private async closeOwnedTabs(session: Session, forget: boolean): Promise<void> {
     const snapshot = this.snapshot(session)
+    const failures: unknown[] = []
     for (const workspace of snapshot.workspaces) {
       for (const browser of workspace.browsers) {
         for (const tab of browser.tabs) {
@@ -352,15 +374,20 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
           try {
             const state = await this.ctx.browserRuntime.observe({ target })
             if (state.status !== 'closed') {
+              if (!forget && state.status === 'open') this.recordPage(session, state)
               await this.ctx.browserRuntime.close({ target, expectedRevision: state.revision })
             }
+            if (forget) this.forget(session, target)
           } catch (error) {
-            this.ctx.logger.warn('browser-workspace: Session cleanup failed for one tab')
+            this.ctx.logger.warn('browser-workspace: Session Runtime release failed for one tab')
             this.ctx.logger.warn(error)
+            if (forget) failures.push(error)
           }
-          this.forget(session, target)
         }
       }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, 'browser-workspace: failed to close every archived Session tab')
     }
   }
 
@@ -448,11 +475,10 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
   /** Record a newly created tab on the owning Session. */
   private adopt(
     session: Session,
-    target: BrowserTarget,
-    revision: number,
+    page: BrowserPageState,
   ): void {
     const current = this.snapshot(session)
-    this.commit(session, adoptTarget(current, target, revision))
+    this.commit(session, adoptTarget(current, page.target, page.revision, page.url))
   }
 
   /**
@@ -464,7 +490,14 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
     if (state.status === 'closed') return
     const session = this.ctx.sessions.list().find(item => ownsTarget(this.snapshot(item), state.target))
     if (session === undefined) return
-    this.recordRevision(session, state.target, state.revision)
+    if (state.status === 'open') this.recordPage(session, state)
+    else this.recordRevision(session, state.target, state.revision)
+  }
+
+  /** Persist the current revision and URL for one open page. */
+  private recordPage(session: Session, page: BrowserPageState): void {
+    const current = this.snapshot(session)
+    this.commit(session, recordTabFacts(current, page.target, page.revision, page.url))
   }
 
   /** Persist the current revision for one already-owned tab. */
@@ -474,7 +507,7 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
     revision: number,
   ): void {
     const current = this.snapshot(session)
-    this.commit(session, recordTabRevision(current, target, revision))
+    this.commit(session, recordTabFacts(current, target, revision))
   }
 
   /** Record the focused tab as the Session's active tab. */
@@ -519,6 +552,7 @@ function adoptTarget(
   snapshot: BrowserWorkspaceProjection,
   target: BrowserTarget,
   revision: number,
+  url?: string,
 ): BrowserWorkspaceProjection {
   const workspaces = snapshot.workspaces.map(workspace => ({
     ...workspace,
@@ -542,7 +576,11 @@ function adoptTarget(
     browser = { browserId: target.browserId, tabs: [], activeTabId: target.tabId }
     workspace.browsers.push(browser)
   }
-  browser.tabs.push({ tabId: target.tabId, revision })
+  browser.tabs.push({
+    tabId: target.tabId,
+    revision,
+    ...(url === undefined || url === 'about:blank' ? {} : { url }),
+  })
   workspace.activeBrowserId = target.browserId
   browser.activeTabId = target.tabId
   return {
@@ -553,10 +591,11 @@ function adoptTarget(
 }
 
 /** Persist the current revision for one already-owned tab. */
-function recordTabRevision(
+function recordTabFacts(
   snapshot: BrowserWorkspaceProjection,
   target: BrowserTarget,
   revision: number,
+  url?: string,
 ): BrowserWorkspaceProjection {
   return {
     ...snapshot,
@@ -569,12 +608,27 @@ function recordTabRevision(
           return {
             ...browser,
             tabs: browser.tabs.map(tab => (
-              tab.tabId === target.tabId ? { ...tab, revision } : tab
+              tab.tabId === target.tabId ? tabWithFacts(tab, revision, url) : tab
             )),
           }
         }),
       }
     }),
+  }
+}
+
+/** Replace one tab's committed facts; omission preserves its remembered URL. */
+function tabWithFacts(
+  tab: BrowserWorkspaceTabRecord,
+  revision: number,
+  url?: string,
+): BrowserWorkspaceTabRecord {
+  if (url === undefined) return { ...tab, revision }
+  const { url: _previousUrl, ...identity } = tab
+  return {
+    ...identity,
+    revision,
+    ...(url === 'about:blank' ? {} : { url }),
   }
 }
 
@@ -651,6 +705,7 @@ function freezeSnapshot(snapshot: BrowserWorkspaceProjection): BrowserWorkspaceP
         tabs: Object.freeze(browser.tabs.map(tab => Object.freeze({
           tabId: tab.tabId,
           revision: tab.revision,
+          ...(tab.url === undefined ? {} : { url: tab.url }),
         } satisfies BrowserWorkspaceTabRecord))),
       }))),
     }))),

@@ -9,6 +9,7 @@ import * as WorkbenchInvariant from '../src/invariant.ts'
 import { SNAPSHOT_PREFS_NS } from '../src/snapshot-browser.ts'
 
 const NS = settingsNamespace(SNAPSHOT_PREFS_NS)
+const TARGET = { profileId: 'p', workspaceId: 'w', browserId: 'b', tabId: 't' }
 
 class SettingsService extends Service {
   readonly values = new Map<string, Record<string, unknown>>()
@@ -70,7 +71,7 @@ describe('ui-workbench host apply', () => {
   it('fails loud when the snapshot row disappears before it registers', async () => {
     const ctx = new Context()
     new SettingsService(ctx)
-    const entries: { options: { id: string } }[] = [{ options: { id: 'better-sidebar' } }]
+    const entries: { options: { id: string } }[] = [{ options: { id: 'ui-better-sidebar' } }]
     ctx.provide('loader', { entries: () => entries })
     setImmediate(() => {
       entries.splice(0, entries.length)
@@ -83,7 +84,7 @@ describe('ui-workbench host apply', () => {
     const settings = new SettingsService(ctx)
     ctx.provide('loader', {
       entries: () => [{
-        options: { id: 'better-sidebar', name: '@deepseek-ai/dsh-client-better-sidebar' },
+        options: { id: 'ui-better-sidebar', name: '@deepseek-ai/dsh-client-ui-better-sidebar' },
         fiber: {
           async await() {
             settings.values.set(NS, { tabsEnabled: { editor: true } })
@@ -103,7 +104,7 @@ describe('ui-workbench host apply', () => {
     const settings = new SettingsService(ctx)
     ctx.provide('loader', {
       entries: () => [{
-        options: { id: 'web-ui-better-sidebar', name: '@deepseek-ai/dsh-client-better-sidebar' },
+        options: { id: 'web-ui-better-sidebar', name: '@deepseek-ai/dsh-client-ui-better-sidebar' },
         fiber: {
           async await() {
             settings.values.set(NS, {})
@@ -122,7 +123,7 @@ describe('ui-workbench host apply', () => {
     const ctx = new Context()
     const settings = new SettingsService(ctx)
     const entry: { options: { id: string }; fiber?: { await(): Promise<void> } } = {
-      options: { id: 'better-sidebar' },
+      options: { id: 'ui-better-sidebar' },
     }
     ctx.provide('loader', { entries: () => [entry] })
     setImmediate(() => {
@@ -202,16 +203,19 @@ describe('ui-workbench client apply', () => {
       renderTab: (props: { ctx: Context; tab: { id: string }; scope: { sessionId: string } }) => unknown
       createRequest: () => { profile: string }
       ensureOfficial: (tabId: string) => void
+      recoverOfficial: (tabId: string, target: typeof TARGET) => Promise<unknown>
     }
     expect(typeof face.reveal).toBe('function')
     expect(typeof face.renderTab).toBe('function')
     expect(typeof face.createRequest).toBe('function')
     expect(typeof face.ensureOfficial).toBe('function')
+    expect(typeof face.recoverOfficial).toBe('function')
     face.reveal('s1')
     expect(sidebar.setPanelOpen).toHaveBeenCalledWith(true)
     expect(face.renderTab({ ctx, tab: { id: 'browser:1' }, scope: { sessionId: 's1' } })).toBeTruthy()
     expect(face.createRequest()).toEqual({ profile: 'shared' })
     face.ensureOfficial('browser:1')
+    await expect(face.recoverOfficial('browser:1', TARGET)).resolves.toBeUndefined()
   })
 
   it('subscribes only to the session list when subscribeState is absent', async () => {

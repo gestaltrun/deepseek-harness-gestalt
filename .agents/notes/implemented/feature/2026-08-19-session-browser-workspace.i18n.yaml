@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-session-browser-workspace.md
 2026-08-19-session-browser-workspace.md: 88d7c37275b8c34ddc8d14930abf5d859fe2947f
-2026-08-19-session-browser-workspace.zh.md: 26b18e8654883d3ad989ef0bf18a098432c2c24d
+2026-08-19-session-browser-workspace.zh.md: 2cfbcedd60842343809fe7af4d46fc0723415592

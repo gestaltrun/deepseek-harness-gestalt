@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-ci-ticket-rerun-flakes.md
 2026-08-20-ci-ticket-rerun-flakes.md: 5b97602db0bd8751733eb835ca52aff1755d0f2b
-2026-08-20-ci-ticket-rerun-flakes.zh.md: 923fcf8c7f020af3c2cb78b8703fa8218b2aa7ff
+2026-08-20-ci-ticket-rerun-flakes.zh.md: 1bc4b43db3d852d5e59b514e2175c1c23d0fecae

@@ -18,7 +18,7 @@ Status: implemented
 
 `onboardingReadiness`（原名 `deepSeekReadiness`，该名称已不再描述它读取的内容）只要联接中有任意一行可用，就返回 `provider-ready`。只有二者皆无的用户才会走到官方 DeepSeek 查找，那部分保持不变：它是这条提示唯一能为其提供密钥输入框的路由。这道门槛吸收了旧投影携带的两个诊断——`settings-unavailable` 与 `credential-ref-unavailable`——因为二者描述的都是新门槛现在判为可用的活跃路由；对用户而言结果本就一致（该步骤不渲染直接完成）。
 
-`needsSetup(row, anyUsable)` 接受同一个事实，因此设置卡片仅代表首次运行姿态。只要该姿态仍成立且用户层从未被写入，或 `dismissedSetup` 在本会话内把它留成一行，Models 列表就会包含官方空路径行。空的残留用户对象是删除后的残余，不出现在列表中；另有可触达的提供方时，空闲的官方路由同样不出现；仍被占用的官方路由才是一行带缺失密钥点的普通行，距离同一张卡片只有一次「编辑」点击。从未写入与残留的区分由[首次运行官方 DeepSeek 列表](2026-08-20-first-run-official-deepseek-listing.md)持有。
+`needsSetup(row, anyUsable)` 接受同一个事实，因此设置卡片仅代表首次运行姿态。只要该姿态仍成立且用户层从未被写入，或 `dismissedSetup` 在本会话内把它留成一行，Models 列表就会包含官方空路径行。空的残留用户对象是删除后的残余，不出现在列表中；另有可触达的提供方时，空闲的官方路由同样不出现；仍被占用的官方路由才是一行带缺失密钥点的普通行，距离同一张卡片只有一次「编辑」点击。从未写入与残留的区分由[首次运行官方 DeepSeek 列表](2026-08-20-first-run-official-deepseek-listing.zh.md)持有。
 
 现在每一类卡片各自拥有自己的关闭回调。`closeSetup` 把该提供方记入组件本地的 `dismissedSetup` 集合，别的一概不碰；`closeEditor` 继续清空它那些卡片所拥有的三个状态。两者都经由同一个 `announceSaved` 助手完成保存后的重载。关闭状态属于查看态，与展开的编辑卡和新增卡一样：对仍处于首次运行姿态的用户，重载会恢复该姿态。
 

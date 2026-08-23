@@ -20,7 +20,7 @@ Mobile 附件使用配对范围的加密 blob capability，并以字节进入现
 
 Companion Surface 是导出的 DSH Web 组件的手机尺寸组合。Mobile 拥有导航、所选 Desktop 状态和远程权威适配；共享 Web 包拥有 Markdown、代码、图片、工具、diff、审批、Ask User、错误、终端摘要和 composer 展示。导入 Desktop 私有 CSS module 或重新实现这些 renderer 不满足组件复用。
 
-Mobile Companion 不提供推送能力。[仅前台同步决策](../../implemented/simplification/2026-08-22-foreground-only-companion-synchronization.md)删除 APNs 与 FCM adapter、token、payload、持久化、配置、配额、指标、secret、原生依赖与验收要求。进入后台会暂停 Relay 连接；打开应用或回到前台时重新连接，并在启用 mutation 前完成 Desktop 权威同步。只有不携带过期交互权威且不依赖推送投递的 deep link 才可保留。
+Mobile Companion 不提供推送能力。[仅前台同步决策](../../implemented/simplification/2026-08-22-foreground-only-companion-synchronization.zh.md)删除 APNs 与 FCM adapter、token、payload、持久化、配置、配额、指标、secret、原生依赖与验收要求。进入后台会暂停 Relay 连接；打开应用或回到前台时重新连接，并在启用 mutation 前完成 Desktop 权威同步。只有不携带过期交互权威且不依赖推送投递的 deep link 才可保留。
 
 产品验收运行发布的 Mobile 入口、已运营的非粘性双实例 Platform 与真实 Paired Desktop。`apps/mobile/prototype-companion`、Vite 端口 5173/5174、假身份、内存存储、测试证书与测试专用 provider 禁止作为验收 origin。
 

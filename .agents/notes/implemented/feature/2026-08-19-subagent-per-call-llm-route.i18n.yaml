@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-subagent-per-call-llm-route.md
 2026-08-19-subagent-per-call-llm-route.md: 6cc197f9a68386a0a121858f2e8210f48133a761
-2026-08-19-subagent-per-call-llm-route.zh.md: 5f0f1cff5fd84f1b0af4d02b4a696e4566a2149f
+2026-08-19-subagent-per-call-llm-route.zh.md: 52bac3f906d74c7f06998efe3d330078f18a19e9

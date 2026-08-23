@@ -4,7 +4,7 @@ Status: implemented
 
 [English](2026-07-22-slot-type-chain-implementation.md) | 中文
 
-> 范围：Web 客户端 slot 体系的终版设计——UI 插件如何拼合页面、渲染权威落在哪里、组件 props 如何定型、业务活数据住在哪里。周边语境（装载链、对象层、服务）归 [Web 客户端架构 RFC](2026-07-19-gui-web-client-architecture.md) 所有，其 slot 各节移交本文。
+> 范围：Web 客户端 slot 体系的终版设计——UI 插件如何拼合页面、渲染权威落在哪里、组件 props 如何定型、业务活数据住在哪里。周边语境（装载链、对象层、服务）归 [Web 客户端架构 RFC](2026-07-19-gui-web-client-architecture.zh.md) 所有，其 slot 各节移交本文。
 
 ## 问题
 
@@ -12,11 +12,11 @@ Status: implemented
 
 ## 决策
 
-一句话：**ui-renderer 只渲染 `'root'`；插件用单独一次 `register` 调用组合 UI——这一次调用同时占用 slot、声明并授权子 slot、声明 store、注入业务面；组件是纯函数，props 分四份额到达，每一份额都从各自唯一的真源自动推导。**
+一句话：**ui-renderer 的应用装配只渲染 `'root'`；插件用单独一次 `register` 调用组合 UI——这一次调用同时占用 slot、声明并授权子 slot、声明 store、注入业务面；组件是纯函数，props 分四份额到达，每一份额都从各自唯一的真源自动推导。** 功能外壳可以通过框架的[显式 Session 挂载](2026-08-23-explicit-session-slot-mounts.zh.md)渲染已声明的非 root Session slot，而不增加另一套定义或组件 import API。
 
 ### 'root' 是唯一的先验 slot
 
-`SlotRegistry`（client 运行时）在构造时声明 `'root'`——single/root、`owner: {}`——其 `SlotMap` 合并声明位于运行时包。ui-renderer 的全部装配就是 `ctx.slots.renderSlot('root', {})`：唯一的 ctx 级渲染入口；传任何其他键、渲染器未安装、root 无人注册，一律大声失败（无 fallback）。
+`SlotRegistry`（client 运行时）在构造时声明 `'root'`——single/root、`owner: {}`——其 `SlotMap` 合并声明位于运行时包。ui-renderer 的应用装配调用 `ctx.slots.renderSlot('root', {})`；向该方法传入其他键、渲染器未安装或 root 无人注册时，一律明确失败（无 fallback）。`renderSessionSlot()` 是显式挂载非 root Session 的独立框架入口，并会校验目标声明与 scope。
 
 ### register 是唯一 API；children = 声明+授权+运行时 spec
 
@@ -36,7 +36,7 @@ ctx.slots.register({
 
 对等原则：**声明子 slot 的 entry 独占渲染这些子 slot 的权力**，全部在 register 时确定（配置错误会在装载时明确失败；渲染热路径不再校验）。装载即炸的情形：第二个 entry 声明已被声明的 slot；向未声明的 slot register；同一个 store 句柄挂到两个 scope 之下；chain 注册缺 `select`。
 
-激活顺序独立于声明条目的贡献方使用 `ctx.slots.inject(key, callback)`，并让直接调用 `register()` 继续大声失败。声明、贡献方、替换与失败各自的生命周期由 [slot 声明注入决策](2026-08-05-slot-declaration-injection.md) 规定。
+激活顺序独立于声明条目的贡献方使用 `ctx.slots.inject(key, callback)`，并让直接调用 `register()` 继续大声失败。声明、贡献方、替换与失败各自的生命周期由 [slot 声明注入决策](2026-08-05-slot-declaration-injection.zh.md) 规定。
 
 `SlotMap` 声明合并仍是类型权威，且 entry 只声明自己的轴加 **owner 份额**——注册方注入的 props 永不进入全局表（「谁注入的，类型归谁」）。
 
@@ -90,7 +90,7 @@ inject 工厂只接收其声明所授权的形参——session slot 获得 `sess
 
 ### 树上语境与渲染器约定
 
-`SessionProvider` 是框架组件，**以标配席位形式送达**：`children` 里声明了 session scope slot 的 entry 经 prop 收到它（类型住 ui-slots，值由渲染器注入）——组件永不对它做值 import。它框架自接线（内部自读运行时的当前会话状态，装配方零传参），render-prop 形——`children(sessionId)` 外加 `empty` 分支，以 `key={sessionId}` 重挂。`BindingContext` 属机械内部；业务组件可见的 React Context 为零。inject 工厂有意在 outlet 内部执行（per-entry 错误边界接得住它们；崩溃的注册方只黑掉自己那一格，装配错误则重抛）；outlet 将树上下文作为仅供框架机制使用的隐式参数读取——即「身份出自 register 闭包、现场出自树位置」的分工。
+`SessionProvider` 是框架组件，**以标配席位形式送达**：`children` 里声明了 session scope slot 的 entry 经 prop 收到它（类型住 ui-slots，值由渲染器注入）——组件永不对它做值 import。装配方不传身份时，它跟随运行时的当前会话；显式 Session 挂载则提供一个不会移动外壳选中项的 id。两种形式都是 render-prop 形——`children(sessionId)` 外加 `empty` 分支，以 `key={sessionId}` 重挂。`BindingContext` 属机械内部；业务组件可见的 React Context 为零。inject 工厂有意在 outlet 内部执行（per-entry 错误边界接得住它们；崩溃的注册方只黑掉自己那一格，装配错误则重抛）；outlet 将树上下文作为仅供框架机制使用的隐式参数读取——即「身份出自 register 闭包、现场出自树位置」的分工。
 
 渲染位于一份安装约定之后，因此运行时不依赖 React：`SlotRenderer`（接口住 ui-slots，实现 `createSlotRenderer()` 住 ui-renderer）在壳 boot 时经 `ctx.slots.install(...)` 安装一次；双重安装与安装前渲染均 throw。归属记账是服务里的单一 `Map<key, entry>`——账本、slot、贡献、渲染绑定、store 实例全部沿同一条 entry 轴生灭，跨插件重载的陈旧权威窗口由此在构造上关闭（已 dispose 的 entry 所捕获的 `renderSlot`，一进入口即抛陈旧授权（stale-authorization）错误）。
 

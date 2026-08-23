@@ -84,7 +84,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * flow instead: `conversation.view` for a whole tab, the input regions for
      * composer chrome.
      */
-    'conversation.session': { kind: 'single'; scope: 'session' }
+    'conversation.session': { kind: 'single'; scope: 'session'; owner: ConversationSessionOwnerProps }
     /**
      * The strip above the session's scrollport: title, view tabs, and the
      * action row. Taking this seat means rendering all three yourself, and it
@@ -92,7 +92,17 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * seat is declared by whoever occupies this one, so replacing the header
      * takes every action entry down with it.
      */
-    'conversation.session.header': { kind: 'single'; scope: 'session' }
+    'conversation.session.header': { kind: 'single'; scope: 'session'; owner: ConversationSessionHeaderOwnerProps }
+    /**
+     * One breadcrumb title and its lineage controls. The render site keeps
+     * the ordinary title as fallback; an occupant receives plain title data
+     * and may replace a subagent title with one combined navigation control.
+     */
+    'conversation.session.header.lineage': {
+      kind: 'single'
+      scope: 'session'
+      owner: ConversationHeaderLineageOwnerProps
+    }
     /**
      * One button in the session header's action row — the additive way to put
      * a per-session control beside the title without replacing the header.
@@ -310,6 +320,8 @@ export interface HeroAgentPresetOwnerProps {
 
 /** Owner share of the strict session content seat. */
 export interface ConversationSessionOwnerProps {
+  /** Side Chat keeps the canonical active Session body visible before its first prompt. */
+  renderMode?: 'sidechat' | undefined
   /**
    * Wrap the view ring in the transcript scrollport that also hosts the
    * sticky composer seat (whole `'conversation.composer'` chain output).
@@ -324,8 +336,27 @@ export interface ConversationSessionOwnerProps {
   wrapActiveBody?: (view: ReactNode) => ReactNode
 }
 
+/** Owner share selecting ordinary or Side Chat header posture. */
+export interface ConversationSessionHeaderOwnerProps {
+  /** Side Chat keeps canonical Session chrome visible before its first prompt. */
+  renderMode?: 'sidechat' | undefined
+}
+
 /** Header actions derive their state from the standard session/global kit. */
-export interface ConversationHeaderActionOwnerProps {}
+export interface ConversationHeaderActionOwnerProps {
+  /** Side Chat suppresses context labels while retaining Session-owned actions. */
+  renderMode?: 'sidechat' | undefined
+}
+
+/** Plain breadcrumb data handed to the optional lineage renderer. */
+export interface ConversationHeaderLineageOwnerProps {
+  /** Session represented by this breadcrumb title. */
+  lineageSessionId: SessionId
+  /** Display title available to a renderer that combines the title with a control. */
+  displayTitle: string
+  /** Navigate to an ancestor title when its combined control is clicked. */
+  openTitle?: () => void
+}
 
 /**
  * The input-region slot currency: dock/left/right entries read
@@ -671,7 +702,11 @@ export type ConversationSessionSlotProps =
 /** Full strict-session header props: shared store, tabs/actions render shares, navigation, and locale. */
 export type ConversationSessionHeaderSlotProps =
   PropsRuntime<'conversation.session.header'>
-  & PropsRenderSlots<'conversation.session.header.actions' | 'conversation.session.header.utilities'>
+  & PropsRenderSlots<
+    'conversation.session.header.lineage'
+    | 'conversation.session.header.actions'
+    | 'conversation.session.header.utilities'
+  >
   & PropsStore<ChatStore>
   & ConversationSessionHeaderInjected
   & PropsLocale<'conversation'>

@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process'
 import { lstat, mkdir, readdir, rm, unlink } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
+import { pnpmInvocation } from './pnpm-invocation.ts'
 
 /** Environment variable selecting the number of instrumented coverage processes. */
 export const COVERAGE_PARTITIONS_ENV = 'DSH_COVERAGE_PARTITIONS'
@@ -19,7 +20,9 @@ export const COVERAGE_TEST_TIMEOUT_ENV = 'DSH_COVERAGE_TEST_TIMEOUT_MS'
 export interface CoverageCommand {
   /** Diagnostic identity. */
   label: string
-  /** Node arguments; the first argument is pnpm's JavaScript entrypoint. */
+  /** Executable launched without a platform shell. */
+  command: string
+  /** Arguments passed to the executable. */
   args: string[]
   /** Environment additions for the child. */
   env: Record<string, string | undefined>
@@ -52,7 +55,7 @@ export interface CoveragePartitionCoordinatorOptions {
   partitions: number
   /** Maximum number of partition processes allowed to execute concurrently. */
   maxConcurrency?: number
-  /** pnpm JavaScript entrypoint from `npm_execpath`. */
+  /** pnpm JavaScript or executable entrypoint from `npm_execpath`. */
   pnpmEntrypoint: string
   /** Additional arguments shared by every partition. */
   vitestArgs?: string[]
@@ -179,23 +182,23 @@ export class CoveragePartitionCoordinator {
   private partitionCommand(index: number): CoverageCommand {
     const blobPath = join(this.blobsRoot, `partition-${index}.json`)
     const reportsDirectory = join(this.temporaryRoot, `coverage-${index}`)
+    const invocation = pnpmInvocation([
+      'exec',
+      'vitest',
+      'run',
+      '--coverage',
+      '--coverage.reportOnFailure',
+      '--maxWorkers=1',
+      `--shard=${index}/${this.partitions}`,
+      '--reporter=default',
+      '--reporter=blob',
+      `--outputFile.blob=${this.relativePath(blobPath)}`,
+      `--coverage.reportsDirectory=${this.relativePath(reportsDirectory)}`,
+      ...this.vitestArgs,
+    ], { npm_execpath: this.pnpmEntrypoint })
     return {
       label: `partition ${index}/${this.partitions}`,
-      args: [
-        this.pnpmEntrypoint,
-        'exec',
-        'vitest',
-        'run',
-        '--coverage',
-        '--coverage.reportOnFailure',
-        '--maxWorkers=1',
-        `--shard=${index}/${this.partitions}`,
-        '--reporter=default',
-        '--reporter=blob',
-        `--outputFile.blob=${this.relativePath(blobPath)}`,
-        `--coverage.reportsDirectory=${this.relativePath(reportsDirectory)}`,
-        ...this.vitestArgs,
-      ],
+      ...invocation,
       env: {
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
@@ -207,15 +210,15 @@ export class CoveragePartitionCoordinator {
   }
 
   private mergeCommand(): CoverageCommand {
+    const invocation = pnpmInvocation([
+      'exec',
+      'vitest',
+      `--merge-reports=${this.relativePath(this.blobsRoot)}`,
+      '--coverage',
+    ], { npm_execpath: this.pnpmEntrypoint })
     return {
       label: 'merged coverage report',
-      args: [
-        this.pnpmEntrypoint,
-        'exec',
-        'vitest',
-        `--merge-reports=${this.relativePath(this.blobsRoot)}`,
-        '--coverage',
-      ],
+      ...invocation,
       env: {
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
@@ -252,7 +255,7 @@ function runCoverageCommand(command: CoverageCommand): Promise<CoverageCommandRe
       if (value === undefined) Reflect.deleteProperty(env, name)
       else env[name] = value
     }
-    const child = spawn(process.execPath, command.args, {
+    const child = spawn(command.command, command.args, {
       cwd: command.cwd,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],

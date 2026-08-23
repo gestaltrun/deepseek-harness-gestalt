@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-17-explicit-issue-priority-field-deployment.md
 2026-08-17-explicit-issue-priority-field-deployment.md: 09b04a2b06a0a4e92a38bd94c270f1c9bde7f796
-2026-08-17-explicit-issue-priority-field-deployment.zh.md: 82ebb8a449387fc692b110dd2fe0cb5dfe06d483
+2026-08-17-explicit-issue-priority-field-deployment.zh.md: a2282ba623fa519944a2619f8a007e134e4f56d6

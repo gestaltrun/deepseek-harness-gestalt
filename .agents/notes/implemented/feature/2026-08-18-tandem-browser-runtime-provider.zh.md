@@ -10,7 +10,7 @@ Browser Runtime 能力目前只有一个无密钥确定性 Provider。驱动真�
 
 ## 决策
 
-`dsh-browser-runtime-tandem` 是 Tandem 形态 HTTP Service Provider。生产环境的 Desktop 把它指向[进程内 Electron Browser Runtime Agent Note](2026-08-19-electron-browser-runtime.md) 中的 loopback origin。它从不启动 Tandem.app。可选的 `command` 与 `cwd` 只启动仓库内 HTTP fixture 子进程。`sidecar: false` 在插件加载拒绝 `command` 与 `cwd`；生产环境的 Desktop 设为 `false`。它把 `baseUrl` 约束为绝对的 loopback HTTP origin，从 `tokenFile` 读取 bearer token，并在接收任何操作之前于 `startupTimeoutMs` 内轮询 `GET /agent/version` 与 `GET /status`。全部配置——`command`、`args`、`cwd`、`env`、`baseUrl`、`tokenFile`、`idPrefix`、`startupTimeoutMs`、`requestTimeoutMs`、`healthPollMs`、`pageSettleMs`、`reconnectAttempts`、`reconnectDelayMs`、`processGraceMs`、`maxResponseBytes`、`sidecar`——都是经过校验的插件配置；没有任何随部署变化的取值被硬编码。
+`dsh-browser-runtime-tandem` 是 Tandem 形态 HTTP Service Provider。生产环境的 Desktop 把它指向[进程内 Electron Browser Runtime Agent Note](2026-08-19-electron-browser-runtime.zh.md) 中的 loopback origin。它从不启动 Tandem.app。可选的 `command` 与 `cwd` 只启动仓库内 HTTP fixture 子进程。`sidecar: false` 在插件加载拒绝 `command` 与 `cwd`；生产环境的 Desktop 设为 `false`。它把 `baseUrl` 约束为绝对的 loopback HTTP origin，从 `tokenFile` 读取 bearer token，并在接收任何操作之前于 `startupTimeoutMs` 内轮询 `GET /agent/version` 与 `GET /status`。全部配置——`command`、`args`、`cwd`、`env`、`baseUrl`、`tokenFile`、`idPrefix`、`startupTimeoutMs`、`requestTimeoutMs`、`healthPollMs`、`pageSettleMs`、`reconnectAttempts`、`reconnectDelayMs`、`processGraceMs`、`maxResponseBytes`、`sidecar`——都是经过校验的插件配置；没有任何随部署变化的取值被硬编码。
 
 协议保真仅限于固定 revision，并以 `TANDEM_UPSTREAM_REVISION` 与 `TANDEM_UPSTREAM_VERSION` 导出。使用的端点为 `POST /sessions/create`、`POST /sessions/destroy`、`GET /tabs/list`、`POST /tabs/focus`、`POST /navigate`、`POST /input`、`GET /page-content` 与 `GET /screenshot`，全部携带 bearer token 鉴权，并受 `requestTimeoutMs` 与 `maxResponseBytes` 约束。页面读取携带 Provider 自有的 `settleMs`/`timeout`/`minLength` 查询上限，因为上游路由在短静态页面上会等待其内部 10 秒的稳定窗口。固定 revision 不可能产生的响应——错误的结构、id 位置出现空字符串、超限响应体——会以 `BROWSER_PROTOCOL` 拒绝；传输与进程失败会以 `BROWSER_RUNTIME_UNAVAILABLE` 拒绝。
 
@@ -32,7 +32,7 @@ Provider 在一个 loopback HTTP origin 上接收临时与命名持久 Profile�
 
 ## 结果
 
-能力 seam 获得了一个 Tandem 形态 HTTP 客户端，其失败模型可观察而非致命：Consumer 通过同一个 `BrowserRuntimeState` union 看到真实的不可用与重连状态。生产环境的 Desktop 通过该协议驱动进程内 Electron 引擎；测试运行在仓库内 HTTP fixture 上，且从不 spawn Tandem.app。命名持久 Browser Profile 复用 `persist:session-*` partition；临时 Profile 使用临时 `session-*` partition。Session 本地多实例与多标签页所有权见 [Session Browser Workspace Agent Note](2026-08-19-session-browser-workspace.md)；同一标签页上的人工与 Agent 控制权见 [浏览器控制权仲裁 Agent Note](2026-08-19-browser-control-arbitration.md)。见[持久 Browser Profile Agent Note](2026-08-19-persistent-browser-profiles.md)与[进程内 Electron Browser Runtime Agent Note](2026-08-19-electron-browser-runtime.md)。
+能力 seam 获得了一个 Tandem 形态 HTTP 客户端，其失败模型可观察而非致命：Consumer 通过同一个 `BrowserRuntimeState` union 看到真实的不可用与重连状态。生产环境的 Desktop 通过该协议驱动进程内 Electron 引擎；测试运行在仓库内 HTTP fixture 上，且从不 spawn Tandem.app。命名持久 Browser Profile 复用 `persist:session-*` partition；临时 Profile 使用临时 `session-*` partition。Session 本地多实例与多标签页所有权见 [Session Browser Workspace Agent Note](2026-08-19-session-browser-workspace.zh.md)；同一标签页上的人工与 Agent 控制权见 [浏览器控制权仲裁 Agent Note](2026-08-19-browser-control-arbitration.zh.md)。见[持久 Browser Profile Agent Note](2026-08-19-persistent-browser-profiles.zh.md)与[进程内 Electron Browser Runtime Agent Note](2026-08-19-electron-browser-runtime.zh.md)。
 
 ## 验证
 

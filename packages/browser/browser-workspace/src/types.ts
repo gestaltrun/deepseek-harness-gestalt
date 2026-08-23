@@ -18,6 +18,8 @@ export interface BrowserWorkspaceTabRecord {
   readonly tabId: BrowserTabId
   /** Last Runtime revision the Binder committed for this tab, including Runtime-internal bumps. */
   readonly revision: number
+  /** Last non-blank committed page URL; omission restores `about:blank`. */
+  readonly url?: string
 }
 
 /** One browser instance retained by a Session-owned Browser Workspace. */
@@ -45,6 +47,8 @@ export interface BrowserWorkspaceProjection {
 export interface BrowserWorkspacePage {
   readonly target: BrowserTarget
   readonly revision: number
+  /** Last non-blank committed page URL; omission restores `about:blank`. */
+  readonly url?: string
 }
 
 /**
@@ -57,6 +61,11 @@ export type BrowserWorkspaceCreateRemoteRequest =
   | { readonly profile: 'shared'; readonly attach?: BrowserCreateAttach }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    /** Browser Workspace fold state; its client view is the same whole value. */
+    browserWorkspace: BrowserWorkspaceProjection
+  }
+
   interface SessionProjectionMap {
     /**
      * Session-owned Browser Workspace snapshot folded from `browser/workspace`.
@@ -70,9 +79,9 @@ declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /**
      * Whole Session-owned Browser Workspace snapshot. Log-only, last-wins.
-     * Carries every owned instance, tab, and per-tab revision so Session
-     * switch, reload, and replay restore the same Workspace without exposing
-     * another Session's tabs.
+     * Carries every owned instance, tab, per-tab revision, and last non-blank
+     * URL so Session switch, reload, and replay restore the same Workspace
+     * without exposing another Session's tabs.
      */
     'browser/workspace': BrowserWorkspaceProjection
   }

@@ -260,6 +260,7 @@ export async function apply(_ctx: Context): Promise<void> {
   if (mobileStatus.type !== 'result' || mobileStatus.result.type !== 'status' || !('committed' in mobileStatus.result)) {
     throw new Error('Mobile did not receive the Desktop status answer')
   }
+  if (mobileStatus.result.committed.type !== 'confirmed') throw new Error('Mobile status answer was not a confirmation')
   console.log(`RECONNECT_QUERY operationId=${mobileStatus.result.operationId} committed=true original=${mobileStatus.result.committed.outcome}`)
 
   const absentStatus = {

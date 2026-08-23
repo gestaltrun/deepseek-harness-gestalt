@@ -80,11 +80,14 @@ function MobileEntry({
       search: projection.search,
       attachment: projection.attachment,
       operationFailure: projection.operationFailure,
+      cacheFailure: projection.cacheFailure,
+      onCreate: companionSurface.create,
       onSubmit: companionSurface.submit,
       onCancel: companionSurface.cancel,
       onLoadOlder: companionSurface.loadOlder,
       onAttach: companionSurface.attach,
       onSearch: companionSurface.search,
+      onClearCache: companionSurface.clearProjectionCache.bind(companionSurface),
     }
   return (
     <MobileAccount

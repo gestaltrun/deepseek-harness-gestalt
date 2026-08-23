@@ -38,6 +38,11 @@ describe('Desktop Companion operation ledger', () => {
     expect(execute).toHaveBeenCalledOnce()
     await expect(restored.execute(pairingId, { ...operation, text: 'different prompt' }, execute))
       .rejects.toThrow('operation id collision')
+    await expect(restored.query(pairingId, operation.operationId)).resolves.toMatchObject({
+      type: 'confirmed', operationId: operation.operationId,
+    })
+    await expect(restored.query(parsePersonalPairingId('pairing-other'), operation.operationId))
+      .resolves.toBeUndefined()
   })
 
   it('keeps prepared work retryable after a failed effect without publishing a result', async () => {

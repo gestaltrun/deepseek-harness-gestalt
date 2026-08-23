@@ -8,6 +8,7 @@ import {
   parseCompanionInteractionId,
   parseCompanionOperationId,
   parseCompanionSessionId,
+  parseCompanionWorkspaceId,
   REMOTE_PROTOCOL_LIMITS,
   RemoteProtocolError,
 } from '../src/index.ts'
@@ -75,7 +76,7 @@ describe('Encrypted Companion Protocol v3 product surface', () => {
           blank: false, updatedAt: 123, pendingInteraction: 'approval',
         }],
         workspaces: [{
-          workspaceId: 'workspace-1', path: '/work', title: 'Work', sessionIds: [sessionId],
+          workspaceId: parseCompanionWorkspaceId('workspace-1'), path: '/work', title: 'Work', sessionIds: [sessionId],
           createdAt: '2026-08-23T00:00:00.000Z', updatedAt: '2026-08-23T00:00:00.000Z',
         }],
       },

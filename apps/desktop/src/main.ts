@@ -251,17 +251,10 @@ async function handleDesktopCompanionOperation(
   context: { generation: number; desktopRevision: number },
   snowPairingVault: DesktopSnowPairingVault,
 ): Promise<DesktopCompanionOperationOutput> {
-  if (operation.type === 'query-operation-status') {
-    return {
-      type: 'operation-failed',
-      operationId: operation.operationId,
-      failure: {
-        kind: 'business', code: 'operation-unsupported',
-        message: 'Desktop operation status requires a committed operation ledger result',
-      },
-    }
-  }
   const pairingId = parsePersonalPairingId(selector)
+  if (operation.type === 'query-operation-status') {
+    return await companionProduct.queryOperationStatus(pairingId, operation.operationId)
+  }
   const attachmentKey = snowPairingVault.attachmentKey(selector)
   if (attachmentKey === undefined) {
     return {

@@ -7,9 +7,11 @@ import {
   parseCompanionOperationId,
   parseCompanionInteractionId,
   parseCompanionSessionId,
+  parseCompanionWorkspaceId,
   REMOTE_PROTOCOL_LIMITS,
   type CompanionOperation,
   type CompanionOperationId,
+  type CompanionMutationResult,
   type CompanionResult,
   type RelayAttachmentId,
   type RelayPairingSelector,
@@ -20,6 +22,11 @@ import type { SnowCompanionProtocolChannel } from '@deepseek-ai/dsh-noise-channe
 import { transferSelectedCompanionAttachment } from './companion-attachment.ts'
 import type { CompanionForegroundRuntime } from './companion-lifecycle.ts'
 import type { PairingCompanionKeyVault } from './companion-keys.ts'
+import {
+  type CompanionOperationReceipt,
+  type CompanionStatusAnswer,
+  type CompanionUncertainOperationSettlement,
+} from './companion-cache.ts'
 import type { MobilePendingSettlement, MobilePendingSettlementReceipt } from './companion-projection.ts'
 import type {
   MobileCompanionMutationChannel,
@@ -84,21 +91,24 @@ export interface MobileSnowCompanionProductOptions {
   reportFailure?(error: unknown): void
   trackHistoryRefresh?(sessionId: SessionId, submission: MobileCompanionTrackedSubmission): void
   trackSurfaceRefresh?(submission: MobileCompanionTrackedSubmission): void
+  /** Apply one durable reconnect outcome to the current Mobile presentation. */
+  recoveredResult?(result: CompanionResult): void
+  /** Durable receipt owner selected for the authenticated Account and pairing. */
+  operationSettlement?: CompanionUncertainOperationSettlement
 }
 
 /** Stable Mobile UI adapter whose every send revalidates current foreground generation. */
 export class MobileSnowCompanionProductChannel implements MobileCompanionMutationChannel {
   private readonly refreshAfterConfirmation = new Map<CompanionOperationId, SessionId>()
-  private readonly confirmations = new Map<CompanionOperationId, {
+  private operationSettlement: CompanionUncertainOperationSettlement | undefined
+  private readonly mutations = new Map<CompanionOperationId, {
     active: ActiveMobileSnowChannel
-    sessionId: SessionId
-    resolve(): void
+    resolve(result: CompanionMutationResult): void
     reject(error: unknown): void
   }>()
-  private readonly settlements = new Map<CompanionOperationId, {
+  private readonly statusQueries = new Map<CompanionOperationId, {
     active: ActiveMobileSnowChannel
-    sessionId: SessionId
-    resolve(receipt: MobilePendingSettlementReceipt): void
+    resolve(answer: CompanionStatusAnswer): void
     reject(error: unknown): void
   }>()
   private readonly images = new Map<CompanionOperationId, {
@@ -115,10 +125,30 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
 
   /** @param options - current lifecycle, endpoint key vault, Account proof owner, and Relay sender. */
   constructor(private readonly options: MobileSnowCompanionProductOptions) {
+    this.operationSettlement = options.operationSettlement
     options.connection.onInvalidated(() => { this.rejectPending() })
   }
 
-  create(): never { throw new Error('Companion Session creation is unavailable in this protocol version') }
+  /** Select the receipt owner for the current Account and Personal Pairing. */
+  setOperationSettlement(settlement: CompanionUncertainOperationSettlement | undefined): void {
+    this.operationSettlement = settlement
+  }
+
+  create(input: { workspace?: string }): MobileCompanionTrackedSubmission {
+    const operationIdValue = operationId()
+    const operation: CompanionOperation = {
+      type: 'create-session', operationId: operationIdValue,
+      ...(input.workspace === undefined ? {} : { workspaceId: parseCompanionWorkspaceId(input.workspace) }),
+    }
+    const active = this.requireActive()
+    const permit = this.options.runtime.bindCompanionMutationPermit('session-create')
+    if (permit === undefined) throw new Error('Companion Session creation has no current connection generation')
+    const completion = this.sendMutation(active, operation, 'session-create', permit).then((result) => {
+      requireConfirmed(result, 'Companion Session creation')
+      this.queueSurfaceRefresh()
+    })
+    return { operationId: operationIdValue, completion }
+  }
 
   submit(sessionId: SessionId, text: string): { operationId: CompanionOperationId; completion: Promise<void> } {
     const operationIdValue = operationId()
@@ -131,24 +161,30 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     const active = this.requireActive()
     const permit = this.options.runtime.bindCompanionMutationPermit('prompt')
     if (permit === undefined) throw new Error('Companion prompt has no current connection generation')
-    const completion = new Promise<void>((resolve, reject) => {
-      this.confirmations.set(operationIdValue, { active, sessionId, resolve, reject })
-      void this.sendCurrent(active, { type: 'operation', operation }, permit).catch((error: unknown) => {
-        this.confirmations.delete(operationIdValue)
-        reject(asError(error, 'Companion prompt send failed'))
-      })
+    const completion = this.sendMutation(
+      active, operation, 'prompt', permit, parseCompanionSessionId(sessionId),
+    ).then((result) => {
+      requireConfirmed(result, 'Companion prompt')
+      this.queueRefresh(sessionId)
     })
     return { operationId: operationIdValue, completion }
   }
 
   cancel(sessionId: SessionId): MobileCompanionTrackedSubmission {
     const operationIdValue = operationId()
-    this.refreshAfterConfirmation.set(operationIdValue, sessionId)
-    const submission = this.sendTracked({
+    const operation: CompanionOperation = {
       type: 'cancel-session', operationId: operationIdValue, sessionId: parseCompanionSessionId(sessionId),
-    })
-    void submission.completion.catch(() => { this.refreshAfterConfirmation.delete(operationIdValue) })
-    return submission
+    }
+    const active = this.requireActive()
+    const permit = this.options.runtime.bindCompanionMutationPermit('cancel')
+    if (permit === undefined) throw new Error('Companion cancel has no current connection generation')
+    return {
+      operationId: operationIdValue,
+      completion: this.sendMutation(active, operation, 'cancel', permit, operation.sessionId).then((result) => {
+        requireConfirmed(result, 'Companion cancel')
+        this.queueRefresh(sessionId)
+      }),
+    }
   }
 
   attach(sessionId: SessionId, file: File): { operationId: ReturnType<typeof parseCompanionOperationId>; completion: Promise<void> } {
@@ -170,7 +206,10 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
           operationId: operationIdValue,
           sessionId: parseCompanionSessionId(sessionId),
           permit,
-          send: async (offer) => { await this.sendCurrent(active, { type: 'operation', operation: offer }, permit) },
+          send: async (offer) => {
+            const result = await this.sendMutation(active, offer, 'attachment', permit, offer.sessionId)
+            if (result.type === 'confirmed') this.queueRefresh(sessionId)
+          },
         })
       } finally {
         attachmentKey.fill(0)
@@ -208,18 +247,17 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
       interactionId: parseCompanionInteractionId(settlement.interactionId),
       settlement: interactionSettlement(settlement),
     }
-    return new Promise<MobilePendingSettlementReceipt>((resolve, reject) => {
-      this.settlements.set(operationIdValue, { active, sessionId: settlement.sessionId, resolve, reject })
-      const permit = this.options.runtime.bindCompanionMutationPermit(settlement.kind)
-      if (permit === undefined) {
-        this.settlements.delete(operationIdValue)
-        reject(new Error('Companion interaction has no current connection generation'))
-        return
+    const permit = this.options.runtime.bindCompanionMutationPermit(settlement.kind)
+    if (permit === undefined) return Promise.reject(new Error('Companion interaction has no current connection generation'))
+    return this.sendMutation(active, operation, settlement.kind, permit, operation.sessionId).then((result) => {
+      if (result.type === 'operation-failed') throw new Error(result.failure.message)
+      if (result.type !== 'interaction-receipt') throw new Error('Companion interaction returned an invalid result')
+      if (result.accepted) {
+        this.queueRefresh(settlement.sessionId)
+        return { accepted: true }
       }
-      void this.sendCurrent(active, { type: 'operation', operation }, permit).catch((error: unknown) => {
-        this.settlements.delete(operationIdValue)
-        reject(asError(error, 'Companion interaction send failed'))
-      })
+      if (result.reason === undefined) throw new Error('Companion interaction receipt omitted its rejection reason')
+      return { accepted: false, reason: result.reason }
     })
   }
 
@@ -251,59 +289,41 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
 
   /** Accept one result already authenticated by the current physical Snow receiver. */
   acceptResult(result: CompanionResult): void {
+    if (result.type === 'status') {
+      const query = this.statusQueries.get(result.operationId)
+      if (query !== undefined) {
+        this.statusQueries.delete(result.operationId)
+        query.resolve('committed' in result
+          ? { committed: true, original: result.committed }
+          : { committed: false })
+      }
+      return
+    }
+    if (result.type === 'confirmed' || result.type === 'attachment-rejected'
+      || result.type === 'operation-failed' || result.type === 'interaction-receipt') {
+      const mutation = this.mutations.get(result.operationId)
+      if (mutation !== undefined) {
+        this.mutations.delete(result.operationId)
+        mutation.resolve(result)
+      }
+    }
     if (result.type === 'operation-failed') {
       this.refreshAfterConfirmation.delete(result.operationId)
-      const confirmation = this.confirmations.get(result.operationId)
-      if (confirmation !== undefined) {
-        this.confirmations.delete(result.operationId)
-        confirmation.reject(new Error(result.failure.message))
-      }
       const image = this.images.get(result.operationId)
       if (image !== undefined) {
         this.images.delete(result.operationId)
         image.reject(new Error(result.failure.message))
       }
-      const settlement = this.settlements.get(result.operationId)
-      if (settlement !== undefined) {
-        this.settlements.delete(result.operationId)
-        settlement.reject(new Error(result.failure.message))
-      }
       return
     }
     if (result.type === 'confirmed') {
-      const confirmation = this.confirmations.get(result.operationId)
-      if (confirmation !== undefined) {
-        this.confirmations.delete(result.operationId)
-        if (this.options.connection.current() !== confirmation.active) {
-          confirmation.reject(new Error('Companion confirmation belongs to a stale connection generation'))
-          return
-        }
-        confirmation.resolve()
-        this.queueRefresh(confirmation.sessionId)
-        return
-      }
       const sessionId = this.refreshAfterConfirmation.get(result.operationId)
       if (sessionId === undefined) return
       this.refreshAfterConfirmation.delete(result.operationId)
       this.queueRefresh(sessionId)
       return
     }
-    if (result.type === 'interaction-receipt') {
-      const pending = this.settlements.get(result.operationId)
-      if (pending === undefined) return
-      this.settlements.delete(result.operationId)
-      if (this.options.connection.current() !== pending.active) {
-        pending.reject(new Error('Companion interaction receipt belongs to a stale connection generation'))
-        return
-      }
-      if (result.accepted) {
-        pending.resolve({ accepted: true })
-        this.queueRefresh(pending.sessionId)
-      }
-      else if (result.reason !== undefined) pending.resolve({ accepted: false, reason: result.reason })
-      else pending.reject(new Error('Companion interaction receipt omitted its rejection reason'))
-      return
-    }
+    if (result.type === 'interaction-receipt') return
     if (result.type !== 'image-chunk') return
     const pending = this.images.get(result.operationId)
     if (pending === undefined) return
@@ -341,14 +361,96 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     active: ActiveMobileSnowChannel,
     message: Parameters<SnowCompanionProtocolChannel['seal']>[0],
     permit: { requireCurrent(): void },
+    onTransmitted?: () => void | Promise<void>,
   ): Promise<void> {
     permit.requireCurrent()
     if (this.options.connection.current() !== active) throw new Error('Companion Snow channel was replaced')
     const ciphertext = active.channel.seal(message)
     permit.requireCurrent()
     await this.options.sendCiphertext(active.targetAttachmentId, ciphertext)
+    await onTransmitted?.()
     permit.requireCurrent()
     if (this.options.connection.current() !== active) throw new Error('Companion Snow channel was replaced')
+  }
+
+  /** Reconcile every unknown receipt after the replacement connection synchronizes. */
+  async reconcileUnknown(): Promise<readonly CompanionOperationReceipt[]> {
+    const active = this.requireActive()
+    const settlement = this.requireOperationSettlement()
+    const rows = await settlement.reconcileUnknown({
+      send: () => Promise.reject(new Error('Companion reconciliation never sends a mutation')),
+      queryStatus: async operationIdValue => await this.queryStatus(active, operationIdValue),
+    })
+    for (const row of rows) {
+      if (row.status === 'committed' && row.original !== undefined) {
+        this.options.recoveredResult?.(row.original)
+        this.refreshRecovered(row)
+      } else if (row.status === 'not-submitted') {
+        this.options.recoveredResult?.({ type: 'status', operationId: row.operationId, absent: true })
+      }
+    }
+    return rows
+  }
+
+  private async sendMutation(
+    active: ActiveMobileSnowChannel,
+    operation: CompanionOperation,
+    kind: Parameters<CompanionUncertainOperationSettlement['transmit']>[0]['kind'],
+    permit: { requireCurrent(): void },
+    sessionId?: ReturnType<typeof parseCompanionSessionId>,
+  ): Promise<CompanionMutationResult> {
+    const receipt = await this.requireOperationSettlement().transmit(
+      { kind, operationId: operation.operationId, ...(sessionId === undefined ? {} : { sessionId }) },
+      {
+        send: async (_mutation, onTransmitted) => {
+          const outcome = new Promise<CompanionMutationResult>((resolve, reject) => {
+            this.mutations.set(operation.operationId, { active, resolve, reject })
+          })
+          void outcome.catch(() => {})
+          try {
+            await this.sendCurrent(active, { type: 'operation', operation }, permit, onTransmitted)
+            return { known: true, result: await outcome }
+          } catch (error) {
+            this.mutations.delete(operation.operationId)
+            throw error
+          }
+        },
+        queryStatus: async operationIdValue => await this.queryStatus(active, operationIdValue),
+      },
+      this.options.runtime.getState(),
+    )
+    if (receipt.status !== 'committed' || receipt.original === undefined) {
+      throw new Error(`Companion operation ${operation.operationId} requires reconnect reconciliation`)
+    }
+    return receipt.original
+  }
+
+  private queryStatus(
+    active: ActiveMobileSnowChannel,
+    operationIdValue: CompanionOperationId,
+  ): Promise<CompanionStatusAnswer> {
+    const permit = this.options.runtime.bindCompanionMutationPermit('other-mutation')
+    if (permit === undefined) return Promise.reject(new Error('Companion status query has no current connection generation'))
+    return new Promise((resolve, reject) => {
+      this.statusQueries.set(operationIdValue, { active, resolve, reject })
+      void this.sendCurrent(active, {
+        type: 'operation', operation: { type: 'query-operation-status', operationId: operationIdValue },
+      }, permit).catch((error: unknown) => {
+        this.statusQueries.delete(operationIdValue)
+        reject(asError(error, 'Companion status query failed'))
+      })
+    })
+  }
+
+  private requireOperationSettlement(): CompanionUncertainOperationSettlement {
+    if (this.operationSettlement === undefined) throw new Error('Companion operation receipt owner is unavailable')
+    return this.operationSettlement
+  }
+
+  private refreshRecovered(receipt: CompanionOperationReceipt): void {
+    const sessionId = receipt.sessionId as SessionId | undefined
+    if (receipt.kind === 'session-create') this.queueSurfaceRefresh()
+    else if (sessionId !== undefined) this.queueRefresh(sessionId)
   }
 
   private requireActive(): ActiveMobileSnowChannel {
@@ -364,12 +466,16 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
         (submission) => { this.options.trackHistoryRefresh?.(sessionId, submission) },
         this.options.trackHistoryRefresh !== undefined,
       )
-      this.startRefresh(
-        () => this.refreshSurface(),
-        (submission) => { this.options.trackSurfaceRefresh?.(submission) },
-        this.options.trackSurfaceRefresh !== undefined,
-      )
+      this.queueSurfaceRefresh()
     })
+  }
+
+  private queueSurfaceRefresh(): void {
+    this.startRefresh(
+      () => this.refreshSurface(),
+      (submission) => { this.options.trackSurfaceRefresh?.(submission) },
+      this.options.trackSurfaceRefresh !== undefined,
+    )
   }
 
   private startRefresh(
@@ -408,12 +514,12 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
 
   private rejectPending(): void {
     const error = new Error('Companion operation belongs to a disconnected connection generation')
-    for (const pending of this.settlements.values()) pending.reject(error)
+    for (const pending of this.mutations.values()) pending.reject(error)
+    for (const pending of this.statusQueries.values()) pending.reject(error)
     for (const pending of this.images.values()) pending.reject(error)
-    for (const pending of this.confirmations.values()) pending.reject(error)
-    this.settlements.clear()
+    this.mutations.clear()
+    this.statusQueries.clear()
     this.images.clear()
-    this.confirmations.clear()
     this.refreshAfterConfirmation.clear()
   }
 }
@@ -424,6 +530,12 @@ function operationId(): ReturnType<typeof parseCompanionOperationId> {
 
 function asError(value: unknown, fallback: string): Error {
   return value instanceof Error ? value : new Error(fallback, { cause: value })
+}
+
+function requireConfirmed(result: CompanionMutationResult, subject: string): void {
+  if (result.type === 'confirmed') return
+  if (result.type === 'operation-failed') throw new Error(result.failure.message)
+  throw new Error(`${subject} returned ${result.type}`)
 }
 
 function interactionSettlement(

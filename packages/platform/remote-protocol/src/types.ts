@@ -28,6 +28,9 @@ export type CompanionInteractionId = Branded<'CompanionInteractionId'>
 /** Protocol-native identifier for an approved Session projection or operation target. */
 export type CompanionSessionId = Branded<'CompanionSessionId'>
 
+/** Protocol-native identifier for one Desktop Workspace target. */
+export type CompanionWorkspaceId = Branded<'CompanionWorkspaceId'>
+
 /** Protocol-native identifier for one ordered transcript projection entry. */
 export type CompanionTranscriptEntryId = Branded<'CompanionTranscriptEntryId'>
 
@@ -108,6 +111,13 @@ export interface CompanionCancelSessionOperation {
   sessionId: CompanionSessionId
 }
 
+/** Create a Session in one Workspace, or omit the Workspace for Ungrouped. */
+export interface CompanionCreateSessionOperation {
+  type: 'create-session'
+  operationId: CompanionOperationId
+  workspaceId?: CompanionWorkspaceId
+}
+
 /** Read exact historical image bytes after Desktop Session authorization. */
 export interface CompanionReadImageOperation {
   type: 'read-image'
@@ -156,6 +166,7 @@ export interface CompanionQueryOperationStatusOperation {
 
 /** Operations in the implemented Companion codec slices. */
 export type CompanionOperation =
+  | CompanionCreateSessionOperation
   | CompanionSubmitPromptOperation
   | CompanionOfferAttachmentOperation
   | CompanionSearchSessionsOperation
@@ -234,11 +245,18 @@ export interface CompanionInteractionReceiptResult {
   reason?: 'not-pending' | 'bad-response'
 }
 
+/** Terminal Desktop result retained for one idempotent Companion mutation. */
+export type CompanionMutationResult =
+  | CompanionConfirmedResult
+  | CompanionAttachmentRejectedResult
+  | CompanionOperationFailedResult
+  | CompanionInteractionReceiptResult
+
 /** Reconnect answer returning the original committed result for one operation id. */
 export interface CompanionCommittedStatusResult {
   type: 'status'
   operationId: CompanionOperationId
-  committed: CompanionConfirmedResult
+  committed: CompanionMutationResult
 }
 
 /** Reconnect answer stating the queried operation id committed nothing. */
@@ -298,7 +316,7 @@ export interface CompanionSessionSummaryProjection {
 
 /** One bounded Workspace row containing only Session ids present in this page. */
 export interface CompanionWorkspaceProjection {
-  workspaceId: string
+  workspaceId: CompanionWorkspaceId
   path: string
   title: string
   sessionIds: readonly CompanionSessionId[]

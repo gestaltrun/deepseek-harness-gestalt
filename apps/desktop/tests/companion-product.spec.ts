@@ -265,6 +265,27 @@ describe('Desktop Companion product operations', () => {
     ])
   })
 
+  it('creates Workspace-owned and Ungrouped Sessions through the exact Host request', async () => {
+    const calls: Array<[string, Record<string, unknown>]> = []
+    const dependencies = baseDependencies(hostRpc(async (method, payload) => {
+      calls.push([method, payload])
+      return { ok: true, value: { sessionId: `session-created-${String(calls.length)}` } }
+    }))
+    const workspace = op({ type: 'create-session', workspaceId: 'workspace-product' as never })
+    const ungrouped = op({ type: 'create-session' })
+
+    await expect(handleCompanionProductOperation(workspace, dependencies)).resolves.toMatchObject({
+      type: 'confirmed', operationId: workspace.operationId,
+    })
+    await expect(handleCompanionProductOperation(ungrouped, dependencies)).resolves.toMatchObject({
+      type: 'confirmed', operationId: ungrouped.operationId,
+    })
+    expect(calls).toEqual([
+      ['session.create', { workspaceId: 'workspace-product' }],
+      ['session.create', {}],
+    ])
+  })
+
   it('settles pairing-private Approval and Ask User requests through Host respond', async () => {
     const respond = vi.fn<NonNullable<DesktopHostRpc['respond']>>(async () => ({ accepted: true }))
     const host = hostRpc(async () => { throw new Error('settlement must not use an arbitrary Host method') }, respond)
@@ -459,7 +480,6 @@ async function offer(fileName: string, plaintext: Uint8Array, id: string): Promi
   operation: CompanionOfferAttachmentOperation
   ciphertext: Uint8Array
 }> {
-  // oxlint-disable-next-line typescript/no-unsafe-assignment -- tsc resolves CryptoKey via @types/node; oxlint misses that global
   const key = await deriveCompanionAttachmentKey(attachmentKey)
   const sealed = await sealCompanionAttachment(key, plaintext)
   return {

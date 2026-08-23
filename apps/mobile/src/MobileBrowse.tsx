@@ -39,6 +39,8 @@ export interface MobileBrowseProps {
   canMutate: boolean
   /** Latest non-attachment mutation or refresh failure. */
   operationFailure?: MobileCompanionOperationFailure | undefined
+  /** Latest cache deletion failure. */
+  cacheFailure?: string | undefined
   /** Live clock owner used by shared relative-time rows. */
   clock: MobilePresentationClock
   /** Optional create handler used by Workspace and global create actions. */
@@ -55,12 +57,15 @@ export interface MobileBrowseProps {
   search: MobileCompanionSearchSnapshot
   /** Request one full-text Session search from Desktop. */
   onSearch?: ((query: string) => void) | undefined
+  /** Clear cached content for this Paired Desktop without deleting pairing keys. */
+  onClearCache?: (() => void | Promise<void>) | undefined
 }
 
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
   desktopName, connection, sessions, workspaces, conversations, locale, theme, loadImage,
-  canMutate, clock, onCreate, onSubmit, onCancel, onAttach, onLoadOlder, search, onSearch, operationFailure,
+  canMutate, clock, onCreate, onSubmit, onCancel, onAttach, onLoadOlder, search, onSearch, onClearCache, operationFailure,
+  cacheFailure,
 }: MobileBrowseProps): ReactNode {
   const [openId, setOpenId] = useState<SessionId>()
   const [page, setPage] = useState(0)
@@ -148,7 +153,14 @@ export function MobileBrowse({
           </form>
         )}
         {search.status === 'error' && <p role="alert">{search.error.message}</p>}
-        {operationFailure?.operation === 'refresh' && <p role="alert">{operationFailure.failure.message}</p>}
+        {(operationFailure?.operation === 'refresh' || operationFailure?.operation === 'create')
+          && <p role="alert">{operationFailure.failure.message}</p>}
+        {cacheFailure !== undefined && <p role="alert">{cacheFailure}</p>}
+        {onClearCache !== undefined && (
+          <button type="button" onClick={() => { void onClearCache() }}>
+            {locale === 'zh' ? '清除此 Desktop 的缓存' : 'Clear this Desktop cache'}
+          </button>
+        )}
         {onCreate !== undefined && (
           <button type="button" disabled={!canMutate} onClick={() => { if (canMutate) onCreate({}) }}>
             {locale === 'zh' ? '新建 Ungrouped Session' : 'New ungrouped Session'}

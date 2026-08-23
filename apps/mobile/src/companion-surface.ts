@@ -46,6 +46,16 @@ export interface ValidatedCompanionResultReceiver {
   acceptValidatedCompanionResult(result: CompanionResult): void
 }
 
+/** Encrypted projection cache selected by the authenticated Account and Personal Pairing. */
+export interface MobileCompanionProjectionCache {
+  /** Seal the latest Desktop-confirmed projection. */
+  save(projection: MobileCompanionProjectionDto): Promise<void>
+  /** Open the last Desktop-confirmed projection for Remote Offline presentation. */
+  restore(): Promise<MobileCompanionProjectionDto | undefined>
+  /** Remove cached content and receipts without deleting pairing authority. */
+  clear(): Promise<void>
+}
+
 /** Desktop-authoritative search state; Mobile never synthesizes substring hits. */
 interface MobileCompanionSearchItem {
   /** Session identity converted from the authenticated protocol value. */
@@ -92,7 +102,7 @@ export interface MobileCompanionOperationFailure {
   /** Exact request correlation from the encrypted Companion protocol. */
   readonly operationId: CompanionOperationId
   /** Product operation class that owns presentation of this failure. */
-  readonly operation: 'cancel' | 'history' | 'refresh'
+  readonly operation: 'create' | 'cancel' | 'history' | 'refresh'
   /** Session scope for cancel and history; refresh is Desktop-wide. */
   readonly sessionId?: SessionId | undefined
   /** Stable Host failure projected for display. */
@@ -115,6 +125,8 @@ export interface MobileCompanionSurfaceSnapshot {
   readonly attachment: MobileCompanionAttachmentSnapshot
   /** Latest correlated non-attachment product failure. */
   readonly operationFailure?: MobileCompanionOperationFailure | undefined
+  /** Latest Companion Cache deletion failure; retained content remains visible. */
+  readonly cacheFailure?: string | undefined
 }
 
 /** One selected-file transfer started by the encrypted Companion channel. */
@@ -136,7 +148,7 @@ export interface MobileCompanionTrackedSubmission {
 
 /** Encrypted mutations owned by one authenticated physical connection. */
 export interface MobileCompanionMutationChannel {
-  create(input: { workspace?: string }): void
+  create(input: { workspace?: string }): MobileCompanionTrackedSubmission
   submit(sessionId: SessionId, text: string): MobileCompanionMutationSubmission
   cancel(sessionId: SessionId): MobileCompanionTrackedSubmission
   attach(sessionId: SessionId, file: File): MobileCompanionAttachmentSubmission
@@ -172,20 +184,15 @@ export class MobileCompanionSurface {
   readonly #runtime: CompanionForegroundRuntime
   readonly #listeners = new Set<() => void>()
   #activeConnection: ActiveConnection | undefined
-  #snapshot: MobileCompanionSurfaceSnapshot = {
-    sessions: {
-      ids: [], byId: {}, current: undefined, phase: 'ready',
-      subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
-    },
-    workspaces: [],
-    conversations: {},
-    search: { query: '', status: 'idle', items: [], hasMore: false },
-    attachment: { status: 'idle' },
-  }
+  #snapshot: MobileCompanionSurfaceSnapshot = emptySurfaceSnapshot()
   #searchOperationId: CompanionOperationId | undefined
   #attachmentOperationId: CompanionOperationId | undefined
   #refreshOperationId: CompanionOperationId | undefined
-  readonly #operations = new Map<CompanionOperationId, { kind: 'submit' | 'cancel'; sessionId: SessionId }>()
+  #projectionCache: MobileCompanionProjectionCache | undefined
+  readonly #operations = new Map<CompanionOperationId, {
+    kind: 'create' | 'submit' | 'cancel'
+    sessionId?: SessionId
+  }>()
   readonly #historyOperations = new Map<CompanionOperationId, PendingHistoryOperation>()
   readonly #historyInFlight = new Map<SessionId, PendingHistoryOperation>()
 
@@ -198,6 +205,65 @@ export class MobileCompanionSurface {
   subscribe(listener: () => void): () => void {
     this.#listeners.add(listener)
     return () => { this.#listeners.delete(listener) }
+  }
+
+  /** Select the cache owned by the current Account and Personal Pairing. */
+  setProjectionCache(cache: MobileCompanionProjectionCache | undefined): void {
+    if (cache === this.#projectionCache) return
+    this.#projectionCache = cache
+    this.#activeConnection = undefined
+    this.#operations.clear()
+    this.#historyOperations.clear()
+    this.#historyInFlight.clear()
+    this.#searchOperationId = undefined
+    this.#attachmentOperationId = undefined
+    this.#refreshOperationId = undefined
+    this.#snapshot = emptySurfaceSnapshot()
+    this.publish()
+  }
+
+  /** Restore cached read-only content only while no authenticated generation has replaced it. */
+  async restoreProjectionCache(): Promise<boolean> {
+    const cache = this.#projectionCache
+    if (cache === undefined) return false
+    const projection = await cache.restore()
+    if (projection === undefined || cache !== this.#projectionCache || this.#activeConnection !== undefined) return false
+    const adapted = adaptMobileCompanionProjection(
+      projection,
+      () => Promise.reject(new Error('Companion interaction requires foreground synchronization')),
+    )
+    this.#snapshot = {
+      ...adapted,
+      search: { query: '', status: 'idle', items: [], hasMore: false },
+      attachment: { status: 'idle' },
+    }
+    this.publish()
+    return true
+  }
+
+  /** Clear cached content for the selected Desktop while retaining Personal Pairing keys. */
+  async clearProjectionCache(): Promise<void> {
+    try {
+      await this.#projectionCache?.clear()
+    } catch (error) {
+      this.#snapshot = {
+        ...this.#snapshot,
+        cacheFailure: error instanceof Error ? error.message : 'Companion Cache deletion failed',
+      }
+      this.publish()
+      throw error
+    }
+    if (!this.mayMutate()) {
+      this.#snapshot = emptySurfaceSnapshot()
+      this.publish()
+    }
+  }
+
+  /** Drop the current authority immediately, optionally deleting its serialized cache afterward. */
+  async releaseProjectionCache(deleteStored: boolean): Promise<void> {
+    const cache = this.#projectionCache
+    this.setProjectionCache(undefined)
+    if (deleteStored && cache !== undefined) await cache.clear()
   }
 
   /**
@@ -269,6 +335,7 @@ export class MobileCompanionSurface {
             : previousSnapshot.search,
           attachment: previousSnapshot.attachment,
           operationFailure: previousSnapshot.operationFailure,
+          cacheFailure: previousSnapshot.cacheFailure,
         }
         let accepted: boolean
         try {
@@ -291,6 +358,9 @@ export class MobileCompanionSurface {
           this.#refreshOperationId = undefined
         }
         this.publish()
+        void this.#projectionCache?.save(message).catch((error: unknown) => {
+          console.error('[companion-cache] authenticated projection retention failed:', error)
+        })
       },
       acceptValidatedCompanionProjection: (projection) => {
         if (this.#activeConnection?.token !== token || !companionMayMutate(this.#runtime.getState())) return false
@@ -300,7 +370,17 @@ export class MobileCompanionSurface {
   }
 
   readonly create = (input: { workspace?: string }): void => {
-    this.transmit('session-create', (channel) => { channel.mutations.create(input) })
+    const submission = this.transmit('session-create', channel => channel.mutations.create(input))
+    this.#operations.set(submission.operationId, { kind: 'create' })
+    void submission.completion.catch(() => {
+      if (this.#operations.get(submission.operationId)?.kind !== 'create') return
+      this.#operations.delete(submission.operationId)
+      this.#snapshot = {
+        ...this.#snapshot,
+        operationFailure: this.sendFailure('create', submission.operationId),
+      }
+      this.publish()
+    })
   }
 
   readonly submit = async (sessionId: SessionId, text: string): Promise<void> => {
@@ -420,6 +500,10 @@ export class MobileCompanionSurface {
   }
 
   private acceptCurrentCompanionResult(result: CompanionResult): void {
+    if (result.type === 'status' && 'committed' in result) {
+      this.acceptCurrentCompanionResult(result.committed)
+      return
+    }
     if (result.operationId === this.#searchOperationId && result.type === 'session-search') {
       this.#snapshot = {
         ...this.#snapshot,
@@ -452,15 +536,15 @@ export class MobileCompanionSurface {
       this.#operations.delete(result.operationId)
       this.#snapshot = {
         ...this.#snapshot,
-        operationFailure: result.type === 'operation-failed' && operation.kind === 'cancel'
+        operationFailure: result.type === 'operation-failed' && operation.kind !== 'submit'
           ? {
             operationId: result.operationId,
-            operation: 'cancel',
+            operation: operation.kind,
             sessionId: operation.sessionId,
             failure: result.failure,
           }
-          : operation.kind === 'cancel'
-            ? this.failureAfterSuccess('cancel', operation.sessionId)
+          : operation.kind !== 'submit'
+            ? this.failureAfterSuccess(operation.kind, operation.sessionId)
             : this.#snapshot.operationFailure,
       }
       this.publish()
@@ -517,16 +601,14 @@ export class MobileCompanionSurface {
         attachment: { operationId: result.operationId, status: 'failed', message: result.failure.message },
       }
     } else if (result.type === 'status') {
-      this.#snapshot = 'absent' in result
-        ? {
-          ...this.#snapshot,
-          attachment: {
-            operationId: result.operationId,
-            status: 'failed',
-            message: 'Desktop reports that the attachment was not submitted.',
-          },
-        }
-        : { ...this.#snapshot, attachment: { operationId: result.operationId, status: 'accepted' } }
+      this.#snapshot = {
+        ...this.#snapshot,
+        attachment: {
+          operationId: result.operationId,
+          status: 'failed',
+          message: 'Desktop reports that the attachment was not submitted.',
+        },
+      }
     } else {
       return
     }
@@ -650,6 +732,18 @@ export class MobileCompanionSurface {
     if (errors.length > 0) {
       console.error('[companion-surface] subscriber failures:', new AggregateError(errors))
     }
+  }
+}
+
+function emptySurfaceSnapshot(): MobileCompanionSurfaceSnapshot {
+  return {
+    sessions: {
+      ids: [], byId: {}, current: undefined, phase: 'ready',
+      subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
+    },
+    workspaces: [], conversations: {},
+    search: { query: '', status: 'idle', items: [], hasMore: false },
+    attachment: { status: 'idle' },
   }
 }
 

@@ -38,6 +38,8 @@ export interface MobileCompanionPresentation {
   attachment: MobileCompanionAttachmentSnapshot
   /** Latest non-attachment mutation or refresh failure. */
   operationFailure?: MobileCompanionOperationFailure | undefined
+  /** Latest Companion Cache deletion failure; cached content was retained. */
+  cacheFailure?: string | undefined
   /** Create one Desktop-default Session when mutation authority is available. */
   onCreate?: ((input: { workspace?: string }) => void) | undefined
   /** Submit a prompt through Desktop authority when transport is available. */
@@ -50,6 +52,8 @@ export interface MobileCompanionPresentation {
   onAttach?: ((sessionId: SessionId, file: File) => void) | undefined
   /** Request one full-text Session search from Desktop. */
   onSearch?: ((query: string) => void) | undefined
+  /** Clear cached content for this Paired Desktop without deleting pairing keys. */
+  onClearCache?: (() => void | Promise<void>) | undefined
 }
 
 /** Page exact Desktop Session ids and their Workspace memberships without projecting another row model. */

@@ -6,6 +6,7 @@ import {
   encodeProtocolBase64Url,
   parseCompanionInteractionId,
   parseCompanionSessionId,
+  parseCompanionWorkspaceId,
   REMOTE_PROTOCOL_LIMITS,
   type CompanionAttachmentRejectedResult,
   type CompanionHostFailure,
@@ -14,6 +15,7 @@ import {
   type CompanionResult,
   type CompanionProjection,
   type CompanionOperation,
+  type CompanionOperationId,
   type CompanionSearchSessionsOperation,
   type CompanionSessionSearchResult,
   type CompanionSessionId,
@@ -96,6 +98,17 @@ export class DesktopCompanionProductOwner {
 
   /** @param ledger - durable pairing-scoped mutation idempotency owner. */
   installLedger(ledger: DesktopCompanionOperationLedger): void { this.ledger = ledger }
+
+  /** Return the exact pairing-scoped durable outcome for reconnect reconciliation. */
+  async queryOperationStatus(
+    pairingId: PersonalPairingId,
+    operationId: CompanionOperationId,
+  ): Promise<CompanionResult> {
+    const original = await this.ledger?.query(pairingId, operationId)
+    return original === undefined
+      ? { type: 'status', operationId, absent: true }
+      : { type: 'status', operationId, committed: requireMutationResult(original) }
+  }
 
   /**
    * Install the current Web Host loopback RPC.
@@ -211,6 +224,8 @@ export async function handleCompanionProductOperation(
   dependencies: CompanionProductOperationDependencies,
 ): Promise<DesktopCompanionOperationOutput> {
   switch (operation.type) {
+    case 'create-session':
+      return await createHostSession(operation, dependencies)
     case 'offer-attachment':
       return await receiveAttachment(operation, dependencies)
     case 'search-sessions':
@@ -238,6 +253,21 @@ export async function handleCompanionProductOperation(
       return never
     }
   }
+}
+
+async function createHostSession(
+  operation: Extract<CompanionProductOperation, { type: 'create-session' }>,
+  dependencies: CompanionProductOperationDependencies,
+): Promise<CompanionResult> {
+  const response = await dependencies.host.call(
+    'session.create',
+    operation.workspaceId === undefined ? {} : { workspaceId: operation.workspaceId },
+    { rpcId: operation.operationId },
+  )
+  if (!response.ok) return operationFailed(operation, normalizeFailure(response.failure))
+  if (!isRecord(response.value)) return invalidHostResult(operation, 'session.create')
+  try { parseCompanionSessionId(response.value.sessionId) } catch { return invalidHostResult(operation, 'session.create') }
+  return { type: 'confirmed', operationId: operation.operationId, committedAt: dependencies.now(), outcome: 'accepted' }
 }
 
 interface DesktopSurfaceAuthoritySnapshot {
@@ -599,7 +629,7 @@ function parseSurfaceWorkspaces(
   value: unknown,
   visible: ReadonlySet<CompanionSessionId>,
 ): Array<{
-  workspaceId: string
+  workspaceId: ReturnType<typeof parseCompanionWorkspaceId>
   path: string
   title: string
   sessionIds: CompanionSessionId[]
@@ -620,7 +650,7 @@ function parseSurfaceWorkspaces(
     }
     if (sessionIds.length === 0) continue
     workspaces.push({
-      workspaceId: itemValue.workspaceId, path: itemValue.path, title: itemValue.title,
+      workspaceId: parseCompanionWorkspaceId(itemValue.workspaceId), path: itemValue.path, title: itemValue.title,
       sessionIds, createdAt: itemValue.createdAt, updatedAt: itemValue.updatedAt,
     })
     if (workspaces.length > REMOTE_PROTOCOL_LIMITS.surfaceWorkspaceRows) return undefined
@@ -813,7 +843,7 @@ function invalidHostResult(
 }
 
 function isLedgerMutation(operation: CompanionProductOperation): boolean {
-  return operation.type === 'submit-prompt' || operation.type === 'cancel-session'
+  return operation.type === 'create-session' || operation.type === 'submit-prompt' || operation.type === 'cancel-session'
     || operation.type === 'settle-interaction' || operation.type === 'offer-attachment'
 }
 
@@ -821,6 +851,12 @@ function isCompanionResultList(
   output: DesktopCompanionOperationOutput,
 ): output is readonly CompanionResult[] {
   return Array.isArray(output)
+}
+
+function requireMutationResult(result: CompanionResult): Exclude<CompanionResult, { type: 'status' | 'session-search' | 'image-chunk' }> {
+  if (result.type === 'confirmed' || result.type === 'attachment-rejected'
+    || result.type === 'operation-failed' || result.type === 'interaction-receipt') return result
+  throw new Error('Desktop Companion operation ledger contains a non-mutation result')
 }
 
 function isCompanionProjectionOutput(

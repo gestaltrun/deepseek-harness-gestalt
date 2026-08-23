@@ -1,0 +1,139 @@
+name: Mobile Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact reviewed master commit to build and sign.
+        required: true
+        type: string
+      upload_testflight:
+        description: Upload the signed iOS candidate to TestFlight.
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-release
+  cancel-in-progress: false
+
+env:
+  PRIMARY_NODE_VERSION: '24'
+
+jobs:
+  android:
+    name: Signed Android APK
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    environment: mobile-release
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      MOBILE_VERSION: ${{ vars.MOBILE_VERSION }}
+      MOBILE_BUILD_NUMBER: ${{ vars.MOBILE_BUILD_NUMBER }}
+      VITE_PLATFORM_ORIGIN: ${{ vars.VITE_PLATFORM_ORIGIN }}
+      VITE_PLATFORM_CALLBACK_URL: ${{ vars.VITE_PLATFORM_CALLBACK_URL }}
+      VITE_PLATFORM_GITHUB_CLIENT_ID: ${{ vars.VITE_PLATFORM_GITHUB_CLIENT_ID }}
+      VITE_PLATFORM_CREDENTIAL_REFERENCE: ${{ vars.VITE_PLATFORM_CREDENTIAL_REFERENCE }}
+      VITE_PLATFORM_DATABASE_IDENTITY: ${{ vars.VITE_PLATFORM_DATABASE_IDENTITY }}
+      VITE_PLATFORM_IDENTITY_NAMESPACE: ${{ vars.VITE_PLATFORM_IDENTITY_NAMESPACE }}
+      VITE_REMOTE_RELAY_WSS_URL: ${{ vars.VITE_REMOTE_RELAY_WSS_URL }}
+      VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS: ${{ vars.VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS }}
+      VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: ${{ vars.VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS }}
+      VITE_REMOTE_RELAY_RECONNECT_DELAY_MS: ${{ vars.VITE_REMOTE_RELAY_RECONNECT_DELAY_MS }}
+      VITE_REMOTE_RELAY_INBOUND_MAX_BYTES: ${{ vars.VITE_REMOTE_RELAY_INBOUND_MAX_BYTES }}
+      VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES: ${{ vars.VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify exact master candidate
+        env:
+          MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build and verify signed APK
+        run: bash apps/mobile/scripts/build-android-release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-gestalt-android-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
+          path: apps/mobile/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  ios:
+    name: Signed iOS and TestFlight
+    if: github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, macOS, ARM64, mobile-release]
+    environment: mobile-release
+    env:
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      MOBILE_BUNDLE_ID: ${{ vars.MOBILE_BUNDLE_ID }}
+      MOBILE_VERSION: ${{ vars.MOBILE_VERSION }}
+      MOBILE_BUILD_NUMBER: ${{ vars.MOBILE_BUILD_NUMBER }}
+      MOBILE_PROVISIONING_PROFILE: Gestalt Mobile App Store
+      VITE_PLATFORM_ORIGIN: ${{ vars.VITE_PLATFORM_ORIGIN }}
+      VITE_PLATFORM_CALLBACK_URL: ${{ vars.VITE_PLATFORM_CALLBACK_URL }}
+      VITE_PLATFORM_GITHUB_CLIENT_ID: ${{ vars.VITE_PLATFORM_GITHUB_CLIENT_ID }}
+      VITE_PLATFORM_CREDENTIAL_REFERENCE: ${{ vars.VITE_PLATFORM_CREDENTIAL_REFERENCE }}
+      VITE_PLATFORM_DATABASE_IDENTITY: ${{ vars.VITE_PLATFORM_DATABASE_IDENTITY }}
+      VITE_PLATFORM_IDENTITY_NAMESPACE: ${{ vars.VITE_PLATFORM_IDENTITY_NAMESPACE }}
+      VITE_REMOTE_RELAY_WSS_URL: ${{ vars.VITE_REMOTE_RELAY_WSS_URL }}
+      VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS: ${{ vars.VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS }}
+      VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: ${{ vars.VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS }}
+      VITE_REMOTE_RELAY_RECONNECT_DELAY_MS: ${{ vars.VITE_REMOTE_RELAY_RECONNECT_DELAY_MS }}
+      VITE_REMOTE_RELAY_INBOUND_MAX_BYTES: ${{ vars.VITE_REMOTE_RELAY_INBOUND_MAX_BYTES }}
+      VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES: ${{ vars.VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify exact master candidate
+        env:
+          MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build signed App Store candidate
+        run: bash apps/mobile/scripts/build-ios-release.sh
+      - name: Upload TestFlight
+        if: inputs.upload_testflight
+        run: |
+          IPA_PATH="$(find apps/mobile/release -maxdepth 1 -name '*.ipa' -print -quit)" \
+            bash apps/mobile/scripts/upload-testflight.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-gestalt-ios-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
+          path: apps/mobile/release/*.ipa
+          if-no-files-found: error
+          retention-days: 30

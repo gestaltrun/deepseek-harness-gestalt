@@ -13,6 +13,7 @@ import type {
   CompanionResult,
   CompanionSecurityCapability,
   CompanionSessionId,
+  CompanionWorkspaceId,
   CompanionTranscriptEntryId,
   CompanionTextTranscriptEntry,
   CompanionVersionDescriptor,
@@ -182,6 +183,11 @@ export function parseCompanionSessionId(value: unknown): CompanionSessionId {
   return parseIdentifier(value, 'Companion sessionId') as CompanionSessionId
 }
 
+/** Parse one opaque Desktop Workspace id at the Companion wire boundary. */
+export function parseCompanionWorkspaceId(value: unknown): CompanionWorkspaceId {
+  return parseIdentifier(value, 'Companion workspaceId') as CompanionWorkspaceId
+}
+
 /**
  * Parse one pairing-private pending-interaction identity.
  * @param value - untrusted protocol-native identifier.
@@ -263,6 +269,18 @@ export function decodeCompanionMessage(
 
 function parseOperation(value: unknown): CompanionOperation {
   const record = object(value, 'Companion operation')
+  if (record.type === 'create-session') {
+    exactKeys(
+      record,
+      record.workspaceId === undefined ? ['type', 'operationId'] : ['type', 'operationId', 'workspaceId'],
+      'Companion create-session operation',
+    )
+    return {
+      type: 'create-session',
+      operationId: parseCompanionOperationId(record.operationId),
+      ...(record.workspaceId === undefined ? {} : { workspaceId: parseCompanionWorkspaceId(record.workspaceId) }),
+    }
+  }
   if (record.type === 'offer-attachment') {
     exactKeys(
       record,
@@ -542,8 +560,10 @@ function parseStatusResult(record: Record<string, unknown>): CompanionResult {
   }
   exactKeys(record, ['type', 'operationId', 'committed'], 'Companion committed status result')
   const confirmed = parseResult(record.committed)
-  if (confirmed.type !== 'confirmed' || confirmed.operationId !== operationId) {
-    invalid('Companion committed status must embed its own confirmed result')
+  if ((confirmed.type !== 'confirmed' && confirmed.type !== 'attachment-rejected'
+    && confirmed.type !== 'operation-failed' && confirmed.type !== 'interaction-receipt')
+    || confirmed.operationId !== operationId) {
+    invalid('Companion committed status must embed its own terminal mutation result')
   }
   return { type: 'status', operationId, committed: confirmed }
 }
@@ -704,7 +724,7 @@ function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProject
       ['workspaceId', 'path', 'title', 'sessionIds', 'createdAt', 'updatedAt'],
       'Companion Workspace projection',
     )
-    const workspaceId = parseIdentifier(workspace.workspaceId, 'Companion Workspace id')
+    const workspaceId = parseCompanionWorkspaceId(workspace.workspaceId)
     for (const key of ['path', 'title', 'createdAt', 'updatedAt'] as const) {
       if (typeof workspace[key] !== 'string' || workspace[key].length === 0) {
         invalid(`Companion Workspace ${key} must be non-empty`)

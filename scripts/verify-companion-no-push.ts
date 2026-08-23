@@ -21,7 +21,8 @@ const PRODUCT_GLOBS = [
 ]
 
 const EXCLUDED_PATHS = [
-  /(?:^|\/)(?:node_modules|\.git|lib|dist|coverage|tests?|__tests__|snapshots)(?:\/|$)/u,
+  /(?:^|\/)(?:node_modules|\.git|\.gradle|lib|dist|DerivedData|coverage|tests?|__tests__|snapshots)(?:\/|$)/u,
+  /^apps\/mobile\/(?:android\/(?:app\/)?build|android\/app\/src\/main\/assets\/public|ios\/App\/App\/public|release)(?:\/|$)/u,
   /(?:^|\/)(?:README|CONTEXT)(?:\.zh)?\.md$/u,
   /\.md$|\.i18n\.yaml$|(?:\.spec|\.test)\.[^.]+$/u,
   /^scripts\/verify-companion-no-push\.ts$/u,

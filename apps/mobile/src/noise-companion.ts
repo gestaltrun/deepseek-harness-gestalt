@@ -45,6 +45,7 @@ export class MobileNoiseCompanionReceiver {
     private readonly resultReceiver?: () => MobileCompanionResultReceiver | undefined,
     private readonly surfaceReceiver?: () => MobileCompanionSurfaceReceiver | undefined,
     private readonly refreshSurface?: (offset: number) => void,
+    private readonly reconcileOperations?: () => void,
   ) {
     if (!Number.isSafeInteger(generation) || generation <= 0) {
       throw new TypeError('Mobile Noise Companion generation must be a positive safe integer')
@@ -90,6 +91,7 @@ export class MobileNoiseCompanionReceiver {
         workspaces: [],
         conversations: [],
       })
+      this.reconcileOperations?.()
       this.refreshSurface?.(0)
       return message
     }

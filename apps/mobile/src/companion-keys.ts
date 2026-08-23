@@ -8,6 +8,7 @@ import {
   parseRelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { MobileEndpointPairingRecovery, MobilePairingKeyRetention } from './personal-pairing.ts'
+import type { MobileProtectedStorage } from './native-protected-storage.ts'
 
 /** Maximum Personal Pairings whose attachment key one Mobile installation retains. */
 export const MAX_RETAINED_PAIRING_KEYS = 16
@@ -19,9 +20,17 @@ interface StoredMobilePairingState {
   grant?: RelayCredentialGrant
 }
 
-interface StoredMobilePairingDocument {
+export interface StoredMobilePairingDocument {
   active: readonly StoredMobilePairingState[]
   pending?: MobileEndpointPairingRecovery
+}
+
+/** Durable document store used by the in-memory key-vault owner. */
+export interface MobilePairingStateStore {
+  /** Load one Account's retained pairing authority. */
+  load(accountId: PlatformAccountId): Promise<StoredMobilePairingDocument>
+  /** Atomically replace one Account's retained pairing authority. */
+  save(accountId: PlatformAccountId, document: StoredMobilePairingDocument): Promise<void>
 }
 
 /** IndexedDB persistence isolated by signed-in Platform Account. */
@@ -78,6 +87,59 @@ export class IndexedDbMobilePairingStateStore {
   }
 }
 
+/** Native protected-store persistence for release builds. */
+export class NativeMobilePairingStateStore implements MobilePairingStateStore {
+  constructor(
+    private readonly storage: MobileProtectedStorage,
+    private readonly namespace: string,
+  ) {}
+
+  async load(accountId: PlatformAccountId): Promise<StoredMobilePairingDocument> {
+    const value = await this.storage.get(this.key(accountId))
+    if (value === undefined) return { active: [] }
+    let document: unknown
+    try { document = JSON.parse(value) } catch {
+      throw new TypeError('Native Mobile pairing document must contain JSON')
+    }
+    if (typeof document !== 'object' || document === null || Array.isArray(document)) {
+      throw new TypeError('Native Mobile pairing document must contain an object')
+    }
+    const record = document as Record<string, unknown>
+    if (record.version !== 1) throw new TypeError('Native Mobile pairing document version is unsupported')
+    if (!Array.isArray(record.active) || record.active.length > MAX_RETAINED_PAIRING_KEYS) {
+      throw new TypeError('Native Mobile pairing active state must contain a bounded array')
+    }
+    return {
+      active: record.active.map(parseNativeState),
+      ...(record.pending === undefined ? {} : { pending: parseNativeRecovery(record.pending) }),
+    }
+  }
+
+  async save(accountId: PlatformAccountId, document: StoredMobilePairingDocument): Promise<void> {
+    const encoded = {
+      version: 1,
+      active: document.active.map(record => ({
+        pairingId: record.pairingId,
+        attachmentKey: encodeBytes(record.attachmentKey),
+        ...(record.reconnectState === undefined ? {} : { reconnectState: encodeBytes(record.reconnectState) }),
+        ...(record.grant === undefined ? {} : { grant: { ...record.grant } }),
+      })),
+      ...(document.pending === undefined ? {} : {
+        pending: {
+          ...document.pending,
+          mobileHandshake: encodeBytes(document.pending.mobileHandshake),
+          handshakeRecovery: encodeBytes(document.pending.handshakeRecovery),
+        },
+      }),
+    }
+    await this.storage.set(this.key(accountId), JSON.stringify(encoded))
+  }
+
+  private key(accountId: PlatformAccountId): string {
+    return `pairings:${this.namespace}:${accountId}`
+  }
+}
+
 /** Retained independent attachment keys for confirmed Personal Pairings. */
 export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
   private readonly attachmentKeys = new Map<string, Uint8Array>()
@@ -87,7 +149,7 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
   private accountId: PlatformAccountId | undefined
   private persistence: Promise<void> = Promise.resolve()
 
-  constructor(private readonly store?: IndexedDbMobilePairingStateStore) {}
+  constructor(private readonly store?: MobilePairingStateStore) {}
 
   async selectAccount(accountId: PlatformAccountId): Promise<void> {
     if (this.accountId === accountId) return
@@ -238,6 +300,43 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
     wipeEndpointRecovery(this.pending)
     this.pending = undefined
   }
+}
+
+function parseNativeState(value: unknown): StoredMobilePairingState {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('Native Mobile pairing state record must be an object')
+  }
+  const record = value as Record<string, unknown>
+  return parseStoredState({
+    ...record,
+    attachmentKey: decodeBytes(record.attachmentKey),
+    ...(record.reconnectState === undefined ? {} : { reconnectState: decodeBytes(record.reconnectState) }),
+  })
+}
+
+function parseNativeRecovery(value: unknown): MobileEndpointPairingRecovery {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('Native Mobile pairing recovery must be an object')
+  }
+  const record = value as Record<string, unknown>
+  return parseEndpointRecovery({
+    ...record,
+    mobileHandshake: decodeBytes(record.mobileHandshake),
+    handshakeRecovery: decodeBytes(record.handshakeRecovery),
+  })
+}
+
+function encodeBytes(bytes: Uint8Array): string {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary)
+}
+
+function decodeBytes(value: unknown): Uint8Array {
+  if (typeof value !== 'string' || value.length === 0) throw new TypeError('Native Mobile secret bytes must be base64')
+  let binary: string
+  try { binary = atob(value) } catch { throw new TypeError('Native Mobile secret bytes must be base64') }
+  return Uint8Array.from(binary, character => character.charCodeAt(0))
 }
 
 function cloneEndpointRecovery(recovery: MobileEndpointPairingRecovery): MobileEndpointPairingRecovery {

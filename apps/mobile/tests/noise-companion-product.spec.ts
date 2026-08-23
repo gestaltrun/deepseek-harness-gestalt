@@ -14,6 +14,11 @@ import {
   MobileSnowCompanionConnection,
   MobileSnowCompanionProductChannel,
 } from '../src/noise-companion-product.ts'
+import {
+  CompanionUncertainOperationSettlement,
+  InMemoryCompanionCacheStore,
+  parseCompanionDesktopId,
+} from '../src/companion-cache.ts'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -43,6 +48,50 @@ describe('Mobile Snow Companion product channel', () => {
     reported.mockRestore()
   })
 
+  it('creates Workspace-owned and Ungrouped Sessions and refreshes their presentation', async () => {
+    const runtime = synchronizedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    const seal = vi.fn((_message: unknown) => Uint8Array.of(1))
+    connection.connect({
+      channel: { seal } as never,
+      targetAttachmentId: parseRelayAttachmentId('desktop-create'),
+      pairingSelector: parseRelayPairingSelector('pairing-create'),
+      generation: 1,
+    })
+    const trackSurfaceRefresh = vi.fn()
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection,
+      operationSettlement: settlement(),
+      installation: { authorizeCurrentInstallation: vi.fn() },
+      attachmentKeys: { attachmentKeyMaterial: () => undefined },
+      platformOrigin: 'https://platform.example', sendCiphertext: async () => {}, trackSurfaceRefresh,
+    })
+
+    const workspace = product.create({ workspace: 'workspace-product' })
+    await vi.waitFor(() => { expect(seal).toHaveBeenCalled() })
+    const first = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
+    expect(first).toMatchObject({ type: 'create-session', workspaceId: 'workspace-product' })
+    product.acceptResult({
+      type: 'confirmed', operationId: first.operationId as never, committedAt: 1, outcome: 'accepted',
+    })
+    await expect(workspace.completion).resolves.toBeUndefined()
+    await vi.waitFor(() => { expect(trackSurfaceRefresh).toHaveBeenCalledOnce() })
+
+    const ungrouped = product.create({})
+    await vi.waitFor(() => {
+      expect(seal.mock.calls.filter(call => (
+        call[0] as { operation: { type: string } }
+      ).operation.type === 'create-session')).toHaveLength(2)
+    })
+    const second = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
+    expect(second).toMatchObject({ type: 'create-session' })
+    expect(second).not.toHaveProperty('workspaceId')
+    product.acceptResult({
+      type: 'confirmed', operationId: second.operationId as never, committedAt: 2, outcome: 'accepted',
+    })
+    await expect(ungrouped.completion).resolves.toBeUndefined()
+  })
+
   it('sends refresh, history, cancel, and settles an Approval with a correlated receipt', async () => {
     const runtime = synchronizedRuntime()
     const connection = new MobileSnowCompanionConnection()
@@ -55,6 +104,7 @@ describe('Mobile Snow Companion product channel', () => {
     })
     const product = new MobileSnowCompanionProductChannel({
       runtime, connection,
+      operationSettlement: settlement(),
       installation: { authorizeCurrentInstallation: vi.fn() },
       attachmentKeys: { attachmentKeyMaterial: () => undefined },
       platformOrigin: 'https://platform.example',
@@ -67,14 +117,30 @@ describe('Mobile Snow Companion product channel', () => {
       kind: 'approval', sessionId: sid('session-v3'), interactionId: parseCompanionInteractionId('interaction-v3'),
       result: { ok: true, value: { sessionId: 'session-v3', approvalId: 'approval-v3', outcome: 'allowed-once' } },
     })
-    const settleMessage = seal.mock.calls.at(-1)?.[0] as { operation: { operationId: string } }
+    await vi.waitFor(() => {
+      const types = seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type)
+      expect(types).toEqual(expect.arrayContaining(['cancel-session', 'settle-interaction']))
+    })
+    const cancelMessage = seal.mock.calls.find(call => (
+      call[0] as { operation: { type: string } }
+    ).operation.type === 'cancel-session')?.[0] as { operation: { operationId: string } }
+    const settleMessage = seal.mock.calls.find(call => (
+      call[0] as { operation: { type: string } }
+    ).operation.type === 'settle-interaction')?.[0] as { operation: { operationId: string } }
+    product.acceptResult({
+      type: 'confirmed', operationId: cancelMessage.operation.operationId as never, committedAt: 1, outcome: 'accepted',
+    })
     product.acceptResult({
       type: 'interaction-receipt', operationId: settleMessage.operation.operationId as never, accepted: true,
     })
     await expect(receipt).resolves.toEqual({ accepted: true })
-    expect(seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type)).toEqual([
-      'refresh-surface', 'load-history', 'cancel-session', 'settle-interaction', 'load-history', 'refresh-surface',
-    ])
+    await vi.waitFor(() => {
+      expect(seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type))
+        .toEqual([
+          'refresh-surface', 'load-history', 'cancel-session', 'settle-interaction',
+          'load-history', 'refresh-surface', 'load-history', 'refresh-surface',
+        ])
+    })
   })
 
   it('refreshes the authoritative history and surface after a confirmed prompt or cancel', async () => {
@@ -91,6 +157,7 @@ describe('Mobile Snow Companion product channel', () => {
     const trackSurfaceRefresh = vi.fn<(submission: MobileCompanionTrackedSubmission) => void>()
     const product = new MobileSnowCompanionProductChannel({
       runtime, connection,
+      operationSettlement: settlement(),
       installation: { authorizeCurrentInstallation: vi.fn() },
       attachmentKeys: { attachmentKeyMaterial: () => undefined },
       platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
@@ -98,6 +165,7 @@ describe('Mobile Snow Companion product channel', () => {
       trackSurfaceRefresh,
     })
     const submission = product.submit(sid('session-refresh'), 'next prompt')
+    await vi.waitFor(() => { expect(seal).toHaveBeenCalled() })
     const submit = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
     product.acceptResult({
       type: 'confirmed', operationId: submit.operationId as never, committedAt: 1, outcome: 'accepted',
@@ -116,6 +184,9 @@ describe('Mobile Snow Companion product channel', () => {
     await expect(trackSurfaceRefresh.mock.lastCall?.[0].completion).resolves.toBeUndefined()
 
     product.cancel(sid('session-refresh'))
+    await vi.waitFor(() => {
+      expect((seal.mock.lastCall?.[0] as { operation?: { type?: string } }).operation?.type).toBe('cancel-session')
+    })
     const cancel = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
     product.acceptResult({
       type: 'confirmed', operationId: cancel.operationId as never, committedAt: 2, outcome: 'accepted',
@@ -141,6 +212,7 @@ describe('Mobile Snow Companion product channel', () => {
     const trackSurfaceRefresh = vi.fn()
     const product = new MobileSnowCompanionProductChannel({
       runtime, connection,
+      operationSettlement: settlement(),
       installation: { authorizeCurrentInstallation: vi.fn() },
       attachmentKeys: { attachmentKeyMaterial: () => undefined },
       platformOrigin: 'https://platform.example',
@@ -153,6 +225,7 @@ describe('Mobile Snow Companion product channel', () => {
       trackSurfaceRefresh,
     })
     const submission = product.submit(sid('session-callback'), 'continue')
+    await vi.waitFor(() => { expect(seal).toHaveBeenCalled() })
     const submit = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
     product.acceptResult({
       type: 'confirmed', operationId: submit.operationId as never, committedAt: 1, outcome: 'accepted',
@@ -182,16 +255,66 @@ describe('Mobile Snow Companion product channel', () => {
     })
     const product = new MobileSnowCompanionProductChannel({
       runtime, connection,
+      operationSettlement: settlement(),
       installation: { authorizeCurrentInstallation: vi.fn() },
       attachmentKeys: { attachmentKeyMaterial: () => undefined },
       platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
     })
     const submission = product.submit(sid('session-submit-failure'), 'will fail')
+    await vi.waitFor(() => { expect(seal).toHaveBeenCalled() })
     product.acceptResult({
       type: 'operation-failed', operationId: submission.operationId,
       failure: { kind: 'business', code: 'prompt-refused', message: 'Desktop rejected the prompt' },
     })
     await expect(submission.completion).rejects.toThrow('Desktop rejected the prompt')
+  })
+
+  it('persists an uncertain prompt and reconciles its original result after reconnect', async () => {
+    const runtime = synchronizedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    const seal = vi.fn((_message: unknown) => Uint8Array.of(1))
+    const active = {
+      channel: { seal } as never,
+      targetAttachmentId: parseRelayAttachmentId('desktop-reconcile'),
+      pairingSelector: parseRelayPairingSelector('pairing-reconcile'),
+      generation: 1,
+    }
+    connection.connect(active)
+    const receipts = settlement()
+    const recoveredResult = vi.fn()
+    let firstSend = true
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection, operationSettlement: receipts,
+      installation: { authorizeCurrentInstallation: vi.fn() },
+      attachmentKeys: { attachmentKeyMaterial: () => undefined },
+      platformOrigin: 'https://platform.example',
+      sendCiphertext: async () => {
+        if (!firstSend) return
+        firstSend = false
+        connection.disconnect()
+      },
+      recoveredResult,
+    })
+
+    const prompt = product.submit(sid('session-reconcile'), 'continue once')
+    await expect(prompt.completion).rejects.toThrow('Companion Snow channel was replaced')
+    connection.connect({ ...active, generation: 2 })
+    const reconciliation = product.reconcileUnknown()
+    await vi.waitFor(() => {
+      expect((seal.mock.lastCall?.[0] as { operation?: { type?: string } }).operation?.type)
+        .toBe('query-operation-status')
+    })
+    product.acceptResult({
+      type: 'status', operationId: prompt.operationId,
+      committed: { type: 'confirmed', operationId: prompt.operationId, committedAt: 5, outcome: 'accepted' },
+    })
+
+    await expect(reconciliation).resolves.toEqual([
+      expect.objectContaining({ operationId: prompt.operationId, status: 'committed', kind: 'prompt' }),
+    ])
+    expect(recoveredResult).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'confirmed', operationId: prompt.operationId,
+    }))
   })
 
   it('assembles and verifies exact historical image bytes', async () => {
@@ -206,6 +329,7 @@ describe('Mobile Snow Companion product channel', () => {
     })
     const product = new MobileSnowCompanionProductChannel({
       runtime, connection,
+      operationSettlement: settlement(),
       installation: { authorizeCurrentInstallation: vi.fn() },
       attachmentKeys: { attachmentKeyMaterial: () => undefined },
       platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
@@ -235,6 +359,7 @@ describe('Mobile Snow Companion product channel', () => {
     })
     const product = new MobileSnowCompanionProductChannel({
       runtime, connection,
+      operationSettlement: settlement(),
       installation: { authorizeCurrentInstallation: vi.fn() },
       attachmentKeys: { attachmentKeyMaterial: () => undefined },
       platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
@@ -281,6 +406,7 @@ describe('Mobile Snow Companion product channel', () => {
     const product = new MobileSnowCompanionProductChannel({
       runtime,
       connection,
+      operationSettlement: settlement(),
       installation: { authorizeCurrentInstallation },
       attachmentKeys: { attachmentKeyMaterial: () => new Uint8Array(32).fill(3) },
       platformOrigin: 'https://platform.example',
@@ -294,10 +420,18 @@ describe('Mobile Snow Companion product channel', () => {
       operation: { type: 'search-sessions', operationId: search.operationId, query: 'indexed needle' },
     })
     const attachment = product.attach(sid('session-current'), new File([Uint8Array.of(1, 2, 3)], 'real.bin'))
+    await vi.waitFor(() => {
+      expect((seal.mock.lastCall?.[0] as { operation?: { type?: string } }).operation?.type).toBe('offer-attachment')
+    })
+    product.acceptResult({
+      type: 'confirmed', operationId: attachment.operationId, committedAt: 1, outcome: 'accepted',
+    })
     await attachment.completion
     expect(authorizeCurrentInstallation).toHaveBeenCalledOnce()
     expect(fetchMock).toHaveBeenCalledOnce()
-    expect(seal.mock.lastCall?.[0]).toMatchObject({
+    expect(seal.mock.calls.find(call => (
+      call[0] as { operation: { type: string } }
+    ).operation.type === 'offer-attachment')?.[0]).toMatchObject({
       type: 'operation',
       operation: {
         type: 'offer-attachment',
@@ -307,7 +441,7 @@ describe('Mobile Snow Companion product channel', () => {
         mediaType: 'application/octet-stream',
       },
     })
-    expect(sendCiphertext).toHaveBeenCalledTimes(2)
+    expect(sendCiphertext).toHaveBeenCalledTimes(4)
   })
 
   it('rejects a send that completes after channel replacement', async () => {
@@ -324,6 +458,7 @@ describe('Mobile Snow Companion product channel', () => {
     const product = new MobileSnowCompanionProductChannel({
       runtime,
       connection,
+      operationSettlement: settlement(),
       installation: { authorizeCurrentInstallation: vi.fn() },
       attachmentKeys: { attachmentKeyMaterial: () => undefined },
       platformOrigin: 'https://platform.example',
@@ -350,4 +485,11 @@ function synchronizedRuntime(): CompanionForegroundRuntime {
     type: 'desktop-resync', version: 1, authenticated: true,
   })) throw new Error('test runtime did not synchronize')
   return runtime
+}
+
+function settlement(): CompanionUncertainOperationSettlement {
+  return new CompanionUncertainOperationSettlement(
+    new InMemoryCompanionCacheStore(),
+    parseCompanionDesktopId(`desktop-${crypto.randomUUID()}`),
+  )
 }

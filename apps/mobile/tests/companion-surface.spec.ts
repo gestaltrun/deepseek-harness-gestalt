@@ -595,6 +595,102 @@ describe('MobileCompanionSurface', () => {
       hasMore: false,
     })
   })
+
+  it('restores a complete cached projection as read-only Remote Offline state', async () => {
+    const runtime = new CompanionForegroundRuntime()
+    const cached = projection('session-cached', 'Cached', true)
+    const cache = {
+      save: vi.fn(async () => {}),
+      restore: vi.fn(async () => cached),
+      clear: vi.fn(async () => {}),
+    }
+    const surface = new MobileCompanionSurface(runtime)
+    surface.setProjectionCache(cache)
+
+    await expect(surface.restoreProjectionCache()).resolves.toBe(true)
+    expect(surface.getSnapshot().desktopName).toBe('Cached Desktop')
+    expect(surface.getSnapshot().sessions.ids).toEqual(['session-cached'])
+    expect(surface.mayMutate()).toBe(false)
+    const pending = surface.getSnapshot().conversations[sid('session-cached')]?.pending[0]
+    if (pending === undefined) throw new Error('expected cached pending interaction')
+    await expect(pending.respond({ ok: true, value: { outcome: 'allowed-once' } }))
+      .rejects.toThrow('requires foreground synchronization')
+    expect(cache.save).not.toHaveBeenCalled()
+  })
+
+  it('clears the visible projection synchronously and rejects a stale restore when cache authority changes', async () => {
+    const runtime = new CompanionForegroundRuntime()
+    let releaseFirst: ((projection: ValidatedDesktopSurfaceResync) => void) | undefined
+    const first = {
+      save: vi.fn(async () => {}),
+      restore: vi.fn()
+        .mockResolvedValueOnce(projection('session-first', 'First'))
+        .mockImplementationOnce(async () => await new Promise<ValidatedDesktopSurfaceResync>((resolve) => {
+          releaseFirst = resolve
+        })),
+      clear: vi.fn(async () => {}),
+    }
+    const second = {
+      save: vi.fn(async () => {}),
+      restore: vi.fn(async () => projection('session-second', 'Second')),
+      clear: vi.fn(async () => {}),
+    }
+    const surface = new MobileCompanionSurface(runtime)
+    surface.setProjectionCache(first)
+    await surface.restoreProjectionCache()
+    expect(surface.getSnapshot().sessions.ids).toEqual(['session-first'])
+    const staleRestore = surface.restoreProjectionCache()
+    surface.setProjectionCache(second)
+
+    expect(surface.getSnapshot().desktopName).toBeUndefined()
+    releaseFirst?.(projection('session-first', 'First'))
+    await expect(staleRestore).resolves.toBe(false)
+    expect(surface.getSnapshot().desktopName).toBeUndefined()
+    await expect(surface.restoreProjectionCache()).resolves.toBe(true)
+    expect(surface.getSnapshot().sessions.ids).toEqual(['session-second'])
+  })
+
+  it('keeps cache-clear failure visible without claiming that retained content was deleted', async () => {
+    const runtime = new CompanionForegroundRuntime()
+    const cached = projection('session-cached', 'Cached')
+    const cache = {
+      save: vi.fn(async () => {}),
+      restore: vi.fn(async () => cached),
+      clear: vi.fn(async () => { throw new Error('protected cache delete failed') }),
+    }
+    const surface = new MobileCompanionSurface(runtime)
+    surface.setProjectionCache(cache)
+    await surface.restoreProjectionCache()
+
+    await expect(surface.clearProjectionCache()).rejects.toThrow('protected cache delete failed')
+    expect(surface.getSnapshot()).toMatchObject({
+      desktopName: 'Cached Desktop',
+      cacheFailure: 'protected cache delete failed',
+    })
+  })
+
+  it('seals accepted projections and clears offline cache without deleting pairing state', async () => {
+    const runtime = connectedRuntime()
+    const cache = {
+      save: vi.fn(async () => {}),
+      restore: vi.fn(async () => projection('session-stale', 'Stale')),
+      clear: vi.fn(async () => {}),
+    }
+    const surface = new MobileCompanionSurface(runtime)
+    surface.setProjectionCache(cache)
+    const receiver = surface.bindAuthenticatedConnection(connectionChannel())
+    if (receiver === undefined) throw new Error('expected authenticated receiver')
+    const live = projection('session-live', 'Live')
+    receiver.acceptValidatedDesktopResync(live)
+    await vi.waitFor(() => { expect(cache.save).toHaveBeenCalledWith(live) })
+    await expect(surface.restoreProjectionCache()).resolves.toBe(false)
+
+    runtime.forgetConnection()
+    await surface.clearProjectionCache()
+    expect(cache.clear).toHaveBeenCalledOnce()
+    expect(surface.getSnapshot().desktopName).toBeUndefined()
+    expect(surface.getSnapshot().sessions.ids).toEqual([])
+  })
 })
 
 function connectedRuntime(): CompanionForegroundRuntime {

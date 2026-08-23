@@ -5,9 +5,11 @@ import type { PlatformAccountId, PlatformEnvironment } from '@deepseek-ai/dsh-pl
 import { accountStorageNamespace } from '@deepseek-ai/dsh-platform-account-client'
 import {
   parseCompanionOperationId,
+  parseCompanionSessionId,
   REMOTE_PROTOCOL_LIMITS,
-  type CompanionConfirmedResult,
+  type CompanionMutationResult,
   type CompanionOperationId,
+  type CompanionSessionId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
   companionMayMutate,
@@ -49,7 +51,11 @@ export function companionCacheDatabaseName(
 }
 
 /** Content kinds the Companion Cache may automatically seal. */
-export type CompanionCacheContentKind = 'workspace-metadata' | 'session-metadata' | 'transcript'
+export type CompanionCacheContentKind =
+  | 'workspace-metadata'
+  | 'session-metadata'
+  | 'transcript'
+  | 'projection-snapshot'
 
 /** Content kind that must never be automatically cached. */
 type CompanionCacheExcludedKind = 'attachment-bytes' | 'terminal-content' | 'spill-file' | 'credential'
@@ -66,6 +72,7 @@ const ADMITTED_CONTENT_KINDS: readonly CompanionCacheContentKind[] = [
   'workspace-metadata',
   'session-metadata',
   'transcript',
+  'projection-snapshot',
 ]
 
 /**
@@ -198,8 +205,12 @@ type CompanionReceiptStatus = 'unknown' | 'committed' | 'not-submitted'
 export interface CompanionOperationReceipt {
   operationId: CompanionOperationId
   status: CompanionReceiptStatus
+  /** Original mutation kind used to restore product presentation after restart. */
+  kind?: CompanionMutationKind
+  /** Session scope for prompt, cancel, interaction, and attachment recovery. */
+  sessionId?: CompanionSessionId
   /** Desktop's original result once reconciliation returned committed. */
-  original?: CompanionConfirmedResult
+  original?: CompanionMutationResult
 }
 
 /**
@@ -293,20 +304,29 @@ function parseCompanionCacheRecord(value: unknown): CompanionCacheRecord {
   }
 }
 
-function parseCompanionConfirmedResult(value: unknown): CompanionConfirmedResult {
+function parseCompanionMutationResult(value: unknown): CompanionMutationResult {
   const record = durableRecord(value, 'Companion confirmed result')
-  if (record.type !== 'confirmed' || record.outcome !== 'accepted') {
-    throw new TypeError('Companion confirmed result type is unsupported')
+  const operationId = parseCompanionOperationId(record.operationId)
+  if (record.type === 'confirmed' && record.outcome === 'accepted'
+    && typeof record.committedAt === 'number' && Number.isSafeInteger(record.committedAt) && record.committedAt > 0) {
+    return { type: 'confirmed', operationId, committedAt: record.committedAt, outcome: 'accepted' }
   }
-  if (typeof record.committedAt !== 'number' || !Number.isSafeInteger(record.committedAt) || record.committedAt <= 0) {
-    throw new TypeError('Companion committedAt must be a positive safe integer')
+  if (record.type === 'attachment-rejected'
+    && (record.reason === 'cross-pairing' || record.reason === 'hash-mismatch' || record.reason === 'expired'
+      || record.reason === 'absent' || record.reason === 'transfer-interrupted' || record.reason === 'limit-exceeded')) {
+    return { type: 'attachment-rejected', operationId, reason: record.reason }
   }
-  return {
-    type: 'confirmed',
-    operationId: parseCompanionOperationId(record.operationId),
-    committedAt: record.committedAt,
-    outcome: 'accepted',
+  if (record.type === 'interaction-receipt' && record.accepted === true) {
+    return { type: 'interaction-receipt', operationId, accepted: true }
   }
+  if (record.type === 'interaction-receipt' && record.accepted === false
+    && (record.reason === 'not-pending' || record.reason === 'bad-response')) {
+    return { type: 'interaction-receipt', operationId, accepted: false, reason: record.reason }
+  }
+  if (record.type === 'operation-failed' && typeof record.failure === 'object' && record.failure !== null) {
+    return structuredClone(record) as unknown as CompanionMutationResult
+  }
+  throw new TypeError('Companion terminal mutation result is unsupported')
 }
 
 function parseReceiptStatus(value: unknown): CompanionReceiptStatus {
@@ -314,24 +334,41 @@ function parseReceiptStatus(value: unknown): CompanionReceiptStatus {
   throw new TypeError('Companion receipt status is unsupported')
 }
 
+function parseReceiptKind(value: unknown): CompanionMutationKind | undefined {
+  if (value === undefined) return undefined
+  if (value === 'session-create' || value === 'prompt' || value === 'cancel' || value === 'approval'
+    || value === 'question' || value === 'attachment' || value === 'other-mutation') return value
+  throw new TypeError('Companion receipt mutation kind is unsupported')
+}
+
 function parseCompanionOperationReceipt(value: unknown): CompanionOperationReceipt {
   const record = durableRecord(value, 'Companion Operation Receipt')
   const operationId = parseCompanionOperationId(record.operationId)
   const status = parseReceiptStatus(record.status)
+  const kind = parseReceiptKind(record.kind)
+  const sessionId = record.sessionId === undefined ? undefined : parseCompanionSessionId(record.sessionId)
   if (status === 'committed') {
     if (record.original === undefined) {
       throw new TypeError('Companion committed receipt must embed its original result')
     }
-    const original = parseCompanionConfirmedResult(record.original)
+    const original = parseCompanionMutationResult(record.original)
     if (original.operationId !== operationId) {
       throw new TypeError('Companion committed receipt original must name the same operation id')
     }
-    return { operationId, status, original }
+    return {
+      operationId, status, original,
+      ...(kind === undefined ? {} : { kind }),
+      ...(sessionId === undefined ? {} : { sessionId }),
+    }
   }
   if (record.original !== undefined) {
     throw new TypeError('Companion uncommitted receipt cannot embed an original result')
   }
-  return { operationId, status }
+  return {
+    operationId, status,
+    ...(kind === undefined ? {} : { kind }),
+    ...(sessionId === undefined ? {} : { sessionId }),
+  }
 }
 
 function assertRecordDesktop(
@@ -583,18 +620,19 @@ export class CompanionCache {
 
 /** Desktop answer to one operation-status query. */
 export type CompanionStatusAnswer =
-  | { readonly committed: true; readonly original: CompanionConfirmedResult }
+  | { readonly committed: true; readonly original: CompanionMutationResult }
   | { readonly committed: false }
 
 /** One proposed mutation with its Desktop-authoritative operation id. */
 export interface CompanionMutationRequest {
   kind: CompanionMutationKind
   operationId: CompanionOperationId
+  sessionId?: CompanionSessionId
 }
 
 /** Transport result once the mutation's fate is known, or explicitly unknown. */
 export type CompanionMutationOutcome =
-  | { readonly known: true; readonly result: CompanionConfirmedResult }
+  | { readonly known: true; readonly result: CompanionMutationResult }
   | { readonly known: false }
 
 /** Hook invoked after a mutation left this device and before `send` returns. */
@@ -664,7 +702,10 @@ export class CompanionUncertainOperationSettlement {
       outcome = await transport.send(mutation, () => {
         transmissionReceipt = this.#store.saveReceipt(
           this.#desktopId,
-          { operationId: mutation.operationId, status: 'unknown' },
+          {
+            operationId: mutation.operationId, status: 'unknown', kind: mutation.kind,
+            ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+          },
         )
         return transmissionReceipt
       })
@@ -679,8 +720,14 @@ export class CompanionUncertainOperationSettlement {
       throw new Error('Companion transport reported an unknown outcome without acknowledging transmission')
     }
     const receipt: CompanionOperationReceipt = outcome.known
-      ? { operationId: mutation.operationId, status: 'committed', original: outcome.result }
-      : { operationId: mutation.operationId, status: 'unknown' }
+      ? {
+        operationId: mutation.operationId, status: 'committed', original: outcome.result, kind: mutation.kind,
+        ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+      }
+      : {
+        operationId: mutation.operationId, status: 'unknown', kind: mutation.kind,
+        ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+      }
     await this.#store.saveReceipt(this.#desktopId, receipt)
     return receipt
   }
@@ -698,8 +745,8 @@ export class CompanionUncertainOperationSettlement {
       if (row.status !== 'unknown') continue
       const answer = await transport.queryStatus(row.operationId)
       await this.#store.saveReceipt(this.#desktopId, answer.committed
-        ? { operationId: row.operationId, status: 'committed', original: answer.original }
-        : { operationId: row.operationId, status: 'not-submitted' })
+        ? { ...row, status: 'committed', original: answer.original }
+        : { ...row, status: 'not-submitted' })
     }
     return await this.#store.loadReceipts(this.#desktopId)
   }

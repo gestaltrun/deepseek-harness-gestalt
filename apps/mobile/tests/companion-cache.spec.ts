@@ -312,7 +312,7 @@ describe('Companion Cache', () => {
     expect(transmitted).toBe(true)
     expect(receipt.status).toBe('unknown')
     expect(receiptsAtTransmission).toEqual([
-      { operationId: parseCompanionOperationId('op-uncertain'), status: 'unknown' },
+      { operationId: parseCompanionOperationId('op-uncertain'), status: 'unknown', kind: 'prompt' },
     ])
   })
 
@@ -350,7 +350,7 @@ describe('Companion Cache', () => {
     )).rejects.toThrow(/relay dropped/)
     expect(receiptObserved).toBe(true)
     expect(await store.loadReceipts(desktopA)).toEqual([
-      { operationId: parseCompanionOperationId('op-dropped'), status: 'unknown' },
+      { operationId: parseCompanionOperationId('op-dropped'), status: 'unknown', kind: 'prompt' },
     ])
   })
 
@@ -393,7 +393,9 @@ describe('Companion Cache', () => {
       ready,
     )
     const settled = await settlement.reconcileUnknown(committedTransport)
-    expect(settled).toEqual([{ operationId: parseCompanionOperationId('op-reconcile'), status: 'committed', original }])
+    expect(settled).toEqual([{
+      operationId: parseCompanionOperationId('op-reconcile'), status: 'committed', original, kind: 'prompt',
+    }])
 
     await settlement.transmit(
       { kind: 'approval', operationId: parseCompanionOperationId('op-absent') },

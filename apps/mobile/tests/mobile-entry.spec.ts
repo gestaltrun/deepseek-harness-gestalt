@@ -5,6 +5,7 @@ import { parseRelayCredential, parseRelayRouteId } from '@deepseek-ai/dsh-remote
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const browserOpen = vi.hoisted(() => vi.fn<(options: { url: string }) => Promise<void>>())
+const protectedValues = vi.hoisted(() => new Map<string, string>())
 const relayLifecycle = vi.hoisted(() => ({
   configure: vi.fn(),
   start: vi.fn(async () => {}),
@@ -18,6 +19,12 @@ const relayLifecycle = vi.hoisted(() => ({
 }))
 
 vi.mock('@capacitor/browser', () => ({ Browser: { open: browserOpen } }))
+vi.mock('@capacitor/app', () => ({
+  App: {
+    getLaunchUrl: vi.fn(async () => undefined),
+    addListener: vi.fn(async () => ({ remove: async () => {} })),
+  },
+}))
 vi.mock('@capacitor/device', () => ({
   Device: {
     getInfo: vi.fn(async () => ({
@@ -55,6 +62,15 @@ vi.mock('@deepseek-ai/dsh-remote-access-client', async (importOriginal) => {
 })
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: () => true },
+  registerPlugin: () => ({
+    get: async ({ key }: { key: string }): Promise<{ value?: string }> => {
+      const value = protectedValues.get(key)
+      return value === undefined ? {} : { value }
+    },
+    set: async ({ key, value }: { key: string; value: string }) => { protectedValues.set(key, value) },
+    remove: async ({ key }: { key: string }) => { protectedValues.delete(key) },
+    addListener: async () => ({ remove: async () => {} }),
+  }),
 }))
 
 afterEach(() => {
@@ -71,6 +87,7 @@ afterEach(() => {
   relayLifecycle.onConnectionLost = undefined
   relayLifecycle.onTransportError = undefined
   localStorage.clear()
+  protectedValues.clear()
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
   document.body.replaceChildren()
@@ -81,7 +98,8 @@ describe('Mobile Platform Account entry', () => {
   it('fails loud when the browsing context cannot create an Installation id', async () => {
     configureEnvironment()
     vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
-    await expect(import('../src/main.tsx')).rejects.toThrow(/secure browsing context/)
+    const { mobileProductStarted } = await import('../src/main.tsx')
+    await expect(mobileProductStarted).rejects.toThrow(/system cryptography/)
   })
 
   it('opens the prepared GitHub URL through Capacitor from the user click and polls over HTTPS', async () => {

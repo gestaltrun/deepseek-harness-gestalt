@@ -10,6 +10,7 @@ import {
   negotiateCompanionProtocol,
   parseCompanionOperationId,
   parseCompanionSessionId,
+  parseCompanionWorkspaceId,
   parseCompanionTranscriptEntryId,
   REMOTE_PROTOCOL_LIMITS,
   RemoteProtocolError,
@@ -76,11 +77,47 @@ describe('Encrypted Companion Protocol codec', () => {
     } as const
     expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, committed))).toEqual(committed)
 
+    const rejected = {
+      type: 'result',
+      result: {
+        type: 'status',
+        operationId,
+        committed: { type: 'attachment-rejected', operationId, reason: 'expired' },
+      },
+    } as const
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, rejected))).toEqual(rejected)
+
     const absent = {
       type: 'result',
       result: { type: 'status', operationId, absent: true },
     } as const
     expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, absent))).toEqual(absent)
+  })
+
+  it('round-trips Workspace-owned and Ungrouped Session creation', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile'),
+      createCompanionVersionOffer('desktop'),
+    )
+    for (const operation of [
+      {
+        type: 'operation' as const,
+        operation: {
+          type: 'create-session' as const,
+          operationId: parseCompanionOperationId('operation-create-workspace'),
+          workspaceId: parseCompanionWorkspaceId('workspace-product'),
+        },
+      },
+      {
+        type: 'operation' as const,
+        operation: {
+          type: 'create-session' as const,
+          operationId: parseCompanionOperationId('operation-create-ungrouped'),
+        },
+      },
+    ]) {
+      expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, operation))).toEqual(operation)
+    }
   })
 
   it('round-trips versioned foreground synchronization and rejects a one-byte substitute', () => {

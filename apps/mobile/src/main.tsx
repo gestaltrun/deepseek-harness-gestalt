@@ -44,24 +44,23 @@ import type {
 } from './companion-surface.ts'
 import type { MobilePairingActions } from './MobilePairing.tsx'
 import { MobilePairingController, NativeMobilePairingQrScanner } from './personal-pairing.ts'
-import { IndexedDbMobilePairingStateStore, PairingCompanionKeyVault } from './companion-keys.ts'
+import { NativeMobilePairingStateStore, PairingCompanionKeyVault } from './companion-keys.ts'
 import { mobileInstallationPresentation } from './mobile-installation.ts'
+import { bindMobilePairingDeepLinks } from './mobile-deep-links.ts'
+import type { MobilePairingDeepLinkBinding } from './mobile-deep-links.ts'
+import {
+  CapacitorMobileProtectedStorage,
+  loadProtectedInstallationId,
+} from './native-protected-storage.ts'
 import { mobileSystemBrowser } from './system-browser.ts'
 import { loadMobilePlatformEnvironment } from './platform-environment.ts'
+import { MobileCompanionProjectionCacheRuntime } from './companion-cache-runtime.ts'
 import './root.css'
 
 const environment = loadMobilePlatformEnvironment(import.meta.env)
-const installationIdKey = `deepseek-gestalt:${environment.identityNamespace}:mobile-installation-id`
-let installationId = localStorage.getItem(installationIdKey)
-if (installationId === null) {
-  if (typeof crypto.randomUUID !== 'function') {
-    throw new TypeError('Mobile requires a secure browsing context (HTTPS or http://127.0.0.1) to create an Installation id')
-  }
-  installationId = crypto.randomUUID()
-  localStorage.setItem(installationIdKey, installationId)
-}
-const parsedInstallationId = parseInstallationId(installationId)
 let companionVisibilityDisposer: (() => Promise<void>) | undefined
+let companionDeepLinkBinding: MobilePairingDeepLinkBinding | undefined
+let companionAccountDisposer: (() => void) | undefined
 let companionSurface: MobileCompanionSurface | undefined
 
 /**
@@ -69,13 +68,22 @@ let companionSurface: MobileCompanionSurface | undefined
  * @returns settled after document listeners and a pending Capacitor handle are removed.
  */
 export function disposeCompanionVisibility(): Promise<void> {
-  return companionVisibilityDisposer?.() ?? Promise.resolve()
+  return Promise.all([
+    companionVisibilityDisposer?.() ?? Promise.resolve(),
+    companionDeepLinkBinding?.dispose() ?? Promise.resolve(),
+    Promise.resolve(companionAccountDisposer?.()),
+  ]).then(() => undefined)
 }
 
 /** Settles after the native Installation presentation is bound and the Mobile product surface mounts. */
 export const mobileProductStarted = mountMobileProduct()
 
 async function mountMobileProduct(): Promise<void> {
+  const protectedStorage = new CapacitorMobileProtectedStorage()
+  const parsedInstallationId = parseInstallationId(await loadProtectedInstallationId(
+    protectedStorage,
+    environment.identityNamespace,
+  ))
   const presentation = mobileInstallationPresentation(await Device.getInfo())
   const installation = new PlatformAccountInstallation({
     environment,
@@ -113,12 +121,15 @@ async function mountMobileProduct(): Promise<void> {
       throw new TypeError('Mobile Relay inbound bytes must admit one maximum Relay message')
     }
     const handshake = new SnowMobileHandshakeClient()
-    const attachmentKeys = new PairingCompanionKeyVault(new IndexedDbMobilePairingStateStore(
-      `deepseek-gestalt:${environment.databaseIdentity}:mobile-snow-pairings`,
+    const attachmentKeys = new PairingCompanionKeyVault(new NativeMobilePairingStateStore(
+      protectedStorage,
+      environment.databaseIdentity,
     ))
     let attachmentOwner: SnowMobileAttachmentOwner | undefined
     let channel: SnowCompanionProtocolChannel | undefined
     let receiver: MobileNoiseCompanionReceiver | undefined
+    let projectionCache: MobileCompanionProjectionCacheRuntime | undefined
+    let projectionOwner: string | undefined
     const productConnection = new MobileSnowCompanionConnection()
     let connectionGeneration: number | undefined
     let activeSourceAttachmentId: ReturnType<typeof parseRelayAttachmentId> | undefined
@@ -190,6 +201,23 @@ async function mountMobileProduct(): Promise<void> {
           generation: connectionGeneration,
         })
         companionRuntime()?.markAuthenticatedPeer()
+        const accountSnapshot = installation.getSnapshot()
+        if (accountSnapshot.status !== 'signed-in' || accountSnapshot.account === undefined) {
+          throw new Error('Mobile Companion cache requires the signed-in Platform Account')
+        }
+        const projectionCache = new MobileCompanionProjectionCacheRuntime({
+          environment: environment.environment,
+          accountId: accountSnapshot.account.id,
+          pairingId: parsePersonalPairingId(pairingSelector),
+          keys: attachmentKeys,
+        })
+        selectProjectionCache(
+          `${accountSnapshot.account.id}\0${pairingSelector}`,
+          projectionCache,
+        )
+        void companionSurface?.restoreProjectionCache().catch((error: unknown) => {
+          console.error('[companion-cache] offline projection restore failed:', error)
+        })
         receiver = new MobileNoiseCompanionReceiver(
           channel,
           connectionGeneration,
@@ -206,6 +234,11 @@ async function mountMobileProduct(): Promise<void> {
           (offset) => {
             const submission = companionChannel?.refreshSurface(offset)
             if (submission !== undefined) companionSurface?.trackSurfaceRefresh(submission)
+          },
+          () => {
+            void companionChannel?.reconcileUnknown().catch((error: unknown) => {
+              console.error('[mobile-companion] operation reconciliation failed:', error)
+            })
           },
         )
       },
@@ -230,6 +263,9 @@ async function mountMobileProduct(): Promise<void> {
         companionSurface?.trackHistoryRefresh(sessionId, submission)
       },
       trackSurfaceRefresh: (submission) => { companionSurface?.trackSurfaceRefresh(submission) },
+      recoveredResult: (result) => {
+        companionSurface?.bindValidatedCompanionResults()?.acceptValidatedCompanionResult(result)
+      },
     })
     companionChannel = productChannel
     companionConnectionChannel = {
@@ -238,7 +274,7 @@ async function mountMobileProduct(): Promise<void> {
         loadImage: async (sessionId, attachment) => await productChannel.loadImage(sessionId, attachment),
       },
     }
-    pairing = new MobilePairingController({
+    const pairingController = new MobilePairingController({
       installation,
       transport: new RemoteAccessHttpTransport({ environment }),
       handshake,
@@ -246,6 +282,84 @@ async function mountMobileProduct(): Promise<void> {
       scanner: new NativeMobilePairingQrScanner(),
       relay: companion,
       companion,
+    })
+    const selectProjectionCache = (
+      owner: string,
+      cache: MobileCompanionProjectionCacheRuntime,
+    ): void => {
+      if (projectionOwner === owner) return
+      projectionOwner = owner
+      projectionCache = cache
+      companionSurface?.setProjectionCache(cache)
+      productChannel.setOperationSettlement(cache.operationSettlement)
+    }
+    const releaseProjectionAuthority = async (deleteStored: boolean): Promise<void> => {
+      if (projectionOwner === undefined && projectionCache === undefined) return
+      projectionOwner = undefined
+      projectionCache = undefined
+      productChannel.setOperationSettlement(undefined)
+      companionRuntime()?.invalidateAuthenticatedPeer()
+      await companionSurface?.releaseProjectionCache(deleteStored)
+    }
+    const installRetainedProjectionCache = async (): Promise<void> => {
+      const accountSnapshot = installation.getSnapshot()
+      const grant = attachmentKeys.relayAuthority()
+      if (accountSnapshot.status !== 'signed-in' || accountSnapshot.account === undefined
+        || grant?.pairingSelector === undefined || companionSurface === undefined) {
+        await releaseProjectionAuthority(false)
+        return
+      }
+      const cache = new MobileCompanionProjectionCacheRuntime({
+        environment: environment.environment,
+        accountId: accountSnapshot.account.id,
+        pairingId: parsePersonalPairingId(grant.pairingSelector),
+        keys: attachmentKeys,
+      })
+      selectProjectionCache(`${accountSnapshot.account.id}\0${grant.pairingSelector}`, cache)
+      await companionSurface.restoreProjectionCache()
+    }
+    pairingController.subscribe(() => {
+      if (pairingController.getSnapshot().status === 'paired') {
+        void installRetainedProjectionCache().catch((error: unknown) => {
+          console.error('[companion-cache] paired projection restore failed:', error)
+        })
+      }
+    })
+    pairing = {
+      getSnapshot: () => pairingController.getSnapshot(),
+      subscribe: listener => pairingController.subscribe(listener),
+      completeLink: async (link) => { await pairingController.completeLink(link) },
+      scanQr: async (video, signal) => { await pairingController.scanQr(video, signal) },
+      retryPairing: async () => { await pairingController.retryPairing() },
+      activate: async () => {
+        await pairingController.activate()
+        await installRetainedProjectionCache()
+        companionDeepLinkBinding?.setReady(true)
+      },
+      deactivate: async () => {
+        companionDeepLinkBinding?.setReady(false)
+        await releaseProjectionAuthority(false)
+        await pairingController.deactivate()
+      },
+      unpair: async () => {
+        await releaseProjectionAuthority(true)
+        await pairingController.unpair()
+      },
+    }
+    companionDeepLinkBinding = bindMobilePairingDeepLinks(
+      async (link) => { await pairing.completeLink(link) },
+      { onError: (error) => { console.error('[mobile-companion] pairing deep link failed:', error) } },
+    )
+    let selectedAccountId: string | undefined
+    companionAccountDisposer = installation.subscribe(() => {
+      const snapshot = installation.getSnapshot()
+      const accountId = snapshot.status === 'signed-in' ? snapshot.account?.id : undefined
+      if (accountId === selectedAccountId) return
+      selectedAccountId = accountId
+      companionDeepLinkBinding?.setReady(false)
+      void releaseProjectionAuthority(false).catch((error: unknown) => {
+        console.error('[companion-cache] Account authority release failed:', error)
+      })
     })
   } else {
     companion = new CompanionForegroundRuntime()

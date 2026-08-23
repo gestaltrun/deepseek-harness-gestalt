@@ -117,6 +117,24 @@ export class DesktopCompanionOperationLedger {
     }
   }
 
+  /**
+   * Read one pairing-scoped committed mutation result without executing it.
+   * @param pairingId - authenticated Personal Pairing asking for status.
+   * @param operationId - original mutation identity.
+   * @returns the durable terminal result, or undefined when no commit exists.
+   */
+  async query(
+    pairingId: PersonalPairingId,
+    operationId: CompanionOperationId,
+  ): Promise<CompanionResult | undefined> {
+    return await this.serialized(async () => {
+      await this.flushPendingCommits()
+      this.pruneExpired()
+      const result = this.records.get(recordKey(pairingId, operationId))?.result
+      return result === undefined ? undefined : structuredClone(result)
+    })
+  }
+
   private async executeOwned(
     key: string,
     pairingId: PersonalPairingId,

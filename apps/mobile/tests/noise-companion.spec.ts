@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  parseCompanionOperationId, parseCompanionSessionId, parseRelayCredential, parseRelayRouteId,
+  parseCompanionOperationId, parseCompanionSessionId, parseCompanionWorkspaceId,
+  parseRelayCredential, parseRelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionForegroundRuntime, companionMayMutate } from '../src/companion-lifecycle.ts'
 import { MobileNoiseCompanionReceiver } from '../src/noise-companion.ts'
@@ -230,7 +231,7 @@ function surfacePage(offset: number, sessionId: string, hasMore: boolean, operat
         updatedAt: offset,
       }],
       workspaces: [{
-        workspaceId: 'workspace-paged',
+        workspaceId: parseCompanionWorkspaceId('workspace-paged'),
         path: '/work',
         title: 'Work',
         sessionIds: [parseCompanionSessionId(sessionId)],

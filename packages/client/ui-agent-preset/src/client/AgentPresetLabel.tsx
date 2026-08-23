@@ -40,18 +40,19 @@ export type AgentPresetLabelProps =
  * @returns the label, or null when the session records no preset.
  */
 export function AgentPresetLabel({
-  sessionId, useSessions, useAgentPresets, load, t,
+  sessionId, useSessions, useAgentPresets, load, t, renderMode,
 }: AgentPresetLabelProps) {
   const preset = useSessions(state => state.byId[sessionId]?.agentPreset)
   const options = useAgentPresets(state => state.options)
 
   useEffect(() => {
+    if (renderMode === 'sidechat') return
     // Deployments that compose no presets never label anything, so the roster
     // is only worth a request once a session reports one.
     if (preset !== undefined) void load()
-  }, [preset, load])
+  }, [preset, load, renderMode])
 
-  if (preset === undefined) return null
+  if (renderMode === 'sidechat' || preset === undefined) return null
 
   const option = options.find(entry => entry.id === preset)
   const text = option === undefined ? undefined : presetDisplayText(option, t)

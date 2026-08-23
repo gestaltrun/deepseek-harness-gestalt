@@ -25,6 +25,9 @@
       "path": "../locale"
     },
     {
+      "path": "../connection"
+    },
+    {
       "path": "../modules"
     },
     {
@@ -32,6 +35,9 @@
     },
     {
       "path": "../ui-conversation"
+    },
+    {
+      "path": "../ui-renderer"
     },
     {
       "path": "../ui-primitives"
@@ -65,6 +71,9 @@
     },
     {
       "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../api/remotes/tsconfig.client.json"
     }
   ]
 }

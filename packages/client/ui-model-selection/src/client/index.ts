@@ -126,17 +126,17 @@ export function apply(ctx: ClientContext): void {
     scope.effect(() => command.register({
       name: 'model',
       description: t('command.description'),
-      available: session => sessions.subagentAddress(session.sessionId) === undefined,
+      available: session => sessions.modelRoute(session.sessionId) !== undefined,
       ui: {
         kind: 'popupSelect',
         options: async (session) => {
-          if (sessions.subagentAddress(session.sessionId) !== undefined) {
+          if (sessions.modelRoute(session.sessionId) === undefined) {
             throw new Error('model selection is unavailable for addressed subagent sessions')
           }
           return optionsOf(await models.directoryFor(session.sessionId).load(), t)
         },
         onSelect: async (option, session) => {
-          if (sessions.subagentAddress(session.sessionId) !== undefined) {
+          if (sessions.modelRoute(session.sessionId) === undefined) {
             throw new Error('model selection is unavailable for addressed subagent sessions')
           }
           const directory = models.directoryFor(session.sessionId)
@@ -159,7 +159,7 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       inject: (sessionId): ModelSelectInjected => {
         const directory = models.directoryFor(sessionId)
-        const available = sessions.subagentAddress(sessionId) === undefined
+        const available = sessions.modelRoute(sessionId) !== undefined
         return {
           available,
           directory: directory.store,

@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import {
   gitBlobHash,
   gitIndexPaths,
+  readGitIndexBlobs,
   readGitIndexBlob,
   storeGitBlob,
 } from './translation-pairing-git.ts'
@@ -129,6 +130,32 @@ describe('translation pairing snapshots', () => {
       expect(indexed?.content.toString('utf8')).toBe('staged')
       expect(indexed?.objectId).toBe(gitBlobHash(Buffer.from('staged')))
       expect(readGitIndexBlob(root, 'absent.md')).toBeUndefined()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('reads multiple selected staged blobs in one batch', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-translation-pairing-index-'))
+    try {
+      execFileSync('git', ['init', '--quiet', root], {
+        env: { ...process.env, GIT_DEFAULT_HASH: 'sha1' },
+      })
+      writeFileSync(join(root, 'first.md'), 'first staged')
+      writeFileSync(join(root, 'duplicate.md'), 'first staged')
+      writeFileSync(join(root, 'second.md'), 'second staged\nwith lines\n')
+      const binary = Buffer.from([0x62, 0x69, 0x6e, 0x0a, 0x00, 0xff])
+      writeFileSync(join(root, 'binary.md'), binary)
+      execFileSync('git', ['-C', root, 'add', 'first.md', 'duplicate.md', 'second.md', 'binary.md'])
+      writeFileSync(join(root, 'first.md'), 'first unstaged')
+
+      const indexed = readGitIndexBlobs(root, ['first.md', 'duplicate.md', 'second.md', 'binary.md', 'absent.md'])
+
+      expect(indexed.get('first.md')?.content.toString('utf8')).toBe('first staged')
+      expect(indexed.get('duplicate.md')?.objectId).toBe(indexed.get('first.md')?.objectId)
+      expect(indexed.get('second.md')?.content.toString('utf8')).toBe('second staged\nwith lines\n')
+      expect(indexed.get('binary.md')?.content).toEqual(binary)
+      expect(indexed.has('absent.md')).toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

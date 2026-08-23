@@ -6,7 +6,7 @@
 
 入口只接受一套实际运行的生产身份，由 `VITE_PLATFORM_ORIGIN`、`VITE_PLATFORM_CALLBACK_URL`、`VITE_PLATFORM_GITHUB_CLIENT_ID`、`VITE_PLATFORM_CREDENTIAL_REFERENCE`、`VITE_PLATFORM_DATABASE_IDENTITY` 与 `VITE_PLATFORM_IDENTITY_NAMESPACE` 提供。字段缺失、localhost、非 HTTPS origin 或回调不匹配会在本地存储、渲染或网络流量前失败。
 
-共用 Mobile 入口内置 `@capacitor/browser` 与 `@capacitor/device` adapter。授权尝试准备完成后，继续按钮的用户激活会直接调用 browser adapter；入口没有 `window.open`、弹窗或携带 token 的自定义 URL 回退。Personal Pairing 页面让取消与仍在等待的 `getUserMedia` 竞速，并以 `@zxing/browser` 读取一个 QR 值；成功、失败、取消或卸载后会停止 decoder，并停止当前或稍后返回的每条相机 track。不支持的相机 API、权限拒绝、无相机、空结果、畸形链接、过期、重放与跨账号尝试都会显式失败；QR 与粘贴绝不会创建不同的邀请或握手路径。`IndexedDbInstallationAccountStore` 将所选数据库 identity 写入数据库名；原生打包负责提供稳定 WebView origin。
+共用 Mobile 入口内置 `@capacitor/browser` 与 `@capacitor/device` adapter。授权尝试准备完成后，继续按钮的用户激活会直接调用 browser adapter；入口没有 `window.open`、弹窗、当前上下文导航或携带 token 的自定义 URL 回退。Personal Pairing 页面让取消与仍在等待的 `getUserMedia` 竞速，并以 `@zxing/browser` 读取一个 QR 值；成功、失败、取消或卸载后会停止 decoder，并停止当前或稍后返回的每条相机 track。不支持的相机 API、权限拒绝、无相机、空结果、畸形链接、过期、重放与跨账号尝试都会显式失败；QR 与粘贴绝不会创建不同的邀请或握手路径。`IndexedDbInstallationAccountStore` 将所选数据库 identity 写入数据库名；原生打包负责提供稳定 WebView origin。缺少 `crypto.randomUUID` 会在渲染前失败，因为创建 Installation id 需要安全浏览上下文。
 
 ## 共享 Session 呈现
 

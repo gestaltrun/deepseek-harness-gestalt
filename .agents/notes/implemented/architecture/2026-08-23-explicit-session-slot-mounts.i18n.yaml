@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-23-explicit-session-slot-mounts.md
+2026-08-23-explicit-session-slot-mounts.md: 9f2eb7cc0f96accdab913badcc14de084bc2a5aa
+2026-08-23-explicit-session-slot-mounts.zh.md: 36bb9d1fe3888d6a9eab3c86e0193185220810ae

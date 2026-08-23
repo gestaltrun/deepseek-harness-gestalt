@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-17-platform-account-installation-sessions.md
 2026-08-17-platform-account-installation-sessions.md: dc4f8304a7938ab3b351a93523cfb1ef77d9aa3b
-2026-08-17-platform-account-installation-sessions.zh.md: dcd4afbf972b76069b9ac3835ee3e9eabdd8859c
+2026-08-17-platform-account-installation-sessions.zh.md: 6d2a3b8edf51f03f1a47e8c3a2ffc5c889e7cf17

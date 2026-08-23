@@ -12,7 +12,7 @@ Mobile Companion 已具备可用于生产的 Account、配对、Relay、附件�
 
 产品 Desktop 与 Mobile 只组装已运营的 HTTPS Platform 身份、真实 GitHub Account 流程、持久化 Platform provider 与经过评审的逐配对加密通道。测试身份、内存 provider、测试证书、keyless 握手、固定 Relay 附着 id 与仅用于证明的同步帧只保留在有界测试中；这些测试的名称和断言不得作为产品验收证据。
 
-已运营身份、持久资源 composition 与产品入口 import gate 已由[将 Companion 产品绑定到唯一实际运行的 Platform 身份](../../implemented/architecture/2026-08-22-operated-companion-platform-identity.md)实现。
+已运营身份、持久资源 composition 与产品入口 import gate 已由[将 Companion 产品绑定到唯一实际运行的 Platform 身份](../../implemented/architecture/2026-08-22-operated-companion-platform-identity.zh.md)实现。
 
 每个 Personal Pairing 独占 Mobile 与 Desktop 附着身份、路由凭据、应用密钥和认证同步。Snow 通过新鲜临时密钥完成 XKpsk3 配对与 IK 重连。版本化 Encrypted Companion 消息承载同步；Relay authority 由配对派生通道密封，绝不以应用明文或 Platform 可见明文出现。
 
@@ -22,7 +22,7 @@ Mobile 附件使用配对范围的加密 blob capability，并以字节进入现
 
 Companion Surface 是导出的 DSH Web 组件的手机尺寸组合。Mobile 拥有导航、所选 Desktop 状态和远程权威适配；共享 Web 包拥有 Markdown、代码、图片、工具、diff、审批、Ask User、错误、终端摘要和 composer 展示。导入 Desktop 私有 CSS module 或重新实现这些 renderer 不满足组件复用。
 
-Mobile Companion 不提供推送能力。[仅前台同步决策](../../implemented/simplification/2026-08-22-foreground-only-companion-synchronization.md)删除 APNs 与 FCM adapter、token、payload、持久化、配置、配额、指标、secret、原生依赖与验收要求。进入后台会暂停 Relay 连接；打开应用或回到前台时重新连接，并在启用 mutation 前完成 Desktop 权威同步。只有不携带过期交互权威且不依赖推送投递的 deep link 才可保留。
+Mobile Companion 不提供推送能力。[仅前台同步决策](../../implemented/simplification/2026-08-22-foreground-only-companion-synchronization.zh.md)删除 APNs 与 FCM adapter、token、payload、持久化、配置、配额、指标、secret、原生依赖与验收要求。进入后台会暂停 Relay 连接；打开应用或回到前台时重新连接，并在启用 mutation 前完成 Desktop 权威同步。只有不携带过期交互权威且不依赖推送投递的 deep link 才可保留。
 
 产品验收运行发布的 Mobile 入口、已运营的非粘性双实例 Platform 与真实 Paired Desktop。`apps/mobile/prototype-companion`、Vite 端口 5173/5174、假身份、内存存储、测试证书与测试专用 provider 禁止作为验收 origin。
 

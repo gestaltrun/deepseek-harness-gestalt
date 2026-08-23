@@ -22,7 +22,7 @@ The generic capability can validate distinct development and production identiti
 
 ## Cordis API
 
-Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — this section is byte-identical in both language sides of the page. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
 <a id="ctxplatformaccount--accountservice-abstract-seam"></a>
 
@@ -33,11 +33,11 @@ Platform Account capability. Providers own OAuth, installation-key binding, toke
 ```ts cordis-catalog
 /**
  * Start one GitHub Authorization Code attempt for an installation key.
- * @param input - installation identity, Mobile presentation when applicable, and public P-256 JWK.
+ * @param input - installation identity, kind, and public P-256 JWK.
  * @returns the system-browser URL and signed polling capability.
  * @throws AccountError `PLATFORM_CAPACITY` with `retryAfter` when the shared watermark is shedding.
  */
-abstract beginLogin(input: InstallationLoginIdentity & { publicKey: JsonWebKey }): Promise<LoginAttemptView>
+abstract beginLogin(input: { installationId: InstallationId installationKind: 'desktop' | 'mobile' publicKey: JsonWebKey }): Promise<LoginAttemptView>
 
 /**
  * Settle the fixed HTTPS GitHub callback; provider credentials never leave the provider.
@@ -72,7 +72,7 @@ abstract current(input: { accessToken: string; proof: AccountProof }): Promise<P
 /**
  * Authenticate the Account and Installation identity bound to one current session.
  * @param input - access token and proof from the session's Installation key.
- * @returns provider-owned Account and Installation identity, including authenticated Mobile presentation.
+ * @returns provider-owned Account id, Installation id, and Installation kind.
  */
 abstract currentInstallation(input: { accessToken: string proof: AccountProof }): Promise<AuthenticatedInstallationView>
 
@@ -94,5 +94,5 @@ abstract signOut(input: { accessToken: string; proof: AccountProof }): Promise<v
 abstract trackConnection(sessionId: AccountSessionId, close: () => void | Promise<void>): Promise<() => void>
 ```
 
-Source: [`packages/platform/platform-account/src/index.ts:37`](../../packages/platform/platform-account/src/index.ts)
+Source: [`packages/platform/platform-account/src/index.ts`](../../packages/platform/platform-account/src/index.ts)
 <!-- END GENERATED cordis-surface -->

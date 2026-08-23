@@ -37,7 +37,8 @@ import { PostgresAccountBackend } from './postgres-backend.ts'
 import { loadOperatedPlatformConfig, type OperatedPlatformConfig } from './production-env.ts'
 import { RedisAccountInvalidationBus, connectRedis } from './redis-bus.ts'
 import { OperatedRemoteAccessResources } from './remote-access-resources.ts'
-import { PostgresRemoteAttachmentStore } from './postgres-attachment-store.ts'
+import { OssRemoteAttachmentStore } from './oss-attachment-store.ts'
+import { createEcsRamRoleOssClient, type OssObjectClient } from './oss-client.ts'
 import { OperatedRemoteAttachmentAuthority } from './remote-attachment-authority.ts'
 
 type RedisConnection = Awaited<ReturnType<typeof connectRedis>>
@@ -46,6 +47,7 @@ type RedisConnection = Awaited<ReturnType<typeof connectRedis>>
 export interface OperatedPlatformLaunchAdapters {
   createPostgres?: (config: OperatedPlatformConfig['postgres']) => Pool
   connectRedis?: (config: OperatedPlatformConfig['redis']) => Promise<RedisConnection>
+  createOssClient?: (config: OperatedPlatformConfig['oss']) => Promise<OssObjectClient>
   githubFetch?: typeof fetch
 }
 
@@ -78,6 +80,7 @@ export async function launchOperatedPlatform(
   const listen = loadListenConfig(env)
   const createPostgres = options.adapters?.createPostgres ?? (value => new pg.Pool(value))
   const connect = options.adapters?.connectRedis ?? connectRedis
+  const createOss = options.adapters?.createOssClient ?? createEcsRamRoleOssClient
   const postgres = createPostgres(config.postgres)
   let publisher: RedisConnection | undefined
   let subscriber: RedisConnection | undefined
@@ -112,11 +115,13 @@ export async function launchOperatedPlatform(
       redisKeyPrefix: config.relayRedisKeyPrefix,
     })
     await remoteAccess.migrate()
-    const remoteAttachments = new PostgresRemoteAttachmentStore(
+    const oss = await createOss(config.oss)
+    const remoteAttachments = new OssRemoteAttachmentStore(
       context,
       environment.databaseIdentity,
       postgres,
-      config.remoteAttachments,
+      oss,
+      { ...config.remoteAttachments, objectPrefix: config.oss.objectPrefix },
     )
     await remoteAttachments.migrate()
     const github = new GitHubOAuthIdentityProvider({

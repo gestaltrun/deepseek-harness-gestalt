@@ -824,6 +824,16 @@
         "tests/**/*.ts"
       ]
     },
+    "apps/platform": {
+      "entry": [
+        "tests/**/*.spec.ts",
+        "tests/fixtures/oss-metadata-fetch.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
     "apps/mobile": {
       "entry": [
         "tests/**/*.spec.ts",

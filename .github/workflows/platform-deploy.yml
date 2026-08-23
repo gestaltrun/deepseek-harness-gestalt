@@ -56,6 +56,11 @@ jobs:
           PLATFORM_REDIS_HOST: ${{ vars.PLATFORM_REDIS_HOST }}
           PLATFORM_REDIS_USER: ${{ secrets.PLATFORM_REDIS_USER }}
           PLATFORM_REDIS_PASSWORD: ${{ secrets.PLATFORM_REDIS_PASSWORD }}
+          PLATFORM_OSS_ENDPOINT: ${{ vars.PLATFORM_OSS_ENDPOINT }}
+          PLATFORM_OSS_BUCKET: ${{ vars.PLATFORM_OSS_BUCKET }}
+          PLATFORM_OSS_AUTH: ${{ vars.PLATFORM_OSS_AUTH }}
+          PLATFORM_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_OSS_OBJECT_PREFIX }}
+          PLATFORM_OSS_TIMEOUT_MS: '10000'
           PLATFORM_RELAY_REDIS_KEY_PREFIX: ${{ vars.PLATFORM_RELAY_REDIS_KEY_PREFIX }}
           PLATFORM_RELAY_INSTANCE_ID: relay-validation
           PLATFORM_RELAY_CAPACITY_RETRY_AFTER_MS: '1000'
@@ -116,6 +121,11 @@ jobs:
           PLATFORM_REDIS_HOST: ${{ vars.PLATFORM_REDIS_HOST }}
           PLATFORM_REDIS_USER: ${{ secrets.PLATFORM_REDIS_USER }}
           PLATFORM_REDIS_PASSWORD: ${{ secrets.PLATFORM_REDIS_PASSWORD }}
+          PLATFORM_OSS_ENDPOINT: ${{ vars.PLATFORM_OSS_ENDPOINT }}
+          PLATFORM_OSS_BUCKET: ${{ vars.PLATFORM_OSS_BUCKET }}
+          PLATFORM_OSS_AUTH: ${{ vars.PLATFORM_OSS_AUTH }}
+          PLATFORM_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_OSS_OBJECT_PREFIX }}
+          PLATFORM_OSS_TIMEOUT_MS: '10000'
           PLATFORM_RELAY_REDIS_KEY_PREFIX: ${{ vars.PLATFORM_RELAY_REDIS_KEY_PREFIX }}
           PLATFORM_REDIS_TLS: '1'
           PLATFORM_TOKEN_SIGNING_KEY: ${{ secrets.PLATFORM_TOKEN_SIGNING_KEY }}
@@ -134,7 +144,14 @@ jobs:
               'dnf -y install docker >/dev/null 2>&1 || yum -y install docker >/dev/null 2>&1; systemctl enable --now docker'
             gzip -dc /tmp/platform.tar.gz | ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" 'docker load'
             ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              "docker rm -f dsh-platform >/dev/null 2>&1 || true; docker run -d --name dsh-platform --restart unless-stopped \
+              "docker run --rm --network host \
+                -e PLATFORM_OSS_ENDPOINT=$(printf %q "$PLATFORM_OSS_ENDPOINT") \
+                -e PLATFORM_OSS_BUCKET=$(printf %q "$PLATFORM_OSS_BUCKET") \
+                -e PLATFORM_OSS_AUTH=$(printf %q "$PLATFORM_OSS_AUTH") \
+                -e PLATFORM_OSS_OBJECT_PREFIX=$(printf %q "$PLATFORM_OSS_OBJECT_PREFIX") \
+                -e PLATFORM_OSS_TIMEOUT_MS=$(printf %q "$PLATFORM_OSS_TIMEOUT_MS") \
+                ${IMAGE} node dist/oss-lifecycle-cli.mjs; \
+               docker rm -f dsh-platform >/dev/null 2>&1 || true; docker run -d --name dsh-platform --restart unless-stopped \
                 --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
                 -p 80:8080 \
                 -e PLATFORM_ENVIRONMENT=production \
@@ -152,6 +169,11 @@ jobs:
                 -e PLATFORM_REDIS_HOST=$(printf %q "$PLATFORM_REDIS_HOST") \
                 -e PLATFORM_REDIS_USER=$(printf %q "$PLATFORM_REDIS_USER") \
                 -e PLATFORM_REDIS_PASSWORD=$(printf %q "$PLATFORM_REDIS_PASSWORD") \
+                -e PLATFORM_OSS_ENDPOINT=$(printf %q "$PLATFORM_OSS_ENDPOINT") \
+                -e PLATFORM_OSS_BUCKET=$(printf %q "$PLATFORM_OSS_BUCKET") \
+                -e PLATFORM_OSS_AUTH=$(printf %q "$PLATFORM_OSS_AUTH") \
+                -e PLATFORM_OSS_OBJECT_PREFIX=$(printf %q "$PLATFORM_OSS_OBJECT_PREFIX") \
+                -e PLATFORM_OSS_TIMEOUT_MS=10000 \
                 -e PLATFORM_RELAY_REDIS_KEY_PREFIX=$(printf %q "$PLATFORM_RELAY_REDIS_KEY_PREFIX") \
                 -e PLATFORM_REDIS_TLS=1 \
                 -e PLATFORM_RELAY_INSTANCE_ID=$(printf %q "$relay_instance") \

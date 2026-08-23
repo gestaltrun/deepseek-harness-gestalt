@@ -1,6 +1,7 @@
 /** Production-only listen-process and deploy Environment names. */
 
 import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
+import { validateOperatedOssConfig, type OperatedOssConfig } from './oss-config.ts'
 
 /** Names the listen process must receive from Environment `production`. */
 export const PLATFORM_PRODUCTION_REQUIRED_ENV = [
@@ -17,6 +18,11 @@ export const PLATFORM_PRODUCTION_REQUIRED_ENV = [
   'PLATFORM_REDIS_HOST',
   'PLATFORM_REDIS_USER',
   'PLATFORM_REDIS_PASSWORD',
+  'PLATFORM_OSS_ENDPOINT',
+  'PLATFORM_OSS_BUCKET',
+  'PLATFORM_OSS_AUTH',
+  'PLATFORM_OSS_OBJECT_PREFIX',
+  'PLATFORM_OSS_TIMEOUT_MS',
   'PLATFORM_RELAY_REDIS_KEY_PREFIX',
   'PLATFORM_RELAY_INSTANCE_ID',
   'PLATFORM_RELAY_CAPACITY_RETRY_AFTER_MS',
@@ -93,6 +99,7 @@ export interface OperatedPlatformConfig {
     capabilityLifetimeMs: number
     maxRetainedBlobs: number
   }
+  oss: OperatedOssConfig
   tokenSigningKey: Uint8Array
   pollingSigningKey: Uint8Array
 }
@@ -233,6 +240,13 @@ export function loadOperatedPlatformConfig(
       ),
       maxRetainedBlobs: positiveIntegerEnv(env, 'PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS'),
     },
+    oss: validateOperatedOssConfig({
+      endpoint: requiredPlatformEnv('PLATFORM_OSS_ENDPOINT', env),
+      bucket: requiredPlatformEnv('PLATFORM_OSS_BUCKET', env),
+      auth: requiredPlatformEnv('PLATFORM_OSS_AUTH', env),
+      objectPrefix: requiredPlatformEnv('PLATFORM_OSS_OBJECT_PREFIX', env),
+      timeoutMs: positiveIntegerEnv(env, 'PLATFORM_OSS_TIMEOUT_MS'),
+    }),
     tokenSigningKey: readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', env),
     pollingSigningKey: readPlatformSigningKey('PLATFORM_POLLING_SIGNING_KEY', env),
   }

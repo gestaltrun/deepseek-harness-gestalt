@@ -21,6 +21,8 @@ import { createClient } from 'redis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connectRedis } from '../src/redis-bus.ts'
 import { launchOperatedPlatform } from '../src/launch.ts'
+import { OssRemoteAttachmentStore } from '../src/oss-attachment-store.ts'
+import type { OssObjectClient } from '../src/oss-client.ts'
 import { PostgresRemoteAttachmentStore } from '../src/postgres-attachment-store.ts'
 import { PostgresPersonalPairingAuthorityStore } from '../src/postgres-pairing-store.ts'
 import { OperatedRemoteAttachmentAuthority } from '../src/remote-attachment-authority.ts'
@@ -41,6 +43,54 @@ afterEach(async () => {
 })
 
 describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry with disposable durable fixtures', () => {
+  it('shares OSS ciphertext through PostgreSQL one-time capability authority', async () => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const firstContext = new Context()
+    const secondContext = new Context()
+    cleanups.push(async () => { await firstContext.fiber.dispose(); await secondContext.fiber.dispose() })
+    const objects = new Map<string, Uint8Array>()
+    const objectClient = memoryOssClient(objects)
+    const options = {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 1_000,
+      maxRetainedBlobs: 1,
+      objectPrefix: 'remote-attachments/fixture',
+    }
+    const first = new OssRemoteAttachmentStore(firstContext, 'oss-fixture', pool, objectClient, options)
+    const second = new OssRemoteAttachmentStore(secondContext, 'oss-fixture', pool, objectClient, options)
+    await first.migrate()
+    const pairing = parsePersonalPairingId('pairing-shared-oss')
+    const otherPairing = parsePersonalPairingId('pairing-other-oss')
+    const grant = await first.publish({ pairingId: pairing, ciphertext: Uint8Array.of(1, 2, 3), now: 100 })
+
+    await expect(second.inspect({ pairingId: otherPairing, capability: grant.capability, now: 101 }))
+      .rejects.toMatchObject({ code: 'ATTACHMENT_PAIRING_MISMATCH' })
+    await expect(second.publish({ pairingId: pairing, ciphertext: Uint8Array.of(4), now: 101 }))
+      .rejects.toMatchObject({ code: 'ATTACHMENT_CAPACITY' })
+    expect(objects.size).toBe(1)
+    await expect(second.consume({ pairingId: pairing, capability: grant.capability, now: 102 }))
+      .resolves.toEqual(Uint8Array.of(1, 2, 3))
+    await expect(first.consume({ pairingId: pairing, capability: grant.capability, now: 103 }))
+      .rejects.toMatchObject({ code: 'ATTACHMENT_CAPABILITY_INVALID' })
+    expect(objects.size).toBe(0)
+
+    const expired = await second.publish({ pairingId: pairing, ciphertext: Uint8Array.of(5), now: 200 })
+    await expect(first.inspect({ pairingId: pairing, capability: expired.capability, now: 1_200 }))
+      .rejects.toMatchObject({ code: 'ATTACHMENT_EXPIRED' })
+    expect(objects.size).toBe(0)
+    await expect(second.inspect({ pairingId: pairing, capability: expired.capability, now: 1_201 }))
+      .rejects.toMatchObject({ code: 'ATTACHMENT_CAPABILITY_INVALID' })
+
+    const expiredConsume = await first.publish({ pairingId: pairing, ciphertext: Uint8Array.of(6), now: 300 })
+    await expect(second.consume({ pairingId: pairing, capability: expiredConsume.capability, now: 1_300 }))
+      .rejects.toMatchObject({ code: 'ATTACHMENT_EXPIRED' })
+    expect(objects.size).toBe(0)
+    await expect(first.inspect({ pairingId: pairing, capability: expiredConsume.capability, now: 1_301 }))
+      .rejects.toMatchObject({ code: 'ATTACHMENT_CAPABILITY_INVALID' })
+  }, 60_000)
+
   it('shares single-use encrypted attachment capabilities across Platform instances', async () => {
     const postgres = await startPostgresFixture()
     const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
@@ -177,6 +227,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
             username: 'fixture', password: 'fixture-secret', tls: false,
           })
         },
+        createOssClient: async () => memoryOssClient(),
         githubFetch,
       },
     })
@@ -251,7 +302,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       'remote_access_pairing_transactions',
       'remote_access_route_authorities',
       'remote_access_routes',
-      'remote_attachment_blobs',
+      'remote_attachment_objects',
     ]))
   }, 60_000)
 
@@ -274,7 +325,9 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     await redisObserver.connect()
     cleanups.push(async () => { await redisObserver.quit() })
     const child = spawn(process.execPath, [
-      '--import', 'tsx/esm', join(import.meta.dirname, '..', 'src', 'boot.ts'),
+      '--import', 'tsx/esm',
+      '--import', join(import.meta.dirname, 'fixtures', 'oss-metadata-fetch.ts'),
+      join(import.meta.dirname, '..', 'src', 'boot.ts'),
     ], {
       cwd: join(import.meta.dirname, '..', '..', '..'),
       env: {
@@ -327,6 +380,11 @@ function operatedFixtureEnv(): NodeJS.Dict<string> {
     PLATFORM_REDIS_HOST: 'redis.operated.fixture',
     PLATFORM_REDIS_USER: 'fixture',
     PLATFORM_REDIS_PASSWORD: 'redis-secret-fixture',
+    PLATFORM_OSS_ENDPOINT: 'oss-cn-hangzhou-internal.aliyuncs.com',
+    PLATFORM_OSS_BUCKET: 'gestalt-secret',
+    PLATFORM_OSS_AUTH: 'ecs-ram-role/gestalt-vpc',
+    PLATFORM_OSS_OBJECT_PREFIX: 'remote-attachments/fixture',
+    PLATFORM_OSS_TIMEOUT_MS: '10000',
     PLATFORM_RELAY_REDIS_KEY_PREFIX: 'gestalt:relay:fixture',
     PLATFORM_RELAY_INSTANCE_ID: 'instance-fixture',
     PLATFORM_RELAY_CAPACITY_RETRY_AFTER_MS: '1000',
@@ -387,6 +445,18 @@ async function startAttachmentHttp(
 
 function json(value: unknown): Response {
   return new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
+}
+
+function memoryOssClient(objects = new Map<string, Uint8Array>()): OssObjectClient {
+  return {
+    putObject: async (key, ciphertext) => { objects.set(key, new Uint8Array(ciphertext)) },
+    getObject: async (key) => {
+      const value = objects.get(key)
+      if (value === undefined) throw new Error('fixture OSS object is absent')
+      return new Uint8Array(value)
+    },
+    deleteObject: async (key) => { objects.delete(key) },
+  }
 }
 
 function commandAvailable(command: string): boolean {

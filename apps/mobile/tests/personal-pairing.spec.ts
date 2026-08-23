@@ -325,8 +325,9 @@ describe('MobilePairingController', () => {
     }
     const relay = { configure: vi.fn(), start: vi.fn(), stop: vi.fn(), isConnected: () => false }
     const companion = new CompanionForegroundRuntime({ relay })
+    const installation = installationFixture()
     const controller = new MobilePairingController({
-      installation: installationFixture(), transport, handshake, relay: companion, companion,
+      installation, transport, handshake, relay: companion, companion,
       scanner: { scan: vi.fn() },
       schedule: (task) => { scheduled.push(task); return { unref: vi.fn() } as never },
       now: () => Date.parse('2026-08-18T10:01:00.000Z'),
@@ -337,6 +338,10 @@ describe('MobilePairingController', () => {
 
     await controller.unpair()
 
+    expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledWith({
+      authentication: await installation.authorizeCurrentInstallation(),
+      pairingId: 'pairing-one',
+    })
     expect(handshake.wipe).toHaveBeenCalledOnce()
     expect(relay.stop).toHaveBeenCalled()
     expect(relay.configure).toHaveBeenCalledWith(undefined)
@@ -397,6 +402,38 @@ describe('MobilePairingController', () => {
       status: 'unpair-failed',
       error: 'Mobile Personal Pairing unpair failed',
     })
+  })
+
+  it('retains the confirmed pairing id until Platform revocation can be retried', async () => {
+    const pairingId = parsePersonalPairingId('pairing-revoke-retry')
+    const transport = transportFixture()
+    transport.revokeMobilePersonalPairing
+      .mockRejectedValueOnce(new Error('Platform revoke failed'))
+      .mockResolvedValueOnce(undefined)
+    const attachmentKeys = {
+      retain: vi.fn(),
+      retainedPairingId: vi.fn(() => pairingId),
+      selectAccount: vi.fn(),
+      wipe: vi.fn(),
+      flush: vi.fn(),
+    }
+    const controller = new MobilePairingController({
+      installation: installationFixture(),
+      transport,
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn(), wipe: vi.fn() },
+      attachmentKeys,
+      scanner: { scan: vi.fn() },
+    })
+    await controller.activate()
+
+    await expect(controller.unpair()).rejects.toThrow('Mobile Personal Pairing unpair failed')
+    expect(controller.getSnapshot()).toEqual({
+      status: 'unpair-failed', error: 'Mobile Personal Pairing unpair failed',
+    })
+    await expect(controller.unpair()).resolves.toBeUndefined()
+    expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledTimes(2)
+    expect(transport.revokeMobilePersonalPairing).toHaveBeenLastCalledWith(expect.objectContaining({ pairingId }))
+    expect(controller.getSnapshot()).toEqual({ status: 'ready' })
   })
 
   it('awaits account-change Companion release and Relay revocation before activation settles', async () => {
@@ -842,6 +879,7 @@ function transportFixture() {
     confirmPairing: vi.fn(),
     rejectPairing: vi.fn(),
     revokePersonalPairing: vi.fn(),
+    revokeMobilePersonalPairing: vi.fn(),
     completeChallenge: vi.fn<RemoteAccessTransport['completeChallenge']>().mockResolvedValue({
       pendingPairingId: parsePendingPairingId('pending-one'),
       authenticationWords: ['amber', 'binary', 'cedar', 'delta', 'ember', 'frost'],

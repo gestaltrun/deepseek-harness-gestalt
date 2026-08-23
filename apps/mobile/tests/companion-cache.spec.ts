@@ -309,7 +309,7 @@ describe('Companion Cache', () => {
     await cacheB.saveOpenedContent(desktopA, 'transcript', 'account-b only')
     expect(await cacheA.loadOpenedContent(desktopA, 'transcript')).toBe('account-a only')
     expect(await cacheB.loadOpenedContent(desktopA, 'transcript')).toBe('account-b only')
-    await cacheA.clearDesktopCache(desktopA)
+    await cacheA.clearDesktopContent(desktopA)
     expect(await cacheA.loadOpenedContent(desktopA, 'transcript')).toBeUndefined()
     expect(await cacheB.loadOpenedContent(desktopA, 'transcript')).toBe('account-b only')
   })
@@ -516,7 +516,7 @@ describe('Companion Cache', () => {
     await cache.saveOpenedContent(desktopA, 'transcript', 'A transcript')
     await cache.saveOpenedContent(desktopB, 'transcript', 'B transcript')
 
-    await cache.clearDesktopCache(desktopA)
+    await cache.clearDesktopContent(desktopA)
     expect(await cache.loadOpenedContent(desktopA, 'transcript')).toBeUndefined()
     expect(await cache.loadOpenedContent(desktopB, 'transcript')).toContain('B transcript')
   })

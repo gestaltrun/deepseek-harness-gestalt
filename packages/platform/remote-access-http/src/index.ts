@@ -110,6 +110,12 @@ async function dispatch(
         pairingId: parsePersonalPairingId(body.pairingId),
       })
       return { completed: true }
+    case 'revoke-mobile-pairing':
+      await ctx.remoteAccess.revokeMobilePersonalPairing({
+        mobile: authentication,
+        pairingId: parsePersonalPairingId(body.pairingId),
+      })
+      return { completed: true }
     case 'get-mobile-pairing-status':
       return mobilePairingStatusWire(await ctx.remoteAccess.getMobilePairingStatus({
         mobile: authentication,

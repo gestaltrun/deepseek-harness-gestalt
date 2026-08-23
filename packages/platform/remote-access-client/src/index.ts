@@ -108,6 +108,11 @@ export interface RemoteAccessTransport {
     authentication: PairingAccountAuthentication
     pairingId: PersonalPairingId
   }): Promise<void>
+  /** @param input - current Mobile authorization and its confirmed pairing id. */
+  revokeMobilePersonalPairing(input: {
+    authentication: PairingAccountAuthentication
+    pairingId: PersonalPairingId
+  }): Promise<void>
   /** @param input - current Desktop authorization and pending id. @returns activated pairing. */
   confirmPairing(input: {
     authentication: PairingAccountAuthentication
@@ -288,6 +293,13 @@ export class RemoteAccessHttpTransport implements RemoteAccessTransport {
     pairingId: PersonalPairingId
   }): Promise<void> {
     await this.call(input.authentication, { operation: 'revoke-pairing', pairingId: input.pairingId })
+  }
+
+  async revokeMobilePersonalPairing(input: {
+    authentication: PairingAccountAuthentication
+    pairingId: PersonalPairingId
+  }): Promise<void> {
+    await this.call(input.authentication, { operation: 'revoke-mobile-pairing', pairingId: input.pairingId })
   }
 
   async confirmPairing(input: {

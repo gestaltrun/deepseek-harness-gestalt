@@ -1486,6 +1486,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'input', description: 'Desktop authorization and pairing identity.' }],
       },
       {
+        signature: 'abstract revokeMobilePersonalPairing(input: { mobile: PairingAccountAuthentication pairingId: PersonalPairingId }): Promise<void>',
+        description: 'Revoke the confirmed pairing owned by its authenticated Mobile Installation.',
+        parameters: [{ name: 'input', description: 'Mobile authorization and retained pairing identity.' }],
+      },
+      {
         signature: 'abstract listPendingPairings(desktop: PairingAccountAuthentication): Promise<readonly PairingCompletionView[]>',
         description: 'List completed handshakes awaiting this Desktop Installation\'s decision.',
         parameters: [{ name: 'desktop', description: 'current Desktop authorization.' }],

@@ -202,6 +202,7 @@ describe('Remote Access HTTP assembled flow', () => {
       confirmPairing: http.confirmPairing.bind(http),
       rejectPairing: http.rejectPairing.bind(http),
       revokePersonalPairing: http.revokePersonalPairing.bind(http),
+      revokeMobilePersonalPairing: http.revokeMobilePersonalPairing.bind(http),
       getMobilePairingStatus: http.getMobilePairingStatus.bind(http),
       finishChallenge: http.finishChallenge.bind(http),
       submitEndpointMessage1: http.submitEndpointMessage1.bind(http),
@@ -278,6 +279,7 @@ describe('Remote Access HTTP assembled flow', () => {
       rejectPairing: vi.fn(),
       reissueDesktopRelayAuthority: vi.fn(async () => ({ enabled: true })),
       revokePersonalPairing: vi.fn(),
+      revokeMobilePersonalPairing: vi.fn(),
       completeChallenge: vi.fn(async () => ({
         pendingPairingId: 'pending-one', authenticationWords: [], desktopHandshake: Uint8Array.of(1),
         device: { name: 'phone', platform: 'ios' },
@@ -381,6 +383,10 @@ describe('Remote Access HTTP assembled flow', () => {
     })).status).toBe(200)
     expect(remoteAccess.createChallenge.mock.calls.at(-1)?.[0].clientIp).toMatch(/127\.0\.0\.1|::1/u)
     expect((await request({ operation: 'revoke-pairing', pairingId: 'pairing-one' })).status).toBe(200)
+    expect((await request({ operation: 'revoke-mobile-pairing', pairingId: 'pairing-one' })).status).toBe(200)
+    expect(remoteAccess.revokeMobilePersonalPairing).toHaveBeenCalledWith(expect.objectContaining({
+      pairingId: 'pairing-one',
+    }))
     expect((await request({ operation: 'reject-pairing', pendingPairingId: 'pending-one' })).status).toBe(200)
     remoteAccess.getMobilePairingStatus.mockResolvedValueOnce({
       status: 'paired', pairingId: parsePersonalPairingId('pairing-one'), sealedRelayAuthority: Uint8Array.of(1, 2),

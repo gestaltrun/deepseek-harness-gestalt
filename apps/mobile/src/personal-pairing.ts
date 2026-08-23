@@ -81,6 +81,8 @@ export interface MobilePairingKeyRetention {
   retainRelayAuthority?(pairingId: PersonalPairingId, grant: RelayCredentialGrant): void
   /** @returns latest retained Mobile Relay grant for this Account. */
   relayAuthority?(): RelayCredentialGrant | undefined
+  /** @returns retained confirmed Personal Pairing for this Account. */
+  retainedPairingId?(): PersonalPairingId | undefined
   /** Persist one in-flight endpoint pairing before its next external effect. */
   retainEndpointRecovery?(recovery: MobileEndpointPairingRecovery): void
   /** @returns an Account-scoped endpoint pairing recovery copy. */
@@ -259,6 +261,7 @@ export class MobilePairingController implements MobilePairingActions {
   private readonly now: () => number
   private timer: ReturnType<typeof setTimeout> | undefined
   private attempt: PreparedMobilePairingAttempt | undefined
+  private pairingId: PersonalPairingId | undefined
   private accountId: PlatformAccountId | undefined
   private active = true
   private lifecycleBarrier: Promise<void> = Promise.resolve()
@@ -287,6 +290,7 @@ export class MobilePairingController implements MobilePairingActions {
     if (this.accountId !== undefined && this.accountId !== accountId) await this.resetAccountScope()
     this.accountId = accountId
     await this.options.attachmentKeys?.selectAccount?.(accountId)
+    this.pairingId = this.options.attachmentKeys?.retainedPairingId?.()
     this.active = true
     const recovery = this.options.attachmentKeys?.endpointRecovery?.()
     if (recovery !== undefined) {
@@ -326,6 +330,13 @@ export class MobilePairingController implements MobilePairingActions {
       this.attempt?.mobileHandshake.fill(0)
       this.clearAttempt()
       const operations: Array<() => void | Promise<void>> = [
+        async () => {
+          if (this.pairingId === undefined) return
+          await this.options.transport.revokeMobilePersonalPairing({
+            authentication: await this.options.installation.authorizeCurrentInstallation(),
+            pairingId: this.pairingId,
+          })
+        },
         () => this.options.handshake.wipe?.(),
         () => this.options.attachmentKeys?.wipe(),
         () => this.options.attachmentKeys?.flush?.(),
@@ -343,6 +354,7 @@ export class MobilePairingController implements MobilePairingActions {
         this.publish({ status: 'unpair-failed', error: errorMessage(error) })
         throw error
       }
+      this.pairingId = undefined
       this.publish({ status: 'ready' })
     })
   }
@@ -573,6 +585,7 @@ export class MobilePairingController implements MobilePairingActions {
           }
           await this.options.relay.configure(confirmed.grant)
           await this.options.relay.start()
+          this.pairingId = confirmed.pairingId
           this.clearAttempt()
           this.publish({ status: 'paired' })
         } catch (error) {
@@ -700,6 +713,7 @@ export class MobilePairingController implements MobilePairingActions {
       await settleOwnedCleanup(operations, 'Mobile Personal Pairing Account reset failed')
     } finally {
       this.accountId = undefined
+      this.pairingId = undefined
       this.snapshot = { status: 'ready' }
     }
   }
@@ -789,6 +803,7 @@ export class MobilePairingController implements MobilePairingActions {
               await this.options.relay.start()
               this.assertActiveAccount()
             }
+            this.pairingId = status.pairingId
             this.clearAttempt()
             this.publish({ status: 'paired' })
           } else {

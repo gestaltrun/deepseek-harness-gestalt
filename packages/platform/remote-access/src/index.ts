@@ -776,6 +776,15 @@ export abstract class RemoteAccessService extends Service {
   }): Promise<void>
 
   /**
+   * Revoke the confirmed pairing owned by its authenticated Mobile Installation.
+   * @param input - Mobile authorization and retained pairing identity.
+   */
+  abstract revokeMobilePersonalPairing(input: {
+    mobile: PairingAccountAuthentication
+    pairingId: PersonalPairingId
+  }): Promise<void>
+
+  /**
    * List completed handshakes awaiting this Desktop Installation's decision.
    * @param desktop - current Desktop authorization.
    * @returns pending handshakes owned by this Desktop Installation.
@@ -1468,7 +1477,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
           }
           return { enabled: true }
         }
-        this.acknowledgeStoredEndpointRevocations(account.id, installation.id)
+        this.acknowledgeStoredEndpointRevocations(account.id, installation.id, 'desktop')
         const routeIds = await this.authority.disableDesktop(account.id, installation.id)
         const accessKeyValue = accessKey(account.id, installation.id)
         const retainedAccess = this.requireTransactions().endpointAccessGenerations.get(accessKeyValue)
@@ -1743,7 +1752,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
       if (endpointOwned) {
         await this.runTransaction(async () => {
           const { account, installation } = await this.authenticate(input.desktop, 'desktop')
-          this.acknowledgeStoredEndpointRevocations(account.id, installation.id)
+          this.acknowledgeStoredEndpointRevocations(account.id, installation.id, 'desktop')
         })
         return
       }
@@ -1752,6 +1761,55 @@ export class PersonalPairingProvider extends RemoteAccessService {
         this.evictExpiredRecords()
         const pairingId = parsePersonalPairingId(input.pairingId)
         const pairing = this.requireOwnedPairing(pairingId, account.id, installation.id)
+        this.pairings.delete(pairingId)
+        this.principalIds.delete(pairing.devicePrincipal.id)
+        const operations: Array<() => Promise<void>> = [() => this.authority.revokeMobilePairing(pairingId)]
+        if (pairing.cleanup !== undefined) operations.push(() => this.cleanupActive(pairing.cleanup as CleanupRecord<ActivePairingKey>))
+        await cleanupAll(operations)
+      })
+    })
+  }
+
+  async revokeMobilePersonalPairing(input: {
+    mobile: PairingAccountAuthentication
+    pairingId: PersonalPairingId
+  }): Promise<void> {
+    await this.serialized(async () => {
+      const endpointOwned = await this.runTransaction(async () => {
+        const { account, installation } = await this.authenticate(input.mobile, 'mobile')
+        this.evictExpiredRecords()
+        const pairingId = parsePersonalPairingId(input.pairingId)
+        const pairing = this.pairings.get(pairingId)
+        if (pairing === undefined) {
+          const settled = [...this.requireTransactions().endpointPublicationRevocations.values()].find(record =>
+            record.pairingId === pairingId && record.accountId === account.id
+            && record.mobileInstallationId === installation.id && record.pairingRemoved)
+          if (settled !== undefined) {
+            wipeEndpointRevocation(settled)
+            this.requireTransactions().endpointPublicationRevocations.delete(settled.pendingPairingId)
+          }
+          return true
+        }
+        const ownedPairing = this.requireMobileOwnedPairing(pairingId, account.id, installation.id)
+        if (isEndpointStoredPairing(ownedPairing)) {
+          this.requireEndpointRelayAuthority()
+          this.stageStoredEndpointRevocation(this.requireTransactions(), ownedPairing)
+          return true
+        }
+        return false
+      })
+      if (endpointOwned) {
+        await this.runTransaction(async () => {
+          const { account, installation } = await this.authenticate(input.mobile, 'mobile')
+          this.acknowledgeStoredEndpointRevocations(account.id, installation.id, 'mobile')
+        })
+        return
+      }
+      await this.runTransaction(async () => {
+        const { account, installation } = await this.authenticate(input.mobile, 'mobile')
+        this.evictExpiredRecords()
+        const pairingId = parsePersonalPairingId(input.pairingId)
+        const pairing = this.requireMobileOwnedPairing(pairingId, account.id, installation.id)
         this.pairings.delete(pairingId)
         this.principalIds.delete(pairing.devicePrincipal.id)
         const operations: Array<() => Promise<void>> = [() => this.authority.revokeMobilePairing(pairingId)]
@@ -2435,6 +2493,19 @@ export class PersonalPairingProvider extends RemoteAccessService {
     return pairing
   }
 
+  private requireMobileOwnedPairing(
+    pairingId: PersonalPairingId,
+    accountId: string,
+    mobileInstallationId: InstallationId,
+  ): StoredPersonalPairing {
+    const pairing = this.pairings.get(pairingId)
+    if (pairing === undefined || pairing.devicePrincipal.accountId !== accountId
+      || pairing.devicePrincipal.installationId !== mobileInstallationId) {
+      throw new RemoteAccessError('PAIRING_PENDING_INVALID', 'Personal Pairing is invalid or unavailable')
+    }
+    return pairing
+  }
+
   private stageStoredEndpointRevocations(accountId: string, desktopInstallationId: InstallationId): void {
     const pairings = [...this.pairings.values()].filter((pairing): pairing is EndpointStoredPersonalPairing =>
       pairing.devicePrincipal.accountId === accountId && pairing.desktopInstallationId === desktopInstallationId
@@ -2558,10 +2629,17 @@ export class PersonalPairingProvider extends RemoteAccessService {
     return relay
   }
 
-  private acknowledgeStoredEndpointRevocations(accountId: string, desktopInstallationId: InstallationId): void {
+  private acknowledgeStoredEndpointRevocations(
+    accountId: string,
+    installationId: InstallationId,
+    endpoint: 'desktop' | 'mobile',
+  ): void {
     for (const [pendingPairingId, revocation] of this.requireTransactions().endpointPublicationRevocations) {
+      const installationMatches = endpoint === 'desktop'
+        ? revocation.desktopInstallationId === installationId
+        : revocation.mobileInstallationId === installationId
       if (!revocation.removeStoredPairing || !revocation.pairingRemoved || revocation.accountId !== accountId
-        || revocation.desktopInstallationId !== desktopInstallationId) continue
+        || !installationMatches) continue
       wipeEndpointRevocation(revocation)
       this.requireTransactions().endpointPublicationRevocations.delete(pendingPairingId)
     }

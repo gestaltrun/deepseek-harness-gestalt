@@ -154,6 +154,10 @@ describe('Personal Pairing assembled controllers', () => {
     expect((await transport.listPersonalPairings(authentication('desktop'))).map(record =>
       record.devicePrincipal.authority)).toEqual(['companion-surface'])
 
+    await mobile.unpair()
+    expect(await transport.listPersonalPairings(authentication('desktop'))).toEqual([])
+    expect(mobileKeys.attachmentKeyMaterial(paired.id)).toBeUndefined()
+
     await desktop.createChallenge()
     const reused = desktop.getSnapshot().challenge
     if (reused === undefined) throw new Error('single-use challenge was not created')

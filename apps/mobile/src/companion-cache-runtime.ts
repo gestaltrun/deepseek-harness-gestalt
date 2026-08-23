@@ -65,8 +65,12 @@ export class MobileCompanionProjectionCacheRuntime implements MobileCompanionPro
     })
   }
 
-  async clear(): Promise<void> {
-    await this.enqueue(async () => { await this.#cache.clearDesktopCache(this.#desktopId) })
+  async clearContent(): Promise<void> {
+    await this.enqueue(async () => { await this.#cache.clearDesktopContent(this.#desktopId) })
+  }
+
+  async destroy(): Promise<void> {
+    await this.enqueue(async () => { await this.#cache.destroyDesktopCache(this.#desktopId) })
   }
 
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {

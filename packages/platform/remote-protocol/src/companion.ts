@@ -183,7 +183,11 @@ export function parseCompanionSessionId(value: unknown): CompanionSessionId {
   return parseIdentifier(value, 'Companion sessionId') as CompanionSessionId
 }
 
-/** Parse one opaque Desktop Workspace id at the Companion wire boundary. */
+/**
+ * Parse one opaque Desktop Workspace id at the Companion wire boundary.
+ * @param value - untrusted protocol-native identifier.
+ * @returns branded Companion Workspace identifier.
+ */
 export function parseCompanionWorkspaceId(value: unknown): CompanionWorkspaceId {
   return parseIdentifier(value, 'Companion workspaceId') as CompanionWorkspaceId
 }

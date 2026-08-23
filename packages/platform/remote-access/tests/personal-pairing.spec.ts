@@ -939,21 +939,63 @@ describe('PersonalPairingProvider', () => {
     })
   })
 
+  it('lets the confirmed Mobile revoke endpoint authority and retry after removal', async () => {
+    const routeId = parseRelayRouteId('route-mobile-revoke')
+    const relay = relayStub(routeId, 1)
+    const authority = new MemoryPersonalPairingAuthorityStore()
+    const provider = configuredProvider({ relay, authority, clock: { now: () => NOW } })
+    const desktop = authentication('desktop-installation')
+    const mobile = authentication('mobile-installation')
+    await provider.setMobileAccess({ desktop, enabled: true })
+    const pending = await prepareEndpointPairing(provider, desktop, mobile, 'mobile-revoke', 'message3')
+    const confirmation = await provider.confirmEndpointPairing({
+      desktop,
+      pendingPairingId: pending.pendingPairingId,
+      desktopCredentialDigest: new Uint8Array(32).fill(21),
+      mobileCredentialDigest: new Uint8Array(32).fill(22),
+    })
+
+    await expect(provider.revokeMobilePersonalPairing({
+      mobile: authentication('other-mobile-installation'), pairingId: confirmation.pairing.id,
+    })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+    await provider.revokeMobilePersonalPairing({ mobile, pairingId: confirmation.pairing.id })
+    await expect(provider.revokeMobilePersonalPairing({ mobile, pairingId: confirmation.pairing.id }))
+      .resolves.toBeUndefined()
+    expect(relay.revokeCredentialDigest).toHaveBeenNthCalledWith(
+      1, expect.any(String), 'desktop', new Uint8Array(32).fill(21),
+    )
+    expect(relay.revokeCredentialDigest).toHaveBeenNthCalledWith(
+      2, expect.any(String), 'mobile', new Uint8Array(32).fill(22),
+    )
+    expect(await authority.getMobilePairing(pending.pendingPairingId)).toBeUndefined()
+    await authority.runPairingTransaction((state) => {
+      expect(state.pairings.has(confirmation.pairing.id)).toBe(false)
+      expect(state.endpointPublicationRevocations.size).toBe(0)
+      return Promise.resolve()
+    })
+  })
+
   it('revokes legacy stored pairings that own no Platform cleanup resource', async () => {
     const authority = new MemoryPersonalPairingAuthorityStore()
     const provider = configuredProvider({ authority })
     const desktop = authentication('desktop-installation')
     await provider.setMobileAccess({ desktop, enabled: true })
     const revoked = storedPairing('no-cleanup-revoke')
+    const desktopRevoked = storedPairing('no-cleanup-desktop')
     const disabled = storedPairing('no-cleanup-disable')
     await authority.runPairingTransaction(async (state) => {
       state.pairings.set(revoked.id, revoked)
+      state.pairings.set(desktopRevoked.id, desktopRevoked)
       state.pairings.set(disabled.id, disabled)
       state.principalIds.add(revoked.devicePrincipal.id)
+      state.principalIds.add(desktopRevoked.devicePrincipal.id)
       state.principalIds.add(disabled.devicePrincipal.id)
     })
 
-    await provider.revokePersonalPairing({ desktop, pairingId: revoked.id })
+    await provider.revokeMobilePersonalPairing({
+      mobile: authentication('mobile-no-cleanup-revoke'), pairingId: revoked.id,
+    })
+    await provider.revokePersonalPairing({ desktop, pairingId: desktopRevoked.id })
     await provider.setMobileAccess({ desktop, enabled: false })
     expect(await provider.listPersonalPairings(desktop)).toEqual([])
   })
@@ -997,6 +1039,12 @@ describe('PersonalPairingProvider', () => {
     await authority.runPairingTransaction(async (state) => {
       expect(state.endpointPublicationRevocations.get(pairing.endpointPendingPairingId))
         .toMatchObject({ pairingRemoved: true })
+    })
+    await provider.revokeMobilePersonalPairing({
+      mobile: authentication('mobile-absent-cleanup'), pairingId: pairing.id,
+    })
+    await authority.runPairingTransaction(async (state) => {
+      expect(state.endpointPublicationRevocations.size).toBe(0)
     })
   })
 
@@ -1448,7 +1496,9 @@ describe('PersonalPairingProvider', () => {
       status: 'paired', pairingId: pairing.id, sealedRelayAuthority: Uint8Array.of(1),
     })
 
-    await provider.revokePersonalPairing({ desktop, pairingId: pairing.id })
+    await provider.revokeMobilePersonalPairing({
+      mobile: authentication('mobile-installation', 'account-one'), pairingId: pairing.id,
+    })
 
     expect(await provider.listPersonalPairings(desktop)).toEqual([])
     expect(handshake.destroyPairing).toHaveBeenCalledOnce()

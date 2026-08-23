@@ -157,6 +157,12 @@ abstract listPersonalPairings(desktop: PairingAccountAuthentication): Promise<re
 abstract revokePersonalPairing(input: { desktop: PairingAccountAuthentication pairingId: PersonalPairingId }): Promise<void>
 
 /**
+ * Revoke the confirmed pairing owned by its authenticated Mobile Installation.
+ * @param input - Mobile authorization and retained pairing identity.
+ */
+abstract revokeMobilePersonalPairing(input: { mobile: PairingAccountAuthentication pairingId: PersonalPairingId }): Promise<void>
+
+/**
  * List completed handshakes awaiting this Desktop Installation's decision.
  * @param desktop - current Desktop authorization.
  * @returns pending handshakes owned by this Desktop Installation.

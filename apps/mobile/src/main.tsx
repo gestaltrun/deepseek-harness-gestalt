@@ -46,8 +46,6 @@ import type { MobilePairingActions } from './MobilePairing.tsx'
 import { MobilePairingController, NativeMobilePairingQrScanner } from './personal-pairing.ts'
 import { NativeMobilePairingStateStore, PairingCompanionKeyVault } from './companion-keys.ts'
 import { mobileInstallationPresentation } from './mobile-installation.ts'
-import { bindMobilePairingDeepLinks } from './mobile-deep-links.ts'
-import type { MobilePairingDeepLinkBinding } from './mobile-deep-links.ts'
 import {
   CapacitorMobileProtectedStorage,
   loadProtectedInstallationId,
@@ -60,7 +58,6 @@ import './root.css'
 
 const environment = loadMobilePlatformEnvironment(import.meta.env)
 let companionVisibilityDisposer: (() => Promise<void>) | undefined
-let companionDeepLinkBinding: MobilePairingDeepLinkBinding | undefined
 let companionAccountDisposer: (() => void) | undefined
 let companionSurface: MobileCompanionSurface | undefined
 
@@ -71,7 +68,6 @@ let companionSurface: MobileCompanionSurface | undefined
 export function disposeCompanionVisibility(): Promise<void> {
   return Promise.all([
     companionVisibilityDisposer?.() ?? Promise.resolve(),
-    companionDeepLinkBinding?.dispose() ?? Promise.resolve(),
     Promise.resolve(companionAccountDisposer?.()),
   ]).then(() => undefined)
 }
@@ -333,28 +329,16 @@ async function mountMobileProduct(): Promise<void> {
       activate: async () => {
         await pairingController.activate()
         await installRetainedProjectionCache()
-        await companionDeepLinkBinding?.setReady(true)
       },
       deactivate: async () => {
-        await companionDeepLinkBinding?.setReady(false)
         await releaseProjectionAuthority(false)
         await pairingController.deactivate()
       },
       unpair: async () => {
-        await releaseProjectionAuthority(true)
         await pairingController.unpair()
+        await releaseProjectionAuthority(true)
       },
     }
-    companionDeepLinkBinding = bindMobilePairingDeepLinks(
-      async (link, signal) => { await pairing.completeLink(link, signal) },
-      {
-        onError: (error) => { console.error('[mobile-companion] pairing deep link failed:', error) },
-        isTerminalError: () => {
-          const status = pairing.getSnapshot().status
-          return status === 'ready' || status === 'unavailable'
-        },
-      },
-    )
     let selectedAccountId: string | undefined
     companionAccountDisposer = installation.subscribe(() => {
       const snapshot = installation.getSnapshot()
@@ -362,7 +346,6 @@ async function mountMobileProduct(): Promise<void> {
       if (accountId === selectedAccountId) return
       selectedAccountId = accountId
       void (async () => {
-        await companionDeepLinkBinding?.setReady(false)
         await releaseProjectionAuthority(false)
       })().catch((error: unknown) => {
         console.error('[companion-cache] Account authority release failed:', error)

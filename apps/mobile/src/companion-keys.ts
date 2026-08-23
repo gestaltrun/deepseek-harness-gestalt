@@ -242,6 +242,11 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
     return grant === undefined ? undefined : { ...grant }
   }
 
+  /** @returns latest retained confirmed Personal Pairing for the selected Account. */
+  retainedPairingId(): PersonalPairingId | undefined {
+    return [...this.attachmentKeys.keys()].at(-1) as PersonalPairingId | undefined
+  }
+
   /**
    * Read one retained attachment key.
    * @param pairingId - confirmed Personal Pairing identity.

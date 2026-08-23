@@ -366,11 +366,12 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
   ): Promise<void> {
     permit.requireCurrent()
     if (this.options.connection.current() !== active) throw new Error('Companion Snow channel was replaced')
+    if (beforeSend !== undefined) {
+      await beforeSend()
+      permit.requireCurrent()
+      if (this.options.connection.current() !== active) throw new Error('Companion Snow channel was replaced')
+    }
     const ciphertext = active.channel.seal(message)
-    permit.requireCurrent()
-    await beforeSend?.()
-    permit.requireCurrent()
-    if (this.options.connection.current() !== active) throw new Error('Companion Snow channel was replaced')
     await this.options.sendCiphertext(active.targetAttachmentId, ciphertext)
     permit.requireCurrent()
     if (this.options.connection.current() !== active) throw new Error('Companion Snow channel was replaced')

@@ -648,7 +648,8 @@ describe('MobileCompanionSurface', () => {
     const cache = {
       save: vi.fn(async () => {}),
       restore: vi.fn(async () => cached),
-      clear: vi.fn(async () => {}),
+      clearContent: vi.fn(async () => {}),
+      destroy: vi.fn(async () => {}),
     }
     const surface = new MobileCompanionSurface(runtime)
     surface.setProjectionCache(cache)
@@ -674,12 +675,14 @@ describe('MobileCompanionSurface', () => {
         .mockImplementationOnce(async () => await new Promise<ValidatedDesktopSurfaceResync>((resolve) => {
           releaseFirst = resolve
         })),
-      clear: vi.fn(async () => {}),
+      clearContent: vi.fn(async () => {}),
+      destroy: vi.fn(async () => {}),
     }
     const second = {
       save: vi.fn(async () => {}),
       restore: vi.fn(async () => projection('session-second', 'Second')),
-      clear: vi.fn(async () => {}),
+      clearContent: vi.fn(async () => {}),
+      destroy: vi.fn(async () => {}),
     }
     const surface = new MobileCompanionSurface(runtime)
     surface.setProjectionCache(first)
@@ -702,7 +705,8 @@ describe('MobileCompanionSurface', () => {
     const cache = {
       save: vi.fn(async () => {}),
       restore: vi.fn(async () => cached),
-      clear: vi.fn(async () => { throw new Error('protected cache delete failed') }),
+      clearContent: vi.fn(async () => { throw new Error('protected cache delete failed') }),
+      destroy: vi.fn(async () => {}),
     }
     const surface = new MobileCompanionSurface(runtime)
     surface.setProjectionCache(cache)
@@ -720,7 +724,8 @@ describe('MobileCompanionSurface', () => {
     const cache = {
       save: vi.fn(async () => {}),
       restore: vi.fn(async () => projection('session-stale', 'Stale')),
-      clear: vi.fn(async () => {}),
+      clearContent: vi.fn(async () => {}),
+      destroy: vi.fn(async () => {}),
     }
     const surface = new MobileCompanionSurface(runtime)
     surface.setProjectionCache(cache)
@@ -733,7 +738,7 @@ describe('MobileCompanionSurface', () => {
 
     runtime.forgetConnection()
     await surface.clearProjectionCache()
-    expect(cache.clear).toHaveBeenCalledOnce()
+    expect(cache.clearContent).toHaveBeenCalledOnce()
     expect(surface.getSnapshot().desktopName).toBeUndefined()
     expect(surface.getSnapshot().sessions.ids).toEqual([])
   })

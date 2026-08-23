@@ -53,8 +53,10 @@ export interface MobileCompanionProjectionCache {
   save(projection: MobileCompanionProjectionDto): Promise<void>
   /** Open the last Desktop-confirmed projection for Remote Offline presentation. */
   restore(): Promise<MobileCompanionProjectionDto | undefined>
-  /** Remove cached content and receipts without deleting pairing authority. */
-  clear(): Promise<void>
+  /** Remove cached presentation content while retaining operation receipts. */
+  clearContent(): Promise<void>
+  /** Remove cached content and receipts after pairing authority is revoked. */
+  destroy(): Promise<void>
 }
 
 /** Desktop-authoritative search state; Mobile never synthesizes substring hits. */
@@ -245,7 +247,7 @@ export class MobileCompanionSurface {
   /** Clear cached content for the selected Desktop while retaining Personal Pairing keys. */
   async clearProjectionCache(): Promise<void> {
     try {
-      await this.#projectionCache?.clear()
+      await this.#projectionCache?.clearContent()
     } catch (error) {
       this.#snapshot = {
         ...this.#snapshot,
@@ -264,7 +266,7 @@ export class MobileCompanionSurface {
   async releaseProjectionCache(deleteStored: boolean): Promise<void> {
     const cache = this.#projectionCache
     this.setProjectionCache(undefined)
-    if (deleteStored && cache !== undefined) await cache.clear()
+    if (deleteStored && cache !== undefined) await cache.destroy()
   }
 
   /**

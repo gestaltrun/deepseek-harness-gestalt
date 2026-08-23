@@ -30,10 +30,6 @@ jobs:
     runs-on: ubuntu-24.04
     environment: mobile-release
     env:
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       MOBILE_VERSION: ${{ vars.MOBILE_VERSION }}
       MOBILE_BUILD_NUMBER: ${{ vars.MOBILE_BUILD_NUMBER }}
       VITE_PLATFORM_ORIGIN: ${{ vars.VITE_PLATFORM_ORIGIN }}
@@ -72,6 +68,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: Build and verify signed APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: bash apps/mobile/scripts/build-android-release.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -86,9 +87,6 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, mobile-release]
     environment: mobile-release
     env:
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       MOBILE_BUNDLE_ID: ${{ vars.MOBILE_BUNDLE_ID }}
       MOBILE_VERSION: ${{ vars.MOBILE_VERSION }}
       MOBILE_BUILD_NUMBER: ${{ vars.MOBILE_BUILD_NUMBER }}
@@ -125,9 +123,14 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: Build signed App Store candidate
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash apps/mobile/scripts/build-ios-release.sh
       - name: Upload TestFlight
         if: inputs.upload_testflight
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
           IPA_PATH="$(find apps/mobile/release -maxdepth 1 -name '*.ipa' -print -quit)" \
             bash apps/mobile/scripts/upload-testflight.sh

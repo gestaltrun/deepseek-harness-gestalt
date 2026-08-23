@@ -238,8 +238,10 @@ export interface CompanionCacheStore {
     desktopId: CompanionDesktopId,
     kind: CompanionCacheContentKind,
   ): Promise<CompanionCacheRecord | undefined>
+  /** Remove cached presentation content without changing operation receipts. */
+  clearContent(desktopId: CompanionDesktopId): Promise<void>
   /**
-   * Drop one Paired Desktop's cached rows; pairing-key records stay untouched.
+   * Drop one Paired Desktop's cached content and receipts during authority teardown.
    * @param desktopId - Paired Desktop to clear.
    */
   clearDesktop(desktopId: CompanionDesktopId): Promise<void>
@@ -406,14 +408,21 @@ export class InMemoryCompanionCacheStore implements CompanionCacheStore {
     return Promise.resolve(this.#content.get(contentKey(desktopId, kind)))
   }
 
-  clearDesktop(desktopId: CompanionDesktopId): Promise<void> {
+  clearContent(desktopId: CompanionDesktopId): Promise<void> {
     const prefix = desktopPrefix(desktopId)
-    for (const key of [...this.#content.keys(), ...this.#receipts.keys()]) {
+    for (const key of this.#content.keys()) {
       if (!key.startsWith(prefix)) continue
       this.#content.delete(key)
-      this.#receipts.delete(key)
     }
     return Promise.resolve()
+  }
+
+  async clearDesktop(desktopId: CompanionDesktopId): Promise<void> {
+    await this.clearContent(desktopId)
+    const prefix = desktopPrefix(desktopId)
+    for (const key of this.#receipts.keys()) {
+      if (key.startsWith(prefix)) this.#receipts.delete(key)
+    }
   }
 
   reserveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void> {
@@ -493,6 +502,16 @@ export class IndexedDbCompanionCacheStore implements CompanionCacheStore {
   ): Promise<CompanionCacheRecord | undefined> {
     const value = await this.read('content', contentKey(desktopId, kind))
     return value === undefined ? undefined : assertRecordDesktop(parseCompanionCacheRecord(value), desktopId)
+  }
+
+  async clearContent(desktopId: CompanionDesktopId): Promise<void> {
+    const database = await this.#database
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('content', 'readwrite')
+      transaction.objectStore('content').delete(desktopRange(desktopId))
+      transaction.oncomplete = () => { resolve() }
+      transaction.onerror = () => { reject(transaction.error ?? new Error('Companion cache content delete failed')) }
+    })
   }
 
   async clearDesktop(desktopId: CompanionDesktopId): Promise<void> {
@@ -683,11 +702,16 @@ export class CompanionCache {
   }
 
   /**
-   * Clear one Paired Desktop's cached rows; pairing-key records live in the
-   * pairing seam's own store and survive this operation.
+   * Clear one Paired Desktop's presentation content while retaining operation
+   * receipts and pairing-key authority.
    * @param desktopId - Paired Desktop to clear.
    */
-  async clearDesktopCache(desktopId: CompanionDesktopId): Promise<void> {
+  async clearDesktopContent(desktopId: CompanionDesktopId): Promise<void> {
+    await this.#store.clearContent(desktopId)
+  }
+
+  /** Remove cached content and receipts after the pairing authority is revoked. */
+  async destroyDesktopCache(desktopId: CompanionDesktopId): Promise<void> {
     await this.#store.clearDesktop(desktopId)
   }
 }

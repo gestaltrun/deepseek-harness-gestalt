@@ -58,6 +58,7 @@
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-settings": "workspace:^",
+    "@deepseek-ai/dsh-subagent": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^"
   },
@@ -75,6 +76,7 @@
     "@deepseek-ai/dsh-llm": "workspace:^",
     "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-settings": "workspace:^",
+    "@deepseek-ai/dsh-subagent": "workspace:^",
     "@deepseek-ai/dsh-tools": "workspace:^",
     "@deepseek-ai/cordis": "workspace:^",
     "@types/react": "~18.3.1",
@@ -111,6 +113,7 @@
     "clsx": "^2.1.1",
     "mermaid": "^11.16.1",
     "node-pty": "^1.1.0",
+    "react-icons": "5.7.0",
     "ws": "^8.18.0"
   },
   "files": [

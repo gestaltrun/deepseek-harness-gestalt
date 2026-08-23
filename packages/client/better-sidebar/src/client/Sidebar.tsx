@@ -28,7 +28,7 @@
  * drawer floats). Widening does not migrate back: the tabs keep living in
  * the right tree.
  */
-import { createElement, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { createElement, memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useSyncExternalStore } from 'react'
 import clsx from 'clsx'
 import { IconCloseFill14, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -52,6 +52,7 @@ import type { TabDragPayload } from './TabBar.tsx'
 import { relativeTo } from './paths.ts'
 import { OrphanedTab } from './OrphanedTab.tsx'
 import { RenderBoundary } from './RenderBoundary.tsx'
+import { tabContentCompare, type TabContentMemoKey } from './tab-content-memo.ts'
 import { detectNewDirectSubagent } from './subagent-detect.ts'
 import { detectNewJob } from './subagent-jobs.ts'
 import { t } from './locales.ts'
@@ -61,6 +62,16 @@ import css from './sidebar.module.css'
 /** How many consecutive reconnect failures stop the agent-terminals push loop
  * (mirror of the terminal view's own cap; the loop restarts on session switch). */
 const FAILURE_LIMIT = 3
+
+/**
+ * Subagent auto-open debounce (ms). The host delivers a new child's origin
+ * and its title in SEPARATE frames: a Side Chat thread's first visible
+ * frame still shows a fallback title (no 'Side: ' prefix), so an immediate
+ * 0→N decision mistakes it for a genuine subagent and pops the task page.
+ * The trigger therefore re-evaluates against the live snapshot once the
+ * title frame has had time to land.
+ */
+const AUTO_OPEN_DEBOUNCE_MS = 500
 
 /**
  * OS file drags over the sidebar belong to the sidebar, not to the chat:
@@ -103,23 +114,25 @@ function injectUserCss(attr: string, id: string, cssText: string): HTMLStyleElem
   return tag
 }
 
-/** Render the content of one tab (dispatched by type). */
-function TabContent(props: {
-  tab: SidebarTab
-  sessionId: string
-  cwd: string | undefined
-  expanded: string[]
+/** Props of one tab's content cell = the memo key (tab-content-memo.ts) plus
+ *  the runtime objects/callbacks the cell renders with. The memo comparator
+ *  is the pure `tabContentCompare`; anything in the key decides a re-render
+ *  must propagate, anything outside it must be a stable object (ctx/store)
+ *  or covered by a compared field (paneId covers onOpenDiff's captured
+ *  pane; sessionId/cwd cover onReferenceFile). */
+interface TabContentProps extends TabContentMemoKey {
   onToggleDir: (path: string) => void
   onReferenceFile: (path: string) => void
   ctx: Context
   store: SidebarStore
-  /** Whether this tab is the active one AND the panel is open (live views pause otherwise). */
-  visible: boolean
   /** Fired before a topology node jumps to its child session (see Sidebar). */
   onSubagentJump: (childSessionId: string) => void
   /** Open a diff tab from the git panel (placement handled by the store). */
   onOpenDiff: (tab: SidebarTab) => void
-}) {
+}
+
+/** Render the content of one tab (dispatched by type). */
+const TabContent = memo(function TabContent(props: TabContentProps) {
   const { tab, sessionId, cwd, expanded, onToggleDir, onReferenceFile, ctx, store, visible, onSubagentJump, onOpenDiff } = props
   const scope = { sessionId, cwd }
   const descriptor = ctx.betterSidebar?.getTab(tab.type)
@@ -142,7 +155,7 @@ function TabContent(props: {
       onToggleDir, onReferenceFile, onOpenDiff, onSubagentJump,
     }),
   )
-}
+}, tabContentCompare)
 
 /** The + menu options for the current state, driven by the tab registry.
  * Hidden tabs (editor/diff) never show; `available` returning false shows
@@ -174,6 +187,18 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
     useCallback(() => ctx.locale.getSnapshot().active, [ctx]),
   )
   void localeRevision
+
+  // Tab-registry revision: TabContent memo cells must pick up a descriptor
+  // a plugin registers/disposes after mount (the + menu / icons already read
+  // the registry at render). Rare events (plugin (un)mount), so one full
+  // re-render per change is fine — this is what keeps the memoized cells
+  // from going stale, mirroring the localeRevision mechanism above.
+  const [tabsVersion, setTabsVersion] = useState(0)
+  useEffect(() => {
+    const service = ctx.betterSidebar
+    if (service === undefined) return
+    return service.subscribe(() => setTabsVersion(version => version + 1))
+  }, [ctx])
 
   // Narrow (mobile) viewports collapse the two panels into one: the right
   // panel becomes a full-width drawer holding BOTH workbenches, the bottom
@@ -395,22 +420,44 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
    * Switching to a session that already has subagents never triggers — its
    * baseline starts at the current count — so a deliberate layout is never
    * fought.
+   *
+   * The decision is DEBOUNCED (AUTO_OPEN_DEBOUNCE_MS): a Side Chat thread
+   * is also a subagent-origin child, and its 'Side: ' title lands one frame
+   * after its origin — an immediate check would misread that first frame as
+   * a new subagent and pop this page on every thread creation. The timer
+   * re-evaluates the ORIGINAL baseline against the live snapshot; by then
+   * the title filter (isSideThreadSummary) sees the settled label.
    */
   const listBaselineRef = useRef<SidebarSessionList | undefined>(undefined)
+  const autoOpenPendingRef = useRef<{ baseline: SidebarSessionList; timer: number } | null>(null)
   useEffect(() => {
     const prev = listBaselineRef.current
     listBaselineRef.current = sessionList
     if (sessionId === undefined || prev === undefined) return
+    if (autoOpenPendingRef.current !== null) return
     if (!detectNewDirectSubagent(prev, sessionList, sessionId)) return
-    if (!store.getPrefs().autoOpenSubagent) return
-    if (ctx.betterSidebar?.isTabEnabled('subagent') === false) return
-    store.reduce(s => s.panelOpen ? s : togglePanel(s))
-    // Pin the landing to the right panel: the auto-opened Subagent page must
-    // appear where the panel just expanded, not in a bottom-panel pane the
-    // user last touched.
-    store.reduce(s => ({ ...s, activePane: firstLeaf(s.splits).id }))
-    ctx.betterSidebar?.openTab({ type: 'subagent', title: t('subagent') })
+    const baseline = prev
+    const timer = window.setTimeout(() => {
+      autoOpenPendingRef.current = null
+      if (!detectNewDirectSubagent(baseline, ctx.sessions.list.getSnapshot(), sessionId)) return
+      if (!store.getPrefs().autoOpenSubagent) return
+      if (ctx.betterSidebar?.isTabEnabled('subagent') === false) return
+      store.reduce(s => s.panelOpen ? s : togglePanel(s))
+      // Pin the landing to the right panel: the auto-opened Subagent page must
+      // appear where the panel just expanded, not in a bottom-panel pane the
+      // user last touched.
+      store.reduce(s => ({ ...s, activePane: firstLeaf(s.splits).id }))
+      ctx.betterSidebar?.openTab({ type: 'subagent', title: t('subagent') })
+    }, AUTO_OPEN_DEBOUNCE_MS)
+    autoOpenPendingRef.current = { baseline, timer }
   }, [sessionList, sessionId, store, ctx])
+
+  // A session switch (or unmount) voids any armed auto-open recheck.
+  useEffect(() => () => {
+    const pending = autoOpenPendingRef.current
+    if (pending !== null) window.clearTimeout(pending.timer)
+    autoOpenPendingRef.current = null
+  }, [sessionId])
 
   /**
    * Job auto-activation: the moment a NEW background job appears for the
@@ -465,7 +512,16 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
   // horizontal edges — including the animated margin-right push while the
   // right panel opens/closes; a frame that never appears keeps the initial
   // zero-size fallback (the panel renders at 0 width until measured).
-  const [centerRect, setCenterRect] = useState({ left: 0, right: 0 })
+  // The rect lives in a REF (not state): the open/close transition resizes
+  // the center column EVERY frame for its duration, and reacting per frame
+  // with setState re-renders the whole Sidebar (every mounted tab) at
+  // animation cadence — the visible toggle jank (#315). measureCenter
+  // writes the bottom panel's edges directly (same DOM-write pattern as
+  // applyDrag), so the panel still tracks the column per frame with zero
+  // React work; `centerMeasured` flips ONCE to gate the hidden→visible
+  // first-paint fallback.
+  const centerRectRef = useRef({ left: 0, right: 0 })
+  const [centerMeasured, setCenterMeasured] = useState(false)
   // Refs keep the measure step stable across renders and let it skip work
   // mid-drag: during a width/corner drag the layout push resizes the center
   // column every frame, and reacting (setCenterRect → re-render) would
@@ -486,13 +542,18 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
       return
     }
     const rect = col.getBoundingClientRect()
-    // The bottom panel only cares about the horizontal edges: a pure height
-    // change (the bottom panel itself opening/closing) must not re-render,
-    // so keep the previous object when left/right are unchanged.
-    setCenterRect(prev =>
-      prev.left === rect.left && prev.right === rect.right
-        ? prev
-        : { left: rect.left, right: rect.right })
+    // Ref + direct DOM write (see the centerRectRef comment): the bottom
+    // panel keeps tracking the center column per frame during the right
+    // panel's open/close animation without re-rendering the shell. The
+    // one-shot measured flip renders the panel visible once (a stale
+    // {0,0} fallback would flash full-width).
+    centerRectRef.current = { left: rect.left, right: rect.right }
+    const bottom = bottomRef.current
+    if (bottom !== null) {
+      bottom.style.setProperty('left', `${rect.left}px`)
+      bottom.style.setProperty('right', `${window.innerWidth - rect.right}px`)
+    }
+    setCenterMeasured(prev => (prev ? prev : true))
   }, [])
   useEffect(() => {
     let disposed = false
@@ -539,6 +600,13 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
     let locateFrame: number | null = null
     const scheduleLocate = (): void => {
       if (locateFrame !== null) return
+      // Mid-drag every frame writes --dsh-sidebar-* on <html>'s style
+      // attribute, which is the mutation this watcher observes — relocating
+      // per drag frame is pointless (the center column node cannot change
+      // while the pointer is captured) and adds a querySelector to every
+      // frame's budget (#315). The 1.5s retry below still covers any node
+      // swap that somehow lands mid-drag.
+      if (draggingRef.current) return
       locateFrame = requestAnimationFrame(() => {
         locateFrame = null
         locate()
@@ -677,7 +745,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
     // width (innerWidth - state.width - detailsWidth), so this equals
     // `width + detailsWidth` — derived from the measured column, keeping the
     // drag write-only (no React re-render mid-drag).
-    bottomRef.current?.style.setProperty('right', `${(window.innerWidth - centerRect.right) + (width - (state?.width ?? 0))}px`)
+    bottomRef.current?.style.setProperty('right', `${(window.innerWidth - centerRectRef.current.right) + (width - (state?.width ?? 0))}px`)
     writeGeometry(width, height)
   }
 
@@ -1002,6 +1070,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
   const renderTab = (tab: SidebarTab, active: boolean, paneId: string, bottom = false) => (
     <TabContent
       tab={tab}
+      paneId={paneId}
       sessionId={sessionId}
       cwd={cwd}
       expanded={state.expanded}
@@ -1012,6 +1081,8 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
       visible={bottom ? state.bottomOpen && active : state.panelOpen && active}
       onSubagentJump={(childSessionId) => { subagentJumpRef.current = childSessionId }}
       onOpenDiff={(diffTab) => { store.reduce(s => openDiffTab(s, paneId, diffTab)) }}
+      localeRevision={localeRevision}
+      tabsVersion={tabsVersion}
     />
   )
 
@@ -1201,7 +1272,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
           data-dsh-bottom-panel
           style={{
             height: Math.min(state.bottomHeight, window.innerHeight),
-            left: centerRect.left,
+            left: centerRectRef.current.left,
             // Keep the panel above the on-screen keyboard when the visual
             // viewport shrinks (see the keyboardInset effect).
             bottom: keyboardInset > 0 ? `${keyboardInset}px` : undefined,
@@ -1210,14 +1281,14 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
             // details column's left edge (the details column sits between the
             // center and the right panel, and the right panel's margin-right
             // push is already baked into centerRect.right).
-            right: window.innerWidth - centerRect.right,
+            right: window.innerWidth - centerRectRef.current.right,
             // The seam against the open right panel needs its own hairline
             // (the right panel's border-left alone is covered by this panel's
             // fill — without it the corner looks cut off).
             borderRight: state.panelOpen ? '1px solid var(--dsw-alias-border-l2)' : undefined,
             // Unmeasured center column → keep the panel invisible (zero-size
             // geometry would flash full-width overflow instead).
-            visibility: centerRect.right > 0 ? undefined : 'hidden',
+            visibility: centerMeasured ? undefined : 'hidden',
           }}
 
           data-dragging={(draggingBottom || draggingCorner) || undefined}

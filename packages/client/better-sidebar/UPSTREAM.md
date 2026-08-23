@@ -6,16 +6,17 @@ This package is a pinned source snapshot of [omdsh-dev/DSH-better-sidebar](https
 
 - Repository: `https://github.com/omdsh-dev/DSH-better-sidebar.git`
 - Branch: `main`
-- Commit: `50a888845fc614f63dfbf4d2b3704cc1004cd5c0`
-- Upstream version label: `0.14.1` (`dsh.plugin.json`)
+- Commit: `d9b8f15d9eab018742f97d67e54b2398504894cd`
+- Upstream version label: `0.15.2` (`dsh.plugin.json`)
 - Prefix: `packages/client/better-sidebar/`
 
 Refresh:
 
 ```sh
 git fetch https://github.com/omdsh-dev/DSH-better-sidebar.git main
-git subtree pull --prefix=packages/client/better-sidebar \
-  https://github.com/omdsh-dev/DSH-better-sidebar.git main
+git diff --binary d9b8f15d9eab018742f97d67e54b2398504894cd..FETCH_HEAD \
+  -- dsh.plugin.json src tsdown.config.ts \
+  | git apply --3way --index --directory=packages/client/better-sidebar
 ```
 
-After a pull, replay every row in [LOCAL-MODIFICATIONS.md](LOCAL-MODIFICATIONS.md), keep this SHA current, and leave product behavior in [`dsh-client-ui-workbench`](../ui-workbench/README.md).
+The import deliberately excludes upstream repository infrastructure, manifests, documentation, and tests; this repository owns those files. After applying the source delta, replay every row in [LOCAL-MODIFICATIONS.md](LOCAL-MODIFICATIONS.md), keep this SHA current, and leave product behavior in [`dsh-client-ui-workbench`](../ui-workbench/README.md).

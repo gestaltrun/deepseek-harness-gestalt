@@ -522,6 +522,9 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     ])
     expect(consumers.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(consumers.filter(result => result.status === 'rejected')).toHaveLength(1)
+    const contestedConsumption = consumers.find(result => result.status === 'fulfilled')
+    if (contestedConsumption?.status !== 'fulfilled') throw new Error('concurrent consume had no winner')
+    await contestedConsumption.value.complete()
     const publishers = await Promise.allSettled([
       first.publish({ pairingId: pairing, ciphertext: Uint8Array.of(7), now: 175 }),
       second.publish({ pairingId: pairing, ciphertext: Uint8Array.of(8), now: 175 }),
@@ -530,7 +533,12 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     expect(publishers.filter(result => result.status === 'rejected')).toHaveLength(1)
     const capacityGrant = publishers.find(result => result.status === 'fulfilled')
     if (capacityGrant?.status !== 'fulfilled') throw new Error('concurrent capacity did not retain one blob')
-    await first.consume({ pairingId: pairing, capability: capacityGrant.value.capability, now: 176 })
+    const capacityConsumption = await first.consume({
+      pairingId: pairing,
+      capability: capacityGrant.value.capability,
+      now: 176,
+    })
+    await capacityConsumption.complete()
     const expired = await second.publish({ pairingId: pairing, ciphertext: Uint8Array.of(5), now: 200 })
     await expect(first.inspect({ pairingId: pairing, capability: expired.capability, now: 1_200 }))
       .rejects.toMatchObject({ code: 'ATTACHMENT_EXPIRED' })

@@ -7,6 +7,7 @@ import type {
   CompanionHostFailure,
   CompanionOperationId,
   CompanionResult,
+  CompanionSessionId,
   CompanionSessionSearchItem,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionAttachmentDeliveryUncertainError } from './companion-attachment.ts'
@@ -23,10 +24,21 @@ import {
 /** Authenticated JSON Desktop projection accepted for one physical connection. */
 export type ValidatedDesktopSurfaceResync = MobileCompanionProjectionDto
 
+type ValidatedCompanionProjectionReceipt =
+  | {
+    readonly type: 'conversation-snapshot'
+    readonly operationId: CompanionOperationId
+    readonly sessionId: CompanionSessionId
+    readonly beforeSeq?: number | undefined
+  }
+  | { readonly type: 'surface-snapshot'; readonly operationId: CompanionOperationId }
+
 /** Receiver installed beside one authenticated decoder generation. */
 export interface ValidatedDesktopSurfaceResyncReceiver {
   /** @param message - decoded projection authenticated for this receiver's physical connection. */
   acceptValidatedDesktopResync(message: ValidatedDesktopSurfaceResync): void
+  /** @param projection - exact authenticated projection applied to the aggregate Mobile state. */
+  acceptValidatedCompanionProjection(projection: ValidatedCompanionProjectionReceipt): void
 }
 
 /** Result receiver owned by one authenticated physical connection generation. */
@@ -68,6 +80,18 @@ export type MobileCompanionAttachmentSnapshot =
     readonly message: string
   }
 
+/** Correlated cancel, history, or refresh failure owned by the Mobile product surface. */
+export interface MobileCompanionOperationFailure {
+  /** Exact request correlation from the encrypted Companion protocol. */
+  readonly operationId: CompanionOperationId
+  /** Product operation class that owns presentation of this failure. */
+  readonly operation: 'cancel' | 'history' | 'refresh'
+  /** Session scope for cancel and history; refresh is Desktop-wide. */
+  readonly sessionId?: SessionId | undefined
+  /** Stable Host failure projected for display. */
+  readonly failure: CompanionHostFailure
+}
+
 /** Current Desktop-confirmed content retained while a replacement connection resynchronizes. */
 export interface MobileCompanionSurfaceSnapshot {
   /** Desktop display name from the last authenticated resync. */
@@ -83,7 +107,7 @@ export interface MobileCompanionSurfaceSnapshot {
   /** Latest selected-file transfer and its correlated Desktop outcome. */
   readonly attachment: MobileCompanionAttachmentSnapshot
   /** Latest correlated non-attachment product failure. */
-  readonly operationFailure?: CompanionHostFailure | undefined
+  readonly operationFailure?: MobileCompanionOperationFailure | undefined
 }
 
 /** One selected-file transfer started by the encrypted Companion channel. */
@@ -124,6 +148,12 @@ interface ActiveConnection {
   readonly channel: MobileCompanionConnectionChannel
 }
 
+interface PendingHistoryOperation {
+  readonly operationId: CompanionOperationId
+  readonly sessionId: SessionId
+  readonly beforeSeq?: number | undefined
+}
+
 /** Generation-bound Desktop projection plus fail-closed Mobile callbacks. */
 export class MobileCompanionSurface {
   readonly #runtime: CompanionForegroundRuntime
@@ -141,9 +171,10 @@ export class MobileCompanionSurface {
   }
   #searchOperationId: CompanionOperationId | undefined
   #attachmentOperationId: CompanionOperationId | undefined
-  readonly #operations = new Map<CompanionOperationId, 'submit' | 'cancel'>()
-  readonly #historyOperations = new Map<CompanionOperationId, SessionId>()
-  readonly #historyInFlight = new Map<SessionId, CompanionOperationId>()
+  #refreshOperationId: CompanionOperationId | undefined
+  readonly #operations = new Map<CompanionOperationId, { kind: 'submit' | 'cancel'; sessionId: SessionId }>()
+  readonly #historyOperations = new Map<CompanionOperationId, PendingHistoryOperation>()
+  readonly #historyInFlight = new Map<SessionId, PendingHistoryOperation>()
 
   /** @param runtime - current physical-connection synchronization authority. */
   constructor(runtime: CompanionForegroundRuntime) { this.#runtime = runtime }
@@ -156,10 +187,13 @@ export class MobileCompanionSurface {
     return () => { this.#listeners.delete(listener) }
   }
 
-  /** Publish one authenticated product failure not owned by search or attachment state. */
-  acceptOperationFailure(failure: CompanionHostFailure): void {
-    this.#snapshot = { ...this.#snapshot, operationFailure: failure }
-    this.publish()
+  /**
+   * Register the exact surface refresh sent on the current authenticated channel.
+   * @param operationId - protocol id returned by the refresh sender.
+   */
+  trackSurfaceRefresh(operationId: CompanionOperationId): void {
+    this.requireActive('other-mutation')
+    this.#refreshOperationId = operationId
   }
 
   /** @returns whether current synchronization and its bound encrypted channel admit mutations. */
@@ -182,21 +216,22 @@ export class MobileCompanionSurface {
           message,
           settlement => this.settlePending(active, settlement),
         )
-        const completedHistory: Array<readonly [SessionId, CompanionOperationId]> = []
-        for (const sessionId of projection.sessions.ids) {
-          const conversation = projection.conversations[sessionId]
-          const operationId = this.#historyInFlight.get(sessionId)
-          if (conversation?.loadingOlder !== false || operationId === undefined) continue
-          completedHistory.push([sessionId, operationId])
+        const conversations = { ...projection.conversations }
+        for (const pending of this.#historyInFlight.values()) {
+          const conversation = conversations[pending.sessionId]
+          if (conversation !== undefined) {
+            conversations[pending.sessionId] = { ...conversation, loadingOlder: true }
+          }
         }
         const previousConnection = this.#activeConnection
         const previousSnapshot = this.#snapshot
         this.#activeConnection = active
         this.#snapshot = {
           ...projection,
+          conversations,
           search: previousSnapshot.search,
           attachment: previousSnapshot.attachment,
-          operationFailure: completedHistory.length > 0 ? undefined : previousSnapshot.operationFailure,
+          operationFailure: previousSnapshot.operationFailure,
         }
         let accepted: boolean
         try {
@@ -211,11 +246,11 @@ export class MobileCompanionSurface {
           this.#snapshot = previousSnapshot
           return
         }
-        for (const [sessionId, operationId] of completedHistory) {
-          this.#historyInFlight.delete(sessionId)
-          this.#historyOperations.delete(operationId)
-        }
         this.publish()
+      },
+      acceptValidatedCompanionProjection: (projection) => {
+        if (this.#activeConnection?.token !== token || !companionMayMutate(this.#runtime.getState())) return
+        this.acceptCurrentCompanionProjection(projection)
       },
     }
   }
@@ -226,13 +261,13 @@ export class MobileCompanionSurface {
 
   readonly submit = async (sessionId: string, text: string): Promise<void> => {
     const submission = this.transmit('prompt', channel => channel.mutations.submit(sessionId, text))
-    this.#operations.set(submission.operationId, 'submit')
+    this.#operations.set(submission.operationId, { kind: 'submit', sessionId: sessionId as SessionId })
     await submission.completion
   }
 
   readonly cancel = (sessionId: string): void => {
     const operationId = this.transmit('cancel', channel => channel.mutations.cancel(sessionId))
-    this.#operations.set(operationId, 'cancel')
+    this.#operations.set(operationId, { kind: 'cancel', sessionId: sessionId as SessionId })
   }
 
   readonly attach = (sessionId: string, file: File): void => {
@@ -292,8 +327,9 @@ export class MobileCompanionSurface {
     const conversation = this.#snapshot.conversations[parsedSessionId]
     const beforeSeq = conversation === undefined ? undefined : oldestNodeSeq(conversation)
     const operationId = this.transmit('history', channel => channel.mutations.loadOlder(sessionId, beforeSeq))
-    this.#historyOperations.set(operationId, parsedSessionId)
-    this.#historyInFlight.set(parsedSessionId, operationId)
+    const pending = { operationId, sessionId: parsedSessionId, beforeSeq }
+    this.#historyOperations.set(operationId, pending)
+    this.#historyInFlight.set(parsedSessionId, pending)
     this.setHistoryLoading(parsedSessionId, true)
     this.publish()
   }
@@ -352,19 +388,47 @@ export class MobileCompanionSurface {
       this.#operations.delete(result.operationId)
       this.#snapshot = {
         ...this.#snapshot,
-        operationFailure: result.type === 'operation-failed' ? result.failure : undefined,
+        operationFailure: result.type === 'operation-failed' && operation.kind === 'cancel'
+          ? {
+            operationId: result.operationId,
+            operation: 'cancel',
+            sessionId: operation.sessionId,
+            failure: result.failure,
+          }
+          : operation.kind === 'cancel'
+            ? this.failureAfterSuccess('cancel', operation.sessionId)
+            : this.#snapshot.operationFailure,
       }
       this.publish()
       return
     }
-    const historySessionId = this.#historyOperations.get(result.operationId)
-    if (historySessionId !== undefined && (result.type === 'confirmed' || result.type === 'operation-failed')) {
+    const history = this.#historyOperations.get(result.operationId)
+    if (history !== undefined && result.type === 'operation-failed'
+      && this.#historyInFlight.get(history.sessionId)?.operationId === result.operationId) {
       this.#historyOperations.delete(result.operationId)
-      this.#historyInFlight.delete(historySessionId)
-      this.setHistoryLoading(historySessionId, false)
+      this.#historyInFlight.delete(history.sessionId)
+      this.setHistoryLoading(history.sessionId, false)
       this.#snapshot = {
         ...this.#snapshot,
-        operationFailure: result.type === 'operation-failed' ? result.failure : undefined,
+        operationFailure: {
+          operationId: result.operationId,
+          operation: 'history',
+          sessionId: history.sessionId,
+          failure: result.failure,
+        },
+      }
+      this.publish()
+      return
+    }
+    if (result.operationId === this.#refreshOperationId && result.type === 'operation-failed') {
+      this.#refreshOperationId = undefined
+      this.#snapshot = {
+        ...this.#snapshot,
+        operationFailure: {
+          operationId: result.operationId,
+          operation: 'refresh',
+          failure: result.failure,
+        },
       }
       this.publish()
       return
@@ -411,6 +475,38 @@ export class MobileCompanionSurface {
   ): T {
     const active = this.requireActive(kind)
     return send(active.channel)
+  }
+
+  private acceptCurrentCompanionProjection(
+    projection: ValidatedCompanionProjectionReceipt,
+  ): void {
+    if (projection.type === 'surface-snapshot') {
+      if (projection.operationId !== this.#refreshOperationId) return
+      this.#refreshOperationId = undefined
+      this.#snapshot = { ...this.#snapshot, operationFailure: this.failureAfterSuccess('refresh') }
+      this.publish()
+      return
+    }
+    const pending = this.#historyOperations.get(projection.operationId)
+    if (pending === undefined || String(projection.sessionId) !== pending.sessionId
+      || projection.beforeSeq !== pending.beforeSeq
+      || this.#historyInFlight.get(pending.sessionId)?.operationId !== projection.operationId) return
+    this.#historyOperations.delete(projection.operationId)
+    this.#historyInFlight.delete(pending.sessionId)
+    this.setHistoryLoading(pending.sessionId, false)
+    this.#snapshot = {
+      ...this.#snapshot,
+      operationFailure: this.failureAfterSuccess('history', pending.sessionId),
+    }
+    this.publish()
+  }
+
+  private failureAfterSuccess(
+    operation: MobileCompanionOperationFailure['operation'],
+    sessionId?: SessionId,
+  ): MobileCompanionOperationFailure | undefined {
+    const failure = this.#snapshot.operationFailure
+    return failure?.operation === operation && failure.sessionId === sessionId ? undefined : failure
   }
 
   private setHistoryLoading(sessionId: SessionId, loadingOlder: boolean): void {

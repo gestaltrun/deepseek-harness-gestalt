@@ -63,6 +63,7 @@ describe('Mobile Noise Companion receiver', () => {
   it('requests and applies v3 surface and conversation projections on the synchronized receiver', () => {
     const runtime = connectedRuntime()
     const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    const acceptValidatedCompanionProjection = vi.fn()
     const refreshSurface = vi.fn()
     const messages = [
       {
@@ -113,7 +114,7 @@ describe('Mobile Noise Companion receiver', () => {
     ]
     const receiver = new MobileNoiseCompanionReceiver(
       { open: () => messages.shift()! }, 2, runtime, undefined,
-      () => ({ acceptValidatedDesktopResync }), refreshSurface,
+      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection }), refreshSurface,
     )
     receiver.receive(Uint8Array.of(1))
     receiver.receive(Uint8Array.of(2))
@@ -125,6 +126,12 @@ describe('Mobile Noise Companion receiver', () => {
     expect(resync?.sessions.ids).toEqual(['session-v3'])
     expect(resync?.conversations.map(conversation => conversation.sessionId)).toEqual(['session-v3'])
     expect(resync?.conversations[0]?.nodes.map(node => node.seq)).toEqual([2, 5])
+    expect(acceptValidatedCompanionProjection).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      type: 'surface-snapshot', operationId: 'surface-v3',
+    }))
+    expect(acceptValidatedCompanionProjection).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'conversation-snapshot', operationId: 'history-older-v3', sessionId: 'session-v3', beforeSeq: 5,
+    }))
   })
 })
 

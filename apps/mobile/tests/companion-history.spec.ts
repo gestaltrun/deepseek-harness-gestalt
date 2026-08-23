@@ -137,12 +137,18 @@ describe('Mobile Companion browse projection', () => {
       desktopName: 'Studio Mac', connection: 'online', sessions, workspaces,
       conversations: { [alphaId]: conversation() }, ...browsePresentation,
       operationFailure: {
-        kind: 'business', code: 'prompt-refused', message: 'Desktop rejected the prompt',
+        operationId: 'history-alpha' as never,
+        operation: 'history',
+        sessionId: alphaId,
+        failure: { kind: 'business', code: 'history-refused', message: 'Desktop rejected history' },
       },
     }))
 
     fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }))
-    expect(screen.getByRole('alert').textContent).toContain('Desktop rejected the prompt')
+    expect(screen.getByRole('alert').textContent).toContain('Desktop rejected history')
+    fireEvent.click(screen.getByRole('button', { name: '返回' }))
+    fireEvent.click(screen.getByRole('treeitem', { name: /Gamma/ }))
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('targets real Workspace ids and disables creation before foreground synchronization', () => {

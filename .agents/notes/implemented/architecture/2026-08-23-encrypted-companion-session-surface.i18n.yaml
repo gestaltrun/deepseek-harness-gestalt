@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-23-encrypted-companion-session-surface.md
-2026-08-23-encrypted-companion-session-surface.md: d4524ff6dae79d07eb848a58ed6d4ec515fb1e96
-2026-08-23-encrypted-companion-session-surface.zh.md: 652b54b19e6c26fe813ee60d96dae8e0bd634b7e
+2026-08-23-encrypted-companion-session-surface.md: 687273f1617648134054c9185a946b5baaf1434b
+2026-08-23-encrypted-companion-session-surface.zh.md: 8492a26f0c9e2bbe800e9c4f152ae414bb7257ff

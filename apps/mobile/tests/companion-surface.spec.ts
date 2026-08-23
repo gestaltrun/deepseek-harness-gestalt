@@ -200,6 +200,9 @@ describe('MobileCompanionSurface', () => {
   it('addresses history loading through the current generation only', () => {
     const runtime = connectedRuntime()
     const firstChannel = connectionChannel()
+    firstChannel.mutations.loadOlder
+      .mockReturnValueOnce(parseCompanionOperationId('history-a'))
+      .mockReturnValueOnce(parseCompanionOperationId('history-b'))
     const surface = new MobileCompanionSurface(runtime)
     const first = surface.bindAuthenticatedConnection(firstChannel)
     if (first === undefined) throw new Error('expected Desktop resync receiver')
@@ -218,6 +221,18 @@ describe('MobileCompanionSurface', () => {
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
 
     first.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
+    surface.loadOlder('session-one')
+    expect(firstChannel.mutations.loadOlder).toHaveBeenCalledOnce()
+    first.acceptValidatedCompanionProjection({
+      type: 'conversation-snapshot', operationId: parseCompanionOperationId('history-a'),
+      sessionId: parseCompanionSessionId('session-one'), beforeSeq: 7,
+    })
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
+    first.acceptValidatedCompanionProjection({
+      type: 'conversation-snapshot', operationId: parseCompanionOperationId('history-a'),
+      sessionId: parseCompanionSessionId('session-one'), beforeSeq: 8,
+    })
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(false)
     surface.loadOlder('session-one')
     expect(firstChannel.mutations.loadOlder).toHaveBeenCalledTimes(2)
@@ -226,10 +241,20 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected current generation result receiver')
     results.acceptValidatedCompanionResult({
-      type: 'operation-failed', operationId: parseCompanionOperationId('history-default'),
+      type: 'operation-failed', operationId: parseCompanionOperationId('history-a'),
+      failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'Stale history timed out' },
+    })
+    expect(surface.getSnapshot().operationFailure).toBeUndefined()
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(true)
+    results.acceptValidatedCompanionResult({
+      type: 'operation-failed', operationId: parseCompanionOperationId('history-b'),
       failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'History timed out' },
     })
     expect(surface.getSnapshot().conversations['session-one' as SessionId]?.loadingOlder).toBe(false)
+    expect(surface.getSnapshot().operationFailure).toMatchObject({
+      operationId: 'history-b', operation: 'history', sessionId: 'session-one',
+      failure: { message: 'History timed out' },
+    })
 
     runtime.forgetConnection()
     runtime.markConnectionOpen()
@@ -270,7 +295,37 @@ describe('MobileCompanionSurface', () => {
     })
   })
 
-  it('surfaces correlated prompt and history failures', async () => {
+  it('correlates refresh and cancel failures with their exact operation ownership', () => {
+    const runtime = connectedRuntime()
+    const channel = connectionChannel()
+    const surface = new MobileCompanionSurface(runtime)
+    const resync = surface.bindAuthenticatedConnection(channel)
+    if (resync === undefined) throw new Error('expected current generation receiver')
+    resync.acceptValidatedDesktopResync(projection('session-one', 'One'))
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected current generation result receiver')
+
+    surface.trackSurfaceRefresh(parseCompanionOperationId('refresh-a'))
+    results.acceptValidatedCompanionResult({
+      type: 'operation-failed', operationId: parseCompanionOperationId('refresh-a'),
+      failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'Refresh timed out' },
+    })
+    expect(surface.getSnapshot().operationFailure).toMatchObject({
+      operationId: 'refresh-a', operation: 'refresh', failure: { message: 'Refresh timed out' },
+    })
+
+    surface.cancel('session-one')
+    results.acceptValidatedCompanionResult({
+      type: 'operation-failed', operationId: parseCompanionOperationId('cancel-default'),
+      failure: { kind: 'business', code: 'cancel-refused', message: 'Cancel refused' },
+    })
+    expect(surface.getSnapshot().operationFailure).toMatchObject({
+      operationId: 'cancel-default', operation: 'cancel', sessionId: 'session-one',
+      failure: { message: 'Cancel refused' },
+    })
+  })
+
+  it('leaves prompt failures with the composer and surfaces correlated history failures', async () => {
     const runtime = connectedRuntime()
     const channel = connectionChannel()
     const surface = new MobileCompanionSurface(runtime)
@@ -286,14 +341,16 @@ describe('MobileCompanionSurface', () => {
       failure: { kind: 'business', code: 'prompt-refused', message: 'Desktop rejected the prompt' },
     })
     await submission
-    expect(surface.getSnapshot().operationFailure?.message).toBe('Desktop rejected the prompt')
+    expect(surface.getSnapshot().operationFailure).toBeUndefined()
 
     surface.loadOlder('session-one')
     results.acceptValidatedCompanionResult({
       type: 'operation-failed', operationId: parseCompanionOperationId('history-default'),
       failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'History timed out' },
     })
-    expect(surface.getSnapshot().operationFailure?.message).toBe('History timed out')
+    expect(surface.getSnapshot().operationFailure).toMatchObject({
+      operation: 'history', sessionId: 'session-one', failure: { message: 'History timed out' },
+    })
   })
 
   it('correlates attachment rejection, Host failure, and uncertain delivery instead of discarding them', async () => {

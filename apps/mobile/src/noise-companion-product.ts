@@ -10,7 +10,6 @@ import {
   REMOTE_PROTOCOL_LIMITS,
   type CompanionOperation,
   type CompanionOperationId,
-  type CompanionHostFailure,
   type CompanionResult,
   type RelayAttachmentId,
   type RelayPairingSelector,
@@ -68,7 +67,6 @@ export interface MobileSnowCompanionProductOptions {
   platformOrigin: string
   sendCiphertext(targetAttachmentId: RelayAttachmentId, ciphertext: Uint8Array): Promise<void>
   reportFailure?(error: unknown): void
-  reportOperationFailure?(failure: CompanionHostFailure): void
 }
 
 /** Stable Mobile UI adapter whose every send revalidates current foreground generation. */
@@ -239,7 +237,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
   /** Accept one result already authenticated by the current physical Snow receiver. */
   acceptResult(result: CompanionResult): void {
     if (result.type === 'operation-failed') {
-      const detached = this.refreshAfterConfirmation.delete(result.operationId)
+      this.refreshAfterConfirmation.delete(result.operationId)
       const confirmation = this.confirmations.get(result.operationId)
       if (confirmation !== undefined) {
         this.confirmations.delete(result.operationId)
@@ -254,9 +252,6 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
       if (settlement !== undefined) {
         this.settlements.delete(result.operationId)
         settlement.reject(new Error(result.failure.message))
-      }
-      if (!detached && confirmation === undefined && image === undefined && settlement === undefined) {
-        this.options.reportOperationFailure?.(result.failure)
       }
       return
     }

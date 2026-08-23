@@ -19,6 +19,10 @@ interface MobileCompanionResultReceiver {
 interface MobileCompanionSurfaceReceiver {
   /** @param message - authenticated Desktop surface baseline for this physical channel. */
   acceptValidatedDesktopResync(message: MobileCompanionProjectionDto): void
+  /** @param projection - authenticated projection correlation applied after its aggregate state. */
+  acceptValidatedCompanionProjection(
+    projection: CompanionConversationSnapshotProjection | CompanionSurfaceSnapshotProjection,
+  ): void
 }
 
 /** Decrypts one physical connection's Companion frames before granting foreground synchronization. */
@@ -118,6 +122,7 @@ export class MobileNoiseCompanionReceiver {
     }
     this.workspaces = projection.workspaces.map(workspace => ({ ...workspace }))
     this.publishSurface()
+    this.activeSurface?.acceptValidatedCompanionProjection(projection)
   }
 
   private acceptConversation(projection: CompanionConversationSnapshotProjection): void {
@@ -134,6 +139,7 @@ export class MobileNoiseCompanionReceiver {
       this.conversations.set(projection.sessionId, prependConversationPage(current, conversation, projection.beforeSeq))
     }
     this.publishSurface()
+    this.activeSurface?.acceptValidatedCompanionProjection(projection)
   }
 
   private requireProjectionGeneration(generation: number, desktopRevision: number): void {

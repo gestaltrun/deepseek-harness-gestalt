@@ -4,7 +4,7 @@ import {
   pageCompanionHistory,
   type CompanionConversationMap,
 } from './companion-history.ts'
-import type { MobileCompanionSearchSnapshot } from './companion-surface.ts'
+import type { MobileCompanionOperationFailure, MobileCompanionSearchSnapshot } from './companion-surface.ts'
 import { MobileConversation } from './MobileConversation.tsx'
 import type {
   SessionId, SessionListState, WorkspaceView,
@@ -14,7 +14,6 @@ import {
   expandedSessionGroups, SessionListPresentation, workspacePresentationTranslate,
 } from '@deepseek-ai/dsh-client-ui-workspace/presentation'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import type { CompanionHostFailure } from '@deepseek-ai/dsh-remote-protocol'
 import css from './MobileBrowse.module.css'
 import type { MobilePresentationClock } from './mobile-clock.ts'
 
@@ -39,7 +38,7 @@ export interface MobileBrowseProps {
   /** Whether the current foreground synchronization admits mutations. */
   canMutate: boolean
   /** Latest non-attachment mutation or refresh failure. */
-  operationFailure?: CompanionHostFailure | undefined
+  operationFailure?: MobileCompanionOperationFailure | undefined
   /** Live clock owner used by shared relative-time rows. */
   clock: MobilePresentationClock
   /** Optional create handler used by Workspace and global create actions. */
@@ -83,6 +82,10 @@ export function MobileBrowse({
   )
   const open = openId === undefined ? undefined : sessions.byId[openId]
   const conversation = openId === undefined ? undefined : conversations[openId]
+  const detailFailure = operationFailure !== undefined
+    && (operationFailure.operation === 'refresh' || operationFailure.sessionId === openId)
+    ? operationFailure.failure
+    : undefined
   const openSession = (id: SessionId): void => {
     setOpenId(id)
     if (conversations[id] === undefined) onLoadOlder?.(id)
@@ -100,7 +103,7 @@ export function MobileBrowse({
           loadImage={attachment => loadImage(open.id, attachment)}
           cwd={open.cwd}
           mutationEnabled={canMutate}
-          operationFailure={operationFailure}
+          operationFailure={detailFailure}
           {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(open.id, text) })}
           {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(open.id) } })}
           {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(open.id, file) } })}
@@ -114,7 +117,7 @@ export function MobileBrowse({
           <button type="button" className={css.back} onClick={() => { setOpenId(undefined) }}>{locale === 'zh' ? '返回' : 'Back'}</button>
           <h1>{open.displayTitle}</h1>
         </header>
-        {operationFailure !== undefined && <p role="alert">{operationFailure.message}</p>}
+        {detailFailure !== undefined && <p role="alert">{detailFailure.message}</p>}
         <p className={css.summary}>{locale === 'zh' ? '尚未加载此 Session 的对话。' : 'This Session conversation is not loaded.'}</p>
       </section>
     )
@@ -141,7 +144,7 @@ export function MobileBrowse({
           </form>
         )}
         {search.status === 'error' && <p role="alert">{search.error.message}</p>}
-        {operationFailure !== undefined && <p role="alert">{operationFailure.message}</p>}
+        {operationFailure?.operation === 'refresh' && <p role="alert">{operationFailure.failure.message}</p>}
         {onCreate !== undefined && (
           <button type="button" disabled={!canMutate} onClick={() => { if (canMutate) onCreate({}) }}>
             {locale === 'zh' ? '新建 Ungrouped Session' : 'New ungrouped Session'}

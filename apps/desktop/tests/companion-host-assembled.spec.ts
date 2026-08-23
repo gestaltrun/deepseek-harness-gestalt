@@ -45,6 +45,11 @@ import {
   DesktopCompanionOperationLedger, FileDesktopCompanionOperationStore,
 } from '../src/companion-operation-ledger.ts'
 import { CompanionForegroundRuntime } from '../../mobile/src/companion-lifecycle.ts'
+import {
+  CompanionUncertainOperationSettlement,
+  InMemoryCompanionCacheStore,
+  parseCompanionDesktopId,
+} from '../../mobile/src/companion-cache.ts'
 import { MobileCompanionSurface } from '../../mobile/src/companion-surface.ts'
 import {
   MobileSnowCompanionConnection, MobileSnowCompanionProductChannel,
@@ -85,6 +90,7 @@ describe('assembled Desktop Companion Host search', () => {
     const receiverRef: { current?: MobileNoiseCompanionReceiver } = {}
     const product = new MobileSnowCompanionProductChannel({
       runtime, connection,
+      operationSettlement: assembledOperationSettlement('desktop-primary'),
       installation: { authorizeCurrentInstallation: async () => ({
         accessToken: 'assembled-current-installation',
         proof: { jti: 'assembled-proof' as never, issuedAt: 1, signature: 'assembled-signature' },
@@ -209,13 +215,18 @@ describe('assembled Desktop Companion Host search', () => {
     })
     let retainedCiphertext = new Uint8Array()
     const results: unknown[] = []
+    const productRef: { current?: MobileSnowCompanionProductChannel } = {}
     const receiver = new MobileNoiseCompanionReceiver(
       channel.mobile, channel.generation, runtime,
-      () => ({ acceptValidatedCompanionResult: (result) => { results.push(result) } }),
+      () => ({ acceptValidatedCompanionResult: (result) => {
+        results.push(result)
+        productRef.current?.acceptResult(result)
+      } }),
     )
     const product = new MobileSnowCompanionProductChannel({
       runtime,
       connection,
+      operationSettlement: assembledOperationSettlement('desktop-shipped'),
       installation: { authorizeCurrentInstallation: async () => ({
         accessToken: 'assembled-current-installation',
         proof: { jti: 'assembled-proof' as never, issuedAt: 1, signature: 'assembled-signature' },
@@ -241,6 +252,7 @@ describe('assembled Desktop Companion Host search', () => {
         receiver.receive(channel.desktop.seal({ type: 'result', result: output as CompanionResult }))
       },
     })
+    productRef.current = product
     const originalFetch = globalThis.fetch
     globalThis.fetch = async (_input, init) => {
       retainedCiphertext = new Uint8Array(await new Response(init?.body).arrayBuffer())
@@ -328,6 +340,13 @@ describe('assembled Desktop Companion Host search', () => {
     45_000,
   )
 })
+
+function assembledOperationSettlement(desktopId: string): CompanionUncertainOperationSettlement {
+  return new CompanionUncertainOperationSettlement(
+    new InMemoryCompanionCacheStore(),
+    parseCompanionDesktopId(desktopId),
+  )
+}
 
 async function startDesktopHost(
   scenario: 'indexed' | 'disabled' | 'index-failure',

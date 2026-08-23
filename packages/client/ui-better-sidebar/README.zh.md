@@ -6,7 +6,7 @@
 
 产品组合挂载本包与 [`dsh-client-ui-workbench`](../ui-workbench/README.zh.md)。适配层启用快照浏览器标签，并发布 [`dsh-client-ui-browser`](../ui-browser/README.zh.md) 的官方 chrome；沙箱 iframe 仍是独立安装时的回退。不要为了改产品行为去改快照源码。
 
-Side Chat 标签页以临时子 Session id 挂载本仓已声明的 `conversation` slot。打开标签页不会创建 Host Session 或 Agent；首次提交消息时才会以该 id 原子创建二者、捕获父会话历史、安装所选模型并准入提示词。因此，已注册的对话/轨迹视图、会话操作、transcript 与 InputBar 都和主会话复用同一批组件。标签页外壳只持有子会话创建与生命周期，不提供标签页内的线程切换、新建或提升工具栏。Side Chat 会话头省略 Session 标题、谱系导航与 agent preset 标签，同时保留视图标签页以及按子会话确定范围的 schedule 和后台任务。继承的 seed 事件保持持久化，但不会出现在该子会话自有的 transcript 中。workbench terminal 标签页仍由自身的 `SessionScope` 确定范围，不会因嵌入式会话而重定向。
+Side Chat 标签页以临时子 Session id 挂载本仓已声明的 `conversation` slot。临时行会立即携带保留的 `Side: ` 标题，因此 subagent 拓扑与自动激活不会把草稿误判为委派任务。打开标签页不会创建 Host Session 或 Agent；首次提交消息时才会以该 id 原子创建二者、捕获父会话历史、安装所选模型并准入提示词。因此，已注册的对话/轨迹视图、会话操作、transcript 与 InputBar 都和主会话复用同一批组件。标签页外壳只持有子会话创建与生命周期，不提供标签页内的线程切换、新建或提升工具栏。Side Chat 会话头省略 Session 标题、谱系导航与 agent preset 标签，同时保留视图标签页以及按子会话确定范围的 schedule 和后台任务。继承的 seed 事件保持持久化，但不会出现在该子会话自有的 transcript 中。workbench terminal 标签页仍由自身的 `SessionScope` 确定范围，不会因嵌入式会话而重定向。
 
 ## 模型体验
 

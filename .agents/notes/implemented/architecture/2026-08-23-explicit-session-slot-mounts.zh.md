@@ -12,7 +12,7 @@ Status: implemented
 
 运行时以 `renderSessionSlot()`、ui-renderer 以 `mountSession()` 提供框架级入口，用于挂载一个已声明的非 root Session slot。挂载会解析指定会话的标配 props、打开其历史窗口，并在独立 React 根中渲染，同时不改变 `sessions.list.current`。既有声明账本、entry 边界、store、inject 接口与标准钩子绑定仍是该树内的权威。
 
-Side Chat 会预先分配子 Session id，并将其暂存为仅供 renderer 使用的临时身份，然后以 `{ renderMode: 'sidechat' }` 挂载已声明的 `conversation` slot。打开标签页不会创建 Host Session 或 Agent。首次提交消息时才会以预分配 id 原子创建二者、捕获父会话历史、安装所选模型并准入提示词；Host 发布会原地升级临时行。better-sidebar 包只持有此子会话创建与生命周期，不提供标签页内的线程切换或提升 chrome。已注册的会话视图与 `conversation.composer.bar` 提供对话/轨迹标签页、transcript、操作项与 InputBar。`ConversationSessionHeader` 使用 Side Chat 形态省略 Session 标题、谱系导航与 agent preset 标签，同时保留按子会话确定范围的操作项。继承的 seed 仍保持持久化，但 `owned-suffix` 准入适配器会在子会话 transcript 中隐藏它，并把 prompt 与 cancel 操作路由到 Side Chat Agent 生命周期。
+Side Chat 会预先分配子 Session id，并以保留的 `Side: ` 标题将其暂存为仅供 renderer 使用的临时身份，然后以 `{ renderMode: 'sidechat' }` 挂载已声明的 `conversation` slot。该标题会阻止列表分类器与 subagent 自动激活把草稿当成委派任务。打开标签页不会创建 Host Session 或 Agent。首次提交消息时才会以预分配 id 原子创建二者、捕获父会话历史、安装所选模型并准入提示词；Host 发布会原地升级临时行。better-sidebar 包只持有此子会话创建与生命周期，不提供标签页内的线程切换或提升 chrome。已注册的会话视图与 `conversation.composer.bar` 提供对话/轨迹标签页、transcript、操作项与 InputBar。`ConversationSessionHeader` 使用 Side Chat 形态省略 Session 标题、谱系导航与 agent preset 标签，同时保留按子会话确定范围的操作项。继承的 seed 仍保持持久化，但 `owned-suffix` 准入适配器会在子会话 transcript 中隐藏它，并把 prompt 与 cancel 操作路由到 Side Chat Agent 生命周期。
 
 session scope 的会话头贡献通过标配套件接收该显式 id。Side Chat 会隐藏谱系导航与静态 preset 上下文；schedule 仍读取该会话的 `schedules` 投影，后台任务读取 `jobsBySession[sessionId]`。better-sidebar terminal 不是会话头贡献；它仍由 workbench 标签页的 `SessionScope` 确定范围，不会因嵌入式会话挂载而隐式重定向。
 

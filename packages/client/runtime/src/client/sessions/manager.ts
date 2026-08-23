@@ -130,7 +130,7 @@ export class SessionManager {
   private readonly projectionStores = new Map<SessionId, ProjectionValueStore>()
   private summaries: SessionSummary[] = []
   /** Renderer-only rows retained across list refreshes until Host publication. */
-  private readonly provisionalSummaries = new Map<SessionId, SessionSummary>()
+  private readonly provisionalSummaries = new Map<SessionId, TitledSessionSummary>()
   private listState: 'idle' | 'loading' | 'error' = 'idle'
   /** Arrival phase; the pending → ready edge fires on the first successful pull (see SessionListPhase). */
   private listPhase: SessionListPhase = 'pending'
@@ -335,12 +335,14 @@ export class SessionManager {
     sessionId: SessionId
     parentSessionId: SessionId
     origin: 'subagent'
+    title: string
   }): void {
     if (this.provisionalSummaries.has(descriptor.sessionId)) return
-    const summary: SessionSummary = {
+    const summary: TitledSessionSummary = {
       sessionId: descriptor.sessionId,
       parentSessionId: descriptor.parentSessionId,
       origin: descriptor.origin,
+      title: descriptor.title,
       updatedAt: Date.now(),
       running: false,
       blank: true,

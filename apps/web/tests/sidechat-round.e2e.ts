@@ -59,8 +59,8 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     const menuItem = page.getByRole('menuitem', { name: 'Side Chat', exact: true })
     expect(await menuItem.locator('svg').count()).toBe(1)
     await menuItem.click()
-    const panel = page.locator('[data-dsh-panel]')
-    const sideComposer = page.locator('[data-dsh-panel] textarea:enabled')
+    const panel = page.locator('[data-dsh-panel]:visible')
+    const sideComposer = panel.locator('textarea:enabled')
     await sideComposer.waitFor({ timeout: 15_000 })
     expect(scaffold.ctx.agents.list().map(agent => agent.id)).toEqual(liveIdsBeforeSideChat)
     const selectSideModel = async () => {

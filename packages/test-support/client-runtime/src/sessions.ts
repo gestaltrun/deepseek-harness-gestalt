@@ -367,6 +367,7 @@ export class TestSessions implements ISessions {
     sessionId: SessionId
     parentSessionId: SessionId
     origin: 'subagent'
+    title: string
   }): () => void {
     return () => {}
   }

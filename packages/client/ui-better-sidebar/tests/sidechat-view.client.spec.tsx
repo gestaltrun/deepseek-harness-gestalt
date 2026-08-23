@@ -87,6 +87,7 @@ describe('SideChatView', () => {
       sessionId: 'side-thread',
       parentSessionId: 'main-thread',
       origin: 'subagent',
+      title: 'Side: New thread',
     })
 
     view.unmount()

@@ -467,6 +467,7 @@ export class SessionRuntime implements ISessions {
     sessionId: SessionId
     parentSessionId: SessionId
     origin: 'subagent'
+    title: string
   }): () => void {
     this.manager.stageProvisional(descriptor)
     return () => { this.manager.dropProvisional(descriptor.sessionId) }

@@ -73,6 +73,7 @@ export interface ISessions {
     sessionId: SessionId
     parentSessionId: SessionId
     origin: 'subagent'
+    title: string
   }): () => void
   /**
    * The `session.search` result bound the wire schema fixes, exposed to

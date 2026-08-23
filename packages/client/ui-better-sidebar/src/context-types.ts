@@ -353,6 +353,7 @@ export interface SidebarSessionsService {
     sessionId: string
     parentSessionId: string
     origin: 'subagent'
+    title: string
   }): () => void
   /** Register one feature-owned prompt/cancel route for exact Session identities. */
   registerAdmissionAdapter?(adapter: SessionAdmissionAdapter): () => void

@@ -44,6 +44,7 @@ export function SideChatView(props: {
       sessionId: threadId as never,
       parentSessionId: scope.sessionId as never,
       origin: 'subagent',
+      title: SIDE_NEW_THREAD_TITLE,
     })
     return () => {
       forgetDraft()

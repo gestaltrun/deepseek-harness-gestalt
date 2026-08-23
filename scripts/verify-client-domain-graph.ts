@@ -82,6 +82,8 @@ function checkPackage(pkgName: string, clientDir: string): Violation[] {
 function main(): void {
   const violations: Violation[] = []
   for (const pkg of readdirSync(CLIENT_DIR)) {
+    // Pinned upstream snapshot keeps its own directory layout.
+    if (pkg === 'better-sidebar') continue
     const clientDir = join(CLIENT_DIR, pkg, 'src/client')
     try {
       if (!statSync(clientDir).isDirectory()) continue

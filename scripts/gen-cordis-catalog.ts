@@ -164,6 +164,8 @@ export const SERVICE_WALK_EXEMPTIONS: Record<string, string> = {
   slots: 'client-side interface-typed browser service — packages/client/runtime/README.md owns the API',
   theme: 'client-side interface-typed browser service — packages/client/ui-theme/README.md owns the API',
   workspaces: 'client-side interface-typed browser service — packages/client/runtime/README.md owns the API',
+  betterSidebar: 'client-side snapshot workbench registry — packages/client/better-sidebar/README.md owns the API',
+  workbenchBrowser: 'client-side official Browser tab face — packages/client/ui-workbench/README.md owns the API',
 }
 
 /**
@@ -246,6 +248,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   BrowserTarget: 'browser-runtime.md',
   BrowserUnavailableState: 'browser-runtime.md',
   BrowserWorkspaceCreateRequest: 'browser-runtime.md',
+  BrowserWorkspaceCreateRemoteRequest: 'browser-runtime.md',
   BrowserWorkspaceDockMutation: 'browser-runtime.md',
   BrowserWorkspaceDockRequest: 'browser-runtime.md',
   BrowserWorkspaceId: 'browser-runtime.md',

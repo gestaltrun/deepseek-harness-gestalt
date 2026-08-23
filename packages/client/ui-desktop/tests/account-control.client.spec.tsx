@@ -211,5 +211,11 @@ function bridge(snapshot: DesktopAccountSnapshot): DesktopBridge {
     pairingReject: vi.fn(),
     pairingRevoke: vi.fn(),
     onPairingSnapshot: () => () => {},
+    chromeOverlayShow: async () => {},
+    chromeOverlayHide: async () => {},
+    chromeOverlayGetState: async () => null,
+    chromeOverlayResult: () => {},
+    onChromeOverlayState: () => () => {},
+    onChromeOverlayResult: () => () => {},
   }
 }

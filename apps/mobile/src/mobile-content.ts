@@ -10,8 +10,20 @@ export type MobileContentBlock =
   | { kind: 'image'; alt: string; src: string }
   | { kind: 'tool'; name: string; args: unknown; result?: unknown }
   | { kind: 'diff'; path: string; text: string }
-  | { kind: 'approval'; summary: string }
-  | { kind: 'ask-user'; question: string }
+  | {
+    kind: 'approval'
+    summary: string
+    interactionId?: string
+    authorized?: readonly string[]
+    settled?: { decision: string; persistent?: boolean }
+  }
+  | {
+    kind: 'ask-user'
+    question: string
+    interactionId?: string
+    authorized?: readonly string[]
+    settled?: { decision: string; persistent?: boolean }
+  }
   | { kind: 'terminal'; summary: string; lines: readonly string[] }
   | { kind: 'unknown-tool'; name: string; args: unknown; result?: unknown }
 

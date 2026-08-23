@@ -27,6 +27,53 @@ function navIcon(id: string) {
   return <IconSettingsOutline16 className={css.navIcon} size={16} />
 }
 
+/** Where the settings panel paints. */
+export type SettingsChromeMode = 'web' | 'desktop-host' | 'overlay'
+
+/** Duck-typed Desktop overlay verbs used by the settings trigger. */
+interface SettingsDesktopBridge {
+  chromeOverlayShow: (request: {
+    kind: 'settings'
+    requestId: string
+    sectionId?: string
+  }) => void | Promise<void>
+  chromeOverlayGetState: () => Promise<{
+    kind?: string
+    requestId?: string
+    sectionId?: string
+  } | null>
+  chromeOverlayResult?: (result: { type: 'close'; requestId: string }) => void
+  onChromeOverlayState: (listener: (state: {
+    kind?: string
+    requestId?: string
+    sectionId?: string
+  } | null) => void) => () => void
+  onChromeOverlayResult: (listener: (result: { type: string; requestId: string }) => void) => () => void
+}
+
+/**
+ * Choose in-page Settings, Host-chrome trigger + native overlay, or overlay panel.
+ * @returns the chrome mode for this document.
+ */
+export function settingsChromeMode(): SettingsChromeMode {
+  if (typeof document !== 'undefined' && document.documentElement.hasAttribute('data-dsh-desktop-overlay')) {
+    return 'overlay'
+  }
+  const bridge = (globalThis as { dshDesktop?: unknown }).dshDesktop
+  if (typeof bridge === 'object' && bridge !== null
+    && typeof (bridge as SettingsDesktopBridge).chromeOverlayShow === 'function') {
+    return 'desktop-host'
+  }
+  return 'web'
+}
+
+function settingsDesktopBridge(): SettingsDesktopBridge | undefined {
+  const bridge = (globalThis as { dshDesktop?: unknown }).dshDesktop
+  if (typeof bridge !== 'object' || bridge === null) return undefined
+  if (typeof (bridge as SettingsDesktopBridge).chromeOverlayShow !== 'function') return undefined
+  return bridge as SettingsDesktopBridge
+}
+
 type PanelProps = {
   rows: readonly SettingsSectionRow[]
   renderSlot: SettingsRootComponentProps['renderSlot']
@@ -103,17 +150,74 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
  */
 export function SettingsRoot(props: SettingsRootComponentProps) {
   const { wide, useSections, useOnboardingSteps, useSessions, renderSlot } = props
+  const mode = settingsChromeMode()
   const [open, setOpen] = useState(false)
   const [activeId, setActiveId] = useState<string | undefined>(undefined)
   const [completedOnboarding, setCompletedOnboarding] = useState<ReadonlySet<string>>(() => new Set())
+  const requestId = useRef('')
   const close = useCallback(() => {
+    if (mode === 'overlay') {
+      settingsDesktopBridge()?.chromeOverlayResult?.({ type: 'close', requestId: requestId.current })
+      return
+    }
     setOpen(false)
     setActiveId(undefined)
+  }, [mode])
+  useEffect(() => {
+    if (mode !== 'web' || !open) return
+    window.dispatchEvent(new CustomEvent('dsh-overlay-lock', { detail: { held: true } }))
+    return () => {
+      window.dispatchEvent(new CustomEvent('dsh-overlay-lock', { detail: { held: false } }))
+    }
+  }, [mode, open])
+  useEffect(() => {
+    if (mode !== 'desktop-host') return
+    const bridge = settingsDesktopBridge()
+    if (bridge === undefined || typeof bridge.onChromeOverlayResult !== 'function') return
+    return bridge.onChromeOverlayResult((result) => {
+      if (result.requestId !== requestId.current || result.type !== 'close') return
+      requestId.current = ''
+      setOpen(false)
+      setActiveId(undefined)
+    })
+  }, [mode])
+  useEffect(() => {
+    if (mode !== 'overlay') return
+    const bridge = settingsDesktopBridge()
+    if (bridge === undefined || typeof bridge.onChromeOverlayState !== 'function') return
+    const applyState = (state: { kind?: string; requestId?: string; sectionId?: string } | null): void => {
+      if (state?.kind !== 'settings' || typeof state.requestId !== 'string') {
+        requestId.current = ''
+        setOpen(false)
+        setActiveId(undefined)
+        return
+      }
+      requestId.current = state.requestId
+      setActiveId(typeof state.sectionId === 'string' ? state.sectionId : undefined)
+      setOpen(true)
+    }
+    void bridge.chromeOverlayGetState().then(applyState)
+    return bridge.onChromeOverlayState(applyState)
+  }, [mode])
+  const openDesktop = useCallback((sectionId?: string) => {
+    const id = crypto.randomUUID()
+    requestId.current = id
+    setActiveId(sectionId)
+    setOpen(true)
+    void settingsDesktopBridge()?.chromeOverlayShow({
+      kind: 'settings',
+      requestId: id,
+      ...(sectionId === undefined ? {} : { sectionId }),
+    })
   }, [])
   const openSection = useCallback((id: string) => {
+    if (mode === 'desktop-host') {
+      openDesktop(id)
+      return
+    }
     setActiveId(id)
     setOpen(true)
-  }, [])
+  }, [mode, openDesktop])
 
   // The ledger tick keeps the nav rows fresh: registrants re-register with
   // freshly localized text on locale change, and the trigger/header/close
@@ -139,6 +243,18 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
     })
   }, [])
 
+  if (mode === 'overlay') {
+    return open ? (
+      <SettingsPanel
+        rows={rows}
+        renderSlot={renderSlot}
+        activeId={activeId}
+        onSelect={setActiveId}
+        onClose={close}
+      />
+    ) : null
+  }
+
   return (
     <>
       <button
@@ -146,11 +262,14 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
         className={clsx(css.trigger, !wide && css.rail)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => { setOpen(true) }}
+        onClick={() => {
+          if (mode === 'desktop-host') openDesktop()
+          else setOpen(true)
+        }}
       >
         {renderSlot('settings.trigger', { wide })}
       </button>
-      {open && (
+      {open && mode === 'web' && (
         <SettingsPanel
           rows={rows}
           renderSlot={renderSlot}

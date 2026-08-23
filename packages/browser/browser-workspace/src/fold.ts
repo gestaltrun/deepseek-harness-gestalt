@@ -8,9 +8,6 @@ import type { BrowserWorkspaceProjection } from './types.ts'
 
 /** Empty Workspace owned by a Session that has never opened a browser. */
 export const EMPTY_BROWSER_WORKSPACE: BrowserWorkspaceProjection = Object.freeze({
-  dockOpen: false,
-  dockWidth: 640,
-  userCollapsed: false,
   workspaces: Object.freeze([]),
   activeWorkspaceId: null,
 })

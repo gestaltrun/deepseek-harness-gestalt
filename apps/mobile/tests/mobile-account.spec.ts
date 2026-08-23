@@ -103,6 +103,7 @@ describe('MobileAccount', () => {
     await screen.findByRole('button', { name: '使用 GitHub 继续' })
     expect(deactivate).toHaveBeenCalledOnce()
   })
+
 })
 
 function fixture(): {

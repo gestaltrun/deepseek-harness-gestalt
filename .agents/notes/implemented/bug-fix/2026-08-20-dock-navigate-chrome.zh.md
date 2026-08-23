@@ -30,4 +30,4 @@ Dock 与收起预览把活动标签页的列表修订号传入 `useBrowserPage`�
 
 ## 测试
 
-`packages/client/ui-browser/tests/browser-dock.client.spec.tsx` 与 `use-browser-page.client.spec.tsx` 会在 `status: open` 的 navigate 推进列表修订号后界面仍停在 `about:blank` 时失败。`packages/client/connection/tests/fixture-browser-workspace.client.spec.ts` 在 navigate 之后观察已提交的 URL。`apps/web/tests/browser-dock.snapshot.ts` 固定展开 Dock 在打开与刷新之后相对 `about:blank` 的界面。
+`packages/client/ui-browser/tests/browser-page-chrome.client.spec.tsx` 与 `use-browser-page.client.spec.tsx` 会在 `status: open` 的 navigate 推进列表修订号后界面仍停在 `about:blank` 时失败。`packages/client/connection/tests/fixture-browser-workspace.client.spec.ts` 在 navigate 之后观察已提交的 URL。`apps/web/tests/browser-dock.snapshot.ts` 固定展开 Dock 在打开与刷新之后相对 `about:blank` 的界面。

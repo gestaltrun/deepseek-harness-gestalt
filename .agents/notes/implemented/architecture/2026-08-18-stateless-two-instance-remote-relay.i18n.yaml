@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-18-stateless-two-instance-remote-relay.md
-2026-08-18-stateless-two-instance-remote-relay.md: 564b313664d561109403da86b981b538d8cbf598
-2026-08-18-stateless-two-instance-remote-relay.zh.md: 4fe7fc856e48c6f468c2332c9c26ed773df6f6a2
+2026-08-18-stateless-two-instance-remote-relay.md: 5fbe1e122a3f5ab40385aaf418339d714c03a860
+2026-08-18-stateless-two-instance-remote-relay.zh.md: 2308bb6c1d3f3848d22efc1a5317d3d008328131

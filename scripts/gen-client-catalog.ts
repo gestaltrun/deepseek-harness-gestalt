@@ -31,6 +31,11 @@ const OUT = 'packages/extensions/cordis-client-runner/src/client/slot-catalog.ts
 /** Source globs: every workspace package's sources, `.tsx` included (a contract may live in one). */
 const SOURCE_GLOBS = ['packages/*/*/src/**/*.ts', 'packages/*/*/src/**/*.tsx']
 
+/** Pinned upstream snapshot: product slots stay on first-party packages. */
+function isPinnedWorkbenchSnapshot(rel: string): boolean {
+  return rel.startsWith('packages/client/better-sidebar/')
+}
+
 /** Slot cardinalities the contract allows. */
 const KINDS = ['single', 'list', 'keyed', 'chain'] as const
 /** Slot data scopes the contract allows. */
@@ -130,10 +135,10 @@ export interface SlotEntry {
  * @throws when any declared slot is unteachable or the scan contradicts itself.
  */
 export function collectSlotEntries(scanRoot: string): SlotEntry[] {
-  const files = scanSlotFiles(scanRoot, SOURCE_GLOBS)
+  const files = scanSlotFiles(scanRoot, SOURCE_GLOBS, isPinnedWorkbenchSnapshot)
   const declarations = files.flatMap(file => slotDeclarations(file))
   const registrations = files.flatMap(file => slotRegistrations(file))
-  const types = indexExportedTypes(scanRoot, SOURCE_GLOBS)
+  const types = indexExportedTypes(scanRoot, SOURCE_GLOBS, isPinnedWorkbenchSnapshot)
   const problems = validateSlotContracts(declarations, registrations, types)
   if (problems.length > 0) {
     throw new Error(`gen-client-catalog: ${String(problems.length)} contract violation(s):\n${problems.map(problem => `  ${problem}`).join('\n')}`)

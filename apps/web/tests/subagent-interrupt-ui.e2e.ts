@@ -198,7 +198,9 @@ describe.skipIf(MODE === 'record')('web e2e: composer interrupt for a running co
     })
     try {
       await page.getByRole('button', { name: /1 subagent/ }).click()
-      await page.getByRole('treeitem', { name: new RegExp(LABEL) }).click()
+      await page.getByRole('tree', { name: 'Subagent sessions' })
+        .getByRole('treeitem', { name: new RegExp(LABEL) })
+        .click()
       const input = page.getByRole('textbox', {
         name: 'Parent session offline; sending is unavailable but you can still stop the run',
       })
@@ -257,7 +259,9 @@ describe.skipIf(MODE === 'record')('web e2e: composer interrupt for a running co
     await page.getByRole('navigation', { name: 'Session hierarchy' })
       .getByRole('button').first().click()
     await page.getByRole('button', { name: /1 subagent/ }).click()
-    await page.getByRole('treeitem', { name: new RegExp(LABEL) }).click()
+    await page.getByRole('tree', { name: 'Subagent sessions' })
+      .getByRole('treeitem', { name: new RegExp(LABEL) })
+      .click()
     const input = page.getByRole('textbox', { name: 'Message the agent' })
     await input.waitFor({ timeout: 15_000 })
     expect(await input.isDisabled()).toBe(false)

@@ -48,11 +48,12 @@ Ship **DeepSeek Gestalt**, a Desktop Host: an Electron window that starts a bund
 36. As someone using Ungrouped sessions, I want those rows to keep meaning "session with no Workspace registration", so that Dock cwd is not "solved" by stuffing a fake project into Ungrouped.
 37. As a Desktop user, I want every new Session to expose Schedule tools, so that reminders work without editing a profile.
 38. As a Desktop user, I want reminder delivery to remain inside the original live Session, so that closing the app never implies an operating-system or external notification will arrive.
+39. As a Desktop user, I do not want the OS default browser to open at startup, so that only the Desktop window shows the Session Surface.
 
 ## Implementation Decisions
 
 - DeepSeek Gestalt is a new desktop product. The Harness Engine is `dsh`. Desktop Host is Electron. Web Host is bundled official Node running `dsh web`.
-- Desktop Host starts Web Host with `--host 127.0.0.1 --port 0` and a Desktop-only `--patch` overlay, then loads the loopback URL printed as `dsh web: http://127.0.0.1:<port>`.
+- Desktop Host starts Web Host with `--host 127.0.0.1 --port 0 --no-open` and a Desktop-only `--patch` overlay, then loads the loopback URL printed as `dsh web: http://127.0.0.1:<port>`. `--no-open` is required because `dsh web` otherwise hands that URL to the OS default browser, duplicating the Desktop window. The overlay also sets `web-runtime.openBrowser` to false.
 - One window, one Web Host child, single-instance lock. A second launch focuses the existing window.
 - Session Surface is unchanged: many Workspaces and Sessions in one sidebar. A Workspace is not a window.
 - User data stays in `$DSH_HOME` / `~/.dsh` and the existing web profile. Desktop does not create a second home or a `gestalt` profile.

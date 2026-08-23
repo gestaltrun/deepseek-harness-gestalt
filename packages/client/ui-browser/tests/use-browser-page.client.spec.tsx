@@ -27,7 +27,6 @@ function page(overrides: Partial<BrowserPageState> = {}): BrowserPageState {
     title: 'Alpha',
     text: 'text',
     focused: true,
-    controlOwner: 'agent',
     chrome: { kind: 'temporary', partition: 'tmp' },
     storage: {
       cookies: 'c', localStorage: 'l', indexedDb: 'i', cache: 'k', serviceWorker: 's',
@@ -121,6 +120,30 @@ describe('useBrowserPage', () => {
     await waitFor(() => { expect(view.getByTestId('url').textContent).toBe('https://alpha.test/') })
     expect(view.getByTestId('title').textContent).toBe('Alpha')
     expect(observe).toHaveBeenCalledTimes(2)
+  })
+
+  it('discards a screenshot rejection after the tab unmounted', async () => {
+    const observe = vi.fn(async () => page())
+    const viewRef: { current?: ReturnType<typeof render> } = {}
+    const screenshot = vi.fn(() => {
+      viewRef.current?.unmount()
+      return Promise.reject(new Error('capture failed'))
+    })
+    const view = render(<Probe target={TARGET} observe={observe} screenshot={screenshot} />)
+    viewRef.current = view
+    await waitFor(() => { expect(screenshot).toHaveBeenCalled() })
+    expect(view.queryByTestId('title')).toBeNull()
+  })
+
+  it('keeps the observed page when the screenshot rejects', async () => {
+    const observe = vi.fn(async () => page())
+    const screenshot = vi.fn(async () => {
+      throw new Error('capture failed')
+    })
+    const view = render(<Probe target={TARGET} observe={observe} screenshot={screenshot} />)
+    await waitFor(() => { expect(view.getByTestId('title').textContent).toBe('Alpha') })
+    expect(view.getByTestId('url').textContent).toBe('https://alpha.test/')
+    expect(view.getByTestId('shot').textContent).toBe('none')
   })
 
   it('skips the screenshot when the tab is closed', async () => {

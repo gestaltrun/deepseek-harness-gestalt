@@ -53,15 +53,13 @@ describe('deferred Browser Runtime Consumer', () => {
       'browser_screenshot',
       'browser_focus',
       'browser_input',
-      'browser_takeover',
-      'browser_return_control',
       'browser_close',
     ])
 
     const discovery = await ctx.tools.execute({
       callId: CallId('search-browser'),
       name: 'tool_search',
-      arguments: { query: 'browser', limit: 9 },
+      arguments: { query: 'browser', limit: 7 },
       signal,
     })
     expect(discovery.isError).toBe(false)
@@ -73,9 +71,7 @@ describe('deferred Browser Runtime Consumer', () => {
       'browser_input',
       'browser_navigate',
       'browser_observe',
-      'browser_return_control',
       'browser_screenshot',
-      'browser_takeover',
     ])
     for (const name of discovery.loadedTools?.map(schema => schema.name) ?? []) {
       expect(ctx.tools.get(name)).not.toHaveProperty('presentCall')
@@ -100,7 +96,6 @@ describe('deferred Browser Runtime Consumer', () => {
         },
         chrome: { kind: 'temporary', partition: 'session-tool-tmp-1' },
         revision: 0,
-        controlOwner: 'agent',
       },
     })
     expect(created.content).toEqual([{
@@ -144,15 +139,15 @@ describe('deferred Browser Runtime Consumer', () => {
       arguments: { target, expectedRevision: 1 },
       signal,
     })
-    expect(focused).toMatchObject({ isError: false, value: { revision: 2, focused: true, controlOwner: 'agent' } })
+    expect(focused).toMatchObject({ isError: false, value: { revision: 2, focused: true } })
 
     const inputted = await ctx.tools.execute({
       callId: CallId('browser-input'),
       name: 'browser_input',
-      arguments: { target, expectedRevision: 2, text: 'human typed' },
+      arguments: { target, expectedRevision: 2, text: 'Agent input' },
       signal,
     })
-    expect(inputted).toMatchObject({ isError: false, value: { revision: 3, controlOwner: 'human', text: 'human typed' } })
+    expect(inputted).toMatchObject({ isError: false, value: { revision: 3, text: 'Agent input' } })
 
     const stale = await ctx.tools.execute({
       callId: CallId('browser-stale-navigate'),
@@ -162,29 +157,13 @@ describe('deferred Browser Runtime Consumer', () => {
     })
     expect(stale).toMatchObject({ isError: true })
 
-    const taken = await ctx.tools.execute({
-      callId: CallId('browser-takeover'),
-      name: 'browser_takeover',
-      arguments: { target, expectedRevision: 3 },
-      signal,
-    })
-    expect(taken).toMatchObject({ isError: false, value: { revision: 4, controlOwner: 'human' } })
-
-    const returned = await ctx.tools.execute({
-      callId: CallId('browser-return'),
-      name: 'browser_return_control',
-      arguments: { target, expectedRevision: 4 },
-      signal,
-    })
-    expect(returned).toMatchObject({ isError: false, value: { revision: 5, controlOwner: 'agent' } })
-
     const closed = await ctx.tools.execute({
       callId: CallId('browser-close'),
       name: 'browser_close',
-      arguments: { target, expectedRevision: 5 },
+      arguments: { target, expectedRevision: 3 },
       signal,
     })
-    expect(closed).toMatchObject({ isError: false, value: { status: 'closed', revision: 6 } })
+    expect(closed).toMatchObject({ isError: false, value: { status: 'closed', revision: 4 } })
   })
 
   it('defaults omitted profile to the shared installation-wide identity', async () => {
@@ -221,6 +200,33 @@ describe('deferred Browser Runtime Consumer', () => {
     expect(explicitTarget?.target.profileId).toBe('tool-profile-shared')
     expect(explicitTarget?.target.workspaceId).not.toBe(createdTarget?.target.workspaceId)
     expect(explicitTarget?.chrome.partition).toBe('persist:session-tool-shared')
+  })
+
+  it('uses the ui-browser settings default when the model omits profile', async () => {
+    const ctx = await harness()
+    let section: Record<string, unknown> = { defaultKind: 'temporary' }
+    ctx.provide('settings', { get: () => section })
+    const created = await ctx.tools.execute({
+      callId: CallId('settings-temporary-default'),
+      name: 'browser_create',
+      arguments: {},
+      signal,
+    })
+    expect(created).toMatchObject({
+      isError: false,
+      value: { chrome: { kind: 'temporary' } },
+    })
+    section = { defaultKind: 'persistent', defaultPersistentName: 'work' }
+    const persistent = await ctx.tools.execute({
+      callId: CallId('settings-persistent-default'),
+      name: 'browser_create',
+      arguments: {},
+      signal,
+    })
+    expect(persistent).toMatchObject({
+      isError: false,
+      value: { chrome: { kind: 'persistent', name: 'work' } },
+    })
   })
 
   it('rejects invalid Consumer arguments and timeout configuration at their owning boundaries', async () => {
@@ -297,13 +303,29 @@ describe('deferred Browser Runtime Consumer', () => {
     })
     expect(emptyInputUrl).toMatchObject({ isError: true })
 
+    const emptyInputText = await ctx.tools.execute({
+      callId: CallId('empty-input-text'),
+      name: 'browser_input',
+      arguments: { target, expectedRevision: 0, text: ' ' },
+      signal,
+    })
+    expect(emptyInputText).toMatchObject({ isError: true })
+
     const inputWithUrl = await ctx.tools.execute({
       callId: CallId('input-with-url'),
       name: 'browser_input',
       arguments: { target, expectedRevision: 0, url: 'https://example.test/' },
       signal,
     })
-    expect(inputWithUrl).toMatchObject({ isError: false, value: { controlOwner: 'human', url: 'https://example.test/' } })
+    expect(inputWithUrl).toMatchObject({ isError: false, value: { url: 'https://example.test/' } })
+
+    const inputWithUrlAndText = await ctx.tools.execute({
+      callId: CallId('input-with-url-and-text'),
+      name: 'browser_input',
+      arguments: { target, expectedRevision: 1, url: 'https://example.test/', text: 'typed' },
+      signal,
+    })
+    expect(inputWithUrlAndText).toMatchObject({ isError: false, value: { text: 'typed' } })
 
     const clickOnlyInput = await ctx.tools.execute({
       callId: CallId('input-click-only'),
@@ -311,7 +333,7 @@ describe('deferred Browser Runtime Consumer', () => {
       arguments: { target, expectedRevision: 1 },
       signal,
     })
-    expect(clickOnlyInput).toMatchObject({ isError: false, value: { controlOwner: 'human', revision: 2 } })
+    expect(clickOnlyInput).toMatchObject({ isError: true })
 
     const negativeRevision = await ctx.tools.execute({
       callId: CallId('negative-revision'),
@@ -437,7 +459,7 @@ describe('deferred Browser Runtime Consumer', () => {
       }],
     })
     const fiber = await ctx.plugin(ToolBrowser)
-    expect(ctx.tools.catalogSchemas()).toHaveLength(9)
+    expect(ctx.tools.catalogSchemas()).toHaveLength(7)
     await fiber.dispose()
     expect(ctx.tools.catalogSchemas()).toEqual([])
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual(['tool_search'])
@@ -546,28 +568,14 @@ describe('deferred Browser Runtime Consumer', () => {
     await expect(ctx.tools.execute({
       callId: CallId('bound-input'),
       name: 'browser_input',
-      arguments: { target, expectedRevision: 2, text: 'human' },
+      arguments: { target, expectedRevision: 2, text: 'Agent input' },
       signal,
       agent,
-    })).resolves.toMatchObject({ isError: false, value: { controlOwner: 'human' } })
-    await expect(ctx.tools.execute({
-      callId: CallId('bound-takeover'),
-      name: 'browser_takeover',
-      arguments: { target, expectedRevision: 3 },
-      signal,
-      agent,
-    })).resolves.toMatchObject({ isError: false, value: { controlOwner: 'human' } })
-    await expect(ctx.tools.execute({
-      callId: CallId('bound-return'),
-      name: 'browser_return_control',
-      arguments: { target, expectedRevision: 4 },
-      signal,
-      agent,
-    })).resolves.toMatchObject({ isError: false, value: { controlOwner: 'agent' } })
+    })).resolves.toMatchObject({ isError: false, value: { text: 'Agent input' } })
     await expect(ctx.tools.execute({
       callId: CallId('bound-close'),
       name: 'browser_close',
-      arguments: { target, expectedRevision: 5 },
+      arguments: { target, expectedRevision: 3 },
       signal,
       agent,
     })).resolves.toMatchObject({ isError: false })
@@ -586,7 +594,7 @@ describe('deferred Browser Runtime Consumer', () => {
       }],
     })
     ToolBrowser.apply(ctx, {})
-    expect(ctx.tools.catalogSchemas()).toHaveLength(9)
+    expect(ctx.tools.catalogSchemas()).toHaveLength(7)
 
     await ctx.plugin(InvariantRegistry)
     const fiber = await ctx.plugin(ToolBrowserInvariant)

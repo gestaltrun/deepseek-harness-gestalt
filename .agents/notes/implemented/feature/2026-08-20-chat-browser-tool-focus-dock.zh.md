@@ -18,7 +18,7 @@ focus 使用被操作列表行的修订号，与 Dock chrome 和收起预览相�
 
 当标签页已不在列表中时，详情仍会打开，且不调用 focus。该路径不合成 409，也不增加第二套错误界面。focus 被拒绝时会被吞掉，因为详情已经打开。
 
-当用户收起 Dock 时，这次选择仍会聚焦列表中的标签页，以便收起预览高亮对应项。它从不写入 `dockOpen`，也从不调用 `setDock`。后续 Agent 活动在用户收起后本就不能再偷开 Dock；这条人工手势遵守同一规则，不会重新打开窗格。
+选择会聚焦列表中的标签页，以便收起预览高亮对应项。Browser Workspace 不携带面板展示状态；better-sidebar 仍是面板是否打开的唯一权威来源。
 
 对话 transcript（文本记录）没有独立的页面事件或链接手势。这类选择若存在，共用这条 `openDetails` 路径。只有 `browser_*` 工具行在点击时调用 `selectCall`；普通工具行保持不响应。
 
@@ -44,4 +44,4 @@ focus 使用被操作列表行的修订号，与 Dock chrome 和收起预览相�
 
 ## 测试
 
-`packages/client/ui-conversation/tests/browser-tab-focus.client.spec.ts` 锁定 args 与 result 身份、列表修订号、标签页已消失，以及被拒绝的 focus。`apply-inject.client.spec.tsx` 锁定 inject 层在 `userCollapsed: true` 时 focus 且不调用 `setDock`。`packages/client/ui-tool/tests/toolview-slot.client.spec.tsx` 通过 conversation+tool 栈点击真实的 `browser_navigate` 卡片，并要求 `focus(sessionId, target, listedRevision)`。无密钥 fixture Session 仍只有一个标签页，因此组装后的 browser-dock 快照无法覆盖双标签页的对话选择。
+`packages/client/ui-conversation/tests/browser-tab-focus.client.spec.ts` 锁定 args 与 result 身份、列表修订号、标签页已消失，以及被拒绝的 focus。`apply-inject.client.spec.tsx` 锁定 inject 层 focus。`packages/client/ui-tool/tests/toolview-slot.client.spec.tsx` 通过 conversation+tool 栈点击真实的 `browser_navigate` 卡片，并要求 `focus(sessionId, target, listedRevision)`。无密钥 fixture Session 仍只有一个标签页，因此组装后的快照无法覆盖双标签页的对话选择。

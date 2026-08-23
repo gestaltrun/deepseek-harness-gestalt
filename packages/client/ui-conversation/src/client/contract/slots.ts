@@ -129,9 +129,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** Optional renderer for one consecutive group of durable message images. */
     'conversation.message.images': { kind: 'single'; scope: 'session'; owner: MessageImagesOwnerProps }
     /**
-     * Collapsed Browser Dock preview in the message region. Occupied by
-     * ui-browser's layered tab stack while the Dock is closed; hidden while
-     * the Dock is visible. Ordinary MCP tool rows stay in conversation history.
+     * Collapsed Browser preview in the conversation right gutter. Occupied by
+     * ui-browser's layered tab stack. ChatView hides the rail when that gutter
+     * is narrower than 240px. Ordinary MCP tool rows stay in conversation history.
      */
     'conversation.browser.preview': { kind: 'single'; scope: 'session' }
     /**
@@ -758,7 +758,7 @@ export interface ChatViewInjected {
   /**
    * Selection write + details panel opening in one gesture. A `browser_*`
    * call whose tab is still listed also focuses that Dock tab with the
-   * listing revision and does not change `dockOpen`.
+   * listing revision.
    */
   openDetails: (target: SelectionTarget) => void
   /**

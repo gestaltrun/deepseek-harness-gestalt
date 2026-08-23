@@ -1,9 +1,9 @@
 // ChatView: the default conversation view — one stable keyed parent list over
 // final business Nodes, plus paging, pending steering, the collapsed Browser
-// Dock preview, and bottom-follow. Each row dispatches through
+// preview rail on the right of the message column, bottom-follow, and the
+// in-page dialog for a Host open-path refusal. Each row dispatches through
 // 'conversation.chat.node'; ui-tool owns the tool-call renderer and its
-// recursive root/subcall composition. A Host open-path refusal from the
-// injected opener is an in-page dialog here.
+// recursive root/subcall composition.
 //
 // Scroll: when nested under `[data-conversation-scroll]` (active conversation
 // column), that host is the scrollport and this view is flow content; when
@@ -21,6 +21,7 @@ import type { ChatViewSlotProps, RenderMessageImages } from '../contract/slots.t
 import { PendingSteeringBubble } from './MessageItem.tsx'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
 import { formatRunDuration } from './message-chrome.ts'
+import { previewRailTight } from './preview-rail.ts'
 import css from './ChatView.module.css'
 
 const FOLLOW_THRESHOLD = 24
@@ -221,6 +222,7 @@ export function ChatView({
   const columnRef = useRef<HTMLDivElement | null>(null)
   const atBottomRef = useRef(true)
   const [atBottom, setAtBottom] = useState(true)
+  const [previewTight, setPreviewTight] = useState(false)
   /** Last position delivered or written on the main thread. */
   const observedTopRef = useRef(0)
   /** Paging anchor: semantic row/position at click, updated by reader scrolls
@@ -391,6 +393,23 @@ export function ChatView({
     return () => { observer.disconnect() }
   }, [])
 
+  // Hide the preview rail when the right gutter of the centered column
+  // cannot host it without overlapping messages.
+  useLayoutEffect(() => {
+    const column = columnRef.current
+    const local = listRef.current
+    if (column === null || local === null || typeof ResizeObserver === 'undefined') return
+    const scrollport = scrollerOf(local)
+    const measure = (): void => {
+      setPreviewTight(previewRailTight(scrollport.clientWidth, column.offsetWidth))
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(scrollport)
+    observer.observe(column)
+    measure()
+    return () => { observer.disconnect() }
+  }, [])
+
   // A failed/empty page leaves the head unchanged. Once the request leaves
   // its busy state there is no future prepend for the saved anchor to own.
   useEffect(() => {
@@ -415,7 +434,7 @@ export function ChatView({
 
   return (
     <div className={css.root}>
-      <div ref={listRef} className={css.scroll}>
+      <div ref={listRef} className={css.scroll} data-preview-tight={previewTight ? '' : undefined}>
         <div ref={columnRef} className={css.column} data-chat-flow="">
           {openState === 'loading' && <div className={css.hint}>{t('chat.loadingHistory')}</div>}
           {openState === 'error' && openError !== null && (
@@ -461,6 +480,8 @@ export function ChatView({
               t={t}
             />
           ))}
+        </div>
+        <div className={css.previewRail} data-browser-preview-rail="">
           {renderSlot('conversation.browser.preview', {})}
         </div>
         {!atBottom && (

@@ -33,16 +33,35 @@ function bridge(platform: NodeJS.Platform): DesktopBridge {
     pairingGetSnapshot: vi.fn(), pairingSetEnabled: vi.fn(), pairingCreateChallenge: vi.fn(),
     pairingCancelChallenge: vi.fn(), pairingConfirm: vi.fn(), pairingReject: vi.fn(), pairingRevoke: vi.fn(),
     onPairingSnapshot: () => () => {},
+    chromeOverlayShow: async () => {},
+    chromeOverlayHide: async () => {},
+    chromeOverlayGetState: async () => null,
+    chromeOverlayResult: () => {},
+    onChromeOverlayState: () => () => {},
+    onChromeOverlayResult: () => () => {},
   }
 }
 
 describe('DragStrip', () => {
-  it('keeps a draggable macOS row above the unchanged sidebar header', () => {
-    const css = readFileSync(join(process.cwd(), 'packages/client/ui-desktop/src/client/DragStrip.module.css'), 'utf8')
-    const rule = /\.macChrome\s*\{(?<body>[^}]+)\}/.exec(css)?.groups?.body ?? ''
+  it('shares one 36px Window Chrome row across the macOS Session Surface', () => {
+    const root = process.cwd()
+    const chromeCss = readFileSync(join(root, 'packages/client/ui-desktop/src/client/DragStrip.module.css'), 'utf8')
+    const sidebarCss = readFileSync(join(root, 'packages/client/ui-sidebar/src/client/SidebarRoot.module.css'), 'utf8')
+    const layoutCss = readFileSync(join(root, 'packages/client/ui-layout/src/client/AppFrame.module.css'), 'utf8')
+    const workbenchCss = readFileSync(join(root, 'packages/client/better-sidebar/src/client/sidebar.module.css'), 'utf8')
+    expect(chromeCss).toContain('--dsh-window-chrome-height: 36px')
+    const rule = /\.macChrome\s*\{(?<body>[^}]+)\}/.exec(chromeCss)?.groups?.body ?? ''
     expect(rule).toContain('position: fixed')
-    expect(rule).toContain('height: 28px')
+    expect(rule).toContain('right: var(--dsh-sidebar-width, 0px)')
+    expect(rule).toContain('height: var(--dsh-window-chrome-height)')
     expect(rule).toContain('-webkit-app-region: drag')
+    expect(sidebarCss).toContain('padding-top: var(--dsh-window-chrome-height)')
+    expect(layoutCss).toContain('padding-top: var(--dsh-window-chrome-height)')
+    expect(workbenchCss).toContain('height: var(--dsh-window-chrome-height)')
+    const tabBar = [...workbenchCss.matchAll(/(?:^|\n)\.tabBar\s*\{(?<body>[^}]+)\}/g)]
+      .map(match => match.groups?.body ?? '')
+      .find(body => body.includes('height: 34px')) ?? ''
+    expect(tabBar).toContain('box-sizing: border-box')
   })
 
   it('paints no caption buttons on macOS', () => {

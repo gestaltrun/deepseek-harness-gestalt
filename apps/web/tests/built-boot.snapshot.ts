@@ -42,8 +42,18 @@ it('boots the built plugin graph and renders a fixture session end to end', asyn
 
   // The sidebar renders from the boot graph: every inject layer activated.
   const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
-  expect(document.querySelector('svg[viewBox="26 0 156 24"]')).not.toBeNull()
-  expect(screen.queryByText('DSH Gestalt')).toBeNull()
+  const openSidebar = screen.queryByRole('button', { name: 'Open sidebar' })
+  if (openSidebar !== null) fireEvent.click(openSidebar)
+  await waitFor(() => {
+    const shortcuts = screen.getAllByRole('button', { name: 'New session' })
+    expect(shortcuts.some(button => button.querySelector('svg[viewBox="0 0 23.16 17.04"]') !== null)).toBe(true)
+  })
+  if (Reflect.get(clientBuildEnvironment, 'DSH_CLIENT_BUILD_PROFILE') === 'official') {
+    expect(document.querySelector('svg[viewBox="26 0 156 24"]')).not.toBeNull()
+    expect(screen.queryByText('DSH Gestalt')).toBeNull()
+  } else {
+    expect(screen.getByText('DSH Gestalt')).toBeTruthy()
+  }
   // The compact layout dropped group session counts; the fixture workspace
   // group row renders immediately with its sessions beneath it.
   const fixtureGroup = (await within(tree).findAllByText('fixture'))

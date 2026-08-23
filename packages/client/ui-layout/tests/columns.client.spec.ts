@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CENTER_MIN, clampWidth, computeColumns,
+  CENTER_MIN, clampWidth, computeColumns, overlayDetailsWidth,
   DETAILS_DEFAULT, DETAILS_MIN, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT, SIDEBAR_MIN,
 } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
 
@@ -94,6 +94,24 @@ describe('computeColumns', () => {
     const restored = computeColumns(1920, open(SIDEBAR_DEFAULT), open(DETAILS_DEFAULT))
     expect(restored.details).toBe(DETAILS_DEFAULT)
     expect(restored.sidebar).toBe(SIDEBAR_DEFAULT)
+  })
+})
+
+describe('overlayDetailsWidth', () => {
+  const range = { minimum: 420, default: 640, maximum: 960 }
+
+  it('is zero when the preference is closed or no remaining width exists', () => {
+    expect(overlayDetailsWidth(1280, 280, 0, range)).toBe(0)
+    expect(overlayDetailsWidth(280, 280, 640, range)).toBe(0)
+  })
+
+  it('uses the clamped preference while it fits beside the sidebar', () => {
+    expect(overlayDetailsWidth(1280, 280, 640, range)).toBe(640)
+    expect(overlayDetailsWidth(1280, 280, 1200, range)).toBe(960)
+  })
+
+  it('shrinks below the occupant minimum so chrome stays on-screen', () => {
+    expect(overlayDetailsWidth(500, 280, 640, range)).toBe(220)
   })
 })
 

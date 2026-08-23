@@ -34,7 +34,9 @@ dsh web GUI 的浏览器侧：shell 启动、浏览器与宿主通信、共享 U
 | [`ui-subagent/`](ui-subagent/README.md) | 提供 subagent（子 agent）导航、子级 transcript（文本记录）的状态和内联引用。 |
 | [`ui-jobs/`](ui-jobs/README.md) | 在会话标题栏列出当前会话的后台任务。 |
 | [`ui-schedule/`](ui-schedule/README.md) | 在会话标题栏展示并管理当前 Session 的持久化提醒。 |
-| [`ui-browser/`](ui-browser/README.md) | 展示 Session 持有的 Browser Dock 与收起后的标签页预览。 |
+| [`ui-browser/`](ui-browser/README.md) | 展示官方 Browser 页面 chrome、收起后的标签页预览，以及 Browser Profile 设置。 |
+| [`better-sidebar/`](better-sidebar/README.md) | 钉死的 DSH-better-sidebar 快照：右侧栏与底部面板工作台。 |
+| [`ui-workbench/`](ui-workbench/README.md) | 把官方 Browser 页面绑到快照侧栏的 `browser` 标签。 |
 | [`ui-model-selection/`](ui-model-selection/README.md) | 在对话界面中提供模型选择。 |
 | [`ui-permission/`](ui-permission-presets/README.md) | 配置默认权限并切换当前会话的访问模式。 |
 | [`ui-plan/`](ui-plan/README.md) | 展示生效中的 plan mode 状态及其退出控件。 |

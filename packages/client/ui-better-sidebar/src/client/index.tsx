@@ -38,7 +38,7 @@ import './layout.css'
  *  locale service backs the sidebar's copy — see locales.ts). `modules`
  *  (rc.8+) is the client module system the chunk loader resolves its
  *  externals through — Cordis guards service access without inject. */
-export const inject = ['connection', 'slots', 'sessions', 'workspaces', 'locale', 'modules', 'uiRenderer']
+export const inject = ['connection', 'remote', 'slots', 'sessions', 'workspaces', 'locale', 'modules', 'uiRenderer']
 
 /**
  * Error boundary over the sidebar tree (root scope): a render error in the
@@ -139,7 +139,12 @@ export function apply(ctx: Context): void {
         const summary = ctx.sessions.list.getSnapshot().byId[sessionId]
         const parentSessionId = draft?.parentSessionId ?? summary?.parentId
         if (parentSessionId === undefined) throw new Error(`Side Chat session "${sessionId}" has no parent`)
-        await api.sidechatPermission(sessionId, parentSessionId, preset, draft !== undefined)
+        if (draft !== undefined) {
+          const result = await ctx.remote.commands.execute(parentSessionId, line, [])
+          if (!result.ok) return result
+          return { ok: true, value: { matched: result.value !== undefined } }
+        }
+        await api.sidechatPermission(sessionId, parentSessionId, preset)
         return { ok: true, value: { matched: true } }
       } catch (cause) {
         return routeFailure(cause)

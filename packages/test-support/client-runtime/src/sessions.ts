@@ -362,6 +362,11 @@ export class TestSessions implements ISessions {
     return undefined
   }
 
+  /** Fixture sessions use their own identity for ordinary command lookup. */
+  commandCatalogSessionId(sessionId: SessionId): SessionId | undefined {
+    return sessionId
+  }
+
   /** Fixture sessions use their own identity for read-only skill lookup. */
   skillCatalogSessionId(sessionId: SessionId): SessionId | undefined {
     return sessionId

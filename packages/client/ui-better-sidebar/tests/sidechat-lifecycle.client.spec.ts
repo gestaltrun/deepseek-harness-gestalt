@@ -118,6 +118,29 @@ describe('sidechat route lifecycle', () => {
     await sidechat.dispose()
   })
 
+  it('rejects a provisional permission request without an owned live child', async () => {
+    const setAgent = vi.fn()
+    const parent = { id: 'parent', session: { header: {} } } as unknown as Agent
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'agents') return { get: (id: string) => id === 'parent' ? parent : undefined }
+        if (name === 'permissionPresets') return { names: ['workspace-write'], setAgent }
+        return undefined
+      },
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.permission']({
+      childId: 'draft-child',
+      parentSessionId: 'parent',
+      preset: 'workspace-write',
+      provisional: true,
+    })).rejects.toThrow('Side Chat session "draft-child" is not running')
+
+    expect(setAgent).not.toHaveBeenCalled()
+    await sidechat.dispose()
+  })
+
   it('retains a validated model choice until a cold child resumes', async () => {
     const llm = {
       resolveCallConfig: vi.fn(() => Promise.resolve({

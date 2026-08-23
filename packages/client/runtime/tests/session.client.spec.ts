@@ -484,6 +484,30 @@ describe('prompt and cancel errors', () => {
     expect(api.callsOf('session.cancel')).toEqual([])
   })
 
+  it('does not fall through omitted feature-owned queue and command routes', async () => {
+    const api = new FakeApiClient()
+    const remote = fakeRemote()
+    const execute = vi.spyOn(remote.commands, 'execute')
+    const adapter = {
+      id: 'feature-owned',
+      handles: () => true,
+      prompt: vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } })),
+      cancel: vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } })),
+    }
+    const session = new Session(SID, api, remote, { admission: () => adapter })
+
+    await expect(session.updateQueue('message-1' as never, { kind: 'remove' })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    })
+    await expect(session.command('/permission workspace-write')).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    })
+    expect(api.callsOf('session.updateQueue')).toEqual([])
+    expect(execute).not.toHaveBeenCalled()
+  })
+
   it('routes an addressed child through non-activating history, continuation prompt, and interrupt only', async () => {
     const api = new FakeApiClient()
     const session = new Session(SID, api, fakeRemote(), {

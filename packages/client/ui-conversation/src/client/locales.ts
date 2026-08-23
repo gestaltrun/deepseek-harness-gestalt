@@ -20,7 +20,7 @@ export const zh = {
   'placeholder.parentOffline': '父会话已离线，无法继续发送；仍可停止当前运行',
   'placeholder.hero': '描述你想要构建的内容',
   'placeholder.workspace': '选择一个工作区开始',
-  'input.commands': '命令和技能',
+  'input.commands': '命令和 skill',
   'input.stop': '停止生成',
   'input.send': '发送消息',
   'annotation.add': '添加注释',

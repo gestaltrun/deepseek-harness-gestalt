@@ -218,6 +218,35 @@ describe('candidates: sessionId addressing', () => {
     ])
     expect(payloads).toEqual([{ sessionId: 'parent' }])
   })
+
+  it('refetches when a feature-owned catalog address changes after publication', async () => {
+    let catalogOwner = sid('parent')
+    const list = vi.fn<ListFn>(payload => Promise.resolve({
+      result: {
+        ok: true as const,
+        value: {
+          skills: (payload as { sessionId: SessionId }).sessionId === sid('parent')
+            ? [{ name: 'parent-skill', description: 'parent catalog', modelInvocable: true }]
+            : [{ name: 'child-skill', description: 'child catalog', modelInvocable: true }],
+        },
+      },
+    }))
+    const { source } = await bench(
+      list,
+      sid('child'),
+      undefined,
+      id => id === sid('child') ? catalogOwner : id,
+    )
+
+    await expect(source.candidates(proj('child'), req(''))).resolves.toEqual([
+      { name: 'parent-skill', description: 'parent catalog' },
+    ])
+    catalogOwner = sid('child')
+    await expect(source.candidates(proj('child'), req(''))).resolves.toEqual([
+      { name: 'child-skill', description: 'child catalog' },
+    ])
+    expect(list).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('catalog cache', () => {

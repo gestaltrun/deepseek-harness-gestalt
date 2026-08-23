@@ -297,7 +297,17 @@ export class Session implements SessionFace {
   async updateQueue(itemId: MessageId, action: QueueAction): Promise<RpcResult<{ accepted: true }>> {
     try {
       const admission = this.options.admission?.()
-      if (admission?.updateQueue !== undefined) {
+      if (admission !== undefined) {
+        if (admission.updateQueue === undefined) {
+          return {
+            ok: false,
+            error: {
+              code: 'internal',
+              message: 'the owning Session feature does not support queue mutation',
+              details: {},
+            },
+          }
+        }
         return await admission.updateQueue(this.sessionId, itemId, action)
       }
       return (await this.api.sessions.updateQueue({ sessionId: this.sessionId, itemId, action })).result
@@ -376,7 +386,19 @@ export class Session implements SessionFace {
    */
   async command(line: string): Promise<RemoteResult<{ matched: boolean }>> {
     const admission = this.options.admission?.()
-    if (admission?.command !== undefined) return await admission.command(this.sessionId, line)
+    if (admission !== undefined) {
+      if (admission.command === undefined) {
+        return {
+          ok: false,
+          error: {
+            code: 'internal',
+            message: 'the owning Session feature does not support commands',
+            details: {},
+          },
+        }
+      }
+      return await admission.command(this.sessionId, line)
+    }
     const result = await this.remote.commands.execute(this.sessionId, line, [])
     if (!result.ok) return result
     return { ok: true, value: { matched: result.value !== undefined } }

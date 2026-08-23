@@ -464,6 +464,14 @@ export class SessionRuntime implements ISessions {
     }
   }
 
+  /** Resolve the identity whose ordinary command routes may serve this Session. */
+  commandCatalogSessionId(sessionId: SessionId): SessionId | undefined {
+    const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
+    if (admission !== undefined) return admission.commandCatalogSessionId?.(sessionId)
+    if (this.manager.subagentAddress(sessionId) !== undefined) return undefined
+    return sessionId
+  }
+
   /** Resolve the catalog identity whose skills apply to this Session. */
   skillCatalogSessionId(sessionId: SessionId): SessionId | undefined {
     const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))

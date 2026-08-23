@@ -47,6 +47,7 @@ describe('CI metrics', () => {
         job('python runtime / release-shaped Linux x64 / plan targets', 'success', '2026-08-24T00:00:01.000Z', '2026-08-24T00:00:02.000Z'),
         job('all checks passed', 'success', '2026-08-24T00:00:15.000Z', '2026-08-24T00:00:40.000Z'),
         job('windows node 24 / native complete', 'failure', '2026-08-24T00:00:02.000Z', '2026-08-24T00:01:00.000Z'),
+        job('windows node 24 / native verdict', 'failure', '2026-08-24T00:00:02.000Z', '2026-08-24T00:01:00.000Z'),
       ]),
       run(2, 'cancelled', []),
       run(3, 'skipped', []),

@@ -47,6 +47,10 @@ const AGGREGATE_JOB_NAMES = new Set(['all checks passed'])
 const OBSERVATIONAL_JOB_NAMES = new Set([
   'macos electron runtime e2e',
   'windows node 24 / native complete',
+  'windows node 24 / native build and runtime',
+  'windows node 24 / native coverage',
+  'windows node 24 / native static portability',
+  'windows node 24 / native verdict',
 ])
 
 function isBookkeepingJob(name: string): boolean {

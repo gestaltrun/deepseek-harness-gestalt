@@ -107,7 +107,9 @@ describe('CI workflow', () => {
       ['node-24-coverage', 'ci-gates-coverage'],
       ['node-24-consumers', 'ci-gates-consumers'],
       ['node-compat', 'ci-gates-node-${{ matrix.node }}'],
-      ['windows-native', 'ci-gates-windows-native'],
+      ['windows-native-core', 'ci-gates-windows-native-core'],
+      ['windows-native-coverage', 'ci-gates-windows-native-coverage'],
+      ['windows-native-static', 'ci-gates-windows-native-static'],
     ])
     for (const [jobId, artifactName] of expected) {
       const job = workflow.jobs[jobId]
@@ -198,12 +200,12 @@ describe('CI workflow', () => {
     for (const { jobName, step } of setups) {
       expect(step, `${jobName} must not share pnpm/action-setup's default destination`).toMatchObject({
         with: {
-          dest: jobName === 'windows-native'
+          dest: jobName.startsWith('windows-native-')
             ? nativeWindowsPnpmDestination
             : runnerPrivatePnpmDestination,
         },
       })
-      if (jobName === 'windows-native') expect(step).not.toMatchObject({ with: { standalone: true } })
+      if (jobName.startsWith('windows-native-')) expect(step).not.toMatchObject({ with: { standalone: true } })
     }
   })
 
@@ -229,7 +231,7 @@ describe('CI workflow', () => {
       'serial-linux-selfhosted',
       'serial-macos',
       'serial-windows',
-      'windows-native',
+      'windows-native-coverage',
     ] as const
     const coverageJobs = workflows.flatMap((workflow) => {
       if (!isRecord(workflow.jobs)) throw new TypeError('CI workflows must define jobs')
@@ -268,12 +270,15 @@ describe('CI workflow', () => {
     expect(checkout).toMatchObject({ with: { 'fetch-depth': 0 } })
   })
 
-  it('keeps a required Wine Windows job, a non-blocking native Windows job with failover, and a master-only standby', () => {
+  it('keeps required Wine, one partitioned native Windows verdict, and a master-only standby', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const masterWorkflow = loadWorkflow('.github/workflows/ci-master.yml')
     if (!isRecord(workflow.jobs)
       || !isRecord(workflow.jobs.windows)
-      || !isRecord(workflow.jobs['windows-native'])
+      || !isRecord(workflow.jobs['windows-native-core'])
+      || !isRecord(workflow.jobs['windows-native-coverage'])
+      || !isRecord(workflow.jobs['windows-native-static'])
+      || !isRecord(workflow.jobs['windows-native-verdict'])
       || !isRecord(workflow.jobs['node-24'])
       || !isRecord(workflow.jobs['node-24-coverage'])
       || !isRecord(workflow.jobs['node-24-consumers'])
@@ -281,11 +286,14 @@ describe('CI workflow', () => {
       || !isRecord(masterWorkflow.jobs)
       || !isRecord(masterWorkflow.jobs['wine-apt-cache'])
       || !isRecord(masterWorkflow.jobs['serial-windows'])) {
-      throw new TypeError('CI workflow must define windows, windows-native, node-24, node-24-coverage, node-24-consumers, and all-checks-passed; ci-master must define wine-apt-cache and serial-windows')
+      throw new TypeError('CI workflow must define Wine, native Windows partitions and verdict, Linux workers, and all-checks-passed; ci-master must define wine-apt-cache and serial-windows')
     }
 
     const windows = workflow.jobs.windows
-    const windowsNative = workflow.jobs['windows-native']
+    const windowsNativeCore = workflow.jobs['windows-native-core']
+    const windowsNativeCoverage = workflow.jobs['windows-native-coverage']
+    const windowsNativeStatic = workflow.jobs['windows-native-static']
+    const windowsNativeVerdict = workflow.jobs['windows-native-verdict']
     const wineAptCache = masterWorkflow.jobs['wine-apt-cache']
     const serialWindows = masterWorkflow.jobs['serial-windows']
     const node24 = workflow.jobs['node-24']
@@ -294,7 +302,10 @@ describe('CI workflow', () => {
     const aggregate = workflow.jobs['all-checks-passed']
     if (!Array.isArray(windows.steps)
       || !Array.isArray(aggregate.needs)
-      || !isRecord(windowsNative.env)
+      || !isRecord(windowsNativeCore.env)
+      || !isRecord(windowsNativeCoverage.env)
+      || !isRecord(windowsNativeStatic.env)
+      || !Array.isArray(windowsNativeVerdict.needs)
       || !isRecord(node24.env)
       || !isRecord(node24Coverage.env)
       || !isRecord(node24Consumers.env)) {
@@ -310,29 +321,42 @@ describe('CI workflow', () => {
     expect(windows.if).toContain(prAfterPreflight)
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
 
-    // windows-native: non-blocking native job with failover, runs windows-complete.
-    // Its pool is resolved by the Windows-specific switch.
-    expect(typeof windowsNative['runs-on']).toBe('string')
-    expect(windowsNative['runs-on']).toContain('DSH_CI_FAILOVER_WINDOWS')
-    expect(windowsNative['runs-on']).not.toContain('DSH_CI_FAILOVER_LINUX')
-    expect(windowsNative['runs-on']).toContain('self-hosted')
-    expect(windowsNative['runs-on']).toContain('dsh-win-ci')
-    expect(windowsNative['runs-on']).toContain('windows-latest')
-    expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
-    expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toContain(prAfterPreflight)
-    expect(windowsNative.env).toMatchObject({
+    const nativePartitions = [windowsNativeCore, windowsNativeCoverage, windowsNativeStatic]
+    for (const partition of nativePartitions) {
+      expect(typeof partition['runs-on']).toBe('string')
+      expect(partition['runs-on']).toContain('DSH_CI_FAILOVER_WINDOWS')
+      expect(partition['runs-on']).not.toContain('DSH_CI_FAILOVER_LINUX')
+      expect(partition['runs-on']).toContain('dsh-win-ci')
+      expect(partition['runs-on']).toContain('windows-latest')
+      expect(partition.if).toContain(prAfterPreflight)
+      expect(partition['timeout-minutes']).toBe(20)
+    }
+    expect(windowsNativeCoverage.env).toMatchObject({
+      DSH_COVERAGE_PARTITIONS: '8',
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000',
+      DSH_GATE_CONCURRENCY: '2',
     })
-    expect(String(windowsNative.env.DSH_COVERAGE_MAX_WORKERS)).toContain("|| '1'")
-    expect(String(windowsNative.env.DSH_COVERAGE_PARTITION_CONCURRENCY)).toContain("&& '8'")
-    expect(String(windowsNative.env.DSH_COVERAGE_PARTITION_CONCURRENCY)).toContain("|| '1'")
-    expect(windowsNative.env.DSH_GATE_CONCURRENCY).toBe('1')
-    expect(String(windowsNative.env.DSH_PUBLINT_CONCURRENCY)).toContain("|| '1'")
-    const nativeCommandSteps = (windowsNative.steps as unknown[]).filter((step): step is Record<string, unknown> & { run: string } => (
-      isRecord(step) && typeof step.run === 'string'
-    ))
-    expect(nativeCommandSteps.map(step => step.run)).toContain('pnpm run check:ci:windows-complete')
+    expect(String(windowsNativeCoverage.env.DSH_COVERAGE_MAX_WORKERS)).toContain("|| '4'")
+    expect(String(windowsNativeCoverage.env.DSH_COVERAGE_PARTITION_CONCURRENCY)).toContain("|| '4'")
+    expect(windowsNativeVerdict.needs).toEqual([
+      'preflight',
+      'windows-native-core',
+      'windows-native-coverage',
+      'windows-native-static',
+    ])
+    expect(windowsNativeVerdict['runs-on']).toBe('ubuntu-latest')
+    expect(windowsNativeVerdict.name).toBe('windows node 24 / native verdict')
+    const nativeCommands = nativePartitions.map((partition) => {
+      if (!Array.isArray(partition.steps)) throw new TypeError('native partition must define steps')
+      return partition.steps
+        .filter((step): step is Record<string, unknown> & { run: string } => isRecord(step) && typeof step.run === 'string')
+        .map(step => step.run)
+    }).flat()
+    expect(nativeCommands).toEqual(expect.arrayContaining([
+      'pnpm run check:ci:windows-native-core',
+      'pnpm run check:ci:coverage',
+      'pnpm run check:ci:windows-native-static',
+    ]))
 
     // wine-apt-cache: master-only, seeds the Wine apt cache, lives in ci-master.
     expect(wineAptCache.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
@@ -343,9 +367,12 @@ describe('CI workflow', () => {
     expect(serialWindows['runs-on']).toEqual(['self-hosted', 'dsh-win-ci', 'windows'])
     expect(serialWindows.name).toBe('serial / windows (self-hosted standby)')
 
-    // Aggregate: Wine `windows` required, native `windows-native` excluded.
+    // Aggregate: Wine is required; the independent native verdict is observational.
     expect(aggregate.needs).toContain('windows')
-    expect(aggregate.needs).not.toContain('windows-native')
+    expect(aggregate.needs).not.toContain('windows-native-verdict')
+    expect(aggregate.needs).not.toContain('windows-native-core')
+    expect(aggregate.needs).not.toContain('windows-native-coverage')
+    expect(aggregate.needs).not.toContain('windows-native-static')
     expect(aggregate.needs).not.toContain('serial-windows')
     expect(aggregate.needs).not.toContain('electron-runtime-e2e-macos')
 

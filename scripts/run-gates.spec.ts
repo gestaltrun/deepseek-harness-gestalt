@@ -67,6 +67,8 @@ describe('gate graph validation', () => {
     'ci-consumers',
     'ci-windows-blocking',
     'ci-windows-complete',
+    'ci-windows-native-core',
+    'ci-windows-native-static',
     'ci-windows-observational',
     'node-compat',
     'check-all',
@@ -155,29 +157,33 @@ describe('gate graph validation', () => {
     },
   )
 
-  it('keeps native Windows coverage blocking while retaining the observational inventory', () => {
+  it('partitions the complete native Windows inventory without losing or weakening gates', () => {
     const complete = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
-    const observational = withPnpmEntrypoint(() => gatesForMode('ci-windows-observational'))
-      .filter(gate => gate.id !== 'build' && gate.id !== 'docs-site-build')
-    const byId = new Map(complete.map(subject => [subject.id, subject]))
+    const core = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-core'))
+    const coverage = withPnpmEntrypoint(() => gatesForMode('ci-coverage'))
+    const staticGates = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static'))
 
-    expect(byId.get('coverage')?.allowFailure).not.toBe(true)
-    expect(byId.get('coverage-exempt-heavy')?.allowFailure).not.toBe(true)
-    expect(byId.get('coverage')?.needs).toEqual(['build'])
-    expect(byId.get('coverage-exempt-heavy')?.needs).toEqual(['build'])
-    expect(byId.get('electron-runtime-e2e')?.allowFailure).not.toBe(true)
-    expect(byId.get('electron-runtime-e2e')?.displayCommand).toBe('pnpm run test:electron-runtime-e2e')
-    expect(byId.get('duplication')?.allowFailure).toBe(true)
-    expect(observational).not.toHaveLength(0)
-    for (const gate of observational) {
-      const completeGate = byId.get(gate.id)
-      expect(completeGate?.allowFailure).toBe(true)
-      expect(completeGate?.after).toEqual(expect.arrayContaining([
-        'coverage',
-        'coverage-exempt-heavy',
-      ]))
-      expect(completeGate?.needs).toEqual(gate.needs)
-    }
+    expect(complete.map(gate => gate.id)).toEqual([
+      ...core.map(gate => gate.id),
+      ...coverage.map(gate => gate.id),
+      ...staticGates.map(gate => gate.id),
+    ])
+    expect(new Set(complete.map(gate => gate.id)).size).toBe(complete.length)
+    expect(complete.every(gate => gate.allowFailure !== true)).toBe(true)
+    expect(core.map(gate => gate.id)).toEqual([
+      'build',
+      'windows-site',
+      'electron-runtime-e2e',
+      'publint',
+      'node-next-types',
+      'doc-typecheck',
+      'built-package-invariants',
+      'built-bin-smoke',
+    ])
+    expect(coverage.map(gate => gate.id)).toEqual(['coverage', 'coverage-exempt-heavy'])
+    expect(staticGates.map(gate => gate.id)).not.toContain('doc-typecheck')
+    expect(staticGates.map(gate => gate.id)).not.toContain('docs-site-build')
+    expect(staticGates.map(gate => gate.id)).toContain('duplication')
   })
 
   it.each(['ci-coverage', 'ci-primary'] as const)(

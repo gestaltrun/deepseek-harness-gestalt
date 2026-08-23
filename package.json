@@ -73,6 +73,8 @@
     "check:windows-wine": "bash scripts/wine-windows-gates.sh",
     "check:ci:windows-blocking": "tsx scripts/run-gates.ts ci-windows-blocking",
     "check:ci:windows-complete": "tsx scripts/run-gates.ts ci-windows-complete",
+    "check:ci:windows-native-core": "tsx scripts/run-gates.ts ci-windows-native-core",
+    "check:ci:windows-native-static": "tsx scripts/run-gates.ts ci-windows-native-static",
     "check:ci:windows-observational": "tsx scripts/run-gates.ts ci-windows-observational",
     "check:node-compat": "tsx scripts/run-gates.ts node-compat",
     "knip": "knip --treat-config-hints-as-errors",

@@ -368,6 +368,24 @@ describe('Session-owned Browser Workspace', () => {
     ])
 
     const observer = ctx.browserRuntime.observe.bind(ctx.browserRuntime)
+    const releaseFailure = ctx.sessions.prepare(SessionId('session-release-failure'))
+    const detachReleaseFailure = ctx.sessions.enter(releaseFailure)
+    ctx.sessions.announce(releaseFailure)
+    const releasePage = await ctx.browserWorkspace.create({ session: releaseFailure, profile: 'temporary' })
+    let markReleaseAttempt: (() => void) | undefined
+    const releaseAttempted = new Promise<void>((resolve) => { markReleaseAttempt = resolve })
+    ctx.browserRuntime.observe = async (request) => {
+      if (request.target.tabId === releasePage.target.tabId) {
+        markReleaseAttempt?.()
+        throw new Error('release observe failed')
+      }
+      return observer(request)
+    }
+    detachReleaseFailure()
+    await releaseAttempted
+    expect(listBrowserWorkspacePages(ctx.browserWorkspace.snapshot(releaseFailure)))
+      .toEqual([{ target: releasePage.target, revision: releasePage.revision }])
+
     ctx.browserRuntime.observe = async (request) => {
       if (request.target.tabId === live.target.tabId) throw new Error('cleanup observe failed')
       return observer(request)
@@ -413,6 +431,8 @@ describe('Session-owned Browser Workspace', () => {
 
   it('closes every live tab when its Session is archived', async () => {
     const ctx = await harness()
+    await expect(ctx.parallel('workspace/session-archived', SessionId('missing-session')))
+      .resolves.toBeUndefined()
     const session = ctx.sessions.create(SessionId('session-archive-cleanup'))
     const first = await ctx.browserWorkspace.create({ session, profile: 'temporary' })
     const second = await ctx.browserWorkspace.create({ session, profile: 'shared' })
@@ -424,6 +444,24 @@ describe('Session-owned Browser Workspace', () => {
     await expect(ctx.browserRuntime.observe({ target: second.target }))
       .resolves.toMatchObject({ status: 'closed' })
     expect(ctx.browserWorkspace.snapshot(session)).toEqual(EMPTY_BROWSER_WORKSPACE)
+  })
+
+  it('records unavailable Runtime revisions without replacing remembered page facts', async () => {
+    const ctx = await harness()
+    const session = ctx.sessions.create(SessionId('session-unavailable'))
+    const created = await ctx.browserWorkspace.create({ session, profile: 'temporary' })
+    ctx.browserRuntime.observe = async () => ({
+      status: 'unavailable',
+      target: created.target,
+      revision: created.revision + 1,
+      reason: 'unhealthy',
+      reconnecting: true,
+    })
+
+    await expect(ctx.browserWorkspace.observe({ session, target: created.target }))
+      .resolves.toMatchObject({ status: 'unavailable', revision: created.revision + 1 })
+    expect(listBrowserWorkspacePages(ctx.browserWorkspace.snapshot(session)))
+      .toEqual([{ target: created.target, revision: created.revision + 1 }])
   })
 
   it('persists the last non-blank page URL for restart recovery', async () => {

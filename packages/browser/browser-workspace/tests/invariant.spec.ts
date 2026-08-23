@@ -41,6 +41,8 @@ describe('Browser Workspace invariant', () => {
       { ...VALID, workspaces: [{ workspaceId: 'ws', profileId: 'p', activeBrowserId: null, browsers: [{ browserId: 'b', tabs: [{ tabId: 't' }], activeTabId: null }] }] },
       { ...VALID, workspaces: [{ workspaceId: 'ws', profileId: 'p', activeBrowserId: null, browsers: [{ browserId: 'b', tabs: [{ tabId: 't', revision: -1 }], activeTabId: null }] }] },
       { ...VALID, workspaces: [{ workspaceId: 'ws', profileId: 'p', activeBrowserId: null, browsers: [{ browserId: 'b', tabs: [{ tabId: 't', revision: 1.5 }], activeTabId: null }] }] },
+      { ...VALID, workspaces: [{ workspaceId: 'ws', profileId: 'p', activeBrowserId: null, browsers: [{ browserId: 'b', tabs: [{ tabId: 't', revision: 0, url: '' }], activeTabId: null }] }] },
+      { ...VALID, workspaces: [{ workspaceId: 'ws', profileId: 'p', activeBrowserId: null, browsers: [{ browserId: 'b', tabs: [{ tabId: 't', revision: 0, url: 1 }], activeTabId: null }] }] },
       { ...VALID, workspaces: [{
         workspaceId: 'ws',
         profileId: 'p',

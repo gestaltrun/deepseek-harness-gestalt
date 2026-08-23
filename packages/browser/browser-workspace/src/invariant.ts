@@ -50,6 +50,9 @@ function validateSnapshot(value: unknown, fail: InvariantFailure): void {
         if (typeof tab.revision !== 'number' || !Number.isSafeInteger(tab.revision) || tab.revision < 0) {
           fail('browser/workspace revision must be a non-negative safe integer')
         }
+        if (tab.url !== undefined && (typeof tab.url !== 'string' || tab.url.length === 0)) {
+          fail('browser/workspace url must be a non-empty string when present')
+        }
         if (tabIds.has(tab.tabId)) fail('browser/workspace repeats a tabId')
         tabIds.add(tab.tabId)
       }

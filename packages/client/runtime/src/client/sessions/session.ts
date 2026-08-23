@@ -23,6 +23,7 @@ import { PendingWait } from './pending.ts'
 import { Notifier } from './notifier.ts'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { SessionRemotes } from './remotes.ts'
+import type { SessionAdmissionAdapter } from '../contract/sessions.ts'
 import { ProjectionValueStore } from './projection-store.ts'
 import type { ProjectionsBaseline } from './projection-store.ts'
 import { resolvedClientTimeZone } from '../time-zone.ts'
@@ -54,6 +55,8 @@ export interface SessionOptions {
   projections?: ProjectionValueStore
   /** Runtime registries used by this Session-owned Conversation assembler. */
   conversation?: ConversationRuntime
+  /** Resolve the currently installed feature-owned admission route, if any. */
+  admission?: () => SessionAdmissionAdapter | undefined
 }
 
 /**
@@ -101,6 +104,8 @@ export class Session implements SessionFace {
   private removed = false
   private promptError: PromptError | null = null
   private lastAgentError: string | null = null
+  /** First visible event after an inherited seed marker for owned-suffix adapters. */
+  private historyFloorSeq: number | undefined
   /** Live events buffered during open/resync and stitched by sequence once history lands. */
   private liveBuffer: { event: SessionEvent; view: ToolEventView | undefined }[] = []
   /** Gap repair in flight; live events detour to the buffer until the tail page lands. */
@@ -202,7 +207,10 @@ export class Session implements SessionFace {
     this.notifier.markDirty()
     let result: RpcResult<{ accepted: true }>
     try {
-      if (this.address === undefined) {
+      const admission = this.options.admission?.()
+      if (admission !== undefined) {
+        result = await admission.prompt(this.sessionId, content, mode, signal)
+      } else if (this.address === undefined) {
         result = (await this.api.sessions.prompt({
           sessionId: this.sessionId,
           mode,
@@ -320,9 +328,12 @@ export class Session implements SessionFace {
     }
     let result: RpcResult<{ accepted: true }>
     try {
-      result = address !== undefined
-        ? (await this.api.subagents.interrupt(address)).result
-        : (await this.api.sessions.cancel({ sessionId: this.sessionId })).result
+      const admission = this.options.admission?.()
+      result = admission !== undefined
+        ? await admission.cancel(this.sessionId)
+        : address !== undefined
+          ? (await this.api.subagents.interrupt(address)).result
+          : (await this.api.sessions.cancel({ sessionId: this.sessionId })).result
     } catch (error) {
       result = transportError(error)
     }
@@ -385,9 +396,10 @@ export class Session implements SessionFace {
     try {
       const { result } = await this.history({ beforeSeq: this.baseSeq, maxMessages: PAGE_MESSAGES })
       if (!result.ok) return // keep the window as-is; do not overwrite openError (open already succeeded)
-      const older = result.value.events
+      const visible = this.visibleHistory(result.value.events, result.value.hasMore)
+      const older = visible.entries
       if (older.length === 0) {
-        this.hasMore = result.value.hasMore
+        this.hasMore = visible.hasMore
         this.conversation.prepend([], this.hasMore)
         return
       }
@@ -403,7 +415,7 @@ export class Session implements SessionFace {
       this.views = [...older.map(e => e.view), ...this.views]
       /* v8 ignore next -- the ?? arm needs older[0] undefined, but the empty-page branch above already returned. */
       this.baseSeq = older[0]?.event.seq ?? this.baseSeq
-      this.hasMore = result.value.hasMore
+      this.hasMore = visible.hasMore
       this.conversation.prepend(older.map(conversationInput), this.hasMore)
     } catch (error) {
       console.error('[web-runtime] loadOlder failed:', error)
@@ -431,6 +443,7 @@ export class Session implements SessionFace {
     this.events = []
     this.views = []
     this.baseSeq = 0
+    this.historyFloorSeq = undefined
     // Superseded, not settled: the baseline replay re-sends still-pending requested frames verbatim
     // (same rpcId), re-minting fresh waits; a stale reference's respond() still reaches the host.
     this.pending.clear()
@@ -655,6 +668,9 @@ export class Session implements SessionFace {
    *  baseline cannot overwrite a newer push frame); the window events themselves are
    *  never folded — the host is the only computation site. */
   private installWindow(entries: HistoryEntry[], hasMore: boolean, projections?: ProjectionsBaseline): void {
+    const visible = this.visibleHistory(entries, hasMore)
+    entries = visible.entries
+    hasMore = visible.hasMore
     this.events = entries.map(e => e.event)
     this.views = entries.map(e => e.view)
     this.baseSeq = this.events[0]?.seq ?? 0
@@ -780,6 +796,24 @@ export class Session implements SessionFace {
     return this.address === undefined
       ? this.api.sessions.history({ sessionId: this.sessionId, ...payload })
       : this.api.subagents.history({ ...this.address, ...payload })
+  }
+
+  /** Cut inherited fork seed rows at the durable marker for adapters that render only their own suffix. */
+  private visibleHistory(entries: HistoryEntry[], hasMore: boolean): { entries: HistoryEntry[]; hasMore: boolean } {
+    if (this.options.admission?.()?.historyScope !== 'owned-suffix') return { entries, hasMore }
+    const marker = entries.findLastIndex(entry => entry.event.type === 'session/end-seed')
+    if (marker === -1) {
+      if (this.historyFloorSeq === undefined) return { entries, hasMore }
+      const floor = this.historyFloorSeq
+      return {
+        entries: entries.filter(entry => entry.event.seq >= floor),
+        hasMore: false,
+      }
+    }
+    const markerEntry = entries[marker]
+    if (markerEntry === undefined) throw new Error('history marker index is outside the returned page')
+    this.historyFloorSeq = markerEntry.event.seq + 1
+    return { entries: entries.slice(marker + 1), hasMore: false }
   }
 }
 

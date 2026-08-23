@@ -29,6 +29,8 @@ export interface BrowserPageChromeProps extends BrowserPageChromeActions {
   visible?: boolean
   /** Called when observe settles on an open page. */
   onCommittedPage?: (page: BrowserPageState) => void
+  /** Replaces a projected target absent from the current Runtime. */
+  onMissingTarget?: (target: BrowserTarget) => BrowserPageState | undefined | Promise<BrowserPageState | undefined>
 }
 
 /**
@@ -37,9 +39,15 @@ export interface BrowserPageChromeProps extends BrowserPageChromeActions {
  * @returns the chrome tree, or a creating placeholder when the target is absent.
  */
 export function BrowserPageChrome({
-  target, listedRevision, refresh, observe, screenshot, t, visible, onCommittedPage,
+  target, listedRevision, refresh, observe, screenshot, t, visible, onCommittedPage, onMissingTarget,
 }: BrowserPageChromeProps) {
-  const { page, screenshot: shot } = useBrowserPage(target, observe, screenshot, listedRevision)
+  const { page, screenshot: shot } = useBrowserPage(
+    target,
+    observe,
+    screenshot,
+    listedRevision,
+    onMissingTarget,
+  )
   const [actionError, setActionError] = useState<string | undefined>(undefined)
   const [navigating, setNavigating] = useState(false)
   const [draft, setDraft] = useState('')

@@ -606,7 +606,7 @@ function buildAlphaLog(): SessionEvent[] {
         browsers: [{
           browserId: FX_BROWSER_TARGET.browserId,
           activeTabId: FX_BROWSER_TARGET.tabId,
-          tabs: [{ tabId: FX_BROWSER_TARGET.tabId, revision: 1 }],
+          tabs: [{ tabId: FX_BROWSER_TARGET.tabId, revision: 1, url: 'https://example.test/' }],
         }],
       }],
     },
@@ -1429,7 +1429,7 @@ interface FxBrowserWorkspace {
     readonly browsers: readonly {
       readonly browserId: string
       readonly activeTabId: string | null
-      readonly tabs: readonly { readonly tabId: string; readonly revision: number }[]
+      readonly tabs: readonly { readonly tabId: string; readonly revision: number; readonly url?: string }[]
     }[]
   }[]
   readonly activeWorkspaceId: string | null
@@ -1515,6 +1515,10 @@ export interface FixtureOptions {
   dropSessionCreateResponse?: boolean
   /** Order of the two successful create frames. */
   createFrameOrder?: 'session-first' | 'workspace-first'
+  /** Keep the projected Browser page while the simulated Runtime starts empty. */
+  browserRuntimeRestart?: boolean
+  /** Reject the first Browser close because the projected revision is stale. */
+  browserCloseRevisionConflict?: boolean
 }
 
 /** Inbox pump shared by both stream generators (FrameQueue pattern: ONE abort listener hung
@@ -2063,6 +2067,12 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   const requireBrowserSession = (id: SessionId): RpcResult<never> | undefined => requireGoalSession(id)
 
   const livePages = new Map<SessionId, ReturnType<typeof browserPage>>()
+  const missingBrowserPages = new Set<SessionId>(
+    options.browserRuntimeRestart ? [sid('fx-alpha')] : [],
+  )
+  const staleBrowserCloses = new Set<SessionId>(
+    options.browserCloseRevisionConflict ? [sid('fx-alpha')] : [],
+  )
 
   const chromeFor = (url: string): Pick<ReturnType<typeof browserPage>, 'url' | 'title' | 'text'> => {
     if (url === 'about:blank') return { url, title: 'New Tab', text: '' }
@@ -2080,19 +2090,25 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   const commitTabFacts = (
     id: SessionId,
     expectedRevision: number,
+    url?: string,
   ): number => {
     const revision = expectedRevision + 1
     const current = browserWorkspaceOf(id)
     const workspace = current.workspaces[0]
     const instance = workspace?.browsers[0]
     if (workspace !== undefined && instance !== undefined) {
+      const resolvedUrl = url ?? instance.tabs[0]?.url
       commitBrowserWorkspace(id, {
         ...current,
         workspaces: [{
           ...workspace,
           browsers: [{
             ...instance,
-            tabs: [{ tabId: FX_BROWSER_TARGET.tabId, revision }],
+            tabs: [{
+              tabId: FX_BROWSER_TARGET.tabId,
+              revision,
+              ...resolvedUrl === undefined || resolvedUrl === 'about:blank' ? {} : { url: resolvedUrl },
+            }],
           }],
         }],
       })
@@ -2114,7 +2130,10 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     create(id: SessionId, _request: unknown): RpcResult<ReturnType<typeof browserPage>> {
       const missing = requireBrowserSession(id)
       if (missing !== undefined) return missing
-      const page = browserPage(1)
+      const restarted = missingBrowserPages.delete(id)
+      const page = restarted
+        ? { ...browserPage(1), ...chromeFor('about:blank') }
+        : browserPage(1)
       commitBrowserWorkspace(id, {
         activeWorkspaceId: FX_BROWSER_TARGET.workspaceId,
         workspaces: [{
@@ -2124,7 +2143,11 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           browsers: [{
             browserId: FX_BROWSER_TARGET.browserId,
             activeTabId: FX_BROWSER_TARGET.tabId,
-            tabs: [{ tabId: FX_BROWSER_TARGET.tabId, revision: page.revision }],
+            tabs: [{
+              tabId: FX_BROWSER_TARGET.tabId,
+              revision: page.revision,
+              ...page.url === 'about:blank' ? {} : { url: page.url },
+            }],
           }],
         }],
       })
@@ -2147,9 +2170,10 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     ): RpcResult<ReturnType<typeof browserPage>> {
       const missing = requireBrowserSession(id)
       if (missing !== undefined) return missing
-      const revision = commitTabFacts(id, expectedRevision)
+      const revision = expectedRevision + 1
       const current = openPageOfSession(id, revision)
       const next = input.url === undefined ? current : { ...current, ...chromeFor(input.url) }
+      commitTabFacts(id, expectedRevision, next.url)
       livePages.set(id, next)
       return { ok: true, value: next }
     },
@@ -2161,20 +2185,27 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     ): RpcResult<ReturnType<typeof browserPage>> {
       const missing = requireBrowserSession(id)
       if (missing !== undefined) return missing
-      const revision = commitTabFacts(id, expectedRevision)
+      const revision = expectedRevision + 1
       const next = { ...browserPage(revision), ...chromeFor(url) }
+      commitTabFacts(id, expectedRevision, next.url)
       livePages.set(id, next)
       return { ok: true, value: next }
     },
     observe(id: SessionId, _target: typeof FX_BROWSER_TARGET): RpcResult<ReturnType<typeof browserPage> | { status: 'closed'; target: typeof FX_BROWSER_TARGET; revision: number }> {
       const missing = requireBrowserSession(id)
       if (missing !== undefined) return missing
+      if (missingBrowserPages.has(id)) {
+        return {
+          ok: false,
+          error: { code: 'internal', message: 'browser target is not present', details: {} },
+        }
+      }
       const current = browserWorkspaceOf(id)
       const tab = current.workspaces[0]?.browsers[0]?.tabs[0]
       if (current.workspaces.length === 0 || tab === undefined) {
         return { ok: true, value: { status: 'closed', target: FX_BROWSER_TARGET, revision: 0 } }
       }
-      return { ok: true, value: openPageOfSession(id, tab.revision) }
+      return { ok: true, value: livePages.get(id) ?? browserPage(tab.revision) }
     },
     screenshot(id: SessionId, _target: typeof FX_BROWSER_TARGET): RpcResult<{
       target: typeof FX_BROWSER_TARGET
@@ -2207,6 +2238,17 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     close(id: SessionId, _target: typeof FX_BROWSER_TARGET, expectedRevision: number): RpcResult<{ status: 'closed'; target: typeof FX_BROWSER_TARGET; revision: number }> {
       const missing = requireBrowserSession(id)
       if (missing !== undefined) return missing
+      if (staleBrowserCloses.delete(id)) {
+        livePages.set(id, openPageOfSession(id, expectedRevision + 2))
+        return {
+          ok: false,
+          error: {
+            code: 'internal',
+            message: `BROWSER_REVISION_CONFLICT: expected ${expectedRevision}, current ${expectedRevision + 2}`,
+            details: {},
+          },
+        }
+      }
       livePages.delete(id)
       commitBrowserWorkspace(id, EMPTY_FX_BROWSER_WORKSPACE)
       return { ok: true, value: { status: 'closed', target: FX_BROWSER_TARGET, revision: expectedRevision + 1 } }
@@ -3545,5 +3587,7 @@ function fixtureOptionsFromLocation(): FixtureOptions {
     failWorkspaceAttach: query.get('fixtureAttach') === 'fail',
     dropSessionCreateResponse: query.get('fixtureSessionCreate') === 'drop-response',
     createFrameOrder: query.get('fixtureFrames') === 'workspace-first' ? 'workspace-first' : 'session-first',
+    browserRuntimeRestart: query.get('fixtureBrowser') === 'restart',
+    browserCloseRevisionConflict: query.get('fixtureBrowserClose') === 'stale',
   }
 }

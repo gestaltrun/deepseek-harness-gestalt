@@ -28,6 +28,16 @@ export interface UiRendererService {
    * @returns Disposer that unmounts the React root.
    */
   mount: (container: HTMLElement) => () => void
+  /**
+   * Mount one declared Session slot under an explicit identity without changing shell selection.
+   * The caller owns the container and must invoke the returned disposer before discarding it.
+   * @param container - Empty mount point owned by the feature shell.
+   * @param slotKey - Declared non-root Session slot.
+   * @param sessionId - Exact Session identity supplying the standard props.
+   * @param ownerProps - Owner share for the target slot.
+   * @returns Disposer that unmounts the independent React root.
+   */
+  mountSession: (container: HTMLElement, slotKey: string, sessionId: string, ownerProps?: object) => () => void
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -80,6 +90,18 @@ export function apply(ctx: Context): void {
   ctx.reflect.provide('uiRenderer', {
     mount: (container: HTMLElement): (() => void) => {
       const root = mountApp(container, buildRenderApp({ ctx }))
+      return () => { root.unmount() }
+    },
+    mountSession: (
+      container: HTMLElement,
+      slotKey: string,
+      sessionId: string,
+      ownerProps: object = {},
+    ): (() => void) => {
+      const root = createRoot(container)
+      flushSync(() => {
+        root.render(ctx.slots.renderSessionSlot(slotKey, sessionId, ownerProps))
+      })
       return () => { root.unmount() }
     },
   })

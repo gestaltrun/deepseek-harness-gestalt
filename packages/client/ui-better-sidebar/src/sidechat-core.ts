@@ -4,7 +4,7 @@
  * node test environment can import it.
  *
  * A side thread is a child session the plugin creates ITSELF with a custom
- * seed — the parent session's FULL event log up to the click moment
+ * seed — the parent session's FULL event log up to the first-submit moment
  * (completed turns, the unanswered user message, and — when the parent is
  * mid-turn — the in-progress assistant output and tool activity). The log
  * model forbids open-turn seeds, so an in-flight parent turn is copied
@@ -16,23 +16,18 @@
  * the open turn and carrying the partial content as a structured text
  * snapshot inside the boundary prompt.
  */
-import type { SidebarHistoryEntry, SidebarSessionSummary } from './context-types.ts'
-
-/** The durable thread-label prefix (also the row filter in the client list). */
+/** The durable thread-label prefix used to identify Side Chat Sessions. */
 export const SIDE_LABEL_PREFIX = 'Side: '
 
-/** The pinned label of a freshly created thread that no prompt has reached
- *  yet (Codex-style immediate create: the tab opens an EMPTY thread, the
- *  first composer message carries the boundary and earns the real label).
- *  The client renders it localized; the prefix keeps the row filter honest. */
+/** The historical placeholder label of a persisted empty thread created by
+ *  builds that published the child before its first prompt. The client renders
+ *  it localized; the prefix keeps the row filter honest. */
 export const SIDE_NEW_THREAD_TITLE = 'Side: New thread'
 
 /** Maximum code points kept in a durable thread label (matches subagent labels). */
 export const LABEL_MAX_CHARS = 48
 
-/** The boundary message's opening line — the transcript mapping drops user
- *  rows starting with it (same first line as dsh-sidechain's boundary, so
- *  the two plugins' threads render consistently in either UI). */
+/** The boundary message's opening line. */
 export const SIDE_BOUNDARY_PREFIX = 'Side conversation boundary'
 
 /** The plugin identity stamped on the source of context-injection messages
@@ -209,7 +204,7 @@ const SNAPSHOT_TOTAL_CAP = 8000
 
 /**
  * Build the side-thread inheritance for one parent log: the full event log
- * up to the click moment, honestly closed when it ends inside an open turn.
+ * up to the first-submit moment, honestly closed when it ends inside an open turn.
  */
 export function buildSidechatInheritance(events: readonly SidechatLogEvent[]): SidechatInheritance {
   if (events.length === 0) return { seed: [], snapshot: null }
@@ -243,11 +238,6 @@ export function buildSidechatInheritance(events: readonly SidechatLogEvent[]): S
     data: { turn, reason: { kind: 'interrupted' } },
   })
   return { seed, snapshot: null }
-}
-
-/** The seed half of {@link buildSidechatInheritance} (test convenience). */
-export function sidechatSeed(events: readonly SidechatLogEvent[]): SeedEvent[] {
-  return buildSidechatInheritance(events).seed
 }
 
 /**
@@ -323,35 +313,6 @@ export function buildOpenTurnSnapshot(events: readonly SidechatLogEvent[]): stri
     : `Parent session in-progress turn (reference only):\n\n${body}`
 }
 
-/** One side-thread row in the client's thread list. */
-export interface SideThreadRow {
-  id: string
-  /** The durable thread title ('Side: …'). */
-  title: string
-  /** Whether the thread's agent is currently running. */
-  running: boolean
-}
-
-/**
- * Derive the side threads of one parent session from the client session list:
- * durable `origin: 'subagent'` children of the parent whose pinned title
- * carries the thread label prefix (our creation path pins it via
- * sessionTitle.rename; dsh-sidechain threads share the convention, so they
- * are visible here too).
- */
-export function sideThreadRows(
-  byId: Readonly<Record<string, SidebarSessionSummary>>,
-  sessionId: string,
-): SideThreadRow[] {
-  const rows: SideThreadRow[] = []
-  for (const summary of Object.values(byId)) {
-    if (summary.origin !== 'subagent' || summary.parentId !== sessionId) continue
-    if (!summary.displayTitle.startsWith(SIDE_LABEL_PREFIX)) continue
-    rows.push({ id: summary.id, title: summary.displayTitle, running: summary.running === true })
-  }
-  return rows
-}
-
 /** Truncate + prefix a question into a durable thread label. */
 export function sideLabel(question: string): string {
   const flat = question.replace(/\s+/g, ' ').trim()
@@ -399,53 +360,6 @@ export function isContextInjectionMessage(data: Record<string, unknown>): boolea
   const source = data.source as { kind?: unknown } | null | undefined
   if (source?.kind !== undefined && source.kind !== 'user') return true
   return messageLeadText(data).startsWith(SIDE_BOUNDARY_PREFIX)
-}
-
-/** The info the thread header shows (live runtime state + agent identity). */
-export interface SidechatThreadInfo {
-  /** A live agent drives the thread right now (false = cold/persisted). */
-  live: boolean
-  /** Live lifecycle state; absent on cold threads. */
-  status?: 'idle' | 'running'
-  /** Provider route of the live agent. */
-  provider?: string
-  /** Model id of the live agent. */
-  model?: string
-  /** The recorded agent preset (live header, or persisted on cold reads). */
-  preset?: string
-}
-
-/** The events a thread produced itself: everything after the LAST
- *  `session/end-seed` marker (the fork-seed boundary). */
-export function threadOwnEvents(entries: readonly SidebarHistoryEntry[]): SidechatLogEvent[] {
-  const events = entries.map(entry => entry.event)
-  for (let index = events.length - 1; index >= 0; index--) {
-    if (events[index]?.type === 'session/end-seed') return events.slice(index + 1)
-  }
-  return events
-}
-
-/**
- * Whether the thread has at least one completed turn — the save-as-new-
- * session precondition (`session.fork` refuses to fork before the first
- * `turn/end`).
- */
-export function threadHasCompletedTurn(entries: readonly SidebarHistoryEntry[]): boolean {
-  return threadOwnEvents(entries).some(event => event.type === 'turn/end')
-}
-
-/** Whether the thread ends with a user message that no completed turn
- *  answered yet — such a pending follow-up is NOT carried into the saved
- *  session (the fork cut is the last `turn/end`). */
-export function threadTrailingPending(entries: readonly SidebarHistoryEntry[]): boolean {
-  const own = threadOwnEvents(entries)
-  let lastUser = -1
-  let lastTurnEnd = -1
-  own.forEach((event, index) => {
-    if (event.type === 'user/message') lastUser = index
-    if (event.type === 'turn/end') lastTurnEnd = index
-  })
-  return lastUser > lastTurnEnd
 }
 
 /**

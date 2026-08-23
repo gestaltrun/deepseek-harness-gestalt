@@ -9,6 +9,7 @@ import * as WorkbenchInvariant from '../src/invariant.ts'
 import { SNAPSHOT_PREFS_NS } from '../src/snapshot-browser.ts'
 
 const NS = settingsNamespace(SNAPSHOT_PREFS_NS)
+const TARGET = { profileId: 'p', workspaceId: 'w', browserId: 'b', tabId: 't' }
 
 class SettingsService extends Service {
   readonly values = new Map<string, Record<string, unknown>>()
@@ -202,16 +203,19 @@ describe('ui-workbench client apply', () => {
       renderTab: (props: { ctx: Context; tab: { id: string }; scope: { sessionId: string } }) => unknown
       createRequest: () => { profile: string }
       ensureOfficial: (tabId: string) => void
+      recoverOfficial: (tabId: string, target: typeof TARGET) => Promise<unknown>
     }
     expect(typeof face.reveal).toBe('function')
     expect(typeof face.renderTab).toBe('function')
     expect(typeof face.createRequest).toBe('function')
     expect(typeof face.ensureOfficial).toBe('function')
+    expect(typeof face.recoverOfficial).toBe('function')
     face.reveal('s1')
     expect(sidebar.setPanelOpen).toHaveBeenCalledWith(true)
     expect(face.renderTab({ ctx, tab: { id: 'browser:1' }, scope: { sessionId: 's1' } })).toBeTruthy()
     expect(face.createRequest()).toEqual({ profile: 'shared' })
     face.ensureOfficial('browser:1')
+    await expect(face.recoverOfficial('browser:1', TARGET)).resolves.toBeUndefined()
   })
 
   it('subscribes only to the session list when subscribeState is absent', async () => {

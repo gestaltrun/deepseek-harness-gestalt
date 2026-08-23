@@ -446,6 +446,40 @@ describe('paging', () => {
 })
 
 describe('prompt and cancel errors', () => {
+  it('uses a feature admission adapter and renders only events after the inherited seed marker', async () => {
+    const api = new FakeApiClient()
+    const prompt = vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } }))
+    const cancel = vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } }))
+    const adapter = {
+      id: 'sidechat',
+      handles: () => true,
+      historyScope: 'owned-suffix' as const,
+      prompt,
+      cancel,
+    }
+    const session = new Session(SID, api, fakeRemote(), {
+      conversation: TEST_CONVERSATION,
+      admission: () => adapter,
+    })
+    const parent = plainTurn(0, 0, 'parent', 'parent answer')
+    const marker = {
+      type: 'session/end-seed', seq: parent.length, time: 1_700_000_000_000 + parent.length, data: {},
+    } as unknown as SessionEvent
+    const own = plainTurn(parent.length + 1, 1, 'side', 'side answer')
+    api.onHistory = () => histResponse([...parent, marker, ...own], true)
+
+    await session.open()
+    await session.prompt([{ type: 'text', text: 'follow up' }], 'queue')
+    await session.cancel()
+
+    expect(chatSeqs(session.getSnapshot())).toEqual(own.map(event => event.seq))
+    expect(session.getSnapshot().hasMore).toBe(false)
+    expect(prompt).toHaveBeenCalledWith(SID, [{ type: 'text', text: 'follow up' }], 'queue', undefined)
+    expect(cancel).toHaveBeenCalledWith(SID)
+    expect(api.callsOf('session.prompt')).toEqual([])
+    expect(api.callsOf('session.cancel')).toEqual([])
+  })
+
   it('routes an addressed child through non-activating history, continuation prompt, and interrupt only', async () => {
     const api = new FakeApiClient()
     const session = new Session(SID, api, fakeRemote(), {

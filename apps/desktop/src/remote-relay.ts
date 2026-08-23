@@ -13,6 +13,7 @@ import {
   type RelayReadyMessage,
   type RelayRouteId,
   type CompanionOperation,
+  type CompanionProjection,
   type CompanionResult,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { RelayEndpointSocket } from '@deepseek-ai/dsh-remote-access-client'
@@ -74,7 +75,8 @@ type DesktopRelaySender = (
 export type DesktopCompanionOperationHandler = (
   operation: CompanionOperation,
   pairingSelector: RelayPairingSelector,
-) => Promise<CompanionResult>
+  context: { generation: number; desktopRevision: number },
+) => Promise<CompanionResult | CompanionProjection | readonly CompanionResult[]>
 
 interface DesktopSnowProjection {
   routeId: RelayRouteId
@@ -159,11 +161,23 @@ export class DesktopSnowRelayChannelOwner {
         if (this.handleOperation === undefined) {
           throw new Error('Desktop Companion operation handler is unavailable')
         }
-        const result = await this.handleOperation(message.operation, pairingSelector)
+        const output = await this.handleOperation(message.operation, pairingSelector, {
+          generation: existing.peer.generation,
+          desktopRevision: this.desktopRevision,
+        })
         if (!this.isCurrent(current, pairingSelector, projected)) {
           throw new Error('Desktop Relay rejected a stale Companion operation result')
         }
-        await this.send(pairingSelector, sourceAttachmentId, existing.channel.seal({ type: 'result', result }))
+        const outputs = Array.isArray(output) ? output : [output]
+        for (const item of outputs) {
+          if (!this.isCurrent(current, pairingSelector, projected)) {
+            throw new Error('Desktop Relay rejected a stale Companion operation result')
+          }
+          const message = isCompanionProjection(item)
+            ? { type: 'projection' as const, projection: item }
+            : { type: 'result' as const, result: item }
+          await this.send(pairingSelector, sourceAttachmentId, existing.channel.seal(message))
+        }
       }
       return
     }
@@ -209,6 +223,13 @@ export class DesktopSnowRelayChannelOwner {
       && retained.peers.some(candidate => candidate.attachmentId === peer.attachmentId
         && candidate.generation === peer.generation && candidate.pairingSelector === peer.pairingSelector)
   }
+}
+
+function isCompanionProjection(
+  value: CompanionResult | CompanionProjection,
+): value is CompanionProjection {
+  return value.type === 'foreground-sync' || value.type === 'transcript-page'
+    || value.type === 'surface-snapshot' || value.type === 'conversation-snapshot'
 }
 
 /**

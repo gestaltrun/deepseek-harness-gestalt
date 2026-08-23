@@ -1,7 +1,10 @@
 /** Desktop authority for product Companion attachments and Session search. */
 
+import { createHash } from 'node:crypto'
 import type { PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
+  encodeProtocolBase64Url,
+  parseCompanionInteractionId,
   parseCompanionSessionId,
   REMOTE_PROTOCOL_LIMITS,
   type CompanionAttachmentRejectedResult,
@@ -9,8 +12,11 @@ import {
   type CompanionOfferAttachmentOperation,
   type CompanionOperationFailedResult,
   type CompanionResult,
+  type CompanionProjection,
+  type CompanionOperation,
   type CompanionSearchSessionsOperation,
   type CompanionSessionSearchResult,
+  type CompanionSessionId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
   CompanionAttachmentReceiveError,
@@ -22,9 +28,22 @@ import {
   type DesktopHostRpcOptions,
   type DesktopHostRpcResult,
 } from './host-rpc.ts'
+import type { DesktopCompanionOperationLedger } from './companion-operation-ledger.ts'
+import { DesktopCompanionInteractionRegistry } from './companion-interactions.ts'
 
 /** Operations owned by the attachment and authoritative-search product bridge. */
-export type CompanionProductOperation = CompanionOfferAttachmentOperation | CompanionSearchSessionsOperation
+export type CompanionProductOperation = Exclude<CompanionOperation, { type: 'query-operation-status' }>
+
+/** One exact Host pending request retained only by Desktop endpoint memory. */
+export interface DesktopPendingCompanionInteraction {
+  rpcId: string
+  kind: 'approval' | 'question'
+  sessionId: CompanionSessionId
+  approvalId?: string
+}
+
+/** One or more encrypted outputs produced by an allowlisted product operation. */
+export type DesktopCompanionOperationOutput = CompanionResult | CompanionProjection | readonly CompanionResult[]
 
 /** Desktop product dependencies scoped to one authenticated Personal Pairing. */
 export interface CompanionProductOperationDependencies {
@@ -49,6 +68,17 @@ export interface CompanionProductOperationDependencies {
     mediaType: string
     plaintext: Uint8Array
   }): Promise<DesktopHostRpcResult>
+  /** Physical Snow generation owning every emitted projection. */
+  generation: number
+  /** Current Desktop projection revision. */
+  desktopRevision: number
+  /** Platform-authenticated Desktop Installation presentation. */
+  desktopName: string
+  /** Resolve a pairing-private interaction id to one current Host request. */
+  resolveInteraction(interactionId: ReturnType<typeof parseCompanionInteractionId>):
+  DesktopPendingCompanionInteraction | undefined
+  /** Current Host waits projected to this pairing's private ids. */
+  pendingInteractions(sessionId: CompanionSessionId): readonly unknown[]
 }
 
 /** Per-pairing dependencies supplied by the reviewed Desktop channel owner. */
@@ -57,9 +87,14 @@ export type DesktopCompanionPairingDependencies = Omit<CompanionProductOperation
 /** Shipped Desktop owner that follows Web Host replacement and executes decoded product operations. */
 export class DesktopCompanionProductOwner {
   private installed: { readonly rpc: DesktopHostRpc } | undefined
+  private ledger: DesktopCompanionOperationLedger | undefined
+  private readonly interactions = new DesktopCompanionInteractionRegistry()
 
   /** @param hostOptions - response bound and request deadline for every Web Host generation. */
   constructor(private readonly hostOptions: DesktopHostRpcOptions) {}
+
+  /** @param ledger - durable pairing-scoped mutation idempotency owner. */
+  installLedger(ledger: DesktopCompanionOperationLedger): void { this.ledger = ledger }
 
   /**
    * Install the current Web Host loopback RPC.
@@ -67,11 +102,37 @@ export class DesktopCompanionProductOwner {
    * @returns disposer that cannot remove a replacement installation.
    */
   installHost(baseUrl: string): () => void {
-    const installed = { rpc: createDesktopHostRpc(baseUrl, this.hostOptions) }
+    const rpc = createDesktopHostRpc(baseUrl, this.hostOptions)
+    const cancellation = new AbortController()
+    const installed = { rpc, cancellation }
+    this.interactions.clear()
     this.installed = installed
-    return () => {
-      if (this.installed === installed) this.installed = undefined
+    if (rpc.watchInteractions !== undefined) {
+      void rpc.watchInteractions(cancellation.signal, (envelope) => { this.interactions.accept(envelope) })
+        .catch((error: unknown) => {
+          if (!cancellation.signal.aborted) console.error('[desktop-companion] Host interaction stream failed:', error)
+        })
     }
+    return () => {
+      cancellation.abort()
+      if (this.installed === installed) {
+        this.installed = undefined
+        this.interactions.clear()
+      }
+    }
+  }
+
+  /** Resolve one pairing-private interaction id against current Host pending state. */
+  resolveInteraction(
+    interactionId: ReturnType<typeof parseCompanionInteractionId>,
+    attachmentKey: Uint8Array,
+  ): DesktopPendingCompanionInteraction | undefined {
+    return this.interactions.resolve(interactionId, attachmentKey)
+  }
+
+  /** Project current Host waits for one Session under this pairing's private ids. */
+  pendingInteractions(sessionId: CompanionSessionId, attachmentKey: Uint8Array): readonly unknown[] {
+    return this.interactions.project(sessionId, attachmentKey)
   }
 
   /**
@@ -83,14 +144,26 @@ export class DesktopCompanionProductOwner {
   async handle(
     operation: CompanionProductOperation,
     dependencies: DesktopCompanionPairingDependencies,
-  ): Promise<CompanionResult> {
+  ): Promise<DesktopCompanionOperationOutput> {
     const host = this.installed?.rpc
     if (host === undefined) {
       return operationFailed(operation, {
         kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Web Host is not available',
       })
     }
-    return await handleCompanionProductOperation(operation, { ...dependencies, host })
+    const execute = async () => await handleCompanionProductOperation(operation, { ...dependencies, host })
+    if (!isLedgerMutation(operation)) return await execute()
+    if (this.ledger === undefined) return operationFailed(operation, {
+      kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Companion operation ledger is unavailable',
+    })
+    return await this.ledger.execute(dependencies.pairingId, operation, async () => {
+      const output = await execute()
+      if (Array.isArray(output) || output.type === 'surface-snapshot' || output.type === 'conversation-snapshot'
+        || output.type === 'transcript-page' || output.type === 'foreground-sync') {
+        throw new Error('Desktop Companion mutation produced a projection')
+      }
+      return output as CompanionResult
+    })
   }
 
   /**
@@ -132,17 +205,150 @@ export class DesktopCompanionProductOwner {
 export async function handleCompanionProductOperation(
   operation: CompanionProductOperation,
   dependencies: CompanionProductOperationDependencies,
-): Promise<CompanionResult> {
+): Promise<DesktopCompanionOperationOutput> {
   switch (operation.type) {
     case 'offer-attachment':
       return await receiveAttachment(operation, dependencies)
     case 'search-sessions':
       return await searchSessions(operation, dependencies.host)
+    case 'refresh-surface':
+      return await refreshSurface(operation, dependencies)
+    case 'load-history':
+      return await loadHistory(operation, dependencies)
+    case 'submit-prompt':
+      return await acceptedHostMutation(operation, dependencies, 'session.prompt', {
+        sessionId: operation.sessionId,
+        mode: 'queue',
+        content: [{ type: 'text', text: operation.text }],
+      })
+    case 'cancel-session':
+      return await acceptedHostMutation(operation, dependencies, 'session.cancel', {
+        sessionId: operation.sessionId,
+      })
+    case 'settle-interaction':
+      return await settleInteraction(operation, dependencies)
+    case 'read-image':
+      return await readImage(operation, dependencies)
     default: {
       const never: never = operation
       return never
     }
   }
+}
+
+async function refreshSurface(
+  operation: Extract<CompanionProductOperation, { type: 'refresh-surface' }>,
+  dependencies: CompanionProductOperationDependencies,
+): Promise<CompanionProjection | CompanionOperationFailedResult> {
+  const [sessionResponse, workspaceResponse] = await Promise.all([
+    dependencies.host.call('session.list', {}),
+    dependencies.host.call('workspace.list', {}),
+  ])
+  if (!sessionResponse.ok) return operationFailed(operation, normalizeFailure(sessionResponse.failure))
+  if (!workspaceResponse.ok) return operationFailed(operation, normalizeFailure(workspaceResponse.failure))
+  const sessions = parseSurfaceSessions(sessionResponse.value)
+  const workspaces = parseSurfaceWorkspaces(workspaceResponse.value, new Set(sessions.map(session => session.sessionId)))
+  if (sessions === undefined || workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
+  return {
+    type: 'surface-snapshot', operationId: operation.operationId,
+    generation: dependencies.generation, desktopRevision: dependencies.desktopRevision,
+    desktopName: dependencies.desktopName,
+    sessions, workspaces, hasMore: sessions.length === REMOTE_PROTOCOL_LIMITS.surfaceSessionRows,
+  }
+}
+
+async function loadHistory(
+  operation: Extract<CompanionProductOperation, { type: 'load-history' }>,
+  dependencies: CompanionProductOperationDependencies,
+): Promise<CompanionProjection | CompanionOperationFailedResult> {
+  const response = await dependencies.host.call('session.history', {
+    sessionId: operation.sessionId,
+    ...(operation.beforeSeq === undefined ? {} : { beforeSeq: operation.beforeSeq }),
+    maxMessages: operation.maxMessages,
+  })
+  if (!response.ok) return operationFailed(operation, normalizeFailure(response.failure))
+  const conversation = parseConversationHistory(
+    response.value, operation.sessionId, dependencies.pendingInteractions(operation.sessionId),
+  )
+  if (conversation === undefined) return invalidHostResult(operation, 'history')
+  return {
+    type: 'conversation-snapshot', operationId: operation.operationId,
+    generation: dependencies.generation, desktopRevision: dependencies.desktopRevision,
+    sessionId: operation.sessionId, conversation,
+  }
+}
+
+async function acceptedHostMutation(
+  operation: Extract<CompanionProductOperation, { type: 'submit-prompt' | 'cancel-session' }>,
+  dependencies: CompanionProductOperationDependencies,
+  method: 'session.prompt' | 'session.cancel',
+  payload: Record<string, unknown>,
+): Promise<CompanionResult> {
+  const response = await dependencies.host.call(method, payload, { rpcId: operation.operationId })
+  if (!response.ok) return operationFailed(operation, normalizeFailure(response.failure))
+  if (!isRecord(response.value) || response.value.accepted !== true) return invalidHostResult(operation, method)
+  return { type: 'confirmed', operationId: operation.operationId, committedAt: dependencies.now(), outcome: 'accepted' }
+}
+
+async function settleInteraction(
+  operation: Extract<CompanionProductOperation, { type: 'settle-interaction' }>,
+  dependencies: CompanionProductOperationDependencies,
+): Promise<CompanionResult> {
+  const pending = dependencies.resolveInteraction(operation.interactionId)
+  if (pending === undefined || pending.sessionId !== operation.sessionId
+    || (operation.settlement.kind === 'approval' ? pending.kind !== 'approval' : pending.kind !== 'question')) {
+    return { type: 'interaction-receipt', operationId: operation.operationId, accepted: false, reason: 'not-pending' }
+  }
+  const respond = dependencies.host.respond
+  if (respond === undefined) return operationFailed(operation, {
+    kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Host interaction response is unavailable',
+  })
+  let result: Record<string, unknown>
+  if (operation.settlement.kind === 'approval') {
+    if (pending.approvalId === undefined) return { type: 'interaction-receipt', operationId: operation.operationId, accepted: false, reason: 'bad-response' }
+    result = { ok: true, value: {
+      sessionId: operation.sessionId, approvalId: pending.approvalId, outcome: operation.settlement.outcome,
+    } }
+  } else if (operation.settlement.kind === 'question') {
+    result = { ok: true, value: { sessionId: operation.sessionId, answer: { answers: operation.settlement.answers } } }
+  } else {
+    result = { ok: false, error: { code: 'cancelled', message: 'Mobile user cancelled Ask User', details: {} } }
+  }
+  const receipt = await respond(pending.rpcId, result)
+  return { type: 'interaction-receipt', operationId: operation.operationId, ...receipt }
+}
+
+async function readImage(
+  operation: Extract<CompanionProductOperation, { type: 'read-image' }>,
+  dependencies: CompanionProductOperationDependencies,
+): Promise<CompanionResult | readonly CompanionResult[]> {
+  const response = await dependencies.host.call('session.attachment', {
+    sessionId: operation.sessionId, attachmentId: operation.attachmentId,
+  })
+  if (!response.ok) return operationFailed(operation, normalizeFailure(response.failure))
+  if (!isRecord(response.value) || !isRecord(response.value.attachment)
+    || typeof response.value.data !== 'string' || typeof response.value.attachment.mediaType !== 'string') {
+    return invalidHostResult(operation, 'image')
+  }
+  let bytes: Uint8Array
+  try { bytes = new Uint8Array(Buffer.from(response.value.data, 'base64')) } catch { return invalidHostResult(operation, 'image') }
+  if (Buffer.from(bytes).toString('base64') !== response.value.data) return invalidHostResult(operation, 'image')
+  const chunks: CompanionResult[] = []
+  const count = Math.max(1, Math.ceil(bytes.byteLength / REMOTE_PROTOCOL_LIMITS.imageChunkBytes))
+  if (count > REMOTE_PROTOCOL_LIMITS.imageChunks) return operationFailed(operation, {
+    kind: 'business', code: 'limit-exceeded', message: 'Desktop image exceeds the Companion byte ceiling',
+  })
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  for (let index = 0; index < count; index++) {
+    const start = index * REMOTE_PROTOCOL_LIMITS.imageChunkBytes
+    chunks.push({
+      type: 'image-chunk', operationId: operation.operationId, sessionId: operation.sessionId,
+      attachmentId: operation.attachmentId, mediaType: response.value.attachment.mediaType,
+      index, count, sha256,
+      data: encodeProtocolBase64Url(bytes.subarray(start, start + REMOTE_PROTOCOL_LIMITS.imageChunkBytes)),
+    })
+  }
+  return chunks.length === 1 ? chunks[0] as CompanionResult : chunks
 }
 
 class HostSubmissionFailure extends Error {
@@ -228,6 +434,165 @@ function parseSearchValue(value: unknown): Omit<CompanionSessionSearchResult, 't
     items.push({ sessionId, snippet: valueItem.snippet })
   }
   return { items, hasMore: value.hasMore }
+}
+
+function parseSurfaceSessions(value: unknown): Array<{
+  sessionId: CompanionSessionId
+  displayTitle: string
+  cwd?: string
+  running: boolean
+  blank: boolean
+  updatedAt: number
+}> | undefined {
+  if (!isRecord(value) || !Array.isArray(value.items)) return undefined
+  const sessions: Array<{
+    sessionId: CompanionSessionId
+    displayTitle: string
+    cwd?: string
+    running: boolean
+    blank: boolean
+    updatedAt: number
+  }> = []
+  for (const itemValue of value.items.slice(0, REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)) {
+    if (!isRecord(itemValue) || typeof itemValue.sessionId !== 'string'
+      || typeof itemValue.updatedAt !== 'number' || !Number.isSafeInteger(itemValue.updatedAt)
+      || typeof itemValue.running !== 'boolean' || typeof itemValue.blank !== 'boolean') return undefined
+    let sessionId: CompanionSessionId
+    try { sessionId = parseCompanionSessionId(itemValue.sessionId) } catch { return undefined }
+    const title = projectionTitle(itemValue.projections) ?? itemValue.sessionId
+    if (typeof itemValue.cwd !== 'string' && itemValue.cwd !== undefined) return undefined
+    sessions.push({
+      sessionId, displayTitle: title,
+      ...(itemValue.cwd === undefined ? {} : { cwd: itemValue.cwd }),
+      running: itemValue.running, blank: itemValue.blank, updatedAt: itemValue.updatedAt,
+    })
+  }
+  return sessions
+}
+
+function projectionTitle(value: unknown): string | undefined {
+  if (!isRecord(value) || !isRecord(value.values)) return undefined
+  const title = value.values.title
+  return typeof title === 'string' && title.trim() !== '' ? title : undefined
+}
+
+function parseSurfaceWorkspaces(
+  value: unknown,
+  visible: ReadonlySet<CompanionSessionId>,
+): Array<{
+  workspaceId: string
+  path: string
+  title: string
+  sessionIds: CompanionSessionId[]
+  createdAt: string
+  updatedAt: string
+}> | undefined {
+  if (!isRecord(value) || !Array.isArray(value.items)) return undefined
+  const workspaces = []
+  for (const itemValue of value.items.slice(0, REMOTE_PROTOCOL_LIMITS.surfaceWorkspaceRows)) {
+    if (!isRecord(itemValue) || typeof itemValue.workspaceId !== 'string' || typeof itemValue.path !== 'string'
+      || typeof itemValue.title !== 'string' || !Array.isArray(itemValue.sessionIds)
+      || typeof itemValue.createdAt !== 'string' || typeof itemValue.updatedAt !== 'string') return undefined
+    const sessionIds: CompanionSessionId[] = []
+    for (const id of itemValue.sessionIds) {
+      let parsed: CompanionSessionId
+      try { parsed = parseCompanionSessionId(id) } catch { return undefined }
+      if (visible.has(parsed)) sessionIds.push(parsed)
+    }
+    workspaces.push({
+      workspaceId: itemValue.workspaceId, path: itemValue.path, title: itemValue.title,
+      sessionIds, createdAt: itemValue.createdAt, updatedAt: itemValue.updatedAt,
+    })
+  }
+  return workspaces
+}
+
+function parseConversationHistory(
+  value: unknown,
+  sessionId: CompanionSessionId,
+  pending: readonly unknown[],
+): Record<string, unknown> | undefined {
+  if (!isRecord(value) || !Array.isArray(value.events) || typeof value.hasMore !== 'boolean') return undefined
+  const nodes: Array<Record<string, unknown>> = []
+  const calls = new Map<string, { name: string; argsRaw: string; time: number; view: unknown }>()
+  for (const entryValue of value.events) {
+    if (!isRecord(entryValue) || !isRecord(entryValue.event)) return undefined
+    const event = entryValue.event
+    if (!Number.isSafeInteger(event.seq) || typeof event.time !== 'number' || !isRecord(event.data)) return undefined
+    if (event.type === 'user/message') {
+      if (!Array.isArray(event.data.content)) return undefined
+      nodes.push({ kind: event.data.source && isRecord(event.data.source) && event.data.source.kind === 'user' ? 'user' : 'context',
+        seq: event.seq, time: event.time, content: event.data.content, source: event.data.source ?? {} })
+    } else if (event.type === 'assistant/message') {
+      const message = event.data.message
+      if (!isRecord(message) || !Array.isArray(message.content)) return undefined
+      nodes.push({
+        kind: 'assistant', seq: event.seq, time: event.time,
+        messageId: typeof message.id === 'string' ? message.id : undefined,
+        turn: numberOr(event.data.turn, 0), step: numberOr(event.data.step, 0),
+        blocks: message.content.map(assistantBlock),
+      })
+    } else if (event.type === 'tool/call') {
+      const callId = event.data.callId
+      if (typeof callId !== 'string') return undefined
+      calls.set(callId, {
+        name: typeof event.data.name === 'string' ? event.data.name : callId,
+        argsRaw: typeof event.data.arguments === 'string' ? event.data.arguments : '{}',
+        time: event.time,
+        view: entryValue.view,
+      })
+    } else if (event.type === 'tool/result') {
+      const message = event.data.message
+      if (!isRecord(message) || !isRecord(message.source) || typeof message.source.callId !== 'string'
+        || !Array.isArray(message.content)) return undefined
+      const call = calls.get(message.source.callId)
+      nodes.push({
+        kind: 'tool-result', seq: event.seq, time: event.time, callId: message.source.callId,
+        call: call === undefined ? null : { name: call.name, argsRaw: call.argsRaw },
+        callTime: call?.time ?? null, content: message.content,
+        isError: event.data.isError === true, callView: call?.view ?? null,
+        resultView: entryValue.view ?? null, subCalls: [],
+      })
+    }
+  }
+  return {
+    sessionId,
+    nodes,
+    turnTimings: [], turnEnds: [], partial: null, runningCalls: [], pending, queue: [],
+    running: false, subagent: null, composerPhase: nodes.length === 0 ? 'pristine' : 'active',
+    removed: false, openState: 'open', openError: null, hasMore: value.hasMore,
+    loadingOlder: false, promptError: null, blank: nodes.length === 0, lastAgentError: null,
+  }
+}
+
+function assistantBlock(value: unknown): Record<string, unknown> {
+  if (!isRecord(value) || typeof value.type !== 'string') return { kind: 'other', block: value }
+  if (value.type === 'text' || value.type === 'reasoning') {
+    return { kind: value.type, text: typeof value.text === 'string' ? value.text : '' }
+  }
+  if (value.type === 'image') return { kind: 'image', attachment: value.attachment }
+  if (value.type === 'tool-call') return {
+    kind: 'tool-call', callId: String(value.id), name: value.name, argsRaw: value.arguments,
+  }
+  return { kind: 'other', block: value }
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return Number.isSafeInteger(value) ? value as number : fallback
+}
+
+function invalidHostResult(
+  operation: CompanionProductOperation,
+  subject: string,
+): CompanionOperationFailedResult {
+  return operationFailed(operation, {
+    kind: 'wire', code: 'HOST_WIRE_INVALID', message: `Desktop Host ${subject} returned an invalid value`,
+  })
+}
+
+function isLedgerMutation(operation: CompanionProductOperation): boolean {
+  return operation.type === 'submit-prompt' || operation.type === 'cancel-session'
+    || operation.type === 'settle-interaction' || operation.type === 'offer-attachment'
 }
 
 function attachmentRejected(

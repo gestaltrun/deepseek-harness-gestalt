@@ -29,7 +29,6 @@ import {
   parseCompanionOperationId,
   REMOTE_PROTOCOL_LIMITS,
   type CompanionOperation,
-  type CompanionResult,
   type RelayPairingSelector,
   type CompanionSearchSessionsOperation,
 } from '@deepseek-ai/dsh-remote-protocol'
@@ -62,6 +61,10 @@ import { disposeDesktopOwners } from './shutdown.ts'
 import { startDesktopBrowserRuntime, type DesktopBrowserRuntime } from './browser-runtime.ts'
 import { createDesktopRemoteRelay } from './remote-relay.ts'
 import { DesktopCompanionProductOwner } from './companion-product.ts'
+import type { DesktopCompanionOperationOutput } from './companion-product.ts'
+import {
+  DesktopCompanionOperationLedger, FileDesktopCompanionOperationStore,
+} from './companion-operation-ledger.ts'
 import { createDesktopHostRpc } from './host-rpc.ts'
 import { desktopInstallationPresentation } from './desktop-installation.ts'
 import { downloadCompanionAttachment } from './companion-attachments.ts'
@@ -138,14 +141,19 @@ async function boot(): Promise<void> {
       decrypt: value => safeStorage.decryptString(Buffer.from(value)),
     },
   ))
+  companionProduct.installLedger(await DesktopCompanionOperationLedger.load(
+    new FileDesktopCompanionOperationStore(join(
+      app.getPath('userData'), `companion-operations-${accountEnvironment.databaseIdentity}.json`,
+    )),
+  ))
   account = createDesktopAccount(accountEnvironment)
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
     source: process.env,
     snowPairingVault,
     desktopName: () => account.installationPresentation()?.name,
-    handleOperation: async (operation, selector) => await handleDesktopCompanionOperation(
-      operation, selector, snowPairingVault,
+    handleOperation: async (operation, selector, context) => await handleDesktopCompanionOperation(
+      operation, selector, context, snowPairingVault,
     ),
   })
   let accountReady = true
@@ -225,15 +233,16 @@ async function boot(): Promise<void> {
 async function handleDesktopCompanionOperation(
   operation: CompanionOperation,
   selector: RelayPairingSelector,
+  context: { generation: number; desktopRevision: number },
   snowPairingVault: DesktopSnowPairingVault,
-): Promise<CompanionResult> {
-  if (operation.type !== 'offer-attachment' && operation.type !== 'search-sessions') {
+): Promise<DesktopCompanionOperationOutput> {
+  if (operation.type === 'query-operation-status') {
     return {
       type: 'operation-failed',
       operationId: operation.operationId,
       failure: {
         kind: 'business', code: 'operation-unsupported',
-        message: `Desktop does not support ${operation.type} in this Companion protocol version`,
+        message: 'Desktop operation status requires a committed operation ledger result',
       },
     }
   }
@@ -243,6 +252,14 @@ async function handleDesktopCompanionOperation(
     return {
       type: 'operation-failed', operationId: operation.operationId,
       failure: { kind: 'business', code: 'pairing-revoked', message: 'Personal Pairing is no longer active' },
+    }
+  }
+  const desktopName = account.installationPresentation()?.name
+  if (desktopName === undefined) {
+    attachmentKey.fill(0)
+    return {
+      type: 'operation-failed', operationId: operation.operationId,
+      failure: { kind: 'business', code: 'installation-unavailable', message: 'Desktop Installation presentation is unavailable' },
     }
   }
   try {
@@ -261,6 +278,11 @@ async function handleDesktopCompanionOperation(
         pairingId, origin: accountEnvironment.origin, headers,
       }),
       submitAttachment: async input => await companionProduct.submitAttachment(input),
+      generation: context.generation,
+      desktopRevision: context.desktopRevision,
+      desktopName,
+      resolveInteraction: interactionId => companionProduct.resolveInteraction(interactionId, attachmentKey),
+      pendingInteractions: sessionId => companionProduct.pendingInteractions(sessionId, attachmentKey),
     })
   } finally {
     attachmentKey.fill(0)

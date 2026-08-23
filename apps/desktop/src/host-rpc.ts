@@ -26,8 +26,27 @@ export interface DesktopHostRpc {
   call(
     method: string,
     payload: Record<string, unknown>,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number; rpcId?: string },
   ): Promise<DesktopHostRpcResult>
+  /**
+   * Settle one Host-originated Approval or Ask User request by its private rpc identity.
+   * @param rpcId - exact id received from the current Host event stream.
+   * @param result - domain result shell accepted by `/api/respond`.
+   * @returns Host carrier receipt.
+   */
+  respond?(
+    rpcId: string,
+    result: Record<string, unknown>,
+  ): Promise<{ accepted: true } | { accepted: false; reason: 'not-pending' | 'bad-response' }>
+  /**
+   * Follow only Host pending-interaction envelopes from the mux stream.
+   * @param signal - current Web Host generation lifetime.
+   * @param accept - validated later by the pairing-neutral interaction registry.
+   */
+  watchInteractions?(
+    signal: AbortSignal,
+    accept: (envelope: { rpcId: string; payload: unknown }) => void,
+  ): Promise<void>
 }
 
 /** Desktop Host RPC construction options. */
@@ -67,7 +86,7 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
       if (!Number.isSafeInteger(callTimeoutMs) || callTimeoutMs <= 0) {
         throw new TypeError('Desktop Host RPC call timeoutMs must be a positive safe integer')
       }
-      const rpcId = randomUUID()
+      const rpcId = callOptions?.rpcId ?? randomUUID()
       const response = await requestJson(
         new URL(`/api/${method}`, origin),
         { type: 'client-request', rpcId, method, payload },
@@ -104,6 +123,60 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
         }
       }
       return parseServerResponse(body, rpcId)
+    },
+    async respond(rpcId, result) {
+      const response = await requestJson(
+        new URL('/api/respond', origin),
+        { type: 'client-response', rpcId, result },
+        timeoutMs,
+        responseMaxBytes,
+      )
+      if (response.kind !== 'response' || response.status < 200 || response.status >= 300) {
+        throw new Error('Desktop Host interaction response transport failed')
+      }
+      const value: unknown = JSON.parse(response.text)
+      if (!isRecord(value) || typeof value.accepted !== 'boolean') {
+        throw new Error('Desktop Host interaction receipt was invalid')
+      }
+      if (value.accepted === true && Object.keys(value).length === 1) return { accepted: true }
+      if (value.accepted === false && Object.keys(value).length === 2
+        && (value.reason === 'not-pending' || value.reason === 'bad-response')) {
+        return { accepted: false, reason: value.reason }
+      }
+      throw new Error('Desktop Host interaction receipt was invalid')
+    },
+    async watchInteractions(signal, accept) {
+      const response = await fetch(new URL('/api/events.mux', origin), { signal })
+      if (!response.ok || response.body === null) throw new Error('Desktop Host interaction stream failed to open')
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) return
+          buffer += decoder.decode(value, { stream: true })
+          if (new TextEncoder().encode(buffer).byteLength > REMOTE_PROTOCOL_LIMITS.companionMessageBytes) {
+            throw new Error('Desktop Host interaction stream frame exceeded its byte ceiling')
+          }
+          let boundary: number
+          while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+            const chunk = buffer.slice(0, boundary)
+            buffer = buffer.slice(boundary + 2)
+            const data = chunk.split('\n').filter(line => line.startsWith('data: '))
+              .map(line => line.slice(6)).join('')
+            if (data === '') continue
+            const envelope: unknown = JSON.parse(data)
+            if (!isRecord(envelope) || envelope.type !== 'server-request'
+              || typeof envelope.rpcId !== 'string' || !('payload' in envelope)) {
+              throw new Error('Desktop Host interaction stream envelope was invalid')
+            }
+            accept({ rpcId: envelope.rpcId, payload: envelope.payload })
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined)
+      }
     },
   }
 }

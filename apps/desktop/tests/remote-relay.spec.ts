@@ -190,7 +190,9 @@ describe('Desktop Remote Relay composition', () => {
       Uint8Array.of(3), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
     )
 
-    expect(handleOperation).toHaveBeenCalledWith(operation, selector)
+    expect(handleOperation).toHaveBeenCalledWith(operation, selector, {
+      generation: 1, desktopRevision: 1,
+    })
     expect(channel.seal).toHaveBeenCalledWith({ type: 'result', result })
     expect(send).toHaveBeenCalledWith(selector, mobileAttachmentId, Uint8Array.of(9))
   })

@@ -57,6 +57,11 @@ export type BrowserWorkspaceCreateRemoteRequest =
   | { readonly profile: 'shared'; readonly attach?: BrowserCreateAttach }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    /** Browser Workspace fold state; its client view is the same whole value. */
+    browserWorkspace: BrowserWorkspaceProjection
+  }
+
   interface SessionProjectionMap {
     /**
      * Session-owned Browser Workspace snapshot folded from `browser/workspace`.

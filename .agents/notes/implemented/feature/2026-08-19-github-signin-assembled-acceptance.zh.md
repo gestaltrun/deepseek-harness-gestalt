@@ -39,5 +39,5 @@ Issue #30 要求 Desktop 与 Mobile 都能用 GitHub 登录 Platform Account。�
 ## 关联
 
 - Issue #30（父 spec #27）——Desktop 与 Mobile 的客户端 GitHub 登录。
-- [Platform Account installation sessions](2026-08-17-platform-account-installation-sessions.md)——这些组合所执行的会话与 proof 设计。
-- [Desktop Host ownership of the Account lifecycle](../architecture/2026-08-16-deepseek-gestalt-desktop-host.md)——Desktop Host 拥有系统浏览器授权与受保护的安装密钥。
+- [Platform Account installation sessions](2026-08-17-platform-account-installation-sessions.zh.md)——这些组合所执行的会话与 proof 设计。
+- [Desktop Host ownership of the Account lifecycle](../architecture/2026-08-16-deepseek-gestalt-desktop-host.zh.md)——Desktop Host 拥有系统浏览器授权与受保护的安装密钥。

@@ -38,7 +38,7 @@
     "packages/client/*/tests/**/*.host.spec.ts",
     // Pinned upstream snapshot compiles under its own relaxed project face;
     // repository product behavior is covered by ui-workbench tests.
-    "packages/client/better-sidebar/tests/**"
+    "packages/client/ui-better-sidebar/tests/**"
   ],
   "references": [
     // Shared leaf: web e2e boots the real host webserver (fixture + real-host

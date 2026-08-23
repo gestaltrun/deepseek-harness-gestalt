@@ -731,9 +731,9 @@ describe('runScenario', () => {
   it('waitForTurnStart rejects missing, earlier, and malformed durable turns', { timeout: 20_000 }, async () => {
     const missing = await scenario({})
     await expect(runScenario(
-      { steps: [...boot, { op: 'waitForTurnStart', timeoutMs: 20 }] },
+      { steps: [...boot, { op: 'waitForTurnStart', timeoutMs: 200 }] },
       { agent: AGENT, mode: 'replay', fixtureFile: missing.fixtureFile },
-    )).rejects.toThrow(/did not persist turn\/start within 20ms/)
+    )).rejects.toThrow(/did not persist turn\/start within 200ms/)
 
     const headerOnly = await scenario({
       prompt: 'hang-until-cancel',
@@ -772,11 +772,11 @@ describe('runScenario', () => {
         steps: [
           ...boot,
           { op: 'promptAndCancel', text: 'hang' },
-          { op: 'waitForTurnStart', minimumTurn: 3, timeoutMs: 20 },
+          { op: 'waitForTurnStart', minimumTurn: 3, timeoutMs: 200 },
         ],
       },
       { agent: AGENT, mode: 'replay', fixtureFile: earlier.fixtureFile },
-    )).rejects.toThrow(/turn\/start at or beyond turn 3 within 20ms/)
+    )).rejects.toThrow(/turn\/start at or beyond turn 3 within 200ms/)
 
     const closed = await scenario({
       prompt: 'hang-until-cancel',
@@ -795,11 +795,11 @@ describe('runScenario', () => {
         steps: [
           ...boot,
           { op: 'promptAndCancel', text: 'hang' },
-          { op: 'waitForTurnStart', timeoutMs: 20 },
+          { op: 'waitForTurnStart', timeoutMs: 200 },
         ],
       },
       { agent: AGENT, mode: 'replay', fixtureFile: closed.fixtureFile },
-    )).rejects.toThrow(/did not persist turn\/start within 20ms/)
+    )).rejects.toThrow(/did not persist turn\/start within 200ms/)
 
     for (const turn of [undefined, 0]) {
       const malformed = await scenario({
@@ -827,11 +827,12 @@ describe('runScenario', () => {
   })
 
   it('waitForTurnEnd times out for a missing log and an open logged turn', { timeout: 20_000 }, async () => {
+    const rejectionTimeoutMs = 500
     const missing = await scenario({})
     await expect(runScenario(
-      { steps: [...boot, { op: 'waitForTurnEnd', timeoutMs: 20 }] },
+      { steps: [...boot, { op: 'waitForTurnEnd', timeoutMs: rejectionTimeoutMs }] },
       { agent: AGENT, mode: 'replay', fixtureFile: missing.fixtureFile },
-    )).rejects.toThrow(/did not persist turn\/end within 20ms/)
+    )).rejects.toThrow(`did not persist turn/end within ${rejectionTimeoutMs}ms`)
 
     const open = await scenario({
       prompt: 'hang-until-cancel',
@@ -849,11 +850,11 @@ describe('runScenario', () => {
         steps: [
           ...boot,
           { op: 'promptAndCancel', text: 'hang' },
-          { op: 'waitForTurnEnd', timeoutMs: 20 },
+          { op: 'waitForTurnEnd', timeoutMs: rejectionTimeoutMs },
         ],
       },
       { agent: AGENT, mode: 'replay', fixtureFile: open.fixtureFile },
-    )).rejects.toThrow(/did not persist turn\/end within 20ms/)
+    )).rejects.toThrow(`did not persist turn/end within ${rejectionTimeoutMs}ms`)
   })
 
   it('waitForGoalPhase requires the requested durable goal phase', { timeout: 20_000 }, async () => {
@@ -1038,16 +1039,17 @@ describe('runScenario', () => {
         ],
       }],
     })
+    const rejectionTimeoutMs = 500
     await expect(runScenario(
       {
         steps: [
           ...boot,
           { op: 'promptAndCancel', text: 'hang' },
-          { op: 'waitForEventAfterTurnEnd', type: 'user/message', timeoutMs: 20 },
+          { op: 'waitForEventAfterTurnEnd', type: 'user/message', timeoutMs: rejectionTimeoutMs },
         ],
       },
       { agent: AGENT, mode: 'replay', fixtureFile: early.fixtureFile },
-    )).rejects.toThrow(/did not persist user\/message after turn\/end within 20ms/)
+    )).rejects.toThrow(`did not persist user/message after turn/end within ${rejectionTimeoutMs}ms`)
   })
 
   it('promptExpectError swallows a model-error response as the expected outcome', { timeout: 20_000 }, async () => {

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-18-temporary-browser-runtime-tracer.md
 2026-08-18-temporary-browser-runtime-tracer.md: ab9bdd02612d4e1802feb867e8e12fc8f0f2e2e7
-2026-08-18-temporary-browser-runtime-tracer.zh.md: 9f4648cfbd3e4a76e9abc89c7216920a987ebf4b
+2026-08-18-temporary-browser-runtime-tracer.zh.md: c98aeb55a9971863c1d6175c71654cbabe197cd4

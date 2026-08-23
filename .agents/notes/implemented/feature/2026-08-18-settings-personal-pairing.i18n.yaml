@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-18-settings-personal-pairing.md
 2026-08-18-settings-personal-pairing.md: 3ef3e75a91823bdf01e8b1c8e73281090fbff44b
-2026-08-18-settings-personal-pairing.zh.md: a7db15e1d6dd93b2137e6b799fcc12d165af2023
+2026-08-18-settings-personal-pairing.zh.md: 83ede3c67c91370114ed8cc20913b8d160bf28fc

@@ -22,7 +22,7 @@ Browser Workspace 还持有隐式的 Profile 匹配复用。省略 `attach` 的�
 
 客户端组合通过显式的 `ui-browser/client` module-table 请求导入 `BrowserPageChrome`，使用 Workspace 包内允许内联的页面扁平化函数，共用 API Remote 结果解包函数，并消费 `ui-browser` 持有的 Browser 设置解析器。`OfficialBrowserTab` 渲染页面 chrome，并把空标签创建委托给 `OfficialBrowserBridge`；它没有直接创建恢复路径。
 
-本决策取代 [Browser 控制权仲裁](../feature/2026-08-19-browser-control-arbitration.md)中的报告式所有权部分、[Session Browser Workspace](../feature/2026-08-19-session-browser-workspace.md)中的 Workspace Dock 字段，以及[工作台官方 Browser](../feature/2026-08-21-workbench-official-browser.md)中的 Dock 跟随规则。那些记录中的修订号、Session 隔离、页面 chrome、overlay 与过期列表决策继续有效。
+本决策取代 [Browser 控制权仲裁](../feature/2026-08-19-browser-control-arbitration.zh.md)中的报告式所有权部分、[Session Browser Workspace](../feature/2026-08-19-session-browser-workspace.zh.md)中的 Workspace Dock 字段，以及[工作台官方 Browser](../feature/2026-08-21-workbench-official-browser.zh.md)中的 Dock 跟随规则。那些记录中的修订号、Session 隔离、页面 chrome、overlay 与过期列表决策继续有效。
 
 ## 考虑过的替代方案
 

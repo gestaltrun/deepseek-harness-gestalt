@@ -18,7 +18,7 @@ Status: implemented
 
 每天 500 条提示的配额仍留在开放注册准入计数器上。配对 HTTP 消费方的发布与登记路由、原生 APNs/FCM 凭据以及真机 TestFlight/APK 证明不在本决策范围内。HTTP 客户端已发送 `unregister-push-token`；Platform 登记与发布路由仍暂缓，Desktop 也尚未监听 session 事件去调用 `DesktopCompanionPushPublisher`。
 
-本决策落实[Mobile Companion 提案](../../proposed/feature/2026-08-17-mobile-companion.md)的推送切片，但不把配对、Relay、附件与推送拆成浅服务。
+本决策落实[Mobile Companion 提案](../../proposed/feature/2026-08-17-mobile-companion.zh.md)的推送切片，但不把配对、Relay、附件与推送拆成浅服务。
 
 ## Alternatives considered
 

@@ -2,7 +2,7 @@
 
 [English](remote-protocol.md) | 中文
 
-[`@deepseek-ai/dsh-remote-protocol`](../../packages/platform/remote-protocol/README.md)定义 Mobile、Desktop 与不透明 Relay 共享的唯一 wire 词汇。它是纯协议模块，不是 Cordis 服务。
+[`@deepseek-ai/dsh-remote-protocol`](../../packages/platform/remote-protocol/README.zh.md)定义 Mobile、Desktop 与不透明 Relay 共享的唯一 wire 词汇。它是纯协议模块，不是 Cordis 服务。
 
 ## 独立协议
 

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/agents/domain.md
 domain.md: db851c8f19312cc5f78b64f3c96a5af1167f8f71
-domain.zh.md: 6485572b4c91fa5ec576b3391202de6330770277
+domain.zh.md: d6d7c9e64fd19309f61a378fe448eaf839864057

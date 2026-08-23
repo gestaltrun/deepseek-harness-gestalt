@@ -48,7 +48,7 @@ describe('DragStrip', () => {
     const chromeCss = readFileSync(join(root, 'packages/client/ui-desktop/src/client/DragStrip.module.css'), 'utf8')
     const sidebarCss = readFileSync(join(root, 'packages/client/ui-sidebar/src/client/SidebarRoot.module.css'), 'utf8')
     const layoutCss = readFileSync(join(root, 'packages/client/ui-layout/src/client/AppFrame.module.css'), 'utf8')
-    const workbenchCss = readFileSync(join(root, 'packages/client/better-sidebar/src/client/sidebar.module.css'), 'utf8')
+    const workbenchCss = readFileSync(join(root, 'packages/client/ui-better-sidebar/src/client/sidebar.module.css'), 'utf8')
     expect(chromeCss).toContain('--dsh-window-chrome-height: 36px')
     const rule = /\.macChrome\s*\{(?<body>[^}]+)\}/.exec(chromeCss)?.groups?.body ?? ''
     expect(rule).toContain('position: fixed')

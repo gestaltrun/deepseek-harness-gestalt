@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-platform-account-client",
   "description": "Desktop and Mobile installation client for Platform Account login, proof, storage isolation, and sign-out",
-  "version": "0.1.0-rc.8",
+  "version": "0.1.1-rc.2",
   "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",

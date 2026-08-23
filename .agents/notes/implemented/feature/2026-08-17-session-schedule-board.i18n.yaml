@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-17-session-schedule-board.md
 2026-08-17-session-schedule-board.md: 83ce2aad669b524d90656c86b162c53386f832fa
-2026-08-17-session-schedule-board.zh.md: 7d357ba24a930e527525e36357c9083ba320c162
+2026-08-17-session-schedule-board.zh.md: 8ffe885ac5cc555739ed9503ca2f957831c7b108

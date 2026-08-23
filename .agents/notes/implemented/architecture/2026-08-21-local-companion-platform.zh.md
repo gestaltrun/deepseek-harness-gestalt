@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-[`examples/local-companion-platform`](../../../../examples/local-companion-platform/README.md) 是长期运行的开发监听。它绑定一个 `127.0.0.1` TLS 端点，把 `/v1/*` 和 Relay 升级在两个进程内实例间轮换，并共享内存中的 Account、配对权威和 Relay 路由存储。所选开发身份就是该 TLS origin；生产身份仍是已运营的 `www.gestaltrun.com` 对，以便客户端成对校验拒绝共享身份。该组成里的 GitHub 授权是同一 origin 上的 `/v1/account/oauth/github/development-complete`，并始终给出 `octocat` 公开身份。Desktop 在进程内完成该环回 URL，且不跟随 303 页面回跳。Desktop 的环回 Fetch 使用 Node `https.request` 和内存中的 Response，因为在 Electron 主进程里构造 Chromium `Request`、`Response` 或 `Headers` 会与正在等待 Settings invoke 的渲染进程死锁。Host 接纳 `beginLogin` 时不会把该 invoke 跨过 Account HTTP 一直占住。环回开发把 Account 记录写成仅所有者可读的文件字节，因为 `safeStorage.encryptString` 会在授权期间阻塞 Host。`LOCAL_COMPANION_PAGE_ORIGIN` 把非 `/v1` 路径反代到 Mobile Vite，使浏览上下文可以共享 TLS origin；当客户端能够出示捆绑证书时，TLS 前端会把该 Vite origin 改写为所选 HTTPS origin，以满足 Account 与配对 CORS。无法对该证书完成 TLS 的 Android WebView 改为打开 Vite origin：Mobile Vite 在关闭证书校验的情况下把 `/v1`（含 Relay WebSocket）代理到监听，Mobile 入口再把 Account、配对、授权与 Relay URL 改写到该页面 origin。配对链接仍打印所选 HTTPS origin。[`apps/platform/src/boot.ts`](../../../../apps/platform/src/boot.ts) 不导入该示例，也不导入 `DevelopmentKeylessPairingHandshakeProvider`。
+[`examples/local-companion-platform`](../../../../examples/local-companion-platform/README.zh.md) 是长期运行的开发监听。它绑定一个 `127.0.0.1` TLS 端点，把 `/v1/*` 和 Relay 升级在两个进程内实例间轮换，并共享内存中的 Account、配对权威和 Relay 路由存储。所选开发身份就是该 TLS origin；生产身份仍是已运营的 `www.gestaltrun.com` 对，以便客户端成对校验拒绝共享身份。该组成里的 GitHub 授权是同一 origin 上的 `/v1/account/oauth/github/development-complete`，并始终给出 `octocat` 公开身份。Desktop 在进程内完成该环回 URL，且不跟随 303 页面回跳。Desktop 的环回 Fetch 使用 Node `https.request` 和内存中的 Response，因为在 Electron 主进程里构造 Chromium `Request`、`Response` 或 `Headers` 会与正在等待 Settings invoke 的渲染进程死锁。Host 接纳 `beginLogin` 时不会把该 invoke 跨过 Account HTTP 一直占住。环回开发把 Account 记录写成仅所有者可读的文件字节，因为 `safeStorage.encryptString` 会在授权期间阻塞 Host。`LOCAL_COMPANION_PAGE_ORIGIN` 把非 `/v1` 路径反代到 Mobile Vite，使浏览上下文可以共享 TLS origin；当客户端能够出示捆绑证书时，TLS 前端会把该 Vite origin 改写为所选 HTTPS origin，以满足 Account 与配对 CORS。无法对该证书完成 TLS 的 Android WebView 改为打开 Vite origin：Mobile Vite 在关闭证书校验的情况下把 `/v1`（含 Relay WebSocket）代理到监听，Mobile 入口再把 Account、配对、授权与 Relay URL 改写到该页面 origin。配对链接仍打印所选 HTTPS origin。[`apps/platform/src/boot.ts`](../../../../apps/platform/src/boot.ts) 不导入该示例，也不导入 `DevelopmentKeylessPairingHandshakeProvider`。
 
 当没有会话时，`PlatformAccountInstallation.load()` 会把仍有效的待完成登录恢复为轮询，并清除过期的待完成尝试。非原生 Mobile 入口会对已准备的授权 URL 执行 `location.assign`，以便返回后由 `load()` 继续；只有打包后的 Capacitor WebView 才使用 `Browser.open`。入口仍然没有 `window.open`、弹窗或携带令牌的自定义 URL 回退。Account 与 Remote Access 的默认 Fetch 实现绑定到全局，以便浏览器调用。
 
@@ -28,7 +28,7 @@ Loader 场景使用顺序熵，以及真实的 Desktop/Mobile Account 客户端�
 
 ## Consequences
 
-开发者可以拉起一个环回 origin，供 Mobile 模拟器和 Desktop 无密钥标志使用，而不需要第二套云上 Platform。代价是未经评审的握手、内存存储和捆绑测试证书：该监听不是生产环境，也不能替代 Noise 评审、SLS 或 TestFlight/APK 验收。交叉引用：[双实例 Relay](2026-08-18-stateless-two-instance-remote-relay.md)，[无密钥配对验收](../testing/2026-08-19-personal-pairing-assembled-acceptance.md)。
+开发者可以拉起一个环回 origin，供 Mobile 模拟器和 Desktop 无密钥标志使用，而不需要第二套云上 Platform。代价是未经评审的握手、内存存储和捆绑测试证书：该监听不是生产环境，也不能替代 Noise 评审、SLS 或 TestFlight/APK 验收。交叉引用：[双实例 Relay](2026-08-18-stateless-two-instance-remote-relay.zh.md)，[无密钥配对验收](../testing/2026-08-19-personal-pairing-assembled-acceptance.zh.md)。
 
 ## 测试
 

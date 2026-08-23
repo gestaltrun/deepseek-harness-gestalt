@@ -32,7 +32,7 @@ Status: implemented
 
 ## 后果
 
-产品里只有一个浏览器。ChatView 在右侧留白不够时隐藏预览。窄窗 details 浮层不是 Browser chrome 的依赖。[删除 Browser 控制权与 Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.md)持有展示与创建复用权威。
+产品里只有一个浏览器。ChatView 在右侧留白不够时隐藏预览。窄窗 details 浮层不是 Browser chrome 的依赖。[删除 Browser 控制权与 Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.zh.md)持有展示与创建复用权威。
 
 ## 验证
 

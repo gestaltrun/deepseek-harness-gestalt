@@ -36,7 +36,7 @@ Gestalt 只发货一个覆盖 `web-search-deepseek` 的 `web_search` 工具。�
 
 想用官方 DeepSeek 的用户留在 DeepSeek tab。想在 Kimi coding 上走 Messages 的用户使用 Anthropic tab，并填写 `https://api.kimi.com/coding/v1`。想用 Moonshot 检索的用户使用 Kimi tab 和专用搜索 URL。非 ASCII 的已存密钥不会作为 HTTP 头发送。
 
-未使用的字段 panel 和 `useThis` 残留见 [删除未使用的提供方面板](../../proposed/simplification/2026-08-19-drop-dead-web-search-provider-panel.md)。
+未使用的字段 panel 和 `useThis` 残留见 [删除未使用的提供方面板](../../proposed/simplification/2026-08-19-drop-dead-web-search-provider-panel.zh.md)。
 
 ## Testing
 
@@ -44,5 +44,5 @@ Gestalt 只发货一个覆盖 `web-search-deepseek` 的 `web_search` 工具。�
 
 ## Related
 
-- [Web 能力 seam](../architecture/2026-06-24-web-capability-seam.md) — 提供方注册能力；`dsh-tool-web` 拥有稳定的 `web_search` schema。
-- [Web 插件配置](2026-08-10-web-plugin-configuration.md) — 设置卡片各自绑定一个命名空间。
+- [Web 能力 seam](../architecture/2026-06-24-web-capability-seam.zh.md) — 提供方注册能力；`dsh-tool-web` 拥有稳定的 `web_search` schema。
+- [Web 插件配置](2026-08-10-web-plugin-configuration.zh.md) — 设置卡片各自绑定一个命名空间。

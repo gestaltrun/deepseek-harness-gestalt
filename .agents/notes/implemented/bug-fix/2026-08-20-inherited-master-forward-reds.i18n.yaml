@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-inherited-master-forward-reds.md
 2026-08-20-inherited-master-forward-reds.md: b4aeb7c36888a21a92ef0db11fb80278570255ed
-2026-08-20-inherited-master-forward-reds.zh.md: e3b9dd64dcbb90d8113d8570c542e787cd83286d
+2026-08-20-inherited-master-forward-reds.zh.md: 3d225bdd9db7270008fb1b2dea67138e384e9b34

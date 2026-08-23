@@ -192,7 +192,7 @@ export default defineConfig({
         // tests and assembled application checks rather than per-file coverage.
         'packages/self-modification/*/src/**/*.{ts,tsx}',
         // Pinned upstream snapshot: product tests live in ui-workbench / ui-browser.
-        'packages/client/better-sidebar/src/**/*.{ts,tsx}',
+        'packages/client/ui-better-sidebar/src/**/*.{ts,tsx}',
         // A killed executable lint-contract test can leave a non-product source probe behind.
         'packages/*/*/src/oxlint-contract-*.ts',
         // Client/web UI files whose remaining branches need a browser-grade

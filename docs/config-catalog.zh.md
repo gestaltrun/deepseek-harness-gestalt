@@ -355,10 +355,12 @@ export interface Config {
   maxImagePixels?: number
   /** Maximum intrinsic width and maximum intrinsic height accepted for one image. */
   maxImageDimension?: number
+  /** Maximum exact bytes accepted for one generic file. */
+  maxFileBytes?: number
 }
 ```
 
-来源：[`packages/attachment/attachment-local/src/index.ts:31`](../packages/attachment/attachment-local/src/index.ts)
+来源：[`packages/attachment/attachment-local/src/index.ts:37`](../packages/attachment/attachment-local/src/index.ts)
 
 <a id="deepseek-aidsh-bash-local"></a>
 
@@ -1763,8 +1765,8 @@ export interface LoginAttemptRecord {
   installationId: InstallationId
   /** Desktop or Mobile installation class. */
   installationKind: InstallationKind
-  /** Device-owned Mobile presentation committed with this attempt. */
-  presentation?: MobileInstallationPresentation
+  /** Device-owned presentation committed with this attempt. */
+  presentation?: InstallationPresentation
   /** Installation P-256 public key. */
   publicKey: JsonWebKey
   /** Random OAuth state bound to the attempt. */
@@ -1811,8 +1813,8 @@ export interface SessionRecord {
   installationId: InstallationId
   /** Desktop or Mobile installation class. */
   installationKind: InstallationKind
-  /** Device-owned presentation present on every Mobile session. */
-  presentation?: MobileInstallationPresentation
+  /** Device-owned presentation present on every Installation session. */
+  presentation?: InstallationPresentation
   /** Installation P-256 public key. */
   publicKey: JsonWebKey
   /** Monotonic refresh-token generation. */
@@ -1832,9 +1834,9 @@ export interface AccountRecord extends PlatformAccountView {
 }
 ```
 
-依赖：[`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.md) · [`InstallationId`](subsystems/platform-account.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.md) · [`MobileInstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountId`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountView`](subsystems/platform-account.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
+依赖：[`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.md) · [`InstallationId`](subsystems/platform-account.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.md) · [`PlatformAccountId`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountView`](subsystems/platform-account.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
 
-来源：[`packages/platform/platform-account-core/src/index.ts:497`](../packages/platform/platform-account-core/src/index.ts)
+来源：[`packages/platform/platform-account-core/src/index.ts:506`](../packages/platform/platform-account-core/src/index.ts)
 
 <a id="deepseek-aidsh-platform-account-http"></a>
 
@@ -1850,7 +1852,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/platform-account-http/src/index.ts:29`](../packages/platform/platform-account-http/src/index.ts)
+来源：[`packages/platform/platform-account-http/src/index.ts:30`](../packages/platform/platform-account-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-electron-browser-runtime.md
 2026-08-19-electron-browser-runtime.md: 70d545728a095847bd45b5cc8b38255f7f0104ef
-2026-08-19-electron-browser-runtime.zh.md: e9d4a75555822b7d99a4ecca9e4b860254f4041d
+2026-08-19-electron-browser-runtime.zh.md: a3d3bc6cd019891b8e213ff85f5d6108f3c52d9b

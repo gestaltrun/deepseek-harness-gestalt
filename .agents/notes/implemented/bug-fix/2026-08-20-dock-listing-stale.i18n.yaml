@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-dock-listing-stale.md
 2026-08-20-dock-listing-stale.md: b8ff68f6b39c2ffdfb204da4c5f0be51c8be2217
-2026-08-20-dock-listing-stale.zh.md: 52c01834c980a13e3578a16fb874c3631898e43a
+2026-08-20-dock-listing-stale.zh.md: 452953e4cf13e98e0e43a70c339399f8908427c0

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-browser",
   "description": "Session-owned official Browser chrome and collapsed tab preview for the dsh web GUI",
-  "version": "0.1.0-rc.8",
+  "version": "0.1.1-rc.2",
   "publishConfig": {
     "access": "public"
   },

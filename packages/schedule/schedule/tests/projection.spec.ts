@@ -27,18 +27,18 @@ describe('Schedule session projection', () => {
   it('projects durable pause, resume, and delete changes as whole retained records', () => {
     const created = applyScheduleProjection(emptyScheduleProjectionState(), change(create, 0))
     const paused = applyScheduleProjection(created, change({ version: 1, operation: 'pause', id: 'schedule-1' }, 1))
-    expect(scheduleProjectionDefinition.view(paused)).toEqual([{
+    expect(scheduleProjectionDefinition.wire.view(paused)).toEqual([{
       ...create.schedule,
       paused: true,
     }])
 
     const resumed = applyScheduleProjection(paused, change({ version: 1, operation: 'resume', id: 'schedule-1' }, 2))
-    expect(scheduleProjectionDefinition.view(resumed)).toEqual([{
+    expect(scheduleProjectionDefinition.wire.view(resumed)).toEqual([{
       ...create.schedule,
       paused: false,
     }])
     const deleted = applyScheduleProjection(resumed, change({ version: 1, operation: 'delete', id: 'schedule-1' }, 3))
-    expect(scheduleProjectionDefinition.view(deleted)).toEqual([])
+    expect(scheduleProjectionDefinition.wire.view(deleted)).toEqual([])
   })
 
   it('ignores unrelated events but rejects malformed or transition-invalid durable changes', () => {
@@ -81,7 +81,7 @@ describe('Schedule session projection', () => {
       id: 'schedule-every',
       acceptedAt: '2026-08-18T01:00:00.000Z',
     }, 1))
-    expect(scheduleProjectionDefinition.view(advanced)).toEqual([{
+    expect(scheduleProjectionDefinition.wire.view(advanced)).toEqual([{
       ...every.schedule,
       scheduledAt: '2026-08-18T01:05:00.000Z',
       paused: false,
@@ -89,7 +89,7 @@ describe('Schedule session projection', () => {
 
     const oneShot = applyScheduleProjection(emptyScheduleProjectionState(), change(create, 0))
     const dispatched = applyScheduleProjection(oneShot, change({ version: 1, operation: 'dispatch', id: 'schedule-1' }, 1))
-    expect(scheduleProjectionDefinition.view(dispatched)).toEqual([])
+    expect(scheduleProjectionDefinition.wire.view(dispatched)).toEqual([])
   })
 
   it('declares fork-owned event scope for standard Session projection transport', () => {
@@ -134,7 +134,7 @@ describe('Schedule session projection', () => {
         acceptedAt: '2026-08-18T01:07:00.000Z',
       }, 1),
     )
-    expect(scheduleProjectionDefinition.view(advanced)).toEqual([{
+    expect(scheduleProjectionDefinition.wire.view(advanced)).toEqual([{
       ...every.schedule,
       scheduledAt: '2026-08-18T01:10:00.000Z',
       paused: false,
@@ -144,6 +144,6 @@ describe('Schedule session projection', () => {
       applyScheduleProjection(emptyScheduleProjectionState(), change(create, 0)),
       change({ version: 1, operation: 'dispatch', id: 'schedule-1' }, 1),
     )
-    expect(scheduleProjectionDefinition.view(terminal)).toEqual([])
+    expect(scheduleProjectionDefinition.wire.view(terminal)).toEqual([])
   })
 })

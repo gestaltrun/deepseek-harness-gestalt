@@ -19,6 +19,13 @@ export interface ScheduleProjectionState {
   readonly seenIds: readonly ScheduleId[]
 }
 
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    /** Plain retained-record state, including identities already consumed by this Session. */
+    schedules: ScheduleProjectionState
+  }
+}
+
 /**
  * Construct a fresh empty projection state.
  * @returns Plain empty state with no retained or seen identities.
@@ -111,23 +118,34 @@ const shared = {
   id: z.string().min(1),
   prompt: z.string().min(1),
   scheduledAt: z.string(),
-  paused: z.boolean(),
 } as const
 
-const projectionSchema = z.array(z.discriminatedUnion('kind', [
+const recordSchema = z.discriminatedUnion('kind', [
   z.object({ ...shared, kind: z.literal('after'), afterSeconds: z.number().int().positive() }).strict(),
   z.object({ ...shared, kind: z.literal('at') }).strict(),
   z.object({ ...shared, kind: z.literal('every'), everySeconds: z.number().int().positive() }).strict(),
+])
+const projectionSchema = z.array(z.discriminatedUnion('kind', [
+  z.object({ ...shared, kind: z.literal('after'), afterSeconds: z.number().int().positive(), paused: z.boolean() }).strict(),
+  z.object({ ...shared, kind: z.literal('at'), paused: z.boolean() }).strict(),
+  z.object({ ...shared, kind: z.literal('every'), everySeconds: z.number().int().positive(), paused: z.boolean() }).strict(),
 ])) as unknown as ZodType<ScheduleProjection>
+const projectionStateSchema = z.object({
+  schedules: z.array(z.object({ record: recordSchema, paused: z.boolean() }).strict()),
+  seenIds: z.array(z.string().min(1)),
+}).strict() as unknown as ZodType<ScheduleProjectionState>
 
 /** Schedule's fork-aware Session projection definition. */
-export const scheduleProjectionDefinition: ProjectionDefinition<'schedules', ScheduleProjectionState> = {
+export const scheduleProjectionDefinition = {
   key: 'schedules',
-  schema: projectionSchema,
+  stateSchema: projectionStateSchema,
   init: emptyScheduleProjectionState,
   apply: applyScheduleProjection,
-  view: state => Object.freeze(state.schedules.map(({ record, paused }): ScheduleProjectionItem =>
-    Object.freeze({ ...record, paused }))),
+  wire: {
+    viewSchema: projectionSchema,
+    view: (state: ScheduleProjectionState) => Object.freeze(state.schedules.map(({ record, paused }): ScheduleProjectionItem =>
+      Object.freeze({ ...record, paused }))),
+  },
   eventScope: 'owned-suffix',
   stateVersion: 1,
-}
+} satisfies ProjectionDefinition<'schedules', ScheduleProjectionState>

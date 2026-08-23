@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-Desktop Host 的 spawn argv 在打包与源码启动中均为 `web --patch <overlay> --no-open --host 127.0.0.1 --port 0`。`--patch` 写在应用 flag 之前，以便启动器消费叠加层，Web 应用接收 `--no-open`。Desktop 叠加层把 `web-runtime` 行配置替换为 `openBrowser: false`，同时保留 `printUrl`、`surfaceContext` 与 `trustedHosts`。普通 `dsh web` 仍保持 `openBrowser: true`，见 [打开已就绪 Web UI 的 Agent Note](../feature/2026-08-12-open-ready-web-ui.md)。[Desktop Host Agent Note](../architecture/2026-08-16-deepseek-gestalt-desktop-host.md) 记录 spawn flags。
+Desktop Host 的 spawn argv 在打包与源码启动中均为 `web --patch <overlay> --no-open --host 127.0.0.1 --port 0`。`--patch` 写在应用 flag 之前，以便启动器消费叠加层，Web 应用接收 `--no-open`。Desktop 叠加层把 `web-runtime` 行配置替换为 `openBrowser: false`，同时保留 `printUrl`、`surfaceContext` 与 `trustedHosts`。普通 `dsh web` 仍保持 `openBrowser: true`，见 [打开已就绪 Web UI 的 Agent Note](../feature/2026-08-12-open-ready-web-ui.zh.md)。[Desktop Host Agent Note](../architecture/2026-08-16-deepseek-gestalt-desktop-host.zh.md) 记录 spawn flags。
 
 ## 考虑过的替代方案
 

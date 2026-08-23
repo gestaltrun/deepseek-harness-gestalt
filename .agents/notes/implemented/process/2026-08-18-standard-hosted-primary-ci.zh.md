@@ -10,9 +10,9 @@ Status: implemented
 
 ## 决策
 
-三个主要 Node 24 Linux 作业默认解析到 `ubuntu-latest`，原生 Windows 作业默认解析到 `windows-latest`。对于可信且非 Dependabot 的拉取请求，仓库变量 `DSH_CI_FAILOVER_LINUX` 和 `DSH_CI_FAILOVER_WINDOWS` 仍可选择各平台的自托管池。[故障切换手册](2026-07-26-ci-failover-runbook.md)负责该操作。
+三个主要 Node 24 Linux 作业默认解析到 `ubuntu-latest`，原生 Windows 作业默认解析到 `windows-latest`。对于可信且非 Dependabot 的拉取请求，仓库变量 `DSH_CI_FAILOVER_LINUX` 和 `DSH_CI_FAILOVER_WINDOWS` 仍可选择各平台的自托管池。[故障切换手册](2026-07-26-ci-failover-runbook.zh.md)负责该操作。
 
-标准运行器的默认值会限制进程扇出：Linux 静态检查使用 4 个顶层工作进程，覆盖率检查使用 2 个顶层工作进程和 2 个插桩工作进程，consumer 检查使用 4 个顶层工作进程和 8 个快照工作进程，原生 Windows 使用 1 个顶层门禁工作进程、1 个覆盖率工作进程和 1 个 publint 工作进程（[串行门禁决策](2026-08-23-hosted-windows-serial-gates.md)）。自托管分支保留其运行器池专属的内部工作进程上限。
+标准运行器的默认值会限制进程扇出：Linux 静态检查使用 4 个顶层工作进程，覆盖率检查使用 2 个顶层工作进程和 2 个插桩工作进程，consumer 检查使用 4 个顶层工作进程和 8 个快照工作进程，原生 Windows 使用 1 个顶层门禁工作进程、1 个覆盖率工作进程和 1 个 publint 工作进程（[串行门禁决策](2026-08-23-hosted-windows-serial-gates.zh.md)）。自托管分支保留其运行器池专属的内部工作进程上限。
 
 自定义大型运行器标签只保留在手动派发的基准测试矩阵中。[CI 工作流测试](../../../../scripts/ci-workflow.spec.ts)要求拉取请求作业默认使用标准标签，并拒绝这些选择器中的自定义大型运行器标签。
 

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-22-desktop-web-host-no-open.md
 2026-08-22-desktop-web-host-no-open.md: c7e400f76533a9904d1c09efea59386d39fb9c48
-2026-08-22-desktop-web-host-no-open.zh.md: ca6125e7651450f9db4ec24d113d604d62b7145c
+2026-08-22-desktop-web-host-no-open.zh.md: 6d6a2dc2afbb869edd88ced5d0faf85bc59b516c

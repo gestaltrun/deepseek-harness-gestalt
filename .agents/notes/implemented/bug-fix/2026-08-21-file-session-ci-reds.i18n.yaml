@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-21-file-session-ci-reds.md
 2026-08-21-file-session-ci-reds.md: 1eccff21ac507af9c8119224c396b46184edea78
-2026-08-21-file-session-ci-reds.zh.md: cf99efd975ddd96e2b9bb80b727b72edb0e8ea1e
+2026-08-21-file-session-ci-reds.zh.md: 652af7aaedb0ed071ef2c6f3553cddc9acbdf149

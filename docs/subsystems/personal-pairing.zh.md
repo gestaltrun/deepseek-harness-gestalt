@@ -259,7 +259,7 @@ abstract revoke(input: { pairingId: PersonalPairingId; capability: AttachmentCap
  * Project every retained blob for Platform-side operations.
  * @returns copies of ciphertext and metadata only; no plaintext exists on this side of the boundary.
  */
-abstract observe(): readonly RemoteAttachmentBlob[]
+abstract observe(): readonly RemoteAttachmentBlob[] | Promise<readonly RemoteAttachmentBlob[]>
 ```
 
 Source: [`packages/platform/remote-attachments/src/index.ts:59`](../../packages/platform/remote-attachments/src/index.ts)

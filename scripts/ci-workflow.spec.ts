@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
@@ -6,8 +6,57 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(import.meta.dirname, '..')
 const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
 const nativeWindowsPnpmDestination = '${{ runner.temp }}/setup-pnpm-js'
+const prAfterWorkflowValidity = "needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'"
 
 describe('CI workflow', () => {
+  it('rejects runner-only contexts before job construction', () => {
+    expect(() => {
+      assertJobConstructionContexts({
+        jobs: {
+          invalid: {
+            env: {
+              CONFIG: '${{ runner.temp }}/config.json',
+            },
+          },
+        },
+      }, 'invalid.yml')
+    }).toThrow('invalid.yml job invalid env CONFIG uses runner context before a runner exists')
+
+    for (const file of readdirSync(resolve(root, '.github/workflows'))) {
+      if (!file.endsWith('.yml') && !file.endsWith('.yaml')) continue
+      assertJobConstructionContexts(loadWorkflow(`.github/workflows/${file}`), file)
+    }
+  })
+
+  it('validates workflows before admitting pull-request evidence jobs', () => {
+    const workflow = loadWorkflow('.github/workflows/ci.yml')
+    const validity = workflowJob(workflow, 'workflow-validity')
+    if (!Array.isArray(validity.steps) || !isRecord(workflow.jobs)) {
+      throw new TypeError('CI workflow must define workflow-validity steps and jobs')
+    }
+
+    expect(validity).toMatchObject({
+      name: 'workflow validity',
+      'runs-on': 'ubuntu-latest',
+      'timeout-minutes': 2,
+    })
+    expect(validity.steps).toContainEqual({
+      name: 'Validate GitHub Actions workflows',
+      uses: 'docker://rhysd/actionlint:1.7.12',
+      with: { args: '-color' },
+    })
+
+    for (const [jobName, job] of Object.entries(workflow.jobs)) {
+      if (jobName === 'workflow-validity') continue
+      if (!isRecord(job)) throw new TypeError(`CI job ${jobName} must be an object`)
+      const needs = typeof job.needs === 'string' ? [job.needs] : job.needs
+      expect(needs, `${jobName} must wait for workflow validity`).toContain('workflow-validity')
+      if (jobName !== 'all-checks-passed') {
+        expect(job.if, `${jobName} must not run after invalid workflow input`).toBe(prAfterWorkflowValidity)
+      }
+    }
+  })
+
   it('makes optional dependencies mandatory for master standby installs', () => {
     const workflow = loadWorkflow('.github/workflows/ci-master.yml')
     if (!isRecord(workflow.env)) throw new TypeError('ci-master workflow must define environment variables')
@@ -156,7 +205,7 @@ describe('CI workflow', () => {
     // Required PR job: Wine on ubuntu-latest, runs wine-windows-gates.sh.
     expect(windows['runs-on']).toBe('ubuntu-latest')
     expect(windows.name).toBe('windows node 24 / wine blocking')
-    expect(windows.if).toBe("github.event_name == 'pull_request'")
+    expect(windows.if).toBe(prAfterWorkflowValidity)
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
 
     // windows-native: non-blocking native job with failover, runs windows-complete.
@@ -169,7 +218,7 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).toContain('windows-latest')
     expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
     expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toBe("github.event_name == 'pull_request'")
+    expect(windowsNative.if).toBe(prAfterWorkflowValidity)
     expect(windowsNative.env).toMatchObject({
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000',
     })
@@ -202,7 +251,7 @@ describe('CI workflow', () => {
     if (!isRecord(macosElectron) || !Array.isArray(macosElectron.steps)) {
       throw new TypeError('CI workflow must define electron-runtime-e2e-macos')
     }
-    expect(macosElectron.if).toBe("github.event_name == 'pull_request'")
+    expect(macosElectron.if).toBe(prAfterWorkflowValidity)
     expect(macosElectron['runs-on']).toBe('macos-latest')
     expect(macosElectron.name).toBe('macos electron runtime e2e')
     const macosCommands = macosElectron.steps.filter((step): step is Record<string, unknown> & { run: string } => (
@@ -327,7 +376,7 @@ describe('CI workflow', () => {
     }
 
     expect(pythonRuntime).toMatchObject({
-      if: "github.event_name == 'pull_request'",
+      if: prAfterWorkflowValidity,
       name: 'python runtime / release-shaped Linux x64',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: {
@@ -688,6 +737,18 @@ function workflowJob(workflow: Record<string, unknown>, job: string): Record<str
     throw new TypeError(`workflow must define the ${job} job`)
   }
   return workflow.jobs[job]
+}
+
+function assertJobConstructionContexts(workflow: Record<string, unknown>, file: string): void {
+  if (!isRecord(workflow.jobs)) throw new TypeError(`${file} must define jobs`)
+  for (const [jobName, job] of Object.entries(workflow.jobs)) {
+    if (!isRecord(job) || !isRecord(job.env)) continue
+    for (const [name, value] of Object.entries(job.env)) {
+      if (typeof value === 'string' && value.includes('${{ runner.')) {
+        throw new TypeError(`${file} job ${jobName} env ${name} uses runner context before a runner exists`)
+      }
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

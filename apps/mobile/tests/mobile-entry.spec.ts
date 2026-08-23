@@ -100,7 +100,7 @@ describe('Mobile Platform Account entry', () => {
     await waitFor(() => { expect(button.hasAttribute('disabled')).toBe(false) })
     fireEvent.click(button)
 
-    await waitFor(() => { expect(browserOpen).toHaveBeenCalledOnce() })
+    expect(browserOpen).toHaveBeenCalledOnce()
     const opened = new URL(browserOpen.mock.calls[0]?.[0].url as string)
     expect(opened.protocol).toBe('https:')
     expect(opened.origin).toBe('https://github.com')

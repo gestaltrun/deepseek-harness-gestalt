@@ -25,7 +25,9 @@ jobs:
   preflight:
     name: preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
+    env:
+      DSH_GATE_CONCURRENCY: '8'
     outputs:
       level: ${{ steps.plan.outputs.level }}
       lanes: ${{ steps.plan.outputs.lanes }}

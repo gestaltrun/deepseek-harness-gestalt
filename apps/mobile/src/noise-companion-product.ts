@@ -111,6 +111,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     resolve(answer: CompanionStatusAnswer): void
     reject(error: unknown): void
   }>()
+  private reconciliation: Promise<readonly CompanionOperationReceipt[]> | undefined
   private readonly images = new Map<CompanionOperationId, {
     active: ActiveMobileSnowChannel
     sessionId: string
@@ -361,20 +362,33 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     active: ActiveMobileSnowChannel,
     message: Parameters<SnowCompanionProtocolChannel['seal']>[0],
     permit: { requireCurrent(): void },
-    onTransmitted?: () => void | Promise<void>,
+    beforeSend?: () => void | Promise<void>,
   ): Promise<void> {
     permit.requireCurrent()
     if (this.options.connection.current() !== active) throw new Error('Companion Snow channel was replaced')
     const ciphertext = active.channel.seal(message)
     permit.requireCurrent()
+    await beforeSend?.()
+    permit.requireCurrent()
+    if (this.options.connection.current() !== active) throw new Error('Companion Snow channel was replaced')
     await this.options.sendCiphertext(active.targetAttachmentId, ciphertext)
-    await onTransmitted?.()
     permit.requireCurrent()
     if (this.options.connection.current() !== active) throw new Error('Companion Snow channel was replaced')
   }
 
-  /** Reconcile every unknown receipt after the replacement connection synchronizes. */
-  async reconcileUnknown(): Promise<readonly CompanionOperationReceipt[]> {
+  /** Reconcile every unknown receipt once after the replacement connection synchronizes. */
+  reconcileUnknown(): Promise<readonly CompanionOperationReceipt[]> {
+    if (this.reconciliation !== undefined) return this.reconciliation
+    const reconciliation = this.reconcileUnknownOwned()
+    this.reconciliation = reconciliation
+    void reconciliation.then(
+      () => { if (this.reconciliation === reconciliation) this.reconciliation = undefined },
+      () => { if (this.reconciliation === reconciliation) this.reconciliation = undefined },
+    )
+    return reconciliation
+  }
+
+  private async reconcileUnknownOwned(): Promise<readonly CompanionOperationReceipt[]> {
     const active = this.requireActive()
     const settlement = this.requireOperationSettlement()
     const rows = await settlement.reconcileUnknown({
@@ -402,13 +416,13 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     const receipt = await this.requireOperationSettlement().transmit(
       { kind, operationId: operation.operationId, ...(sessionId === undefined ? {} : { sessionId }) },
       {
-        send: async (_mutation, onTransmitted) => {
+        send: async (_mutation, beforeSend) => {
           const outcome = new Promise<CompanionMutationResult>((resolve, reject) => {
             this.mutations.set(operation.operationId, { active, resolve, reject })
           })
           void outcome.catch(() => {})
           try {
-            await this.sendCurrent(active, { type: 'operation', operation }, permit, onTransmitted)
+            await this.sendCurrent(active, { type: 'operation', operation }, permit, beforeSend)
             return { known: true, result: await outcome }
           } catch (error) {
             this.mutations.delete(operation.operationId)

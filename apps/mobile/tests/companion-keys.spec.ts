@@ -26,7 +26,7 @@ describe('PairingCompanionKeyVault', () => {
         if (accountId === accountA) await blockedA
         return { active: [{
           pairingId: accountId === accountA ? pairingA : pairingB,
-          attachmentKey: accountId === accountA ? MATERIAL : OTHER,
+          attachmentKey: (accountId === accountA ? MATERIAL : OTHER).slice(),
         }] }
       }),
       save: vi.fn(async (accountId: string, document: { active: Array<{ pairingId: string }> }) => {
@@ -44,6 +44,35 @@ describe('PairingCompanionKeyVault', () => {
     vault.retain(pairingB, MATERIAL)
     await vault.flush()
     expect(saves).toEqual([{ accountId: accountB, pairings: [pairingB] }])
+  })
+
+  it('zeroes temporary loaded key and recovery buffers after copying them into the active Account', async () => {
+    const accountId = parsePlatformAccountId('account-loaded-zeroed')
+    const pairingId = parsePersonalPairingId('pairing-loaded-zeroed')
+    const attachmentKey = MATERIAL.slice()
+    const reconnectState = new Uint8Array(96).fill(7)
+    const mobileHandshake = new Uint8Array(32).fill(8)
+    const handshakeRecovery = new Uint8Array(32).fill(9)
+    const store = {
+      load: vi.fn(async () => ({
+        active: [{ pairingId, attachmentKey, reconnectState }],
+        pending: {
+          link: 'https://example.test/pair', expiresAt: 100, accountId,
+          completionId: 'completion-zero' as never, mobileHandshake, handshakeRecovery,
+          transmission: 'prepared' as const, endpointChallengeId: 'challenge-zero' as never,
+          endpointHandshakeFinished: false,
+        },
+      })),
+      save: vi.fn(async () => {}),
+    }
+    const vault = new PairingCompanionKeyVault(store)
+    await vault.selectAccount(accountId)
+
+    expect(attachmentKey).toEqual(new Uint8Array(32))
+    expect(reconnectState).toEqual(new Uint8Array(96))
+    expect(mobileHandshake).toEqual(new Uint8Array(32))
+    expect(handshakeRecovery).toEqual(new Uint8Array(32))
+    expect(vault.attachmentKeyMaterial(pairingId)).toEqual(MATERIAL)
   })
 
   it('restores account-scoped Snow reconnect state and Mobile-only Relay authority', async () => {

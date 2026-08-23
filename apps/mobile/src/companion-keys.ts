@@ -27,7 +27,7 @@ export interface StoredMobilePairingDocument {
 
 /** Durable document store used by the in-memory key-vault owner. */
 export interface MobilePairingStateStore {
-  /** Load one Account's retained pairing authority. */
+  /** Load one Account's retained pairing authority, transferring ownership of every returned secret buffer. */
   load(accountId: PlatformAccountId): Promise<StoredMobilePairingDocument>
   /** Atomically replace one Account's retained pairing authority. */
   save(accountId: PlatformAccountId, document: StoredMobilePairingDocument): Promise<void>
@@ -157,14 +157,22 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
       if (this.accountId === accountId) return
       await this.persistence
       const state = await this.store?.load(accountId) ?? { active: [] }
-      this.clearMemory()
-      this.accountId = accountId
-      for (const record of state.active) {
-        this.attachmentKeys.set(record.pairingId, record.attachmentKey.slice())
-        if (record.reconnectState !== undefined) this.reconnectStates.set(record.pairingId, record.reconnectState.slice())
-        if (record.grant !== undefined) this.grants.set(record.pairingId, { ...record.grant })
+      try {
+        this.clearMemory()
+        this.accountId = accountId
+        for (const record of state.active) {
+          this.attachmentKeys.set(record.pairingId, record.attachmentKey.slice())
+          if (record.reconnectState !== undefined) this.reconnectStates.set(record.pairingId, record.reconnectState.slice())
+          if (record.grant !== undefined) this.grants.set(record.pairingId, { ...record.grant })
+        }
+        this.pending = state.pending === undefined ? undefined : cloneEndpointRecovery(state.pending)
+      } finally {
+        for (const record of state.active) {
+          record.attachmentKey.fill(0)
+          record.reconnectState?.fill(0)
+        }
+        wipeEndpointRecovery(state.pending)
       }
-      this.pending = state.pending === undefined ? undefined : cloneEndpointRecovery(state.pending)
     })
     this.selection = selected.then(() => undefined, () => undefined)
     await selected

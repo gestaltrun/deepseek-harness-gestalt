@@ -198,10 +198,10 @@ export class WebCryptoCompanionCacheCipher implements CompanionCacheCipher {
   }
 }
 
-/** Settlement state of one transmitted operation. */
-type CompanionReceiptStatus = 'unknown' | 'committed' | 'not-submitted'
+/** Durable lifecycle state of one proposed operation. */
+type CompanionReceiptStatus = 'prepared' | 'unknown' | 'committed' | 'not-submitted'
 
-/** Operation Receipt row stored only after transmission. */
+/** Operation Receipt row reserved before transmission and settled afterward. */
 export interface CompanionOperationReceipt {
   operationId: CompanionOperationId
   status: CompanionReceiptStatus
@@ -221,7 +221,7 @@ export interface CompanionOperationReceipt {
 export interface CompanionCacheStore {
   /** Reserve bounded capacity before a mutation can leave the device. */
   reserveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void>
-  /** Remove a pre-send reservation when the transport proves nothing left the device. */
+  /** Remove a prepared reservation when the transport never installed its send fence. */
   deleteReceipt(desktopId: CompanionDesktopId, operationId: CompanionOperationId): Promise<void>
   /**
    * @param desktopId - Paired Desktop whose row is written.
@@ -334,7 +334,7 @@ function parseCompanionMutationResult(value: unknown): CompanionMutationResult {
 }
 
 function parseReceiptStatus(value: unknown): CompanionReceiptStatus {
-  if (value === 'unknown' || value === 'committed' || value === 'not-submitted') return value
+  if (value === 'prepared' || value === 'unknown' || value === 'committed' || value === 'not-submitted') return value
   throw new TypeError('Companion receipt status is unsupported')
 }
 
@@ -422,7 +422,7 @@ export class InMemoryCompanionCacheStore implements CompanionCacheStore {
     if (!this.#receipts.has(key)) {
       const owned = [...this.#receipts.entries()].filter(([candidate]) => candidate.startsWith(prefix))
       if (owned.length >= COMPANION_CACHE_RECEIPT_LIMIT) {
-        const terminal = owned.find(([, row]) => row.status !== 'unknown')
+        const terminal = owned.find(([, row]) => row.status === 'committed' || row.status === 'not-submitted')
         if (terminal === undefined) requireReceiptCapacity(owned.length, false)
         else this.#receipts.delete(terminal[0])
       }
@@ -520,7 +520,7 @@ export class IndexedDbCompanionCacheStore implements CompanionCacheStore {
         if (keysRequest.readyState !== 'done' || rowsRequest.readyState !== 'done') return
         if (!keysRequest.result.includes(key) && keysRequest.result.length >= COMPANION_CACHE_RECEIPT_LIMIT) {
           const terminalIndex = rowsRequest.result.findIndex((row: unknown) => (
-            parseCompanionOperationReceipt(row).status !== 'unknown'
+            ['committed', 'not-submitted'].includes(parseCompanionOperationReceipt(row).status)
           ))
           if (terminalIndex < 0) {
             try { requireReceiptCapacity(keysRequest.result.length, false) } catch (error) {
@@ -709,21 +709,22 @@ export type CompanionMutationOutcome =
   | { readonly known: true; readonly result: CompanionMutationResult }
   | { readonly known: false }
 
-/** Hook invoked after a mutation left this device and before `send` returns. */
-export type CompanionTransmissionAck = () => void | Promise<void>
+/** Durable fence invoked immediately before a mutation may leave this device. */
+export type CompanionTransmissionFence = () => void | Promise<void>
 
 /** Relay-backed transport the settlement controller drives. */
 export interface CompanionMutationTransport {
   /**
-   * Transmit one mutation; await `onTransmitted` exactly once after the request
-   * left this device and before returning or rejecting.
+   * Transmit one mutation; await `beforeSend` exactly once immediately before
+   * the first external send attempt. Any later success or failure is uncertain
+   * until Desktop reconciliation.
    * @param mutation - proposed mutation.
-   * @param onTransmitted - transmission acknowledgment hook.
+   * @param beforeSend - durable unknown-outcome fence.
    * @returns the Desktop result, or an explicitly unknown outcome.
    */
   send(
     mutation: CompanionMutationRequest,
-    onTransmitted: CompanionTransmissionAck,
+    beforeSend: CompanionTransmissionFence,
   ): Promise<CompanionMutationOutcome>
   /**
    * Query Desktop for the authoritative outcome of one transmitted operation.
@@ -737,6 +738,9 @@ export interface CompanionMutationTransport {
 export class CompanionUncertainOperationSettlement {
   readonly #store: CompanionCacheStore
   readonly #desktopId: CompanionDesktopId
+  readonly #inFlight = new Set<CompanionOperationId>()
+  #transitions: Promise<void> = Promise.resolve()
+  #reconciliation: Promise<readonly CompanionOperationReceipt[]> | undefined
 
   /** @param store - durable receipt rows. @param desktopId - owning Paired Desktop. */
   constructor(store: CompanionCacheStore, desktopId: CompanionDesktopId) {
@@ -745,10 +749,10 @@ export class CompanionUncertainOperationSettlement {
   }
 
   /**
-   * Transmit one mutation, storing an Operation Receipt only after the request
-   * left this device. Unsynchronized proposals never reach the transport. An existing
-   * `unknown` receipt must be reconciled first; a `committed` receipt is
-   * returned without resending.
+   * Transmit one mutation after reserving bounded capacity and durably changing
+   * that reservation to `unknown` immediately before the external send. An
+   * existing `unknown` receipt must be reconciled first; a `committed` receipt
+   * is returned without resending.
    * @param mutation - proposed mutation.
    * @param transport - Relay-backed transport.
    * @param connection - foreground connection and validated synchronization state.
@@ -760,8 +764,23 @@ export class CompanionUncertainOperationSettlement {
     connection: CompanionConnectionState | undefined,
   ): Promise<CompanionOperationReceipt> {
     requireCompanionMutation(connection, mutation.kind)
-    const existing = (await this.#store.loadReceipts(this.#desktopId))
-      .find(row => row.operationId === mutation.operationId)
+    const existing = await this.transition(async () => {
+      const found = (await this.#store.loadReceipts(this.#desktopId))
+        .find(row => row.operationId === mutation.operationId)
+      if (found?.status === 'prepared' && this.#inFlight.has(mutation.operationId)) {
+        throw new Error(`Companion operation ${mutation.operationId} is already transmitting`)
+      }
+      if (found === undefined) {
+        await this.#store.reserveReceipt(this.#desktopId, {
+          operationId: mutation.operationId, status: 'prepared', kind: mutation.kind,
+          ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+        })
+      }
+      if (found?.status !== 'unknown' && found?.status !== 'committed') {
+        this.#inFlight.add(mutation.operationId)
+      }
+      return found
+    })
     if (existing?.status === 'unknown') {
       throw new Error(
         `Companion operation ${mutation.operationId} is unknown and must be reconciled before another transmit`,
@@ -770,46 +789,49 @@ export class CompanionUncertainOperationSettlement {
     if (existing?.status === 'committed') {
       return existing
     }
-    await this.#store.reserveReceipt(this.#desktopId, {
-      operationId: mutation.operationId, status: 'not-submitted', kind: mutation.kind,
-      ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
-    })
-    let transmissionReceipt: Promise<void> | undefined
-    let outcome: CompanionMutationOutcome
     try {
-      outcome = await transport.send(mutation, () => {
-        transmissionReceipt = this.#store.saveReceipt(
-          this.#desktopId,
-          {
-            operationId: mutation.operationId, status: 'unknown', kind: mutation.kind,
-            ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
-          },
-        )
-        return transmissionReceipt
-      })
-    } catch (error) {
-      // The transmission acknowledgment write must settle before its rejection
-      // escapes; otherwise the promise rejects unobserved.
-      if (transmissionReceipt === undefined) await this.#store.deleteReceipt(this.#desktopId, mutation.operationId)
-      else await transmissionReceipt
-      throw error
-    }
-    await transmissionReceipt
-    if (transmissionReceipt === undefined) {
-      await this.#store.deleteReceipt(this.#desktopId, mutation.operationId)
-      throw new Error('Companion transport reported an unknown outcome without acknowledging transmission')
-    }
-    const receipt: CompanionOperationReceipt = outcome.known
-      ? {
-        operationId: mutation.operationId, status: 'committed', original: outcome.result, kind: mutation.kind,
-        ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+      let transmissionFence: Promise<void> | undefined
+      let outcome: CompanionMutationOutcome
+      try {
+        outcome = await transport.send(mutation, () => {
+          if (transmissionFence !== undefined) {
+            throw new Error('Companion transport installed its durable send fence more than once')
+          }
+          transmissionFence = this.transition(async () => {
+            await this.#store.saveReceipt(this.#desktopId, {
+              operationId: mutation.operationId, status: 'unknown', kind: mutation.kind,
+              ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+            })
+          })
+          return transmissionFence
+        })
+      } catch (error) {
+        if (transmissionFence === undefined) {
+          await this.transition(async () => { await this.#store.deleteReceipt(this.#desktopId, mutation.operationId) })
+        } else {
+          await transmissionFence
+        }
+        throw error
       }
-      : {
-        operationId: mutation.operationId, status: 'unknown', kind: mutation.kind,
-        ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+      await transmissionFence
+      if (transmissionFence === undefined) {
+        await this.transition(async () => { await this.#store.deleteReceipt(this.#desktopId, mutation.operationId) })
+        throw new Error('Companion transport returned without installing its durable send fence')
       }
-    await this.#store.saveReceipt(this.#desktopId, receipt)
-    return receipt
+      const receipt: CompanionOperationReceipt = outcome.known
+        ? {
+          operationId: mutation.operationId, status: 'committed', original: outcome.result, kind: mutation.kind,
+          ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+        }
+        : {
+          operationId: mutation.operationId, status: 'unknown', kind: mutation.kind,
+          ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+        }
+      await this.transition(async () => { await this.#store.saveReceipt(this.#desktopId, receipt) })
+      return receipt
+    } finally {
+      this.#inFlight.delete(mutation.operationId)
+    }
   }
 
   /**
@@ -820,17 +842,50 @@ export class CompanionUncertainOperationSettlement {
    * @returns receipts after reconciliation.
    */
   async reconcileUnknown(transport: CompanionMutationTransport): Promise<readonly CompanionOperationReceipt[]> {
-    const rows = await this.#store.loadReceipts(this.#desktopId)
+    if (this.#reconciliation !== undefined) return await this.#reconciliation
+    const reconciliation = this.reconcileOwned(transport)
+    this.#reconciliation = reconciliation
+    try { return await reconciliation } finally {
+      if (this.#reconciliation === reconciliation) this.#reconciliation = undefined
+    }
+  }
+
+  private async reconcileOwned(transport: CompanionMutationTransport): Promise<readonly CompanionOperationReceipt[]> {
+    const rows = await this.transition(async () => await this.#store.loadReceipts(this.#desktopId))
     const reconciled: CompanionOperationReceipt[] = []
     for (const row of rows) {
+      if (row.status === 'prepared') {
+        const next = { ...row, status: 'not-submitted' as const }
+        const accepted = await this.transition(async () => {
+          const current = (await this.#store.loadReceipts(this.#desktopId))
+            .find(candidate => candidate.operationId === row.operationId)
+          if (current?.status !== 'prepared' || this.#inFlight.has(row.operationId)) return false
+          await this.#store.saveReceipt(this.#desktopId, next)
+          return true
+        })
+        if (accepted) reconciled.push(next)
+        continue
+      }
       if (row.status !== 'unknown') continue
       const answer = await transport.queryStatus(row.operationId)
       const next: CompanionOperationReceipt = answer.committed
         ? { ...row, status: 'committed', original: answer.original }
         : { ...row, status: 'not-submitted' }
-      await this.#store.saveReceipt(this.#desktopId, next)
-      reconciled.push(next)
+      const accepted = await this.transition(async () => {
+        const current = (await this.#store.loadReceipts(this.#desktopId))
+          .find(candidate => candidate.operationId === row.operationId)
+        if (current?.status !== 'unknown') return false
+        await this.#store.saveReceipt(this.#desktopId, next)
+        return true
+      })
+      if (accepted) reconciled.push(next)
     }
     return reconciled
+  }
+
+  private transition<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.#transitions.then(operation, operation)
+    this.#transitions = result.then(() => undefined, () => undefined)
+    return result
   }
 }

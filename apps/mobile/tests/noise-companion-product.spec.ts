@@ -299,7 +299,8 @@ describe('Mobile Snow Companion product channel', () => {
     const prompt = product.submit(sid('session-reconcile'), 'continue once')
     await expect(prompt.completion).rejects.toThrow('Companion Snow channel was replaced')
     connection.connect({ ...active, generation: 2 })
-    const reconciliation = product.reconcileUnknown()
+    const firstReconciliation = product.reconcileUnknown()
+    const secondReconciliation = product.reconcileUnknown()
     await vi.waitFor(() => {
       expect((seal.mock.lastCall?.[0] as { operation?: { type?: string } }).operation?.type)
         .toBe('query-operation-status')
@@ -309,12 +310,88 @@ describe('Mobile Snow Companion product channel', () => {
       committed: { type: 'confirmed', operationId: prompt.operationId, committedAt: 5, outcome: 'accepted' },
     })
 
-    await expect(reconciliation).resolves.toEqual([
-      expect.objectContaining({ operationId: prompt.operationId, status: 'committed', kind: 'prompt' }),
+    await expect(Promise.all([firstReconciliation, secondReconciliation])).resolves.toEqual([
+      [expect.objectContaining({ operationId: prompt.operationId, status: 'committed', kind: 'prompt' })],
+      [expect.objectContaining({ operationId: prompt.operationId, status: 'committed', kind: 'prompt' })],
     ])
-    expect(recoveredReceipt).toHaveBeenCalledWith(expect.objectContaining({
+    const statusQueries = seal.mock.calls.filter(([message]) => (
+      (message as { operation?: { type?: string } }).operation?.type === 'query-operation-status'
+    ))
+    expect(statusQueries).toHaveLength(1)
+    expect(recoveredReceipt).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       status: 'committed', operationId: prompt.operationId,
     }))
+  })
+
+  it('does not attempt Relay send when the durable unknown fence cannot commit', async () => {
+    const runtime = synchronizedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    connection.connect({
+      channel: { seal: () => Uint8Array.of(1) } as never,
+      targetAttachmentId: parseRelayAttachmentId('desktop-fence-failure'),
+      pairingSelector: parseRelayPairingSelector('pairing-fence-failure'),
+      generation: 1,
+    })
+    const store = new InMemoryCompanionCacheStore()
+    vi.spyOn(store, 'saveReceipt').mockRejectedValueOnce(new Error('durable fence failed'))
+    const sendCiphertext = vi.fn(async () => {})
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection,
+      operationSettlement: new CompanionUncertainOperationSettlement(
+        store, parseCompanionDesktopId('desktop-fence-failure'),
+      ),
+      installation: { authorizeCurrentInstallation: vi.fn() },
+      attachmentKeys: { attachmentKeyMaterial: () => undefined },
+      platformOrigin: 'https://platform.example', sendCiphertext,
+    })
+    const prompt = product.submit(sid('session-fence-failure'), 'do not send')
+
+    await expect(prompt.completion).rejects.toThrow('durable fence failed')
+    expect(sendCiphertext).not.toHaveBeenCalled()
+    expect(await store.loadReceipts(parseCompanionDesktopId('desktop-fence-failure'))).toEqual([
+      expect.objectContaining({ operationId: prompt.operationId, status: 'prepared' }),
+    ])
+  })
+
+  it('commits the unknown fence before Relay send and retains it after an explicit send failure', async () => {
+    const runtime = synchronizedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    connection.connect({
+      channel: { seal: () => Uint8Array.of(1) } as never,
+      targetAttachmentId: parseRelayAttachmentId('desktop-fence'),
+      pairingSelector: parseRelayPairingSelector('pairing-fence'),
+      generation: 1,
+    })
+    const store = new InMemoryCompanionCacheStore()
+    const operationSettlement = new CompanionUncertainOperationSettlement(
+      store, parseCompanionDesktopId('desktop-fence'),
+    )
+    let receiptAtSend: string | undefined
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection, operationSettlement,
+      installation: { authorizeCurrentInstallation: vi.fn() },
+      attachmentKeys: { attachmentKeyMaterial: () => undefined },
+      platformOrigin: 'https://platform.example',
+      sendCiphertext: async () => {
+        receiptAtSend = (await store.loadReceipts(parseCompanionDesktopId('desktop-fence')))[0]?.status
+        throw new Error('Relay explicitly refused the send')
+      },
+    })
+    const prompt = product.submit(sid('session-fence'), 'send once')
+
+    await expect(prompt.completion).rejects.toThrow('Relay explicitly refused the send')
+    expect(receiptAtSend).toBe('unknown')
+    expect(await store.loadReceipts(parseCompanionDesktopId('desktop-fence'))).toEqual([
+      expect.objectContaining({ operationId: prompt.operationId, status: 'unknown' }),
+    ])
+    const queryStatus = vi.fn(async () => ({ committed: false as const }))
+    await expect(operationSettlement.reconcileUnknown({
+      send: async () => { throw new Error('reconciliation must not send') },
+      queryStatus,
+    })).resolves.toEqual([
+      expect.objectContaining({ operationId: prompt.operationId, status: 'not-submitted' }),
+    ])
+    expect(queryStatus).toHaveBeenCalledExactlyOnceWith(prompt.operationId)
   })
 
   it('assembles and verifies exact historical image bytes', async () => {

@@ -480,6 +480,7 @@ async function offer(fileName: string, plaintext: Uint8Array, id: string): Promi
   operation: CompanionOfferAttachmentOperation
   ciphertext: Uint8Array
 }> {
+  // oxlint-disable-next-line typescript/no-unsafe-assignment -- the host test face cannot resolve the DOM CryptoKey return type
   const key = await deriveCompanionAttachmentKey(attachmentKey)
   const sealed = await sealCompanionAttachment(key, plaintext)
   return {

@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { accountStorageNamespace } from '@deepseek-ai/dsh-platform-account-client'
 import { parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
@@ -22,7 +22,7 @@ import {
   type CompanionMutationRequest,
   type CompanionMutationTransport,
   type CompanionStatusAnswer,
-  type CompanionTransmissionAck,
+  type CompanionTransmissionFence,
 } from '../src/companion-cache.ts'
 
 const desktopA = parseCompanionDesktopId('desktop-a')
@@ -199,6 +199,33 @@ describe('Companion Cache', () => {
     expect(await store.loadReceipts(desktopA)).toHaveLength(limit)
   })
 
+  it('never evicts prepared or unknown fences across 257 concurrent reservations', async () => {
+    const store = new InMemoryCompanionCacheStore()
+    const settlement = new CompanionUncertainOperationSettlement(store, desktopA)
+    const releases: Array<() => Promise<void>> = []
+    let transportEntries = 0
+    const transmissions = Array.from({ length: REMOTE_PROTOCOL_LIMITS.containerValues + 1 }, (_, index) => (
+      settlement.transmit({
+        kind: 'prompt', operationId: parseCompanionOperationId(`concurrent-${String(index)}`),
+      }, {
+        send: async (_mutation, fence) => await new Promise((resolve) => {
+          transportEntries += 1
+          releases.push(async () => { await fence(); resolve({ known: false }) })
+        }),
+        queryStatus: async () => ({ committed: false }),
+      }, ready)
+    ))
+    const settledTransmissions = Promise.allSettled(transmissions)
+    await vi.waitFor(() => { expect(transportEntries).toBe(REMOTE_PROTOCOL_LIMITS.containerValues) })
+    expect(new Set((await store.loadReceipts(desktopA)).map(row => row.status))).toEqual(new Set(['prepared']))
+    for (const release of releases) await release()
+    const settled = await settledTransmissions
+
+    expect(transportEntries).toBe(REMOTE_PROTOCOL_LIMITS.containerValues)
+    expect(settled.filter(result => result.status === 'rejected')).toHaveLength(1)
+    expect(await store.loadReceipts(desktopA)).toHaveLength(REMOTE_PROTOCOL_LIMITS.containerValues)
+  })
+
   it('persists sealed rows through the IndexedDB store with metadata and transcript coexisting', async () => {
     const keys = { 'desktop-a': await freshKey() }
     const databaseName = companionCacheDatabaseName('development', parsePlatformAccountId('cache-content'))
@@ -310,16 +337,16 @@ describe('Companion Cache', () => {
     await expect(cache.loadOpenedContent(desktopA, 'transcript')).resolves.not.toBeUndefined()
   })
 
-  it('stores an Operation Receipt only after transmission', async () => {
+  it('commits the durable unknown fence before transmission', async () => {
     const store = new InMemoryCompanionCacheStore()
     const settlement = new CompanionUncertainOperationSettlement(store, desktopA)
-    let transmitted = false
-    let receiptsAtTransmission: readonly unknown[] | undefined
+    let sent = false
+    let receiptsAtSend: readonly unknown[] | undefined
     const transport: CompanionMutationTransport = {
-      async send(_mutation, onTransmitted) {
-        await onTransmitted()
-        receiptsAtTransmission = await store.loadReceipts(desktopA)
-        transmitted = true
+      async send(_mutation, beforeSend) {
+        await beforeSend()
+        receiptsAtSend = await store.loadReceipts(desktopA)
+        sent = true
         return { known: false }
       },
       async queryStatus() { return { committed: false } },
@@ -329,9 +356,9 @@ describe('Companion Cache', () => {
       transport,
       ready,
     )
-    expect(transmitted).toBe(true)
+    expect(sent).toBe(true)
     expect(receipt.status).toBe('unknown')
-    expect(receiptsAtTransmission).toEqual([
+    expect(receiptsAtSend).toEqual([
       { operationId: parseCompanionOperationId('op-uncertain'), status: 'unknown', kind: 'prompt' },
     ])
   })
@@ -347,17 +374,32 @@ describe('Companion Cache', () => {
       { kind: 'prompt', operationId: parseCompanionOperationId('op-never-sent') },
       neverTransmits,
       ready,
-    )).rejects.toThrow(/without acknowledging transmission/)
+    )).rejects.toThrow(/without installing its durable send fence/)
     expect(await store.loadReceipts(desktopA)).toEqual([])
   })
 
-  it('settles the transmission acknowledgment even when the send fails after transmitting', async () => {
+  it('settles a prepared reservation left by a pre-fence crash without querying Desktop', async () => {
+    const store = new InMemoryCompanionCacheStore()
+    const operationId = parseCompanionOperationId('op-pre-fence-crash')
+    await store.reserveReceipt(desktopA, { operationId, status: 'prepared', kind: 'prompt' })
+    const queryStatus = vi.fn(async () => ({ committed: false as const }))
+
+    await expect(new CompanionUncertainOperationSettlement(store, desktopA).reconcileUnknown({
+      send: async () => { throw new Error('reconciliation must not send') },
+      queryStatus,
+    })).resolves.toEqual([
+      { operationId, status: 'not-submitted', kind: 'prompt' },
+    ])
+    expect(queryStatus).not.toHaveBeenCalled()
+  })
+
+  it('retains the unknown fence when the send fails after the fence commits', async () => {
     const store = new InMemoryCompanionCacheStore()
     const settlement = new CompanionUncertainOperationSettlement(store, desktopA)
     let receiptObserved = false
     const failsAfterTransmit: CompanionMutationTransport = {
-      async send(_mutation, onTransmitted) {
-        await onTransmitted()
+      async send(_mutation, beforeSend) {
+        await beforeSend()
         receiptObserved = (await store.loadReceipts(desktopA)).length === 1
         throw new Error('relay dropped before the Desktop result arrived')
       },
@@ -427,6 +469,30 @@ describe('Companion Cache', () => {
     expect(absent.find(row => row.operationId === parseCompanionOperationId('op-absent'))?.status).toBe('not-submitted')
   })
 
+  it('single-flights concurrent reconciliation of the same unknown receipt', async () => {
+    const store = new InMemoryCompanionCacheStore()
+    const settlement = new CompanionUncertainOperationSettlement(store, desktopA)
+    const operationId = parseCompanionOperationId('op-reconcile-single-flight')
+    await settlement.transmit({ kind: 'prompt', operationId }, outcomeTransport({ known: false }), ready)
+    let resolveStatus: ((answer: CompanionStatusAnswer) => void) | undefined
+    const status = new Promise<CompanionStatusAnswer>((resolve) => { resolveStatus = resolve })
+    const queryStatus = vi.fn(async () => await status)
+    const transport: CompanionMutationTransport = {
+      send: async () => { throw new Error('reconciliation must not send') },
+      queryStatus,
+    }
+    const first = settlement.reconcileUnknown(transport)
+    const second = settlement.reconcileUnknown(transport)
+    await vi.waitFor(() => { expect(queryStatus).toHaveBeenCalled() })
+    resolveStatus?.({ committed: false })
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      [expect.objectContaining({ operationId, status: 'not-submitted' })],
+      [expect.objectContaining({ operationId, status: 'not-submitted' })],
+    ])
+    expect(queryStatus).toHaveBeenCalledOnce()
+  })
+
   it('never automatically replays an uncertain or unsynchronized operation', async () => {
     const store = new InMemoryCompanionCacheStore()
     const settlement = new CompanionUncertainOperationSettlement(store, desktopA)
@@ -477,8 +543,8 @@ describe('Companion Cache', () => {
 
 function outcomeTransport(outcome: CompanionMutationOutcome): CompanionMutationTransport {
   return {
-    async send(_mutation, onTransmitted) {
-      await onTransmitted()
+    async send(_mutation, beforeSend) {
+      await beforeSend()
       return outcome
     },
     async queryStatus() { return { committed: false } },
@@ -495,10 +561,10 @@ function statusTransport(answer: CompanionStatusAnswer): CompanionMutationTransp
 function recordingTransport(onSend: (() => void) | undefined, outcome: CompanionMutationOutcome) {
   const transport: CompanionMutationTransport & { sends: number } = {
     sends: 0,
-    async send(_mutation: CompanionMutationRequest, onTransmitted: CompanionTransmissionAck) {
+    async send(_mutation: CompanionMutationRequest, beforeSend: CompanionTransmissionFence) {
+      await beforeSend()
       transport.sends += 1
       onSend?.()
-      await onTransmitted()
       return outcome
     },
     async queryStatus() { return { committed: false } },

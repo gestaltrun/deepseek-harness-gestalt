@@ -105,6 +105,41 @@ describe('Desktop Companion operation ledger', () => {
     expect(effect).toHaveBeenCalledOnce()
   })
 
+  it('isolates a failed preparation from a concurrent different operation', async () => {
+    let persisted: Awaited<ReturnType<LedgerStore['load']>> = []
+    let rejectFirstSave: ((error: Error) => void) | undefined
+    const firstSave = new Promise<void>((_resolve, reject) => { rejectFirstSave = reject })
+    let saveCount = 0
+    const store: LedgerStore = {
+      load: async () => structuredClone(persisted),
+      save: async (records) => {
+        saveCount += 1
+        if (saveCount === 1) await firstSave
+        persisted = structuredClone(records)
+      },
+    }
+    const ledger = await DesktopCompanionOperationLedger.load(store, () => 1_000)
+    const pairingId = parsePersonalPairingId('pairing-ledger')
+    const operationA = cancelOperation('operation-interleaved-a')
+    const operationB = cancelOperation('operation-interleaved-b')
+    const effectA = vi.fn(async () => confirmed(operationA, 1_000))
+    const effectB = vi.fn(async () => confirmed(operationB, 1_000))
+
+    const resultA = ledger.execute(pairingId, operationA, effectA)
+    await vi.waitFor(() => { expect(saveCount).toBe(1) })
+    const resultB = ledger.execute(pairingId, operationB, effectB)
+    rejectFirstSave?.(new Error('prepare unavailable'))
+
+    await expect(resultA).rejects.toThrow('prepare unavailable')
+    await expect(resultB).resolves.toEqual(confirmed(operationB, 1_000))
+    expect(effectA).not.toHaveBeenCalled()
+    expect(effectB).toHaveBeenCalledOnce()
+
+    const restored = await DesktopCompanionOperationLedger.load(store, () => 2_000)
+    await expect(restored.execute(pairingId, operationB, effectB)).resolves.toEqual(confirmed(operationB, 1_000))
+    expect(effectB).toHaveBeenCalledOnce()
+  })
+
   it('prunes expired records and evicts the oldest terminal result at capacity', async () => {
     const store = memoryStore()
     const pairingId = parsePersonalPairingId('pairing-ledger')

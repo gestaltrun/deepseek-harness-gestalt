@@ -63,6 +63,7 @@ export class DesktopCompanionOperationLedger {
   private readonly records = new Map<string, PersistedOperationRecord>()
   private readonly pendingCommits = new Map<string, PersistedOperationRecord>()
   private readonly inFlight = new Map<string, { fingerprint: string; result: Promise<CompanionResult> }>()
+  private transactions: Promise<void> = Promise.resolve()
   private persistence: Promise<void> = Promise.resolve()
 
   private constructor(
@@ -105,7 +106,9 @@ export class DesktopCompanionOperationLedger {
       if (running.fingerprint !== fingerprint) throw new Error('Desktop Companion operation id collision')
       return structuredClone(await running.result)
     }
-    const result = this.executeOwned(key, pairingId, operation, fingerprint, effect)
+    const result = this.serialized(
+      async () => await this.executeOwned(key, pairingId, operation, fingerprint, effect),
+    )
     this.inFlight.set(key, { fingerprint, result })
     try {
       return structuredClone(await result)
@@ -154,6 +157,12 @@ export class DesktopCompanionOperationLedger {
     this.pendingCommits.set(key, committed)
     await this.flushPendingCommits()
     return structuredClone(committed.result)
+  }
+
+  private serialized<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.transactions.then(operation, operation)
+    this.transactions = result.then(() => undefined, () => undefined)
+    return result
   }
 
   private async flushPendingCommits(): Promise<void> {

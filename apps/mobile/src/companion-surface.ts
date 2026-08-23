@@ -109,7 +109,7 @@ export interface MobileCompanionMutationChannel {
 }
 
 /** Authenticated content reads owned by one physical connection. */
-export interface MobileCompanionContentChannel {
+interface MobileCompanionContentChannel {
   loadImage(sessionId: string, attachment: ImageAttachmentRef): Promise<string>
 }
 

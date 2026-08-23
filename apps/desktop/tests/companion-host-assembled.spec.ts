@@ -249,8 +249,9 @@ describe('assembled Desktop Companion Host search', () => {
       }), { status: 201, headers: { 'content-type': 'application/json' } })
     }
     try {
-      const searchId = product.search('assembled Snow search needle')
-      await expect.poll(() => results.some(result => isOperationResult(result, searchId))).toBe(true)
+      const search = product.search('assembled Snow search needle')
+      await search.completion
+      await expect.poll(() => results.some(result => isOperationResult(result, search.operationId))).toBe(true)
       for (const [name, type, bytes] of [
         ['payload.bin', 'application/octet-stream', Uint8Array.of(0, 255, 1, 2)],
         ['pixel.png', 'image/png', Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10)],

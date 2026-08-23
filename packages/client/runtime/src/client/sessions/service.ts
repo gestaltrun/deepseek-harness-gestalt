@@ -28,7 +28,9 @@ import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/t
 import type { SnapshotStore } from '../contract/store.ts'
 import { createSnapshotStore } from '../contract/store.ts'
 import type { SessionFace } from '../contract/session.ts'
-import type { AgentContext, ISessions, SessionAdmissionAdapter } from '../contract/sessions.ts'
+import type {
+  AgentContext, ISessions, SessionAdmissionAdapter, SessionModelRoute,
+} from '../contract/sessions.ts'
 import { createScope, scopeOf as scopeTagOf } from '../agents/scope.ts'
 import type { ConversationRuntime } from './conversation-assembler.ts'
 import { SessionManager } from './manager.ts'
@@ -279,7 +281,7 @@ export class SessionRuntime implements ISessions {
    */
   constructor(
     private readonly rootCtx: Context,
-    api: IApiClient,
+    private readonly api: IApiClient,
     remote: SessionRemotes,
     conversationRuntime?: ConversationRuntime,
   ) {
@@ -422,6 +424,7 @@ export class SessionRuntime implements ISessions {
 
   /** Open one explicit renderer window without moving the selected Session. */
   openForRender(sessionId: SessionId): void {
+    if (this.manager.isProvisional(sessionId)) return
     const record = this.resolve(sessionId)
     if (record === undefined) return
     void record.session.open()
@@ -438,6 +441,36 @@ export class SessionRuntime implements ISessions {
       const at = this.admissionAdapters.indexOf(adapter)
       if (at !== -1) this.admissionAdapters.splice(at, 1)
     }
+  }
+
+  /** Resolve model operations without bypassing feature-owned Session routing. */
+  modelRoute(sessionId: SessionId): SessionModelRoute | undefined {
+    const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
+    const featureRoute = admission?.modelRoute?.(sessionId)
+    if (admission !== undefined) return featureRoute
+    if (this.manager.subagentAddress(sessionId) !== undefined) return undefined
+    return {
+      models: async signal => (await this.api.sessions.models({ sessionId }, signal)).result,
+      selectModel: async (selection, signal) => (await this.api.sessions.selectModel({
+        sessionId,
+        provider: selection.provider,
+        model: selection.model,
+        ...selection.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: selection.reasoningEffort },
+      }, signal)).result,
+    }
+  }
+
+  /** Stage one renderer-only identity until its feature publishes a Host Session. */
+  stageProvisional(descriptor: {
+    sessionId: SessionId
+    parentSessionId: SessionId
+    origin: 'subagent'
+    title: string
+  }): () => void {
+    this.manager.stageProvisional(descriptor)
+    return () => { this.manager.dropProvisional(descriptor.sessionId) }
   }
 
   /**

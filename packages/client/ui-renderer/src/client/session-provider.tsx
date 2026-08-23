@@ -164,12 +164,15 @@ function ExplicitSessionProvider({
   const host = useHost()
   // A newly-created child can enter the list without changing the selected
   // Session projection, so this subtree retries resolution on list changes.
-  observableHook(host.sessions.list)(s => s)
+  const listEntry = observableHook(host.sessions.list)((snapshot) => {
+    const byId = (snapshot as { byId?: Record<string, unknown> }).byId
+    return byId?.[sessionId]
+  })
   const info = host.sessions.provideInfoFor?.(sessionId)
   useEffect(() => {
     if (info?.sessionId === undefined) return
     host.sessions.openForRender?.(sessionId)
-  }, [host, info?.sessionId, sessionId])
+  }, [host, info?.sessionId, listEntry, sessionId])
   const id = info?.sessionId
   if (id === undefined || info === undefined) return <>{empty?.() ?? null}</>
   return (

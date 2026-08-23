@@ -18,7 +18,7 @@ import { lazyChunkComponent } from '../lazy-chunk.tsx'
 import { GitView } from '../GitView.tsx'
 import { DiffTab } from '../DiffTab.tsx'
 import { SubagentView } from '../SubagentView.tsx'
-import { consumeSidechatSeed, SideChatView, sidechatThreadIdOf } from '../SideChatView.tsx'
+import { SideChatView, sidechatThreadIdOf } from '../SideChatView.tsx'
 import { api } from '../api.ts'
 import { BrowserView } from '../BrowserView.tsx'
 import { IconTerminalOutline16, IconDiffOutline16, IconGlobeOutline16 } from '../icons.tsx'
@@ -76,7 +76,7 @@ function uiTerminalCount(state: SidebarState): number {
     .filter(tab => tab.type === 'terminal' && !isAgentTabId(tab.id)).length
 }
 
-/** The 6 built-in tab descriptors. */
+/** The 7 built-in tab descriptors. */
 export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): readonly TabDescriptor[] {
   return [
     {
@@ -178,36 +178,22 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
       title: () => t('sideChat'),
       icon: (size: number) => <IconNewChatOutline16 size={size} />,
       order: 35,
-      // Codex-style: EVERY side conversation is its own tab. A plain open
-      // mints a fresh tab flagged `autoCreate` (the view creates the EMPTY
-      // thread on mount); a thread switch from the header menu parks the
-      // target id for a deterministic `sidechat:<threadId>` reattach tab.
+      // Every side conversation reserves a client identity. The first prompt,
+      // not opening the tab, publishes the Host Session under that identity.
       createTab: () => {
-        const threadId = consumeSidechatSeed()
-        if (threadId !== undefined) {
-          return {
-            tab: {
-              id: `sidechat:${threadId}`,
-              type: 'sidechat',
-              title: t('sideChat'),
-              meta: { threadId },
-            },
-          }
-        }
-        return {
-          tab: {
-            id: `sidechat:new-${crypto.randomUUID()}`,
-            type: 'sidechat',
-            title: t('sideChatUntitled'),
-            meta: { autoCreate: true },
-          },
-        }
+        const threadId = `session-${crypto.randomUUID()}`
+        return { tab: {
+          id: `sidechat:${threadId}`,
+          type: 'sidechat',
+          title: t('sideChatUntitled'),
+          meta: { threadId, provisional: true },
+        } }
       },
       // One tab per thread: an already-open thread focuses instead of
       // duplicating; unbound fresh tabs never dedupe (each mints its own).
       dedupeKey: (tab) => sidechatThreadIdOf(tab),
-      // Closing the tab releases the thread's live agent; the session and
-      // its history stay persisted (reopen from any thread's header menu).
+      // Closing the tab releases the thread's live agent while its Session
+      // and history remain persisted.
       onClose: (tab) => {
         const threadId = sidechatThreadIdOf(tab)
         if (threadId !== undefined) {

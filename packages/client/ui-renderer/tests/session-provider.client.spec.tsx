@@ -32,6 +32,8 @@ function observable<T>(initial: T) {
 function makeHost(bodies: { root: (rp: (key: string, owner: object) => React.ReactNode) => React.ReactNode }) {
   const absentInfo: SessionMaybeProvideInfo = { sessionId: undefined, hooks: { session: undefined }, props: {} }
   const provide = observable<SessionMaybeProvideInfo>(absentInfo)
+  const list = observable<{ byId: Record<string, unknown> }>({ byId: {} })
+  const openForRender = vi.fn()
   let currentId: string | undefined
   const infos = new Map<string, SessionProvideInfo>()
   const sessionEntries: StoredEntry[] = []
@@ -53,10 +55,10 @@ function makeHost(bodies: { root: (rp: (key: string, owner: object) => React.Rea
     isLive: () => true,
     storeOf: () => undefined,
     sessions: {
-      list: observable<unknown>({ ids: [] }),
+      list,
       provideInfo: provide,
       provideInfoFor: id => infos.get(id) ?? absentInfo,
-      openForRender: () => {},
+      openForRender,
     },
     workspaces: { list: observable<unknown>({ items: [] }) },
   }
@@ -87,6 +89,10 @@ function makeHost(bodies: { root: (rp: (key: string, owner: object) => React.Rea
       if (currentId === info.sessionId) provide.set(info)
     },
     registerSession: (entry: StoredEntry) => { sessionEntries.push(entry) },
+    publishListEntry: (id: string, entry: unknown) => {
+      list.set({ byId: { ...list.getSnapshot().byId, [id]: entry } })
+    },
+    openForRender,
   }
 }
 
@@ -189,6 +195,19 @@ describe('SessionProvider', () => {
     expect(seen.at(-1)).toEqual({ sessionId: 'side', read: 'side' })
     h.current.set(undefined)
     expect(seen.at(-1)).toEqual({ sessionId: 'side', read: 'side' })
+  })
+
+  it('reopens an explicit provisional identity when Host publication upgrades its list row', () => {
+    const h = makeHost({
+      root: () => <SessionProvider sessionId="side">{id => <span>{id}</span>}</SessionProvider>,
+    })
+    h.addSession('side')
+    h.publishListEntry('side', { provisional: true })
+    render(<>{createSlotRenderer().renderRoot(h.host, {})}</>)
+    expect(h.openForRender).toHaveBeenCalledTimes(1)
+
+    act(() => { h.publishListEntry('side', { durable: true }) })
+    expect(h.openForRender).toHaveBeenCalledTimes(2)
   })
 
   it('republishes a mounted session entry when its provide bundle changes under the same id', () => {

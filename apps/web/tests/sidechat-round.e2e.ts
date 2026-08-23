@@ -50,12 +50,31 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     await composer.fill(PROMPT)
     await composer.press('Enter')
     const parentId = await parentSettled
+    const liveIdsBeforeSideChat = scaffold.ctx.agents.list().map(agent => agent.id)
 
     await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click()
     await page.getByRole('button', { name: 'New tab', exact: true }).click()
-    await page.getByRole('menuitem', { name: 'Side Chat (beta)', exact: true }).click()
-    const sideComposer = page.locator('[data-dsh-panel] textarea:enabled')
+    const menuLabels = await page.getByRole('menuitem').allTextContents()
+    expect(menuLabels).toContain('Side Chat')
+    const menuItem = page.getByRole('menuitem', { name: 'Side Chat', exact: true })
+    expect(await menuItem.locator('svg').count()).toBe(1)
+    await menuItem.click()
+    const panel = page.locator('[data-dsh-panel]:visible')
+    const sideComposer = panel.locator('textarea:enabled')
     await sideComposer.waitFor({ timeout: 15_000 })
+    expect(scaffold.ctx.agents.list().map(agent => agent.id)).toEqual(liveIdsBeforeSideChat)
+    const selectSideModel = async () => {
+      const trigger = panel.getByRole('button', { name: /^Select model, current DeepSeek-V4-Flash$/u })
+      await trigger.waitFor({ timeout: 15_000 })
+      await trigger.click()
+      await panel.getByRole('menuitem', { name: /^Model/u }).click()
+      const option = page.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash', exact: true })
+      await option.waitFor({ timeout: 15_000 })
+      await option.click()
+      expect(await panel.getByText(/^Model operation failed:/u).count()).toBe(0)
+    }
+    await selectSideModel()
+    expect(scaffold.ctx.agents.list().map(agent => agent.id)).toEqual(liveIdsBeforeSideChat)
 
     const childSettled = scaffold.whenTurnSettled()
     await sideComposer.fill(PROMPT)
@@ -63,8 +82,15 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     const childId = await childSettled
     expect(childId).not.toBe(parentId)
 
-    const panel = page.locator('[data-dsh-panel]')
     await panel.getByText(RESPONSE, { exact: true }).waitFor({ timeout: 30_000 })
+    await selectSideModel()
+    const selected = await page.request.post(`${scaffold.baseUrl}/sidebar/api/sidechat.selectModel`, {
+      data: {
+        childId,
+        selection: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      },
+    })
+    expect(selected.ok()).toBe(true)
     const child = scaffold.ctx.agents.get(childId)
     expect(child).toBeDefined()
     const injection = child?.session.events.find((event: SessionEvent) => {

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import { SideChatView, sidechatRootThreadIdOf } from '../src/client/SideChatView.tsx'
 import { builtinTabs } from '../src/client/builtins/tabs.tsx'
 import { api } from '../src/client/api.ts'
@@ -101,8 +102,10 @@ describe('SideChatView', () => {
       'side-thread',
       { renderMode: 'sidechat', openSession: expect.any(Function) },
     )
-    const owner = mountSession.mock.calls[0]?.[3] as { openSession?: (sessionId: string) => void } | undefined
-    owner?.openSession?.('nested-child')
+    const owner = mountSession.mock.calls[0]?.[3] as {
+      openSession?: (sessionId: SessionId) => void
+    } | undefined
+    owner?.openSession?.('nested-child' as SessionId)
     expect(updateTab).toHaveBeenCalledWith('sidechat:side-thread', {
       meta: { threadId: 'nested-child', rootThreadId: 'side-thread' },
     })

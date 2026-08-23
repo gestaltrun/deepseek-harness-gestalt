@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-24-side-chat-owned-admission-and-header-actions.md
-2026-08-24-side-chat-owned-admission-and-header-actions.md: 55fc4da1a78e0789612c29c9fa343044fba5032a
-2026-08-24-side-chat-owned-admission-and-header-actions.zh.md: 7d71d53fe77c6d9575609dde780bfa5f84c0e01a
+2026-08-24-side-chat-owned-admission-and-header-actions.md: 0e95da03fde050f132efeb71b41de19f43575c17
+2026-08-24-side-chat-owned-admission-and-header-actions.zh.md: e653d873df2af2fd4e922c9434a9f0898c252ac8

@@ -24,4 +24,4 @@ Layout sanitization removes the automatic Files home emitted by the former defau
 
 ## Consequences
 
-Opening a fresh sidebar requires an explicit tab-type choice and gives every enabled type equal placement. Loading an existing layout removes only the automatic Files record; explicit editor homes and file tabs remain. Component tests pin the empty fresh state, visible type cards, and the migration discriminator.
+Opening a fresh sidebar requires an explicit tab-type choice and gives every enabled type equal placement. Loading an existing layout removes only the automatic Files record; explicit editor homes and file tabs remain. Component tests pin the empty fresh state, visible type cards, and the migration discriminator. The assembled Web replay snapshots the fresh picker and opens Side Chat through its card.

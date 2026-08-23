@@ -34,4 +34,4 @@ Side Chat 只有一棵标准对话组件树和一条功能自有准入路径。�
 
 ## Testing
 
-运行时与包级测试固定适配器路由、临时拓扑排除、分组 trigger launcher、模型选择、queue steering、权限归属、catalog 归属切换、child-scoped 头部操作、本地下级重定向、根句柄释放与 viewport 弹层位置。装配后的 Web replay 会打开临时 Side Chat，在创建 child 前读取预置 skill，提交首条消息，切换模型，将权限同步到父会话与子会话，并验证子会话 transcript。
+运行时与包级测试固定适配器路由、临时拓扑排除、分组 trigger launcher、模型选择、queue steering、权限归属、catalog 归属切换、child-scoped 头部操作、本地下级重定向、根句柄释放与 viewport 弹层位置。装配后的 Web replay 会从新 pane 选择 Side Chat，在创建 child 前读取预置 skill，提交首条消息，切换模型，将权限同步到父会话与子会话，重定向到嵌套后代，验证两份 transcript，并通过保留的根句柄关闭标签。

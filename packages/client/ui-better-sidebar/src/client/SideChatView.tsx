@@ -16,9 +16,9 @@ export function sidechatThreadIdOf(tab: SidebarTab): SessionId | undefined {
 }
 
 /** Root Side Chat identity whose live handle belongs to this navigable tab. */
-export function sidechatRootThreadIdOf(tab: SidebarTab): string | undefined {
+export function sidechatRootThreadIdOf(tab: SidebarTab): SessionId | undefined {
   const meta = tab.meta as { rootThreadId?: unknown } | undefined
-  return typeof meta?.rootThreadId === 'string' ? meta.rootThreadId : sidechatThreadIdOf(tab)
+  return typeof meta?.rootThreadId === 'string' ? meta.rootThreadId as SessionId : sidechatThreadIdOf(tab)
 }
 
 function threadDisplayTitle(title: string): string {
@@ -44,7 +44,7 @@ export function SideChatView(props: {
   const summary = threadId === undefined ? undefined : list.byId[threadId]
   const published = summary?.blank === false
   const conversationHost = useRef<HTMLDivElement | null>(null)
-  const openSession = useCallback((sessionId: string): void => {
+  const openSession = useCallback((sessionId: SessionId): void => {
     ctx.betterSidebar?.updateTab(tab.id, {
       meta: { threadId: sessionId, ...(rootThreadId === undefined ? {} : { rootThreadId }) },
     })

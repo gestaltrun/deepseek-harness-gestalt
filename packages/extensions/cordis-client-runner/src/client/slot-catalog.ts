@@ -87,7 +87,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     doc: 'The whole center column, across both the no-session hero and a live\nconversation. OCCUPIED by ui-conversation\'s ConversationRoot, which\ndeclares the session body, composer, and input seats inside it —\nregistering here replaces the entire conversation surface (and removes\nevery seat it declares) rather than adding to it.\n\nCurrent-session-optional: the occupant owns both states without\nchanging its React identity, so it keeps its own state across a session\nswitch. It receives no owner props; session facts arrive through the\nframework hooks of the `session-maybe` scope.',
     registerOptions: [],
     ownerProps: [
-      '/** Conversation owner share: business state and actions belong to the registrant. */\nexport interface ConvOwnerProps {}',
+      '/** Conversation owner share: business state and actions belong to the registrant. */\nexport interface ConvOwnerProps {\n  /** Side Chat renders the same conversation registration without blank-session Hero chrome. */\n  renderMode?: \'sidechat\' | undefined\n}',
     ],
     ownerPropsReferences: [],
     standardProps: [
@@ -938,7 +938,9 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     summary: 'The entire body of one session: taking this seat means rendering that session\'s conversation yourself.',
     doc: 'The entire body of one session: taking this seat means rendering that\nsession\'s conversation yourself. The occupant also owns the per-session\ndraft mirror and the active view ring, so a replacement inherits both\nduties and an empty one leaves a blank session pane — nothing here\ndegrades gracefully. To ADD rather than replace, take a seat inside the\nflow instead: `conversation.view` for a whole tab, the input regions for\ncomposer chrome.',
     registerOptions: [],
-    ownerProps: [],
+    ownerProps: [
+      '/** Owner share of the strict session content seat. */\nexport interface ConversationSessionOwnerProps {\n  /** Side Chat keeps the canonical active Session body visible before its first prompt. */\n  renderMode?: \'sidechat\' | undefined\n  /**\n   * Wrap the view ring in the transcript scrollport that also hosts the\n   * sticky composer seat (whole `\'conversation.composer\'` chain output).\n   * Supplied for every real session (hero/settling/active) so the composer\n   * keeps one tree seat across the blank → active flip; the header stays\n   * outside that wrapper as ordinary column chrome (`flex: none`), while\n   * active CSS sticks the seat to the bottom of the same scrollport so wheel\n   * over the footer scrolls the flow.\n   * @param view - the session view-ring content (null while blank chrome is hidden).\n   * @returns the scrollport containing `view` and the sticky composer seat.\n   */\n  wrapActiveBody?: (view: ReactNode) => ReactNode\n}',
+    ],
     ownerPropsReferences: [],
     standardProps: [
       'useSessions: SnapshotSelectorHook<SessionListState>',
@@ -967,7 +969,9 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     summary: 'The strip above the session\'s scrollport: title, view tabs, and the action row.',
     doc: 'The strip above the session\'s scrollport: title, view tabs, and the\naction row. Taking this seat means rendering all three yourself, and it\nalso collapses `conversation.session.header.actions` — that additive\nseat is declared by whoever occupies this one, so replacing the header\ntakes every action entry down with it.',
     registerOptions: [],
-    ownerProps: [],
+    ownerProps: [
+      '/** Owner share selecting ordinary or Side Chat header posture. */\nexport interface ConversationSessionHeaderOwnerProps {\n  /** Side Chat keeps canonical Session chrome visible before its first prompt. */\n  renderMode?: \'sidechat\' | undefined\n}',
+    ],
     ownerPropsReferences: [],
     standardProps: [
       'useSessions: SnapshotSelectorHook<SessionListState>',
@@ -1299,7 +1303,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'root\', () => ctx.slots.register(\n      { name: \'root\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/runtime/src/client/slots.ts:41',
+    source: 'packages/client/runtime/src/client/slots.ts:42',
   },
   {
     key: 'settings.action',

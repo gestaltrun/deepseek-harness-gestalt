@@ -4,12 +4,13 @@
 
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
-  BrowserWorkspaceCreateRemoteRequest,
+  BrowserPageState, BrowserTarget, BrowserWorkspaceCreateRemoteRequest,
   BrowserWorkspaceProjection,
 } from '@deepseek-ai/dsh-browser-workspace/client'
 import { listBrowserWorkspacePages } from '@deepseek-ai/dsh-browser-workspace/client'
+import { recoverListedMutation } from '@deepseek-ai/dsh-client-ui-browser/client'
 import {
-  officialProfileFromChrome, officialTabMeta, officialTargetKey, officialTargetOf,
+  officialProfileFromChrome, officialProfileOf, officialTabMeta, officialTargetKey, officialTargetOf,
 } from '../official-tab-meta.ts'
 import { planOfficialPageReconcile, type OfficialPage, type SidebarBrowserTab } from '../reconcile.ts'
 import { collectSidebarBrowserTabs, type SidebarStateSlice } from '../sidebar-tabs.ts'
@@ -38,6 +39,23 @@ export interface OfficialBrowserBridgeDeps {
   createRequest: () => BrowserWorkspaceCreateRemoteRequest
 }
 
+/** Resolve persisted Profile metadata to the Browser Workspace create vocabulary. */
+function createRequestForTab(
+  meta: unknown,
+  fallback: () => BrowserWorkspaceCreateRemoteRequest,
+): BrowserWorkspaceCreateRemoteRequest {
+  const profile = officialProfileOf(meta)
+  if (profile === undefined) return fallback()
+  if (profile.kind === 'persistent') return { profile: 'persistent', name: profile.name }
+  return { profile: profile.kind }
+}
+
+interface MissingTargetRecovery {
+  readonly missingTarget: BrowserTarget
+  readonly request: BrowserWorkspaceCreateRemoteRequest
+  readonly url?: string
+}
+
 /**
  * Keep snapshot browser tabs 1:1 with official Workspace pages.
  */
@@ -46,6 +64,8 @@ export class OfficialBrowserBridge {
   private running = false
   private queued = false
   private readonly creating = new Set<string>()
+  private readonly recovering = new Set<string>()
+  private readonly closing = new Set<string>()
 
   /**
    * @param deps - Sidebar, Remote, projection, and create-identity faces.
@@ -82,10 +102,48 @@ export class OfficialBrowserBridge {
   }
 
   /**
+   * Replace a projected target that disappeared across a Runtime restart.
+   * @param tabId - Sidebar tab that must keep its occupancy.
+   * @param missingTarget - Target rejected by the current Runtime.
+   * @returns the replacement page, or `undefined` when the tab changed or creation failed.
+   */
+  async recoverOfficial(tabId: string, missingTarget: BrowserTarget): Promise<BrowserPageState | undefined> {
+    const snapshot = this.deps.sidebar.getSnapshot()
+    if (snapshot.sessionId === undefined) return
+    if (this.recovering.has(tabId)) return
+    const tab = collectSidebarBrowserTabs(snapshot.state).find(entry => entry.id === tabId)
+    const bound = tab === undefined ? undefined : officialTargetOf(tab.meta)
+    if (tab === undefined || bound === undefined) return
+    if (officialTargetKey(bound) !== officialTargetKey(missingTarget)) return
+    const remembered = listBrowserWorkspacePages(this.deps.projectionOf(snapshot.sessionId))
+      .find(page => officialTargetKey(page.target) === officialTargetKey(missingTarget))
+    const profile = officialProfileOf(tab.meta)
+    const request = createRequestForTab(tab.meta, this.deps.createRequest)
+    this.recovering.add(tabId)
+    this.deps.sidebar.updateTab(tabId, {
+      meta: profile === undefined ? {} : { profile },
+    })
+    this.known.delete(tabId)
+    try {
+      return await this.createOfficialOnce(tabId, {
+        missingTarget,
+        request,
+        ...(remembered?.url === undefined ? {} : { url: remembered.url }),
+      })
+    } finally {
+      this.recovering.delete(tabId)
+      if (this.queued && !this.running && this.recovering.size === 0) {
+        this.queued = false
+        this.tick()
+      }
+    }
+  }
+
+  /**
    * Reconcile official pages and sidebar tabs for the current Session.
    */
   tick(): void {
-    if (this.running) {
+    if (this.running || this.recovering.size > 0) {
       this.queued = true
       return
     }
@@ -93,14 +151,22 @@ export class OfficialBrowserBridge {
     const sessionId = snapshot.sessionId
     if (sessionId === undefined) return
     const projection = this.deps.projectionOf(sessionId)
-    const official: OfficialPage[] = listBrowserWorkspacePages(projection).map(page => ({
+    const listed: OfficialPage[] = listBrowserWorkspacePages(projection).map(page => ({
       target: page.target,
       revision: page.revision,
     }))
+    const listedKeys = new Set(listed.map(page => officialTargetKey(page.target)))
+    for (const key of this.closing) {
+      if (!listedKeys.has(key)) this.closing.delete(key)
+    }
+    const retryClosing = listed
+      .filter(page => this.closing.has(officialTargetKey(page.target)))
+      .map(page => ({ kind: 'closeOfficial' as const, target: page.target, revision: page.revision }))
+    const official = listed.filter(page => !this.closing.has(officialTargetKey(page.target)))
     const sidebar = collectSidebarBrowserTabs(snapshot.state)
     const planned = planOfficialPageReconcile(official, sidebar, this.known)
     this.known = planned.known
-    void this.applyActions(sessionId as SessionId, planned.actions)
+    void this.applyActions(sessionId as SessionId, [...retryClosing, ...planned.actions])
   }
 
   private async applyActions(
@@ -124,10 +190,17 @@ export class OfficialBrowserBridge {
           continue
         }
         if (action.kind === 'closeOfficial') {
+          this.closing.add(officialTargetKey(action.target))
           try {
-            await remote.close(action.target, action.revision)
+            await recoverListedMutation(
+              remote.close,
+              remote.observe,
+              action.target,
+              action.revision,
+            )
           } catch {
-            // The Runtime may already have closed the tab; the next tick drops it.
+            // Keep the close intent until the projection drops the page. A later
+            // reconcile retries the Runtime mutation without reopening its tab.
           }
           continue
         }
@@ -149,13 +222,16 @@ export class OfficialBrowserBridge {
   /**
    * Run at most one create for an empty sidebar tab.
    * @param tabId - Snapshot tab that still has no official identity.
-   * @returns when that tab's create attempt settles.
+   * @returns the created page, or `undefined` when skipped or rejected.
    */
-  private async createOfficialOnce(tabId: string): Promise<void> {
+  private async createOfficialOnce(
+    tabId: string,
+    recovery?: MissingTargetRecovery,
+  ): Promise<BrowserPageState | undefined> {
     if (this.creating.has(tabId)) return
     this.creating.add(tabId)
     try {
-      await this.createOfficialTab(tabId)
+      return await this.createOfficialTab(tabId, recovery)
     } finally {
       this.creating.delete(tabId)
     }
@@ -166,21 +242,36 @@ export class OfficialBrowserBridge {
    * Browser Workspace owns matching-Profile instance reuse.
    * @param tabId - Snapshot tab that still has no official identity.
    */
-  private async createOfficialTab(tabId: string): Promise<void> {
+  private async createOfficialTab(
+    tabId: string,
+    recovery?: MissingTargetRecovery,
+  ): Promise<BrowserPageState | undefined> {
     const snapshot = this.deps.sidebar.getSnapshot()
     const sessionId = snapshot.sessionId
     if (sessionId === undefined) return
     const sidebar = collectSidebarBrowserTabs(snapshot.state)
     const tab = sidebar.find(entry => entry.id === tabId)
-    if (tab === undefined || officialTargetOf(tab.meta) !== undefined) return
+    if (tab === undefined) return
+    const bound = officialTargetOf(tab.meta)
+    if (recovery === undefined && bound !== undefined) return
+    if (
+      recovery !== undefined
+      && bound !== undefined
+      && officialTargetKey(bound) !== officialTargetKey(recovery.missingTarget)
+    ) return
     try {
-      const request = this.deps.createRequest()
-      const created = await this.deps.bindRemote(sessionId as SessionId).create(request)
+      const request = recovery?.request ?? createRequestForTab(tab.meta, this.deps.createRequest)
+      const remote = this.deps.bindRemote(sessionId as SessionId)
+      const created = await remote.create(request)
+      const committed = recovery?.url === undefined
+        ? created
+        : await remote.refresh(created.target, created.revision, recovery.url)
       this.deps.sidebar.updateTab(tabId, {
-        meta: officialTabMeta(created.target, officialProfileFromChrome(created.chrome)),
-        ...(created.title.trim() === '' ? {} : { title: created.title }),
+        meta: officialTabMeta(committed.target, officialProfileFromChrome(committed.chrome)),
+        ...(committed.title.trim() === '' ? {} : { title: committed.title }),
       })
-      this.known.set(tabId, officialTargetKey(created.target))
+      this.known.set(tabId, officialTargetKey(committed.target))
+      return committed
     } catch {
       // Create can reject when the Session or Runtime is gone; the empty
       // sidebar tab stays until the user closes it or a later tick retries.

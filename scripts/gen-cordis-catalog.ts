@@ -204,6 +204,7 @@ export const EVENT_SCOPE_PAGE: Record<string, string> = {
   'tools': 'tools.md',
   'webserver': 'web-server.md',
   'workflow': 'workflow.md',
+  'workspace': 'workspace.md',
 }
 
 /**

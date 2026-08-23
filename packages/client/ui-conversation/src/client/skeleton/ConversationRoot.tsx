@@ -14,8 +14,9 @@ export type ConversationRootProps = ConversationSlotProps
 
 export function ConversationRoot({
   sessionId, useSession, useSessions, useWorkspaces, useInput, useComposerBlock,
-  renderSlot, renderSlotChain, selectWorkspace, t,
+  renderSlot, renderSlotChain, selectWorkspace, t, renderMode,
 }: ConversationRootProps) {
+  const sidechat = renderMode === 'sidechat'
   const openState = useSession(s => s.openState)
   const composerPhase = useSession(s => s.composerPhase)
   const pending = useSession(s => s.pending) ?? []
@@ -74,10 +75,11 @@ export function ConversationRoot({
   // The exemption is deliberately open-state-wide, not loading-only: a
   // summary-blank session is the hero before its open starts (`cold`) and
   // after one fails (`error`) for the same reason — there is no history.
-  const settling = sessionId !== undefined && composerPhase === 'blank' && openState === 'loading'
+  const settling = !sidechat && sessionId !== undefined && composerPhase === 'blank' && openState === 'loading'
     && summaryBlank !== true
-  const hero = sessionId === undefined
+  const hero = !sidechat && (sessionId === undefined
     || (composerPhase === 'blank' && (openState === 'open' || summaryBlank === true))
+  )
   const zone: InputZone | undefined =
     session === undefined || inputState === undefined ? undefined : { session, input: inputState }
 
@@ -185,9 +187,9 @@ export function ConversationRoot({
 
   return (
     <div className={css.root} data-phase={phase}>
-      {renderSlot('conversation.session.header', {})}
+      {renderSlot('conversation.session.header', { renderMode })}
       <div className={css.scrollBody} data-conversation-scroll="">
-        {renderSlot('conversation.session', {})}
+        {renderSlot('conversation.session', { renderMode })}
         {composerSeat}
       </div>
     </div>

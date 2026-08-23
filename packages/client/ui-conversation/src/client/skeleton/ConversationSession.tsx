@@ -65,7 +65,7 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  */
 export function ConversationSessionHeader({
   sessionId, useSession, useSessions, useStore, actions,
-  renderSlot, views, open, t,
+  renderSlot, views, open, t, renderMode,
 }: ConversationSessionHeaderProps) {
   useSyncExternalStore(views.subscribe, views.version)
   const tabs = views.list()
@@ -74,7 +74,7 @@ export function ConversationSessionHeader({
   const ancestry = useSessions(s => deriveAncestry(s, sessionId), equalBreadcrumbs)
   const composerPhase = useSession(s => s.composerPhase)
   const blank = useSession(s => s.blank)
-  const hideChrome = blank && composerPhase === 'blank'
+  const hideChrome = renderMode !== 'sidechat' && blank && composerPhase === 'blank'
 
   return (
     <header
@@ -173,6 +173,7 @@ export function ConversationSessionHeader({
 export function ConversationSession({
   sessionId, useSession, useInput, inputActions, useStore, actions,
   renderSlot, views, bindDraftMirror, bindAnnotationMirror, restoreAnnotationDraft, releaseSessionImages,
+  renderMode,
 }: ConversationSessionProps) {
   useSyncExternalStore(views.subscribe, views.version)
   const tabs = views.list()
@@ -206,7 +207,7 @@ export function ConversationSession({
     releaseSessionImages(sessionId)
   }, [releaseSessionImages, sessionId])
 
-  if (blank && composerPhase === 'blank') return null
+  if (renderMode !== 'sidechat' && blank && composerPhase === 'blank') return null
   return (
     <div className={css.viewArea}>
       {active !== undefined && renderSlot('conversation.view', {

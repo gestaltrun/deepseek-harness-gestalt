@@ -55,6 +55,8 @@ function makeHost(bodies: { root: (rp: (key: string, owner: object) => React.Rea
     sessions: {
       list: observable<unknown>({ ids: [] }),
       provideInfo: provide,
+      provideInfoFor: id => infos.get(id) ?? absentInfo,
+      openForRender: () => {},
     },
     workspaces: { list: observable<unknown>({ items: [] }) },
   }
@@ -162,6 +164,31 @@ describe('SessionProvider', () => {
     act(() => { h.current.set('s2') })
     expect(seen.at(-1)!['read']).toBe('s2')
     expect(seen.at(-1)!['sessionId']).toBe('s2')
+  })
+
+  it('binds an explicit session without changing or following the current session', () => {
+    const seen: Record<string, unknown>[] = []
+    const h = makeHost({
+      root: renderSlot => (
+        <SessionProvider sessionId="side">
+          {() => renderSlot('k.session', {})}
+        </SessionProvider>
+      ),
+    })
+    h.addSession('main')
+    h.addSession('side')
+    h.registerSession({
+      component: (props: { useSession?: <S>(sel: (s: { sid: string }) => S) => S; sessionId?: string }) => {
+        seen.push({ sessionId: props.sessionId, read: props.useSession!(s => s.sid) })
+        return null
+      },
+      options: {},
+    })
+    h.current.set('main')
+    render(<>{createSlotRenderer().renderRoot(h.host, {})}</>)
+    expect(seen.at(-1)).toEqual({ sessionId: 'side', read: 'side' })
+    h.current.set(undefined)
+    expect(seen.at(-1)).toEqual({ sessionId: 'side', read: 'side' })
   })
 
   it('republishes a mounted session entry when its provide bundle changes under the same id', () => {

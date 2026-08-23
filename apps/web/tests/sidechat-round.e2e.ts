@@ -54,7 +54,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click()
     await page.getByRole('button', { name: 'New tab', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Side Chat (beta)', exact: true }).click()
-    const sideComposer = page.getByPlaceholder('Ask the first question — context inherited…')
+    const sideComposer = page.locator('[data-dsh-panel] textarea:enabled')
     await sideComposer.waitFor({ timeout: 15_000 })
 
     const childSettled = scaffold.whenTurnSettled()

@@ -6,6 +6,8 @@ Pinned source snapshot of [omdsh-dev/DSH-better-sidebar](https://github.com/omds
 
 Product composition mounts this package and [`dsh-client-ui-workbench`](../ui-workbench/README.md). The adapter enables the snapshot browser tab and publishes official chrome from [`dsh-client-ui-browser`](../ui-browser/README.md); the sandboxed iframe remains the standalone fallback. Do not edit snapshot sources to change product behavior.
 
+The Side Chat tab mounts the repository's declared `conversation` slot under the child Session id. The canonical Session header, registered Chat/Trajectory views, header actions, transcript, and InputBar therefore share the same components as the main conversation. The tab shell retains only thread lifecycle, switching, and promotion controls; inherited seed events remain durable but are hidden from this child-owned transcript. Session-scoped subagent lineage, schedules, and background jobs resolve against the child id. Workbench terminal tabs remain scoped by their own `SessionScope` and are not retargeted by the embedded conversation.
+
 ## Model Experience
 
 ### Side Chat

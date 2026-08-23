@@ -8,6 +8,13 @@ const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
 const nativeWindowsPnpmDestination = '${{ runner.temp }}/setup-pnpm-js'
 
 describe('CI workflow', () => {
+  it('makes optional dependencies mandatory for master standby installs', () => {
+    const workflow = loadWorkflow('.github/workflows/ci-master.yml')
+    if (!isRecord(workflow.env)) throw new TypeError('ci-master workflow must define environment variables')
+
+    expect(workflow.env.PNPM_CONFIG_OPTIONAL).toBe('true')
+  })
+
   it('isolates every pnpm action setup destination per runner', () => {
     const files = ['.github/workflows/ci.yml', '.github/workflows/ci-master.yml']
     const setups: Array<{ jobName: string; step: unknown }> = []

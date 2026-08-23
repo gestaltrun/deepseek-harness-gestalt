@@ -28,7 +28,7 @@ import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/t
 import type { SnapshotStore } from '../contract/store.ts'
 import { createSnapshotStore } from '../contract/store.ts'
 import type { SessionFace } from '../contract/session.ts'
-import type { AgentContext, ISessions } from '../contract/sessions.ts'
+import type { AgentContext, ISessions, SessionAdmissionAdapter } from '../contract/sessions.ts'
 import { createScope, scopeOf as scopeTagOf } from '../agents/scope.ts'
 import type { ConversationRuntime } from './conversation-assembler.ts'
 import { SessionManager } from './manager.ts'
@@ -266,6 +266,8 @@ export class SessionRuntime implements ISessions {
    * keep the staged scope's frozen view alive until the stage moves on).
    */
   private watched: SessionId | undefined
+  /** Feature-owned admission routes in registration order. */
+  private readonly admissionAdapters: SessionAdmissionAdapter[] = []
   /** Removed-while-staged sessions whose teardown waits for the stage to move away. */
   private readonly deferredRemovals = new Set<SessionId>()
 
@@ -298,6 +300,7 @@ export class SessionRuntime implements ISessions {
       restored.sessionId,
       restored.subagentAddress,
       conversation,
+      sessionId => this.admissionAdapters.find(adapter => adapter.handles(sessionId)),
     )
     this.list = createSnapshotStore<SessionListState>({
       ids: [], byId: {}, current: undefined, phase: 'pending',
@@ -410,6 +413,31 @@ export class SessionRuntime implements ISessions {
 
   noteAgentPreset(sessionId: SessionId, agentPreset: string): void {
     this.manager.noteAgentPreset(sessionId, agentPreset)
+  }
+
+  /** Resolve one explicit renderer bundle without moving the selected Session. */
+  provideInfoFor(sessionId: SessionId): SessionMaybeProvideInfo {
+    return this.maybeProvideInfo(sessionId)
+  }
+
+  /** Open one explicit renderer window without moving the selected Session. */
+  openForRender(sessionId: SessionId): void {
+    const record = this.resolve(sessionId)
+    if (record === undefined) return
+    void record.session.open()
+    void this.manager.refreshSubagents(sessionId)
+  }
+
+  /** Register one feature-owned admission route; first matching registration wins. */
+  registerAdmissionAdapter(adapter: SessionAdmissionAdapter): () => void {
+    if (this.admissionAdapters.some(candidate => candidate.id === adapter.id)) {
+      throw new Error(`sessions.registerAdmissionAdapter: duplicate adapter ${JSON.stringify(adapter.id)}`)
+    }
+    this.admissionAdapters.push(adapter)
+    return () => {
+      const at = this.admissionAdapters.indexOf(adapter)
+      if (at !== -1) this.admissionAdapters.splice(at, 1)
+    }
   }
 
   /**

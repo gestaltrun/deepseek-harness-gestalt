@@ -4,8 +4,9 @@
  * the load-time validations, and the unload cascade). This layer owns what
  * needs the runtime: the 'slots/changed' event bridge, register and
  * declaration injection through the caller's ctx.effect (fiber unload
- * collects both), the renderer installation contract (install()/renderSlot('root') +
- * the SlotRendererHost face), and the store INSTANCE axis — handle x scope
+ * collects both), the renderer installation contract (install(), root and
+ * explicit-Session rendering, plus the SlotRendererHost face), and the store
+ * INSTANCE axis — handle x scope
  * key -> create/cache, dropped with the last holding entry, session instances
  * cleared (with persisted state) on scope death.
  */
@@ -262,6 +263,31 @@ export class SlotRegistry extends Service {
   }
 
   /**
+   * Render one declared non-root Session slot without changing shell selection.
+   * This framework entry is for feature shells that need a second resident
+   * Session tree; ordinary child slots remain exclusive to their declaring
+   * entry's `renderSlot` prop.
+   * @param key - declared non-root, non-root-scoped slot key.
+   * @param sessionId - exact Session identity supplying the standard props.
+   * @param owner - owner share for the target slot.
+   * @returns the rendered slot tree.
+   * @throws when the renderer is absent or unsupported, or the slot is absent or root-scoped.
+   */
+  renderSessionSlot(key: string, sessionId: string, owner: object): ReturnType<SlotRenderer['renderRoot']> {
+    if (key === 'root') throw new Error("renderSessionSlot cannot render the built-in 'root' slot")
+    if (this._renderer === undefined) {
+      throw new Error('renderSessionSlot requires the installed slot renderer')
+    }
+    if (this._renderer.renderSession === undefined) {
+      throw new Error('renderSessionSlot requires renderer support for explicit Sessions')
+    }
+    const spec = this._core.specDynamic(key)
+    if (spec === undefined) throw new Error(`renderSessionSlot target '${key}' is undeclared`)
+    if (spec.scope === 'root') throw new Error(`renderSessionSlot target '${key}' is root-scoped`)
+    return this._renderer.renderSession(this.hostFace(), key, sessionId, owner)
+  }
+
+  /**
    * Drop the per-session store instances of a dead session (the sessions
    * service calls this on scope teardown; root-scoped records are untouched).
    * Persisted state goes with the session — a never-rendered dead session can
@@ -412,6 +438,13 @@ export class SlotRegistry extends Service {
       sessions: {
         list: sessions.list,
         provideInfo: sessions.currentProvideInfo,
+        provideInfoFor: (sessionId) => {
+          if (sessions.provideInfoFor === undefined) {
+            throw new Error('explicit Session rendering requires sessions.provideInfoFor')
+          }
+          return sessions.provideInfoFor(sessionId as never)
+        },
+        openForRender: (sessionId) => { sessions.openForRender?.(sessionId as never) },
       },
       workspaces: { list: workspaces.list },
       get locale() { return service._locale },

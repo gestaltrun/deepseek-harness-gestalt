@@ -10,6 +10,7 @@ import { CompanionForegroundRuntime } from './companion-lifecycle.ts'
 import type {
   MobileCompanionProjectionDto, MobileConversationProjectionDto,
 } from './companion-projection.ts'
+import { parseMobileConversationProjection } from './companion-projection.ts'
 
 interface MobileCompanionResultReceiver {
   /** @param result - decoded result authenticated by this physical channel. */
@@ -140,10 +141,7 @@ export class MobileNoiseCompanionReceiver {
   private acceptConversation(projection: CompanionConversationSnapshotProjection): void {
     this.requireProjectionGeneration(projection.generation, projection.desktopRevision)
     if (this.activeSurface?.acceptValidatedCompanionProjection(projection) !== true) return
-    if (!isRecord(projection.conversation) || projection.conversation.sessionId !== projection.sessionId) {
-      throw new Error('Authenticated Companion conversation projection is invalid')
-    }
-    const conversation = projection.conversation as unknown as MobileConversationProjectionDto
+    const conversation = parseMobileConversationProjection(projection.conversation, projection.sessionId)
     if (projection.beforeSeq === undefined) {
       this.conversations.set(projection.sessionId, conversation)
     } else {

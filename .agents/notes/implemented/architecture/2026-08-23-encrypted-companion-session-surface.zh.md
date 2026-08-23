@@ -6,7 +6,7 @@ Status: implemented
 
 ## Problem
 
-[共享 Mobile Web 展示](2026-08-22-shared-mobile-web-presentation.md)可以重建 Desktop 展示值，但加密产品 channel 只提供 foreground authority、搜索与 attachment operation。Session 发现、history、mutation、待处理人工 interaction 与历史图片字节仍缺少一套有界协议和 Host owner，因此渲染共享组件并不能证明其 authority 来自配对 Desktop。
+[共享 Mobile Web 展示](2026-08-22-shared-mobile-web-presentation.zh.md)可以重建 Desktop 展示值，但加密产品 channel 只提供 foreground authority、搜索与 attachment operation。Session 发现、history、mutation、待处理人工 interaction 与历史图片字节仍缺少一套有界协议和 Host owner，因此渲染共享组件并不能证明其 authority 来自配对 Desktop。
 
 ## Decision
 
@@ -24,7 +24,7 @@ Desktop assembled 测试启动真实文件 Session persistence、Workspace stora
 
 **通过 Snow 透传 Host RPC。** 否决，因为这会向独立发布的 Mobile client 授予当前及未来所有 Host 方法，并把 Companion 兼容性耦合到 Host envelope。
 
-**发送 Client Runtime class 与 responder。** 否决，因为 map、closure 与 Host rpc id 是进程本地 authority。JSON 协议只携带数据，由已认证 Mobile adapter 重建[共享展示](2026-08-22-shared-mobile-web-presentation.md)。
+**发送 Client Runtime class 与 responder。** 否决，因为 map、closure 与 Host rpc id 是进程本地 authority。JSON 协议只携带数据，由已认证 Mobile adapter 重建[共享展示](2026-08-22-shared-mobile-web-presentation.zh.md)。
 
 **增加通用 live event stream。** 否决，因为 foreground synchronization、mutation confirmation 与有界刷新已经提供所需 ownership，无需再增加一套 multiplexed transport 和 replay model。
 

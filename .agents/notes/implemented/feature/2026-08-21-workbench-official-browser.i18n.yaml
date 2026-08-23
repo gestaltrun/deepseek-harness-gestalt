@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-21-workbench-official-browser.md
 2026-08-21-workbench-official-browser.md: 4feac88da81b95da1c8ae7f70bf005bb975bb228
-2026-08-21-workbench-official-browser.zh.md: 4ff2532a9de84a78f26f21e87dfa52e27f225d1b
+2026-08-21-workbench-official-browser.zh.md: 3eedba39711dc8310c9e404670ef8352e5a5ab38

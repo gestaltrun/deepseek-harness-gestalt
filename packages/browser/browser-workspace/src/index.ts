@@ -109,10 +109,13 @@ export class BrowserWorkspaceBinder extends TypertRemoteService {
     ctx.inject(['sessionProjections'], (projectionCtx) => {
       projectionCtx.sessionProjections.register<'browserWorkspace', BrowserWorkspaceProjection>({
         key: 'browserWorkspace',
-        schema: workspaceProjectionSchema,
+        stateSchema: workspaceProjectionSchema,
         init: () => EMPTY_BROWSER_WORKSPACE,
         apply: applyBrowserWorkspaceProjection,
-        view: state => state,
+        wire: {
+          viewSchema: workspaceProjectionSchema,
+          view: state => state,
+        },
         stateVersion: 3,
       })
     })

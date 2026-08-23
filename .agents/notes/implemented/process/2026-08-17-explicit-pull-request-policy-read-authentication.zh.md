@@ -22,7 +22,7 @@ PR 策略读取、Issue Priority 集成与 Project 生命周期自动化具有�
 
 每种认证与激活组合下的 API 错误都是致命错误。策略绝不会在认证请求失败后匿名重试，也不会把 `404` 转换为元数据缺失。
 
-通用 API 客户端默认继续使用 token 认证。生命周期、Project GraphQL 与审计读写操作不使用 `pullRequestReadAuthentication`；它们要求生命周期工作流提供的 GitHub App token。[Issue Priority field 决策](2026-08-17-explicit-issue-priority-field-deployment.md)与[仓库相对生命周期决策](2026-08-17-repository-relative-issue-policy.md)分别负责这些独立的部署选项。
+通用 API 客户端默认继续使用 token 认证。生命周期、Project GraphQL 与审计读写操作不使用 `pullRequestReadAuthentication`；它们要求生命周期工作流提供的 GitHub App token。[Issue Priority field 决策](2026-08-17-explicit-issue-priority-field-deployment.zh.md)与[仓库相对生命周期决策](2026-08-17-repository-relative-issue-policy.zh.md)分别负责这些独立的部署选项。
 
 ## 验证
 

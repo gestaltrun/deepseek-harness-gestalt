@@ -14,7 +14,7 @@ Platform 监听进程及其 GitHub Actions 工作流只需要一套实际运行�
 
 GitHub Actions 只使用 Environment `production`。[Platform Image](../../../../.github/workflows/platform-image.yml) 会在拉取请求和匹配的 master 推送上构建，仅在 `workflow_dispatch` 且 `inputs.push` 为真时推送到 GHCR。[Platform Deploy](../../../../.github/workflows/platform-deploy.yml) 始终通过 [`production-env-cli.ts`](../../../../apps/platform/src/production-env-cli.ts)（`node --import tsx/esm`）校验生产和 ECS 名称，仅在 `inputs.deploy` 为真时 SSH。它会在全局 contract 前逐主机启动并校验 candidate，要求每台主机都有 live predecessor，在任何 replacement 接收流量前停止全部 predecessor，并且只恢复存在已 rename rollback container 的主机。附件 storage 使用两次调用：`postgres` 建立原子 bridge；随后 `oss` 要求每个 predecessor readiness response 都报告该 bridge。该 CLI 入口不会打进 `boot.mjs`。
 
-Desktop 与 Mobile 解析同一套生产身份，并在产品工作开始前拒绝 localhost（见[已运营 Companion Platform 身份](../architecture/2026-08-22-operated-companion-platform-identity.md)）。通用环境 pair 校验只保留给有界 capability 测试，不进入产品入口。
+Desktop 与 Mobile 解析同一套生产身份，并在产品工作开始前拒绝 localhost（见[已运营 Companion Platform 身份](../architecture/2026-08-22-operated-companion-platform-identity.zh.md)）。通用环境 pair 校验只保留给有界 capability 测试，不进入产品入口。
 
 ## 考虑过的替代方案
 

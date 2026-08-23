@@ -10,4 +10,4 @@ Schedule 家族负责管理提醒，其持久状态保存在原 Session 日志�
 
 公开的 `ctx.schedules` service 负责人工暂停、恢复和删除。工具、Remote 变更与 runtime 向 Session stream 追加事件；独立的 `schedules` projection 向浏览器提供当前保留的提醒，到期工作则通过 Agent 的普通 follow-up 队列进入同一对话。Schedule 不拥有单独的可变数据库。
 
-有关持久记录、转换、视图与交付约定，请参阅[仅限 Session 内的 Schedule](../../docs/subsystems/schedule.md)。
+有关持久记录、转换、视图与交付约定，请参阅[仅限 Session 内的 Schedule](../../docs/subsystems/schedule.zh.md)。

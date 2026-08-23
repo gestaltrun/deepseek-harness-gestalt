@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-browser-control-arbitration.md
 2026-08-19-browser-control-arbitration.md: f5d6d5a56d88e4a0259aafebdf033be48c168bcc
-2026-08-19-browser-control-arbitration.zh.md: 75065a1aff9a60425e5d513d25b0a29288423b1f
+2026-08-19-browser-control-arbitration.zh.md: b001736182d401e73999e6726904f93d406ed1c3

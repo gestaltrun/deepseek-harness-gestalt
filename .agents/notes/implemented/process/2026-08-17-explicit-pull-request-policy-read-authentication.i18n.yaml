@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-17-explicit-pull-request-policy-read-authentication.md
 2026-08-17-explicit-pull-request-policy-read-authentication.md: 4797e7c9fe99563fee1a1db2be90a12709d61beb
-2026-08-17-explicit-pull-request-policy-read-authentication.zh.md: aef9d2d98b5a89699f75a083b31a135838a508bb
+2026-08-17-explicit-pull-request-policy-read-authentication.zh.md: 33a220f61757b780cf8b3bfd7c872f231de6b353

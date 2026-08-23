@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-17-cross-runtime-noise-security-path.md
 2026-08-17-cross-runtime-noise-security-path.md: aba96da00d43983471173a6758cb9d65eef332a9
-2026-08-17-cross-runtime-noise-security-path.zh.md: 1d05887ce6f27805bd4f2c6b01b847a9883f49bb
+2026-08-17-cross-runtime-noise-security-path.zh.md: 603f2f8bf0557c6537913ce3c61a04b5f29c173a

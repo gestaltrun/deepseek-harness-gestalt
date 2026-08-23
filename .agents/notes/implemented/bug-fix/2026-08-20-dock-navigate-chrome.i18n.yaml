@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-20-dock-navigate-chrome.md
 2026-08-20-dock-navigate-chrome.md: 136ac6ffe6efd48efd7fc735dc39fbd656d4a3f0
-2026-08-20-dock-navigate-chrome.zh.md: 829ba5d46e2f89958dde34fb9290134d1cc5a7e0
+2026-08-20-dock-navigate-chrome.zh.md: dbe29c4522d400b051e4c55dbb81478f42e09d1f

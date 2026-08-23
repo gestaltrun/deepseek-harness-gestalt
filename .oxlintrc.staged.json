@@ -13,7 +13,7 @@
     "**/.node-next-types-*/**",
     "website/.generated/**",
     "vendor/**",
-    "packages/client/better-sidebar/**",
+    "packages/client/ui-better-sidebar/**",
     "native/**",
     "**/*.js",
     "**/*.mjs",

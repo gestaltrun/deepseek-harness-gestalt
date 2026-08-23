@@ -22,7 +22,7 @@ focus 使用被操作列表行的修订号，与 Dock chrome 和收起预览相�
 
 对话 transcript（文本记录）没有独立的页面事件或链接手势。这类选择若存在，共用这条 `openDetails` 路径。只有 `browser_*` 工具行在点击时调用 `selectCall`；普通工具行保持不响应。
 
-这扩展了 [原生 Browser Dock Agent Note](2026-08-19-browser-dock.md) 中的收起与预览规则，以及 [Dock 标签页修订号 Agent Note](../bug-fix/2026-08-20-dock-tab-revision.md) 中的每标签页列表修订号约定。
+这扩展了 [原生 Browser Dock Agent Note](2026-08-19-browser-dock.zh.md) 中的收起与预览规则，以及 [Dock 标签页修订号 Agent Note](../bug-fix/2026-08-20-dock-tab-revision.zh.md) 中的每标签页列表修订号约定。
 
 ## 考虑过的替代方案
 

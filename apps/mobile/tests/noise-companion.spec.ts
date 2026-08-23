@@ -4,7 +4,9 @@ import {
 } from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionForegroundRuntime, companionMayMutate } from '../src/companion-lifecycle.ts'
 import { MobileNoiseCompanionReceiver } from '../src/noise-companion.ts'
-import type { MobileCompanionProjectionDto } from '../src/companion-projection.ts'
+import {
+  parseMobileConversationProjection, type MobileCompanionProjectionDto,
+} from '../src/companion-projection.ts'
 
 describe('Mobile Noise Companion receiver', () => {
   it('grants mutation authority only after authenticated generation-matching synchronization', () => {
@@ -135,6 +137,96 @@ describe('Mobile Noise Companion receiver', () => {
     }))
   })
 
+  it('normalizes an authenticated future conversation node through the unknown presentation arm', () => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    const messages = [
+      foregroundSync(),
+      conversationPage({
+        ...validConversation(),
+        nodes: [{ kind: 'future-card', seq: 5, time: 10, payload: { label: 'Future' } }],
+      }),
+    ]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection: () => true }),
+    )
+
+    receiver.receive(Uint8Array.of(1))
+    receiver.receive(Uint8Array.of(2))
+
+    expect(acceptValidatedDesktopResync.mock.lastCall?.[0].conversations[0]?.nodes).toEqual([{
+      kind: 'unknown', seq: 5, time: 10, type: 'future-card',
+      data: { kind: 'future-card', seq: 5, time: 10, payload: { label: 'Future' } },
+    }])
+  })
+
+  it.each([
+    ['node content', { ...validConversation(), nodes: [{ kind: 'user', seq: 5, time: 10, content: null, source: null }] }],
+    ['tool presentation intent', {
+      ...validConversation(),
+      nodes: [{
+        kind: 'tool-result', seq: 5, time: 10, callId: 'call-invalid', call: null, callTime: null,
+        content: [], isError: false, callView: {
+          card: 'diff', title: 'Edit file', diffs: [{ path: 7, oldText: null, newText: 'new' }],
+        },
+        resultView: null, subCalls: [],
+      }],
+    }],
+    ['pending interaction', {
+      ...validConversation(),
+      pending: [{ kind: 'approval', interactionId: 'approval-invalid', sessionId: 'session-v3', payload: { toolName: 'write' } }],
+    }],
+  ])('rejects invalid authenticated conversation %s before publishing it', (_label, conversation) => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    const messages = [foregroundSync(), conversationPage(conversation)]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection: () => true }),
+    )
+
+    receiver.receive(Uint8Array.of(1))
+    expect(() => receiver.receive(Uint8Array.of(2))).toThrow('Authenticated Companion conversation projection is invalid')
+    expect(acceptValidatedDesktopResync).toHaveBeenCalledOnce()
+    expect(acceptValidatedDesktopResync.mock.lastCall?.[0].conversations).toEqual([])
+  })
+
+  it.each([
+    ['generic call', { card: 'generic', title: 'Read file', kind: 'read', rawInput: { path: 'a.ts' }, content: [{ type: 'text', text: 'Reading' }], locations: [{ path: 'a.ts', line: 1 }] }, null],
+    ['terminal call', { card: 'terminal', title: 'pnpm test', description: 'Run tests', cwd: '/work' }, null],
+    ['diff call', { card: 'diff', title: 'Edit file', diffs: [{ path: 'a.ts', oldText: 'old', newText: 'new' }], locations: [{ path: 'a.ts' }] }, null],
+    ['generic result', null, { card: 'generic', title: 'Done', content: [{ type: 'text', text: 'Done' }] }],
+    ['terminal result', null, { card: 'terminal', title: 'Done', output: 'ok', exitCode: 0 }],
+    ['diff result', null, { card: 'diff', title: 'Edited', diffs: [{ path: 'a.ts', oldText: 'old', newText: 'new' }] }],
+    ['matches result', null, { card: 'search', shape: 'matches', files: [{ path: 'a.ts', matches: [{ lineNumber: 1, line: 'match' }] }], truncated: false, total: 1 }],
+    ['paths result', null, { card: 'search', shape: 'paths', paths: ['a.ts'], truncated: false, total: 1 }],
+    ['read result', null, { card: 'read', path: 'a.ts', offset: 1, lines: [{ number: 1, text: 'line' }], totalLines: 1, lang: 'ts', content: [{ type: 'text', text: 'line' }] }],
+    ['web search result', null, { card: 'web', kind: 'search', sources: [{ url: 'https://example.test', title: 'Example' }], answer: 'Answer', truncated: false }],
+    ['web fetch result', null, { card: 'web', kind: 'fetch', url: 'https://example.test', statusCode: 200, truncated: false }],
+    ['future cards', { card: 'chart', series: [1] }, { card: 'timeline', entries: [] }],
+  ])('accepts structurally valid %s presentation intents', (_label, callView, resultView) => {
+    expect(() => parseMobileConversationProjection({
+      ...validConversation(), nodes: [toolResultNode(callView, resultView)],
+    })).not.toThrow()
+  })
+
+  it.each([
+    ['generic call', { card: 'generic' }, null],
+    ['terminal call', { card: 'terminal', title: 7 }, null],
+    ['diff call', { card: 'diff', title: 'Edit file', diffs: null }, null],
+    ['generic result', null, { card: 'generic', content: [{ type: 'text' }] }],
+    ['terminal result', null, { card: 'terminal', output: 7 }],
+    ['diff result', null, { card: 'diff' }],
+    ['search result', null, { card: 'search', shape: 'matches', files: [{ path: 'a.ts', matches: [{ lineNumber: '1', line: 'match' }] }], truncated: false, total: 1 }],
+    ['read result', null, { card: 'read', offset: 1, lines: [], totalLines: 0 }],
+    ['web result', null, { card: 'web', kind: 'fetch', url: 'https://example.test', statusCode: '200', truncated: false }],
+  ])('rejects structurally invalid %s presentation intents', (_label, callView, resultView) => {
+    expect(() => parseMobileConversationProjection({
+      ...validConversation(), nodes: [toolResultNode(callView, resultView)],
+    })).toThrow('Authenticated Companion conversation projection is invalid')
+  })
+
   it('loads every contiguous surface page and merges Workspace membership', () => {
     const runtime = connectedRuntime()
     const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
@@ -238,6 +330,46 @@ function surfacePage(offset: number, sessionId: string, hasMore: boolean, operat
         updatedAt: '2026-08-23T00:00:00.000Z',
       }],
     },
+  }
+}
+
+function foregroundSync() {
+  return {
+    type: 'projection' as const,
+    projection: {
+      type: 'foreground-sync' as const,
+      desktopName: 'Authenticated Desktop', generation: 2, desktopRevision: 7,
+    },
+  }
+}
+
+function conversationPage(conversation: unknown) {
+  return {
+    type: 'projection' as const,
+    projection: {
+      type: 'conversation-snapshot' as const,
+      operationId: parseCompanionOperationId('history-v3'),
+      generation: 2,
+      desktopRevision: 7,
+      sessionId: parseCompanionSessionId('session-v3'),
+      conversation,
+    },
+  }
+}
+
+function validConversation() {
+  return {
+    sessionId: 'session-v3', nodes: [], turnTimings: [], turnEnds: [], partial: null,
+    runningCalls: [], pending: [], queue: [], running: false, subagent: null,
+    composerPhase: 'active', removed: false, openState: 'open', openError: null,
+    hasMore: false, loadingOlder: false, promptError: null, blank: false, lastAgentError: null,
+  }
+}
+
+function toolResultNode(callView: unknown, resultView: unknown) {
+  return {
+    kind: 'tool-result', seq: 5, time: 10, callId: 'call-one', call: null, callTime: null,
+    content: [], isError: false, callView, resultView, subCalls: [],
   }
 }
 

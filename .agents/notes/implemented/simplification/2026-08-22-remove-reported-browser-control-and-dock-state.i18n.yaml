@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/simplification/2026-08-22-remove-reported-browser-control-and-dock-state.md
 2026-08-22-remove-reported-browser-control-and-dock-state.md: 769ae509b1246acd395ca604b43afe6e5a1dab52
-2026-08-22-remove-reported-browser-control-and-dock-state.zh.md: 42969ac73bcdf1ef91e56373f4592520e674d9fb
+2026-08-22-remove-reported-browser-control-and-dock-state.zh.md: cda5066db13ac562468f57051a7fe8e8ebe22419

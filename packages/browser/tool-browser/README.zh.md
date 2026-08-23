@@ -28,4 +28,4 @@
 
 ## 已知限制与后续工作
 
-- Consumer 暴露临时、命名持久与共享 Browser Profile，不添加账号选择器或浏览器专用对话卡片。持久与共享 chrome 是运行时事实，不是 Dock 页眉。Session 本地 Workspace 所有权见 [`dsh-browser-workspace`](../browser-workspace/README.md)。Dock chrome 见 [`dsh-client-ui-browser`](../../client/ui-browser/README.md)。无密钥 Browser Runtime 快照保持不含 Binder，因为它们证明发现与已渲染 Runtime 事实，而不是 Session 隔离。
+- Consumer 暴露临时、命名持久与共享 Browser Profile，不添加账号选择器或浏览器专用对话卡片。持久与共享 chrome 是运行时事实，不是 Dock 页眉。Session 本地 Workspace 所有权见 [`dsh-browser-workspace`](../browser-workspace/README.zh.md)。Dock chrome 见 [`dsh-client-ui-browser`](../../client/ui-browser/README.zh.md)。无密钥 Browser Runtime 快照保持不含 Binder，因为它们证明发现与已渲染 Runtime 事实，而不是 Session 隔离。

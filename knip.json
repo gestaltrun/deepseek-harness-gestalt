@@ -28,7 +28,7 @@
   "ignoreWorkspaces": [
     "vendor/*",
     "python/sdk-runtime",
-    "packages/client/better-sidebar"
+    "packages/client/ui-better-sidebar"
   ],
   "ignoreDependencies": [
     "@yarnpkg/cli-dist",
@@ -151,24 +151,6 @@
       "project": [
         "src/**/*.{ts,tsx}",
         "tests/**/*.{ts,tsx}"
-      ]
-    },
-    "packages/client/web-ui": {
-      "entry": [
-        "tests/**/*.spec.{ts,tsx}"
-      ],
-      "project": [
-        "src/**/*.{ts,tsx}",
-        "tests/**/*.{ts,tsx}"
-      ]
-    },
-    "packages/client/runtime": {
-      "entry": [
-        "tests/**/*.spec.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
       ]
     },
     "packages/api/remotes": {
@@ -356,15 +338,6 @@
         "tests/**/*.ts"
       ]
     },
-    "packages/context/tmux-context": {
-      "entry": [
-        "tests/**/*.spec.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
-      ]
-    },
     "packages/lsp/lsp-stdio": {
       "entry": [
         "tests/**/*.spec.ts",
@@ -409,24 +382,6 @@
         "src/**/*.ts"
       ]
     },
-    "packages/util/timeout": {
-      "entry": [
-        "tests/**/*.spec.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
-      ]
-    },
-    "packages/util/output-retention": {
-      "entry": [
-        "tests/**/*.spec.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
-      ]
-    },
     "packages/test-support/acp-snapshot": {
       "entry": [
         "tests/**/*.spec.ts",
@@ -461,24 +416,6 @@
       "entry": [
         "tests/**/*.spec.ts",
         "tests/**/*.e2e.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
-      ]
-    },
-    "packages/goal/goal-round-driver": {
-      "entry": [
-        "tests/**/*.spec.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
-      ]
-    },
-    "packages/goal/tool-goal": {
-      "entry": [
-        "tests/**/*.spec.ts"
       ],
       "project": [
         "src/**/*.ts",
@@ -569,15 +506,6 @@
       "entry": [
         "tests/**/*.spec.ts",
         "tests/**/*.e2e.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
-      ]
-    },
-    "packages/util/home-paths": {
-      "entry": [
-        "tests/**/*.spec.ts"
       ],
       "project": [
         "src/**/*.ts",
@@ -722,15 +650,6 @@
         "tests/**/*.ts"
       ]
     },
-    "packages/fs/tool-fs-search": {
-      "entry": [
-        "tests/**/*.spec.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
-      ]
-    },
     "packages/mcp/mcp-client": {
       "entry": [
         "tests/**/*.spec.ts",
@@ -748,7 +667,7 @@
     },
     "packages/client/ui-workbench": {
       "ignoreDependencies": [
-        "@deepseek-ai/dsh-client-better-sidebar"
+        "@deepseek-ai/dsh-client-ui-better-sidebar"
       ]
     },
     "packages/client/web": {
@@ -765,15 +684,6 @@
         "src/**/*.ts",
         "src/**/*.tsx",
         "tests/**/*.tsx"
-      ]
-    },
-    "packages/client/ui-settings": {
-      "entry": [
-        "tests/**/*.spec.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "tests/**/*.ts"
       ]
     },
     "apps/web": {

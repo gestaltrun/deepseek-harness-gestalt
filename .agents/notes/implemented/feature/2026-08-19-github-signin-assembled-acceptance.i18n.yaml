@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-github-signin-assembled-acceptance.md
 2026-08-19-github-signin-assembled-acceptance.md: 14039bf8989f17b1ed17d177f31b5a7015df120c
-2026-08-19-github-signin-assembled-acceptance.zh.md: 99d48014c508dc0c96f766ce1d922104f7c31114
+2026-08-19-github-signin-assembled-acceptance.zh.md: e8da0d4ef94e7ce497053ae8dd10e7bf6d33f5e2

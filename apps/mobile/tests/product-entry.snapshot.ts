@@ -11,8 +11,8 @@ import { chromium, type Browser } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 const MOBILE_ROOT = fileURLToPath(new URL('..', import.meta.url))
-const EXPECTED = fileURLToPath(new URL('../snapshots/product-entry.expected.txt', import.meta.url))
 const VITE_BIN = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url))
+const VITE_CONFIG = fileURLToPath(new URL('./product-entry.vite.config.ts', import.meta.url))
 let preview: ChildProcess | undefined
 let browser: Browser | undefined
 let origin = ''
@@ -122,6 +122,7 @@ beforeAll(async () => {
   previewRoot = await mkdtemp(join(tmpdir(), 'dsh-mobile-product-entry-'))
   const build = spawnSync(process.execPath, [
     VITE_BIN, 'build',
+    '--config', VITE_CONFIG,
     '--outDir', previewRoot, '--emptyOutDir',
   ], {
     cwd: MOBILE_ROOT,
@@ -156,25 +157,85 @@ afterAll(async () => {
 })
 
 describe('bundled Mobile product entry', () => {
-  it('boots the operated production entry without a development projection or prototype origin', async () => {
-    if (browser === undefined) throw new Error('Mobile snapshot browser unavailable')
-    const context = await browser.newContext({
+  it.each([
+    { locale: 'en-US', colorScheme: 'dark' as const, back: 'Back', placeholder: 'Message the agent' },
+    { locale: 'zh-CN', colorScheme: 'light' as const, back: '返回', placeholder: '给智能体发消息' },
+  ])('renders authenticated shared conversation behavior in $locale/$colorScheme', async ({
+    locale, colorScheme, back, placeholder,
+  }) => {
+    const activeBrowser = browser
+    if (activeBrowser === undefined) throw new Error('Mobile snapshot browser unavailable')
+    const context = await activeBrowser.newContext({
       viewport: { width: 390, height: 844 },
-      locale: 'zh-CN',
-      colorScheme: 'light',
+      locale,
+      colorScheme,
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
     })
     const page = await context.newPage()
     await page.goto(origin)
     const main = page.locator('[data-mobile-platform-account]')
-    await expect.poll(async () => await main.getAttribute('data-mobile-platform-account')).toBe('idle')
-    expect(await page.getByRole('checkbox').count()).toBe(1)
-    expect(await page.getByRole('button', { name: '使用 GitHub 继续' }).isDisabled()).toBe(true)
-    expect(await page.locator('[data-mobile-conversation]').count()).toBe(0)
+    await expect.poll(async () => await main.getAttribute('data-mobile-platform-account')).toBe('signed-in')
+    await page.getByRole('treeitem', { name: /Shared Session/ }).click()
+    await expect.poll(async () => await page.locator('[data-mobile-conversation="detail"]').count()).toBe(1)
+    expect(await page.getByText('Shared Markdown').evaluate(node => node.tagName)).toBe('STRONG')
+    expect(await page.locator('pre code').filter({ hasText: 'const shared = true' }).count()).toBe(1)
+    expect(await page.getByAltText('shared.gif').count()).toBe(1)
+    expect(await page.locator('[data-toolview="file-mutation"] [data-tool="edit"]').count()).toBe(1)
+    expect(await page.locator('[data-toolview="generic"] [data-tool="future_tool"]').count()).toBe(1)
+    expect(await page.getByText('HOST_400').count()).toBe(1)
+    expect(await page.getByText(/future-card/).count()).toBeGreaterThan(0)
+    expect(await page.getByRole('button', { name: back }).count()).toBe(1)
+    expect(await page.locator('[data-mobile-conversation="detail"]').getAttribute('data-theme')).toBe(colorScheme)
+
+    const layout = await page.locator('[data-mobile-conversation="detail"]').evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        contentWidth: style.getPropertyValue('--dsh-chat-content-width').trim(),
+        cardWidth: style.getPropertyValue('--dsh-composer-card-max-width').trim(),
+        clearance: style.getPropertyValue('--dsh-composer-side-clearance').trim(),
+        textHeight: style.getPropertyValue('--dsh-composer-text-max-height').trim(),
+      }
+    })
+    expect(layout).toEqual({
+      contentWidth: '748px',
+      cardWidth: 'calc(748px + 32px)',
+      clearance: '16px',
+      textHeight: '336px',
+    })
+
+    const diffRow = page.locator('[data-toolview="file-mutation"] [data-expandable]')
+    await diffRow.click()
+    expect(await page.locator('[data-diff]').count()).toBe(1)
+
+    const approvalScroll = page.locator('[data-approval-scroll]')
+    await expect.poll(async () => await approvalScroll.count()).toBe(1)
+    const approvalOverflow = await approvalScroll.evaluate(element => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }))
+    expect(approvalOverflow.clientHeight).toBeLessThanOrEqual(336)
+    expect(approvalOverflow.scrollHeight).toBeGreaterThan(approvalOverflow.clientHeight)
+    const approvalButton = await page.getByRole('button', { name: /Allow once|允许一次/ }).boundingBox()
+    expect(approvalButton).not.toBeNull()
+    expect((approvalButton?.y ?? 1_000) + (approvalButton?.height ?? 0)).toBeLessThanOrEqual(844)
+
+    await page.evaluate(() => { window.__DSH_MOBILE_PRODUCT_EVIDENCE__.show('question') })
+    await expect.poll(async () => await page.getByText('Continue shared delivery?').count()).toBe(1)
+    expect(await page.getByRole('radio', { name: 'Yes' }).count()).toBe(1)
+
+    await page.evaluate(() => { window.__DSH_MOBILE_PRODUCT_EVIDENCE__.show('composer') })
+    const input = page.getByPlaceholder(placeholder)
+    await expect.poll(async () => await input.count()).toBe(1)
+    await input.fill(Array.from({ length: 80 }, (_, index) => `draft-${String(index)}`).join('\n'))
+    const inputScroll = page.locator('[data-input-scroll]')
+    const inputOverflow = await inputScroll.evaluate(element => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }))
+    expect(inputOverflow.clientHeight).toBeLessThanOrEqual(336)
+    expect(inputOverflow.scrollHeight).toBeGreaterThan(inputOverflow.clientHeight)
     expect(page.url()).not.toMatch(/:517[34](?:\/|$)/)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
-    const text = (await main.innerText()).replace(/[ \t]+$/gm, '').trimEnd() + '\n'
-    await expect(text).toMatchFileSnapshot(EXPECTED)
     await context.close()
   })
 })

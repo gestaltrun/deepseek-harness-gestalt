@@ -6,7 +6,7 @@ Status: implemented
 
 ## Problem
 
-开放的 GitHub 注册会让单个账号或单个 IP 耗尽 Platform 安装、配对、密文上传和在线连接。[Mobile Companion 提案](../../proposed/feature/2026-08-17-mobile-companion.md)已经拒绝允许名单、账号数量上限、自动扩容和运营停用控制台。配额数字是规格固定的安全不变量；只有双实例容量水位及其重试延迟随部署变化。配额辅助函数如果没有从登录、配对、附件或 WSS 接入路径调用，这些上限就不会被执行。
+开放的 GitHub 注册会让单个账号或单个 IP 耗尽 Platform 安装、配对、密文上传和在线连接。[Mobile Companion 提案](../../proposed/feature/2026-08-17-mobile-companion.zh.md)已经拒绝允许名单、账号数量上限、自动扩容和运营停用控制台。配额数字是规格固定的安全不变量；只有双实例容量水位及其重试延迟随部署变化。配额辅助函数如果没有从登录、配对、附件或 WSS 接入路径调用，这些上限就不会被执行。
 
 ## Decision
 
@@ -18,7 +18,7 @@ Remote Access 拥有配对和附件上限，并把 `MemoryPlatformCapacityGate` 
 
 各计数器的存储与完整性：安装是 `AccountBackend` 行，在 `consumeAuthorizedAttempt` 内计数；50 个配对、每小时账号与 IP 挑战、并发附件和每日上传字节是共享存储事务映射；20 条连接是进程内 `connections` 映射，在后端解析会话之后按账号计数；容量水位是可选的构造注入。`apps/platform` 会挂载 Account、Remote Access、Relay 与加密附件，但不会把可选的共享容量水位传给 Account 或 Personal Pairing。OSS 附件 store 与 Relay 仍会执行配置的整体容量与重试延迟。
 
-实现不包含允许名单、账号数量上限、自动扩容或运营停用控制台。产品附件 HTTP 会在 OSS publish 前调用 `admitAttachmentBlob`，并在 consume、过期、pairing revocation 或显式 revoke 后释放持久 reservation；字节存储与清理由[实际运行的 OSS 决策](../architecture/2026-08-23-operated-oss-attachment-authority.md)拥有。
+实现不包含允许名单、账号数量上限、自动扩容或运营停用控制台。产品附件 HTTP 会在 OSS publish 前调用 `admitAttachmentBlob`，并在 consume、过期、pairing revocation 或显式 revoke 后释放持久 reservation；字节存储与清理由[实际运行的 OSS 决策](../architecture/2026-08-23-operated-oss-attachment-authority.zh.md)拥有。
 
 ## Alternatives considered
 
@@ -38,7 +38,7 @@ Remote Access 拥有配对和附件上限，并把 `MemoryPlatformCapacityGate` 
 
 **在容量到达时卸载已建立流或断开在线 attachment。** 双实例部署会保留现有连接，并拒绝新的获取，直到运营扩容。
 
-**在这里实现产品附件存储。** 该协议属于[实际运行的加密附件 capability](../architecture/2026-08-23-operated-oss-attachment-authority.md)。按声明大小准入仍然执行开放注册上限。
+**在这里实现产品附件存储。** 该协议属于[实际运行的加密附件 capability](../architecture/2026-08-23-operated-oss-attachment-authority.zh.md)。按声明大小准入仍然执行开放注册上限。
 
 ## Consequences
 
@@ -50,5 +50,5 @@ Account 单元测试钉住第 10、11 个 Desktop 与 Mobile 安装、同一安�
 
 ## Related
 
-- [Mobile Companion 提案](../../proposed/feature/2026-08-17-mobile-companion.md) —— 父级开放注册与容量决策。
-- [Platform 账号安装会话](2026-08-17-platform-account-installation-sessions.md) —— 这些安装与连接上限所统计的会话。
+- [Mobile Companion 提案](../../proposed/feature/2026-08-17-mobile-companion.zh.md) —— 父级开放注册与容量决策。
+- [Platform 账号安装会话](2026-08-17-platform-account-installation-sessions.zh.md) —— 这些安装与连接上限所统计的会话。

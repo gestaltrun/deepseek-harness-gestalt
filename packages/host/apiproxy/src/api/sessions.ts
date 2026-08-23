@@ -35,6 +35,10 @@ declare module '@deepseek-ai/dsh-session/types' {
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    sessionListMetadata: SessionListMetadata
+    imageLimits: null
+  }
   interface SessionProjectionMap {
     /**
      * Session-list hints persisted by the projection cache. `blank: false`

@@ -9,6 +9,9 @@ import {
 } from '@deepseek-ai/dsh-remote-protocol'
 
 const DEFAULT_HOST_RPC_TIMEOUT_MS = 15_000
+const MAX_HOST_ATTACHMENT_RESPONSE_BYTES = Math.ceil(
+  REMOTE_PROTOCOL_LIMITS.imageChunkBytes * REMOTE_PROTOCOL_LIMITS.imageChunks / 3,
+) * 4 + REMOTE_PROTOCOL_LIMITS.companionMessageBytes
 
 /** Unary Host call result after HTTP, JSON, envelope, and business validation. */
 export type DesktopHostRpcResult =
@@ -82,7 +85,10 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
   }
   return {
     async call(method, payload, callOptions) {
-      const callTimeoutMs = callOptions?.timeoutMs ?? timeoutMs
+      const attachmentRead = method === 'session.attachment'
+      const callTimeoutMs = callOptions?.timeoutMs
+        ?? (attachmentRead ? options.attachmentTimeoutMs : undefined)
+        ?? timeoutMs
       if (!Number.isSafeInteger(callTimeoutMs) || callTimeoutMs <= 0) {
         throw new TypeError('Desktop Host RPC call timeoutMs must be a positive safe integer')
       }
@@ -91,7 +97,7 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
         new URL(`/api/${method}`, origin),
         { type: 'client-request', rpcId, method, payload },
         callTimeoutMs,
-        responseMaxBytes,
+        attachmentRead ? MAX_HOST_ATTACHMENT_RESPONSE_BYTES : responseMaxBytes,
       )
       if (response.kind === 'timeout') {
         return { ok: false, failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'Desktop Host request timed out' } }

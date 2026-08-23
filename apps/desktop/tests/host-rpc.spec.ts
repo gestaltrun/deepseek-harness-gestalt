@@ -137,6 +137,9 @@ describe('Desktop Host RPC', () => {
     const exact = createDesktopHostRpc(origin, { timeoutMs: 1_000, responseMaxBytes: responseBytes })
     const overflow = createDesktopHostRpc(origin, { timeoutMs: 1_000, responseMaxBytes: responseBytes - 1 })
     const flood = createDesktopHostRpc(origin, { timeoutMs: 1_000, responseMaxBytes: 1_024 })
+    const attachment = createDesktopHostRpc(origin, {
+      timeoutMs: 1, attachmentTimeoutMs: 1_000, responseMaxBytes: 1,
+    })
 
     await expect(exact.call('session.search', { query: 'exact' })).resolves.toMatchObject({
       ok: true,
@@ -150,6 +153,9 @@ describe('Desktop Host RPC', () => {
     } as const
     await expect(overflow.call('session.search', { query: 'overflow' })).resolves.toEqual(limitFailure)
     await expect(flood.call('session.search', { query: 'fast-flood' })).resolves.toEqual(limitFailure)
+    await expect(attachment.call('session.attachment', { query: 'attachment' })).resolves.toMatchObject({
+      ok: true, value: { padding },
+    })
   })
 
   it('preserves non-2xx status before an oversized or never-ending response body', async () => {

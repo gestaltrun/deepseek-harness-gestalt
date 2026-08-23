@@ -10,6 +10,8 @@
   },
   "include": ["src", "tests", "scripts"],
   "references": [
+    { "path": "../../packages/attachment/attachment" },
+    { "path": "../../packages/attachment/attachment-local" },
     { "path": "../../packages/browser/browser-runtime-electron" },
     { "path": "../../packages/client/ui-desktop" },
     { "path": "../../packages/host/webserver" },
@@ -23,6 +25,14 @@
     { "path": "../../packages/platform/noise-channel" },
     { "path": "../../packages/platform/remote-access-http" },
     { "path": "../../packages/platform/remote-protocol" },
+    { "path": "../../packages/session/session-persistence-sqlite" },
+    { "path": "../../packages/storage/storage" },
+    { "path": "../../packages/storage/storage-domain" },
+    { "path": "../../packages/storage/storage-sqlite" },
+    { "path": "../../packages/core/system-prompt" },
+    { "path": "../../packages/interaction/user-approval" },
+    { "path": "../../packages/interaction/user-questions" },
+    { "path": "../../packages/workspace/workspace" },
     { "path": "../../packages/test-support/loader-smoke" }
   ]
 }

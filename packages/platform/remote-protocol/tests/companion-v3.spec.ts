@@ -24,9 +24,12 @@ describe('Encrypted Companion Protocol v3 product surface', () => {
     const sessionId = parseCompanionSessionId('session-1')
     for (const message of [
       { type: 'operation', operation: { type: 'refresh-surface', operationId } },
+      { type: 'operation', operation: { type: 'load-history', operationId, sessionId, maxMessages: 20 } },
       { type: 'operation', operation: { type: 'load-history', operationId, sessionId, beforeSeq: 41, maxMessages: 20 } },
       { type: 'operation', operation: { type: 'cancel-session', operationId, sessionId } },
-      { type: 'operation', operation: { type: 'read-image', operationId, sessionId, attachmentId: 'image-1' } },
+      { type: 'operation', operation: {
+        type: 'read-image', operationId, sessionId, attachmentId: `sha256:${'b'.repeat(64)}`,
+      } },
     ] as const) {
       expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, message))).toEqual(message)
     }
@@ -83,7 +86,7 @@ describe('Encrypted Companion Protocol v3 product surface', () => {
       type: 'result',
       result: {
         type: 'image-chunk', operationId, sessionId, mediaType: 'image/png',
-        attachmentId: 'image-1', index: 0, count: 1,
+        attachmentId: `sha256:${'b'.repeat(64)}`, index: 0, count: 1,
         sha256: 'a'.repeat(64), data: 'AAEC',
       },
     } as const

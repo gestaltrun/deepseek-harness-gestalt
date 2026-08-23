@@ -46,8 +46,45 @@ describe('Mobile Snow Companion product channel', () => {
     })
     await expect(receipt).resolves.toEqual({ accepted: true })
     expect(seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type)).toEqual([
-      'refresh-surface', 'load-history', 'cancel-session', 'settle-interaction',
+      'refresh-surface', 'load-history', 'cancel-session', 'settle-interaction', 'load-history', 'refresh-surface',
     ])
+  })
+
+  it('refreshes the authoritative history and surface after a confirmed prompt or cancel', async () => {
+    const runtime = synchronizedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    const seal = vi.fn((_message: unknown) => Uint8Array.of(1))
+    connection.connect({
+      channel: { seal } as never,
+      targetAttachmentId: parseRelayAttachmentId('desktop-refresh'),
+      pairingSelector: parseRelayPairingSelector('pairing-refresh'),
+      generation: 3,
+    })
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection,
+      installation: { authorizeCurrentInstallation: vi.fn() },
+      attachmentKeys: { attachmentKeyMaterial: () => undefined },
+      platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
+    })
+    product.submit('session-refresh', 'next prompt')
+    const submit = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
+    product.acceptResult({
+      type: 'confirmed', operationId: submit.operationId as never, committedAt: 1, outcome: 'accepted',
+    })
+    await vi.waitFor(() => {
+      expect(seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type))
+        .toEqual(['submit-prompt', 'load-history', 'refresh-surface'])
+    })
+
+    product.cancel('session-refresh')
+    const cancel = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
+    product.acceptResult({
+      type: 'confirmed', operationId: cancel.operationId as never, committedAt: 2, outcome: 'accepted',
+    })
+    await vi.waitFor(() => {
+      expect(seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type).slice(-3))
+        .toEqual(['cancel-session', 'load-history', 'refresh-surface'])
+    })
   })
 
   it('assembles and verifies exact historical image bytes', async () => {
@@ -67,16 +104,43 @@ describe('Mobile Snow Companion product channel', () => {
       platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
     })
     const loaded = product.loadImage('session-image', {
-      attachmentId: 'image-1' as never, mediaType: 'image/png', bytes: 3, width: 1, height: 1,
+      attachmentId: `sha256:${'a'.repeat(64)}` as never, mediaType: 'image/png', bytes: 3, width: 1, height: 1,
     })
     const operationId = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation.operationId
     const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.of(0, 1, 2))))
       .map(byte => byte.toString(16).padStart(2, '0')).join('')
     product.acceptResult({
       type: 'image-chunk', operationId: operationId as never, sessionId: 'session-image' as never,
-      attachmentId: 'image-1', mediaType: 'image/png', index: 0, count: 1, sha256, data: 'AAEC',
+      attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', index: 0, count: 1, sha256, data: 'AAEC',
     })
     await expect(loaded).resolves.toBe('data:image/png;base64,AAEC')
+  })
+
+  it('rejects a correlated image request when Desktop returns an operation failure', async () => {
+    const runtime = synchronizedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    const seal = vi.fn((_message: unknown) => Uint8Array.of(1))
+    connection.connect({
+      channel: { seal } as never,
+      targetAttachmentId: parseRelayAttachmentId('desktop-image-failure'),
+      pairingSelector: parseRelayPairingSelector('pairing-image-failure'),
+      generation: 3,
+    })
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection,
+      installation: { authorizeCurrentInstallation: vi.fn() },
+      attachmentKeys: { attachmentKeyMaterial: () => undefined },
+      platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
+    })
+    const loaded = product.loadImage('session-image', {
+      attachmentId: `sha256:${'a'.repeat(64)}` as never, mediaType: 'image/png', bytes: 3, width: 1, height: 1,
+    })
+    const operationId = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation.operationId
+    product.acceptResult({
+      type: 'operation-failed', operationId: operationId as never,
+      failure: { kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Host response exceeded its byte limit' },
+    })
+    await expect(loaded).rejects.toThrow('Desktop Host response exceeded its byte limit')
   })
 
   it('seals search and encrypted attachment operations on the current generation with Installation proof', async () => {

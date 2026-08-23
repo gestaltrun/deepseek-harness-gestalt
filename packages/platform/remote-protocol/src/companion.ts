@@ -20,6 +20,7 @@ import type {
 } from './types.ts'
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]+$/
+const ATTACHMENT_ID_PATTERN = /^sha256:[0-9a-f]{64}$/u
 const MAX_IDENTIFIER_CHARACTERS = 128
 
 /** Security properties that both endpoints must preserve at the selected major. */
@@ -321,7 +322,9 @@ function parseOperation(value: unknown): CompanionOperation {
     return { type: 'refresh-surface', operationId: parseCompanionOperationId(record.operationId) }
   }
   if (record.type === 'load-history') {
-    exactKeys(record, ['type', 'operationId', 'sessionId', 'beforeSeq', 'maxMessages'], 'Companion load-history operation')
+    exactKeys(record, record.beforeSeq === undefined
+      ? ['type', 'operationId', 'sessionId', 'maxMessages']
+      : ['type', 'operationId', 'sessionId', 'beforeSeq', 'maxMessages'], 'Companion load-history operation')
     const maxMessages = positiveSafeInteger(record.maxMessages, 'Companion history maxMessages')
     if (maxMessages > REMOTE_PROTOCOL_LIMITS.historyPageMessages) {
       throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion history request exceeds its message ceiling')
@@ -351,7 +354,7 @@ function parseOperation(value: unknown): CompanionOperation {
       type: 'read-image',
       operationId: parseCompanionOperationId(record.operationId),
       sessionId: parseCompanionSessionId(record.sessionId),
-      attachmentId: parseIdentifier(record.attachmentId, 'Companion image attachmentId'),
+      attachmentId: parseAttachmentId(record.attachmentId),
     }
   }
   if (record.type === 'settle-interaction') {
@@ -401,7 +404,7 @@ function parseResult(value: unknown): CompanionResult {
       type: 'image-chunk',
       operationId: parseCompanionOperationId(record.operationId),
       sessionId: parseCompanionSessionId(record.sessionId),
-      attachmentId: parseIdentifier(record.attachmentId, 'Companion image attachmentId'),
+      attachmentId: parseAttachmentId(record.attachmentId),
       mediaType,
       index,
       count,
@@ -793,6 +796,13 @@ function parseIdentifier(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > MAX_IDENTIFIER_CHARACTERS
     || !IDENTIFIER_PATTERN.test(value)) {
     invalid(`${name} must be 1-${String(MAX_IDENTIFIER_CHARACTERS)} base64url characters`)
+  }
+  return value
+}
+
+function parseAttachmentId(value: unknown): string {
+  if (typeof value !== 'string' || !ATTACHMENT_ID_PATTERN.test(value)) {
+    invalid('Companion image attachmentId must be a content-addressed sha256 identifier')
   }
   return value
 }

@@ -71,8 +71,10 @@ export interface MobileSnowCompanionProductOptions {
 
 /** Stable Mobile UI adapter whose every send revalidates current foreground generation. */
 export class MobileSnowCompanionProductChannel implements MobileCompanionMutationChannel {
+  private readonly refreshAfterConfirmation = new Map<CompanionOperationId, string>()
   private readonly settlements = new Map<CompanionOperationId, {
     active: ActiveMobileSnowChannel
+    sessionId: string
     resolve(receipt: MobilePendingSettlementReceipt): void
     reject(error: unknown): void
   }>()
@@ -96,17 +98,21 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
   create(): never { throw new Error('Companion Session creation is unavailable in this protocol version') }
 
   submit(sessionId: string, text: string): void {
+    const operationIdValue = operationId()
+    this.refreshAfterConfirmation.set(operationIdValue, sessionId)
     this.sendDetached({
       type: 'submit-prompt',
-      operationId: operationId(),
+      operationId: operationIdValue,
       sessionId: parseCompanionSessionId(sessionId),
       text,
     })
   }
 
   cancel(sessionId: string): void {
+    const operationIdValue = operationId()
+    this.refreshAfterConfirmation.set(operationIdValue, sessionId)
     this.sendDetached({
-      type: 'cancel-session', operationId: operationId(), sessionId: parseCompanionSessionId(sessionId),
+      type: 'cancel-session', operationId: operationIdValue, sessionId: parseCompanionSessionId(sessionId),
     })
   }
 
@@ -166,7 +172,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
       settlement: interactionSettlement(settlement),
     }
     return new Promise<MobilePendingSettlementReceipt>((resolve, reject) => {
-      this.settlements.set(operationIdValue, { active, resolve, reject })
+      this.settlements.set(operationIdValue, { active, sessionId: settlement.sessionId, resolve, reject })
       const permit = this.options.runtime.bindCompanionMutationPermit(settlement.kind)
       if (permit === undefined) {
         this.settlements.delete(operationIdValue)
@@ -208,6 +214,27 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
 
   /** Accept one result already authenticated by the current physical Snow receiver. */
   acceptResult(result: CompanionResult): void {
+    if (result.type === 'operation-failed') {
+      this.refreshAfterConfirmation.delete(result.operationId)
+      const image = this.images.get(result.operationId)
+      if (image !== undefined) {
+        this.images.delete(result.operationId)
+        image.reject(new Error(result.failure.message))
+      }
+      const settlement = this.settlements.get(result.operationId)
+      if (settlement !== undefined) {
+        this.settlements.delete(result.operationId)
+        settlement.reject(new Error(result.failure.message))
+      }
+      return
+    }
+    if (result.type === 'confirmed') {
+      const sessionId = this.refreshAfterConfirmation.get(result.operationId)
+      if (sessionId === undefined) return
+      this.refreshAfterConfirmation.delete(result.operationId)
+      this.queueRefresh(sessionId)
+      return
+    }
     if (result.type === 'interaction-receipt') {
       const pending = this.settlements.get(result.operationId)
       if (pending === undefined) return
@@ -216,7 +243,10 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
         pending.reject(new Error('Companion interaction receipt belongs to a stale connection generation'))
         return
       }
-      if (result.accepted) pending.resolve({ accepted: true })
+      if (result.accepted) {
+        pending.resolve({ accepted: true })
+        this.queueRefresh(pending.sessionId)
+      }
       else if (result.reason !== undefined) pending.resolve({ accepted: false, reason: result.reason })
       else pending.reject(new Error('Companion interaction receipt omitted its rejection reason'))
       return
@@ -270,12 +300,24 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     return active
   }
 
+  private queueRefresh(sessionId: string): void {
+    queueMicrotask(() => {
+      try {
+        this.loadOlder(sessionId)
+        this.refreshSurface()
+      } catch (error) {
+        this.options.reportFailure?.(error)
+      }
+    })
+  }
+
   private rejectPending(): void {
     const error = new Error('Companion operation belongs to a disconnected connection generation')
     for (const pending of this.settlements.values()) pending.reject(error)
     for (const pending of this.images.values()) pending.reject(error)
     this.settlements.clear()
     this.images.clear()
+    this.refreshAfterConfirmation.clear()
   }
 }
 

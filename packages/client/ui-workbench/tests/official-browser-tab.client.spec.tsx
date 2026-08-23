@@ -109,9 +109,11 @@ describe('OfficialBrowserTab', () => {
     })
     expect(b.observe).toHaveBeenCalledWith(SESSION, TARGET)
     expect(b.screenshot).toHaveBeenCalledWith(SESSION, TARGET)
-    expect(b.updateTab).toHaveBeenCalledWith('browser:1', {
-      title: 'Example',
-      meta: officialTabMeta(TARGET, { kind: 'shared' }),
+    await waitFor(() => {
+      expect(b.updateTab).toHaveBeenCalledWith('browser:1', {
+        title: 'Example',
+        meta: officialTabMeta(TARGET, { kind: 'shared' }),
+      })
     })
   })
 

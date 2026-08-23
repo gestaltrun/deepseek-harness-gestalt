@@ -151,11 +151,17 @@ describe('MobileCompanionSurface', () => {
       operationId: parseCompanionOperationId('create-recovered'), status: 'committed', kind: 'session-create',
       original: {
         type: 'operation-failed', operationId: parseCompanionOperationId('create-recovered'),
-        failure: { kind: 'business', code: 'workspace-missing', message: 'Workspace was removed' },
+        failure: {
+          kind: 'business', code: 'companion-outcome-unknown',
+          message: 'Desktop Host effect outcome is unknown after operation ledger recovery.',
+        },
       },
     })
     expect(surface.getSnapshot().operationFailure).toMatchObject({
-      operation: 'create', failure: { code: 'workspace-missing', message: 'Workspace was removed' },
+      operation: 'create', failure: {
+        code: 'companion-outcome-unknown',
+        message: 'Desktop Host effect outcome is unknown after operation ledger recovery.',
+      },
     })
   })
 

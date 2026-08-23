@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  parseCompanionOperationId,
+  parseCompanionSessionId,
   parseCompanionInteractionId,
   parseRelayAttachmentId,
   parseRelayCredential,
@@ -392,6 +394,60 @@ describe('Mobile Snow Companion product channel', () => {
       expect.objectContaining({ operationId: prompt.operationId, status: 'not-submitted' }),
     ])
     expect(queryStatus).toHaveBeenCalledExactlyOnceWith(prompt.operationId)
+  })
+
+  it('projects an outcome-unknown Host failure and refreshes authoritative history after reconciliation', async () => {
+    const runtime = synchronizedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    const seal = vi.fn((_message: unknown) => Uint8Array.of(1))
+    connection.connect({
+      channel: { seal } as never,
+      targetAttachmentId: parseRelayAttachmentId('desktop-outcome-unknown'),
+      pairingSelector: parseRelayPairingSelector('pairing-outcome-unknown'),
+      generation: 1,
+    })
+    const operationId = parseCompanionOperationId('operation-outcome-unknown')
+    const sessionId = parseCompanionSessionId('session-outcome-unknown')
+    const store = new InMemoryCompanionCacheStore()
+    await store.saveReceipt(parseCompanionDesktopId('desktop-outcome-unknown'), {
+      operationId, status: 'unknown', kind: 'prompt', sessionId,
+    })
+    const recoveredReceipt = vi.fn()
+    const trackHistoryRefresh = vi.fn()
+    const trackSurfaceRefresh = vi.fn()
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection,
+      operationSettlement: new CompanionUncertainOperationSettlement(
+        store, parseCompanionDesktopId('desktop-outcome-unknown'),
+      ),
+      installation: { authorizeCurrentInstallation: vi.fn() },
+      attachmentKeys: { attachmentKeyMaterial: () => undefined },
+      platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
+      recoveredReceipt, trackHistoryRefresh, trackSurfaceRefresh,
+    })
+    const reconciliation = product.reconcileUnknown()
+    await vi.waitFor(() => {
+      expect((seal.mock.lastCall?.[0] as { operation?: { type?: string } }).operation?.type)
+        .toBe('query-operation-status')
+    })
+    const failureResult = {
+      type: 'operation-failed' as const,
+      operationId,
+      failure: {
+        kind: 'business' as const,
+        code: 'companion-outcome-unknown',
+        message: 'Desktop Host effect outcome is unknown after operation ledger recovery.',
+      },
+    }
+    product.acceptResult({ type: 'status', operationId, committed: failureResult })
+
+    const receipt = { operationId, status: 'committed', kind: 'prompt', sessionId, original: failureResult }
+    await expect(reconciliation).resolves.toEqual([receipt])
+    expect(recoveredReceipt).toHaveBeenCalledExactlyOnceWith(receipt)
+    await vi.waitFor(() => {
+      expect(trackHistoryRefresh).toHaveBeenCalledOnce()
+      expect(trackSurfaceRefresh).toHaveBeenCalledOnce()
+    })
   })
 
   it('assembles and verifies exact historical image bytes', async () => {

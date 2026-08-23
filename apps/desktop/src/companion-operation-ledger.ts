@@ -58,7 +58,7 @@ export class FileDesktopCompanionOperationStore implements DesktopCompanionOpera
   }
 }
 
-/** Serialized prepared/committed mutation transactions for one Desktop installation. */
+/** Serialized prepared and terminal mutation transactions for one Desktop installation. */
 export class DesktopCompanionOperationLedger {
   private readonly records = new Map<string, PersistedOperationRecord>()
   private readonly pendingCommits = new Map<string, PersistedOperationRecord>()
@@ -91,7 +91,7 @@ export class DesktopCompanionOperationLedger {
    * Prepare, execute, and commit one mutation or return its original committed result.
    * @param pairingId - exact Personal Pairing authority.
    * @param operation - decoded mutation carrying its stable id.
-   * @param effect - Host effect executed only without a committed record.
+   * @param effect - Host effect executed only after this call durably creates a new preparation.
    * @returns original or newly committed terminal result.
    */
   async execute(
@@ -121,7 +121,8 @@ export class DesktopCompanionOperationLedger {
    * Read one pairing-scoped committed mutation result without executing it.
    * @param pairingId - authenticated Personal Pairing asking for status.
    * @param operationId - original mutation identity.
-   * @returns the durable terminal result, or undefined when no commit exists.
+   * @returns the durable terminal result, or undefined when no record exists. A
+   *   recovered preparation first becomes a durable outcome-unknown failure.
    */
   async query(
     pairingId: PersonalPairingId,
@@ -130,8 +131,11 @@ export class DesktopCompanionOperationLedger {
     return await this.serialized(async () => {
       await this.flushPendingCommits()
       this.pruneExpired()
-      const result = this.records.get(recordKey(pairingId, operationId))?.result
-      return result === undefined ? undefined : structuredClone(result)
+      const key = recordKey(pairingId, operationId)
+      const record = this.records.get(key)
+      if (record === undefined) return undefined
+      if (record.result === undefined) return await this.commitUnknownOutcome(key, record)
+      return structuredClone(record.result)
     })
   }
 
@@ -151,6 +155,7 @@ export class DesktopCompanionOperationLedger {
     if (existing !== undefined) {
       if (existing.fingerprint !== fingerprint) throw new Error('Desktop Companion operation id collision')
       if (existing.result !== undefined) return structuredClone(existing.result)
+      return await this.commitUnknownOutcome(key, existing)
     } else {
       this.evictTerminalRecords()
       if (this.records.size >= MAX_RECORDS) throw new Error('Desktop Companion operation ledger capacity exceeded')
@@ -192,10 +197,30 @@ export class DesktopCompanionOperationLedger {
     this.pendingCommits.clear()
   }
 
+  private async commitUnknownOutcome(
+    key: string,
+    prepared: PersistedOperationRecord,
+  ): Promise<CompanionResult> {
+    const result: CompanionResult = {
+      type: 'operation-failed',
+      operationId: prepared.operationId,
+      failure: {
+        kind: 'business',
+        code: 'companion-outcome-unknown',
+        message: 'Desktop Host effect outcome is unknown after operation ledger recovery.',
+      },
+    }
+    this.pendingCommits.set(key, { ...prepared, updatedAt: this.now(), result })
+    await this.flushPendingCommits()
+    return structuredClone(result)
+  }
+
   private pruneExpired(): void {
     const now = this.now()
     for (const [key, record] of this.records) {
-      if (now >= record.updatedAt && now - record.updatedAt >= RECORD_TTL_MS) this.records.delete(key)
+      if (record.result !== undefined && now >= record.updatedAt && now - record.updatedAt >= RECORD_TTL_MS) {
+        this.records.delete(key)
+      }
     }
   }
 

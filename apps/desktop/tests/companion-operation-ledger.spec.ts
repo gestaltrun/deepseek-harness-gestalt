@@ -3,11 +3,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
-import { parseCompanionOperationId, parseCompanionSessionId } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  parseCompanionOperationId,
+  parseCompanionSessionId,
+  REMOTE_PROTOCOL_LIMITS,
+} from '@deepseek-ai/dsh-remote-protocol'
 import {
   DesktopCompanionOperationLedger,
   FileDesktopCompanionOperationStore,
 } from '../src/companion-operation-ledger.ts'
+import { DesktopCompanionProductOwner } from '../src/companion-product.ts'
 
 type LedgerStore = Parameters<typeof DesktopCompanionOperationLedger.load>[0]
 
@@ -45,7 +50,7 @@ describe('Desktop Companion operation ledger', () => {
       .resolves.toBeUndefined()
   })
 
-  it('keeps prepared work retryable after a failed effect without publishing a result', async () => {
+  it('commits an outcome-unknown failure for prepared work after restart and never repeats the effect', async () => {
     const root = await mkdtemp(join(tmpdir(), 'desktop-companion-ledger-'))
     cleanups.push(async () => { await rm(root, { recursive: true, force: true }) })
     const store = new FileDesktopCompanionOperationStore(join(root, 'operations.json'))
@@ -58,10 +63,73 @@ describe('Desktop Companion operation ledger', () => {
     const first = await DesktopCompanionOperationLedger.load(store, () => 1_000)
     await expect(first.execute(pairingId, operation, async () => { throw new Error('lost') })).rejects.toThrow('lost')
 
+    const restored = await DesktopCompanionOperationLedger.load(store, () => 366 * 24 * 60 * 60 * 1_000)
+    const effect = vi.fn(async () => confirmed(operation, 2_000))
+    const failure = {
+      type: 'operation-failed' as const,
+      operationId: operation.operationId,
+      failure: {
+        kind: 'business' as const,
+        code: 'companion-outcome-unknown',
+        message: 'Desktop Host effect outcome is unknown after operation ledger recovery.',
+      },
+    }
+    await expect(restored.query(pairingId, operation.operationId)).resolves.toEqual(failure)
+    expect((await store.load())[0]?.result).toEqual(failure)
+    const owner = new DesktopCompanionProductOwner({
+      responseMaxBytes: REMOTE_PROTOCOL_LIMITS.companionMessageBytes,
+    })
+    owner.installLedger(restored)
+    await expect(owner.queryOperationStatus(pairingId, operation.operationId)).resolves.toEqual({
+      type: 'status', operationId: operation.operationId, committed: failure,
+    })
+    await expect(restored.execute(pairingId, operation, effect)).resolves.toEqual(failure)
+    expect(effect).not.toHaveBeenCalled()
+  })
+
+  it('does not execute the Host effect when a duplicate encounters a restored preparation', async () => {
+    const store = memoryStore()
+    const pairingId = parsePersonalPairingId('pairing-ledger')
+    const operation = cancelOperation('operation-restored-duplicate')
+    const first = await DesktopCompanionOperationLedger.load(store, () => 1_000)
+    await expect(first.execute(pairingId, operation, async () => { throw new Error('lost') })).rejects.toThrow('lost')
+
     const restored = await DesktopCompanionOperationLedger.load(store, () => 2_000)
-    await expect(restored.execute(pairingId, operation, async () => ({
-      type: 'confirmed', operationId: operation.operationId, committedAt: 2_000, outcome: 'accepted',
-    }))).resolves.toMatchObject({ committedAt: 2_000 })
+    const effect = vi.fn(async () => confirmed(operation, 2_000))
+    await expect(restored.execute(pairingId, operation, effect)).resolves.toMatchObject({
+      type: 'operation-failed', failure: { code: 'companion-outcome-unknown' },
+    })
+    expect(effect).not.toHaveBeenCalled()
+    expect((await store.load())[0]?.result).toMatchObject({
+      type: 'operation-failed', failure: { code: 'companion-outcome-unknown' },
+    })
+  })
+
+  it('retries persistence of a prepared outcome-unknown result without repeating the effect', async () => {
+    let persisted: Awaited<ReturnType<LedgerStore['load']>> = []
+    let failUnknownCommit = false
+    const store: LedgerStore = {
+      load: async () => structuredClone(persisted),
+      save: async (records) => {
+        if (failUnknownCommit && records.some(record => record.result !== undefined)) {
+          throw new Error('outcome commit unavailable')
+        }
+        persisted = structuredClone(records)
+      },
+    }
+    const pairingId = parsePersonalPairingId('pairing-ledger')
+    const operation = cancelOperation('operation-unknown-commit-retry')
+    const first = await DesktopCompanionOperationLedger.load(store, () => 1_000)
+    await expect(first.execute(pairingId, operation, async () => { throw new Error('lost') })).rejects.toThrow('lost')
+    const restored = await DesktopCompanionOperationLedger.load(store, () => 2_000)
+    failUnknownCommit = true
+    await expect(restored.query(pairingId, operation.operationId)).rejects.toThrow('outcome commit unavailable')
+    expect(persisted[0]?.result).toBeUndefined()
+
+    failUnknownCommit = false
+    await expect(restored.query(pairingId, operation.operationId)).resolves.toMatchObject({
+      type: 'operation-failed', failure: { code: 'companion-outcome-unknown' },
+    })
   })
 
   it('single-flights concurrent retries of the same operation', async () => {

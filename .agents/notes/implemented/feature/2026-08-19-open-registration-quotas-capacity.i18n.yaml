@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-open-registration-quotas-capacity.md
 2026-08-19-open-registration-quotas-capacity.md: 1c6922d3576f80711e2461a0809f2098ffea069e
-2026-08-19-open-registration-quotas-capacity.zh.md: 6870ccc51af4619b5c1e1552b627dd9d67c7c449
+2026-08-19-open-registration-quotas-capacity.zh.md: 68531bc3af8e12f0860187ad23b7687d4aa139d1

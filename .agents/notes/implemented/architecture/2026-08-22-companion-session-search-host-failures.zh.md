@@ -18,7 +18,7 @@ Desktop Host 会在发布的 Web Host 报告 loopback origin 后安装 `DesktopC
 
 搜索结果最多包含 20 个唯一 Session id，每个 snippet 最多包含 240 个 Unicode code point。查询沿用 Host 的 500 个 UTF-16 code unit 上限。失败消息限制为 4,096 个 UTF-8 字节。协议 codec 与 Desktop adapter 会独立执行这些上限，使有效 Host 响应无法变成超限的 Encrypted Companion 消息。
 
-该决策实现[真实 Companion 产品链路](../../proposed/architecture/2026-08-22-real-companion-product-path.md)中的 Session 搜索与 Host 失败切片。[配对范围的附件决策](../feature/2026-08-19-encrypted-companion-attachments.md)负责附件密文与字节交付；本记录负责 Host 结局如何穿过 Companion 应用协议。
+该决策实现[真实 Companion 产品链路](../../proposed/architecture/2026-08-22-real-companion-product-path.zh.md)中的 Session 搜索与 Host 失败切片。[配对范围的附件决策](../feature/2026-08-19-encrypted-companion-attachments.zh.md)负责附件密文与字节交付；本记录负责 Host 结局如何穿过 Companion 应用协议。
 
 ## 曾考虑的替代方案
 

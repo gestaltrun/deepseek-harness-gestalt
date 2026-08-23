@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-08-17-mobile-companion.md
 2026-08-17-mobile-companion.md: de64cd7ca7350fc9f7ed2b7aa728252204abcf94
-2026-08-17-mobile-companion.zh.md: 48d6263434d5088d13c4d5f38cad5a943120aa77
+2026-08-17-mobile-companion.zh.md: f16afb1a749b69c162900b9ee4e79720f91f393d

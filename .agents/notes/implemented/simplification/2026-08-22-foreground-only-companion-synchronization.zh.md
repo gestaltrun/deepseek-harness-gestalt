@@ -16,7 +16,7 @@ Mobile Companion 只在用户打开应用或把应用切回前台后获取当前
 
 仓库级 `verify-companion-no-push` 门禁扫描发布的 application、已跟踪 build 配置、package、example、native、Python、website、workflow、script、生成源码、manifest 与依赖 lock 路径，同时排除测试、说明文档和已知生成输出。它拒绝提供方 symbol 与 operation、单复数 device-token 字段、token repository、原生通知依赖、权限与 API、厂商原生 asset 文件名及过时发布证据，同时允许普通数组 `push()` 调用。Mobile 生命周期与 mutation 测试证明进入后台时停止连接、串行前台和内部重连、拒绝过期 generation、拒绝把原始 ciphertext 当作同步、各 mutation 路径 fail closed，以及解除配对时移除 grant。发布的 `main.tsx` 与 keyless snapshot 调用同一个 `mountMobileEntry` composition，由它拥有提供给共用 Web 组件的 `MobileCompanionSurface`。snapshot 会让一个此前已鉴权的 Session 经历物理重连，并钉住创建、提示词、取消、附件、审批和 Ask User 控件在当前 generation 完成已验证同步前保持 disabled。
 
-该决策实现[真实 Companion 产品链路](../../proposed/architecture/2026-08-22-real-companion-product-path.md)中的通知移除切片。旧的无内容通知决策已整合到此处，因为没有生产 schema、配置、migration、兼容行为、文档承诺或支持性行为测试继续存在。
+该决策实现[真实 Companion 产品链路](../../proposed/architecture/2026-08-22-real-companion-product-path.zh.md)中的通知移除切片。旧的无内容通知决策已整合到此处，因为没有生产 schema、配置、migration、兼容行为、文档承诺或支持性行为测试继续存在。
 
 ## 曾考虑的替代方案
 

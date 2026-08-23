@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(import.meta.dirname, '..')
 const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
 const nativeWindowsPnpmDestination = '${{ runner.temp }}/setup-pnpm-js'
-const prAfterWorkflowValidity = "needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'"
+const prAfterPreflight = "needs.preflight.result == 'success' && github.event_name == 'pull_request'"
 
 describe('CI workflow', () => {
   it('rejects runner-only contexts before job construction', () => {
@@ -28,31 +28,51 @@ describe('CI workflow', () => {
     }
   })
 
-  it('validates workflows before admitting pull-request evidence jobs', () => {
+  it('validates PR metadata, generated state, and the CI plan before admitting evidence jobs', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
-    const validity = workflowJob(workflow, 'workflow-validity')
-    if (!Array.isArray(validity.steps) || !isRecord(workflow.jobs)) {
-      throw new TypeError('CI workflow must define workflow-validity steps and jobs')
+    const preflight = workflowJob(workflow, 'preflight')
+    if (!Array.isArray(preflight.steps) || !isRecord(workflow.jobs)) {
+      throw new TypeError('CI workflow must define preflight steps and jobs')
     }
+    const preflightSteps = preflight.steps as unknown[]
 
-    expect(validity).toMatchObject({
-      name: 'workflow validity',
+    expect(preflight).toMatchObject({
+      name: 'preflight',
       'runs-on': 'ubuntu-latest',
       'timeout-minutes': 2,
+      outputs: {
+        level: '${{ steps.plan.outputs.level }}',
+        lanes: '${{ steps.plan.outputs.lanes }}',
+        'affected-areas': '${{ steps.plan.outputs.affected_areas }}',
+        'escalation-reasons': '${{ steps.plan.outputs.escalation_reasons }}',
+        'evidence-key': '${{ steps.plan.outputs.evidence_key }}',
+      },
     })
-    expect(validity.steps).toContainEqual({
+    expect(preflightSteps).toContainEqual({
       name: 'Validate GitHub Actions workflows',
       uses: 'docker://rhysd/actionlint:1.7.12',
       with: { args: '-color' },
     })
+    const metadata = preflightSteps.find(
+      step => isRecord(step) && step.name === 'Validate pull request metadata',
+    )
+    if (!isRecord(metadata) || !isRecord(metadata.env)) {
+      throw new TypeError('preflight metadata step must define an environment')
+    }
+    expect(metadata.env.DSH_REQUIRED_PR_AREAS).toBe('${{ steps.plan.outputs.affected_areas }}')
+    expect(preflightSteps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Validate pull request metadata' }),
+      expect.objectContaining({ name: 'Validate generated state and repository constraints' }),
+      expect.objectContaining({ id: 'plan', name: 'Compute CI plan' }),
+    ]))
 
     for (const [jobName, job] of Object.entries(workflow.jobs)) {
-      if (jobName === 'workflow-validity') continue
+      if (jobName === 'preflight') continue
       if (!isRecord(job)) throw new TypeError(`CI job ${jobName} must be an object`)
       const needs = typeof job.needs === 'string' ? [job.needs] : job.needs
-      expect(needs, `${jobName} must wait for workflow validity`).toContain('workflow-validity')
+      expect(needs, `${jobName} must wait for preflight`).toContain('preflight')
       if (jobName !== 'all-checks-passed') {
-        expect(job.if, `${jobName} must not run after invalid workflow input`).toBe(prAfterWorkflowValidity)
+        expect(job.if, `${jobName} must not run after invalid preflight input`).toBe(prAfterPreflight)
       }
     }
   })
@@ -205,7 +225,7 @@ describe('CI workflow', () => {
     // Required PR job: Wine on ubuntu-latest, runs wine-windows-gates.sh.
     expect(windows['runs-on']).toBe('ubuntu-latest')
     expect(windows.name).toBe('windows node 24 / wine blocking')
-    expect(windows.if).toBe(prAfterWorkflowValidity)
+    expect(windows.if).toBe(prAfterPreflight)
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
 
     // windows-native: non-blocking native job with failover, runs windows-complete.
@@ -218,7 +238,7 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).toContain('windows-latest')
     expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
     expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toBe(prAfterWorkflowValidity)
+    expect(windowsNative.if).toBe(prAfterPreflight)
     expect(windowsNative.env).toMatchObject({
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000',
     })
@@ -251,7 +271,7 @@ describe('CI workflow', () => {
     if (!isRecord(macosElectron) || !Array.isArray(macosElectron.steps)) {
       throw new TypeError('CI workflow must define electron-runtime-e2e-macos')
     }
-    expect(macosElectron.if).toBe(prAfterWorkflowValidity)
+    expect(macosElectron.if).toBe(prAfterPreflight)
     expect(macosElectron['runs-on']).toBe('macos-latest')
     expect(macosElectron.name).toBe('macos electron runtime e2e')
     const macosCommands = macosElectron.steps.filter((step): step is Record<string, unknown> & { run: string } => (
@@ -376,7 +396,7 @@ describe('CI workflow', () => {
     }
 
     expect(pythonRuntime).toMatchObject({
-      if: prAfterWorkflowValidity,
+      if: prAfterPreflight,
       name: 'python runtime / release-shaped Linux x64',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: {

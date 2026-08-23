@@ -4,6 +4,8 @@ on:
   pull_request:
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 
 env:
   PRIMARY_NODE_VERSION: '24'
@@ -20,19 +22,54 @@ concurrency:
 
 jobs:
 
-  workflow-validity:
-    name: workflow validity
+  preflight:
+    name: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    outputs:
+      level: ${{ steps.plan.outputs.level }}
+      lanes: ${{ steps.plan.outputs.lanes }}
+      affected-areas: ${{ steps.plan.outputs.affected_areas }}
+      escalation-reasons: ${{ steps.plan.outputs.escalation_reasons }}
+      evidence-key: ${{ steps.plan.outputs.evidence_key }}
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate GitHub Actions workflows
         uses: docker://rhysd/actionlint:1.7.12
         with:
           args: -color
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Compute CI plan
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          READINESS: ${{ github.event.pull_request.draft && 'draft' || 'ready' }}
+        run: pnpm --silent run ci:plan -- --event "$GITHUB_EVENT_NAME" --readiness "$READINESS" --base "$BASE_SHA" --head "$HEAD_SHA"
+
+      - name: Validate pull request metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DSH_REQUIRED_PR_AREAS: ${{ steps.plan.outputs.affected_areas }}
+        run: node .github/issue-management/policy.mjs pr-metadata
+
+      - name: Validate generated state and repository constraints
+        run: pnpm run check:ci:preflight
 
   # Three standard hosted jobs isolate coverage, static analysis, and the
   # build-backed consumer tail. The consumer job owns the only Linux build so
@@ -51,8 +88,8 @@ jobs:
   # switch is the separate DSH_CI_FAILOVER_WINDOWS variable on the windows-native
   # job below.
   node-24:
-    needs: workflow-validity
-    if: needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -104,8 +141,8 @@ jobs:
         run: pnpm run check:ci:static
 
   node-24-coverage:
-    needs: workflow-validity
-    if: needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -169,8 +206,8 @@ jobs:
         run: pnpm run check:ci:coverage
 
   node-24-consumers:
-    needs: workflow-validity
-    if: needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -256,8 +293,8 @@ jobs:
 
 
   node-compat:
-    needs: workflow-validity
-    if: needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
     # Each compatibility contract receives an independent standard hosted job.
     runs-on: ${{ matrix.runner }}
     name: ${{ matrix.name }}
@@ -297,8 +334,8 @@ jobs:
         run: pnpm run check:node-compat
 
   python-sdk:
-    needs: workflow-validity
-    if: needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     name: python 3.10 / keyless SDK
     steps:
@@ -320,8 +357,8 @@ jobs:
   # The reusable builder owns the executable, snapshot, wheel, clean-install,
   # GLIBC, and manylinux checks; release validation retains all native targets.
   python-runtime:
-    needs: workflow-validity
-    if: needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
     name: python runtime / release-shaped Linux x64
     uses: ./.github/workflows/build-exe-for-python-sdk.yml
     with:
@@ -339,8 +376,8 @@ jobs:
   # Current topology and fidelity limits live in
   # .agents/notes/implemented/process/2026-08-08-native-windows-pull-request-ci.md
   windows:
-    needs: workflow-validity
-    if: needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     name: windows node 24 / wine blocking
     timeout-minutes: 15
@@ -430,8 +467,8 @@ jobs:
   # DSH_CI_FAILOVER_LINUX variable that retargets the three required Linux jobs
   # and the all-checks-passed verdict above.
   windows-native:
-    needs: workflow-validity
-    if: needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -486,8 +523,8 @@ jobs:
   # workflow's serial macOS lane is disabled; this focused job keeps the real
   # cookie-isolation launcher visible without joining the required aggregate.
   electron-runtime-e2e-macos:
-    needs: workflow-validity
-    if: needs.workflow-validity.result == 'success' && github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
     runs-on: macos-latest
     name: macos electron runtime e2e
     timeout-minutes: 20
@@ -534,7 +571,7 @@ jobs:
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
-    needs: [workflow-validity, node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows]
+    needs: [preflight, node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows]
     if: always() && github.event_name == 'pull_request'
     steps:
       - name: Fail if any needed job did not succeed

@@ -58,6 +58,7 @@ describe('gate graph validation', () => {
   it.each([
     'ci-primary',
     'ci-linux-primary',
+    'ci-preflight',
     'ci-static',
     'ci-lint-contracts-ready',
     'ci-coverage',
@@ -76,6 +77,24 @@ describe('gate graph validation', () => {
     const execute = vi.fn(async (item: Gate) => resultFor(item))
 
     await expect(runGates(subject, subject.length, execute)).resolves.toHaveLength(subject.length)
+  })
+
+  it('keeps fail-fast generated state and repository constraints in CI preflight', () => {
+    const ids = withPnpmEntrypoint(() => gatesForMode('ci-preflight').map(subject => subject.id))
+
+    expect(ids).toEqual([
+      'constraints',
+      'translation-pairing',
+      'cordis-catalog',
+      'cordis-api',
+      'client-catalog',
+      'tool-catalog',
+      'config-catalog',
+      'doc-graphs',
+      'persistence-catalog',
+      'module-graph',
+      'scoped-events',
+    ])
   })
 
   it('keeps the public repository link policy in the documentation gate', () => {

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-24-fail-closed-workflow-validity.md
-2026-08-24-fail-closed-workflow-validity.md: 745ba622273e04b07e52d5ab31c96157c31283da
-2026-08-24-fail-closed-workflow-validity.zh.md: f5ccad18721dbfaceaaba93b964b57b7c110dd74
+2026-08-24-fail-closed-workflow-validity.md: 77c07208644384613f3f848096571e67b364e92f
+2026-08-24-fail-closed-workflow-validity.zh.md: 9a214f6c65868b13f433d397dcd09d6e90f1dfea

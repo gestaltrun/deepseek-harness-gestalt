@@ -1039,16 +1039,17 @@ describe('runScenario', () => {
         ],
       }],
     })
+    const rejectionTimeoutMs = 500
     await expect(runScenario(
       {
         steps: [
           ...boot,
           { op: 'promptAndCancel', text: 'hang' },
-          { op: 'waitForEventAfterTurnEnd', type: 'user/message', timeoutMs: 20 },
+          { op: 'waitForEventAfterTurnEnd', type: 'user/message', timeoutMs: rejectionTimeoutMs },
         ],
       },
       { agent: AGENT, mode: 'replay', fixtureFile: early.fixtureFile },
-    )).rejects.toThrow(/did not persist user\/message after turn\/end within 20ms/)
+    )).rejects.toThrow(`did not persist user/message after turn/end within ${rejectionTimeoutMs}ms`)
   })
 
   it('promptExpectError swallows a model-error response as the expected outcome', { timeout: 20_000 }, async () => {

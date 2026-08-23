@@ -11,6 +11,7 @@ const relayLifecycle = vi.hoisted(() => ({
   stop: vi.fn(async () => {}),
   isConnected: vi.fn(() => false),
   onCiphertext: undefined as (() => void) | undefined,
+  onPeerAttachments: undefined as ((ready: { peers: readonly unknown[] }) => Promise<void>) | undefined,
   onConnectionReady: undefined as (() => void) | undefined,
   onConnectionLost: undefined as (() => void) | undefined,
   onTransportError: undefined as (() => void) | undefined,
@@ -34,11 +35,13 @@ vi.mock('@deepseek-ai/dsh-remote-access-client', async (importOriginal) => {
     MobileRelayEndpointLifecycle: class {
       constructor(options: {
         onCiphertext?: () => void
+        onPeerAttachments?: (ready: { peers: readonly unknown[] }) => Promise<void>
         onConnectionReady?: () => void
         onConnectionLost?: () => void
         onTransportError?: () => void
       } = {}) {
         relayLifecycle.onCiphertext = options.onCiphertext
+        relayLifecycle.onPeerAttachments = options.onPeerAttachments
         relayLifecycle.onConnectionReady = options.onConnectionReady
         relayLifecycle.onConnectionLost = options.onConnectionLost
         relayLifecycle.onTransportError = options.onTransportError
@@ -63,6 +66,7 @@ afterEach(() => {
   relayLifecycle.isConnected.mockReset()
   relayLifecycle.isConnected.mockReturnValue(false)
   relayLifecycle.onCiphertext = undefined
+  relayLifecycle.onPeerAttachments = undefined
   relayLifecycle.onConnectionReady = undefined
   relayLifecycle.onConnectionLost = undefined
   relayLifecycle.onTransportError = undefined
@@ -221,6 +225,15 @@ describe('Mobile Platform Account entry', () => {
     if (replacementResync === undefined) throw new Error('expected replacement Desktop resync receiver')
     replacementResync.acceptValidatedDesktopResync({ type: 'desktop-resync', version: 1, authenticated: true })
     expect(companionMayMutate(runtime.getState())).toBe(true)
+    await relayLifecycle.onPeerAttachments?.({ peers: [] })
+    expect(companionMayMutate(runtime.getState())).toBe(false)
+    relayLifecycle.onConnectionReady?.()
+    const afterPeerRemoval = runtime.bindValidatedDesktopResync()
+    if (afterPeerRemoval === undefined) throw new Error('expected resync receiver after peer removal')
+    afterPeerRemoval.acceptValidatedDesktopResync({ type: 'desktop-resync', version: 1, authenticated: true })
+    expect(companionMayMutate(runtime.getState())).toBe(true)
+    await expect(relayLifecycle.onPeerAttachments?.({ peers: [{}, {}] })).rejects.toThrow('multiple Desktop')
+    expect(companionMayMutate(runtime.getState())).toBe(false)
     hidden = true
     document.dispatchEvent(new Event('visibilitychange'))
     await waitFor(() => { expect(companionMayMutate(runtime.getState())).toBe(false) })

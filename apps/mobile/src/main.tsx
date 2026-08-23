@@ -148,17 +148,16 @@ async function mountMobileProduct(): Promise<void> {
       onPeerAttachments: async (ready) => {
         const peer = ready.peers[0]
         if (peer === undefined || ready.peers.length !== 1) {
-          attachmentOwner?.dispose()
-          attachmentOwner = undefined
-          pendingGeneration = undefined
-          pendingPairingSelector = undefined
+          clearNoiseConnection()
+          companionRuntime()?.forgetConnection()
           if (ready.peers.length > 1) throw new Error('Mobile Relay has multiple Desktop pairing peers')
           return
         }
         if (peer.generation === connectionGeneration || peer.generation === pendingGeneration) return
+        clearNoiseConnection()
+        companionRuntime()?.forgetConnection()
         const reconnectState = attachmentKeys.reconnectState(parsePersonalPairingId(peer.pairingSelector))
         if (reconnectState === undefined) throw new Error('Mobile Relay peer has no retained Snow pairing state')
-        attachmentOwner?.dispose()
         pendingGeneration = peer.generation
         pendingPairingSelector = peer.pairingSelector
         attachmentOwner = new SnowMobileAttachmentOwner(reconnectState, peer.pairingSelector)

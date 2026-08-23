@@ -1,6 +1,7 @@
 /** Session-header task board for durable Schedule reminders. */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { ScheduleProjectionItem } from '@deepseek-ai/dsh-schedule/client'
 import {
   IconChevronDownOutline14,
@@ -20,6 +21,21 @@ export type ScheduleListActionProps = PropsRuntime<'conversation.session.header.
   & ScheduleActions
 
 type Translate = ScheduleListActionProps['t']
+const POPOVER_MARGIN = 16
+const POPOVER_WIDTH = 560
+
+/** Align the task board's right edge to its trigger and clamp it inside the viewport. */
+export function schedulePopoverPosition(trigger: HTMLButtonElement): CSSProperties {
+  const rect = trigger.getBoundingClientRect()
+  const width = Math.min(POPOVER_WIDTH, window.innerWidth - POPOVER_MARGIN * 2)
+  return {
+    top: rect.bottom + 5,
+    left: Math.min(
+      Math.max(POPOVER_MARGIN, rect.right - width),
+      window.innerWidth - width - POPOVER_MARGIN,
+    ),
+  }
+}
 
 function ClockGlyph() {
   return (
@@ -78,6 +94,7 @@ export function ScheduleListAction({
 }: ScheduleListActionProps) {
   const schedules = useProjection('schedules')
   const [open, setOpen] = useState(false)
+  const [popoverPosition, setPopoverPosition] = useState<CSSProperties>()
   const [now, setNow] = useState(() => Date.now())
   const [confirming, setConfirming] = useState<ScheduleProjectionItem['id'] | null>(null)
   const [pending, setPending] = useState<ScheduleProjectionItem['id'] | null>(null)
@@ -85,6 +102,7 @@ export function ScheduleListAction({
   const pendingRef = useRef(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const popoverRef = useRef<HTMLElement>(null)
 
   const active = useMemo(() => schedules?.filter(schedule => !schedule.paused) ?? [], [schedules])
   const next = useMemo(() => [...active].sort((left, right) =>
@@ -100,10 +118,27 @@ export function ScheduleListAction({
   useEffect(() => {
     if (!open) return
     const closeOutside = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false)
+      if (!(event.target instanceof Node)) return
+      if (rootRef.current?.contains(event.target) || popoverRef.current?.contains(event.target)) return
+      setOpen(false)
     }
     document.addEventListener('pointerdown', closeOutside)
     return () => { document.removeEventListener('pointerdown', closeOutside) }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const place = (): void => {
+      const trigger = triggerRef.current
+      if (trigger !== null) setPopoverPosition(schedulePopoverPosition(trigger))
+    }
+    place()
+    window.addEventListener('resize', place)
+    document.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      document.removeEventListener('scroll', place, true)
+    }
   }, [open])
 
   useEffect(() => {
@@ -149,16 +184,20 @@ export function ScheduleListAction({
         className={css.trigger}
         aria-expanded={open}
         aria-label={countLabel}
-        onClick={() => { setOpen(value => !value) }}
+        onClick={() => {
+          const trigger = triggerRef.current
+          if (trigger !== null) setPopoverPosition(schedulePopoverPosition(trigger))
+          setOpen(value => !value)
+        }}
       >
         <ClockGlyph />
         <span>{t('count.short', { count: active.length })}</span>
         {next === undefined ? null : <time className={css.next}>{target(next.scheduledAt)}</time>}
         <IconChevronDownOutline14 className={open ? css.chevronOpen : undefined} />
       </button>
-      {open
-        ? (
-          <section className={css.popover} aria-label={t('list.aria')}>
+      {open && popoverPosition !== undefined
+        ? createPortal((
+          <section ref={popoverRef} className={css.popover} style={popoverPosition} aria-label={t('list.aria')}>
             <header className={css.header}>
               <div><strong>{t('list.title')}</strong><span>{t('list.scope')}</span></div>
               <span className={css.total}>{schedules.length}</span>
@@ -221,7 +260,7 @@ export function ScheduleListAction({
               })}
             </ul>
           </section>
-        )
+        ), document.body)
         : null}
     </div>
   )

@@ -9,8 +9,10 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {
-  ModelSelection, PromptContentPart, RpcResult, SessionId, SessionModels, SubagentAddress,
+  MessageId, ModelSelection, PromptContentPart, QueueAction, RpcResult, SessionId,
+  SessionModels, SubagentAddress,
 } from '@deepseek-ai/dsh-api-remotes/client'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { HostObservable, SessionMaybeProvideInfo } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AgentContext } from '../agents/scope.ts'
 import type { SessionSearchResultItem } from '../sessions/manager.ts'
@@ -48,6 +50,16 @@ export interface SessionAdmissionAdapter {
   ): Promise<RpcResult<{ accepted: true }>>
   /** Stop the Session current turn while preserving queued work. */
   cancel(sessionId: SessionId): Promise<RpcResult<{ accepted: true }>>
+  /** Mutate one pending queue item through the feature's ownership route. */
+  updateQueue?(
+    sessionId: SessionId,
+    itemId: MessageId,
+    action: QueueAction,
+  ): Promise<RpcResult<{ accepted: true }>>
+  /** Execute one supported human command through the feature's ownership route. */
+  command?(sessionId: SessionId, line: string): Promise<RemoteResult<{ matched: boolean }>>
+  /** Session whose skill catalog describes this feature-owned Session; omission hides skills. */
+  skillCatalogSessionId?(sessionId: SessionId): SessionId | undefined
   /** Feature-owned model route; omission hides model selection for handled Sessions. */
   modelRoute?(sessionId: SessionId): SessionModelRoute | undefined
   /** Hide inherited fork seed events from the rendered conversation window. */
@@ -68,6 +80,8 @@ export interface ISessions {
   registerAdmissionAdapter?(adapter: SessionAdmissionAdapter): () => void
   /** Route model inspection and selection for one ordinary or feature-owned Session. */
   modelRoute(sessionId: SessionId): SessionModelRoute | undefined
+  /** Resolve the safe read-only skill catalog address for an ordinary or feature-owned Session. */
+  skillCatalogSessionId(sessionId: SessionId): SessionId | undefined
   /** Project a client-only Session identity until its feature publishes the Host Session. */
   stageProvisional(descriptor: {
     sessionId: SessionId

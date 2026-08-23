@@ -89,12 +89,13 @@ export function apply(ctx: ClientContext): void {
   }
 
   const fetchCatalog = (sessionId: SessionId): Promise<readonly SkillEntry[]> => {
-    if (sessions.subagentAddress(sessionId) !== undefined) return Promise.resolve([])
+    const catalogSessionId = sessions.skillCatalogSessionId(sessionId)
+    if (catalogSessionId === undefined) return Promise.resolve([])
     const existing = fetches.get(sessionId)
     if (existing !== undefined) return existing.promise
     const abort = new AbortController()
     const promise = (async () => {
-      const { result } = await skills.list({ sessionId }, abort.signal)
+      const { result } = await skills.list({ sessionId: catalogSessionId }, abort.signal)
       if (!result.ok) throw new Error(`skill.list failed: ${result.error.code}: ${result.error.message}`)
       return result.value.skills
     })()

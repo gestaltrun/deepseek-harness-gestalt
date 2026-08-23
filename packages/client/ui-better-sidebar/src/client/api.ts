@@ -7,7 +7,7 @@
  * request). Failures surface as {@link SidebarApiError} with the wire code.
  */
 import { encodeHtmlUrl } from '../html-route.ts'
-import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ModelSelection, QueueAction } from '@deepseek-ai/dsh-api-remotes/client'
 import type { LastActivity } from '../subagent-activity.ts'
 import type { BrowserProbeResult } from './browser.ts'
 
@@ -338,6 +338,21 @@ export const api = {
   /** Abort a Side Chat thread's running turn (queued work is preserved). */
   sidechatCancel: (childId: string) =>
     call<{ accepted: true }>('sidechat.cancel', { childId }),
+  /** Edit, remove, or strictly steer one pending Side Chat message. */
+  sidechatUpdateQueue: (childId: string, itemId: string, action: QueueAction) =>
+    call<{ accepted: true }>('sidechat.updateQueue', { childId, itemId, action }),
+  /** Synchronize one permission preset across the Side Chat and its parent. */
+  sidechatPermission: (
+    childId: string,
+    parentSessionId: string,
+    preset: string,
+    provisional: boolean,
+  ) => call<{ selected: string }>('sidechat.permission', {
+    childId,
+    parentSessionId,
+    preset,
+    ...(provisional ? { provisional: true } : {}),
+  }),
   /** Release a Side Chat thread's live agent (history stays persisted). */
   sidechatDispose: (childId: string) =>
     call<{ accepted: true }>('sidechat.dispose', { childId }),

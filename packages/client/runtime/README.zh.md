@@ -84,7 +84,7 @@ reason 为 `max-tokens` 的 `turn/end` 会在该轮位置投影出一个 `turn-m
 
 每个常驻 `Session` 都拥有一个 `modelSelection` 快照，其中包含当前模型选择、按提供方分组的目录、逐提供方失败记录，以及 `idle`／`loading`／`ready`／`selecting`／`error` 状态。历史记录会建立或刷新当前模型选择，打开选择器会刷新目录；选择失败会保留上一次模型选择和可用分组。目录与选择操作共用单调递增的代次，因此较旧响应无法覆盖较新的模型选择。重连重建会恢复 Host 报告的模型选择，同时不替换未变化的选择子结构。
 
-`ISessions.modelRoute(sessionId)` 先通过第一个持有该 id 的功能准入适配器解析模型操作，再回退到普通 Session RPC。这样，功能自有 Agent 始终留在自身路由之后，临时功能也可以验证并保留用于首次准入的选择。没有功能路由、但已被 catalog 定址的 subagent 仍不可用，避免普通 Session RPC 绕过 subagent routing。
+`SessionAdmissionAdapter` 让功能自有 Session 的提示词、取消、排队消息变更、命令、skill catalog 寻址与模型操作始终经过同一个路由归属方。`ISessions.modelRoute(sessionId)` 与 `ISessions.skillCatalogSessionId(sessionId)` 会先咨询第一个持有该 id 的适配器，再考虑普通 Session RPC。临时功能可以在不发布未来 Session 的情况下寻址既有父会话的 catalog，并保留模型选择。没有功能路由、但已被 catalog 定址的 subagent 仍不可用，避免普通 Session RPC 绕过 subagent routing。
 
 ## 模型体验
 

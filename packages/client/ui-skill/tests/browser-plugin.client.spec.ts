@@ -63,7 +63,12 @@ function providePresentation(ctx: Context): PresentationCapture {
 }
 
 /** Boot the plugin over fake slash/connection faces; returns the captured source and its ctx. */
-async function bench(list: ListFn, addressed?: SessionId, invoke?: InvokeFn) {
+async function bench(
+  list: ListFn,
+  addressed?: SessionId,
+  invoke?: InvokeFn,
+  skillCatalogSessionId?: (id: SessionId) => SessionId | undefined,
+) {
   const ctx = new Context()
   let captured: InputTriggerSource | undefined
   ctx.provide('inputTriggers', { registerSource: (src: InputTriggerSource) => { captured = src; return () => {} } })
@@ -73,6 +78,7 @@ async function bench(list: ListFn, addressed?: SessionId, invoke?: InvokeFn) {
     subagentAddress: (id: SessionId) => id === addressed
       ? { parentSessionId: sid('parent'), childSessionId: id, mode: 'continuable' as const }
       : undefined,
+    skillCatalogSessionId: skillCatalogSessionId ?? ((id: SessionId) => addressed === id ? undefined : id),
   })
   new TestRemote(ctx)
   providePresentation(ctx)
@@ -196,6 +202,21 @@ describe('candidates: sessionId addressing', () => {
     await expect(source.candidates(proj('child'), req(''))).resolves.toEqual([])
     source.warm!(proj('child'))
     expect(payloads).toEqual([])
+  })
+
+  it('uses a feature-owned catalog address for Side Chat drafts and children', async () => {
+    const { list, payloads } = countingList()
+    const { source } = await bench(
+      list,
+      sid('child'),
+      undefined,
+      id => id === sid('child') ? sid('parent') : id,
+    )
+
+    await expect(source.candidates(proj('child'), req('code'))).resolves.toEqual([
+      { name: 'code-review', description: 'review flow' },
+    ])
+    expect(payloads).toEqual([{ sessionId: 'parent' }])
   })
 })
 

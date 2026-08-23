@@ -30,6 +30,10 @@ export interface SubagentCatalogInjected {
 export type SubagentHeaderLineageProps =
   PropsRuntime<'conversation.session.header.lineage'> & SubagentCatalogInjected & PropsLocale<typeof NS>
 
+/** Full props for the Side Chat descendant action. */
+export type SubagentHeaderActionProps =
+  PropsRuntime<'conversation.session.header.actions'> & SubagentCatalogInjected & PropsLocale<typeof NS>
+
 interface CatalogRowsProps {
   parentSessionId: SessionId
   currentSessionId: SessionId | undefined
@@ -849,5 +853,23 @@ export function SubagentHeaderLineage({
         />
       )}
     </>
+  )
+}
+
+/** Render only the descendants rooted at the explicitly mounted Side Chat Session. */
+export function SubagentHeaderAction({
+  renderMode, sessionId, useSessions, openChild, refresh, setCatalogOpen, t,
+}: SubagentHeaderActionProps) {
+  if (renderMode !== 'sidechat') return null
+  return (
+    <CatalogDropdown
+      rootSessionId={sessionId}
+      variant="count"
+      useSessions={useSessions}
+      openChild={openChild}
+      refresh={refresh}
+      setCatalogOpen={setCatalogOpen}
+      t={t}
+    />
   )
 }

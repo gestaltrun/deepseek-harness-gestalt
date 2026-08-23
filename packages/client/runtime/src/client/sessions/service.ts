@@ -72,6 +72,8 @@ export interface SessionSummary {
   updatedAt: number
   /** Current host-computed projection values retained by the object layer. */
   projectionValues?: Readonly<Partial<SessionProjectionMap>>
+  /** Renderer-only identity that has not published a Host Session yet. */
+  provisional?: true
 }
 
 /**
@@ -462,6 +464,14 @@ export class SessionRuntime implements ISessions {
     }
   }
 
+  /** Resolve the catalog identity whose skills apply to this Session. */
+  skillCatalogSessionId(sessionId: SessionId): SessionId | undefined {
+    const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
+    if (admission !== undefined) return admission.skillCatalogSessionId?.(sessionId)
+    if (this.manager.subagentAddress(sessionId) !== undefined) return undefined
+    return sessionId
+  }
+
   /** Stage one renderer-only identity until its feature publishes a Host Session. */
   stageProvisional(descriptor: {
     sessionId: SessionId
@@ -744,6 +754,7 @@ export class SessionRuntime implements ISessions {
         ...(entry.parentSessionId !== undefined ? { parentId: entry.parentSessionId } : {}),
         ...(entry.origin !== undefined ? { origin: entry.origin } : {}),
         ...(entry.agentPreset !== undefined ? { agentPreset: entry.agentPreset } : {}),
+        ...(this.manager.isProvisional(entry.sessionId) ? { provisional: true } : {}),
       }
     }
     if (current !== undefined && currentAddress !== undefined) {

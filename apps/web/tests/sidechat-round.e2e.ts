@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import type { Browser, Page } from 'playwright'
@@ -17,6 +18,26 @@ const MODE = webSnapshotMode()
 const PROMPT = 'Reply with a one-sentence description of event sourcing, then stop.'
 const SIDE_BOUNDARY_PREFIX = 'Side conversation boundary'
 const RESPONSE = 'Event sourcing is a pattern where all changes to an application\'s state are stored as an immutable, append-only sequence of events, rather than persisting only the current state, enabling full auditability, temporal queries, and event-driven architectures.'
+const SIDE_SKILL = 'side-chat-catalog'
+
+function latestPermissionPreset(events: readonly SessionEvent[]): string | undefined {
+  return events.findLast(event => event.type === 'permission/preset')?.data.preset
+}
+
+async function seedSideChatSkill(workspaceCwd: string): Promise<void> {
+  const directory = join(workspaceCwd, 'workspace', '.agents', 'skills', SIDE_SKILL)
+  await mkdir(directory, { recursive: true })
+  await writeFile(join(directory, 'SKILL.md'), [
+    '---',
+    `name: ${SIDE_SKILL}`,
+    'description: Verify the Side Chat composer catalog route',
+    'disable-model-invocation: true',
+    '---',
+    '',
+    'Reply through the ordinary Side Chat prompt route.',
+    '',
+  ].join('\n'))
+}
 
 describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workbench', () => {
   let scaffold: WebScaffold
@@ -30,6 +51,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
       replayChildFixtures: [FIXTURE],
       paceMs: 25,
     })
+    await seedSideChatSkill(scaffold.workspaceCwd)
     browser = await chromium.launch()
     page = await newEnglishPage(browser, 800)
     tripwire = watchConsole(page)
@@ -63,6 +85,15 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     const sideComposer = panel.locator('textarea:enabled')
     await sideComposer.waitFor({ timeout: 15_000 })
     expect(scaffold.ctx.agents.list().map(agent => agent.id)).toEqual(liveIdsBeforeSideChat)
+
+    const launcher = panel.getByRole('button', { name: 'Commands and skills', exact: true })
+    await launcher.click()
+    const triggerMenu = page.getByRole('listbox', { name: 'Trigger suggestions' })
+    await triggerMenu.waitFor({ timeout: 15_000 })
+    await triggerMenu.getByRole('option', { name: new RegExp(SIDE_SKILL) }).waitFor({ timeout: 15_000 })
+    await sideComposer.press('Escape')
+    expect(scaffold.ctx.agents.list().map(agent => agent.id)).toEqual(liveIdsBeforeSideChat)
+
     const selectSideModel = async () => {
       const trigger = panel.getByRole('button', { name: /^Select model, current DeepSeek-V4-Flash$/u })
       await trigger.waitFor({ timeout: 15_000 })
@@ -93,6 +124,17 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     expect(selected.ok()).toBe(true)
     const child = scaffold.ctx.agents.get(childId)
     expect(child).toBeDefined()
+    const parent = scaffold.ctx.agents.get(parentId)
+    expect(parent).toBeDefined()
+
+    await panel.getByRole('button', { name: 'Access mode, current: Workspace Write' }).click()
+    await page.getByRole('menuitem', { name: 'Read Only', exact: true }).click()
+    await panel.getByRole('button', { name: 'Access mode, current: Read Only' }).waitFor({ timeout: 10_000 })
+    await expect.poll(() => [
+      latestPermissionPreset(parent?.session.events ?? []),
+      latestPermissionPreset(child?.session.events ?? []),
+    ], { timeout: 10_000 }).toEqual(['read-only', 'read-only'])
+
     const injection = child?.session.events.find((event: SessionEvent) => {
       if (event.type !== 'user/message') return false
       const first = event.data.content[0]

@@ -296,6 +296,10 @@ export class Session implements SessionFace {
   /** Apply one operation to a still-pending queue occurrence. */
   async updateQueue(itemId: MessageId, action: QueueAction): Promise<RpcResult<{ accepted: true }>> {
     try {
+      const admission = this.options.admission?.()
+      if (admission?.updateQueue !== undefined) {
+        return await admission.updateQueue(this.sessionId, itemId, action)
+      }
       return (await this.api.sessions.updateQueue({ sessionId: this.sessionId, itemId, action })).result
     } catch (error) {
       return transportError(error)
@@ -371,6 +375,8 @@ export class Session implements SessionFace {
    * @returns the admission result, or the error branch on transport failure.
    */
   async command(line: string): Promise<RemoteResult<{ matched: boolean }>> {
+    const admission = this.options.admission?.()
+    if (admission?.command !== undefined) return await admission.command(this.sessionId, line)
     const result = await this.remote.commands.execute(this.sessionId, line, [])
     if (!result.ok) return result
     return { ok: true, value: { matched: result.value !== undefined } }

@@ -4,7 +4,7 @@
 .clock { color: var(--dsw-alias-state-business-primary); }
 .next { color: var(--dsw-alias-label-tertiary); font-family: var(--dsw-font-mono); font-size: 10px; }
 .chevronOpen { transform: rotate(180deg); }
-.popover { position: absolute; z-index: 110; top: calc(100% + 5px); left: 0; box-sizing: border-box; width: min(560px, calc(100vw - 48px)); overflow: hidden; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-specific-menu); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); box-shadow: var(--dsw-shadow-lv3); }
+.popover { position: fixed; z-index: 110; box-sizing: border-box; width: min(560px, calc(100vw - 32px)); overflow: hidden; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-specific-menu); --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2); --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2); box-shadow: var(--dsw-shadow-lv3); }
 .header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px 11px; border-bottom: 1px solid var(--dsw-alias-border-l3); }
 .header > div { display: flex; align-items: baseline; gap: 9px; }
 .header strong { color: var(--dsw-alias-label-primary); font-size: 13px; }

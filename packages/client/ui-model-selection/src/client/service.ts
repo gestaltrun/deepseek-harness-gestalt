@@ -14,7 +14,7 @@
  */
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
-import type { ConnectionHandle, SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionRuntime } from '@deepseek-ai/dsh-client-runtime/client'
 import { ModelDirectory } from './directory.ts'
 
@@ -73,12 +73,7 @@ export class ModelDirectoryResolver extends Service {
     const sessions = this.ctx.get('sessions') as SessionRuntime
     const actx = sessions.scope(sessionId)
     if (actx === undefined) throw new Error(`ui-model-selection: session "${String(sessionId)}" resolved no scope`)
-    const connection = this.ctx.get('connection') as ConnectionHandle
-    const directory = new ModelDirectory(
-      connection.api.sessions,
-      sessionId,
-      () => sessions.subagentAddress(sessionId) === undefined,
-    )
+    const directory = new ModelDirectory(sessions.modelRoute(sessionId))
     live.directories.set(sessionId, directory)
     // The composer cannot read this plugin (the dependency runs one way), so
     // the block is pushed: the Host says whether an adapter serves the

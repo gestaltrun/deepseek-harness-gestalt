@@ -5,8 +5,15 @@ import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { TestSessions, TestWorkspaces } from '@deepseek-ai/dsh-client-test-runtime'
 import type { Stabilizer } from '@deepseek-ai/dsh-client-test-runtime'
+import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { apply as nodeApply } from '@deepseek-ai/dsh-client-ui-renderer'
 import * as UiRenderer from '../src/client/index.ts'
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    'renderer.explicit-session': { kind: 'single'; scope: 'session'; owner: object }
+  }
+}
 
 const mounted: (() => void)[] = []
 
@@ -79,6 +86,27 @@ describe('UI renderer plugin', () => {
     act(() => { unmount = ctx.get('uiRenderer')!.mount(el) })
     act(() => { unmount() })
     expect(el.querySelector('[data-testid="root-probe"]')).toBeNull()
+  })
+
+  it('mounts a declared slot against an explicit Session without changing current selection', async () => {
+    const { ctx, slots } = await bench()
+    slots.register({
+      name: 'root',
+      children: { 'renderer.explicit-session': { kind: 'single', scope: 'session' } },
+    }, (_props: PropsRenderSlots<'renderer.explicit-session'>) => null)
+    slots.register(
+      { name: 'renderer.explicit-session' },
+      (props: { sessionId: string }) => <b>{props.sessionId}</b>,
+    )
+    const sessions = ctx.get('sessions') as TestSessions
+    await sessions.add({ id: 'main' })
+    await sessions.add({ id: 'side-thread' }, { current: false })
+    const el = container()
+    act(() => {
+      mounted.push(ctx.get('uiRenderer')!.mountSession(el, 'renderer.explicit-session', 'side-thread'))
+    })
+    expect(el.textContent).toBe('side-thread')
+    expect(sessions.list.getSnapshot().current).toBe('main')
   })
 
   it('retracts the service and renderer with its fiber', async () => {

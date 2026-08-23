@@ -11,6 +11,8 @@ import { installAssembledBootEnv, mountAssembledApp, REFRESHING_GOLDEN } from '.
 
 const PREVIEW_EXPECTED = join(process.cwd(), 'apps/web/tests/snapshots/browser-dock/fixture.expected.txt')
 const DOCK_EXPECTED = join(process.cwd(), 'apps/web/tests/snapshots/browser-dock/dock-chrome.expected.txt')
+const RESTART_EXPECTED = join(process.cwd(), 'apps/web/tests/snapshots/browser-dock/restart-recovery.expected.txt')
+const CLOSE_EXPECTED = join(process.cwd(), 'apps/web/tests/snapshots/browser-dock/stale-close.expected.txt')
 
 installAssembledBootEnv()
 
@@ -84,5 +86,47 @@ describe('assembled Browser Dock preview', () => {
       writeFileSync(DOCK_EXPECTED, shape)
     }
     await expect(shape).toMatchFileSnapshot(DOCK_EXPECTED)
+  })
+
+  it('replaces a projected page and restores its URL after the Runtime restarts', async () => {
+    mountAssembledApp('?fixture&fixtureBrowser=restart')
+    await openFixtureSession()
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand Untitled' }, { timeout: 10_000 }))
+    const recovered = await waitFor(() => {
+      const shape = pageShape(document)
+      expect(shape).toContain('address=https://example.test/')
+      expect(shape).toContain('screenshot=Example Domain')
+      return shape
+    }, { timeout: 10_000 })
+    const shape = `${['after-restart', recovered].join('\n')}\n`
+    if (REFRESHING_GOLDEN) {
+      mkdirSync(dirname(RESTART_EXPECTED), { recursive: true })
+      writeFileSync(RESTART_EXPECTED, shape)
+    }
+    await expect(shape).toMatchFileSnapshot(RESTART_EXPECTED)
+  })
+
+  it('closes the Runtime page when the sidebar listing has a stale revision', async () => {
+    mountAssembledApp('?fixture&fixtureBrowserClose=stale')
+    await openFixtureSession()
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand Example Domain' }, { timeout: 10_000 }))
+    await waitFor(() => { expect(pageShape(document)).not.toBe('page=hidden') }, { timeout: 10_000 })
+    const closeButtons = await screen.findAllByRole('button', { name: 'Close' }, { timeout: 10_000 })
+    expect(closeButtons).toHaveLength(2)
+    fireEvent.click(closeButtons[1]!)
+    const shape = await waitFor(() => {
+      const current = [
+        pageShape(document),
+        `browser-tab=${screen.queryAllByRole('button', { name: 'Close' }).length === 1 ? 'hidden' : 'shown'}`,
+      ].join('\n')
+      expect(current).toContain('page=hidden')
+      expect(current).toContain('browser-tab=hidden')
+      return `${current}\n`
+    }, { timeout: 10_000 })
+    if (REFRESHING_GOLDEN) {
+      mkdirSync(dirname(CLOSE_EXPECTED), { recursive: true })
+      writeFileSync(CLOSE_EXPECTED, shape)
+    }
+    await expect(shape).toMatchFileSnapshot(CLOSE_EXPECTED)
   })
 })

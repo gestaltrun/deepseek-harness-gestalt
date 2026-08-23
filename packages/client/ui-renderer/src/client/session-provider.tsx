@@ -1,5 +1,5 @@
 /** Internal React bindings for the renderer host and active session provide bundle. */
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, type ReactNode } from 'react'
 import type {
   HostObservable, MaybeSnapshotSelectorHook, SessionMaybeProvideInfo, SessionProvideInfo,
   SlotRendererHost, SnapshotSelectorHook,
@@ -134,20 +134,15 @@ export function SessionMaybeProvider({ children }: { children: ReactNode }) {
 
 /** SessionProvider API: render-prop body plus the no-session branch. */
 export interface SessionProviderProps {
+  /** Explicit Session identity for a concurrent subtree; omission follows the shell current Session. */
+  sessionId?: string | undefined
   /** No-session body (also covers a current id whose session cannot be resolved). */
   empty?: (() => ReactNode) | undefined
   /** Session body; remounted per session via key={sessionId}. */
   children: (sessionId: string) => ReactNode
 }
 
-/**
- * Framework-wired session area: subscribes to the host's current provide
- * source and remounts the body under `key={sessionId}` so a session switch
- * rebuilds the session subtree. This dependency-inverted layer uses plain
- * string ids; `PropsRuntime` applies the branded type at the component
- * boundary.
- */
-export function SessionProvider({ empty, children }: SessionProviderProps) {
+function CurrentSessionProvider({ empty, children }: Omit<SessionProviderProps, 'sessionId'>) {
   const host = useHost()
   const info = observableHook(host.sessions.provideInfo)(s => s)
   const id = info.sessionId
@@ -157,4 +152,45 @@ export function SessionProvider({ empty, children }: SessionProviderProps) {
       {children(id)}
     </BindingContext.Provider>
   )
+}
+
+function ExplicitSessionProvider({
+  sessionId, empty, children,
+}: {
+  sessionId: string
+  empty?: (() => ReactNode) | undefined
+  children: (sessionId: string) => ReactNode
+}) {
+  const host = useHost()
+  // A newly-created child can enter the list without changing the selected
+  // Session projection, so this subtree retries resolution on list changes.
+  const listEntry = observableHook(host.sessions.list)((snapshot) => {
+    const byId = (snapshot as { byId?: Record<string, unknown> }).byId
+    return byId?.[sessionId]
+  })
+  const info = host.sessions.provideInfoFor?.(sessionId)
+  useEffect(() => {
+    if (info?.sessionId === undefined) return
+    host.sessions.openForRender?.(sessionId)
+  }, [host, info?.sessionId, listEntry, sessionId])
+  const id = info?.sessionId
+  if (id === undefined || info === undefined) return <>{empty?.() ?? null}</>
+  return (
+    <BindingContext.Provider value={info} key={id}>
+      {children(id)}
+    </BindingContext.Provider>
+  )
+}
+
+/**
+ * Framework-wired session area. Omission follows the host's current provide
+ * source; an explicit identity resolves and opens that Session without moving
+ * shell selection. Both forms remount the body under `key={sessionId}`. This
+ * dependency-inverted layer uses plain string ids; `PropsRuntime` applies the
+ * branded type at the component boundary.
+ */
+export function SessionProvider({ sessionId, empty, children }: SessionProviderProps) {
+  return sessionId === undefined
+    ? <CurrentSessionProvider empty={empty}>{children}</CurrentSessionProvider>
+    : <ExplicitSessionProvider sessionId={sessionId} empty={empty}>{children}</ExplicitSessionProvider>
 }

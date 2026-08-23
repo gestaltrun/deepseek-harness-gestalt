@@ -3309,6 +3309,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     description: 'A workflow run started — the script\'s meta block validated, the body about to execute. Paired with Events[\'workflow/end\'].',
     parameters: [{ name: 'info', description: 'the run\'s identity snapshot (id + meta).' }],
   },
+  {
+    name: 'workspace/session-archived',
+    mode: 'parallel',
+    signature: '\'workspace/session-archived\'(sessionId: SessionId): Promise<void> | void',
+    summary: 'Awaited process-resource cleanup after one Session is durably archived.',
+    description: 'Awaited process-resource cleanup after one Session is durably archived. Idempotent archive requests repeat the cleanup opportunity without rewriting the archive set.',
+    parameters: [{ name: 'sessionId', description: 'Session whose process-local resources must close.' }],
+  },
 ]
 
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
@@ -3655,7 +3663,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'BrowserWorkspaceTabRecord',
-    declaration: 'export interface BrowserWorkspaceTabRecord {\n    readonly tabId: BrowserTabId;\n    readonly revision: number;\n}',
+    declaration: 'export interface BrowserWorkspaceTabRecord {\n    readonly tabId: BrowserTabId;\n    readonly revision: number;\n    readonly url?: string;\n}',
   },
   {
     name: 'CancelOptions',

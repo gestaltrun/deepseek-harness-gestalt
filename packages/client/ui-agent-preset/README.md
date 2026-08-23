@@ -18,7 +18,7 @@ A session that has started is refused rather than queued: the host answers `agen
 
 ## The session-header label
 
-A third surface, beside the session title: the preset THIS session runs, as static chrome. A control there would promise a switch the host refuses outright. It reads the preset from the session's own summary and resolves the display name against the same roster the General row reads. Forwarded `agent-preset/selected` owner events fold committed blank-session switches into that shared summary in every tab; the initiating tab may already have applied the RPC echo, and the merge is idempotent.
+A third surface, beside the ordinary session title: the preset THIS session runs, as static chrome. A control there would promise a switch the host refuses outright. The label omits itself in the compact Side Chat header, which already runs under an explicitly bound child Session and reserves that row for view tabs and child-scoped actions. It reads the preset from the session's own summary and resolves the display name against the same roster the General row reads. Forwarded `agent-preset/selected` owner events fold committed blank-session switches into that shared summary in every tab; the initiating tab may already have applied the RPC echo, and the merge is idempotent.
 
 ## What it reads and writes
 

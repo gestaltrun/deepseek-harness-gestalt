@@ -53,6 +53,7 @@ function bench({
   const current = page(title)
   const updateTab = vi.fn()
   const ensureOfficial = vi.fn()
+  const recoverOfficial = vi.fn()
   const observe = vi.fn(async () => ({ ok: true as const, value: current }))
   const screenshot = vi.fn(async () => ({
     ok: true as const,
@@ -75,7 +76,7 @@ function bench({
   }
   if (!noLocale) ctx.provide('locale', { bind: () => (key: string) => key })
   if (!noSidebar) ctx.provide('betterSidebar', { updateTab })
-  ctx.provide('workbenchBrowser', { ensureOfficial })
+  ctx.provide('workbenchBrowser', { ensureOfficial, recoverOfficial })
   if (!noRemote) {
     ctx.provide('remote.browserWorkspace', {
       close: vi.fn(),
@@ -84,7 +85,7 @@ function bench({
       screenshot,
     })
   }
-  return { ctx, ensureOfficial, observe, screenshot, updateTab }
+  return { ctx, ensureOfficial, observe, recoverOfficial, screenshot, updateTab }
 }
 
 afterEach(() => {
@@ -122,6 +123,24 @@ describe('OfficialBrowserTab', () => {
     render(<OfficialBrowserTab ctx={b.ctx} tab={{ id: 'browser:2' }} scope={{ sessionId: SESSION }} />)
     expect(screen.getByText('dock.creating')).toBeTruthy()
     expect(b.ensureOfficial).toHaveBeenCalledWith('browser:2')
+  })
+
+  it('delegates a missing Runtime target to workbench recovery', async () => {
+    const b = bench()
+    b.observe.mockRejectedValueOnce(Object.assign(new Error('browser target is not present'), {
+      code: 'BROWSER_NOT_FOUND',
+    }))
+    render(
+      <OfficialBrowserTab
+        ctx={b.ctx}
+        tab={{ id: 'browser:1', meta: officialTabMeta(TARGET, { kind: 'shared' }) }}
+        scope={{ sessionId: SESSION }}
+      />,
+    )
+    await waitFor(() => {
+      expect(b.recoverOfficial).toHaveBeenCalledWith('browser:1', TARGET)
+    })
+    expect(b.screenshot).not.toHaveBeenCalled()
   })
 
   it('does not observe or create from the Desktop overlay document', () => {

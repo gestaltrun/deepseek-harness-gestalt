@@ -11,6 +11,8 @@
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Context } from '../context-types.ts'
+import type { SessionAdmissionAdapter } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ModelSelection, RpcResult } from '@deepseek-ai/dsh-api-remotes/client'
 import { allLeaves, createSidebarStore, isAgentTabId } from './state.ts'
 import { createBetterSidebarService, matchUrlTarget } from './service.ts'
 import { revalidateChunksOnReactivate, setChunkModuleSystem } from './chunk-loader.ts'
@@ -23,7 +25,11 @@ import { registerImeGuard } from './ime-guard.ts'
 import { registerSettingsNavIcon } from './settings-nav-icon.ts'
 import { loadExternalDisable, loadPrefs } from './prefs.ts'
 import { SideCardSection } from './SideCardSection.tsx'
-import { api } from './api.ts'
+import {
+  api, isKnownSidechatSession, noteSidechatDraftSelection, settleSidechatDraft,
+  sidechatDraftOf,
+} from './api.ts'
+import { SIDE_LABEL_PREFIX } from '../sidechat-core.ts'
 import { LOCALE_NS, attachLocale, t, zh, en } from './locales.ts'
 import css from './sidebar.module.css'
 import './layout.css'
@@ -32,7 +38,7 @@ import './layout.css'
  *  locale service backs the sidebar's copy — see locales.ts). `modules`
  *  (rc.8+) is the client module system the chunk loader resolves its
  *  externals through — Cordis guards service access without inject. */
-export const inject = ['slots', 'sessions', 'connection', 'workspaces', 'locale', 'modules']
+export const inject = ['connection', 'slots', 'sessions', 'workspaces', 'locale', 'modules', 'uiRenderer']
 
 /**
  * Error boundary over the sidebar tree (root scope): a render error in the
@@ -55,6 +61,93 @@ function isDesktopOverlayDocument(): boolean {
  * @param ctx - the client cordis context (slots, sessions).
  */
 export function apply(ctx: Context): void {
+  const routeFailure = <T,>(cause: unknown): RpcResult<T> => ({
+    ok: false,
+    error: {
+      code: 'internal',
+      message: cause instanceof Error ? cause.message : String(cause),
+      details: {},
+    },
+  })
+  const sidechatAdmission: SessionAdmissionAdapter = {
+    id: 'better-sidebar-sidechat',
+    handles: (sessionId) => {
+      if (isKnownSidechatSession(sessionId)) return true
+      const summary = ctx.sessions.list.getSnapshot().byId[sessionId]
+      return summary?.origin === 'subagent' && summary.displayTitle.startsWith(SIDE_LABEL_PREFIX)
+    },
+    historyScope: 'owned-suffix',
+    prompt: async (sessionId, content, mode, signal) => {
+      if (content.some(part => part.type !== 'text')) {
+        return {
+          ok: false,
+          error: {
+            code: 'attachment-error',
+            message: 'Image input is unavailable in Side Chat.',
+            details: { reason: 'SUBAGENT_IMAGE_UNSUPPORTED' },
+          },
+        }
+      }
+      const text = content.map(part => part.type === 'text' ? part.text : '').join('\n\n')
+      const draft = sidechatDraftOf(sessionId)
+      if (draft === undefined) {
+        await api.sidechatPrompt(sessionId, text, mode, signal)
+      } else {
+        await api.sidechatStart(
+          draft.parentSessionId,
+          sessionId,
+          text,
+          draft.selection,
+          signal,
+        )
+        settleSidechatDraft(sessionId)
+      }
+      return { ok: true, value: { accepted: true } }
+    },
+    cancel: async (sessionId) => {
+      if (sidechatDraftOf(sessionId) !== undefined) return { ok: true, value: { accepted: true } }
+      await api.sidechatCancel(sessionId)
+      return { ok: true, value: { accepted: true } }
+    },
+    modelRoute: (sessionId) => ({
+      models: async (signal) => {
+        try {
+          const draft = sidechatDraftOf(sessionId)
+          const summary = ctx.sessions.list.getSnapshot().byId[sessionId]
+          const parentSessionId = draft?.parentSessionId ?? summary?.parentId
+          const [catalog, model] = await Promise.all([
+            ctx.connection.api.llm.models({}, signal),
+            api.sidechatModel(sessionId, parentSessionId, signal),
+          ])
+          if (!catalog.result.ok) return catalog.result
+          return {
+            ok: true,
+            value: {
+              ...model,
+              groups: catalog.result.value.groups,
+              failures: catalog.result.value.failures,
+            },
+          }
+        } catch (cause) {
+          return routeFailure(cause)
+        }
+      },
+      selectModel: async (selection: ModelSelection, signal) => {
+        try {
+          const provisional = sidechatDraftOf(sessionId) !== undefined
+          const result = await api.sidechatSelectModel(sessionId, selection, provisional, signal)
+          noteSidechatDraftSelection(sessionId, result.selected)
+          return { ok: true, value: result }
+        } catch (cause) {
+          return routeFailure(cause)
+        }
+      },
+    }),
+  }
+  ctx.effect(
+    () => ctx.sessions.registerAdmissionAdapter?.(sidechatAdmission),
+    'dsh-better-sidebar: Side Chat Session admission',
+  )
   // The sidebar follows the DSH i18n system: attach the locale service so
   // the module-level t()/isZh() resolve the Host-backed language preference
   // (and switch live — the Sidebar root subscribes to it), and register the

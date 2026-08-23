@@ -31,7 +31,10 @@ import {
 import { OssRemoteAttachmentStore } from '../src/oss-attachment-store.ts'
 import type { OssObjectClient } from '../src/oss-client.ts'
 import { PostgresRemoteAttachmentStore } from '../src/postgres-attachment-store.ts'
-import { PostgresPersonalPairingAuthorityStore } from '../src/postgres-pairing-store.ts'
+import {
+  PostgresPersonalPairingAuthorityStore,
+  type PlatformSqlPool,
+} from '../src/postgres-pairing-store.ts'
 import { OperatedRemoteAttachmentAuthority } from '../src/remote-attachment-authority.ts'
 import {
   FIXED_BASE_ATTACHMENT_CONSUMER_SHA,
@@ -44,6 +47,7 @@ const durableProgramsAvailable = commandAvailable('initdb')
   && commandAvailable('redis-server')
   && commandAvailable('openssl')
 const cleanups: Array<() => Promise<void>> = []
+const CUTOVER_OPTIONS = { maxBlobBytes: 1024, quotaCleanup: { release: async () => {} } }
 
 afterEach(async () => {
   const results = await Promise.allSettled(cleanups.splice(0).reverse().map(cleanup => cleanup()))
@@ -73,6 +77,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       'attachment-rolling-fixture',
       'bridge',
       'remote-attachments/rolling-fixture',
+      CUTOVER_OPTIONS,
     )
     const now = Date.now()
     const oldGrant = await oldStore.publish({ pairingId: pairing, ciphertext: Uint8Array.of(1, 2), now })
@@ -141,7 +146,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     })
     await bridge.migrate()
     const legacyOnly = await bridge.publish({ pairingId, ciphertext: Uint8Array.of(1), now })
-    await completeAttachmentStorageCutover(pool, databaseIdentity, 'bridge', objectPrefix)
+    await completeAttachmentStorageCutover(pool, databaseIdentity, 'bridge', objectPrefix, CUTOVER_OPTIONS)
     const objects = new Map<string, Uint8Array>()
     const oss = new OssRemoteAttachmentStore(ossContext, databaseIdentity, pool, memoryOssClient(objects), {
       maxBlobBytes: 1024,
@@ -173,7 +178,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       [databaseIdentity, activeClaim],
     )
 
-    await completeAttachmentStorageCutover(pool, databaseIdentity, 'oss', objectPrefix)
+    await completeAttachmentStorageCutover(pool, databaseIdentity, 'oss', objectPrefix, CUTOVER_OPTIONS)
     expect((await pool.query(
       `SELECT legacy_authority FROM remote_attachment_objects
         WHERE database_identity = $1 ORDER BY expires_at`,
@@ -287,6 +292,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       'attachment-fixed-base-overlap',
       'bridge',
       'remote-attachments/fixed-base-overlap',
+      CUTOVER_OPTIONS,
     )
     const atomicGrant = await bridge.publish({ pairingId, ciphertext, now: Date.now() })
     const firstOrigin = await startAttachmentHttp(bridge, {
@@ -338,6 +344,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       databaseIdentity,
       'bridge',
       'remote-attachments/phase-barrier',
+      CUTOVER_OPTIONS,
     ).then(() => { cutoverFinished = true })
     await delay(50)
     expect(cutoverFinished).toBe(false)
@@ -360,6 +367,101 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     expect(loser).toMatchObject({ code: 'ATTACHMENT_CAPABILITY_INVALID' })
     await atomic.complete()
   }, 60_000)
+
+  it.each(['delete-fail', 'commit-unknown', 'crash'] as const)(
+    'does not redeliver a legacy response after %s leaves settlement uncertain',
+    async (failure) => {
+      const postgres = await startPostgresFixture()
+      const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+      cleanups.push(async () => { await pool.end() })
+      const context = new Context()
+      const bridgeContext = new Context()
+      cleanups.push(async () => { await context.fiber.dispose(); await bridgeContext.fiber.dispose() })
+      const databaseIdentity = `attachment-legacy-uncertain-${failure}`
+      const pairingId = parsePersonalPairingId(`pairing-legacy-uncertain-${failure}`)
+      const reservationId = parseAttachmentBlobReservationId(`quota-legacy-uncertain-${failure}`)
+      const fault = legacySettlementFaultPool(pool, failure)
+      const store = new PostgresRemoteAttachmentStore(context, databaseIdentity, fault.pool, {
+        maxBlobBytes: 1024,
+        capabilityLifetimeMs: 60_000,
+        maxRetainedBlobs: 4,
+        quotaCleanup: { release: async () => {} },
+      })
+      await store.migrate()
+      const grant = await store.publish({
+        pairingId,
+        ciphertext: Uint8Array.of(4, 9),
+        now: Date.now(),
+        quota: { id: reservationId, release: async () => {} },
+      })
+      fault.arm()
+      const delivered = await store.consume({ pairingId, capability: grant.capability, now: Date.now() })
+      expect(delivered.ciphertext).toEqual(Uint8Array.of(4, 9))
+      if (failure === 'crash') {
+        await pool.query('SELECT pg_terminate_backend($1)', [await fault.legacyBackendPid])
+      } else {
+        await expect(delivered.complete()).rejects.toThrow(failure)
+      }
+
+      const uncertain = await pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM remote_attachment_blobs WHERE database_identity = $1) AS blobs,
+           (SELECT COUNT(*)::int FROM remote_attachment_legacy_deliveries WHERE database_identity = $1) AS deliveries`,
+        [databaseIdentity],
+      )
+      expect(uncertain.rows).toEqual([{ blobs: 1, deliveries: 1 }])
+      const released: string[] = []
+      let releaseAttempts = 0
+      const cutover = async (): Promise<void> => {
+        await completeAttachmentStorageCutover(
+          pool,
+          databaseIdentity,
+          'bridge',
+          `remote-attachments/${failure}`,
+          {
+            maxBlobBytes: 1024,
+            quotaCleanup: {
+              release: async (id) => {
+                releaseAttempts += 1
+                if (failure === 'commit-unknown' && releaseAttempts === 1) {
+                  throw new Error('quota release unavailable')
+                }
+                released.push(id)
+              },
+            },
+          },
+        )
+      }
+      if (failure === 'commit-unknown') {
+        await expect(cutover()).rejects.toThrow('quota release unavailable')
+        expect((await pool.query(
+          'SELECT phase FROM remote_attachment_storage_phase WHERE database_identity = $1',
+          [databaseIdentity],
+        )).rows).toEqual([{ phase: 'bridge' }])
+        await expect(cutover()).resolves.toBeUndefined()
+      } else {
+        await expect(cutover()).resolves.toBeUndefined()
+      }
+      const bridge = new PostgresRemoteAttachmentStore(bridgeContext, databaseIdentity, pool, {
+        maxBlobBytes: 1024,
+        capabilityLifetimeMs: 60_000,
+        maxRetainedBlobs: 4,
+        quotaCleanup: { release: async () => {} },
+      })
+      await expect(bridge.consume({ pairingId, capability: grant.capability, now: Date.now() }))
+        .rejects.toMatchObject({ code: 'ATTACHMENT_CAPABILITY_INVALID' })
+      const retained = await pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM remote_attachment_blobs WHERE database_identity = $1) AS blobs,
+           (SELECT COUNT(*)::int FROM remote_attachment_legacy_deliveries WHERE database_identity = $1) AS deliveries,
+           (SELECT COUNT(*)::int FROM remote_attachment_quota_releases WHERE database_identity = $1) AS releases`,
+        [databaseIdentity],
+      )
+      expect(retained.rows).toEqual([{ blobs: 0, deliveries: 0, releases: 0 }])
+      expect(released).toEqual([reservationId])
+    },
+    60_000,
+  )
 
   it('claims one OSS capability atomically across operated Platform instances', async () => {
     const postgres = await startPostgresFixture()
@@ -696,6 +798,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       'attachment-fixture',
       'bridge',
       'remote-attachments/postgres-fixture',
+      CUTOVER_OPTIONS,
     )
     const pairing = parsePersonalPairingId('pairing-shared-attachment')
     const otherPairing = parsePersonalPairingId('pairing-other-attachment')
@@ -1059,7 +1162,7 @@ async function prepareBridgePhase(
   objectPrefix: string,
 ): Promise<void> {
   await migrateAttachmentStoragePhase(pool, databaseIdentity)
-  await completeAttachmentStorageCutover(pool, databaseIdentity, 'bridge', objectPrefix)
+  await completeAttachmentStorageCutover(pool, databaseIdentity, 'bridge', objectPrefix, CUTOVER_OPTIONS)
 }
 
 async function startAttachmentHttp(
@@ -1120,6 +1223,57 @@ function memoryOssClient(objects = new Map<string, Uint8Array>()): OssObjectClie
     },
     deleteObject: async (key) => { objects.delete(key) },
   }
+}
+
+type LegacySettlementFailure = 'delete-fail' | 'commit-unknown' | 'crash'
+
+function legacySettlementFaultPool(
+  base: pg.Pool,
+  failure: LegacySettlementFailure,
+): { pool: PlatformSqlPool; arm(): void; legacyBackendPid: Promise<number> } {
+  let armed = false
+  let reportLegacyBackendPid!: (pid: number) => void
+  const legacyBackendPid = new Promise<number>((resolve) => { reportLegacyBackendPid = resolve })
+  const pool = {
+    query: async (sql: string, values?: unknown[]) => await base.query(sql, values),
+    connect: async () => {
+      const client = await base.connect()
+      let failedClientReleased = false
+      let legacyResponse = false
+      let settlement = false
+      return {
+        query: async (sql: string, values?: unknown[]) => {
+          if (armed && sql.includes('pg_advisory_lock_shared')) {
+            const result = await client.query(sql, values)
+            legacyResponse = true
+            if (failure === 'crash') {
+              client.on('error', () => {
+                if (failedClientReleased) return
+                failedClientReleased = true
+                client.release(true)
+              })
+            }
+            const selected = await client.query('SELECT pg_backend_pid() AS pid')
+            const backendPid = (selected.rows as Array<Record<string, unknown>>)[0]?.pid
+            if (typeof backendPid !== 'number') throw new TypeError('legacy fixture backend pid is invalid')
+            reportLegacyBackendPid(backendPid)
+            return result
+          }
+          if (armed && legacyResponse && sql === 'BEGIN') settlement = true
+          if (armed && settlement && failure === 'delete-fail'
+            && sql.includes('DELETE FROM remote_attachment_blobs AS blob')) {
+            throw new Error('delete-fail')
+          }
+          if (armed && settlement && failure === 'commit-unknown' && sql === 'COMMIT') {
+            throw new Error('commit-unknown')
+          }
+          return await client.query(sql, values)
+        },
+        release: () => { client.release() },
+      }
+    },
+  } as unknown as PlatformSqlPool
+  return { pool, arm: () => { armed = true }, legacyBackendPid }
 }
 
 function commandAvailable(command: string): boolean {

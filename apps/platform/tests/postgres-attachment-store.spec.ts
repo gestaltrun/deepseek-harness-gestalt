@@ -40,7 +40,9 @@ describe('PostgreSQL remote attachment durable rows', () => {
       release: () => {},
     }
     const pool = {
-      query: async () => ({ rows: [], rowCount: 0 }),
+      query: async (sql: string) => sql.includes('SELECT reservation_id AS quota_reservation_id')
+        ? { rows: [{ quota_reservation_id: 'quota-expired' }], rowCount: 1 }
+        : { rows: [], rowCount: 0 },
       connect: async () => client,
     } as unknown as PlatformSqlPool
     const store = new PostgresRemoteAttachmentStore(context, 'expired-fixture', pool, {

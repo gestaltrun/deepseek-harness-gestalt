@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { completeAttachmentStorageCutover } from '../src/attachment-storage-phase.ts'
 import type { PlatformSqlPool } from '../src/postgres-pairing-store.ts'
 
+const CUTOVER_OPTIONS = { maxBlobBytes: 4, quotaCleanup: { release: async () => {} } }
+
 describe('attachment storage destructive cutover', () => {
   it('retries idempotently after an OSS phase COMMIT with an unknown outcome', async () => {
     let phase = 'bridge'
@@ -34,6 +36,7 @@ describe('attachment storage destructive cutover', () => {
       'cutover-retry-fixture',
       'oss',
       'remote-attachments/cutover',
+      CUTOVER_OPTIONS,
     )).rejects.toThrow('COMMIT outcome is unknown')
     expect(phase).toBe('oss')
     await expect(completeAttachmentStorageCutover(
@@ -41,6 +44,7 @@ describe('attachment storage destructive cutover', () => {
       'cutover-retry-fixture',
       'oss',
       'remote-attachments/cutover',
+      CUTOVER_OPTIONS,
     )).resolves.toBeUndefined()
   })
 
@@ -84,6 +88,7 @@ describe('attachment storage destructive cutover', () => {
       'cutover-fixture',
       'oss',
       'remote-attachments/cutover',
+      CUTOVER_OPTIONS,
     )).resolves.toBeUndefined()
     expect(statements.some(statement => statement.includes('DELETE FROM remote_attachment_blobs AS legacy'))).toBe(true)
   })
@@ -93,6 +98,7 @@ describe('attachment storage destructive cutover', () => {
     ['object key', { object_key: 'remote-attachments/cutover/not-the-digest' }],
     ['pairing', { legacy_pairing_id: 'pairing-other' }],
     ['ciphertext length', { legacy_ciphertext: Buffer.from([1, 2]) }],
+    ['deployment byte ceiling', { object_byte_length: 5, legacy_ciphertext: Buffer.alloc(5) }],
     ['expiry', { legacy_expires_at: 101 }],
     ['quota reservation', { legacy_quota_reservation_id: 'quota-other' }],
     ['claim state', { object_claim_token: Buffer.alloc(32, 3) }],
@@ -138,6 +144,7 @@ describe('attachment storage destructive cutover', () => {
       'cutover-fixture',
       'oss',
       'remote-attachments/cutover',
+      CUTOVER_OPTIONS,
     )).rejects.toThrow('OSS remote attachment cutover row is invalid')
     expect(statements.some(statement => statement.includes('DELETE FROM remote_attachment_blobs AS legacy'))).toBe(false)
   })

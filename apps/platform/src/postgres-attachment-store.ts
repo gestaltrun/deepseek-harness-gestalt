@@ -26,7 +26,9 @@ import type { PlatformSqlClient, PlatformSqlPool } from './postgres-pairing-stor
 import {
   legacyDrainLockIdentity,
   migrateAttachmentStoragePhase,
+  recordAttachmentQuotaRelease,
   readAttachmentStoragePhase,
+  releasePendingAttachmentQuota,
 } from './attachment-storage-phase.ts'
 
 const SCHEMA = `
@@ -279,14 +281,36 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
             RETURNING quota_reservation_id`,
             [this.databaseIdentity, digest(input.capability)],
           )
+          await client.query(
+            `DELETE FROM remote_attachment_legacy_deliveries
+              WHERE database_identity = $1 AND capability_digest = $2`,
+            [this.databaseIdentity, row.capability_digest],
+          )
+          for (const reservationId of reservationIds(removed.rows)) {
+            await recordAttachmentQuotaRelease(client, this.databaseIdentity, reservationId)
+          }
           await client.query('COMMIT')
           client.release()
           clientReleased = true
-          await this.releaseReservations(reservationIds(removed.rows))
+          await releasePendingAttachmentQuota(this.pool, this.databaseIdentity, this.quotaCleanup)
           throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
         }
         if (row.claim_token !== undefined) {
           throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability is already in use')
+        }
+        const token = randomBytes(32)
+        const admitted = await client.query(
+          `INSERT INTO remote_attachment_legacy_deliveries (
+             database_identity, capability_digest, claim_token, expires_at, quota_reservation_id
+           ) VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (database_identity, capability_digest) DO NOTHING`,
+          [this.databaseIdentity, row.capability_digest, token, row.expires_at, row.quota_reservation_id ?? null],
+        )
+        if (admitted.rowCount !== 1) {
+          throw new RemoteAttachmentError(
+            'ATTACHMENT_CAPABILITY_INVALID',
+            'Remote attachment capability is already in use',
+          )
         }
         await client.query(
           'SELECT pg_advisory_lock_shared(hashtext($1))',
@@ -294,7 +318,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
         )
         advisoryLockHeld = true
         await client.query('COMMIT')
-        return this.legacyConsumption(client, row)
+        return this.legacyConsumption(client, row, token)
       } catch (error) {
         if (clientReleased) throw error
         try { await client.query('ROLLBACK') } catch {
@@ -319,28 +343,43 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
   private legacyConsumption(
     client: PlatformSqlClient & { release(): void },
     row: AttachmentRow,
+    token: Uint8Array,
   ): RemoteAttachmentConsumption {
     let settled = false
     const settle = async (removeCiphertext: boolean): Promise<void> => {
       try {
         await client.query('BEGIN')
-        let ids: AttachmentBlobReservationId[] = []
         if (removeCiphertext) {
           const removed = await client.query(
-            `DELETE FROM remote_attachment_blobs
-              WHERE database_identity = $1 AND capability_digest = $2
-            RETURNING quota_reservation_id`,
-            [this.databaseIdentity, row.capability_digest],
+            `DELETE FROM remote_attachment_blobs AS blob
+              USING remote_attachment_legacy_deliveries AS delivery
+              WHERE blob.database_identity = $1
+                AND blob.capability_digest = $2
+                AND delivery.database_identity = blob.database_identity
+                AND delivery.capability_digest = blob.capability_digest
+                AND delivery.claim_token = $3
+            RETURNING blob.quota_reservation_id`,
+            [this.databaseIdentity, row.capability_digest, token],
           )
-          ids = reservationIds(removed.rows)
+          for (const reservationId of reservationIds(removed.rows)) {
+            await recordAttachmentQuotaRelease(client, this.databaseIdentity, reservationId)
+          }
+          if (row.quota_reservation_id !== undefined) {
+            await recordAttachmentQuotaRelease(client, this.databaseIdentity, row.quota_reservation_id)
+          }
         }
+        await client.query(
+          `DELETE FROM remote_attachment_legacy_deliveries
+            WHERE database_identity = $1 AND capability_digest = $2 AND claim_token = $3`,
+          [this.databaseIdentity, row.capability_digest, token],
+        )
         await client.query('COMMIT')
         await client.query(
           'SELECT pg_advisory_unlock_shared(hashtext($1))',
           [legacyDrainLockIdentity(this.databaseIdentity)],
         )
         client.release()
-        await this.releaseReservations(ids)
+        await releasePendingAttachmentQuota(this.pool, this.databaseIdentity, this.quotaCleanup)
       } catch (error) {
         try { await client.query('ROLLBACK') } catch {
           /* rollback after a failed legacy response settlement is best-effort */

@@ -665,7 +665,12 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
     inactivePairingIds: readonly PersonalPairingId[] = [],
   ): Promise<CleanupBatch> {
     if (await readAttachmentStoragePhase(client, this.databaseIdentity) === 'oss') {
-      await removeAttachmentStorageLegacyDuplicates(client, this.databaseIdentity, this.objectPrefix)
+      await removeAttachmentStorageLegacyDuplicates(
+        client,
+        this.databaseIdentity,
+        this.objectPrefix,
+        this.maxBlobBytes,
+      )
     }
     const retirePairings = inactivePairingIds.length > 0
     const objects = await client.query(

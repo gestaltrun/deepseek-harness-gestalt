@@ -2,14 +2,18 @@
 
 import type { PlatformSqlClient, PlatformSqlPool } from './postgres-pairing-store.ts'
 import { validateOssObjectPrefix } from './oss-config.ts'
+import {
+  parseAttachmentBlobReservationId,
+  parsePersonalPairingId,
+} from '@deepseek-ai/dsh-remote-access'
 
 /** Storage authority understood by the fixed-base drain, PostgreSQL bridge, and OSS store. */
-export type AttachmentStoragePhase = 'legacy' | 'bridge' | 'oss'
+export type AttachmentStoragePhase = 'legacy' | 'draining' | 'bridge' | 'oss'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS remote_attachment_storage_phase (
   database_identity text PRIMARY KEY,
-  phase text NOT NULL CHECK (phase IN ('legacy', 'bridge', 'oss'))
+  phase text NOT NULL CHECK (phase IN ('legacy', 'draining', 'bridge', 'oss'))
 );
 `
 
@@ -31,15 +35,16 @@ export async function migrateAttachmentStoragePhase(
 export async function readAttachmentStoragePhase(
   client: PlatformSqlClient,
   databaseIdentity: string,
-  lock = false,
+  lock: 'none' | 'share' | 'update' = 'none',
 ): Promise<AttachmentStoragePhase> {
+  const lockClause = lock === 'share' ? ' FOR SHARE' : lock === 'update' ? ' FOR UPDATE' : ''
   const selected = await client.query(
     `SELECT phase FROM remote_attachment_storage_phase
-      WHERE database_identity = $1${lock ? ' FOR UPDATE' : ''}`,
+      WHERE database_identity = $1${lockClause}`,
     [databaseIdentity],
   )
   const phase = selected.rows[0]?.phase
-  if (phase !== 'legacy' && phase !== 'bridge' && phase !== 'oss') {
+  if (phase !== 'legacy' && phase !== 'draining' && phase !== 'bridge' && phase !== 'oss') {
     throw new TypeError('remote attachment storage phase is invalid')
   }
   return phase
@@ -55,35 +60,90 @@ export async function readAttachmentStoragePhase(
 export async function completeAttachmentStorageCutover(
   pool: PlatformSqlPool,
   databaseIdentity: string,
-  target: Exclude<AttachmentStoragePhase, 'legacy'>,
+  target: 'bridge' | 'oss',
   objectPrefix: string,
 ): Promise<void> {
   const prefix = validateOssObjectPrefix(objectPrefix)
   const client = await pool.connect()
+  let advisoryLockHeld = false
+  let advisoryIdentity: string | undefined
   try {
-    await client.query('BEGIN')
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`remote-attachments:${databaseIdentity}`])
-    const current = await readAttachmentStoragePhase(client, databaseIdentity, true)
-    if (target === 'bridge' && current !== 'legacy' && current !== 'bridge') {
-      throw new TypeError('PostgreSQL bridge cutover cannot replace OSS authority')
+    if (target === 'bridge') {
+      await beginLegacyDrain(client, databaseIdentity)
+      advisoryIdentity = legacyDrainLockIdentity(databaseIdentity)
+      await client.query('SELECT pg_advisory_lock(hashtext($1))', [advisoryIdentity])
+      advisoryLockHeld = true
+      await finishLegacyDrain(client, databaseIdentity)
+    } else {
+      advisoryIdentity = `remote-attachments:${databaseIdentity}`
+      await client.query('SELECT pg_advisory_lock(hashtext($1))', [advisoryIdentity])
+      advisoryLockHeld = true
+      await client.query('BEGIN')
+      const current = await readAttachmentStoragePhase(client, databaseIdentity, 'update')
+      if (current !== 'bridge' && current !== 'oss') {
+        throw new TypeError('OSS cutover requires completed PostgreSQL bridge authority')
+      }
+      await removeAttachmentStorageLegacyDuplicates(client, databaseIdentity, prefix)
+      await client.query(
+        'UPDATE remote_attachment_storage_phase SET phase = $2 WHERE database_identity = $1',
+        [databaseIdentity, target],
+      )
+      await client.query('COMMIT')
     }
-    if (target === 'oss' && current !== 'bridge' && current !== 'oss') {
-      throw new TypeError('OSS cutover requires completed PostgreSQL bridge authority')
-    }
-    if (target === 'oss') await removeAttachmentStorageLegacyDuplicates(client, databaseIdentity, prefix)
-    await client.query(
-      'UPDATE remote_attachment_storage_phase SET phase = $2 WHERE database_identity = $1',
-      [databaseIdentity, target],
-    )
-    await client.query('COMMIT')
   } catch (error) {
     try { await client.query('ROLLBACK') } catch {
       /* rollback after a failed authority transition is best-effort */
     }
     throw error
   } finally {
+    try {
+      if (advisoryLockHeld) {
+        await client.query('SELECT pg_advisory_unlock(hashtext($1))', [advisoryIdentity])
+      }
+    } catch {
+      /* connection release also drops the cutover advisory lock */
+    }
     client.release()
   }
+}
+
+/**
+ * Database lock identity held by each fixed-base-compatible response.
+ * @param databaseIdentity - deployment namespace.
+ * @returns advisory-lock identity distinct from attachment capacity serialization.
+ */
+export function legacyDrainLockIdentity(databaseIdentity: string): string {
+  return `remote-attachments-legacy-drain:${databaseIdentity}`
+}
+
+async function beginLegacyDrain(client: PlatformSqlClient, databaseIdentity: string): Promise<void> {
+  await client.query('BEGIN')
+  const current = await readAttachmentStoragePhase(client, databaseIdentity, 'update')
+  if (current !== 'legacy' && current !== 'draining' && current !== 'bridge') {
+    throw new TypeError('PostgreSQL bridge cutover cannot replace OSS authority')
+  }
+  if (current === 'legacy') {
+    await client.query(
+      "UPDATE remote_attachment_storage_phase SET phase = 'draining' WHERE database_identity = $1",
+      [databaseIdentity],
+    )
+  }
+  await client.query('COMMIT')
+}
+
+async function finishLegacyDrain(client: PlatformSqlClient, databaseIdentity: string): Promise<void> {
+  await client.query('BEGIN')
+  const current = await readAttachmentStoragePhase(client, databaseIdentity, 'update')
+  if (current !== 'draining' && current !== 'bridge') {
+    throw new TypeError('PostgreSQL bridge drain phase is invalid')
+  }
+  if (current === 'draining') {
+    await client.query(
+      "UPDATE remote_attachment_storage_phase SET phase = 'bridge' WHERE database_identity = $1",
+      [databaseIdentity],
+    )
+  }
+  await client.query('COMMIT')
 }
 
 /**
@@ -99,7 +159,20 @@ export async function removeAttachmentStorageLegacyDuplicates(
   objectPrefix: string,
 ): Promise<void> {
   const selected = await client.query(
-    `SELECT object.capability_digest, object.object_key
+    `SELECT
+            object.capability_digest AS object_capability_digest,
+            legacy.capability_digest AS legacy_capability_digest,
+            object.pairing_id AS object_pairing_id,
+            legacy.pairing_id AS legacy_pairing_id,
+            object.object_key,
+            object.byte_length AS object_byte_length,
+            legacy.ciphertext AS legacy_ciphertext,
+            object.expires_at AS object_expires_at,
+            legacy.expires_at AS legacy_expires_at,
+            object.quota_reservation_id AS object_quota_reservation_id,
+            legacy.quota_reservation_id AS legacy_quota_reservation_id,
+            object.claim_token AS object_claim_token,
+            legacy.claim_token AS legacy_claim_token
        FROM remote_attachment_objects AS object
        JOIN remote_attachment_blobs AS legacy
          ON legacy.database_identity = object.database_identity
@@ -137,9 +210,35 @@ export async function removeAttachmentStorageLegacyDuplicates(
 }
 
 function validateObjectBinding(row: Record<string, unknown>, objectPrefix: string): void {
-  if (!(row.capability_digest instanceof Uint8Array) || row.capability_digest.byteLength !== 32
+  const objectDigest = row.object_capability_digest
+  const legacyDigest = row.legacy_capability_digest
+  const objectLength = Number(row.object_byte_length)
+  const objectExpiry = Number(row.object_expires_at)
+  const legacyExpiry = Number(row.legacy_expires_at)
+  if (!(objectDigest instanceof Uint8Array) || objectDigest.byteLength !== 32
+    || !(legacyDigest instanceof Uint8Array) || legacyDigest.byteLength !== 32
+    || !sameBytes(objectDigest, legacyDigest)
+    || typeof row.object_pairing_id !== 'string' || typeof row.legacy_pairing_id !== 'string'
+    || parsePersonalPairingId(row.object_pairing_id) !== parsePersonalPairingId(row.legacy_pairing_id)
     || typeof row.object_key !== 'string'
-    || row.object_key !== `${objectPrefix}/${Buffer.from(row.capability_digest).toString('hex')}`) {
+    || row.object_key !== `${objectPrefix}/${Buffer.from(objectDigest).toString('hex')}`
+    || !Number.isSafeInteger(objectLength) || objectLength <= 0
+    || !(row.legacy_ciphertext instanceof Uint8Array) || row.legacy_ciphertext.byteLength !== objectLength
+    || !Number.isSafeInteger(objectExpiry) || objectExpiry <= 0
+    || objectExpiry !== legacyExpiry
+    || reservationId(row.object_quota_reservation_id) !== reservationId(row.legacy_quota_reservation_id)
+    || (row.object_claim_token !== null && row.object_claim_token !== undefined)
+    || (row.legacy_claim_token !== null && row.legacy_claim_token !== undefined)) {
     throw new TypeError('OSS remote attachment cutover row is invalid')
   }
+}
+
+function reservationId(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined
+  if (typeof value !== 'string') throw new TypeError('OSS remote attachment cutover row is invalid')
+  return parseAttachmentBlobReservationId(value)
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength && left.every((value, index) => value === right[index])
 }

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-23-operated-oss-attachment-authority.md
-2026-08-23-operated-oss-attachment-authority.md: 3ba221df7bcf124428f3d5ed0036bab5c9557a27
-2026-08-23-operated-oss-attachment-authority.zh.md: a7ca8996d1a7ad4cffc5b1f645858b733bb9b1a1
+2026-08-23-operated-oss-attachment-authority.md: 395424333dda7c58475ab392e36557e7a3e9dbc4
+2026-08-23-operated-oss-attachment-authority.zh.md: b06b31603c4b46358f2e75e7078aee5a1c3a4de1

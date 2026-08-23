@@ -28,6 +28,9 @@ describe('PostgreSQL remote attachment durable rows', () => {
     const client = {
       query: async (sql: string) => {
         statements.push(sql)
+        if (sql.includes('SELECT phase FROM remote_attachment_storage_phase')) {
+          return { rows: [{ phase: 'legacy' }], rowCount: 1 }
+        }
         if (sql.includes('SELECT capability_digest')) return { rows: [row], rowCount: 1 }
         if (sql.includes('DELETE FROM remote_attachment_blobs')) {
           return { rows: [{ quota_reservation_id: 'quota-expired' }], rowCount: 1 }

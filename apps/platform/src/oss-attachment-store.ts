@@ -187,7 +187,9 @@ export class OssRemoteAttachmentStore extends RemoteAttachmentStoreService {
   async migrate(): Promise<void> {
     await this.pool.query(SCHEMA)
     const phase = await migrateAttachmentStoragePhase(this.pool, this.databaseIdentity)
-    if (phase === 'legacy') throw new TypeError('OSS attachment store requires completed PostgreSQL bridge authority')
+    if (phase !== 'bridge' && phase !== 'oss') {
+      throw new TypeError('OSS attachment store requires completed PostgreSQL bridge authority')
+    }
     await this.sweep()
     this.armSweep()
   }

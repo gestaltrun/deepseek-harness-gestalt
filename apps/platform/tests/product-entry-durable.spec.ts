@@ -308,6 +308,59 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     expect(atomicResponses.map(response => response.status).sort()).toEqual([200, 404])
   }, 60_000)
 
+  it('holds the shared phase barrier until an active legacy response settles', async () => {
+    const postgres = await startPostgresFixture()
+    const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })
+    cleanups.push(async () => { await pool.end() })
+    const context = new Context()
+    cleanups.push(async () => { await context.fiber.dispose() })
+    const databaseIdentity = 'attachment-phase-barrier-fixture'
+    const pairingId = parsePersonalPairingId('pairing-phase-barrier')
+    const store = new PostgresRemoteAttachmentStore(context, databaseIdentity, pool, {
+      maxBlobBytes: 1024,
+      capabilityLifetimeMs: 500,
+      maxRetainedBlobs: 4,
+      quotaCleanup: { release: async () => {} },
+    })
+    await store.migrate()
+    const first = await store.publish({ pairingId, ciphertext: Uint8Array.of(1), now: Date.now() - 475 })
+    const activeLegacy = await store.consume({
+      pairingId,
+      capability: first.capability,
+      now: first.expiresAt - 1,
+    })
+    await delay(75)
+    expect(Date.now()).toBeGreaterThanOrEqual(first.expiresAt)
+    const second = await store.publish({ pairingId, ciphertext: Uint8Array.of(2), now: Date.now() })
+    let cutoverFinished = false
+    const cutover = completeAttachmentStorageCutover(
+      pool,
+      databaseIdentity,
+      'bridge',
+      'remote-attachments/phase-barrier',
+    ).then(() => { cutoverFinished = true })
+    await delay(50)
+    expect(cutoverFinished).toBe(false)
+    let crossingFinished = false
+    const crossing = store.consume({ pairingId, capability: second.capability, now: Date.now() })
+      .then((consumption) => { crossingFinished = true; return consumption })
+    await delay(50)
+    expect(crossingFinished).toBe(false)
+
+    await activeLegacy.complete()
+    await cutover
+    const atomic = await crossing
+    expect(atomic.ciphertext).toEqual(Uint8Array.of(2))
+    let loser: unknown = 'fulfilled'
+    try {
+      await store.consume({ pairingId, capability: second.capability, now: Date.now() })
+    } catch (error: unknown) {
+      loser = error
+    }
+    expect(loser).toMatchObject({ code: 'ATTACHMENT_CAPABILITY_INVALID' })
+    await atomic.complete()
+  }, 60_000)
+
   it('claims one OSS capability atomically across operated Platform instances', async () => {
     const postgres = await startPostgresFixture()
     const pool = new pg.Pool({ host: '127.0.0.1', port: postgres.port, user: 'fixture', database: 'postgres' })

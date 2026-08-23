@@ -24,6 +24,7 @@ import {
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { PlatformSqlClient, PlatformSqlPool } from './postgres-pairing-store.ts'
 import {
+  legacyDrainLockIdentity,
   migrateAttachmentStoragePhase,
   readAttachmentStoragePhase,
 } from './attachment-storage-phase.ts'
@@ -176,6 +177,8 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     capability: AttachmentCapability
     now: number
   }): Promise<RemoteAttachmentConsumption> {
+    const legacy = await this.tryLegacyConsumption(input)
+    if (legacy !== undefined) return legacy
     const token = randomBytes(32)
     const outcome = await this.transaction(async (client) => {
       const row = await this.loadRequiredRow(client, input, true)
@@ -189,7 +192,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
         return { kind: 'expired' as const, reservationIds: reservationIds(removed.rows) }
       }
       const phase = await readAttachmentStoragePhase(client, this.databaseIdentity)
-      if (phase === 'legacy') return { kind: 'legacy' as const, row }
+      if (phase === 'legacy') throw new TypeError('legacy attachment consume did not hold the phase barrier')
       if (phase === 'oss') throw new TypeError('PostgreSQL attachment store cannot consume under OSS authority')
       if (row.claim_token !== undefined) {
         throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability is already in use')
@@ -208,7 +211,6 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
       await this.releaseReservations(outcome.reservationIds)
       throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
     }
-    if (outcome.kind === 'legacy') return this.legacyConsumption(outcome.row)
     const { row } = outcome
     let settled = false
     return {
@@ -246,32 +248,126 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     }
   }
 
-  private legacyConsumption(row: AttachmentRow): RemoteAttachmentConsumption {
+  private async tryLegacyConsumption(input: {
+    pairingId: PersonalPairingId
+    capability: AttachmentCapability
+    now: number
+  }): Promise<RemoteAttachmentConsumption | undefined> {
+    for (;;) {
+      const client = await this.pool.connect()
+      let advisoryLockHeld = false
+      let clientReleased = false
+      try {
+        await client.query('BEGIN')
+        const phase = await readAttachmentStoragePhase(client, this.databaseIdentity, 'update')
+        if (phase === 'draining') {
+          await client.query('ROLLBACK')
+          client.release()
+          await new Promise<void>((resolve) => { setTimeout(resolve, 25) })
+          continue
+        }
+        if (phase !== 'legacy') {
+          await client.query('ROLLBACK')
+          client.release()
+          return undefined
+        }
+        const row = await this.loadRequiredRow(client, input, false)
+        if (input.now >= row.expires_at) {
+          const removed = await client.query(
+            `DELETE FROM remote_attachment_blobs
+              WHERE database_identity = $1 AND capability_digest = $2
+            RETURNING quota_reservation_id`,
+            [this.databaseIdentity, digest(input.capability)],
+          )
+          await client.query('COMMIT')
+          client.release()
+          clientReleased = true
+          await this.releaseReservations(reservationIds(removed.rows))
+          throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
+        }
+        if (row.claim_token !== undefined) {
+          throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability is already in use')
+        }
+        await client.query(
+          'SELECT pg_advisory_lock_shared(hashtext($1))',
+          [legacyDrainLockIdentity(this.databaseIdentity)],
+        )
+        advisoryLockHeld = true
+        await client.query('COMMIT')
+        return this.legacyConsumption(client, row)
+      } catch (error) {
+        if (clientReleased) throw error
+        try { await client.query('ROLLBACK') } catch {
+          /* rollback after a failed legacy consume admission is best-effort */
+        }
+        try {
+          if (advisoryLockHeld) {
+            await client.query(
+              'SELECT pg_advisory_unlock_shared(hashtext($1))',
+              [legacyDrainLockIdentity(this.databaseIdentity)],
+            )
+          }
+        } catch {
+          /* connection release also drops the legacy response lock */
+        }
+        client.release()
+        throw error
+      }
+    }
+  }
+
+  private legacyConsumption(
+    client: PlatformSqlClient & { release(): void },
+    row: AttachmentRow,
+  ): RemoteAttachmentConsumption {
     let settled = false
+    const settle = async (removeCiphertext: boolean): Promise<void> => {
+      try {
+        await client.query('BEGIN')
+        let ids: AttachmentBlobReservationId[] = []
+        if (removeCiphertext) {
+          const removed = await client.query(
+            `DELETE FROM remote_attachment_blobs
+              WHERE database_identity = $1 AND capability_digest = $2
+            RETURNING quota_reservation_id`,
+            [this.databaseIdentity, row.capability_digest],
+          )
+          ids = reservationIds(removed.rows)
+        }
+        await client.query('COMMIT')
+        await client.query(
+          'SELECT pg_advisory_unlock_shared(hashtext($1))',
+          [legacyDrainLockIdentity(this.databaseIdentity)],
+        )
+        client.release()
+        await this.releaseReservations(ids)
+      } catch (error) {
+        try { await client.query('ROLLBACK') } catch {
+          /* rollback after a failed legacy response settlement is best-effort */
+        }
+        try {
+          await client.query(
+            'SELECT pg_advisory_unlock_shared(hashtext($1))',
+            [legacyDrainLockIdentity(this.databaseIdentity)],
+          )
+        } catch {
+          /* connection release also drops the legacy response lock */
+        }
+        client.release()
+        throw error
+      }
+    }
     return {
       ciphertext: new Uint8Array(row.ciphertext),
       complete: async () => {
         if (settled) return
         settled = true
-        const removed = await this.pool.query(
-          `DELETE FROM remote_attachment_blobs
-            WHERE database_identity = $1 AND capability_digest = $2
-          RETURNING quota_reservation_id`,
-          [this.databaseIdentity, row.capability_digest],
-        )
-        await this.releaseReservations(reservationIds(removed.rows))
+        await settle(true)
       },
       abandon: async (now) => {
         if (settled) return
         settled = true
-        if (now < row.expires_at) return
-        const removed = await this.pool.query(
-          `DELETE FROM remote_attachment_blobs
-            WHERE database_identity = $1 AND capability_digest = $2
-          RETURNING quota_reservation_id`,
-          [this.databaseIdentity, row.capability_digest],
-        )
-        await this.releaseReservations(reservationIds(removed.rows))
+        await settle(now >= row.expires_at)
       },
     }
   }

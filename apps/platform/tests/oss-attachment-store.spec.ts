@@ -18,6 +18,9 @@ describe('OSS remote attachment durable metadata', () => {
     const deleteObject = vi.fn(async () => {})
     const client = {
       query: async (sql: string) => {
+        if (sql.includes('SELECT phase FROM remote_attachment_storage_phase')) {
+          return { rows: [{ phase: 'bridge' }], rowCount: 1 }
+        }
         if (sql.includes('DELETE FROM remote_attachment_objects')) {
           return {
             rows: [{
@@ -68,6 +71,9 @@ describe('OSS remote attachment durable metadata', () => {
     const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
     const client = {
       query: async (sql: string) => {
+        if (sql.includes('SELECT phase FROM remote_attachment_storage_phase')) {
+          return { rows: [{ phase: 'bridge' }], rowCount: 1 }
+        }
         if (sql.includes('SELECT COUNT(*)')) return { rows: [{ count: '1' }], rowCount: 1 }
         return { rows: [], rowCount: 0 }
       },
@@ -118,6 +124,9 @@ describe('OSS remote attachment durable metadata', () => {
       let commits = 0
       const client = {
         query: async (sql: string, values?: readonly unknown[]) => {
+          if (sql.includes('SELECT phase FROM remote_attachment_storage_phase')) {
+            return { rows: [{ phase: 'bridge' }], rowCount: 1 }
+          }
           if (sql === 'COMMIT' && ++commits === 2) throw new Error('COMMIT outcome is unknown')
           if (sql.includes('INSERT INTO remote_attachment_publish_intents')) objectKey = String(values?.[3])
           if (sql.includes('SELECT COUNT(*)')) return { rows: [{ count: '0' }], rowCount: 1 }

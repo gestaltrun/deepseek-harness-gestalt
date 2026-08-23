@@ -18,7 +18,7 @@ Runtime `create` 可以把新实例附加到已有 Workspace，或把新标签�
 
 无密钥 Browser Runtime 快照保持不含 Binder，因为它们证明 Consumer 发现与已渲染 Runtime 事实，而不是 Session 隔离。只有组合了 Binder 的路径才宣称 Session 本地所有权。
 
-每个标签页最近一次提交的修订号是 Session 事实，供投影恢复乐观并发；[标签页修订号 Agent Note](../bug-fix/2026-08-20-dock-tab-revision.md)持有这条列表规则。工作台面板可见性与宽度属于 better-sidebar。[删除报告式 Browser 控制权与 Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.md)持有收窄后的 payload 与隐式 Profile 匹配复用。
+每个标签页最近一次提交的修订号是 Session 事实，供投影恢复乐观并发；[标签页修订号 Agent Note](../bug-fix/2026-08-20-dock-tab-revision.zh.md)持有这条列表规则。工作台面板可见性与宽度属于 better-sidebar。[删除报告式 Browser 控制权与 Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.zh.md)持有收窄后的 payload 与隐式 Profile 匹配复用。
 
 ## 考虑过的替代方案
 

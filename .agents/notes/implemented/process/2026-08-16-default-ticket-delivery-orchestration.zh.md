@@ -22,7 +22,7 @@ subagent 文本记录也不适合作为持久协调记录。Worker 可以重启�
 
 项目 Codex 角色编码两个常用职责：`ticket_worker` 负责一个 ticket 直至形成经过验证的 PR，但不执行合并；`dsh_reviewer` 以只读方式执行规范与规格双轴评审。无法创建任务或 worktree 时，根任务通过顺序执行 ticket Worker 保持相同的所有权模型。
 
-[推送前工作流](../../../skills/dsh-pre-push-checks/SKILL.md)选择对外提交所需证据，[原生 stack 决策](2026-08-02-native-github-stacks-and-optional-rebases.md)负责依赖 PR 的落地。Ticket PR 合入基线并引用对应 Issue，但不关闭它们。Feature 级组装验证通过后，一个经过评审的基线 PR 才进入 `master` 并关闭 tickets。只有在根任务证明终态 ticket 任务干净、已推送、已合并且可由 GitHub 重建后，才归档任务并删除对应 worktree 和分支。创建 tag、GitHub Release、发布、签名、公证和部署始终需要针对该次发布的明确授权。
+[推送前工作流](../../../skills/dsh-pre-push-checks/SKILL.md)选择对外提交所需证据，[原生 stack 决策](2026-08-02-native-github-stacks-and-optional-rebases.zh.md)负责依赖 PR 的落地。Ticket PR 合入基线并引用对应 Issue，但不关闭它们。Feature 级组装验证通过后，一个经过评审的基线 PR 才进入 `master` 并关闭 tickets。只有在根任务证明终态 ticket 任务干净、已推送、已合并且可由 GitHub 重建后，才归档任务并删除对应 worktree 和分支。创建 tag、GitHub Release、发布、签名、公证和部署始终需要针对该次发布的明确授权。
 
 ## Alternatives considered
 

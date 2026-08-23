@@ -2,7 +2,7 @@
 
 [English](platform-account.md) | 中文
 
-[`@deepseek-ai/dsh-platform-account`](../../packages/platform/platform-account/README.md)定义 Platform 身份，以及绑定到一个 Desktop 或 Mobile 安装的持有证明账号会话。GitHub 只提供不可变的数字主体和当前公开登录名／头像；身份验证后会丢弃其 OAuth 令牌。
+[`@deepseek-ai/dsh-platform-account`](../../packages/platform/platform-account/README.zh.md)定义 Platform 身份，以及绑定到一个 Desktop 或 Mobile 安装的持有证明账号会话。GitHub 只提供不可变的数字主体和当前公开登录名／头像；身份验证后会丢弃其 OAuth 令牌。
 
 ## 登录与会话生命周期
 
@@ -22,7 +22,7 @@ Installation 在创建五分钟 `LoginAttemptView` 前接受唯一规范的双�
 
 ## Cordis API
 
-Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — this section is byte-identical in both language sides of the page. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
 <a id="ctxplatformaccount--accountservice-abstract-seam"></a>
 
@@ -94,5 +94,5 @@ abstract signOut(input: { accessToken: string; proof: AccountProof }): Promise<v
 abstract trackConnection(sessionId: AccountSessionId, close: () => void | Promise<void>): Promise<() => void>
 ```
 
-Source: [`packages/platform/platform-account/src/index.ts:37`](../../packages/platform/platform-account/src/index.ts)
+Source: [`packages/platform/platform-account/src/index.ts`](../../packages/platform/platform-account/src/index.ts)
 <!-- END GENERATED cordis-surface -->

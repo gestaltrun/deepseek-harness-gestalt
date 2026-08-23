@@ -1,0 +1,107 @@
+- dialog "设置":
+  - navigation:
+    - text: 设置
+    - button "通用设置":
+      - img
+      - text: 通用设置
+    - button "模型":
+      - img
+      - text: 模型
+    - button "插件":
+      - img
+      - text: 插件
+    - button "Agent 预设":
+      - img
+      - text: Agent 预设
+    - button "浏览器":
+      - img
+      - text: 浏览器
+    - button "侧边卡片"
+  - button "打开配置文件"
+  - button "关闭":
+    - img
+    - text: 关闭
+  - heading "模型" [level=2]
+  - paragraph: 填入各提供方的 API 密钥即可使用其模型。
+  - list:
+    - listitem:
+      - text: deepseek
+      - img "API 密钥已配置"
+      - button "编辑 deepseek": 编辑
+      - button "删除 deepseek": 删除
+      - text: deepseek API 密钥
+      - textbox "API 密钥":
+        - /placeholder: 已配置——输入新值可替换
+      - group:
+        - text: 自定义设置 API 地址
+        - textbox "API 地址":
+          - /placeholder: 提供方默认
+        - text: 默认接受的输入
+        - group "默认接受的输入":
+          - button "默认接受的输入 文本": 文本
+          - button "默认接受的输入 图片": 图片
+        - text: 模型未单独设置时使用。适配器默认只接受文本。
+        - region "模型目录":
+          - text: 模型目录 已自定义模型目录
+          - button "恢复默认模型"
+          - button "获取可用模型"
+          - textbox "模型 ID 1":
+            - /placeholder: 模型 ID
+            - text: deepseek-v4-pro
+          - textbox "显示名称 1":
+            - /placeholder: 显示名称
+            - text: DeepSeek-V4-Pro
+          - button "容量 1"
+          - button "删除模型 1"
+          - textbox "模型 ID 2":
+            - /placeholder: 模型 ID
+            - text: deepseek-v4-flash-vision-exp
+          - textbox "显示名称 2":
+            - /placeholder: 显示名称
+            - text: DeepSeek-V4-Flash-Vision-Exp
+          - button "容量 2"
+          - button "删除模型 2"
+          - textbox "模型 ID 3":
+            - /placeholder: 模型 ID
+            - text: private-preview
+          - textbox "显示名称 3":
+            - /placeholder: 显示名称
+            - text: Private Preview
+          - button "容量 3" [expanded]
+          - button "删除模型 3"
+          - text: 上下文窗口
+          - textbox "上下文窗口 3":
+            - /placeholder: 256K
+            - text: "131072"
+          - text: 最大输出 token
+          - textbox "最大输出 token 3":
+            - /placeholder: 32K
+            - text: 64K
+          - text: 接受的输入
+          - group "接受的输入 3":
+            - button "接受的输入 3 文本": 文本
+            - button "接受的输入 3 图片": 图片
+          - text: 都不选则沿用模型目录，再使用本提供方的默认设置。 思考档位
+          - group "思考档位 3":
+            - button "思考档位 3 关闭": 关闭
+            - button "思考档位 3 最低": 最低
+            - button "思考档位 3 低": 低
+            - button "思考档位 3 中": 中
+            - button "思考档位 3 高": 高
+            - button "思考档位 3 很高": 很高
+            - button "思考档位 3 最高": 最高
+          - text: 都不选则沿用模型目录；自定义模型此时没有思考档位。若要设置，除「关闭」外至少再选一档。
+          - button "添加模型"
+      - button "取消"
+      - button "保存"
+    - listitem:
+      - text: minimax-cn
+      - img "API 密钥已配置"
+      - button "编辑 minimax-cn": 编辑
+      - button "删除 minimax-cn": 删除
+  - button "添加提供方":
+    - img
+    - text: 添加提供方
+  - button "添加自定义提供方":
+    - img
+    - text: 添加自定义提供方

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-moonshot-search-wire-adaptation.md
 2026-08-19-moonshot-search-wire-adaptation.md: 0385dc0882790b818bc715040d75276a131ae8dd
-2026-08-19-moonshot-search-wire-adaptation.zh.md: 9bc360574cd3c5794e652556c3823706ea2aa549
+2026-08-19-moonshot-search-wire-adaptation.zh.md: 64ca9de5e8e12160825575d0b19c501db91d1736

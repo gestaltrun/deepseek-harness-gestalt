@@ -57,6 +57,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The macOS parity suite executes the Desktop release-notes CLI,
+          # which verifies a tracked historical baseline through the Git graph.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 

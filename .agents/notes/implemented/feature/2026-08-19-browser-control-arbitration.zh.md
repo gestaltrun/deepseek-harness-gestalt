@@ -14,7 +14,7 @@ Status: implemented
 
 `dsh-browser-workspace` 把每个标签页的最新修订号持久化到 Session 的 `browser/workspace` 快照，供 Session 切换与重新加载后恢复乐观并发事实。Browser 工具不设置 `ask` 或权限分类器；只有组合挂上现有审批与权限能力时，那些能力才会生效。
 
-报告式所有权及其接管、交还操作已由[删除报告式 Browser 控制权与 Workspace Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.md)取代。Desktop 直接页面交互与 Runtime 状态相互独立；修订号仍是唯一并发机制。
+报告式所有权及其接管、交还操作已由[删除报告式 Browser 控制权与 Workspace Dock 状态](../simplification/2026-08-22-remove-reported-browser-control-and-dock-state.zh.md)取代。Desktop 直接页面交互与 Runtime 状态相互独立；修订号仍是唯一并发机制。
 
 ## 考虑过的替代方案
 

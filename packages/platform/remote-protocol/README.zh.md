@@ -47,7 +47,7 @@ conversation projection 会回显 history 请求中可选的 exclusive `beforeSe
 
 `RemoteProtocolError` 为无效输入、超过限制、不兼容 Relay 版本、缺少 Companion 安全 capability、endpoint 必须更新及缺少协商提供稳定 code。诊断不会包含应用明文。二进制 wire 值只接受一种规范的无填充 base64url 拼写；能够解码成相同字节的别名也会被拒绝。60 KiB 应用上限在固定 65,535 字节 Noise 消息上限内为加密开销保留 4,095 字节；Relay frame 上限也能在该最大值下容纳 base64url 与 transport 元数据。
 
-本包不加密 Companion 消息流量。Mobile 与 Desktop 提供 [`dsh-noise-channel`](../noise-channel/README.md) endpoint channel，再在 Relay 转发前加密版本 offer 和已编码 Companion 消息。[无密钥 assembled example](../../../examples/remote-protocol/start.ts)保留仅限示例的 AES-GCM adapter，用于隔离验证 codec；它不是产品密码实现或安全评审证据。产品 Mobile 与 Desktop 已组装 endpoint-owned 首配、credential-bound peer discovery、fresh-ephemeral IK 与加密 Companion 消息。[双实例产品快照](../../../examples/two-instance-relay/start.ts)通过真实 WSS Relay 实例运行不透明 endpoint mailbox、密封 Mobile authority 与 Snow IK，而不是示例 adapter。
+本包不加密 Companion 消息流量。Mobile 与 Desktop 提供 [`dsh-noise-channel`](../noise-channel/README.zh.md) endpoint channel，再在 Relay 转发前加密版本 offer 和已编码 Companion 消息。[无密钥 assembled example](../../../examples/remote-protocol/start.ts)保留仅限示例的 AES-GCM adapter，用于隔离验证 codec；它不是产品密码实现或安全评审证据。产品 Mobile 与 Desktop 已组装 endpoint-owned 首配、credential-bound peer discovery、fresh-ephemeral IK 与加密 Companion 消息。[双实例产品快照](../../../examples/two-instance-relay/start.ts)通过真实 WSS Relay 实例运行不透明 endpoint mailbox、密封 Mobile authority 与 Snow IK，而不是示例 adapter。
 
 ## 模型体验
 

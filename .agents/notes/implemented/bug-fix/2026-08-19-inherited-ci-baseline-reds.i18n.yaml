@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-19-inherited-ci-baseline-reds.md
 2026-08-19-inherited-ci-baseline-reds.md: d469a0e1a6d328c70657bca6db782afd31f11b7c
-2026-08-19-inherited-ci-baseline-reds.zh.md: f6df75e2a58ef6bf4f7e95ef9b694fbf468ca73f
+2026-08-19-inherited-ci-baseline-reds.zh.md: 2f6d750ceb9f25efc9c94e4a69419cff311f33fd

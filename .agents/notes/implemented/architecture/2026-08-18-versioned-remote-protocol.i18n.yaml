@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-18-versioned-remote-protocol.md
 2026-08-18-versioned-remote-protocol.md: ef5d1bbe23fa79573d432cf15b3b96c2971c355b
-2026-08-18-versioned-remote-protocol.zh.md: e8f4e2724aabaeee6a65c782828de7335139e4ef
+2026-08-18-versioned-remote-protocol.zh.md: d94685ff8f92c6ff59f7ecad70cd4021452fc2b6

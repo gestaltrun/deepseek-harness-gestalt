@@ -84,6 +84,11 @@ async function bootWeb(
     { id: 'skill-badge', disabled: false },
     { id: 'modules', disabled: true },
     { id: 'connection', disabled: true },
+    // The sidebar Host row needs webServer and webRuntime, which this
+    // Agent-plane harness omits. Its workbench adapter joins that row; neither
+    // contributes to the capabilities asserted by this file.
+    { id: 'ui-better-sidebar', disabled: true },
+    { id: 'ui-workbench', disabled: true },
     // The always-on reload chain waits for the browser roster and bound port
     // disabled above.
     { id: 'client-hmr', disabled: true },
@@ -180,13 +185,11 @@ beforeAll(async () => {
 }, 120_000)
 
 describe('the shipped Web composition', () => {
-  it('leaves the global tool layer empty', () => {
-    // Every model-facing tool belongs to a preset, `ask_user_question`
-    // included: a tool in the global layer reaches EVERY agent regardless of
-    // which preset composed it, so a two-tool benchmark surface would really
-    // present three. A regression here means an agent-plane row came back to
-    // the host composition.
-    expect(toolNames(ctx)).toEqual([])
+  it('leaves only the registry-owned discovery transport in the global tool projection', () => {
+    // Every ordinary model-facing tool belongs to a preset,
+    // `ask_user_question` included. `tool_search` is reserved infrastructure
+    // outside the filterable capability layers, not a Host-owned tool row.
+    expect(toolNames(ctx)).toEqual(['tool_search'])
   })
 
   it('keeps the token meter and its context-meter projections on the host plane', async () => {
@@ -238,7 +241,7 @@ describe('the shipped Web composition', () => {
       expect(toolNames(ctx, handle.agent).filter(name => name !== 'glob' && name !== 'grep')).toEqual([
         'ask_user_question', 'bash', 'create_goal', 'edit', 'exit_plan_mode',
         'get_goal', 'interrupt_agent', 'job_kill', 'job_list', 'job_output', 'list_agents', 'ralph', 'read', 'read_image', 'send_message', 'skill',
-        'subagent', 'subagent_fork', 'todo_write', 'update_goal', 'web_search',
+        'subagent', 'subagent_fork', 'todo_write', 'tool_search', 'update_goal', 'web_search',
         'workflow', 'write',
       ])
     } finally {
@@ -246,7 +249,7 @@ describe('the shipped Web composition', () => {
     }
   })
 
-  it('composes the exact RL prompt and two tools from `minimal`', async () => {
+  it('composes the exact RL prompt and two preset tools from `minimal`', async () => {
     const handle = await ctx.agents.create({
       sessionId: SessionId('preset-minimal'),
       setup: agentCtx => ctx.agentPresets.mount(agentCtx, 'minimal').then(() => undefined),
@@ -256,7 +259,7 @@ describe('the shipped Web composition', () => {
       expect(assembly.sections).toEqual([
         { name: 'deployment:persona', text: MINIMAL_PROMPT },
       ])
-      expect(assembly.tools.map(tool => tool.name)).toEqual(['bash', 'str_replace_editor'])
+      expect(assembly.tools.map(tool => tool.name)).toEqual(['bash', 'str_replace_editor', 'tool_search'])
       expect(assembly.tools.find(tool => tool.name === 'bash')?.description).toBe(MINIMAL_BASH_DESCRIPTION)
       expect(JSON.stringify(assembly.tools.find(tool => tool.name === 'str_replace_editor')?.parameters))
         .toContain('Absolute path')
@@ -277,14 +280,14 @@ describe('the shipped Web composition', () => {
       setup: agentCtx => ctx.agentPresets.mount(agentCtx, 'minimal').then(() => undefined),
     })
     try {
-      expect(toolNames(ctx, minimal.agent)).toEqual(['bash', 'str_replace_editor'])
+      expect(toolNames(ctx, minimal.agent)).toEqual(['bash', 'str_replace_editor', 'tool_search'])
       expect(toolNames(ctx, full.agent).length).toBeGreaterThan(10)
 
       await minimal.dispose()
 
       // Tearing the minimal session down leaves the full one whole.
       expect(toolNames(ctx, full.agent).length).toBeGreaterThan(10)
-      expect(toolNames(ctx)).toEqual([])
+      expect(toolNames(ctx)).toEqual(['tool_search'])
     } finally {
       await full.dispose()
     }
@@ -426,7 +429,7 @@ describe('the shipped Web composition', () => {
       // stays the preset's choice — minimal mounts no `tool-skill`, so its
       // tool table has no loader even though the global layer is readable.
       expect((await ctx.skills.list({ scope: handle.agent })).map(skill => skill.name)).toContain('dsh-badge')
-      expect(toolNames(ctx, handle.agent)).toEqual(['bash', 'str_replace_editor'])
+      expect(toolNames(ctx, handle.agent)).toEqual(['bash', 'str_replace_editor', 'tool_search'])
     } finally {
       await handle.dispose()
     }
@@ -822,9 +825,9 @@ describe('authoring a preset on the shipped composition', () => {
       setup: agentCtx => authorCtx.agentPresets.mount(agentCtx, 'my-agent').then(() => undefined),
     })
     try {
-      // The same tools the shipped `minimal` composes, from a directory copied
-      // through the service into a root outside the installed harness.
-      expect(toolNames(authorCtx, handle.agent)).toEqual(['bash', 'str_replace_editor'])
+      // The same model-visible tool projection as shipped `minimal`, from a
+      // directory copied through the service outside the installed harness.
+      expect(toolNames(authorCtx, handle.agent)).toEqual(['bash', 'str_replace_editor', 'tool_search'])
     } finally {
       await handle.dispose()
     }
@@ -859,9 +862,10 @@ describe('the default preset as a user setting', () => {
         setup: agentCtx => ctx.agentPresets.mount(agentCtx).then(() => undefined),
       })
       try {
-        // `mount()` with no id resolves the effective default. Two tools, not
-        // `standard`'s catalog: the setting decided the composition.
-        expect(toolNames(ctx, handle.agent)).toEqual(['bash', 'str_replace_editor'])
+        // `mount()` with no id resolves the effective default. Two preset
+        // tools plus registry discovery, not `standard`'s catalog: the
+        // setting decided the composition.
+        expect(toolNames(ctx, handle.agent)).toEqual(['bash', 'str_replace_editor', 'tool_search'])
       } finally {
         await handle.dispose()
       }

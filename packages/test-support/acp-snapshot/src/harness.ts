@@ -636,8 +636,7 @@ async function waitForPersistedInboxMessage(
 ): Promise<void> {
   await vi.waitFor(async () => {
     const log = (await harvestSessionLogs(root)).find(candidate => candidate.id === sessionId)
-    const matched = log?.content.split('\n').some((line) => {
-      if (line.length === 0) return false
+    const matched = log?.content.split('\n').filter(Boolean).some((line) => {
       const record = JSON.parse(line) as {
         type?: unknown
         data?: { inserted?: Array<{ content?: Array<{ type?: unknown; text?: unknown }> }> }

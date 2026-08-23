@@ -32,4 +32,4 @@ Status: implemented
 
 ## 后果
 
-官方 Browser chrome 占用快照 `browser` 标签；Dock 不占用 `details`。快照宿主路由仍走 `/sidebar`。宿主 apply 在 prefs 命名空间尚未注册时加入快照 loader fiber；调用 `entry.init()` 会把快照 apply 两遍并重复注册 `/sidebar` 路由。源码启动从包内 `lib/` 提供惰性分块，而不是 `dirname(import.meta.url)`。覆盖率、Oxlint、jscpd 与 knip 跳过快照树；适配层与官方 Browser 测试持有产品行为。快照不是 `tsconfig.client.json` 工程，因为它的 references 会把宿主 Context 键合并进客户端程序；`tsdown` 用 `noCheck` 写出 `lib/types`。预发布工作区不提供 `@deepseek-ai/dsh-client-better-sidebar` 别名；仓库内所有消费者都使用带 UI 前缀的包。
+官方 Browser chrome 占用快照 `browser` 标签；Dock 不占用 `details`。快照宿主路由仍走 `/sidebar`。宿主 apply 在 prefs 命名空间尚未注册时加入快照 loader fiber；调用 `entry.init()` 会把快照 apply 两遍并重复注册 `/sidebar` 路由。源码启动从包内 `lib/` 提供惰性分块，而不是 `dirname(import.meta.url)`。覆盖率、Oxlint、jscpd 与 knip 跳过快照树；适配层与官方 Browser 测试持有各自的集成行为，组装后的 Web Side Chat 快照则钉住模型可见的子会话路径。Side Chat 活跃 Agent 句柄归属于单次插件激活；停机会关闭准入、排空已接纳调用并释放全部句柄，同时保留持久化历史。快照不是 `tsconfig.client.json` 工程，因为它的 references 会把宿主 Context 键合并进客户端程序；`tsdown` 用 `noCheck` 写出 `lib/types`。预发布工作区不提供 `@deepseek-ai/dsh-client-better-sidebar` 别名；仓库内所有消费者都使用带 UI 前缀的包。

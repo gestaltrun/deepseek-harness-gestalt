@@ -49,7 +49,7 @@ import {
 import { registerTools } from './tools.ts'
 import { buildJobsApi, type SidebarJobsRoutes } from './jobs-routes.ts'
 import { buildSubagentLiveApi, type SidebarSubagentLiveRoutes } from './subagent-live-route.ts'
-import { buildSidechatApi } from './sidechat-routes.ts'
+import { buildSidechatApi, type SidechatRoutes } from './sidechat-routes.ts'
 import { readJsonBody, requireString, SidebarError, writeError, writeJson, writeOk } from './wire.ts'
 
 export { Config }
@@ -222,6 +222,7 @@ function buildApi(
   resolved: ResolvedSidebarConfig,
   terminalShell: string,
   getSettings: () => SidebarSettingsFace | undefined,
+  sidechatRoutes: SidechatRoutes,
 ): Record<string, ApiMethod> {
   const cwdOf = (payload: unknown): { sessionId: string; cwd: string } => {
     const sessionId = requireString(payload, 'sessionId')
@@ -499,7 +500,7 @@ function buildApi(
     // identities are fenced from the generic session RPCs (agent-lookup
     // ownership), and the thread is created with a CUSTOM seed the stock
     // fork APIs cannot express.
-    ...buildSidechatApi(ctx),
+    ...sidechatRoutes,
   }
 }
 
@@ -621,7 +622,11 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
   })
 
   // ── JSON API ────────────────────────────────────────────────────────────
-  const api = buildApi(ctx, ptyManager, agentPtyRegistry, resolved, terminalShell, () => settingsFace)
+  const sidechat = buildSidechatApi(ctx)
+  ctx.effect(() => () => sidechat.dispose(), 'dsh-better-sidebar: side chat Agents')
+  const api = buildApi(
+    ctx, ptyManager, agentPtyRegistry, resolved, terminalShell, () => settingsFace, sidechat.routes,
+  )
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix',
     path: '/sidebar/api',

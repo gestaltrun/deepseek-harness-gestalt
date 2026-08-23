@@ -8,11 +8,33 @@ Product composition mounts this package and [`dsh-client-ui-workbench`](../ui-wo
 
 ## Model Experience
 
-Indirectly, through the snapshot host's optional `terminal_*` tools when the Side Card setting `agentTerminalTools` is on. Those tools are owned by this snapshot's host half and stay off until that setting is enabled.
+### Side Chat
+
+#### What the model sees
+
+The persisted child Agent receives the parent log captured when the thread opens, followed by a plugin-stamped context injection containing the side-conversation boundary and any frozen in-progress parent output. The first question follows that injection. Each plugin activation owns its live Side Chat handles: unload closes route admission, waits for admitted calls, and disposes every handle while retaining persisted history.
+
+#### Token effect
+
+The child request includes the inherited parent log, the boundary injection, and the Side Chat question.
 
 #### KV Cache effect
 
-None while `agentTerminalTools` is off. Enabling it adds tool schemas to later requests and invalidates a prefix that omitted them.
+The inherited parent history remains a reusable prefix; the boundary injection and first question diverge after it.
+
+### Optional terminal tools
+
+#### What the model sees
+
+When the Side Card setting `agentTerminalTools` is on, the snapshot host adds its optional `terminal_*` tool schemas. The tools stay absent until that setting is enabled.
+
+#### Token effect
+
+Enabling the setting adds the optional tool schemas to later requests.
+
+#### KV Cache effect
+
+There is no effect while `agentTerminalTools` is off. Enabling it invalidates a cached request prefix that omitted the optional tool schemas.
 
 ## Known Limitations and Deferred Work
 

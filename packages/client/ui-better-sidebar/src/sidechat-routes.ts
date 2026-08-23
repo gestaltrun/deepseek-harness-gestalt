@@ -63,18 +63,17 @@ export interface SidechatRoutes {
   'sidechat.info'(payload: unknown): Promise<SidechatThreadInfo>
 }
 
+/** Activation-owned routes and the quiescent teardown for their live Agent handles. */
+export interface SidechatApi {
+  /** Routes mounted under `/sidebar/api`. */
+  routes: SidechatRoutes
+  /** Stop admission, wait for admitted calls, and release every live Agent handle. */
+  dispose(): Promise<void>
+}
+
 /** Timeout guarding the create call (the registry detaches it before the
  *  handle becomes visible, so the child is never cancelled by it). */
 const CREATE_TIMEOUT_MS = 15_000
-
-/** Per-activation disposers of created thread agents (the dispose route
- *  releases them; the session and its history always stay persisted). */
-const threadDisposers = new Map<string, () => Promise<void>>()
-
-/** The in-progress-turn snapshot captured at creation of an EMPTY thread,
- *  waiting to ride the first prompt (lost on a host restart — the boundary
- *  prompt is then delivered alone, a logged degradation). */
-const pendingSnapshots = new Map<string, string>()
 
 /** Resolve the parent's preset and build the child's composition setup
  *  (mirror of api-proxy's composeAgent minus the model-selection install —
@@ -154,8 +153,25 @@ function liveThreadAgent(ctx: Context, childId: string): Agent | undefined {
 /** Build the Side Chat routes (all optional services degrade to a wire
  *  error the tab surfaces inline). The record keys are the FULL wire method
  *  names the /sidebar/api dispatcher looks up (`api[method]`). */
-export function buildSidechatApi(ctx: Context): SidechatRoutes {
-  return {
+export function buildSidechatApi(ctx: Context): SidechatApi {
+  /** Disposers of thread agents created by this activation. */
+  const threadDisposers = new Map<string, () => Promise<void>>()
+  /** In-progress snapshots waiting for an immediately-created thread's first prompt. */
+  const pendingSnapshots = new Map<string, string>()
+  const inFlight = new Set<Promise<void>>()
+  let stopping = false
+  let teardown: Promise<void> | undefined
+
+  const admit = <T>(operation: () => Promise<T>): Promise<T> => {
+    if (stopping) return Promise.reject(new SidebarError('sidechat-error', 'side chat is stopping', 503))
+    const result = operation()
+    const settled = result.then(() => undefined, () => undefined)
+    inFlight.add(settled)
+    void settled.finally(() => { inFlight.delete(settled) })
+    return result
+  }
+
+  const rawRoutes: SidechatRoutes = {
     'sidechat.start': async (payload: unknown) => {
       const sessionId = requireString(payload, 'sessionId')
       const rawQuestion = (payload as { question?: unknown }).question
@@ -341,4 +357,27 @@ export function buildSidechatApi(ctx: Context): SidechatRoutes {
       return { live: false }
     },
   }
+  const routes: SidechatRoutes = {
+    'sidechat.start': payload => admit(() => rawRoutes['sidechat.start'](payload)),
+    'sidechat.prompt': payload => admit(() => rawRoutes['sidechat.prompt'](payload)),
+    'sidechat.cancel': payload => admit(() => rawRoutes['sidechat.cancel'](payload)),
+    'sidechat.dispose': payload => admit(() => rawRoutes['sidechat.dispose'](payload)),
+    'sidechat.info': payload => admit(() => rawRoutes['sidechat.info'](payload)),
+  }
+  const dispose = (): Promise<void> => {
+    if (teardown !== undefined) return teardown
+    stopping = true
+    teardown = (async () => {
+      await Promise.all([...inFlight])
+      pendingSnapshots.clear()
+      const disposers = [...threadDisposers.values()]
+      threadDisposers.clear()
+      const results = await Promise.allSettled(disposers.map(async release => release()))
+      const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+      if (failures.length === 1) throw failures[0]
+      if (failures.length > 1) throw new AggregateError(failures, 'side chat Agent teardown failed')
+    })()
+    return teardown
+  }
+  return { routes, dispose }
 }

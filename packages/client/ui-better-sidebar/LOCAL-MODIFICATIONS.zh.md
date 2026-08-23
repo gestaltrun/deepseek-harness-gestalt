@@ -13,3 +13,4 @@
 9. **`src/client/TabBar.tsx` / `src/client/sidebar.module.css`** — 存在 `window.dshDesktop.chromeOverlayShow` 时，`+` 菜单在 Desktop 原生 overlay 视图里打开，而不是页内 `Menu`。Desktop 顶部 Workbench 与 36px Window Chrome 对齐，并且只用 `+` 后可伸缩的未占用空间拖动窗口；标签拖动期间，该空间会临时恢复为投放目标。底部 Workbench 与纯浏览器 `dsh web` 都不渲染窗口拖拽空间，Web 继续使用页内菜单、上游标签上下文菜单和 34px 标签栏。
 10. **`src/client/Sidebar.tsx` / `src/client/state.ts` / `src/client/sidebar.module.css`** — 右侧和底部面板只在各自可见时占用布局空间，因此拖动一个轴不会激活已关闭面板保留的尺寸。面板缩放保留上游按帧批处理的 DOM 几何更新与会话滚动条的 gutter 和滚动能力，并在松手前把 thumb 设为透明，避免 Chromium 在滚动容器改变大小时闪出 overlay scrollbar。
 11. **`src/client/index.tsx`** — Desktop overlay 文档（`data-dsh-desktop-overlay` / `?dsh-desktop-overlay=1`）不把快照 `Sidebar` 挂到 `document.body`。overlay 设置仍走 Host chrome 的设置席位。
+12. **`src/sidechat-routes.ts` / `src/index.ts`** — Side Chat 活跃 Agent 句柄与待发送快照归属于单次插件激活。停机先关闭路由准入，等待已接纳调用完成，再清空待发送快照并释放全部句柄，之后插件才达到静止状态。

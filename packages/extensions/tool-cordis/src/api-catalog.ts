@@ -1456,10 +1456,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Pairing scope seam: the Personal Pairing layer authenticates one HTTPS request to exactly one Personal Pairing. Implementations never see attachment bytes.',
     methods: [
       {
-        signature: 'authenticate(input: { headers: IncomingHttpHeaders }): Promise<PersonalPairingId>',
+        signature: 'authenticate(input: { headers: IncomingHttpHeaders }): Promise<{ pairingId: PersonalPairingId admit(bytes: number): Promise<RemoteAttachmentQuotaReservation> }>',
         description: 'Authenticate one attachment request to its owning Personal Pairing.',
         parameters: [{ name: 'input', description: 'complete untrusted request headers.' }],
-        returns: 'the Personal Pairing whose scope governs the capability.',
+        returns: 'pairing authority plus Account-complete blob admission.',
       },
     ],
   },
@@ -1479,7 +1479,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
       },
       {
-        signature: 'abstract publish(input: { pairingId: PersonalPairingId; ciphertext: Uint8Array; now: number }): Promise<RemoteAttachmentGrant>',
+        signature: 'abstract publish(input: { pairingId: PersonalPairingId ciphertext: Uint8Array now: number quota?: RemoteAttachmentQuotaReservation }): Promise<RemoteAttachmentGrant>',
         description: 'Retain one pairing-scoped ciphertext blob and issue its one-time capability.',
         parameters: [{ name: 'input', description: 'owning Personal Pairing, endpoint-encrypted ciphertext, and current time.' }],
         returns: 'the capability grant Mobile forwards to Desktop.',
@@ -1491,10 +1491,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'a copy of the retained ciphertext bytes.',
       },
       {
-        signature: 'abstract consume(input: { pairingId: PersonalPairingId; capability: AttachmentCapability; now: number }): Promise<Uint8Array>',
-        description: 'Exchange one capability for its ciphertext exactly once, then remove both.',
+        signature: 'abstract consume(input: { pairingId: PersonalPairingId capability: AttachmentCapability now: number }): Promise<RemoteAttachmentConsumption>',
+        description: 'Exclusively claim one capability for a single HTTP response.',
         parameters: [{ name: 'input', description: 'requesting Personal Pairing, one-time capability, and current time.' }],
-        returns: 'a copy of the retained ciphertext bytes.',
+        returns: 'claimed ciphertext plus delivery settlement operations.',
       },
       {
         signature: 'abstract revoke(input: { pairingId: PersonalPairingId; capability: AttachmentCapability }): Promise<void>',
@@ -4625,8 +4625,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RemoteAttachmentBlob {\n    capabilityDigest: Uint8Array;\n    pairingId: PersonalPairingId;\n    ciphertext: Uint8Array;\n    expiresAt: number;\n}',
   },
   {
+    name: 'RemoteAttachmentConsumption',
+    declaration: 'export interface RemoteAttachmentConsumption {\n    ciphertext: Uint8Array;\n    complete(): Promise<void>;\n    abandon(now: number): Promise<void>;\n}',
+  },
+  {
     name: 'RemoteAttachmentGrant',
     declaration: 'export interface RemoteAttachmentGrant {\n    capability: AttachmentCapability;\n    byteLength: number;\n    expiresAt: number;\n}',
+  },
+  {
+    name: 'RemoteAttachmentQuotaReservation',
+    declaration: 'export interface RemoteAttachmentQuotaReservation {\n    id: string;\n    release(): Promise<void>;\n}',
   },
   {
     name: 'RemoteRelayAttachment',

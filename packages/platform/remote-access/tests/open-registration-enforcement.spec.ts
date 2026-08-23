@@ -160,6 +160,9 @@ describe('open-registration enforcement', () => {
       bytes: OPEN_REGISTRATION_QUOTAS.blobBytes,
     })
     expect(exactLimit.reservationId.length).toBeGreaterThan(0)
+    await provider.releaseAttachmentReservation(exactLimit.reservationId)
+    await provider.releaseAttachmentReservation(exactLimit.reservationId)
+    await expect(provider.releaseAttachmentReservation('')).rejects.toBeInstanceOf(TypeError)
     await expect(provider.admitAttachmentBlob({
       owner,
       bytes: OPEN_REGISTRATION_QUOTAS.blobBytes + 1,

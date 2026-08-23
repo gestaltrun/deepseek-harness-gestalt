@@ -36,7 +36,9 @@ describe('Remote attachment blob store', () => {
     expect(service.observe()).toHaveLength(1)
     expect(service.observe()[0]).toMatchObject({ pairingId: pairingA, expiresAt: now + 1_000 })
 
-    await expect(service.consume({ pairingId: pairingA, capability: grant.capability, now })).resolves.toEqual(ciphertext)
+    const consumption = await service.consume({ pairingId: pairingA, capability: grant.capability, now })
+    expect(consumption.ciphertext).toEqual(ciphertext)
+    await consumption.complete()
     expect(service.observe()).toHaveLength(0)
     await expect(service.consume({ pairingId: pairingA, capability: grant.capability, now }))
       .rejects.toMatchObject({ code: 'ATTACHMENT_CAPABILITY_INVALID' })
@@ -57,8 +59,47 @@ describe('Remote attachment blob store', () => {
     inspected[0] = 5
     expect(service.observe()).toHaveLength(1)
     const consumed = await service.consume({ pairingId: pairingA, capability: grant.capability, now })
-    expect(consumed).toEqual(Uint8Array.of(1, 2, 3, 4))
-    consumed[0] = 3
+    expect(consumed.ciphertext).toEqual(Uint8Array.of(1, 2, 3, 4))
+    consumed.ciphertext[0] = 3
+    await consumed.complete()
+    expect(service.observe()).toHaveLength(0)
+  })
+
+  it('settles quota once across complete, retryable abandon, expired abandon, and revoke', async () => {
+    const service = store()
+    const release = vi.fn(async () => {})
+    const completed = await service.publish({
+      pairingId: pairingA, ciphertext: Uint8Array.of(1), now,
+      quota: { id: 'quota-complete', release },
+    })
+    const completedClaim = await service.consume({ pairingId: pairingA, capability: completed.capability, now })
+    await completedClaim.complete()
+    await completedClaim.complete()
+
+    const retryable = await service.publish({
+      pairingId: pairingA, ciphertext: Uint8Array.of(2), now,
+      quota: { id: 'quota-retryable', release },
+    })
+    const retryableClaim = await service.consume({ pairingId: pairingA, capability: retryable.capability, now })
+    await retryableClaim.abandon(now)
+    await retryableClaim.abandon(now)
+    const retried = await service.consume({ pairingId: pairingA, capability: retryable.capability, now })
+    await retried.complete()
+
+    const expired = await service.publish({
+      pairingId: pairingA, ciphertext: Uint8Array.of(3), now,
+      quota: { id: 'quota-expired', release },
+    })
+    const expiredClaim = await service.consume({ pairingId: pairingA, capability: expired.capability, now })
+    await expiredClaim.abandon(now + 1_000)
+
+    const revoked = await service.publish({
+      pairingId: pairingA, ciphertext: Uint8Array.of(4), now,
+      quota: { id: 'quota-revoked', release },
+    })
+    await service.revoke({ pairingId: pairingA, capability: revoked.capability })
+
+    expect(release).toHaveBeenCalledTimes(4)
     expect(service.observe()).toHaveLength(0)
   })
 
@@ -93,14 +134,24 @@ describe('Remote attachment blob store', () => {
 
   it('rejects empty ciphertext as empty, not as a limit breach', async () => {
     const service = store()
-    await expect(service.publish({ pairingId: pairingA, ciphertext: new Uint8Array(0), now }))
+    const release = vi.fn(async () => {})
+    await expect(service.publish({
+      pairingId: pairingA, ciphertext: new Uint8Array(0), now,
+      quota: { id: 'quota-empty', release },
+    }))
       .rejects.toMatchObject({ code: 'ATTACHMENT_EMPTY' })
+    expect(release).toHaveBeenCalledOnce()
   })
 
   it('enforces the per-blob byte ceiling on the complete ciphertext', async () => {
     const service = store()
-    await expect(service.publish({ pairingId: pairingA, ciphertext: new Uint8Array(9), now }))
+    const release = vi.fn(async () => {})
+    await expect(service.publish({
+      pairingId: pairingA, ciphertext: new Uint8Array(9), now,
+      quota: { id: 'quota-oversize', release },
+    }))
       .rejects.toMatchObject({ code: 'ATTACHMENT_LIMIT_EXCEEDED' })
+    expect(release).toHaveBeenCalledOnce()
     await expect(service.publish({ pairingId: pairingA, ciphertext: new Uint8Array(8), now }))
       .resolves.toMatchObject({ byteLength: 8 })
   })
@@ -109,8 +160,13 @@ describe('Remote attachment blob store', () => {
     const service = store()
     await service.publish({ pairingId: pairingA, ciphertext: Uint8Array.of(1), now })
     await service.publish({ pairingId: pairingA, ciphertext: Uint8Array.of(2), now })
-    await expect(service.publish({ pairingId: pairingA, ciphertext: Uint8Array.of(3), now }))
+    const release = vi.fn(async () => {})
+    await expect(service.publish({
+      pairingId: pairingA, ciphertext: Uint8Array.of(3), now,
+      quota: { id: 'quota-capacity', release },
+    }))
       .rejects.toMatchObject({ code: 'ATTACHMENT_CAPACITY' })
+    expect(release).toHaveBeenCalledOnce()
     await service.publish({ pairingId: pairingA, ciphertext: Uint8Array.of(4), now: now + 2_000 })
     expect(service.observe()).toHaveLength(1)
   })
@@ -168,6 +224,26 @@ describe('Remote attachment blob store', () => {
     await service.publish({ pairingId: pairingA, ciphertext: Uint8Array.of(1), now })
     service.dispose()
     expect(service.observe()).toHaveLength(0)
+  })
+
+  it('contains a rejected quota release during disposal expiry cleanup', async () => {
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const service = store()
+    await service.publish({
+      pairingId: pairingA,
+      ciphertext: Uint8Array.of(1),
+      now,
+      quota: { id: 'quota-dispose', release: async () => { throw new Error('quota backend unavailable') } },
+    })
+
+    service.dispose()
+    await vi.waitFor(() => {
+      expect(reported).toHaveBeenCalledWith(
+        '[remote-attachments] quota release failed:',
+        expect.objectContaining({ message: 'quota backend unavailable' }),
+      )
+    })
+    reported.mockRestore()
   })
 
   it('defaults bounds to the accepted protocol ceilings and disposes with the owning fiber', async () => {

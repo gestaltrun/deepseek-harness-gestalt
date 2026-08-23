@@ -67,7 +67,10 @@ function testAuthority(): unknown {
         authenticate: async ({ headers }: { headers: { [key: string]: string | string[] | undefined } }) => {
           const value = headers['x-gestalt-pairing-id'] ?? headers['x-test-pairing']
           if (typeof value !== 'string') throw new Error('pairing header is required')
-          return parsePersonalPairingId(value)
+          return {
+            pairingId: parsePersonalPairingId(value),
+            admit: async () => ({ id: 'loader-quota', release: async () => {} }),
+          }
         },
       })
     },

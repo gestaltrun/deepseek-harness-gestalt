@@ -37,6 +37,8 @@ export const PLATFORM_PRODUCTION_REQUIRED_ENV = [
   'PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES',
   'PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS',
   'PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS',
+  'PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS',
+  'PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY',
   'PLATFORM_TOKEN_SIGNING_KEY',
   'PLATFORM_POLLING_SIGNING_KEY',
 ] as const
@@ -98,6 +100,8 @@ export interface OperatedPlatformConfig {
     maxBlobBytes: number
     capabilityLifetimeMs: number
     maxRetainedBlobs: number
+    sweepIntervalMs: number
+    cleanupConcurrency: number
   }
   oss: OperatedOssConfig
   tokenSigningKey: Uint8Array
@@ -239,6 +243,8 @@ export function loadOperatedPlatformConfig(
         REMOTE_PROTOCOL_LIMITS.attachmentCapabilityLifetimeMs,
       ),
       maxRetainedBlobs: positiveIntegerEnv(env, 'PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS'),
+      sweepIntervalMs: positiveIntegerEnv(env, 'PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS'),
+      cleanupConcurrency: positiveIntegerEnv(env, 'PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY'),
     },
     oss: validateOperatedOssConfig({
       endpoint: requiredPlatformEnv('PLATFORM_OSS_ENDPOINT', env),

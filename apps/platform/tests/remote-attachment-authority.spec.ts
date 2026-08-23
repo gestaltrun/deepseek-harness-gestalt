@@ -23,12 +23,20 @@ describe('operated remote attachment authority', () => {
         presentation: { name: 'Real phone', platform: 'ios' as const } },
     }))
     const ownsConfirmedPairing = vi.fn(async () => true)
+    const admitAttachmentBlob = vi.fn(async () => ({ reservationId: 'quota-authorized' }))
+    const releaseAttachmentBlob = vi.fn(async () => {})
     const authority = new OperatedRemoteAttachmentAuthority(
       { currentInstallation },
       { ownsConfirmedPairing },
+      { admitAttachmentBlob, releaseAttachmentBlob },
     )
 
-    await expect(authority.authenticate({ headers: authenticationHeaders })).resolves.toBe(pairingId)
+    const authenticated = await authority.authenticate({ headers: authenticationHeaders })
+    expect(authenticated.pairingId).toBe(pairingId)
+    const quota = await authenticated.admit(17)
+    expect(quota.id).toBe('quota-authorized')
+    await quota.release()
+    await quota.release()
     expect(currentInstallation).toHaveBeenCalledWith({
       accessToken: 'current-access',
       proof: { jti: 'proof-jti', issuedAt: 1234, signature: 'proof-signature' },
@@ -36,6 +44,8 @@ describe('operated remote attachment authority', () => {
     expect(ownsConfirmedPairing).toHaveBeenCalledWith(
       'account-authorized', 'mobile-authorized', pairingId,
     )
+    expect(admitAttachmentBlob).toHaveBeenCalledWith(expect.objectContaining({ bytes: 17 }))
+    expect(releaseAttachmentBlob).toHaveBeenCalledTimes(1)
   })
 
   it('rejects a selector missing durable Installation membership', async () => {
@@ -47,7 +57,7 @@ describe('operated remote attachment authority', () => {
         },
         installation: { id: parseInstallationId('mobile-hostile'), kind: 'mobile' },
       }),
-    } as never, { ownsConfirmedPairing: async () => false })
+    } as never, { ownsConfirmedPairing: async () => false }, {} as never)
 
     await expect(authority.authenticate({ headers: authenticationHeaders }))
       .rejects.toMatchObject({ status: 403, code: 'ATTACHMENT_PAIRING_DENIED' })
@@ -58,6 +68,7 @@ describe('operated remote attachment authority', () => {
     const authority = new OperatedRemoteAttachmentAuthority(
       { currentInstallation },
       { ownsConfirmedPairing: vi.fn() },
+      {} as never,
     )
     const { 'x-gestalt-pairing-selector': _selector, ...headers } = authenticationHeaders
     await expect(authority.authenticate({ headers }))

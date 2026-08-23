@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import { parsePersonalPairingId, RemoteAccessError } from '@deepseek-ai/dsh-remote-access'
 import {
   deriveCompanionAttachmentKey,
   openCompanionAttachment,
@@ -11,7 +11,12 @@ import {
   sealCompanionAttachment,
   type CompanionOfferAttachmentOperation,
 } from '@deepseek-ai/dsh-remote-protocol'
-import { RemoteAttachmentStoreProvider, type RemoteAttachmentStoreOptions } from '../src/index.ts'
+import {
+  RemoteAttachmentError,
+  RemoteAttachmentStoreProvider,
+  type RemoteAttachmentQuotaReservation,
+  type RemoteAttachmentStoreOptions,
+} from '../src/index.ts'
 import { apply } from '../src/http.ts'
 import {
   downloadCompanionAttachment,
@@ -291,7 +296,35 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(store.observe()).toHaveLength(0)
   })
 
-  it('leaves a finished consume body intact when delete-after-finish fails, so a later consume still delivers the blob', async () => {
+  it('admits only one concurrent HTTP consume while the winning response remains in flight', async () => {
+    const { routes } = await start()
+    const sealed = await mobileSeal(attachmentKey, Uint8Array.of(3, 2, 1), ready)
+    const uploadRoute = routes.get('/v1/remote-attachments')
+    const consumeRoute = routes.get('/v1/remote-attachments/consume')
+    if (uploadRoute === undefined || consumeRoute === undefined) throw new Error('attachment routes were not registered')
+    const upload = stubResponse()
+    await uploadRoute.handler(
+      streamingRequest({ 'x-test-pairing': 'pairing-a' }, [sealed.ciphertext]),
+      upload.res,
+    )
+    const grant = JSON.parse(new TextDecoder().decode(concatBytes(upload.body))) as { capability: string }
+    const request = (): IncomingMessage => streamingRequest(
+      { 'x-test-pairing': 'pairing-a' },
+      [new TextEncoder().encode(JSON.stringify({ capability: grant.capability }))],
+    )
+    const first = heldResponse()
+    const firstConsume = consumeRoute.handler(request(), first.res)
+    await first.written
+    const second = stubResponse()
+    await consumeRoute.handler(request(), second.res)
+
+    const statuses = [first.status, second.status].sort()
+    first.finish()
+    await firstConsume
+    expect(statuses).toEqual([200, 404])
+  })
+
+  it('never replays a delivered body when consume settlement cleanup fails', async () => {
     const { routes, store } = await start()
     const sealed = await mobileSeal(attachmentKey, Uint8Array.of(4, 5, 6), ready)
     const uploadRoute = routes.get('/v1/remote-attachments')
@@ -304,7 +337,11 @@ describe('Remote attachment HTTP assembled transfer', () => {
     const grant = JSON.parse(new TextDecoder().decode(concatBytes(uploadResponse.body))) as { capability: string }
     const consumeRoute = routes.get('/v1/remote-attachments/consume')
     if (consumeRoute === undefined) throw new Error('consume route was not registered')
-    vi.spyOn(store, 'revoke').mockRejectedValueOnce(new Error('delete after finish failed'))
+    const consume = store.consume.bind(store)
+    vi.spyOn(store, 'consume').mockImplementationOnce(async (input) => {
+      const claimed = await consume(input)
+      return { ...claimed, complete: async () => { throw new Error('settlement cleanup failed') } }
+    })
     const first = stubResponse()
     await consumeRoute.handler(
       streamingRequest(
@@ -315,7 +352,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
     )
     expect(first.status).toBe(200)
     expect(concatBytes(first.body)).toEqual(sealed.ciphertext)
-    expect(store.observe()).toHaveLength(1)
+    expect(store.observe()).toHaveLength(0)
     const retry = stubResponse()
     await consumeRoute.handler(
       streamingRequest(
@@ -324,8 +361,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
       ),
       retry.res,
     )
-    expect(retry.status).toBe(200)
-    expect(concatBytes(retry.body)).toEqual(sealed.ciphertext)
+    expect(retry.status).toBe(404)
     expect(store.observe()).toHaveLength(0)
   })
 
@@ -433,6 +469,56 @@ describe('Remote attachment HTTP assembled transfer', () => {
     })
     expect(exploded.status).toBe(500)
     expect(await errorBody(exploded)).toMatchObject({ code: 'INTERNAL_ERROR' })
+  })
+
+  it('admits the product upload through Remote Access quota and preserves capacity retry guidance', async () => {
+    const admit = vi.fn(async () => {
+      throw new RemoteAccessError('PLATFORM_CAPACITY', 'Platform attachment capacity is full', 7)
+    })
+    const { origin } = await start({ admit })
+    const response = await fetch(`${origin}/v1/remote-attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
+      body: Uint8Array.of(1, 2, 3),
+    })
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBe('7')
+    expect(await errorBody(response)).toMatchObject({ code: 'PLATFORM_CAPACITY' })
+    expect(admit).toHaveBeenCalledWith(3)
+  })
+
+  it('preserves non-capacity Remote Access failures as conflicts', async () => {
+    const { origin } = await start({
+      admit: async () => {
+        throw new RemoteAccessError('PAIRING_PENDING_INVALID', 'Pairing is unavailable')
+      },
+    })
+    const response = await fetch(`${origin}/v1/remote-attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
+      body: Uint8Array.of(1),
+    })
+
+    expect(response.status).toBe(409)
+    expect(await errorBody(response)).toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+  })
+
+  it.each([
+    ['class error', new RemoteAttachmentError('PLATFORM_CAPACITY', 'Attachment capacity is full', 9)],
+    ['structural error', { code: 'ATTACHMENT_EMPTY', message: 'Attachment body is empty' }],
+  ])('projects a %s from a durable store', async (_label, failure) => {
+    const { origin, store } = await start()
+    vi.spyOn(store, 'publish').mockRejectedValueOnce(failure)
+    const response = await fetch(`${origin}/v1/remote-attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'pairing-a' },
+      body: Uint8Array.of(1),
+    })
+
+    expect(response.status).toBe(failure instanceof RemoteAttachmentError ? 429 : 400)
+    expect(await errorBody(response)).toMatchObject({ code: failure.code })
+    if (failure instanceof RemoteAttachmentError) expect(response.headers.get('retry-after')).toBe('9')
   })
 
   it('accepts non-Buffer stream chunks at the HTTP boundary', async () => {
@@ -553,6 +639,32 @@ function failingResponse(failure: unknown = new Error('mid-write failure')): { r
   return { res: emitter as unknown as ServerResponse }
 }
 
+function heldResponse(): {
+  res: ServerResponse
+  status: number
+  written: Promise<void>
+  finish(): void
+} {
+  let resolveWritten!: () => void
+  const written = new Promise<void>((resolve) => { resolveWritten = resolve })
+  const holder: { status: number; res: ServerResponse; written: Promise<void>; finish(): void } = {
+    status: 0,
+    res: undefined as never,
+    written,
+    finish: () => {},
+  }
+  const emitter = new EventEmitter()
+  Object.assign(emitter, {
+    writeHead(status: number) { holder.status = status; return emitter },
+    setHeader() { return emitter },
+    end() { resolveWritten(); return emitter },
+  })
+  Object.defineProperty(emitter, 'headersSent', { get() { return holder.status !== 0 } })
+  holder.finish = () => { emitter.emit('finish') }
+  holder.res = emitter as unknown as ServerResponse
+  return holder
+}
+
 function concatBytes(chunks: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0))
   let offset = 0
@@ -563,7 +675,10 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
   return out
 }
 
-async function start(options: { store?: Partial<RemoteAttachmentStoreOptions> } = {}): Promise<{
+async function start(options: {
+  store?: Partial<RemoteAttachmentStoreOptions>
+  admit?: (bytes: number) => Promise<RemoteAttachmentQuotaReservation>
+} = {}): Promise<{
   origin: string
   store: RemoteAttachmentStoreProvider
   responses: Uint8Array[]
@@ -586,7 +701,10 @@ async function start(options: { store?: Partial<RemoteAttachmentStoreOptions> } 
         const value = headers['x-test-pairing'] ?? headers['x-gestalt-pairing-id']
         if (typeof value !== 'string') throw new Error('pairing header is required')
         if (value === 'explode') throw new Error('authority exploded')
-        return parsePersonalPairingId(value)
+        return {
+          pairingId: parsePersonalPairingId(value),
+          admit: options.admit ?? (async () => ({ id: crypto.randomUUID(), release: async () => {} })),
+        }
       },
     },
     webServer: {

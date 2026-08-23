@@ -75,6 +75,8 @@ jobs:
           PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES: '104857600'
           PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS: '900000'
           PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS: '10000'
+          PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS: '60000'
+          PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY: '8'
           PLATFORM_TOKEN_SIGNING_KEY: ${{ secrets.PLATFORM_TOKEN_SIGNING_KEY }}
           PLATFORM_POLLING_SIGNING_KEY: ${{ secrets.PLATFORM_POLLING_SIGNING_KEY }}
           PLATFORM_ECS_SSH_KEY: ${{ secrets.PLATFORM_ECS_SSH_KEY }}
@@ -144,7 +146,7 @@ jobs:
               'dnf -y install docker >/dev/null 2>&1 || yum -y install docker >/dev/null 2>&1; systemctl enable --now docker'
             gzip -dc /tmp/platform.tar.gz | ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" 'docker load'
             ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              "docker run --rm --network host \
+              "set -euo pipefail; docker run --rm --network host \
                 -e PLATFORM_OSS_ENDPOINT=$(printf %q "$PLATFORM_OSS_ENDPOINT") \
                 -e PLATFORM_OSS_BUCKET=$(printf %q "$PLATFORM_OSS_BUCKET") \
                 -e PLATFORM_OSS_AUTH=$(printf %q "$PLATFORM_OSS_AUTH") \
@@ -189,6 +191,8 @@ jobs:
                 -e PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES=104857600 \
                 -e PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS=900000 \
                 -e PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS=10000 \
+                -e PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS=60000 \
+                -e PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY=8 \
                 -e PLATFORM_TOKEN_SIGNING_KEY=$(printf %q "$PLATFORM_TOKEN_SIGNING_KEY") \
                 -e PLATFORM_POLLING_SIGNING_KEY=$(printf %q "$PLATFORM_POLLING_SIGNING_KEY") \
                 ${IMAGE}"

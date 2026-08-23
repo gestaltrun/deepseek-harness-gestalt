@@ -1941,7 +1941,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/platform/remote-attachments/src/index.ts:111`](../packages/platform/remote-attachments/src/index.ts)
+Source: [`packages/platform/remote-attachments/src/index.ts:138`](../packages/platform/remote-attachments/src/index.ts)
 
 <a id="deepseek-aidsh-repeat-tool-reminder"></a>
 

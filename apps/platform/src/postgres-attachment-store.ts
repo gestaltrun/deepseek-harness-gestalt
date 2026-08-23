@@ -7,7 +7,9 @@ import {
   RemoteAttachmentError,
   RemoteAttachmentStoreService,
   type RemoteAttachmentBlob,
+  type RemoteAttachmentConsumption,
   type RemoteAttachmentGrant,
+  type RemoteAttachmentQuotaReservation,
 } from '@deepseek-ai/dsh-remote-attachments'
 import {
   parseAttachmentCapability,
@@ -85,6 +87,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     pairingId: PersonalPairingId
     ciphertext: Uint8Array
     now: number
+    quota?: RemoteAttachmentQuotaReservation
   }): Promise<RemoteAttachmentGrant> {
     if (input.ciphertext.byteLength === 0) {
       throw new RemoteAttachmentError('ATTACHMENT_EMPTY', 'Remote attachment ciphertext must not be empty')
@@ -105,6 +108,7 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
         [this.databaseIdentity],
       )
       if (Number(counted.rows[0]?.count ?? 0) >= this.maxRetainedBlobs) {
+        await input.quota?.release()
         throw new RemoteAttachmentError('ATTACHMENT_CAPACITY', 'Remote attachment store is at capacity')
       }
       await client.query(
@@ -130,8 +134,8 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
     pairingId: PersonalPairingId
     capability: AttachmentCapability
     now: number
-  }): Promise<Uint8Array> {
-    return await this.transaction(async (client) => {
+  }): Promise<RemoteAttachmentConsumption> {
+    const row = await this.transaction(async (client) => {
       const row = await this.requireRow(client, input, true)
       const deleted = await client.query(
         'DELETE FROM remote_attachment_blobs WHERE database_identity = $1 AND capability_digest = $2',
@@ -140,8 +144,28 @@ export class PostgresRemoteAttachmentStore extends RemoteAttachmentStoreService 
       if (deleted.rowCount !== 1) {
         throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability was already consumed')
       }
-      return new Uint8Array(row.ciphertext)
+      return row
     })
+    let settled = false
+    return {
+      ciphertext: new Uint8Array(row.ciphertext),
+      complete: () => {
+        settled = true
+        return Promise.resolve()
+      },
+      abandon: async (now) => {
+        if (settled) return
+        settled = true
+        if (now >= row.expires_at) return
+        await this.pool.query(
+          `INSERT INTO remote_attachment_blobs (
+             database_identity, capability_digest, pairing_id, ciphertext, expires_at
+           ) VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT (database_identity, capability_digest) DO NOTHING`,
+          [this.databaseIdentity, row.capability_digest, row.pairing_id, Buffer.from(row.ciphertext), row.expires_at],
+        )
+      },
+    }
   }
 
   override async revoke(input: { pairingId: PersonalPairingId; capability: AttachmentCapability }): Promise<void> {

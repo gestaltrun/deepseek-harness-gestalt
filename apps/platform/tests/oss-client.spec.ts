@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { Readable } from 'node:stream'
 
 const oss = vi.hoisted(() => ({
   options: undefined as Record<string, unknown> | undefined,
   put: vi.fn(async () => ({})),
   get: vi.fn(async () => ({ content: Buffer.from([1, 2, 3]) })),
+  getStream: vi.fn(async () => ({ stream: undefined as unknown, res: { headers: {} } })),
   delete: vi.fn(async () => ({})),
   getBucketLifecycle: vi.fn(async () => ({ rules: [{
     id: 'unrelated', prefix: 'logs/', status: 'Enabled', days: 30, date: '',
@@ -16,6 +18,7 @@ vi.mock('ali-oss', () => ({
     constructor(options: Record<string, unknown>) { oss.options = options }
     put = oss.put
     get = oss.get
+    getStream = oss.getStream
     delete = oss.delete
     getBucketLifecycle = oss.getBucketLifecycle
     putBucketLifecycle = oss.putBucketLifecycle
@@ -33,6 +36,11 @@ beforeEach(() => {
   oss.put.mockClear()
   oss.get.mockClear()
   oss.delete.mockClear()
+  oss.getStream.mockReset()
+  oss.getStream.mockResolvedValue({
+    stream: Readable.from([Buffer.from([1, 2, 3])]),
+    res: { headers: { 'content-length': '3' } },
+  })
   oss.getBucketLifecycle.mockReset()
   oss.getBucketLifecycle.mockResolvedValue({ rules: [{
     id: 'unrelated', prefix: 'logs/', status: 'Enabled', days: 30, date: '',
@@ -46,7 +54,7 @@ describe('ECS RAM role OSS client', () => {
     const requests: Array<{ url: string; init?: RequestInit }> = []
     const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      requests.push({ url, init })
+      requests.push({ url, ...(init === undefined ? {} : { init }) })
       if (url.endsWith('/latest/api/token')) return new Response('metadata-token')
       return new Response(JSON.stringify({
         Code: 'Success', AccessKeyId: 'temporary-id', AccessKeySecret: 'temporary-secret', SecurityToken: 'sts-token',
@@ -75,9 +83,24 @@ describe('ECS RAM role OSS client', () => {
     expect(oss.put).toHaveBeenCalledWith('remote/key', Buffer.from([1, 2]), {
       headers: { 'x-oss-object-acl': 'private', 'x-oss-meta-expires-at': '2000' },
     })
-    await expect(client.getObject('remote/key')).resolves.toEqual(Uint8Array.of(1, 2, 3))
+    await expect(client.getObject('remote/key', 3)).resolves.toEqual(Uint8Array.of(1, 2, 3))
     await client.deleteObject('remote/key')
     expect(oss.delete).toHaveBeenCalledWith('remote/key')
+  })
+
+  it('rejects an oversized download from headers before buffering its stream', async () => {
+    let pulls = 0
+    oss.getStream.mockResolvedValueOnce({
+      stream: Readable.from((async function* () { pulls += 1; yield Buffer.alloc(4) })()),
+      res: { headers: { 'content-length': '4' } },
+    })
+    const client = await createEcsRamRoleOssClient({
+      endpoint: 'oss-cn-hangzhou-internal.aliyuncs.com', bucket: 'gestalt-secret',
+      auth: 'ecs-ram-role/gestalt-vpc', objectPrefix: 'remote-attachments/test', timeoutMs: 10,
+    }, metadataCredentials)
+
+    await expect(client.getObject('remote/key', 3)).rejects.toThrow('length')
+    expect(pulls).toBe(0)
   })
 
   it('rejects non-role auth, unsafe endpoints, invalid buckets, metadata failures, and malformed credentials', async () => {
@@ -118,7 +141,7 @@ describe('ECS RAM role OSS client', () => {
       prefix: 'remote-attachments/production/',
       status: 'Enabled',
       expiration: { days: '1' },
-    }] })
+    }] } as never)
     await ensureEcsRamRoleOssLifecycle({
       endpoint: 'oss-cn-hangzhou-internal.aliyuncs.com', bucket: 'gestalt-secret', auth: 'ecs-ram-role/role',
       objectPrefix: 'remote-attachments/production', timeoutMs: 10,
@@ -138,4 +161,12 @@ describe('ECS RAM role OSS client', () => {
 
 function requestUrl(input: string | URL | Request): string {
   return typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+}
+
+async function metadataCredentials(input: string | URL | Request): Promise<Response> {
+  return requestUrl(input).endsWith('/token')
+    ? new Response('token')
+    : new Response(JSON.stringify({
+      Code: 'Success', AccessKeyId: 'id', AccessKeySecret: 'secret', SecurityToken: 'token',
+    }))
 }

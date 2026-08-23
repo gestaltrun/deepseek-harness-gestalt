@@ -116,14 +116,6 @@ export async function launchOperatedPlatform(
     })
     await remoteAccess.migrate()
     const oss = await createOss(config.oss)
-    const remoteAttachments = new OssRemoteAttachmentStore(
-      context,
-      environment.databaseIdentity,
-      postgres,
-      oss,
-      { ...config.remoteAttachments, objectPrefix: config.oss.objectPrefix },
-    )
-    await remoteAttachments.migrate()
     const github = new GitHubOAuthIdentityProvider({
       environment,
       credential: { reference: environment.credentialReference, secret: config.githubClientSecret },
@@ -161,16 +153,32 @@ export async function launchOperatedPlatform(
         maxPendingDeliveries: config.relay.maxPendingDeliveries,
       },
     })
-    new PersonalPairingProvider(context, {
+    const personalPairing = new PersonalPairingProvider(context, {
       account: context.platformAccount,
       handshake: endpointOnlyHandshake(),
       relay,
       authority: remoteAccess.authority,
       pairingLinkOrigin: `${environment.origin}/pair`,
     })
+    const remoteAttachments = new OssRemoteAttachmentStore(
+      context,
+      environment.databaseIdentity,
+      postgres,
+      oss,
+      {
+        ...config.remoteAttachments,
+        objectPrefix: config.oss.objectPrefix,
+        capacityRetryAfterSeconds: Math.max(1, Math.ceil(config.relay.capacityRetryAfterMs / 1_000)),
+        releaseQuotaReservation: async (reservationId) => {
+          await personalPairing.releaseAttachmentReservation(reservationId)
+        },
+        activePairingIds: async pairingIds => await remoteAccess.authority.filterConfirmedPairingIds(pairingIds),
+      },
+    )
+    await remoteAttachments.migrate()
     context.effect(() => context.provide(
       'remoteAttachmentAuthority',
-      new OperatedRemoteAttachmentAuthority(context.platformAccount, remoteAccess.authority),
+      new OperatedRemoteAttachmentAuthority(context.platformAccount, remoteAccess.authority, personalPairing),
     ), 'platform: operated remote attachment authority')
     await context.plugin({
       Config: RemoteAccessHttpConfig,

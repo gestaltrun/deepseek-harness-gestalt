@@ -1,6 +1,7 @@
 /** Alibaba Cloud OSS client backed by an ECS RAM role and IMDSv2 credentials. */
 
 import OSS from 'ali-oss'
+import { Readable } from 'node:stream'
 import {
   validateOperatedOssConfig,
   type OperatedOssConfig,
@@ -21,7 +22,7 @@ export { parseEcsRamRole } from './oss-config.ts'
 /** Minimal ciphertext-object operations owned by the Platform attachment store. */
 export interface OssObjectClient {
   putObject(key: string, ciphertext: Uint8Array, expiresAt: number): Promise<void>
-  getObject(key: string): Promise<Uint8Array>
+  getObject(key: string, expectedByteLength: number): Promise<Uint8Array>
   deleteObject(key: string): Promise<void>
 }
 
@@ -46,11 +47,30 @@ export async function createEcsRamRoleOssClient(
         },
       })
     },
-    async getObject(key) {
-      const result = await client.get(key)
-      const content: unknown = result.content
-      if (!(content instanceof Uint8Array)) throw new TypeError('OSS returned invalid attachment ciphertext')
-      return new Uint8Array(content)
+    async getObject(key, expectedByteLength) {
+      const result = await client.getStream(key)
+      const stream: unknown = result.stream
+      if (!(stream instanceof Readable)) throw new TypeError('OSS returned an invalid attachment ciphertext stream')
+      const declared = contentLength(result.res.headers)
+      if (declared !== expectedByteLength) {
+        stream.destroy()
+        throw new TypeError('OSS attachment ciphertext length does not match PostgreSQL authority')
+      }
+      const chunks: Buffer[] = []
+      let received = 0
+      for await (const chunk of stream) {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array)
+        received += bytes.byteLength
+        if (received > expectedByteLength) {
+          stream.destroy()
+          throw new TypeError('OSS attachment ciphertext exceeded PostgreSQL authority')
+        }
+        chunks.push(bytes)
+      }
+      if (received !== expectedByteLength) {
+        throw new TypeError('OSS attachment ciphertext length does not match PostgreSQL authority')
+      }
+      return new Uint8Array(Buffer.concat(chunks, received))
     },
     async deleteObject(key) { await client.delete(key) },
   }
@@ -160,6 +180,17 @@ function parseTemporaryCredentials(value: unknown): OssTemporaryCredentials {
 function requiredString(value: unknown, name: string): string {
   if (typeof value !== 'string' || value === '') throw new TypeError(`OSS RAM role ${name} is invalid`)
   return value
+}
+
+function contentLength(headers: unknown): number {
+  if (!isRecord(headers)) throw new TypeError('OSS attachment response headers are invalid')
+  const value = headers['content-length']
+  if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
+    throw new TypeError('OSS attachment content-length is invalid')
+  }
+  const length = Number(value)
+  if (!Number.isSafeInteger(length)) throw new TypeError('OSS attachment content-length is invalid')
+  return length
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

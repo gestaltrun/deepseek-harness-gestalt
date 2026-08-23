@@ -16,9 +16,9 @@ Remote Access 拥有配对和附件上限，并把 `MemoryPlatformCapacityGate` 
 
 每小时挑战、并发附件和每日上传窗口与 50 个配对快照一起放在 `PersonalPairingTransactionState` 中，因此共享同一个 `PersonalPairingAuthorityStore` 的两个提供方执行同一份账号完整上限。`createChallenge` 要求非空 `clientIp`；配对挑战 HTTP 只提供 `req.socket.remoteAddress`。`x-forwarded-for` 可被客户端伪造，因此被忽略；可信代理映射仍属部署工作。HTTP 的 `QUOTA` 与 `PLATFORM_CAPACITY` 映射为状态 429、JSON 秒级 `retryAfter` 和 `Retry-After` 响应头。HTTP `admit-blob` 对负的 `bytes` 返回 400。Relay 的 `tryAcquire` 为新 attachment 持有一个水位槽，替换时转移持有，并在关闭或接入失败时释放。
 
-各计数器的存储与完整性：安装是 `AccountBackend` 行，在 `consumeAuthorizedAttempt` 内计数；50 个配对、每小时账号与 IP 挑战、并发附件和每日上传字节是共享存储事务映射；20 条连接是进程内 `connections` 映射，在后端解析会话之后按账号计数；容量水位是可选的构造注入。`apps/platform` 启动时构造的 `PlatformAccount` 没有 `capacity` 字段，也不挂载 Remote Access 或 Relay，因此该组合不会卸载。
+各计数器的存储与完整性：安装是 `AccountBackend` 行，在 `consumeAuthorizedAttempt` 内计数；50 个配对、每小时账号与 IP 挑战、并发附件和每日上传字节是共享存储事务映射；20 条连接是进程内 `connections` 映射，在后端解析会话之后按账号计数；容量水位是可选的构造注入。`apps/platform` 会挂载 Account、Remote Access、Relay 与加密附件，但不会把可选的共享容量水位传给 Account 或 Personal Pairing。OSS 附件 store 与 Relay 仍会执行配置的整体容量与重试延迟。
 
-实现不包含允许名单、账号数量上限、自动扩容或运营停用控制台。附件 HTTP 操作只做配额准入；加密附件传输仍由 [Mobile Companion 提案](../../proposed/feature/2026-08-17-mobile-companion.md)拥有。
+实现不包含允许名单、账号数量上限、自动扩容或运营停用控制台。产品附件 HTTP 会在 OSS publish 前调用 `admitAttachmentBlob`，并在 consume、过期、pairing revocation 或显式 revoke 后释放持久 reservation；字节存储与清理由[实际运行的 OSS 决策](../architecture/2026-08-23-operated-oss-attachment-authority.md)拥有。
 
 ## Alternatives considered
 
@@ -32,17 +32,17 @@ Remote Access 拥有配对和附件上限，并把 `MemoryPlatformCapacityGate` 
 
 **把每小时和附件窗口留在提供方实例上。** 共享同一个 authority 存储的两个提供方会让每个窗口翻倍。共享事务映射与 50 个配对计数一致。
 
-**为 20 条连接上限共享 Redis 计数器。** 20 条连接上限是账号进程内映射，因为 `apps/platform` 启动时仍只有 Account、没有配对或 Relay。部署共享计数器仍是双实例证据缺口。
+**为 20 条连接上限共享 Redis 计数器。** 20 条连接上限仍是账号进程内映射。部署共享计数器仍是双实例证据缺口。
 
 **把配额数字做成 cordis.yml Config。** Companion 提案把这些整数定为安全不变量。只有在线 WSS 水位和容量重试延迟保持为部署校验 Config。
 
 **在容量到达时卸载已建立流或断开在线 attachment。** 双实例部署会保留现有连接，并拒绝新的获取，直到运营扩容。
 
-**在这里实现产品附件存储。** 该协议属于加密附件 capability。按声明大小准入仍然执行开放注册上限。
+**在这里实现产品附件存储。** 该协议属于[实际运行的加密附件 capability](../architecture/2026-08-23-operated-oss-attachment-authority.md)。按声明大小准入仍然执行开放注册上限。
 
 ## Consequences
 
-开放注册可以保持开放且没有允许名单，同时单个账号或 IP 不能无界保留安装、配对或附件。运营仍需手工扩展已购买的两台实例；CloudMonitor 仪表盘、生产共享容量水位、可信代理客户端 IP、跨实例连接计数器，以及真实附件产品路径，仍属部署或后续工作。尚未见过 `pollLogin` 的冷账号实例在 `getSession` 绑定会话后仍执行 20 条连接上限，并拒绝未知 id。每安装的在线、待确认和保留配对上限与账号范围配额同时生效；清理失败墓碑填满十六条记录上限时，安装可能先碰到 `PAIRING_RESOURCE_LIMIT` 再碰到 `QUOTA`。
+开放注册可以保持开放且没有允许名单，同时单个账号或 IP 不能无界保留安装、配对或附件。运营仍需手工扩展已购买的两台实例；CloudMonitor 仪表盘、生产共享容量水位、可信代理客户端 IP 与跨实例连接计数器仍属部署工作。尚未见过 `pollLogin` 的冷账号实例在 `getSession` 绑定会话后仍执行 20 条连接上限，并拒绝未知 id。每安装的在线、待确认和保留配对上限与账号范围配额同时生效；清理失败墓碑填满十六条记录上限时，安装可能先碰到 `PAIRING_RESOURCE_LIMIT` 再碰到 `QUOTA`。
 
 ## Testing
 

@@ -2,11 +2,15 @@
 
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-host-webserver'
-import type { PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import { writeRetryAfterError } from '@deepseek-ai/dsh-host-webserver'
+import { RemoteAccessError, type PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { parseAttachmentCapability, type AttachmentCapability } from '@deepseek-ai/dsh-remote-protocol'
 import z from '@deepseek-ai/schemastery'
-import { RemoteAttachmentError, type RemoteAttachmentErrorCode } from './index.ts'
+import {
+  RemoteAttachmentError,
+  type RemoteAttachmentErrorCode,
+  type RemoteAttachmentQuotaReservation,
+} from './index.ts'
 
 const MAX_JSON_BYTES = 4 * 1024
 
@@ -30,9 +34,12 @@ export interface RemoteAttachmentAuthority {
   /**
    * Authenticate one attachment request to its owning Personal Pairing.
    * @param input - complete untrusted request headers.
-   * @returns the Personal Pairing whose scope governs the capability.
+   * @returns pairing authority plus Account-complete blob admission.
    */
-  authenticate(input: { headers: IncomingHttpHeaders }): Promise<PersonalPairingId>
+  authenticate(input: { headers: IncomingHttpHeaders }): Promise<{
+    pairingId: PersonalPairingId
+    admit(bytes: number): Promise<RemoteAttachmentQuotaReservation>
+  }>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -48,12 +55,13 @@ const STORE_FAILURE_STATUS: Record<RemoteAttachmentErrorCode, number> = {
   ATTACHMENT_PAIRING_MISMATCH: 403,
   ATTACHMENT_LIMIT_EXCEEDED: 413,
   ATTACHMENT_CAPACITY: 503,
+  PLATFORM_CAPACITY: 429,
 }
 
 type AttachmentRouteHandler = (
   req: IncomingMessage,
   res: ServerResponse,
-  pairingId: PersonalPairingId,
+  authorization: Awaited<ReturnType<RemoteAttachmentAuthority['authenticate']>>,
 ) => Promise<void>
 
 /** Register the bounded attachment blob routes over the mounted blob store. */
@@ -74,10 +82,16 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/v1/remote-attachments',
-    handler: route(async (req, res, pairingId) => {
+    handler: route(async (req, res, authorization) => {
       const ciphertext = await readBounded(req, store.maxBlobBytes, () =>
         new RemoteAttachmentHttpError(413, 'ATTACHMENT_LIMIT_EXCEEDED', 'Remote attachment exceeds the per-blob byte ceiling'))
-      const grant = await store.publish({ pairingId, ciphertext: new Uint8Array(ciphertext), now: Date.now() })
+      const quota = await authorization.admit(ciphertext.byteLength)
+      const grant = await store.publish({
+        pairingId: authorization.pairingId,
+        ciphertext: new Uint8Array(ciphertext),
+        now: Date.now(),
+        quota,
+      })
       answerJson(res, 201, {
         capability: grant.capability,
         byteLength: grant.byteLength,
@@ -88,20 +102,27 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/v1/remote-attachments/consume',
-    handler: route(async (req, res, pairingId) => {
+    handler: route(async (req, res, authorization) => {
       const body = await readJson(req)
       const capability = parseCapability(body.capability)
-      const ciphertext = await store.inspect({ pairingId, capability, now: Date.now() })
-      await writeOctetStream(res, ciphertext)
-      await store.revoke({ pairingId, capability })
+      const consumption = await store.consume({ pairingId: authorization.pairingId, capability, now: Date.now() })
+      let delivered = false
+      try {
+        await writeOctetStream(res, consumption.ciphertext)
+        delivered = true
+        await consumption.complete()
+      } catch (error) {
+        if (!delivered) await consumption.abandon(Date.now())
+        throw error
+      }
     }),
   }), 'remote-attachments: consume route')
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/v1/remote-attachments/revoke',
-    handler: route(async (req, res, pairingId) => {
+    handler: route(async (req, res, authorization) => {
       const body = await readJson(req)
-      await store.revoke({ pairingId, capability: parseCapability(body.capability) })
+      await store.revoke({ pairingId: authorization.pairingId, capability: parseCapability(body.capability) })
       res.writeHead(204).end()
     }),
   }), 'remote-attachments: revoke route')
@@ -186,6 +207,15 @@ function answerJson(res: ServerResponse, status: number, value: unknown): void {
 
 function answerError(res: ServerResponse, error: unknown): void {
   if (res.headersSent) return
+  if (error instanceof RemoteAccessError) {
+    writeRetryAfterError(res, error, error.code === 'QUOTA' || error.code === 'PLATFORM_CAPACITY' ? 429 : 409)
+    return
+  }
+  const storeError = remoteAttachmentFailure(error)
+  if (storeError?.code === 'PLATFORM_CAPACITY') {
+    writeRetryAfterError(res, storeError, 429)
+    return
+  }
   const { status, body } = toFailureView(error)
   answerJson(res, status, body)
 }
@@ -225,8 +255,14 @@ function toFailureView(error: unknown): { status: number; body: { error: { code:
   return { status: 500, body: { error: { code: 'INTERNAL_ERROR', message: 'Remote Attachments request failed' } } }
 }
 
-function remoteAttachmentFailure(error: unknown): { code: RemoteAttachmentErrorCode; message: string } | undefined {
-  if (error instanceof RemoteAttachmentError) return { code: error.code, message: error.message }
+function remoteAttachmentFailure(error: unknown): {
+  code: RemoteAttachmentErrorCode
+  message: string
+  retryAfter?: number
+} | undefined {
+  if (error instanceof RemoteAttachmentError) {
+    return { code: error.code, message: error.message, ...(error.retryAfter === undefined ? {} : { retryAfter: error.retryAfter }) }
+  }
   if (typeof error !== 'object' || error === null || !('code' in error) || !('message' in error)) return undefined
   const { code, message } = error
   if (typeof code !== 'string' || !(code in STORE_FAILURE_STATUS) || typeof message !== 'string') return undefined

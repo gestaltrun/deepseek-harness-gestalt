@@ -2006,6 +2006,17 @@ export class PersonalPairingProvider extends RemoteAccessService {
     })
   }
 
+  /**
+   * Release one durable blob reservation from the Platform-owned attachment cleanup worker.
+   * @param reservationId - opaque reservation retained beside blob metadata.
+   */
+  async releaseAttachmentReservation(reservationId: string): Promise<void> {
+    await this.exclusive(() => {
+      if (reservationId === '') throw new TypeError('Attachment blob reservation id must be non-empty')
+      this.blobs.delete(reservationId)
+    })
+  }
+
   /** Drain instance-local incomplete crypto work while preserving durable confirmed authority. */
   async dispose(): Promise<void> {
     if (!this.ownsAuthority) {

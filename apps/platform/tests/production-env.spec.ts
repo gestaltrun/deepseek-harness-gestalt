@@ -59,6 +59,8 @@ function completeDeployEnv(): NodeJS.Dict<string> {
     PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES: '104857600',
     PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS: '900000',
     PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS: '10000',
+    PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS: '60000',
+    PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY: '8',
     PLATFORM_TOKEN_SIGNING_KEY: HEX,
     PLATFORM_POLLING_SIGNING_KEY: HEX,
     PLATFORM_ECS_SSH_KEY: '-----BEGIN DISTINCTIVE KEY-----',
@@ -140,6 +142,8 @@ describe('production and deploy names', () => {
         maxBlobBytes: 104857600,
         capabilityLifetimeMs: 900000,
         maxRetainedBlobs: 10000,
+        sweepIntervalMs: 60000,
+        cleanupConcurrency: 8,
       },
       oss: {
         endpoint: 'oss-cn-hangzhou-internal.aliyuncs.com',
@@ -213,6 +217,8 @@ describe('production and deploy names', () => {
       'PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES',
       'PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS',
       'PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS',
+      'PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS',
+      'PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY',
       'PLATFORM_TOKEN_SIGNING_KEY',
       'PLATFORM_POLLING_SIGNING_KEY',
       'PLATFORM_ECS_SSH_KEY',
@@ -330,6 +336,7 @@ describe('Platform release workflows', () => {
     expect(String(apply.run)).toContain('dist/oss-lifecycle-cli.mjs')
     expect(String(apply.run).indexOf('dist/oss-lifecycle-cli.mjs'))
       .toBeLessThan(String(apply.run).indexOf('docker rm -f dsh-platform'))
+    expect(String(apply.run)).toContain('"set -euo pipefail; docker run --rm --network host')
     expect(String(apply.run)).toContain('dsh-loongcollector')
     expect(String(apply.run)).toContain('gestalt-platform')
     if (!isRecord(apply.env)) throw new TypeError('deploy apply step must define env')

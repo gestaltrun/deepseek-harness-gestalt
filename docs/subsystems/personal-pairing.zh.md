@@ -2,7 +2,7 @@
 
 [English](personal-pairing.md) | 中文
 
-[`@deepseek-ai/dsh-remote-access`](../../packages/platform/remote-access/README.md) 拥有手机访问开关、配对挑战消费、待确认握手确认、个人配对身份与仅限 Companion 的设备主体权限。它调用 `ctx.platformAccount.currentInstallation()` 鉴别每个账号会话的安装 id 与类型，再比较不透明的平台账号 id；它从不读取账号存储或 GitHub 字段，也不信任调用方自行提供的安装身份。
+[`@deepseek-ai/dsh-remote-access`](../../packages/platform/remote-access/README.zh.md) 拥有手机访问开关、配对挑战消费、待确认握手确认、个人配对身份与仅限 Companion 的设备主体权限。它调用 `ctx.platformAccount.currentInstallation()` 鉴别每个账号会话的安装 id 与类型，再比较不透明的平台账号 id；它从不读取账号存储或 GitHub 字段，也不信任调用方自行提供的安装身份。
 
 ## 挑战与确认生命周期
 
@@ -14,7 +14,7 @@ Mobile 仅在完整链接与保留能力相符后消费邀请。跨账号尝试�
 
 ## 密码适配器
 
-`PairingHandshakeProvider` 准备、完成、激活并销毁提供方私有握手状态。远程访问从不实现 Noise 状态迁移或密码原语。`remote-access-http` 消费 `ctx.remoteAccess`，`remote-access-client` 则校验真实 Desktop 设置与 Mobile 控制器使用的协议值。组装后的 loader 场景使用 `DevelopmentKeylessPairingHandshakeProvider`，让提供方、HTTP 消费方和共享传输通过真实环回服务器运行。[`examples/local-companion-platform`](../../examples/local-companion-platform/README.md) 把同一适配器保持在长期运行的双实例 TLS origin 上，供本地 Desktop 与 Mobile 客户端使用。Desktop 与 Mobile 开发入口只能通过显式标志选择各自的真实控制器。生产组合在独立 Noise 评审接纳经过评审的提供方前保持不可用；开发证明永远不会由生产路径选择。
+`PairingHandshakeProvider` 准备、完成、激活并销毁提供方私有握手状态。远程访问从不实现 Noise 状态迁移或密码原语。`remote-access-http` 消费 `ctx.remoteAccess`，`remote-access-client` 则校验真实 Desktop 设置与 Mobile 控制器使用的协议值。组装后的 loader 场景使用 `DevelopmentKeylessPairingHandshakeProvider`，让提供方、HTTP 消费方和共享传输通过真实环回服务器运行。[`examples/local-companion-platform`](../../examples/local-companion-platform/README.zh.md) 把同一适配器保持在长期运行的双实例 TLS origin 上，供本地 Desktop 与 Mobile 客户端使用。Desktop 与 Mobile 开发入口只能通过显式标志选择各自的真实控制器。生产组合在独立 Noise 评审接纳经过评审的提供方前保持不可用；开发证明永远不会由生产路径选择。
 
 ## 多实例 Relay
 
@@ -28,7 +28,7 @@ Mobile 与 Desktop 通过一个 non-sticky TLS endpoint 向外连接。实例丢
 
 ## Cordis API
 
-Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — this section is byte-identical in both language sides of the page. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
 <a id="ctxremoteaccess--remoteaccessservice-abstract-seam"></a>
 
@@ -166,9 +166,9 @@ abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication rese
 abstract emitPushHint(owner: PairingAccountAuthentication): Promise<void>
 ```
 
-Types: [CompanionPushHint](remote-protocol.md) · [CompanionPushToken](remote-protocol.md)
+Types: [CompanionPushHint](remote-protocol.zh.md) · [CompanionPushToken](remote-protocol.zh.md)
 
-Source: [`packages/platform/remote-access/src/index.ts:449`](../../packages/platform/remote-access/src/index.ts)
+Source: [`packages/platform/remote-access/src/index.ts`](../../packages/platform/remote-access/src/index.ts)
 
 <a id="ctxremoteattachmentauthority--remoteattachmentauthority"></a>
 
@@ -185,7 +185,7 @@ Pairing scope seam: the Personal Pairing layer authenticates one HTTPS request t
 authenticate(input: { headers: IncomingHttpHeaders }): Promise<PersonalPairingId>
 ```
 
-Source: [`packages/platform/remote-attachments/src/http.ts:29`](../../packages/platform/remote-attachments/src/http.ts)
+Source: [`packages/platform/remote-attachments/src/http.ts`](../../packages/platform/remote-attachments/src/http.ts)
 
 <a id="ctxremoteattachments--remoteattachmentstoreservice-abstract-seam"></a>
 
@@ -229,7 +229,7 @@ abstract revoke(input: { pairingId: PersonalPairingId; capability: AttachmentCap
 abstract observe(): readonly RemoteAttachmentBlob[]
 ```
 
-Source: [`packages/platform/remote-attachments/src/index.ts:59`](../../packages/platform/remote-attachments/src/index.ts)
+Source: [`packages/platform/remote-attachments/src/index.ts`](../../packages/platform/remote-attachments/src/index.ts)
 
 <a id="ctxremoterelay--remoterelayservice-abstract-seam"></a>
 
@@ -274,5 +274,5 @@ abstract revokeRoute(routeId: RelayRouteId): Promise<void>
 abstract attach(input: { message: RelayAttachMessage deliver: (message: RelayCiphertextMessage) => Promise<void> close?: () => void | Promise<void> signal?: AbortSignal announce?: () => Promise<void> }): Promise<RemoteRelayAttachment>
 ```
 
-Source: [`packages/platform/remote-access/src/relay.ts:143`](../../packages/platform/remote-access/src/relay.ts)
+Source: [`packages/platform/remote-access/src/relay.ts`](../../packages/platform/remote-access/src/relay.ts)
 <!-- END GENERATED cordis-surface -->

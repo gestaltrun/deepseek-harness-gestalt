@@ -14,7 +14,7 @@ import {
   WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_COPY, WELCOME_NOTICE_SETTINGS_NAMESPACE,
   WELCOME_NOTICE_VERSION,
 } from './scaffold.ts'
-import { ZH_BROWSER_LOCALE, saveFailureShot } from './support.ts'
+import { ZH_BROWSER_LOCALE, connectFreshWorkspaceZh, saveFailureShot } from './support.ts'
 
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/onboarding-deepseek-config', import.meta.url))
 const WELCOME_EXPECTED = join(SNAPSHOT_DIR, 'welcome.expected.md')
@@ -164,6 +164,60 @@ describe.skipIf(MODE === 'record')('web e2e: first-run configure-models onboardi
       (window as unknown as { __takeoverSightings: string[] }).__takeoverSightings)).toEqual([])
     expect(await page.getByRole('dialog', { name: WELCOME_NOTICE_COPY.zh.title }).count()).toBe(0)
     expect(await page.getByRole('dialog', { name: CONFIGURE_STEP }).count()).toBe(0)
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
+  it('configures arbitrary DeepSeek models and prompts after the selected model is removed', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-onboarding-deepseek-models'))
+    // Opened here rather than inherited: the credential test reloads the page
+    // after configuring the key, so nothing carries an open dialog across.
+    await page.getByRole('button', { name: '设置', exact: true }).click()
+    const settings = page.getByRole('dialog', { name: '设置' })
+    await settings.waitFor({ timeout: 10_000 })
+    await settings.getByRole('button', { name: '模型' }).click()
+    const deepSeek = settings.getByText('DeepSeek', { exact: true }).first()
+    await deepSeek.waitFor({ timeout: 10_000 })
+    await deepSeek.locator('xpath=ancestor::li').getByRole('button', { name: '编辑' }).click()
+    await settings.getByText('自定义设置').click()
+    await settings.getByRole('button', { name: /删除模型/ }).first().click()
+    await settings.getByRole('button', { name: '添加模型' }).click()
+    const customModelId = settings.getByLabel('模型 ID 3')
+    await customModelId.fill('private-preview')
+    await settings.getByLabel('显示名称 3').fill('Private Preview')
+    // Capacities live behind the row's own disclosure, as in the pi-ai form.
+    await settings.getByRole('button', { name: '容量 3' }).click()
+    await settings.getByLabel('上下文窗口 3').fill('131072')
+    await settings.getByLabel('最大输出 token 数 3').fill('64K')
+
+    const modelEditor = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
+    await compareOrRefreshGolden(MODELS_EXPECTED, modelEditor, MODE)
+    await settings.getByRole('button', { name: '保存', exact: true }).click()
+    await customModelId.waitFor({ state: 'detached', timeout: 15_000 })
+
+    const document = await readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8')
+    expect(document).toContain('id: deepseek-v4-pro')
+    expect(document).toContain('id: deepseek-v4-flash-vision-exp')
+    expect(document).toContain('inputModalities:')
+    expect(document).toContain('- image')
+    expect(document).toContain('id: private-preview')
+    expect(document).toContain('name: Private Preview')
+    expect(document).toContain('contextWindow: 131072')
+    expect(document).toContain('maxTokens: 64000')
+    expect(document).not.toMatch(/^\s*- id: deepseek-v4-flash$/m)
+
+    await page.keyboard.press('Escape')
+    // A connected Workspace is what puts a live composer — and its model
+    // trigger — on the page; the scaffold boots without one.
+    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'model-fallback-e2e')
+
+    const modelTrigger = page.getByRole('button', { name: '选择模型', exact: true })
+    await modelTrigger.waitFor({ timeout: 10_000 })
+    await modelTrigger.click()
+    await page.getByRole('menuitem', { name: /模型/ }).click()
+    expect(await page.getByText('deepseek-v4-flash', { exact: true }).count()).toBe(0)
+    await page.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash-Vision-Exp' }).waitFor({ timeout: 10_000 })
+    await page.getByRole('menuitemradio', { name: 'Private Preview' }).waitFor({ timeout: 10_000 })
+    expect(tripwire.warnings).toEqual([])
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 

@@ -14,7 +14,7 @@ Session 持有的 AI Browser 需要在 Desktop 上使用真实 Chromium 引擎�
 
 Tandem 仍是 HTTP 与 MCP 操作词汇，不是 sidecar 二进制。`listenElectronBrowserHttp` 把 sessions、tabs、navigate、input、page-content、screenshot、focus 与 destroy 复制到 loopback origin。navigate、input 与 focus 会把客户端的 `expectedRevision` 与引擎修订号比较，并返回引擎已提交的修订号；不匹配时为 409 `BROWSER_REVISION_CONFLICT`。Desktop Host 启动该引擎，向 Node Web Host 导出 `DSH_ELECTRON_BROWSER_ORIGIN` 与 `DSH_ELECTRON_BROWSER_TOKEN_FILE`；当任一 Host 环境变量存在时，Desktop 叠加层把 `dsh-browser-runtime-tandem` 挂载为 `sidecar: false` 的协议专用 HTTP 客户端。两者都缺失时叠加层保留确定性 Provider 并禁用 HTTP 客户端——有意缺席的 Host 不是错误配置；只出现其中一个变量时在加载期即失败。`command` 与 `cwd` 仍可选，供仓库内 HTTP fixture 使用，并在 `sidecar` 为 false 时于插件加载失败。生产环境从不启动 Tandem.app。客户端无论是否拥有子进程都会通过 HTTP 销毁剩余打开的 session。
 
-Dock 仍是截图、标题与文本的原生窗格。它不嵌入第二个 BrowserView。headless 与浏览器 `dsh web` 继续使用 `dsh-browser-runtime-deterministic`。[Tandem provider Agent Note](2026-08-18-tandem-browser-runtime-provider.md) 记录协议专用 HTTP 客户端。
+Dock 仍是截图、标题与文本的原生窗格。它不嵌入第二个 BrowserView。headless 与浏览器 `dsh web` 继续使用 `dsh-browser-runtime-deterministic`。[Tandem provider Agent Note](2026-08-18-tandem-browser-runtime-provider.zh.md) 记录协议专用 HTTP 客户端。
 
 ## 考虑过的替代方案
 
@@ -28,7 +28,7 @@ Dock 仍是截图、标题与文本的原生窗格。它不嵌入第二个 Brows
 
 ## 结果
 
-Desktop 拥有真实页面，而不再使用第二个 Electron 应用。Web 与 headless 保持无密钥且确定性。Dock 继续渲染 Runtime 事实，而不是 live 视图。真实 Chromium e2e 通过 `pnpm run test:electron-runtime-e2e` 运行（[启动器说明](../testing/2026-08-20-electron-runtime-e2e-launcher.md)）；Node 覆盖使用注入的 Electron host 与 HTTP fixture。
+Desktop 拥有真实页面，而不再使用第二个 Electron 应用。Web 与 headless 保持无密钥且确定性。Dock 继续渲染 Runtime 事实，而不是 live 视图。真实 Chromium e2e 通过 `pnpm run test:electron-runtime-e2e` 运行（[启动器说明](../testing/2026-08-20-electron-runtime-e2e-launcher.zh.md)）；Node 覆盖使用注入的 Electron host 与 HTTP fixture。
 
 ## 验证
 

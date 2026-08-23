@@ -6,7 +6,7 @@ Status: implemented
 
 ## Problem
 
-下面两层已经让 pi-ai 路由变成[一份声明](2026-08-03-pi-ai-declared-provider-catalog.md)，并给了 host [询问草稿端点](2026-08-04-draft-provider-endpoint-interrogation.md)的能力。但两者都没有抵达不编辑 YAML 的人：Models 页仍然只为每个提供方提供一个 API 密钥输入框和一个装着 API 地址的折叠区，因此接入一个网关意味着打开 `$DSH_HOME/settings.yaml` 并知道 profile 的形状，更正一个陈旧的上下文窗口也是如此。能力已经存在，界面却没有暴露它。
+下面两层已经让 pi-ai 路由变成[一份声明](2026-08-03-pi-ai-declared-provider-catalog.zh.md)，并给了 host [询问草稿端点](2026-08-04-draft-provider-endpoint-interrogation.zh.md)的能力。但两者都没有抵达不编辑 YAML 的人：Models 页仍然只为每个提供方提供一个 API 密钥输入框和一个装着 API 地址的折叠区，因此接入一个网关意味着打开 `$DSH_HOME/settings.yaml` 并知道 profile 的形状，更正一个陈旧的上下文窗口也是如此。能力已经存在，界面却没有暴露它。
 
 缺的是两件事，而它们的形状并不相同。编辑既有路由的模型，是一张已经存在的卡片上的一个*字段*；声明一条路由则是一次*创建*：路由 id 正在此处被选定，而在选定之前根本没有可编辑的 settings 地址。
 
@@ -14,7 +14,7 @@ Status: implemented
 
 模型列表是两条流程共用的组件；创建则是它自己的卡片。
 
-`ModelListEditor` 编辑 profile 的 `models` 数组——一行一个模型，含 id、显示名称、上下文窗口、输出上限与 `input` 标签——并持有获取动作。空列表意味着「使用该路由的内置 catalog」，因此每一行都只会被刻意添加；清空某个可选字段会丢弃它，而不是存入一个 schema 会拒绝的值，不是正整数的容量则根本不会被存下。标签写入的就是 `$DSH_HOME/settings.yaml` 里的 `text`/`image` 数组；创建卡片和编辑卡片也用同一方式暴露路由的 `defaultInput`（[模态标签](../feature/2026-08-16-models-page-input-modality-tags.md)）。
+`ModelListEditor` 编辑 profile 的 `models` 数组——一行一个模型，含 id、显示名称、上下文窗口、输出上限与 `input` 标签——并持有获取动作。空列表意味着「使用该路由的内置 catalog」，因此每一行都只会被刻意添加；清空某个可选字段会丢弃它，而不是存入一个 schema 会拒绝的值，不是正整数的容量则根本不会被存下。标签写入的就是 `$DSH_HOME/settings.yaml` 里的 `text`/`image` 数组；创建卡片和编辑卡片也用同一方式暴露路由的 `defaultInput`（[模态标签](../feature/2026-08-16-models-page-input-modality-tags.zh.md)）。
 
 获取会询问表单**当前显示**的端点——已修改但未保存的 API 地址、已键入但未存储的密钥——因此新增一个提供方是一趟走完，而不是「先保存再回来」。回复会打开一个选择框而不是直接写入：已配置过的候选默认不勾选，因此采纳一次选择绝不会覆盖用户已更正的容量。无法被询问的提供方只是绕路而非死路；适配器自己的消息会出现在各行旁边，而这些行仍可手工编辑。
 

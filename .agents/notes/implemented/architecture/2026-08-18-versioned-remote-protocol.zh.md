@@ -18,7 +18,7 @@ Relay Transport 版本 1 只接受路由 attachment、不透明密文转发、�
 
 Codec 会限制完整消息字节、密文字节、parser 深度、container 值数、编码值总数、字符串字节和 transcript page 条数。Base64url wire 字段必须使用规范的无填充拼写。加密前 Companion 应用数据限制为 60 KiB，从而在固定 65,535 字节 Noise 消息上限内为加密开销保留 4,095 字节。完整编码 transcript-page 消息限制为 50 条或 48 KiB UTF-8 wire 字节。它们在 dispatch 前拒绝畸形 UTF-8/JSON、不安全数值、未知 discriminant 与额外字段。
 
-由 Loader assembled 的无密钥 example 使用 harness-local AES-GCM adapter 加密 Mobile 与 Desktop payload，并且只让密文通过 Relay codec。该 adapter 证明装配与明文隔离，不证明产品密码实现。[Snow 跨运行时决策](2026-08-17-cross-runtime-noise-security-path.md)仍只属于 proof，产品集成或 release 仍须完成其安全入口记录的独立评审。Platform Account 与 Installation authorization 继续由[账号决策](../feature/2026-08-17-platform-account-installation-sessions.md)拥有。
+由 Loader assembled 的无密钥 example 使用 harness-local AES-GCM adapter 加密 Mobile 与 Desktop payload，并且只让密文通过 Relay codec。该 adapter 证明装配与明文隔离，不证明产品密码实现。[Snow 跨运行时决策](2026-08-17-cross-runtime-noise-security-path.zh.md)仍只属于 proof，产品集成或 release 仍须完成其安全入口记录的独立评审。Platform Account 与 Installation authorization 继续由[账号决策](../feature/2026-08-17-platform-account-installation-sessions.zh.md)拥有。
 
 ## 考虑过的替代方案
 
@@ -32,4 +32,4 @@ Codec 会限制完整消息字节、密文字节、parser 深度、container 值
 
 ## 后果
 
-Relay 实现可以在不链接 Harness 领域的情况下路由和拒绝 frame，而 endpoint adapter 共享一个应用 parser 与兼容性决策。新增 Companion operation 必须显式修改协议 union 和 parser，因此当前窄 catalog 不会静默继承 Host route。本包有意将配对、加密、凭据持久化、blob capability、Desktop adaptation 与 operation receipt 留给服务或经评审的 endpoint 集成；[无状态双实例 Relay](2026-08-18-stateless-two-instance-remote-relay.md)拥有 attachment authority 与 forwarding。
+Relay 实现可以在不链接 Harness 领域的情况下路由和拒绝 frame，而 endpoint adapter 共享一个应用 parser 与兼容性决策。新增 Companion operation 必须显式修改协议 union 和 parser，因此当前窄 catalog 不会静默继承 Host route。本包有意将配对、加密、凭据持久化、blob capability、Desktop adaptation 与 operation receipt 留给服务或经评审的 endpoint 集成；[无状态双实例 Relay](2026-08-18-stateless-two-instance-remote-relay.zh.md)拥有 attachment authority 与 forwarding。

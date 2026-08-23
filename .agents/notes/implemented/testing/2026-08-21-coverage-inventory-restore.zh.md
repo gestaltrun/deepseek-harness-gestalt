@@ -12,7 +12,7 @@ Status: implemented
 
 从 `coverage.exclude` 去掉 #185 列出的路径。Desktop Account/updater、附件 lightbox/图片、Schedule 列表、Models 编辑器/标签、Platform HTTP/Redis/client 入口、Schedule 插件入口、session-log 导出、loader-smoke、Markdown 文本、Web Search 卡片，以及 API-proxy fetch 的既有归属测试已经达到 per-file 100%。`web-search-deepseek` 的 `index.ts` 补上凭证回退与 ByteString 拒绝用例，使 `resolveApiKey` 不再把这些分支留在清单外。#185 未点名的其它 `TODO(gui)` 排除保持不动。
 
-本笔记取代[基线既有 CI 红灯笔记](../bug-fix/2026-08-19-inherited-ci-baseline-reds.md)中关于剩余排除的句子。
+本笔记取代[基线既有 CI 红灯笔记](../bug-fix/2026-08-19-inherited-ci-baseline-reds.zh.md)中关于剩余排除的句子。
 
 ## 考虑过的替代方案
 

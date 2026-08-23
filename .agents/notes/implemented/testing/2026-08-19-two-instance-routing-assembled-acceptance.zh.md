@@ -37,4 +37,4 @@ Issue #32 的可本地运行标准在本基线上有了已执行证据：两个�
 ## Related
 
 - Issue #32（父 spec #27）——把一台已配对 Desktop 路由到两个 Platform Instance。
-- [无状态双实例 Remote Relay](../architecture/2026-08-18-stateless-two-instance-remote-relay.md)——本组合所执行的提供方、coordinator 与生命周期决策。
+- [无状态双实例 Remote Relay](../architecture/2026-08-18-stateless-two-instance-remote-relay.zh.md)——本组合所执行的提供方、coordinator 与生命周期决策。

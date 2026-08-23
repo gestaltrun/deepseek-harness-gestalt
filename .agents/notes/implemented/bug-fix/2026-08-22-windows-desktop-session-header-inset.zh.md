@@ -10,7 +10,7 @@ Windows Desktop Host 无边框，并绘制一条全宽 36px 拖动条（含 capt
 
 ## 决策
 
-AppFrame 在存在 Windows chrome 标记时把中间 Session 栏下移 36px，与 macOS 已使用的统一 Window Chrome 高度对齐。[Desktop Host Agent Note](../architecture/2026-08-16-deepseek-gestalt-desktop-host.md) 记录 chrome 几何。
+AppFrame 在存在 Windows chrome 标记时把中间 Session 栏下移 36px，与 macOS 已使用的统一 Window Chrome 高度对齐。[Desktop Host Agent Note](../architecture/2026-08-16-deepseek-gestalt-desktop-host.zh.md) 记录 chrome 几何。
 
 ## 考虑过的替代方案
 

@@ -26,7 +26,7 @@ Windows 的必需所有者是 `ci-windows-complete`（`windows node 24 / native 
 
 ## 结果
 
-cookie 罐隔离在原生 Windows complete 与 macOS Electron e2e 作业上是必需的绿/红结果。贡献者只运行一条脚本；按次即兴 spawn Electron 不符合策略。[进程内 Electron Runtime 说明](../feature/2026-08-19-electron-browser-runtime.md) 记录 Provider；本说明记录启动模式。
+cookie 罐隔离在原生 Windows complete 与 macOS Electron e2e 作业上是必需的绿/红结果。贡献者只运行一条脚本；按次即兴 spawn Electron 不符合策略。[进程内 Electron Runtime 说明](../feature/2026-08-19-electron-browser-runtime.zh.md) 记录 Provider；本说明记录启动模式。
 
 ## 测试
 

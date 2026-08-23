@@ -4,7 +4,7 @@
 
 [omdsh-dev/DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) 的钉死源码快照。宿主半边在 webServer 信任围栏后挂上 `/sidebar` JSON、媒体、HTML 预览、懒加载分块与终端 WebSocket 路由。客户端半边发布 `ctx.betterSidebar`，并绘制右侧栏与底部面板。SHA 与更新步骤见 [UPSTREAM.md](UPSTREAM.md)。本仓持有的改动列在 [LOCAL-MODIFICATIONS.md](LOCAL-MODIFICATIONS.md)。
 
-产品组合挂载本包与 [`dsh-client-ui-workbench`](../ui-workbench/README.md)。适配层关闭快照里的 iframe 浏览器标签页。Session 持有的浏览仍由 [`dsh-client-ui-browser`](../ui-browser/README.md) 负责。不要为了改产品行为去改快照源码。
+产品组合挂载本包与 [`dsh-client-ui-workbench`](../ui-workbench/README.zh.md)。适配层关闭快照里的 iframe 浏览器标签页。Session 持有的浏览仍由 [`dsh-client-ui-browser`](../ui-browser/README.zh.md) 负责。不要为了改产品行为去改快照源码。
 
 ## 模型体验
 

@@ -6,7 +6,7 @@
 
 消费方不读取账号数据库字段，也不自行授予权限。远程访问提供方会在任何配对生命周期变更前，通过平台账号公开服务鉴别账号、安装标识及安装类型。
 
-WSS 消费方要求第一帧必须是 attach，执行显式 attach deadline 与协议消息字节上限，关闭压缩，串行处理 frame，并且只在鉴权与目录注册完成后发送匹配的 ready acknowledgement。它随 socket 一起清理 Relay attachment，并且只返回不含内容的稳定 transport error。TLS 终止与单个 non-sticky endpoint 仍由部署负责。双实例路由的组装级证据见[双实例 Remote Relay 验收 Agent Note](../../../.agents/notes/implemented/testing/2026-08-19-two-instance-routing-assembled-acceptance.md)。
+WSS 消费方要求第一帧必须是 attach，执行显式 attach deadline 与协议消息字节上限，关闭压缩，串行处理 frame，并且只在鉴权与目录注册完成后发送匹配的 ready acknowledgement。它随 socket 一起清理 Relay attachment，并且只返回不含内容的稳定 transport error。TLS 终止与单个 non-sticky endpoint 仍由部署负责。双实例路由的组装级证据见[双实例 Remote Relay 验收 Agent Note](../../../.agents/notes/implemented/testing/2026-08-19-two-instance-routing-assembled-acceptance.zh.md)。
 
 ## 模型体验
 

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-browser-dock.md
 2026-08-19-browser-dock.md: 3e47b5547ca990a9a56769a11298770f218e2a60
-2026-08-19-browser-dock.zh.md: d64b9e1e406151d43316e626f4e340a8b1b6a6cb
+2026-08-19-browser-dock.zh.md: 75f14279cdfb4cdb5c627732c39a0b37317e85e9

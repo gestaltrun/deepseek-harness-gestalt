@@ -14,7 +14,7 @@ Status: implemented
 
 在具备该能力的后端上，面向模型的工具公开可选的 `provider` 和 `model` 字符串。这两个名字是 LLM 适配器路由和模型 id（例如 `deepseek-official` 和 `deepseek-v4-pro`），不是工具配置的 subagent 后端。两个字段都可以单独传入。调用值覆盖部署 `agentOptions`；省略的字段保留该默认值，然后再继承父会话路由。空值或纯空白会在启动前失败。不具备该能力的后端会省略这些字段，在挂载时拒绝部署钉死，并在执行时拒绝未声明的额外键。
 
-传输后端选择仍属于配置：一个工具实例仍然只绑定 spawn、fork、ACP 等其中之一。[能力 seam 说明](2026-06-21-subagent-capability-seam.md) 记录了这一区分。显式 `request.agentOptions` 仍然优先于[父会话当前路由继承](../bug-fix/2026-08-18-subagent-inherits-live-parent-model.md)。
+传输后端选择仍属于配置：一个工具实例仍然只绑定 spawn、fork、ACP 等其中之一。[能力 seam 说明](2026-06-21-subagent-capability-seam.zh.md) 记录了这一区分。显式 `request.agentOptions` 仍然优先于[父会话当前路由继承](../bug-fix/2026-08-18-subagent-inherits-live-parent-model.zh.md)。
 
 ## Alternatives considered
 

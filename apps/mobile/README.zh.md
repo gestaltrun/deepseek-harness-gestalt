@@ -6,7 +6,7 @@
 
 入口会在渲染前校验完整的开发与生产身份对：两侧分别通过 `VITE_PLATFORM_DEVELOPMENT_*` 或 `VITE_PLATFORM_PRODUCTION_*` 前缀提供 `ORIGIN`、`CALLBACK_URL`、`GITHUB_CLIENT_ID`、`CREDENTIAL_REFERENCE`、`DATABASE_IDENTITY` 和 `IDENTITY_NAMESPACE`，再由 `VITE_PLATFORM_ENV` 显式选择一侧。成对字段必须全部不同；缺失、未知、共享、非 HTTPS 或回调不匹配的配置会在渲染和网络流量前失败。
 
-共用 Mobile 入口内置 `@capacitor/browser` 适配器，并在授权尝试准备完成后由继续按钮的用户激活直接调用。入口没有 `window.open`、弹窗或携带令牌的自定义 URL 回退。当 Capacitor Browser 不可用时，当前浏览上下文会导航到已准备的授权 URL，并由 `load()` 恢复仍有效的待完成登录。`IndexedDbInstallationAccountStore` 将所选数据库身份写入数据库名；原生打包负责提供稳定 WebView origin。缺少 `crypto.randomUUID` 会在渲染前失败，因为创建 Installation id 需要安全浏览上下文（`https:` 或 `http://127.0.0.1`）。环回双实例开发监听见 [`examples/local-companion-platform`](../../examples/local-companion-platform/README.md)。
+共用 Mobile 入口内置 `@capacitor/browser` 适配器，并在授权尝试准备完成后由继续按钮的用户激活直接调用。入口没有 `window.open`、弹窗或携带令牌的自定义 URL 回退。当 Capacitor Browser 不可用时，当前浏览上下文会导航到已准备的授权 URL，并由 `load()` 恢复仍有效的待完成登录。`IndexedDbInstallationAccountStore` 将所选数据库身份写入数据库名；原生打包负责提供稳定 WebView origin。缺少 `crypto.randomUUID` 会在渲染前失败，因为创建 Installation id 需要安全浏览上下文（`https:` 或 `http://127.0.0.1`）。环回双实例开发监听见 [`examples/local-companion-platform`](../../examples/local-companion-platform/README.zh.md)。
 
 开发入口在账号 signed-in 后绑定 Companion Cache：`companionCacheDatabaseName`（`${accountStorageNamespace(environment, accountId)}:companion-cache`）命名 IndexedDB 数据库，`bindDevelopmentCompanionCache` 把 Desktop 已确认的 Session 元数据恢复进空列表，并持久化后续确认。附件字节、终端内容、spill 文件与凭据永不进入缓存。`CompanionUncertainOperationSettlement` 仍仅在 mutation 离开设备后写入 Operation Receipt，发送前查阅已有回执，通过 `query-operation-status` 对账未知回执，且永不重放 operation。
 
@@ -15,7 +15,7 @@ pnpm --filter @deepseek-ai/dsh-mobile build
 pnpm --filter @deepseek-ai/dsh-mobile exec vite --host
 ```
 
-Vite 通过 [`tsconfig.base.json`](../../tsconfig.base.json) 的 paths 解析工作区包，因此这些命令走源平面。开发服务器把 `/v1`（含 Relay WebSocket）代理到 `VITE_PLATFORM_DEVELOPMENT_ORIGIN`，且不校验监听证书。Android 模拟器必须 `adb reverse` Vite 端口并打开 `http://127.0.0.1`；`10.0.2.2` 不是安全上下文，无法创建 Installation id。无法信任捆绑监听证书的 WebView 留在该 Vite origin；入口会把 Account、配对、授权与 Relay URL 改写到该 origin，配对链接仍使用 [`examples/local-companion-platform`](../../examples/local-companion-platform/README.md) 的 HTTPS 监听 origin。
+Vite 通过 [`tsconfig.base.json`](../../tsconfig.base.json) 的 paths 解析工作区包，因此这些命令走源平面。开发服务器把 `/v1`（含 Relay WebSocket）代理到 `VITE_PLATFORM_DEVELOPMENT_ORIGIN`，且不校验监听证书。Android 模拟器必须 `adb reverse` Vite 端口并打开 `http://127.0.0.1`；`10.0.2.2` 不是安全上下文，无法创建 Installation id。无法信任捆绑监听证书的 WebView 留在该 Vite origin；入口会把 Account、配对、授权与 Relay URL 改写到该 origin，配对链接仍使用 [`examples/local-companion-platform`](../../examples/local-companion-platform/README.zh.md) 的 HTTPS 监听 origin。
 
 ## 已知限制与暂缓事项
 

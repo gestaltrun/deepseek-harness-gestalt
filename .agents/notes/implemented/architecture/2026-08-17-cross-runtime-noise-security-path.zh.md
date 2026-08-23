@@ -6,7 +6,7 @@ Status: implemented
 
 ## 问题
 
-Mobile Companion 要求固定的 `Noise_XKpsk3_25519_ChaChaPoly_SHA256` 配对流程与 `Noise_IK_25519_ChaChaPoly_SHA256` 重连流程在 Node 22、Node 24、iOS `WKWebView` 和 Android `WebView` 中表现一致。选择互不相关的原生实现与 JavaScript 实现会扩大多份审计面，并使成功握手不足以证明跨运行时兼容性。从原语构建 X25519、ChaChaPoly、SHA-256 或 Noise 状态转换会产生安全敏感的自有代码，违背仓库的[依赖决策](../process/2026-07-26-dependencies-over-hand-rolling.md)。
+Mobile Companion 要求固定的 `Noise_XKpsk3_25519_ChaChaPoly_SHA256` 配对流程与 `Noise_IK_25519_ChaChaPoly_SHA256` 重连流程在 Node 22、Node 24、iOS `WKWebView` 和 Android `WebView` 中表现一致。选择互不相关的原生实现与 JavaScript 实现会扩大多份审计面，并使成功握手不足以证明跨运行时兼容性。从原语构建 X25519、ChaChaPoly、SHA-256 或 Noise 状态转换会产生安全敏感的自有代码，违背仓库的[依赖决策](../process/2026-07-26-dependencies-over-hand-rolling.zh.md)。
 
 实现选择还需要超出快乐路径的证据：官方向量、远端静态密钥认证、新鲜临时密钥、主动攻击拒绝、准确资源上限、降级拒绝，以及不会混淆静态硬件支持封装与 X25519 执行的措辞。
 
@@ -16,7 +16,7 @@ Mobile Companion 要求固定的 `Noise_XKpsk3_25519_ChaChaPoly_SHA256` 配对�
 
 将有界证明保留在 `scripts/noise-security-path` 下，而不创建产品 package。产品代码不得依赖它。证明拥有两个完整的六消息 Cacophony 向量、XKpsk3 与 IK 流程、双向传输、新鲜临时密钥比较、篡改/stale 配对 transcript/传输重放/乱序/跨配对/降级用例、65,535 字节最大消息往返，以及对 65,536 字节消息的重复拒绝。stale 配对用例在 fresh responder 状态中接受旧第一条消息，发出 fresh 第二条消息，再拒绝旧的认证第三条消息。无密钥快照固定稳定结果，而一次性原生宿主证明实际 WebView 执行。
 
-[跨运行时安全证明](../../../../docs/security/noise-cross-runtime-proof.md)是独立评审入口。Snow 是已选实现，但产品集成与发布仍以独立评审者复现证明、审计依赖与适配层、记录准确环境并解决发现为门禁。模拟器证据绝不表示物理设备硬件保护。
+[跨运行时安全证明](../../../../docs/security/noise-cross-runtime-proof.zh.md)是独立评审入口。Snow 是已选实现，但产品集成与发布仍以独立评审者复现证明、审计依赖与适配层、记录准确环境并解决发现为门禁。模拟器证据绝不表示物理设备硬件保护。
 
 存储声明包含两个独立部分：原生产品代码可以在相应操作系统能力可用时，使用硬件支持设施封装静态私钥材料；本路径中的 X25519 在 Snow WebAssembly 进程内存中执行，不声称硬件支持或不可提取性。
 

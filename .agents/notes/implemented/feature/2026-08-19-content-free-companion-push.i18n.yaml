@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-19-content-free-companion-push.md
 2026-08-19-content-free-companion-push.md: fde6ac9ab1a7454c5366896e3f1bac643da5ec00
-2026-08-19-content-free-companion-push.zh.md: 3a66bf8b6cea95dc0a971bb69d4fd9879c7c7ba8
+2026-08-19-content-free-companion-push.zh.md: fe3633e8adbfd07acd3a2cb01a024c37f1d770d9

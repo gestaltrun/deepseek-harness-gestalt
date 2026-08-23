@@ -26,7 +26,9 @@ Update Control 只在可操作的更新阶段和发现版本后的 error 阶段�
 
 锁定 Web Host 快照中存在某个包，并不表示相应能力已经激活。Desktop 不配置任何 MCP server；Cordis 自修改与 Code Mode preset 可供选择但不是默认值；standard preset 保留关闭的 Codex 与 Claude Code subagent 模板；Web 能力提供搜索但不提供 fetch。production HMR 保持关闭；因为 `session-query-sqlite` 使用 `openAt: never`，全文 Session 搜索仍需显式启用。headless、ACP 与 JSON-RPC example 是其他应用组合，不是 Desktop 插件。
 
-macOS chrome 在 DSH 侧栏标题和中间 Session 内容上方为 traffic lights 保留固定 28px 顶部间距，同时保留原始收起交互。详情栏保留现有顶边。Windows 使用横跨整个窗口的 36px 拖拽行，其中三个 caption 按钮为不可拖拽区域，中间 Session 栏同步下移 36px，使 Session 顶栏留在拖拽条下方（[Windows Desktop Session 顶栏下移](../bug-fix/2026-08-22-windows-desktop-session-header-inset.md)）。未支持平台的开发运行保留系统窗口框架。
+Window Chrome 在 Desktop 侧栏、中间 Session 内容与顶部 Workbench 上统一使用一条 36px 行。在 macOS 上，侧栏与中间区域围绕 traffic lights 构成连续拖拽区。Workbench 只用 `+` 后可伸缩的未占用空间拖动窗口；标签、控件与标签投放仍可交互。Windows 使用同一行，把三个 caption 按钮设为不可拖拽区域，并把中间 Session 栏同步下移 36px，使 Session 顶栏留在拖拽条下方（[Windows Desktop Session 顶栏下移](../bug-fix/2026-08-22-windows-desktop-session-header-inset.md)）。纯浏览器 Web 保留紧凑的 34px Workbench 标签栏，且不渲染窗口拖拽空间。未支持平台的开发运行保留系统窗口框架。
+
+右侧和底部 Workbench 在关闭时保留各自的偏好尺寸，但只在可见时独立占用布局空间。拖动底部 Workbench 不会应用已关闭右侧 Workbench 保留的宽度，窄屏浮动抽屉也不占用布局空间。
 
 ## Alternatives considered
 
@@ -51,7 +53,8 @@ macOS chrome 在 DSH 侧栏标题和中间 Session 内容上方为 traffic light
 - `pnpm gestalt:dev` 启动 Desktop Host，由它启动 Web Host，并在环回 URL 上加载带 `window.__DSH_BOOT__` 的页面（不是裸 Vite）。
 - 浏览器 `dsh web` 仍是 HARNESS 次标，没有拖拽带，也没有 Update Control。
 - Desktop 组合显示 GESTALT 次标和 logo 行上方的拖拽带。Update Control 渲染测试确保不活跃阶段不出现，可操作阶段与设置位于同一脚部行。
-- macOS 展开和收起布局让未改动的侧栏控件与中间 Session 内容位于原生控件下方；Windows 把 caption 按钮放在全窗口拖拽行右侧，并把中间 Session 内容下移 36px。
+- macOS 展开和收起布局让侧栏、中间 Session 内容与顶部 Workbench 在 36px Window Chrome 上对齐；中间区域与 Workbench 未占用空间可以拖动窗口，且不会吞掉标签或控件。Windows 把 caption 按钮放在同一行右侧，并把中间 Session 内容下移 36px。纯浏览器 Web 保留可交互的 34px 标签栏，且没有窗口拖拽节点。
+- 右侧 Workbench 关闭时拖动底部 Workbench 会保持 Session 列表宽度和中间列的水平边界；各面板保留的尺寸只在该面板可见时影响布局。
 - Dock 式启动把 Launch Directory 当作 cwd，并且不把该路径登记为 Workspace。
 - Desktop 退出会等待尚未启动完成和正在运行的 Web Host 进程退出；smoke 测试会拒绝遗留子进程、缺失的 Desktop 组合或 updater bridge、尚未到达 renderer 的更新状态，以及可见但尚未激活的 Update Control。打包 smoke 会排空 Electron 的 stdout/stderr，避免 Windows 管道填满后卡住启动，并在进程于写入 `ok` 前退出时失败。缺少或无效的 Platform Account 部署配对会停用 Account 与 Pairing，但仍启动 Web Host。首次启动的 Platform Account 只在内存中保留 installation id，直到登录尝试才加密写入记录，且 Web Host 启动不等待这次 start。
 - 无密钥浏览器 golden 会启动已交付 Web profile 与 Desktop overlay；release job 会校验 Node 归档摘要，在 macOS 签名前将打开文件数限制提升到 runner 硬限制，并对 `@electron/osx-sign` 应用有界的资源遍历。发布构建必须通过代码签名和已装订公证票据校验，并在上传前 smoke 每个打包目标。

@@ -1,6 +1,5 @@
 /** Desktop Host composition for the product-gated Remote Relay endpoint. */
 
-import { randomUUID } from 'node:crypto'
 import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
 import { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
 import {
@@ -14,8 +13,20 @@ import {
   type DesktopRelayLifecycle,
 } from '@deepseek-ai/dsh-remote-access-client/desktop-relay-lifecycle'
 import { NodeRelayEndpointSocket } from '@deepseek-ai/dsh-remote-access-client/node-relay-socket'
+import {
+  DEVELOPMENT_COMPANION_STREAM_DELAY_MS,
+  DevelopmentKeylessCompanionAuthority,
+} from './development-keyless-companion.ts'
+import { isLoopbackListenUrl } from './loopback-listen-trust.ts'
 
 const CRYPTO_GATE = 'Personal Pairing requires an independently reviewed handshake and Relay crypto provider.'
+
+/** Keyless Desktop attachment shared with the Mobile development entry. */
+export const DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID = parseRelayAttachmentId('desktop-development-keyless')
+/** Keyless Mobile attachment that Desktop addresses for development resync. */
+export const DEVELOPMENT_KEYLESS_MOBILE_ATTACHMENT_ID = parseRelayAttachmentId('mobile-development-keyless')
+/** One-byte development sync frame; it is not product Companion ciphertext. */
+export const DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT = Uint8Array.of(1)
 
 /** Validated Desktop endpoint deployment inputs. */
 export interface DesktopRemoteRelayConfig {
@@ -73,21 +84,49 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
     config.url,
     signal,
     { maxBytes: config.inboundMaxBytes, maxMessages: config.inboundMaxMessages },
+    isLoopbackListenUrl(config.url) ? { rejectUnauthorized: false } : undefined,
   ))
-  return new DesktopRelayEndpointLifecycle({
-    attachmentId: () => parseRelayAttachmentId(`desktop-${randomUUID()}`),
+  let lastSourceAttachmentId = DEVELOPMENT_KEYLESS_MOBILE_ATTACHMENT_ID
+  const relay: { lifecycle?: DesktopRelayEndpointLifecycle } = {}
+  const authority = new DevelopmentKeylessCompanionAuthority({
+    streamDelayMs: DEVELOPMENT_COMPANION_STREAM_DELAY_MS,
+    emit: async (frames) => {
+      const lifecycle = relay.lifecycle
+      if (lifecycle === undefined) return
+      for (const frame of frames) {
+        await ignoreRemoteOffline(lifecycle.sendCiphertext(lastSourceAttachmentId, frame))
+      }
+    },
+  })
+  const lifecycle = new DesktopRelayEndpointLifecycle({
+    attachmentId: () => DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID,
     connect: async signal => await connect(signal, config),
     attachTimeoutMs: config.attachTimeoutMs,
     heartbeatIntervalMs: config.heartbeatIntervalMs,
     reconnectDelayMs: config.reconnectDelayMs,
-    resynchronize: async () => {},
-    onCiphertext: () => {
-      throw new RemoteRelayError(
-        'RELAY_ATTACHMENT_REJECTED',
-        'Development Desktop has no product Companion crypto provider',
+    resynchronize: async (send) => {
+      await ignoreRemoteOffline(
+        send(DEVELOPMENT_KEYLESS_MOBILE_ATTACHMENT_ID, DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT),
       )
     },
+    onCiphertext: async (ciphertext, sourceAttachmentId) => {
+      lastSourceAttachmentId = sourceAttachmentId
+      for (const reply of await authority.reply(ciphertext)) {
+        await ignoreRemoteOffline(lifecycle.sendCiphertext(sourceAttachmentId, reply))
+      }
+    },
   })
+  relay.lifecycle = lifecycle
+  return lifecycle
+}
+
+async function ignoreRemoteOffline(operation: Promise<void>): Promise<void> {
+  try {
+    await operation
+  } catch (error) {
+    if (error instanceof RemoteRelayError && error.code === 'REMOTE_OFFLINE') return
+    throw error
+  }
 }
 
 function required(source: Record<string, string | undefined>, name: string): string {

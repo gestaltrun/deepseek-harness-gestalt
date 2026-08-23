@@ -12,7 +12,7 @@ Remote Access 的纯 codec 与协商器。本包拥有两个独立版本化的�
 
 Companion major 2 和 1 是当前及紧邻的前一应用版本。双方 endpoint 必须在所选 major 上声明已认证加密、配对密钥隔离与重放保护。协商不受 offer 数组顺序影响，始终选择最高的安全共同 major，因此不安全的共同 major 只能降级到安全的紧邻前一 major。每条逻辑 endpoint 连接拥有一个 negotiation channel。在该 channel 上开始新协商时，会在求值 offer 前让此前的应用 codec token 失效；失败的协商会让 channel 保持未激活，而其他 channel 仍然有效。不存在安全版本交集时，会在编码应用明文前失败，并指出必须更新的 endpoint。
 
-已实现 catalog 包含有界 transcript page projection、prompt 提交 operation、attachment offer operation、重连用的 `query-operation-status` operation、Desktop-confirmed result、attachment 拒绝 result，以及 `status` 应答——为被查询的 operation id 返回原始 committed 结果，或显式声明其未提交任何内容。attachment offer operation 是加密 attachment 传输的有界控制消息：只携带一次性 blob capability、密文 SHA-256、精确密文字节数、capability 过期时间与有界文件名。每个标识符由本协议自行品牌化，不从 Harness 领域包导入。解码时会拒绝不支持的 operation 与 projection 字段。committed 的 `status` 应答内嵌同一 operation id 的 confirmed 结果；absent 应答仅为 `{ absent: true }`。
+已实现 catalog 包含有界 transcript-page projection（可选 `streaming`，以及 `text`、`image`、`approval` 与 `ask-user` 条目）、Session 创建 operation、prompt 提交 operation、prompt 取消 operation、attachment offer operation、`settle-approval` 与 `answer-ask-user` operation、重连用的 `query-operation-status` operation、Desktop-confirmed result、attachment 拒绝 result，以及 `status` 应答——为被查询的 operation id 返回原始 committed 结果，或显式声明其未提交任何内容。attachment offer operation 是加密 attachment 传输的有界控制消息：只携带一次性 blob capability、密文 SHA-256、精确密文字节数、capability 过期时间与有界文件名。image 条目只携带 `fileName` 与 `alt`；附件明文字节不进入 Relay frame。`approval` 或 `ask-user` 条目命名一个品牌化 `interactionId` 以及 Desktop 已授权的决定；若存在 `settled`，其 decision 必须是这些决定之一。每个标识符由本协议自行品牌化，不从 Harness 领域包导入。解码时会拒绝不支持的 operation 与 projection 字段。committed 的 `status` 应答内嵌同一 operation id 的 confirmed 结果；absent 应答仅为 `{ absent: true }`。
 
 ## Endpoint attachment cipher
 
@@ -53,5 +53,5 @@ Companion 推送提示只携带通用类别（`approval`、`question`、`turn-co
 
 ## 已知限制与延后工作
 
-- 当前 Companion catalog 只证明 prompt 提交、attachment offer、operation-status 查询、transcript projection，以及 confirmed、attachment-rejected 与 status 三种 result；discovery、creation、interaction 和 cancellation 消息必须在后续协议扩展中加入，adapter 才能暴露它们。
+- 当前 Companion catalog 证明 Session 创建、prompt 提交与取消、attachment offer、审批与 Ask User 结算、operation-status 查询、含 image 与交互卡片的 transcript projection，以及 confirmed、attachment-rejected 与 status 三种 result。远程 Workspace 发现仍属于后续 catalog 切片。
 - 配对 handshake、凭据持久化、challenge lifecycle、token 分发与生产 Companion 消息加密属于服务或经评审的 endpoint 集成，不属于这些 codec。

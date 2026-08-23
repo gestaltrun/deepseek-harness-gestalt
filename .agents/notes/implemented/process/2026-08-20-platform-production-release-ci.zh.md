@@ -10,7 +10,7 @@ Platform 监听进程及其 GitHub Actions 工作流只需要一套实际运行�
 
 ## 决策
 
-实际运行的 Platform 只有生产环境。[`apps/platform/src/production-env.ts`](../../../../apps/platform/src/production-env.ts) 列出监听进程所需密钥，将未设置的 `PLATFORM_ENVIRONMENT` 视为 production，并在 `loadPlatformEnvironment` 运行前拒绝任何其他选择。[`boot.ts`](../../../../apps/platform/src/boot.ts) 仍保留虚假的 development 身份，以便客户端成对校验拒绝共享身份；它们不是第二套监听进程。
+实际运行的 Platform 只有生产环境。[`apps/platform/src/production-env.ts`](../../../../apps/platform/src/production-env.ts) 列出监听进程所需密钥，将未设置的 `PLATFORM_ENVIRONMENT` 视为 production，并在 `loadPlatformEnvironment` 运行前拒绝任何其他选择。[`boot.ts`](../../../../apps/platform/src/boot.ts) 仍保留虚假的 development 身份，以便客户端成对校验拒绝共享身份；它们不是第二套监听进程。本地模拟器使用的无密钥 Account、配对与 Relay 监听在 [`examples/local-companion-platform`](../../../../examples/local-companion-platform/README.md)（[本地 Companion Platform](../architecture/2026-08-21-local-companion-platform.md)）。
 
 GitHub Actions 只使用 Environment `production`。[Platform Image](../../../../.github/workflows/platform-image.yml) 会在拉取请求和匹配的 master 推送上构建，仅在 `workflow_dispatch` 且 `inputs.push` 为真时推送到 GHCR。[Platform Deploy](../../../../.github/workflows/platform-deploy.yml) 始终通过 [`production-env-cli.ts`](../../../../apps/platform/src/production-env-cli.ts)（`node --experimental-strip-types`）校验生产和 ECS 名称，仅在 `inputs.deploy` 为真时 SSH。该 CLI 入口不会打进 `boot.mjs`。
 

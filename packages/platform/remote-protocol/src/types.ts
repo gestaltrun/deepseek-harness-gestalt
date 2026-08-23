@@ -21,6 +21,9 @@ export type CompanionSessionId = Branded<'CompanionSessionId'>
 /** Protocol-native identifier for one ordered transcript projection entry. */
 export type CompanionTranscriptEntryId = Branded<'CompanionTranscriptEntryId'>
 
+/** Protocol-native identifier for one Desktop-authorized approval or Ask User card. */
+export type CompanionInteractionId = Branded<'CompanionInteractionId'>
+
 /** Opaque APNs or FCM device registration token; it routes pushes to one device and carries no account identity. */
 export type CompanionPushToken = Branded<'CompanionPushToken'>
 
@@ -42,12 +45,28 @@ export interface CompanionVersionOffer {
   versions: readonly CompanionVersionDescriptor[]
 }
 
+/** Mobile-proposed Session that Desktop must accept before the list may change. */
+export interface CompanionCreateSessionOperation {
+  type: 'create-session'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
+  title: string
+  workspace?: string
+}
+
 /** Approved prompt submission to one opaque Companion Session target. */
 export interface CompanionSubmitPromptOperation {
   type: 'submit-prompt'
   operationId: CompanionOperationId
   sessionId: CompanionSessionId
   text: string
+}
+
+/** Mobile request that Desktop cancel the active prompt on one Session. */
+export interface CompanionCancelPromptOperation {
+  type: 'cancel-prompt'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
 }
 
 /** Bounded Mobile control message pointing Desktop at one Platform-retained encrypted blob. */
@@ -87,11 +106,34 @@ export interface CompanionQueryOperationStatusOperation {
   operationId: CompanionOperationId
 }
 
+/** Mobile settlement of one Desktop-authorized approval card. */
+export interface CompanionSettleApprovalOperation {
+  type: 'settle-approval'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
+  interactionId: CompanionInteractionId
+  decision: string
+  persistent?: boolean
+}
+
+/** Mobile answer to one Desktop-authorized Ask User card. */
+export interface CompanionAnswerAskUserOperation {
+  type: 'answer-ask-user'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
+  interactionId: CompanionInteractionId
+  decision: string
+}
+
 /** Operations in the implemented Companion codec slices. */
 export type CompanionOperation =
+  | CompanionCreateSessionOperation
   | CompanionSubmitPromptOperation
+  | CompanionCancelPromptOperation
   | CompanionOfferAttachmentOperation
   | CompanionQueryOperationStatusOperation
+  | CompanionSettleApprovalOperation
+  | CompanionAnswerAskUserOperation
 
 /** Desktop-authoritative mutation result. */
 export interface CompanionConfirmedResult {
@@ -137,11 +179,56 @@ export interface CompanionTextTranscriptEntry {
   text: string
 }
 
+/** Desktop-confirmed image attachment metadata; plaintext bytes stay off the Relay frame. */
+export interface CompanionImageTranscriptEntry {
+  type: 'image'
+  entryId: CompanionTranscriptEntryId
+  fileName: string
+  alt: string
+}
+
+/** Desktop-authoritative settlement recorded on an interaction card. */
+export interface CompanionInteractionSettlement {
+  decision: string
+  persistent?: boolean
+}
+
+/** Desktop-authorized approval card projected for Mobile settlement. */
+export interface CompanionApprovalTranscriptEntry {
+  type: 'approval'
+  entryId: CompanionTranscriptEntryId
+  interactionId: CompanionInteractionId
+  summary: string
+  authorized: readonly string[]
+  cwd?: string
+  diff?: string
+  terminal?: string
+  settled?: CompanionInteractionSettlement
+}
+
+/** Desktop-authorized Ask User card projected for Mobile settlement. */
+export interface CompanionAskUserTranscriptEntry {
+  type: 'ask-user'
+  entryId: CompanionTranscriptEntryId
+  interactionId: CompanionInteractionId
+  summary: string
+  authorized: readonly string[]
+  settled?: CompanionInteractionSettlement
+}
+
+/** One Desktop-approved transcript entry. */
+export type CompanionTranscriptEntry =
+  | CompanionTextTranscriptEntry
+  | CompanionImageTranscriptEntry
+  | CompanionApprovalTranscriptEntry
+  | CompanionAskUserTranscriptEntry
+
 /** Approved transcript page projected by the Paired Desktop. */
 export interface CompanionTranscriptPageProjection {
   type: 'transcript-page'
   sessionId: CompanionSessionId
-  entries: readonly CompanionTextTranscriptEntry[]
+  entries: readonly CompanionTranscriptEntry[]
+  streaming?: boolean
 }
 
 /** Projections in the first implemented Companion codec slice. */

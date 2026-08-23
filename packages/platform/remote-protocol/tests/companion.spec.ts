@@ -8,6 +8,7 @@ import {
   encodeCompanionMessage,
   encodeCompanionVersionOffer,
   negotiateCompanionProtocol,
+  parseCompanionInteractionId,
   parseCompanionOperationId,
   parseCompanionSessionId,
   parseCompanionTranscriptEntryId,
@@ -47,6 +48,135 @@ describe('Encrypted Companion Protocol codec', () => {
       },
     } as const
     expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, result))).toEqual(result)
+  })
+
+  it('round-trips Session creation with and without a Workspace and rejects empty fields', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile'),
+      createCompanionVersionOffer('desktop'),
+    )
+    const operationId = parseCompanionOperationId('operation-create')
+    const sessionId = parseCompanionSessionId('session-create')
+    const ungrouped = {
+      type: 'operation',
+      operation: {
+        type: 'create-session',
+        operationId,
+        sessionId,
+        title: 'Ungrouped Session',
+      },
+    } as const
+    const workspace = {
+      type: 'operation',
+      operation: {
+        type: 'create-session',
+        operationId,
+        sessionId,
+        title: 'Workspace Session',
+        workspace: 'Work',
+      },
+    } as const
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, ungrouped))).toEqual(ungrouped)
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, workspace))).toEqual(workspace)
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'operation',
+      operation: { type: 'create-session', operationId, sessionId, title: '' },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'operation',
+      operation: { type: 'create-session', operationId, sessionId, title: 'Work', workspace: '' },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'operation',
+      operation: { type: 'create-session', operationId, sessionId, title: 'Work', extra: true },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+  })
+
+  it('round-trips a prompt cancellation targeting one Session', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile'),
+      createCompanionVersionOffer('desktop'),
+    )
+    const cancel = {
+      type: 'operation',
+      operation: {
+        type: 'cancel-prompt',
+        operationId: parseCompanionOperationId('operation-cancel'),
+        sessionId: parseCompanionSessionId('session-cancel'),
+      },
+    } as const
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, cancel))).toEqual(cancel)
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'operation',
+      operation: { type: 'cancel-prompt', operationId: 'operation-cancel' },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+  })
+
+  it('round-trips settle-approval and answer-ask-user operations', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile'),
+      createCompanionVersionOffer('desktop'),
+    )
+    const settle = {
+      type: 'operation',
+      operation: {
+        type: 'settle-approval',
+        operationId: parseCompanionOperationId('operation-settle'),
+        sessionId: parseCompanionSessionId('session-settle'),
+        interactionId: parseCompanionInteractionId('approval-1'),
+        decision: 'once',
+        persistent: true,
+      },
+    } as const
+    const answer = {
+      type: 'operation',
+      operation: {
+        type: 'answer-ask-user',
+        operationId: parseCompanionOperationId('operation-answer'),
+        sessionId: parseCompanionSessionId('session-answer'),
+        interactionId: parseCompanionInteractionId('question-1'),
+        decision: 'A',
+      },
+    } as const
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, settle))).toEqual(settle)
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, {
+      type: 'operation',
+      operation: {
+        type: 'settle-approval',
+        operationId: parseCompanionOperationId('operation-settle-once'),
+        sessionId: parseCompanionSessionId('session-settle'),
+        interactionId: parseCompanionInteractionId('approval-1'),
+        decision: 'once',
+      },
+    }))).toMatchObject({ operation: { type: 'settle-approval', decision: 'once' } })
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, answer))).toEqual(answer)
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'operation',
+      operation: {
+        type: 'settle-approval',
+        operationId: 'operation-settle',
+        sessionId: 'session-settle',
+        interactionId: 'approval-1',
+        decision: '',
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'operation',
+      operation: {
+        type: 'answer-ask-user',
+        operationId: 'operation-answer',
+        sessionId: 'session-answer',
+        interactionId: 'question-1',
+        decision: 'A',
+        extra: true,
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
   })
 
   it('round-trips a reconnect operation-status query and its committed or absent answer', () => {
@@ -267,6 +397,200 @@ describe('Encrypted Companion Protocol codec', () => {
       negotiated,
       encodeCompanionMessage(negotiated, projection),
     )).toEqual(projection)
+
+    const streaming = {
+      type: 'projection' as const,
+      projection: {
+        type: 'transcript-page' as const,
+        sessionId: parseCompanionSessionId('session-stream'),
+        streaming: true,
+        entries: [{
+          type: 'text' as const,
+          entryId: parseCompanionTranscriptEntryId('entry-stream'),
+          role: 'user' as const,
+          text: 'in flight',
+        }],
+      },
+    }
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, streaming))).toEqual(streaming)
+
+    const mixed = {
+      type: 'projection' as const,
+      projection: {
+        type: 'transcript-page' as const,
+        sessionId: parseCompanionSessionId('session-mixed'),
+        entries: [
+          {
+            type: 'image' as const,
+            entryId: parseCompanionTranscriptEntryId('entry-image'),
+            fileName: 'shot.png',
+            alt: 'shot.png',
+          },
+          {
+            type: 'approval' as const,
+            entryId: parseCompanionTranscriptEntryId('entry-approval'),
+            interactionId: parseCompanionInteractionId('approval-1'),
+            summary: 'Allow Desktop development action',
+            authorized: ['once', 'always'],
+            cwd: '/tmp',
+            settled: { decision: 'once', persistent: false },
+          },
+          {
+            type: 'ask-user' as const,
+            entryId: parseCompanionTranscriptEntryId('entry-question'),
+            interactionId: parseCompanionInteractionId('question-1'),
+            summary: 'Which Desktop path?',
+            authorized: ['A', 'B'],
+          },
+        ],
+      },
+    }
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, mixed))).toEqual(mixed)
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'projection',
+      projection: {
+        type: 'transcript-page',
+        sessionId: 'session-mixed',
+        streaming: 'yes',
+        entries: [],
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'projection',
+      projection: {
+        type: 'transcript-page',
+        sessionId: 'session-mixed',
+        entries: [{
+          type: 'approval',
+          entryId: 'entry-approval',
+          interactionId: 'approval-1',
+          summary: 'Allow',
+          authorized: ['once'],
+          settled: { decision: 'always' },
+        }],
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'operation',
+      operation: {
+        type: 'settle-approval',
+        operationId: 'operation-settle',
+        sessionId: 'session-settle',
+        interactionId: 'approval-1',
+        decision: 'once',
+        persistent: 'yes',
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    const idle = {
+      type: 'projection' as const,
+      projection: {
+        type: 'transcript-page' as const,
+        sessionId: parseCompanionSessionId('session-idle'),
+        streaming: false,
+        entries: [{
+          type: 'approval' as const,
+          entryId: parseCompanionTranscriptEntryId('entry-idle-approval'),
+          interactionId: parseCompanionInteractionId('approval-idle'),
+          summary: 'Allow with extras',
+          authorized: ['once'],
+          diff: '-old\n+new',
+          terminal: 'echo hi',
+          settled: { decision: 'once' },
+        }, {
+          type: 'approval' as const,
+          entryId: parseCompanionTranscriptEntryId('entry-minimal-approval'),
+          interactionId: parseCompanionInteractionId('approval-minimal'),
+          summary: 'Allow without extras',
+          authorized: ['once'],
+        }, {
+          type: 'ask-user' as const,
+          entryId: parseCompanionTranscriptEntryId('entry-idle-question'),
+          interactionId: parseCompanionInteractionId('question-idle'),
+          summary: 'Pick one',
+          authorized: ['A'],
+          settled: { decision: 'A', persistent: false },
+        }],
+      },
+    }
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, idle))).toEqual(idle)
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'projection',
+      projection: {
+        type: 'transcript-page',
+        sessionId: 'session-idle',
+        entries: [{
+          type: 'approval',
+          entryId: 'entry-empty-auth',
+          interactionId: 'approval-empty',
+          summary: 'Allow',
+          authorized: [],
+        }],
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'projection',
+      projection: {
+        type: 'transcript-page',
+        sessionId: 'session-idle',
+        entries: [{
+          type: 'approval',
+          entryId: 'entry-dup-auth',
+          interactionId: 'approval-dup',
+          summary: 'Allow',
+          authorized: ['once', 'once'],
+        }],
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'projection',
+      projection: {
+        type: 'transcript-page',
+        sessionId: 'session-idle',
+        entries: [{
+          type: 'ask-user',
+          entryId: 'entry-blank-auth',
+          interactionId: 'question-blank',
+          summary: 'Pick',
+          authorized: [''],
+        }],
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'projection',
+      projection: {
+        type: 'transcript-page',
+        sessionId: 'session-idle',
+        entries: [{
+          type: 'approval',
+          entryId: 'entry-bad-persistent',
+          interactionId: 'approval-bad',
+          summary: 'Allow',
+          authorized: ['once'],
+          settled: { decision: 'once', persistent: 'yes' },
+        }],
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    expect(() => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2,
+      type: 'projection',
+      projection: {
+        type: 'transcript-page',
+        sessionId: 'session-idle',
+        entries: [{
+          type: 'image',
+          entryId: 'entry-image-empty',
+          fileName: 'shot.png',
+          alt: '',
+        }],
+      },
+    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
 
     const oversized = {
       ...projection,
@@ -507,6 +831,9 @@ describe('Encrypted Companion Protocol codec', () => {
   it('brands only bounded canonical Companion identifiers', () => {
     for (const value of [undefined, '', 'x'.repeat(129), 'not valid']) {
       expect(() => parseCompanionOperationId(value)).toThrow(
+        expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+      )
+      expect(() => parseCompanionInteractionId(value)).toThrow(
         expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
       )
     }

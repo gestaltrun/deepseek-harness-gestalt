@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import type { CompanionInteraction } from './companion-approval.ts'
 import {
   COMPANION_HISTORY_PAGE_SIZE,
   groupCompanionSessions,
@@ -19,14 +20,26 @@ export interface MobileBrowseProps {
   sessions: readonly CompanionSessionSummary[]
   /** Optional create handler used by Workspace and global create actions. */
   onCreate?: (input: { workspace?: string }) => void
+  /** Submit a prompt through Desktop acceptance. */
+  onSubmit?: (sessionId: string, text: string) => void
+  /** Cancel the active prompt through Desktop cancellation. */
+  onCancel?: (sessionId: string) => void
+  /** Offer a local file on the open Session. */
+  onAttach?: (sessionId: string, file: File) => void
+  /** Forward a Desktop-authorized interaction settlement. */
+  onSettled?: (sessionId: string, interaction: CompanionInteraction) => void
   /** Process visibility required before conversation settlement. */
   companionState?: CompanionPushState
 }
 
 /** Phone-sized Workspace/Session browse without Desktop columns. */
-export function MobileBrowse({ desktopName, connection, sessions, onCreate, companionState }: MobileBrowseProps): ReactNode {
+export function MobileBrowse({
+  desktopName, connection, sessions, onCreate, onSubmit, onCancel, onAttach, onSettled, companionState,
+}: MobileBrowseProps): ReactNode {
   const [openId, setOpenId] = useState<string>()
+  const [workspaceName, setWorkspaceName] = useState('')
   const [page, setPage] = useState(0)
+  const canCreate = onCreate !== undefined && connection === 'online'
   const paged = useMemo(
     () => pageCompanionHistory(sessions, page, COMPANION_HISTORY_PAGE_SIZE),
     [sessions, page],
@@ -41,6 +54,11 @@ export function MobileBrowse({ desktopName, connection, sessions, onCreate, comp
           title={open.title}
           onBack={() => { setOpenId(undefined) }}
           blocks={open.blocks}
+          streaming={open.live === true}
+          {...(onSubmit === undefined ? {} : { onSubmit: (text) => { onSubmit(open.id, text) } })}
+          {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(open.id) } })}
+          {...(onAttach === undefined ? {} : { onAttach: (file) => { onAttach(open.id, file) } })}
+          {...(onSettled === undefined ? {} : { onSettled: (interaction) => { onSettled(open.id, interaction) } })}
           {...(companionState === undefined ? {} : { companionState })}
         />
       )
@@ -64,14 +82,40 @@ export function MobileBrowse({ desktopName, connection, sessions, onCreate, comp
         <p className={css.desktop}>{desktopName}</p>
         <p className={css.connection} data-connection={connection}>{connection === 'online' ? 'Remote Online' : 'Remote Offline'}</p>
         {onCreate !== undefined && (
-          <button type="button" onClick={() => { onCreate({}) }}>新建 Ungrouped Session</button>
+          <>
+            <button type="button" disabled={!canCreate} onClick={() => { onCreate({}) }}>新建 Ungrouped Session</button>
+            <input
+              aria-label="Workspace 名称"
+              value={workspaceName}
+              disabled={!canCreate}
+              onChange={(event) => { setWorkspaceName(event.target.value) }}
+            />
+            <button
+              type="button"
+              disabled={!canCreate || workspaceName.trim() === ''}
+              onClick={() => {
+                const workspace = workspaceName.trim()
+                if (workspace === '') return
+                onCreate({ workspace })
+                setWorkspaceName('')
+              }}
+            >
+              在新 Workspace 新建 Session
+            </button>
+          </>
         )}
       </header>
       {grouped.groups.map(group => (
         <section key={group.name} className={css.group} aria-label={group.name}>
           <h2>{group.name}</h2>
           {onCreate !== undefined && (
-            <button type="button" onClick={() => { onCreate({ workspace: group.name }) }}>在 {group.name} 新建 Session</button>
+            <button
+              type="button"
+              disabled={!canCreate}
+              onClick={() => { onCreate({ workspace: group.name }) }}
+            >
+              在 {group.name} 新建 Session
+            </button>
           )}
           <SessionList sessions={group.sessions} onOpen={setOpenId} />
         </section>

@@ -24,6 +24,11 @@ import {
 import type { SidebarRootComponentProps } from './contract/slots.ts'
 import css from './SidebarRoot.module.css'
 
+/** True when this document is the Desktop native overlay renderer. */
+function isDesktopOverlayDocument(): boolean {
+  return document.documentElement.hasAttribute('data-dsh-desktop-overlay')
+}
+
 /** Wide-content unmount delay; matches the 150ms wide-content fade-out. */
 const COLLAPSE_SETTLE_MS = 150
 
@@ -49,6 +54,11 @@ export function SidebarRoot({
   renderSlot,
   renderSlotChain,
 }: SidebarRootComponentProps) {
+  // Overlay document: Host chrome already has the rail; this tree only
+  // paints Settings above official pages.
+  if (isDesktopOverlayDocument()) {
+    return renderSlot('sidebar.settings', { wide: true })
+  }
   // Wide content stays mounted while the collapse animates (fading via
   // .collapsed .wide), unmounts at settle, and remounts right away on expand.
   const [settled, setSettled] = useState(collapsed)

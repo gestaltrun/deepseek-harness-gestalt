@@ -114,8 +114,8 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     key: 'conversation.browser.preview',
     kind: 'single',
     scope: 'session',
-    summary: 'Collapsed Browser Dock preview in the message region.',
-    doc: 'Collapsed Browser Dock preview in the message region. Occupied by\nui-browser\'s layered tab stack while the Dock is closed; hidden while\nthe Dock is visible. Ordinary MCP tool rows stay in conversation history.',
+    summary: 'Collapsed Browser preview in the conversation right gutter.',
+    doc: 'Collapsed Browser preview in the conversation right gutter. Occupied by\nui-browser\'s layered tab stack. ChatView hides the rail when that gutter\nis narrower than 240px. Ordinary MCP tool rows stay in conversation history.',
     registerOptions: [],
     ownerProps: [],
     ownerPropsReferences: [],
@@ -1198,7 +1198,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     kind: 'list',
     scope: 'session',
     summary: 'The right details column, shown when the layout opens it.',
-    doc: 'The right details column, shown when the layout opens it. Occupants are\nadditive list entries: ui-conversation\'s DetailsPanel (`id: \'tool\'`)\ndeclares the tool-details seat, and Browser Dock (`id: \'browser\'`)\ncovers the column while that Session\'s Dock is open. Absent an occupant\nthe column renders nothing.\n\nNo owner props: the framework injects the session id and hooks for the\n`session` scope, and `ctx.layout` owns whether the column is open.',
+    doc: 'The right details column, shown when the layout opens it. Occupants are\nadditive list entries: ui-conversation\'s DetailsPanel (`id: \'tool\'`)\ndeclares the tool-details seat. Official Browser chrome lives in the\nworkbench sidebar, not here. Absent an occupant the column renders nothing.\n\nNo owner props: the framework injects the session id and hooks for the\n`session` scope, and `ctx.layout` owns whether the column is open.',
     registerOptions: [
       {
         name: 'id',
@@ -1237,12 +1237,11 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'root\' (client-ui-layout), so it exists while that entry is mounted',
     occupants: [
-      'client-ui-browser BrowserDock id \'browser\'',
       'client-ui-conversation DetailsPanel id \'tool\'',
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'details\', () => ctx.slots.register(\n      { name: \'details\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-layout/src/client/index.ts:73',
+    source: 'packages/client/ui-layout/src/client/index.ts:72',
   },
   {
     key: 'root',
@@ -1630,6 +1629,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     declaredBy: 'an entry in \'sidebar.settings\' (client-ui-settings-general), so it exists while that entry is mounted',
     occupants: [
       'client-ui-agent-preset AgentPresetSection id \'agent-presets\'',
+      'client-ui-browser BrowserSettingsSection id \'browser\'',
       'client-ui-desktop AccountControl id \'mobile-pairing\'',
       'client-ui-settings-general GeneralSection id \'general\'',
       'client-ui-settings-models ModelsSection id \'models\'',
@@ -1701,10 +1701,12 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     hookContext: '',
     slotInject: '',
     declaredBy: 'an entry in \'root\' (client-ui-layout), so it exists while that entry is mounted',
-    occupants: [],
+    occupants: [
+      'client-ui-desktop DesktopChromeOverlay id \'desktop-chrome-overlay\'',
+    ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'shell.overlay\', () => ctx.slots.register(\n      { name: \'shell.overlay\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-layout/src/client/index.ts:84',
+    source: 'packages/client/ui-layout/src/client/index.ts:83',
   },
   {
     key: 'sidebar',

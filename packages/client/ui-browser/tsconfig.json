@@ -24,13 +24,19 @@
       "path": "../ui-conversation"
     },
     {
-      "path": "../ui-layout"
-    },
-    {
       "path": "../ui-primitives"
     },
     {
       "path": "../ui-slots"
+    },
+    {
+      "path": "../ui-settings"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../settings/settings"
     },
     {
       "path": "../../browser/browser-workspace"

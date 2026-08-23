@@ -48,6 +48,12 @@ describe('RemoteRelayEndpointController', () => {
     await lifecycle.start()
     expect(lifecycle.isConnected()).toBe(true)
     expect(socket.decoded()[0]).toMatchObject({ type: 'attach', endpoint: 'mobile', routeId: 'route-product' })
+    await lifecycle.sendCiphertext(parseRelayAttachmentId('desktop-product'), Uint8Array.of(1))
+    expect(socket.decoded()[1]).toMatchObject({
+      type: 'ciphertext',
+      targetAttachmentId: 'desktop-product',
+      ciphertext: Uint8Array.of(1),
+    })
     await lifecycle.stop()
     expect(lifecycle.isConnected()).toBe(false)
   })

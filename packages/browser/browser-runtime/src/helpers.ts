@@ -2,10 +2,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { BrowserInstanceId, BrowserProfileId, BrowserProfileName, BrowserRuntimeError, BrowserTabId, BrowserWorkspaceId } from './types.ts'
 import type {
-  BrowserControlOwner,
   BrowserCreateAttach,
   BrowserCreateRequest,
-  BrowserMutationRequest,
   BrowserPageState,
   BrowserProfileChrome,
   BrowserProfileKind,
@@ -526,61 +524,4 @@ export function requireExpectedOpenBrowserPage(
 ): BrowserPageState {
   requireExpectedBrowserRevision(state, revision)
   return requireOpenBrowserPage(state)
-}
-
-/**
- * Advance one open page to the next revision and assign its reported control owner.
- * @param state - Current open page.
- * @param controlOwner - Next reported operator.
- * @returns the next committed open-page facts.
- */
-export function withBrowserControlOwner(
-  state: BrowserPageState,
-  controlOwner: BrowserControlOwner,
-): BrowserPageState {
-  return { ...state, revision: state.revision + 1, controlOwner }
-}
-
-/**
- * Run one serialized mutation that only changes control ownership.
- * @param exclusive - Provider queue that serializes accepted work.
- * @param open - Resolves the addressed open page.
- * @param expected - Enforces the caller's last observed revision.
- * @param commit - Commits the next open page.
- * @param request - Target, expected revision, and cancellation.
- * @param controlOwner - Next reported operator.
- * @returns the committed open page.
- */
-export async function mutateBrowserControlOwner(
-  exclusive: <T>(operation: () => T | Promise<T>) => Promise<T>,
-  open: (target: BrowserTarget) => BrowserPageState,
-  expected: (state: BrowserRuntimeState, revision: number) => void,
-  commit: (state: BrowserPageState) => BrowserPageState,
-  request: BrowserMutationRequest,
-  controlOwner: BrowserControlOwner,
-): Promise<BrowserPageState> {
-  assertBrowserNotAborted(request.signal)
-  return exclusive(() => {
-    assertBrowserNotAborted(request.signal)
-    const state = open(request.target)
-    expected(state, request.expectedRevision)
-    return commit(withBrowserControlOwner(state, controlOwner))
-  })
-}
-
-/**
- * Bind one Provider's serialized queue to a control-owner mutation.
- * @param exclusive - Provider queue that serializes accepted work.
- * @param open - Resolves the addressed open page.
- * @param expected - Enforces the caller's last observed revision.
- * @param commit - Commits the next open page.
- * @returns a function that assigns one control owner.
- */
-export function bindBrowserControlMutation(
-  exclusive: <T>(operation: () => T | Promise<T>) => Promise<T>,
-  open: (target: BrowserTarget) => BrowserPageState,
-  expected: (state: BrowserRuntimeState, revision: number) => void,
-  commit: (state: BrowserPageState) => BrowserPageState,
-): (request: BrowserMutationRequest, controlOwner: BrowserControlOwner) => Promise<BrowserPageState> {
-  return (request, controlOwner) => mutateBrowserControlOwner(exclusive, open, expected, commit, request, controlOwner)
 }

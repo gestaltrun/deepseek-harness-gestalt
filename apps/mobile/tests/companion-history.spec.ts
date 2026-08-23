@@ -99,7 +99,28 @@ describe('Mobile Companion browse projection', () => {
     }))
     fireEvent.click(screen.getByRole('button', { name: '在 Work 新建 Session' }))
     fireEvent.click(screen.getByRole('button', { name: '新建 Ungrouped Session' }))
-    expect(created).toEqual([{ workspace: 'Work' }, {}])
+    fireEvent.change(screen.getByLabelText('Workspace 名称'), { target: { value: 'Docs' } })
+    fireEvent.click(screen.getByRole('button', { name: '在新 Workspace 新建 Session' }))
+    expect(created).toEqual([{ workspace: 'Work' }, {}, { workspace: 'Docs' }])
     expect(screen.queryByRole('button', { name: /voice|语音/i })).toBeNull()
+  })
+
+  it('opens a created Session into the conversation composer after Desktop confirmation', () => {
+    const submitted: Array<{ id: string; text: string }> = []
+    const created = createCompanionSession([], new Set(), {
+      operationId: 'session-composer',
+      title: 'Ungrouped Session',
+      devicePrincipalId: 'device-1',
+    })
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac',
+      connection: 'online',
+      sessions: created.sessions,
+      onSubmit: (sessionId, text) => { submitted.push({ id: sessionId, text }) },
+    }))
+    fireEvent.click(screen.getByRole('button', { name: /Ungrouped Session/ }))
+    fireEvent.change(screen.getByLabelText('继续会话'), { target: { value: 'hello from Mobile' } })
+    fireEvent.submit(screen.getByLabelText('继续会话').closest('form')!)
+    expect(submitted).toEqual([{ id: 'session-composer', text: 'hello from Mobile' }])
   })
 })

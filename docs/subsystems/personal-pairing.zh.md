@@ -14,7 +14,7 @@ Mobile 仅在完整链接与保留能力相符后消费邀请。跨账号尝试�
 
 ## 密码适配器
 
-`PairingHandshakeProvider` 准备、完成、激活并销毁提供方私有握手状态。远程访问从不实现 Noise 状态迁移或密码原语。`remote-access-http` 消费 `ctx.remoteAccess`，`remote-access-client` 则校验真实 Desktop 设置与 Mobile 控制器使用的协议值。组装后的 loader 场景使用 `DevelopmentKeylessPairingHandshakeProvider`，让提供方、HTTP 消费方和共享传输通过真实环回服务器运行。Desktop 与 Mobile 开发入口只能通过显式标志选择各自的真实控制器。生产组合在独立 Noise 评审接纳经过评审的提供方前保持不可用；开发证明永远不会由生产路径选择。
+`PairingHandshakeProvider` 准备、完成、激活并销毁提供方私有握手状态。远程访问从不实现 Noise 状态迁移或密码原语。`remote-access-http` 消费 `ctx.remoteAccess`，`remote-access-client` 则校验真实 Desktop 设置与 Mobile 控制器使用的协议值。组装后的 loader 场景使用 `DevelopmentKeylessPairingHandshakeProvider`，让提供方、HTTP 消费方和共享传输通过真实环回服务器运行。[`examples/local-companion-platform`](../../examples/local-companion-platform/README.md) 把同一适配器保持在长期运行的双实例 TLS origin 上，供本地 Desktop 与 Mobile 客户端使用。Desktop 与 Mobile 开发入口只能通过显式标志选择各自的真实控制器。生产组合在独立 Noise 评审接纳经过评审的提供方前保持不可用；开发证明永远不会由生产路径选择。
 
 ## 多实例 Relay
 

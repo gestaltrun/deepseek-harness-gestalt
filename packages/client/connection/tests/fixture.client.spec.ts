@@ -152,9 +152,6 @@ describe('createFixtureApi', () => {
         plan: { active: false, pending: false },
         goal: null,
         browserWorkspace: {
-          dockOpen: false,
-          dockWidth: 640,
-          userCollapsed: false,
           workspaces: [],
           activeWorkspaceId: null,
         },
@@ -389,12 +386,12 @@ describe('createFixtureApi', () => {
     expect(first[6]?.payload).toMatchObject({
       type: 'session/projection', sessionId: 'fx-alpha', key: 'browserWorkspace',
       value: {
-        dockOpen: false, dockWidth: 720, userCollapsed: true, activeWorkspaceId: 'fx-workspace',
+        activeWorkspaceId: 'fx-workspace',
         workspaces: [{
           workspaceId: 'fx-workspace', profileId: 'fx-profile', activeBrowserId: 'fx-browser',
           browsers: [{
             browserId: 'fx-browser', activeTabId: 'fx-tab',
-            tabs: [{ tabId: 'fx-tab', controlOwner: 'agent', revision: 1 }],
+            tabs: [{ tabId: 'fx-tab', revision: 1 }],
           }],
         }],
       },

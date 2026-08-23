@@ -33,6 +33,26 @@ describe('Mobile conversation renderer', () => {
     expect(screen.queryByRole('button', { name: '允许' })).toBeNull()
   })
 
+  it('refuses composer mutations while Remote Offline', () => {
+    const onSubmit = vi.fn()
+    const onAttach = vi.fn()
+    render(createElement(MobileConversation, {
+      title: 'Offline',
+      onBack: () => {},
+      companionState: { token: 'tok', foreground: true, socketOpen: false, synchronized: false },
+      onSubmit,
+      onAttach,
+      blocks: [{ kind: 'markdown', text: 'cached' }],
+    }))
+    expect(screen.getByRole('alert').textContent).toBe('Remote Offline 拒绝发送')
+    expect(screen.getByLabelText('继续会话').hasAttribute('disabled')).toBe(true)
+    expect(screen.getByLabelText('添加附件').hasAttribute('disabled')).toBe(true)
+    fireEvent.change(screen.getByLabelText('继续会话'), { target: { value: 'nope' } })
+    fireEvent.submit(screen.getByLabelText('继续会话').closest('form')!)
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onAttach).not.toHaveBeenCalled()
+  })
+
   it('disables settlement until foreground reconnect and Desktop-authoritative sync', () => {
     const onSettled = vi.fn()
     render(createElement(MobileConversation, {
@@ -40,12 +60,48 @@ describe('Mobile conversation renderer', () => {
       onBack: () => {},
       companionState: { token: 'tok', foreground: true, socketOpen: true, synchronized: false },
       onSettled,
-      blocks: [{ kind: 'approval', summary: 'Allow write' }],
+      blocks: [{ kind: 'approval', summary: 'Allow write', authorized: ['once', 'always'] }],
     }))
     const button = screen.getByRole('button', { name: '允许' })
     expect(button.hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: '始终允许' }).hasAttribute('disabled')).toBe(true)
     fireEvent.click(button)
     expect(onSettled).not.toHaveBeenCalled()
+  })
+
+  it('offers Desktop-authorized Ask User answers and hides cancel unless streaming', () => {
+    const onSettled = vi.fn()
+    const onCancel = vi.fn()
+    const { rerender } = render(createElement(MobileConversation, {
+      title: 'Ask',
+      onBack: () => {},
+      companionState: { token: 'tok', foreground: true, socketOpen: true, synchronized: true },
+      onSubmit: () => {},
+      onCancel,
+      onSettled,
+      blocks: [{
+        kind: 'ask-user',
+        question: 'Which Desktop path?',
+        interactionId: 'question-1',
+        authorized: ['A', 'B'],
+      }],
+    }))
+    expect(screen.queryByRole('button', { name: '取消' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'B' }))
+    expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'ask-user',
+      settled: { decision: 'B' },
+    }))
+    rerender(createElement(MobileConversation, {
+      title: 'Ask',
+      onBack: () => {},
+      streaming: true,
+      onSubmit: () => {},
+      onCancel,
+      blocks: [{ kind: 'markdown', text: 'streaming' }],
+    }))
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(onCancel).toHaveBeenCalledOnce()
   })
 
   it('renders unknown tools as a generic read-only card and bounds terminal output', () => {

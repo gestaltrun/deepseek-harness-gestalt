@@ -93,6 +93,8 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/client/ui-jobs': { kind: 'none', reason: 'Browser-side read-only projection of ctx.jobs records; dsh-tool-jobs owns the model-facing behavior.' },
   'packages/client/ui-schedule': { kind: 'none', reason: 'Browser-side current-state projection and human controls; dsh-schedule owns model-facing reminder behavior.' },
   'packages/client/ui-browser': { kind: 'none', reason: 'Browser-side Dock chrome over Session-owned Browser Workspace facts; dsh-tool-browser owns model-facing page operations.' },
+  'packages/client/ui-workbench': { kind: 'none', reason: 'Adapter that patches snapshot prefs; registers no prompt, schema, or tool.' },
+  'packages/client/better-sidebar': { kind: 'indirect', reason: 'Optional snapshot terminal_* tools stay behind a Side Card setting; this README does not own those schemas.' },
   'packages/client/ui-workflow-run': { kind: 'none', reason: 'Browser-side UI plugin layer; renders durable workflow records without changing model context.' },
   'packages/client/ui-input-trigger': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/ui-reference': { kind: 'indirect', reason: 'Browser-side reference selection delegates file guidance and session snapshot preparation to Host-owned providers.' },

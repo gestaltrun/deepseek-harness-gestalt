@@ -71,6 +71,20 @@ describe('RemoteAccessHttpTransport', () => {
     expect(fetch).toHaveBeenCalledOnce()
   })
 
+  it('keeps the default Fetch implementation callable after method extraction', async () => {
+    const impl = {
+      async fetch(this: unknown) {
+        if (this == null) throw new TypeError('Illegal invocation')
+        return new Response(JSON.stringify({ enabled: false }))
+      },
+    }
+    vi.stubGlobal('fetch', impl.fetch.bind(impl))
+    const client = new RemoteAccessHttpTransport({
+      environment: { environment: 'development', origin: 'https://platform.example' } as never,
+    })
+    await expect(client.getMobileAccessState(authentication)).resolves.toEqual({ enabled: false })
+  })
+
   it('serializes every Desktop and Mobile operation and parses their public results', async () => {
     const replies = [
       { enabled: false }, {

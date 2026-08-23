@@ -10,7 +10,7 @@ Windows Desktop Host 无边框，并绘制一条全宽 36px 拖动条（含 capt
 
 ## 决策
 
-AppFrame 在存在 Windows chrome 标记时把中间 Session 栏下移 36px，与拖动条高度对齐，方式和 macOS 已有的 28px 下移相同。[Desktop Host Agent Note](../architecture/2026-08-16-deepseek-gestalt-desktop-host.md) 记录 chrome 几何。
+AppFrame 在存在 Windows chrome 标记时把中间 Session 栏下移 36px，与 macOS 已使用的统一 Window Chrome 高度对齐。[Desktop Host Agent Note](../architecture/2026-08-16-deepseek-gestalt-desktop-host.md) 记录 chrome 几何。
 
 ## 考虑过的替代方案
 
@@ -26,4 +26,4 @@ Windows Desktop 的 Session 内容从拖动条下方开始。浏览器组合不�
 
 ## 测试
 
-`packages/client/ui-layout/tests/app-frame.client.spec.tsx` 固定 AppFrame CSS 中 macOS 28px 与 Windows 36px 中间栏 padding。`apps/web/tests/desktop-chrome.e2e.ts` 测量两种 chrome 标记下组装后的 Session Surface inset 与 padding。
+`packages/client/ui-layout/tests/app-frame.client.spec.tsx` 固定 AppFrame CSS 中 macOS 与 Windows 的 36px 中间栏 padding。`apps/web/tests/desktop-chrome.e2e.ts` 测量两种 chrome 标记下组装后的 Session Surface inset 与 padding。

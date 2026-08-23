@@ -38,7 +38,7 @@
 
 .frame:has([data-desktop-chrome='mac']) .centerCol {
   box-sizing: border-box;
-  padding-top: 28px;
+  padding-top: var(--dsh-window-chrome-height);
 }
 
 .frame:has([data-desktop-chrome='win']) .centerCol {
@@ -51,6 +51,17 @@
   min-width: 0;
   overflow: hidden;
   border-left: 1px solid var(--dsw-alias-border-l2);
+}
+
+/* In-flow concession closed the track; the occupant stays mounted and paints
+   over the center so collapse chrome and the page stay reachable. */
+.detailsCol[data-overlay] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 15;
+  box-shadow: -16px 0 40px color-mix(in srgb, var(--dsw-alias-label-primary) 16%, transparent);
 }
 
 .detailsCol > [data-slot] {

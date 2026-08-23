@@ -36,7 +36,6 @@ function page(): BrowserPageState {
     title: 'Alpha',
     text: 'page text',
     focused: true,
-    controlOwner: 'agent',
     chrome: { kind: 'temporary', partition: 'tmp' },
     storage: {
       cookies: 'c', localStorage: 'l', indexedDb: 'i', cache: 'k', serviceWorker: 's',
@@ -46,9 +45,6 @@ function page(): BrowserPageState {
 
 function snapshot(overrides: Partial<BrowserWorkspaceProjection> = {}): BrowserWorkspaceProjection {
   return {
-    dockOpen: false,
-    dockWidth: 640,
-    userCollapsed: true,
     activeWorkspaceId: TARGET.workspaceId,
     workspaces: [{
       workspaceId: TARGET.workspaceId,
@@ -58,8 +54,8 @@ function snapshot(overrides: Partial<BrowserWorkspaceProjection> = {}): BrowserW
         browserId: TARGET.browserId,
         activeTabId: TARGET.tabId,
         tabs: [
-          { tabId: BACK.tabId, controlOwner: 'human', revision: 2 },
-          { tabId: TARGET.tabId, controlOwner: 'agent', revision: 3 },
+          { tabId: BACK.tabId, revision: 2 },
+          { tabId: TARGET.tabId, revision: 3 },
         ],
       }],
     }],
@@ -71,7 +67,7 @@ function props(current: BrowserWorkspaceProjection | null | undefined = snapshot
   const open = page()
   return {
     useProjection: () => current,
-    openDock: vi.fn().mockResolvedValue(snapshot({ dockOpen: true, userCollapsed: false })),
+    reveal: vi.fn(),
     focus: vi.fn().mockResolvedValue(open),
     observe: vi.fn().mockResolvedValue(open),
     screenshot: vi.fn().mockResolvedValue({
@@ -82,10 +78,14 @@ function props(current: BrowserWorkspaceProjection | null | undefined = snapshot
 }
 
 describe('BrowserPreview occupancy', () => {
-  it('renders nothing without tabs or while the Dock is open', () => {
+  it('renders nothing without tabs and paints whenever pages exist', async () => {
     expect(render(<BrowserPreview {...props(null)} />).container.firstChild).toBeNull()
     cleanup()
-    expect(render(<BrowserPreview {...props(snapshot({ dockOpen: true, userCollapsed: false }))} />).container.firstChild).toBeNull()
+    const input = props(snapshot())
+    render(<BrowserPreview {...input} />)
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '展开 Alpha' })).toBeTruthy()
+    })
   })
 
   it('opens the current layer and focuses a back layer', async () => {
@@ -96,7 +96,7 @@ describe('BrowserPreview occupancy', () => {
     })
     expect(screen.getByText('Alpha · alpha.test')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '展开 Alpha' }))
-    expect(input.openDock).toHaveBeenCalled()
+    expect(input.reveal).toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '切换到 Alpha' }))
     expect(input.focus).toHaveBeenCalledWith(BACK, 2)
   })

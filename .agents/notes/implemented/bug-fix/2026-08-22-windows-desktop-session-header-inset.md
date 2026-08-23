@@ -10,7 +10,7 @@ Windows Desktop Host is frameless and paints a full-width 36px drag strip with c
 
 ## Decision
 
-AppFrame insets the center Session column 36px when the Windows chrome marker is present, matching the drag-strip height the same way macOS already insets 28px. The [Desktop Host Agent Note](../architecture/2026-08-16-deepseek-gestalt-desktop-host.md) records the chrome geometry.
+AppFrame insets the center Session column 36px when the Windows chrome marker is present, matching the shared Window Chrome height already used by macOS. The [Desktop Host Agent Note](../architecture/2026-08-16-deepseek-gestalt-desktop-host.md) records the chrome geometry.
 
 ## Alternatives considered
 
@@ -26,4 +26,4 @@ Windows Desktop Session content starts below the drag strip. Browser composition
 
 ## Testing
 
-`packages/client/ui-layout/tests/app-frame.client.spec.tsx` pins the 28px macOS and 36px Windows center-column padding in AppFrame CSS. `apps/web/tests/desktop-chrome.e2e.ts` measures assembled Session Surface inset and padding for both chrome markers.
+`packages/client/ui-layout/tests/app-frame.client.spec.tsx` pins the 36px macOS and Windows center-column padding in AppFrame CSS. `apps/web/tests/desktop-chrome.e2e.ts` measures assembled Session Surface inset and padding for both chrome markers.

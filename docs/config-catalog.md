@@ -431,7 +431,7 @@ export interface DeterministicBrowserPage {
 }
 ```
 
-Source: [`packages/browser/browser-runtime-deterministic/src/index.ts:70`](../packages/browser/browser-runtime-deterministic/src/index.ts)
+Source: [`packages/browser/browser-runtime-deterministic/src/index.ts:69`](../packages/browser/browser-runtime-deterministic/src/index.ts)
 
 <a id="deepseek-aidsh-browser-runtime-electron"></a>
 
@@ -442,16 +442,16 @@ Source: [`packages/browser/browser-runtime-deterministic/src/index.ts:70`](../pa
 export interface Config {
   /** Prefix for DSH-owned opaque Profile, Workspace, and browser identities. */
   idPrefix?: string
-  /** Hidden window width used for offscreen capture. */
+  /** Hidden window width used for capture while the page is not presented. */
   viewportWidth?: number
-  /** Hidden window height used for offscreen capture. */
+  /** Hidden window height used for capture while the page is not presented. */
   viewportHeight?: number
   /** Bound on each Chromium navigation or content read. */
   requestTimeoutMs?: number
 }
 ```
 
-Source: [`packages/browser/browser-runtime-electron/src/index.ts:86`](../packages/browser/browser-runtime-electron/src/index.ts)
+Source: [`packages/browser/browser-runtime-electron/src/index.ts:135`](../packages/browser/browser-runtime-electron/src/index.ts)
 
 <a id="deepseek-aidsh-browser-runtime-tandem"></a>
 
@@ -499,6 +499,48 @@ export interface Config {
 ```
 
 Source: [`packages/browser/browser-runtime-tandem/src/index.ts:55`](../packages/browser/browser-runtime-tandem/src/index.ts)
+
+<a id="deepseek-aidsh-client-better-sidebar"></a>
+
+## `@deepseek-ai/dsh-client-better-sidebar`
+
+Requires: `webServer` · `sessions` · `webRuntime` · `tools`
+
+```ts config-catalog
+/** Tunable sidebar host limits (every field optional; defaults fill in). */
+export interface SidebarConfig {
+  /** Read cap of one text file (bytes); larger files return truncated. */
+  readLimit?: number
+  /** Media route cap (bytes); larger binaries are refused. */
+  mediaLimit?: number
+  /** Upload route cap (bytes); larger files are refused without touching disk. */
+  uploadLimit?: number
+  /** Explorer row bound of one level. */
+  listLimit?: number
+  /** Terminals per session. */
+  terminalsPerSession?: number
+  /** How long a disconnected terminal process survives awaiting a reconnect. */
+  reconnectGraceMs?: number
+  /**
+   * Terminal shell (absolute path or bare executable name) for BOTH the UI
+   * terminal tabs and the model-facing `terminal_*` tools. Empty = auto:
+   * POSIX follows `$SHELL` then the account login shell; Windows follows
+   * `DSH_SIDEBAR_SHELL`, then probes for `pwsh.exe`, then falls back to the
+   * inbox `powershell.exe` (5.1). Set it from `cordis.patch.yml` / profile
+   * plugin config, e.g. `config: { shell: /bin/zsh }`.
+   */
+  shell?: string
+  /**
+   * Optional arguments passed to the shell executable. When non-empty these
+   * REPLACE the automatic platform defaults (POSIX `-l` / Windows none), so
+   * the deployment has full control over how the shell starts. When omitted
+   * the existing default behavior is kept.
+   */
+  shellArgs?: string[]
+}
+```
+
+Source: [`packages/client/better-sidebar/src/config.ts:40`](../packages/client/better-sidebar/src/config.ts)
 
 <a id="deepseek-aidsh-client-connection"></a>
 
@@ -2863,7 +2905,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/browser/tool-browser/src/index.ts:24`](../packages/browser/tool-browser/src/index.ts)
+Source: [`packages/browser/tool-browser/src/index.ts:28`](../packages/browser/tool-browser/src/index.ts)
 
 <a id="deepseek-aidsh-tool-fs"></a>
 
@@ -3626,6 +3668,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-tool` ([`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-trajectory` ([`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-user-questions` ([`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-workbench` — requires `settings` ([`packages/client/ui-workbench/src/index.ts`](../packages/client/ui-workbench/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workflow-run` ([`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workspace` ([`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts))
 - `@deepseek-ai/dsh-command-compact` — requires `commands` · `compaction` ([`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts))

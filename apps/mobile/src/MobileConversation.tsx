@@ -22,13 +22,16 @@ export interface MobileConversationProps {
   companionState?: CompanionPushState
   /** Receive the Desktop-authoritative interaction after a successful UI settlement. */
   onSettled?: (interaction: CompanionInteraction) => void
+  /** Offer one local file through Encrypted Companion after Desktop confirmation. */
+  onAttach?: (file: File) => void
 }
 
 /** Phone conversation that reuses Gestalt tokens and never exposes terminal input. */
 export function MobileConversation({
-  title, onBack, blocks, onSubmit, onCancel, streaming = false, companionState, onSettled,
+  title, onBack, blocks, onSubmit, onCancel, streaming = false, companionState, onSettled, onAttach,
 }: MobileConversationProps): ReactNode {
   const [draft, setDraft] = useState('')
+  const mayMutate = companionState === undefined || companionMayMutate(companionState)
   return (
     <section className={css.page} data-mobile-conversation="detail">
       <header className={css.header}>
@@ -50,17 +53,32 @@ export function MobileConversation({
           className={css.composer}
           onSubmit={(event) => {
             event.preventDefault()
-            if (draft === '') return
+            if (!mayMutate || draft === '') return
             onSubmit(draft)
             setDraft('')
           }}
         >
+          {!mayMutate && <p role="alert">Remote Offline 拒绝发送</p>}
           <textarea
             aria-label="继续会话"
             value={draft}
+            disabled={!mayMutate}
             onChange={(event) => { setDraft(event.target.value) }}
           />
-          <button type="submit">发送</button>
+          {onAttach !== undefined && (
+            <input
+              type="file"
+              aria-label="添加附件"
+              disabled={!mayMutate}
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file === undefined || !mayMutate) return
+                onAttach(file)
+                event.target.value = ''
+              }}
+            />
+          )}
+          <button type="submit" disabled={!mayMutate}>发送</button>
           {onCancel !== undefined && streaming && (
             <button type="button" onClick={onCancel}>取消</button>
           )}
@@ -103,36 +121,40 @@ function ContentBlock({
       return (
         <section className={css.card} data-kind="approval">
           <p>{block.summary}</p>
-          {companionState !== undefined && (
-            <SettlementActions
-              interaction={{
-                operationId: block.summary,
-                kind: 'approval',
-                summary: block.summary,
-                authorized: ['once'],
-              }}
-              companionState={companionState}
-              {...(onSettled === undefined ? {} : { onSettled })}
-            />
-          )}
+          {block.settled !== undefined
+            ? <p>已允许: {block.settled.decision}</p>
+            : companionState !== undefined && (
+              <SettlementActions
+                interaction={{
+                  operationId: block.interactionId ?? block.summary,
+                  kind: 'approval',
+                  summary: block.summary,
+                  authorized: block.authorized ?? ['once'],
+                }}
+                companionState={companionState}
+                {...(onSettled === undefined ? {} : { onSettled })}
+              />
+            )}
         </section>
       )
     case 'ask-user':
       return (
         <section className={css.card} data-kind="ask-user">
           <p>{block.question}</p>
-          {companionState !== undefined && (
-            <SettlementActions
-              interaction={{
-                operationId: block.question,
-                kind: 'ask-user',
-                summary: block.question,
-                authorized: ['A'],
-              }}
-              companionState={companionState}
-              {...(onSettled === undefined ? {} : { onSettled })}
-            />
-          )}
+          {block.settled !== undefined
+            ? <p>已回答: {block.settled.decision}</p>
+            : companionState !== undefined && (
+              <SettlementActions
+                interaction={{
+                  operationId: block.interactionId ?? block.question,
+                  kind: 'ask-user',
+                  summary: block.question,
+                  authorized: block.authorized ?? ['A'],
+                }}
+                companionState={companionState}
+                {...(onSettled === undefined ? {} : { onSettled })}
+              />
+            )}
         </section>
       )
     case 'terminal': {
@@ -168,16 +190,32 @@ function SettlementActions({
   onSettled?: (interaction: CompanionInteraction) => void
 }): ReactNode {
   const mayMutate = companionMayMutate(companionState)
+  const decisions = interaction.authorized.length > 0 ? interaction.authorized : ['once']
   return (
-    <button
-      type="button"
-      disabled={!mayMutate}
-      onClick={() => {
-        const next = settleCompanionInteraction(interaction, { accepted: true, decision: interaction.authorized[0] ?? 'once' }, companionState)
-        onSettled?.(next)
-      }}
-    >
-      允许
-    </button>
+    <>
+      {decisions.map(decision => (
+        <button
+          key={decision}
+          type="button"
+          disabled={!mayMutate}
+          onClick={() => {
+            const next = settleCompanionInteraction(interaction, {
+              accepted: true,
+              decision,
+              ...(decision === 'always' ? { persistent: true } : {}),
+            }, companionState)
+            onSettled?.(next)
+          }}
+        >
+          {settlementLabel(interaction.kind, decision)}
+        </button>
+      ))}
+    </>
   )
+}
+
+function settlementLabel(kind: CompanionInteraction['kind'], decision: string): string {
+  if (kind === 'approval' && decision === 'once') return '允许'
+  if (kind === 'approval' && decision === 'always') return '始终允许'
+  return decision
 }

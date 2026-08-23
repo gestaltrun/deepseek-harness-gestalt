@@ -6,6 +6,9 @@ import { join, relative, sep } from 'node:path'
 /** Environment variable selecting the number of instrumented coverage processes. */
 export const COVERAGE_PARTITIONS_ENV = 'DSH_COVERAGE_PARTITIONS'
 
+/** Environment variable bounding concurrently active coverage partition processes. */
+export const COVERAGE_PARTITION_CONCURRENCY_ENV = 'DSH_COVERAGE_PARTITION_CONCURRENCY'
+
 /** Internal marker that suppresses reports and thresholds inside a partition process. */
 export const COVERAGE_PARTITION_MODE_ENV = 'DSH_COVERAGE_PARTITION_MODE'
 
@@ -45,8 +48,10 @@ export type CoverageCommandRunner = (command: CoverageCommand) => Promise<Covera
 export interface CoveragePartitionCoordinatorOptions {
   /** Repository root that owns coverage output. */
   root: string
-  /** Number of concurrent single-worker Vitest processes. */
+  /** Number of single-worker Vitest shards. */
   partitions: number
+  /** Maximum number of partition processes allowed to execute concurrently. */
+  maxConcurrency?: number
   /** pnpm JavaScript entrypoint from `npm_execpath`. */
   pnpmEntrypoint: string
   /** Additional arguments shared by every partition. */
@@ -61,6 +66,16 @@ export function parseCoveragePartitionCount(raw: string | undefined): number | u
   const parsed = Number.parseInt(raw, 10)
   if (!Number.isSafeInteger(parsed) || parsed < 2 || String(parsed) !== raw) {
     throw new Error(`${COVERAGE_PARTITIONS_ENV} must be an integer greater than 1, got ${JSON.stringify(raw)}.`)
+  }
+  return parsed
+}
+
+/** Parse an optional coverage partition process limit. */
+export function parseCoveragePartitionConcurrency(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw === '') return undefined
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || String(parsed) !== raw) {
+    throw new Error(`${COVERAGE_PARTITION_CONCURRENCY_ENV} must be a positive integer, got ${JSON.stringify(raw)}.`)
   }
   return parsed
 }
@@ -84,6 +99,7 @@ export function forwardedCoverageArgs(args: readonly string[]): string[] {
 export class CoveragePartitionCoordinator {
   private readonly root: string
   private readonly partitions: number
+  private readonly maxConcurrency: number
   private readonly pnpmEntrypoint: string
   private readonly vitestArgs: string[]
   private readonly runCommand: CoverageCommandRunner
@@ -97,6 +113,10 @@ export class CoveragePartitionCoordinator {
     }
     this.root = options.root
     this.partitions = options.partitions
+    this.maxConcurrency = options.maxConcurrency ?? options.partitions
+    if (!Number.isSafeInteger(this.maxConcurrency) || this.maxConcurrency < 1) {
+      throw new Error(`coverage partition concurrency must be a positive integer, got ${String(this.maxConcurrency)}.`)
+    }
     this.pnpmEntrypoint = options.pnpmEntrypoint
     this.vitestArgs = options.vitestArgs ?? []
     this.runCommand = options.runCommand ?? runCoverageCommand
@@ -117,17 +137,34 @@ export class CoveragePartitionCoordinator {
         { length: this.partitions },
         (_, index) => this.partitionCommand(index + 1),
       )
-      const results = await Promise.all(commands.map(async (command) => {
-        console.log(`coverage-partitions: start ${command.label}`)
-        const result = await this.runCommand(command)
-        if (commandFailed(result)) {
-          console.error(`coverage-partitions: FAIL ${command.label} (${commandFailureReason(result)})`)
-          if (result.outputTail !== undefined && result.outputTail !== '') {
-            console.error(`coverage-partitions: output tail for ${command.label}:\n${result.outputTail}`)
+      const results = new Array<CoverageCommandResult>(commands.length)
+      let nextIndex = 0
+      const worker = async (): Promise<void> => {
+        while (nextIndex < commands.length) {
+          const index = nextIndex
+          nextIndex += 1
+          const command = commands[index]
+          if (command === undefined) throw new Error(`coverage partition ${String(index + 1)} is missing.`)
+          console.log(`coverage-partitions: start ${command.label}`)
+          let result = await this.runCommand(command)
+          if (isIsolatedVitestWorkerExit(result)) {
+            console.warn(`coverage-partitions: retry ${command.label} after an unexpected Vitest worker exit`)
+            if (command.blobPath !== undefined) await removeOwnedFile(command.blobPath)
+            result = await this.runCommand(command)
+          }
+          results[index] = result
+          if (commandFailed(result)) {
+            console.error(`coverage-partitions: FAIL ${command.label} (${commandFailureReason(result)})`)
+            if (result.outputTail !== undefined && result.outputTail !== '') {
+              console.error(`coverage-partitions: output tail for ${command.label}:\n${result.outputTail}`)
+            }
           }
         }
-        return result
-      }))
+      }
+      await Promise.all(Array.from(
+        { length: Math.min(this.maxConcurrency, commands.length) },
+        worker,
+      ))
       await this.assertCompleteBlobSet(commands)
 
       const mergeCommand = this.mergeCommand()
@@ -160,6 +197,7 @@ export class CoveragePartitionCoordinator {
         ...this.vitestArgs,
       ],
       env: {
+        [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: '1',
       },
@@ -179,6 +217,7 @@ export class CoveragePartitionCoordinator {
         '--coverage',
       ],
       env: {
+        [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: undefined,
       },
@@ -253,6 +292,23 @@ function commandFailureReason(result: CoverageCommandResult): string {
     result.signalCode === null ? undefined : `signal ${result.signalCode}`,
   ].filter((fact): fact is string => fact !== undefined)
   return facts.join(', ') || 'no exit code or signal'
+}
+
+function isIsolatedVitestWorkerExit(result: CoverageCommandResult): boolean {
+  const output = result.outputTail ?? ''
+  return result.exitCode === 1
+    && result.signalCode === null
+    && result.error === undefined
+    && output.includes('[vitest-pool]: Worker forks emitted error.')
+    && output.includes('Worker exited unexpectedly')
+    && !output.includes('Failed Tests')
+}
+
+async function removeOwnedFile(path: string): Promise<void> {
+  await unlink(path).catch((error: unknown) => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return
+    throw error
+  })
 }
 
 async function removeOwnedTree(path: string): Promise<void> {

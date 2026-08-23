@@ -246,6 +246,8 @@
       "@deepseek-ai/dsh-client-ui-plan": ["./packages/client/ui-plan/src"],
       "@deepseek-ai/dsh-client-ui-schedule": ["./packages/client/ui-schedule/src"],
       "@deepseek-ai/dsh-client-ui-browser": ["./packages/client/ui-browser/src"],
+      "@deepseek-ai/dsh-client-better-sidebar": ["./packages/client/better-sidebar/src"],
+      "@deepseek-ai/dsh-client-ui-workbench": ["./packages/client/ui-workbench/src"],
       "@deepseek-ai/dsh-client-ui-user-questions": ["./packages/client/ui-user-questions/src"],
       "@deepseek-ai/dsh-client-ui-trajectory": ["./packages/client/ui-trajectory/src"],
       "@deepseek-ai/dsh-client-ui-workspace": ["./packages/client/ui-workspace/src"],

@@ -6,6 +6,7 @@ import {
   PlatformAccountInstallation,
 } from '@deepseek-ai/dsh-platform-account-client'
 import { loadPlatformEnvironment, parseInstallationId } from '@deepseek-ai/dsh-platform-account'
+import { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
 import {
   BrowserRelayEndpointSocket,
   MobileRelayEndpointLifecycle,
@@ -18,14 +19,29 @@ import '@deepseek-ai/dsh-client-ui-theme/src/styles/gradient-shadow-text.css'
 import {
   bindCompanionProcessVisibility,
   CompanionForegroundRuntime,
-  companionRuntime,
   installCompanionRuntime,
 } from './companion-push.ts'
 import { MobileAccount } from './MobileAccount.tsx'
 import type { MobilePairingActions } from './MobilePairing.tsx'
 import { MobilePairingController, NativeMobilePairingQrScanner } from './personal-pairing.ts'
+import {
+  DevelopmentCompanionClient,
+  DevelopmentCompanionSessionStore,
+  bindDevelopmentCompanionCache,
+  createDevelopmentCompanionCache,
+  installDevelopmentCompanionClient,
+} from './development-keyless-companion.ts'
 import { mobileSystemBrowser } from './system-browser.ts'
+import {
+  createLoopbackPageFetch,
+  rewriteLoopbackPlatformUrl,
+  rewriteLoopbackRelayUrl,
+} from './loopback-page-origin.ts'
 import './root.css'
+
+const DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID = parseRelayAttachmentId('desktop-development-keyless')
+const DEVELOPMENT_KEYLESS_MOBILE_ATTACHMENT_ID = parseRelayAttachmentId('mobile-development-keyless')
+const DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT = Uint8Array.of(1)
 
 const environment = loadPlatformEnvironment({
   selection: import.meta.env.VITE_PLATFORM_ENV,
@@ -56,13 +72,19 @@ if (installationId === null) {
   localStorage.setItem(installationIdKey, installationId)
 }
 const parsedInstallationId = parseInstallationId(installationId)
+const pageOrigin = window.location.origin
+const fetch = createLoopbackPageFetch(pageOrigin, environment.origin)
 const installation = new PlatformAccountInstallation({
   environment,
   installationId: parsedInstallationId,
   installationKind: 'mobile',
-  transport: new PlatformAccountHttpTransport({ environment }),
+  transport: new PlatformAccountHttpTransport({ environment, fetch }),
   store: new IndexedDbInstallationAccountStore(`deepseek-gestalt-platform-account:${environment.databaseIdentity}`),
-  systemBrowser: mobileSystemBrowser,
+  systemBrowser: {
+    open(url) {
+      return mobileSystemBrowser.open(rewriteLoopbackPlatformUrl(url, pageOrigin, environment.origin))
+    },
+  },
 })
 let companionVisibilityDisposer: (() => Promise<void>) | undefined
 
@@ -92,14 +114,20 @@ let pairing: MobilePairingActions = {
 if (environment.environment === 'development' && import.meta.env.VITE_PERSONAL_PAIRING_KEYLESS === '1') {
   const { DevelopmentKeylessMobileHandshakeClient } = await import('./development-keyless-pairing.ts')
   const { PairingCompanionKeyVault } = await import('./companion-keys.ts')
-  const relayUrl = requiredWss(import.meta.env.VITE_REMOTE_RELAY_WSS_URL)
+  const relayUrl = rewriteLoopbackRelayUrl(
+    requiredWss(import.meta.env.VITE_REMOTE_RELAY_WSS_URL),
+    pageOrigin,
+    environment.origin,
+  )
   const inboundMaxBytes = positiveInteger(import.meta.env.VITE_REMOTE_RELAY_INBOUND_MAX_BYTES, 'inbound bytes')
   const inboundMaxMessages = positiveInteger(import.meta.env.VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES, 'inbound messages')
   if (inboundMaxBytes < REMOTE_PROTOCOL_LIMITS.relayMessageBytes) {
     throw new TypeError('Mobile Relay inbound bytes must admit one maximum Relay message')
   }
+  const companionSessions = new DevelopmentCompanionSessionStore()
+  const companionRef: { client?: DevelopmentCompanionClient } = {}
   const relay = new MobileRelayEndpointLifecycle({
-    attachmentId: () => parseRelayAttachmentId(crypto.randomUUID()),
+    attachmentId: () => DEVELOPMENT_KEYLESS_MOBILE_ATTACHMENT_ID,
     connect: async signal => await BrowserRelayEndpointSocket.connect(relayUrl, signal, {
       maxBytes: inboundMaxBytes,
       maxMessages: inboundMaxMessages,
@@ -107,14 +135,46 @@ if (environment.environment === 'development' && import.meta.env.VITE_PERSONAL_P
     attachTimeoutMs: positiveInteger(import.meta.env.VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS, 'attach timeout'),
     heartbeatIntervalMs: positiveInteger(import.meta.env.VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS, 'heartbeat interval'),
     reconnectDelayMs: positiveInteger(import.meta.env.VITE_REMOTE_RELAY_RECONNECT_DELAY_MS, 'reconnect delay'),
-    onCiphertext: () => { companionRuntime()?.synchronize() },
+    onCiphertext: (ciphertext) => { void companionRef.client?.receive(ciphertext) },
   })
-  const companion = new CompanionForegroundRuntime({ relay })
+  const developmentCompanion = new DevelopmentCompanionClient(
+    companionSessions,
+    async (target, ciphertext) => { await relay.sendCiphertext(target, ciphertext) },
+    DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID,
+  )
+  companionRef.client = developmentCompanion
+  installDevelopmentCompanionClient(developmentCompanion)
+  const boundAccounts = new Set<string>()
+  installation.subscribe(() => {
+    const snapshot = installation.getSnapshot()
+    if (snapshot.status !== 'signed-in' || snapshot.account === undefined) return
+    if (boundAccounts.has(snapshot.account.id)) return
+    boundAccounts.add(snapshot.account.id)
+    const cache = createDevelopmentCompanionCache(environment.environment, snapshot.account.id)
+    void bindDevelopmentCompanionCache(companionSessions, cache)
+  })
+  const companion = new CompanionForegroundRuntime({
+    relay: {
+      configure: (grant) => { relay.configure(grant) },
+      start: async () => {
+        await relay.start()
+        if (!relay.isConnected()) return
+        try {
+          await relay.sendCiphertext(DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID, DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT)
+        } catch (error) {
+          if (error instanceof RemoteRelayError && error.code === 'REMOTE_OFFLINE') return
+          throw error
+        }
+      },
+      stop: async () => { await relay.stop() },
+      isConnected: () => relay.isConnected(),
+    },
+  })
   installCompanionRuntime(companion)
   companionVisibilityDisposer = bindCompanionProcessVisibility(companion)
   pairing = new MobilePairingController({
     installation,
-    transport: new RemoteAccessHttpTransport({ environment }),
+    transport: new RemoteAccessHttpTransport({ environment, fetch }),
     handshake: new DevelopmentKeylessMobileHandshakeClient(),
     scanner: new NativeMobilePairingQrScanner(),
     relay: companion,

@@ -128,6 +128,7 @@ export function createCompanionSession(
     title: input.title,
     ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
     summary: 'New Session',
+    blocks: [],
   }
   return { sessions: [...sessions, created], created: true }
 }

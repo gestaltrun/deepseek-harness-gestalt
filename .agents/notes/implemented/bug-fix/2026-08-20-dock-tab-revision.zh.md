@@ -26,8 +26,8 @@ Browser Runtime 写入要求被操作标签页的 `expectedRevision`，不匹配
 
 ## 后果
 
-推进修订号的变更即使 `controlOwner` 未变也会写入 `browser/workspace`。无密钥 fixture Session 仍只有一个标签页，因此组装后的 Dock 快照无法演练双标签页聚焦或关闭。
+推进修订号的变更会写入 `browser/workspace`。无密钥 fixture Session 仍只有一个标签页，因此组装后的快照无法演练双标签页聚焦或关闭。
 
 ## 测试
 
-`packages/browser/browser-workspace/tests/workspace.spec.ts` 固定双标签页聚焦与关闭时的列表修订号。`packages/client/ui-browser/tests/browser-dock.client.spec.tsx` 与 `browser-preview.client.spec.tsx` 断言被操作列表修订号。当该列表修订号前进时重新观察活动标签页，由 [Dock 导航 chrome Agent Note](2026-08-20-dock-navigate-chrome.md) 持有。`apps/web/tests/browser-dock.snapshot.ts` 固定恢复后的预览，以及展开 Dock 在打开与刷新之后的界面。无密钥 headless 的 `browser-runtime` 与 `browser-runtime-tandem` stream-json 快照现在在每条 `browser/workspace` 事件上携带每标签页修订号。
+`packages/browser/browser-workspace/tests/workspace.spec.ts` 固定双标签页聚焦与关闭时的列表修订号。`packages/client/ui-browser/tests/model.client.spec.ts` 与 `browser-preview.client.spec.tsx` 断言被操作列表修订号。当该列表修订号前进时重新观察活动标签页，由 [Dock 导航 chrome Agent Note](2026-08-20-dock-navigate-chrome.md) 持有。`apps/web/tests/browser-dock.snapshot.ts` 固定恢复后的预览，以及展开 Dock 在打开与刷新之后的界面。无密钥 headless 的 `browser-runtime` 与 `browser-runtime-tandem` stream-json 快照现在在每条 `browser/workspace` 事件上携带每标签页修订号。

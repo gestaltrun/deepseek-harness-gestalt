@@ -8,6 +8,7 @@ import type { DesktopBridge, UpdaterStatus } from '../src/protocol.ts'
 
 afterEach(() => {
   delete window.dshDesktop
+  document.documentElement.removeAttribute('data-dsh-desktop-overlay')
 })
 
 async function bench() {
@@ -20,6 +21,7 @@ async function bench() {
       name: 'root',
       children: {
         sidebar: { kind: 'single', scope: 'root' },
+        'shell.overlay': { kind: 'list', scope: 'root' },
         'settings.section': { kind: 'list', scope: 'root' },
       },
     } as never,
@@ -53,6 +55,18 @@ describe('ui-desktop apply', () => {
     expect(b.slots.entries('settings.section').map(entry => entry.options.id)).toContain('mobile-pairing')
   })
 
+  it('registers native menu chrome only in the Desktop overlay document', async () => {
+    const regular = await bench()
+    await regular.ctx.plugin({ inject: [...inject], apply }).await()
+    expect(regular.slots.entries('shell.overlay')).toHaveLength(0)
+
+    document.documentElement.setAttribute('data-dsh-desktop-overlay', '')
+    const overlay = await bench()
+    await overlay.ctx.plugin({ inject: [...inject], apply }).await()
+    expect(overlay.slots.entries('shell.overlay').map(entry => entry.options.id))
+      .toEqual(['desktop-chrome-overlay'])
+  })
+
   it('subscribes to the Desktop updater bridge when present', async () => {
     const desktop: DesktopBridge = {
       platform: 'darwin',
@@ -80,6 +94,12 @@ describe('ui-desktop apply', () => {
       pairingReject: vi.fn(),
       pairingRevoke: vi.fn(),
       onPairingSnapshot: vi.fn(() => () => {}),
+      chromeOverlayShow: async () => {},
+      chromeOverlayHide: async () => {},
+      chromeOverlayGetState: async () => null,
+      chromeOverlayResult: () => {},
+      onChromeOverlayState: () => () => {},
+      onChromeOverlayResult: () => () => {},
     }
     window.dshDesktop = desktop
     const b = await bench()

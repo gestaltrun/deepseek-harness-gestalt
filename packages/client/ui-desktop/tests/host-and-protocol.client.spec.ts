@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/index.ts'
 import { apply as applyInvariant, name } from '../src/invariant.ts'
 import {
+  CHROME_OVERLAY_SHOW, DESKTOP_OVERLAY_PARAM,
   UPDATER_CHECK_NOW, UPDATER_DOWNLOAD_NOW, UPDATER_GET_STATUS,
   UPDATER_QUIT_AND_INSTALL, UPDATER_STATUS_CHANGED,
   WINDOW_CLOSE, WINDOW_MAXIMIZE, WINDOW_MINIMIZE,
@@ -19,6 +20,8 @@ describe('host half and protocol', () => {
     expect(WINDOW_MINIMIZE).toBe('window:minimize')
     expect(WINDOW_MAXIMIZE).toBe('window:maximize')
     expect(WINDOW_CLOSE).toBe('window:close')
+    expect(CHROME_OVERLAY_SHOW).toBe('chrome:overlayShow')
+    expect(DESKTOP_OVERLAY_PARAM).toBe('dsh-desktop-overlay')
   })
 
   it('registers the invariant companion', async () => {

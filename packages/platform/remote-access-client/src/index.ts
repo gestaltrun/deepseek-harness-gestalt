@@ -32,6 +32,7 @@ export * from './relay.ts'
 export * from './browser-relay-socket.ts'
 export * from './relay-queue.ts'
 export * from './mobile-relay-lifecycle.ts'
+export * from './development-keyless-companion.ts'
 import {
   PERSONAL_PAIRING_PROTOCOL_MAJOR,
   RemoteAccessError,
@@ -113,7 +114,7 @@ export class RemoteAccessHttpTransport implements RemoteAccessTransport {
 
   /** @param options - selected Platform deployment and optional Fetch implementation. */
   constructor(options: RemoteAccessHttpTransportOptions) {
-    this.fetch = options.fetch ?? globalThis.fetch
+    this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis)
     this.endpoint = `${options.environment.origin}/v1/remote-access/personal-pairing`
   }
 

@@ -14,7 +14,7 @@ During a live collapse, the shell holds the expanded content at its current widt
 
 Scrollbars in the column are a pointer affordance: the shell rebinds ui-theme's [scrollbar indirection](../ui-theme/README.md) to `transparent` whenever the pointer is outside it, and keeps the thumb drawn for 2s after the pointer leaves, so a list nobody is pointing at carries no bar. The reservation that keeps rows from moving belongs to the scrolling region ([ui-workspace](../ui-workspace/README.md)), so revealing a thumb never reflows.
 
-The foot is one row: `sidebar.settings` on the left and optional `sidebar.footer.action` items on the right (the rail stacks actions above Settings). ui-settings registers the trigger row and settings panel. `sidebar.brand` is a chain whose fallback is the HARNESS wordmark. `sidebar.chrome.drag` is an empty list in the browser composition.
+The foot is one row: `sidebar.settings` on the left and optional `sidebar.footer.action` items on the right (the rail stacks actions above Settings). ui-settings registers the trigger row and settings panel. The Desktop native-overlay document renders only `sidebar.settings`. `sidebar.brand` is a chain whose fallback is the HARNESS wordmark. `sidebar.chrome.drag` is an empty list in the browser composition.
 
 The `/client` exports are the plugin body (`apply`/`inject`) plus the contract types only; SidebarRoot, the row components, and the tree derivation remain package-internal behind the slot registration.
 

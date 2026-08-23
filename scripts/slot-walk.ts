@@ -82,19 +82,35 @@ export interface ScannedFile {
   sf: ts.SourceFile
 }
 
+/** Resolve, normalize, filter, and sort one source glob set. */
+function matchedSourcePaths(
+  scanRoot: string,
+  patterns: readonly string[],
+  exclude?: (rel: string) => boolean,
+): string[] {
+  return [...new Set(globSync(patterns as string[], { cwd: scanRoot })
+    .map(path => path.split(sep).join('/')))]
+    .filter(rel => exclude?.(rel) !== true)
+    .sort()
+}
+
 /**
  * Parse every file matching `patterns`, keeping the ones that carry a slot
  * contract merge or a registration call. Files without either are skipped so
  * the scan stays cheap over the whole workspace.
  * @param scanRoot - repository root the patterns resolve against.
  * @param patterns - glob(s) selecting the TypeScript/TSX files to scan.
+ * @param exclude - repo-relative paths to skip (pinned snapshot sources).
  * @returns one entry per interesting file, in path order.
  */
-export function scanSlotFiles(scanRoot: string, patterns: readonly string[]): ScannedFile[] {
+export function scanSlotFiles(
+  scanRoot: string,
+  patterns: readonly string[],
+  exclude?: (rel: string) => boolean,
+): ScannedFile[] {
   const out: ScannedFile[] = []
   const names = new Map<string, string>()
-  const rels = [...new Set(globSync(patterns as string[], { cwd: scanRoot })
-    .map(path => path.split(sep).join('/')))].sort()
+  const rels = matchedSourcePaths(scanRoot, patterns, exclude)
   for (const rel of rels) {
     const abs = resolve(scanRoot, rel)
     const text = readFileSync(abs, 'utf8')
@@ -115,13 +131,17 @@ export function scanSlotFiles(scanRoot: string, patterns: readonly string[]): Sc
  * documentation IS the teaching material a registrant needs.
  * @param scanRoot - repository root the patterns resolve against.
  * @param patterns - glob(s) selecting the TypeScript/TSX files to index.
+ * @param exclude - repo-relative paths to skip (pinned snapshot sources).
  * @returns name → declaration, with names declared more than once dropped as ambiguous.
  */
-export function indexExportedTypes(scanRoot: string, patterns: readonly string[]): Map<string, TypeDeclaration> {
+export function indexExportedTypes(
+  scanRoot: string,
+  patterns: readonly string[],
+  exclude?: (rel: string) => boolean,
+): Map<string, TypeDeclaration> {
   const index = new Map<string, TypeDeclaration>()
   const ambiguous = new Set<string>()
-  const rels = [...new Set(globSync(patterns as string[], { cwd: scanRoot })
-    .map(path => path.split(sep).join('/')))].sort()
+  const rels = matchedSourcePaths(scanRoot, patterns, exclude)
   for (const rel of rels) {
     const abs = resolve(scanRoot, rel)
     const sf = ts.createSourceFile(abs, readFileSync(abs, 'utf8'), ts.ScriptTarget.Latest, true, scriptKindOf(rel))

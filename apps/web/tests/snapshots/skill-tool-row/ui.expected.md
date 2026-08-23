@@ -4,7 +4,7 @@
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"
-- text: Load the editing-cordis-compositions skill with the skill tool, then reply DONE. {{date}} {{clock}}
+- text: Load the editing-cordis-compositions skill with the skill tool, then reply DONE. {{clock}}
 - button "Copy":
   - img
 - button "Context injection @deepseek-ai/dsh-system-prompt":
@@ -37,7 +37,7 @@
   - img
 - button "Branch into a new conversation":
   - img
-- text: {{date}} {{clock}} Ran for {{duration}} TTFT {{duration}} {{throughput}} tok/s
+- text: {{clock}} Ran for {{duration}} TTFT {{duration}} {{throughput}} tok/s
 - textbox "Message the agent"
 - button "Commands":
   - img

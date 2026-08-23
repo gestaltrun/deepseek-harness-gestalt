@@ -13,7 +13,7 @@
 // this spec's own contract): these cases pin factory choreography the UI
 // guards would mask. Rendering-path acceptance lives in
 // chat-toolview-slot.spec.tsx. openDetails also focuses a listed browser
-// tab without writing dockOpen.
+// tab from its listing revision.
 
 import { describe, expect, it, vi } from 'vitest'
 import { SlotTestRuntime, usePinnedBrowserLanguages, stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
@@ -249,7 +249,6 @@ describe('conversation slot inject API', () => {
       tabId: 'tab-1',
     }
     const focus = vi.fn(() => Promise.resolve({ ok: true, value: {} }))
-    const setDock = vi.fn(() => Promise.resolve({ ok: true, value: {} }))
     const node: ToolResultNode = {
       kind: 'tool-result',
       seq: 5,
@@ -280,7 +279,7 @@ describe('conversation slot inject API', () => {
       data: { root: node },
     }
     const b = await bench({
-      remotes: { browserWorkspace: { focus, setDock } },
+      remotes: { browserWorkspace: { focus } },
       snapshot: {
         chat: {
           order: [view.key],
@@ -302,9 +301,6 @@ describe('conversation slot inject API', () => {
     })
     const session = b.runtime.sessions.binding(ROOT)?.session
     session?.projections.set('browserWorkspace', {
-      dockOpen: false,
-      dockWidth: 720,
-      userCollapsed: true,
       activeWorkspaceId: target.workspaceId,
       workspaces: [{
         workspaceId: target.workspaceId,
@@ -313,7 +309,7 @@ describe('conversation slot inject API', () => {
         browsers: [{
           browserId: target.browserId,
           activeTabId: target.tabId,
-          tabs: [{ tabId: target.tabId, controlOwner: 'agent', revision: 7 }],
+          tabs: [{ tabId: target.tabId, revision: 7 }],
         }],
       }],
     })
@@ -324,13 +320,9 @@ describe('conversation slot inject API', () => {
     })
     expect(b.layoutFake.openDetails).toHaveBeenCalledTimes(1)
     expect(focus).toHaveBeenCalledWith(ROOT, target, 7)
-    expect(setDock).not.toHaveBeenCalled()
 
     focus.mockClear()
     session?.projections.set('browserWorkspace', {
-      dockOpen: true,
-      dockWidth: 720,
-      userCollapsed: false,
       activeWorkspaceId: target.workspaceId,
       workspaces: [{
         workspaceId: target.workspaceId,
@@ -339,14 +331,13 @@ describe('conversation slot inject API', () => {
         browsers: [{
           browserId: target.browserId,
           activeTabId: 'other',
-          tabs: [{ tabId: 'other', controlOwner: 'agent', revision: 1 }],
+          tabs: [{ tabId: 'other', revision: 1 }],
         }],
       }],
     })
     injected.openDetails({ turnSeq: 4, callId: 'nav-1', toolName: 'browser_navigate' })
     expect(b.layoutFake.openDetails).toHaveBeenCalledTimes(2)
     expect(focus).not.toHaveBeenCalled()
-    expect(setDock).not.toHaveBeenCalled()
     await b.runtime.dispose()
   })
 

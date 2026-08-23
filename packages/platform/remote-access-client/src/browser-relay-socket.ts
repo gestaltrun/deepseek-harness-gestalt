@@ -36,14 +36,16 @@ export class BrowserRelayEndpointSocket implements RelayEndpointSocket {
 
   /**
    * Open one browser WebSocket owned by the supplied lifecycle signal.
-   * @param url - deployment WSS endpoint.
+   * @param url - deployment WSS endpoint, or loopback `ws:` when the page cannot present the listen certificate.
    * @param signal - lifecycle cancellation.
    * @param limits - bounded live inbound queue.
    * @returns connected Relay socket.
    */
   static async connect(url: string, signal: AbortSignal, limits: RelayInboundQueueLimits): Promise<BrowserRelayEndpointSocket> {
     const parsed = new URL(url)
-    if (parsed.protocol !== 'wss:') throw new TypeError('Browser Relay endpoint must use WSS')
+    if (parsed.protocol !== 'wss:' && !isLoopbackWs(parsed)) {
+      throw new TypeError('Browser Relay endpoint must use WSS')
+    }
     const socket = new WebSocket(parsed)
     await opened(socket, signal)
     return new BrowserRelayEndpointSocket(socket, limits)
@@ -63,6 +65,11 @@ export class BrowserRelayEndpointSocket implements RelayEndpointSocket {
     if (!this.closed) this.socket.close()
     await this.done
   }
+}
+
+function isLoopbackWs(url: URL): boolean {
+  return url.protocol === 'ws:'
+    && (url.hostname === '127.0.0.1' || url.hostname === 'localhost' || url.hostname === '[::1]')
 }
 
 function opened(socket: WebSocket, signal: AbortSignal): Promise<void> {

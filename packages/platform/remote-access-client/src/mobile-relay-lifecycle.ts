@@ -1,4 +1,5 @@
 import type { RelayCredentialGrant } from '@deepseek-ai/dsh-remote-access'
+import type { RelayAttachmentId } from '@deepseek-ai/dsh-remote-protocol'
 import { RemoteRelayEndpointController, type RemoteRelayEndpointOptions } from './relay.ts'
 
 /** Mobile-owned Relay lifecycle configured only by authority opened from a confirmed pairing. */
@@ -31,4 +32,13 @@ export class MobileRelayEndpointLifecycle {
    * @returns whether Platform acknowledged the current attachment.
    */
   isConnected(): boolean { return this.endpoint.isConnected() }
+
+  /**
+   * Send only on the current live Mobile attachment; offline sends are never retained.
+   * @param targetAttachmentId - current Desktop attachment receiving the ciphertext.
+   * @param ciphertext - bounded encrypted Companion Protocol frame.
+   */
+  async sendCiphertext(targetAttachmentId: RelayAttachmentId, ciphertext: Uint8Array): Promise<void> {
+    await this.endpoint.sendCiphertext(targetAttachmentId, ciphertext)
+  }
 }

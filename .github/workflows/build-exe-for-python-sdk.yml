@@ -239,9 +239,11 @@ jobs:
             macos-arm64) wheel=deepseek_harness_runtime_bin-$VERSION-py3-none-macosx_14_0_arm64.whl ;;
             *) echo "::error::Unsupported runtime platform $platform"; exit 1 ;;
           esac
-          echo "platform=$platform" >> "$GITHUB_OUTPUT"
-          echo "exe=$exe" >> "$GITHUB_OUTPUT"
-          echo "wheel=$wheel" >> "$GITHUB_OUTPUT"
+          {
+            echo "platform=$platform"
+            echo "exe=$exe"
+            echo "wheel=$wheel"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Full-turn SDK, executable snapshot, and direct-binary smoke
         run: >-

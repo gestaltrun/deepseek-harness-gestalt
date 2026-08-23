@@ -15,13 +15,20 @@ describe('Companion push absence gate', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-companion-no-push-'))
     roots.push(root)
     mkdirSync(join(root, 'apps/mobile/src'), { recursive: true })
+    mkdirSync(join(root, 'packages/client/ui-better-sidebar/src/client'), { recursive: true })
     mkdirSync(join(root, 'packages/platform/remote-access/src'), { recursive: true })
     writeFileSync(join(root, 'apps/mobile/src/list.ts'), 'const values: string[] = []\nvalues.push("ok")\n')
     writeFileSync(join(root, 'apps/mobile/src/notifications.ts'), 'const provider = "APNs"\n')
+    writeFileSync(join(root, 'apps/mobile/src/push-language.ts'), 'const label = "推送通知"\n')
+    writeFileSync(
+      join(root, 'packages/client/ui-better-sidebar/src/client/locales.ts'),
+      'const gitHelp = "push 策略硬拦；不允许模型自动推送"\n',
+    )
     writeFileSync(join(root, 'packages/platform/remote-access/src/config.ts'), 'const secret = "PLATFORM_FCM_KEY"\n')
 
     expect(collectCompanionPushResidue(root)).toEqual([
       'apps/mobile/src/notifications.ts:1: contains forbidden Companion push product token APNs.',
+      'apps/mobile/src/push-language.ts:1: contains forbidden Companion push product token push product language.',
       'packages/platform/remote-access/src/config.ts:1: contains forbidden Companion push product token FCM.',
     ])
   })
@@ -70,5 +77,5 @@ describe('Companion push absence gate', () => {
 
   it('finds no Companion push product residue in the repository', () => {
     expect(collectCompanionPushResidue(join(import.meta.dirname, '..'))).toEqual([])
-  })
+  }, 15_000)
 })

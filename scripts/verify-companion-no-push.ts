@@ -41,7 +41,7 @@ const FORBIDDEN_TOKENS = [
   { label: 'push token repository', pattern: /\bPushTokenRepository[A-Za-z0-9_]*\b/u },
   { label: 'push token symbol', pattern: /\b(?:PushPlatform|PushTokenRegistration|PushTokenStore)\b/u },
   { label: 'push product language', pattern: /\bpush[- ](?:token|notification|delivery|provider|hint|quota|metric|secret)s?\b/iu },
-  { label: 'push product language', pattern: /推送/u },
+  { label: 'push product language', pattern: /推送(?:令牌|通知|投递|供应商|提示|配额|指标|密钥|服务)/u },
   { label: 'push operation', pattern: /\b(?:emit|register|unregister)-push-(?:hint|token)\b/u },
   { label: 'push quota or persistence', pattern: /\bpushHints(?:At|PerAccountPerDay)\b/u },
   { label: 'Capacitor push dependency', pattern: /@capacitor\/push-notifications\b/u },

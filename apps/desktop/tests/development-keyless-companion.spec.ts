@@ -65,13 +65,12 @@ describe('Development keyless Companion authority', () => {
         ],
       },
     })
-    expect(completed.type === 'projection' && completed.projection.streaming).toBeUndefined()
-    const approvalId = completed.type === 'projection'
-      ? completed.projection.entries.find(entry => entry.type === 'approval')?.interactionId
-      : undefined
-    const questionId = completed.type === 'projection'
-      ? completed.projection.entries.find(entry => entry.type === 'ask-user')?.interactionId
-      : undefined
+    if (completed.type !== 'projection' || completed.projection.type !== 'transcript-page') {
+      throw new Error('expected transcript projection')
+    }
+    expect(completed.projection.streaming).toBeUndefined()
+    const approvalId = completed.projection.entries.find(entry => entry.type === 'approval')?.interactionId
+    const questionId = completed.projection.entries.find(entry => entry.type === 'ask-user')?.interactionId
     expect(approvalId).toBeDefined()
     expect(questionId).toBeDefined()
 
@@ -161,7 +160,9 @@ describe('Development keyless Companion authority', () => {
     expect(attach).toHaveLength(2)
     const attached = await openDevelopmentCompanionMessage(protocol, attach[1]!)
     expect(attached.type).toBe('projection')
-    if (attached.type !== 'projection') throw new Error('expected transcript projection')
+    if (attached.type !== 'projection' || attached.projection.type !== 'transcript-page') {
+      throw new Error('expected transcript projection')
+    }
     expect(attached.projection.entries.some(entry => (
       entry.type === 'image' && entry.fileName === 'shot.png' && entry.alt === 'shot.png'
     ))).toBe(true)
@@ -178,7 +179,9 @@ describe('Development keyless Companion authority', () => {
     }))
     const settledPage = await openDevelopmentCompanionMessage(protocol, settle[1]!)
     expect(settledPage.type).toBe('projection')
-    if (settledPage.type !== 'projection') throw new Error('expected transcript projection')
+    if (settledPage.type !== 'projection' || settledPage.projection.type !== 'transcript-page') {
+      throw new Error('expected transcript projection')
+    }
     expect(settledPage.projection.entries.some(entry => (
       entry.type === 'approval' && entry.settled?.decision === 'once'
     ))).toBe(true)
@@ -195,7 +198,9 @@ describe('Development keyless Companion authority', () => {
     }))
     const answered = await openDevelopmentCompanionMessage(protocol, answer[1]!)
     expect(answered.type).toBe('projection')
-    if (answered.type !== 'projection') throw new Error('expected transcript projection')
+    if (answered.type !== 'projection' || answered.projection.type !== 'transcript-page') {
+      throw new Error('expected transcript projection')
+    }
     expect(answered.projection.entries.some(entry => (
       entry.type === 'ask-user' && entry.settled?.decision === 'A'
     ))).toBe(true)
@@ -268,7 +273,9 @@ describe('Development keyless Companion authority', () => {
     expect(emitted).toHaveLength(1)
     const finished = await openDevelopmentCompanionMessage(protocol, emitted[0]!)
     expect(finished.type).toBe('projection')
-    if (finished.type !== 'projection') throw new Error('expected transcript projection')
+    if (finished.type !== 'projection' || finished.projection.type !== 'transcript-page') {
+      throw new Error('expected transcript projection')
+    }
     expect(finished.projection.entries.some(entry => (
       entry.type === 'text' && entry.role === 'assistant' && entry.text === 'Desktop accepted: let it finish'
     ))).toBe(true)

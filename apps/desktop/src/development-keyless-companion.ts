@@ -24,9 +24,6 @@ import {
 const DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT = Uint8Array.of(1)
 const IMAGE_FILE_NAME = /\.(avif|gif|heic|jpe?g|png|webp)$/iu
 
-/** Delay before the development assistant and interaction projection. */
-export const DEVELOPMENT_COMPANION_STREAM_DELAY_MS = 2_000
-
 interface DevelopmentSession {
   sessionId: CompanionSessionId
   title: string

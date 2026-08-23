@@ -353,11 +353,6 @@ export function installDevelopmentCompanionClient(
   }
 }
 
-/** @returns the installed development Companion client, if any. */
-export function developmentCompanionClient(): DevelopmentCompanionClient | undefined {
-  return installed
-}
-
 /**
  * Build the development Companion Cache for one signed-in Platform Account.
  * @param environment - selected Platform environment.
@@ -365,7 +360,7 @@ export function developmentCompanionClient(): DevelopmentCompanionClient | undef
  * @param store - durable rows; defaults to the account-scoped IndexedDB database.
  * @returns cache that seals metadata and transcripts only.
  */
-export function createDevelopmentCompanionCache(
+function createDevelopmentCompanionCache(
   environment: PlatformEnvironment,
   accountId: PlatformAccountId,
   store?: CompanionCacheStore,

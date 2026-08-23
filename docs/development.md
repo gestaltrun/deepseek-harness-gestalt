@@ -122,6 +122,8 @@ Contributors can opt into the comprehensive local gate set with `pnpm run check:
 
 The keyless [CI workflow](../.github/workflows/ci.yml) groups independent gates into broad lanes and runs a smaller compatibility signal across supported Node versions. Artifact consumers wait for one build within their lane. The separate real-API workflow runs `pnpm run test:e2e` with its configured worker bound. See [scripts/run-gates.ts](../scripts/run-gates.ts) and the workflow files for the current gate and job inventory.
 
+Each main CI run uploads the planner JSON and versioned gate reports. Reports identify the first blocking failure in completion order, classify failed gates, retain every stage duration, and name related artifacts. Only a command whose exact diagnostics classify as transient infrastructure may receive one automatic retry; its artifact retains both attempts. Run `pnpm ci:metrics --repo <owner/name>` to calculate success, queue, execution, and first-conclusion distributions while excluding bookkeeping, cancelled, skipped, stale, and observational samples.
+
 ### Daily commands
 
 The root [contributor instructions](../AGENTS.md#commands) summarize common commands, while [`package.json`](../package.json) and [scripts/run-gates.ts](../scripts/run-gates.ts) own the current script and gate inventories. Select the smallest checks that cover the changed surface. Documentation changes use `pnpm run doc-sync`; package-public behavior changes also update the owning README or JSDoc, and built-artifact checks require `pnpm run build` first.

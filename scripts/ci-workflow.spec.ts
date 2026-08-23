@@ -62,14 +62,28 @@ describe('CI workflow', () => {
     }
     expect(metadata.env.DSH_REQUIRED_PR_AREAS).toBe('${{ steps.plan.outputs.affected_areas }}')
     const planner = preflightSteps.find(step => isRecord(step) && step.name === 'Compute CI plan')
-    expect(planner).toMatchObject({
-      run: 'pnpm --silent run ci:plan --event "$GITHUB_EVENT_NAME" --readiness "$READINESS" --base "$BASE_SHA" --head "$HEAD_SHA"',
+    if (!isRecord(planner) || typeof planner.run !== 'string') {
+      throw new TypeError('preflight planner step must define a command')
+    }
+    expect(planner.run).toContain(
+      'pnpm --silent run ci:plan --event "$GITHUB_EVENT_NAME" --readiness "$READINESS" --base "$BASE_SHA" --head "$HEAD_SHA"',
+    )
+    expect(planner.run).toContain('tee "$RUNNER_TEMP/ci-evidence/plan.json"')
+    expect(preflightSteps.some(step => isRecord(step) && step.name === 'Validate pull request metadata')).toBe(true)
+    expect(preflightSteps.some(step => isRecord(step) && step.name === 'Validate generated state and repository constraints')).toBe(true)
+    expect(preflightSteps.some(step => isRecord(step) && step.id === 'plan' && step.name === 'Compute CI plan')).toBe(true)
+    const planUpload = preflightSteps.find(step => isRecord(step) && step.name === 'Publish CI plan')
+    expect(planUpload).toEqual({
+      name: 'Publish CI plan',
+      if: 'always()',
+      uses: 'actions/upload-artifact@v7',
+      with: {
+        name: 'ci-plan',
+        path: '${{ runner.temp }}/ci-evidence/*.json',
+        'if-no-files-found': 'warn',
+        'retention-days': 30,
+      },
     })
-    expect(preflightSteps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: 'Validate pull request metadata' }),
-      expect.objectContaining({ name: 'Validate generated state and repository constraints' }),
-      expect.objectContaining({ id: 'plan', name: 'Compute CI plan' }),
-    ]))
 
     for (const [jobName, job] of Object.entries(workflow.jobs)) {
       if (jobName === 'preflight') continue
@@ -79,6 +93,35 @@ describe('CI workflow', () => {
       if (jobName !== 'all-checks-passed') {
         expect(job.if, `${jobName} must not run after invalid preflight input`).toBe(prAfterPreflight)
       }
+    }
+  })
+
+  it('publishes machine-readable gate evidence from every run-gates lane', () => {
+    const workflow = loadWorkflow('.github/workflows/ci.yml')
+    if (!isRecord(workflow.jobs)) throw new TypeError('CI workflow must define jobs')
+    const expected = new Map([
+      ['node-24', 'ci-gates-static'],
+      ['node-24-coverage', 'ci-gates-coverage'],
+      ['node-24-consumers', 'ci-gates-consumers'],
+      ['node-compat', 'ci-gates-node-${{ matrix.node }}'],
+      ['windows-native', 'ci-gates-windows-native'],
+    ])
+    for (const [jobId, artifactName] of expected) {
+      const job = workflow.jobs[jobId]
+      if (!isRecord(job) || !Array.isArray(job.steps)) throw new TypeError(`${jobId} must define steps`)
+      const steps = job.steps as unknown[]
+      const command = steps.find(step =>
+        isRecord(step)
+        && isRecord(step.env)
+        && typeof step.env.DSH_CI_REPORT_PATH === 'string')
+      const upload = steps.find(step =>
+        isRecord(step)
+        && step.uses === 'actions/upload-artifact@v7'
+        && isRecord(step.with)
+        && step.with.name === artifactName)
+
+      expect(command, `${jobId} must select a gate report path`).toBeDefined()
+      expect(upload, `${jobId} must publish its gate report`).toMatchObject({ if: 'always()' })
     }
   })
 

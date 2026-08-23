@@ -18,6 +18,7 @@ import {
   parseCoveragePartitionCount,
 } from './coverage-partitions.ts'
 import { pnpmInvocation } from './pnpm-invocation.ts'
+import { buildGateReport, writeGateReport } from './ci-evidence.ts'
 
 /** A named aggregate exposed by the gate runner. */
 export type Mode =
@@ -54,6 +55,8 @@ export interface Gate {
   env?: Record<string, string | undefined>
   /** Keep a failure visible without failing the aggregate. */
   allowFailure?: boolean
+  /** Permit infrastructure classification for transport diagnostics owned by this gate. */
+  failureDomain?: 'infrastructure'
   /** Write child output as it arrives instead of buffering it until completion. */
   streamOutput?: boolean
 }
@@ -102,10 +105,31 @@ async function main(args: string[]): Promise<number> {
     ? concurrencyDefault.source
     : '$DSH_GATE_CONCURRENCY'
   const startedAt = performance.now()
+  const startedAtDate = new Date()
+  const settledResults: GateResult[] = []
   console.log(`run-gates: ${mode} running ${gates.length} gate(s) with ${maxConcurrency} worker(s) from ${concurrencySource}.`)
 
-  const results = await runGates(gates, maxConcurrency, runGate, printResult)
+  const results = await runGates(gates, maxConcurrency, runGate, (result) => {
+    settledResults.push(result)
+    printResult(result)
+  })
+  const completedAtDate = new Date()
   printSummary(results, performance.now() - startedAt)
+  const reportPath = process.env.DSH_CI_REPORT_PATH
+  if (reportPath !== undefined && reportPath !== '') {
+    const artifactRefs = (process.env.DSH_CI_ARTIFACT_REFS ?? '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(value => value !== '')
+    writeGateReport(reportPath, buildGateReport(
+      mode,
+      results,
+      settledResults,
+      startedAtDate,
+      completedAtDate,
+      artifactRefs,
+    ))
+  }
   return results.some(result => result.gate.allowFailure !== true && (result.status === 'failed' || result.status === 'skipped'))
     ? 1
     : 0

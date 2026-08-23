@@ -62,7 +62,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           READINESS: ${{ github.event.pull_request.draft && 'draft' || 'ready' }}
-        run: pnpm --silent run ci:plan --event "$GITHUB_EVENT_NAME" --readiness "$READINESS" --base "$BASE_SHA" --head "$HEAD_SHA"
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-evidence"
+          pnpm --silent run ci:plan --event "$GITHUB_EVENT_NAME" --readiness "$READINESS" --base "$BASE_SHA" --head "$HEAD_SHA" \
+            | tee "$RUNNER_TEMP/ci-evidence/plan.json"
 
       - name: Validate pull request metadata
         env:
@@ -71,7 +74,19 @@ jobs:
         run: node .github/issue-management/policy.mjs pr-metadata
 
       - name: Validate generated state and repository constraints
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/preflight.json
+          DSH_CI_ARTIFACT_REFS: ci-plan
         run: pnpm run check:ci:preflight
+
+      - name: Publish CI plan
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-plan
+          path: ${{ runner.temp }}/ci-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 30
 
   # Three standard hosted jobs isolate coverage, static analysis, and the
   # build-backed consumer tail. The consumer job owns the only Linux build so
@@ -140,7 +155,18 @@ jobs:
       - name: Run static gates
         env:
           DSH_ARCHIVE_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/static.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-static
         run: pnpm run check:ci:static
+
+      - name: Publish static gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-static
+          path: ${{ runner.temp }}/ci-evidence/static.json
+          if-no-files-found: warn
+          retention-days: 30
 
   node-24-coverage:
     needs: preflight
@@ -205,7 +231,19 @@ jobs:
           exit "$sandbox_status"
 
       - name: Run exhaustive coverage
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/coverage.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-coverage
         run: pnpm run check:ci:coverage
+
+      - name: Publish coverage gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-coverage
+          path: ${{ runner.temp }}/ci-evidence/coverage.json
+          if-no-files-found: warn
+          retention-days: 30
 
   node-24-consumers:
     needs: preflight
@@ -291,7 +329,19 @@ jobs:
         run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install chromium
 
       - name: Run compatibility, snapshot, and artifact gates
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/consumers.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-consumers
         run: pnpm run check:ci:consumers
+
+      - name: Publish consumer gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-consumers
+          path: ${{ runner.temp }}/ci-evidence/consumers.json
+          if-no-files-found: warn
+          retention-days: 30
 
 
   node-compat:
@@ -333,7 +383,18 @@ jobs:
       - name: Run compatibility smokes
         env:
           DSH_BUILD_CLIENT_PROFILE: official
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/node-${{ matrix.node }}.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-node-${{ matrix.node }}
         run: pnpm run check:node-compat
+
+      - name: Publish compatibility gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-node-${{ matrix.node }}
+          path: ${{ runner.temp }}/ci-evidence/node-${{ matrix.node }}.json
+          if-no-files-found: warn
+          retention-days: 30
 
   python-sdk:
     needs: preflight
@@ -519,7 +580,19 @@ jobs:
 
       - name: Run complete native Windows gate inventory
         shell: pwsh
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-windows-native
         run: pnpm run check:ci:windows-complete
+
+      - name: Publish native Windows gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-windows-native
+          path: ${{ runner.temp }}/ci-evidence/windows-native.json
+          if-no-files-found: warn
+          retention-days: 30
 
   # macOS PR owner for the declared Electron Browser Runtime e2e. The master
   # workflow's serial macOS lane is disabled; this focused job keeps the real

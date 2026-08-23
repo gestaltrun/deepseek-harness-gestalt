@@ -61,7 +61,7 @@ function completeDeployEnv(): NodeJS.Dict<string> {
 }
 
 function spawnCli(env: NodeJS.Dict<string>) {
-  return spawnSync(process.execPath, ['--experimental-strip-types', script], {
+  return spawnSync(process.execPath, ['--import', 'tsx/esm', script], {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
@@ -281,7 +281,7 @@ describe('Platform release workflows', () => {
     const validateStep = steps(validate).find(step => typeof step.run === 'string'
       && step.run.includes('apps/platform/src/production-env-cli.ts'))
     if (validateStep === undefined) throw new TypeError('validate job must run production-env.ts')
-    expect(String(validateStep.run)).toContain('--experimental-strip-types')
+    expect(String(validateStep.run)).toContain('--import tsx/esm')
     if (!isRecord(validateStep.env)) throw new TypeError('validate step must define env')
     for (const name of PLATFORM_DEPLOY_REQUIRED_ENV) {
       expect(validateStep.env, name).toHaveProperty(name)

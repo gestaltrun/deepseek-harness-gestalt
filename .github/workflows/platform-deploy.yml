@@ -74,7 +74,7 @@ jobs:
           PLATFORM_POLLING_SIGNING_KEY: ${{ secrets.PLATFORM_POLLING_SIGNING_KEY }}
           PLATFORM_ECS_SSH_KEY: ${{ secrets.PLATFORM_ECS_SSH_KEY }}
           PLATFORM_ECS_HOSTS: ${{ vars.PLATFORM_ECS_HOSTS }}
-        run: node --experimental-strip-types apps/platform/src/production-env-cli.ts
+        run: node --import tsx/esm apps/platform/src/production-env-cli.ts
 
   deploy:
     name: Deploy to ECS

@@ -8,6 +8,7 @@ import { matchesGlob, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 
 import { renderChangeScope } from './change-scope.ts'
+import { collectPackageGraph, type PackageGraphNode } from './package-graph.ts'
 
 const FORMAT_VERSION = 1
 const RISK_CATALOG_FORMAT_VERSION = 1
@@ -31,6 +32,7 @@ export interface CiPlanInput {
   headSha: string | null
   changedPaths: readonly string[] | null
   dependencyGraphDigest: string | null
+  dependencyGraph: readonly PackageGraphNode[] | null
   riskCatalog: CiRiskCatalog | null
   lockfileDigest: string | null
   workflowDigest: string | null
@@ -45,8 +47,11 @@ export interface CiPlanLane {
 
 export interface CiPlan {
   formatVersion: typeof FORMAT_VERSION
-  level: 'exhaustive'
+  level: 'impacted' | 'exhaustive'
   affectedAreas: string[]
+  directPackages: string[]
+  affectedPackages: string[]
+  changedSources: string[]
   escalationReasons: string[]
   lanes: CiPlanLane[]
   evidenceKey: string
@@ -62,6 +67,29 @@ const EXHAUSTIVE_LANES: CiPlanLane[] = [
   { id: 'windows-wine', classification: 'required', reason: 'blocking Windows compatibility' },
   { id: 'windows-native', classification: 'observational', reason: 'native Windows inventory' },
   { id: 'electron-macos', classification: 'observational', reason: 'macOS Electron runtime' },
+]
+
+const DRAFT_IMPACT_LANE: CiPlanLane = {
+  id: 'draft-impact',
+  classification: 'required',
+  reason: 'changed packages and reverse consumers',
+}
+
+const ASSEMBLED_SURFACE_PATTERNS = [
+  /^apps\//u,
+  /^packages\/client\//u,
+  /^packages\/bundle\//u,
+  /^packages\/core\/(?:system-prompt|tools)\//u,
+  /^packages\/examples\//u,
+  /^packages\/[^/]+\/tool-[^/]+\//u,
+]
+
+const DOCUMENTATION_PATTERNS = [
+  /^\.agents\/notes\//u,
+  /^\.agents\/research\//u,
+  /^docs\//u,
+  /(?:^|\/)README(?:\.zh)?\.md$/iu,
+  /^[^/]+\.md$/u,
 ]
 
 /**
@@ -104,6 +132,29 @@ export function planCi(input: CiPlanInput): CiPlan {
       }
     }
   }
+  const productAreas = [...affectedAreas].filter(area => area !== 'area/infra')
+  if (new Set(productAreas).size > 1) addUnique(reasons, 'cross-domain-change')
+
+  const directPackages = normalizedPaths === null || input.dependencyGraph === null
+    ? []
+    : resolveDirectPackages(normalizedPaths, input.dependencyGraph)
+  if (normalizedPaths !== null && input.dependencyGraph !== null
+    && normalizedPaths.some(path => path.startsWith('packages/')
+      && !input.dependencyGraph.some(pkg => path === pkg.rel || path.startsWith(`${pkg.rel}/`)))) {
+    addUnique(reasons, 'unresolved-package-path')
+  }
+  const affectedPackages = input.dependencyGraph === null
+    ? []
+    : resolveReverseConsumers(directPackages, input.dependencyGraph)
+  const changedSources = normalizedPaths?.filter(path =>
+    /^packages\/[^/]+\/[^/]+\/src\/.*\.(?:[cm]?[jt]sx?)$/u.test(path)
+    && !/\.d\.[cm]?[jt]sx?$/u.test(path)) ?? []
+  const exhaustive = input.event !== 'pull_request'
+    || input.readiness !== 'draft'
+    || reasons.length > 0
+  const lanes = exhaustive
+    ? EXHAUSTIVE_LANES.map(lane => ({ ...lane }))
+    : impactedLanes(normalizedPaths ?? [], affectedPackages)
 
   const normalizedInput = {
     event: input.event,
@@ -119,12 +170,54 @@ export function planCi(input: CiPlanInput): CiPlan {
   }
   return {
     formatVersion: FORMAT_VERSION,
-    level: 'exhaustive',
+    level: exhaustive ? 'exhaustive' : 'impacted',
     affectedAreas: [...affectedAreas].sort(),
+    directPackages,
+    affectedPackages,
+    changedSources,
     escalationReasons: reasons,
-    lanes: EXHAUSTIVE_LANES.map(lane => ({ ...lane })),
+    lanes,
     evidenceKey: sha256(JSON.stringify(normalizedInput)),
   }
+}
+
+function resolveDirectPackages(paths: readonly string[], graph: readonly PackageGraphNode[]): string[] {
+  return graph
+    .filter(pkg => paths.some(path => path === pkg.rel || path.startsWith(`${pkg.rel}/`)))
+    .map(pkg => pkg.short)
+    .sort()
+}
+
+function resolveReverseConsumers(direct: readonly string[], graph: readonly PackageGraphNode[]): string[] {
+  const affected = new Set(direct)
+  for (;;) {
+    const previousSize = affected.size
+    for (const pkg of graph) {
+      if (pkg.deps.some(dependency => affected.has(dependency))) affected.add(pkg.short)
+    }
+    if (affected.size === previousSize) return [...affected].sort()
+  }
+}
+
+function impactedLanes(paths: readonly string[], affectedPackages: readonly string[]): CiPlanLane[] {
+  const lanes: CiPlanLane[] = []
+  if (affectedPackages.length > 0) lanes.push({ ...DRAFT_IMPACT_LANE })
+  if (paths.some(path => DOCUMENTATION_PATTERNS.some(pattern => pattern.test(path)))) {
+    lanes.push(copyExhaustiveLane('static'))
+  }
+  if (paths.some(path => ASSEMBLED_SURFACE_PATTERNS.some(pattern => pattern.test(path)))) {
+    lanes.push(copyExhaustiveLane('consumers'))
+  }
+  if (paths.some(path => path.startsWith('packages/browser/browser-runtime-electron/'))) {
+    lanes.push(copyExhaustiveLane('electron-macos'))
+  }
+  return lanes
+}
+
+function copyExhaustiveLane(id: string): CiPlanLane {
+  const lane = EXHAUSTIVE_LANES.find(candidate => candidate.id === id)
+  if (lane === undefined) throw new Error(`ci-plan: missing exhaustive lane ${JSON.stringify(id)}`)
+  return { ...lane }
 }
 
 /**
@@ -137,6 +230,12 @@ export function renderCiPlan(args: string[], cwd: string): string {
   const options = parseOptions(args)
   const repositoryRoot = repositoryRootFrom(cwd)
   const riskCatalog = readRiskCatalog(repositoryRoot)
+  let dependencyGraph: PackageGraphNode[] | null = null
+  try {
+    dependencyGraph = collectPackageGraph(repositoryRoot, [], 'ci-plan')
+  } catch {
+    dependencyGraph = null
+  }
   let scope: ReturnType<typeof parseChangeScope> | null = null
   try {
     scope = parseChangeScope(renderChangeScope([
@@ -152,7 +251,8 @@ export function renderCiPlan(args: string[], cwd: string): string {
     baseSha: scope?.resolved.baseSha ?? null,
     headSha: scope?.resolved.headSha ?? null,
     changedPaths: scope?.paths.committed ?? null,
-    dependencyGraphDigest: digestFile(repositoryRoot, 'docs/module-graph.md'),
+    dependencyGraphDigest: dependencyGraph === null ? null : sha256(JSON.stringify(dependencyGraph)),
+    dependencyGraph,
     riskCatalog,
     lockfileDigest: digestFile(repositoryRoot, 'pnpm-lock.yaml'),
     workflowDigest: digestWorkflows(repositoryRoot),
@@ -171,6 +271,8 @@ export function renderGitHubOutputs(plan: CiPlan): string {
     `level=${plan.level}`,
     `lanes=${JSON.stringify(plan.lanes.map(lane => lane.id))}`,
     `affected_areas=${JSON.stringify(plan.affectedAreas)}`,
+    `affected_packages=${JSON.stringify(plan.affectedPackages)}`,
+    `changed_sources=${JSON.stringify(plan.changedSources)}`,
     `escalation_reasons=${JSON.stringify(plan.escalationReasons)}`,
     `evidence_key=${plan.evidenceKey}`,
     '',

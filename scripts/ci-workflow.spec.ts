@@ -45,6 +45,8 @@ describe('CI workflow', () => {
         level: '${{ steps.plan.outputs.level }}',
         lanes: '${{ steps.plan.outputs.lanes }}',
         'affected-areas': '${{ steps.plan.outputs.affected_areas }}',
+        'affected-packages': '${{ steps.plan.outputs.affected_packages }}',
+        'changed-sources': '${{ steps.plan.outputs.changed_sources }}',
         'escalation-reasons': '${{ steps.plan.outputs.escalation_reasons }}',
         'evidence-key': '${{ steps.plan.outputs.evidence_key }}',
       },
@@ -91,7 +93,8 @@ describe('CI workflow', () => {
       const needs = typeof job.needs === 'string' ? [job.needs] : job.needs
       expect(needs, `${jobName} must wait for preflight`).toContain('preflight')
       if (jobName !== 'all-checks-passed') {
-        expect(job.if, `${jobName} must not run after invalid preflight input`).toBe(prAfterPreflight)
+        expect(job.if, `${jobName} must not run after invalid preflight input`)
+          .toContain(prAfterPreflight)
       }
     }
   })
@@ -123,6 +126,37 @@ describe('CI workflow', () => {
       expect(command, `${jobId} must select a gate report path`).toBeDefined()
       expect(upload, `${jobId} must publish its gate report`).toMatchObject({ if: 'always()' })
     }
+  })
+
+  it('runs only selected Draft evidence while keeping ready plans exhaustive', () => {
+    const workflow = loadWorkflow('.github/workflows/ci.yml')
+    if (!isRecord(workflow.jobs)) throw new TypeError('CI workflow must define jobs')
+    const draftImpact = workflow.jobs['draft-impact']
+    const consumers = workflow.jobs['node-24-consumers']
+    const aggregate = workflow.jobs['all-checks-passed']
+    if (!isRecord(draftImpact) || !Array.isArray(draftImpact.steps)
+      || !isRecord(consumers) || !isRecord(aggregate) || !Array.isArray(aggregate.steps)) {
+      throw new TypeError('CI workflow must define Draft impact, consumers, and aggregate jobs')
+    }
+    expect(draftImpact.if).toBe(
+      `${prAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'draft-impact')`,
+    )
+    expect(draftImpact.steps).toContainEqual(expect.objectContaining({
+      name: 'Run changed packages and reverse consumers',
+      run: 'pnpm ci:impact --base "$BASE_SHA" --head "$HEAD_SHA"',
+    }))
+    expect(consumers.if).toBe(
+      `${prAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'consumers')`,
+    )
+    const verdict = (aggregate.steps as unknown[]).find(step =>
+      isRecord(step) && step.name === 'Validate selected required jobs')
+    if (!isRecord(verdict) || typeof verdict.run !== 'string') {
+      throw new TypeError('aggregate verdict must define a command')
+    }
+    expect(verdict.run).toContain("level === 'exhaustive'")
+    expect(verdict.run).toContain("lanes.includes('draft-impact')")
+    expect(verdict.run).toContain("lanes.includes('static')")
+    expect(verdict.run).toContain("lanes.includes('consumers')")
   })
 
   it('makes optional dependencies mandatory for master standby installs', () => {
@@ -273,7 +307,7 @@ describe('CI workflow', () => {
     // Required PR job: Wine on ubuntu-latest, runs wine-windows-gates.sh.
     expect(windows['runs-on']).toBe('ubuntu-latest')
     expect(windows.name).toBe('windows node 24 / wine blocking')
-    expect(windows.if).toBe(prAfterPreflight)
+    expect(windows.if).toContain(prAfterPreflight)
     expect(commandSteps.some(step => step.run.includes('wine-windows-gates.sh'))).toBe(true)
 
     // windows-native: non-blocking native job with failover, runs windows-complete.
@@ -286,7 +320,7 @@ describe('CI workflow', () => {
     expect(windowsNative['runs-on']).toContain('windows-latest')
     expect(windowsNative['runs-on']).not.toContain('dsh-windows-2025-16core')
     expect(windowsNative.name).toBe('windows node 24 / native complete')
-    expect(windowsNative.if).toBe(prAfterPreflight)
+    expect(windowsNative.if).toContain(prAfterPreflight)
     expect(windowsNative.env).toMatchObject({
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000',
     })
@@ -319,7 +353,7 @@ describe('CI workflow', () => {
     if (!isRecord(macosElectron) || !Array.isArray(macosElectron.steps)) {
       throw new TypeError('CI workflow must define electron-runtime-e2e-macos')
     }
-    expect(macosElectron.if).toBe(prAfterPreflight)
+    expect(macosElectron.if).toContain(prAfterPreflight)
     expect(macosElectron['runs-on']).toBe('macos-latest')
     expect(macosElectron.name).toBe('macos electron runtime e2e')
     const macosCommands = macosElectron.steps.filter((step): step is Record<string, unknown> & { run: string } => (
@@ -435,7 +469,7 @@ describe('CI workflow', () => {
     expect(config).not.toContain('packages/lsp/lsp-stdio/src/instance.ts')
   })
 
-  it('requires one release-shaped Python runtime target on every pull request', () => {
+  it('requires one release-shaped Python runtime target in every exhaustive plan', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const pythonRuntime = workflowJob(workflow, 'python-runtime')
     const aggregate = workflowJob(workflow, 'all-checks-passed')
@@ -444,7 +478,7 @@ describe('CI workflow', () => {
     }
 
     expect(pythonRuntime).toMatchObject({
-      if: prAfterPreflight,
+      if: `${prAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'python-runtime')`,
       name: 'python runtime / release-shaped Linux x64',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: {

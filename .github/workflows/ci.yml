@@ -32,6 +32,8 @@ jobs:
       level: ${{ steps.plan.outputs.level }}
       lanes: ${{ steps.plan.outputs.lanes }}
       affected-areas: ${{ steps.plan.outputs.affected_areas }}
+      affected-packages: ${{ steps.plan.outputs.affected_packages }}
+      changed-sources: ${{ steps.plan.outputs.changed_sources }}
       escalation-reasons: ${{ steps.plan.outputs.escalation_reasons }}
       evidence-key: ${{ steps.plan.outputs.evidence_key }}
     steps:
@@ -106,7 +108,7 @@ jobs:
   # job below.
   node-24:
     needs: preflight
-    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'static')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -170,7 +172,7 @@ jobs:
 
   node-24-coverage:
     needs: preflight
-    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'coverage')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -247,7 +249,7 @@ jobs:
 
   node-24-consumers:
     needs: preflight
-    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'consumers')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -343,10 +345,39 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  draft-impact:
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'draft-impact')
+    runs-on: ubuntu-latest
+    name: Draft changed packages and consumers
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run changed packages and reverse consumers
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm ci:impact --base "$BASE_SHA" --head "$HEAD_SHA"
+
 
   node-compat:
     needs: preflight
-    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'node-compat')
     # Each compatibility contract receives an independent standard hosted job.
     runs-on: ${{ matrix.runner }}
     name: ${{ matrix.name }}
@@ -398,7 +429,7 @@ jobs:
 
   python-sdk:
     needs: preflight
-    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'python-sdk')
     runs-on: ubuntu-latest
     name: python 3.10 / keyless SDK
     steps:
@@ -421,7 +452,7 @@ jobs:
   # GLIBC, and manylinux checks; release validation retains all native targets.
   python-runtime:
     needs: preflight
-    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'python-runtime')
     name: python runtime / release-shaped Linux x64
     uses: ./.github/workflows/build-exe-for-python-sdk.yml
     with:
@@ -440,7 +471,7 @@ jobs:
   # .agents/notes/implemented/process/2026-08-08-native-windows-pull-request-ci.md
   windows:
     needs: preflight
-    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-wine')
     runs-on: ubuntu-latest
     name: windows node 24 / wine blocking
     timeout-minutes: 15
@@ -531,7 +562,7 @@ jobs:
   # and the all-checks-passed verdict above.
   windows-native:
     needs: preflight
-    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
           && github.event.pull_request.user.login != 'dependabot[bot]'
@@ -599,7 +630,7 @@ jobs:
   # cookie-isolation launcher visible without joining the required aggregate.
   electron-runtime-e2e-macos:
     needs: preflight
-    if: needs.preflight.result == 'success' && github.event_name == 'pull_request'
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'electron-macos')
     runs-on: macos-latest
     name: macos electron runtime e2e
     timeout-minutes: 20
@@ -629,10 +660,10 @@ jobs:
   # deliberately absent so its independent result never delays or changes this
   # verdict. (`needs` cannot reach across workflow files; the master-only jobs in
   # ci-master.yml are intentionally not part of this PR verdict.)
-  # `if: always()` is load-bearing: without it a failed dependency
-  # would SKIP this job, and GitHub counts a skipped required check as passing
-  # — so this job always runs and fails on any non-success result, including
-  # 'cancelled' and 'skipped'.
+  # `if: always()` is load-bearing: without it a failed dependency would SKIP
+  # this job, and GitHub counts a skipped required check as passing. The
+  # verdict reads the plan and rejects any selected job that failed, was
+  # cancelled, or was skipped; deliberately unselected Draft jobs stay skipped.
   all-checks-passed:
     name: all checks passed
     # This bookkeeping-only verdict must not depend on custom-pool
@@ -646,13 +677,31 @@ jobs:
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
-    needs: [preflight, node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows]
+    needs: [preflight, draft-impact, node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows]
     if: always() && github.event_name == 'pull_request'
     steps:
-      - name: Fail if any needed job did not succeed
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+      - name: Validate selected required jobs
+        env:
+          CI_LEVEL: ${{ needs.preflight.outputs.level }}
+          CI_LANES: ${{ needs.preflight.outputs.lanes }}
+          CI_RESULTS: ${{ toJSON(needs) }}
         run: |
-          echo "::error::Needed job results: ${{ join(needs.*.result, ', ') }}"
-          exit 1
-      - name: All checks passed
-        run: echo "All needed jobs succeeded (${{ join(needs.*.result, ', ') }})"
+          node <<'NODE'
+          const level = process.env.CI_LEVEL
+          const lanes = JSON.parse(process.env.CI_LANES || '[]')
+          const results = JSON.parse(process.env.CI_RESULTS || '{}')
+          const required = level === 'exhaustive'
+            ? ['preflight', 'node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-runtime', 'windows']
+            : [
+                'preflight',
+                ...(lanes.includes('draft-impact') ? ['draft-impact'] : []),
+                ...(lanes.includes('static') ? ['node-24'] : []),
+                ...(lanes.includes('consumers') ? ['node-24-consumers'] : []),
+              ]
+          const failed = required.filter(job => results[job]?.result !== 'success')
+          if (failed.length > 0) {
+            console.error(`Required jobs did not succeed: ${failed.map(job => `${job}=${results[job]?.result}`).join(', ')}`)
+            process.exit(1)
+          }
+          console.log(`Required jobs succeeded: ${required.join(', ')}`)
+          NODE

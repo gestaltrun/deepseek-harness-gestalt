@@ -124,6 +124,8 @@ The keyless [CI workflow](../.github/workflows/ci.yml) groups independent gates 
 
 Each main CI run uploads the planner JSON and versioned gate reports. Reports identify the first blocking failure in completion order, classify failed gates, retain every stage duration, and name related artifacts. Only a command whose exact diagnostics classify as transient infrastructure may receive one automatic retry; its artifact retains both attempts. Run `pnpm ci:metrics --repo <owner/name>` to calculate success, queue, execution, and first-conclusion distributions while excluding bookkeeping, cancelled, skipped, stale, and observational samples.
 
+A Draft pull request with fully known low-risk paths runs tests for changed packages and every reverse consumer, with 100% thresholds applied to existing changed source files. GUI and model-visible paths also run assembled snapshots. Ready pull requests and changes to workflows, lockfiles, vendor source, protocols, session lifecycle, agent loop, build configuration, multiple product areas, or unknown paths run the exhaustive plan. `pnpm ci:impact --base <ref> --head <ref> --plan-only` prints the same Draft command locally; omit `--plan-only` to execute it.
+
 ### Daily commands
 
 The root [contributor instructions](../AGENTS.md#commands) summarize common commands, while [`package.json`](../package.json) and [scripts/run-gates.ts](../scripts/run-gates.ts) own the current script and gate inventories. Select the smallest checks that cover the changed surface. Documentation changes use `pnpm run doc-sync`; package-public behavior changes also update the owning README or JSDoc, and built-artifact checks require `pnpm run build` first.

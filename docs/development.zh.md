@@ -128,6 +128,8 @@ keyless [CI 工作流](../.github/workflows/ci.yml) 将独立门禁分组到若�
 
 每次主 CI 运行都会上传 Planner JSON 和带版本的 gate 报告。报告按实际完成顺序标识首个阻塞失败，对失败 gate 分类，保留每个阶段的耗时，并列出相关 artifact。只有精确诊断被分类为瞬时基础设施故障的命令才允许自动重试一次，其 artifact 会保留两次尝试。运行 `pnpm ci:metrics --repo <owner/name>` 可计算成功率、排队、执行和首个结论分布，并排除记账任务、cancelled、skipped、stale 和观察性样本。
 
+当 Draft PR 的所有路径都已知且风险较低时，CI 会运行变更 package 及其全部反向 consumer 的测试，并对仍存在的变更源文件应用 100% 阈值。GUI 和模型可见路径还会运行组装态 snapshot。Ready PR，以及涉及 workflow、lockfile、vendor 源码、protocol、session lifecycle、agent loop、构建配置、多个产品 area 或未知路径的改动，都会运行穷尽计划。`pnpm ci:impact --base <ref> --head <ref> --plan-only` 会在本地打印同一条 Draft 命令；移除 `--plan-only` 即可执行。
+
 ### 日常命令
 
 根目录的[贡献者说明](../AGENTS.md#commands)概述常用命令，[`package.json`](../package.json) 与 [scripts/run-gates.ts](../scripts/run-gates.ts) 则负责当前脚本和门禁清单。请选择覆盖变更表面的最小检查集。文档变更使用 `pnpm run doc-sync`；包公开行为变更还需更新所属 README 或 JSDoc，而基于构建产物的检查需要先运行 `pnpm run build`。

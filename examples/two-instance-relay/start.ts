@@ -316,7 +316,7 @@ export async function apply(_ctx: Context, config: Config): Promise<void> {
     await waitUntil(async () => await backendA.coordinator.locate(routeId, mobileAttachmentId) === undefined)
     const offlinePairing = (await pairingB.listPersonalPairings(desktopAuthentication))[0]
     if (offlinePairing === undefined) throw new Error('Desktop Settings lost the disconnected Mobile pairing')
-    console.log(`PAIRING_DISCONNECT online=${String(offlinePairing.online)} lastAccessPreserved=${String(offlinePairing.lastAccessAt === beforeDisconnect.lastAccessAt)}`)
+    console.log(`PAIRING_DISCONNECT online=${String(offlinePairing.online)} lastAccessMonotonic=${String(offlinePairing.lastAccessAt >= beforeDisconnect.lastAccessAt)}`)
     const pairingReplacement = createPairingProvider(backendA.provider)
     resources.add({ close: async () => { await pairingReplacement.dispose() } })
     await pairingReplacement.setMobileAccess({ desktop: desktopAuthentication, enabled: false })

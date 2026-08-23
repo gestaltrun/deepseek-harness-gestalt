@@ -19,7 +19,9 @@ describe('CI workflow', () => {
       if (!isRecord(job) || !Array.isArray(job.steps)) {
         throw new TypeError(`ci-master workflow must define ${jobName} steps`)
       }
-      const install = job.steps.find(step => isRecord(step) && step.name === 'Install (immutable)')
+      const install = (job.steps as unknown[]).find(
+        step => isRecord(step) && step.name === 'Install (immutable)',
+      )
       expect(install, `${jobName} must rebuild persistent node_modules with optional dependencies`).toMatchObject({
         run: 'pnpm install --frozen-lockfile --force',
       })

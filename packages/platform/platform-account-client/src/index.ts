@@ -16,7 +16,8 @@ import {
   type AccountErrorCode,
   type AccountSessionView,
   type InstallationId,
-  type InstallationKind,
+  type InstallationLoginIdentity,
+  type MobileInstallationPresentation,
   type LoginAttemptId,
   type LoginAttemptView,
   type LoginPollResult,
@@ -32,11 +33,7 @@ export { ACCOUNT_PRIVACY_NOTICE }
 export interface PlatformAccountTransport {
   /** Deployment identity owning every request. */
   readonly environment: SelectedPlatformEnvironment
-  beginLogin(input: {
-    installationId: InstallationId
-    installationKind: InstallationKind
-    publicKey: JsonWebKey
-  }): Promise<LoginAttemptView>
+  beginLogin(input: InstallationLoginIdentity & { publicKey: JsonWebKey }): Promise<LoginAttemptView>
   pollLogin(input: { attemptId: LoginAttemptId; pollingToken: string; proof: AccountProof }): Promise<LoginPollResult>
   refresh(input: { refreshToken: string; proof: AccountProof }): Promise<AccountSessionView>
   current(input: { accessToken: string; proof: AccountProof }): Promise<PlatformAccountView>
@@ -63,11 +60,7 @@ export class PlatformAccountHttpTransport implements PlatformAccountTransport {
     this.fetch = options.fetch ?? globalThis.fetch
   }
 
-  beginLogin(input: {
-    installationId: InstallationId
-    installationKind: InstallationKind
-    publicKey: JsonWebKey
-  }): Promise<LoginAttemptView> {
+  beginLogin(input: InstallationLoginIdentity & { publicKey: JsonWebKey }): Promise<LoginAttemptView> {
     return this.json('/v1/account/login-attempts', { method: 'POST', body: JSON.stringify(input) }, parseLoginAttemptView)
   }
 
@@ -375,11 +368,9 @@ export class AccountLifecycleClosedError extends Error {
   }
 }
 
-/** Controller construction inputs. */
-export interface PlatformAccountInstallationOptions {
+interface PlatformAccountInstallationBaseOptions {
   environment: SelectedPlatformEnvironment
   installationId: InstallationId
-  installationKind: InstallationKind
   transport: PlatformAccountTransport
   store: InstallationAccountStore
   systemBrowser: SystemBrowser
@@ -387,6 +378,12 @@ export interface PlatformAccountInstallationOptions {
   crypto?: Crypto
   now?: () => number
 }
+
+/** Controller construction inputs, including authenticated Mobile presentation. */
+export type PlatformAccountInstallationOptions = PlatformAccountInstallationBaseOptions & (
+  | { installationKind: 'desktop'; presentation: import('@deepseek-ai/dsh-platform-account').DesktopInstallationPresentation }
+  | { installationKind: 'mobile'; presentation: MobileInstallationPresentation }
+)
 
 /** Access token and proof for one authenticated current-Installation operation. */
 export interface CurrentInstallationAuthorization {
@@ -525,11 +522,18 @@ export class PlatformAccountInstallation {
         ['sign', 'verify'],
       )
       const publicKey = await this.crypto.subtle.exportKey('jwk', pair.publicKey)
-      const attempt = await this.options.transport.beginLogin({
-        installationId: this.options.installationId,
-        installationKind: this.options.installationKind,
-        publicKey,
-      })
+      const identity: InstallationLoginIdentity = this.options.installationKind === 'desktop'
+        ? {
+          installationId: this.options.installationId,
+          installationKind: 'desktop',
+          presentation: this.options.presentation,
+        }
+        : {
+          installationId: this.options.installationId,
+          installationKind: 'mobile',
+          presentation: this.options.presentation,
+        }
+      const attempt = await this.options.transport.beginLogin({ ...identity, publicKey })
       await this.options.store.savePending(this.options.environment.environment, { attempt, privateKey: pair.privateKey })
       this.preparedAuthorizationUrl = attempt.authorizationUrl
       this.publish({ status: 'ready', privacyAccepted: true })

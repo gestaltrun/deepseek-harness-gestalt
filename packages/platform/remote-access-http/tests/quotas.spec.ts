@@ -5,6 +5,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parseAccountProofJti, parseInstallationId } from '@deepseek-ai/dsh-platform-account'
 import {
+  MemoryPersonalPairingAuthorityStore,
   OPEN_REGISTRATION_QUOTAS,
   PersonalPairingProvider,
   parsePairingRendezvousId,
@@ -75,7 +76,13 @@ function pairingProvider(): PersonalPairingProvider {
             githubLogin: accountId,
             avatarUrl: 'https://avatars.example/account',
           },
-          installation: { id: parseInstallationId(installationId), kind },
+          installation: kind === 'mobile'
+            ? {
+              id: parseInstallationId(installationId),
+              kind,
+              presentation: { name: `${installationId} installation`, platform: 'ios' as const },
+            }
+            : { id: parseInstallationId(installationId), kind: 'desktop' as const, presentation: { name: 'Test Desktop', platform: 'linux' as const } },
         }
       }),
     },
@@ -94,6 +101,7 @@ function pairingProvider(): PersonalPairingProvider {
       destroyPendingPairing: vi.fn(),
       destroyPairing: vi.fn(),
     },
+    authority: new MemoryPersonalPairingAuthorityStore(),
     randomBytes: size => new Uint8Array(size).fill(1),
     randomId: kind => `${kind}-${String(++id)}`,
     pairingLinkOrigin: 'https://platform.example/pair',

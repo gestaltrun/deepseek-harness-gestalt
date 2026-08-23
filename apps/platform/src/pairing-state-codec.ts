@@ -14,6 +14,9 @@ import {
   type ChallengeRecord,
   type CleanupRecord,
   type CompletionReplayRecord,
+  type EndpointOwnedPairingMailboxState,
+  type EndpointPairingPublication,
+  type EndpointPairingRevocation,
   type OrphanPendingCleanupRecord,
   type PendingOutcome,
   type PendingPairingRecord,
@@ -23,8 +26,9 @@ import {
   type SettledPendingRecord,
   type StoredPersonalPairing,
 } from '@deepseek-ai/dsh-remote-access'
-import type { RelayCredentialGrant } from '@deepseek-ai/dsh-remote-access'
-import { parseRelayCredential, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  parseRelayRouteId,
+} from '@deepseek-ai/dsh-remote-protocol'
 
 const CHALLENGE_OUTCOMES = new Set<ChallengeOutcome>([
   'cancelled', 'expired', 'completed', 'account-mismatch', 'disabled', 'disposed',
@@ -32,10 +36,15 @@ const CHALLENGE_OUTCOMES = new Set<ChallengeOutcome>([
 const PENDING_OUTCOMES = new Set<PendingOutcome>([
   'confirmed', 'rejected', 'disabled', 'collision', 'disposed',
 ])
+const PAIRING_TRANSACTION_FORMAT_VERSION = 1
 
 /** Empty exclusive pairing-transaction document. */
 export function emptyPairingTransactionState(): PersonalPairingTransactionState {
   return {
+    endpointMailbox: { challenges: [], pending: [] },
+    endpointPublications: new Map(),
+    endpointPublicationRevocations: new Map(),
+    endpointAccessGenerations: new Map(),
     challenges: new Map(),
     settledChallenges: new Map(),
     completions: new Map(),
@@ -53,12 +62,18 @@ export function emptyPairingTransactionState(): PersonalPairingTransactionState 
 }
 
 /**
- * Encode one exclusive pairing-transaction document as JSON-safe data.
+ * Encode one exclusive pairing-transaction document in the current JSON-safe format.
  * @param state - in-memory Maps mutated under the store lease.
  * @returns JSON-serializable document.
  */
 export function encodePairingTransactionState(state: PersonalPairingTransactionState): unknown {
   return {
+    formatVersion: PAIRING_TRANSACTION_FORMAT_VERSION,
+    endpointMailbox: encodeEndpointMailbox(state.endpointMailbox),
+    endpointPublications: [...state.endpointPublications].map(([id, publication]) => [id, encodeEndpointPublication(publication)]),
+    endpointPublicationRevocations: [...state.endpointPublicationRevocations]
+      .map(([id, revocation]) => [id, encodeEndpointRevocation(revocation)]),
+    endpointAccessGenerations: [...state.endpointAccessGenerations],
     challenges: [...state.challenges].map(([id, record]) => [id, encodeChallenge(record)]),
     settledChallenges: [...state.settledChallenges].map(([id, record]) => [id, encodeSettledChallenge(record)]),
     completions: [...state.completions].map(([id, record]) => [id, encodeCompletion(record)]),
@@ -78,23 +93,50 @@ export function encodePairingTransactionState(state: PersonalPairingTransactionS
 /**
  * Decode one exclusive pairing-transaction document after a durable read.
  * @param value - JSON or jsonb document.
- * @returns Maps ready for in-lease mutation.
+ * @returns Maps ready for in-lease mutation; legacy replay entries without a request digest become cleanup-owning terminal records.
+ * @throws TypeError when an explicit format version is unknown or the selected document format is malformed.
  */
 export function decodePairingTransactionState(value: unknown): PersonalPairingTransactionState {
   if (value === null || value === undefined) return emptyPairingTransactionState()
   const record = asRecord(value, 'pairing transaction state')
+  if (!Object.hasOwn(record, 'formatVersion')) return decodeLegacyPairingTransactionState(record)
+  const formatVersion = asSafeInteger(record.formatVersion, 'pairing transaction formatVersion')
+  if (formatVersion !== PAIRING_TRANSACTION_FORMAT_VERSION) {
+    throw new TypeError('pairing transaction format version is unsupported')
+  }
+  return decodePairingTransactionFields(
+    record,
+    decodeMap(record.completions, 'completions', parsePairingCompletionId, decodeCompletion),
+    decodeMap(record.pending, 'pending', parsePendingPairingId, decodePending),
+  )
+}
+
+function decodePairingTransactionFields(
+  record: Record<string, unknown>,
+  completions: PersonalPairingTransactionState['completions'],
+  pending: PersonalPairingTransactionState['pending'],
+): PersonalPairingTransactionState {
   const orphans = new Map<CleanupRecord<Uint8Array>, OrphanPendingCleanupRecord>()
   for (const encoded of asArray(record.orphanPendingCleanups, 'orphanPendingCleanups')) {
     const orphan = decodeOrphan(encoded)
     orphans.set(orphan.cleanup, orphan)
   }
   return {
+    endpointMailbox: decodeEndpointMailbox(record.endpointMailbox),
+    endpointPublications: decodeMap(
+      record.endpointPublications, 'endpointPublications', parsePendingPairingId, decodeEndpointPublication,
+    ),
+    endpointPublicationRevocations: decodeMap(
+      record.endpointPublicationRevocations, 'endpointPublicationRevocations',
+      parsePendingPairingId, decodeEndpointRevocation,
+    ),
+    endpointAccessGenerations: decodeEndpointAccessGenerations(record.endpointAccessGenerations),
     challenges: decodeMap(record.challenges, 'challenges', parsePairingChallengeId, decodeChallenge),
     settledChallenges: decodeMap(
       record.settledChallenges, 'settledChallenges', parsePairingChallengeId, decodeSettledChallenge,
     ),
-    completions: decodeMap(record.completions, 'completions', parsePairingCompletionId, decodeCompletion),
-    pending: decodeMap(record.pending, 'pending', parsePendingPairingId, decodePending),
+    completions,
+    pending,
     settledPending: decodeMap(record.settledPending, 'settledPending', parsePendingPairingId, decodeSettledPending),
     pairings: decodeMap(record.pairings, 'pairings', parsePersonalPairingId, decodeStoredPairing),
     principalIds: new Set(asArray(record.principalIds, 'principalIds').map(parseDevicePrincipalId)),
@@ -104,6 +146,314 @@ export function decodePairingTransactionState(value: unknown): PersonalPairingTr
     blobs: decodeMap(record.blobs, 'blobs', asPlainString, decodeBlob),
     blobUploads: decodeMap(record.blobUploads, 'blobUploads', asPlainString, decodeBlobUploads),
     blobSequence: { next: asSafeInteger(asRecord(record.blobSequence, 'blobSequence').next, 'blobSequence.next') },
+  }
+}
+
+type LegacyCompletionReplayRecord = Pick<
+  CompletionReplayRecord,
+  | 'accountId'
+  | 'desktopInstallationId'
+  | 'mobileInstallationId'
+  | 'challengeId'
+  | 'challengeCleanup'
+  | 'completedAt'
+>
+type LegacyPendingPairingRecord = LegacyCompletionReplayRecord & Pick<PendingPairingRecord, 'cleanup' | 'activationCleanup'>
+
+function decodeLegacyPairingTransactionState(record: Record<string, unknown>): PersonalPairingTransactionState {
+  const safeCompletions = new Map<ReturnType<typeof parsePairingCompletionId>, CompletionReplayRecord>()
+  const unsafeCompletions: LegacyCompletionReplayRecord[] = []
+  for (const [id, encoded] of decodeEntries(record.completions, 'completions')) {
+    const completionId = parsePairingCompletionId(asPlainString(id, 'completions key'))
+    const completion = asRecord(encoded, 'completion')
+    if (Object.hasOwn(completion, 'requestDigest')) safeCompletions.set(completionId, decodeCompletion(completion))
+    else unsafeCompletions.push(decodeLegacyCompletion(completion))
+  }
+  const safePending = new Map<ReturnType<typeof parsePendingPairingId>, PendingPairingRecord>()
+  const unsafePending = new Map<ReturnType<typeof parsePendingPairingId>, LegacyPendingPairingRecord>()
+  for (const [id, encoded] of decodeEntries(record.pending, 'pending')) {
+    const pendingId = parsePendingPairingId(asPlainString(id, 'pending key'))
+    const pending = asRecord(encoded, 'pending pairing')
+    if (Object.hasOwn(pending, 'requestDigest')) safePending.set(pendingId, decodePending(pending))
+    else unsafePending.set(pendingId, decodeLegacyPending(pending))
+  }
+  const state = decodePairingTransactionFields({
+    endpointMailbox: { challenges: [], pending: [] },
+    endpointPublications: [],
+    endpointPublicationRevocations: [],
+    endpointAccessGenerations: [],
+    ...record,
+  }, safeCompletions, safePending)
+  for (const completion of unsafeCompletions) recoverLegacyChallenge(state, completion)
+  for (const [pendingId, pending] of unsafePending) {
+    recoverLegacyChallenge(state, pending)
+    if (state.settledPending.has(pendingId)) {
+      throw new TypeError('legacy pairing transaction contains duplicate pending state')
+    }
+    state.settledPending.set(pendingId, {
+      accountId: pending.accountId,
+      desktopInstallationId: pending.desktopInstallationId,
+      mobileInstallationId: pending.mobileInstallationId,
+      outcome: 'disposed',
+      cleanup: pending.cleanup,
+      ...(pending.activationCleanup === undefined ? {} : { activeCleanup: pending.activationCleanup }),
+      settledAt: pending.completedAt,
+    })
+  }
+  return state
+}
+
+function decodeEntries(value: unknown, name: string): Array<[unknown, unknown]> {
+  return asArray(value, name).map((entry) => {
+    if (!Array.isArray(entry) || entry.length !== 2) throw new TypeError(`${name} entries must be pairs`)
+    return [entry[0], entry[1]]
+  })
+}
+
+function decodeLegacyCompletion(value: Record<string, unknown>): LegacyCompletionReplayRecord {
+  return {
+    accountId: asPlainString(value.accountId, 'completion.accountId'),
+    desktopInstallationId: parseInstallationId(value.desktopInstallationId),
+    mobileInstallationId: parseInstallationId(value.mobileInstallationId),
+    challengeId: parsePairingChallengeId(value.challengeId),
+    challengeCleanup: decodeCleanup(value.challengeCleanup),
+    completedAt: asSafeInteger(value.completedAt, 'completion.completedAt'),
+  }
+}
+
+function decodeLegacyPending(value: Record<string, unknown>): LegacyPendingPairingRecord {
+  return {
+    ...decodeLegacyCompletion(value),
+    cleanup: decodeCleanup(value.cleanup),
+    ...(value.activationCleanup === undefined ? {} : { activationCleanup: decodeCleanup(value.activationCleanup) }),
+  }
+}
+
+function recoverLegacyChallenge(
+  state: PersonalPairingTransactionState,
+  completion: LegacyCompletionReplayRecord,
+): void {
+  if (state.challenges.has(completion.challengeId)) {
+    throw new TypeError('legacy pairing transaction contains active and completed challenge state')
+  }
+  const settled = state.settledChallenges.get(completion.challengeId)
+  if (settled === undefined) {
+    state.settledChallenges.set(completion.challengeId, {
+      accountId: completion.accountId,
+      desktopInstallationId: completion.desktopInstallationId,
+      outcome: 'completed',
+      cleanup: completion.challengeCleanup,
+      settledAt: completion.completedAt,
+    })
+    return
+  }
+  if (settled.accountId !== completion.accountId
+    || settled.desktopInstallationId !== completion.desktopInstallationId
+    || settled.outcome !== 'completed'
+    || !sameCleanup(settled.cleanup, completion.challengeCleanup)) {
+    throw new TypeError('legacy pairing transaction completed challenge state is inconsistent')
+  }
+}
+
+function sameCleanup(left: CleanupRecord<Uint8Array>, right: CleanupRecord<Uint8Array>): boolean {
+  const leftResource = left.resource
+  const rightResource = right.resource
+  if (leftResource === undefined || rightResource === undefined) return leftResource === rightResource
+  return leftResource.byteLength === rightResource.byteLength
+    && leftResource.every((byte, index) => byte === rightResource[index])
+}
+
+function encodeEndpointPublication(publication: EndpointPairingPublication): unknown {
+  return {
+    accountId: publication.accountId,
+    desktopInstallationId: publication.desktopInstallationId,
+    mobileInstallationId: publication.mobileInstallationId,
+    pendingPairingId: publication.pendingPairingId,
+    routeId: publication.routeId,
+    desktopCredentialDigest: encodeBytes(publication.desktopCredentialDigest),
+    credentialDigest: encodeBytes(publication.credentialDigest),
+    pairing: encodeStoredPairing(publication.pairing),
+    accessGeneration: publication.accessGeneration,
+  }
+}
+
+function decodeEndpointPublication(value: unknown): EndpointPairingPublication {
+  const record = asRecord(value, 'endpoint publication')
+  rejectUnsupportedKeys(record, [
+    'accountId', 'desktopInstallationId', 'mobileInstallationId', 'pendingPairingId',
+    'routeId', 'desktopCredentialDigest', 'credentialDigest', 'pairing', 'accessGeneration',
+  ], 'endpoint publication')
+  const publication = {
+    accountId: parsePlatformAccountId(record.accountId),
+    desktopInstallationId: parseInstallationId(record.desktopInstallationId),
+    mobileInstallationId: parseInstallationId(record.mobileInstallationId),
+    pendingPairingId: parsePendingPairingId(record.pendingPairingId),
+    routeId: parseRelayRouteId(record.routeId),
+    desktopCredentialDigest: decodeFixedBytes(record.desktopCredentialDigest, 'endpoint publication Desktop credential digest', 32),
+    credentialDigest: decodeFixedBytes(record.credentialDigest, 'endpoint publication credential digest', 32),
+    pairing: decodeStoredPairing(record.pairing),
+    accessGeneration: positiveSafeInteger(record.accessGeneration, 'endpoint publication access generation'),
+  }
+  assertDistinctCredentialDigests(
+    publication.desktopCredentialDigest, publication.credentialDigest, 'endpoint publication',
+  )
+  return publication
+}
+
+function encodeEndpointRevocation(revocation: EndpointPairingRevocation): unknown {
+  return {
+    accountId: revocation.accountId,
+    desktopInstallationId: revocation.desktopInstallationId,
+    mobileInstallationId: revocation.mobileInstallationId,
+    pendingPairingId: revocation.pendingPairingId,
+    pairingId: revocation.pairingId,
+    routeId: revocation.routeId,
+    desktopCredentialDigest: encodeBytes(revocation.desktopCredentialDigest),
+    credentialDigest: encodeBytes(revocation.credentialDigest),
+    desktopRevoked: revocation.desktopRevoked,
+    mobileRevoked: revocation.mobileRevoked,
+    authorityRevoked: revocation.authorityRevoked,
+    removeStoredPairing: revocation.removeStoredPairing,
+    pairingRemoved: revocation.pairingRemoved,
+  }
+}
+
+function decodeEndpointRevocation(value: unknown): EndpointPairingRevocation {
+  const record = asRecord(value, 'endpoint publication revocation')
+  rejectUnsupportedKeys(record, [
+    'accountId', 'desktopInstallationId', 'mobileInstallationId', 'pendingPairingId',
+    'pairingId', 'routeId', 'desktopCredentialDigest', 'credentialDigest',
+    'desktopRevoked', 'mobileRevoked', 'authorityRevoked', 'removeStoredPairing', 'pairingRemoved',
+  ], 'endpoint publication revocation')
+  if (typeof record.desktopRevoked !== 'boolean' || typeof record.mobileRevoked !== 'boolean'
+    || typeof record.authorityRevoked !== 'boolean' || typeof record.removeStoredPairing !== 'boolean'
+    || typeof record.pairingRemoved !== 'boolean') {
+    throw new TypeError('endpoint publication revocation completion flags are invalid')
+  }
+  const decoded = {
+    accountId: parsePlatformAccountId(record.accountId),
+    desktopInstallationId: parseInstallationId(record.desktopInstallationId),
+    mobileInstallationId: parseInstallationId(record.mobileInstallationId),
+    pendingPairingId: parsePendingPairingId(record.pendingPairingId),
+    pairingId: parsePersonalPairingId(record.pairingId),
+    routeId: parseRelayRouteId(record.routeId),
+    desktopCredentialDigest: decodeFixedBytes(
+      record.desktopCredentialDigest, 'endpoint publication revocation Desktop credential digest', 32,
+    ),
+    credentialDigest: decodeFixedBytes(
+      record.credentialDigest, 'endpoint publication revocation credential digest', 32,
+    ),
+    desktopRevoked: record.desktopRevoked,
+    mobileRevoked: record.mobileRevoked,
+    authorityRevoked: record.authorityRevoked,
+    removeStoredPairing: record.removeStoredPairing,
+    pairingRemoved: record.pairingRemoved,
+  }
+  assertDistinctCredentialDigests(
+    decoded.desktopCredentialDigest, decoded.credentialDigest, 'endpoint publication revocation',
+  )
+  return decoded
+}
+
+function decodeEndpointAccessGenerations(value: unknown): PersonalPairingTransactionState['endpointAccessGenerations'] {
+  const result = new Map<string, PersonalPairingTransactionState['endpointAccessGenerations'] extends Map<string, infer V> ? V : never>()
+  for (const entry of asArray(value, 'endpointAccessGenerations')) {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') {
+      throw new TypeError('endpointAccessGenerations entry is invalid')
+    }
+    const record = asRecord(entry[1], 'endpoint access generation')
+    rejectUnsupportedKeys(record, ['generation', 'phase', 'routeId'], 'endpoint access generation')
+    if (record.phase !== 'enabled' && record.phase !== 'disabled') {
+      throw new TypeError('endpoint access generation phase is invalid')
+    }
+    result.set(entry[0], {
+      generation: positiveSafeInteger(record.generation, 'endpoint access generation'),
+      phase: record.phase,
+      ...(record.routeId === undefined ? {} : { routeId: parseRelayRouteId(record.routeId) }),
+    })
+  }
+  return result
+}
+
+function positiveSafeInteger(value: unknown, name: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) throw new TypeError(`${name} must be a positive safe integer`)
+  return value as number
+}
+
+function encodeEndpointMailbox(state: EndpointOwnedPairingMailboxState): unknown {
+  return {
+    challenges: state.challenges.map(record => ({
+      ...record,
+    })),
+    pending: state.pending.map(record => ({
+      ...record,
+      message1: encodeBytes(record.message1),
+      ...(record.message2 === undefined ? {} : { message2: encodeBytes(record.message2) }),
+      ...(record.message3 === undefined ? {} : { message3: encodeBytes(record.message3) }),
+      ...(record.sealedRelayAuthority === undefined
+        ? {}
+        : { sealedRelayAuthority: encodeBytes(record.sealedRelayAuthority) }),
+    })),
+  }
+}
+
+function decodeEndpointMailbox(value: unknown): EndpointOwnedPairingMailboxState {
+  const mailbox = asRecord(value, 'endpoint mailbox')
+  return {
+    challenges: asArray(mailbox.challenges, 'endpoint mailbox challenges').map((value, index) => {
+      const record = asRecord(value, `endpoint mailbox challenge ${String(index)}`)
+      rejectUnsupportedKeys(
+        record,
+        ['challengeId', 'accountId', 'desktopInstallationId', 'expiresAt', 'completionId', 'pendingPairingId'],
+        `endpoint mailbox challenge ${String(index)}`,
+      )
+      return {
+        challengeId: parsePairingChallengeId(record.challengeId),
+        accountId: parsePlatformAccountId(record.accountId),
+        desktopInstallationId: parseInstallationId(record.desktopInstallationId),
+        expiresAt: asSafeInteger(record.expiresAt, 'endpoint mailbox challenge expiresAt'),
+        ...(record.completionId === undefined
+          ? {}
+          : { completionId: parsePairingCompletionId(record.completionId) }),
+        ...(record.pendingPairingId === undefined
+          ? {}
+          : { pendingPairingId: parsePendingPairingId(record.pendingPairingId) }),
+      }
+    }),
+    pending: asArray(mailbox.pending, 'endpoint mailbox pending').map((value, index) => {
+      const record = asRecord(value, `endpoint mailbox pending ${String(index)}`)
+      rejectUnsupportedKeys(
+        record,
+        ['pendingPairingId', 'completionId', 'challengeId', 'accountId', 'desktopInstallationId',
+          'mobileInstallationId', 'device', 'expiresAt', 'message1', 'message2', 'message3',
+          'confirmed', 'rejected', 'pairingId', 'sealedRelayAuthority', 'settledAt'],
+        `endpoint mailbox pending ${String(index)}`,
+      )
+      if (typeof record.confirmed !== 'boolean') throw new TypeError('endpoint mailbox confirmed must be boolean')
+      if (typeof record.rejected !== 'boolean') throw new TypeError('endpoint mailbox rejected must be boolean')
+      return {
+        pendingPairingId: parsePendingPairingId(record.pendingPairingId),
+        completionId: parsePairingCompletionId(record.completionId),
+        challengeId: parsePairingChallengeId(record.challengeId),
+        accountId: parsePlatformAccountId(record.accountId),
+        desktopInstallationId: parseInstallationId(record.desktopInstallationId),
+        mobileInstallationId: parseInstallationId(record.mobileInstallationId),
+        device: decodeDevice(record.device),
+        expiresAt: asSafeInteger(record.expiresAt, 'endpoint mailbox pending expiresAt'),
+        message1: decodeBytes(record.message1, 'endpoint mailbox message1'),
+        ...(record.message2 === undefined ? {} : { message2: decodeBytes(record.message2, 'endpoint mailbox message2') }),
+        ...(record.message3 === undefined ? {} : { message3: decodeBytes(record.message3, 'endpoint mailbox message3') }),
+        confirmed: record.confirmed,
+        rejected: record.rejected,
+        ...(record.pairingId === undefined ? {} : { pairingId: parsePersonalPairingId(record.pairingId) }),
+        ...(record.sealedRelayAuthority === undefined
+          ? {}
+          : { sealedRelayAuthority: decodeBytes(record.sealedRelayAuthority, 'endpoint mailbox sealed authority') }),
+        ...(record.settledAt === undefined
+          ? {}
+          : { settledAt: asSafeInteger(record.settledAt, 'endpoint mailbox pending settledAt') }),
+      }
+    }),
   }
 }
 
@@ -157,6 +507,7 @@ function encodeCompletion(record: CompletionReplayRecord): unknown {
     desktopInstallationId: record.desktopInstallationId,
     mobileInstallationId: record.mobileInstallationId,
     challengeId: record.challengeId,
+    requestDigest: encodeBytes(record.requestDigest),
     challengeCleanup: encodeCleanup(record.challengeCleanup),
     view: encodeCompletionView(record.view),
     completedAt: record.completedAt,
@@ -170,6 +521,7 @@ function decodeCompletion(value: unknown): CompletionReplayRecord {
     desktopInstallationId: parseInstallationId(record.desktopInstallationId),
     mobileInstallationId: parseInstallationId(record.mobileInstallationId),
     challengeId: parsePairingChallengeId(record.challengeId),
+    requestDigest: decodeDigest(record.requestDigest, 'completion.requestDigest'),
     challengeCleanup: decodeCleanup(record.challengeCleanup),
     view: decodeCompletionView(record.view),
     completedAt: asSafeInteger(record.completedAt, 'completion.completedAt'),
@@ -181,6 +533,8 @@ function encodePending(record: PendingPairingRecord): unknown {
     ...encodeCompletion(record) as Record<string, unknown>,
     cleanup: encodeCleanup(record.cleanup),
     ...(record.activationCleanup === undefined ? {} : { activationCleanup: encodeCleanup(record.activationCleanup) }),
+    ...(record.awaitingFinish === true ? { awaitingFinish: true } : {}),
+    ...(record.finishDigest === undefined ? {} : { finishDigest: encodeBytes(record.finishDigest) }),
   }
 }
 
@@ -190,6 +544,8 @@ function decodePending(value: unknown): PendingPairingRecord {
     ...decodeCompletion(record),
     cleanup: decodeCleanup(record.cleanup),
     ...(record.activationCleanup === undefined ? {} : { activationCleanup: decodeCleanup(record.activationCleanup) }),
+    ...(record.awaitingFinish === true ? { awaitingFinish: true } : {}),
+    ...(record.finishDigest === undefined ? {} : { finishDigest: decodeBytes(record.finishDigest, 'finishDigest') }),
   }
 }
 
@@ -228,21 +584,63 @@ function encodeStoredPairing(record: StoredPersonalPairing): unknown {
   return {
     ...encodePairingView(record) as Record<string, unknown>,
     desktopInstallationId: record.desktopInstallationId,
-    keyReference: record.keyReference,
-    cleanup: encodeCleanup(record.cleanup),
-    ...(record.mobileGrant === undefined ? {} : { mobileGrant: encodeGrant(record.mobileGrant) }),
+    ...(record.keyReference === undefined ? {} : { keyReference: record.keyReference }),
+    ...(record.cleanup === undefined ? {} : { cleanup: encodeCleanup(record.cleanup) }),
+    ...(record.endpointPendingPairingId === undefined ? {} : { endpointPendingPairingId: record.endpointPendingPairingId }),
+    ...(record.endpointRouteId === undefined ? {} : { endpointRouteId: record.endpointRouteId }),
+    ...(record.endpointCredentialDigest === undefined ? {} : { endpointCredentialDigest: encodeBytes(record.endpointCredentialDigest) }),
+    ...(record.endpointDesktopCredentialDigest === undefined ? {} : {
+      endpointDesktopCredentialDigest: encodeBytes(record.endpointDesktopCredentialDigest),
+    }),
+    ...(record.endpointRelayRevision === undefined ? {} : { endpointRelayRevision: record.endpointRelayRevision }),
   }
 }
 
 function decodeStoredPairing(value: unknown): StoredPersonalPairing {
   const record = asRecord(value, 'stored pairing')
-  return {
+  rejectUnsupportedKeys(record, [
+    'id', 'devicePrincipal', 'device', 'pairedAt', 'lastAccessAt', 'online',
+    'desktopInstallationId', 'keyReference', 'cleanup', 'endpointPendingPairingId',
+    'endpointRouteId', 'endpointCredentialDigest', 'endpointDesktopCredentialDigest',
+    'endpointRelayRevision',
+  ], 'stored pairing')
+  const pairing: StoredPersonalPairing = {
     ...decodePairingView(record),
     desktopInstallationId: parseInstallationId(record.desktopInstallationId),
-    keyReference: parsePersonalPairingKeyReference(record.keyReference),
-    cleanup: decodeCleanup(record.cleanup),
-    ...(record.mobileGrant === undefined ? {} : { mobileGrant: decodeGrant(record.mobileGrant) }),
+    ...(record.keyReference === undefined ? {} : { keyReference: parsePersonalPairingKeyReference(record.keyReference) }),
+    ...(record.cleanup === undefined ? {} : { cleanup: decodeCleanup(record.cleanup) }),
+    ...(record.endpointPendingPairingId === undefined
+      ? {}
+      : { endpointPendingPairingId: parsePendingPairingId(record.endpointPendingPairingId) }),
+    ...(record.endpointRouteId === undefined ? {} : { endpointRouteId: parseRelayRouteId(record.endpointRouteId) }),
+    ...(record.endpointCredentialDigest === undefined
+      ? {}
+      : { endpointCredentialDigest: decodeFixedBytes(
+        record.endpointCredentialDigest, 'stored pairing endpoint credential digest', 32,
+      ) }),
+    ...(record.endpointDesktopCredentialDigest === undefined
+      ? {}
+      : { endpointDesktopCredentialDigest: decodeFixedBytes(
+        record.endpointDesktopCredentialDigest, 'stored pairing endpoint Desktop credential digest', 32,
+      ) }),
+    ...(record.endpointRelayRevision === undefined
+      ? {}
+      : { endpointRelayRevision: positiveSafeInteger(
+        record.endpointRelayRevision, 'stored pairing endpoint Relay revision',
+      ) }),
   }
+  const hasEndpointConfirmation = pairing.endpointCredentialDigest !== undefined
+    || pairing.endpointDesktopCredentialDigest !== undefined || pairing.endpointRelayRevision !== undefined
+  if (hasEndpointConfirmation && (pairing.endpointCredentialDigest === undefined
+    || pairing.endpointDesktopCredentialDigest === undefined || pairing.endpointRelayRevision === undefined)) {
+    throw new TypeError('stored pairing endpoint confirmation is incomplete')
+  }
+  if (pairing.endpointCredentialDigest !== undefined && pairing.endpointDesktopCredentialDigest !== undefined) {
+    assertDistinctCredentialDigests(
+      pairing.endpointDesktopCredentialDigest, pairing.endpointCredentialDigest, 'stored pairing endpoint',
+    )
+  }
+  return pairing
 }
 
 function encodeOrphan(record: OrphanPendingCleanupRecord): unknown {
@@ -270,6 +668,9 @@ function encodeInvitation(invitation: ChallengeRecord['invitation']): unknown {
     challengeId: invitation.challengeId,
     invitationSecret: encodeBytes(invitation.invitationSecret),
     desktopFingerprint: invitation.desktopFingerprint,
+    ...(invitation.desktopStaticPublicKey === undefined
+      ? {}
+      : { desktopStaticPublicKey: encodeBytes(invitation.desktopStaticPublicKey) }),
     rendezvousId: invitation.rendezvousId,
     expiresAt: invitation.expiresAt,
     protocolMajor: invitation.protocolMajor,
@@ -286,6 +687,9 @@ function decodeInvitation(value: unknown): ChallengeRecord['invitation'] {
     challengeId: parsePairingChallengeId(record.challengeId),
     invitationSecret: decodeBytes(record.invitationSecret, 'invitationSecret'),
     desktopFingerprint: asPlainString(record.desktopFingerprint, 'desktopFingerprint'),
+    ...(record.desktopStaticPublicKey === undefined
+      ? {}
+      : { desktopStaticPublicKey: decodeFixedBytes(record.desktopStaticPublicKey, 'desktopStaticPublicKey', 32) }),
     rendezvousId: parsePairingRendezvousId(record.rendezvousId),
     expiresAt: asSafeInteger(record.expiresAt, 'invitation.expiresAt'),
     protocolMajor: PERSONAL_PAIRING_PROTOCOL_MAJOR,
@@ -358,28 +762,6 @@ function decodeDevice(value: unknown): CompletionReplayRecord['view']['device'] 
   }
 }
 
-function encodeGrant(grant: RelayCredentialGrant): unknown {
-  return {
-    routeId: grant.routeId,
-    endpoint: grant.endpoint,
-    credential: grant.credential,
-    revision: grant.revision,
-  }
-}
-
-function decodeGrant(value: unknown): RelayCredentialGrant {
-  const record = asRecord(value, 'relay grant')
-  if (record.endpoint !== 'mobile' && record.endpoint !== 'desktop') {
-    throw new TypeError('relay grant endpoint is invalid')
-  }
-  return {
-    routeId: parseRelayRouteId(record.routeId),
-    endpoint: record.endpoint,
-    credential: parseRelayCredential(record.credential),
-    revision: asSafeInteger(record.revision, 'relay grant revision'),
-  }
-}
-
 function decodeBlob(value: unknown): { accountId: string; bytes: number } {
   const record = asRecord(value, 'blob reservation')
   return {
@@ -418,6 +800,22 @@ function decodeBytes(value: unknown, name: string): Uint8Array {
   return Uint8Array.from(Buffer.from(encoded, 'base64url'))
 }
 
+function decodeDigest(value: unknown, name: string): Uint8Array {
+  return decodeFixedBytes(value, name, 32)
+}
+
+function decodeFixedBytes(value: unknown, name: string, length: number): Uint8Array {
+  const bytes = decodeBytes(value, name)
+  if (bytes.byteLength !== length) throw new TypeError(`${name} must contain ${String(length)} bytes`)
+  return bytes
+}
+
+function assertDistinctCredentialDigests(left: Uint8Array, right: Uint8Array, name: string): void {
+  if (left.every((byte, index) => byte === right[index])) {
+    throw new TypeError(`${name} credential digests must be distinct`)
+  }
+}
+
 function decodeMap<K, V>(
   value: unknown,
   name: string,
@@ -443,6 +841,13 @@ function asRecord(value: unknown, name: string): Record<string, unknown> {
     throw new TypeError(`${name} must be an object`)
   }
   return value as Record<string, unknown>
+}
+
+function rejectUnsupportedKeys(record: Record<string, unknown>, keys: readonly string[], name: string): void {
+  const supported = new Set(keys)
+  if (Object.keys(record).some(key => !supported.has(key))) {
+    throw new TypeError(`${name} contains unsupported fields`)
+  }
 }
 
 function asArray(value: unknown, name: string): unknown[] {

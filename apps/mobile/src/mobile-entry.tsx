@@ -64,6 +64,7 @@ function MobileEntry({
       installation={composition.installation}
       {...(composition.pairing === undefined ? {} : { pairing: composition.pairing })}
       companionSurface={{
+        ...(projection.desktopName === undefined ? {} : { desktopName: projection.desktopName }),
         sessions: projection.sessions,
         streaming: projection.streaming,
         attachment: projection.attachment,

@@ -97,6 +97,18 @@ describe('AttachmentStore.saveImages', () => {
   })
 })
 
+describe('AttachmentStore generic-file composition', () => {
+  it('fails loudly when a specialized provider omits generic file storage', async () => {
+    const store = new RecordingStore(new Context())
+    await expect(store.saveFile({ data: Uint8Array.of(1), name: 'a.bin', mediaType: 'application/octet-stream' }))
+      .rejects.toMatchObject({ code: 'ATTACHMENT_WRITE_FAILED' })
+    await expect(store.readFile({
+      attachmentId: AttachmentId(`sha256:${'0'.repeat(64)}`),
+      mediaType: 'application/octet-stream', bytes: 1, sha256: '0'.repeat(64), name: 'a.bin',
+    })).rejects.toMatchObject({ code: 'ATTACHMENT_READ_FAILED' })
+  })
+})
+
 describe('isImageAdmissionError', () => {
   it('separates caller-correctable image admission failures from storage faults', () => {
     expect(isImageAdmissionError(new AttachmentError('bad bytes', 'INVALID_IMAGE'))).toBe(true)

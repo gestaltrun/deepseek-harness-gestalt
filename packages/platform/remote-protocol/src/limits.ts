@@ -32,4 +32,6 @@ export const REMOTE_PROTOCOL_LIMITS = {
   attachmentCapabilityLifetimeMs: 15 * 60 * 1000,
   /** Maximum UTF-8 bytes in one Companion attachment file name. */
   attachmentFileNameBytes: 255,
+  /** Maximum UTF-8 bytes in one Companion attachment media type. */
+  attachmentMediaTypeBytes: 127,
 } as const

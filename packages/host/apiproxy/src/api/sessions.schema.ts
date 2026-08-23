@@ -16,7 +16,7 @@ import type {
   SessionToolEligibility,
 } from './sessions.ts'
 import type { ToolEventView } from './events.ts'
-import type { AttachmentIdType, ImageAttachmentLimits, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { AttachmentIdType, FileAttachmentRef, ImageAttachmentLimits, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { WorkspaceId } from './workspace.ts'
 import {
   SESSION_SEARCH_RESULT_LIMIT,
@@ -345,6 +345,29 @@ export const sessionAttachmentValueSchema = z.object({
   attachment: imageAttachmentRefSchema,
   data: z.string(),
 }) satisfies z.ZodType<Wire<ResponseValue<'session.attachment'>>>
+
+const fileAttachmentRefSchema = z.object({
+  attachmentId: attachmentIdSchema,
+  mediaType: z.string().min(3).max(127),
+  bytes: z.number().int().positive().max(100 * 1024 * 1024),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  name: z.string().min(1).max(255),
+}) as unknown as z.ZodType<FileAttachmentRef>
+
+/** session.admitAttachment request payload. */
+export const sessionAdmitAttachmentRequestSchema = z.object({
+  sessionId: sessionIdSchema,
+  operationId: z.string().min(1).max(128),
+  mediaType: z.string().min(3).max(127),
+  name: z.string().min(1).max(255),
+  data: z.string().min(4).max(Math.ceil(100 * 1024 * 1024 / 3) * 4)
+    .regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u),
+}) satisfies z.ZodType<Wire<RequestPayload<'session.admitAttachment'>>>
+
+/** session.admitAttachment response value. */
+export const sessionAdmitAttachmentValueSchema = z.object({
+  attachment: fileAttachmentRefSchema,
+}) satisfies z.ZodType<Wire<ResponseValue<'session.admitAttachment'>>>
 
 /** session.updateQueue request payload. */
 export const sessionUpdateQueueRequestSchema = z.object({

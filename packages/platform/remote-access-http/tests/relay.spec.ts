@@ -10,21 +10,23 @@ import {
 } from '@deepseek-ai/dsh-remote-access'
 import {
   decodeRelayMessage,
+  deriveRelayCredentialPublicKey,
   encodeRelayMessage,
+  generateRelayCredential,
   parseRelayAttachmentId,
-  parseRelayCredential,
   parseRelayRouteId,
-  type RelayAttachMessage,
   type RelayCiphertextMessage,
   type RelayHeartbeatMessage,
   type RelayMessage,
   RemoteProtocolError,
+  signRelayAttachmentChallenge,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket, { type WebSocketServer } from 'ws'
 import { apply, RelayWebSocketConsumer } from '../src/relay.ts'
 
 const cleanup: Array<() => Promise<void>> = []
+const TEST_CREDENTIAL = await generateRelayCredential()
 afterEach(async () => {
   const results = await Promise.allSettled(cleanup.splice(0).reverse().map(close => close()))
   const errors = results.filter(result => result.status === 'rejected')
@@ -32,16 +34,35 @@ afterEach(async () => {
 })
 
 describe('RelayWebSocketConsumer', () => {
+  it('bounds stalled pre-proof challenges and releases capacity on every socket close', async () => {
+    const relay = relayFixture(attachmentFixture())
+    const endpoint = await start(relay, 1_000, 1)
+    const stalled = await connect(endpoint.url)
+    await vi.waitFor(() => { expect(Reflect.get(endpoint.consumer, 'pendingChallenges')).toBe(1) })
+    const shed = await connect(endpoint.url)
+    const [code] = await once(shed, 'close') as [number]
+    expect(code).toBe(1013)
+    expect(relay.attach).not.toHaveBeenCalled()
+    stalled.close()
+    await once(stalled, 'close')
+    await vi.waitFor(() => { expect(Reflect.get(endpoint.consumer, 'pendingChallenges')).toBe(0) })
+    const admitted = await connect(endpoint.url)
+    const { outcome } = await sendAttach(admitted)
+    await expect(outcome).resolves.toMatchObject({ type: 'ready' })
+    admitted.close()
+    await once(admitted, 'close')
+  })
+
   it('attaches first, exchanges ciphertext and heartbeat, and cleans up on close', async () => {
     const attachment = attachmentFixture()
     const relay = relayFixture(attachment)
     const endpoint = await start(relay)
     const socket = await connect(endpoint.url)
-    const ready = nextMessage(socket)
-    socket.send(encodeRelayMessage(attach()))
+    const { outcome: ready } = await sendAttach(socket)
     await vi.waitFor(() => { expect(relay.attach).toHaveBeenCalledOnce() })
     expect(await ready).toEqual({
-      type: 'ready', transportVersion: 1, attachmentId: parseRelayAttachmentId('mobile-one'),
+      type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+      attachmentId: parseRelayAttachmentId('mobile-one'), peers: [],
     })
 
     const ciphertext = ciphertextMessage()
@@ -69,24 +90,43 @@ describe('RelayWebSocketConsumer', () => {
   it.each([
     { name: 'ciphertext before attach', first: ciphertextMessage(), code: 'RELAY_ATTACHMENT_REJECTED' },
     { name: 'heartbeat before attach', first: heartbeatMessage(), code: 'RELAY_ATTACHMENT_REJECTED' },
-    { name: 'attach after attach', first: attach(), second: attach(), code: 'RELAY_ATTACHMENT_REJECTED' },
-  ])('rejects $name', async ({ first, second, code }) => {
+  ])('rejects $name', async ({ first, code }) => {
     const relay = relayFixture(attachmentFixture())
     const endpoint = await start(relay)
     const socket = await connect(endpoint.url)
     const error = nextMessage(socket)
     socket.send(encodeRelayMessage(first))
-    if (second !== undefined) {
-      await vi.waitFor(() => { expect(relay.attach).toHaveBeenCalledOnce() })
-      expect(await error).toMatchObject({ type: 'ready' })
-      const secondError = nextMessage(socket)
-      socket.send(encodeRelayMessage(second))
-      expect(await secondError).toMatchObject({ type: 'error', code })
-    } else {
-      socket.send(encodeRelayMessage(first))
-      expect(await error).toMatchObject({ type: 'error', code })
-    }
+    expect(await error).toMatchObject({ type: 'error', code })
     await once(socket, 'close')
+  })
+
+  it('rejects a second attachment proof after attachment', async () => {
+    const relay = relayFixture(attachmentFixture())
+    const endpoint = await start(relay)
+    const socket = await connect(endpoint.url)
+    const { outcome: ready } = await sendAttach(socket)
+    expect(await ready).toMatchObject({ type: 'ready' })
+    const error = nextMessage(socket)
+    await sendAttachRequest(socket)
+    expect(await error).toMatchObject({ type: 'error', code: 'RELAY_ATTACHMENT_REJECTED' })
+    await once(socket, 'close')
+  })
+
+  it('rejects an attachment proof replayed on another physical socket', async () => {
+    const relay = relayFixture(attachmentFixture())
+    const endpoint = await start(relay)
+    const first = await connect(endpoint.url)
+    const attached = await sendAttach(first)
+    expect(await attached.outcome).toMatchObject({ type: 'ready' })
+    const replay = await connect(endpoint.url)
+    const replayChallenge = nextMessage(replay)
+    await sendAttachRequest(replay)
+    await replayChallenge
+    const error = nextMessage(replay)
+    replay.send(encodeRelayMessage(attached.proof))
+    expect(await error).toMatchObject({ type: 'error', code: 'RELAY_ATTACHMENT_REJECTED' })
+    await once(replay, 'close')
+    first.close()
   })
 
   it.each([
@@ -110,8 +150,7 @@ describe('RelayWebSocketConsumer', () => {
     relay.attach.mockRejectedValueOnce(failure)
     const endpoint = await start(relay)
     const socket = await connect(endpoint.url)
-    const error = nextMessage(socket)
-    socket.send(encodeRelayMessage(attach()))
+    const { outcome: error } = await sendAttach(socket)
     expect(await error).toMatchObject({ type: 'error', ...expected })
     await once(socket, 'close')
   })
@@ -125,13 +164,13 @@ describe('RelayWebSocketConsumer', () => {
       'no shared Relay Transport version',
     ))
     const incompatible = await connect(endpoint.url)
-    const incompatibleError = nextMessage(incompatible)
-    incompatible.send(encodeRelayMessage(attach()))
+    const { outcome: incompatibleError } = await sendAttach(incompatible)
     expect(await incompatibleError).toMatchObject({ type: 'error', code: 'RELAY_TRANSPORT_INCOMPATIBLE' })
     await once(incompatible, 'close')
 
     const malformed = await connect(endpoint.url)
     const malformedError = nextMessage(malformed)
+    malformed.send('{')
     malformed.send('{')
     expect(await malformedError).toMatchObject({ type: 'error', code: 'RELAY_ATTACHMENT_REJECTED' })
     await once(malformed, 'close')
@@ -146,8 +185,7 @@ describe('RelayWebSocketConsumer', () => {
     const relay = relayFixture(attachment)
     const endpoint = await start(relay)
     const socket = await connect(endpoint.url)
-    const ready = nextMessage(socket)
-    socket.send(encodeRelayMessage(attach()))
+    const { outcome: ready } = await sendAttach(socket)
     await vi.waitFor(() => { expect(relay.attach).toHaveBeenCalledOnce() })
     expect(await ready).toMatchObject({ type: 'ready' })
     const error = nextMessage(socket)
@@ -170,7 +208,7 @@ describe('RelayWebSocketConsumer', () => {
     })
     const endpoint = await start(relay, 10)
     const socket = await connect(endpoint.url)
-    socket.send(encodeRelayMessage(attach()))
+    await sendAttach(socket)
     await once(socket, 'close')
     expect(attachSignal?.aborted).toBe(true)
     await endpoint.consumer.close()
@@ -201,7 +239,7 @@ describe('RelayWebSocketConsumer', () => {
     })
     const endpoint = await start(relay)
     const socket = await connect(endpoint.url)
-    socket.send(encodeRelayMessage(attach()))
+    await sendAttach(socket)
     await vi.waitFor(() => { expect(input).toBeDefined() })
     const send = vi.spyOn(serverSocket(endpoint.consumer), 'send').mockImplementationOnce(
       (_data, _options, callback) => { if (typeof callback === 'function') callback(new Error('send failed')) },
@@ -224,7 +262,7 @@ describe('RelayWebSocketConsumer', () => {
     const relay = relayFixture(attachment)
     const endpoint = await start(relay)
     const socket = await connect(endpoint.url)
-    socket.send(encodeRelayMessage(attach()))
+    await sendAttach(socket)
     await vi.waitFor(() => { expect(relay.attach).toHaveBeenCalledOnce() })
     socket.close()
     await once(socket, 'close')
@@ -240,7 +278,7 @@ describe('RelayWebSocketConsumer', () => {
     const relay = relayFixture(attachment)
     const endpoint = await start(relay)
     const socket = await connect(endpoint.url)
-    socket.send(encodeRelayMessage(attach()))
+    await sendAttach(socket)
     await vi.waitFor(() => { expect(relay.attach).toHaveBeenCalledOnce() })
     socket.close()
     await once(socket, 'close')
@@ -251,10 +289,12 @@ describe('RelayWebSocketConsumer', () => {
   })
 
   it('validates direct and Cordis plugin configuration and registers exact ownership', async () => {
-    expect(() => new RelayWebSocketConsumer(context(relayFixture(attachmentFixture())), 0)).toThrow('positive integer')
-    expect(() => new RelayWebSocketConsumer(context(relayFixture(attachmentFixture())), 1.5)).toThrow('positive integer')
+    expect(() => new RelayWebSocketConsumer(context(relayFixture(attachmentFixture())), 0, 1)).toThrow('positive integer')
+    expect(() => new RelayWebSocketConsumer(context(relayFixture(attachmentFixture())), 1.5, 1)).toThrow('positive integer')
+    expect(() => new RelayWebSocketConsumer(context(relayFixture(attachmentFixture())), 1, 0)).toThrow('positive integer')
     for (const path of ['', '/', 'relay', '/relay/', '/relay?x', '/relay#x']) {
-      expect(() =>{  apply({} as Context, { path, attachTimeoutMs: 1 }) }).toThrow('absolute non-root pathname')
+      expect(() =>{  apply({} as Context, { path, attachTimeoutMs: 1, maxPendingChallenges: 1 }) })
+        .toThrow('absolute non-root pathname')
     }
 
     const handleUpgrade = vi.spyOn(RelayWebSocketConsumer.prototype, 'handleUpgrade').mockImplementation(() => {})
@@ -266,7 +306,7 @@ describe('RelayWebSocketConsumer', () => {
       webServer: { registerUpgrade },
       effect: vi.fn((effect: () => () => void | Promise<void>) => { effects.push(effect) }),
     } as unknown as Context
-    apply(ctx, { path: '/v1/remote-access/relay', attachTimeoutMs: 10 })
+    apply(ctx, { path: '/v1/remote-access/relay', attachTimeoutMs: 10, maxPendingChallenges: 2 })
     expect(effects).toHaveLength(2)
     expect(effects[0]?.()).toBe(disposeUpgrade)
     expect(registerUpgrade).toHaveBeenCalledWith(expect.objectContaining({ path: '/v1/remote-access/relay' }))
@@ -283,7 +323,7 @@ describe('RelayWebSocketConsumer', () => {
   })
 
   it('surfaces a WebSocket server shutdown failure', async () => {
-    const consumer = new RelayWebSocketConsumer(context(relayFixture(attachmentFixture())), 10)
+    const consumer = new RelayWebSocketConsumer(context(relayFixture(attachmentFixture())), 10, 2)
     const server = internalServer(consumer)
     vi.spyOn(server, 'close').mockImplementationOnce((callback) => {
       callback?.(new Error('server close failed'))
@@ -298,7 +338,10 @@ function relayFixture(attachment: RemoteRelayAttachment) {
     rotateCredential: vi.fn(),
     revokeRoute: vi.fn(),
     attach: vi.fn<RemoteRelayService['attach']>(async (input) => {
-      await input.announce?.()
+      await input.announce?.({
+        type: 'ready', transportVersion: 1, routeId: input.message.routeId,
+        attachmentId: input.message.attachmentId, peers: [],
+      })
       return attachment
     }),
   }
@@ -325,12 +368,12 @@ function serverSocket(consumer: RelayWebSocketConsumer): WebSocket {
   return socket
 }
 
-async function start(relay: ReturnType<typeof relayFixture>, timeout = 1_000): Promise<{
+async function start(relay: ReturnType<typeof relayFixture>, timeout = 1_000, maxPendingChallenges = 16): Promise<{
   url: string
   consumer: RelayWebSocketConsumer
   closed: boolean
 }> {
-  const consumer = new RelayWebSocketConsumer(context(relay), timeout)
+  const consumer = new RelayWebSocketConsumer(context(relay), timeout, maxPendingChallenges)
   const server = createServer()
   server.on('upgrade', (req, socket, head) => { consumer.handleUpgrade(req, socket, head) })
   server.listen(0, '127.0.0.1')
@@ -371,15 +414,28 @@ async function closeServer(server: Server): Promise<void> {
   })
 }
 
-function attach(): RelayAttachMessage {
-  return {
-    type: 'attach',
-    transportVersion: 1,
-    routeId: parseRelayRouteId('route-one'),
-    attachmentId: parseRelayAttachmentId('mobile-one'),
-    endpoint: 'mobile',
-    credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+async function sendAttach(socket: WebSocket): Promise<{
+  outcome: Promise<RelayMessage>
+  proof: Awaited<ReturnType<typeof signRelayAttachmentChallenge>>
+}> {
+  const challengeMessage = nextMessage(socket)
+  await sendAttachRequest(socket)
+  const challenge = await challengeMessage
+  if (challenge.type !== 'attach-challenge-response') throw new Error('expected Relay attach challenge')
+  const outcome = nextMessage(socket)
+  const proof = await signRelayAttachmentChallenge(TEST_CREDENTIAL, challenge)
+  socket.send(encodeRelayMessage(proof))
+  return { outcome, proof }
+}
+
+async function sendAttachRequest(socket: WebSocket): Promise<void> {
+  const request = {
+    type: 'attach-challenge' as const, transportVersion: 1 as const,
+    routeId: parseRelayRouteId('route-one'), attachmentId: parseRelayAttachmentId('mobile-one'),
+    endpoint: 'mobile' as const,
+    credentialPublicKey: await deriveRelayCredentialPublicKey(TEST_CREDENTIAL),
   }
+  socket.send(encodeRelayMessage(request))
 }
 
 function ciphertextMessage(): RelayCiphertextMessage {

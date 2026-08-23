@@ -103,7 +103,8 @@ describe('Host HTTP failure Companion projection', () => {
     const resync = surface.bindValidatedDesktopResync()
     if (resync === undefined) throw new Error('expected Desktop resync receiver')
     resync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Paired Desktop', sessions: [], streaming: false,
     })
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected Companion result receiver')
@@ -199,6 +200,7 @@ function installationWithCompletedLogin(): PlatformAccountInstallation {
     environment,
     installationId: parseInstallationId('mobile-host-400'),
     installationKind: 'mobile',
+    presentation: { name: 'Host 400 test phone', platform: 'ios' },
     transport,
     store: new MemoryInstallationAccountStore(),
     systemBrowser: { open: vi.fn() },

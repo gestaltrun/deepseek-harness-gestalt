@@ -3,8 +3,8 @@ import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   parseInstallationId,
-  selectPlatformEnvironment,
-  validatePlatformEnvironmentPair,
+  parseMobileInstallationPresentation,
+  loadOperatedPlatformEnvironment,
   type AccountSessionView,
   type LoginAttemptView,
 } from '@deepseek-ai/dsh-platform-account'
@@ -23,20 +23,12 @@ import { CompanionForegroundRuntime, installCompanionRuntime } from '../src/comp
 import { CompanionAttachmentDeliveryUncertainError } from '../src/companion-attachment.ts'
 import { mountMobileEntry } from '../src/mobile-entry.tsx'
 
-const environment = selectPlatformEnvironment(validatePlatformEnvironmentPair({
-  development: {
-    environment: 'development', origin: 'https://dev.example',
-    callbackUrl: 'https://dev.example/v1/account/oauth/github/callback',
-    githubClientId: 'mobile-development', credentialReference: 'credentials://development',
-    databaseIdentity: 'database-development', identityNamespace: 'namespace-development',
-  },
-  production: {
-    environment: 'production', origin: 'https://prod.example',
-    callbackUrl: 'https://prod.example/v1/account/oauth/github/callback',
-    githubClientId: 'mobile-production', credentialReference: 'credentials://production',
-    databaseIdentity: 'database-production', identityNamespace: 'namespace-production',
-  },
-}), 'development')
+const environment = loadOperatedPlatformEnvironment({
+  environment: 'production', origin: 'https://platform.fixture.example',
+  callbackUrl: 'https://platform.fixture.example/v1/account/oauth/github/callback',
+  githubClientId: 'mobile-fixture', credentialReference: 'credentials://fixture',
+  databaseIdentity: 'database-fixture', identityNamespace: 'namespace-fixture',
+})
 
 const attempt: LoginAttemptView = {
   id: 'attempt-mobile-snapshot' as never,
@@ -51,8 +43,8 @@ const accountSession: AccountSessionView = {
   account: {
     id: 'account-mobile-snapshot' as never,
     githubId: 583231,
-    githubLogin: 'octocat',
-    avatarUrl: 'https://avatars.example/octocat',
+    githubLogin: 'fixture-account',
+    avatarUrl: 'https://avatars.example/fixture-account',
   },
   accessToken: 'access-mobile-snapshot',
   refreshToken: 'refresh-mobile-snapshot',
@@ -83,7 +75,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     const login = screen.getByRole('button', { name: '使用 GitHub 继续' })
     await waitFor(() => { expect(login.hasAttribute('disabled')).toBe(false) })
     fireEvent.click(login)
-    await screen.findByText('@octocat')
+    await screen.findByText('@fixture-account')
 
     runtime.configure({
       routeId: parseRelayRouteId('route-mobile-snapshot'),
@@ -98,6 +90,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       type: 'desktop-resync',
       version: 1,
       authenticated: true,
+      desktopName: 'Studio Mac',
       sessions: [{
         id: 'guarded-session',
         title: 'Guarded Session',
@@ -153,7 +146,8 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     runtime.forgetConnection()
     runtime.markConnectionOpen()
     firstResync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Stale Desktop', sessions: [], streaming: false,
     })
 
     await waitFor(() => {
@@ -198,6 +192,7 @@ function installationWithCompletedLogin(): PlatformAccountInstallation {
     environment,
     installationId: parseInstallationId('mobile-snapshot'),
     installationKind: 'mobile',
+    presentation: parseMobileInstallationPresentation({ name: 'Snapshot phone', platform: 'ios' }),
     transport,
     store: new MemoryInstallationAccountStore(),
     systemBrowser: { open: vi.fn() },

@@ -12,6 +12,8 @@ Mobile Companion has production-capable Account, pairing, Relay, attachment, Ses
 
 Product Desktop and Mobile compose only the operated HTTPS Platform identity, real GitHub Account flow, durable Platform providers, and the reviewed per-pairing encrypted channel. Test identities, memory providers, test certificates, keyless handshakes, fixed Relay attachment ids, and proof-only synchronization frames remain available only to bounded tests whose names and assertions cannot be cited as product acceptance.
 
+The operated identity, durable resource composition, and product-entry import gate are implemented by [Bind Companion products to one operated Platform identity](../../implemented/architecture/2026-08-22-operated-companion-platform-identity.md).
+
 Each Personal Pairing owns its Mobile and Desktop attachment identities, route credentials, application keys, and authenticated synchronization. Snow completes XKpsk3 pairing and IK reconnect with fresh ephemeral keys. A versioned Encrypted Companion message carries synchronization; Relay authority is sealed to the pairing-derived channel and never appears as application or Platform-visible plaintext.
 
 Mobile presents the authenticated Installation name and platform, scans the complete Pairing Challenge through browser camera APIs, and retains the full-link fallback. Two phones remain independently paired and revocable without sharing a key, attachment id, device record, or online state.
@@ -23,6 +25,8 @@ The Companion Surface is a phone-sized composition of exported DSH Web component
 Mobile Companion has no push capability. APNs and FCM adapters, tokens, payloads, persistence, configuration, quotas, metrics, secrets, native dependencies, and acceptance requirements are deleted by the [foreground-only synchronization decision](../../implemented/simplification/2026-08-22-foreground-only-companion-synchronization.md). Backgrounding pauses the Relay connection; opening or foregrounding the application reconnects and completes Desktop-authoritative synchronization before enabling a mutation. Deep links may remain only when they carry no stale interaction authority and do not depend on push delivery.
 
 Product acceptance runs the shipped Mobile entry, the operated non-sticky two-instance Platform, and a real Paired Desktop. `apps/mobile/prototype-companion`, Vite ports 5173/5174, fake identities, in-memory stores, test certificates, and test-only providers are prohibited as acceptance origins.
+
+Repository evidence boots two independent Loader-owned Platform/WebServer/HTTP compositions and reaches both published WSS upgrade handlers through a non-sticky endpoint. It completes two endpoint-owned XKpsk3 pairings, sealed authority delivery, Snow IK foreground synchronization, instance failover, and independent revocation. Its memory stores and localhost certificate prove composition and protocol behavior only; they do not replace operated infrastructure, native WebView, or trust-chain evidence.
 
 ## Alternatives considered
 
@@ -46,4 +50,4 @@ Product acceptance runs the shipped Mobile entry, the operated non-sticky two-in
 
 ## Risks
 
-Removing push means the product cannot alert a backgrounded phone; the user must open or foreground Mobile Companion before it can learn current Desktop state. Shared Web components may require deeper public interfaces so phone layout remains independent without exposing Desktop authority. The real assembled test remains blocked until the operated Platform and review-approved channel are available, and production deployment or mobile distribution still requires separate authorization.
+Removing push means the product cannot alert a backgrounded phone; the user must open or foreground Mobile Companion before it can learn current Desktop state. Shared Web components may require deeper public interfaces so phone layout remains independent without exposing Desktop authority. Operated Platform, physical WKWebView/Android WebView, independent security review, production deployment, and mobile distribution remain separate evidence or authorization requirements.

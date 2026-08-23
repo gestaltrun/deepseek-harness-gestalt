@@ -60,6 +60,10 @@ function scriptedApi(overrides: {
         attachment: { attachmentId: 'a' as never, mediaType: 'image/png', bytes: 1, width: 1, height: 1 },
         data: 'AA==',
       }),
+      admitAttachment: r => ok(r, { attachment: {
+        attachmentId: 'sha256:file' as never, mediaType: r.payload.mediaType,
+        bytes: 1, sha256: 'a'.repeat(64), name: r.payload.name,
+      } }),
       updateQueue: r => ok(r, { accepted: true as const }),
       cancel: r => ok(r, { accepted: true as const }),
       ...overrides.sessions,

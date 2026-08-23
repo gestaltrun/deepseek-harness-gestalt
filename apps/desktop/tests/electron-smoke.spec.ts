@@ -21,26 +21,13 @@ describe.skipIf(process.env.DSH_DESKTOP_SMOKE !== '1')('Desktop Host smoke', () 
       const child = spawn(electronBin, ['out/main.mjs'], {
         cwd: desktopRoot,
         env: {
-          ...process.env,
+          ...withoutRuntimePlatformEnvironment(process.env),
           DSH_DESKTOP_SMOKE: '1',
           DSH_DESKTOP_SMOKE_FILE: log,
           DSH_HOME: join(dir, 'dsh-home'),
           DSH_NODE: process.execPath,
           DEEPSEEK_API_KEY: 'keyless-desktop-entry-smoke',
           DEEPSEEK_BASE_URL: provider.origin,
-          DSH_PLATFORM_ENV: 'development',
-          DSH_PLATFORM_DEVELOPMENT_ORIGIN: 'https://platform.invalid',
-          DSH_PLATFORM_DEVELOPMENT_CALLBACK_URL: 'https://platform.invalid/v1/account/oauth/github/callback',
-          DSH_PLATFORM_DEVELOPMENT_GITHUB_CLIENT_ID: 'desktop-smoke',
-          DSH_PLATFORM_DEVELOPMENT_CREDENTIAL_REFERENCE: 'credentials://desktop-smoke',
-          DSH_PLATFORM_DEVELOPMENT_DATABASE_IDENTITY: 'desktop-smoke',
-          DSH_PLATFORM_DEVELOPMENT_IDENTITY_NAMESPACE: 'desktop-smoke',
-          DSH_PLATFORM_PRODUCTION_ORIGIN: 'https://platform-production.invalid',
-          DSH_PLATFORM_PRODUCTION_CALLBACK_URL: 'https://platform-production.invalid/v1/account/oauth/github/callback',
-          DSH_PLATFORM_PRODUCTION_GITHUB_CLIENT_ID: 'desktop-smoke-production',
-          DSH_PLATFORM_PRODUCTION_CREDENTIAL_REFERENCE: 'credentials://desktop-smoke-production',
-          DSH_PLATFORM_PRODUCTION_DATABASE_IDENTITY: 'desktop-smoke-production',
-          DSH_PLATFORM_PRODUCTION_IDENTITY_NAMESPACE: 'desktop-smoke-production',
           ELECTRON_ENABLE_LOGGING: '1',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -98,4 +85,10 @@ function processExists(pid: number): boolean {
   } catch {
     return false
   }
+}
+
+function withoutRuntimePlatformEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(source).filter(([name]) => !name.startsWith('DSH_PLATFORM_')),
+  )
 }

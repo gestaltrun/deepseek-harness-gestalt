@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   GitHubOAuthIdentityProvider,
+  loadOperatedPlatformEnvironment,
   loadPlatformEnvironment,
   selectPlatformEnvironment,
   validatePlatformEnvironmentPair,
@@ -192,6 +193,22 @@ describe('validatePlatformEnvironmentPair', () => {
     expect(() => validatePlatformEnvironmentPair({
       development: { ...development, [field]: value }, production,
     })).toThrow(message)
+  })
+})
+
+describe('loadOperatedPlatformEnvironment', () => {
+  it('accepts one complete non-local production identity', () => {
+    expect(loadOperatedPlatformEnvironment(production)).toEqual(production)
+  })
+
+  it.each([
+    { field: 'environment', value: 'development', message: 'must be production' },
+    { field: 'origin', value: 'https://localhost', message: 'must not use a local host' },
+    { field: 'origin', value: 'https://127.0.0.1', message: 'must not use a local host' },
+    { field: 'callbackUrl', value: 'https://other.example.com/v1/account/oauth/github/callback', message: 'share one HTTPS origin' },
+    { field: 'credentialReference', value: undefined, message: 'credential reference is required' },
+  ])('rejects operated identity with $field=$value before use', ({ field, value, message }) => {
+    expect(() => loadOperatedPlatformEnvironment({ ...production, [field]: value })).toThrow(message)
   })
 })
 

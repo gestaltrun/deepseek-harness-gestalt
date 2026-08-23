@@ -259,6 +259,7 @@ flowchart TD
     pkg_mcp_client["mcp-client"]
   end
   subgraph group_platform["packages/platform"]
+    pkg_noise_channel["noise-channel"]
     pkg_platform_account["platform-account"]
     pkg_platform_account_client["platform-account-client"]
     pkg_platform_account_core["platform-account-core"]
@@ -493,6 +494,9 @@ flowchart TD
   pkg_lsp --> pkg_brand
   pkg_lsp --> pkg_invariants
   pkg_lsp --> pkg_llm
+  pkg_noise_channel --> pkg_invariants
+  pkg_noise_channel --> pkg_remote_access
+  pkg_noise_channel --> pkg_remote_protocol
   pkg_remote_access_client --> pkg_invariants
   pkg_remote_access_client --> pkg_platform_account
   pkg_remote_access_client --> pkg_remote_access
@@ -1634,6 +1638,7 @@ flowchart TD
 | [`skill`](../packages/skill/skill) | `skill` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm), [`scope`](../packages/core/scope) |
 | [`web`](../packages/web/web) | `web` | [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`lsp`](../packages/lsp/lsp) | `lsp` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
+| [`noise-channel`](../packages/platform/noise-channel) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`remote-access-client`](../packages/platform/remote-access-client) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`remote-access-http`](../packages/platform/remote-access-http) | `platform` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`remote-access-redis`](../packages/platform/remote-access-redis) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |

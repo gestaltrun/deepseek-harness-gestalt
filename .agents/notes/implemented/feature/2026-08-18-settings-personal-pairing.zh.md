@@ -14,9 +14,9 @@ Platform 账号识别安装，但不会授予 Desktop 权限。个人配对需�
 
 Desktop 与 Mobile 的密码行为通过 `PairingHandshakeProvider` 进入。生命周期向它传递全新的 32 字节邀请密钥，仅从返回的握手哈希派生显示词，并将每次激活的公开密钥引用与提供方私有分配句柄分开。分配在激活返回后立即归清理流程持有，因此公开引用解析、id 生成、碰撞或提交失败都只能销毁本次新分配。终态结果与资源清理相互独立：重试会返回已提交结果，不会重复握手或激活；销毁失败的资源仍由清理记录持有，提供方释放资源时会聚合处理全部保留资源。每个已鉴权安装都有固定的存活挑战、待确认配对和保留记录总量上限。清理完成的重放投影在五分钟后淘汰，清理失败的终态记录则继续占用容量，直到销毁成功。挑战创建时就调度过期任务。共享 authority 的 dispose 仍会结算本实例创建的存活挑战，避免创建进程退出后永久占用每安装上限。生成 id 碰撞不能覆盖既有记录。
 
-`remote-access-http` 消费 `ctx.remoteAccess`；`remote-access-client` 为 Host 拥有的 Desktop 控制器与 Mobile 控制器校验 JSON 和带品牌的 id。Mobile 区分尚未发送的尝试、可能已经提交的请求和待确认结果，分别将它们保留到邀请过期、服务端重放期限或明确终态，并以相同的完成 id 和握手字节重试。Desktop 账号退出与 Mobile 卸载会停用各自按账号划分的生命周期拥有者：投影与重试状态会清除，计时器停止，包括原生扫码在内的进行中工作排空，后续操作在重新激活前都会失败。组装后的 loader 场景使用 `DevelopmentKeylessPairingHandshakeProvider`，让提供方、HTTP 消费方和共享传输通过真实环回服务器运行。Desktop 与 Mobile 开发入口可以通过显式环境标志选择各自的真实控制器。生产环境在独立 Snow 评审接纳产品提供方前保持关闭，任何生产路径都不会导入无密钥实现。无密钥组装验收、精确两分钟边界与 Settings 外壳放置证明见[个人配对组装验收说明](../testing/2026-08-19-personal-pairing-assembled-acceptance.md)。
+`remote-access-http` 消费 `ctx.remoteAccess`；`remote-access-client` 为 Host 拥有的 Desktop 控制器与 Mobile 控制器校验 JSON 和带品牌的 id。Mobile 区分尚未发送的尝试、可能已经提交的请求和待确认结果，分别将它们保留到邀请过期、服务端重放期限或明确终态，并以相同的完成 id 和握手字节重试。Desktop 账号退出与 Mobile 卸载会停用各自按账号划分的生命周期拥有者：投影与重试状态会清除，计时器停止，包括浏览器相机扫码在内的进行中工作排空，后续操作在重新激活前都会失败。组装后的 loader 场景使用 `DevelopmentKeylessPairingHandshakeProvider`，让提供方、HTTP 消费方和共享传输通过真实环回服务器运行。Desktop 与 Mobile 开发入口可以通过显式环境标志选择各自的真实控制器。生产环境在独立 Snow 评审接纳产品提供方前保持关闭，任何生产路径都不会导入无密钥实现。无密钥组装验收、精确两分钟边界与 Settings 外壳放置证明见[个人配对组装验收说明](../testing/2026-08-19-personal-pairing-assembled-acceptance.md)。
 
-既有 Desktop `手机配对` 设置区拥有手机访问开关、QR／完整链接挑战、认证词、确认、拒绝与已配对设备列表。QR 生成使用维护中的零依赖 `uqr` 编码器。Mobile 接受同一个完整链接或原生 QR 载荷，并等待 Desktop 确认。不会注册新的 Session 标题栏、侧栏、批准、编辑器或离线界面。
+既有 Desktop `手机配对` 设置区拥有手机访问开关、QR／完整链接挑战、认证词、确认、拒绝与已配对设备列表。QR 生成使用维护中的零依赖 `uqr` 编码器。Mobile 通过粘贴或浏览器相机 QR 扫描接受同一个完整链接，并等待 Desktop 确认。不会注册新的 Session 标题栏、侧栏、批准、编辑器或离线界面。
 
 ## Alternatives considered
 

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/proposed/architecture/2026-08-22-real-companion-product-path.md
-2026-08-22-real-companion-product-path.md: 5a340ac93c65c15eb47898932f17f82f719c1a67
-2026-08-22-real-companion-product-path.zh.md: 025cf50650cbccadfa033be3db528f9b9eac1f92
+2026-08-22-real-companion-product-path.md: 6184e01d9906323aaa1aa63e03be31e69329a9cf
+2026-08-22-real-companion-product-path.zh.md: 6143093eb408eede7a7c2b58f87a44925f681cb5

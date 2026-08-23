@@ -33,7 +33,7 @@ export interface CompanionProductOperationDependencies {
   /** Personal Pairing authenticated by the reviewed Companion channel. */
   pairingId: PersonalPairingId
   /** Independent key material for that exact Personal Pairing. */
-  pairingKey: Uint8Array
+  attachmentKey: Uint8Array
   /** Product clock used for capability expiry and confirmations. */
   now(): number
   /** Download ciphertext through the pairing-scoped remote-attachments capability. */
@@ -44,7 +44,9 @@ export interface CompanionProductOperationDependencies {
   /** Submit decrypted bytes into the Desktop-owned Session attachment path. */
   submitAttachment(input: {
     sessionId: CompanionOfferAttachmentOperation['sessionId']
+    operationId: CompanionOfferAttachmentOperation['operationId']
     fileName: string
+    mediaType: string
     plaintext: Uint8Array
   }): Promise<DesktopHostRpcResult>
 }
@@ -90,12 +92,41 @@ export class DesktopCompanionProductOwner {
     }
     return await handleCompanionProductOperation(operation, { ...dependencies, host })
   }
+
+  /**
+   * Submit decrypted bytes through the Desktop Web Host's Session attachment admission.
+   * @param input - target Session, exact file name, and endpoint-decrypted bytes.
+   * @returns Host result preserving HTTP, wire, business, and timeout failures.
+   */
+  async submitAttachment(input: {
+    sessionId: CompanionOfferAttachmentOperation['sessionId']
+    operationId: CompanionOfferAttachmentOperation['operationId']
+    fileName: string
+    mediaType: string
+    plaintext: Uint8Array
+  }): Promise<DesktopHostRpcResult> {
+    const host = this.installed?.rpc
+    if (host === undefined) {
+      return { ok: false, failure: {
+        kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Web Host is not available',
+      } }
+    }
+    return await host.call('session.admitAttachment', {
+      sessionId: input.sessionId,
+      operationId: input.operationId,
+      name: input.fileName,
+      mediaType: input.mediaType,
+      data: Buffer.from(input.plaintext).toString('base64'),
+    }, this.hostOptions.attachmentTimeoutMs === undefined
+      ? undefined
+      : { timeoutMs: this.hostOptions.attachmentTimeoutMs })
+  }
 }
 
 /**
  * Execute one attachment or search operation against the Paired Desktop authority.
  * @param operation - validated Encrypted Companion operation.
- * @param dependencies - pairing identity, pairing key, Web Host, and Session attachment path.
+ * @param dependencies - pairing identity, attachment key, Web Host, and Session attachment path.
  * @returns correlated result that the encrypted channel can encode without loss.
  */
 export async function handleCompanionProductOperation(
@@ -128,13 +159,15 @@ async function receiveAttachment(
   try {
     await receiveCompanionAttachment(operation, {
       pairingId: dependencies.pairingId,
-      pairingKey: dependencies.pairingKey,
+      attachmentKey: dependencies.attachmentKey,
       now: dependencies.now(),
       download: async (offer, pairingId) => await dependencies.downloadAttachment(offer, pairingId),
       submit: async ({ fileName, plaintext }) => {
         const submitted = await dependencies.submitAttachment({
           sessionId: operation.sessionId,
+          operationId: operation.operationId,
           fileName,
+          mediaType: operation.mediaType,
           plaintext,
         })
         if (!submitted.ok) throw new HostSubmissionFailure(normalizeFailure(submitted.failure))

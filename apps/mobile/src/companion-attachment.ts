@@ -40,20 +40,23 @@ export interface CompanionAttachmentTransfer {
   byteLength: number
   expiresAt: number
   fileName: string
+  mediaType: string
 }
 
 /** Browser file values required by the Companion transfer controller. */
 export interface SelectedCompanionFile {
   /** Exact user-selected file name. */
   readonly name: string
+  /** Browser-declared media type. */
+  readonly type: string
   /** @returns a fresh copy of the selected file bytes. */
   arrayBuffer(): Promise<ArrayBuffer>
 }
 
 /** Product dependencies for one selected-file transfer. */
 export interface SelectedCompanionAttachmentOptions {
-  /** Independent Personal Pairing key material retained on Mobile. */
-  pairingKey: Uint8Array
+  /** Independent Personal Pairing attachment key retained on Mobile. */
+  attachmentKey: Uint8Array
   /** Operated HTTPS Platform origin that owns the pairing-scoped blob capability. */
   origin: string
   /** Current-installation proof interpreted by Platform as one Personal Pairing. */
@@ -75,14 +78,14 @@ export interface SelectedCompanionAttachmentOptions {
 
 /**
  * Encrypt attachment bytes on Mobile before upload.
- * @param pairingKey - secret bytes supplied by the Personal Pairing layer.
+ * @param attachmentKey - secret bytes supplied by the Personal Pairing layer.
  * @param plaintext - caller-held plaintext; never leaves Mobile unencrypted.
  * @param permit - dynamic foreground synchronization authority.
  * @param ciphertextLimit - ciphertext ceiling compared against `plaintext + seal overhead`; defaults to the protocol ceiling.
  * @returns sealed transfer values for upload and the bounded control message.
  */
 export async function sealCompanionAttachment(
-  pairingKey: Uint8Array,
+  attachmentKey: Uint8Array,
   plaintext: Uint8Array,
   permit: CompanionMutationPermit,
   ciphertextLimit: number = COMPANION_ATTACHMENT_MAX_BYTES,
@@ -91,7 +94,7 @@ export async function sealCompanionAttachment(
   if (plaintext.byteLength + COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES > ciphertextLimit) {
     throw new Error('Companion attachment exceeds the ciphertext blob ceiling')
   }
-  const key = await deriveCompanionAttachmentKey(pairingKey)
+  const key = await deriveCompanionAttachmentKey(attachmentKey)
   permit.requireCurrent()
   const sealed = await sealEndpointAttachment(key, plaintext)
   permit.requireCurrent()
@@ -121,13 +124,14 @@ export function buildCompanionAttachmentOffer(
     byteLength: transfer.byteLength,
     expiresAt: transfer.expiresAt,
     fileName: transfer.fileName,
+    mediaType: transfer.mediaType,
   }
 }
 
 /**
  * Read one real browser-selected file, upload only its ciphertext, and send only its capability.
  * @param file - user-selected browser File values.
- * @param options - pairing key, operated Platform authority, target Session, and encrypted sender.
+ * @param options - attachment key, operated Platform authority, target Session, and encrypted sender.
  * @returns the exact control message accepted by the encrypted sender.
  */
 export async function transferSelectedCompanionAttachment(
@@ -147,7 +151,7 @@ export async function transferSelectedCompanionAttachment(
   let sealed: Awaited<ReturnType<typeof sealCompanionAttachment>>
   try {
     options.permit.requireCurrent()
-    sealed = await sealCompanionAttachment(options.pairingKey, plaintext, options.permit)
+    sealed = await sealCompanionAttachment(options.attachmentKey, plaintext, options.permit)
   } finally {
     plaintext.fill(0)
   }
@@ -180,6 +184,7 @@ export async function transferSelectedCompanionAttachment(
     byteLength: sealed.ciphertext.byteLength,
     expiresAt: value.expiresAt as number,
     fileName: file.name,
+    mediaType: file.type === '' ? 'application/octet-stream' : file.type,
   }, options.operationId, options.sessionId, options.permit)
   options.permit.requireCurrent()
   try {

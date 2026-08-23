@@ -26,6 +26,7 @@
     "@deepseek-ai/dsh-platform-account-client": "workspace:^",
     "@deepseek-ai/dsh-remote-access": "workspace:^",
     "@deepseek-ai/dsh-remote-access-client": "workspace:^",
+    "@deepseek-ai/dsh-noise-channel": "workspace:^",
     "electron-updater": "^6.8.3",
     "@deepseek-ai/dsh-remote-protocol": "workspace:^"
   },
@@ -58,6 +59,7 @@
     "files": [
       "out/main.mjs",
       "out/preload.cjs",
+      "out/operated-platform.json",
       "cordis.patch.yml",
       "package.json"
     ],

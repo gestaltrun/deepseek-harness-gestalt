@@ -27,6 +27,7 @@ describe('MobileCompanionSurface', () => {
     if (first === undefined) throw new Error('expected Desktop resync receiver')
     first.acceptValidatedDesktopResync({
       type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Authenticated Desktop',
       sessions: [{ id: 'session-first', title: 'First', summary: 'Authenticated' }],
       streaming: false,
     })
@@ -35,11 +36,13 @@ describe('MobileCompanionSurface', () => {
     runtime.markConnectionOpen()
     first.acceptValidatedDesktopResync({
       type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Stale Desktop',
       sessions: [{ id: 'session-stale', title: 'Stale', summary: 'Rejected' }],
       streaming: true,
     })
 
     expect(surface.getSnapshot()).toEqual({
+      desktopName: 'Authenticated Desktop',
       sessions: [{ id: 'session-first', title: 'First', summary: 'Authenticated' }],
       streaming: false,
       search: { query: '', status: 'idle', items: [], hasMore: false },
@@ -65,7 +68,8 @@ describe('MobileCompanionSurface', () => {
     const resync = surface.bindValidatedDesktopResync()
     if (resync === undefined) throw new Error('expected Desktop resync receiver')
     resync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Authenticated Desktop', sessions: [], streaming: false,
     })
 
     surface.create({ workspace: 'Work' })
@@ -94,6 +98,7 @@ describe('MobileCompanionSurface', () => {
     if (resync === undefined) throw new Error('expected Desktop resync receiver')
     resync.acceptValidatedDesktopResync({
       type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Paired Desktop',
       sessions: [
         { id: 'session-hit', title: 'Indexed', summary: 'metadata does not contain query' },
         { id: 'session-local-only', title: 'needle in title', summary: 'must not be searched locally' },
@@ -142,7 +147,8 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (resync === undefined || results === undefined) throw new Error('expected current generation receivers')
     resync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Paired Desktop', sessions: [], streaming: false,
     })
 
     surface.attach('session-one', selectedFile())
@@ -205,7 +211,8 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (resync === undefined || results === undefined) throw new Error('expected current generation receivers')
     resync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Paired Desktop', sessions: [], streaming: false,
     })
 
     surface.attach('session-one', selectedFile())
@@ -262,7 +269,8 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (resync === undefined || results === undefined) throw new Error('expected current generation receivers')
     resync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Paired Desktop', sessions: [], streaming: false,
     })
 
     surface.attach('session-one', selectedFile())
@@ -296,7 +304,8 @@ describe('MobileCompanionSurface', () => {
     const firstResults = surface.bindValidatedCompanionResults()
     if (firstResync === undefined || firstResults === undefined) throw new Error('expected first generation receivers')
     firstResync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Paired Desktop', sessions: [], streaming: false,
     })
     surface.search('needle')
 
@@ -308,7 +317,8 @@ describe('MobileCompanionSurface', () => {
       throw new Error('expected replacement generation receivers')
     }
     replacementResync.acceptValidatedDesktopResync({
-      type: 'desktop-resync', version: 1, authenticated: true, sessions: [], streaming: false,
+      type: 'desktop-resync', version: 1, authenticated: true,
+      desktopName: 'Paired Desktop', sessions: [], streaming: false,
     })
     surface.search('replacement')
 

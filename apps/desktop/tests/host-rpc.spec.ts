@@ -14,6 +14,9 @@ describe('Desktop Host RPC', () => {
     expect(() => createDesktopHostRpc('http://127.0.0.1', {
       responseMaxBytes: REMOTE_PROTOCOL_LIMITS.companionMessageBytes + 1,
     })).toThrow(/positive safe integer within the Companion message ceiling/)
+    expect(() => createDesktopHostRpc('http://127.0.0.1', {
+      responseMaxBytes: 1, attachmentTimeoutMs: 0,
+    })).toThrow('attachmentTimeoutMs must be a positive safe integer')
   })
 
   it('preserves success, HTTP 400, wire failure, business refusal, and timeout as typed results', async () => {
@@ -89,6 +92,8 @@ describe('Desktop Host RPC', () => {
       ok: false,
       failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'Desktop Host request timed out' },
     })
+    await expect(rpc.call('session.admitAttachment', { query: 'slow-chunks' }, { timeoutMs: 100 }))
+      .resolves.toMatchObject({ ok: true, value: {} })
     const deadlineRpc = createDesktopHostRpc(`http://127.0.0.1:${String(address.port)}`, {
       timeoutMs: 50,
       responseMaxBytes: REMOTE_PROTOCOL_LIMITS.companionMessageBytes,

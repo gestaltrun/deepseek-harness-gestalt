@@ -34,7 +34,7 @@ export async function runHost400CodecProbe(): Promise<Uint8Array> {
       type: 'search-sessions', operationId, query: 'Host 400 visible alert',
     }, {
       pairingId: parsePersonalPairingId('visible-host-400-pairing'),
-      pairingKey: new Uint8Array(32),
+      attachmentKey: new Uint8Array(32),
       now: Date.now,
       downloadAttachment: () => Promise.reject(new Error('search must not download an attachment')),
       submitAttachment: () => Promise.reject(new Error('search must not submit an attachment')),

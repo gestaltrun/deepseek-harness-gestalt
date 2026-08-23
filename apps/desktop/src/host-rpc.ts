@@ -23,7 +23,11 @@ export interface DesktopHostRpc {
    * @param payload - JSON payload for the method.
    * @returns validated value or a stable failure for Companion projection.
    */
-  call(method: string, payload: Record<string, unknown>): Promise<DesktopHostRpcResult>
+  call(
+    method: string,
+    payload: Record<string, unknown>,
+    options?: { timeoutMs?: number },
+  ): Promise<DesktopHostRpcResult>
 }
 
 /** Desktop Host RPC construction options. */
@@ -32,6 +36,8 @@ export interface DesktopHostRpcOptions {
   timeoutMs?: number
   /** Maximum accumulated response bytes; cannot exceed the Companion application-message ceiling. */
   responseMaxBytes: number
+  /** Wall-clock deadline for one maximum-size local attachment admission. */
+  attachmentTimeoutMs?: number
 }
 
 /**
@@ -47,17 +53,25 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
     throw new TypeError('Desktop Host RPC timeoutMs must be a positive safe integer')
   }
   const responseMaxBytes = options.responseMaxBytes
+  if (options.attachmentTimeoutMs !== undefined
+    && (!Number.isSafeInteger(options.attachmentTimeoutMs) || options.attachmentTimeoutMs <= 0)) {
+    throw new TypeError('Desktop Host RPC attachmentTimeoutMs must be a positive safe integer')
+  }
   if (!Number.isSafeInteger(responseMaxBytes) || responseMaxBytes <= 0
     || responseMaxBytes > REMOTE_PROTOCOL_LIMITS.companionMessageBytes) {
     throw new TypeError('Desktop Host RPC responseMaxBytes must be a positive safe integer within the Companion message ceiling')
   }
   return {
-    async call(method, payload) {
+    async call(method, payload, callOptions) {
+      const callTimeoutMs = callOptions?.timeoutMs ?? timeoutMs
+      if (!Number.isSafeInteger(callTimeoutMs) || callTimeoutMs <= 0) {
+        throw new TypeError('Desktop Host RPC call timeoutMs must be a positive safe integer')
+      }
       const rpcId = randomUUID()
       const response = await requestJson(
         new URL(`/api/${method}`, origin),
         { type: 'client-request', rpcId, method, payload },
-        timeoutMs,
+        callTimeoutMs,
         responseMaxBytes,
       )
       if (response.kind === 'timeout') {

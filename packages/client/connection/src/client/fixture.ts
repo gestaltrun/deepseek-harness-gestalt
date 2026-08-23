@@ -2835,6 +2835,13 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         }
         return ok(request, stored)
       },
+      admitAttachment: request => ok(request, { attachment: {
+        attachmentId: `sha256:${request.payload.operationId}` as never,
+        mediaType: request.payload.mediaType,
+        bytes: atob(request.payload.data).length,
+        sha256: 'a'.repeat(64),
+        name: request.payload.name,
+      } }),
       updateQueue: request => err(request, {
         code: 'queue-item-not-found',
         message: 'fixture has no pending queue item',
@@ -3449,6 +3456,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'session.fork': return this.api.sessions.fork(request)
       case 'session.prompt': return this.api.sessions.prompt(request)
       case 'session.attachment': return this.api.sessions.attachment(request)
+      case 'session.admitAttachment': return this.api.sessions.admitAttachment(request)
       case 'session.updateQueue': return this.api.sessions.updateQueue(request)
       case 'session.cancel': return this.api.sessions.cancel(request)
       case 'subagent.list': return this.api.subagents.list(request)

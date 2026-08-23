@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MobilePairing, type MobilePairingActions } from '../src/MobilePairing.tsx'
 
@@ -10,11 +10,12 @@ describe('MobilePairing', () => {
   it('uses a complete link or QR and shows Desktop-matching authentication words', () => {
     let snapshot: ReturnType<MobilePairingActions['getSnapshot']> = { status: 'ready' }
     const completeLink = vi.fn()
+    const scanQr = vi.fn()
     const actions: MobilePairingActions = {
       getSnapshot: () => snapshot,
       subscribe: () => () => {},
       completeLink,
-      scanQr: vi.fn(),
+      scanQr,
       retryPairing: vi.fn(),
       activate: vi.fn().mockResolvedValue(undefined),
       deactivate: vi.fn().mockResolvedValue(undefined),
@@ -22,6 +23,9 @@ describe('MobilePairing', () => {
     }
     const { rerender } = render(createElement(MobilePairing, { actions }))
     const link = 'https://platform.example.com/pair?secret=complete-high-entropy-invitation'
+    fireEvent.click(screen.getByRole('button', { name: '扫描 QR' }))
+    expect(scanQr).toHaveBeenCalledWith(expect.any(HTMLVideoElement), expect.any(AbortSignal))
+    expect(screen.getByText('将 Desktop Settings 中的 QR 对准取景框')).toBeTruthy()
     fireEvent.change(screen.getByRole('textbox', { name: '完整的一次性配对链接' }), { target: { value: link } })
     fireEvent.click(screen.getByRole('button', { name: '继续配对' }))
     expect(completeLink).toHaveBeenCalledWith(link)
@@ -74,5 +78,57 @@ describe('MobilePairing', () => {
     expect(activate).toHaveBeenCalledOnce()
     rendered.unmount()
     expect(deactivate).toHaveBeenCalledOnce()
+  })
+
+  it('contains and reports rejected mount and unmount lifecycle work', async () => {
+    const activateFailure = new Error('activation failed')
+    const deactivateFailure = new Error('deactivation failed')
+    const reportLifecycleError = vi.fn()
+    const snapshot = { status: 'ready' } as const
+    const actions: MobilePairingActions = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      activate: vi.fn().mockRejectedValue(activateFailure),
+      deactivate: vi.fn().mockRejectedValue(deactivateFailure),
+      unpair: vi.fn(),
+    }
+    const rendered = render(createElement(MobilePairing, { actions, reportLifecycleError }))
+    await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(activateFailure) })
+
+    rendered.unmount()
+
+    await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(deactivateFailure) })
+  })
+
+  it('reports failed unpairing and keeps the product in an explicit unresolved state', async () => {
+    const failure = new AggregateError([new Error('Relay revoke failed')], 'Mobile Personal Pairing unpair failed')
+    const reportLifecycleError = vi.fn()
+    let snapshot: ReturnType<MobilePairingActions['getSnapshot']> = { status: 'paired' }
+    let notify = (): void => {}
+    const actions: MobilePairingActions = {
+      getSnapshot: () => snapshot,
+      subscribe: (listener) => { notify = listener; return () => {} },
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      activate: vi.fn().mockResolvedValue(undefined),
+      deactivate: vi.fn().mockResolvedValue(undefined),
+      unpair: vi.fn(async () => {
+        snapshot = { status: 'unpair-failed', error: failure.message }
+        notify()
+        throw failure
+      }),
+    }
+    render(createElement(MobilePairing, { actions, reportLifecycleError }))
+
+    fireEvent.click(screen.getByRole('button', { name: '解除配对' }))
+
+    await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(failure) })
+    expect(screen.getByRole('heading', { name: '解除配对失败' })).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('可能仍然有效')
+    expect(screen.queryByText('连接 Paired Desktop')).toBeNull()
   })
 })

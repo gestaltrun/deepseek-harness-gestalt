@@ -11,6 +11,7 @@ export type MobilePairingSnapshot =
     authenticationWords: readonly [string, string, string, string, string, string]
   }
   | { status: 'paired' }
+  | { status: 'unpair-failed'; error: string }
   | { status: 'unavailable'; error: string }
 
 /** Mobile adapter for full-link/QR completion and handshake state. */
@@ -21,14 +22,17 @@ export interface MobilePairingActions {
   subscribe(listener: () => void): () => void
   /** Complete the exact high-entropy link produced by Desktop. */
   completeLink(link: string): void | Promise<void>
-  /** Open the native QR scanner and complete its exact payload. */
-  scanQr(): void | Promise<void>
+  /** Open the browser camera scanner and complete its exact payload. */
+  scanQr(video: HTMLVideoElement, signal?: AbortSignal): void | Promise<void>
   /** Retry the retained completion attempt without regenerating handshake material. */
   retryPairing(): void | Promise<void>
   /** Activate this signed-in Mobile lifecycle owner. */
   activate(): Promise<void>
   /** Stop timers and drain in-flight work on sign-out or unmount. */
   deactivate(): Promise<void>
-  /** Unpair this installation: wipe handshake material, drop Relay authority, and stop the connection. */
+  /**
+   * Unpair this installation by attempting every owned cleanup.
+   * A rejected cleanup publishes `unpair-failed`, preserves an unresolved product state, and rejects with every failure.
+   */
   unpair(): Promise<void>
 }

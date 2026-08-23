@@ -70,7 +70,6 @@ describe('open-registration enforcement', () => {
       mobile,
       completionId: parsePairingCompletionId('keep'),
       oneTimeLink: first.oneTimeLink,
-      device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: Uint8Array.of(9),
     })
     const pairing = await provider.confirmPairing({ desktop, pendingPairingId: pending.pendingPairingId })
@@ -119,7 +118,6 @@ describe('open-registration enforcement', () => {
         mobile: authentication(`mobile-${String(index)}`, 'account-one'),
         completionId: parsePairingCompletionId(`pair-${String(index)}`),
         oneTimeLink: challenge.oneTimeLink,
-        device: { name: `Phone ${String(index)}`, platform: 'ios' },
         mobileHandshake: Uint8Array.of(9),
       })
       await provider.confirmPairing({ desktop, pendingPairingId: pending.pendingPairingId })
@@ -134,7 +132,6 @@ describe('open-registration enforcement', () => {
       mobile: authentication('mobile-over', 'account-one'),
       completionId: parsePairingCompletionId('pair-over'),
       oneTimeLink: extra.oneTimeLink,
-      device: { name: 'Over', platform: 'android' },
       mobileHandshake: Uint8Array.of(9),
     })
     await expect(provider.confirmPairing({ desktop, pendingPairingId: pending.pendingPairingId }))
@@ -222,7 +219,6 @@ describe('open-registration enforcement', () => {
       mobile,
       completionId: parsePairingCompletionId('keep-capacity'),
       oneTimeLink: challenge.oneTimeLink,
-      device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: Uint8Array.of(9),
     })
     const pairing = await provider.confirmPairing({ desktop, pendingPairingId: pending.pendingPairingId })
@@ -310,20 +306,23 @@ function uniqueProvider(
             githubLogin: accountId,
             avatarUrl: 'https://avatars.example/account',
           },
-          installation: {
-            id: parseInstallationId(installationId),
-            kind: installationId.includes('mobile') ? 'mobile' as const : 'desktop' as const,
-          },
+          installation: installationId.includes('mobile')
+            ? {
+              id: parseInstallationId(installationId),
+              kind: 'mobile' as const,
+              presentation: { name: `${installationId} installation`, platform: 'ios' as const },
+            }
+            : { id: parseInstallationId(installationId), kind: 'desktop' as const, presentation: { name: 'Test Desktop', platform: 'linux' as const } },
         }
       }),
     },
     handshake: handshakeProvider(),
+    authority: authority ?? new MemoryPersonalPairingAuthorityStore(),
     clock: { now: () => now.value },
     randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index + 1),
     randomId: kind => `${kind}-${idPrefix}${String(++id)}`,
     pairingLinkOrigin: 'https://platform.example.com/pair',
     ...(capacity === undefined ? {} : { capacity }),
-    ...(authority === undefined ? {} : { authority }),
   })
 }
 

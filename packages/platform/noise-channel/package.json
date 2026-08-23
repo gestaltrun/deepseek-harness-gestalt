@@ -1,0 +1,47 @@
+{
+  "name": "@deepseek-ai/dsh-noise-channel",
+  "description": "Snow 0.10.0 pairing and per-attachment Companion channels",
+  "version": "0.1.0-rc.8",
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "packages/platform/noise-channel"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./invariant": { "types": "./lib/types/invariant.d.ts", "default": "./lib/invariant.js" },
+    "./snow-wasm": { "types": "./pkg/dsh_noise_channel.d.ts", "default": "./pkg/dsh_noise_channel.js" },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "pkg/dsh_noise_channel.d.ts",
+    "pkg/dsh_noise_channel.js",
+    "pkg/dsh_noise_channel_bg.wasm",
+    "pkg/dsh_noise_channel_bg.wasm.d.ts",
+    "THIRD_PARTY_NOTICES.txt",
+    "lib/types/**/*.d.ts"
+  ],
+  "scripts": {
+    "build:wasm": "node ./rust/build.mjs"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-remote-access": "workspace:^",
+    "@deepseek-ai/dsh-remote-protocol": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-remote-access": "workspace:^",
+    "@deepseek-ai/dsh-remote-protocol": "workspace:^"
+  }
+}

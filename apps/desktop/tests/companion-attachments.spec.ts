@@ -17,7 +17,7 @@ import {
 } from '../src/companion-attachments.ts'
 
 const pairingId = parsePersonalPairingId('pairing-a')
-const pairingKey = crypto.getRandomValues(new Uint8Array(32))
+const attachmentKey = crypto.getRandomValues(new Uint8Array(32))
 const plaintext = new TextEncoder().encode('desktop-bound attachment')
 
 async function offer(overrides: Partial<CompanionOfferAttachmentOperation> = {}): Promise<{
@@ -26,7 +26,7 @@ async function offer(overrides: Partial<CompanionOfferAttachmentOperation> = {})
   hash: string
 }> {
   // oxlint-disable-next-line typescript/no-unsafe-assignment -- tsc resolves CryptoKey via @types/node; oxlint's program misses that global
-  const key = await deriveCompanionAttachmentKey(pairingKey)
+  const key = await deriveCompanionAttachmentKey(attachmentKey)
   const sealed = await sealCompanionAttachment(key, plaintext)
   return {
     ciphertext: sealed.ciphertext,
@@ -40,6 +40,7 @@ async function offer(overrides: Partial<CompanionOfferAttachmentOperation> = {})
       byteLength: sealed.ciphertext.byteLength,
       expiresAt: 2_000,
       fileName: 'notes.txt',
+      mediaType: 'text/plain',
       ...overrides,
     },
   }
@@ -52,7 +53,7 @@ describe('Desktop Companion attachment receive', () => {
     const download = vi.fn(async () => prepared.ciphertext)
     const received = await receiveCompanionAttachment(prepared.offer, {
       pairingId,
-      pairingKey,
+      attachmentKey,
       now: 1_000,
       download,
       submit,
@@ -67,7 +68,7 @@ describe('Desktop Companion attachment receive', () => {
     const submit = vi.fn()
     await expect(receiveCompanionAttachment(prepared.offer, {
       pairingId,
-      pairingKey,
+      attachmentKey,
       now: 1_000,
       download: vi.fn(async () => prepared.ciphertext),
       submit,
@@ -80,7 +81,7 @@ describe('Desktop Companion attachment receive', () => {
     const noSubmit = () => { throw new Error('rejected receive must never submit') }
 
     await expect(receiveCompanionAttachment(prepared.offer, {
-      pairingId, pairingKey, now: 1_000,
+      pairingId, attachmentKey, now: 1_000,
       download: async () => prepared.ciphertext.slice(0, -1),
       submit: noSubmit,
     })).rejects.toMatchObject({ reason: 'hash-mismatch' })
@@ -89,19 +90,19 @@ describe('Desktop Companion attachment receive', () => {
     tampered[0] ^= 0xff
     expect(await hashCompanionCiphertext(tampered)).not.toBe(prepared.hash)
     await expect(receiveCompanionAttachment(prepared.offer, {
-      pairingId, pairingKey, now: 1_000,
+      pairingId, attachmentKey, now: 1_000,
       download: async () => tampered,
       submit: noSubmit,
     })).rejects.toMatchObject({ reason: 'hash-mismatch' })
 
     await expect(receiveCompanionAttachment(prepared.offer, {
-      pairingId, pairingKey, now: 2_000,
+      pairingId, attachmentKey, now: 2_000,
       download: async () => prepared.ciphertext,
       submit: noSubmit,
     })).rejects.toMatchObject({ reason: 'expired' })
 
     await expect(receiveCompanionAttachment(prepared.offer, {
-      pairingId, pairingKey, now: 1_000,
+      pairingId, attachmentKey, now: 1_000,
       download: () => Promise.reject(new Error('connection reset')),
       submit: noSubmit,
     })).rejects.toMatchObject({ reason: 'transfer-interrupted' })
@@ -109,7 +110,7 @@ describe('Desktop Companion attachment receive', () => {
     await expect(receiveCompanionAttachment(
       (await offer({ byteLength: REMOTE_PROTOCOL_LIMITS.attachmentBlobBytes + 1 })).offer,
       {
-        pairingId, pairingKey, now: 1_000,
+        pairingId, attachmentKey, now: 1_000,
         download: async () => prepared.ciphertext,
         submit: noSubmit,
       },
@@ -117,7 +118,7 @@ describe('Desktop Companion attachment receive', () => {
 
     await expect(receiveCompanionAttachment(prepared.offer, {
       pairingId,
-      pairingKey: crypto.getRandomValues(new Uint8Array(32)),
+      attachmentKey: crypto.getRandomValues(new Uint8Array(32)),
       now: 1_000,
       download: async () => prepared.ciphertext,
       submit: noSubmit,
@@ -128,7 +129,7 @@ describe('Desktop Companion attachment receive', () => {
     const prepared = await offer()
     await expect(receiveCompanionAttachment(prepared.offer, {
       pairingId,
-      pairingKey,
+      attachmentKey,
       now: 1_000,
       download: () => Promise.reject(new CompanionAttachmentReceiveError(
         'cross-pairing',
@@ -174,7 +175,7 @@ describe('Desktop Companion attachment receive', () => {
       origin,
       fetch: async (_input, init) => {
         const headers = new Headers(init?.headers)
-        expect(headers.get('x-gestalt-pairing-id')).toBe(pairingId)
+        expect(headers.get('x-gestalt-pairing-selector')).toBe(pairingId)
         return new Response(prepared.ciphertext, { status: 200 })
       },
     })).resolves.toEqual(prepared.ciphertext)

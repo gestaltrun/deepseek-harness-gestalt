@@ -13,12 +13,12 @@ import {
   transferSelectedCompanionAttachment,
 } from '../src/companion-attachment.ts'
 
-const pairingKey = crypto.getRandomValues(new Uint8Array(32))
+const attachmentKey = crypto.getRandomValues(new Uint8Array(32))
 
 describe('Companion encrypted attachments', () => {
   it('encrypts on Mobile with a pairing-derived key and returns the ciphertext hash', async () => {
     const plaintext = new TextEncoder().encode('secret attachment')
-    const sealed = await sealCompanionAttachment(pairingKey, plaintext, readyPermit())
+    const sealed = await sealCompanionAttachment(attachmentKey, plaintext, readyPermit())
     expect(sealed.ciphertext).not.toEqual(plaintext)
     expect(sealed.ciphertext.byteLength).toBe(plaintext.byteLength + COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES)
     expect(sealed.ciphertextSha256).toMatch(/^[0-9a-f]{64}$/u)
@@ -29,6 +29,7 @@ describe('Companion encrypted attachments', () => {
       byteLength: sealed.ciphertext.byteLength,
       expiresAt: 1_000_000 + 900_000,
       fileName: 'notes.txt',
+      mediaType: 'text/plain',
     }, parseCompanionOperationId('operation-one'), parseCompanionSessionId('session-one'), readyPermit())
     expect(offer).toEqual({
       type: 'offer-attachment',
@@ -39,20 +40,21 @@ describe('Companion encrypted attachments', () => {
       byteLength: sealed.ciphertext.byteLength,
       expiresAt: 1_900_000,
       fileName: 'notes.txt',
+      mediaType: 'text/plain',
     })
   })
 
   it('rejects plaintext that cannot fit in the ciphertext ceiling after the GCM seal', async () => {
     const limit = 64
     const accepted = await sealCompanionAttachment(
-      pairingKey,
+      attachmentKey,
       new Uint8Array(limit - COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES),
       readyPermit(),
       limit,
     )
     expect(accepted.ciphertext.byteLength).toBe(limit)
     await expect(sealCompanionAttachment(
-      pairingKey,
+      attachmentKey,
       new Uint8Array(limit - COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES + 1),
       readyPermit(),
       limit,
@@ -63,7 +65,7 @@ describe('Companion encrypted attachments', () => {
   })
 
   it('refuses attachment preparation and offers before foreground synchronization', async () => {
-    await expect(sealCompanionAttachment(pairingKey, Uint8Array.of(1), blockedPermit()))
+    await expect(sealCompanionAttachment(attachmentKey, Uint8Array.of(1), blockedPermit()))
       .rejects.toThrow(/foreground synchronization/)
     expect(() => buildCompanionAttachmentOffer({
       capability: 'A'.repeat(43) as never,
@@ -71,6 +73,7 @@ describe('Companion encrypted attachments', () => {
       byteLength: 29,
       expiresAt: 1_900_000,
       fileName: 'notes.txt',
+      mediaType: 'text/plain',
     }, parseCompanionOperationId('operation-blocked'), parseCompanionSessionId('session-one'), blockedPermit()))
       .toThrow(/foreground synchronization/)
   })
@@ -88,13 +91,14 @@ describe('Companion encrypted attachments', () => {
     const sent: unknown[] = []
     const file = {
       name,
+      type: _kind === 'image' ? 'image/png' : _kind === 'text' ? 'text/plain' : 'application/octet-stream',
       arrayBuffer: async () => plaintext.buffer.slice(
         plaintext.byteOffset,
         plaintext.byteOffset + plaintext.byteLength,
       ),
     }
     const operation = await transferSelectedCompanionAttachment(file, {
-      pairingKey,
+      attachmentKey,
       origin: 'https://platform.example',
       authorizationHeaders: { authorization: 'Bearer opaque-current-installation-proof' },
       operationId: parseCompanionOperationId(`operation-${_kind}`),
@@ -123,7 +127,7 @@ describe('Companion encrypted attachments', () => {
     expect(sent).toEqual([operation])
     expect(JSON.stringify(sent)).not.toContain(Buffer.from(plaintext).toString('base64'))
     expect(Object.keys(operation).sort()).toEqual([
-      'byteLength', 'capability', 'ciphertextSha256', 'expiresAt', 'fileName', 'operationId', 'sessionId', 'type',
+      'byteLength', 'capability', 'ciphertextSha256', 'expiresAt', 'fileName', 'mediaType', 'operationId', 'sessionId', 'type',
     ])
   })
 
@@ -134,6 +138,7 @@ describe('Companion encrypted attachments', () => {
     const selectedBytes = Uint8Array.of(1, 2, 3)
     const transfer = transferSelectedCompanionAttachment({
       name: 'late.bin',
+      type: 'application/octet-stream',
       arrayBuffer: async () => await new Promise<ArrayBuffer>((resolve) => { releaseRead = resolve }),
     }, transferOptions(permit, fetch, vi.fn(async () => {})))
 
@@ -162,6 +167,7 @@ describe('Companion encrypted attachments', () => {
 
     await expect(transferSelectedCompanionAttachment({
       name: 'background.bin',
+      type: 'application/octet-stream',
       arrayBuffer: async () => Uint8Array.of(4, 5, 6).buffer,
     }, transferOptions(permit, fetch, send))).rejects.toThrow(/connection generation/)
     expect(fetch).toHaveBeenCalledOnce()
@@ -182,6 +188,7 @@ describe('Companion encrypted attachments', () => {
 
     const transfer = transferSelectedCompanionAttachment({
       name: 'uncertain.bin',
+      type: 'application/octet-stream',
       arrayBuffer: async () => Uint8Array.of(7, 8, 9).buffer,
     }, transferOptions(permit, fetch, send))
 
@@ -222,7 +229,7 @@ function transferOptions(
   send: (offer: CompanionOfferAttachmentOperation) => Promise<void>,
 ) {
   return {
-    pairingKey,
+    attachmentKey,
     origin: 'https://platform.example',
     authorizationHeaders: { authorization: 'Bearer opaque-current-installation-proof' },
     operationId: parseCompanionOperationId('operation-race'),

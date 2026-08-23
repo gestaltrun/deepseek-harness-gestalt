@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-21-platform-durable-remote-access-stores.md
-2026-08-21-platform-durable-remote-access-stores.md: c98866e92ea4c562fa4afe396440cd53ae6eb24d
-2026-08-21-platform-durable-remote-access-stores.zh.md: bc794c9073e694fee559011142c01b4540cf6eb2
+2026-08-21-platform-durable-remote-access-stores.md: 170031c06794e9de05094b3133fd442bdd06e8c7
+2026-08-21-platform-durable-remote-access-stores.zh.md: ed41654f1720f46de5b95a24945fea83abdd3096

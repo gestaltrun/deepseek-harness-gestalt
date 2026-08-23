@@ -27,6 +27,14 @@ export class MobileRelayEndpointLifecycle {
   async start(): Promise<void> { await this.endpoint.start() }
   /** Stop and drain the current Mobile attachment. */
   async stop(): Promise<void> { await this.endpoint.stop() }
+  /**
+   * Send endpoint-owned handshake or Companion ciphertext on the current attachment.
+   * @param targetAttachmentId - current peer attachment.
+   * @param ciphertext - opaque handshake or encrypted Companion bytes.
+   */
+  async sendCiphertext(targetAttachmentId: Parameters<RemoteRelayEndpointController['sendCiphertext']>[0], ciphertext: Uint8Array): Promise<void> {
+    await this.endpoint.sendCiphertext(targetAttachmentId, ciphertext)
+  }
   /** Report whether Platform acknowledged the current attachment.
    * @returns whether Platform acknowledged the current attachment.
    */

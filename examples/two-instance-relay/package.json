@@ -1,5 +1,16 @@
 {
   "private": true,
   "name": "@deepseek-ai/dsh-example-two-instance-relay",
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-noise-channel": "workspace:^",
+    "@deepseek-ai/dsh-platform-account": "workspace:^",
+    "@deepseek-ai/dsh-remote-access": "workspace:^",
+    "@deepseek-ai/dsh-remote-access-client": "workspace:^",
+    "@deepseek-ai/dsh-remote-access-http": "workspace:^",
+    "@deepseek-ai/dsh-remote-access-redis": "workspace:^",
+    "@deepseek-ai/dsh-remote-protocol": "workspace:^",
+    "@deepseek-ai/schemastery": "workspace:^"
+  }
 }

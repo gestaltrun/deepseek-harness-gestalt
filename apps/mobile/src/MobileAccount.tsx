@@ -1,11 +1,11 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { companionRuntime } from './companion-lifecycle.ts'
+import { companionMayMutate, companionRuntime } from './companion-lifecycle.ts'
 import type { ReactNode } from 'react'
 import type { PlatformAccountInstallation } from '@deepseek-ai/dsh-platform-account-client'
 import { ACCOUNT_PRIVACY_NOTICE } from '@deepseek-ai/dsh-platform-account/privacy'
 import css from './MobileAccount.module.css'
 import type { CompanionInteraction } from './companion-approval.ts'
-import { createCompanionSession, type CompanionSessionSummary } from './companion-history.ts'
+import type { CompanionSessionSummary } from './companion-history.ts'
 import { MobileBrowse } from './MobileBrowse.tsx'
 import { MobilePairing, type MobilePairingActions } from './MobilePairing.tsx'
 import type {
@@ -21,6 +21,7 @@ export interface MobileAccountProps {
   pairing?: MobilePairingActions
   /** Desktop-confirmed Companion Surface and mutation callbacks. */
   companionSurface?: {
+    desktopName?: string
     sessions: readonly CompanionSessionSummary[]
     onCreate?: (input: { workspace?: string }) => void
     onSubmit?: (sessionId: string, text: string) => void
@@ -46,8 +47,6 @@ export function MobileAccount({ installation, pairing, companionSurface }: Mobil
     () => companion?.getState(),
   )
   const [accepted, setAccepted] = useState(false)
-  const [sessions, setSessions] = useState<readonly CompanionSessionSummary[]>([])
-  const [committed] = useState(() => new Set<string>())
 
   useEffect(() => { void installation.load() }, [installation])
   useEffect(() => {
@@ -138,34 +137,20 @@ export function MobileAccount({ installation, pairing, companionSurface }: Mobil
         && 'message' in companionSurface.attachment
         && <p className={css.error} role="alert">{companionSurface.attachment.message}</p>}
       {signedIn && pairing !== undefined && <MobilePairing actions={pairing} />}
-      {signedIn && (
+      {signedIn && companionSurface?.desktopName !== undefined && (
         <MobileBrowse
-          desktopName="Paired Desktop"
-          connection="offline"
-          sessions={companionSurface?.sessions ?? sessions}
+          desktopName={companionSurface.desktopName}
+          connection={companionMayMutate(companionState) ? 'online' : 'offline'}
+          sessions={companionSurface.sessions}
           {...(companionState === undefined ? {} : { companionState })}
-          {...(companionSurface?.onSubmit === undefined ? {} : { onSubmit: companionSurface.onSubmit })}
-          {...(companionSurface?.onCancel === undefined ? {} : { onCancel: companionSurface.onCancel })}
-          {...(companionSurface?.onAttach === undefined ? {} : { onAttach: companionSurface.onAttach })}
-          {...(companionSurface?.search === undefined ? {} : { search: companionSurface.search })}
-          {...(companionSurface?.onSearch === undefined ? {} : { onSearch: companionSurface.onSearch })}
-          {...(companionSurface?.streaming === undefined ? {} : { streaming: companionSurface.streaming })}
-          {...(companionSurface?.onSettled === undefined ? {} : { onSettled: companionSurface.onSettled })}
-          onCreate={(input) => {
-            if (companionSurface?.onCreate !== undefined) {
-              companionSurface.onCreate(input)
-              return
-            }
-            const operationId = crypto.randomUUID()
-            const next = createCompanionSession(sessions, committed, {
-              operationId,
-              title: input.workspace === undefined ? 'Ungrouped Session' : 'Workspace Session',
-              ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
-              devicePrincipalId: 'current-mobile',
-            }, companionState)
-            if (next.created) committed.add(operationId)
-            setSessions(next.sessions)
-          }}
+          {...(companionSurface.onSubmit === undefined ? {} : { onSubmit: companionSurface.onSubmit })}
+          {...(companionSurface.onCancel === undefined ? {} : { onCancel: companionSurface.onCancel })}
+          {...(companionSurface.onAttach === undefined ? {} : { onAttach: companionSurface.onAttach })}
+          {...(companionSurface.search === undefined ? {} : { search: companionSurface.search })}
+          {...(companionSurface.onSearch === undefined ? {} : { onSearch: companionSurface.onSearch })}
+          {...(companionSurface.streaming === undefined ? {} : { streaming: companionSurface.streaming })}
+          {...(companionSurface.onSettled === undefined ? {} : { onSettled: companionSurface.onSettled })}
+          {...(companionSurface.onCreate === undefined ? {} : { onCreate: companionSurface.onCreate })}
         />
       )}
       <footer>此账号仅识别你的安装；它不会授予任何 Desktop 访问权限。</footer>

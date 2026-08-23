@@ -41,6 +41,19 @@ describe('local attachment service', () => {
     }
   })
 
+  it('persists exact generic file bytes through the immutable binary seam', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-attachment-file-service-'))
+    try {
+      const service = new LocalAttachmentStore(new Context(), { dshHome })
+      const data = Uint8Array.of(0, 255, 1, 2, 0)
+      const ref = await service.saveFile({ data, mediaType: 'application/octet-stream', name: '/tmp/payload.bin' })
+      expect(ref).toMatchObject({ mediaType: 'application/octet-stream', bytes: data.byteLength, name: 'payload.bin' })
+      await expect(service.readFile(ref)).resolves.toEqual({ ref, data })
+    } finally {
+      await rm(dshHome, { recursive: true, force: true })
+    }
+  })
+
   it('validates without persisting: a rejected image leaves no storage root behind', async () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-attachment-validate-'))
     try {

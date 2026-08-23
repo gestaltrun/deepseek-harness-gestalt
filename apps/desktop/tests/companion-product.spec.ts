@@ -17,7 +17,7 @@ import {
 import type { DesktopHostRpc, DesktopHostRpcResult } from '../src/host-rpc.ts'
 
 const pairingId = parsePersonalPairingId('pairing-product')
-const pairingKey = crypto.getRandomValues(new Uint8Array(32))
+const attachmentKey = crypto.getRandomValues(new Uint8Array(32))
 const sessionId = parseCompanionSessionId('session-product')
 const closeServers: Array<() => Promise<void>> = []
 
@@ -39,7 +39,7 @@ describe('Desktop Companion product operations', () => {
     const result = await handleCompanionProductOperation(prepared.operation, {
       host,
       pairingId,
-      pairingKey,
+      attachmentKey,
       now: () => 1_000,
       downloadAttachment: async () => prepared.ciphertext,
       submitAttachment,
@@ -47,7 +47,10 @@ describe('Desktop Companion product operations', () => {
 
     expect(result).toMatchObject({ type: 'confirmed', operationId: prepared.operation.operationId })
     expect(submitAttachment).toHaveBeenCalledOnce()
-    expect(submitAttachment.mock.calls[0]?.[0]).toEqual({ sessionId, fileName, plaintext })
+    expect(submitAttachment.mock.calls[0]?.[0]).toEqual({
+      sessionId, operationId: prepared.operation.operationId,
+      fileName, mediaType: prepared.operation.mediaType, plaintext,
+    })
     expect(JSON.stringify(submitAttachment.mock.calls)).not.toContain(`Attached: ${fileName}`)
   })
 
@@ -57,7 +60,7 @@ describe('Desktop Companion product operations', () => {
     const dependencies = {
       host: hostRpc(() => { throw new Error('rejected attachment must not call Host') }),
       pairingId,
-      pairingKey,
+      attachmentKey,
       now: () => 2_000,
       downloadAttachment: async () => hash.ciphertext,
       submitAttachment: async () => { throw new Error('rejected attachment must not submit') },
@@ -173,7 +176,7 @@ async function offer(fileName: string, plaintext: Uint8Array, id: string): Promi
   ciphertext: Uint8Array
 }> {
   // oxlint-disable-next-line typescript/no-unsafe-assignment -- tsc resolves CryptoKey via @types/node; oxlint misses that global
-  const key = await deriveCompanionAttachmentKey(pairingKey)
+  const key = await deriveCompanionAttachmentKey(attachmentKey)
   const sealed = await sealCompanionAttachment(key, plaintext)
   return {
     ciphertext: sealed.ciphertext,
@@ -186,6 +189,7 @@ async function offer(fileName: string, plaintext: Uint8Array, id: string): Promi
       byteLength: sealed.ciphertext.byteLength,
       expiresAt: 2_000,
       fileName,
+      mediaType: 'application/octet-stream',
     },
   }
 }
@@ -204,7 +208,7 @@ function baseDependencies(host: DesktopHostRpc) {
   return {
     host,
     pairingId,
-    pairingKey,
+    attachmentKey,
     now: () => 1_000,
     downloadAttachment: async () => { throw new Error('search must not download attachments') },
     submitAttachment: async () => { throw new Error('search must not submit attachments') },

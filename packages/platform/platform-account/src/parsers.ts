@@ -2,13 +2,47 @@ import type {
   AccountProofJti,
   AccountSessionId,
   AccountSessionView,
+  DesktopInstallationPresentation,
   InstallationId,
   LoginAttemptId,
   LoginAttemptView,
   LoginPollResult,
+  MobileInstallationPresentation,
   PlatformAccountId,
   PlatformAccountView,
 } from './types.ts'
+
+/**
+ * Parse Desktop Installation presentation at an Account wire or durable boundary.
+ * @param value - untrusted device information supplied during installation sign-in.
+ * @returns bounded presentation bound to the resulting Account Session.
+ */
+export function parseDesktopInstallationPresentation(value: unknown): DesktopInstallationPresentation {
+  const record = object(value, 'Desktop Installation presentation')
+  if (typeof record.name !== 'string' || record.name.trim() === '' || record.name.length > 128) {
+    throw new TypeError('Desktop Installation name must contain 1-128 characters')
+  }
+  if (record.platform !== 'macos' && record.platform !== 'windows' && record.platform !== 'linux') {
+    throw new TypeError('Desktop Installation platform must be macos, windows, or linux')
+  }
+  return { name: record.name, platform: record.platform }
+}
+
+/**
+ * Parse Mobile Installation presentation at an Account wire or durable boundary.
+ * @param value - untrusted device information supplied during installation sign-in.
+ * @returns bounded presentation bound to the resulting Account Session.
+ */
+export function parseMobileInstallationPresentation(value: unknown): MobileInstallationPresentation {
+  const record = object(value, 'Mobile Installation presentation')
+  if (typeof record.name !== 'string' || record.name.trim() === '' || record.name.length > 128) {
+    throw new TypeError('Mobile Installation name must contain 1-128 characters')
+  }
+  if (record.platform !== 'ios' && record.platform !== 'android') {
+    throw new TypeError('Mobile Installation platform must be ios or android')
+  }
+  return { name: record.name, platform: record.platform }
+}
 
 /**
  * Parse a proof jti at a wire or random-source boundary.

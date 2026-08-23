@@ -5,7 +5,9 @@
  */
 
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { AttachmentIdType, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import type {
+  AttachmentIdType, FileAttachmentRef, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType,
+} from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm/types'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session/types'
 // The pure-type outlet: api/ is browser-importable, and the package root's
@@ -14,6 +16,23 @@ import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/t
 import type { RpcId, RpcRequest, RpcResponse } from './rpc.ts'
 import type { ToolEventView } from './events.ts'
 import type { WorkspaceId } from './workspace.ts'
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /**
+     * Records one immutable file admitted through the authenticated Companion path.
+     * This log-only event never enters model history.
+     * @param attachment - durable verified file reference.
+     * @param operationId - idempotency identity from the encrypted Companion operation.
+     * @param source - authenticated Companion admission source.
+     */
+    'session/attachment-admitted': {
+      attachment: FileAttachmentRef
+      operationId: string
+      source: 'companion'
+    }
+  }
+}
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
@@ -366,6 +385,15 @@ export interface SessionsApi {
   /** Reads one durable image after proving that this session's log references its id. */
   attachment(request: RpcRequest<{ sessionId: SessionId; attachmentId: AttachmentIdType }>):
   Promise<RpcResponse<{ attachment: ImageAttachmentRef; data: string }>>
+
+  /** Admits exact generic file bytes and durably records their Session-scoped reference. */
+  admitAttachment(request: RpcRequest<{
+    sessionId: SessionId
+    operationId: string
+    mediaType: string
+    name: string
+    data: string
+  }>): Promise<RpcResponse<{ attachment: FileAttachmentRef }>>
 
   /**
    * Edits, removes, or strictly steers one pending queued occurrence on an ordinary session.

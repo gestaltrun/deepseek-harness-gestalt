@@ -83,6 +83,34 @@ describe('Encrypted Companion Protocol codec', () => {
     expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, absent))).toEqual(absent)
   })
 
+  it('round-trips versioned foreground synchronization and rejects a one-byte substitute', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile'),
+      createCompanionVersionOffer('desktop'),
+    )
+    const synchronization = {
+      type: 'projection',
+      projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 3, desktopRevision: 11 },
+    } as const
+    expect(decodeCompanionMessage(
+      negotiated,
+      encodeCompanionMessage(negotiated, synchronization),
+    )).toEqual(synchronization)
+    expect(() => decodeCompanionMessage(negotiated, Uint8Array.of(1))).toThrow(
+      expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+    )
+    for (const value of [
+      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', desktopName: '', generation: 1, desktopRevision: 1 } },
+      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'x'.repeat(129), generation: 1, desktopRevision: 1 } },
+      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 0, desktopRevision: 1 } },
+      { applicationVersion: 2, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 1, desktopRevision: 0 } },
+    ]) {
+      expect(() => decodeCompanionMessage(negotiated, json(value))).toThrow(
+        expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+      )
+    }
+  })
+
   it('rejects forged operation-status answers that misstate the queried operation', () => {
     const negotiated = negotiateFresh(
       createCompanionVersionOffer('mobile'),
@@ -528,6 +556,7 @@ describe('Encrypted Companion Protocol codec', () => {
         byteLength: 4_096,
         expiresAt: 1_787_027_200_000,
         fileName: 'notes.txt',
+        mediaType: 'text/plain',
       },
     }
     const encoded = encodeCompanionMessage(negotiated, message)
@@ -552,6 +581,7 @@ describe('Encrypted Companion Protocol codec', () => {
         byteLength: 4_096,
         expiresAt: 1_787_027_200_000,
         fileName: 'notes.txt',
+        mediaType: 'text/plain',
       },
     }
     const invalid = (mutate: (operation: Record<string, unknown>) => void): Uint8Array => {
@@ -574,6 +604,11 @@ describe('Encrypted Companion Protocol codec', () => {
     expect(() => decodeCompanionMessage(negotiated, invalid((operation) => {
       operation.fileName = ''
     }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    for (const mediaType of [undefined, 'not-a-media-type', 'x'.repeat(128)]) {
+      expect(() => decodeCompanionMessage(negotiated, invalid((operation) => {
+        operation.mediaType = mediaType
+      }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    }
     expect(() => decodeCompanionMessage(negotiated, invalid((operation) => {
       operation.extra = 'unsupported'
     }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
@@ -756,6 +791,7 @@ function attachmentOffer(overrides: { fileName: string }): CompanionOfferAttachm
     byteLength: 4_096,
     expiresAt: 1_787_027_200_000,
     fileName: overrides.fileName,
+    mediaType: 'application/octet-stream',
   }
 }
 

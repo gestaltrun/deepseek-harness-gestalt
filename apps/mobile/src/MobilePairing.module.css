@@ -5,6 +5,9 @@
 .card input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-background-primary); color: inherit; }
 .scan, .continue { min-height: 44px; border-radius: 12px; font: inherit; font-weight: 700; }
 .scan { border: 1px solid var(--dsw-alias-border-l2); background: transparent; color: inherit; }
+.camera { display: grid; gap: 10px; }
+.camera[hidden] { display: none; }
+.camera video { width: 100%; aspect-ratio: 1; border-radius: 16px; background: #050505; object-fit: cover; }
 .continue { border: 0; background: var(--dsw-alias-button-info-fill); color: var(--dsw-alias-button-info-label); }
 .continue:disabled { opacity: .45; }
 .card output { padding: 14px; border-radius: 12px; background: var(--dsw-alias-fill-secondary); font-size: 18px; font-weight: 800; letter-spacing: .04em; line-height: 1.5; }

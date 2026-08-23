@@ -200,6 +200,7 @@ export function encodeCompanionMessage(
 ): Uint8Array {
   requireNegotiated(protocol)
   if (message.type === 'projection'
+    && message.projection.type === 'transcript-page'
     && message.projection.entries.length > REMOTE_PROTOCOL_LIMITS.transcriptPageEntries) {
     throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion transcript page exceeds its entry ceiling')
   }
@@ -253,7 +254,7 @@ function parseOperation(value: unknown): CompanionOperation {
   if (record.type === 'offer-attachment') {
     exactKeys(
       record,
-      ['type', 'operationId', 'sessionId', 'capability', 'ciphertextSha256', 'byteLength', 'expiresAt', 'fileName'],
+      ['type', 'operationId', 'sessionId', 'capability', 'ciphertextSha256', 'byteLength', 'expiresAt', 'fileName', 'mediaType'],
       'Companion offer-attachment operation',
     )
     if (typeof record.ciphertextSha256 !== 'string' || !/^[0-9a-f]{64}$/u.test(record.ciphertextSha256)) {
@@ -264,6 +265,10 @@ function parseOperation(value: unknown): CompanionOperation {
     }
     if (new TextEncoder().encode(record.fileName).byteLength > REMOTE_PROTOCOL_LIMITS.attachmentFileNameBytes) {
       invalid('Companion attachment fileName exceeds its byte ceiling')
+    }
+    if (typeof record.mediaType !== 'string' || !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(record.mediaType)
+      || new TextEncoder().encode(record.mediaType).byteLength > REMOTE_PROTOCOL_LIMITS.attachmentMediaTypeBytes) {
+      invalid('Companion attachment mediaType is invalid')
     }
     const byteLength = positiveSafeInteger(record.byteLength, 'Companion attachment byteLength')
     if (byteLength > REMOTE_PROTOCOL_LIMITS.attachmentBlobBytes) {
@@ -278,6 +283,7 @@ function parseOperation(value: unknown): CompanionOperation {
       byteLength,
       expiresAt: positiveSafeInteger(record.expiresAt, 'Companion attachment expiresAt'),
       fileName: record.fileName,
+      mediaType: record.mediaType,
     }
   }
   if (record.type === 'search-sessions') {
@@ -430,6 +436,18 @@ function parseStatusResult(record: Record<string, unknown>): CompanionResult {
 
 function parseProjection(value: unknown): CompanionProjection {
   const record = object(value, 'Companion projection')
+  if (record.type === 'foreground-sync') {
+    exactKeys(record, ['type', 'desktopName', 'generation', 'desktopRevision'], 'Companion foreground-sync projection')
+    if (typeof record.desktopName !== 'string' || record.desktopName.trim() === '' || record.desktopName.length > 128) {
+      invalid('Companion foreground-sync desktopName must contain 1-128 characters')
+    }
+    return {
+      type: 'foreground-sync',
+      desktopName: record.desktopName,
+      generation: positiveSafeInteger(record.generation, 'Companion foreground-sync generation'),
+      desktopRevision: positiveSafeInteger(record.desktopRevision, 'Companion foreground-sync desktopRevision'),
+    }
+  }
   if (record.type !== 'transcript-page') invalid('Companion projection type is unsupported')
   exactKeys(record, ['type', 'sessionId', 'entries'], 'Companion transcript-page projection')
   if (!Array.isArray(record.entries)) invalid('Companion transcript entries must be an array')

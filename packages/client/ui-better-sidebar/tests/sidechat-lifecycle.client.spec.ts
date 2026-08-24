@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { buildSidechatApi } from '../src/sidechat-routes.ts'
 import type { Context } from '../src/context-types.ts'
 
@@ -66,6 +67,77 @@ describe('sidechat route lifecycle', () => {
 
     expect(steer).toHaveBeenCalledOnce()
     expect(followup).not.toHaveBeenCalled()
+    await sidechat.dispose()
+  })
+
+  it('mutates queued Side Chat messages through the owning live Agent', async () => {
+    const queued = createUserMessage({ content: [{ type: 'text', text: 'queued' }], source: { kind: 'user' } })
+    const remove = vi.fn()
+    const steer = vi.fn()
+    const agent = {
+      status: 'running',
+      steer,
+      inbox: { nextTurn: [queued], nextStep: [], remove, replace: vi.fn() },
+    } as unknown as Agent
+    const ctx = {
+      get: (name: string) => name === 'agents' ? { get: () => agent } : undefined,
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.updateQueue']({
+      childId: 'child', itemId: queued.id, action: { kind: 'steer' },
+    })).resolves.toEqual({ accepted: true })
+
+    expect(remove).toHaveBeenCalledWith(queued.id)
+    expect(steer).toHaveBeenCalledWith(queued)
+    await sidechat.dispose()
+  })
+
+  it('synchronizes a Side Chat permission selection with its direct parent', async () => {
+    const setAgent = vi.fn()
+    const parent = { id: 'parent', session: { header: {} } } as unknown as Agent
+    const child = {
+      id: 'child',
+      session: { header: { parentSession: 'parent' } },
+    } as unknown as Agent
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'agents') return { get: (id: string) => id === 'parent' ? parent : id === 'child' ? child : undefined }
+        if (name === 'permissionPresets') return { names: ['workspace-write'], setAgent }
+        return undefined
+      },
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.permission']({
+      childId: 'child', parentSessionId: 'parent', preset: 'workspace-write',
+    })).resolves.toEqual({ selected: 'workspace-write' })
+
+    expect(setAgent).toHaveBeenNthCalledWith(1, parent, 'workspace-write')
+    expect(setAgent).toHaveBeenNthCalledWith(2, child, 'workspace-write')
+    await sidechat.dispose()
+  })
+
+  it('rejects a provisional permission request without an owned live child', async () => {
+    const setAgent = vi.fn()
+    const parent = { id: 'parent', session: { header: {} } } as unknown as Agent
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'agents') return { get: (id: string) => id === 'parent' ? parent : undefined }
+        if (name === 'permissionPresets') return { names: ['workspace-write'], setAgent }
+        return undefined
+      },
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.permission']({
+      childId: 'draft-child',
+      parentSessionId: 'parent',
+      preset: 'workspace-write',
+      provisional: true,
+    })).rejects.toThrow('Side Chat session "draft-child" is not running')
+
+    expect(setAgent).not.toHaveBeenCalled()
     await sidechat.dispose()
   })
 

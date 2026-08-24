@@ -7,28 +7,28 @@
  * request). Failures surface as {@link SidebarApiError} with the wire code.
  */
 import { encodeHtmlUrl } from '../html-route.ts'
-import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { MessageId, ModelSelection, QueueAction, SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { LastActivity } from '../subagent-activity.ts'
 import type { BrowserProbeResult } from './browser.ts'
 
 /** Side Chat ids learned before their list summary reaches the browser. */
-const sidechatSessionIds = new Set<string>()
+const sidechatSessionIds = new Set<SessionId>()
 
 /** Client-only Side Chat identity before its first prompt publishes a Host Session. */
 export interface SidechatDraft {
-  readonly parentSessionId: string
+  readonly parentSessionId: SessionId
   selection?: ModelSelection | undefined
 }
 
-const sidechatDrafts = new Map<string, SidechatDraft>()
+const sidechatDrafts = new Map<SessionId, SidechatDraft>()
 
 /** Whether this browser has created or reattached the exact Side Chat Session. */
-export function isKnownSidechatSession(sessionId: string): boolean {
+export function isKnownSidechatSession(sessionId: SessionId): boolean {
   return sidechatSessionIds.has(sessionId)
 }
 
 /** Register one renderer-only Side Chat draft until its first prompt succeeds. */
-export function registerSidechatDraft(sessionId: string, parentSessionId: string): () => void {
+export function registerSidechatDraft(sessionId: SessionId, parentSessionId: SessionId): () => void {
   sidechatSessionIds.add(sessionId)
   const draft: SidechatDraft = { parentSessionId }
   sidechatDrafts.set(sessionId, draft)
@@ -38,18 +38,18 @@ export function registerSidechatDraft(sessionId: string, parentSessionId: string
 }
 
 /** Read the provisional creation data for one Side Chat identity. */
-export function sidechatDraftOf(sessionId: string): SidechatDraft | undefined {
+export function sidechatDraftOf(sessionId: SessionId): SidechatDraft | undefined {
   return sidechatDrafts.get(sessionId)
 }
 
 /** Retain a validated model selection for the future child Agent. */
-export function noteSidechatDraftSelection(sessionId: string, selection: ModelSelection): void {
+export function noteSidechatDraftSelection(sessionId: SessionId, selection: ModelSelection): void {
   const draft = sidechatDrafts.get(sessionId)
   if (draft !== undefined) draft.selection = selection
 }
 
 /** Mark the provisional identity as published without forgetting Side Chat ownership. */
-export function settleSidechatDraft(sessionId: string): void {
+export function settleSidechatDraft(sessionId: SessionId): void {
   sidechatDrafts.delete(sessionId)
 }
 
@@ -300,13 +300,13 @@ export const api = {
     call<SubagentLiveResult>('subagents.live', { rootSessionId }, signal),
   /** Create the Side Chat Session and admit its first prompt atomically. */
   sidechatStart: async (
-    sessionId: string,
-    childId: string,
+    sessionId: SessionId,
+    childId: SessionId,
     text: string,
     selection: ModelSelection | undefined,
     signal?: AbortSignal,
   ) => {
-    const result = await call<{ childId: string; accepted: true }>('sidechat.start', {
+    const result = await call<{ childId: SessionId; accepted: true }>('sidechat.start', {
       sessionId,
       childId,
       text,
@@ -316,14 +316,14 @@ export const api = {
     return result
   },
   /** Read Side Chat's current model selection and route availability. */
-  sidechatModel: (childId: string, parentSessionId?: string, signal?: AbortSignal) =>
+  sidechatModel: (childId: SessionId, parentSessionId?: SessionId, signal?: AbortSignal) =>
     call<{ current: ModelSelection; routable: boolean }>('sidechat.model', {
       childId,
       ...(parentSessionId === undefined ? {} : { parentSessionId }),
     }, signal),
   /** Validate and apply one Side Chat model selection. */
   sidechatSelectModel: (
-    childId: string,
+    childId: SessionId,
     selection: ModelSelection,
     provisional: boolean,
     signal?: AbortSignal,
@@ -333,13 +333,26 @@ export const api = {
     ...(provisional ? { provisional: true } : {}),
   }, signal),
   /** Deliver one queued or steering message to a Side Chat thread. */
-  sidechatPrompt: (childId: string, text: string, mode: 'queue' | 'steer', signal?: AbortSignal) =>
+  sidechatPrompt: (childId: SessionId, text: string, mode: 'queue' | 'steer', signal?: AbortSignal) =>
     call<{ accepted: true }>('sidechat.prompt', { childId, text, mode }, signal),
   /** Abort a Side Chat thread's running turn (queued work is preserved). */
-  sidechatCancel: (childId: string) =>
+  sidechatCancel: (childId: SessionId) =>
     call<{ accepted: true }>('sidechat.cancel', { childId }),
+  /** Edit, remove, or strictly steer one pending Side Chat message. */
+  sidechatUpdateQueue: (childId: SessionId, itemId: MessageId, action: QueueAction) =>
+    call<{ accepted: true }>('sidechat.updateQueue', { childId, itemId, action }),
+  /** Synchronize one permission preset across the Side Chat and its parent. */
+  sidechatPermission: (
+    childId: SessionId,
+    parentSessionId: SessionId,
+    preset: string,
+  ) => call<{ selected: string }>('sidechat.permission', {
+    childId,
+    parentSessionId,
+    preset,
+  }),
   /** Release a Side Chat thread's live agent (history stays persisted). */
-  sidechatDispose: (childId: string) =>
+  sidechatDispose: (childId: SessionId) =>
     call<{ accepted: true }>('sidechat.dispose', { childId }),
   /** The effective terminal shell and its display name (plugin-global). */
   shellGet: () =>

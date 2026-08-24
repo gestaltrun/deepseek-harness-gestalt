@@ -7,7 +7,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   IconBranchOutline16, IconCodeOutline16, IconFolderOpen16, IconGlobeOutline14,
-  IconThinkOutline16, Menu,
+  IconNewChatOutline16, IconThinkOutline16, Menu,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChromeOverlayShowRequest, DesktopBridge } from '../protocol.ts'
 
@@ -26,6 +26,7 @@ export function overlayMenuIcon(id: string | undefined): ReactNode {
   if (id === 'editor') return <IconFolderOpen16 size={16} />
   if (id === 'git') return <IconBranchOutline16 size={16} />
   if (id === 'subagent') return <IconThinkOutline16 size={16} />
+  if (id === 'sidechat') return <IconNewChatOutline16 size={16} />
   if (id === 'browser') return <IconGlobeOutline14 size={16} />
   if (id === 'terminal') return <IconCodeOutline16 size={16} />
   return undefined

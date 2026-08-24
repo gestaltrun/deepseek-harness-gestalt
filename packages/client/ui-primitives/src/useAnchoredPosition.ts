@@ -1,5 +1,5 @@
 /**
- * Keep a fixed-position floating element anchored to a trigger.
+ * Keep a fixed-position floating element anchored to either edge of a trigger.
  *
  * A portaled panel is positioned from its anchor's viewport rect, which stops
  * being true the moment anything scrolls or the window resizes. This owns that
@@ -24,6 +24,10 @@ export interface AnchoredPositionOptions {
   gap: number
   /** Distance kept between the panel and each viewport edge. */
   margin: number
+  /** Horizontal anchor edge; `start` aligns left edges and `end` aligns right edges. */
+  align?: 'start' | 'end'
+  /** Width used before a portaled panel mounts and can report its own size. */
+  width?: number
 }
 
 /**
@@ -32,7 +36,7 @@ export interface AnchoredPositionOptions {
  * @returns `left`/`top` for the panel, or `null` before the first measurement.
  */
 export function useAnchoredPosition(options: AnchoredPositionOptions): CSSProperties | null {
-  const { open, anchorRef, panelRef, gap, margin } = options
+  const { open, anchorRef, panelRef, gap, margin, align = 'start', width: fallbackWidth = 0 } = options
   const [position, setPosition] = useState<CSSProperties | null>(null)
   useLayoutEffect(() => {
     if (!open) {
@@ -46,9 +50,12 @@ export function useAnchoredPosition(options: AnchoredPositionOptions): CSSProper
       const rect = anchorRef.current?.getBoundingClientRect()
       if (rect === undefined) return
       const panel = panelRef.current
-      const width = panel?.offsetWidth ?? 0
+      const width = panel?.offsetWidth || Math.min(
+        fallbackWidth,
+        Math.max(0, window.innerWidth - margin * 2),
+      )
       const height = panel?.offsetHeight ?? 0
-      let left = rect.left
+      let left = align === 'end' ? rect.right - width : rect.left
       let top = rect.bottom + gap
       if (width > 0) left = Math.min(Math.max(left, margin), window.innerWidth - width - margin)
       if (height > 0) top = Math.min(Math.max(top, margin), window.innerHeight - height - margin)
@@ -76,6 +83,6 @@ export function useAnchoredPosition(options: AnchoredPositionOptions): CSSProper
       window.removeEventListener('scroll', place, true)
       window.removeEventListener('resize', place)
     }
-  }, [open, anchorRef, panelRef, gap, margin])
+  }, [open, anchorRef, panelRef, gap, margin, align, fallbackWidth])
   return position
 }

@@ -327,17 +327,19 @@ describe('CI workflow', () => {
       expect(partition['runs-on']).toContain('DSH_CI_FAILOVER_WINDOWS')
       expect(partition['runs-on']).not.toContain('DSH_CI_FAILOVER_LINUX')
       expect(partition['runs-on']).toContain('dsh-win-ci')
-      expect(partition['runs-on']).toContain('windows-latest')
       expect(partition.if).toContain(prAfterPreflight)
       expect(partition['timeout-minutes']).toBe(20)
     }
+    expect(windowsNativeCore['runs-on']).toContain('windows-latest')
+    expect(windowsNativeStatic['runs-on']).toContain('windows-latest')
+    expect(windowsNativeCoverage['runs-on']).toContain('dsh-windows-2025-8core')
     expect(windowsNativeCoverage.env).toMatchObject({
+      DSH_COVERAGE_MAX_WORKERS: '8',
       DSH_COVERAGE_PARTITIONS: '8',
+      DSH_COVERAGE_PARTITION_CONCURRENCY: '8',
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000',
       DSH_GATE_CONCURRENCY: '2',
     })
-    expect(String(windowsNativeCoverage.env.DSH_COVERAGE_MAX_WORKERS)).toContain("|| '4'")
-    expect(String(windowsNativeCoverage.env.DSH_COVERAGE_PARTITION_CONCURRENCY)).toContain("|| '4'")
     expect(windowsNativeVerdict.needs).toEqual([
       'preflight',
       'windows-native-core',

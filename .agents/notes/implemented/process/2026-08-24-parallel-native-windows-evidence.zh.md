@@ -12,7 +12,7 @@
 
 原生清单按独立 artifact 所有权拆成 3 个普通 Windows job。`native build and runtime` 负责 workspace build、生产站点、Electron runtime、基于构建产物的 doc typecheck、package 发布检查、NodeNext 声明、构建 package invariant 和构建二进制冒烟。`native coverage` 负责两项完整覆盖率 gate，保留每文件 100% 阈值和 8 个隔离的单 worker shard。`native static portability` 负责源码静态 policy、除已归属站点与构建 doc typecheck 之外的文档检查、module graph、Knip 和 duplication。
 
-覆盖率 job 在 `windows-latest` 上并发运行 4 个 shard 进程，在现有故障切换池上并发运行 8 个。豁免重型 gate 与分区覆盖率共享两个顶层 gate 的预算。每个 job 都有独立的 immutable install 和 20 分钟 timeout，因此 setup 重复换来了互不共享可变构建产物的独立时钟。
+覆盖率 job 在仓库的 hosted 8 核 Windows 池和现有故障切换池上并发运行 8 个 single-worker shard 进程。豁免重型 gate 与分区覆盖率共享两个顶层 gate 的预算。构建/runtime 与静态可移植性继续使用标准 hosted runner。每个 job 都有独立的 immutable install 和 20 分钟 timeout，因此 setup 重复换来了互不共享可变构建产物的独立时钟。
 
 `windows node 24 / native verdict` 会在 3 个分区全部结束后运行；任一分区失败、取消或跳过时都会失败。各分区 job 与 verdict 都保留普通且未掩盖的结论。verdict 仍位于必需 `all checks passed` aggregate 之外，而 Wine job 保持必需且不变。
 

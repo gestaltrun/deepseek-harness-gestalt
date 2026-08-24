@@ -1,4 +1,4 @@
-/** Coordinate single-worker Vitest coverage partitions and one merged report. */
+/** Coordinate parallel Vitest coverage partitions, exclusive real-process suites, and one merged report. */
 import { spawn } from 'node:child_process'
 import { lstat, mkdir, readdir, rm, unlink } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
@@ -19,8 +19,21 @@ export const COVERAGE_PRESERVE_BLOBS_ENV = 'DSH_COVERAGE_PRESERVE_BLOBS'
 /** Internal marker that suppresses reports and thresholds inside a partition process. */
 export const COVERAGE_PARTITION_MODE_ENV = 'DSH_COVERAGE_PARTITION_MODE'
 
+/** Internal marker selecting the serialized real-process coverage suites. */
+export const COVERAGE_EXCLUSIVE_MODE_ENV = 'DSH_COVERAGE_EXCLUSIVE_MODE'
+
 /** Environment variable overriding instrumented test and polling timeouts. */
 export const COVERAGE_TEST_TIMEOUT_ENV = 'DSH_COVERAGE_TEST_TIMEOUT_MS'
+
+/** Real-process suites that must not overlap other instrumented processes. */
+export const coverageExclusiveSuites = [
+  'packages/shell/pwsh-local/tests/executor.spec.ts',
+  'packages/shell/pwsh-sandbox/tests/sandbox.spec.ts',
+  'packages/shell/tool-pwsh-persistent/tests/loader-composition.spec.ts',
+  'packages/shell/tool-pwsh/tests/integration.spec.ts',
+  'packages/shell/tool-pwsh/tests/loader.spec.ts',
+  'packages/terminal/terminal-bash/tests/local.spec.ts',
+] as const
 
 /** One child command owned by the coverage coordinator. */
 export interface CoverageCommand {
@@ -127,7 +140,7 @@ export function forwardedCoverageArgs(args: readonly string[]): string[] {
   return [...args.slice(args[0] === '--' ? 1 : 0)]
 }
 
-/** Run instrumented partitions, validate their blobs, and merge once. */
+/** Run instrumented partitions plus exclusive suites, validate their blobs, and merge once. */
 export class CoveragePartitionCoordinator {
   private readonly root: string
   private readonly partitions: number
@@ -173,7 +186,7 @@ export class CoveragePartitionCoordinator {
   }
 
   /**
-   * Run every partition before one merged threshold check.
+   * Run every partition, then exclusive real-process suites, before one merged threshold check.
    * @returns zero only when every partition and the merge command succeed.
    */
   public async run(): Promise<number> {
@@ -210,6 +223,21 @@ export class CoveragePartitionCoordinator {
         { length: Math.min(this.maxConcurrency, commands.length) },
         worker,
       ))
+      const exclusiveCommand = this.partitionIndexes.includes(1)
+        ? this.exclusiveCommand()
+        : undefined
+      if (exclusiveCommand !== undefined) {
+        console.log(`coverage-partitions: start ${exclusiveCommand.label}`)
+        const result = await this.runCommand(exclusiveCommand)
+        results.push(result)
+        commands.push(exclusiveCommand)
+        if (commandFailed(result)) {
+          console.error(`coverage-partitions: FAIL ${exclusiveCommand.label} (${commandFailureReason(result)})`)
+          if (result.outputTail !== undefined && result.outputTail !== '') {
+            console.error(`coverage-partitions: output tail for ${exclusiveCommand.label}:\n${result.outputTail}`)
+          }
+        }
+      }
       await this.assertCompleteBlobSet(commands)
 
       if (!this.mergeReports) return results.some(commandFailed) ? 1 : 0
@@ -247,6 +275,7 @@ export class CoveragePartitionCoordinator {
         [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: '1',
+        [COVERAGE_EXCLUSIVE_MODE_ENV]: undefined,
         [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       },
       cwd: this.root,
@@ -269,9 +298,43 @@ export class CoveragePartitionCoordinator {
         [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: undefined,
+        [COVERAGE_EXCLUSIVE_MODE_ENV]: undefined,
         [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       },
       cwd: this.root,
+    }
+  }
+
+  private exclusiveCommand(): CoverageCommand {
+    const blobPath = join(this.blobsRoot, 'exclusive-real-process.json')
+    const reportsDirectory = join(this.temporaryRoot, 'coverage-exclusive-real-process')
+    const invocation = pnpmInvocation([
+      'exec',
+      'vitest',
+      'run',
+      '--coverage',
+      '--coverage.reportOnFailure',
+      '--maxWorkers=1',
+      '--reporter=default',
+      '--reporter=blob',
+      `--outputFile.blob=${this.relativePath(blobPath)}`,
+      `--coverage.reportsDirectory=${this.relativePath(reportsDirectory)}`,
+      ...coverageExclusiveSuites,
+      ...this.vitestArgs,
+    ], { npm_execpath: this.pnpmEntrypoint })
+    return {
+      label: 'exclusive real-process coverage',
+      ...invocation,
+      env: {
+        [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
+        [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
+        [COVERAGE_PARTITIONS_ENV]: undefined,
+        [COVERAGE_PARTITION_MODE_ENV]: undefined,
+        [COVERAGE_EXCLUSIVE_MODE_ENV]: '1',
+        [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
+      },
+      cwd: this.root,
+      blobPath,
     }
   }
 

@@ -4,12 +4,14 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   COVERAGE_PARTITION_MODE_ENV,
+  COVERAGE_EXCLUSIVE_MODE_ENV,
   COVERAGE_PARTITION_CONCURRENCY_ENV,
   COVERAGE_PARTITION_INDEXES_ENV,
   COVERAGE_PRESERVE_BLOBS_ENV,
   COVERAGE_PARTITIONS_ENV,
   COVERAGE_TEST_TIMEOUT_ENV,
   CoveragePartitionCoordinator,
+  coverageExclusiveSuites,
   coverageTestTimeoutArgs,
   forwardedCoverageArgs,
   parseCoveragePartitionConcurrency,
@@ -115,6 +117,66 @@ describe('coverage forwarded arguments', () => {
 })
 
 describe('coverage partition coordinator', () => {
+  it('runs real PowerShell coverage once after concurrent partitions', async () => {
+    const root = await temporaryRoot()
+    const commands: CoverageCommand[] = []
+    const coordinator = new CoveragePartitionCoordinator({
+      root,
+      partitions: 3,
+      maxConcurrency: 3,
+      pnpmEntrypoint: '/pnpm.cjs',
+      runCommand: successfulCommandRecorder(commands),
+    })
+
+    await expect(coordinator.run()).resolves.toBe(0)
+    expect(commands.map(command => command.label)).toEqual([
+      'partition 1/3',
+      'partition 2/3',
+      'partition 3/3',
+      'exclusive real-process coverage',
+      'merged coverage report',
+    ])
+    const exclusive = commands[3]
+    if (exclusive === undefined) throw new Error('exclusive coverage command was not observed')
+    expect(exclusive.args).toEqual(expect.arrayContaining([
+      '--coverage',
+      '--coverage.reportOnFailure',
+      '--maxWorkers=1',
+      ...coverageExclusiveSuites,
+    ]))
+    expect(exclusive.args.some(argument => argument.startsWith('--shard='))).toBe(false)
+    expect(exclusive.env).toMatchObject({
+      [COVERAGE_PARTITION_MODE_ENV]: undefined,
+      [COVERAGE_EXCLUSIVE_MODE_ENV]: '1',
+    })
+  })
+
+  it('assigns exclusive coverage to the subset that owns partition one', async () => {
+    const root = await temporaryRoot()
+    const commands: CoverageCommand[] = []
+    const coordinator = new CoveragePartitionCoordinator({
+      root,
+      partitions: 8,
+      partitionIndexes: [1, 2, 3, 4],
+      mergeReports: false,
+      preserveBlobs: true,
+      maxConcurrency: 2,
+      pnpmEntrypoint: '/pnpm.cjs',
+      runCommand: successfulCommandRecorder(commands),
+    })
+
+    await expect(coordinator.run()).resolves.toBe(0)
+    expect(commands.map(command => command.label)).toEqual([
+      'partition 1/8',
+      'partition 2/8',
+      'partition 3/8',
+      'partition 4/8',
+      'exclusive real-process coverage',
+    ])
+    await expect(access(join(root, 'coverage/.partitioned/blobs/exclusive-real-process.json')))
+      .resolves.toBeUndefined()
+  })
+
   it('retains an explicit subset without merging it', async () => {
     const root = await temporaryRoot()
     const commands: CoverageCommand[] = []
@@ -168,6 +230,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/3',
       'partition 2/3',
       'partition 3/3',
+      'exclusive real-process coverage',
       'merged coverage report',
     ])
   })
@@ -190,6 +253,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/3',
       'partition 2/3',
       'partition 3/3',
+      'exclusive real-process coverage',
       'merged coverage report',
     ])
     for (const [index, command] of commands.slice(0, 3).entries()) {
@@ -212,7 +276,7 @@ describe('coverage partition coordinator', () => {
         [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       })
     }
-    const mergeCommand = commands[3]
+    const mergeCommand = commands[4]
     if (mergeCommand === undefined) throw new Error('coverage merge command was not observed')
     expect(mergeCommand.args).toContain('--coverage')
     expect(mergeCommand.args.some(argument => argument.startsWith('--merge-reports='))).toBe(true)
@@ -237,7 +301,7 @@ describe('coverage partition coordinator', () => {
     })
 
     await expect(coordinator.run()).resolves.toBe(0)
-    expect(commands).toHaveLength(3)
+    expect(commands).toHaveLength(4)
     for (const command of commands) {
       expect(command.command).toBe('/tools/pnpm')
       expect(command.args[0]).toBe('exec')
@@ -265,7 +329,38 @@ describe('coverage partition coordinator', () => {
     expect(reported).toHaveBeenCalledWith(
       'coverage-partitions: output tail for partition 2/2:\nspecific Vitest failure',
     )
-    expect(runCommand).toHaveBeenCalledTimes(3)
+    expect(runCommand).toHaveBeenCalledTimes(4)
+  })
+
+  it('merges an exclusive-suite failure and returns its failed status', async () => {
+    const root = await temporaryRoot()
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const runCommand = vi.fn(async (command: CoverageCommand) => {
+      await writeBlob(command)
+      return command.label === 'exclusive real-process coverage'
+        ? { exitCode: 1, signalCode: null, outputTail: 'specific PowerShell failure' }
+        : passed
+    })
+    const coordinator = new CoveragePartitionCoordinator({
+      root,
+      partitions: 2,
+      pnpmEntrypoint: '/pnpm.cjs',
+      runCommand,
+    })
+
+    await expect(coordinator.run()).resolves.toBe(1)
+    expect(reported).toHaveBeenCalledWith(
+      'coverage-partitions: FAIL exclusive real-process coverage (exit 1)',
+    )
+    expect(reported).toHaveBeenCalledWith(
+      'coverage-partitions: output tail for exclusive real-process coverage:\nspecific PowerShell failure',
+    )
+    expect(runCommand.mock.calls.map(([command]) => command.label)).toEqual([
+      'partition 1/2',
+      'partition 2/2',
+      'exclusive real-process coverage',
+      'merged coverage report',
+    ])
   })
 
   it('retries one partition once after an isolated Vitest worker exit', async () => {
@@ -302,6 +397,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/2',
       'partition 1/2',
       'partition 2/2',
+      'exclusive real-process coverage',
       'merged coverage report',
     ])
   })
@@ -320,7 +416,7 @@ describe('coverage partition coordinator', () => {
     })
 
     await expect(coordinator.run()).rejects.toThrow('coverage partitions produced')
-    expect(runCommand).toHaveBeenCalledTimes(2)
+    expect(runCommand).toHaveBeenCalledTimes(3)
   })
 
   it('reports signal termination before missing-blob validation', async () => {
@@ -365,7 +461,7 @@ describe('coverage partition coordinator', () => {
     await expect(coordinator.run()).resolves.toBe(1)
     expect(reported).toHaveBeenCalledWith('coverage-partitions: FAIL partition 1/2 (spawn unavailable)')
     expect(secondFinished).toBe(true)
-    expect(runCommand).toHaveBeenCalledTimes(3)
+    expect(runCommand).toHaveBeenCalledTimes(4)
   })
 
   it('unlinks a link-shaped coverage path without touching its target', async () => {

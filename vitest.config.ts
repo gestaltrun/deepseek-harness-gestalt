@@ -3,7 +3,11 @@ import tsconfigPaths from 'vite-tsconfig-paths'
 import { defineConfig } from 'vitest/config'
 import { standardDecoratorPlugin, vitestExecArgv } from './vitest.shared.ts'
 import { COVERAGE_EXEMPT_ENV, coverageExemptHeavySuites } from './scripts/coverage-exempt.ts'
-import { COVERAGE_PARTITION_MODE_ENV } from './scripts/coverage-partitions.ts'
+import {
+  COVERAGE_EXCLUSIVE_MODE_ENV,
+  COVERAGE_PARTITION_MODE_ENV,
+  coverageExclusiveSuites,
+} from './scripts/coverage-partitions.ts'
 import { testPwshAvailable } from './scripts/pwsh-test-availability.ts'
 
 // Prints exact `path:line:col` records for every uncovered statement, branch
@@ -115,6 +119,14 @@ if (coveragePartitionRaw !== undefined && coveragePartitionRaw !== '' && coverag
 }
 const coveragePartitionMode = coveragePartitionRaw === '1'
 
+const coverageExclusiveRaw = process.env[COVERAGE_EXCLUSIVE_MODE_ENV]
+if (coverageExclusiveRaw !== undefined && coverageExclusiveRaw !== '' && coverageExclusiveRaw !== '1') {
+  throw new Error(`vitest config: ${COVERAGE_EXCLUSIVE_MODE_ENV} must be '1' or unset, got ${JSON.stringify(coverageExclusiveRaw)}.`)
+}
+const coverageExclusiveMode = coverageExclusiveRaw === '1'
+const coveragePartialMode = coveragePartitionMode || coverageExclusiveMode
+const coverageExclusiveExcludes = coveragePartitionMode ? coverageExclusiveSuites : []
+
 // These suites exercise process-global state, process APIs, or timing-sensitive process I/O
 // that worker threads cannot isolate reliably under aggregate gate contention.
 // Keep the narrow exception in forks while the rest of the inventory avoids per-file processes.
@@ -154,6 +166,7 @@ export default defineConfig({
             ...windowsUnsupportedTests,
             ...processBoundTests,
             ...coverageExemptExcludes,
+            ...coverageExclusiveExcludes,
           ],
         },
       },
@@ -168,6 +181,7 @@ export default defineConfig({
           exclude: [
             ...windowsUnsupportedTests,
             ...coverageExemptExcludes,
+            ...coverageExclusiveExcludes,
           ],
         },
       },
@@ -295,7 +309,7 @@ export default defineConfig({
       // Per-file so a well-covered big file can't subsidize a bare one.
       // Every v8 ignore comment must carry a reason — see the quality-gates Agent Note
       // (.agents/notes/implemented/process/2026-06-11-quality-gates.md).
-      thresholds: coveragePartitionMode
+      thresholds: coveragePartialMode
         ? undefined
         : {
             perFile: true,
@@ -304,7 +318,7 @@ export default defineConfig({
             functions: 100,
             lines: 100,
           },
-      reporter: coveragePartitionMode
+      reporter: coveragePartialMode
         ? []
         : process.env.CI
           ? ['text', uncoveredLocationsReporter]

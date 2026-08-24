@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { CodeBlock } from '../src/markdown/CodeBlock.tsx'
-import { highlightToHtml } from '../src/markdown/highlight.ts'
+import { highlightToHtml, subscribeGrammarLoaded } from '../src/markdown/highlight.ts'
 
 afterEach(cleanup)
 
@@ -42,12 +42,20 @@ describe('highlightToHtml', () => {
   ]
 
   it('lazily loads every read-card grammar: plain first, highlighted after load', async () => {
+    let dispose = (): void => undefined
+    const loaded = new Promise<void>((resolve) => {
+      dispose = subscribeGrammarLoaded(() => {
+        if (LAZY_ALIASES.every(alias => highlightToHtml('x', alias)?.includes('shiki') === true)) resolve()
+      })
+    })
     // First touch returns the plain fallback (undefined) and starts the import.
     for (const alias of LAZY_ALIASES) expect(highlightToHtml('x', alias)).toBeUndefined()
-    // Once every grammar has registered, the same call highlights.
-    await vi.waitFor(() => {
-      for (const alias of LAZY_ALIASES) expect(highlightToHtml('x', alias)).toContain('shiki')
-    }, { timeout: 5_000 })
+    try {
+      await loaded
+    } finally {
+      dispose()
+    }
+    for (const alias of LAZY_ALIASES) expect(highlightToHtml('x', alias)).toContain('shiki')
   })
 })
 

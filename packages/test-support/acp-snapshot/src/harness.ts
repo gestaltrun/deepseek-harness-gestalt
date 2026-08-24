@@ -615,16 +615,19 @@ async function waitForPersistedGoalPhase(
   phase: string,
   timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
 ): Promise<void> {
-  await vi.waitFor(async () => {
-    const content = (await harvestSessionLogs(root)).find(log => log.id === sessionId)?.content
-    const matched = content?.split('\n').filter(Boolean).some((line) => {
-      const event = JSON.parse(line) as { type?: unknown; data?: { goal?: { phase?: unknown } } }
-      return event.type === 'goal/change' && event.data?.goal?.phase === phase
-    }) ?? false
-    if (!matched) {
-      throw new Error(`snapshot-harness: session "${sessionId}" did not persist goal phase "${phase}" within ${timeoutMs}ms`)
-    }
-  }, { interval: WAIT_POLL_INTERVAL_MS, timeout: timeoutMs })
+  const message = `snapshot-harness: session "${sessionId}" did not persist goal phase "${phase}" within ${timeoutMs}ms`
+  try {
+    await vi.waitFor(async () => {
+      const content = (await harvestSessionLogs(root)).find(log => log.id === sessionId)?.content
+      const matched = content?.split('\n').filter(Boolean).some((line) => {
+        const event = JSON.parse(line) as { type?: unknown; data?: { goal?: { phase?: unknown } } }
+        return event.type === 'goal/change' && event.data?.goal?.phase === phase
+      }) ?? false
+      if (!matched) throw new Error(message)
+    }, { interval: WAIT_POLL_INTERVAL_MS, timeout: timeoutMs })
+  } catch (error) {
+    throw new Error(message, { cause: error })
+  }
 }
 
 /** Wait until an inserted inbox message contains scenario-owned text. */
@@ -634,21 +637,24 @@ async function waitForPersistedInboxMessage(
   text: string,
   timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
 ): Promise<void> {
-  await vi.waitFor(async () => {
-    const log = (await harvestSessionLogs(root)).find(candidate => candidate.id === sessionId)
-    const matched = log?.content.split('\n').filter(Boolean).some((line) => {
-      const record = JSON.parse(line) as {
-        type?: unknown
-        data?: { inserted?: Array<{ content?: Array<{ type?: unknown; text?: unknown }> }> }
-      }
-      return record.type === 'agent/inbox/spliced' && record.data?.inserted?.some(message =>
-        message.content?.some(block => block.type === 'text'
-          && typeof block.text === 'string' && block.text.includes(text))) === true
-    }) ?? false
-    if (!matched) {
-      throw new Error(`snapshot-harness: session "${sessionId}" did not persist expected inbox message within ${timeoutMs}ms`)
-    }
-  }, { interval: WAIT_POLL_INTERVAL_MS, timeout: timeoutMs })
+  const message = `snapshot-harness: session "${sessionId}" did not persist expected inbox message within ${timeoutMs}ms`
+  try {
+    await vi.waitFor(async () => {
+      const log = (await harvestSessionLogs(root)).find(candidate => candidate.id === sessionId)
+      const matched = log?.content.split('\n').filter(Boolean).some((line) => {
+        const record = JSON.parse(line) as {
+          type?: unknown
+          data?: { inserted?: Array<{ content?: Array<{ type?: unknown; text?: unknown }> }> }
+        }
+        return record.type === 'agent/inbox/spliced' && record.data?.inserted?.some(message =>
+          message.content?.some(block => block.type === 'text'
+            && typeof block.text === 'string' && block.text.includes(text))) === true
+      }) ?? false
+      if (!matched) throw new Error(message)
+    }, { interval: WAIT_POLL_INTERVAL_MS, timeout: timeoutMs })
+  } catch (error) {
+    throw new Error(message, { cause: error })
+  }
 }
 
 /** Whether a child log contains model work after its own descriptor event. */

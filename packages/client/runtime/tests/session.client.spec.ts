@@ -450,12 +450,14 @@ describe('prompt and cancel errors', () => {
     const api = new FakeApiClient()
     const prompt = vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } }))
     const cancel = vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } }))
+    const command = vi.fn(() => Promise.resolve({ ok: true as const, value: { matched: true } }))
     const adapter = {
       id: 'sidechat',
       handles: () => true,
       historyScope: 'owned-suffix' as const,
       prompt,
       cancel,
+      command,
     }
     const session = new Session(SID, api, fakeRemote(), {
       conversation: TEST_CONVERSATION,
@@ -471,13 +473,39 @@ describe('prompt and cancel errors', () => {
     await session.open()
     await session.prompt([{ type: 'text', text: 'follow up' }], 'queue')
     await session.cancel()
+    await session.command('/permission workspace-write')
 
     expect(chatSeqs(session.getSnapshot())).toEqual(own.map(event => event.seq))
     expect(session.getSnapshot().hasMore).toBe(false)
     expect(prompt).toHaveBeenCalledWith(SID, [{ type: 'text', text: 'follow up' }], 'queue', undefined)
     expect(cancel).toHaveBeenCalledWith(SID)
+    expect(command).toHaveBeenCalledWith(SID, '/permission workspace-write')
     expect(api.callsOf('session.prompt')).toEqual([])
     expect(api.callsOf('session.cancel')).toEqual([])
+  })
+
+  it('does not fall through omitted feature-owned queue and command routes', async () => {
+    const api = new FakeApiClient()
+    const remote = fakeRemote()
+    const execute = vi.spyOn(remote.commands, 'execute')
+    const adapter = {
+      id: 'feature-owned',
+      handles: () => true,
+      prompt: vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } })),
+      cancel: vi.fn(() => Promise.resolve({ ok: true as const, value: { accepted: true as const } })),
+    }
+    const session = new Session(SID, api, remote, { admission: () => adapter })
+
+    await expect(session.updateQueue('message-1' as never, { kind: 'remove' })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    })
+    await expect(session.command('/permission workspace-write')).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'internal' },
+    })
+    expect(api.callsOf('session.updateQueue')).toEqual([])
+    expect(execute).not.toHaveBeenCalled()
   })
 
   it('routes an addressed child through non-activating history, continuation prompt, and interrupt only', async () => {

@@ -158,6 +158,8 @@ describe('sessions', () => {
 
     runtime.sessions.openForRender('s1' as SessionId)
     expect(runtime.sessions.modelRoute('s1' as SessionId)).toBeUndefined()
+    expect(runtime.sessions.commandCatalogSessionId('s1' as SessionId)).toBe('s1')
+    expect(runtime.sessions.skillCatalogSessionId('s1' as SessionId)).toBe('s1')
     expect(runtime.sessions.provideInfoFor('s1' as SessionId)).toBe(runtime.sessions.provideInfo('s1'))
     const unstage = runtime.sessions.stageProvisional({
       sessionId: 'provisional' as SessionId,

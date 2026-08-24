@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
-import { SideChatView } from '../src/client/SideChatView.tsx'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import { SideChatView, sidechatRootThreadIdOf } from '../src/client/SideChatView.tsx'
 import { builtinTabs } from '../src/client/builtins/tabs.tsx'
+import { api } from '../src/client/api.ts'
 import type { Context, SidebarSessionList } from '../src/context-types.ts'
 import type { SidebarTab } from '../src/client/state.ts'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 function tab(threadId: string): SidebarTab {
   return {
@@ -31,6 +36,22 @@ describe('SideChatView', () => {
       id: 'sidechat:session-draft-id',
       meta: { threadId: 'session-draft-id', provisional: true },
     })
+    expect(sidechatRootThreadIdOf({
+      ...created!.tab,
+      meta: { threadId: 'nested-child', rootThreadId: 'session-draft-id' },
+    })).toBe('session-draft-id')
+  })
+
+  it('releases the root Side Chat handle after descendant navigation', () => {
+    const descriptor = builtinTabs({} as Context).find(candidate => candidate.id === 'sidechat')!
+    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ ok: true })
+
+    descriptor.onClose?.({
+      ...tab('nested-child'),
+      meta: { threadId: 'nested-child', rootThreadId: 'side-thread' },
+    }, { sessionId: 'main-thread' })
+
+    expect(dispose).toHaveBeenCalledWith('side-thread')
   })
 
   it('mounts the canonical conversation slot for the tab thread without changing the selected Session', () => {
@@ -52,6 +73,7 @@ describe('SideChatView', () => {
     const open = vi.fn()
     const unstage = vi.fn()
     const stageProvisional = vi.fn(() => unstage)
+    const updateTab = vi.fn()
     const ctx = {
       sessions: {
         list: {
@@ -62,7 +84,7 @@ describe('SideChatView', () => {
         stageProvisional,
       },
       uiRenderer: { mountSession },
-      betterSidebar: { updateTab: vi.fn() },
+      betterSidebar: { updateTab },
     } as unknown as Context
 
     const view = render(
@@ -78,8 +100,15 @@ describe('SideChatView', () => {
       expect.any(HTMLDivElement),
       'conversation',
       'side-thread',
-      { renderMode: 'sidechat' },
+      { renderMode: 'sidechat', openSession: expect.any(Function) },
     )
+    const owner = mountSession.mock.calls[0]?.[3] as {
+      openSession?: (sessionId: SessionId) => void
+    } | undefined
+    owner?.openSession?.('nested-child' as SessionId)
+    expect(updateTab).toHaveBeenCalledWith('sidechat:side-thread', {
+      meta: { threadId: 'nested-child', rootThreadId: 'side-thread' },
+    })
     expect(snapshot.current).toBe('main-thread')
     expect(open).not.toHaveBeenCalled()
     expect(view.queryByRole('button')).toBeNull()

@@ -65,7 +65,7 @@ function equalBreadcrumbs(left: readonly Breadcrumb[], right: readonly Breadcrum
  */
 export function ConversationSessionHeader({
   sessionId, useSession, useSessions, useStore, actions,
-  renderSlot, views, open, t, renderMode,
+  renderSlot, views, open, t, renderMode, openSession,
 }: ConversationSessionHeaderProps) {
   useSyncExternalStore(views.subscribe, views.version)
   const tabs = views.list()
@@ -79,7 +79,7 @@ export function ConversationSessionHeader({
   const composerPhase = useSession(s => s.composerPhase)
   const blank = useSession(s => s.blank)
   const hideChrome = !sidechat && blank && composerPhase === 'blank'
-  const actionOwner = sidechat ? { renderMode } : {}
+  const actionOwner = sidechat ? { renderMode, openSession } : {}
   const actionsView = (
     <div className={css.headerActions}>
       {renderSlot('conversation.session.header.actions', actionOwner)}

@@ -91,7 +91,7 @@ export function InputBar({
   const input = useInput(s => s)
   const notice = useNotices(s => s)
   const lexicon = useLexicon(s => s)
-  const commandMenuOpen = useMenuLauncher(source => source === 'command')
+  const commandMenuOpen = useMenuLauncher(source => source === '/')
   const promptError = useSession(s => s.promptError) ?? null
   const running = useSession(s => s.running) ?? false
   const subagent = useSession(s => s.subagent) ?? null

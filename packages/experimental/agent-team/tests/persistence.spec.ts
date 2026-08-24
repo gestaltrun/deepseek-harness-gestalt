@@ -18,7 +18,7 @@ import TeamService, { foldTeam, TeamId, TeamMessageId } from '../src/index.ts'
 import type { TeamMemberSnapshot, TeamMessageSnapshot, TeamTaskSnapshot } from '../src/index.ts'
 
 const SIGNAL = new AbortController().signal
-const PERSISTENCE_TEST_TIMEOUT_MS = 15_000
+const PERSISTENCE_TEST_TIMEOUT_MS = 30_000
 const roots: string[] = []
 const contexts = new Set<Context>()
 

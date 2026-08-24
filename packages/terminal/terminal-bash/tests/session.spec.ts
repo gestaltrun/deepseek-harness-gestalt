@@ -230,6 +230,51 @@ describe('LocalPtySession readiness and output', () => {
     expect((await operation.done).waitReason).toBe('inferred_idle')
   })
 
+  it('requires the owned pwsh prompt after an early stdin-wait sample', async () => {
+    vi.useFakeTimers()
+    const terminal = new FakeTerminal()
+    const inspector = new FakeInspector()
+    inspector.waiting = false
+    const session = makeSession(terminal, inspector, config({
+      shellDialect: 'pwsh',
+      shellPath: 'pwsh',
+      idleSilenceMs: 100,
+      timeoutMs: 200,
+    }))
+    await initialize(session, terminal)
+
+    const operation = session.startSend({ text: 'Write-Output ready', submit: true })
+    let settled = false
+    void operation.done.then(() => { settled = true })
+    await Promise.resolve()
+    await Promise.resolve()
+    terminal.emitData('Write-Output ready\n')
+    inspector.waiting = true
+    await vi.advanceTimersByTimeAsync(20)
+    expect(settled).toBe(false)
+
+    terminal.emitData('\x1b]133;D;0\x07dsh> ')
+    await vi.advanceTimersByTimeAsync(10)
+    expect((await operation.done).waitReason).toBe('stdin_read')
+  })
+
+  it('accepts an exact stdin wait from a pwsh foreground child', async () => {
+    vi.useFakeTimers()
+    const terminal = new FakeTerminal()
+    const inspector = new FakeInspector()
+    const session = makeSession(terminal, inspector, config({ shellDialect: 'pwsh', shellPath: 'pwsh' }))
+    await initialize(session, terminal)
+
+    const operation = session.startSend({ text: 'python', submit: true })
+    await Promise.resolve()
+    await Promise.resolve()
+    inspector.pgid = 789
+    inspector.waiting = true
+    terminal.emitData('Python\n>>> ')
+    await vi.advanceTimersByTimeAsync(20)
+    expect(await operation.done).toMatchObject({ waitReason: 'stdin_read', viewport: 'Python\n>>> ' })
+  })
+
   it('uses CR on Windows and LF on Unix for pwsh submit', () => {
     expect(pwshSubmitTerminator('win32')).toBe('\r')
     expect(pwshSubmitTerminator('linux')).toBe('\n')

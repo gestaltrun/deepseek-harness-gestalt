@@ -12,9 +12,11 @@ PR job 会恢复依赖和浏览器缓存，但没有默认分支 owner 生产其
 
 `CI cache producer` 会在每次 master push、每日以及手动 dispatch 时，针对 hosted Linux x64 和 Windows x64 运行。它固定 Node 24 与 pnpm 11.7.0，配置平台的内容寻址 pnpm store，执行 immutable install，准备 Playwright Chromium，并且只保存这两个自有缓存目录。
 
+PowerShell setup 会先在当前进程设置 `PNPM_CONFIG_STORE_DIR`，再解析 `pnpm store path`，同时通过 `GITHUB_ENV` 将它导出给后续步骤。因此 cache action 拥有的版本化目录正是后续 install 写入的目录；如果只写入 `GITHUB_ENV`，当前步骤仍会解析到 `pnpm/action-setup` 的临时 store，而该目录会在 job 收尾时被删除。
+
 Producer 与 consumer 使用完全相同的 key 形式：仓库 namespace、OS、架构、Node、pnpm、缓存种类和 lockfile 摘要。Restore fallback 只移除最后的 lockfile 摘要，因此不会跨越任一环境组件。PR worker 使用仅恢复 action，并保留无条件 install 与 Playwright 准备，使未命中或 lockfile 过期只会进入冷启动但正确的路径。
 
-Gate 报告会解析 workflow 提供的带版本 cache-evidence 数组，并记录每个 cache id、primary key、matched key 和精确命中布尔值。Workflow contract tests 会固定 producer trigger、平台矩阵、key、fallback 前缀、干净 install、consumer restore，以及 cache path 中不存在 `node_modules`。
+Gate 报告会解析 workflow 提供的带版本 cache-evidence 数组，并记录每个 cache id、primary key、matched key 和精确命中布尔值。Workflow contract tests 会固定 producer trigger、平台矩阵、key、fallback 前缀、干净 install、consumer restore、PowerShell 在解析路径前完成当前进程配置，以及 cache path 中不存在 `node_modules`。
 
 ## 考虑过的替代方案
 

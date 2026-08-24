@@ -12,9 +12,11 @@ Pull-request jobs restored dependency and browser caches, but no default-branch 
 
 `CI cache producer` runs on each master push, daily, and by manual dispatch for hosted Linux x64 and Windows x64. It pins Node 24 and pnpm 11.7.0, configures the platform's content-addressed pnpm store, performs an immutable install, provisions Playwright Chromium, and saves only those two owned cache directories.
 
+PowerShell setup assigns `PNPM_CONFIG_STORE_DIR` in the current process before resolving `pnpm store path`, then also exports it through `GITHUB_ENV` for later steps. The cache action therefore owns the same versioned directory that the following install populates; writing only to `GITHUB_ENV` would leave the current resolution on the temporary `pnpm/action-setup` store, which is removed during post-job cleanup.
+
 Producer and consumer keys share the exact form: repository namespace, OS, architecture, Node, pnpm, cache kind, and lockfile digest. Restore fallback removes only the final lockfile digest, so it never crosses an environment component. Pull-request workers use restore-only actions and retain unconditional install and Playwright provisioning, making a miss or stale lockfile a cold but correct path.
 
-Gate reports parse a versioned cache-evidence array supplied by the workflow and record each cache id, primary key, matched key, and exact-hit boolean. Workflow contract tests pin producer triggers, platform matrix, keys, fallback prefixes, clean installs, consumer restores, and the absence of `node_modules` cache paths.
+Gate reports parse a versioned cache-evidence array supplied by the workflow and record each cache id, primary key, matched key, and exact-hit boolean. Workflow contract tests pin producer triggers, platform matrix, keys, fallback prefixes, clean installs, consumer restores, PowerShell current-process configuration before path resolution, and the absence of `node_modules` cache paths.
 
 ## Alternatives considered
 

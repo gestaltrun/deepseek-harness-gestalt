@@ -175,6 +175,27 @@ describe('CI workflow', () => {
       run: 'pnpm install --frozen-lockfile',
     }))
 
+    const cacheJobs = [producerJob, ...Object.values(workflow.jobs)]
+    const powerShellStoreSteps: unknown[] = []
+    for (const job of cacheJobs) {
+      if (!isRecord(job) || !Array.isArray(job.steps)) continue
+      for (const step of job.steps as unknown[]) {
+        if (isRecord(step) && step.id === 'pnpm-store' && step.shell === 'pwsh') {
+          powerShellStoreSteps.push(step)
+        }
+      }
+    }
+    expect(powerShellStoreSteps).not.toHaveLength(0)
+    for (const step of powerShellStoreSteps) {
+      if (!isRecord(step) || typeof step.run !== 'string') {
+        throw new TypeError('PowerShell pnpm store setup must define a command')
+      }
+      const assignment = step.run.indexOf('$env:PNPM_CONFIG_STORE_DIR = $storeRoot')
+      const resolution = step.run.indexOf('$storePath = pnpm store path --silent')
+      expect(assignment, 'PowerShell must configure the current step before resolving the store').toBeGreaterThan(-1)
+      expect(resolution).toBeGreaterThan(assignment)
+    }
+
     for (const jobId of ['node-24', 'node-24-coverage', 'node-24-consumers']) {
       const job = workflowJob(workflow, jobId)
       if (!Array.isArray(job.steps)) throw new TypeError(`${jobId} must define steps`)

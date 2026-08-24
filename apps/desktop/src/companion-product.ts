@@ -266,8 +266,9 @@ async function createHostSession(
   )
   if (!response.ok) return operationFailed(operation, normalizeFailure(response.failure))
   if (!isRecord(response.value)) return invalidHostResult(operation, 'session.create')
-  try { parseCompanionSessionId(response.value.sessionId) } catch { return invalidHostResult(operation, 'session.create') }
-  return { type: 'confirmed', operationId: operation.operationId, committedAt: dependencies.now(), outcome: 'accepted' }
+  let sessionId: ReturnType<typeof parseCompanionSessionId>
+  try { sessionId = parseCompanionSessionId(response.value.sessionId) } catch { return invalidHostResult(operation, 'session.create') }
+  return { type: 'session-created', operationId: operation.operationId, sessionId, committedAt: dependencies.now() }
 }
 
 interface DesktopSurfaceAuthoritySnapshot {
@@ -854,7 +855,7 @@ function isCompanionResultList(
 }
 
 function requireMutationResult(result: CompanionResult): Exclude<CompanionResult, { type: 'status' | 'session-search' | 'image-chunk' }> {
-  if (result.type === 'confirmed' || result.type === 'attachment-rejected'
+  if (result.type === 'confirmed' || result.type === 'session-created' || result.type === 'attachment-rejected'
     || result.type === 'operation-failed' || result.type === 'interaction-receipt') return result
   throw new Error('Desktop Companion operation ledger contains a non-mutation result')
 }

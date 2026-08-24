@@ -145,7 +145,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     const permit = this.options.runtime.bindCompanionMutationPermit('session-create')
     if (permit === undefined) throw new Error('Companion Session creation has no current connection generation')
     const completion = this.sendMutation(active, operation, 'session-create', permit).then((result) => {
-      requireConfirmed(result, 'Companion Session creation')
+      requireSessionCreated(result)
       this.queueSurfaceRefresh()
     })
     return { operationId: operationIdValue, completion }
@@ -300,7 +300,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
       }
       return
     }
-    if (result.type === 'confirmed' || result.type === 'attachment-rejected'
+    if (result.type === 'confirmed' || result.type === 'session-created' || result.type === 'attachment-rejected'
       || result.type === 'operation-failed' || result.type === 'interaction-receipt') {
       const mutation = this.mutations.get(result.operationId)
       if (mutation !== undefined) {
@@ -551,6 +551,12 @@ function requireConfirmed(result: CompanionMutationResult, subject: string): voi
   if (result.type === 'confirmed') return
   if (result.type === 'operation-failed') throw new Error(result.failure.message)
   throw new Error(`${subject} returned ${result.type}`)
+}
+
+function requireSessionCreated(result: CompanionMutationResult): void {
+  if (result.type === 'session-created') return
+  if (result.type === 'operation-failed') throw new Error(result.failure.message)
+  throw new Error(`Companion Session creation returned ${result.type}`)
 }
 
 function interactionSettlement(

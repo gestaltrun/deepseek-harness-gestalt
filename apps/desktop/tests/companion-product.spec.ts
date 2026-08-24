@@ -275,10 +275,10 @@ describe('Desktop Companion product operations', () => {
     const ungrouped = op({ type: 'create-session' })
 
     await expect(handleCompanionProductOperation(workspace, dependencies)).resolves.toMatchObject({
-      type: 'confirmed', operationId: workspace.operationId,
+      type: 'session-created', operationId: workspace.operationId, sessionId: 'session-created-1',
     })
     await expect(handleCompanionProductOperation(ungrouped, dependencies)).resolves.toMatchObject({
-      type: 'confirmed', operationId: ungrouped.operationId,
+      type: 'session-created', operationId: ungrouped.operationId, sessionId: 'session-created-2',
     })
     expect(calls).toEqual([
       ['session.create', { workspaceId: 'workspace-product' }],

@@ -92,6 +92,92 @@ describe('MobileCompanionSurface', () => {
     expect(surface.getSnapshot().sessions.ids).toEqual(['session-replacement'])
   })
 
+  it('selects a Desktop-confirmed created Session only after the current generation projects it', () => {
+    const runtime = connectedRuntime()
+    const channel = connectionChannel()
+    const surface = new MobileCompanionSurface(runtime)
+    const receiver = surface.bindAuthenticatedConnection(channel)
+    if (receiver === undefined) throw new Error('expected Desktop resync receiver')
+    receiver.acceptValidatedDesktopResync(projection('session-existing', 'Existing'))
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected Companion result receiver')
+
+    surface.create({ workspace: 'workspace-product' })
+    const created = {
+      type: 'session-created', operationId: parseCompanionOperationId('create-default'),
+      sessionId: parseCompanionSessionId('session-created'), committedAt: 1,
+    } as const
+    results.acceptValidatedCompanionResult(created)
+    expect(surface.getSnapshot().sessions.ids).toEqual(['session-existing'])
+    expect(surface.getSnapshot().sessions.current).toBeUndefined()
+
+    receiver.acceptValidatedDesktopResync(blankProjection('session-created', 'workspace-product'))
+    expect(surface.getSnapshot().sessions.ids).toEqual(['session-created'])
+    expect(surface.getSnapshot().sessions.current).toBe('session-created')
+
+    results.acceptValidatedCompanionResult(created)
+    receiver.acceptValidatedDesktopResync(blankProjection('session-created', 'workspace-product'))
+    expect(surface.getSnapshot().sessions.current).toBeUndefined()
+  })
+
+  it('does not let a stale generation, duplicate result, or uncorrelated result select a Session', () => {
+    const runtime = connectedRuntime()
+    const firstChannel = connectionChannel()
+    const surface = new MobileCompanionSurface(runtime)
+    const first = surface.bindAuthenticatedConnection(firstChannel)
+    if (first === undefined) throw new Error('expected first receiver')
+    first.acceptValidatedDesktopResync(projection('session-first', 'First'))
+    const staleResults = surface.bindValidatedCompanionResults()
+    if (staleResults === undefined) throw new Error('expected first result receiver')
+    surface.create({})
+
+    runtime.forgetConnection()
+    runtime.markConnectionOpen()
+    const replacement = surface.bindAuthenticatedConnection(connectionChannel())
+    if (replacement === undefined) throw new Error('expected replacement receiver')
+    replacement.acceptValidatedDesktopResync(projection('session-replacement', 'Replacement'))
+    staleResults.acceptValidatedCompanionResult({
+      type: 'session-created', operationId: parseCompanionOperationId('create-default'),
+      sessionId: parseCompanionSessionId('session-stale-created'), committedAt: 1,
+    })
+    replacement.acceptValidatedDesktopResync(blankProjection('session-stale-created'))
+    expect(surface.getSnapshot().sessions.current).toBeUndefined()
+
+    const currentResults = surface.bindValidatedCompanionResults()
+    if (currentResults === undefined) throw new Error('expected current result receiver')
+    currentResults.acceptValidatedCompanionResult({
+      type: 'session-created', operationId: parseCompanionOperationId('not-correlated'),
+      sessionId: parseCompanionSessionId('session-not-correlated'), committedAt: 2,
+    })
+    replacement.acceptValidatedDesktopResync(blankProjection('session-not-correlated'))
+    expect(surface.getSnapshot().sessions.current).toBeUndefined()
+  })
+
+  it('restores a committed create focus once and never focuses a not-submitted retry', () => {
+    const runtime = connectedRuntime()
+    const surface = new MobileCompanionSurface(runtime)
+    const receiver = surface.bindAuthenticatedConnection(connectionChannel())
+    if (receiver === undefined) throw new Error('expected Desktop resync receiver')
+    receiver.acceptValidatedDesktopResync(projection('session-existing', 'Existing'))
+    surface.acceptRecoveredOperation({
+      operationId: parseCompanionOperationId('create-recovered'), status: 'committed', kind: 'session-create',
+      original: {
+        type: 'session-created', operationId: parseCompanionOperationId('create-recovered'),
+        sessionId: parseCompanionSessionId('session-recovered'), committedAt: 1,
+      },
+    })
+    receiver.acceptValidatedDesktopResync(blankProjection('session-recovered'))
+    expect(surface.getSnapshot().sessions.current).toBe('session-recovered')
+
+    receiver.acceptValidatedDesktopResync(blankProjection('session-recovered'))
+    expect(surface.getSnapshot().sessions.current).toBeUndefined()
+    surface.acceptRecoveredOperation({
+      operationId: parseCompanionOperationId('create-not-submitted'), status: 'not-submitted', kind: 'session-create',
+    })
+    receiver.acceptValidatedDesktopResync(blankProjection('session-not-submitted'))
+    expect(surface.getSnapshot().sessions.current).toBeUndefined()
+  })
+
   it('clears old-generation history ownership when a replacement is accepted', () => {
     const runtime = connectedRuntime()
     const firstChannel = connectionChannel()
@@ -781,7 +867,7 @@ function connectionChannel(options?: {
   historyCompletion?: Promise<void>
 }) {
   const mutations = {
-    create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(),
+    create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(() => tracked('create-default')),
     submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(() => ({
       operationId: parseCompanionOperationId('submit-default'), completion: Promise.resolve(),
     })),
@@ -857,6 +943,24 @@ function projection(id: string, title: string, pending = false): ValidatedDeskto
       blank: false,
       lastAgentError: null,
     }],
+  }
+}
+
+function blankProjection(id: string, workspaceId?: string): ValidatedDesktopSurfaceResync {
+  const base = projection(id, id)
+  return {
+    ...base,
+    sessions: {
+      ...base.sessions,
+      byId: { [id]: { ...base.sessions.byId[id]!, blank: true } },
+    },
+    workspaces: workspaceId === undefined
+      ? []
+      : [{
+        workspaceId, path: `/${workspaceId}`, title: workspaceId, sessionIds: [id],
+        createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z',
+      }],
+    conversations: [],
   }
 }
 

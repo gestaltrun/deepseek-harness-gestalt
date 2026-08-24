@@ -118,6 +118,25 @@ describe('Encrypted Companion Protocol codec', () => {
     ]) {
       expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, operation))).toEqual(operation)
     }
+    const result = {
+      type: 'result' as const,
+      result: {
+        type: 'session-created' as const,
+        operationId: parseCompanionOperationId('operation-create-workspace'),
+        sessionId: parseCompanionSessionId('session-created-workspace'),
+        committedAt: 1,
+      },
+    }
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, result))).toEqual(result)
+    const status = {
+      type: 'result' as const,
+      result: {
+        type: 'status' as const,
+        operationId: result.result.operationId,
+        committed: result.result,
+      },
+    }
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, status))).toEqual(status)
   })
 
   it('round-trips versioned foreground synchronization and rejects a one-byte substitute', () => {
@@ -501,6 +520,9 @@ describe('Encrypted Companion Protocol codec', () => {
       { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1, outcome: 'unknown' } },
       { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: -1, outcome: 'accepted' } },
       { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1.5, outcome: 'accepted' } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'session-created', operationId, sessionId: '', committedAt: 1 } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'session-created', operationId, sessionId: 'created', committedAt: 0 } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'session-created', operationId, sessionId: 'created', committedAt: 1, extra: true } },
       { applicationVersion: negotiated.major, type: 'projection', projection: null },
       { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'workspace-admin' } },
       { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: null } },

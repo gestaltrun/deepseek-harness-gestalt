@@ -185,6 +185,14 @@ export interface CompanionConfirmedResult {
   outcome: 'accepted'
 }
 
+/** Desktop-confirmed creation of one real Host Session. */
+export interface CompanionSessionCreatedResult {
+  type: 'session-created'
+  operationId: CompanionOperationId
+  sessionId: CompanionSessionId
+  committedAt: number
+}
+
 /** Explicit Desktop rejection of one offered attachment. */
 export interface CompanionAttachmentRejectedResult {
   type: 'attachment-rejected'
@@ -248,6 +256,7 @@ export interface CompanionInteractionReceiptResult {
 /** Terminal Desktop result retained for one idempotent Companion mutation. */
 export type CompanionMutationResult =
   | CompanionConfirmedResult
+  | CompanionSessionCreatedResult
   | CompanionAttachmentRejectedResult
   | CompanionOperationFailedResult
   | CompanionInteractionReceiptResult
@@ -269,6 +278,7 @@ export interface CompanionAbsentStatusResult {
 /** Results in the implemented Companion codec slices. */
 export type CompanionResult =
   | CompanionConfirmedResult
+  | CompanionSessionCreatedResult
   | CompanionAttachmentRejectedResult
   | CompanionSessionSearchResult
   | CompanionOperationFailedResult

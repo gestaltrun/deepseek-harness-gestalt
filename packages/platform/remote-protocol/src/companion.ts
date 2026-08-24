@@ -499,6 +499,15 @@ function parseResult(value: unknown): CompanionResult {
       failure: parseHostFailure(record.failure),
     }
   }
+  if (record.type === 'session-created') {
+    exactKeys(record, ['type', 'operationId', 'sessionId', 'committedAt'], 'Companion session-created result')
+    return {
+      type: 'session-created',
+      operationId: parseCompanionOperationId(record.operationId),
+      sessionId: parseCompanionSessionId(record.sessionId),
+      committedAt: positiveSafeInteger(record.committedAt, 'Companion session-created committedAt'),
+    }
+  }
   if (record.type === 'status') return parseStatusResult(record)
   if (record.type !== 'confirmed') invalid('Companion result type is unsupported')
   exactKeys(record, ['type', 'operationId', 'committedAt', 'outcome'], 'Companion confirmed result')
@@ -563,13 +572,14 @@ function parseStatusResult(record: Record<string, unknown>): CompanionResult {
     return { type: 'status', operationId, absent: true }
   }
   exactKeys(record, ['type', 'operationId', 'committed'], 'Companion committed status result')
-  const confirmed = parseResult(record.committed)
-  if ((confirmed.type !== 'confirmed' && confirmed.type !== 'attachment-rejected'
-    && confirmed.type !== 'operation-failed' && confirmed.type !== 'interaction-receipt')
-    || confirmed.operationId !== operationId) {
+  const mutationResult = parseResult(record.committed)
+  if ((mutationResult.type !== 'confirmed' && mutationResult.type !== 'session-created'
+    && mutationResult.type !== 'attachment-rejected'
+    && mutationResult.type !== 'operation-failed' && mutationResult.type !== 'interaction-receipt')
+    || mutationResult.operationId !== operationId) {
     invalid('Companion committed status must embed its own terminal mutation result')
   }
-  return { type: 'status', operationId, committed: confirmed }
+  return { type: 'status', operationId, committed: mutationResult }
 }
 
 function parseProjection(value: unknown): CompanionProjection {

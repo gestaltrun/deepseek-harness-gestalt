@@ -72,7 +72,7 @@ describe('CI workflow', () => {
     expect(preflight).toMatchObject({
       name: 'preflight',
       'runs-on': 'ubuntu-latest',
-      'timeout-minutes': 3,
+      'timeout-minutes': 5,
       env: { DSH_GATE_CONCURRENCY: '8' },
       outputs: {
         level: '${{ steps.plan.outputs.level }}',

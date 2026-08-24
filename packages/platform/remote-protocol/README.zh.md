@@ -14,7 +14,7 @@ Companion major 4 和 3 是当前及紧邻的前一应用版本。双方 endpoin
 
 Major 3 新增有界 Session 与 Workspace 发现、完整 conversation page projection、Session history、Workspace 所有或 Ungrouped 的 Session 创建、prompt 提交、取消、Approval 与 Ask User settlement，以及按内容寻址的历史图片读取。图片字节以有序 32 KiB 分片传输，共用一个摘要且最多 512 个分片；Mobile endpoint 只接受与原 operation、Session、attachment、media type、generation、index、count 和 digest 全部匹配的分片。catalog 继续包含 attachment offer、权威 `search-sessions`、重连用的 `query-operation-status`、Desktop confirmation、attachment rejection、关联的 `session-search`、类型化 `operation-failed`，以及携带原始终态 mutation result 或明确未提交状态的 `status` 应答。Host failure 会保留 4 种闭合类别之一：HTTP 状态、无效 wire response、类型化业务错误或超时。`foreground-sync` 在认证解密后携带正数 physical-connection generation 与 Desktop revision；原始字节不能解码为同步 authority。解码会拒绝不支持的 operation、额外字段、格式错误的按内容寻址 attachment id 与超限值。
 
-Major 4 新增 `observe-session` 与主动发送的 `session-live` 替换。每个 pairing 最多观察一个已打开 Session；该替换可以携带有界 conversation，而每个发生变化的隐藏 Session 只携带权威摘要、位置与 Workspace 归属。移除消息只携带 Session id。每个替换都标明 physical generation 与单调递增的 Desktop revision；Mobile 对每个 revision 最多应用一次，忽略更旧的重复项，并且在分页 baseline 完成前最多排队 32 个不同 Session 的替换。同一 Session 的变化会在同一个有序 Snow sender 后合并。队列超限、Host stream 失败或投影失败都会淘汰 channel，使重连建立新的 generation 与完整 baseline。
+Major 4 新增 `observe-session` 与主动发送的 `session-live` 替换。每个 pairing 最多观察一个已打开 Session；只有操作的 observation epoch 仍为当前值时，该替换才可以携带有界 conversation，而每个发生变化的隐藏 Session 只携带权威摘要、位置与 Workspace 归属。移除消息只携带 Session id。Workspace 与归档权威变化会请求完整分页 baseline；其 cursor 绑定冻结的 Host snapshot 与 physical generation，而不绑定后续发送 revision。每个替换都标明 physical generation 与单调递增的 Desktop revision；Mobile 对每个 revision 最多应用一次，忽略更旧的重复项，并且在分页 baseline 完成前最多排队 32 个不同 Session 的替换。同一 Session 的变化会在同一个有序 Snow sender 后合并。加密前，超大的 live conversation 会丢弃最旧 node，并按 UTF-8 截断单个超大的最新文本 node，直到完整 major 4 message 符合 48 KiB projection 上限。队列超限、Host stream 失败、无效的有界输出或投影失败都会淘汰 channel，使重连建立新的 generation 与完整 baseline。
 
 conversation projection 会回显 history 请求中可选的 exclusive `beforeSeq`。cursor 缺失时替换 tail；cursor 存在时标识由 Mobile 进行连续性校验并 prepend 的旧 page。
 
@@ -33,7 +33,7 @@ conversation projection 会回显 history 请求中可选的 exclusive `beforeSe
 | 完整 Relay 消息 | 98,304 字节 |
 | 不透明 Noise 消息 | 65,535 字节 |
 | 加密前 Companion 应用数据 | 61,440 字节（60 KiB） |
-| 完整编码 transcript-page 消息 | 49,152 字节（48 KiB） |
+| 完整编码 projection 消息 | 49,152 字节（48 KiB） |
 | Transcript page | 50 条 |
 | Session history 请求 | 20 条消息 |
 | Session 或 Workspace 发现页 | 20 行 |

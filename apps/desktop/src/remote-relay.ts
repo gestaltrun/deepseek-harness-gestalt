@@ -4,7 +4,12 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
 import {
+  createCompanionNegotiationChannel,
+  createCompanionVersionOffer,
+  encodeCompanionMessage,
+  negotiateCompanionProtocol,
   parseRelayAttachmentId,
+  RemoteProtocolError,
   REMOTE_PROTOCOL_LIMITS,
   type RelayAttachmentId,
   type RelayPairingSelector,
@@ -13,6 +18,7 @@ import {
   type RelayReadyMessage,
   type RelayRouteId,
   type CompanionOperation,
+  type CompanionMessage,
   type CompanionProjection,
   type CompanionResult,
 } from '@deepseek-ai/dsh-remote-protocol'
@@ -36,6 +42,12 @@ import type {
 import type { DesktopCompanionLiveProjectionPayload } from './companion-product.ts'
 
 const CRYPTO_GATE = 'Personal Pairing requires an independently reviewed handshake and Relay crypto provider.'
+const SURFACE_CHANGE_KEY = '\0surface'
+const COMPANION_V4 = negotiateCompanionProtocol(
+  createCompanionNegotiationChannel(),
+  createCompanionVersionOffer('mobile', [4]),
+  createCompanionVersionOffer('desktop', [4]),
+)
 
 /** Validated Desktop endpoint deployment inputs. */
 export interface DesktopRemoteRelayConfig {
@@ -98,6 +110,11 @@ export interface DesktopCompanionLiveProjectionAdapter {
     pairingSelector: RelayPairingSelector,
     signal: AbortSignal,
   ): Promise<DesktopCompanionLiveProjectionPayload>
+  /** Revalidate detailed transcript ownership immediately before publication. */
+  retainsConversation(
+    change: DesktopCompanionLiveProjectionChange,
+    pairingSelector: RelayPairingSelector,
+  ): boolean
   /** Force a fresh physical attachment after projection loss or bounded-queue overflow. */
   reconnect(pairingSelector: RelayPairingSelector, error: Error): void
 }
@@ -276,7 +293,9 @@ export class DesktopSnowRelayChannelOwner {
 
   private queueLive(active: DesktopSnowActiveChannel, change: DesktopCompanionLiveProjectionChange): void {
     if (active.retired || this.channels.get(active.peer.attachmentId) !== active) return
-    active.pendingLive.set(change.sessionId, change)
+    const key = change.type === 'surface' ? SURFACE_CHANGE_KEY : change.sessionId
+    if (change.type === 'surface') active.pendingLive.clear()
+    active.pendingLive.set(key, change)
     if (active.pendingLive.size > REMOTE_PROTOCOL_LIMITS.liveProjectionPendingSessions) {
       this.failActive(active, new Error('Companion live projection consumer exceeded its pending Session ceiling'))
       return
@@ -300,16 +319,33 @@ export class DesktopSnowRelayChannelOwner {
     while (!active.retired && !active.cancellation.signal.aborted) {
       const next = active.pendingLive.entries().next()
       if (next.done) return
-      const [sessionId, change] = next.value
-      active.pendingLive.delete(sessionId)
+      const [key, change] = next.value
+      active.pendingLive.delete(key)
+      if (change.type === 'surface') {
+        const desktopName = this.desktopName()
+        if (desktopName === undefined) throw new Error('Desktop Relay has no authenticated Installation presentation')
+        await this.enqueueOutbound(active, () => ({
+          type: 'projection',
+          projection: {
+            type: 'foreground-sync', desktopName, generation: active.peer.generation,
+            desktopRevision: this.allocateDesktopRevision(),
+          },
+        }))
+        continue
+      }
       const payload = await adapter.project(change, active.peer.pairingSelector, active.cancellation.signal)
       if (!this.isActive(active)) return
+      const projected = retainObservedConversation(payload, adapter.retainsConversation(change, active.peer.pairingSelector))
       await this.enqueueOutbound(active, () => ({
         type: 'projection',
-        projection: {
+        projection: boundLiveSessionProjection({
           type: 'session-live', generation: active.peer.generation,
-          desktopRevision: this.allocateDesktopRevision(), ...payload,
-        },
+          desktopRevision: this.allocateDesktopRevision(),
+          ...retainObservedConversation(
+            projected,
+            adapter.retainsConversation(change, active.peer.pairingSelector),
+          ),
+        }),
       }))
     }
   }
@@ -380,6 +416,102 @@ export class DesktopSnowRelayChannelOwner {
       && retained.peers.some(candidate => candidate.attachmentId === peer.attachmentId
         && candidate.generation === peer.generation && candidate.pairingSelector === peer.pairingSelector)
   }
+}
+
+function retainObservedConversation(
+  payload: DesktopCompanionLiveProjectionPayload,
+  retained: boolean,
+): DesktopCompanionLiveProjectionPayload {
+  if (retained || !('conversation' in payload)) return payload
+  const { conversation: _conversation, ...summary } = payload
+  return summary
+}
+
+function boundLiveSessionProjection(
+  projection: Extract<CompanionProjection, { type: 'session-live' }>,
+): Extract<CompanionProjection, { type: 'session-live' }> {
+  const message = (candidate: typeof projection): CompanionMessage => ({ type: 'projection', projection: candidate })
+  if (fitsCompanionProjection(message(projection))) return projection
+  if (!('conversation' in projection) || projection.conversation === undefined
+    || !isRecord(projection.conversation)) {
+    encodeCompanionMessage(COMPANION_V4, message(projection))
+    return projection
+  }
+  const nodes = Array.isArray(projection.conversation.nodes) ? projection.conversation.nodes : []
+  for (let offset = 0; offset < nodes.length; offset += 1) {
+    const candidate = {
+      ...projection,
+      conversation: { ...projection.conversation, nodes: nodes.slice(offset) },
+    }
+    if (fitsCompanionProjection(message(candidate))) return candidate
+  }
+  let lower = 0
+  let upper = REMOTE_PROTOCOL_LIMITS.transcriptPageBytes
+  let fitted: typeof projection | undefined
+  while (lower <= upper) {
+    const limit = Math.floor((lower + upper) / 2)
+    const candidate = {
+      ...projection,
+      conversation: truncateConversationText({
+        ...projection.conversation,
+        nodes: nodes.length === 0 ? [] : [nodes.at(-1)],
+      }, limit),
+    }
+    if (fitsCompanionProjection(message(candidate))) {
+      fitted = candidate
+      lower = limit + 1
+    } else {
+      upper = limit - 1
+    }
+  }
+  if (fitted !== undefined) return fitted
+  const { conversation: _conversation, ...summary } = projection
+  encodeCompanionMessage(COMPANION_V4, message(summary))
+  return summary
+}
+
+function fitsCompanionProjection(message: CompanionMessage): boolean {
+  try {
+    encodeCompanionMessage(COMPANION_V4, message)
+    return true
+  } catch (error) {
+    if (!(error instanceof RemoteProtocolError) || error.code !== 'REMOTE_PROTOCOL_LIMIT_EXCEEDED') throw error
+    return false
+  }
+}
+
+function truncateConversationText(value: unknown, limit: number, key?: string): unknown {
+  if (typeof value === 'string') {
+    return key === 'text' || key === 'argsRaw' || key === 'message'
+      ? truncateUtf8(value, limit)
+      : value
+  }
+  if (Array.isArray(value)) return value.map(item => truncateConversationText(item, limit))
+  if (!isRecord(value)) return value
+  return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) => [
+    entryKey,
+    truncateConversationText(entryValue, limit, entryKey),
+  ]))
+}
+
+function truncateUtf8(value: string, limit: number): string {
+  if (new TextEncoder().encode(value).byteLength <= limit) return value
+  if (limit <= 0) return ''
+  const suffix = limit >= 3 ? '…' : ''
+  const contentLimit = limit - new TextEncoder().encode(suffix).byteLength
+  let result = ''
+  let bytes = 0
+  for (const codePoint of value) {
+    const size = new TextEncoder().encode(codePoint).byteLength
+    if (bytes + size > contentLimit) break
+    result += codePoint
+    bytes += size
+  }
+  return result + suffix
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isCompanionProjection(

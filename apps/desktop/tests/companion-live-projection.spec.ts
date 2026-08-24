@@ -26,12 +26,12 @@ describe('Desktop Companion live projection', () => {
     source.changed(hidden)
 
     expect(firstChanges).toEqual([
-      { sessionId: opened, includeConversation: true },
-      { sessionId: hidden, includeConversation: false },
+      { type: 'session', sessionId: opened, includeConversation: true, observationEpoch: 1 },
+      { type: 'session', sessionId: hidden, includeConversation: false, observationEpoch: 1 },
     ])
     expect(secondChanges).toEqual([
-      { sessionId: opened, includeConversation: false },
-      { sessionId: hidden, includeConversation: false },
+      { type: 'session', sessionId: opened, includeConversation: false, observationEpoch: 0 },
+      { type: 'session', sessionId: hidden, includeConversation: false, observationEpoch: 0 },
     ])
   })
 
@@ -53,9 +53,43 @@ describe('Desktop Companion live projection', () => {
     expect(source.observedSession(pairingId)).toBeUndefined()
   })
 
+  it('invalidates detailed work when the pairing switches or closes its observed Session', () => {
+    const source = new DesktopCompanionLiveProjectionSource()
+    const pairingId = parsePersonalPairingId('pairing-observation-epoch')
+    const first = parseCompanionSessionId('session-first')
+    const second = parseCompanionSessionId('session-second')
+    const changes: import('../src/companion-live-projection.ts').DesktopCompanionLiveProjectionChange[] = []
+    source.connect(pairingId, (change) => { changes.push(change) }, () => {})
+    source.observe(pairingId, first)
+    const detailed = changes.at(-1)
+    if (detailed === undefined) throw new Error('expected detailed observation change')
+    expect(source.retainsConversation(pairingId, detailed)).toBe(true)
+
+    source.observe(pairingId, second)
+    expect(source.retainsConversation(pairingId, detailed)).toBe(false)
+    const switched = changes.at(-1)
+    if (switched === undefined) throw new Error('expected switched observation change')
+    expect(source.retainsConversation(pairingId, switched)).toBe(true)
+
+    source.observe(pairingId)
+    expect(source.retainsConversation(pairingId, switched)).toBe(false)
+  })
+
+  it('requests one authoritative surface baseline for every authenticated connection', () => {
+    const source = new DesktopCompanionLiveProjectionSource()
+    const changes: unknown[] = []
+    source.connect(parsePersonalPairingId('pairing-surface-first'), (change) => { changes.push(change) }, () => {})
+    source.connect(parsePersonalPairingId('pairing-surface-second'), (change) => { changes.push(change) }, () => {})
+
+    source.surfaceChanged()
+
+    expect(changes).toEqual([{ type: 'surface' }, { type: 'surface' }])
+  })
+
   it('projects an opened streaming tail while hidden Sessions avoid history bytes', async () => {
     const opened = parseCompanionSessionId('session-opened')
     const calls: string[] = []
+    let archivedSessionIds: string[] = []
     const host: DesktopHostRpc = {
       call: vi.fn(async (method: string) => {
         calls.push(method)
@@ -67,7 +101,7 @@ describe('Desktop Companion live projection', () => {
           workspaceId: 'workspace-live', path: '/work', title: 'Work',
           sessionIds: [opened], createdAt: '2026-08-24T00:00:00.000Z',
           updatedAt: '2026-08-24T00:00:00.000Z',
-        }] } }
+        }], archivedSessionIds } }
         if (method === 'session.history') return { ok: true, value: { events: [
           { event: { type: 'step/start', seq: 0, time: 1, data: { turn: 1, step: 1 } } },
           { event: { type: 'assistant/chunk', seq: 1, time: 2, data: {
@@ -103,6 +137,12 @@ describe('Desktop Companion live projection', () => {
       },
     })
     expect(calls).toEqual(['session.list', 'workspace.list', 'session.history'])
+
+    calls.splice(0)
+    archivedSessionIds = [opened]
+    await expect(projectDesktopCompanionLiveSession(
+      opened, true, liveDependencies(host), new AbortController().signal,
+    )).resolves.toEqual({ sessionId: opened, removed: true })
   })
 })
 

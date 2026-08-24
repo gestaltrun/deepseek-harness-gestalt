@@ -146,6 +146,12 @@ export class MobileNoiseCompanionReceiver {
     this.workspaces = projection.offset === 0
       ? projection.workspaces.map(workspace => ({ ...workspace }))
       : mergeWorkspacePage(this.workspaces, projection.workspaces)
+    if (!projection.hasMore) {
+      const visible = new Set(this.sessions.ids)
+      for (const sessionId of this.conversations.keys()) {
+        if (!visible.has(sessionId)) this.conversations.delete(sessionId)
+      }
+    }
     this.publishSurface()
     if (projection.hasMore) {
       this.surfaceComplete = false

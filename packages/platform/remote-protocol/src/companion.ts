@@ -240,7 +240,7 @@ export function encodeCompanionMessage(
     'Companion message',
   )
   if (message.type === 'projection' && encoded.byteLength > REMOTE_PROTOCOL_LIMITS.transcriptPageBytes) {
-    throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion transcript page exceeds its byte ceiling')
+    throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion projection exceeds its byte ceiling')
   }
   return encoded
 }
@@ -268,7 +268,7 @@ export function decodeCompanionMessage(
     case 'projection':
       exactKeys(record, ['applicationVersion', 'type', 'projection'], 'Companion projection message')
       if (encoded.byteLength > REMOTE_PROTOCOL_LIMITS.transcriptPageBytes) {
-        throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion transcript page exceeds its byte ceiling')
+        throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion projection exceeds its byte ceiling')
       }
       return { type: 'projection', projection: parseProjection(record.projection, protocol.major) }
     case 'result':

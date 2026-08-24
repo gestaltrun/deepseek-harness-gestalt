@@ -182,6 +182,9 @@ async function boot(): Promise<void> {
           attachmentKey.fill(0)
         }
       },
+      retainsConversation: (change, selector) => companionProduct.retainsLiveConversation(
+        parsePersonalPairingId(selector), change,
+      ),
     },
   })
   let accountReady = true

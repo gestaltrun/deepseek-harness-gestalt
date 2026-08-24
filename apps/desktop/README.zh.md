@@ -30,7 +30,7 @@ Schedule 交付为 `session-local`：只有原 Session 处于 live 状态时才�
 
 Pairing-scoped Companion operation ledger 会 single-flight 并发重试，在运行另一项 Host effect 前重试保存失败的 terminal result，七天后淘汰记录，并在达到容量时驱逐最旧 terminal 记录而保留 unresolved work。其持久 codec 会解析品牌化 pairing 与 operation id 及完整 v3 result，并拒绝 record/result operation id 不一致。
 
-Desktop owner 也会消费权威 Host mux 与 Session event stream。Companion major 4 的 Mobile attachment 通过 `observe-session` 最多选择一个已打开 Session：该 Session 中已经记录的输出会产生有界 conversation 替换，隐藏 Session 的权威变化则只产生摘要、位置与 Workspace 归属替换。pairing-scoped projection source 会在最多包含 32 个 Session 的有界队列内合并同一 Session 的重复变化，Snow owner 会按 channel 单调递增的 Desktop revision 串行发送所有 projection。Host 替换、stream 失败、projection 失败、队列超限、peer 替换、sleep、关闭功能、退出账号、关闭窗口与 quit 都会在重连或 teardown 前清除 listener 和 pending work。重连会建立新的 generation 与权威 baseline，而不会重放 transport event。
+至少一个已鉴别 Mobile attachment 存活时，Desktop owner 才会消费权威 Host mux 与 Session event stream；第一个 attachment 启动两条 WebSocket，最后一个 attachment 关闭它们。Companion major 4 attachment 通过 `observe-session` 最多选择一个已打开 Session：该 Session 中已经记录的输出会产生有界 conversation 替换，隐藏 Session 的权威变化则只产生摘要、位置与 Workspace 归属替换。observation epoch 会从 Mobile 切换或关闭 Session 后才完成的工作中移除 conversation 字节。Workspace 创建、更新、移除、重排与归档 frame 会触发新的权威分页 baseline；归档 Session id 同时过滤该 baseline 与 live replacement。每个分页 cursor 拥有一份冻结的 Host snapshot，不受无关 Desktop 发送 revision 变化影响。pairing-scoped projection source 会在最多包含 32 个 Session 的有界队列内合并同一 Session 的重复变化，Snow owner 会按 channel 单调递增的 Desktop revision 串行发送所有 projection。live conversation 超过 48 KiB projection 上限时，会先丢弃最旧 node，再按 UTF-8 截断单个超大的最新文本 node，从而保留可用的最新尾部而不触发重连。Host 替换、stream 失败、projection 失败、队列超限、peer 替换、sleep、关闭功能、退出账号、关闭窗口与 quit 都会在重连或 teardown 前清除 listener 和 pending work。重连会建立新的 generation 与权威 baseline，而不会重放 transport event。
 
 ## 开发
 

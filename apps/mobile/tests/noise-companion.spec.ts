@@ -208,6 +208,46 @@ describe('Mobile Noise Companion receiver', () => {
     expect(acceptValidatedCompanionProjection).toHaveBeenCalledTimes(3)
   })
 
+  it('removes a cached conversation when a completed authoritative baseline omits its Session', () => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    const messages = [
+      foregroundSync(),
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'surface-snapshot' as const, operationId: 'surface-retained' as never,
+          generation: 2, desktopRevision: 8, desktopName: 'Authenticated Desktop',
+          offset: 0, sessions: [{
+            sessionId: 'session-v3' as never, displayTitle: 'Retained',
+            running: false, blank: false, updatedAt: 1,
+          }], workspaces: [], hasMore: false,
+        },
+      },
+      {
+        ...conversationPage(validConversation()),
+        projection: { ...conversationPage(validConversation()).projection, desktopRevision: 9 },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'surface-snapshot' as const, operationId: 'surface-archived' as never,
+          generation: 2, desktopRevision: 10, desktopName: 'Authenticated Desktop',
+          offset: 0, sessions: [], workspaces: [], hasMore: false,
+        },
+      },
+    ]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection: () => true }),
+    )
+
+    for (let index = 0; index < 4; index++) receiver.receive(Uint8Array.of(index))
+
+    expect(acceptValidatedDesktopResync.mock.lastCall?.[0].sessions.ids).toEqual([])
+    expect(acceptValidatedDesktopResync.mock.lastCall?.[0].conversations).toEqual([])
+  })
+
   it('normalizes an authenticated future conversation node through the unknown presentation arm', () => {
     const runtime = connectedRuntime()
     const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})

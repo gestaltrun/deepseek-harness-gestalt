@@ -24,9 +24,49 @@ const attachmentKey = crypto.getRandomValues(new Uint8Array(32))
 const sessionId = parseCompanionSessionId('session-product')
 const closeServers: Array<() => Promise<void>> = []
 
-afterEach(async () => { await Promise.all(closeServers.splice(0).map(close => close())) })
+afterEach(async () => {
+  vi.unstubAllGlobals()
+  await Promise.all(closeServers.splice(0).map(close => close()))
+})
 
 describe('Desktop Companion product operations', () => {
+  it('leases Host event streams only while authenticated live connections exist', async () => {
+    const sockets: TestHostWebSocket[] = []
+    class TestHostWebSocket extends EventTarget {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      readyState = TestHostWebSocket.CONNECTING
+      readonly close = vi.fn(() => {
+        this.readyState = 3
+        this.dispatchEvent(new Event('close'))
+      })
+      constructor(readonly url: URL) {
+        super()
+        sockets.push(this)
+      }
+    }
+    vi.stubGlobal('WebSocket', TestHostWebSocket)
+    const owner = new DesktopCompanionProductOwner({
+      timeoutMs: 100, responseMaxBytes: REMOTE_PROTOCOL_LIMITS.companionMessageBytes,
+    })
+    const uninstall = owner.installHost('http://127.0.0.1:43123')
+    expect(sockets).toHaveLength(0)
+    const first = owner.connectLiveProjection(pairingId, () => {}, () => {})
+    const second = owner.connectLiveProjection(pairingId, () => {}, () => {})
+    expect(sockets).toHaveLength(2)
+
+    first()
+    expect(sockets.every(socket => socket.close.mock.calls.length === 0)).toBe(true)
+    second()
+    expect(sockets.every(socket => socket.close.mock.calls.length === 1)).toBe(true)
+
+    const replacement = owner.connectLiveProjection(pairingId, () => {}, () => {})
+    expect(sockets).toHaveLength(4)
+    replacement()
+    uninstall()
+    await Promise.resolve()
+  })
+
   it('projects a bounded real Host Session and Workspace surface', async () => {
     const calls: string[] = []
     const dependencies = baseDependencies(hostRpc(async (method) => {
@@ -34,12 +74,14 @@ describe('Desktop Companion product operations', () => {
       if (method === 'session.list') return { ok: true, value: { items: [{
         sessionId: 'session-product', updatedAt: 9, running: false, blank: false,
         cwd: '/work', projections: { asOfSeq: 1, values: { title: 'Real session' } },
+      }, {
+        sessionId: 'session-archived', updatedAt: 10, running: false, blank: false,
       }] } }
       if (method === 'workspace.list') return { ok: true, value: { items: [{
         workspaceId: 'workspace-product', path: '/work', title: 'Work',
         sessionIds: ['session-product'], createdAt: '2026-08-23T00:00:00.000Z',
         updatedAt: '2026-08-23T00:00:00.000Z',
-      }], archivedSessionIds: [] } }
+      }], archivedSessionIds: ['session-archived'] } }
       throw new Error(`unexpected Host method ${method}`)
     }))
     const operation = op({ type: 'refresh-surface', offset: 0 })
@@ -86,7 +128,10 @@ describe('Desktop Companion product operations', () => {
       operationId: parseCompanionOperationId('operation-refresh-surface-page-two'),
     }
 
-    await expect(discovery.refresh(operation, dependencies)).resolves.toMatchObject({
+    await expect(discovery.refresh(operation, {
+      ...dependencies,
+      desktopRevision: dependencies.desktopRevision + 2,
+    })).resolves.toMatchObject({
       type: 'surface-snapshot',
       offset: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows,
       hasMore: false,

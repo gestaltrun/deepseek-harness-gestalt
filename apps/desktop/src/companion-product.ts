@@ -125,7 +125,19 @@ export class DesktopCompanionProductOwner {
     const dispose = this.liveProjection.connect(pairingId, changed, disconnect)
     const installed = this.installed
     if (installed !== undefined) this.ensureHostStreams(installed)
-    return dispose
+    return () => {
+      dispose()
+      const current = this.installed
+      if (!this.liveProjection.hasConnections() && current !== undefined) this.stopHostStreams(current)
+    }
+  }
+
+  /** Whether one projected conversation still belongs to the pairing's current observation epoch. */
+  retainsLiveConversation(
+    pairingId: PersonalPairingId,
+    change: DesktopCompanionLiveProjectionChange,
+  ): boolean {
+    return this.liveProjection.retainsConversation(pairingId, change)
   }
 
   /** Build one live replacement from the current Web Host for an authenticated pairing. */
@@ -134,6 +146,7 @@ export class DesktopCompanionProductOwner {
     attachmentKey: Uint8Array,
     signal: AbortSignal,
   ): Promise<DesktopCompanionLiveProjectionPayload> {
+    if (change.type !== 'session') throw new Error('Desktop surface synchronization does not project one Session')
     const host = this.installed?.rpc
     if (host === undefined) throw new Error('Desktop Web Host is not available')
     return await projectDesktopCompanionLiveSession(change.sessionId, change.includeConversation, {
@@ -165,7 +178,7 @@ export class DesktopCompanionProductOwner {
     this.interactions.clear()
     this.surfaceDiscovery.clear()
     this.installed = installed
-    this.ensureHostStreams(installed)
+    if (this.liveProjection.hasConnections()) this.ensureHostStreams(installed)
     return () => {
       cancellation.abort()
       installed.streams?.cancellation.abort()
@@ -251,6 +264,13 @@ export class DesktopCompanionProductOwner {
     ).finally(() => { installed.cancellation.signal.removeEventListener('abort', abort) })
   }
 
+  private stopHostStreams(installed: NonNullable<DesktopCompanionProductOwner['installed']>): void {
+    const streams = installed.streams
+    if (streams === undefined) return
+    delete installed.streams
+    streams.cancellation.abort()
+  }
+
   private finishHostStreams(
     installed: NonNullable<DesktopCompanionProductOwner['installed']>,
     streams: NonNullable<NonNullable<DesktopCompanionProductOwner['installed']>['streams']>,
@@ -273,6 +293,10 @@ export class DesktopCompanionProductOwner {
   }
 
   private acceptHostEnvelope(envelope: { rpcId: string; payload: unknown }): void {
+    if (isHostSurfaceAuthorityEvent(envelope.payload)) {
+      this.liveProjection.surfaceChanged()
+      return
+    }
     const sessionId = hostEventSessionId(envelope.payload)
     if (sessionId !== undefined) this.liveProjection.changed(sessionId)
   }
@@ -371,7 +395,6 @@ async function createHostSession(
 
 interface DesktopSurfaceAuthoritySnapshot {
   readonly generation: number
-  readonly desktopRevision: number
   readonly sessionValue: unknown
   readonly workspaceValue: unknown
 }
@@ -406,8 +429,7 @@ export class DesktopCompanionSurfaceDiscovery {
     if (operation.offset === 0) return await this.start(operation, dependencies)
     const state = this.states.get(dependencies.pairingId)
     if (state === undefined || state.nextOffset !== operation.offset
-      || state.snapshot.generation !== dependencies.generation
-      || state.snapshot.desktopRevision !== dependencies.desktopRevision) {
+      || state.snapshot.generation !== dependencies.generation) {
       return invalidHostResult(operation, 'surface discovery cursor')
     }
     return this.project(operation, dependencies, state.epoch, state.snapshot)
@@ -428,7 +450,6 @@ export class DesktopCompanionSurfaceDiscovery {
     if (!workspaceResponse.ok) return operationFailed(operation, normalizeFailure(workspaceResponse.failure))
     const snapshot: DesktopSurfaceAuthoritySnapshot = {
       generation: dependencies.generation,
-      desktopRevision: dependencies.desktopRevision,
       sessionValue: sessionResponse.value,
       workspaceValue: workspaceResponse.value,
     }
@@ -444,11 +465,15 @@ export class DesktopCompanionSurfaceDiscovery {
     if (this.epochs.get(dependencies.pairingId) !== epoch) {
       return invalidHostResult(operation, 'surface discovery owner')
     }
-    const sessions = parseSurfaceSessions(snapshot.sessionValue, operation.offset)
+    const archived = parseArchivedSessionIds(snapshot.workspaceValue)
+    if (archived === undefined) return invalidHostResult(operation, 'surface baseline')
+    const visibleSessionValues = surfaceSessionValues(snapshot.sessionValue, archived)
+    if (visibleSessionValues === undefined) return invalidHostResult(operation, 'surface baseline')
+    const sessions = parseSurfaceSessions(visibleSessionValues, operation.offset)
     if (sessions === undefined) return invalidHostResult(operation, 'surface baseline')
     const workspaces = parseSurfaceWorkspaces(snapshot.workspaceValue, new Set(sessions.map(session => session.sessionId)))
     if (workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
-    const hasMore = surfaceHasMore(snapshot.sessionValue, operation.offset, sessions.length)
+    const hasMore = visibleSessionValues.length > operation.offset + sessions.length
     if (hasMore) {
       this.states.set(dependencies.pairingId, {
         epoch,
@@ -528,6 +553,9 @@ export async function projectDesktopCompanionLiveSession(
   if (!isRecord(sessionResponse.value) || !Array.isArray(sessionResponse.value.items)) {
     throw new Error('Desktop Host live Session list returned an invalid value')
   }
+  const archived = parseArchivedSessionIds(workspaceResponse.value)
+  if (archived === undefined) throw new Error('Desktop Host live Workspace projection returned an invalid value')
+  if (archived.has(sessionId)) return { sessionId, removed: true }
   const position = sessionResponse.value.items.findIndex(item => isRecord(item) && item.sessionId === sessionId)
   if (position === -1) return { sessionId, removed: true }
   const summary = parseSurfaceSessionRow(sessionResponse.value.items[position])
@@ -707,7 +735,10 @@ function parseSearchValue(value: unknown): Omit<CompanionSessionSearchResult, 't
   return { items, hasMore: value.hasMore }
 }
 
-function parseSurfaceSessions(value: unknown, offset = 0): Array<{
+function parseSurfaceSessions(
+  values: readonly unknown[],
+  offset = 0,
+): Array<{
   sessionId: CompanionSessionId
   displayTitle: string
   cwd?: string
@@ -715,7 +746,6 @@ function parseSurfaceSessions(value: unknown, offset = 0): Array<{
   blank: boolean
   updatedAt: number
 }> | undefined {
-  if (!isRecord(value) || !Array.isArray(value.items)) return undefined
   const sessions: Array<{
     sessionId: CompanionSessionId
     displayTitle: string
@@ -724,7 +754,7 @@ function parseSurfaceSessions(value: unknown, offset = 0): Array<{
     blank: boolean
     updatedAt: number
   }> = []
-  for (const itemValue of value.items.slice(offset, offset + REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)) {
+  for (const itemValue of values.slice(offset, offset + REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)) {
     const session = parseSurfaceSessionRow(itemValue)
     if (session === undefined) return undefined
     sessions.push(session)
@@ -732,8 +762,27 @@ function parseSurfaceSessions(value: unknown, offset = 0): Array<{
   return sessions
 }
 
-function surfaceHasMore(value: unknown, offset: number, pageLength: number): boolean {
-  return isRecord(value) && Array.isArray(value.items) && value.items.length > offset + pageLength
+function surfaceSessionValues(
+  value: unknown,
+  archived: ReadonlySet<CompanionSessionId>,
+): unknown[] | undefined {
+  if (!isRecord(value) || !Array.isArray(value.items)) return undefined
+  const items: unknown[] = value.items
+  return items.filter((item) => {
+    if (!isRecord(item) || typeof item.sessionId !== 'string') return true
+    try { return !archived.has(parseCompanionSessionId(item.sessionId)) } catch { return true }
+  })
+}
+
+function parseArchivedSessionIds(value: unknown): Set<CompanionSessionId> | undefined {
+  if (!isRecord(value) || !Array.isArray(value.archivedSessionIds)) return undefined
+  const archived = new Set<CompanionSessionId>()
+  try {
+    for (const sessionId of value.archivedSessionIds) archived.add(parseCompanionSessionId(sessionId))
+  } catch {
+    return undefined
+  }
+  return archived
 }
 
 function parseSurfaceSession(
@@ -1126,4 +1175,10 @@ function hostEventSessionId(payload: unknown): CompanionSessionId | undefined {
     && payload.type !== 'host/session-removed' && payload.type !== 'host/session-status'
     && payload.type !== 'host/agent-error') return undefined
   return parseCompanionSessionId(payload.sessionId)
+}
+
+function isHostSurfaceAuthorityEvent(payload: unknown): boolean {
+  if (!isRecord(payload)) return false
+  return payload.type === 'host/workspace-changed' || payload.type === 'host/workspace-removed'
+    || payload.type === 'host/workspace-order-changed' || payload.type === 'host/archived-sessions-changed'
 }

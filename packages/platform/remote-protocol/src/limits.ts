@@ -14,7 +14,7 @@ export const REMOTE_PROTOCOL_LIMITS = {
   ciphertextBytes: 65_535,
   /** Maximum Encrypted Companion application bytes before endpoint encryption. */
   companionMessageBytes: 60 * 1_024,
-  /** Maximum complete encoded transcript-page message bytes. */
+  /** Maximum complete encoded projection message bytes. */
   transcriptPageBytes: 48 * 1_024,
   /** Maximum transcript entries in one approved Companion projection. */
   transcriptPageEntries: 50,

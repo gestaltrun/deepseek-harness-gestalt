@@ -80,6 +80,10 @@ describe('assembled Desktop Companion Host search', () => {
       new FileDesktopCompanionOperationStore(join(assembled.root, 'companion-operations.json')),
     ))
     const channels = await snowProductChannels()
+    const disposeLive = owner.connectLiveProjection(
+      parsePersonalPairingId(channels.pairingSelector), () => {}, () => {},
+    )
+    cleanups.push(async () => { disposeLive() })
     const runtime = connectedRuntime()
     const connection = new MobileSnowCompanionConnection()
     connection.connect({
@@ -128,7 +132,7 @@ describe('assembled Desktop Companion Host search', () => {
         },
       }),
       () => surface.bindAuthenticatedConnection(connectionChannel),
-      () => { surface.trackSurfaceRefresh(product.refreshSurface()) },
+      (offset) => { surface.trackSurfaceRefresh(product.refreshSurface(offset)) },
     )
     receiverRef.current = receiver
     receiver.receive(channels.desktop.seal({
@@ -202,6 +206,17 @@ describe('assembled Desktop Companion Host search', () => {
 
   it('pushes committed Host output and hidden Session summaries through the authenticated Snow owner', async () => {
     const assembled = await startDesktopHost('indexed', 'live projection baseline')
+    const baselineSessionIds = [assembled.sessionId]
+    for (let index = 0; index < REMOTE_PROTOCOL_LIMITS.surfaceSessionRows; index += 1) {
+      const sessionId = SessionId(`desktop-paged-session-${String(index)}`)
+      assembled.ctx.sessions.create(sessionId, {
+        meta: {
+          version: SESSION_FORMAT_VERSION, id: sessionId,
+          createdAt: index + 2, cwd: assembled.root,
+        },
+      })
+      baselineSessionIds.push(sessionId)
+    }
     const owner = productOwner(assembled.url)
     const channels = await snowProductChannels()
     const runtime = connectedRuntime()
@@ -239,6 +254,9 @@ describe('assembled Desktop Companion Host search', () => {
       project: async (change, _selector, signal) => await owner.projectLiveSession(
         change, channels.attachmentKey, signal,
       ),
+      retainsConversation: (change, selector) => owner.retainsLiveConversation(
+        parsePersonalPairingId(selector), change,
+      ),
       reconnect: (_selector, error) => { reconnectFailures.push(error) },
     })
     const product = new MobileSnowCompanionProductChannel({
@@ -270,7 +288,7 @@ describe('assembled Desktop Companion Host search', () => {
         surface.bindValidatedCompanionResults()?.acceptValidatedCompanionResult(result)
       } }),
       () => surface.bindAuthenticatedConnection(connectionChannel),
-      () => { surface.trackSurfaceRefresh(product.refreshSurface()) },
+      (offset) => { surface.trackSurfaceRefresh(product.refreshSurface(offset)) },
     )
     relayOwner.updatePeers({
       type: 'ready', transportVersion: 1,
@@ -286,7 +304,8 @@ describe('assembled Desktop Companion Host search', () => {
       Uint8Array.of(1), channels.mobileAttachmentId, channels.desktopAttachmentId,
       channels.pairingSelector, new AbortController().signal,
     )
-    await expect.poll(() => surface.getSnapshot().sessions.ids.includes(assembled.sessionId)).toBe(true)
+    await expect.poll(() => baselineSessionIds.every(id => surface.getSnapshot().sessions.ids.includes(id))).toBe(true)
+    expect(surface.getSnapshot().sessions.ids).toHaveLength(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows + 1)
     const observation = product.observeSession(assembled.sessionId)
     await expect(observation.completion).resolves.toBeUndefined()
     await expect.poll(() => surface.getSnapshot().conversations[assembled.sessionId] !== undefined).toBe(true)
@@ -315,6 +334,31 @@ describe('assembled Desktop Companion Host search', () => {
     }), { surfaceOp: 'append' })
     await expect.poll(() => surface.getSnapshot().sessions.ids.includes(hiddenId)).toBe(true)
     expect(surface.getSnapshot().conversations[hiddenId]).toBeUndefined()
+
+    const secondaryRoot = join(assembled.root, 'secondary')
+    await mkdir(secondaryRoot)
+    const secondaryId = SessionId('desktop-secondary-workspace-session')
+    assembled.ctx.sessions.create(secondaryId, {
+      meta: {
+        version: SESSION_FORMAT_VERSION, id: secondaryId,
+        createdAt: 100, cwd: secondaryRoot,
+      },
+    })
+    const secondaryWorkspace = await assembled.ctx.workspaceRegistry.create(secondaryRoot, 'Secondary')
+    await secondaryWorkspace.attachSession(secondaryId)
+    const primaryWorkspace = await assembled.ctx.workspaceRegistry.create(assembled.root, 'Primary')
+    await primaryWorkspace.attachSession(assembled.sessionId)
+    await expect.poll(() => surface.getSnapshot().workspaces.map(workspace => workspace.workspaceId))
+      .toEqual([primaryWorkspace.id, secondaryWorkspace.id])
+    await assembled.ctx.workspaceRegistry.insertBefore(primaryWorkspace.id)
+    await expect.poll(() => surface.getSnapshot().workspaces.map(workspace => workspace.workspaceId))
+      .toEqual([secondaryWorkspace.id, primaryWorkspace.id])
+    await assembled.ctx.workspaceRegistry.delete(secondaryWorkspace.id)
+    await expect.poll(() => surface.getSnapshot().workspaces.map(workspace => workspace.workspaceId))
+      .toEqual([primaryWorkspace.id])
+    await assembled.ctx.workspaceRegistry.archiveSession(assembled.sessionId)
+    await expect.poll(() => surface.getSnapshot().sessions.ids.includes(assembled.sessionId)).toBe(false)
+    expect(surface.getSnapshot().conversations[assembled.sessionId]).toBeUndefined()
     expect(reconnectFailures).toEqual([])
     relayOwner.invalidate(channels.pairingSelector)
     await relayOwner.drain()

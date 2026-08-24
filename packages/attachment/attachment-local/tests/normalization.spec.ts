@@ -278,9 +278,15 @@ describe('normalizeImage', () => {
 })
 
 describe('hasLowColourCount', () => {
-  it('distinguishes photographic rasters from low-colour graphics without averaged sampling', async () => {
+  it('classifies high-frequency noise as photographic without averaged sampling', async () => {
     const side = 256
     const highFrequency = sharp(noisePixels(side, side), { raw: { width: side, height: side, channels: 3 } })
+
+    await expect(hasLowColourCount(highFrequency)).resolves.toBe(false)
+  })
+
+  it('classifies an ordinary color gradient as photographic', async () => {
+    const side = 256
     const gradientPixels = new Uint8Array(side * side * 3)
     for (let y = 0; y < side; y += 1) {
       for (let x = 0; x < side; x += 1) {
@@ -291,15 +297,32 @@ describe('hasLowColourCount', () => {
       }
     }
     const ordinaryPhoto = sharp(gradientPixels, { raw: { width: side, height: side, channels: 3 } })
+
+    await expect(hasLowColourCount(ordinaryPhoto)).resolves.toBe(false)
+  })
+
+  it('classifies a solid raster as low-color', async () => {
+    const side = 256
     const solid = sharp({
       create: { width: side, height: side, channels: 3, background: { r: 12, g: 34, b: 56 } },
     })
+
+    await expect(hasLowColourCount(solid)).resolves.toBe(true)
+  })
+
+  it('classifies rendered text as low-color', async () => {
     const text = sharp(Buffer.from(`
       <svg width="512" height="256" xmlns="http://www.w3.org/2000/svg">
         <rect width="512" height="256" fill="white"/>
         <text x="24" y="145" font-size="96" fill="#16324f">DeepSeek 16-bit</text>
       </svg>
     `))
+
+    await expect(hasLowColourCount(text)).resolves.toBe(true)
+  })
+
+  it('classifies a transparent graphic as low-color', async () => {
+    const side = 256
     const transparentData = await sharp({
       create: { width: side, height: side, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
     }).composite([{ input: Buffer.from(`
@@ -309,10 +332,6 @@ describe('hasLowColourCount', () => {
     `) }]).png().toBuffer()
     const transparent = sharp(transparentData)
 
-    await expect(hasLowColourCount(highFrequency)).resolves.toBe(false)
-    await expect(hasLowColourCount(ordinaryPhoto)).resolves.toBe(false)
-    await expect(hasLowColourCount(solid)).resolves.toBe(true)
-    await expect(hasLowColourCount(text)).resolves.toBe(true)
     await expect(hasLowColourCount(transparent)).resolves.toBe(true)
   })
 

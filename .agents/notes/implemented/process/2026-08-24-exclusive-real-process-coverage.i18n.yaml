@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-24-exclusive-real-process-coverage.md
-2026-08-24-exclusive-real-process-coverage.md: 5de7ef3a097ec661ff06152924da9658172d3d35
-2026-08-24-exclusive-real-process-coverage.zh.md: 793371efda33c7f1859ea8c57404d351639b32df
+2026-08-24-exclusive-real-process-coverage.md: 827ecd4afe87bdcb87d60bfc5004c5500e3ee776
+2026-08-24-exclusive-real-process-coverage.zh.md: 5d13ae5bd471e23a77eb98902d5bf9dc99ded3e8

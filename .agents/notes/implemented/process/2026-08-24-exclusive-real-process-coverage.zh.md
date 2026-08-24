@@ -14,6 +14,8 @@ Status: implemented
 
 高频 normalization fixture 使用 256×256 像素，正好是分类器 128 像素有界采样边长的两倍。因此它仍能证明最近邻缩小而非平均采样，保留照片与低色彩图形的断言，同时避免 512 像素输入带来的四倍原生像素工作量；后者并不覆盖更多分支。
 
+噪声、渐变、纯色、渲染文本与透明图形分类各自构成独立测试。每项测试独立执行一条原生 Sharp pipeline，并各自拥有一个超时预算；一项测试不会仅因另外四项已成功分类消耗了同一份累计预算而失败。
+
 拥有第一分区的协调器同时拥有专属命令。因此，单 job 的 Linux 运行会在合并阈值检查前执行它一次。拆分后的原生 Windows 覆盖率把它交给包含第一分区的 shard job；该 job 会把专属 blob 与自己的分区 blob 一同上传，既有合并 job 再下载完整集合。最终合并仍是仓库逐文件 100% 阈值的唯一所有者。
 
 专属清单包含 `pwsh-local`、`pwsh-sandbox`、`tool-pwsh`、`tool-pwsh-persistent` 的真实进程文件、`terminal-bash` 中的 PowerShell 部分，以及 `attachment-local` normalization。与这些套件同文件的纯测试会随之迁移；没有测试变成无插桩或可选。没有 PowerShell 的宿主继续使用既有显式源码排除和跳过行为，而 CI 继续设置 `DSH_TEST_REQUIRE_PWSH=1`，可执行文件不可用时必须失败。

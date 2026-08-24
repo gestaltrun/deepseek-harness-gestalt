@@ -14,6 +14,8 @@ Partitioned coverage excludes the six test files that launch real PowerShell pro
 
 The high-frequency normalization fixture is 256 by 256 pixels: twice the classifier's bounded 128-pixel sample edge. It therefore still proves nearest-neighbour downsampling rather than an averaged sample, preserves the photographic-versus-low-colour assertions, and avoids four times the native pixel work that a 512-pixel source adds without covering another branch.
 
+Noise, gradient, solid, rendered-text, and transparent classification are separate tests. Each independently exercises one native Sharp pipeline and owns one timeout budget; one test never fails merely because four other successful classifications consumed the same cumulative budget.
+
 The coordinator owning partition one owns the exclusive command. A single-job Linux run therefore executes it once before the merged threshold check. Split native Windows coverage assigns it to the shard job containing partition one; that job uploads the exclusive blob beside its partition blobs, and the existing merge job downloads the complete set. The final merge remains the only owner of repository-wide per-file 100% thresholds.
 
 The exclusive inventory contains the real-process files for `pwsh-local`, `pwsh-sandbox`, `tool-pwsh`, `tool-pwsh-persistent`, and the PowerShell half of `terminal-bash`, plus `attachment-local` normalization. Pure tests that share those files move with the suites; no test becomes uninstrumented or optional. Hosts without PowerShell retain the existing explicit source exclusions and skip behavior, while CI keeps `DSH_TEST_REQUIRE_PWSH=1` and fails if the executable is unavailable.

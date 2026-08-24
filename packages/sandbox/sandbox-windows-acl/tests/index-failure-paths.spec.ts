@@ -248,7 +248,7 @@ describe('AclSandbox init', () => {
     const sandbox = new AclSandbox({ writableDirs: [workspace], tempDir: null, mode: 'read-only' })
 
     await sandbox.init()
-    await sandbox.dispose()
+    sandbox.dispose()
   })
 
   it('requires an explicit private temp directory or null under workspace-write', () => {

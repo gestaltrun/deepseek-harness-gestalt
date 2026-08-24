@@ -100,7 +100,7 @@ describe('CI workflow', () => {
       name: 'preflight / generated / ${{ matrix.partition }}',
       'runs-on': 'ubuntu-latest',
       'timeout-minutes': 2,
-      env: { DSH_GATE_CONCURRENCY: '2' },
+      env: { DSH_GATE_CONCURRENCY: '4' },
       strategy: {
         'fail-fast': false,
         matrix: {

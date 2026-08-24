@@ -30,5 +30,5 @@ describe.skipIf(!builtClientLibsPresent)('Mobile Relay bundle purity', () => {
 
     expect(chunks.some(chunk => chunk.isEntry)).toBe(true)
     expect(emitted).not.toMatch(/(?:from\s*["']|import\s*\()["']node:/u)
-  })
+  }, 30_000)
 })

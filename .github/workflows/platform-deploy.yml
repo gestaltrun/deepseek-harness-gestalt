@@ -52,9 +52,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Fail on missing production names
         env:

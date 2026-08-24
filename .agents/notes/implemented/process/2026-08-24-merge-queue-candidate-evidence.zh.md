@@ -16,6 +16,8 @@ CI 工作流监听 `merge_group`，并 checkout GitHub 的合成候选合并 com
 
 `candidate verdict` 是唯一供分支保护使用的 merge-group 结论。它使用 `always()`，要求穷尽 plan，并拒绝任何失败、取消或意外跳过的必需依赖。Draft 与 Ready PR 继续使用 `all checks passed`；已知低风险 Draft 仍只选择影响面证据。
 
+依赖 verdict 通过后，该 job 会 checkout 候选树、安装固定版本的 pnpm 与 Node 工具链，并完成不可变依赖安装，再通过仓库 CLI 完成 attestation。Worker job 的设置不会跨越 GitHub Actions job 边界，因此 verdict 自身的工具链准备属于证明路径，并由工作流契约测试固定。
+
 ## 考虑过的替代方案
 
 **把 Ready PR head 当作合并证明。** 拒绝，因为它不能标识 base 出现更新或队列中其他 PR 落地后形成的精确树。

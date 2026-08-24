@@ -16,6 +16,8 @@ Every exhaustive worker accepts a planner-selected merge-group lane. The candida
 
 `candidate verdict` is the only merge-group conclusion intended for branch protection. It runs with `always()`, requires an exhaustive plan, and rejects every failed, cancelled, or unexpectedly skipped required dependency. The Draft and ready pull-request verdict remains `all checks passed`; a known low-risk Draft still selects only impacted evidence.
 
+After the dependency verdict succeeds, the job checks out the candidate tree, installs the pinned pnpm and Node toolchain, and performs an immutable dependency installation before completing the attestation with the repository CLI. Worker-job setup does not cross the GitHub Actions job boundary; the verdict's toolchain preparation is therefore part of the proof path and is pinned by the workflow contract test.
+
 ## Alternatives considered
 
 **Treat a ready PR head as the merge proof.** Rejected because it does not identify the exact tree formed after newer base commits or queue peers.

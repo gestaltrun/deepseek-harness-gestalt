@@ -305,6 +305,16 @@ describe('CI workflow', () => {
     if (!isRecord(attestationCompletion) || typeof attestationCompletion.run !== 'string') {
       throw new TypeError('candidate verdict must complete its attestation through the checked command')
     }
+    const completionIndex = candidateSteps.indexOf(attestationCompletion)
+    expect(candidateSteps.slice(candidateSteps.indexOf(verdict) + 1, completionIndex)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ uses: 'actions/checkout@v6' }),
+      expect.objectContaining({ uses: 'pnpm/action-setup@v4' }),
+      expect.objectContaining({ uses: 'actions/setup-node@v6' }),
+      expect.objectContaining({
+        name: 'Install (immutable)',
+        run: 'pnpm install --frozen-lockfile',
+      }),
+    ]))
     expect(attestationCompletion.run).toContain('pnpm --silent ci:attestation complete')
     expect(attestationCompletion.run).not.toContain("node <<'NODE'")
     const attestationUpload = candidateSteps.find(step => isRecord(step)

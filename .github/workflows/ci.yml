@@ -1054,6 +1054,21 @@ jobs:
           console.log(`Candidate jobs succeeded: ${required.join(', ')}`)
           NODE
 
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
       - name: Download candidate identity
         uses: actions/download-artifact@v8
         with:

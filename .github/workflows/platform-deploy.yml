@@ -331,6 +331,13 @@ jobs:
           state_probe=$(aliyun oss cat "$state_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" 2>&1)
           state_probe_status=$?
           set -e
+          printf 'platform: diagnostic OSS state probe exit status: %s\n' "$state_probe_status"
+          if [ "$state_probe_status" != 0 ]; then
+            printf '%s\n' "$state_probe"
+          else
+            echo 'platform: diagnostic found an existing deployment state object'
+          fi
+          exit 1
           if [ "$state_probe_status" = 0 ]; then
             echo 'platform: an unresolved deployment exists; dispatch recover before deploying again' >&2
             exit 1

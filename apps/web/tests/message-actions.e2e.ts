@@ -164,8 +164,17 @@ describe('web e2e: message IconActions and clocks on settled history', () => {
     await expect.poll(() => actionButton.isVisible(), { timeout: 2_000 }).toBe(true)
     const buttonBox = await actionButton.boundingBox()
     if (buttonBox === null) throw new Error('fork source row action has no layout box')
+    const renameResponse = page.waitForResponse(response =>
+      new URL(response.url()).pathname === '/api/session.rename')
     await page.mouse.click(buttonBox.x + buttonBox.width / 2, buttonBox.y + buttonBox.height / 2)
     await page.getByRole('menuitem', { name: 'Fork session' }).click()
+    const renameReceipt = await (await renameResponse).json() as {
+      result:
+        | { ok: true; value: { title: string } }
+        | { ok: false; error: { code: string; message: string } }
+    }
+    expect(renameReceipt.result).toMatchObject({ ok: true, value: { title: 'Use the read tool twice (2)' } })
+    if (!renameReceipt.result.ok) return
     await expect.poll(
       () => scaffold.ctx.agents.list().filter(agent => agent.session.header.parentSession !== undefined).length,
       { timeout: 15_000 },
@@ -178,12 +187,12 @@ describe('web e2e: message IconActions and clocks on settled history', () => {
       () => page.locator('[role="treeitem"][aria-selected="true"]').count(),
       { timeout: 10_000 },
     ).toBe(1)
-    // The child row is published before its inherited title rename settles;
-    // wait for that second RPC projection before freezing the ARIA tree.
+    // The rename receipt settles before the client opens the child; wait for
+    // that title to reach the selected row before freezing the ARIA tree.
     await expect.poll(
       () => page.locator('[role="treeitem"][aria-selected="true"]').textContent(),
       { timeout: 10_000 },
-    ).toContain('Use the read tool twice (2)')
+    ).toContain(renameReceipt.result.value.title)
     const tree = await captureStableAria(
       page,
       '[role="tree"][aria-label="Sessions"]',

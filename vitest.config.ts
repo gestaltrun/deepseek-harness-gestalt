@@ -1,11 +1,14 @@
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import tsconfigPaths from 'vite-tsconfig-paths'
-import { resolvePwshPath } from './packages/shell/pwsh-local/src/resolve.ts'
 import { defineConfig } from 'vitest/config'
 import { standardDecoratorPlugin, vitestExecArgv } from './vitest.shared.ts'
 import { COVERAGE_EXEMPT_ENV, coverageExemptHeavySuites } from './scripts/coverage-exempt.ts'
-import { COVERAGE_PARTITION_MODE_ENV } from './scripts/coverage-partitions.ts'
+import {
+  COVERAGE_EXCLUSIVE_MODE_ENV,
+  COVERAGE_PARTITION_MODE_ENV,
+  coverageExclusiveSuites,
+} from './scripts/coverage-partitions.ts'
+import { testPwshAvailable } from './scripts/pwsh-test-availability.ts'
 
 // Prints exact `path:line:col` records for every uncovered statement, branch
 // path, and function when a file misses the per-file 100% gate — the built-in
@@ -80,14 +83,12 @@ const windowsRunnerCoverageExclusions = process.platform === 'win32'
     ]
   : []
 
-// pwsh-local's run/start/lifecycle suites self-skip without a real pwsh
-// (executor.spec.ts hasPwsh), leaving this file
-// far below per-file 100% on pwsh-less hosts; the exemption keeps those hosts
-// green while CI runners ship pwsh and still enforce the full bar. The probe
-// runs the suites' own resolution (the dependency-free resolve.ts module),
-// so the exemption is active exactly when the suites skip — a mismatched
-// narrower probe could exempt the file on hosts whose suites actually run.
-const pwshCoverageExclusions = spawnSync(resolvePwshPath(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$true'], { encoding: 'utf8' }).status === 0
+// pwsh-local's run/start/lifecycle suites self-skip without a real pwsh,
+// leaving these files below per-file 100% on pwsh-less development hosts.
+// Coverage CI explicitly requires pwsh, so its config and test workers do not
+// repeat a load-sensitive process probe. Other hosts share one resolver that
+// excludes the files exactly when the suites skip.
+const pwshCoverageExclusions = testPwshAvailable()
   ? []
   : [
       'packages/shell/pwsh-local/src/index.ts',
@@ -117,6 +118,14 @@ if (coveragePartitionRaw !== undefined && coveragePartitionRaw !== '' && coverag
   throw new Error(`vitest config: ${COVERAGE_PARTITION_MODE_ENV} must be '1' or unset, got ${JSON.stringify(coveragePartitionRaw)}.`)
 }
 const coveragePartitionMode = coveragePartitionRaw === '1'
+
+const coverageExclusiveRaw = process.env[COVERAGE_EXCLUSIVE_MODE_ENV]
+if (coverageExclusiveRaw !== undefined && coverageExclusiveRaw !== '' && coverageExclusiveRaw !== '1') {
+  throw new Error(`vitest config: ${COVERAGE_EXCLUSIVE_MODE_ENV} must be '1' or unset, got ${JSON.stringify(coverageExclusiveRaw)}.`)
+}
+const coverageExclusiveMode = coverageExclusiveRaw === '1'
+const coveragePartialMode = coveragePartitionMode || coverageExclusiveMode
+const coverageExclusiveExcludes = coveragePartitionMode ? coverageExclusiveSuites : []
 
 // These suites exercise process-global state, process APIs, or timing-sensitive process I/O
 // that worker threads cannot isolate reliably under aggregate gate contention.
@@ -157,6 +166,7 @@ export default defineConfig({
             ...windowsUnsupportedTests,
             ...processBoundTests,
             ...coverageExemptExcludes,
+            ...coverageExclusiveExcludes,
           ],
         },
       },
@@ -171,6 +181,7 @@ export default defineConfig({
           exclude: [
             ...windowsUnsupportedTests,
             ...coverageExemptExcludes,
+            ...coverageExclusiveExcludes,
           ],
         },
       },
@@ -298,7 +309,7 @@ export default defineConfig({
       // Per-file so a well-covered big file can't subsidize a bare one.
       // Every v8 ignore comment must carry a reason — see the quality-gates Agent Note
       // (.agents/notes/implemented/process/2026-06-11-quality-gates.md).
-      thresholds: coveragePartitionMode
+      thresholds: coveragePartialMode
         ? undefined
         : {
             perFile: true,
@@ -307,7 +318,7 @@ export default defineConfig({
             functions: 100,
             lines: 100,
           },
-      reporter: coveragePartitionMode
+      reporter: coveragePartialMode
         ? []
         : process.env.CI
           ? ['text', uncoveredLocationsReporter]

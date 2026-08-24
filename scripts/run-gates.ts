@@ -18,20 +18,32 @@ import {
   parseCoveragePartitionCount,
 } from './coverage-partitions.ts'
 import { pnpmInvocation } from './pnpm-invocation.ts'
+import {
+  buildGateReport,
+  parseCiCacheEvidence,
+  parseCiFailureClassificationOverride,
+  writeGateReport,
+} from './ci-evidence.ts'
 
 /** A named aggregate exposed by the gate runner. */
 export type Mode =
+  | 'ci-preflight'
   | 'ci-primary'
   | 'ci-linux-primary'
   | 'ci-static'
   | 'ci-lint-contracts-ready'
   | 'ci-coverage'
+  | 'ci-windows-native-coverage-merge'
   | 'ci-snapshot'
   | 'ci-artifacts'
   | 'ci-consumers'
   | 'ci-windows-blocking'
   | 'ci-windows-complete'
+  | 'ci-windows-native-core'
+  | 'ci-windows-native-static'
   | 'ci-windows-observational'
+  | 'ci-standby-linux-smoke'
+  | 'ci-standby-windows-smoke'
   | 'node-compat'
   | 'check-all'
   | 'hygiene'
@@ -53,6 +65,8 @@ export interface Gate {
   env?: Record<string, string | undefined>
   /** Keep a failure visible without failing the aggregate. */
   allowFailure?: boolean
+  /** Permit infrastructure classification for transport diagnostics owned by this gate. */
+  failureDomain?: 'infrastructure' | 'failover-readiness'
   /** Write child output as it arrives instead of buffering it until completion. */
   streamOutput?: boolean
 }
@@ -101,10 +115,33 @@ async function main(args: string[]): Promise<number> {
     ? concurrencyDefault.source
     : '$DSH_GATE_CONCURRENCY'
   const startedAt = performance.now()
+  const startedAtDate = new Date()
+  const settledResults: GateResult[] = []
   console.log(`run-gates: ${mode} running ${gates.length} gate(s) with ${maxConcurrency} worker(s) from ${concurrencySource}.`)
 
-  const results = await runGates(gates, maxConcurrency, runGate, printResult)
+  const results = await runGates(gates, maxConcurrency, runGate, (result) => {
+    settledResults.push(result)
+    printResult(result)
+  })
+  const completedAtDate = new Date()
   printSummary(results, performance.now() - startedAt)
+  const reportPath = process.env.DSH_CI_REPORT_PATH
+  if (reportPath !== undefined && reportPath !== '') {
+    const artifactRefs = (process.env.DSH_CI_ARTIFACT_REFS ?? '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(value => value !== '')
+    writeGateReport(reportPath, buildGateReport(
+      mode,
+      results,
+      settledResults,
+      startedAtDate,
+      completedAtDate,
+      artifactRefs,
+      parseCiCacheEvidence(process.env.DSH_CI_CACHE_STATUS),
+      parseCiFailureClassificationOverride(process.env.DSH_CI_FAILURE_CLASSIFICATION),
+    ))
+  }
   return results.some(result => result.gate.allowFailure !== true && (result.status === 'failed' || result.status === 'skipped'))
     ? 1
     : 0
@@ -112,17 +149,23 @@ async function main(args: string[]): Promise<number> {
 
 function parseMode(raw: string | undefined): Mode {
   switch (raw) {
+    case 'ci-preflight':
     case 'ci-primary':
     case 'ci-linux-primary':
     case 'ci-static':
     case 'ci-lint-contracts-ready':
     case 'ci-coverage':
+    case 'ci-windows-native-coverage-merge':
     case 'ci-snapshot':
     case 'ci-artifacts':
     case 'ci-consumers':
     case 'ci-windows-blocking':
     case 'ci-windows-complete':
+    case 'ci-windows-native-core':
+    case 'ci-windows-native-static':
     case 'ci-windows-observational':
+    case 'ci-standby-linux-smoke':
+    case 'ci-standby-windows-smoke':
     case 'node-compat':
     case 'check-all':
     case 'hygiene':
@@ -130,7 +173,7 @@ function parseMode(raw: string | undefined): Mode {
       return raw
     default:
       throw new Error(
-        `run-gates: expected mode ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-observational | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
+        `run-gates: expected mode ci-preflight | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | ci-standby-linux-smoke | ci-standby-windows-smoke | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
       )
   }
 }
@@ -205,6 +248,8 @@ function pnpmExec(id: string, args: string[], options: Partial<Gate> = {}): Gate
  */
 export function gatesForMode(selected: Mode): Gate[] {
   switch (selected) {
+    case 'ci-preflight':
+      return ciPreflightGates()
     case 'ci-primary':
       return ciPrimaryGates()
     case 'ci-linux-primary':
@@ -218,6 +263,8 @@ export function gatesForMode(selected: Mode): Gate[] {
       ]
     case 'ci-coverage':
       return coverageGates()
+    case 'ci-windows-native-coverage-merge':
+      return coverageMergeGates()
     case 'ci-snapshot':
       return [ciBuildGate(), snapshotGate()]
     case 'ci-artifacts':
@@ -228,8 +275,16 @@ export function gatesForMode(selected: Mode): Gate[] {
       return ciWindowsBlockingGates()
     case 'ci-windows-complete':
       return ciWindowsCompleteGates()
+    case 'ci-windows-native-core':
+      return ciWindowsNativeCoreGates()
+    case 'ci-windows-native-static':
+      return ciWindowsNativeStaticGates()
     case 'ci-windows-observational':
       return ciWindowsObservationalGates()
+    case 'ci-standby-linux-smoke':
+      return standbySmokeGates('linux')
+    case 'ci-standby-windows-smoke':
+      return standbySmokeGates('windows')
     case 'node-compat':
       return nodeCompatGates()
     case 'check-all':
@@ -261,6 +316,22 @@ export function gatesForMode(selected: Mode): Gate[] {
     case 'doc-sync':
       return docSyncLeafGates()
   }
+}
+
+function ciPreflightGates(): Gate[] {
+  return [
+    pnpmScript('constraints', 'constraints'),
+    pnpmScript('translation-pairing', 'verify-translation-pairing', { label: 'translation pairing' }),
+    pnpmScript('cordis-catalog', 'verify-cordis-catalog', { label: 'cordis catalog' }),
+    pnpmScript('cordis-api', 'verify-cordis-api', { label: 'Cordis API' }),
+    pnpmScript('client-catalog', 'verify-client-catalog', { label: 'client catalog' }),
+    pnpmScript('tool-catalog', 'verify-tool-catalog', { label: 'tool catalog' }),
+    pnpmScript('config-catalog', 'verify-config-catalog', { label: 'config catalog' }),
+    pnpmScript('doc-graphs', 'verify-doc-graphs', { label: 'doc graphs' }),
+    pnpmScript('persistence-catalog', 'verify-persistence-catalog', { label: 'persistence catalog' }),
+    pnpmScript('module-graph', 'verify-module-graph', { label: 'module graph' }),
+    pnpmScript('scoped-events', 'verify-scoped-events', { label: 'scoped events' }),
+  ]
 }
 
 function ciSharedStaticGates(): Gate[] {
@@ -365,6 +436,38 @@ function nodeCompatSmokeGates(options: { cliSmoke?: boolean } = {}): Gate[] {
     )
   }
   return gates
+}
+
+function standbySmokeGates(platform: 'linux' | 'windows'): Gate[] {
+  const common: Gate[] = [
+    pnpmScript('optional-dependency-imports', 'verify-optional-dependency-imports'),
+    ciBuildGate(),
+    pnpmScript('build:web', 'build:web', { label: 'Web frontend build', needs: ['build'] }),
+    pnpmExec('browser-runtime-smoke', [
+      'vitest',
+      'run',
+      'packages/browser/browser-runtime-deterministic/tests/runtime.spec.ts',
+      'packages/browser/browser-workspace/tests/workspace.spec.ts',
+    ], { label: 'browser runtime smoke' }),
+  ]
+  const platformGate = platform === 'windows'
+    ? pnpmExec('platform-fixture-smoke', [
+      'vitest',
+      'run',
+      'packages/session/session-persistence-jsonl/tests/win32.spec.ts',
+      'packages/fs/fs-local/tests/win32.spec.ts',
+      'packages/subprocess/subprocess-local/tests/windows-inspector.spec.ts',
+    ], { label: 'Windows platform fixture smoke' })
+    : pnpmExec('platform-fixture-smoke', [
+      'vitest',
+      'run',
+      'scripts/vitest-environment.compat.spec.ts',
+      'packages/browser/browser-runtime-electron/tests/runtime-invariant.spec.ts',
+    ], { label: 'Linux platform fixture smoke' })
+  return [...common, platformGate].map(gate => ({
+    ...gate,
+    failureDomain: 'failover-readiness' as const,
+  }))
 }
 
 /** Active Node major used to select version-specific compatibility checks. */
@@ -477,25 +580,42 @@ function ciWindowsBlockingGates(): Gate[] {
 }
 
 function ciWindowsCompleteGates(): Gate[] {
-  const coverage = coverageGates(['build'])
-  const coverageAfter = coverage.map(gate => gate.id)
-  const observational = ciWindowsObservationalGates()
-    // The required production site replaces the observational MPA build; both
-    // VitePress modes write the same output directory and cannot overlap.
-    .filter(gate => gate.id !== 'build' && gate.id !== 'docs-site-build')
-    .map(gate => ({
-      ...gate,
-      allowFailure: true,
-      after: [...new Set([...coverageAfter, ...(gate.after ?? [])])],
-    }))
+  return [
+    ...ciWindowsNativeCoreGates(),
+    ...coverageGates(),
+    ...ciWindowsNativeStaticGates(),
+  ]
+}
+
+function ciWindowsNativeCoreGates(): Gate[] {
+  const build = ['build']
   return [
     ciBuildGate(),
     pnpmScript('windows-site', 'docs:build', { label: 'production site' }),
     pnpmScript('electron-runtime-e2e', 'test:electron-runtime-e2e', {
       label: 'electron runtime e2e',
     }),
-    ...coverage,
-    ...observational,
+    pnpmScript('publint', 'publint', { needs: build }),
+    pnpmScript('node-next-types', 'verify-node-next-types', {
+      label: 'node-next types',
+      needs: build,
+    }),
+    pnpmScript('doc-typecheck', 'doc-typecheck:contracts-ready', {
+      needs: build,
+      env: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },
+    }),
+    builtPackageInvariantsGate(build),
+    builtBinSmokeGate(build),
+  ]
+}
+
+function ciWindowsNativeStaticGates(): Gate[] {
+  return [
+    ...ciSharedStaticGates(),
+    ...docSyncLeafGates().filter(gate => gate.id !== 'docs-site-build' && gate.id !== 'doc-typecheck'),
+    pnpmScript('module-graph', 'verify-module-graph', { label: 'module graph' }),
+    pnpmScript('knip', 'knip'),
+    pnpmScript('duplication', 'duplication'),
   ]
 }
 
@@ -593,6 +713,28 @@ function coverageGates(needs?: string[]): Gate[] {
       label: 'test:coverage-exempt-heavy',
       ...dependency,
     }),
+  ]
+}
+
+function coverageMergeGates(): Gate[] {
+  const workers = coverageWorkerArgs()
+  const timeouts = coverageTestTimeoutArgs(process.env[COVERAGE_TEST_TIMEOUT_ENV])
+  return [
+    pnpmExec('coverage', [
+      'vitest',
+      '--merge-reports=coverage/.partitioned/blobs',
+      '--coverage',
+    ], {
+      label: 'merge native coverage',
+      env: { [COVERAGE_EXEMPT_ENV]: '1' },
+    }),
+    pnpmExec('coverage-exempt-heavy', [
+      'vitest',
+      'run',
+      ...coverageExemptHeavySuites.map(suite => suite.filter),
+      ...workers.instrumented,
+      ...timeouts,
+    ], { label: 'test:coverage-exempt-heavy' }),
   ]
 }
 

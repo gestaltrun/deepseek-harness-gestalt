@@ -362,6 +362,27 @@ describe('PlatformAccountInstallation', () => {
     expect(await store.loadPending('development')).toMatchObject({ attempt: { expiresAt: 2_000 } })
   })
 
+  it('keeps a newly prepared login ready when a late load sees its pending attempt', async () => {
+    const openSystemBrowser = vi.fn()
+    const installation = new PlatformAccountInstallation({
+      environment: DEVELOPMENT,
+      installationId: parseInstallationId('pending-prepared'),
+      installationKind: 'mobile',
+      transport: transport([]),
+      store: new MemoryInstallationAccountStore(),
+      systemBrowser: { open: openSystemBrowser },
+      crypto: webcrypto as Crypto,
+    })
+    installation.acceptPrivacy()
+    await installation.prepareLogin()
+
+    await installation.load()
+
+    expect(installation.getSnapshot()).toMatchObject({ status: 'ready', privacyAccepted: true })
+    installation.openLogin()
+    expect(openSystemBrowser).toHaveBeenCalledOnce()
+  })
+
   it('clears an expired pending login without publishing polling', async () => {
     const store = new MemoryInstallationAccountStore()
     const pair = await webcrypto.subtle.generateKey(

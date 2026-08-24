@@ -975,21 +975,12 @@ jobs:
         env:
           IDENTITY_PATH: ${{ runner.temp }}/candidate-proof/candidate-identity.json
           OUTPUT_PATH: ${{ runner.temp }}/candidate-proof/candidate-attestation.json
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs')
-          const identity = JSON.parse(fs.readFileSync(process.env.IDENTITY_PATH, 'utf8'))
-          const attestation = {
-            ...identity,
-            complete: true,
-            repository: process.env.GITHUB_REPOSITORY,
-            sourceRunId: Number(process.env.GITHUB_RUN_ID),
-            sourceEvent: 'merge_group',
-            candidateVerdict: 'success',
-          }
-          fs.writeFileSync(process.env.OUTPUT_PATH, `${JSON.stringify(attestation, null, 2)}\n`)
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `artifact_name=ci-candidate-attestation-${identity.tree}\n`)
-          NODE
+        run: >-
+          pnpm --silent ci:attestation complete
+          --input "$IDENTITY_PATH"
+          --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID"
+          --output "$OUTPUT_PATH"
 
       - name: Publish candidate attestation
         uses: actions/upload-artifact@v7

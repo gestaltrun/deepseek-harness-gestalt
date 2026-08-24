@@ -221,6 +221,13 @@ describe('CI workflow', () => {
       expect(verdict.run, `candidate verdict must require ${job}`).toContain(`'${job}'`)
     }
     expect(verdict.run).toContain("results[job]?.result !== 'success'")
+    const attestationCompletion = candidateSteps.find(step => isRecord(step)
+      && step.name === 'Complete candidate attestation')
+    if (!isRecord(attestationCompletion) || typeof attestationCompletion.run !== 'string') {
+      throw new TypeError('candidate verdict must complete its attestation through the checked command')
+    }
+    expect(attestationCompletion.run).toContain('pnpm --silent ci:attestation complete')
+    expect(attestationCompletion.run).not.toContain("node <<'NODE'")
     const attestationUpload = candidateSteps.find(step => isRecord(step)
       && step.name === 'Publish candidate attestation')
     expect(attestationUpload).toMatchObject({

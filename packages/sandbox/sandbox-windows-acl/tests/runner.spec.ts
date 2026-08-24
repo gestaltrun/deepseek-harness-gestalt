@@ -112,7 +112,15 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
       '--', 'pwsh', '/NoLogo', '/NonInteractive', '/NoProfile', '/Command', probe,
     ])
     expect(result.status, `stderr: ${result.stderr}`).toBe(0)
-    expect(result.stdout).toContain(`LANGMODE: ${expectedLanguageMode}`)
+    const confinedLanguageMode = /LANGMODE: (\w+)/u.exec(result.stdout)?.[1]
+    expect(confinedLanguageMode).toBeDefined()
+    // The restricted token may tighten ambient FullLanguage; it must preserve
+    // an already restricted host mode instead of relaxing it.
+    if (expectedLanguageMode === 'FullLanguage') {
+      expect(['FullLanguage', 'ConstrainedLanguage']).toContain(confinedLanguageMode)
+    } else {
+      expect(confinedLanguageMode).toBe(expectedLanguageMode)
+    }
     expect(result.stdout).toContain('TARGET-WRITE: OK')
     expect(result.stdout).toContain('TEMP-WRITE: OK')
     expect(result.stdout).toContain('ESCAPE-WRITE: DENIED')

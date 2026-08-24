@@ -10,7 +10,7 @@ The Platform deployment checked each candidate and replacement only through an E
 
 ## Decision
 
-After both rolling replacements pass loopback readiness, the workflow requests the production HTTPS `/readyz` route from the GitHub runner and verifies the selected attachment storage. This check runs while the error trap and stopped predecessor containers still exist. Exhausting the bounded retry triggers the existing all-host rollback.
+After both rolling replacements pass loopback readiness, the workflow requests the production HTTPS `/readyz` route from the GitHub runner and verifies the selected attachment storage and both expected non-sensitive instance ids. This check runs while the error trap and stopped predecessor containers still exist. Exhausting the bounded retry triggers the existing all-host rollback.
 
 ## Alternatives considered
 
@@ -22,8 +22,8 @@ After both rolling replacements pass loopback readiness, the workflow requests t
 
 ## Consequences
 
-An unreachable or incorrectly routed product origin now fails the deployment before its predecessors are removed. The deployment remains bounded and does not modify ALB or DNS configuration automatically.
+An unreachable, sticky, partially registered, or incorrectly routed product origin now fails the deployment before its predecessors are removed. The deployment remains bounded and does not modify ALB or DNS configuration automatically.
 
 ## Testing
 
-The workflow contract test requires the public readiness check, the production origin, and execution before rollback cleanup. The operated deployment supplies the runtime proof against the real HTTPS origin.
+The workflow contract test requires the public readiness check, the production origin, both expected instances, and execution before rollback cleanup. Executable shell tests make the public route fail, return the wrong storage, or expose only one backend and verify that both predecessor hosts are restored; the success case observes both instances and reaches cleanup without rollback. The operated deployment supplies the runtime proof against the real HTTPS origin.

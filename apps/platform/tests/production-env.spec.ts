@@ -23,6 +23,7 @@ const bootSource = readFileSync(new URL('../src/boot.ts', import.meta.url), 'utf
 const launchSource = readFileSync(new URL('../src/launch.ts', import.meta.url), 'utf8')
 const remoteAccessResourcesSource = readFileSync(new URL('../src/remote-access-resources.ts', import.meta.url), 'utf8')
 const dockerfileSource = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8')
+const publicReadinessSource = readFileSync(new URL('../scripts/platform-public-readiness.sh', import.meta.url), 'utf8')
 const repoRoot = resolve(import.meta.dirname, '../../..')
 
 function completeDeployEnv(): NodeJS.Dict<string> {
@@ -83,6 +84,43 @@ function spawnCli(env: NodeJS.Dict<string>) {
         }
         : {}),
       ...env,
+    },
+  })
+}
+
+function runPublicReadinessHarness(result: 'success' | 'one-backend' | 'unreachable' | 'wrong-storage') {
+  const harness = [
+    'set -eEuo pipefail',
+    'hosts=(10.0.0.1 10.0.0.2)',
+    'READINESS_COUNTER=$(mktemp)',
+    'curl() {',
+    '  if [ "$READINESS_RESULT" = unreachable ]; then return 22; fi',
+    '  count=$(cat "$READINESS_COUNTER")',
+    '  count=$((count + 1))',
+    '  printf \'%s\' "$count" > "$READINESS_COUNTER"',
+    '  if [ "$READINESS_RESULT" = wrong-storage ]; then',
+    '    printf \'{"attachmentStorage":"postgres","instanceId":"relay-10-0-0-1"}\'',
+    '  elif [ "$READINESS_RESULT" = one-backend ] || [ "$count" = 1 ]; then',
+    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-10-0-0-1"}\'',
+    '  else',
+    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-10-0-0-2"}\'',
+    '  fi',
+    '}',
+    'sleep() { :; }',
+    'ssh() { printf \'ROLLBACK:%s\\n\' "$*"; }',
+    publicReadinessSource,
+    'trap on_deploy_error ERR',
+    'platform_public_readiness 2',
+    'trap - ERR',
+    'printf \'CLEANUP\\n\'',
+  ].join('\n')
+  return spawnSync('bash', ['-c', harness], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      PLATFORM_ORIGIN: 'https://platform.example.test',
+      PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'oss',
+      READINESS_RESULT: result,
     },
   })
 }
@@ -342,31 +380,35 @@ describe('Platform release workflows', () => {
     }
     const apply = steps(deploy).find(step => typeof step.run === 'string' && step.run.includes('docker run'))
     if (apply === undefined) throw new TypeError('deploy job must run docker')
-    expect(String(apply.run)).toContain('--log-opt max-size=20m')
-    expect(String(apply.run)).toContain('--log-opt max-file=3')
-    expect(String(apply.run)).toContain('dist/oss-lifecycle-cli.mjs')
-    expect(String(apply.run)).toContain('dsh-platform-candidate')
-    expect(String(apply.run)).toContain('127.0.0.1:18080/readyz')
-    expect(String(apply.run)).toContain('attachmentStorage')
-    expect(String(apply.run)).toContain('rollback_platform')
-    expect(String(apply.run)).toContain('docker inspect dsh-platform >/dev/null; ! docker inspect dsh-platform-rollback')
-    expect(String(apply.run)).toContain('if docker inspect dsh-platform-rollback')
-    expect(String(apply.run).indexOf('if docker inspect dsh-platform-rollback'))
-      .toBeLessThan(String(apply.run).indexOf('docker rm -f dsh-platform >/dev/null 2>&1 || true'))
-    expect(String(apply.run)).not.toContain('Stop every predecessor before')
-    expect(String(apply.run)).toContain('docker stop --time 60 dsh-platform-rollback')
-    expect(String(apply.run)).toContain('rolling replacement keeps the other host serving')
-    expect(String(apply.run)).toContain('public readiness through the production HTTPS origin')
-    expect(String(apply.run)).toContain('${PLATFORM_ORIGIN}/readyz')
-    expect(String(apply.run).indexOf('public readiness through the production HTTPS origin'))
-      .toBeLessThan(String(apply.run).indexOf('rollback_cleanup_failed=0'))
-    expect(String(apply.run)).toContain('rollback_cleanup_failed=0')
-    expect(String(apply.run)).toContain('attachment-storage-cutover-cli.mjs')
-    expect(String(apply.run)).toContain('grep -Eq')
-    expect(String(apply.run)).toContain('attachmentStorage\\\":\\\"(postgres|oss)')
-    expect(String(apply.run)).not.toContain("grep -Fq '\"attachmentStorage\":\"postgres\"'")
-    expect(String(apply.run).indexOf('rollback_cleanup_failed=0'))
-      .toBeLessThan(String(apply.run).indexOf('attachment-storage-cutover-cli.mjs'))
+    const applySource = String(apply.run)
+    expect(applySource).toContain('set -eEuo pipefail')
+    expect(applySource).toContain('source apps/platform/scripts/platform-public-readiness.sh')
+    expect(applySource).toContain('--log-opt max-size=20m')
+    expect(applySource).toContain('--log-opt max-file=3')
+    expect(applySource).toContain('dist/oss-lifecycle-cli.mjs')
+    expect(applySource).toContain('dsh-platform-candidate')
+    expect(applySource).toContain('127.0.0.1:18080/readyz')
+    expect(applySource).toContain('attachmentStorage')
+    expect(publicReadinessSource).toContain('rollback_platform')
+    expect(applySource).toContain('docker inspect dsh-platform >/dev/null; ! docker inspect dsh-platform-rollback')
+    expect(publicReadinessSource).toContain('if docker inspect dsh-platform-rollback')
+    expect(publicReadinessSource.indexOf('if docker inspect dsh-platform-rollback'))
+      .toBeLessThan(publicReadinessSource.indexOf('docker rm -f dsh-platform >/dev/null 2>&1 || true'))
+    expect(applySource).not.toContain('Stop every predecessor before')
+    expect(publicReadinessSource).toContain('docker stop --time 60 dsh-platform >/dev/null')
+    expect(applySource).toContain('docker stop --time 60 dsh-platform-rollback')
+    expect(applySource).toContain('rolling replacement keeps the other host serving')
+    expect(publicReadinessSource).toContain('public readiness through the production HTTPS origin')
+    expect(publicReadinessSource).toContain('${PLATFORM_ORIGIN}/readyz')
+    expect(applySource.indexOf('platform_public_readiness 30'))
+      .toBeLessThan(applySource.indexOf('rollback_cleanup_failed=0'))
+    expect(applySource).toContain('rollback_cleanup_failed=0')
+    expect(applySource).toContain('attachment-storage-cutover-cli.mjs')
+    expect(applySource).toContain('grep -Eq')
+    expect(applySource).toContain('attachmentStorage\\\":\\\"(postgres|oss)')
+    expect(applySource).not.toContain("grep -Fq '\"attachmentStorage\":\"postgres\"'")
+    expect(applySource.indexOf('rollback_cleanup_failed=0'))
+      .toBeLessThan(applySource.indexOf('attachment-storage-cutover-cli.mjs'))
     expect(String(apply.run)).toContain('--env-file /run/dsh-platform-candidate.env')
     expect(String(apply.run)).toContain('PLATFORM_REMOTE_ATTACHMENT_STORAGE')
     expect(String(apply.run)).toContain('dsh-loongcollector')
@@ -386,6 +428,28 @@ describe('Platform release workflows', () => {
       if (!isRecord(value)) throw new TypeError(`${name} must be a job`)
       expect(value.environment, name).toBe('production')
     }
+  })
+
+  it.each(['unreachable', 'wrong-storage', 'one-backend'] as const)(
+    'restores both predecessors before cleanup when public readiness is %s',
+    (result) => {
+      const failed = runPublicReadinessHarness(result)
+      expect(failed.status).toBe(1)
+      expect(failed.stdout).toContain('public readiness through the production HTTPS origin')
+      expect(failed.stdout).not.toContain('CLEANUP')
+      const rollbacks = failed.stdout.split('\n').filter(line => line.startsWith('ROLLBACK:'))
+      expect(rollbacks).toHaveLength(2)
+      expect(rollbacks[0]).toContain('root@10.0.0.1')
+      expect(rollbacks[1]).toContain('root@10.0.0.2')
+    },
+  )
+
+  it('reaches cleanup without rollback only after public readiness succeeds', () => {
+    const succeeded = runPublicReadinessHarness('success')
+    expect(succeeded.status).toBe(0)
+    expect(succeeded.stdout).toContain('public readiness through the production HTTPS origin')
+    expect(succeeded.stdout).toContain('CLEANUP')
+    expect(succeeded.stdout).not.toContain('ROLLBACK:')
   })
 
   it('builds the image on master path changes without publishing to GHCR', () => {

@@ -144,7 +144,7 @@ jobs:
           PLATFORM_SLS_ACCOUNT_ID: ${{ vars.PLATFORM_SLS_ACCOUNT_ID }}
           PLATFORM_REMOTE_ATTACHMENT_STORAGE: ${{ inputs.attachment_storage }}
         run: |
-          set -euo pipefail
+          set -eEuo pipefail
           install -m 600 /dev/null /tmp/ecs.pem
           printf '%s\n' "$SSH_KEY" > /tmp/ecs.pem
           IFS=',' read -r -a hosts <<< "$HOSTS"
@@ -247,27 +247,7 @@ jobs:
             done
           fi
 
-          rollback_platform() {
-            set +e
-            rollback_failed=0
-            for rollback_host in "${hosts[@]}"; do
-              rollback_host="${rollback_host// /}"
-              ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${rollback_host}" \
-                "if docker inspect dsh-platform-rollback >/dev/null 2>&1; then \
-                   docker stop --time 60 dsh-platform >/dev/null 2>&1 || true; \
-                   docker rm -f dsh-platform >/dev/null 2>&1 || true; \
-                   docker rename dsh-platform-rollback dsh-platform && docker start dsh-platform; \
-                 fi; docker rm -f dsh-platform-candidate >/dev/null 2>&1 || true; \
-                 rm -f /run/dsh-platform-candidate.env" || rollback_failed=1
-            done
-            return "$rollback_failed"
-          }
-          on_deploy_error() {
-            status=$?
-            trap - ERR
-            rollback_platform || echo 'platform: one or more hosts failed to restore the predecessor' >&2
-            exit "$status"
-          }
+          source apps/platform/scripts/platform-public-readiness.sh
           trap on_deploy_error ERR
 
           # Each graceful rolling replacement keeps the other host serving. The shared authority
@@ -289,17 +269,7 @@ jobs:
                done; test \"\$ready\" = 1"
           done
 
-          echo 'public readiness through the production HTTPS origin'
-          public_ready=0
-          for attempt in $(seq 1 30); do
-            if body=$(curl -fsS --connect-timeout 5 --max-time 5 "${PLATFORM_ORIGIN}/readyz") \
-              && printf '%s' "$body" | grep -Fq '"attachmentStorage":"'"$PLATFORM_REMOTE_ATTACHMENT_STORAGE"'"'; then
-              public_ready=1
-              break
-            fi
-            sleep 2
-          done
-          test "$public_ready" = 1
+          platform_public_readiness 30
           trap - ERR
 
           # A stopped rollback container is removed on every host before the irreversible phase

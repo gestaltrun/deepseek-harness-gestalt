@@ -207,7 +207,7 @@ export async function launchOperatedPlatform(
       attachTimeoutMs: config.relay.attachTimeoutMs,
       maxPendingChallenges: config.relay.maxPendingChallenges,
     })
-    registerHealth(context, config.remoteAttachments.storage)
+    registerHealth(context, config.remoteAttachments.storage, config.relay.instanceId)
     await context.plugin(FrontendStatic, {
       distIndex: options.publicIndex ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'index.html'),
     })
@@ -245,14 +245,14 @@ function endpointOnlyError(): Error {
   return new Error('Platform-mediated pairing cryptography is disabled; endpoints must use the opaque mailbox')
 }
 
-function registerHealth(context: Context, attachmentStorage: 'postgres' | 'oss'): void {
+function registerHealth(context: Context, attachmentStorage: 'postgres' | 'oss', instanceId: string): void {
   for (const path of ['/healthz', '/readyz']) {
     context.effect(() => context.webServer.register({
       kind: 'exact',
       path,
       handler(_req, res) {
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-        res.end(JSON.stringify({ ok: true, attachmentStorage }))
+        res.end(JSON.stringify({ ok: true, attachmentStorage, instanceId }))
       },
     }),
     `platform: ${path}`,

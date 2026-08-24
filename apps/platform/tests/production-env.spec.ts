@@ -65,6 +65,7 @@ function spawnCli(env: NodeJS.Dict<string>) {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
+      TSX_TSCONFIG_PATH: resolve(repoRoot, 'tsconfig.json'),
       ...(process.platform === 'win32'
         ? {
           SYSTEMROOT: process.env.SYSTEMROOT,

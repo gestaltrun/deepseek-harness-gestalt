@@ -34,6 +34,7 @@ interface HappyStubs {
   createRestrictedToken: MockFn
   createJobObjectW: MockFn
   getNamedSecurityInfoW: MockFn
+  getTokenInformation: MockFn
 }
 
 const state = vi.hoisted(() => ({ stubs: undefined as HappyStubs | undefined }))
@@ -164,7 +165,7 @@ function happyStubs(): HappyStubs {
   } as unknown as Win32Bindings
   return {
     api, setNamedSecurityInfoW, convertStringSidToSidW, closeHandle, localFree,
-    createRestrictedToken, createJobObjectW, getNamedSecurityInfoW,
+    createRestrictedToken, createJobObjectW, getNamedSecurityInfoW, getTokenInformation,
   }
 }
 
@@ -225,6 +226,29 @@ describe('AclSandbox init', () => {
     await sandbox.init()
     expect(sandbox.tempDir).toBe(resolve(temp))
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(2)
+  })
+
+  it('initializes under a service token that has no logon SID', async () => {
+    const { getTokenInformation } = state.stubs as HappyStubs
+    getTokenInformation.mockImplementation((_token: unknown, cls: number, info: Buffer | null, _length: number, needed: NativePtr) => {
+      if (info === null) {
+        koffi.encode(needed, 'uint32', cls === abi.TokenGroups ? 24 : 8)
+        return 0
+      }
+      if (cls === abi.TokenGroups) {
+        info.writeUInt32LE(1, 0)
+        info.writeBigUInt64LE(77n, abi.TOKEN_GROUPS_OFFSET)
+        info.writeUInt32LE(0, abi.TOKEN_GROUPS_OFFSET + 8)
+      } else {
+        info.writeBigUInt64LE(88n, 0)
+      }
+      return 1
+    })
+    const workspace = scratch()
+    const sandbox = new AclSandbox({ writableDirs: [workspace], tempDir: null, mode: 'read-only' })
+
+    await sandbox.init()
+    await sandbox.dispose()
   })
 
   it('requires an explicit private temp directory or null under workspace-write', () => {

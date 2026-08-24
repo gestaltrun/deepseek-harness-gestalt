@@ -470,7 +470,7 @@ describe('CI workflow', () => {
         step => isRecord(step) && step.name === 'Install (immutable)',
       )
       expect(install, `${jobName} must rebuild persistent node_modules with optional dependencies`).toMatchObject({
-        run: 'pnpm install --frozen-lockfile --force',
+        run: 'pnpm install --frozen-lockfile',
       })
       const payloads = (job.steps as unknown[]).find(
         step => isRecord(step) && step.name === 'Verify current platform payloads',

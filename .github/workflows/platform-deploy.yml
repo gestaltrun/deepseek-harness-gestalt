@@ -269,11 +269,13 @@ jobs:
           DEPLOY_ENV_KEY="$deploy_env_key" openssl enc -aes-256-cbc -pbkdf2 -salt \
             -in "$DEPLOY_DIR/platform.env" -out "$DEPLOY_DIR/platform.env.enc" -pass env:DEPLOY_ENV_KEY
           install -m 600 apps/platform/scripts/platform-host-deploy.sh "$DEPLOY_DIR/platform-host-deploy.sh"
-          printf 'IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
-          printf 'DEPLOY_ENV_KEY=%s\n' "$deploy_env_key" >> "$GITHUB_ENV"
-          printf 'IMAGE_SHA256=%s\n' "$(sha256sum "$DEPLOY_DIR/platform.tar.gz" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
-          printf 'ENV_SHA256=%s\n' "$(sha256sum "$DEPLOY_DIR/platform.env.enc" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
-          printf 'SCRIPT_SHA256=%s\n' "$(sha256sum "$DEPLOY_DIR/platform-host-deploy.sh" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+          {
+            printf 'IMAGE=%s\n' "$image"
+            printf 'DEPLOY_ENV_KEY=%s\n' "$deploy_env_key"
+            printf 'IMAGE_SHA256=%s\n' "$(sha256sum "$DEPLOY_DIR/platform.tar.gz" | cut -d ' ' -f 1)"
+            printf 'ENV_SHA256=%s\n' "$(sha256sum "$DEPLOY_DIR/platform.env.enc" | cut -d ' ' -f 1)"
+            printf 'SCRIPT_SHA256=%s\n' "$(sha256sum "$DEPLOY_DIR/platform-host-deploy.sh" | cut -d ' ' -f 1)"
+          } >> "$GITHUB_ENV"
 
       - name: Configure fresh Alibaba Cloud OIDC credentials
         uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6
@@ -301,7 +303,7 @@ jobs:
           source apps/platform/scripts/platform-public-readiness.sh
           IFS=',' read -r -a instance_ids <<< "$PLATFORM_ECS_INSTANCE_IDS"
           for index in "${!instance_ids[@]}"; do
-            instance_ids[$index]="${instance_ids[$index]// /}"
+            instance_ids[index]="${instance_ids[index]// /}"
           done
           object_root="${PLATFORM_DEPLOY_OSS_OBJECT_PREFIX}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           image_object="oss://${PLATFORM_OSS_BUCKET}/${object_root}/platform.tar.gz"
@@ -360,9 +362,13 @@ jobs:
               echo 'set -eEuo pipefail'
               echo 'umask 077'
               printf 'workdir=$(mktemp -d /run/dsh-platform-command.XXXXXX)\n'
+              # shellcheck disable=SC2016
               echo 'cleanup_command() { find "$workdir" -type f -delete; rmdir "$workdir"; }'
+              # shellcheck disable=SC2016
               echo 'trap cleanup_command EXIT'
+              # shellcheck disable=SC2016
               printf 'curl --proto "=https" --tlsv1.2 -fsS %q -o "$workdir/platform-host-deploy.sh"\n' "$script_url"
+              # shellcheck disable=SC2016
               printf 'printf "%%s  %%s\\n" %q "$workdir/platform-host-deploy.sh" | sha256sum -c -\n' "$SCRIPT_SHA256"
               printf 'export DSH_DEPLOY_IMAGE_URL=%q\n' "$image_url"
               printf 'export DSH_DEPLOY_IMAGE_SHA256=%q\n' "$IMAGE_SHA256"
@@ -372,6 +378,7 @@ jobs:
               printf 'export DSH_DEPLOY_IMAGE=%q\n' "$IMAGE"
               printf 'export DSH_DEPLOY_STORAGE=%q\n' "$PLATFORM_REMOTE_ATTACHMENT_STORAGE"
               printf 'export DSH_RELAY_INSTANCE_ID=%q\n' "$relay_instance"
+              # shellcheck disable=SC2016
               printf 'bash "$workdir/platform-host-deploy.sh" %q\n' "$action"
             } > "$wrapper"
             if [ "$action" = prepare ]; then

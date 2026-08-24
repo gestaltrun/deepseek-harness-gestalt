@@ -126,7 +126,7 @@ vendor manifest 守卫检查 `vendor/*/src` 下的改动是否连同对应的 `v
 
 keyless [CI 工作流](../.github/workflows/ci.yml) 将独立门禁分组到若干宽粒度 lane，并在受支持的 Node 版本上运行一组较小的兼容性检查。产物消费方在各自 lane 内等待一次 build。单独的真实 API 工作流按其配置的 worker 上限运行 `pnpm run test:e2e`。当前门禁和 job 清单以 [scripts/run-gates.ts](../scripts/run-gates.ts) 和工作流文件为准。
 
-每次主 CI 运行都会上传 Planner JSON 和带版本的 gate 报告。Preflight 独立计算路由，同时并行运行四个生成状态分区；只有五个 worker 全部成功，公开的 `preflight` verdict 才会准入证据。报告按实际完成顺序标识首个阻塞失败，对失败 gate 分类，保留每个阶段的耗时，并列出相关 artifact。只有精确诊断被分类为瞬时基础设施故障的命令才允许自动重试一次，其 artifact 会保留两次尝试。运行 `pnpm ci:metrics --repo <owner/name>` 可计算成功率、排队、执行和首个结论分布，并排除记账任务、cancelled、skipped、stale 和观察性样本。
+每次主 CI 运行都会上传 Planner JSON 和带版本的 gate 报告。Preflight 独立计算路由，同时并行运行四个生成状态分区；只有五个 worker 全部成功，公开的 `preflight` verdict 才会准入证据。报告按实际完成顺序标识首个阻塞失败，对失败 gate 分类，保留每个阶段的耗时，并列出相关 artifact。只有精确诊断被分类为瞬时基础设施故障的命令才允许自动重试一次，其 artifact 会保留两次尝试。运行 `pnpm ci:metrics --repo <owner/name>` 可计算成功率，以及排队、执行和首个结论耗时的 p50、p95 与最大值，并排除记账任务、cancelled、skipped、stale 和观察性样本。
 
 每次 master push 还会在重建干净的当前平台依赖树并执行其中的 Codex 与 Claude Code 载荷后，运行有界的 Linux 与 Windows standby smoke。完整的非分片 standby 清单按日运行，或通过 `standby-exhaustive` dispatch 启动。持久 Windows service host 会省略已由 Linux 清单权威覆盖的 `knip` 和重复度 gate，同时保留 Windows 特有 gate 与可移植仓库 gate。报告使用 `failover-readiness` 分类，因此就绪失败保持可见，但不会降低产品回归成功率；两个独立接管开关由[故障切换手册](../.agents/notes/implemented/process/2026-07-26-ci-failover-runbook.zh.md)负责。
 
@@ -134,7 +134,7 @@ keyless [CI 工作流](../.github/workflows/ci.yml) 将独立门禁分组到若�
 
 当 Draft PR 的所有路径都已知且风险较低时，CI 会运行变更 package 及其全部反向 consumer 的测试，并对仍存在的变更源文件应用 100% 阈值。GUI 和模型可见路径还会运行组装态 snapshot。Ready PR，以及涉及 workflow、lockfile、vendor 源码、protocol、session lifecycle、agent loop、构建配置、多个产品 area 或未知路径的改动，都会运行穷尽计划。`merge_group` 事件会针对 GitHub 的候选合并树运行该计划，并以 `candidate verdict` 作为唯一的故障关闭结论。其 attestation 以 Git tree、lockfile、workflow 与 Planner、toolchain 和 gate inventory 组成证据键。master push 只有在 tree 与完整证据键相同时才会复用证明并只运行具名 master smoke；证明缺失或不匹配时会运行穷尽 fallback。`pnpm ci:impact --base <ref> --head <ref> --plan-only` 会在本地打印同一条 Draft 命令；移除 `--plan-only` 即可执行。
 
-穷尽 PR plan 保留 Wine 作为必需 Windows 信号，并把原生 Windows 构建与 runtime、覆盖率和静态可移植性作为并行观察性证据运行。覆盖率使用两个生成 blob 的 worker，再由一个 job 合并并应用阈值；构建/runtime 与静态可移植性各自保留独立 worker。任一证据 owner 失败、取消或跳过时，单一原生 verdict 都会失败，但不会延迟 `all checks passed`。Merge Queue 会把原生 verdict 与 macOS Electron lane 连同所有通常的阻塞 lane 一并设为必需。每个 owner 都会发布可检查证据；完整本地清单仍使用 `pnpm run check:ci:windows-complete`。
+穷尽 PR plan 保留 Wine 作为必需 Windows 信号，并把原生 Windows 构建与 runtime、覆盖率和静态可移植性作为并行观察性证据运行。覆盖率使用两个生成 blob 的 Windows worker 与一个并行运行 coverage-exempt 清单的 Windows worker；hosted Linux reducer 在不执行产品代码的情况下对自包含 blob 应用阈值。构建/runtime 与静态可移植性各自保留独立 worker。任一证据 owner 失败、取消或跳过时，单一原生 verdict 都会失败，但不会延迟 `all checks passed`。Merge Queue 会把原生 verdict 与 macOS Electron lane 连同所有通常的阻塞 lane 一并设为必需。每个 owner 都会发布可检查证据；完整本地清单仍使用 `pnpm run check:ci:windows-complete`。
 
 ### 日常命令
 

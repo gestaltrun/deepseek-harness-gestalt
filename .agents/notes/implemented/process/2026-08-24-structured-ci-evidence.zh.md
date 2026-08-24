@@ -14,7 +14,7 @@ CI Planner JSON 和每个已接入的 gate aggregate 都会作为带版本的 ar
 
 自动重试由显式命令包装器负责，而不是重试整个工作流。只有第一次命令的完整诊断与严格的瞬时基础设施 allowlist 匹配时，才允许恰好一次第二次尝试。报告会保留两次尝试。allowlist 包含传输超时/重置，以及 node-gyp 获取 headers 时 pnpm 内置 Undici HTTP/1 解析器触发 `assert(!this.paused)` 的精确故障；Python runtime immutable install 与 manylinux 镜像拉取都通过该包装器发布尝试证据。断言、覆盖率失败、snapshot 漂移、生成物漂移、policy 失败、进程 signal 和未分类失败永不重试。
 
-`ci:metrics` 根据完整的 workflow 和 job 时间戳计算可重复基线。它从 lane 样本中排除 aggregate 和观察性 job，并从 run 总体中排除未完成、cancelled、skipped 或 stale 的 run。它会在成功率以及排队、执行、首个结论的 p50/p95 耗时之外同时发布纳入和排除的 run id。
+`ci:metrics` 根据完整的 workflow 和 job 时间戳计算可重复基线。它从 lane 样本中排除 aggregate 和观察性 job，并从 run 总体中排除未完成、cancelled、skipped 或 stale 的 run。它会在成功率以及排队、执行、首个结论的 p50、p95 与最大耗时之外同时发布纳入和排除的 run id。
 
 2026-08-24 基线查询了最近 20 次主 CI run。run 32667140424、32666575103、32665585148、32664797140、32664516987 和 32663145844 是有效样本：成功率为 33.3%；排队 p50/p95 为 3/24 秒；执行 p50/p95 为 13/718 秒；首个有效结论 p50/p95 为 16/43 秒。执行分布包含快速出现的有效失败，而不会把它们作为下游 skip 隐藏。较小的有效样本量作为此前取消和 supersession 噪声的证据被保留，不会用无效样本补齐。
 

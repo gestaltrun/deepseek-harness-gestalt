@@ -821,24 +821,24 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  windows-native-coverage:
-    needs: [preflight, windows-native-coverage-shards]
-    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+  windows-native-coverage-exempt:
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
           && github.event_name == 'pull_request'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
           || 'windows-latest' }}
-    name: windows node 24 / native coverage
+    name: windows node 24 / native coverage exempt-heavy
     timeout-minutes: 20
     env:
       DSH_COVERAGE_MAX_WORKERS: '4'
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
-      DSH_GATE_CONCURRENCY: '2'
     steps:
       - uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Enable Developer Mode (symlink support)
@@ -878,6 +878,65 @@ jobs:
         shell: pwsh
         run: pnpm install --frozen-lockfile
 
+      - name: Run native coverage exempt-heavy suites
+        shell: pwsh
+        env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-coverage-exempt.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-coverage-exempt
+        run: pnpm run check:ci:windows-native-coverage-exempt
+
+      - name: Publish native coverage exempt-heavy evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-windows-native-coverage-exempt
+          path: ${{ runner.temp }}/ci-evidence/windows-native-coverage-exempt.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  # Vitest coverage blobs are self-contained reports. Threshold reduction does
+  # not execute product code or require a Windows kernel, so this job uses the
+  # faster hosted Linux data plane after both Windows shard owners succeed.
+  windows-native-coverage:
+    needs: [preflight, windows-native-coverage-shards]
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    runs-on: ubuntu-latest
+    name: windows node 24 / native coverage
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Configure pnpm store path
+        id: pnpm-store
+        run: |
+          store_root="$HOME/.local/share/pnpm/store"
+          echo "PNPM_CONFIG_STORE_DIR=$store_root" >> "$GITHUB_ENV"
+          store_path=$(PNPM_CONFIG_STORE_DIR="$store_root" pnpm store path --silent)
+          echo "path=$store_path" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v4
+        id: pnpm-cache
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
       - name: Download native coverage blobs
         uses: actions/download-artifact@v8
         with:
@@ -885,8 +944,7 @@ jobs:
           path: coverage/.partitioned/blobs
           merge-multiple: true
 
-      - name: Merge native coverage and run exempt-heavy suites
-        shell: pwsh
+      - name: Merge native coverage
         env:
           DSH_CI_CACHE_STATUS: >-
             [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
@@ -984,7 +1042,7 @@ jobs:
           retention-days: 30
 
   windows-native-verdict:
-    needs: [preflight, windows-native-core, windows-native-coverage, windows-native-static]
+    needs: [preflight, windows-native-core, windows-native-coverage-shards, windows-native-coverage-exempt, windows-native-coverage, windows-native-static]
     if: always() && needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
     runs-on: ubuntu-latest
     name: windows node 24 / native verdict

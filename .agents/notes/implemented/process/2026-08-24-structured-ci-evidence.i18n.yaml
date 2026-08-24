@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-24-structured-ci-evidence.md
-2026-08-24-structured-ci-evidence.md: 54e2fd8c8d7e3c7540627ee94a993d7bfb4959d1
-2026-08-24-structured-ci-evidence.zh.md: 325f0d80513015afcf6f26f37b3ad61d75956ae0
+2026-08-24-structured-ci-evidence.md: 69f66994d46fe82c85a8f096993132ae2ba8c89b
+2026-08-24-structured-ci-evidence.zh.md: 2a2b430d6abf8bcbffb85b0e085329e9f7843908

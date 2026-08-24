@@ -834,9 +834,14 @@ describe('Python release workflows', () => {
     }
 
     const buildSteps: unknown[] = build.steps
+    const install = buildSteps.find(step => isRecord(step) && step.name === 'Install (immutable)')
     const manylinuxAddon = buildSteps.find(step => isRecord(step) && step.name === 'Rebuild Linux node-pty against manylinux 2.28')
     const macosCheck = buildSteps.find(step => isRecord(step) && step.name === 'Check macOS deployment target')
     const manylinuxSmoke = buildSteps.find(step => isRecord(step) && step.name === 'Run wheel in a manylinux 2.28 container')
+    const transientAttempts = buildSteps.find(step => isRecord(step) && step.name === 'Publish transient infrastructure attempts')
+    if (!isRecord(install) || typeof install.run !== 'string') {
+      throw new TypeError('Python wheel builder must define its immutable install command')
+    }
     expect(call.inputs).toHaveProperty('targets')
     expect(call.inputs).toMatchObject({
       ci: { type: 'boolean', default: false },
@@ -848,6 +853,13 @@ describe('Python release workflows', () => {
     expect(plan.if).toContain('inputs.ci')
     expect(plan.if).toContain('inputs.release')
     expect(JSON.stringify(plan.steps)).toContain('pep440_version')
+    expect(install.run).toContain('scripts/retry-transient-ci.ts')
+    expect(install.run).toContain('install-${{ matrix.target }}.json')
+    expect(install.run).toContain('-- pnpm install --frozen-lockfile')
+    expect(transientAttempts).toMatchObject({
+      if: "always() && runner.os == 'Linux'",
+      with: { path: '${{ runner.temp }}/ci-evidence/*.json' },
+    })
     const workflowJson = JSON.stringify(workflow)
     expect(workflowJson).toContain('macosx_14_0_arm64')
     expect(workflowJson).toContain('dist-python/$SDK_WHEEL')

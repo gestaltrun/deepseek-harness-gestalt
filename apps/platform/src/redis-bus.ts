@@ -52,8 +52,8 @@ export class RedisAccountInvalidationBus implements AccountInvalidationBus {
   }
 }
 
-/** Connection fields for one Redis client. */
-export interface RedisConnectOptions {
+/** Shared connection fields for one Redis client. */
+interface RedisEndpointOptions {
   /** Redis hostname. */
   host: string
   /** Redis ACL username, when present. */
@@ -62,9 +62,13 @@ export interface RedisConnectOptions {
   password: string
   /** Redis TCP port. */
   port: number
-  /** Whether to use TLS. */
-  tls: boolean
 }
+
+/** Connection fields for one plaintext or CA-verified Redis client. */
+export type RedisConnectOptions = RedisEndpointOptions & (
+  | { tls: false }
+  | { tls: true; ca: string }
+)
 
 /** Connected Redis client plus the listener-safe process resource owner. */
 export interface RedisConnection {
@@ -86,7 +90,9 @@ export async function connectRedis(options: RedisConnectOptions): Promise<RedisC
     socket: {
       host: options.host,
       port: options.port,
-      ...(options.tls ? { tls: true, rejectUnauthorized: true } : {}),
+      ...(options.tls
+        ? { tls: true, rejectUnauthorized: true, servername: options.host, ca: options.ca }
+        : {}),
     },
   }) as RedisClientType
   const handleError = (): void => {

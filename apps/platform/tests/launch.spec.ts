@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import type { Pool } from 'pg'
 import type { RedisClientType } from 'redis'
@@ -5,6 +6,9 @@ import { launchOperatedPlatform } from '../src/launch.ts'
 import type { connectRedis as connectRedisEntry } from '../src/redis-bus.ts'
 
 const HEX = 'ab'.repeat(32)
+const APSARADB_CA_BASE64 = readFileSync(
+  new URL('../../../packages/platform/remote-access-http/tests/fixtures/localhost-cert.pem', import.meta.url),
+).toString('base64')
 
 describe('operated Platform launch configuration', () => {
   it.each([
@@ -87,6 +91,7 @@ function operatedFixtureEnv(): NodeJS.Dict<string> {
     PLATFORM_POSTGRES_HOST: 'postgres.operated.fixture',
     PLATFORM_POSTGRES_USER: 'fixture',
     PLATFORM_POSTGRES_PASSWORD: 'postgres-secret-fixture',
+    PLATFORM_APSARADB_CA_BASE64: APSARADB_CA_BASE64,
     PLATFORM_POSTGRES_DATABASE: 'product-entry-fixture',
     PLATFORM_IDENTITY_NAMESPACE: 'identity-fixture',
     PLATFORM_REDIS_HOST: 'redis.operated.fixture',

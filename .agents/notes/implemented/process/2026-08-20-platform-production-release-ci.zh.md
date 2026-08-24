@@ -10,7 +10,7 @@ Platform 监听进程及其 GitHub Actions 工作流只需要一套实际运行�
 
 ## 决策
 
-实际运行的 Platform 只有生产环境。[`apps/platform/src/production-env.ts`](../../../../apps/platform/src/production-env.ts) 列出监听进程所需密钥，将未设置的 `PLATFORM_ENVIRONMENT` 视为 production，并在 [`boot.ts`](../../../../apps/platform/src/boot.ts) 加载唯一完整的已运营身份前拒绝其他选择。监听入口没有 development 身份，也没有 credential、database 或 namespace fallback。
+实际运行的 Platform 只有生产环境。[`apps/platform/src/production-env.ts`](../../../../apps/platform/src/production-env.ts) 列出监听进程所需密钥，将未设置的 `PLATFORM_ENVIRONMENT` 视为 production，并在 [`boot.ts`](../../../../apps/platform/src/boot.ts) 加载唯一完整的已运营身份前拒绝其他选择。该身份包含一条 Base64 编码的 ApsaraDB CA 链；它在获取资源前完成解码与校验，并由 PostgreSQL 和 Redis 在启用证书与主机名校验的情况下共享。监听入口没有 development 身份，也没有 credential、database、namespace fallback 或本地信任库依赖。
 
 GitHub Actions 只使用 Environment `production`。[Platform Image](../../../../.github/workflows/platform-image.yml) 会在拉取请求和匹配的 master 推送上构建，仅在 `workflow_dispatch` 且 `inputs.push` 为真时推送到 GHCR。[Platform Deploy](../../../../.github/workflows/platform-deploy.yml) 会先安装锁定的工作区依赖且禁用生命周期脚本，再通过从源码启动的 [`production-env-cli.ts`](../../../../apps/platform/src/production-env-cli.ts) 校验生产和 ECS 名称。两个 job 都会把 GitHub 的 Environment-scoped OIDC token 换成短期阿里云角色，并校验恰好两个私网 ECS instance id 上的云助手。role trust 钉住不可变 GitHub subject `repo:gestaltrun@320476671/deepseek-harness-gestalt@1335215887:environment:production`；每个 ECS API 调用都会同时携带显式全局 region 和对应的 API 专用 region 参数，每个部署或恢复 OSS CLI 调用都会携带显式 region 和 endpoint。deploy job 只在 `inputs.deploy` 为真时运行。
 
@@ -42,4 +42,4 @@ Desktop 与 Mobile 解析同一套生产身份，并在产品工作开始前拒�
 
 ## 测试
 
-[`apps/platform/tests/production-env.spec.ts`](../../../../apps/platform/tests/production-env.spec.ts) 钉住运行环境选择、缺失名称顺序、ECS instance id 校验、从源码启动校验 CLI 前的依赖安装、只列出名称不打印值的 CLI stderr、OIDC permission 与固定 action identity、加密暂存、云助手空结果轮询与终态结果校验、终止取消、独立恢复、全实例 finalization、candidate readiness、bridge 前置条件、contract 顺序、逐实例 rollback、SSH 名称缺席、`json-file` 轮转选项与 LoongCollector 注册。它也钉住 Platform Image 在 master 推送上构建但不推送到 GHCR。
+[`apps/platform/tests/production-env.spec.ts`](../../../../apps/platform/tests/production-env.spec.ts) 钉住运行环境选择、缺失名称顺序、ApsaraDB CA 解码与非法输入拒绝、ECS instance id 校验、从源码启动校验 CLI 前的依赖安装、只列出名称不打印值的 CLI stderr、OIDC permission 与固定 action identity、加密暂存、云助手空结果轮询与终态结果校验、终止取消、独立恢复、全实例 finalization、candidate readiness、bridge 前置条件、contract 顺序、逐实例 rollback、SSH 名称缺席、`json-file` 轮转选项与 LoongCollector 注册。[`apps/platform/tests/redis-bus.spec.ts`](../../../../apps/platform/tests/redis-bus.spec.ts) 钉住传给 Redis socket 的 CA、TLS、peer-certificate 校验与从 host 派生的 server name，并证明受信任但主机名不同的证书会被拒绝。生产环境测试还钉住 Platform Image 在 master 推送上构建但不推送到 GHCR。

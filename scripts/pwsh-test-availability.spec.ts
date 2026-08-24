@@ -14,7 +14,7 @@ describe('PowerShell test availability', () => {
     [1, false],
     [null, false],
   ] as const)('uses the real probe outside a required CI lane: %j', (status, expected) => {
-    expect(testPwshAvailable(undefined, () => ({ status }))).toBe(expected)
+    expect(testPwshAvailable('', () => ({ status }))).toBe(expected)
   })
 
   it.each(['0', 'true', 'required'])('rejects invalid requirement %j', (required) => {

@@ -17,8 +17,8 @@ describe('Encrypted Companion Protocol v3 product surface', () => {
   it('negotiates v3 and round-trips typed surface and history requests', () => {
     const protocol = negotiateCompanionProtocol(
       createCompanionNegotiationChannel(),
-      createCompanionVersionOffer('mobile'),
-      createCompanionVersionOffer('desktop'),
+      createCompanionVersionOffer('mobile', [3]),
+      createCompanionVersionOffer('desktop', [3]),
     )
     expect(protocol.major).toBe(3)
     const operationId = parseCompanionOperationId('surface-1')
@@ -339,7 +339,7 @@ function decodeRaw(protocol: ReturnType<typeof currentProtocol>, message: Record
 function currentProtocol() {
   return negotiateCompanionProtocol(
     createCompanionNegotiationChannel(),
-    createCompanionVersionOffer('mobile'),
-    createCompanionVersionOffer('desktop'),
+    createCompanionVersionOffer('mobile', [3]),
+    createCompanionVersionOffer('desktop', [3]),
   )
 }

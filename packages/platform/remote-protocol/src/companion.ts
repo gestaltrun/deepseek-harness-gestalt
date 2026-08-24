@@ -12,12 +12,14 @@ import type {
   CompanionProjection,
   CompanionResult,
   CompanionSecurityCapability,
+  CompanionSessionSummaryProjection,
   CompanionSessionId,
   CompanionWorkspaceId,
   CompanionTranscriptEntryId,
   CompanionTextTranscriptEntry,
   CompanionVersionDescriptor,
   CompanionVersionOffer,
+  CompanionWorkspaceProjection,
 } from './types.ts'
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]+$/
@@ -34,7 +36,7 @@ export const REQUIRED_COMPANION_SECURITY_CAPABILITIES = [
 /** Successful application-version negotiation required by Companion application codecs. */
 export interface NegotiatedCompanionProtocol {
   /** Selected current or immediately preceding application major. */
-  readonly major: 1 | 2 | 3
+  readonly major: 1 | 2 | 3 | 4
 }
 
 /** Logical endpoint connection whose latest negotiation owns one active codec capability. */
@@ -68,7 +70,7 @@ export function createCompanionNegotiationChannel(): CompanionNegotiationChannel
  */
 export function createCompanionVersionOffer(
   endpoint: 'mobile' | 'desktop',
-  majors: readonly (1 | 2 | 3)[] = [3, 2],
+  majors: readonly (1 | 2 | 3 | 4)[] = [4, 3],
 ): CompanionVersionOffer {
   if (majors.length === 0 || new Set(majors).size !== majors.length) {
     throw new RemoteProtocolError('REMOTE_PROTOCOL_INVALID_MESSAGE', 'Companion version offer majors must be non-empty and unique')
@@ -135,7 +137,7 @@ export function negotiateCompanionProtocol(
     throw new RemoteProtocolError('REMOTE_PROTOCOL_INVALID_MESSAGE', 'Companion version offers use the wrong endpoints')
   }
   let unsafeEndpoint: 'mobile' | 'desktop' | undefined
-  for (const major of [3, 2, 1] as const) {
+  for (const major of [4, 3, 2, 1] as const) {
     const mobileVersion = mobile.versions.find(version => version.major === major)
     const desktopVersion = desktop.versions.find(version => version.major === major)
     if (mobileVersion === undefined || desktopVersion === undefined) continue
@@ -221,6 +223,12 @@ export function encodeCompanionMessage(
   message: CompanionMessage,
 ): Uint8Array {
   requireNegotiated(protocol)
+  if (protocol.major < 4 && isCompanionV4Message(message)) {
+    throw new RemoteProtocolError(
+      'COMPANION_UPDATE_REQUIRED',
+      'Companion live projection requires application major 4',
+    )
+  }
   if (message.type === 'projection'
     && message.projection.type === 'transcript-page'
     && message.projection.entries.length > REMOTE_PROTOCOL_LIMITS.transcriptPageEntries) {
@@ -232,7 +240,7 @@ export function encodeCompanionMessage(
     'Companion message',
   )
   if (message.type === 'projection' && encoded.byteLength > REMOTE_PROTOCOL_LIMITS.transcriptPageBytes) {
-    throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion transcript page exceeds its byte ceiling')
+    throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion projection exceeds its byte ceiling')
   }
   return encoded
 }
@@ -256,13 +264,13 @@ export function decodeCompanionMessage(
   switch (record.type) {
     case 'operation':
       exactKeys(record, ['applicationVersion', 'type', 'operation'], 'Companion operation message')
-      return { type: 'operation', operation: parseOperation(record.operation) }
+      return { type: 'operation', operation: parseOperation(record.operation, protocol.major) }
     case 'projection':
       exactKeys(record, ['applicationVersion', 'type', 'projection'], 'Companion projection message')
       if (encoded.byteLength > REMOTE_PROTOCOL_LIMITS.transcriptPageBytes) {
-        throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion transcript page exceeds its byte ceiling')
+        throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion projection exceeds its byte ceiling')
       }
-      return { type: 'projection', projection: parseProjection(record.projection) }
+      return { type: 'projection', projection: parseProjection(record.projection, protocol.major) }
     case 'result':
       exactKeys(record, ['applicationVersion', 'type', 'result'], 'Companion result message')
       return { type: 'result', result: parseResult(record.result) }
@@ -271,7 +279,7 @@ export function decodeCompanionMessage(
   }
 }
 
-function parseOperation(value: unknown): CompanionOperation {
+function parseOperation(value: unknown, major: NegotiatedCompanionProtocol['major']): CompanionOperation {
   const record = object(value, 'Companion operation')
   if (record.type === 'create-session') {
     exactKeys(
@@ -364,6 +372,19 @@ function parseOperation(value: unknown): CompanionOperation {
       sessionId: parseCompanionSessionId(record.sessionId),
       ...beforeSeq === undefined ? {} : { beforeSeq },
       maxMessages,
+    }
+  }
+  if (record.type === 'observe-session') {
+    if (major < 4) invalid('Companion observe-session requires application major 4')
+    exactKeys(
+      record,
+      record.sessionId === undefined ? ['type', 'operationId'] : ['type', 'operationId', 'sessionId'],
+      'Companion observe-session operation',
+    )
+    return {
+      type: 'observe-session',
+      operationId: parseCompanionOperationId(record.operationId),
+      ...(record.sessionId === undefined ? {} : { sessionId: parseCompanionSessionId(record.sessionId) }),
     }
   }
   if (record.type === 'cancel-session') {
@@ -582,7 +603,7 @@ function parseStatusResult(record: Record<string, unknown>): CompanionResult {
   return { type: 'status', operationId, committed: mutationResult }
 }
 
-function parseProjection(value: unknown): CompanionProjection {
+function parseProjection(value: unknown, major: NegotiatedCompanionProtocol['major']): CompanionProjection {
   const record = object(value, 'Companion projection')
   if (record.type === 'foreground-sync') {
     exactKeys(record, ['type', 'desktopName', 'generation', 'desktopRevision'], 'Companion foreground-sync projection')
@@ -597,6 +618,10 @@ function parseProjection(value: unknown): CompanionProjection {
     }
   }
   if (record.type === 'surface-snapshot') return parseSurfaceSnapshot(record)
+  if (record.type === 'session-live') {
+    if (major < 4) invalid('Companion session-live requires application major 4')
+    return parseLiveSession(record)
+  }
   if (record.type === 'conversation-snapshot') {
     exactKeys(
       record,
@@ -701,65 +726,12 @@ function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProject
     throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion surface exceeds its Workspace row ceiling')
   }
   if (typeof record.hasMore !== 'boolean') invalid('Companion surface hasMore must be boolean')
-  const sessions = record.sessions.map((valueSession) => {
-    const session = object(valueSession, 'Companion Session summary')
-    const keys = [
-      'sessionId', 'displayTitle', 'cwd', 'running', 'blank', 'updatedAt', 'pendingInteraction',
-    ].filter(key => session[key] !== undefined)
-    exactKeys(session, keys, 'Companion Session summary')
-    if (typeof session.displayTitle !== 'string' || session.displayTitle.trim() === '') {
-      invalid('Companion Session displayTitle must be non-blank')
-    }
-    if (session.cwd !== undefined && typeof session.cwd !== 'string') invalid('Companion Session cwd must be a string')
-    if (typeof session.running !== 'boolean' || typeof session.blank !== 'boolean') {
-      invalid('Companion Session running and blank must be boolean')
-    }
-    const pendingInteraction = parsePendingInteraction(session.pendingInteraction)
-    return {
-      sessionId: parseCompanionSessionId(session.sessionId),
-      displayTitle: session.displayTitle,
-      ...session.cwd === undefined ? {} : { cwd: session.cwd },
-      running: session.running,
-      blank: session.blank,
-      updatedAt: nonNegativeSafeInteger(session.updatedAt, 'Companion Session updatedAt'),
-      ...pendingInteraction === undefined ? {} : {
-        pendingInteraction,
-      },
-    }
-  })
+  const sessions = record.sessions.map(parseSessionSummary)
   if (new Set(sessions.map(session => session.sessionId)).size !== sessions.length) {
     invalid('Companion surface Session ids must be unique')
   }
   const visibleIds = new Set(sessions.map(session => session.sessionId))
-  const workspaces = record.workspaces.map((valueWorkspace) => {
-    const workspace = object(valueWorkspace, 'Companion Workspace projection')
-    exactKeys(
-      workspace,
-      ['workspaceId', 'path', 'title', 'sessionIds', 'createdAt', 'updatedAt'],
-      'Companion Workspace projection',
-    )
-    const workspaceId = parseCompanionWorkspaceId(workspace.workspaceId)
-    for (const key of ['path', 'title', 'createdAt', 'updatedAt'] as const) {
-      if (typeof workspace[key] !== 'string' || workspace[key].length === 0) {
-        invalid(`Companion Workspace ${key} must be non-empty`)
-      }
-    }
-    if (!Array.isArray(workspace.sessionIds) || workspace.sessionIds.length > REMOTE_PROTOCOL_LIMITS.surfaceSessionRows) {
-      invalid('Companion Workspace sessionIds exceed the current surface page')
-    }
-    const sessionIds = workspace.sessionIds.map(parseCompanionSessionId)
-    if (new Set(sessionIds).size !== sessionIds.length || sessionIds.some(id => !visibleIds.has(id))) {
-      invalid('Companion Workspace sessionIds must be unique ids from the current surface page')
-    }
-    return {
-      workspaceId,
-      path: workspace.path as string,
-      title: workspace.title as string,
-      sessionIds,
-      createdAt: workspace.createdAt as string,
-      updatedAt: workspace.updatedAt as string,
-    }
-  })
+  const workspaces = record.workspaces.map(valueWorkspace => parseWorkspaceProjection(valueWorkspace, visibleIds))
   return {
     type: 'surface-snapshot',
     operationId: parseCompanionOperationId(record.operationId),
@@ -770,6 +742,111 @@ function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProject
     sessions,
     workspaces,
     hasMore: record.hasMore,
+  }
+}
+
+function parseLiveSession(record: Record<string, unknown>): CompanionProjection {
+  const sessionId = parseCompanionSessionId(record.sessionId)
+  const common = {
+    type: 'session-live' as const,
+    generation: positiveSafeInteger(record.generation, 'Companion live Session generation'),
+    desktopRevision: positiveSafeInteger(record.desktopRevision, 'Companion live Session desktopRevision'),
+    sessionId,
+  }
+  if (record.removed !== undefined) {
+    exactKeys(
+      record,
+      ['type', 'generation', 'desktopRevision', 'sessionId', 'removed'],
+      'Companion live Session removal',
+    )
+    if (record.removed !== true) invalid('Companion live Session removed must be literal true')
+    return { ...common, removed: true }
+  }
+  exactKeys(
+    record,
+    record.conversation === undefined
+      ? ['type', 'generation', 'desktopRevision', 'sessionId', 'position', 'summary', 'workspaces']
+      : ['type', 'generation', 'desktopRevision', 'sessionId', 'position', 'summary', 'workspaces', 'conversation'],
+    'Companion live Session projection',
+  )
+  const summary = parseSessionSummary(record.summary)
+  if (summary.sessionId !== sessionId) invalid('Companion live Session summary identity must match sessionId')
+  if (!Array.isArray(record.workspaces) || record.workspaces.length > REMOTE_PROTOCOL_LIMITS.surfaceWorkspaceRows) {
+    throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion live Session workspaces exceed their row ceiling')
+  }
+  const workspaces = record.workspaces.map((valueWorkspace) => {
+    const workspace = parseWorkspaceProjection(valueWorkspace, new Set([sessionId]))
+    if (workspace.sessionIds.length !== 1 || workspace.sessionIds[0] !== sessionId) {
+      invalid('Companion live Workspace must contain only its Session')
+    }
+    return workspace
+  })
+  if (new Set(workspaces.map(workspace => workspace.workspaceId)).size !== workspaces.length) {
+    invalid('Companion live Workspace ids must be unique')
+  }
+  return {
+    ...common,
+    position: nonNegativeSafeInteger(record.position, 'Companion live Session position'),
+    summary,
+    workspaces,
+    ...(record.conversation === undefined ? {} : { conversation: record.conversation }),
+  }
+}
+
+function parseSessionSummary(value: unknown): CompanionSessionSummaryProjection {
+  const session = object(value, 'Companion Session summary')
+  const keys = [
+    'sessionId', 'displayTitle', 'cwd', 'running', 'blank', 'updatedAt', 'pendingInteraction',
+  ].filter(key => session[key] !== undefined)
+  exactKeys(session, keys, 'Companion Session summary')
+  if (typeof session.displayTitle !== 'string' || session.displayTitle.trim() === '') {
+    invalid('Companion Session displayTitle must be non-blank')
+  }
+  if (session.cwd !== undefined && typeof session.cwd !== 'string') invalid('Companion Session cwd must be a string')
+  if (typeof session.running !== 'boolean' || typeof session.blank !== 'boolean') {
+    invalid('Companion Session running and blank must be boolean')
+  }
+  const pendingInteraction = parsePendingInteraction(session.pendingInteraction)
+  return {
+    sessionId: parseCompanionSessionId(session.sessionId),
+    displayTitle: session.displayTitle,
+    ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+    running: session.running,
+    blank: session.blank,
+    updatedAt: nonNegativeSafeInteger(session.updatedAt, 'Companion Session updatedAt'),
+    ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
+  }
+}
+
+function parseWorkspaceProjection(
+  value: unknown,
+  visibleIds: ReadonlySet<CompanionSessionId>,
+): CompanionWorkspaceProjection {
+  const workspace = object(value, 'Companion Workspace projection')
+  exactKeys(
+    workspace,
+    ['workspaceId', 'path', 'title', 'sessionIds', 'createdAt', 'updatedAt'],
+    'Companion Workspace projection',
+  )
+  for (const key of ['path', 'title', 'createdAt', 'updatedAt'] as const) {
+    if (typeof workspace[key] !== 'string' || workspace[key].length === 0) {
+      invalid(`Companion Workspace ${key} must be non-empty`)
+    }
+  }
+  if (!Array.isArray(workspace.sessionIds) || workspace.sessionIds.length > REMOTE_PROTOCOL_LIMITS.surfaceSessionRows) {
+    invalid('Companion Workspace sessionIds exceed the current projection')
+  }
+  const sessionIds = workspace.sessionIds.map(parseCompanionSessionId)
+  if (new Set(sessionIds).size !== sessionIds.length || sessionIds.some(id => !visibleIds.has(id))) {
+    invalid('Companion Workspace sessionIds must be unique ids from the current projection')
+  }
+  return {
+    workspaceId: parseCompanionWorkspaceId(workspace.workspaceId),
+    path: workspace.path as string,
+    title: workspace.title as string,
+    sessionIds,
+    createdAt: workspace.createdAt as string,
+    updatedAt: workspace.updatedAt as string,
   }
 }
 
@@ -801,11 +878,18 @@ function hasRequiredCapabilities(version: CompanionVersionDescriptor): boolean {
 function parseVersionDescriptor(value: unknown): CompanionVersionDescriptor {
   const record = object(value, 'Companion version descriptor')
   exactKeys(record, ['major', 'capabilities'], 'Companion version descriptor')
-  if (record.major !== 1 && record.major !== 2 && record.major !== 3) invalid('Companion major must be supported')
+  if (record.major !== 1 && record.major !== 2 && record.major !== 3 && record.major !== 4) {
+    invalid('Companion major must be supported')
+  }
   if (!Array.isArray(record.capabilities)) invalid('Companion capabilities must be an array')
   const capabilities = record.capabilities.map(parseSecurityCapability)
   if (new Set(capabilities).size !== capabilities.length) invalid('Companion security capabilities must be unique')
   return { major: record.major, capabilities }
+}
+
+function isCompanionV4Message(message: CompanionMessage): boolean {
+  return message.type === 'operation' && message.operation.type === 'observe-session'
+    || message.type === 'projection' && message.projection.type === 'session-live'
 }
 
 function parseSecurityCapability(value: unknown): CompanionSecurityCapability {

@@ -68,6 +68,7 @@ describe('Mobile Noise Companion receiver', () => {
     const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
     const acceptValidatedCompanionProjection = vi.fn(() => true)
     const refreshSurface = vi.fn()
+    const authenticatedDesktop = vi.fn()
     const messages = [
       {
         type: 'projection' as const,
@@ -118,6 +119,7 @@ describe('Mobile Noise Companion receiver', () => {
     const receiver = new MobileNoiseCompanionReceiver(
       { open: () => messages.shift()! }, 2, runtime, undefined,
       () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection }), refreshSurface,
+      undefined, authenticatedDesktop,
     )
     receiver.receive(Uint8Array.of(1))
     receiver.receive(Uint8Array.of(2))
@@ -125,6 +127,7 @@ describe('Mobile Noise Companion receiver', () => {
     receiver.receive(Uint8Array.of(4))
     expect(refreshSurface).toHaveBeenCalledOnce()
     expect(refreshSurface).toHaveBeenCalledWith(0)
+    expect(authenticatedDesktop).toHaveBeenCalledWith('Authenticated Desktop')
     const resync = acceptValidatedDesktopResync.mock.lastCall?.[0]
     expect(resync?.desktopName).toBe('Authenticated Desktop')
     expect(resync?.sessions.ids).toEqual(['session-v3'])
@@ -136,6 +139,116 @@ describe('Mobile Noise Companion receiver', () => {
     expect(acceptValidatedCompanionProjection).toHaveBeenCalledWith(expect.objectContaining({
       type: 'conversation-snapshot', operationId: 'history-older-v3', sessionId: 'session-v3', beforeSeq: 5,
     }))
+  })
+
+  it('applies higher-revision hidden summaries and opened conversation replacements without refresh', () => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    const acceptValidatedCompanionProjection = vi.fn(() => true)
+    const sessionId = parseCompanionSessionId('session-live')
+    const summary = (displayTitle: string, updatedAt: number) => ({
+      sessionId, displayTitle, running: true, blank: false, updatedAt,
+    })
+    const messages = [
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'foreground-sync' as const, desktopName: 'Authenticated Desktop',
+          generation: 2, desktopRevision: 7,
+        },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'surface-snapshot' as const, operationId: 'surface-live' as never,
+          generation: 2, desktopRevision: 8, desktopName: 'Authenticated Desktop', offset: 0, hasMore: false,
+          sessions: [summary('Before', 1)], workspaces: [],
+        },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'session-live' as const, generation: 2, desktopRevision: 9,
+          sessionId, position: 0, summary: summary('Hidden update', 2), workspaces: [],
+        },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'session-live' as const, generation: 2, desktopRevision: 10,
+          sessionId, position: 0, summary: summary('Opened update', 3), workspaces: [],
+          conversation: {
+            ...validConversation(), sessionId,
+            partial: { turn: 1, step: 1, blocks: [{ kind: 'text', text: 'streaming output' }] },
+            running: true, blank: false,
+          },
+        },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'session-live' as const, generation: 2, desktopRevision: 10,
+          sessionId, position: 0, summary: summary('Duplicate stale update', 4), workspaces: [],
+        },
+      },
+    ]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection }),
+      vi.fn(),
+    )
+
+    for (let index = 0; index < 5; index++) receiver.receive(Uint8Array.of(index))
+
+    const hidden = acceptValidatedDesktopResync.mock.calls.at(-2)?.[0]
+    expect(hidden?.sessions.byId[sessionId]?.displayTitle).toBe('Hidden update')
+    expect(hidden?.conversations).toEqual([])
+    const opened = acceptValidatedDesktopResync.mock.lastCall?.[0]
+    expect(opened?.sessions.byId[sessionId]?.displayTitle).toBe('Opened update')
+    expect(opened?.conversations[0]?.partial).toEqual({
+      turn: 1, step: 1, blocks: [{ kind: 'text', text: 'streaming output' }],
+    })
+    expect(acceptValidatedCompanionProjection).toHaveBeenCalledTimes(3)
+  })
+
+  it('removes a cached conversation when a completed authoritative baseline omits its Session', () => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    const messages = [
+      foregroundSync(),
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'surface-snapshot' as const, operationId: 'surface-retained' as never,
+          generation: 2, desktopRevision: 8, desktopName: 'Authenticated Desktop',
+          offset: 0, sessions: [{
+            sessionId: 'session-v3' as never, displayTitle: 'Retained',
+            running: false, blank: false, updatedAt: 1,
+          }], workspaces: [], hasMore: false,
+        },
+      },
+      {
+        ...conversationPage(validConversation()),
+        projection: { ...conversationPage(validConversation()).projection, desktopRevision: 9 },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'surface-snapshot' as const, operationId: 'surface-archived' as never,
+          generation: 2, desktopRevision: 10, desktopName: 'Authenticated Desktop',
+          offset: 0, sessions: [], workspaces: [], hasMore: false,
+        },
+      },
+    ]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection: () => true }),
+    )
+
+    for (let index = 0; index < 4; index++) receiver.receive(Uint8Array.of(index))
+
+    expect(acceptValidatedDesktopResync.mock.lastCall?.[0].sessions.ids).toEqual([])
+    expect(acceptValidatedDesktopResync.mock.lastCall?.[0].conversations).toEqual([])
   })
 
   it('normalizes an authenticated future conversation node through the unknown presentation arm', () => {
@@ -259,11 +372,54 @@ describe('Mobile Noise Companion receiver', () => {
     expect(resync?.workspaces[0]?.sessionIds).toEqual(['session-first', 'session-second'])
   })
 
+  it('applies a live replacement captured after page zero even when the frozen final page has a newer send revision', () => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    const first = surfacePage(0, 'session-first', true)
+    first.projection.desktopRevision = 8
+    const final = surfacePage(1, 'session-second', false)
+    final.projection.desktopRevision = 10
+    const messages = [
+      foregroundSync(),
+      first,
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'session-live' as const,
+          generation: 2,
+          desktopRevision: 9,
+          sessionId: parseCompanionSessionId('session-first'),
+          position: 0,
+          summary: {
+            sessionId: parseCompanionSessionId('session-first'), displayTitle: 'Live after page zero',
+            running: true, blank: false, updatedAt: 9,
+          },
+          workspaces: [],
+        },
+      },
+      final,
+    ]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      () => ({
+        acceptValidatedDesktopResync,
+        acceptValidatedCompanionProjection: vi.fn(() => true),
+      }),
+      vi.fn(),
+    )
+
+    for (let index = 0; index < 4; index += 1) receiver.receive(Uint8Array.of(index))
+
+    expect(acceptValidatedDesktopResync.mock.lastCall?.[0].sessions.byId['session-first']).toMatchObject({
+      displayTitle: 'Live after page zero', running: true, updatedAt: 9,
+    })
+  })
+
   it('drops an older page before a replacement baseline mutates aggregate state', () => {
     const runtime = connectedRuntime()
     const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
     let expected = 'scan-a-0'
-    const acceptValidatedCompanionProjection = vi.fn((projection: { operationId: string }) => (
+    const acceptValidatedCompanionProjection = vi.fn((projection: { type: string; operationId?: string }) => (
       projection.operationId === expected
     ))
     const refreshSurface = vi.fn()

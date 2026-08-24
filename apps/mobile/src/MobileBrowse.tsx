@@ -55,6 +55,8 @@ export interface MobileBrowseProps {
   onAttach?: ((sessionId: SessionId, file: File) => void) | undefined
   /** Load older history for one selected Session. */
   onLoadOlder?: ((sessionId: SessionId) => void) | undefined
+  /** Select the one Session that receives full live conversation projection. */
+  onObserveSession?: ((sessionId?: SessionId) => void) | undefined
   /** Desktop-authoritative full-text Session search state. */
   search: MobileCompanionSearchSnapshot
   /** Request one full-text Session search from Desktop. */
@@ -66,8 +68,8 @@ export interface MobileBrowseProps {
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
   desktopName, connection, sessions, workspaces, conversations, locale, theme, loadImage,
-  canMutate, clock, onCreate, onSessionOpened, onSubmit, onCancel, onAttach, onLoadOlder, search, onSearch, onClearCache,
-  operationFailure,
+  canMutate, clock, onCreate, onSessionOpened, onSubmit, onCancel, onAttach, onLoadOlder, onObserveSession,
+  search, onSearch, onClearCache, operationFailure,
   cacheFailure,
 }: MobileBrowseProps): ReactNode {
   const [openId, setOpenId] = useState<SessionId>()
@@ -96,6 +98,9 @@ export function MobileBrowse({
     historyRequested.current = openId
     onLoadOlder?.(openId)
   }, [conversations, onLoadOlder, onSessionOpened, openId])
+  useEffect(() => {
+    if (canMutate) onObserveSession?.(openId)
+  }, [canMutate, onObserveSession, openId])
   const searchActive = search.query !== ''
   const paged = useMemo(
     () => pageCompanionHistory(sessions, workspaces, page, COMPANION_HISTORY_PAGE_SIZE),

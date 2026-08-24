@@ -169,6 +169,23 @@ async function boot(): Promise<void> {
     handleOperation: async (operation, selector, context) => await handleDesktopCompanionOperation(
       operation, selector, context, snowPairingVault,
     ),
+    liveProjection: {
+      connect: (selector, changed, disconnect) => companionProduct.connectLiveProjection(
+        parsePersonalPairingId(selector), changed, disconnect,
+      ),
+      project: async (change, selector, signal) => {
+        const attachmentKey = snowPairingVault.attachmentKey(selector)
+        if (attachmentKey === undefined) throw new Error('Personal Pairing is no longer active')
+        try {
+          return await companionProduct.projectLiveSession(change, attachmentKey, signal)
+        } finally {
+          attachmentKey.fill(0)
+        }
+      },
+      retainsConversation: (change, selector) => companionProduct.retainsLiveConversation(
+        parsePersonalPairingId(selector), change,
+      ),
+    },
   })
   let accountReady = true
   try {

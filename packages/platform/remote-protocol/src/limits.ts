@@ -14,7 +14,7 @@ export const REMOTE_PROTOCOL_LIMITS = {
   ciphertextBytes: 65_535,
   /** Maximum Encrypted Companion application bytes before endpoint encryption. */
   companionMessageBytes: 60 * 1_024,
-  /** Maximum complete encoded transcript-page message bytes. */
+  /** Maximum complete encoded projection message bytes. */
   transcriptPageBytes: 48 * 1_024,
   /** Maximum transcript entries in one approved Companion projection. */
   transcriptPageEntries: 50,
@@ -26,6 +26,8 @@ export const REMOTE_PROTOCOL_LIMITS = {
   surfaceSessionRows: 20,
   /** Maximum Workspace rows in one browse projection. */
   surfaceWorkspaceRows: 20,
+  /** Maximum distinct changed Sessions coalesced behind one slow Mobile projection consumer. */
+  liveProjectionPendingSessions: 32,
   /** Maximum pending questions in one settlement. */
   interactionQuestions: 8,
   /** Maximum selected option labels in one question answer. */

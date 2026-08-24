@@ -213,7 +213,12 @@ export class CompanionForegroundRuntime {
   /** Drop pairing-delivered authority, reset connection state, and stop Relay. */
   async releasePairing(): Promise<void> {
     this.configure(undefined)
-    await this.enqueue(() => this.stopOwned())
+    const pendingTransition = this.transition
+    const [stopped] = await Promise.allSettled([
+      this.relay?.stop() ?? Promise.resolve(),
+      pendingTransition,
+    ])
+    if (stopped.status === 'rejected') throw stopped.reason
   }
 
   /** Reset socket and synchronization state after connection loss. */

@@ -26,7 +26,7 @@ Desktop assembled 测试启动真实文件 Session persistence、Workspace stora
 
 **发送 Client Runtime class 与 responder。** 否决，因为 map、closure 与 Host rpc id 是进程本地 authority。JSON 协议只携带数据，由已认证 Mobile adapter 重建[共享展示](2026-08-22-shared-mobile-web-presentation.zh.md)。
 
-**增加通用 live event stream。** 否决，因为 foreground synchronization、mutation confirmation 与有界刷新已经提供所需 ownership，无需再增加一套 multiplexed transport 和 replay model。
+**增加通用原始 live event stream。** 否决，因为 Host envelope 会要求另一套 multiplexed replay model。后续的[有界实时 Session projection](2026-08-24-companion-live-session-projection.zh.md)会携带权威替换，而不是原始 event。
 
 ## Consequences
 

@@ -42,7 +42,7 @@ export type CompanionSecurityCapability =
 
 /** One supported Companion major and the security properties it preserves. */
 export interface CompanionVersionDescriptor {
-  major: 1 | 2 | 3
+  major: 1 | 2 | 3 | 4
   capabilities: readonly CompanionSecurityCapability[]
 }
 
@@ -102,6 +102,14 @@ export interface CompanionLoadHistoryOperation {
   sessionId: CompanionSessionId
   beforeSeq?: number
   maxMessages: number
+}
+
+/** Select the one Session whose full bounded tail receives live projection. */
+export interface CompanionObserveSessionOperation {
+  type: 'observe-session'
+  operationId: CompanionOperationId
+  /** Omit to retain only bounded Session summaries for the current pairing. */
+  sessionId?: CompanionSessionId
 }
 
 /** Cancel the active turn of one Desktop Session. */
@@ -173,11 +181,12 @@ export type CompanionOperation =
   | CompanionQueryOperationStatusOperation
   | CompanionRefreshSurfaceOperation
   | CompanionLoadHistoryOperation
+  | CompanionObserveSessionOperation
   | CompanionCancelSessionOperation
   | CompanionReadImageOperation
   | CompanionSettleInteractionOperation
 
-/** Desktop-authoritative mutation result. */
+/** Desktop-authoritative acceptance of a correlated operation. */
 export interface CompanionConfirmedResult {
   type: 'confirmed'
   operationId: CompanionOperationId
@@ -361,12 +370,35 @@ export interface CompanionConversationSnapshotProjection {
   conversation: unknown
 }
 
+/** One Desktop-authoritative Session replacement pushed after a committed Host change. */
+export type CompanionLiveSessionProjection = {
+  type: 'session-live'
+  generation: number
+  desktopRevision: number
+  sessionId: CompanionSessionId
+} & (
+  | {
+    /** Exact index in the current complete Desktop Session list. */
+    position: number
+    summary: CompanionSessionSummaryProjection
+    /** Workspace memberships for this Session only. */
+    workspaces: readonly CompanionWorkspaceProjection[]
+    /** Present only while Mobile observes this Session as its open conversation. */
+    conversation?: unknown
+  }
+  | {
+    /** The Session is absent from the current authoritative list. */
+    removed: true
+  }
+)
+
 /** Projections in the first implemented Companion codec slice. */
 export type CompanionProjection =
   | CompanionTranscriptPageProjection
   | CompanionForegroundSyncProjection
   | CompanionSurfaceSnapshotProjection
   | CompanionConversationSnapshotProjection
+  | CompanionLiveSessionProjection
 
 /** Version-tagged encrypted application plaintext before endpoint encryption. */
 export type CompanionMessage =

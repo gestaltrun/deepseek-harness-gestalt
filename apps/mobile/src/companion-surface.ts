@@ -5,6 +5,7 @@ import type { ConversationSnapshot, SessionId, SessionListState, WorkspaceView }
 import type {
   CompanionAttachmentRejectedResult,
   CompanionHostFailure,
+  CompanionLiveSessionProjection,
   CompanionOperationId,
   CompanionResult,
   CompanionSessionId,
@@ -32,6 +33,7 @@ type ValidatedCompanionProjectionReceipt =
     readonly beforeSeq?: number | undefined
   }
   | { readonly type: 'surface-snapshot'; readonly operationId: CompanionOperationId }
+  | CompanionLiveSessionProjection
 
 /** Receiver installed beside one authenticated decoder generation. */
 export interface ValidatedDesktopSurfaceResyncReceiver {
@@ -156,6 +158,7 @@ export interface MobileCompanionMutationChannel {
   cancel(sessionId: SessionId): MobileCompanionTrackedSubmission
   attach(sessionId: SessionId, file: File): MobileCompanionAttachmentSubmission
   search(query: string): MobileCompanionTrackedSubmission
+  observeSession(sessionId?: SessionId): MobileCompanionTrackedSubmission
   loadOlder(sessionId: SessionId, beforeSeq?: number): MobileCompanionTrackedSubmission
   settle(settlement: MobilePendingSettlement): Promise<MobilePendingSettlementReceipt>
 }
@@ -502,6 +505,16 @@ export class MobileCompanionSurface {
     })
   }
 
+  readonly observeSession = (sessionId?: SessionId): void => {
+    const submission = this.transmit(
+      'other-mutation',
+      channel => channel.mutations.observeSession(sessionId),
+    )
+    void submission.completion.catch((error: unknown) => {
+      console.error('[mobile-companion] Session observation failed:', error)
+    })
+  }
+
   readonly loadOlder = (sessionId: SessionId): void => {
     this.requireActive('history')
     if (this.#historyInFlight.has(sessionId)) return
@@ -712,6 +725,7 @@ export class MobileCompanionSurface {
   private acceptCurrentCompanionProjection(
     projection: ValidatedCompanionProjectionReceipt,
   ): boolean {
+    if (projection.type === 'session-live') return true
     if (projection.type === 'surface-snapshot') {
       if (projection.operationId !== this.#refreshOperationId) return false
       this.#refreshOperationId = undefined

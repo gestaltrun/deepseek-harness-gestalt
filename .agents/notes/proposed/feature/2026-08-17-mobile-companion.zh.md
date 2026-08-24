@@ -4,7 +4,7 @@ Status: proposed
 
 [English](2026-08-17-mobile-companion.md) | 中文
 
-真实产品链路与仅前台生命周期由[使用真实 Companion 产品链路](../architecture/2026-08-22-real-companion-product-path.zh.md)所有；该提案取代本文的推送投递与证明链路验收条款。
+真实产品链路与仅前台生命周期由[使用真实 Companion 产品链路](../architecture/2026-08-22-real-companion-product-path.zh.md)所有；该提案取代本文的推送投递与证明链路验收条款。[以有界替换投影实时 Session](../../implemented/architecture/2026-08-24-companion-live-session-projection.zh.md)实现了这里描述的已打开 transcript 与隐藏摘要 projection；提案的其余部分继续有效。
 
 ## 问题
 

@@ -815,6 +815,47 @@ describe('DesktopRelayEndpointLifecycle', () => {
     await lifecycle.stop()
   })
 
+  it('reconnects one pairing with the same durable grant and a fresh physical attachment', async () => {
+    const first = new FakeSocket()
+    const second = new FakeSocket()
+    const sockets: RelayEndpointSocket[] = [first, second]
+    const connect = vi.fn(async () => {
+      const socket = sockets.shift()
+      if (socket === undefined) throw new Error('unexpected connection')
+      return socket
+    })
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(connect))
+    const grant = desktopGrant('route-reconnect', 'pairing-reconnect', 1)
+    await lifecycle.configure(grant)
+    await lifecycle.start()
+
+    await lifecycle.reconnect(grant.pairingSelector)
+
+    expect(first.closed).toBe(true)
+    expect(second.closed).toBe(false)
+    expect(connect).toHaveBeenCalledTimes(2)
+    await lifecycle.sendCiphertext(
+      grant.pairingSelector, parseRelayAttachmentId('mobile-reconnect'), Uint8Array.of(8),
+    )
+    expect(second.decoded().at(-1)).toMatchObject({ type: 'ciphertext', ciphertext: Uint8Array.of(8) })
+    await lifecycle.stop()
+  })
+
+  it('keeps reconnect inert for a missing or currently stopped pairing', async () => {
+    const connect = vi.fn(async () => new FakeSocket())
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(connect))
+    const grant = desktopGrant('route-reconnect-stopped', 'pairing-reconnect-stopped', 1)
+
+    await lifecycle.reconnect(grant.pairingSelector)
+    await lifecycle.configure(grant)
+    await lifecycle.reconnect(grant.pairingSelector)
+
+    expect(connect).not.toHaveBeenCalled()
+    await lifecycle.start()
+    expect(connect).toHaveBeenCalledOnce()
+    await lifecycle.stop()
+  })
+
   it('preempts a start that never reaches attachment readiness', async () => {
     const socket = new FakeSocket(false)
     const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(async () => socket))

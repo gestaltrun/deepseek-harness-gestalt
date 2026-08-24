@@ -103,6 +103,7 @@ async function mountMobileProduct(): Promise<void> {
     completeLink: pairingUnavailable,
     scanQr: pairingUnavailable,
     retryPairing: pairingUnavailable,
+    selectDesktop: pairingUnavailable,
     activate: () => Promise.resolve(),
     deactivate: () => Promise.resolve(),
     unpair: pairingUnavailable,
@@ -128,6 +129,7 @@ async function mountMobileProduct(): Promise<void> {
     let projectionCache: MobileCompanionProjectionCacheRuntime | undefined
     let projectionOwner: string | undefined
     const productConnection = new MobileSnowCompanionConnection()
+    const pairingControllerRef: { current?: MobilePairingController } = {}
     let connectionGeneration: number | undefined
     let activeSourceAttachmentId: ReturnType<typeof parseRelayAttachmentId> | undefined
     let pendingGeneration: number | undefined
@@ -160,6 +162,12 @@ async function mountMobileProduct(): Promise<void> {
           companionRuntime()?.invalidateAuthenticatedPeer()
           if (ready.peers.length > 1) throw new Error('Mobile Relay has multiple Desktop pairing peers')
           return
+        }
+        const selectedPairingSelector = attachmentKeys.relayAuthority()?.pairingSelector
+        if (selectedPairingSelector === undefined || peer.pairingSelector !== selectedPairingSelector) {
+          clearNoiseConnection()
+          companionRuntime()?.invalidateAuthenticatedPeer()
+          throw new Error('Mobile Relay peer does not match the selected Paired Desktop')
         }
         if (peer.generation === connectionGeneration || peer.generation === pendingGeneration) return
         clearNoiseConnection()
@@ -237,6 +245,15 @@ async function mountMobileProduct(): Promise<void> {
               console.error('[mobile-companion] operation reconciliation failed:', error)
             })
           },
+          (desktopName) => {
+            void Promise.resolve().then(() => {
+              pairingControllerRef.current?.recordAuthenticatedDesktopName(
+                parsePersonalPairingId(pairingSelector), desktopName,
+              )
+            }).catch((error: unknown) => {
+              console.error('[mobile-companion] Paired Desktop name retention failed:', error)
+            })
+          },
         )
       },
       onConnectionReady: () => { companionRuntime()?.markConnectionOpen() },
@@ -269,7 +286,7 @@ async function mountMobileProduct(): Promise<void> {
         loadImage: async (sessionId, attachment) => await productChannel.loadImage(sessionId, attachment),
       },
     }
-    const pairingController = new MobilePairingController({
+    const productPairingController = new MobilePairingController({
       installation,
       transport: new RemoteAccessHttpTransport({ environment }),
       handshake,
@@ -277,8 +294,9 @@ async function mountMobileProduct(): Promise<void> {
       scanner: new NativeMobilePairingQrScanner(),
       relay: companion,
       companion,
-      releaseProjectionAuthority: async () => { await releaseProjectionAuthority(true) },
+      releaseProjectionAuthority: async (deleteStored) => { await releaseProjectionAuthority(deleteStored) },
     })
+    pairingControllerRef.current = productPairingController
     const selectProjectionCache = (
       owner: string,
       cache: MobileCompanionProjectionCacheRuntime,
@@ -316,29 +334,33 @@ async function mountMobileProduct(): Promise<void> {
       selectProjectionCache(`${accountSnapshot.account.id}\0${grant.pairingSelector}`, cache)
       await companionSurface.restoreProjectionCache()
     }
-    pairingController.subscribe(() => {
-      if (pairingController.getSnapshot().status === 'paired') {
+    productPairingController.subscribe(() => {
+      if (productPairingController.getSnapshot().status === 'paired') {
         void installRetainedProjectionCache().catch((error: unknown) => {
           console.error('[companion-cache] paired projection restore failed:', error)
         })
       }
     })
     pairing = {
-      getSnapshot: () => pairingController.getSnapshot(),
-      subscribe: listener => pairingController.subscribe(listener),
-      completeLink: async (link, signal) => { await pairingController.completeLink(link, signal) },
-      scanQr: async (video, signal) => { await pairingController.scanQr(video, signal) },
-      retryPairing: async () => { await pairingController.retryPairing() },
+      getSnapshot: () => productPairingController.getSnapshot(),
+      subscribe: listener => productPairingController.subscribe(listener),
+      completeLink: async (link, signal) => { await productPairingController.completeLink(link, signal) },
+      scanQr: async (video, signal) => { await productPairingController.scanQr(video, signal) },
+      retryPairing: async () => { await productPairingController.retryPairing() },
+      selectDesktop: async (pairingId) => {
+        await productPairingController.selectDesktop(pairingId)
+        await installRetainedProjectionCache()
+      },
       activate: async () => {
-        await pairingController.activate()
+        await productPairingController.activate()
         await installRetainedProjectionCache()
       },
       deactivate: async () => {
         await releaseProjectionAuthority(false)
-        await pairingController.deactivate()
+        await productPairingController.deactivate()
       },
       unpair: async () => {
-        await pairingController.unpair()
+        await productPairingController.unpair()
       },
     }
     let selectedAccountId: string | undefined

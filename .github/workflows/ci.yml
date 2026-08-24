@@ -703,7 +703,7 @@ jobs:
 
   windows-native-coverage:
     needs: [preflight, windows-native-coverage-shards]
-    if: needs.preflight.result == 'success' && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
           && github.event_name == 'pull_request'

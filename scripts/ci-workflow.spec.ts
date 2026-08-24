@@ -503,7 +503,7 @@ describe('CI workflow', () => {
     })
     expect(windowsNativeCoverage.needs).toEqual(['preflight', 'windows-native-coverage-shards'])
     expect(windowsNativeCoverage.if).toBe(
-      `${evidenceAfterPreflight} && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')`,
+      `${evidenceAfterPreflight} && ${masterFallback} && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')`,
     )
     expect(windowsNativeVerdict.needs).toEqual([
       'preflight',

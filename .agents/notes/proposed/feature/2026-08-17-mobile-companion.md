@@ -4,7 +4,7 @@ Status: proposed
 
 English | [中文](2026-08-17-mobile-companion.zh.md)
 
-The real product path and foreground-only lifecycle are owned by [Use the real Companion product path](../architecture/2026-08-22-real-companion-product-path.md), which supersedes this proposal's push delivery and proof-path acceptance clauses.
+The real product path and foreground-only lifecycle are owned by [Use the real Companion product path](../architecture/2026-08-22-real-companion-product-path.md), which supersedes this proposal's push delivery and proof-path acceptance clauses. [Project live Sessions as bounded replacements](../../implemented/architecture/2026-08-24-companion-live-session-projection.md) implements the open-transcript and hidden-summary projection described here; the remaining proposal stays active.
 
 ## Problem
 

@@ -3,9 +3,11 @@
 import type { SnowCompanionProtocolChannel } from '@deepseek-ai/dsh-noise-channel'
 import type {
   CompanionConversationSnapshotProjection,
+  CompanionLiveSessionProjection,
   CompanionResult,
   CompanionSurfaceSnapshotProjection,
 } from '@deepseek-ai/dsh-remote-protocol'
+import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import { CompanionForegroundRuntime } from './companion-lifecycle.ts'
 import type {
   MobileCompanionProjectionDto, MobileConversationProjectionDto,
@@ -22,7 +24,7 @@ interface MobileCompanionSurfaceReceiver {
   acceptValidatedDesktopResync(message: MobileCompanionProjectionDto): void
   /** @param projection - authenticated projection correlation checked before aggregate state changes. */
   acceptValidatedCompanionProjection(
-    projection: CompanionConversationSnapshotProjection | CompanionSurfaceSnapshotProjection,
+    projection: CompanionConversationSnapshotProjection | CompanionSurfaceSnapshotProjection | CompanionLiveSessionProjection,
   ): boolean
 }
 
@@ -34,6 +36,8 @@ export class MobileNoiseCompanionReceiver {
   private sessions: MobileCompanionProjectionDto['sessions'] = emptySessions()
   private workspaces: MobileCompanionProjectionDto['workspaces'] = []
   private readonly conversations = new Map<string, MobileConversationProjectionDto>()
+  private readonly pendingLive = new Map<string, CompanionLiveSessionProjection>()
+  private surfaceComplete = false
   /**
    * @param channel - completed attachment-bound IK and Companion codec.
    * @param generation - physical connection generation bound into the IK prologue.
@@ -75,6 +79,10 @@ export class MobileNoiseCompanionReceiver {
       this.acceptConversation(message.projection)
       return message
     }
+    if (message.projection.type === 'session-live') {
+      this.acceptLiveSession(message.projection)
+      return message
+    }
     if (message.projection.type !== 'foreground-sync') return message
     if (message.projection.generation !== this.generation) {
       throw new Error('Authenticated foreground synchronization belongs to another connection generation')
@@ -85,6 +93,8 @@ export class MobileNoiseCompanionReceiver {
       this.activeSurface = surface
       this.desktopName = message.projection.desktopName
       this.desktopRevision = message.projection.desktopRevision
+      this.surfaceComplete = false
+      this.pendingLive.clear()
       surface.acceptValidatedDesktopResync({
         type: 'desktop-resync', version: 1, authenticated: true,
         desktopName: message.projection.desktopName,
@@ -137,7 +147,13 @@ export class MobileNoiseCompanionReceiver {
       ? projection.workspaces.map(workspace => ({ ...workspace }))
       : mergeWorkspacePage(this.workspaces, projection.workspaces)
     this.publishSurface()
-    if (projection.hasMore) this.refreshSurface?.(this.sessions.ids.length)
+    if (projection.hasMore) {
+      this.surfaceComplete = false
+      this.refreshSurface?.(this.sessions.ids.length)
+      return
+    }
+    this.surfaceComplete = true
+    this.flushPendingLive()
   }
 
   private acceptConversation(projection: CompanionConversationSnapshotProjection): void {
@@ -152,6 +168,84 @@ export class MobileNoiseCompanionReceiver {
       this.conversations.set(projection.sessionId, prependConversationPage(current, conversation, projection.beforeSeq))
     }
     this.publishSurface()
+  }
+
+  private acceptLiveSession(projection: CompanionLiveSessionProjection): void {
+    if (projection.generation !== this.generation) {
+      throw new Error('Authenticated Companion projection belongs to another connection generation')
+    }
+    if (this.activeSurface === undefined || this.desktopRevision === undefined) {
+      throw new Error('Authenticated Companion projection arrived before foreground synchronization')
+    }
+    const pendingRevision = this.pendingLive.get(projection.sessionId)?.desktopRevision ?? -1
+    if (projection.desktopRevision <= Math.max(this.desktopRevision, pendingRevision)) return
+    if (!this.activeSurface.acceptValidatedCompanionProjection(projection)) return
+    if (!this.surfaceComplete) {
+      this.pendingLive.set(projection.sessionId, projection)
+      if (this.pendingLive.size > REMOTE_PROTOCOL_LIMITS.liveProjectionPendingSessions) {
+        throw new Error('Authenticated Companion live projection exceeded its pending Session ceiling')
+      }
+      return
+    }
+    this.desktopRevision = projection.desktopRevision
+    this.applyLiveSession(projection)
+    this.publishSurface()
+  }
+
+  private applyLiveSession(projection: CompanionLiveSessionProjection): void {
+    const currentIds = this.sessions.ids.filter(id => id !== projection.sessionId)
+    const byId = Object.fromEntries(
+      Object.entries(this.sessions.byId).filter(([id]) => id !== projection.sessionId),
+    )
+    const workspaces = this.workspaces
+      .map(workspace => ({
+        ...workspace,
+        sessionIds: workspace.sessionIds.filter(id => id !== projection.sessionId),
+      }))
+      .filter(workspace => workspace.sessionIds.length > 0)
+    if ('removed' in projection) {
+      this.sessions = { ...this.sessions, ids: currentIds, byId }
+      this.workspaces = workspaces
+      this.conversations.delete(projection.sessionId)
+      return
+    }
+    if (projection.position > currentIds.length) {
+      throw new Error('Authenticated Companion live Session position exceeds the synchronized list')
+    }
+    currentIds.splice(projection.position, 0, projection.sessionId)
+    byId[projection.sessionId] = {
+      id: projection.sessionId,
+      displayTitle: projection.summary.displayTitle,
+      ...(projection.summary.cwd === undefined ? {} : { cwd: projection.summary.cwd }),
+      running: projection.summary.running,
+      ...(projection.summary.pendingInteraction === undefined
+        ? {} : { pendingInteraction: projection.summary.pendingInteraction }),
+      blank: projection.summary.blank,
+      updatedAt: projection.summary.updatedAt,
+    }
+    for (const projected of projection.workspaces) {
+      const existing = workspaces.find(workspace => workspace.workspaceId === projected.workspaceId)
+      if (existing === undefined) workspaces.push({ ...projected, sessionIds: [projection.sessionId] })
+      else existing.sessionIds.push(projection.sessionId)
+    }
+    this.sessions = { ...this.sessions, ids: currentIds, byId }
+    this.workspaces = workspaces
+    if (projection.conversation !== undefined) {
+      this.conversations.set(
+        projection.sessionId,
+        parseMobileConversationProjection(projection.conversation, projection.sessionId),
+      )
+    }
+  }
+
+  private flushPendingLive(): void {
+    const pending = [...this.pendingLive.values()].sort((left, right) => left.desktopRevision - right.desktopRevision)
+    this.pendingLive.clear()
+    for (const projection of pending) {
+      this.desktopRevision = Math.max(this.desktopRevision ?? 0, projection.desktopRevision)
+      this.applyLiveSession(projection)
+      this.publishSurface()
+    }
   }
 
   private requireProjectionGeneration(generation: number, desktopRevision: number): void {

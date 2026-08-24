@@ -26,6 +26,8 @@ export const REMOTE_PROTOCOL_LIMITS = {
   surfaceSessionRows: 20,
   /** Maximum Workspace rows in one browse projection. */
   surfaceWorkspaceRows: 20,
+  /** Maximum distinct changed Sessions coalesced behind one slow Mobile projection consumer. */
+  liveProjectionPendingSessions: 32,
   /** Maximum pending questions in one settlement. */
   interactionQuestions: 8,
   /** Maximum selected option labels in one question answer. */

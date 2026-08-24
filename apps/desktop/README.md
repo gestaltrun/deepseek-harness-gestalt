@@ -30,6 +30,8 @@ The locked Web Host snapshot contains packages that the Desktop default does not
 
 The pairing-scoped Companion operation ledger single-flights concurrent retries, retries a failed terminal-result save before another Host effect, expires records after seven days, and evicts the oldest terminal records at capacity while retaining unresolved work. Its durable codec parses branded pairing and operation ids plus complete v3 results and rejects mismatched record/result operation ids.
 
+The Desktop owner also consumes the authoritative Host mux and Session event streams. A Companion major 4 Mobile attachment selects at most one open Session with `observe-session`: logged output for that Session produces a bounded conversation replacement, while authoritative changes to hidden Sessions produce summary, position, and Workspace-membership replacements only. The pairing-scoped projection source coalesces repeated changes for one Session in a bounded 32-Session queue, and the Snow owner serializes every projection on the channel's monotonic Desktop revision. Host replacement, stream failure, projection failure, overflow, peer replacement, sleep, disable, sign-out, window close, and quit clear listeners and pending work before reconnect or teardown. Reconnection establishes a new generation and authoritative baseline rather than replaying transport events.
+
 ## Develop
 
 ```sh

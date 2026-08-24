@@ -76,6 +76,7 @@ describe('Host HTTP failure Companion projection', () => {
         completion: Promise.resolve(),
       })),
       search: vi.fn(() => ({ operationId, completion: Promise.resolve() })),
+      observeSession: vi.fn(() => ({ operationId, completion: Promise.resolve() })),
       loadOlder: vi.fn(() => ({ operationId, completion: Promise.resolve() })),
       settle: vi.fn(),
     }

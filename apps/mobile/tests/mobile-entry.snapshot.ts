@@ -296,6 +296,9 @@ function connectionChannel(attachmentCompletion: Promise<void>) {
     search: vi.fn<MobileCompanionConnectionChannel['mutations']['search']>(() => (
       { operationId: parseCompanionOperationId('mobile-snapshot-search'), completion: Promise.resolve() }
     )),
+    observeSession: vi.fn<MobileCompanionConnectionChannel['mutations']['observeSession']>(() => ({
+      operationId: parseCompanionOperationId('mobile-snapshot-observe'), completion: Promise.resolve(),
+    })),
     loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(() => ({
       operationId: parseCompanionOperationId('history-snapshot'), completion: Promise.resolve(),
     })),

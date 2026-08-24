@@ -30,6 +30,10 @@ import {
 } from '@deepseek-ai/dsh-noise-channel'
 import { sealDesktopForegroundSynchronization } from './noise-companion.ts'
 import type { DesktopSnowPairingVault } from './snow-pairing-vault.ts'
+import type {
+  DesktopCompanionLiveProjectionChange,
+} from './companion-live-projection.ts'
+import type { DesktopCompanionLiveProjectionPayload } from './companion-product.ts'
 
 const CRYPTO_GATE = 'Personal Pairing requires an independently reviewed handshake and Relay crypto provider.'
 
@@ -54,6 +58,8 @@ export interface DesktopRemoteRelayOptions {
   desktopName(): string | undefined
   /** Execute one application operation after Snow authentication. */
   handleOperation: DesktopCompanionOperationHandler
+  /** Bind authenticated Snow connections to current Host projection. */
+  liveProjection?: Omit<DesktopCompanionLiveProjectionAdapter, 'reconnect'>
 }
 
 interface DesktopSnowAcceptOwner {
@@ -78,6 +84,24 @@ export type DesktopCompanionOperationHandler = (
   context: { generation: number; desktopRevision: number },
 ) => Promise<CompanionResult | CompanionProjection | readonly CompanionResult[]>
 
+/** Endpoint adapter joining authenticated Snow connections to Host live projection. */
+export interface DesktopCompanionLiveProjectionAdapter {
+  /** Register one current encrypted connection and return its disposer. */
+  connect(
+    pairingSelector: RelayPairingSelector,
+    changed: (change: DesktopCompanionLiveProjectionChange) => void,
+    disconnect: (error: Error) => void,
+  ): () => void
+  /** Build one current Host replacement without assigning wire generation or revision. */
+  project(
+    change: DesktopCompanionLiveProjectionChange,
+    pairingSelector: RelayPairingSelector,
+    signal: AbortSignal,
+  ): Promise<DesktopCompanionLiveProjectionPayload>
+  /** Force a fresh physical attachment after projection loss or bounded-queue overflow. */
+  reconnect(pairingSelector: RelayPairingSelector, error: Error): void
+}
+
 interface DesktopSnowProjection {
   routeId: RelayRouteId
   attachmentId: RelayAttachmentId
@@ -85,13 +109,22 @@ interface DesktopSnowProjection {
   cancellation: AbortController
 }
 
+interface DesktopSnowActiveChannel {
+  readonly channel: SnowCompanionProtocolChannel
+  readonly peer: RelayPeerDescriptor
+  readonly cancellation: AbortController
+  readonly pendingLive: Map<string, DesktopCompanionLiveProjectionChange>
+  outbound: Promise<void>
+  livePump?: Promise<void>
+  liveDisposer?: () => void
+  retired: boolean
+}
+
 /** Attachment-generation owner that rejects late Snow accept results before channel publication. */
 export class DesktopSnowRelayChannelOwner {
-  private readonly channels = new Map<RelayAttachmentId, {
-    channel: SnowCompanionProtocolChannel
-    peer: RelayPeerDescriptor
-  }>()
+  private readonly channels = new Map<RelayAttachmentId, DesktopSnowActiveChannel>()
   private readonly projections = new Map<RelayPairingSelector, DesktopSnowProjection>()
+  private readonly tasks = new Set<Promise<void>>()
   private desktopRevision = 0
 
   /** @param owner - Desktop Snow IK responder. @param send - current Relay attachment sender. */
@@ -100,6 +133,7 @@ export class DesktopSnowRelayChannelOwner {
     private readonly send: DesktopRelaySender,
     private readonly handleOperation: DesktopCompanionOperationHandler | undefined,
     private readonly desktopName: () => string | undefined,
+    private readonly liveProjection?: DesktopCompanionLiveProjectionAdapter,
   ) {}
 
   /** @param update - current route-bound peer projection. @param selector - owned pairing selector. */
@@ -119,6 +153,10 @@ export class DesktopSnowRelayChannelOwner {
     this.projections.delete(selector)
     for (const [attachmentId, active] of this.channels) {
       if (active.peer.pairingSelector !== selector) continue
+      active.retired = true
+      active.cancellation.abort()
+      active.pendingLive.clear()
+      active.liveDisposer?.()
       active.channel.dispose()
       this.channels.delete(attachmentId)
     }
@@ -173,10 +211,7 @@ export class DesktopSnowRelayChannelOwner {
           if (!this.isCurrent(current, pairingSelector, projected)) {
             throw new Error('Desktop Relay rejected a stale Companion operation result')
           }
-          const message = isCompanionProjection(item)
-            ? { type: 'projection' as const, projection: item }
-            : { type: 'result' as const, result: item }
-          await this.send(pairingSelector, sourceAttachmentId, existing.channel.seal(message))
+          await this.sendOutput(existing, item)
         }
       }
       return
@@ -195,7 +230,7 @@ export class DesktopSnowRelayChannelOwner {
       if (!this.isCurrent(current, pairingSelector, projected)) {
         throw new Error('Desktop Relay rejected a stale Snow IK transcript')
       }
-      const nextRevision = this.desktopRevision + 1
+      const nextRevision = this.allocateDesktopRevision()
       const desktopName = this.desktopName()
       if (desktopName === undefined) throw new Error('Desktop Relay has no authenticated Installation presentation')
       const synchronization = sealDesktopForegroundSynchronization(
@@ -205,12 +240,134 @@ export class DesktopSnowRelayChannelOwner {
       if (!this.isCurrent(current, pairingSelector, projected)) {
         throw new Error('Desktop Relay rejected a stale Snow IK transcript')
       }
-      this.channels.set(sourceAttachmentId, { channel: accepted.channel, peer: projected })
-      this.desktopRevision = nextRevision
+      const active: DesktopSnowActiveChannel = {
+        channel: accepted.channel,
+        peer: projected,
+        cancellation: new AbortController(),
+        pendingLive: new Map(),
+        outbound: Promise.resolve(),
+        retired: false,
+      }
+      this.channels.set(sourceAttachmentId, active)
+      if (this.liveProjection !== undefined) {
+        try {
+          active.liveDisposer = this.liveProjection.connect(
+            pairingSelector,
+            (change) => { this.queueLive(active, change) },
+            (error) => { this.failActive(active, error) },
+          )
+        } catch (error) {
+          this.channels.delete(sourceAttachmentId)
+          active.retired = true
+          active.cancellation.abort()
+          throw error
+        }
+      }
       published = true
     } finally {
       if (!published) accepted.channel.dispose()
     }
+  }
+
+  /** Wait until every active or retiring live projection pump reaches quiescence. */
+  async drain(): Promise<void> {
+    while (this.tasks.size > 0) await Promise.allSettled([...this.tasks])
+  }
+
+  private queueLive(active: DesktopSnowActiveChannel, change: DesktopCompanionLiveProjectionChange): void {
+    if (active.retired || this.channels.get(active.peer.attachmentId) !== active) return
+    active.pendingLive.set(change.sessionId, change)
+    if (active.pendingLive.size > REMOTE_PROTOCOL_LIMITS.liveProjectionPendingSessions) {
+      this.failActive(active, new Error('Companion live projection consumer exceeded its pending Session ceiling'))
+      return
+    }
+    if (active.livePump !== undefined) return
+    const pump = this.pumpLive(active)
+    active.livePump = pump
+    this.tasks.add(pump)
+    void pump.then(
+      () => { if (active.livePump === pump) active.livePump = undefined },
+      (error: unknown) => {
+        if (active.livePump === pump) active.livePump = undefined
+        this.failActive(active, error instanceof Error ? error : new Error('Companion live projection failed', { cause: error }))
+      },
+    ).finally(() => { this.tasks.delete(pump) })
+  }
+
+  private async pumpLive(active: DesktopSnowActiveChannel): Promise<void> {
+    const adapter = this.liveProjection
+    if (adapter === undefined) return
+    while (!active.retired && !active.cancellation.signal.aborted) {
+      const next = active.pendingLive.entries().next()
+      if (next.done) return
+      const [sessionId, change] = next.value
+      active.pendingLive.delete(sessionId)
+      const payload = await adapter.project(change, active.peer.pairingSelector, active.cancellation.signal)
+      if (!this.isActive(active)) return
+      await this.enqueueOutbound(active, () => ({
+        type: 'projection',
+        projection: {
+          type: 'session-live', generation: active.peer.generation,
+          desktopRevision: this.allocateDesktopRevision(), ...payload,
+        },
+      }))
+    }
+  }
+
+  private async sendOutput(
+    active: DesktopSnowActiveChannel,
+    item: CompanionResult | CompanionProjection,
+  ): Promise<void> {
+    await this.enqueueOutbound(active, () => isCompanionProjection(item)
+      ? { type: 'projection', projection: this.currentProjection(item, active.peer.generation) }
+      : { type: 'result', result: item })
+  }
+
+  private enqueueOutbound(
+    active: DesktopSnowActiveChannel,
+    message: () => Parameters<SnowCompanionProtocolChannel['seal']>[0],
+  ): Promise<void> {
+    const result = active.outbound.then(async () => {
+      if (!this.isActive(active)) {
+        throw new Error('Desktop Relay rejected a stale Companion output')
+      }
+      const ciphertext = active.channel.seal(message())
+      await this.send(active.peer.pairingSelector, active.peer.attachmentId, ciphertext)
+      if (!this.isActive(active)) {
+        throw new Error('Desktop Relay rejected a stale Companion output')
+      }
+    })
+    this.tasks.add(result)
+    void result.finally(() => { this.tasks.delete(result) }).catch(() => {})
+    active.outbound = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  private currentProjection(projection: CompanionProjection, generation: number): CompanionProjection {
+    if (projection.type === 'surface-snapshot' || projection.type === 'conversation-snapshot'
+      || projection.type === 'session-live') {
+      return { ...projection, generation, desktopRevision: this.allocateDesktopRevision() }
+    }
+    return projection
+  }
+
+  private allocateDesktopRevision(): number {
+    this.desktopRevision += 1
+    return this.desktopRevision
+  }
+
+  private failActive(active: DesktopSnowActiveChannel, error: Error): void {
+    if (active.retired) return
+    const selector = active.peer.pairingSelector
+    this.invalidate(selector)
+    try { this.liveProjection?.reconnect(selector, error) } catch (failure) {
+      console.error('[desktop-companion] live projection reconnect failed:', failure)
+    }
+  }
+
+  private isActive(active: DesktopSnowActiveChannel): boolean {
+    return !active.retired && !active.cancellation.signal.aborted
+      && this.channels.get(active.peer.attachmentId) === active
   }
 
   private isCurrent(
@@ -230,6 +387,7 @@ function isCompanionProjection(
 ): value is CompanionProjection {
   return value.type === 'foreground-sync' || value.type === 'transcript-page'
     || value.type === 'surface-snapshot' || value.type === 'conversation-snapshot'
+    || value.type === 'session-live'
 }
 
 function isCompanionResultList(
@@ -273,7 +431,15 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
   const owner = new SnowDesktopAttachmentOwner(selector => options.snowPairingVault.reconnectState(selector))
   const channelOwner = new DesktopSnowRelayChannelOwner(owner, async (...input) => {
     await lifecycle.sendCiphertext(...input)
-  }, options.handleOperation, () => options.desktopName())
+  }, options.handleOperation, () => options.desktopName(), options.liveProjection === undefined ? undefined : {
+    ...options.liveProjection,
+    reconnect: (selector, error) => {
+      console.error('[desktop-companion] live projection requires Relay reconnect:', error)
+      void lifecycle.reconnect(selector).catch((failure: unknown) => {
+        console.error('[desktop-companion] Relay reconnect failed:', failure)
+      })
+    },
+  })
   const lifecycle = new DesktopRelayEndpointLifecycle({
     attachmentId: () => parseRelayAttachmentId(crypto.randomUUID()),
     connect: async signal => options.connect === undefined
@@ -292,7 +458,16 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
     resynchronize: async () => {},
     onConnectionLost: (attachmentId) => { channelOwner.connectionLost(attachmentId) },
   })
-  return lifecycle
+  return {
+    configure: async (grant) => { await lifecycle.configure(grant) },
+    synchronize: async (grants) => { await lifecycle.synchronize(grants) },
+    start: async () => { await lifecycle.start() },
+    stop: async (reason) => {
+      await lifecycle.stop(reason)
+      await channelOwner.drain()
+    },
+    getState: () => lifecycle.getState(),
+  }
 }
 
 async function abortableAccept<T extends { channel: SnowCompanionProtocolChannel }>(

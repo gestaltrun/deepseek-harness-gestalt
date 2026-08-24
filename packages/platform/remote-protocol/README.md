@@ -10,9 +10,11 @@ Version 1 exposes only route attachment, opaque ciphertext forwarding, heartbeat
 
 ## Encrypted Companion Protocol
 
-Companion majors 3 and 2 are the current and immediately preceding application versions. Both endpoints must advertise authenticated encryption, pairing-key separation, and replay protection at the selected major. Negotiation selects the highest safe shared major regardless of offer-array order, so an unsafe shared major can fall back only to a safe immediately preceding major. Each logical endpoint connection owns a negotiation channel. Starting a negotiation on that channel invalidates its prior application-codec token before the offers are evaluated; a failed attempt leaves the channel inactive, while other channels remain valid. No safe version overlap fails with an endpoint-specific update requirement before application plaintext can be encoded.
+Companion majors 4 and 3 are the current and immediately preceding application versions. Both endpoints must advertise authenticated encryption, pairing-key separation, and replay protection at the selected major. Negotiation selects the highest safe shared major regardless of offer-array order, so an unsafe shared major can fall back only to a safe immediately preceding major. Each logical endpoint connection owns a negotiation channel. Starting a negotiation on that channel invalidates its prior application-codec token before the offers are evaluated; a failed attempt leaves the channel inactive, while other channels remain valid. No safe version overlap fails with an endpoint-specific update requirement before application plaintext can be encoded.
 
 Major 3 adds bounded Session and Workspace discovery, complete conversation-page projections, Session history, Workspace-owned or Ungrouped Session creation, prompt submission, cancellation, Approval and Ask User settlement, and content-addressed historical-image reads. Image bytes travel as ordered 32 KiB chunks with one shared digest and at most 512 chunks; a Mobile endpoint accepts them only for the originating operation, Session, attachment, media type, generation, index, count, and digest. The catalog retains attachment offers, authoritative `search-sessions`, reconnect `query-operation-status`, Desktop confirmations, attachment rejections, correlated `session-search`, typed `operation-failed`, and `status` answers carrying the original terminal mutation result or explicit absence. Host failures preserve one of four closed categories: HTTP status, invalid wire response, typed business error, or timeout. `foreground-sync` carries the positive physical-connection generation and Desktop revision after authenticated decryption; a raw byte cannot decode as synchronization authority. Unsupported operations, extra fields, malformed content-addressed attachment ids, and limit overflow fail during decoding.
+
+Major 4 adds `observe-session` and unsolicited `session-live` replacements. One pairing observes at most one open Session. Its replacement may include a bounded conversation, while every hidden changed Session carries only its authoritative summary, position, and Workspace memberships. A removal carries only the Session id. Each replacement names the physical generation and a monotonically increasing Desktop revision; Mobile applies a revision at most once, ignores older duplicates, and queues at most 32 distinct Session replacements until the paged baseline completes. Same-Session changes coalesce behind one ordered Snow sender. Queue overflow, Host stream failure, and projection failure retire the channel so reconnect establishes a new generation and full baseline.
 
 A conversation projection echoes the optional exclusive `beforeSeq` from its history request. An absent cursor replaces the tail; a present cursor identifies an older page that Mobile continuity-checks and prepends.
 
@@ -35,6 +37,7 @@ A conversation projection echoes the optional exclusive `beforeSeq` from its his
 | Transcript page | 50 entries |
 | Session history request | 20 messages |
 | Session or Workspace discovery page | 20 rows |
+| Pending live Session replacements | 32 distinct Sessions |
 | Historical image chunk | 32,768 decoded bytes |
 | Historical image result | 512 chunks |
 | Session search query | 500 UTF-16 code units |
@@ -59,5 +62,5 @@ None.
 
 ## Known Limitations and Deferred Work
 
-- Session rename, archive, deletion, and fork; Workspace administration; terminal input; and settings, credential, plugin, model, and preset mutations are not part of Companion major 3.
+- Session rename, archive, deletion, and fork; Workspace administration; terminal input; and settings, credential, plugin, model, and preset mutations are not part of Companion major 4.
 - Pairing handshakes, credential persistence, challenge lifecycle, and production Companion message encryption belong to service or reviewed endpoint integrations, not these codecs.

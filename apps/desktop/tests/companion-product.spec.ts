@@ -420,8 +420,8 @@ describe('Desktop Companion product operations', () => {
 
   it('installs the real Web Host RPC in the product owner and invalidates it on Host exit', async () => {
     const server = createServer((request, response) => {
-      if (request.url === '/api/events.mux') {
-        response.writeHead(200, { 'content-type': 'text/event-stream' })
+      if (request.url === '/api/events.mux' || request.url === '/api/events.host') {
+        response.writeHead(426)
         response.end()
         return
       }

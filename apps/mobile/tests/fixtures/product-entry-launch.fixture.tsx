@@ -12,7 +12,7 @@ import type {
   ValidatedDesktopSurfaceResync,
 } from '../../src/companion-surface.ts'
 
-type EvidenceMode = 'approval' | 'question' | 'composer'
+type EvidenceMode = 'approval' | 'question' | 'composer' | 'live'
 
 declare global {
   interface Window {
@@ -23,6 +23,7 @@ declare global {
 }
 
 const SESSION_ID = 'shared-session' as SessionId
+const BACKGROUND_SESSION_ID = 'background-session' as SessionId
 const LONG_TEXT = Array.from({ length: 80 }, (_, index) => `long-line-${String(index)}`).join('\n')
 
 /** Built-entry fixture launch; selected only by the snapshot Vite resolver. */
@@ -80,6 +81,7 @@ function connectionChannel(): MobileCompanionConnectionChannel {
       cancel: tracked,
       attach: tracked,
       search: tracked,
+      observeSession: tracked,
       loadOlder: tracked,
       settle: async () => ({ accepted: true }),
     },
@@ -90,13 +92,14 @@ function connectionChannel(): MobileCompanionConnectionChannel {
 }
 
 function projection(mode: EvidenceMode): ValidatedDesktopSurfaceResync {
+  const live = mode === 'live'
   return {
     type: 'desktop-resync',
     version: 1,
     authenticated: true,
     desktopName: 'Authenticated Shared Desktop',
     sessions: {
-      ids: [SESSION_ID],
+      ids: live ? [SESSION_ID, BACKGROUND_SESSION_ID] : [SESSION_ID],
       byId: {
         [SESSION_ID]: {
           id: SESSION_ID,
@@ -107,6 +110,17 @@ function projection(mode: EvidenceMode): ValidatedDesktopSurfaceResync {
           blank: false,
           updatedAt: 1,
         },
+        ...(live ? {
+          [BACKGROUND_SESSION_ID]: {
+            id: BACKGROUND_SESSION_ID,
+            title: 'Background Session Updated Live',
+            displayTitle: 'Background Session Updated Live',
+            cwd: '/work',
+            running: false,
+            blank: false,
+            updatedAt: 2,
+          },
+        } : {}),
       },
       current: null,
       phase: 'ready',
@@ -118,7 +132,7 @@ function projection(mode: EvidenceMode): ValidatedDesktopSurfaceResync {
       workspaceId: 'workspace-shared',
       path: '/work',
       title: 'Shared Workspace',
-      sessionIds: [SESSION_ID],
+      sessionIds: live ? [SESSION_ID, BACKGROUND_SESSION_ID] : [SESSION_ID],
       createdAt: '2026-08-23T00:00:00.000Z',
       updatedAt: '2026-08-23T00:00:00.000Z',
     }],
@@ -154,7 +168,9 @@ function conversation(mode: EvidenceMode): ValidatedDesktopSurfaceResync['conver
     ],
     turnTimings: [],
     turnEnds: [],
-    partial: null,
+    partial: mode === 'live'
+      ? { turn: 2, step: 1, blocks: [{ kind: 'text', text: 'LIVE_PUSH_OK' }] }
+      : null,
     runningCalls: mode === 'approval'
       ? [{
         callId: 'approval-call', name: 'bash', argsRaw: JSON.stringify({ command: LONG_TEXT }),

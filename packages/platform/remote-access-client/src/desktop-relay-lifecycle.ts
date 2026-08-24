@@ -150,6 +150,21 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
     })
   }
 
+  /**
+   * Replace one pairing's physical attachment without retiring its durable grant.
+   * @param pairingSelector - pairing to reconnect.
+   */
+  async reconnect(pairingSelector: RelayPairingSelector): Promise<void> {
+    await this.exclusive(async () => {
+      const record = this.endpoints.get(pairingSelector)
+      if (record === undefined || record.token.retired) return
+      await record.controller.stop()
+      if (this.running && this.endpoints.get(pairingSelector) === record) {
+        await record.controller.start()
+      }
+    })
+  }
+
   /** @returns observed attachment ownership and the last completed stop reason. */
   getState(): { connected: boolean; stopReason?: DesktopRelayStopReason } {
     return {

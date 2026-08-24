@@ -795,6 +795,9 @@ function connectionChannel(options?: {
     search: vi.fn<MobileCompanionConnectionChannel['mutations']['search']>(() => (
       tracked('search-needle')
     )),
+    observeSession: vi.fn<MobileCompanionConnectionChannel['mutations']['observeSession']>(() => (
+      tracked('observe-default')
+    )),
     loadOlder: vi.fn<MobileCompanionConnectionChannel['mutations']['loadOlder']>(() => (
       tracked('history-default', options?.historyCompletion)
     )),

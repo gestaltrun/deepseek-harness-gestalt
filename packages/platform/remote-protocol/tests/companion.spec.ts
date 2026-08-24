@@ -428,7 +428,7 @@ describe('Encrypted Companion Protocol codec', () => {
       { endpoint: 'mobile', versions: [null] },
       { endpoint: 'mobile', versions: [{ major: 1, wrong: [] }] },
       { endpoint: 'mobile', versions: [{ major: 0, capabilities: [] }] },
-      { endpoint: 'mobile', versions: [{ major: 4, capabilities: [] }] },
+      { endpoint: 'mobile', versions: [{ major: 5, capabilities: [] }] },
       { endpoint: 'mobile', versions: [{ major: 1, capabilities: null }] },
       { endpoint: 'mobile', versions: [{ major: 1, capabilities: ['replay-protection', 'replay-protection'] }] },
       { endpoint: 'mobile', versions: [{ major: 1, capabilities: ['plaintext'] }] },

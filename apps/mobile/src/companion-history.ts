@@ -48,6 +48,8 @@ export interface MobileCompanionPresentation {
   onCancel?: ((sessionId: SessionId) => void) | undefined
   /** Load the preceding authoritative history window. */
   onLoadOlder?: ((sessionId: SessionId) => void) | undefined
+  /** Select or clear the Session receiving full live conversation projection. */
+  onObserveSession?: ((sessionId?: SessionId) => void) | undefined
   /** Select an attachment for encrypted transfer through Desktop. */
   onAttach?: ((sessionId: SessionId, file: File) => void) | undefined
   /** Request one full-text Session search from Desktop. */

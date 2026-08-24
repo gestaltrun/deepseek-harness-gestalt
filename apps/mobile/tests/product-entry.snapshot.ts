@@ -234,6 +234,13 @@ describe('bundled Mobile product entry', () => {
     }))
     expect(inputOverflow.clientHeight).toBeLessThanOrEqual(336)
     expect(inputOverflow.scrollHeight).toBeGreaterThan(inputOverflow.clientHeight)
+
+    await page.evaluate(() => { window.__DSH_MOBILE_PRODUCT_EVIDENCE__.show('live') })
+    await expect.poll(async () => await page.getByText('LIVE_PUSH_OK').count()).toBe(1)
+    await page.getByRole('button', { name: back }).click()
+    await expect.poll(async () => await page.getByRole('treeitem', {
+      name: /Background Session Updated Live/,
+    }).count()).toBe(1)
     expect(page.url()).not.toMatch(/:517[34](?:\/|$)/)
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
     await context.close()

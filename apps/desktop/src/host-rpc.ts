@@ -29,7 +29,7 @@ export interface DesktopHostRpc {
   call(
     method: string,
     payload: Record<string, unknown>,
-    options?: { timeoutMs?: number; rpcId?: string },
+    options?: { timeoutMs?: number; rpcId?: string; signal?: AbortSignal },
   ): Promise<DesktopHostRpcResult>
   /**
    * Settle one Host-originated Approval or Ask User request by its private rpc identity.
@@ -41,12 +41,13 @@ export interface DesktopHostRpc {
     rpcId: string,
     result: Record<string, unknown>,
   ): Promise<{ accepted: true } | { accepted: false; reason: 'not-pending' | 'bad-response' }>
-  /**
-   * Follow only Host pending-interaction envelopes from the mux stream.
-   * @param signal - current Web Host generation lifetime.
-   * @param accept - validated later by the pairing-neutral interaction registry.
-   */
-  watchInteractions?(
+  /** Follow Host Session and interaction frames for the current Web Host generation. */
+  watchMux?(
+    signal: AbortSignal,
+    accept: (envelope: { rpcId: string; payload: unknown }) => void,
+  ): Promise<void>
+  /** Follow Host list/status frames for the current Web Host generation. */
+  watchHost?(
     signal: AbortSignal,
     accept: (envelope: { rpcId: string; payload: unknown }) => void,
   ): Promise<void>
@@ -98,6 +99,7 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
         { type: 'client-request', rpcId, method, payload },
         callTimeoutMs,
         attachmentRead ? MAX_HOST_ATTACHMENT_RESPONSE_BYTES : responseMaxBytes,
+        callOptions?.signal,
       )
       if (response.kind === 'timeout') {
         return { ok: false, failure: { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'Desktop Host request timed out' } }
@@ -151,46 +153,70 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
       }
       throw new Error('Desktop Host interaction receipt was invalid')
     },
-    async watchInteractions(signal, accept) {
-      const response = await fetch(new URL('/api/events.mux', origin), { signal })
-      if (!response.ok || response.body === null) throw new Error('Desktop Host interaction stream failed to open')
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      try {
-        while (true) {
-          const readResult: unknown = await reader.read()
-          if (!isRecord(readResult) || typeof readResult.done !== 'boolean') {
-            throw new Error('Desktop Host interaction stream returned an invalid read result')
-          }
-          if (readResult.done) return
-          if (!(readResult.value instanceof Uint8Array)) {
-            throw new Error('Desktop Host interaction stream returned an invalid byte chunk')
-          }
-          buffer += decoder.decode(readResult.value, { stream: true })
-          if (new TextEncoder().encode(buffer).byteLength > REMOTE_PROTOCOL_LIMITS.companionMessageBytes) {
-            throw new Error('Desktop Host interaction stream frame exceeded its byte ceiling')
-          }
-          let boundary: number
-          while ((boundary = buffer.indexOf('\n\n')) !== -1) {
-            const chunk = buffer.slice(0, boundary)
-            buffer = buffer.slice(boundary + 2)
-            const data = chunk.split('\n').filter(line => line.startsWith('data: '))
-              .map(line => line.slice(6)).join('')
-            if (data === '') continue
-            const envelope: unknown = JSON.parse(data)
-            if (!isRecord(envelope) || envelope.type !== 'server-request'
-              || typeof envelope.rpcId !== 'string' || !('payload' in envelope)) {
-              throw new Error('Desktop Host interaction stream envelope was invalid')
-            }
-            accept({ rpcId: envelope.rpcId, payload: envelope.payload })
-          }
-        }
-      } finally {
-        await reader.cancel().catch(() => undefined)
-      }
+    watchMux: async (signal, accept) => {
+      await watchHostWebSocket(origin, '/api/events.mux', signal, accept)
+    },
+    watchHost: async (signal, accept) => {
+      await watchHostWebSocket(origin, '/api/events.host', signal, accept)
     },
   }
+}
+
+function watchHostWebSocket(
+  origin: URL,
+  path: string,
+  signal: AbortSignal,
+  accept: (envelope: { rpcId: string; payload: unknown }) => void,
+): Promise<void> {
+  const url = new URL(path, origin)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url)
+    let settled = false
+    const cleanup = (): void => {
+      signal.removeEventListener('abort', abort)
+      socket.removeEventListener('message', message)
+      socket.removeEventListener('close', close)
+      socket.removeEventListener('error', error)
+    }
+    const settle = (failure?: Error): void => {
+      if (settled) return
+      settled = true
+      cleanup()
+      if (failure === undefined) resolve()
+      else reject(failure)
+    }
+    const abort = (): void => {
+      if (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN) socket.close()
+      settle()
+    }
+    const message = (event: MessageEvent): void => {
+      try {
+        if (typeof event.data !== 'string'
+          || new TextEncoder().encode(event.data).byteLength > REMOTE_PROTOCOL_LIMITS.companionMessageBytes) {
+          throw new Error('Desktop Host event stream frame exceeded its byte ceiling')
+        }
+        const envelope: unknown = JSON.parse(event.data)
+        if (!isRecord(envelope) || envelope.type !== 'server-request'
+          || typeof envelope.rpcId !== 'string' || !('payload' in envelope)) {
+          throw new Error('Desktop Host event stream envelope was invalid')
+        }
+        accept({ rpcId: envelope.rpcId, payload: envelope.payload })
+      } catch (cause) {
+        socket.close()
+        settle(new Error('Desktop Host event stream returned an invalid frame', { cause }))
+      }
+    }
+    const close = (): void => {
+      settle(signal.aborted ? undefined : new Error('Desktop Host event stream closed'))
+    }
+    const error = (): void => { settle(new Error('Desktop Host event stream failed')) }
+    signal.addEventListener('abort', abort, { once: true })
+    socket.addEventListener('message', message)
+    socket.addEventListener('close', close, { once: true })
+    socket.addEventListener('error', error, { once: true })
+    if (signal.aborted) abort()
+  })
 }
 
 function parseServerResponse(body: unknown, rpcId: string): DesktopHostRpcResult {
@@ -223,14 +249,25 @@ type RequestOutcome =
   | { kind: 'transport' }
   | { kind: 'limit' }
 
-function requestJson(url: URL, body: unknown, timeoutMs: number, responseMaxBytes: number): Promise<RequestOutcome> {
+function requestJson(
+  url: URL,
+  body: unknown,
+  timeoutMs: number,
+  responseMaxBytes: number,
+  signal?: AbortSignal,
+): Promise<RequestOutcome> {
   const encoded = JSON.stringify(body)
   return new Promise((resolve) => {
     let settled = false
+    const abort = (): void => {
+      settle({ kind: 'transport' })
+      upstream.destroy()
+    }
     const settle = (outcome: RequestOutcome): void => {
       if (settled) return
       settled = true
       clearTimeout(deadline)
+      signal?.removeEventListener('abort', abort)
       resolve(outcome)
     }
     const upstream = startRequest(url, {
@@ -277,6 +314,11 @@ function requestJson(url: URL, body: unknown, timeoutMs: number, responseMaxByte
     }, timeoutMs)
     deadline.unref()
     upstream.on('error', () => { settle({ kind: 'transport' }) })
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+      return
+    }
     upstream.end(encoded)
   })
 }

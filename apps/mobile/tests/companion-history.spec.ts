@@ -115,9 +115,10 @@ describe('Mobile Companion browse projection', () => {
   })
 
   it('uses shared Desktop Session rows and opens authoritative conversations full-screen', () => {
+    const onObserveSession = vi.fn()
     render(createElement(MobileBrowse, {
       desktopName: 'Studio Mac', connection: 'online', sessions, workspaces,
-      conversations: { [alphaId]: conversation() }, ...browsePresentation,
+      conversations: { [alphaId]: conversation() }, ...browsePresentation, onObserveSession,
     }))
     expect(screen.getByText('Studio Mac')).toBeTruthy()
     expect(screen.getByText('Remote Online')).toBeTruthy()
@@ -126,9 +127,12 @@ describe('Mobile Companion browse projection', () => {
     const alpha = screen.getByRole('treeitem', { name: /Alpha/ })
     expect(alpha.getAttribute('data-session-row')).toBe(alphaId)
     fireEvent.click(alpha)
+    expect(onObserveSession).toHaveBeenLastCalledWith(alphaId)
     expect(screen.getByText('hello')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '返回' }))
+    expect(onObserveSession).toHaveBeenLastCalledWith(undefined)
     fireEvent.click(screen.getByRole('treeitem', { name: /Gamma/ }))
+    expect(onObserveSession).toHaveBeenLastCalledWith(gammaId)
     expect(screen.getByText('尚未加载此 Session 的对话。')).toBeTruthy()
   })
 

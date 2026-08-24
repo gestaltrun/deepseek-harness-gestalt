@@ -85,6 +85,7 @@ function MobileEntry({
       onSubmit: companionSurface.submit,
       onCancel: companionSurface.cancel,
       onLoadOlder: companionSurface.loadOlder,
+      onObserveSession: companionSurface.observeSession,
       onAttach: companionSurface.attach,
       onSearch: companionSurface.search,
       onClearCache: companionSurface.clearProjectionCache.bind(companionSurface),

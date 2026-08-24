@@ -59,5 +59,5 @@ conversation projection 会回显 history 请求中可选的 exclusive `beforeSe
 
 ## 已知限制与延后工作
 
-- Session 创建不属于 Companion major 3。Mobile 可以浏览现有 Desktop Session、打开 history、提交、取消、settle 当前 interaction、读取图片字节、搜索及附加文件。
+- Session 重命名、归档、删除与 fork、Workspace 管理、terminal 输入，以及 settings、credential、plugin、model 与 preset mutation 不属于 Companion major 3。
 - 配对 handshake、凭据持久化、challenge lifecycle 与生产 Companion 消息加密属于服务或经评审的 endpoint 集成，不属于这些 codec。

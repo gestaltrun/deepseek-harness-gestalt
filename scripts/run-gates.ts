@@ -444,6 +444,7 @@ function nodeCompatSmokeGates(options: { cliSmoke?: boolean } = {}): Gate[] {
 
 function standbySmokeGates(platform: 'linux' | 'windows'): Gate[] {
   const common: Gate[] = [
+    pnpmScript('platform-payloads', 'verify-platform-payloads', { label: 'current platform payloads' }),
     pnpmScript('optional-dependency-imports', 'verify-optional-dependency-imports'),
     ciBuildGate(),
     pnpmScript('build:web', 'build:web', { label: 'Web frontend build', needs: ['build'] }),
@@ -614,10 +615,14 @@ function ciWindowsNativeCoreGates(): Gate[] {
 }
 
 function ciWindowsNativeStaticGates(): Gate[] {
-  return [
+  const portableGates = [
     ...ciSharedStaticGates(),
     ...docSyncLeafGates().filter(gate => gate.id !== 'docs-site-build' && gate.id !== 'doc-typecheck'),
     pnpmScript('module-graph', 'verify-module-graph', { label: 'module graph' }),
+  ]
+  if (process.env.DSH_WINDOWS_STATIC_PORTABLE_ONLY === '1') return portableGates
+  return [
+    ...portableGates,
     pnpmScript('knip', 'knip'),
     pnpmScript('duplication', 'duplication'),
   ]

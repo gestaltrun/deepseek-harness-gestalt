@@ -109,6 +109,7 @@ describe('gate graph validation', () => {
     const gates = withPnpmEntrypoint(() => gatesForMode(mode))
 
     expect(gates.map(gate => gate.id)).toEqual([
+      'platform-payloads',
       'optional-dependency-imports',
       'build',
       'build:web',
@@ -179,10 +180,12 @@ describe('gate graph validation', () => {
   )
 
   it('partitions the complete native Windows inventory without losing or weakening gates', () => {
-    const complete = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
+    const complete = withEnv('DSH_WINDOWS_STATIC_PORTABLE_ONLY', undefined, () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-complete')))
     const core = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-core'))
     const coverage = withPnpmEntrypoint(() => gatesForMode('ci-coverage'))
-    const staticGates = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static'))
+    const staticGates = withEnv('DSH_WINDOWS_STATIC_PORTABLE_ONLY', undefined, () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static')))
 
     expect(complete.map(gate => gate.id)).toEqual([
       ...core.map(gate => gate.id),
@@ -205,6 +208,17 @@ describe('gate graph validation', () => {
     expect(staticGates.map(gate => gate.id)).not.toContain('doc-typecheck')
     expect(staticGates.map(gate => gate.id)).not.toContain('docs-site-build')
     expect(staticGates.map(gate => gate.id)).toContain('duplication')
+  })
+
+  it('omits Linux-owned resolver analysis only from the portable Windows failover inventory', () => {
+    const hosted = withEnv('DSH_WINDOWS_STATIC_PORTABLE_ONLY', undefined, () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static').map(gate => gate.id)))
+    const portable = withEnv('DSH_WINDOWS_STATIC_PORTABLE_ONLY', '1', () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static').map(gate => gate.id)))
+
+    expect(hosted).toEqual([...portable, 'knip', 'duplication'])
+    expect(portable).toContain('module-graph')
+    expect(portable).toContain('package-invariants')
   })
 
   it.each(['ci-coverage', 'ci-primary'] as const)(

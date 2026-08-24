@@ -72,7 +72,7 @@ describe('CI workflow', () => {
     expect(preflight).toMatchObject({
       name: 'preflight',
       'runs-on': 'ubuntu-latest',
-      'timeout-minutes': 3,
+      'timeout-minutes': 5,
       env: { DSH_GATE_CONCURRENCY: '8' },
       outputs: {
         level: '${{ steps.plan.outputs.level }}',
@@ -470,9 +470,27 @@ describe('CI workflow', () => {
         step => isRecord(step) && step.name === 'Install (immutable)',
       )
       expect(install, `${jobName} must rebuild persistent node_modules with optional dependencies`).toMatchObject({
-        run: 'pnpm install --frozen-lockfile --force',
+        env: { PNPM_CONFIG_FETCH_TIMEOUT: '600000' },
+        run: 'pnpm install --frozen-lockfile',
+      })
+      const payloads = (job.steps as unknown[]).find(
+        step => isRecord(step) && step.name === 'Verify current platform payloads',
+      )
+      expect(payloads, `${jobName} must execute the installed native payloads`).toMatchObject({
+        run: 'pnpm run verify-platform-payloads',
       })
     }
+  })
+
+  it('pins ordinary installs to current-platform optional payloads', () => {
+    const workspace = yaml.load(readFileSync(resolve(root, 'pnpm-workspace.yaml'), 'utf8'))
+    if (!isRecord(workspace)) throw new TypeError('pnpm-workspace.yaml must define a mapping')
+
+    expect(workspace.supportedArchitectures).toEqual({
+      os: ['current'],
+      cpu: ['current'],
+      libc: ['current'],
+    })
   })
 
   it('keeps bounded push smokes separate from exhaustive failover readiness drills', () => {
@@ -684,6 +702,9 @@ describe('CI workflow', () => {
     }
     expect(windowsNativeCore['runs-on']).toContain('windows-latest')
     expect(windowsNativeStatic['runs-on']).toContain('windows-latest')
+    if (!isRecord(windowsNativeStatic.env)) throw new TypeError('windows-native-static must define environment variables')
+    expect(windowsNativeStatic.env.DSH_WINDOWS_STATIC_PORTABLE_ONLY)
+      .toEqual(expect.stringContaining("DSH_CI_FAILOVER_WINDOWS == 'selfhosted'"))
     expect(windowsNativeCoverage['runs-on']).toContain('windows-latest')
     expect(windowsNativeCoverageShards['runs-on']).toContain('windows-latest')
     expect(windowsNativeCoverageShards.strategy).toMatchObject({
@@ -749,6 +770,15 @@ describe('CI workflow', () => {
       name: 'standby exhaustive / windows (self-hosted)',
       'runs-on': ['self-hosted', 'dsh-win-ci', 'windows'],
       'timeout-minutes': 120,
+    })
+    if (!Array.isArray(standbyWindowsExhaustive.steps)) {
+      throw new TypeError('standby-windows-exhaustive must define steps')
+    }
+    const standbyWindowsRun = (standbyWindowsExhaustive.steps as unknown[]).find(
+      step => isRecord(step) && step.run === 'pnpm run check:ci:windows-complete',
+    )
+    expect(standbyWindowsRun).toMatchObject({
+      env: { DSH_WINDOWS_STATIC_PORTABLE_ONLY: '1' },
     })
 
     // Aggregate: Wine is required; the independent native verdict is observational.

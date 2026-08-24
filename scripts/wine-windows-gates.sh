@@ -153,12 +153,25 @@ snapshot_and_install() {
     | while IFS= read -r -d '' file; do [ -e "$repo_root/$file" ] && printf '%s\0' "$file"; done \
     | tar -C "$repo_root" --null --files-from=- -cf - \
     | tar -C "$scratch/tree" -xf -
-  cat >> "$scratch/tree/pnpm-workspace.yaml" << 'EOF'
+  node --input-type=module - "$scratch/tree/pnpm-workspace.yaml" << 'EOF'
+import { readFileSync, writeFileSync } from 'node:fs'
 
-nodeLinker: hoisted
-supportedArchitectures:
+const path = process.argv[2]
+const source = readFileSync(path, 'utf8')
+const current = `supportedArchitectures:
+  os: [current]
+  cpu: [current]
+  libc: [current]
+`
+const windows = `supportedArchitectures:
   os: [current, win32]
   cpu: [current, x64]
+  libc: [current]
+`
+if (!source.includes(current)) {
+  throw new Error('wine-windows-gates: pnpm-workspace.yaml current-platform policy changed')
+}
+writeFileSync(path, `${source.replace(current, windows)}\nnodeLinker: hoisted\n`)
 EOF
   # The hoisted linker — used only by this lane — has an upstream rename
   # race (pnpm/pnpm#12880): parallel linkers staging a nested package copy

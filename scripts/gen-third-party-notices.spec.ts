@@ -114,6 +114,22 @@ describe('virtualManifest', () => {
     }
   })
 
+  it('ignores a platform-filtered virtual-store placeholder', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-notices-platform-placeholder-'))
+    try {
+      const name = '@scope/pkg'
+      const store = join(root, 'store')
+      mkdirSync(join(store, '@scope+pkg@1.0.0'), { recursive: true })
+      const installed = join(store, 'peer-suffixed-entry', 'node_modules', name)
+      mkdirSync(installed, { recursive: true })
+      writeFileSync(join(installed, 'package.json'), JSON.stringify({ name, version: '1.0.0', license: 'MIT' }))
+
+      expect(virtualManifest(store, name)).toMatchObject({ name, version: '1.0.0' })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('returns undefined when neither the prefix nor the content scan finds the package', () => {
     const root = mkdtempSync(join(tmpdir(), 'dsh-notices-miss-'))
     try {

@@ -257,7 +257,10 @@ export function claudeDistributionFromManifest(
  */
 export function virtualManifest(virtual: string, name: string): VirtualManifest | undefined {
   const prefix = `${name.replace('/', '+')}@`
-  const entry = readdirSync(virtual).find(dir => dir.startsWith(prefix))
+  const entry = readdirSync(virtual).find((dir) => {
+    if (!dir.startsWith(prefix)) return false
+    return existsSync(resolve(virtual, dir, 'node_modules', name, 'package.json'))
+  })
   if (entry !== undefined) {
     return JSON.parse(readFileSync(resolve(virtual, entry, 'node_modules', name, 'package.json'), 'utf8')) as VirtualManifest
   }

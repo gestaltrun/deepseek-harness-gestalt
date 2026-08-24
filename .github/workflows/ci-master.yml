@@ -159,10 +159,6 @@ jobs:
           PNPM_CONFIG_FETCH_TIMEOUT: '600000'
         run: pnpm install --frozen-lockfile
 
-      - name: Ensure Windows CI native runtime
-        shell: pwsh
-        run: ./scripts/ensure-windows-ci-runtime.ps1
-
       - name: Verify current platform payloads
         shell: pwsh
         run: pnpm run verify-platform-payloads
@@ -337,10 +333,6 @@ jobs:
           PNPM_CONFIG_FETCH_TIMEOUT: '600000'
         run: pnpm install --frozen-lockfile
 
-      - name: Ensure Windows CI native runtime
-        shell: pwsh
-        run: ./scripts/ensure-windows-ci-runtime.ps1
-
       - name: Verify current platform payloads
         shell: pwsh
         run: pnpm run verify-platform-payloads
@@ -354,6 +346,7 @@ jobs:
           DSH_COVERAGE_MAX_WORKERS: '1'
           DSH_GATE_CONCURRENCY: '1'
           DSH_PUBLINT_CONCURRENCY: '1'
+          DSH_WINDOWS_STATIC_PORTABLE_ONLY: '1'
         run: pnpm run check:ci:windows-complete
 
       - name: Publish exhaustive Windows failover readiness

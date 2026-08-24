@@ -6,5 +6,14 @@
   "credentialReference": "credentials://github-oauth/desktop-packaged-fixture",
   "databaseIdentity": "desktop-packaged-fixture",
   "identityNamespace": "desktop-packaged-fixture",
-  "companionAttachmentHostTimeoutMs": 120000
+  "companionAttachmentHostTimeoutMs": 120000,
+  "remoteRelay": {
+    "url": "wss://platform.fixture.example/v1/remote-access/relay",
+    "attachTimeoutMs": 10000,
+    "negotiationTimeoutMs": 10000,
+    "heartbeatIntervalMs": 30000,
+    "reconnectDelayMs": 1000,
+    "inboundMaxBytes": 1048576,
+    "inboundMaxMessages": 16
+  }
 }

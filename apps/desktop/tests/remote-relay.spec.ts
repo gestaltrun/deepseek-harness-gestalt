@@ -42,6 +42,7 @@ const SOURCE = {
   DSH_REMOTE_RELAY_INBOUND_MAX_BYTES: String(REMOTE_PROTOCOL_LIMITS.relayMessageBytes),
   DSH_REMOTE_RELAY_INBOUND_MAX_MESSAGES: '16',
 }
+const RELAY_CONFIG = loadDesktopRemoteRelayConfig(SOURCE)
 
 const AUTHENTICATED_DESKTOP_NAME = (): string => 'Authenticated Desktop'
 const NEGOTIATION_TIMEOUT_MS = 1_000
@@ -847,7 +848,7 @@ describe('Desktop Remote Relay composition', () => {
 
     const socket = new TestRelaySocket()
     const relay = createDesktopRemoteRelay({
-      environment: { ...DEVELOPMENT, environment: 'production' }, source: SOURCE,
+      environment: { ...DEVELOPMENT, environment: 'production' }, config: RELAY_CONFIG,
       snowPairingVault: vault, connect: async () => socket,
       desktopName: AUTHENTICATED_DESKTOP_NAME, handleOperation: UNUSED_OPERATION_HANDLER,
     })
@@ -933,7 +934,7 @@ describe('Desktop Remote Relay composition', () => {
     }))
     const production = createDesktopRemoteRelay({
       environment: { ...DEVELOPMENT, environment: 'production' },
-      source: SOURCE,
+      config: RELAY_CONFIG,
       connect,
       snowPairingVault: new DesktopSnowPairingVault(),
       initializeWasm: () => {},
@@ -949,7 +950,7 @@ describe('Desktop Remote Relay composition', () => {
     await production.stop('quit')
     await expect(starting).rejects.toThrow()
     const disabled = createDesktopRemoteRelay({
-      environment: DEVELOPMENT, source: SOURCE, connect,
+      environment: DEVELOPMENT, config: RELAY_CONFIG, connect,
       snowPairingVault: new DesktopSnowPairingVault(),
       desktopName: AUTHENTICATED_DESKTOP_NAME, handleOperation: UNUSED_OPERATION_HANDLER,
     })
@@ -961,7 +962,7 @@ describe('Desktop Remote Relay composition', () => {
     const socket = new TestRelaySocket()
     const connect = vi.spyOn(NodeRelayEndpointSocket, 'connect').mockResolvedValue(socket)
     const relay = createDesktopRemoteRelay({
-      environment: { ...DEVELOPMENT, environment: 'production' }, source: SOURCE,
+      environment: { ...DEVELOPMENT, environment: 'production' }, config: RELAY_CONFIG,
       snowPairingVault: new DesktopSnowPairingVault(), initializeWasm: () => {},
       desktopName: AUTHENTICATED_DESKTOP_NAME, handleOperation: UNUSED_OPERATION_HANDLER,
     })

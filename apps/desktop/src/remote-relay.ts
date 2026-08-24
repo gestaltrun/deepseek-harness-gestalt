@@ -52,7 +52,7 @@ export interface DesktopRemoteRelayConfig {
 /** Product composition dependencies for a Desktop Relay lifecycle. */
 export interface DesktopRemoteRelayOptions {
   environment: SelectedPlatformEnvironment
-  source: NodeJS.ProcessEnv | Record<string, string | undefined>
+  config: DesktopRemoteRelayConfig
   connect?: (signal: AbortSignal, config: DesktopRemoteRelayConfig) => Promise<RelayEndpointSocket>
   snowPairingVault: DesktopSnowPairingVault
   initializeWasm?: () => void
@@ -604,37 +604,65 @@ function isCompanionResultList(
 }
 
 /**
- * Keep Relay unavailable until the reviewed product channel is composed.
- * @returns fail-closed Desktop-owned Relay lifecycle injected into Settings.
+ * Parse explicit Relay environment variables for source development and tests.
+ * @param source - Environment variable values
+ * @returns Validated Relay configuration
  */
 export function loadDesktopRemoteRelayConfig(
   source: NodeJS.ProcessEnv | Record<string, string | undefined>,
 ): DesktopRemoteRelayConfig {
-  const url = required(source, 'DSH_REMOTE_RELAY_WSS_URL')
-  if (new URL(url).protocol !== 'wss:') throw new TypeError('DSH_REMOTE_RELAY_WSS_URL must use WSS')
-  const config: DesktopRemoteRelayConfig = {
-    url,
+  return validateDesktopRemoteRelayConfig({
+    url: required(source, 'DSH_REMOTE_RELAY_WSS_URL'),
     attachTimeoutMs: positiveInteger(source, 'DSH_REMOTE_RELAY_ATTACH_TIMEOUT_MS'),
     negotiationTimeoutMs: positiveInteger(source, 'DSH_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS'),
     heartbeatIntervalMs: positiveInteger(source, 'DSH_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS'),
     reconnectDelayMs: positiveInteger(source, 'DSH_REMOTE_RELAY_RECONNECT_DELAY_MS'),
     inboundMaxBytes: positiveInteger(source, 'DSH_REMOTE_RELAY_INBOUND_MAX_BYTES'),
     inboundMaxMessages: positiveInteger(source, 'DSH_REMOTE_RELAY_INBOUND_MAX_MESSAGES'),
+  })
+}
+
+/**
+ * Validate the Relay values embedded in the operated Desktop artifact.
+ * @param source - Parsed `remoteRelay` value
+ * @returns Frozen Relay configuration safe for product composition
+ */
+export function validateDesktopRemoteRelayConfig(source: unknown): DesktopRemoteRelayConfig {
+  if (!isRecord(source)) throw new TypeError('Desktop remoteRelay configuration must be an object')
+  const fields = [
+    'url', 'attachTimeoutMs', 'negotiationTimeoutMs', 'heartbeatIntervalMs',
+    'reconnectDelayMs', 'inboundMaxBytes', 'inboundMaxMessages',
+  ]
+  const unknown = Object.keys(source).filter(field => !fields.includes(field))
+  if (unknown.length > 0) {
+    throw new TypeError(`Desktop remoteRelay configuration contains unknown fields: ${unknown.join(', ')}`)
+  }
+  if (typeof source.url !== 'string' || new URL(source.url).protocol !== 'wss:') {
+    throw new TypeError('Desktop remoteRelay.url must use WSS')
+  }
+  const config: DesktopRemoteRelayConfig = {
+    url: source.url,
+    attachTimeoutMs: configPositiveInteger(source.attachTimeoutMs, 'remoteRelay.attachTimeoutMs'),
+    negotiationTimeoutMs: configPositiveInteger(source.negotiationTimeoutMs, 'remoteRelay.negotiationTimeoutMs'),
+    heartbeatIntervalMs: configPositiveInteger(source.heartbeatIntervalMs, 'remoteRelay.heartbeatIntervalMs'),
+    reconnectDelayMs: configPositiveInteger(source.reconnectDelayMs, 'remoteRelay.reconnectDelayMs'),
+    inboundMaxBytes: configPositiveInteger(source.inboundMaxBytes, 'remoteRelay.inboundMaxBytes'),
+    inboundMaxMessages: configPositiveInteger(source.inboundMaxMessages, 'remoteRelay.inboundMaxMessages'),
   }
   if (config.inboundMaxBytes < REMOTE_PROTOCOL_LIMITS.relayMessageBytes) {
-    throw new TypeError('DSH_REMOTE_RELAY_INBOUND_MAX_BYTES must admit one maximum Relay message')
+    throw new TypeError('Desktop remoteRelay.inboundMaxBytes must admit one maximum Relay message')
   }
-  return config
+  return Object.freeze(config)
 }
 
 /**
  * Select the observable production crypto gate or the explicit development endpoint.
- * @param options - Platform environment, process configuration, and optional socket adapter.
+ * @param options - Platform environment, operated Relay configuration, and optional socket adapter.
  * @returns Desktop-owned Relay lifecycle injected into Settings.
  */
 export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): DesktopRelayLifecycle {
   if (options.environment.environment !== 'production') return new FailClosedDesktopRelayLifecycle(CRYPTO_GATE)
-  const config = loadDesktopRemoteRelayConfig(options.source)
+  const config = options.config
   ;(options.initializeWasm ?? initializeDesktopSnowWasm)()
   const owner = new SnowDesktopAttachmentOwner(selector => options.snowPairingVault.reconnectState(selector))
   const liveProjection = options.liveProjection === undefined ? undefined : {
@@ -720,5 +748,12 @@ function required(source: Record<string, string | undefined>, name: string): str
 function positiveInteger(source: Record<string, string | undefined>, name: string): number {
   const value = Number(required(source, name))
   if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive integer`)
+  return value
+}
+
+function configPositiveInteger(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new TypeError(`Desktop ${name} must be a positive safe integer`)
+  }
   return value
 }

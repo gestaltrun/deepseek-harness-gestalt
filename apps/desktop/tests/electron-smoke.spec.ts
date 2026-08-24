@@ -89,6 +89,7 @@ function processExists(pid: number): boolean {
 
 function withoutRuntimePlatformEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(
-    Object.entries(source).filter(([name]) => !name.startsWith('DSH_PLATFORM_')),
+    Object.entries(source).filter(([name]) => !name.startsWith('DSH_PLATFORM_')
+      && !name.startsWith('DSH_REMOTE_RELAY_')),
   )
 }

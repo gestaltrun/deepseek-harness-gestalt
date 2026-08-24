@@ -276,6 +276,7 @@ describe('Desktop Platform environment composition', () => {
       origin: 'https://platform.example.com',
       callbackUrl: 'https://platform.example.com/v1/account/oauth/github/callback',
       companionAttachmentHostTimeoutMs: 120_000,
+      remoteRelay: { url: 'wss://platform.example.com/v1/remote-access/relay' },
     })
     expect(() => loadDesktopPlatformEnvironment({ ...source, origin: undefined }))
       .toThrow('production origin is required')
@@ -283,6 +284,8 @@ describe('Desktop Platform environment composition', () => {
       .toThrow('environment must be production')
     expect(() => loadDesktopPlatformEnvironment({ ...source, companionAttachmentHostTimeoutMs: 0 }))
       .toThrow('positive safe integer')
+    expect(() => loadDesktopPlatformEnvironment({ ...source, remoteRelay: undefined }))
+      .toThrow('remoteRelay configuration must be an object')
     expect(() => loadDesktopPlatformEnvironment({
       ...source,
       origin: 'https://localhost',
@@ -393,5 +396,14 @@ function desktopEnvironmentSource(): Record<string, unknown> {
     databaseIdentity: 'database-production',
     identityNamespace: 'gestalt-production',
     companionAttachmentHostTimeoutMs: 120_000,
+    remoteRelay: {
+      url: 'wss://platform.example.com/v1/remote-access/relay',
+      attachTimeoutMs: 10_000,
+      negotiationTimeoutMs: 10_000,
+      heartbeatIntervalMs: 30_000,
+      reconnectDelayMs: 1_000,
+      inboundMaxBytes: 1_048_576,
+      inboundMaxMessages: 16,
+    },
   }
 }

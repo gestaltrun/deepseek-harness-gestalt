@@ -7,15 +7,25 @@ if (output === undefined || output.trim() === '') {
   throw new TypeError('operated Platform config output path is required')
 }
 
+const origin = required('PLATFORM_ORIGIN')
 const config = {
   environment: 'production',
-  origin: required('PLATFORM_ORIGIN'),
+  origin,
   callbackUrl: required('PLATFORM_GITHUB_CALLBACK'),
   githubClientId: required('PLATFORM_GITHUB_CLIENT_ID'),
   credentialReference: required('PLATFORM_GITHUB_CREDENTIAL_REFERENCE'),
   databaseIdentity: required('PLATFORM_POSTGRES_DATABASE'),
   identityNamespace: required('PLATFORM_IDENTITY_NAMESPACE'),
   companionAttachmentHostTimeoutMs: positiveInteger('DESKTOP_COMPANION_ATTACHMENT_HOST_TIMEOUT_MS'),
+  remoteRelay: {
+    url: relayUrl(origin),
+    attachTimeoutMs: positiveInteger('DESKTOP_REMOTE_RELAY_ATTACH_TIMEOUT_MS'),
+    negotiationTimeoutMs: positiveInteger('DESKTOP_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS'),
+    heartbeatIntervalMs: positiveInteger('DESKTOP_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS'),
+    reconnectDelayMs: positiveInteger('DESKTOP_REMOTE_RELAY_RECONNECT_DELAY_MS'),
+    inboundMaxBytes: positiveInteger('DESKTOP_REMOTE_RELAY_INBOUND_MAX_BYTES'),
+    inboundMaxMessages: positiveInteger('DESKTOP_REMOTE_RELAY_INBOUND_MAX_MESSAGES'),
+  },
 }
 validateOrigin(config.origin, config.callbackUrl)
 const path = resolve(output)
@@ -32,6 +42,12 @@ function positiveInteger(name) {
   const value = Number(required(name))
   if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive safe integer`)
   return value
+}
+
+function relayUrl(originValue) {
+  const url = new URL('/v1/remote-access/relay', originValue)
+  url.protocol = 'wss:'
+  return url.href
 }
 
 function validateOrigin(originValue, callbackValue) {

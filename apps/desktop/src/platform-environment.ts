@@ -1,9 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { loadOperatedPlatformEnvironment, type SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
+import {
+  validateDesktopRemoteRelayConfig, type DesktopRemoteRelayConfig,
+} from './remote-relay.ts'
 
-/** Desktop-operated Platform identity plus local maximum-size attachment admission deadline. */
+/** Desktop-operated Platform identity, attachment admission deadline, and public Relay configuration. */
 export interface DesktopPlatformEnvironment extends SelectedPlatformEnvironment {
   companionAttachmentHostTimeoutMs: number
+  remoteRelay: DesktopRemoteRelayConfig
 }
 
 /** Read the operated Desktop identity embedded beside the executable entry. */
@@ -28,7 +32,11 @@ export function loadDesktopPlatformEnvironment(source: unknown): DesktopPlatform
     || (source.companionAttachmentHostTimeoutMs as number) <= 0) {
     throw new TypeError('Desktop companionAttachmentHostTimeoutMs must be a positive safe integer')
   }
-  return { ...environment, companionAttachmentHostTimeoutMs: source.companionAttachmentHostTimeoutMs as number }
+  return {
+    ...environment,
+    companionAttachmentHostTimeoutMs: source.companionAttachmentHostTimeoutMs as number,
+    remoteRelay: validateDesktopRemoteRelayConfig(source.remoteRelay),
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

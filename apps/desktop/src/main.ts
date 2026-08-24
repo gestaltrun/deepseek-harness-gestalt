@@ -163,7 +163,7 @@ async function boot(): Promise<void> {
   account = createDesktopAccount(accountEnvironment)
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
-    source: process.env,
+    config: accountEnvironment.remoteRelay,
     snowPairingVault,
     desktopName: () => account.installationPresentation()?.name,
     handleOperation: async (operation, selector, context) => await handleDesktopCompanionOperation(

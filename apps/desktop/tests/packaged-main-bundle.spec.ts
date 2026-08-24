@@ -9,6 +9,43 @@ const here = dirname(fileURLToPath(import.meta.url))
 const desktop = join(here, '..')
 
 describe('packaged Desktop main bundle', () => {
+  it('writes the public Relay configuration consumed by an ambient-env-free package', () => {
+    const temporary = mkdtempSync(join(tmpdir(), 'dsh-desktop-release-config-'))
+    const output = join(temporary, 'operated-platform.json')
+    try {
+      execFileSync(process.execPath, [join(desktop, 'scripts', 'write-operated-platform-config.mjs'), output], {
+        cwd: desktop,
+        env: {
+          PATH: process.env.PATH,
+          PLATFORM_ORIGIN: 'https://platform.release.example',
+          PLATFORM_GITHUB_CALLBACK: 'https://platform.release.example/v1/account/oauth/github/callback',
+          PLATFORM_GITHUB_CLIENT_ID: 'release-client',
+          PLATFORM_GITHUB_CREDENTIAL_REFERENCE: 'credentials://release-client',
+          PLATFORM_POSTGRES_DATABASE: 'release-database',
+          PLATFORM_IDENTITY_NAMESPACE: 'release-identity',
+          DESKTOP_COMPANION_ATTACHMENT_HOST_TIMEOUT_MS: '120000',
+          DESKTOP_REMOTE_RELAY_ATTACH_TIMEOUT_MS: '10000',
+          DESKTOP_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS: '10000',
+          DESKTOP_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: '30000',
+          DESKTOP_REMOTE_RELAY_RECONNECT_DELAY_MS: '1000',
+          DESKTOP_REMOTE_RELAY_INBOUND_MAX_BYTES: '1048576',
+          DESKTOP_REMOTE_RELAY_INBOUND_MAX_MESSAGES: '16',
+        },
+        stdio: 'pipe',
+      })
+      expect(JSON.parse(readFileSync(output, 'utf8'))).toMatchObject({
+        origin: 'https://platform.release.example',
+        remoteRelay: {
+          url: 'wss://platform.release.example/v1/remote-access/relay',
+          negotiationTimeoutMs: 10_000,
+          inboundMaxBytes: 1_048_576,
+        },
+      })
+    } finally {
+      rmSync(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('requires a complete operated Platform config artifact at build time', () => {
     const env = { ...process.env }
     delete env.DSH_DESKTOP_OPERATED_PLATFORM_CONFIG
@@ -65,6 +102,15 @@ describe('packaged Desktop main bundle', () => {
       databaseIdentity: 'desktop-packaged-fixture',
       identityNamespace: 'desktop-packaged-fixture',
       companionAttachmentHostTimeoutMs: 120_000,
+      remoteRelay: {
+        url: 'wss://platform.fixture.example/v1/remote-access/relay',
+        attachTimeoutMs: 10_000,
+        negotiationTimeoutMs: 10_000,
+        heartbeatIntervalMs: 30_000,
+        reconnectDelayMs: 1_000,
+        inboundMaxBytes: 1_048_576,
+        inboundMaxMessages: 16,
+      },
     })
   })
 })

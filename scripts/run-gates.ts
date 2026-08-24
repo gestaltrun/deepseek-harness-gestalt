@@ -30,6 +30,7 @@ export type Mode =
   | 'ci-preflight'
   | 'ci-preflight-core'
   | 'ci-preflight-cordis'
+  | 'ci-preflight-docs'
   | 'ci-preflight-graphs'
   | 'ci-primary'
   | 'ci-linux-primary'
@@ -155,6 +156,7 @@ function parseMode(raw: string | undefined): Mode {
     case 'ci-preflight':
     case 'ci-preflight-core':
     case 'ci-preflight-cordis':
+    case 'ci-preflight-docs':
     case 'ci-preflight-graphs':
     case 'ci-primary':
     case 'ci-linux-primary':
@@ -179,7 +181,7 @@ function parseMode(raw: string | undefined): Mode {
       return raw
     default:
       throw new Error(
-        `run-gates: expected mode ci-preflight | ci-preflight-core | ci-preflight-cordis | ci-preflight-graphs | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | ci-standby-linux-smoke | ci-standby-windows-smoke | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
+        `run-gates: expected mode ci-preflight | ci-preflight-core | ci-preflight-cordis | ci-preflight-docs | ci-preflight-graphs | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | ci-standby-linux-smoke | ci-standby-windows-smoke | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
       )
   }
 }
@@ -260,6 +262,8 @@ export function gatesForMode(selected: Mode): Gate[] {
       return ciPreflightCoreGates()
     case 'ci-preflight-cordis':
       return ciPreflightCordisGates()
+    case 'ci-preflight-docs':
+      return ciPreflightDocGates()
     case 'ci-preflight-graphs':
       return ciPreflightGraphGates()
     case 'ci-primary':
@@ -336,6 +340,7 @@ function ciPreflightGates(): Gate[] {
   return [
     ...ciPreflightCoreGates(),
     ...ciPreflightCordisGates(),
+    ...ciPreflightDocGates(),
     ...ciPreflightGraphGates(),
   ]
 }
@@ -359,10 +364,15 @@ function ciPreflightCordisGates(): Gate[] {
 
 function ciPreflightGraphGates(): Gate[] {
   return [
-    pnpmScript('doc-graphs', 'verify-doc-graphs', { label: 'doc graphs' }),
     pnpmScript('persistence-catalog', 'verify-persistence-catalog', { label: 'persistence catalog' }),
     pnpmScript('module-graph', 'verify-module-graph', { label: 'module graph' }),
     pnpmScript('scoped-events', 'verify-scoped-events', { label: 'scoped events' }),
+  ]
+}
+
+function ciPreflightDocGates(): Gate[] {
+  return [
+    pnpmScript('doc-graphs', 'verify-doc-graphs', { label: 'doc graphs' }),
   ]
 }
 

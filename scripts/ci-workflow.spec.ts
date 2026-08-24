@@ -107,6 +107,7 @@ describe('CI workflow', () => {
           include: [
             { partition: 'core', command: 'check:ci:preflight:core' },
             { partition: 'cordis', command: 'check:ci:preflight:cordis' },
+            { partition: 'docs', command: 'check:ci:preflight:docs' },
             { partition: 'graphs', command: 'check:ci:preflight:graphs' },
           ],
         },

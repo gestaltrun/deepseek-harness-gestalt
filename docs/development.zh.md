@@ -126,7 +126,7 @@ vendor manifest 守卫检查 `vendor/*/src` 下的改动是否连同对应的 `v
 
 keyless [CI 工作流](../.github/workflows/ci.yml) 将独立门禁分组到若干宽粒度 lane，并在受支持的 Node 版本上运行一组较小的兼容性检查。产物消费方在各自 lane 内等待一次 build。单独的真实 API 工作流按其配置的 worker 上限运行 `pnpm run test:e2e`。当前门禁和 job 清单以 [scripts/run-gates.ts](../scripts/run-gates.ts) 和工作流文件为准。
 
-每次主 CI 运行都会上传 Planner JSON 和带版本的 gate 报告。Preflight 独立计算路由，同时并行运行三个生成状态分区；只有四个 worker 全部成功，公开的 `preflight` verdict 才会准入证据。报告按实际完成顺序标识首个阻塞失败，对失败 gate 分类，保留每个阶段的耗时，并列出相关 artifact。只有精确诊断被分类为瞬时基础设施故障的命令才允许自动重试一次，其 artifact 会保留两次尝试。运行 `pnpm ci:metrics --repo <owner/name>` 可计算成功率、排队、执行和首个结论分布，并排除记账任务、cancelled、skipped、stale 和观察性样本。
+每次主 CI 运行都会上传 Planner JSON 和带版本的 gate 报告。Preflight 独立计算路由，同时并行运行四个生成状态分区；只有五个 worker 全部成功，公开的 `preflight` verdict 才会准入证据。报告按实际完成顺序标识首个阻塞失败，对失败 gate 分类，保留每个阶段的耗时，并列出相关 artifact。只有精确诊断被分类为瞬时基础设施故障的命令才允许自动重试一次，其 artifact 会保留两次尝试。运行 `pnpm ci:metrics --repo <owner/name>` 可计算成功率、排队、执行和首个结论分布，并排除记账任务、cancelled、skipped、stale 和观察性样本。
 
 每次 master push 还会在重建干净的当前平台依赖树并执行其中的 Codex 与 Claude Code 载荷后，运行有界的 Linux 与 Windows standby smoke。完整的非分片 standby 清单按日运行，或通过 `standby-exhaustive` dispatch 启动。其报告使用 `failover-readiness` 分类，因此就绪失败保持可见，但不会降低产品回归成功率；两个独立接管开关由[故障切换手册](../.agents/notes/implemented/process/2026-07-26-ci-failover-runbook.zh.md)负责。
 

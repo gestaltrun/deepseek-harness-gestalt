@@ -61,6 +61,7 @@ describe('gate graph validation', () => {
     'ci-preflight',
     'ci-preflight-core',
     'ci-preflight-cordis',
+    'ci-preflight-docs',
     'ci-preflight-graphs',
     'ci-static',
     'ci-lint-contracts-ready',
@@ -110,6 +111,7 @@ describe('gate graph validation', () => {
     const partitions = withPnpmEntrypoint(() => [
       ...gatesForMode('ci-preflight-core'),
       ...gatesForMode('ci-preflight-cordis'),
+      ...gatesForMode('ci-preflight-docs'),
       ...gatesForMode('ci-preflight-graphs'),
     ].map(subject => subject.id))
 

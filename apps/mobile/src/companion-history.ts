@@ -42,12 +42,16 @@ export interface MobileCompanionPresentation {
   cacheFailure?: string | undefined
   /** Create one Desktop-default Session when mutation authority is available. */
   onCreate?: ((input: { workspace?: string }) => void) | undefined
+  /** Acknowledge that Mobile committed the selected Session detail view. */
+  onSessionOpened?: ((sessionId: SessionId) => void) | undefined
   /** Submit a prompt through Desktop authority when transport is available. */
   onSubmit?: ((sessionId: SessionId, text: string) => void | Promise<void>) | undefined
   /** Cancel a running Desktop Session when transport is available. */
   onCancel?: ((sessionId: SessionId) => void) | undefined
   /** Load the preceding authoritative history window. */
   onLoadOlder?: ((sessionId: SessionId) => void) | undefined
+  /** Select or clear the Session receiving full live conversation projection. */
+  onObserveSession?: ((sessionId?: SessionId) => void) | undefined
   /** Select an attachment for encrypted transfer through Desktop. */
   onAttach?: ((sessionId: SessionId, file: File) => void) | undefined
   /** Request one full-text Session search from Desktop. */

@@ -4,8 +4,10 @@ import { accountStorageNamespace } from '@deepseek-ai/dsh-platform-account-clien
 import { parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   parseCompanionOperationId,
+  parseCompanionSessionId,
   REMOTE_PROTOCOL_LIMITS,
   type CompanionConfirmedResult,
+  type CompanionSessionCreatedResult,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
   companionCacheAdmits,
@@ -49,6 +51,13 @@ async function freshKey(): Promise<CryptoKey> {
 
 function confirmed(operationId: string): CompanionConfirmedResult {
   return { type: 'confirmed', operationId: parseCompanionOperationId(operationId), committedAt: 1_787_027_200_000, outcome: 'accepted' }
+}
+
+function sessionCreated(operationId: string, sessionId: string): CompanionSessionCreatedResult {
+  return {
+    type: 'session-created', operationId: parseCompanionOperationId(operationId),
+    sessionId: parseCompanionSessionId(sessionId), committedAt: 1_787_027_200_000,
+  }
 }
 
 async function openIndexedDb(databaseName: string): Promise<IDBDatabase> {
@@ -285,6 +294,18 @@ describe('Companion Cache', () => {
       { operationId: 'op-bad', status: 'forged' },
     )
     await expect(store.loadReceipts(desktopA)).rejects.toThrow(/receipt status/)
+  })
+
+  it('round-trips a Desktop-confirmed created Session through durable operation receipts', async () => {
+    const store = namespacedStore('session-created-result')
+    const operationId = parseCompanionOperationId('create-session-durable')
+    const original = sessionCreated('create-session-durable', 'session-created-durable')
+    await store.saveReceipt(desktopA, {
+      operationId, status: 'committed', kind: 'session-create', original,
+    })
+    await expect(store.loadReceipts(desktopA)).resolves.toEqual([{
+      operationId, status: 'committed', kind: 'session-create', original,
+    }])
   })
 
   it('names the cache database from the account storage namespace', () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   EMPTY_CHAT_SNAPSHOT, EMPTY_CONVERSATION_VIEWS,
@@ -115,9 +115,10 @@ describe('Mobile Companion browse projection', () => {
   })
 
   it('uses shared Desktop Session rows and opens authoritative conversations full-screen', () => {
+    const onObserveSession = vi.fn()
     render(createElement(MobileBrowse, {
       desktopName: 'Studio Mac', connection: 'online', sessions, workspaces,
-      conversations: { [alphaId]: conversation() }, ...browsePresentation,
+      conversations: { [alphaId]: conversation() }, ...browsePresentation, onObserveSession,
     }))
     expect(screen.getByText('Studio Mac')).toBeTruthy()
     expect(screen.getByText('Remote Online')).toBeTruthy()
@@ -126,10 +127,43 @@ describe('Mobile Companion browse projection', () => {
     const alpha = screen.getByRole('treeitem', { name: /Alpha/ })
     expect(alpha.getAttribute('data-session-row')).toBe(alphaId)
     fireEvent.click(alpha)
+    expect(onObserveSession).toHaveBeenLastCalledWith(alphaId)
     expect(screen.getByText('hello')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '返回' }))
+    expect(onObserveSession).toHaveBeenLastCalledWith(undefined)
     fireEvent.click(screen.getByRole('treeitem', { name: /Gamma/ }))
+    expect(onObserveSession).toHaveBeenLastCalledWith(gammaId)
     expect(screen.getByText('尚未加载此 Session 的对话。')).toBeTruthy()
+  })
+
+  it('opens the authoritative current Session before acknowledging its pending creation selection', async () => {
+    const createdId = sid('created-blank')
+    const onSessionOpened = vi.fn()
+    const onLoadOlder = vi.fn()
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online',
+      sessions: {
+        ...sessions,
+        ids: [...sessions.ids, createdId],
+        byId: {
+          ...sessions.byId,
+          [createdId]: {
+            id: createdId, title: 'Created blank', displayTitle: 'Created blank',
+            running: false, blank: true, updatedAt: 3,
+          },
+        },
+        current: createdId,
+      },
+      workspaces,
+      conversations: {},
+      ...browsePresentation,
+      onSessionOpened,
+      onLoadOlder,
+    }))
+
+    await screen.findByRole('heading', { name: 'Created blank' })
+    await waitFor(() => { expect(onSessionOpened).toHaveBeenCalledWith(createdId) })
+    expect(onLoadOlder).toHaveBeenCalledWith(createdId)
   })
 
   it('keeps a correlated operation failure visible in the opened conversation', () => {

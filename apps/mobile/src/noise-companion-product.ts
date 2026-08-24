@@ -111,6 +111,11 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     resolve(answer: CompanionStatusAnswer): void
     reject(error: unknown): void
   }>()
+  private readonly observations = new Map<CompanionOperationId, {
+    active: ActiveMobileSnowChannel
+    resolve(): void
+    reject(error: unknown): void
+  }>()
   private reconciliation: Promise<readonly CompanionOperationReceipt[]> | undefined
   private readonly images = new Map<CompanionOperationId, {
     active: ActiveMobileSnowChannel
@@ -145,7 +150,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     const permit = this.options.runtime.bindCompanionMutationPermit('session-create')
     if (permit === undefined) throw new Error('Companion Session creation has no current connection generation')
     const completion = this.sendMutation(active, operation, 'session-create', permit).then((result) => {
-      requireConfirmed(result, 'Companion Session creation')
+      requireSessionCreated(result)
       this.queueSurfaceRefresh()
     })
     return { operationId: operationIdValue, completion }
@@ -224,6 +229,26 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     return this.sendTracked({ type: 'search-sessions', operationId: operationIdValue, query })
   }
 
+  /** Select or clear the one Session receiving full live conversation replacement. */
+  observeSession(sessionId?: SessionId): MobileCompanionTrackedSubmission {
+    const operationIdValue = operationId()
+    const operation: CompanionOperation = {
+      type: 'observe-session', operationId: operationIdValue,
+      ...(sessionId === undefined ? {} : { sessionId: parseCompanionSessionId(sessionId) }),
+    }
+    const permit = this.options.runtime.bindCompanionMutationPermit('other-mutation')
+    if (permit === undefined) throw new Error('Companion Session observation has no current connection generation')
+    const active = this.requireActive()
+    const completion = new Promise<void>((resolve, reject) => {
+      this.observations.set(operationIdValue, { active, resolve, reject })
+      void this.sendCurrent(active, { type: 'operation', operation }, permit).catch((error: unknown) => {
+        this.observations.delete(operationIdValue)
+        reject(asError(error, 'Companion Session observation send failed'))
+      })
+    })
+    return { operationId: operationIdValue, completion }
+  }
+
   /** Request the current Desktop Session and Workspace baseline after foreground synchronization. */
   refreshSurface(offset = 0): MobileCompanionTrackedSubmission {
     const operationIdValue = operationId()
@@ -290,6 +315,13 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
 
   /** Accept one result already authenticated by the current physical Snow receiver. */
   acceptResult(result: CompanionResult): void {
+    const observation = this.observations.get(result.operationId)
+    if (observation !== undefined && (result.type === 'confirmed' || result.type === 'operation-failed')) {
+      this.observations.delete(result.operationId)
+      if (result.type === 'confirmed') observation.resolve()
+      else observation.reject(new Error(result.failure.message))
+      return
+    }
     if (result.type === 'status') {
       const query = this.statusQueries.get(result.operationId)
       if (query !== undefined) {
@@ -300,7 +332,7 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
       }
       return
     }
-    if (result.type === 'confirmed' || result.type === 'attachment-rejected'
+    if (result.type === 'confirmed' || result.type === 'session-created' || result.type === 'attachment-rejected'
       || result.type === 'operation-failed' || result.type === 'interaction-receipt') {
       const mutation = this.mutations.get(result.operationId)
       if (mutation !== undefined) {
@@ -532,9 +564,11 @@ export class MobileSnowCompanionProductChannel implements MobileCompanionMutatio
     for (const pending of this.mutations.values()) pending.reject(error)
     for (const pending of this.statusQueries.values()) pending.reject(error)
     for (const pending of this.images.values()) pending.reject(error)
+    for (const pending of this.observations.values()) pending.reject(error)
     this.mutations.clear()
     this.statusQueries.clear()
     this.images.clear()
+    this.observations.clear()
     this.refreshAfterConfirmation.clear()
   }
 }
@@ -551,6 +585,12 @@ function requireConfirmed(result: CompanionMutationResult, subject: string): voi
   if (result.type === 'confirmed') return
   if (result.type === 'operation-failed') throw new Error(result.failure.message)
   throw new Error(`${subject} returned ${result.type}`)
+}
+
+function requireSessionCreated(result: CompanionMutationResult): void {
+  if (result.type === 'session-created') return
+  if (result.type === 'operation-failed') throw new Error(result.failure.message)
+  throw new Error(`Companion Session creation returned ${result.type}`)
 }
 
 function interactionSettlement(

@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
-import { parseRelayCredential, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
+import { parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import { IndexedDbInstallationAccountStore } from '@deepseek-ai/dsh-platform-account-client'
+import {
+  parseRelayAttachmentId,
+  parseRelayCredential,
+  parseRelayPairingSelector,
+  parseRelayRouteId,
+} from '@deepseek-ai/dsh-remote-protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { MobileCompanionProjectionDto } from '../src/companion-projection.ts'
 
 const browserOpen = vi.hoisted(() => vi.fn<(options: { url: string }) => Promise<void>>())
 const protectedValues = vi.hoisted(() => new Map<string, string>())
@@ -11,11 +19,32 @@ const relayLifecycle = vi.hoisted(() => ({
   start: vi.fn(async () => {}),
   stop: vi.fn(async () => {}),
   isConnected: vi.fn(() => false),
-  onCiphertext: undefined as (() => void) | undefined,
+  sendCiphertext: vi.fn(async () => {}),
+  onCiphertext: undefined as ((ciphertext: Uint8Array, sourceAttachmentId: ReturnType<typeof parseRelayAttachmentId>) => void) | undefined,
   onPeerAttachments: undefined as ((ready: { peers: readonly unknown[] }) => Promise<void>) | undefined,
   onConnectionReady: undefined as (() => void) | undefined,
   onConnectionLost: undefined as (() => void) | undefined,
   onTransportError: undefined as (() => void) | undefined,
+}))
+const snowAttachmentOwners = vi.hoisted(() => ({
+  selectors: [] as string[],
+  begin: vi.fn(async (ready: { peers: ReadonlyArray<{ attachmentId: string }> }) => ({
+    targetAttachmentId: ready.peers[0]?.attachmentId,
+    payload: Uint8Array.of(1),
+  })),
+  finish: vi.fn(() => ({
+    dispose: vi.fn(),
+    seal: vi.fn(() => Uint8Array.of(2)),
+    open: vi.fn(),
+  })),
+  dispose: vi.fn(),
+}))
+const projectionCaches = vi.hoisted(() => ({
+  projection: undefined as MobileCompanionProjectionDto | undefined,
+  instances: [] as Array<{
+    clearContent: ReturnType<typeof vi.fn>
+    destroy: ReturnType<typeof vi.fn>
+  }>,
 }))
 
 vi.mock('@capacitor/browser', () => ({ Browser: { open: browserOpen } }))
@@ -57,9 +86,34 @@ vi.mock('@deepseek-ai/dsh-remote-access-client', async (importOriginal) => {
       start = relayLifecycle.start
       stop = relayLifecycle.stop
       isConnected = relayLifecycle.isConnected
+      sendCiphertext = relayLifecycle.sendCiphertext
     },
   }
 })
+vi.mock('@deepseek-ai/dsh-noise-channel', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@deepseek-ai/dsh-noise-channel')>()
+  return {
+    ...actual,
+    SnowMobileAttachmentOwner: class {
+      constructor(_reconnectState: Uint8Array, pairingSelector: string) {
+        snowAttachmentOwners.selectors.push(pairingSelector)
+      }
+      begin = snowAttachmentOwners.begin
+      finish = snowAttachmentOwners.finish
+      dispose = snowAttachmentOwners.dispose
+    },
+  }
+})
+vi.mock('../src/companion-cache-runtime.ts', () => ({
+  MobileCompanionProjectionCacheRuntime: class {
+    readonly operationSettlement = undefined
+    readonly restore = vi.fn(async () => projectionCaches.projection)
+    readonly save = vi.fn(async () => {})
+    readonly clearContent = vi.fn(async () => {})
+    readonly destroy = vi.fn(async () => {})
+    constructor() { projectionCaches.instances.push(this) }
+  },
+}))
 vi.mock('@capacitor/core', () => ({
   Capacitor: { isNativePlatform: () => true },
   registerPlugin: () => ({
@@ -81,11 +135,18 @@ afterEach(() => {
   relayLifecycle.stop.mockReset()
   relayLifecycle.isConnected.mockReset()
   relayLifecycle.isConnected.mockReturnValue(false)
+  relayLifecycle.sendCiphertext.mockReset()
   relayLifecycle.onCiphertext = undefined
   relayLifecycle.onPeerAttachments = undefined
   relayLifecycle.onConnectionReady = undefined
   relayLifecycle.onConnectionLost = undefined
   relayLifecycle.onTransportError = undefined
+  snowAttachmentOwners.selectors.length = 0
+  snowAttachmentOwners.begin.mockClear()
+  snowAttachmentOwners.finish.mockClear()
+  snowAttachmentOwners.dispose.mockClear()
+  projectionCaches.projection = undefined
+  projectionCaches.instances.length = 0
   localStorage.clear()
   protectedValues.clear()
   vi.unstubAllEnvs()
@@ -221,7 +282,9 @@ describe('Mobile Platform Account entry', () => {
       operationId: 'op-approve', kind: 'approval', summary: 'write a.ts', authorized: ['once'],
     }, { accepted: true, decision: 'once' }, runtime.getState()).settled).toBeUndefined()
 
-    expect(() => { relayLifecycle.onCiphertext?.() }).toThrow('pending Snow IK owner')
+    expect(() => {
+      relayLifecycle.onCiphertext?.(Uint8Array.of(1), parseRelayAttachmentId('unexpected-desktop'))
+    }).toThrow('pending Snow IK owner')
     expect(runtime.getState().synchronized).toBe(false)
     relayLifecycle.onConnectionReady?.()
     const firstResync = runtime.bindValidatedDesktopResync()
@@ -258,9 +321,63 @@ describe('Mobile Platform Account entry', () => {
     await waitFor(() => { expect(companionMayMutate(runtime.getState())).toBe(false) })
     expect(runtime.getState()).toMatchObject({ foreground: false, socketOpen: false, synchronized: false })
   })
+
+  it('rejects a wrong retained pairing selector in the initial Relay ready projection before Snow IK', async () => {
+    const product = await mountSelectedDesktopProduct('wrong-initial')
+
+    await expect(relayLifecycle.onPeerAttachments?.(relayPeerProjection(
+      'ready', product.databaseIdentity, 'work', 1,
+    ))).rejects.toThrow('selected Paired Desktop')
+
+    expect(snowAttachmentOwners.selectors).toEqual([])
+    expect(snowAttachmentOwners.begin).not.toHaveBeenCalled()
+    expect(product.runtime.getState()).toMatchObject({ socketOpen: false, synchronized: false })
+    expect(product.companionMayMutate(product.runtime.getState())).toBe(false)
+    expect(screen.getByText(product.cachedProjection.desktopName)).toBeTruthy()
+    expect(product.cacheInstances.every(cache => !cache.clearContent.mock.calls.length
+      && !cache.destroy.mock.calls.length)).toBe(true)
+  })
+
+  it('revalidates a wrong pairing selector in a same-generation peer update and drops mutation authority', async () => {
+    const product = await mountSelectedDesktopProduct('wrong-update')
+    relayLifecycle.onConnectionReady?.()
+    await relayLifecycle.onPeerAttachments?.(relayPeerProjection(
+      'ready', product.databaseIdentity, 'home', 1,
+    ))
+    relayLifecycle.onCiphertext?.(Uint8Array.of(2), parseRelayAttachmentId('desktop-home'))
+    const resync = product.runtime.bindValidatedDesktopResync()
+    if (resync === undefined) throw new Error('expected authenticated Desktop resync receiver')
+    resync.acceptValidatedDesktopResync({ type: 'desktop-resync', version: 1, authenticated: true })
+    expect(product.companionMayMutate(product.runtime.getState())).toBe(true)
+
+    await expect(relayLifecycle.onPeerAttachments?.(relayPeerProjection(
+      'peer-update', product.databaseIdentity, 'work', 1,
+    ))).rejects.toThrow('selected Paired Desktop')
+
+    expect(snowAttachmentOwners.selectors).toEqual(['home'])
+    expect(snowAttachmentOwners.begin).toHaveBeenCalledOnce()
+    expect(product.companionMayMutate(product.runtime.getState())).toBe(false)
+    expect(screen.getByText(product.cachedProjection.desktopName)).toBeTruthy()
+    expect(product.cacheInstances.every(cache => !cache.clearContent.mock.calls.length
+      && !cache.destroy.mock.calls.length)).toBe(true)
+  })
+
+  it('starts Snow IK for the selected pairing selector in the initial Relay ready projection', async () => {
+    const product = await mountSelectedDesktopProduct('right-initial')
+
+    await expect(relayLifecycle.onPeerAttachments?.(relayPeerProjection(
+      'ready', product.databaseIdentity, 'home', 1,
+    ))).resolves.toBeUndefined()
+
+    expect(snowAttachmentOwners.selectors).toEqual(['home'])
+    expect(snowAttachmentOwners.begin).toHaveBeenCalledOnce()
+    expect(relayLifecycle.sendCiphertext).toHaveBeenCalledWith(
+      parseRelayAttachmentId('desktop-home'), Uint8Array.of(1),
+    )
+  })
 })
 
-function configureEnvironment(): void {
+function configureEnvironment(overrides: Record<string, string> = {}): void {
   const fields: Record<string, string> = {
     VITE_PLATFORM_ORIGIN: 'https://platform.example.com',
     VITE_PLATFORM_CALLBACK_URL: 'https://platform.example.com/v1/account/oauth/github/callback',
@@ -274,8 +391,131 @@ function configureEnvironment(): void {
     VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS: '1000',
     VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: '5000',
     VITE_REMOTE_RELAY_RECONNECT_DELAY_MS: '100',
+    ...overrides,
   }
   for (const [key, value] of Object.entries(fields)) vi.stubEnv(key, value)
+}
+
+async function mountSelectedDesktopProduct(suffix: string): Promise<{
+  databaseIdentity: string
+  cachedProjection: MobileCompanionProjectionDto
+  cacheInstances: typeof projectionCaches.instances
+  runtime: NonNullable<ReturnType<typeof import('../src/companion-lifecycle.ts')['companionRuntime']>>
+  companionMayMutate: typeof import('../src/companion-lifecycle.ts')['companionMayMutate']
+}> {
+  const databaseIdentity = `database-${suffix}`
+  const identityNamespace = `namespace-${suffix}`
+  const accountId = parsePlatformAccountId(`account-${suffix}`)
+  const cachedProjection = emptyProjection(`Cached Desktop ${suffix}`)
+  projectionCaches.projection = cachedProjection
+  configureEnvironment({
+    VITE_PLATFORM_DATABASE_IDENTITY: databaseIdentity,
+    VITE_PLATFORM_IDENTITY_NAMESPACE: identityNamespace,
+  })
+  document.body.innerHTML = '<div id="root"></div>'
+  protectedValues.set(`installation:${identityNamespace}`, `installation-${suffix}`)
+  protectedValues.set(`pairings:${databaseIdentity}:${accountId}`, JSON.stringify({
+    version: 2,
+    active: [pairingRecord(databaseIdentity, 'home'), pairingRecord(databaseIdentity, 'work')],
+    selectedPairingId: 'home',
+  }))
+  const account = {
+    id: accountId,
+    githubId: 583_231,
+    githubLogin: `fixture-${suffix}`,
+    avatarUrl: `https://avatars.example/${suffix}`,
+  }
+  const pair = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify'],
+  )
+  const store = new IndexedDbInstallationAccountStore(
+    `deepseek-gestalt-platform-account:${databaseIdentity}`,
+  )
+  await store.saveSession({
+    environment: 'production',
+    session: {
+      sessionId: `session-${suffix}` as never,
+      account,
+      accessToken: `access-${suffix}`,
+      refreshToken: `refresh-${suffix}`,
+      accessExpiresAt: Date.now() + 900_000,
+      refreshExpiresAt: Date.now() + 2_592_000_000,
+    },
+    privateKey: pair.privateKey,
+  })
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.endsWith('/v1/account/session')) return json(account)
+    return json({ status: 'pending' })
+  }))
+
+  const { mobileProductStarted } = await import('../src/main.tsx')
+  await mobileProductStarted
+  await screen.findByText(`@fixture-${suffix}`)
+  await waitFor(() => {
+    expect(relayLifecycle.configure).toHaveBeenCalledWith(expect.objectContaining({ pairingSelector: 'home' }))
+  })
+  await screen.findByText(cachedProjection.desktopName)
+  const lifecycle = await import('../src/companion-lifecycle.ts')
+  const runtime = lifecycle.companionRuntime()
+  if (runtime === undefined) throw new Error('expected Companion runtime')
+  return {
+    databaseIdentity,
+    cachedProjection,
+    cacheInstances: [...projectionCaches.instances],
+    runtime,
+    companionMayMutate: lifecycle.companionMayMutate,
+  }
+}
+
+function pairingRecord(databaseIdentity: string, pairingId: 'home' | 'work'): Record<string, unknown> {
+  return {
+    pairingId,
+    attachmentKey: bytesBase64(32, pairingId === 'home' ? 1 : 2),
+    reconnectState: bytesBase64(96, pairingId === 'home' ? 3 : 4),
+    grant: {
+      routeId: `route-${databaseIdentity}-${pairingId}`,
+      endpoint: 'mobile',
+      credential: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE',
+      revision: 1,
+      pairingSelector: pairingId,
+    },
+  }
+}
+
+function bytesBase64(length: number, value: number): string {
+  return btoa(String.fromCharCode(...new Uint8Array(length).fill(value)))
+}
+
+function relayPeerProjection(
+  type: 'ready' | 'peer-update',
+  databaseIdentity: string,
+  pairingId: 'home' | 'work',
+  generation: number,
+): Record<string, unknown> & { peers: readonly unknown[] } {
+  return {
+    type,
+    transportVersion: 1,
+    routeId: parseRelayRouteId(`route-${databaseIdentity}-home`),
+    attachmentId: parseRelayAttachmentId(`mobile-${databaseIdentity}`),
+    peers: [{
+      attachmentId: parseRelayAttachmentId(`desktop-${pairingId}`),
+      pairingSelector: parseRelayPairingSelector(pairingId),
+      generation,
+    }],
+  }
+}
+
+function emptyProjection(desktopName: string): MobileCompanionProjectionDto {
+  return {
+    type: 'desktop-resync', version: 1, authenticated: true, desktopName,
+    sessions: {
+      ids: [], byId: {}, current: null, phase: 'ready',
+      subagentsByParent: {}, jobsBySession: {}, currentAddress: null,
+    },
+    workspaces: [],
+    conversations: [],
+  }
 }
 
 function json(value: unknown): Response {

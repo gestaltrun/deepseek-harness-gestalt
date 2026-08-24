@@ -74,7 +74,8 @@ describe('Mobile Snow Companion product channel', () => {
     const first = (seal.mock.lastCall?.[0] as { operation: { operationId: string } }).operation
     expect(first).toMatchObject({ type: 'create-session', workspaceId: 'workspace-product' })
     product.acceptResult({
-      type: 'confirmed', operationId: first.operationId as never, committedAt: 1, outcome: 'accepted',
+      type: 'session-created', operationId: first.operationId as never,
+      sessionId: 'session-created-workspace' as never, committedAt: 1,
     })
     await expect(workspace.completion).resolves.toBeUndefined()
     await vi.waitFor(() => { expect(trackSurfaceRefresh).toHaveBeenCalledOnce() })
@@ -89,7 +90,8 @@ describe('Mobile Snow Companion product channel', () => {
     expect(second).toMatchObject({ type: 'create-session' })
     expect(second).not.toHaveProperty('workspaceId')
     product.acceptResult({
-      type: 'confirmed', operationId: second.operationId as never, committedAt: 2, outcome: 'accepted',
+      type: 'session-created', operationId: second.operationId as never,
+      sessionId: 'session-created-ungrouped' as never, committedAt: 2,
     })
     await expect(ungrouped.completion).resolves.toBeUndefined()
   })
@@ -197,6 +199,35 @@ describe('Mobile Snow Companion product channel', () => {
       expect(seal.mock.calls.map(call => (call[0] as { operation: { type: string } }).operation.type).slice(-3))
         .toEqual(['cancel-session', 'load-history', 'refresh-surface'])
     })
+  })
+
+  it('confirms opened-Session observation on the current Snow generation', async () => {
+    const runtime = synchronizedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    const seal = vi.fn((_message: unknown) => Uint8Array.of(1))
+    connection.connect({
+      channel: { seal } as never,
+      targetAttachmentId: parseRelayAttachmentId('desktop-observe'),
+      pairingSelector: parseRelayPairingSelector('pairing-observe'),
+      generation: 3,
+    })
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection,
+      operationSettlement: settlement(),
+      installation: { authorizeCurrentInstallation: vi.fn() },
+      attachmentKeys: { attachmentKeyMaterial: () => undefined },
+      platformOrigin: 'https://platform.example', sendCiphertext: async () => {},
+    })
+
+    const submission = product.observeSession(sid('session-observe'))
+    await vi.waitFor(() => { expect(seal).toHaveBeenCalledOnce() })
+    const operation = (seal.mock.lastCall?.[0] as { operation: { type: string; operationId: string; sessionId?: string } }).operation
+    expect(operation).toMatchObject({ type: 'observe-session', sessionId: 'session-observe' })
+    product.acceptResult({
+      type: 'confirmed', operationId: operation.operationId as never,
+      committedAt: 1, outcome: 'accepted',
+    })
+    await expect(submission.completion).resolves.toBeUndefined()
   })
 
   it('starts both post-confirmation refreshes when one tracker throws and observes its send rejection', async () => {

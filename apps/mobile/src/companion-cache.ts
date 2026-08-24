@@ -317,6 +317,13 @@ function parseCompanionMutationResult(value: unknown): CompanionMutationResult {
     && typeof record.committedAt === 'number' && Number.isSafeInteger(record.committedAt) && record.committedAt > 0) {
     return { type: 'confirmed', operationId, committedAt: record.committedAt, outcome: 'accepted' }
   }
+  if (record.type === 'session-created'
+    && typeof record.committedAt === 'number' && Number.isSafeInteger(record.committedAt) && record.committedAt > 0) {
+    return {
+      type: 'session-created', operationId,
+      sessionId: parseCompanionSessionId(record.sessionId), committedAt: record.committedAt,
+    }
+  }
   if (record.type === 'attachment-rejected'
     && (record.reason === 'cross-pairing' || record.reason === 'hash-mismatch' || record.reason === 'expired'
       || record.reason === 'absent' || record.reason === 'transfer-interrupted' || record.reason === 'limit-exceeded')) {

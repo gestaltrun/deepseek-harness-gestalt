@@ -5,6 +5,7 @@ import type { ConversationSnapshot, SessionId, SessionListState, WorkspaceView }
 import type {
   CompanionAttachmentRejectedResult,
   CompanionHostFailure,
+  CompanionLiveSessionProjection,
   CompanionOperationId,
   CompanionResult,
   CompanionSessionId,
@@ -32,6 +33,7 @@ type ValidatedCompanionProjectionReceipt =
     readonly beforeSeq?: number | undefined
   }
   | { readonly type: 'surface-snapshot'; readonly operationId: CompanionOperationId }
+  | CompanionLiveSessionProjection
 
 /** Receiver installed beside one authenticated decoder generation. */
 export interface ValidatedDesktopSurfaceResyncReceiver {
@@ -156,6 +158,7 @@ export interface MobileCompanionMutationChannel {
   cancel(sessionId: SessionId): MobileCompanionTrackedSubmission
   attach(sessionId: SessionId, file: File): MobileCompanionAttachmentSubmission
   search(query: string): MobileCompanionTrackedSubmission
+  observeSession(sessionId?: SessionId): MobileCompanionTrackedSubmission
   loadOlder(sessionId: SessionId, beforeSeq?: number): MobileCompanionTrackedSubmission
   settle(settlement: MobilePendingSettlement): Promise<MobilePendingSettlementReceipt>
 }
@@ -176,6 +179,11 @@ interface ActiveConnection {
   readonly channel: MobileCompanionConnectionChannel
 }
 
+interface PendingCreatedSessionFocus {
+  readonly token: symbol
+  readonly sessionId: SessionId
+}
+
 interface PendingHistoryOperation {
   readonly operationId: CompanionOperationId
   readonly sessionId: SessionId
@@ -191,6 +199,7 @@ export class MobileCompanionSurface {
   #searchOperationId: CompanionOperationId | undefined
   #attachmentOperationId: CompanionOperationId | undefined
   #refreshOperationId: CompanionOperationId | undefined
+  #createdSessionFocus: PendingCreatedSessionFocus | undefined
   #projectionCache: MobileCompanionProjectionCache | undefined
   readonly #operations = new Map<CompanionOperationId, {
     kind: 'create' | 'submit' | 'cancel'
@@ -221,6 +230,7 @@ export class MobileCompanionSurface {
     this.#searchOperationId = undefined
     this.#attachmentOperationId = undefined
     this.#refreshOperationId = undefined
+    this.#createdSessionFocus = undefined
     this.#snapshot = emptySurfaceSnapshot()
     this.publish()
   }
@@ -313,8 +323,16 @@ export class MobileCompanionSurface {
       acceptValidatedDesktopResync: (message) => {
         assertCompanionJsonProjection(message)
         const active = { token, channel }
+        const pendingFocus = this.#createdSessionFocus
+        const pendingCreatedSession = pendingFocus?.token === token
+          ? message.sessions.byId[pendingFocus.sessionId]
+          : undefined
+        const releaseCreatedSession = pendingCreatedSession?.blank === false
+        const presentationMessage = pendingFocus !== undefined && pendingCreatedSession?.blank === true
+          ? { ...message, sessions: { ...message.sessions, current: pendingFocus.sessionId } }
+          : message
         const projection = adaptMobileCompanionProjection(
-          message,
+          presentationMessage,
           settlement => this.settlePending(active, settlement),
         )
         const previousConnection = this.#activeConnection
@@ -359,6 +377,9 @@ export class MobileCompanionSurface {
           this.#historyInFlight.clear()
           this.#searchOperationId = undefined
           this.#refreshOperationId = undefined
+          this.#createdSessionFocus = undefined
+        } else if (releaseCreatedSession && this.#createdSessionFocus === pendingFocus) {
+          this.#createdSessionFocus = undefined
         }
         this.publish()
         void this.#projectionCache?.save(message).catch((error: unknown) => {
@@ -384,6 +405,18 @@ export class MobileCompanionSurface {
       }
       this.publish()
     })
+  }
+
+  /**
+   * Retire one created-Session selection after the current Mobile view has opened it.
+   * @param sessionId - exact Session identity committed by the rendered detail view.
+   */
+  readonly acknowledgeSessionOpened = (sessionId: SessionId): void => {
+    const pending = this.#createdSessionFocus
+    const active = this.#activeConnection
+    if (pending === undefined || active === undefined
+      || pending.token !== active.token || pending.sessionId !== sessionId) return
+    this.#createdSessionFocus = undefined
   }
 
   readonly submit = async (sessionId: SessionId, text: string): Promise<void> => {
@@ -472,6 +505,16 @@ export class MobileCompanionSurface {
     })
   }
 
+  readonly observeSession = (sessionId?: SessionId): void => {
+    const submission = this.transmit(
+      'other-mutation',
+      channel => channel.mutations.observeSession(sessionId),
+    )
+    void submission.completion.catch((error: unknown) => {
+      console.error('[mobile-companion] Session observation failed:', error)
+    })
+  }
+
   readonly loadOlder = (sessionId: SessionId): void => {
     this.requireActive('history')
     if (this.#historyInFlight.has(sessionId)) return
@@ -514,7 +557,14 @@ export class MobileCompanionSurface {
     const operation = recoveredFailureOperation(receipt.kind)
     if (operation === undefined) return
     const sessionId = receipt.sessionId === undefined ? undefined : localSessionId(receipt.sessionId)
-    if (receipt.status === 'committed' && receipt.original?.type === 'operation-failed') {
+    if (receipt.kind === 'session-create' && receipt.status === 'committed'
+      && receipt.original?.type === 'session-created') {
+      const active = this.#activeConnection
+      if (active !== undefined && companionMayMutate(this.#runtime.getState())) {
+        this.#createdSessionFocus = { token: active.token, sessionId: localSessionId(receipt.original.sessionId) }
+      }
+      this.#snapshot = { ...this.#snapshot, operationFailure: this.failureAfterSuccess('create') }
+    } else if (receipt.status === 'committed' && receipt.original?.type === 'operation-failed') {
       this.#snapshot = {
         ...this.#snapshot,
         operationFailure: {
@@ -571,6 +621,16 @@ export class MobileCompanionSurface {
       return
     }
     const operation = this.#operations.get(result.operationId)
+    if (operation?.kind === 'create' && result.type === 'session-created') {
+      this.#operations.delete(result.operationId)
+      const active = this.#activeConnection
+      if (active !== undefined) {
+        this.#createdSessionFocus = { token: active.token, sessionId: localSessionId(result.sessionId) }
+      }
+      this.#snapshot = { ...this.#snapshot, operationFailure: this.failureAfterSuccess('create') }
+      this.publish()
+      return
+    }
     if (operation !== undefined && (result.type === 'confirmed' || result.type === 'operation-failed')) {
       this.#operations.delete(result.operationId)
       this.#snapshot = {
@@ -665,6 +725,7 @@ export class MobileCompanionSurface {
   private acceptCurrentCompanionProjection(
     projection: ValidatedCompanionProjectionReceipt,
   ): boolean {
+    if (projection.type === 'session-live') return true
     if (projection.type === 'surface-snapshot') {
       if (projection.operationId !== this.#refreshOperationId) return false
       this.#refreshOperationId = undefined

@@ -17,8 +17,8 @@ describe('Encrypted Companion Protocol v3 product surface', () => {
   it('negotiates v3 and round-trips typed surface and history requests', () => {
     const protocol = negotiateCompanionProtocol(
       createCompanionNegotiationChannel(),
-      createCompanionVersionOffer('mobile'),
-      createCompanionVersionOffer('desktop'),
+      createCompanionVersionOffer('mobile', [3]),
+      createCompanionVersionOffer('desktop', [3]),
     )
     expect(protocol.major).toBe(3)
     const operationId = parseCompanionOperationId('surface-1')
@@ -91,6 +91,15 @@ describe('Encrypted Companion Protocol v3 product surface', () => {
       },
     } as const
     expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, history))).toEqual(history)
+    const tail = {
+      ...history,
+      projection: {
+        type: 'conversation-snapshot' as const,
+        operationId, sessionId, generation: 2, desktopRevision: 8,
+        conversation: { sessionId, nodes: [], hasMore: false },
+      },
+    }
+    expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, tail))).toEqual(tail)
 
     const image = {
       type: 'result',
@@ -330,7 +339,7 @@ function decodeRaw(protocol: ReturnType<typeof currentProtocol>, message: Record
 function currentProtocol() {
   return negotiateCompanionProtocol(
     createCompanionNegotiationChannel(),
-    createCompanionVersionOffer('mobile'),
-    createCompanionVersionOffer('desktop'),
+    createCompanionVersionOffer('mobile', [3]),
+    createCompanionVersionOffer('desktop', [3]),
   )
 }

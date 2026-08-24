@@ -14,6 +14,7 @@ import {
   type CompanionOperationFailedResult,
   type CompanionResult,
   type CompanionProjection,
+  type CompanionLiveSessionProjection,
   type CompanionOperation,
   type CompanionOperationId,
   type CompanionSearchSessionsOperation,
@@ -32,6 +33,10 @@ import {
 } from './host-rpc.ts'
 import type { DesktopCompanionOperationLedger } from './companion-operation-ledger.ts'
 import { DesktopCompanionInteractionRegistry } from './companion-interactions.ts'
+import {
+  DesktopCompanionLiveProjectionSource,
+  type DesktopCompanionLiveProjectionChange,
+} from './companion-live-projection.ts'
 
 /** Operations owned by the attachment and authoritative-search product bridge. */
 export type CompanionProductOperation = Exclude<CompanionOperation, { type: 'query-operation-status' }>
@@ -46,6 +51,13 @@ export interface DesktopPendingCompanionInteraction {
 
 /** One or more encrypted outputs produced by an allowlisted product operation. */
 export type DesktopCompanionOperationOutput = CompanionResult | CompanionProjection | readonly CompanionResult[]
+
+/** Live Session data before the current Snow attachment assigns generation and revision. */
+export type DesktopCompanionLiveProjectionPayload = CompanionLiveSessionProjection extends infer Projection
+  ? Projection extends CompanionLiveSessionProjection
+    ? Omit<Projection, 'type' | 'generation' | 'desktopRevision'>
+    : never
+  : never
 
 /** Desktop product dependencies scoped to one authenticated Personal Pairing. */
 export interface CompanionProductOperationDependencies {
@@ -88,16 +100,60 @@ export type DesktopCompanionPairingDependencies = Omit<CompanionProductOperation
 
 /** Shipped Desktop owner that follows Web Host replacement and executes decoded product operations. */
 export class DesktopCompanionProductOwner {
-  private installed: { readonly rpc: DesktopHostRpc } | undefined
+  private installed: {
+    readonly rpc: DesktopHostRpc
+    readonly cancellation: AbortController
+    streams?: { readonly cancellation: AbortController; readonly task: Promise<void> }
+  } | undefined
   private ledger: DesktopCompanionOperationLedger | undefined
   private readonly interactions = new DesktopCompanionInteractionRegistry()
   private readonly surfaceDiscovery = new DesktopCompanionSurfaceDiscovery()
+  private readonly liveProjection = new DesktopCompanionLiveProjectionSource()
 
   /** @param hostOptions - response bound and request deadline for every Web Host generation. */
   constructor(private readonly hostOptions: DesktopHostRpcOptions) {}
 
   /** @param ledger - durable pairing-scoped mutation idempotency owner. */
   installLedger(ledger: DesktopCompanionOperationLedger): void { this.ledger = ledger }
+
+  /** Register one authenticated Snow connection for active Host projection. */
+  connectLiveProjection(
+    pairingId: PersonalPairingId,
+    changed: (change: DesktopCompanionLiveProjectionChange) => void,
+    disconnect: (error: Error) => void,
+  ): () => void {
+    const dispose = this.liveProjection.connect(pairingId, changed, disconnect)
+    const installed = this.installed
+    if (installed !== undefined) this.ensureHostStreams(installed)
+    return () => {
+      dispose()
+      const current = this.installed
+      if (!this.liveProjection.hasConnections() && current !== undefined) this.stopHostStreams(current)
+    }
+  }
+
+  /** Whether one projected conversation still belongs to the pairing's current observation epoch. */
+  retainsLiveConversation(
+    pairingId: PersonalPairingId,
+    change: DesktopCompanionLiveProjectionChange,
+  ): boolean {
+    return this.liveProjection.retainsConversation(pairingId, change)
+  }
+
+  /** Build one live replacement from the current Web Host for an authenticated pairing. */
+  async projectLiveSession(
+    change: DesktopCompanionLiveProjectionChange,
+    attachmentKey: Uint8Array,
+    signal: AbortSignal,
+  ): Promise<DesktopCompanionLiveProjectionPayload> {
+    if (change.type !== 'session') throw new Error('Desktop surface synchronization does not project one Session')
+    const host = this.installed?.rpc
+    if (host === undefined) throw new Error('Desktop Web Host is not available')
+    return await projectDesktopCompanionLiveSession(change.sessionId, change.includeConversation, {
+      host,
+      pendingInteractions: sessionId => this.pendingInteractions(sessionId, attachmentKey),
+    }, signal)
+  }
 
   /** Return the exact pairing-scoped durable outcome for reconnect reconciliation. */
   async queryOperationStatus(
@@ -118,22 +174,19 @@ export class DesktopCompanionProductOwner {
   installHost(baseUrl: string): () => void {
     const rpc = createDesktopHostRpc(baseUrl, this.hostOptions)
     const cancellation = new AbortController()
-    const installed = { rpc, cancellation }
+    const installed: NonNullable<DesktopCompanionProductOwner['installed']> = { rpc, cancellation }
     this.interactions.clear()
     this.surfaceDiscovery.clear()
     this.installed = installed
-    if (rpc.watchInteractions !== undefined) {
-      void rpc.watchInteractions(cancellation.signal, (envelope) => { this.interactions.accept(envelope) })
-        .catch((error: unknown) => {
-          if (!cancellation.signal.aborted) console.error('[desktop-companion] Host interaction stream failed:', error)
-        })
-    }
+    if (this.liveProjection.hasConnections()) this.ensureHostStreams(installed)
     return () => {
       cancellation.abort()
+      installed.streams?.cancellation.abort()
       if (this.installed === installed) {
         this.installed = undefined
         this.interactions.clear()
         this.surfaceDiscovery.clear()
+        this.liveProjection.fail(new Error('Desktop Web Host is not available'))
       }
     }
   }
@@ -167,6 +220,13 @@ export class DesktopCompanionProductOwner {
         kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Web Host is not available',
       })
     }
+    if (operation.type === 'observe-session') {
+      this.liveProjection.observe(dependencies.pairingId, operation.sessionId)
+      return {
+        type: 'confirmed', operationId: operation.operationId,
+        committedAt: dependencies.now(), outcome: 'accepted',
+      }
+    }
     const execute = async () => operation.type === 'refresh-surface'
       ? await this.surfaceDiscovery.refresh(operation, { ...dependencies, host })
       : await handleCompanionProductOperation(operation, { ...dependencies, host })
@@ -181,6 +241,64 @@ export class DesktopCompanionProductOwner {
       }
       return output
     })
+  }
+
+  private ensureHostStreams(installed: NonNullable<DesktopCompanionProductOwner['installed']>): void {
+    if (installed.streams !== undefined || installed.cancellation.signal.aborted) return
+    if (installed.rpc.watchMux === undefined || installed.rpc.watchHost === undefined) {
+      this.liveProjection.fail(new Error('Desktop Web Host event streams are unavailable'))
+      return
+    }
+    const cancellation = new AbortController()
+    const abort = (): void => { cancellation.abort() }
+    installed.cancellation.signal.addEventListener('abort', abort, { once: true })
+    const task = Promise.all([
+      installed.rpc.watchMux(cancellation.signal, (envelope) => { this.acceptMuxEnvelope(envelope) }),
+      installed.rpc.watchHost(cancellation.signal, (envelope) => { this.acceptHostEnvelope(envelope) }),
+    ]).then(() => undefined)
+    const streams = { cancellation, task }
+    installed.streams = streams
+    void task.then(
+      () => { this.finishHostStreams(installed, streams, undefined) },
+      (error: unknown) => { this.finishHostStreams(installed, streams, error) },
+    ).finally(() => { installed.cancellation.signal.removeEventListener('abort', abort) })
+  }
+
+  private stopHostStreams(installed: NonNullable<DesktopCompanionProductOwner['installed']>): void {
+    const streams = installed.streams
+    if (streams === undefined) return
+    delete installed.streams
+    streams.cancellation.abort()
+  }
+
+  private finishHostStreams(
+    installed: NonNullable<DesktopCompanionProductOwner['installed']>,
+    streams: NonNullable<NonNullable<DesktopCompanionProductOwner['installed']>['streams']>,
+    failure: unknown,
+  ): void {
+    if (installed.streams !== streams) return
+    delete installed.streams
+    streams.cancellation.abort()
+    if (installed.cancellation.signal.aborted || this.installed !== installed) return
+    this.interactions.clear()
+    const error = failure instanceof Error ? failure : new Error('Desktop Web Host event streams ended', { cause: failure })
+    console.error('[desktop-companion] Host event streams failed:', error)
+    this.liveProjection.fail(error)
+  }
+
+  private acceptMuxEnvelope(envelope: { rpcId: string; payload: unknown }): void {
+    this.interactions.accept(envelope)
+    const sessionId = hostEventSessionId(envelope.payload)
+    if (sessionId !== undefined) this.liveProjection.changed(sessionId)
+  }
+
+  private acceptHostEnvelope(envelope: { rpcId: string; payload: unknown }): void {
+    if (isHostSurfaceAuthorityEvent(envelope.payload)) {
+      this.liveProjection.surfaceChanged()
+      return
+    }
+    const sessionId = hostEventSessionId(envelope.payload)
+    if (sessionId !== undefined) this.liveProjection.changed(sessionId)
   }
 
   /**
@@ -234,6 +352,11 @@ export async function handleCompanionProductOperation(
       return await new DesktopCompanionSurfaceDiscovery().refresh(operation, dependencies)
     case 'load-history':
       return await loadHistory(operation, dependencies)
+    case 'observe-session':
+      return {
+        type: 'confirmed', operationId: operation.operationId,
+        committedAt: dependencies.now(), outcome: 'accepted',
+      }
     case 'submit-prompt':
       return await acceptedHostMutation(operation, dependencies, 'session.prompt', {
         sessionId: operation.sessionId,
@@ -266,13 +389,13 @@ async function createHostSession(
   )
   if (!response.ok) return operationFailed(operation, normalizeFailure(response.failure))
   if (!isRecord(response.value)) return invalidHostResult(operation, 'session.create')
-  try { parseCompanionSessionId(response.value.sessionId) } catch { return invalidHostResult(operation, 'session.create') }
-  return { type: 'confirmed', operationId: operation.operationId, committedAt: dependencies.now(), outcome: 'accepted' }
+  let sessionId: ReturnType<typeof parseCompanionSessionId>
+  try { sessionId = parseCompanionSessionId(response.value.sessionId) } catch { return invalidHostResult(operation, 'session.create') }
+  return { type: 'session-created', operationId: operation.operationId, sessionId, committedAt: dependencies.now() }
 }
 
 interface DesktopSurfaceAuthoritySnapshot {
   readonly generation: number
-  readonly desktopRevision: number
   readonly sessionValue: unknown
   readonly workspaceValue: unknown
 }
@@ -307,8 +430,7 @@ export class DesktopCompanionSurfaceDiscovery {
     if (operation.offset === 0) return await this.start(operation, dependencies)
     const state = this.states.get(dependencies.pairingId)
     if (state === undefined || state.nextOffset !== operation.offset
-      || state.snapshot.generation !== dependencies.generation
-      || state.snapshot.desktopRevision !== dependencies.desktopRevision) {
+      || state.snapshot.generation !== dependencies.generation) {
       return invalidHostResult(operation, 'surface discovery cursor')
     }
     return this.project(operation, dependencies, state.epoch, state.snapshot)
@@ -329,7 +451,6 @@ export class DesktopCompanionSurfaceDiscovery {
     if (!workspaceResponse.ok) return operationFailed(operation, normalizeFailure(workspaceResponse.failure))
     const snapshot: DesktopSurfaceAuthoritySnapshot = {
       generation: dependencies.generation,
-      desktopRevision: dependencies.desktopRevision,
       sessionValue: sessionResponse.value,
       workspaceValue: workspaceResponse.value,
     }
@@ -345,11 +466,15 @@ export class DesktopCompanionSurfaceDiscovery {
     if (this.epochs.get(dependencies.pairingId) !== epoch) {
       return invalidHostResult(operation, 'surface discovery owner')
     }
-    const sessions = parseSurfaceSessions(snapshot.sessionValue, operation.offset)
+    const archived = parseArchivedSessionIds(snapshot.workspaceValue)
+    if (archived === undefined) return invalidHostResult(operation, 'surface baseline')
+    const visibleSessionValues = surfaceSessionValues(snapshot.sessionValue, archived)
+    if (visibleSessionValues === undefined) return invalidHostResult(operation, 'surface baseline')
+    const sessions = parseSurfaceSessions(visibleSessionValues, operation.offset)
     if (sessions === undefined) return invalidHostResult(operation, 'surface baseline')
     const workspaces = parseSurfaceWorkspaces(snapshot.workspaceValue, new Set(sessions.map(session => session.sessionId)))
     if (workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
-    const hasMore = surfaceHasMore(snapshot.sessionValue, operation.offset, sessions.length)
+    const hasMore = visibleSessionValues.length > operation.offset + sessions.length
     if (hasMore) {
       this.states.set(dependencies.pairingId, {
         epoch,
@@ -398,6 +523,59 @@ async function loadHistory(
     ...(operation.beforeSeq === undefined ? {} : { beforeSeq: operation.beforeSeq }),
     conversation,
   }
+}
+
+/**
+ * Project one changed Session from current Host authority.
+ * @param sessionId - Session named by a committed Host event.
+ * @param includeConversation - whether this pairing currently displays the Session.
+ * @param dependencies - current Host and pairing-private interaction projection.
+ * @param signal - authenticated Snow attachment lifetime.
+ * @returns one bounded replacement, or a removal when the Session left the authoritative list.
+ */
+export async function projectDesktopCompanionLiveSession(
+  sessionId: CompanionSessionId,
+  includeConversation: boolean,
+  dependencies: Pick<CompanionProductOperationDependencies, 'host' | 'pendingInteractions'>,
+  signal: AbortSignal,
+): Promise<DesktopCompanionLiveProjectionPayload> {
+  const requests = [
+    dependencies.host.call('session.list', {}, { signal }),
+    dependencies.host.call('workspace.list', {}, { signal }),
+    ...(includeConversation
+      ? [dependencies.host.call('session.history', {
+        sessionId, maxMessages: REMOTE_PROTOCOL_LIMITS.historyPageMessages,
+      }, { signal })]
+      : []),
+  ] as const
+  const [sessionResponse, workspaceResponse, historyResponse] = await Promise.all(requests)
+  if (!sessionResponse.ok) throw new Error(sessionResponse.failure.message)
+  if (!workspaceResponse.ok) throw new Error(workspaceResponse.failure.message)
+  if (!isRecord(sessionResponse.value) || !Array.isArray(sessionResponse.value.items)) {
+    throw new Error('Desktop Host live Session list returned an invalid value')
+  }
+  const archived = parseArchivedSessionIds(workspaceResponse.value)
+  if (archived === undefined) throw new Error('Desktop Host live Workspace projection returned an invalid value')
+  if (archived.has(sessionId)) return { sessionId, removed: true }
+  const position = sessionResponse.value.items.findIndex(item => isRecord(item) && item.sessionId === sessionId)
+  if (position === -1) return { sessionId, removed: true }
+  const summary = parseSurfaceSessionRow(sessionResponse.value.items[position])
+  if (summary === undefined || summary.sessionId !== sessionId) {
+    throw new Error('Desktop Host live Session summary returned an invalid value')
+  }
+  const workspaces = parseSurfaceWorkspaces(workspaceResponse.value, new Set([sessionId]))
+  if (workspaces === undefined) throw new Error('Desktop Host live Workspace projection returned an invalid value')
+  if (!includeConversation) return { sessionId, position, summary, workspaces }
+  if (historyResponse === undefined || !historyResponse.ok) {
+    throw new Error(historyResponse === undefined
+      ? 'Desktop Host live history response is unavailable'
+      : historyResponse.failure.message)
+  }
+  const conversation = parseConversationHistory(
+    historyResponse.value, sessionId, dependencies.pendingInteractions(sessionId), summary.running,
+  )
+  if (conversation === undefined) throw new Error('Desktop Host live conversation returned an invalid value')
+  return { sessionId, position, summary, workspaces, conversation }
 }
 
 async function acceptedHostMutation(
@@ -558,7 +736,10 @@ function parseSearchValue(value: unknown): Omit<CompanionSessionSearchResult, 't
   return { items, hasMore: value.hasMore }
 }
 
-function parseSurfaceSessions(value: unknown, offset = 0): Array<{
+function parseSurfaceSessions(
+  values: readonly unknown[],
+  offset = 0,
+): Array<{
   sessionId: CompanionSessionId
   displayTitle: string
   cwd?: string
@@ -566,7 +747,6 @@ function parseSurfaceSessions(value: unknown, offset = 0): Array<{
   blank: boolean
   updatedAt: number
 }> | undefined {
-  if (!isRecord(value) || !Array.isArray(value.items)) return undefined
   const sessions: Array<{
     sessionId: CompanionSessionId
     displayTitle: string
@@ -575,7 +755,7 @@ function parseSurfaceSessions(value: unknown, offset = 0): Array<{
     blank: boolean
     updatedAt: number
   }> = []
-  for (const itemValue of value.items.slice(offset, offset + REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)) {
+  for (const itemValue of values.slice(offset, offset + REMOTE_PROTOCOL_LIMITS.surfaceSessionRows)) {
     const session = parseSurfaceSessionRow(itemValue)
     if (session === undefined) return undefined
     sessions.push(session)
@@ -583,8 +763,27 @@ function parseSurfaceSessions(value: unknown, offset = 0): Array<{
   return sessions
 }
 
-function surfaceHasMore(value: unknown, offset: number, pageLength: number): boolean {
-  return isRecord(value) && Array.isArray(value.items) && value.items.length > offset + pageLength
+function surfaceSessionValues(
+  value: unknown,
+  archived: ReadonlySet<CompanionSessionId>,
+): unknown[] | undefined {
+  if (!isRecord(value) || !Array.isArray(value.items)) return undefined
+  const items: unknown[] = value.items
+  return items.filter((item) => {
+    if (!isRecord(item) || typeof item.sessionId !== 'string') return true
+    try { return !archived.has(parseCompanionSessionId(item.sessionId)) } catch { return true }
+  })
+}
+
+function parseArchivedSessionIds(value: unknown): Set<CompanionSessionId> | undefined {
+  if (!isRecord(value) || !Array.isArray(value.archivedSessionIds)) return undefined
+  const archived = new Set<CompanionSessionId>()
+  try {
+    for (const sessionId of value.archivedSessionIds) archived.add(parseCompanionSessionId(sessionId))
+  } catch {
+    return undefined
+  }
+  return archived
 }
 
 function parseSurfaceSession(
@@ -671,11 +870,18 @@ function parseConversationHistory(
   const retryAttempts = new Map<string, number>()
   const retryTurns = new Set<number>()
   const closedTurns = new Set<number>()
+  let partial: { turn: number; step: number; blocks: Array<Record<string, unknown> | undefined> } | undefined
   for (const entryValue of value.events) {
     if (!isRecord(entryValue) || !isRecord(entryValue.event)) return undefined
     const event = entryValue.event
     if (!isSafeInteger(event.seq) || typeof event.time !== 'number' || !isRecord(event.data)) return undefined
-    if (event.type === 'user/message') {
+    if (event.type === 'assistant/chunk') {
+      if (!isSafeInteger(event.data.turn) || !isSafeInteger(event.data.step) || !isRecord(event.data.chunk)) return undefined
+      if (partial === undefined || partial.turn !== event.data.turn || partial.step !== event.data.step) {
+        partial = { turn: event.data.turn, step: event.data.step, blocks: [] }
+      }
+      if (!applyLiveAssistantChunk(partial.blocks, event.data.chunk)) return undefined
+    } else if (event.type === 'user/message') {
       if (!Array.isArray(event.data.content)) return undefined
       const source = event.data.source ?? {}
       const sourceKind = isRecord(source) ? source.kind : undefined
@@ -698,6 +904,9 @@ function parseConversationHistory(
         turn: numberOr(event.data.turn, 0), step: numberOr(event.data.step, 0),
         blocks: message.content.map(assistantBlock),
       })
+      if (partial?.turn === numberOr(event.data.turn, 0) && partial.step === numberOr(event.data.step, 0)) {
+        partial = undefined
+      }
     } else if (event.type === 'tool/call') {
       const callId = event.data.callId
       if (typeof callId !== 'string') return undefined
@@ -746,6 +955,7 @@ function parseConversationHistory(
     } else if (event.type === 'turn/end') {
       if (!isSafeInteger(event.data.turn) || !isRecord(event.data.reason)) return undefined
       const turn = event.data.turn
+      if (partial?.turn === turn) partial = undefined
       closedTurns.add(turn)
       if (event.data.reason.kind === 'error') {
         const error = event.data.reason.error
@@ -770,11 +980,65 @@ function parseConversationHistory(
   return {
     sessionId,
     nodes: visibleNodes,
-    turnTimings: [], turnEnds: [], partial: null, runningCalls: [], pending, queue: [],
+    turnTimings: [], turnEnds: [],
+    partial: partial === undefined ? null : {
+      turn: partial.turn, step: partial.step,
+      blocks: partial.blocks.filter((block): block is Record<string, unknown> => block !== undefined),
+    },
+    runningCalls: [], pending, queue: [],
     running, subagent: null, composerPhase: nodes.length === 0 && !running ? 'pristine' : 'active',
     removed: false, openState: 'open', openError: null, hasMore: value.hasMore,
     loadingOlder: false, promptError: null, blank: nodes.length === 0, lastAgentError: null,
   }
+}
+
+function applyLiveAssistantChunk(
+  blocks: Array<Record<string, unknown> | undefined>,
+  chunk: Record<string, unknown>,
+): boolean {
+  if (!isSafeInteger(chunk.index)) {
+    return chunk.type === 'usage' || chunk.type === 'finish'
+  }
+  const index = chunk.index
+  if (chunk.type === 'block-start' && typeof chunk.blockType === 'string') {
+    blocks[index] = chunk.blockType === 'text' || chunk.blockType === 'reasoning'
+      ? { kind: chunk.blockType, text: '' }
+      : chunk.blockType === 'tool-call'
+        ? { kind: 'tool-call', callId: '', name: '', argsRaw: '' }
+        : { kind: 'other', block: null }
+    return true
+  }
+  if (chunk.type === 'text-delta' && typeof chunk.text === 'string') {
+    const previous = blocks[index]
+    blocks[index] = { kind: 'text', text: (previous?.kind === 'text' ? String(previous.text) : '') + chunk.text }
+    return true
+  }
+  if (chunk.type === 'reasoning-delta' && typeof chunk.text === 'string') {
+    const previous = blocks[index]
+    blocks[index] = { kind: 'reasoning', text: (previous?.kind === 'reasoning' ? String(previous.text) : '') + chunk.text }
+    return true
+  }
+  if (chunk.type === 'tool-call-delta' && typeof chunk.argumentsDelta === 'string') {
+    const previous = blocks[index]
+    const chunkId = typeof chunk.id === 'string' ? chunk.id : ''
+    blocks[index] = {
+      kind: 'tool-call',
+      callId: previous?.kind === 'tool-call' && typeof previous.callId === 'string'
+        ? previous.callId || chunkId
+        : chunkId,
+      name: typeof chunk.name === 'string'
+        ? chunk.name
+        : previous?.kind === 'tool-call' && typeof previous.name === 'string' ? previous.name : '',
+      argsRaw: (previous?.kind === 'tool-call' && typeof previous.argsRaw === 'string' ? previous.argsRaw : '')
+        + chunk.argumentsDelta,
+    }
+    return true
+  }
+  if (chunk.type === 'block-end' && 'block' in chunk) {
+    blocks[index] = assistantBlock(chunk.block)
+    return true
+  }
+  return false
 }
 
 interface ProjectedModelRetry extends Record<string, unknown> {
@@ -854,7 +1118,7 @@ function isCompanionResultList(
 }
 
 function requireMutationResult(result: CompanionResult): Exclude<CompanionResult, { type: 'status' | 'session-search' | 'image-chunk' }> {
-  if (result.type === 'confirmed' || result.type === 'attachment-rejected'
+  if (result.type === 'confirmed' || result.type === 'session-created' || result.type === 'attachment-rejected'
     || result.type === 'operation-failed' || result.type === 'interaction-receipt') return result
   throw new Error('Desktop Companion operation ledger contains a non-mutation result')
 }
@@ -863,7 +1127,7 @@ function isCompanionProjectionOutput(
   output: CompanionResult | CompanionProjection,
 ): output is CompanionProjection {
   return output.type === 'surface-snapshot' || output.type === 'conversation-snapshot'
-    || output.type === 'transcript-page' || output.type === 'foreground-sync'
+    || output.type === 'transcript-page' || output.type === 'foreground-sync' || output.type === 'session-live'
 }
 
 function attachmentRejected(
@@ -900,4 +1164,22 @@ function codePointCount(value: string): number {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hostEventSessionId(payload: unknown): CompanionSessionId | undefined {
+  if (!isRecord(payload) || typeof payload.type !== 'string' || typeof payload.sessionId !== 'string') return undefined
+  if (payload.type !== 'session/event' && payload.type !== 'session/subscribed'
+    && payload.type !== 'approval/requested' && payload.type !== 'approval/resolved'
+    && payload.type !== 'question/requested' && payload.type !== 'question/resolved'
+    && payload.type !== 'session/queue' && payload.type !== 'session/jobs'
+    && payload.type !== 'session/projection' && payload.type !== 'host/session-added'
+    && payload.type !== 'host/session-removed' && payload.type !== 'host/session-status'
+    && payload.type !== 'host/agent-error') return undefined
+  return parseCompanionSessionId(payload.sessionId)
+}
+
+function isHostSurfaceAuthorityEvent(payload: unknown): boolean {
+  if (!isRecord(payload)) return false
+  return payload.type === 'host/workspace-changed' || payload.type === 'host/workspace-removed'
+    || payload.type === 'host/workspace-order-changed' || payload.type === 'host/archived-sessions-changed'
 }

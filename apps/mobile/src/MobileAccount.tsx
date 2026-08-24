@@ -119,7 +119,7 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
       {snapshot.error !== undefined && <p className={css.error} role="alert">{snapshot.error}</p>}
       {signedIn && companion !== undefined && 'message' in companion.attachment
         && <p className={css.error} role="alert">{companion.attachment.message}</p>}
-      {signedIn && pairing !== undefined && <MobilePairing actions={pairing} />}
+      {signedIn && pairing !== undefined && <MobilePairing actions={pairing} locale={locale} />}
       {signedIn && companion !== undefined && (
         <MobileBrowse
           {...companion}

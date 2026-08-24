@@ -1,16 +1,20 @@
+import { createElement, useSyncExternalStore, type ReactNode } from 'react'
 import { readFileSync } from 'node:fs'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import LocalAttachmentStore from '@deepseek-ai/dsh-attachment-local'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { createApiProxy, toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { WebSocketDownlinks } from '@deepseek-ai/dsh-client-connection/src/websocket-downlink.ts'
 import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
   generateRelayCredential,
@@ -20,6 +24,7 @@ import {
   parseRelayRouteId,
   REMOTE_PROTOCOL_LIMITS,
   type CompanionOperationFailedResult,
+  type CompanionCreateSessionOperation,
   type CompanionSearchSessionsOperation,
   type CompanionSessionSearchResult,
   type CompanionProjection,
@@ -39,6 +44,7 @@ import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { DesktopCompanionProductOwner } from '../src/companion-product.ts'
 import type { DesktopCompanionOperationOutput, DesktopCompanionPairingDependencies } from '../src/companion-product.ts'
 import {
@@ -55,7 +61,10 @@ import {
   MobileSnowCompanionConnection, MobileSnowCompanionProductChannel,
 } from '../../mobile/src/noise-companion-product.ts'
 import { MobileNoiseCompanionReceiver } from '../../mobile/src/noise-companion.ts'
+import { MobileBrowse } from '../../mobile/src/MobileBrowse.tsx'
+import { fixedMobilePresentationClock } from '../../mobile/src/mobile-clock.ts'
 import { runHost400CodecProbe } from './host-400-codec-probe.ts'
+import { DesktopSnowRelayChannelOwner } from '../src/remote-relay.ts'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -64,6 +73,123 @@ afterEach(async () => {
 })
 
 describe('assembled Desktop Companion Host search', () => {
+  it('creates Workspace-owned and Ungrouped Sessions from shipped Mobile buttons through Snow and the real Host', async () => {
+    installMobileDom()
+    const { cleanup, fireEvent, render, screen, waitFor, within } = await import('@testing-library/react')
+    cleanups.push(async () => { cleanup() })
+    const assembled = await startDesktopHost('indexed', 'assembled create baseline', true)
+    const workspace = await assembled.ctx.workspaceRegistry.create(assembled.root, 'Assembled Workspace')
+    await workspace.attachSession(assembled.sessionId)
+    const owner = productOwner(assembled.url)
+    const ledgerPath = join(assembled.root, 'companion-create-operations.json')
+    owner.installLedger(await DesktopCompanionOperationLedger.load(
+      new FileDesktopCompanionOperationStore(ledgerPath),
+    ))
+    const channels = await snowProductChannels()
+    const runtime = connectedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    connection.connect({
+      channel: channels.mobile, targetAttachmentId: channels.desktopAttachmentId,
+      pairingSelector: channels.pairingSelector, generation: channels.generation,
+    })
+    const surface = new MobileCompanionSurface(runtime)
+    const receiverRef: { current?: MobileNoiseCompanionReceiver } = {}
+    const createOperations: CompanionCreateSessionOperation[] = []
+    const received: CompanionResult[] = []
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection,
+      operationSettlement: assembledOperationSettlement('desktop-create'),
+      installation: { authorizeCurrentInstallation: async () => ({
+        accessToken: 'assembled-current-installation',
+        proof: { jti: 'assembled-proof' as never, issuedAt: 1, signature: 'assembled-signature' },
+      }) },
+      attachmentKeys: { attachmentKeyMaterial: () => channels.attachmentKey.slice() },
+      platformOrigin: 'https://operated-platform.test',
+      trackSurfaceRefresh: (submission) => { surface.trackSurfaceRefresh(submission) },
+      sendCiphertext: async (_target, ciphertext) => {
+        await Promise.resolve()
+        const opened = channels.desktop.open(ciphertext)
+        if (opened.type !== 'operation') throw new Error('assembled Desktop expected a Companion operation')
+        if (opened.operation.type === 'create-session') createOperations.push(opened.operation)
+        const output = await owner.handle(opened.operation, pairingDependencies(owner, channels))
+        const receiver = receiverRef.current
+        if (receiver === undefined) throw new Error('assembled Mobile receiver is not installed')
+        for (const item of isResultList(output) ? output : [output]) {
+          receiver.receive(channels.desktop.seal(isProjection(item)
+            ? { type: 'projection', projection: item }
+            : { type: 'result', result: item }))
+        }
+      },
+    })
+    const connectionChannel = {
+      mutations: product,
+      content: { loadImage: async (sessionId: string, attachment: never) => await product.loadImage(sessionId, attachment) },
+    }
+    const receiver = new MobileNoiseCompanionReceiver(
+      channels.mobile, channels.generation, runtime,
+      () => ({ acceptValidatedCompanionResult: (result) => {
+        received.push(result)
+        product.acceptResult(result)
+        surface.bindValidatedCompanionResults()?.acceptValidatedCompanionResult(result)
+      } }),
+      () => surface.bindAuthenticatedConnection(connectionChannel),
+      () => { surface.trackSurfaceRefresh(product.refreshSurface()) },
+    )
+    receiverRef.current = receiver
+    receiver.receive(channels.desktop.seal({
+      type: 'projection',
+      projection: {
+        type: 'foreground-sync', desktopName: 'Assembled Desktop',
+        generation: channels.generation, desktopRevision: 1,
+      },
+    }))
+    await expect.poll(() => surface.getSnapshot().workspaces.map(item => item.workspaceId))
+      .toContain(workspace.id)
+
+    render(createElement(AssembledMobileBrowse, { surface, runtime }))
+    const initialIds = new Set(surface.getSnapshot().sessions.ids)
+    fireEvent.click(within(screen.getByRole('region', { name: 'Assembled Workspace' }))
+      .getByRole('button', { name: 'New Session in Assembled Workspace' }))
+    await waitFor(() => { expect(createOperations).toHaveLength(1) })
+    await waitFor(() => { expect(received).toHaveLength(1) })
+    expect(received[0]).toMatchObject({ type: 'session-created' })
+    await waitFor(() => { expect(surface.getSnapshot().sessions.ids).toHaveLength(initialIds.size + 1) })
+    const workspaceSessionId = surface.getSnapshot().sessions.ids.find(id => !initialIds.has(id))
+    if (workspaceSessionId === undefined) throw new Error('Workspace-owned Session was not projected')
+    await screen.findByRole('heading', { name: workspaceSessionId })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(within(screen.getByRole('region', { name: 'Assembled Workspace' }))
+      .getByRole('treeitem', { name: 'New Session' }).getAttribute('data-session-row')).toBe(workspaceSessionId)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New ungrouped Session' }))
+    await waitFor(() => { expect(surface.getSnapshot().sessions.ids).toHaveLength(initialIds.size + 2) })
+    const ungroupedSessionId = surface.getSnapshot().sessions.ids.find(id => (
+      !initialIds.has(id) && id !== workspaceSessionId
+    ))
+    if (ungroupedSessionId === undefined) throw new Error('Ungrouped Session was not projected')
+    await screen.findByRole('heading', { name: ungroupedSessionId })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(within(screen.getByRole('region', { name: 'Ungrouped' }))
+      .getByRole('treeitem', { name: 'New Session' }).getAttribute('data-session-row')).toBe(ungroupedSessionId)
+
+    expect(createOperations).toHaveLength(2)
+    expect(createOperations[0]).toMatchObject({ type: 'create-session', workspaceId: workspace.id })
+    expect(createOperations[1]).not.toHaveProperty('workspaceId')
+    const restoredLedger = await DesktopCompanionOperationLedger.load(
+      new FileDesktopCompanionOperationStore(ledgerPath),
+    )
+    for (const operation of createOperations) {
+      await expect(restoredLedger.query(parsePersonalPairingId(channels.pairingSelector), operation.operationId))
+        .resolves.toMatchObject({ type: 'session-created', operationId: operation.operationId })
+      await expect(owner.queryOperationStatus(
+        parsePersonalPairingId(channels.pairingSelector), operation.operationId,
+      )).resolves.toMatchObject({
+        type: 'status', operationId: operation.operationId,
+        committed: { type: 'session-created', operationId: operation.operationId },
+      })
+    }
+  }, 45_000)
+
   it('projects real Session history and runs submit, cancel, and image bytes through Snow into shared Mobile state', async () => {
     const assembled = await startDesktopHost('indexed', 'assembled v3 history')
     for (const method of ['session.list', 'workspace.list'] as const) {
@@ -78,6 +204,10 @@ describe('assembled Desktop Companion Host search', () => {
       new FileDesktopCompanionOperationStore(join(assembled.root, 'companion-operations.json')),
     ))
     const channels = await snowProductChannels()
+    const disposeLive = owner.connectLiveProjection(
+      parsePersonalPairingId(channels.pairingSelector), () => {}, () => {},
+    )
+    cleanups.push(async () => { disposeLive() })
     const runtime = connectedRuntime()
     const connection = new MobileSnowCompanionConnection()
     connection.connect({
@@ -126,7 +256,7 @@ describe('assembled Desktop Companion Host search', () => {
         },
       }),
       () => surface.bindAuthenticatedConnection(connectionChannel),
-      () => { surface.trackSurfaceRefresh(product.refreshSurface()) },
+      (offset) => { surface.trackSurfaceRefresh(product.refreshSurface(offset)) },
     )
     receiverRef.current = receiver
     receiver.receive(channels.desktop.seal({
@@ -196,6 +326,166 @@ describe('assembled Desktop Companion Host search', () => {
       },
     })).resolves.toEqual({ accepted: true })
     await expect(approval).resolves.toBe('allowed-once')
+  }, 45_000)
+
+  it('pushes committed Host output and hidden Session summaries through the authenticated Snow owner', async () => {
+    const assembled = await startDesktopHost('indexed', 'live projection baseline')
+    const baselineSessionIds = [assembled.sessionId]
+    for (let index = 0; index < REMOTE_PROTOCOL_LIMITS.surfaceSessionRows; index += 1) {
+      const sessionId = SessionId(`desktop-paged-session-${String(index)}`)
+      assembled.ctx.sessions.create(sessionId, {
+        meta: {
+          version: SESSION_FORMAT_VERSION, id: sessionId,
+          createdAt: index + 2, cwd: assembled.root,
+        },
+      })
+      baselineSessionIds.push(sessionId)
+    }
+    const owner = productOwner(assembled.url)
+    const channels = await snowProductChannels()
+    const runtime = connectedRuntime()
+    const connection = new MobileSnowCompanionConnection()
+    connection.connect({
+      channel: channels.mobile, targetAttachmentId: channels.desktopAttachmentId,
+      pairingSelector: channels.pairingSelector, generation: channels.generation,
+    })
+    const surface = new MobileCompanionSurface(runtime)
+    const operationTypes: string[] = []
+    const reconnectFailures: Error[] = []
+    let sends = 0
+    const relayOwner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+      targetAttachmentId: channels.mobileAttachmentId,
+      payload: Uint8Array.of(77),
+      channel: channels.desktop,
+      pairingSelector: channels.pairingSelector,
+      generation: channels.generation,
+    }) }, async (_selector, _target, ciphertext) => {
+      sends += 1
+      if (sends === 1) return
+      setTimeout(() => { receiver.receive(ciphertext) }, 0)
+    }, async (operation) => {
+      operationTypes.push(operation.type)
+      if (operation.type === 'query-operation-status') {
+        return await owner.queryOperationStatus(
+          parsePersonalPairingId(channels.pairingSelector), operation.operationId,
+        )
+      }
+      return await owner.handle(operation, pairingDependencies(owner, channels))
+    }, () => 'Assembled Desktop', {
+      connect: (selector, changed, disconnect) => owner.connectLiveProjection(
+        parsePersonalPairingId(selector), changed, disconnect,
+      ),
+      project: async (change, _selector, signal) => await owner.projectLiveSession(
+        change, channels.attachmentKey, signal,
+      ),
+      retainsConversation: (change, selector) => owner.retainsLiveConversation(
+        parsePersonalPairingId(selector), change,
+      ),
+      reconnect: (_selector, error) => { reconnectFailures.push(error) },
+    })
+    const product = new MobileSnowCompanionProductChannel({
+      runtime, connection,
+      operationSettlement: assembledOperationSettlement('desktop-live'),
+      installation: { authorizeCurrentInstallation: async () => ({
+        accessToken: 'assembled-current-installation',
+        proof: { jti: 'assembled-proof' as never, issuedAt: 1, signature: 'assembled-signature' },
+      }) },
+      attachmentKeys: { attachmentKeyMaterial: () => channels.attachmentKey.slice() },
+      platformOrigin: 'https://operated-platform.test',
+      sendCiphertext: async (_target, ciphertext) => {
+        await relayOwner.receive(
+          ciphertext, channels.mobileAttachmentId, channels.desktopAttachmentId,
+          channels.pairingSelector, new AbortController().signal,
+        )
+      },
+      trackHistoryRefresh: (sessionId, submission) => { surface.trackHistoryRefresh(sessionId, submission) },
+      trackSurfaceRefresh: (submission) => { surface.trackSurfaceRefresh(submission) },
+    })
+    const connectionChannel = {
+      mutations: product,
+      content: { loadImage: async (sessionId: string, attachment: never) => await product.loadImage(sessionId, attachment) },
+    }
+    const receiver = new MobileNoiseCompanionReceiver(
+      channels.mobile, channels.generation, runtime,
+      () => ({ acceptValidatedCompanionResult: (result) => {
+        product.acceptResult(result)
+        surface.bindValidatedCompanionResults()?.acceptValidatedCompanionResult(result)
+      } }),
+      () => surface.bindAuthenticatedConnection(connectionChannel),
+      (offset) => { surface.trackSurfaceRefresh(product.refreshSurface(offset)) },
+    )
+    relayOwner.updatePeers({
+      type: 'ready', transportVersion: 1,
+      routeId: parseRelayRouteId('route-assembled-snow'),
+      attachmentId: channels.desktopAttachmentId,
+      peers: [{
+        attachmentId: channels.mobileAttachmentId,
+        pairingSelector: channels.pairingSelector,
+        generation: channels.generation,
+      }],
+    }, channels.pairingSelector)
+    await relayOwner.receive(
+      Uint8Array.of(1), channels.mobileAttachmentId, channels.desktopAttachmentId,
+      channels.pairingSelector, new AbortController().signal,
+    )
+    await expect.poll(() => baselineSessionIds.every(id => surface.getSnapshot().sessions.ids.includes(id))).toBe(true)
+    expect(surface.getSnapshot().sessions.ids).toHaveLength(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows + 1)
+    const observation = product.observeSession(assembled.sessionId)
+    await expect(observation.completion).resolves.toBeUndefined()
+    await expect.poll(() => surface.getSnapshot().conversations[assembled.sessionId] !== undefined).toBe(true)
+    const historyOperations = operationTypes.filter(type => type === 'load-history').length
+
+    assembled.session.append('turn/start', { turn: 1 })
+    assembled.session.append('step/start', { turn: 1, step: 1 })
+    assembled.session.append('assistant/chunk', {
+      turn: 1, step: 1, chunk: { type: 'block-start', index: 0, blockType: 'text' },
+    })
+    assembled.session.append('assistant/chunk', {
+      turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text: 'LIVE_PUSH_OK' },
+    })
+    await expect.poll(() => surface.getSnapshot().conversations[assembled.sessionId]?.partial)
+      .toMatchObject({ blocks: [{ kind: 'text', text: 'LIVE_PUSH_OK' }] })
+    expect(operationTypes.filter(type => type === 'load-history')).toHaveLength(historyOperations)
+
+    const hiddenId = SessionId('desktop-hidden-session')
+    const hidden = assembled.ctx.sessions.create(hiddenId, {
+      meta: {
+        version: SESSION_FORMAT_VERSION, id: hiddenId, createdAt: 2, cwd: assembled.root,
+      },
+    })
+    hidden.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'hidden summary change' }], source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    await expect.poll(() => surface.getSnapshot().sessions.ids.includes(hiddenId)).toBe(true)
+    expect(surface.getSnapshot().conversations[hiddenId]).toBeUndefined()
+
+    const secondaryRoot = join(assembled.root, 'secondary')
+    await mkdir(secondaryRoot)
+    const secondaryId = SessionId('desktop-secondary-workspace-session')
+    assembled.ctx.sessions.create(secondaryId, {
+      meta: {
+        version: SESSION_FORMAT_VERSION, id: secondaryId,
+        createdAt: 100, cwd: secondaryRoot,
+      },
+    })
+    const secondaryWorkspace = await assembled.ctx.workspaceRegistry.create(secondaryRoot, 'Secondary')
+    await secondaryWorkspace.attachSession(secondaryId)
+    const primaryWorkspace = await assembled.ctx.workspaceRegistry.create(assembled.root, 'Primary')
+    await primaryWorkspace.attachSession(assembled.sessionId)
+    await expect.poll(() => surface.getSnapshot().workspaces.map(workspace => workspace.workspaceId))
+      .toEqual([primaryWorkspace.id, secondaryWorkspace.id])
+    await assembled.ctx.workspaceRegistry.insertBefore(primaryWorkspace.id)
+    await expect.poll(() => surface.getSnapshot().workspaces.map(workspace => workspace.workspaceId))
+      .toEqual([secondaryWorkspace.id, primaryWorkspace.id])
+    await assembled.ctx.workspaceRegistry.delete(secondaryWorkspace.id)
+    await expect.poll(() => surface.getSnapshot().workspaces.map(workspace => workspace.workspaceId))
+      .toEqual([primaryWorkspace.id])
+    await assembled.ctx.workspaceRegistry.archiveSession(assembled.sessionId)
+    await expect.poll(() => surface.getSnapshot().sessions.ids.includes(assembled.sessionId)).toBe(false)
+    expect(surface.getSnapshot().conversations[assembled.sessionId]).toBeUndefined()
+    expect(reconnectFailures).toEqual([])
+    relayOwner.invalidate(channels.pairingSelector)
+    await relayOwner.drain()
   }, 45_000)
 
   it('runs shipped Mobile mutations through Snow into the real Desktop Host', async () => {
@@ -396,9 +686,60 @@ function assembledSessionId(): SessionId {
   return 'session-fence-nonce' as SessionId
 }
 
+function installMobileDom(): void {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'https://mobile.test' })
+  vi.stubGlobal('window', dom.window)
+  vi.stubGlobal('document', dom.window.document)
+  vi.stubGlobal('navigator', dom.window.navigator)
+  vi.stubGlobal('HTMLElement', dom.window.HTMLElement)
+  vi.stubGlobal('Node', dom.window.Node)
+  vi.stubGlobal('Event', dom.window.Event)
+  vi.stubGlobal('MouseEvent', dom.window.MouseEvent)
+  vi.stubGlobal('MutationObserver', dom.window.MutationObserver)
+  vi.stubGlobal('getComputedStyle', dom.window.getComputedStyle.bind(dom.window))
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  cleanups.push(async () => {
+    dom.window.close()
+    vi.unstubAllGlobals()
+  })
+}
+
+function AssembledMobileBrowse({
+  surface,
+  runtime,
+}: {
+  surface: MobileCompanionSurface
+  runtime: CompanionForegroundRuntime
+}): ReactNode {
+  const snapshot = useSyncExternalStore(
+    listener => surface.subscribe(listener),
+    () => surface.getSnapshot(),
+  )
+  const connection = useSyncExternalStore(
+    listener => runtime.subscribe(listener),
+    () => runtime.getState(),
+  )
+  if (snapshot.desktopName === undefined) return null
+  return createElement(MobileBrowse, {
+    desktopName: snapshot.desktopName,
+    connection: connection.socketOpen && connection.synchronized ? 'online' : 'offline',
+    sessions: snapshot.sessions,
+    workspaces: snapshot.workspaces,
+    conversations: snapshot.conversations,
+    locale: 'en',
+    theme: 'light',
+    loadImage: surface.loadImage,
+    canMutate: surface.mayMutate(),
+    clock: fixedMobilePresentationClock(10_000),
+    onCreate: surface.create,
+    search: snapshot.search,
+  })
+}
+
 async function startDesktopHost(
   scenario: 'indexed' | 'disabled' | 'index-failure',
   message: string,
+  enableCreation = false,
 ): Promise<{
   url: string
   root: string
@@ -422,6 +763,14 @@ async function startDesktopHost(
   cleanups.push(async () => { await questions.dispose() })
   const systemPrompt = await ctx.plugin(SystemPrompt, { persona: '' })
   cleanups.push(async () => { await systemPrompt.dispose() })
+  if (enableCreation) {
+    const llm = await ctx.plugin(LlmRuntime)
+    cleanups.push(async () => { await llm.dispose() })
+    const tools = await ctx.plugin(ToolRuntime)
+    cleanups.push(async () => { await tools.dispose() })
+    const agentLoop = await ctx.plugin(AgentLoop, { agents: [] })
+    cleanups.push(async () => { await agentLoop.dispose() })
+  }
   const approval = await ctx.plugin(ApprovalService)
   cleanups.push(async () => { await approval.dispose() })
   const attachments = await ctx.plugin(LocalAttachmentStore, { dshHome: root })
@@ -479,11 +828,14 @@ async function startDesktopHost(
     defaultModelSelection: () => ({ provider: 'assembled-provider', model: 'assembled-model' }),
     cwd: root,
   })
-  const url = await startHttpCarrier(toFetchHandler(api))
+  const url = await startHttpCarrier(toFetchHandler(api), new WebSocketDownlinks(api))
   return { url, root, sessionId, session, image, cancelled, ctx, agent }
 }
 
-async function startHttpCarrier(handler: { fetch(request: Request): Promise<Response> }): Promise<string> {
+async function startHttpCarrier(
+  handler: { fetch(request: Request): Promise<Response> },
+  downlinks: WebSocketDownlinks,
+): Promise<string> {
   const server = createServer((request, response) => {
     void (async () => {
       const chunks: Buffer[] = []
@@ -521,6 +873,12 @@ async function startHttpCarrier(handler: { fetch(request: Request): Promise<Resp
       response.end(error instanceof Error ? error.message : String(error))
     })
   })
+  server.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url ?? '/', 'http://desktop-companion.test').pathname
+    if (pathname === '/api/events.mux') downlinks.handleMux(request, socket, head)
+    else if (pathname === '/api/events.host') downlinks.handleHost(request, socket, head)
+    else socket.destroy()
+  })
   await new Promise<void>((resolveListen, rejectListen) => {
     server.once('error', rejectListen)
     server.listen(0, '127.0.0.1', () => {
@@ -529,6 +887,7 @@ async function startHttpCarrier(handler: { fetch(request: Request): Promise<Resp
     })
   })
   cleanups.push(async () => {
+    await downlinks.close()
     server.closeAllConnections()
     await new Promise<void>((resolveClose, rejectClose) => {
       server.close((error) => { if (error === undefined) resolveClose(); else rejectClose(error) })
@@ -556,6 +915,7 @@ async function snowProductChannels(): Promise<{
   attachmentKey: Uint8Array
   pairingSelector: ReturnType<typeof parseRelayPairingSelector>
   desktopAttachmentId: ReturnType<typeof parseRelayAttachmentId>
+  mobileAttachmentId: ReturnType<typeof parseRelayAttachmentId>
   generation: number
 }> {
   initializeSnowChannel(readFileSync(new URL(
@@ -589,7 +949,7 @@ async function snowProductChannels(): Promise<{
   return {
     mobile: new SnowCompanionProtocolChannel(initiator.finish(responder.message2)),
     desktop: new SnowCompanionProtocolChannel(responder.channel),
-    attachmentKey, pairingSelector, desktopAttachmentId, generation,
+    attachmentKey, pairingSelector, desktopAttachmentId, mobileAttachmentId, generation,
   }
 }
 

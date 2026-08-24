@@ -26,7 +26,7 @@ The assembled Desktop test starts real file Session persistence, Workspace stora
 
 **Send Client Runtime classes and responders.** Rejected because maps, closures, and Host rpc ids are process-local authority. The JSON protocol carries data only, and the authenticated Mobile adapter reconstructs the [shared presentation](2026-08-22-shared-mobile-web-presentation.md).
 
-**Add a general live event stream.** Rejected because foreground synchronization, mutation confirmations, and bounded refreshes provide the required ownership without another multiplexed transport and replay model.
+**Add a general raw live event stream.** Rejected because Host envelopes would require another multiplexed replay model. The later [bounded live Session projection](2026-08-24-companion-live-session-projection.md) carries authoritative replacements instead of raw events.
 
 ## Consequences
 

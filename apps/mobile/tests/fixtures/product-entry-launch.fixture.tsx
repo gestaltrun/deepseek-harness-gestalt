@@ -1,4 +1,5 @@
 import type { PlatformAccountInstallation } from '@deepseek-ai/dsh-platform-account-client'
+import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
   parseRelayCredential,
   parseRelayRouteId,
@@ -7,12 +8,13 @@ import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { CompanionForegroundRuntime } from '../../src/companion-lifecycle.ts'
 import { fixedMobilePresentationClock } from '../../src/mobile-clock.ts'
 import { mountMobileEntry } from '../../src/mobile-entry.tsx'
+import type { MobilePairingActions } from '../../src/personal-pairing-model.ts'
 import type {
   MobileCompanionConnectionChannel,
   ValidatedDesktopSurfaceResync,
 } from '../../src/companion-surface.ts'
 
-type EvidenceMode = 'approval' | 'question' | 'composer'
+type EvidenceMode = 'approval' | 'question' | 'composer' | 'live'
 
 declare global {
   interface Window {
@@ -23,6 +25,7 @@ declare global {
 }
 
 const SESSION_ID = 'shared-session' as SessionId
+const BACKGROUND_SESSION_ID = 'background-session' as SessionId
 const LONG_TEXT = Array.from({ length: 80 }, (_, index) => `long-line-${String(index)}`).join('\n')
 
 /** Built-entry fixture launch; selected only by the snapshot Vite resolver. */
@@ -39,6 +42,7 @@ export function launchMobileProduct(_start: () => Promise<void>): Promise<void> 
   runtime.markConnectionOpen()
   const mounted = mountMobileEntry(root, {
     installation: signedInInstallation(),
+    pairing: pairedDesktops(),
     companion: runtime,
     clock: fixedMobilePresentationClock(10_000),
   })
@@ -50,6 +54,29 @@ export function launchMobileProduct(_start: () => Promise<void>): Promise<void> 
   window.__DSH_MOBILE_PRODUCT_EVIDENCE__ = { show }
   show('approval')
   return Promise.resolve()
+}
+
+function pairedDesktops(): MobilePairingActions {
+  const selected = parsePersonalPairingId('pairing-product-entry')
+  const snapshot = {
+    status: 'paired' as const,
+    desktops: [
+      { pairingId: selected, desktopName: 'Authenticated Shared Desktop' },
+      { pairingId: parsePersonalPairingId('pairing-secondary'), desktopName: 'Secondary Desktop' },
+    ],
+    selectedPairingId: selected,
+  }
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: () => () => {},
+    completeLink: () => {},
+    scanQr: () => {},
+    retryPairing: () => {},
+    selectDesktop: () => {},
+    activate: async () => {},
+    deactivate: async () => {},
+    unpair: async () => {},
+  }
 }
 
 function signedInInstallation(): PlatformAccountInstallation {
@@ -80,6 +107,7 @@ function connectionChannel(): MobileCompanionConnectionChannel {
       cancel: tracked,
       attach: tracked,
       search: tracked,
+      observeSession: tracked,
       loadOlder: tracked,
       settle: async () => ({ accepted: true }),
     },
@@ -90,13 +118,14 @@ function connectionChannel(): MobileCompanionConnectionChannel {
 }
 
 function projection(mode: EvidenceMode): ValidatedDesktopSurfaceResync {
+  const live = mode === 'live'
   return {
     type: 'desktop-resync',
     version: 1,
     authenticated: true,
     desktopName: 'Authenticated Shared Desktop',
     sessions: {
-      ids: [SESSION_ID],
+      ids: live ? [SESSION_ID, BACKGROUND_SESSION_ID] : [SESSION_ID],
       byId: {
         [SESSION_ID]: {
           id: SESSION_ID,
@@ -107,6 +136,17 @@ function projection(mode: EvidenceMode): ValidatedDesktopSurfaceResync {
           blank: false,
           updatedAt: 1,
         },
+        ...(live ? {
+          [BACKGROUND_SESSION_ID]: {
+            id: BACKGROUND_SESSION_ID,
+            title: 'Background Session Updated Live',
+            displayTitle: 'Background Session Updated Live',
+            cwd: '/work',
+            running: false,
+            blank: false,
+            updatedAt: 2,
+          },
+        } : {}),
       },
       current: null,
       phase: 'ready',
@@ -118,7 +158,7 @@ function projection(mode: EvidenceMode): ValidatedDesktopSurfaceResync {
       workspaceId: 'workspace-shared',
       path: '/work',
       title: 'Shared Workspace',
-      sessionIds: [SESSION_ID],
+      sessionIds: live ? [SESSION_ID, BACKGROUND_SESSION_ID] : [SESSION_ID],
       createdAt: '2026-08-23T00:00:00.000Z',
       updatedAt: '2026-08-23T00:00:00.000Z',
     }],
@@ -154,7 +194,9 @@ function conversation(mode: EvidenceMode): ValidatedDesktopSurfaceResync['conver
     ],
     turnTimings: [],
     turnEnds: [],
-    partial: null,
+    partial: mode === 'live'
+      ? { turn: 2, step: 1, blocks: [{ kind: 'text', text: 'LIVE_PUSH_OK' }] }
+      : null,
     runningCalls: mode === 'approval'
       ? [{
         callId: 'approval-call', name: 'bash', argsRaw: JSON.stringify({ command: LONG_TEXT }),

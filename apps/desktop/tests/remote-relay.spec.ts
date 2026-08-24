@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  createCompanionNegotiationChannel, createCompanionVersionOffer, encodeCompanionMessage,
   decodeRelayMessage, encodeRelayMessage, parseRelayAttachmentId, parseRelayPairingSelector,
-  parseRelayAttachChallengeId,
+  negotiateCompanionProtocol, parseRelayAttachChallengeId,
   generateRelayCredential,
   REMOTE_PROTOCOL_LIMITS,
 } from '@deepseek-ai/dsh-remote-protocol'
@@ -19,6 +20,8 @@ import {
 import { parsePairingChallengeId, parsePendingPairingId, parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { NodeRelayEndpointSocket } from '@deepseek-ai/dsh-remote-access-client/node-relay-socket'
 import type { RelayEndpointSocket } from '@deepseek-ai/dsh-remote-access-client'
+import type { DesktopCompanionLiveProjectionChange } from '../src/companion-live-projection.ts'
+import { DesktopCompanionLiveProjectionSource } from '../src/companion-live-projection.ts'
 
 const DEVELOPMENT = {
   environment: 'development',
@@ -197,6 +200,253 @@ describe('Desktop Remote Relay composition', () => {
     expect(send).toHaveBeenCalledWith(selector, mobileAttachmentId, Uint8Array.of(9))
   })
 
+  it('coalesces active Host changes behind one ordered Snow sender and advances projection revisions', async () => {
+    const selector = parseRelayPairingSelector('pairing-live')
+    const desktopAttachmentId = parseRelayAttachmentId('desktop-live')
+    const mobileAttachmentId = parseRelayAttachmentId('mobile-live')
+    const channel = fakeSnowChannel()
+    let changed: ((change: DesktopCompanionLiveProjectionChange) => void) | undefined
+    const firstProjection = deferred<Record<string, unknown>>()
+    const project = vi.fn()
+      .mockImplementationOnce(async () => await firstProjection.promise)
+      .mockResolvedValue({
+        sessionId: 'session-live', position: 0,
+        summary: {
+          sessionId: 'session-live', displayTitle: 'Live', running: true,
+          blank: false, updatedAt: 2,
+        },
+        workspaces: [],
+      })
+    const reconnect = vi.fn()
+    const disposeLive = vi.fn()
+    const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+      pairingSelector: selector, generation: 1,
+    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+      connect: (_pairingSelector, listener) => { changed = listener; return disposeLive },
+      project,
+      retainsConversation: () => false,
+      reconnect,
+    })
+    owner.updatePeers({
+      type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-live'),
+      attachmentId: desktopAttachmentId,
+      peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+    }, selector)
+    await owner.receive(
+      Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    channel.seal.mockClear()
+    const change = {
+      type: 'session', sessionId: 'session-live', includeConversation: false, observationEpoch: 0,
+    } as DesktopCompanionLiveProjectionChange
+    changed?.(change)
+    changed?.(change)
+    changed?.(change)
+    await vi.waitFor(() => { expect(project).toHaveBeenCalledOnce() })
+    firstProjection.resolve({
+      sessionId: 'session-live', position: 0,
+      summary: {
+        sessionId: 'session-live', displayTitle: 'Live', running: true,
+        blank: false, updatedAt: 1,
+      },
+      workspaces: [],
+    })
+
+    await vi.waitFor(() => { expect(channel.seal).toHaveBeenCalledTimes(2) })
+    const sealed = channel.seal.mock.calls.map(call => call[0])
+    expect(sealed[0]).toMatchObject({
+      type: 'projection',
+      projection: { type: 'session-live', desktopRevision: 2, summary: { updatedAt: 1 } },
+    })
+    expect(sealed[1]).toMatchObject({
+      type: 'projection',
+      projection: { type: 'session-live', desktopRevision: 3, summary: { updatedAt: 2 } },
+    })
+    expect(reconnect).not.toHaveBeenCalled()
+    owner.invalidate(selector)
+    expect(disposeLive).toHaveBeenCalledOnce()
+  })
+
+  it.each(['switch', 'close'] as const)(
+    'drops a projected conversation when Mobile performs a deferred observation %s',
+    async (event) => {
+      const selector = parseRelayPairingSelector(`pairing-observation-${event}`)
+      const pairingId = parsePersonalPairingId(selector)
+      const desktopAttachmentId = parseRelayAttachmentId(`desktop-observation-${event}`)
+      const mobileAttachmentId = parseRelayAttachmentId(`mobile-observation-${event}`)
+      const channel = fakeSnowChannel()
+      const source = new DesktopCompanionLiveProjectionSource()
+      const firstProjection = deferred<Record<string, unknown>>()
+      const project = vi.fn()
+        .mockImplementationOnce(async () => await firstProjection.promise)
+        .mockResolvedValue({
+          sessionId: 'session-observed', position: 0,
+          summary: liveSummary('session-observed', 2), workspaces: [],
+        })
+      const reconnect = vi.fn()
+      const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+        pairingSelector: selector, generation: 1,
+      }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+        connect: (_selector, listener, disconnect) => source.connect(pairingId, listener, disconnect),
+        project,
+        retainsConversation: change => source.retainsConversation(pairingId, change),
+        reconnect,
+      })
+      owner.updatePeers({
+        type: 'ready', transportVersion: 1, routeId: parseRelayRouteId(`route-observation-${event}`),
+        attachmentId: desktopAttachmentId,
+        peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+      }, selector)
+      await owner.receive(
+        Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+      )
+      channel.seal.mockClear()
+      source.observe(pairingId, 'session-observed' as never)
+      await vi.waitFor(() => { expect(project).toHaveBeenCalledOnce() })
+      source.observe(pairingId, event === 'switch' ? 'session-replacement' as never : undefined)
+      firstProjection.resolve({
+        sessionId: 'session-observed', position: 0,
+        summary: liveSummary('session-observed', 1), workspaces: [],
+        conversation: liveConversation('session-observed', [{
+          kind: 'assistant', seq: 1, time: 1, blocks: [{ kind: 'text', text: 'must not leak' }],
+        }]),
+      })
+
+      await vi.waitFor(() => { expect(channel.seal).toHaveBeenCalled() })
+      const first = channel.seal.mock.calls[0]?.[0]
+      expect(first).toMatchObject({
+        type: 'projection',
+        projection: { type: 'session-live', sessionId: 'session-observed' },
+      })
+      expect(first).not.toHaveProperty('projection.conversation')
+      expect(reconnect).not.toHaveBeenCalled()
+      owner.invalidate(selector)
+      await owner.drain()
+    },
+  )
+
+  it.each([
+    ['one oversized latest entry', [
+      { kind: 'assistant', seq: 7, time: 7, blocks: [{ kind: 'text', text: 'x'.repeat(55 * 1_024) }] },
+    ]],
+    ['a cumulative transcript tail', Array.from({ length: 12 }, (_, index) => ({
+      kind: 'assistant', seq: index + 1, time: index + 1,
+      blocks: [{ kind: 'text', text: `${String(index)}:${'y'.repeat(6 * 1_024)}` }],
+    }))],
+  ] as const)(
+    'bounds %s before Snow sealing without reconnecting',
+    async (_scenario, nodes) => {
+      const selector = parseRelayPairingSelector('pairing-live-bytes')
+      const desktopAttachmentId = parseRelayAttachmentId('desktop-live-bytes')
+      const mobileAttachmentId = parseRelayAttachmentId('mobile-live-bytes')
+      const channel = fakeSnowChannel()
+      const protocol = negotiateCompanionProtocol(
+        createCompanionNegotiationChannel(),
+        createCompanionVersionOffer('mobile', [4]),
+        createCompanionVersionOffer('desktop', [4]),
+      )
+      channel.seal.mockImplementation((message) => {
+        encodeCompanionMessage(protocol, message)
+        return Uint8Array.of(9)
+      })
+      let changed: ((change: DesktopCompanionLiveProjectionChange) => void) | undefined
+      const reconnect = vi.fn()
+      const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+        pairingSelector: selector, generation: 1,
+      }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+        connect: (_selector, listener) => { changed = listener; return () => {} },
+        project: async () => ({
+          sessionId: 'session-live-bytes', position: 0,
+          summary: liveSummary('session-live-bytes', 1), workspaces: [],
+          conversation: liveConversation('session-live-bytes', nodes),
+        }),
+        retainsConversation: () => true,
+        reconnect,
+      })
+      owner.updatePeers({
+        type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-live-bytes'),
+        attachmentId: desktopAttachmentId,
+        peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+      }, selector)
+      await owner.receive(
+        Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+      )
+      channel.seal.mockClear()
+      changed?.({
+        type: 'session', sessionId: 'session-live-bytes' as never,
+        includeConversation: true, observationEpoch: 1,
+      })
+      await owner.drain()
+
+      expect(reconnect).not.toHaveBeenCalled()
+      expect(channel.dispose).not.toHaveBeenCalled()
+      const sealed = channel.seal.mock.calls[0]?.[0]
+      if (sealed?.type !== 'projection' || sealed.projection.type !== 'session-live'
+        || !('conversation' in sealed.projection) || !isRecord(sealed.projection.conversation)) {
+        throw new Error('expected bounded live conversation')
+      }
+      expect(encodeCompanionMessage(protocol, sealed).byteLength)
+        .toBeLessThanOrEqual(REMOTE_PROTOCOL_LIMITS.transcriptPageBytes)
+      const projectedNodes = sealed.projection.conversation.nodes
+      expect(Array.isArray(projectedNodes)).toBe(true)
+      expect(projectedNodes).not.toHaveLength(0)
+      expect((projectedNodes as Array<{ seq: number }>).at(-1)?.seq).toBe(nodes.at(-1)?.seq)
+      expect(JSON.stringify(projectedNodes)).toContain(nodes.length === 1 ? '…' : '11:')
+      owner.invalidate(selector)
+    },
+  )
+
+  it('retires and reconnects a channel when distinct live Sessions exceed the bounded queue', async () => {
+    const selector = parseRelayPairingSelector('pairing-live-overflow')
+    const desktopAttachmentId = parseRelayAttachmentId('desktop-live-overflow')
+    const mobileAttachmentId = parseRelayAttachmentId('mobile-live-overflow')
+    const channel = fakeSnowChannel()
+    let changed: ((change: DesktopCompanionLiveProjectionChange) => void) | undefined
+    const firstProjection = deferred<Record<string, unknown>>()
+    const reconnect = vi.fn()
+    const disposeLive = vi.fn()
+    const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+      pairingSelector: selector, generation: 1,
+    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+      connect: (_pairingSelector, listener) => { changed = listener; return disposeLive },
+      project: async () => await firstProjection.promise,
+      retainsConversation: () => false,
+      reconnect,
+    })
+    owner.updatePeers({
+      type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-live-overflow'),
+      attachmentId: desktopAttachmentId,
+      peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+    }, selector)
+    await owner.receive(
+      Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+
+    changed?.({
+      type: 'session', sessionId: 'session-live-active', includeConversation: false, observationEpoch: 0,
+    } as DesktopCompanionLiveProjectionChange)
+    await Promise.resolve()
+    for (let index = 0; index <= REMOTE_PROTOCOL_LIMITS.liveProjectionPendingSessions; index += 1) {
+      changed?.({
+        type: 'session', sessionId: `session-live-${String(index)}`,
+        includeConversation: false, observationEpoch: 0,
+      } as DesktopCompanionLiveProjectionChange)
+    }
+
+    expect(reconnect).toHaveBeenCalledWith(selector, expect.objectContaining({
+      message: 'Companion live projection consumer exceeded its pending Session ceiling',
+    }))
+    expect(disposeLive).toHaveBeenCalledOnce()
+    expect(channel.dispose).toHaveBeenCalledOnce()
+    firstProjection.resolve({ sessionId: 'session-live-active', removed: true })
+    await owner.drain()
+    expect(channel.seal).toHaveBeenCalledTimes(1)
+  })
+
   it('revalidates peer generation after accept and after the IK response send', async () => {
     const selector = parseRelayPairingSelector('pairing-revalidate')
     const desktopAttachmentId = parseRelayAttachmentId('desktop-revalidate')
@@ -257,7 +507,7 @@ describe('Desktop Remote Relay composition', () => {
     ['IK response', 1],
     ['foreground synchronization', 2],
   ] as const)(
-    'disposes an unpublished channel when the %s send fails and retries without advancing revision',
+    'disposes an unpublished channel when the %s send fails and keeps revisions monotonic',
     async (_stage, failedSend) => {
       const selector = parseRelayPairingSelector(`pairing-send-${String(failedSend)}`)
       const desktopAttachmentId = parseRelayAttachmentId(`desktop-send-${String(failedSend)}`)
@@ -295,7 +545,10 @@ describe('Desktop Remote Relay composition', () => {
       )
       expect(accept).toHaveBeenCalledTimes(2)
       expect(recoveredChannel.seal).toHaveBeenCalledWith({
-        type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 1, desktopRevision: 1 },
+        type: 'projection', projection: {
+          type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 1,
+          desktopRevision: failedSend === 2 ? 2 : 1,
+        },
       })
       owner.invalidate(selector)
       expect(failedChannel.dispose).toHaveBeenCalledOnce()
@@ -592,15 +845,14 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   return { promise, resolve }
 }
 
-function fakeSnowChannel(): {
-  channel: SnowCompanionProtocolChannel
-  open: ReturnType<typeof vi.fn>
-  seal: ReturnType<typeof vi.fn>
-  dispose: ReturnType<typeof vi.fn>
-} {
+function fakeSnowChannel() {
   const channel = Object.create(SnowCompanionProtocolChannel.prototype) as SnowCompanionProtocolChannel
-  const open = vi.fn(() => ({ type: 'result' }))
-  const seal = vi.fn(() => Uint8Array.of(9))
+  const open = vi.fn<(ciphertext: Uint8Array) => ReturnType<SnowCompanionProtocolChannel['open']>>(
+    () => ({ type: 'result', result: { type: 'status', operationId: 'fake' as never, absent: true } }),
+  )
+  const seal = vi.fn<(
+    message: Parameters<SnowCompanionProtocolChannel['seal']>[0],
+  ) => Uint8Array>(() => Uint8Array.of(9))
   const dispose = vi.fn()
   Object.defineProperties(channel, {
     open: { value: open },
@@ -608,4 +860,21 @@ function fakeSnowChannel(): {
     dispose: { value: dispose },
   })
   return { channel, open, seal, dispose }
+}
+
+function liveSummary(sessionId: string, updatedAt: number) {
+  return { sessionId, displayTitle: sessionId, running: true, blank: false, updatedAt }
+}
+
+function liveConversation(sessionId: string, nodes: readonly unknown[]) {
+  return {
+    sessionId, nodes, turnTimings: [], turnEnds: [], partial: null,
+    runningCalls: [], pending: [], queue: [], running: true, subagent: null,
+    composerPhase: 'active', removed: false, openState: 'open', openError: null,
+    hasMore: false, loadingOlder: false, promptError: null, blank: false, lastAgentError: null,
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

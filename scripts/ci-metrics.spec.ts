@@ -78,4 +78,19 @@ describe('CI metrics', () => {
 
     expect(metrics).toMatchObject({ sampleSize: 1, successfulRuns: 0, successRate: 0 })
   })
+
+  it('keeps candidate and master evidence out of pull-request feedback metrics', () => {
+    const candidate = { ...run(6, 'success', [
+      job('candidate verdict', 'success', '2026-08-24T00:00:01.000Z', '2026-08-24T00:00:02.000Z'),
+    ]), event: 'merge_group' }
+    const master = { ...run(7, 'success', [
+      job('master evidence verdict', 'success', '2026-08-24T00:00:01.000Z', '2026-08-24T00:00:02.000Z'),
+    ]), event: 'push' }
+
+    expect(computeCiMetrics([candidate, master])).toMatchObject({
+      sampleSize: 0,
+      includedRunIds: [],
+      excludedRunIds: [6, 7],
+    })
+  })
 })

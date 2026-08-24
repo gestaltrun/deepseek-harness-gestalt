@@ -101,9 +101,10 @@ export function parseCoveragePartitionIndexes(
   partitions: number,
 ): number[] | undefined {
   if (raw === undefined || raw === '') return undefined
-  const indexes = raw.split(',').map(value => Number.parseInt(value, 10))
+  const parts = raw.split(',')
+  const indexes = parts.map(value => Number.parseInt(value, 10))
   if (indexes.length === 0
-    || indexes.some((index, offset) => String(index) !== raw.split(',')[offset])
+    || indexes.some((index, offset) => !Number.isSafeInteger(index) || String(index) !== parts[offset])
     || new Set(indexes).size !== indexes.length
     || indexes.some(index => index < 1 || index > partitions)) {
     throw new Error(`${COVERAGE_PARTITION_INDEXES_ENV} must contain unique integers within 1..${String(partitions)}.`)
@@ -243,8 +244,10 @@ export class CoveragePartitionCoordinator {
       ...invocation,
       env: {
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
+        [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: '1',
+        [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       },
       cwd: this.root,
       blobPath,
@@ -263,8 +266,10 @@ export class CoveragePartitionCoordinator {
       ...invocation,
       env: {
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
+        [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: undefined,
+        [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       },
       cwd: this.root,
     }

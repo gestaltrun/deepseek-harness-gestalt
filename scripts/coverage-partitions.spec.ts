@@ -6,6 +6,7 @@ import {
   COVERAGE_PARTITION_MODE_ENV,
   COVERAGE_PARTITION_CONCURRENCY_ENV,
   COVERAGE_PARTITION_INDEXES_ENV,
+  COVERAGE_PRESERVE_BLOBS_ENV,
   COVERAGE_PARTITIONS_ENV,
   COVERAGE_TEST_TIMEOUT_ENV,
   CoveragePartitionCoordinator,
@@ -205,8 +206,10 @@ describe('coverage partition coordinator', () => {
       ]))
       expect(command.env).toEqual({
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
+        [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: '1',
+        [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       })
     }
     const mergeCommand = commands[3]
@@ -215,8 +218,10 @@ describe('coverage partition coordinator', () => {
     expect(mergeCommand.args.some(argument => argument.startsWith('--merge-reports='))).toBe(true)
     expect(mergeCommand.env).toEqual({
       [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
+      [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
       [COVERAGE_PARTITIONS_ENV]: undefined,
       [COVERAGE_PARTITION_MODE_ENV]: undefined,
+      [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
     })
   })
 

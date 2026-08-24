@@ -18,7 +18,12 @@ import {
   parseCoveragePartitionCount,
 } from './coverage-partitions.ts'
 import { pnpmInvocation } from './pnpm-invocation.ts'
-import { buildGateReport, parseCiCacheEvidence, writeGateReport } from './ci-evidence.ts'
+import {
+  buildGateReport,
+  parseCiCacheEvidence,
+  parseCiFailureClassificationOverride,
+  writeGateReport,
+} from './ci-evidence.ts'
 
 /** A named aggregate exposed by the gate runner. */
 export type Mode =
@@ -37,6 +42,8 @@ export type Mode =
   | 'ci-windows-native-core'
   | 'ci-windows-native-static'
   | 'ci-windows-observational'
+  | 'ci-standby-linux-smoke'
+  | 'ci-standby-windows-smoke'
   | 'node-compat'
   | 'check-all'
   | 'hygiene'
@@ -59,7 +66,7 @@ export interface Gate {
   /** Keep a failure visible without failing the aggregate. */
   allowFailure?: boolean
   /** Permit infrastructure classification for transport diagnostics owned by this gate. */
-  failureDomain?: 'infrastructure'
+  failureDomain?: 'infrastructure' | 'failover-readiness'
   /** Write child output as it arrives instead of buffering it until completion. */
   streamOutput?: boolean
 }
@@ -132,6 +139,7 @@ async function main(args: string[]): Promise<number> {
       completedAtDate,
       artifactRefs,
       parseCiCacheEvidence(process.env.DSH_CI_CACHE_STATUS),
+      parseCiFailureClassificationOverride(process.env.DSH_CI_FAILURE_CLASSIFICATION),
     ))
   }
   return results.some(result => result.gate.allowFailure !== true && (result.status === 'failed' || result.status === 'skipped'))
@@ -156,6 +164,8 @@ function parseMode(raw: string | undefined): Mode {
     case 'ci-windows-native-core':
     case 'ci-windows-native-static':
     case 'ci-windows-observational':
+    case 'ci-standby-linux-smoke':
+    case 'ci-standby-windows-smoke':
     case 'node-compat':
     case 'check-all':
     case 'hygiene':
@@ -163,7 +173,7 @@ function parseMode(raw: string | undefined): Mode {
       return raw
     default:
       throw new Error(
-        `run-gates: expected mode ci-preflight | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
+        `run-gates: expected mode ci-preflight | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | ci-standby-linux-smoke | ci-standby-windows-smoke | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
       )
   }
 }
@@ -271,6 +281,10 @@ export function gatesForMode(selected: Mode): Gate[] {
       return ciWindowsNativeStaticGates()
     case 'ci-windows-observational':
       return ciWindowsObservationalGates()
+    case 'ci-standby-linux-smoke':
+      return standbySmokeGates('linux')
+    case 'ci-standby-windows-smoke':
+      return standbySmokeGates('windows')
     case 'node-compat':
       return nodeCompatGates()
     case 'check-all':
@@ -422,6 +436,38 @@ function nodeCompatSmokeGates(options: { cliSmoke?: boolean } = {}): Gate[] {
     )
   }
   return gates
+}
+
+function standbySmokeGates(platform: 'linux' | 'windows'): Gate[] {
+  const common: Gate[] = [
+    pnpmScript('optional-dependency-imports', 'verify-optional-dependency-imports'),
+    ciBuildGate(),
+    pnpmScript('build:web', 'build:web', { label: 'Web frontend build', needs: ['build'] }),
+    pnpmExec('browser-runtime-smoke', [
+      'vitest',
+      'run',
+      'packages/browser/browser-runtime-deterministic/tests/runtime.spec.ts',
+      'packages/browser/browser-workspace/tests/workspace.spec.ts',
+    ], { label: 'browser runtime smoke' }),
+  ]
+  const platformGate = platform === 'windows'
+    ? pnpmExec('platform-fixture-smoke', [
+      'vitest',
+      'run',
+      'packages/session/session-persistence-jsonl/tests/win32.spec.ts',
+      'packages/fs/fs-local/tests/win32.spec.ts',
+      'packages/subprocess/subprocess-local/tests/windows-inspector.spec.ts',
+    ], { label: 'Windows platform fixture smoke' })
+    : pnpmExec('platform-fixture-smoke', [
+      'vitest',
+      'run',
+      'scripts/vitest-environment.compat.spec.ts',
+      'packages/browser/browser-runtime-electron/tests/runtime-invariant.spec.ts',
+    ], { label: 'Linux platform fixture smoke' })
+  return [...common, platformGate].map(gate => ({
+    ...gate,
+    failureDomain: 'failover-readiness' as const,
+  }))
 }
 
 /** Active Node major used to select version-specific compatibility checks. */

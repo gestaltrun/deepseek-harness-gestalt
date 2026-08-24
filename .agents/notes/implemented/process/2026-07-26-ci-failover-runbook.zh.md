@@ -6,27 +6,27 @@ Status: implemented
 
 ## 问题
 
-[CI](../../../../.github/workflows/ci.yml) 中三个必需的 Linux 工作作业（`node 24 / static`、`node 24 / coverage`、`node 24 / snapshots and artifacts`）、聚合它们的必需判定作业（`all checks passed`）以及独立的原生 Windows 作业（`windows node 24 / native complete`）默认运行在标准 GitHub 托管运行器上。[标准托管主路径决策](2026-08-18-standard-hosted-primary-ci.zh.md)负责这些选择器及其工作进程上限。当某个平台的托管池发生故障时，所有匹配的拉取请求都可能因无法运行的检查而无法合并。**适用范围：两个独立开关，每个平台一个。**`DSH_CI_FAILOVER_LINUX` 恢复托管 Linux 池故障（三个必需的 Linux 工作作业加 `all checks passed` 判定作业）；`DSH_CI_FAILOVER_WINDOWS` 恢复托管 Windows 池故障（原生 Windows 作业）。Linux 池故障无需重定向原生 Windows 作业，反之亦然。判定作业的其余必需依赖（`node-compat`、`python-sdk`、`windows`）按设计留在标准托管运行器上；若更大范围的 GitHub 托管容量发生故障，这些依赖仍会阻塞 `all checks passed`。因此，故障需要一个任何具备仓库写权限的响应者都能在不合并任何代码的情况下触发的开关。
+[CI](../../../../.github/workflows/ci.yml) 中三个必需的 Linux 工作作业（`node 24 / static`、`node 24 / coverage`、`node 24 / snapshots and artifacts`）、聚合它们的必需判定作业（`all checks passed`）以及独立的原生 Windows 证据作业默认运行在标准 GitHub 托管运行器上。[标准托管主路径决策](2026-08-18-standard-hosted-primary-ci.zh.md)负责这些选择器及其工作进程上限。当某个平台的托管池发生故障时，所有匹配的拉取请求都可能因无法运行的检查而无法合并。**适用范围：两个独立开关，每个平台一个。**`DSH_CI_FAILOVER_LINUX` 恢复托管 Linux 池故障（三个必需的 Linux 工作作业加 `all checks passed` 判定作业）；`DSH_CI_FAILOVER_WINDOWS` 恢复托管 Windows 池故障（原生 Windows 分区）。Linux 池故障无需重定向原生 Windows 作业，反之亦然。判定作业的其余必需依赖（`node-compat`、`python-sdk`、`windows`）按设计留在标准托管运行器上；若更大范围的 GitHub 托管容量发生故障，这些依赖仍会阻塞 `all checks passed`。因此，故障需要一个任何具备仓库写权限的响应者都能在不合并任何代码的情况下触发的开关。
 
 ## 决策
 
-三个必需的 Linux 工作作业、独立的原生 Windows 作业，以及 `all checks passed` 判定作业（若不随切换，即使全部工作作业通过，它仍会滞留在故障池的队列中）——各自通过仓库变量解析运行器池，且开关按平台拆分，使一个平台的故障不会重定向另一个平台。三个 Linux 工作作业与 `all checks passed` 判定作业（其 `needs` 是必需的 Linux 工作作业，且运行在 `vm-backup` 池上）通过 `DSH_CI_FAILOVER_LINUX` 解析；原生 Windows 作业通过 `DSH_CI_FAILOVER_WINDOWS` 解析。变量不存在（正常）时它们运行在 `ubuntu-latest` 或 `windows-latest` 上；由任何具备写权限的协作者设为 `selfhosted` 时，对应作业切换到公司自有的自托管池：`DSH_CI_FAILOVER_LINUX` 下，Linux 作业与判定作业切到 `vm-backup` 池，快照并发降到共享虚拟机上限，并跳过托管路径的 pnpm 缓存恢复；`DSH_CI_FAILOVER_WINDOWS` 下，原生 Windows 作业切到 `dsh-win-ci` 池。每个开关都是写者可管理的仓库状态而非一次合并，因此在所有检查都是红色时仍然有效。自有池的就绪状态由 `serial / linux (self-hosted standby)` 与 `serial / windows (self-hosted standby)` 通道持续验证——每次 master 推送都在其上运行完整的未分片聚合流程。
+三个必需的 Linux 工作作业、独立的原生 Windows 作业，以及 `all checks passed` 判定作业（若不随切换，即使全部工作作业通过，它仍会滞留在故障池的队列中）——各自通过仓库变量解析运行器池，且开关按平台拆分，使一个平台的故障不会重定向另一个平台。三个 Linux 工作作业与 `all checks passed` 判定作业通过 `DSH_CI_FAILOVER_LINUX` 解析；原生 Windows 分区通过 `DSH_CI_FAILOVER_WINDOWS` 解析。变量不存在（正常）时它们运行在 `ubuntu-latest` 或 `windows-latest` 上；由任何具备写权限的协作者设为 `selfhosted` 时，对应作业切换到公司自有池。每个开关都是写者可管理的仓库状态而非一次合并，因此在所有检查都是红色时仍然有效。自有池会在每次 master push 后运行有界的 Linux 与 Windows standby smoke，并按日或通过 `standby-exhaustive` dispatch 运行完整的非分片清单；该证据由[分层就绪决策](2026-08-24-tiered-standby-readiness.zh.md)负责。
 
-`ci-master.yml` 为每个作业设置 `PNPM_CONFIG_OPTIONAL=true`，并用 `--force` 执行热备安装。完整的热备聚合流程会执行依赖平台可执行文件的产品测试与静态工具，而这些可执行文件以 optional dependency 形式分发。持久化运行器可能保留在禁用 optional dependency 时创建的 `node_modules` 树，因此每次演练都必须按仓库自有配置重建该树。
+`ci-master.yml` 为每个作业设置 `PNPM_CONFIG_OPTIONAL=true`，删除 checkout 内被忽略和未跟踪的状态，并用 `--force` 执行 standby 安装。持久化 Runner 只保留内容寻址的依赖下载与受控机器工具；每次演练都会按仓库自有设置重建 `node_modules` 与 workspace 输出。
 
-`ci-master.yml` 只豁免一个事件不做取消（`${{ github.event_name != 'push' }}`），因此一次 master 推送不会取消上一次推送留下的、仍在运行的演练。每次演练以单门禁工作进程执行完整的未分片聚合流程，耗时长于 master 合并的间隔；在无条件取消下，演练会在得出结论前被后续运行取代，该通道无法产出供响应者查看的就绪证据。
+`ci-master.yml` 只豁免一个事件不做取消（`${{ github.event_name != 'push' }}`），因此一次 master push 不会取消上一次 push 留下的有界就绪 smoke。按日和手动 dispatch 的工作仍可被更新的非 push 运行替换。
 
-这项豁免比「演练总能跑完」要窄，有两点限制。其一，GitHub 每个组只保留一个待运行条目，更新的待运行条目会顶掉更早的，繁忙时段中间的推送运行仍会以 `cancelled` 结束。其二，该表达式是针对**新触发的运行**求值的，因此自身事件不是 `push` 的运行——例如在 `ci-master.yml` 内的 master 上派发的基准测试，与其演练共用 `CI master-<ref>` 组——求值为 `true`，会取消正在运行中的演练。这属于罕见的手动操作，且下一次 master 推送即可恢复证据，因此不值得为它再加机制。这项豁免换来的是该通道**周期性**地得出结论，而这正是它能作为证据的前提。
+这项豁免不保证每次 push 都会完成：GitHub 在每个并发组中只保留一个待运行条目，而非 push 运行会把该表达式求值为 `true`，并可能替换更早的按日或手动运行。下一次 master push 会恢复有界 smoke 证据；下一次每日计划或显式 dispatch 会恢复 exhaustive 证据。
 
-这个决定必须放在工作流级：取消作用于被取代的整个运行，作业级 `concurrency` 组并不能豁免其所属作业。采用否定式写法而非仅指名 `pull_request`，是有实质作用的：后者会连 `workflow_dispatch` 一起停止取消，而每次运行器基准测试会在 master 上的同一并发组内同时占用 12 台大规格运行器、最长 15 分钟，届时重复派发会排在演练之前，而不是替换掉已过时的测量。成本之所以可控，是因为 `ci-master.yml` 中一次 master 推送只承载 `wine-apt-cache` 和这两条演练；拉取请求作业位于独立的 `ci.yml`（不监听 `push`），而基准测试在 `ci-master.yml` 内受 `workflow_dispatch` 门控。`scripts/ci-workflow.spec.ts` 会锁定这个推送可达集合——按条件精确匹配，因为否定式事件判断会包含它所排除的事件名——使新的推送可达作业无法悄悄开始累积未取消的运行。
+这个决定必须放在工作流级：取消作用于被取代的整个运行，作业级 `concurrency` 组并不能豁免其所属作业。否定式写法会让重复派发的基准测试和 exhaustive 演练保持可替换。`ci-master.yml` 的一次 master push 只承载 `wine-apt-cache` 和两条有界 smoke；`scripts/ci-workflow.spec.ts` 会锁定这个 push 可达集合，使新的作业无法悄悄累积未取消的运行。
 
 ### 自有池是什么
 
-`vm-backup`：一台 64 核虚拟机，6 个常驻 systemd 管理的运行器实例。其镜像必须预装 Playwright Chromium 的 Linux 系统软件包；CI 会下载锁文件选定的浏览器，但绝不在这台持久化共享主机上运行 `apt`。切换前先看 `serial / linux (self-hosted standby)` 最近一次运行：其聚合流程包含浏览器回放，因此绿色热备同时验证常规容量和这项浏览器先决条件。
+`vm-backup`：一台 64 核虚拟机，6 个常驻 systemd 管理的运行器实例。其镜像必须预装 Playwright Chromium 的 Linux 系统软件包；CI 会下载锁文件选定的浏览器，但绝不在这台持久化共享主机上运行 `apt`。切换前查看最近的 `standby smoke / linux (self-hosted)` 结果与 `standby-linux-exhaustive` artifact。
 
 #### Windows 池
 
-`dsh-win-ci`：公司内部 Windows CI 服务器（一台 96 核 / 580 GB 机器）上 32 个常驻运行器实例（计划任务 `GH-Runner-01`…`GH-Runner-32`）。标签：`[self-hosted, dsh-win-ci, windows]`。镜像必须预装 Node 24、pnpm、Git（Git Bash 在 `PATH` 上，即 `C:\Program Files\Git\bin`——`bash` 工具按名称 spawn `bash`）、PowerShell 7，并为符号链接支持启用开发人员模式。切换前先看 `serial / windows (self-hosted standby)` 最近一次运行：绿色热备验证该池能端到端执行 `check:ci:windows-complete`。
+`dsh-win-ci`：公司内部 Windows CI 服务器（一台 96 核 / 580 GB 机器）上 32 个常驻运行器实例（计划任务 `GH-Runner-01`…`GH-Runner-32`）。标签：`[self-hosted, dsh-win-ci, windows]`。镜像必须预装 Node 24、pnpm、Git（Git Bash 在 `PATH` 上，即 `C:\Program Files\Git\bin`——`bash` 工具按名称 spawn `bash`）、PowerShell 7，并为符号链接支持启用开发人员模式。切换前查看最近的 `standby smoke / windows (self-hosted)` 结果与 `standby-windows-exhaustive` artifact。
 
 ### 切换步骤（任何具备写权限的协作者，约 1 分钟，无需合并）
 
@@ -42,7 +42,7 @@ Status: implemented
 
 ## 切换期间的容量
 
-6 个常驻实例可承接正常 PR 流量（该池平时唯一的稳态负载是每次 master 推送一个串行热备作业，故障切换时几乎全池可用）。若仍出现排队，用组织级注册 token（组织 Settings → Actions → Runners → New runner）追加注册实例。复制现有 runner 目录时**必须排除身份文件**——`rsync -a --exclude '.runner*' --exclude '.credentials*' --exclude '_diag' --exclude '_work' <src>/ <dst>/`（通配同时排除 `.runner_migrated`/`.credentials_migrated`——GitHub 会在迁移过的运行器上写入这些文件，它们同样会触发 already-configured 拒绝）——再跑 `config.sh`（原样拷贝 `.runner`/`.credentials` 会使其以 "already configured" 拒绝），然后**启动监听器**：`sudo ./svc.sh install ubuntu && sudo ./svc.sh start`。仅注册不会上线；只有启动了服务的 runner 才会增加容量。每个约一分钟。
+6 个常驻实例可承接正常 PR 流量；该池平时的 master 稳态负载是一条有界 Linux smoke，exhaustive 工作按日或手动运行。若仍出现排队，用组织级注册 token（组织 Settings → Actions → Runners → New runner）追加注册实例。复制现有 runner 目录时**必须排除身份文件**——`rsync -a --exclude '.runner*' --exclude '.credentials*' --exclude '_diag' --exclude '_work' <src>/ <dst>/`（通配同时排除 `.runner_migrated`/`.credentials_migrated`——GitHub 会在迁移过的运行器上写入这些文件，它们同样会触发 already-configured 拒绝）——再跑 `config.sh`（原样拷贝 `.runner`/`.credentials` 会使其以 "already configured" 拒绝），然后**启动监听器**：`sudo ./svc.sh install ubuntu && sudo ./svc.sh start`。仅注册不会上线；只有启动了服务的 runner 才会增加容量。每个约一分钟。
 
 
 ### 切回
@@ -61,4 +61,4 @@ Status: implemented
 
 ## 后果
 
-从托管池故障中恢复只需切换受影响平台的变量（任何写者可设）加一次重跑，关键路径上没有合并。代价是每个平台都要维护第二套运行器拓扑：热备通道在每次 master 推送时都运行它们，避免故障切换目标变得陈旧；而 `ci.yml` 中的快照并发与缓存恢复分支带有一条 `selfhosted` 支路（仅 Linux），必须与托管支路保持同步。按平台拆分开关多了一个需要管理的变量，但把每个开关的影响范围限定在单个平台的作业上。
+从托管池故障中恢复只需切换受影响平台的变量（任何写者可设）加一次重跑，关键路径上没有合并。代价是每个平台都要维护第二套运行器拓扑：有界 smoke 会在每次 master push 后演练它，每日/手动 exhaustive 演练保留完整证据；而 `ci.yml` 中的快照并发与缓存恢复分支带有一条 `selfhosted` 支路（仅 Linux），必须与托管支路保持同步。按平台拆分会把每个开关的影响范围限定在单个平台。

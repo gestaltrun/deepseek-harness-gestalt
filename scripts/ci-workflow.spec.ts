@@ -393,7 +393,12 @@ describe('CI workflow', () => {
     if (!isRecord(workflow.jobs)) throw new TypeError('ci-master workflow must define jobs')
 
     expect(workflow.env.PNPM_CONFIG_OPTIONAL).toBe('true')
-    for (const jobName of ['serial-linux-selfhosted', 'serial-windows']) {
+    for (const jobName of [
+      'standby-linux-smoke',
+      'standby-windows-smoke',
+      'standby-linux-exhaustive',
+      'standby-windows-exhaustive',
+    ]) {
       const job = workflow.jobs[jobName]
       if (!isRecord(job) || !Array.isArray(job.steps)) {
         throw new TypeError(`ci-master workflow must define ${jobName} steps`)
@@ -404,6 +409,53 @@ describe('CI workflow', () => {
       expect(install, `${jobName} must rebuild persistent node_modules with optional dependencies`).toMatchObject({
         run: 'pnpm install --frozen-lockfile --force',
       })
+    }
+  })
+
+  it('keeps bounded push smokes separate from exhaustive failover readiness drills', () => {
+    const workflow = loadWorkflow('.github/workflows/ci-master.yml')
+    const smokeCases = [
+      ['standby-linux-smoke', 'pnpm run check:ci:standby-linux-smoke'],
+      ['standby-windows-smoke', 'pnpm run check:ci:standby-windows-smoke'],
+    ] as const
+    const exhaustiveCases = [
+      ['standby-linux-exhaustive', 'pnpm run check:ci:linux-primary'],
+      ['standby-windows-exhaustive', 'pnpm run check:ci:windows-complete'],
+    ] as const
+
+    for (const [jobName, command] of smokeCases) {
+      const job = workflowJob(workflow, jobName)
+      if (!Array.isArray(job.steps)) throw new TypeError(`${jobName} must define steps`)
+      expect(job).toMatchObject({
+        if: "github.event_name == 'push' && github.ref == 'refs/heads/master'",
+        'timeout-minutes': 20,
+      })
+      expect(job.steps).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'Rebuild workspace state', run: 'git clean -ffdx' }),
+        expect.objectContaining({ run: command }),
+        expect.objectContaining({ if: 'always()', uses: 'actions/upload-artifact@v7' }),
+      ]))
+    }
+
+    for (const [jobName, command] of exhaustiveCases) {
+      const job = workflowJob(workflow, jobName)
+      if (!Array.isArray(job.steps)) throw new TypeError(`${jobName} must define steps`)
+      expect(job).toMatchObject({
+        if: "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'standby-exhaustive')",
+        'timeout-minutes': 120,
+      })
+      expect(job.steps).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'Rebuild workspace state', run: 'git clean -ffdx' }),
+        expect.objectContaining({ if: 'always()', uses: 'actions/upload-artifact@v7' }),
+      ]))
+      const runStep = (job.steps as unknown[]).find(step => isRecord(step) && step.run === command)
+      if (!isRecord(runStep) || !isRecord(runStep.env)) {
+        throw new TypeError(`${jobName} must define the exhaustive command environment`)
+      }
+      expect(runStep.env.DSH_CI_FAILURE_CLASSIFICATION).toBe('failover-readiness')
+      if (jobName === 'standby-linux-exhaustive') {
+        expect(runStep.env.DSH_ARCHIVE_BASE_REF).toBe('HEAD^')
+      }
     }
   })
 
@@ -459,9 +511,9 @@ describe('CI workflow', () => {
     const coverageJobIds = [
       'consolidated-runner-benchmark',
       'node-24-coverage',
-      'serial-linux-selfhosted',
       'serial-macos',
-      'serial-windows',
+      'standby-linux-exhaustive',
+      'standby-windows-exhaustive',
       'windows-native-coverage-shards',
     ] as const
     const coverageJobs = workflows.flatMap((workflow) => {
@@ -501,7 +553,7 @@ describe('CI workflow', () => {
     expect(checkout).toMatchObject({ with: { 'fetch-depth': 0 } })
   })
 
-  it('keeps required Wine, one partitioned native Windows verdict, and a master-only standby', () => {
+  it('keeps required Wine, one partitioned native Windows verdict, and tiered master standby drills', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const masterWorkflow = loadWorkflow('.github/workflows/ci-master.yml')
     if (!isRecord(workflow.jobs)
@@ -517,8 +569,9 @@ describe('CI workflow', () => {
       || !isRecord(workflow.jobs['all-checks-passed'])
       || !isRecord(masterWorkflow.jobs)
       || !isRecord(masterWorkflow.jobs['wine-apt-cache'])
-      || !isRecord(masterWorkflow.jobs['serial-windows'])) {
-      throw new TypeError('CI workflow must define Wine, native Windows partitions and verdict, Linux workers, and all-checks-passed; ci-master must define wine-apt-cache and serial-windows')
+      || !isRecord(masterWorkflow.jobs['standby-windows-smoke'])
+      || !isRecord(masterWorkflow.jobs['standby-windows-exhaustive'])) {
+      throw new TypeError('CI workflow must define Wine, native Windows partitions and verdict, Linux workers, and all-checks-passed; ci-master must define Wine cache and tiered Windows standby drills')
     }
 
     const windows = workflow.jobs.windows
@@ -528,7 +581,8 @@ describe('CI workflow', () => {
     const windowsNativeStatic = workflow.jobs['windows-native-static']
     const windowsNativeVerdict = workflow.jobs['windows-native-verdict']
     const wineAptCache = masterWorkflow.jobs['wine-apt-cache']
-    const serialWindows = masterWorkflow.jobs['serial-windows']
+    const standbyWindowsSmoke = masterWorkflow.jobs['standby-windows-smoke']
+    const standbyWindowsExhaustive = masterWorkflow.jobs['standby-windows-exhaustive']
     const node24 = workflow.jobs['node-24']
     const node24Coverage = workflow.jobs['node-24-coverage']
     const node24Consumers = workflow.jobs['node-24-consumers']
@@ -619,10 +673,20 @@ describe('CI workflow', () => {
     expect(wineAptCache.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
     expect(wineAptCache['runs-on']).toBe('ubuntu-latest')
 
-    // serial-windows: master-only standby, self-hosted, non-blocking, lives in ci-master.
-    expect(serialWindows.if).toBe("github.event_name == 'push' && github.ref == 'refs/heads/master'")
-    expect(serialWindows['runs-on']).toEqual(['self-hosted', 'dsh-win-ci', 'windows'])
-    expect(serialWindows.name).toBe('serial / windows (self-hosted standby)')
+    // Every master push proves a bounded Windows failover smoke. The complete
+    // serial reference remains available on the daily/manual cadence.
+    expect(standbyWindowsSmoke).toMatchObject({
+      if: "github.event_name == 'push' && github.ref == 'refs/heads/master'",
+      name: 'standby smoke / windows (self-hosted)',
+      'runs-on': ['self-hosted', 'dsh-win-ci', 'windows'],
+      'timeout-minutes': 20,
+    })
+    expect(standbyWindowsExhaustive).toMatchObject({
+      if: "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'standby-exhaustive')",
+      name: 'standby exhaustive / windows (self-hosted)',
+      'runs-on': ['self-hosted', 'dsh-win-ci', 'windows'],
+      'timeout-minutes': 120,
+    })
 
     // Aggregate: Wine is required; the independent native verdict is observational.
     expect(aggregate.needs).toContain('windows')
@@ -630,7 +694,8 @@ describe('CI workflow', () => {
     expect(aggregate.needs).not.toContain('windows-native-core')
     expect(aggregate.needs).not.toContain('windows-native-coverage')
     expect(aggregate.needs).not.toContain('windows-native-static')
-    expect(aggregate.needs).not.toContain('serial-windows')
+    expect(aggregate.needs).not.toContain('standby-windows-smoke')
+    expect(aggregate.needs).not.toContain('standby-windows-exhaustive')
     expect(aggregate.needs).not.toContain('electron-runtime-e2e-macos')
 
     const macosElectron = workflow.jobs['electron-runtime-e2e-macos']
@@ -695,19 +760,19 @@ describe('CI workflow', () => {
     })
 
     // The exact event sets are what keep master-only jobs out of the PR check
-    // panel: ci-master triggers only on push(master) + workflow_dispatch and
-    // never on pull_request; ci.yml owns PR feedback plus Merge Queue proof.
+    // panel: ci-master triggers only on push(master), the daily schedule, and
+    // workflow_dispatch; ci.yml owns PR feedback plus Merge Queue proof.
     // Assert the full sets so losing the wrong event, or gaining an extra one,
     // fails.
     if (!isRecord(workflow.on) || !isRecord(prWorkflow.on)) {
       throw new TypeError('both CI workflows must define on')
     }
-    expect(Object.keys(workflow.on).sort()).toEqual(['push', 'workflow_dispatch'])
+    expect(Object.keys(workflow.on).sort()).toEqual(['push', 'schedule', 'workflow_dispatch'])
     expect(Object.keys(prWorkflow.on).sort()).toEqual(['merge_group', 'pull_request', 'push'])
 
     // Neither drill may carry a job-level group: it would not exempt the job
     // from run-scoped cancellation.
-    for (const name of ['serial-linux-selfhosted', 'serial-windows']) {
+    for (const name of ['standby-linux-smoke', 'standby-windows-smoke']) {
       const job = workflow.jobs[name]
       if (!isRecord(job)) throw new TypeError(`${name} must be defined`)
       expect(job.concurrency).toBeUndefined()
@@ -721,6 +786,7 @@ describe('CI workflow', () => {
     const NOT_PUSH_REACHABLE = new Set([
       "github.event_name == 'workflow_dispatch' && inputs.suite == 'larger-runner-benchmark'",
       "github.event_name == 'workflow_dispatch' && inputs.suite == 'consolidated-runner-benchmark'",
+      "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'standby-exhaustive')",
     ])
     const pushReachable = Object.entries(workflow.jobs)
       .filter(([, job]) => {
@@ -732,7 +798,7 @@ describe('CI workflow', () => {
       })
       .map(([name]) => name)
       .sort()
-    expect(pushReachable).toEqual(['serial-linux-selfhosted', 'serial-windows', 'wine-apt-cache'])
+    expect(pushReachable).toEqual(['standby-linux-smoke', 'standby-windows-smoke', 'wine-apt-cache'])
 
     // Why workflow_dispatch must keep cancelling: each benchmark fans out to a
     // dozen larger runners at once, in this same group on master. If it stopped

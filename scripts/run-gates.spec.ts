@@ -71,6 +71,8 @@ describe('gate graph validation', () => {
     'ci-windows-native-core',
     'ci-windows-native-static',
     'ci-windows-observational',
+    'ci-standby-linux-smoke',
+    'ci-standby-windows-smoke',
     'node-compat',
     'check-all',
     'hygiene',
@@ -98,6 +100,24 @@ describe('gate graph validation', () => {
       'module-graph',
       'scoped-events',
     ])
+  })
+
+  it.each([
+    ['ci-standby-linux-smoke', 'Linux platform fixture smoke'],
+    ['ci-standby-windows-smoke', 'Windows platform fixture smoke'],
+  ] as const)('keeps %s bounded and classified as failover readiness', (mode, platformLabel) => {
+    const gates = withPnpmEntrypoint(() => gatesForMode(mode))
+
+    expect(gates.map(gate => gate.id)).toEqual([
+      'optional-dependency-imports',
+      'build',
+      'build:web',
+      'browser-runtime-smoke',
+      'platform-fixture-smoke',
+    ])
+    expect(gates.every(gate => gate.failureDomain === 'failover-readiness')).toBe(true)
+    expect(gates.find(gate => gate.id === 'build:web')?.needs).toEqual(['build'])
+    expect(gates.at(-1)?.label).toBe(platformLabel)
   })
 
   it('keeps the public repository link policy in the documentation gate', () => {

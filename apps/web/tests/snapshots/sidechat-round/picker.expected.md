@@ -1,0 +1,20 @@
+- button "New tab":
+  - img
+- button "Files":
+  - img
+  - text: Files
+- button "Source Control":
+  - img
+  - text: Source Control
+- button "Tasks":
+  - img
+  - text: Tasks
+- button "Side Chat":
+  - img
+  - text: Side Chat
+- button "Terminal":
+  - img
+  - text: Terminal
+- button "Browser":
+  - img
+  - text: Browser

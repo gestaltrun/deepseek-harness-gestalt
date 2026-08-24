@@ -146,6 +146,31 @@ export class InputTriggerController {
   }
 
   /**
+   * Toggle every source registered for one trigger. The synthetic hit reuses
+   * the ordinary grouped menu without inserting the trigger into the draft.
+   * @param hit - trigger, query, placement, and draft CAS captured by the launcher.
+   */
+  toggleTrigger(hit: TriggerHit): void {
+    if (this.disposed) return
+    const launcher = hit.trigger
+    if (this.launcher.getSnapshot() === launcher && this.menu.getSnapshot().open) {
+      this.dismiss()
+      return
+    }
+    const roster = this.deps.roster.sources(hit.trigger)
+    if (roster.length === 0) {
+      this.dismiss()
+      return
+    }
+    this.stopFetch()
+    this.hit = hit
+    this.launcher.set(launcher)
+    this.menu.set(seedGroups(this.menu.getSnapshot(), roster))
+    this.reduce({ type: 'hit', hit })
+    this.fetchCandidates(hit, roster)
+  }
+
+  /**
    * Pointer pick from MenuView: route the clicked candidate through onPick
    * and execute claim/insert outcomes via the scoped input events.
    * @param source - source (group) name.

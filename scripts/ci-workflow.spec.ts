@@ -737,9 +737,9 @@ describe('CI workflow', () => {
     }
     expect(windowsNativeCore['runs-on']).toContain('windows-latest')
     expect(windowsNativeStatic['runs-on']).toContain('windows-latest')
-    expect(windowsNativeStatic.env).toMatchObject({
-      DSH_WINDOWS_STATIC_PORTABLE_ONLY: expect.stringContaining("DSH_CI_FAILOVER_WINDOWS == 'selfhosted'"),
-    })
+    if (!isRecord(windowsNativeStatic.env)) throw new TypeError('windows-native-static must define environment variables')
+    expect(windowsNativeStatic.env.DSH_WINDOWS_STATIC_PORTABLE_ONLY)
+      .toEqual(expect.stringContaining("DSH_CI_FAILOVER_WINDOWS == 'selfhosted'"))
     expect(windowsNativeCoverage['runs-on']).toBe('ubuntu-latest')
     expect(windowsNativeCoverage['timeout-minutes']).toBe(5)
     expect(windowsNativeCoverageShards['runs-on']).toContain('windows-latest')
@@ -812,7 +812,7 @@ describe('CI workflow', () => {
     if (!Array.isArray(standbyWindowsExhaustive.steps)) {
       throw new TypeError('standby-windows-exhaustive must define steps')
     }
-    const standbyWindowsRun = standbyWindowsExhaustive.steps.find(
+    const standbyWindowsRun = (standbyWindowsExhaustive.steps as unknown[]).find(
       step => isRecord(step) && step.run === 'pnpm run check:ci:windows-complete',
     )
     expect(standbyWindowsRun).toMatchObject({

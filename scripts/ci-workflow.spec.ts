@@ -490,6 +490,10 @@ describe('CI workflow', () => {
       cpu: ['current'],
       libc: ['current'],
     })
+    expect(readFileSync(resolve(root, '.npmrc'), 'utf8').trim().split('\n')).toEqual([
+      '@anthropic-ai:registry=https://registry.npmjs.org/',
+      '@openai:registry=https://registry.npmjs.org/',
+    ])
   })
 
   it('keeps bounded push smokes separate from exhaustive failover readiness drills', () => {

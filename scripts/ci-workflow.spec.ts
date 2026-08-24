@@ -422,6 +422,9 @@ describe('CI workflow', () => {
       DSH_GATE_CONCURRENCY: '2',
     })
     expect(windowsNativeCoverage.needs).toEqual(['preflight', 'windows-native-coverage-shards'])
+    expect(windowsNativeCoverage.if).toBe(
+      `${evidenceAfterPreflight} && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')`,
+    )
     expect(windowsNativeVerdict.needs).toEqual([
       'preflight',
       'windows-native-core',

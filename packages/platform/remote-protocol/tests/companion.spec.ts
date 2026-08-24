@@ -87,6 +87,18 @@ describe('Encrypted Companion Protocol codec', () => {
     } as const
     expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, rejected))).toEqual(rejected)
 
+    for (const terminal of [
+      {
+        type: 'operation-failed' as const,
+        operationId,
+        failure: { kind: 'business' as const, code: 'session-refused', message: 'Desktop refused the operation' },
+      },
+      { type: 'interaction-receipt' as const, operationId, accepted: true as const },
+    ]) {
+      const status = { type: 'result' as const, result: { type: 'status' as const, operationId, committed: terminal } }
+      expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, status))).toEqual(status)
+    }
+
     const absent = {
       type: 'result',
       result: { type: 'status', operationId, absent: true },

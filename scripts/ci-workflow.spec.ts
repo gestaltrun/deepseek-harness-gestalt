@@ -635,7 +635,7 @@ describe('CI workflow', () => {
     expect(windowsNativeCoverageShards.env).toMatchObject({
       DSH_COVERAGE_EXEMPT_HEAVY: '1',
       DSH_COVERAGE_PARTITIONS: '8',
-      DSH_COVERAGE_PARTITION_CONCURRENCY: '4',
+      DSH_COVERAGE_PARTITION_CONCURRENCY: '2',
       DSH_COVERAGE_PARTITION_INDEXES: '${{ matrix.indexes }}',
       DSH_COVERAGE_PRESERVE_BLOBS: '1',
       DSH_TEST_REQUIRE_PWSH: '1',

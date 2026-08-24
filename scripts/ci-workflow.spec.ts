@@ -479,6 +479,17 @@ describe('CI workflow', () => {
       expect(payloads, `${jobName} must execute the installed native payloads`).toMatchObject({
         run: 'pnpm run verify-platform-payloads',
       })
+      if (jobName.includes('windows')) {
+        const runtime = (job.steps as unknown[]).find(
+          step => isRecord(step) && step.name === 'Ensure Windows CI native runtime',
+        )
+        expect(runtime, `${jobName} must provision the signed MSVC runtime before native gates`).toMatchObject({
+          shell: 'pwsh',
+          run: './scripts/ensure-windows-ci-runtime.ps1',
+        })
+        expect(job.steps.indexOf(install)).toBeLessThan(job.steps.indexOf(runtime))
+        expect(job.steps.indexOf(runtime)).toBeLessThan(job.steps.indexOf(payloads))
+      }
     }
   })
 

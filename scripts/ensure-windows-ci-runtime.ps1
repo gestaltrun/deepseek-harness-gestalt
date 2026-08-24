@@ -27,10 +27,18 @@ try {
   }
 
   $runtimeProcess = Start-Process -FilePath $runtimeInstaller -ArgumentList '/install', '/quiet', '/norestart' -Wait -PassThru
+  Write-Host "ensure-windows-ci-runtime: Visual C++ Redistributable installer exited $($runtimeProcess.ExitCode)."
   if ($runtimeProcess.ExitCode -notin 0, 1638, 3010) {
     throw "Microsoft Visual C++ Redistributable installer exited $($runtimeProcess.ExitCode)."
   }
   if (-not (Test-OxcResolverBinding)) {
+    $probeErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+      & node -e "require('oxc-resolver')"
+    } finally {
+      $ErrorActionPreference = $probeErrorActionPreference
+    }
     throw 'native resolver binding remains unavailable after installing the Microsoft Visual C++ Redistributable.'
   }
   Write-Host 'ensure-windows-ci-runtime: installed the signed Microsoft Visual C++ runtime and loaded the native resolver binding.'

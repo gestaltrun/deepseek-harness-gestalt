@@ -12,6 +12,8 @@ import {
   COVERAGE_TEST_TIMEOUT_ENV,
   CoveragePartitionCoordinator,
   coverageExclusiveSuites,
+  coveragePersistentStateSuites,
+  coverageProcessBoundSuites,
   coverageTestTimeoutArgs,
   forwardedCoverageArgs,
   parseCoveragePartitionConcurrency,
@@ -134,6 +136,7 @@ describe('coverage partition coordinator', () => {
       'partition 2/3',
       'partition 3/3',
       'exclusive resource-bound coverage',
+      'exclusive persistent-state coverage',
       'merged coverage report',
     ])
     const exclusive = commands[3]
@@ -142,17 +145,26 @@ describe('coverage partition coordinator', () => {
       '--coverage',
       '--coverage.reportOnFailure',
       '--maxWorkers=1',
-      ...coverageExclusiveSuites,
+      ...coverageProcessBoundSuites,
     ]))
-    expect(coverageExclusiveSuites).toContain(
+    expect(coverageProcessBoundSuites).toContain(
       'packages/attachment/attachment-local/tests/normalization.spec.ts',
     )
-    expect(coverageExclusiveSuites).toContain(
+    const persistentState = commands[4]
+    if (persistentState === undefined) throw new Error('persistent-state coverage command was not observed')
+    expect(persistentState.args).toEqual(expect.arrayContaining([
+      ...coveragePersistentStateSuites,
+    ]))
+    expect(coveragePersistentStateSuites).toContain(
       'packages/experimental/agent-team/tests/persistence.spec.ts',
     )
-    expect(coverageExclusiveSuites).toContain(
+    expect(coveragePersistentStateSuites).toContain(
       'packages/session/session-persistence-sqlite/tests/differential.spec.ts',
     )
+    expect(coverageExclusiveSuites).toEqual([
+      ...coveragePersistentStateSuites,
+      ...coverageProcessBoundSuites,
+    ])
     expect(exclusive.args.some(argument => argument.startsWith('--shard='))).toBe(false)
     expect(exclusive.env).toMatchObject({
       [COVERAGE_PARTITION_MODE_ENV]: undefined,
@@ -181,8 +193,11 @@ describe('coverage partition coordinator', () => {
       'partition 3/8',
       'partition 4/8',
       'exclusive resource-bound coverage',
+      'exclusive persistent-state coverage',
     ])
     await expect(access(join(root, 'coverage/.partitioned/blobs/exclusive-resource-bound.json')))
+      .resolves.toBeUndefined()
+    await expect(access(join(root, 'coverage/.partitioned/blobs/exclusive-persistent-state.json')))
       .resolves.toBeUndefined()
   })
 
@@ -240,6 +255,7 @@ describe('coverage partition coordinator', () => {
       'partition 2/3',
       'partition 3/3',
       'exclusive resource-bound coverage',
+      'exclusive persistent-state coverage',
       'merged coverage report',
     ])
   })
@@ -263,6 +279,7 @@ describe('coverage partition coordinator', () => {
       'partition 2/3',
       'partition 3/3',
       'exclusive resource-bound coverage',
+      'exclusive persistent-state coverage',
       'merged coverage report',
     ])
     for (const [index, command] of commands.slice(0, 3).entries()) {
@@ -285,7 +302,7 @@ describe('coverage partition coordinator', () => {
         [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       })
     }
-    const mergeCommand = commands[4]
+    const mergeCommand = commands[5]
     if (mergeCommand === undefined) throw new Error('coverage merge command was not observed')
     expect(mergeCommand.args).toContain('--coverage')
     expect(mergeCommand.args.some(argument => argument.startsWith('--merge-reports='))).toBe(true)
@@ -310,7 +327,7 @@ describe('coverage partition coordinator', () => {
     })
 
     await expect(coordinator.run()).resolves.toBe(0)
-    expect(commands).toHaveLength(4)
+    expect(commands).toHaveLength(5)
     for (const command of commands) {
       expect(command.command).toBe('/tools/pnpm')
       expect(command.args[0]).toBe('exec')
@@ -338,7 +355,7 @@ describe('coverage partition coordinator', () => {
     expect(reported).toHaveBeenCalledWith(
       'coverage-partitions: output tail for partition 2/2:\nspecific Vitest failure',
     )
-    expect(runCommand).toHaveBeenCalledTimes(4)
+    expect(runCommand).toHaveBeenCalledTimes(5)
   })
 
   it('merges an exclusive-suite failure and returns its failed status', async () => {
@@ -368,6 +385,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/2',
       'partition 2/2',
       'exclusive resource-bound coverage',
+      'exclusive persistent-state coverage',
       'merged coverage report',
     ])
   })
@@ -407,6 +425,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/2',
       'partition 2/2',
       'exclusive resource-bound coverage',
+      'exclusive persistent-state coverage',
       'merged coverage report',
     ])
   })
@@ -425,7 +444,7 @@ describe('coverage partition coordinator', () => {
     })
 
     await expect(coordinator.run()).rejects.toThrow('coverage partitions produced')
-    expect(runCommand).toHaveBeenCalledTimes(3)
+    expect(runCommand).toHaveBeenCalledTimes(4)
   })
 
   it('reports signal termination before missing-blob validation', async () => {
@@ -470,7 +489,7 @@ describe('coverage partition coordinator', () => {
     await expect(coordinator.run()).resolves.toBe(1)
     expect(reported).toHaveBeenCalledWith('coverage-partitions: FAIL partition 1/2 (spawn unavailable)')
     expect(secondFinished).toBe(true)
-    expect(runCommand).toHaveBeenCalledTimes(4)
+    expect(runCommand).toHaveBeenCalledTimes(5)
   })
 
   it('unlinks a link-shaped coverage path without touching its target', async () => {

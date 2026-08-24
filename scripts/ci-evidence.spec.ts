@@ -7,6 +7,7 @@ import {
   buildGateReport,
   classifyGateFailure,
   isTransientInfrastructureFailure,
+  parseCiCacheEvidence,
   writeGateReport,
   type CiFailureClassification,
 } from './ci-evidence.ts'
@@ -80,6 +81,17 @@ describe('CI failure classification', () => {
 })
 
 describe('CI gate reports', () => {
+  it('parses exact, fallback, and cold cache outcomes', () => {
+    expect(parseCiCacheEvidence(JSON.stringify([
+      { id: 'pnpm-store', primaryKey: 'exact', matchedKey: 'exact', exactHit: true },
+      { id: 'playwright', primaryKey: 'new', matchedKey: 'old', exactHit: false },
+      { id: 'cold', primaryKey: 'cold', matchedKey: '', exactHit: false },
+    ]))).toHaveLength(3)
+    expect(parseCiCacheEvidence(undefined)).toEqual([])
+    expect(() => parseCiCacheEvidence('[{"id":"missing-fields"}]'))
+      .toThrow('CI cache evidence entry 0 is invalid')
+  })
+
   it('records actual first blocking failure and all stage durations', () => {
     const declared = [
       result('slow-product'),
@@ -93,6 +105,7 @@ describe('CI gate reports', () => {
       new Date('2026-08-24T00:00:00.000Z'),
       new Date('2026-08-24T00:00:01.000Z'),
       ['ci-gates-node-24', 'ci-gates-node-24'],
+      [{ id: 'pnpm-store', primaryKey: 'exact', matchedKey: 'fallback', exactHit: false }],
     )
 
     expect(report).toMatchObject({
@@ -101,6 +114,7 @@ describe('CI gate reports', () => {
       durationMs: 1000,
       firstFailure: { gateId: 'coverage', classification: 'coverage' },
       artifactRefs: ['ci-gates-node-24'],
+      caches: [{ id: 'pnpm-store', primaryKey: 'exact', matchedKey: 'fallback', exactHit: false }],
     })
     expect(report.gates.map(gate => gate.durationMs)).toEqual([12, 12, 12])
   })

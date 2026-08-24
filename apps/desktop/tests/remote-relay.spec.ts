@@ -80,7 +80,7 @@ describe('Desktop Remote Relay composition', () => {
       else if (event === 'revocation') owner.invalidate(selector)
       else owner.connectionLost(desktopAttachmentId)
       accepted.resolve({
-        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel,
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel),
         pairingSelector: selector, generation: 1,
       })
 
@@ -99,7 +99,7 @@ describe('Desktop Remote Relay composition', () => {
     const signal = new AbortController().signal
     const channel = fakeSnowChannel()
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
-      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: otherSelector, generation: 2,
     }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME)
     await expect(owner.receive(Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, signal))
@@ -126,7 +126,7 @@ describe('Desktop Remote Relay composition', () => {
     const channel = fakeSnowChannel()
     const send = vi.fn(async () => {})
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
-      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: selector, generation: 1,
     }) }, send, undefined, AUTHENTICATED_DESKTOP_NAME)
     const ready = {
@@ -137,6 +137,9 @@ describe('Desktop Remote Relay composition', () => {
     owner.updatePeers(ready, selector)
     await owner.receive(
       Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    await owner.receive(
+      Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
     )
     expect(send).toHaveBeenCalledTimes(2)
     expect(channel.seal).toHaveBeenCalledOnce()
@@ -153,6 +156,38 @@ describe('Desktop Remote Relay composition', () => {
     owner.connectionLost(parseRelayAttachmentId('desktop-unrelated'))
     owner.invalidate(selector)
     expect(channel.dispose).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the safe preceding application major off the major 4 live projection stream', async () => {
+    const selector = parseRelayPairingSelector('pairing-preceding-major')
+    const desktopAttachmentId = parseRelayAttachmentId('desktop-preceding-major')
+    const mobileAttachmentId = parseRelayAttachmentId('mobile-preceding-major')
+    const channel = fakeSnowChannel(3)
+    const connect = vi.fn(() => () => {})
+    const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2),
+      negotiation: fakeNegotiation(channel.channel), pairingSelector: selector, generation: 1,
+    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+      connect,
+      project: async () => ({ sessionId: 'unused' as never, removed: true }),
+      retainsConversation: () => false,
+      reconnect: vi.fn(),
+    })
+    owner.updatePeers({
+      type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-preceding-major'),
+      attachmentId: desktopAttachmentId,
+      peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+    }, selector)
+
+    await owner.receive(
+      Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    await owner.receive(
+      Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+
+    expect(connect).not.toHaveBeenCalled()
+    owner.invalidate(selector)
   })
 
   it('dispatches a decoded product operation and encrypts its correlated result on the current channel', async () => {
@@ -175,7 +210,7 @@ describe('Desktop Remote Relay composition', () => {
     const handleOperation = vi.fn(async () => result)
     const send = vi.fn(async () => {})
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
-      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: selector, generation: 1,
     }) }, send, handleOperation, AUTHENTICATED_DESKTOP_NAME)
     owner.updatePeers({
@@ -185,6 +220,9 @@ describe('Desktop Remote Relay composition', () => {
     }, selector)
     await owner.receive(
       Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    await owner.receive(
+      Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
     )
     send.mockClear()
     channel.seal.mockClear()
@@ -220,7 +258,7 @@ describe('Desktop Remote Relay composition', () => {
     const reconnect = vi.fn()
     const disposeLive = vi.fn()
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
-      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: selector, generation: 1,
     }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
       connect: (_pairingSelector, listener) => { changed = listener; return disposeLive },
@@ -235,6 +273,9 @@ describe('Desktop Remote Relay composition', () => {
     }, selector)
     await owner.receive(
       Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    await owner.receive(
+      Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
     )
     channel.seal.mockClear()
     const change = {
@@ -286,7 +327,7 @@ describe('Desktop Remote Relay composition', () => {
         })
       const reconnect = vi.fn()
       const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
-        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
         pairingSelector: selector, generation: 1,
       }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
         connect: (_selector, listener, disconnect) => source.connect(pairingId, listener, disconnect),
@@ -301,6 +342,9 @@ describe('Desktop Remote Relay composition', () => {
       }, selector)
       await owner.receive(
         Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+      )
+      await owner.receive(
+        Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
       )
       channel.seal.mockClear()
       source.observe(pairingId, 'session-observed' as never)
@@ -351,10 +395,18 @@ describe('Desktop Remote Relay composition', () => {
         encodeCompanionMessage(protocol, message)
         return Uint8Array.of(9)
       })
+      channel.canEncode.mockImplementation((message) => {
+        try {
+          encodeCompanionMessage(protocol, message)
+          return true
+        } catch {
+          return false
+        }
+      })
       let changed: ((change: DesktopCompanionLiveProjectionChange) => void) | undefined
       const reconnect = vi.fn()
       const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
-        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
         pairingSelector: selector, generation: 1,
       }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
         connect: (_selector, listener) => { changed = listener; return () => {} },
@@ -373,6 +425,9 @@ describe('Desktop Remote Relay composition', () => {
       }, selector)
       await owner.receive(
         Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+      )
+      await owner.receive(
+        Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
       )
       channel.seal.mockClear()
       changed?.({
@@ -393,6 +448,7 @@ describe('Desktop Remote Relay composition', () => {
       const projectedNodes = sealed.projection.conversation.nodes
       expect(Array.isArray(projectedNodes)).toBe(true)
       expect(projectedNodes).not.toHaveLength(0)
+      expect(sealed.projection.conversation.hasMore).toBe(true)
       expect((projectedNodes as Array<{ seq: number }>).at(-1)?.seq).toBe(nodes.at(-1)?.seq)
       expect(JSON.stringify(projectedNodes)).toContain(nodes.length === 1 ? '…' : '11:')
       owner.invalidate(selector)
@@ -409,7 +465,7 @@ describe('Desktop Remote Relay composition', () => {
     const reconnect = vi.fn()
     const disposeLive = vi.fn()
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
-      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: channel.channel,
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: selector, generation: 1,
     }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
       connect: (_pairingSelector, listener) => { changed = listener; return disposeLive },
@@ -424,6 +480,9 @@ describe('Desktop Remote Relay composition', () => {
     }, selector)
     await owner.receive(
       Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    await owner.receive(
+      Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
     )
 
     changed?.({
@@ -468,7 +527,7 @@ describe('Desktop Remote Relay composition', () => {
     await Promise.resolve()
     peers.splice(0)
     firstAccept.resolve({
-      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: firstChannel.channel,
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(firstChannel.channel),
       pairingSelector: selector, generation: 1,
     })
     await expect(staleAfterAccept).rejects.toThrow('stale Snow IK transcript')
@@ -477,7 +536,7 @@ describe('Desktop Remote Relay composition', () => {
     const secondChannel = fakeSnowChannel()
     const secondPeers = [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }]
     const second = new DesktopSnowRelayChannelOwner({ accept: async () => ({
-      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: secondChannel.channel,
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(secondChannel.channel),
       pairingSelector: selector, generation: 1,
     }) }, async () => { secondPeers.splice(0) }, undefined, AUTHENTICATED_DESKTOP_NAME)
     second.updatePeers({ ...ready, peers: secondPeers }, selector)
@@ -490,16 +549,19 @@ describe('Desktop Remote Relay composition', () => {
     const thirdPeers = [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }]
     let thirdSend = 0
     const third = new DesktopSnowRelayChannelOwner({ accept: async () => ({
-      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: thirdChannel.channel,
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(thirdChannel.channel),
       pairingSelector: selector, generation: 1,
     }) }, async () => {
       thirdSend += 1
       if (thirdSend === 2) thirdPeers.splice(0)
     }, undefined, AUTHENTICATED_DESKTOP_NAME)
     third.updatePeers({ ...ready, peers: thirdPeers }, selector)
-    await expect(third.receive(
+    await third.receive(
       Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
-    )).rejects.toThrow('stale Snow IK transcript')
+    )
+    await expect(third.receive(
+      Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )).rejects.toThrow('stale Companion negotiation')
     expect(thirdChannel.dispose).toHaveBeenCalledOnce()
   })
 
@@ -516,11 +578,11 @@ describe('Desktop Remote Relay composition', () => {
       const recoveredChannel = fakeSnowChannel()
       const accept = vi.fn()
         .mockResolvedValueOnce({
-          targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: failedChannel.channel,
+          targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(failedChannel.channel),
           pairingSelector: selector, generation: 1,
         })
         .mockResolvedValueOnce({
-          targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(3), channel: recoveredChannel.channel,
+          targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(3), negotiation: fakeNegotiation(recoveredChannel.channel),
           pairingSelector: selector, generation: 1,
         })
       let sends = 0
@@ -535,13 +597,23 @@ describe('Desktop Remote Relay composition', () => {
         peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
       }, selector)
 
-      await expect(owner.receive(
+      const ik = owner.receive(
         Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
-      )).rejects.toThrow('Relay send failed')
+      )
+      if (failedSend === 1) await expect(ik).rejects.toThrow('Relay send failed')
+      else {
+        await ik
+        await expect(owner.receive(
+          Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+        )).rejects.toThrow('Relay send failed')
+      }
       expect(failedChannel.dispose).toHaveBeenCalledOnce()
       expect(failedChannel.open).not.toHaveBeenCalled()
       await owner.receive(
         Uint8Array.of(4), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+      )
+      await owner.receive(
+        Uint8Array.of(5), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
       )
       expect(accept).toHaveBeenCalledTimes(2)
       expect(recoveredChannel.seal).toHaveBeenCalledWith({
@@ -564,11 +636,11 @@ describe('Desktop Remote Relay composition', () => {
     const recoveredChannel = fakeSnowChannel()
     const accept = vi.fn()
       .mockResolvedValueOnce({
-        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), channel: failedChannel.channel,
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(failedChannel.channel),
         pairingSelector: selector, generation: 1,
       })
       .mockResolvedValueOnce({
-        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(3), channel: recoveredChannel.channel,
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(3), negotiation: fakeNegotiation(recoveredChannel.channel),
         pairingSelector: selector, generation: 2,
       })
     const send = vi.fn(async () => {
@@ -593,6 +665,9 @@ describe('Desktop Remote Relay composition', () => {
     }, selector)
     await owner.receive(
       Uint8Array.of(4), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    await owner.receive(
+      Uint8Array.of(5), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
     )
     expect(accept).toHaveBeenCalledTimes(2)
     expect(recoveredChannel.seal).toHaveBeenCalledWith({
@@ -702,14 +777,19 @@ describe('Desktop Remote Relay composition', () => {
       sourceAttachmentId: mobileAttachmentId, targetAttachmentId: attach.attachmentId,
       ciphertext: begun.payload,
     }))
+    await vi.waitFor(() => { expect(socket.sent).toHaveLength(3) })
+    const ik2 = decodeRelayMessage(socket.sent[2] as Uint8Array)
+    if (ik2.type !== 'ciphertext') throw new Error('Desktop Relay did not send IK2')
+    const mobileNegotiation = mobileOwner.finish(ik2.ciphertext, attach.attachmentId)
+    socket.push(encodeRelayMessage({
+      type: 'ciphertext', transportVersion: 1, routeId: mobileGrant.routeId,
+      sourceAttachmentId: mobileAttachmentId, targetAttachmentId: attach.attachmentId,
+      ciphertext: mobileNegotiation.payload,
+    }))
+    const channel = mobileNegotiation.finish()
     await vi.waitFor(() => { expect(socket.sent).toHaveLength(4) })
-    const responses = socket.sent.slice(2).map(decodeRelayMessage)
-    const ik2 = responses[0]
-    const sync = responses[1]
-    if (ik2?.type !== 'ciphertext' || sync?.type !== 'ciphertext') {
-      throw new Error('Desktop Relay did not send IK2 and synchronization')
-    }
-    const channel = mobileOwner.finish(ik2.ciphertext, attach.attachmentId)
+    const sync = decodeRelayMessage(socket.sent[3] as Uint8Array)
+    if (sync.type !== 'ciphertext') throw new Error('Desktop Relay did not send synchronization')
     expect(channel.open(sync.ciphertext)).toEqual({
       type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation, desktopRevision: 1 },
     })
@@ -845,7 +925,7 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
   return { promise, resolve }
 }
 
-function fakeSnowChannel() {
+function fakeSnowChannel(applicationMajor: 3 | 4 = 4) {
   const channel = Object.create(SnowCompanionProtocolChannel.prototype) as SnowCompanionProtocolChannel
   const open = vi.fn<(ciphertext: Uint8Array) => ReturnType<SnowCompanionProtocolChannel['open']>>(
     () => ({ type: 'result', result: { type: 'status', operationId: 'fake' as never, absent: true } }),
@@ -853,13 +933,34 @@ function fakeSnowChannel() {
   const seal = vi.fn<(
     message: Parameters<SnowCompanionProtocolChannel['seal']>[0],
   ) => Uint8Array>(() => Uint8Array.of(9))
+  const canEncode = vi.fn<(
+    message: Parameters<SnowCompanionProtocolChannel['canEncode']>[0],
+  ) => boolean>(() => true)
   const dispose = vi.fn()
   Object.defineProperties(channel, {
+    applicationMajor: { value: applicationMajor },
     open: { value: open },
     seal: { value: seal },
+    canEncode: { value: canEncode },
     dispose: { value: dispose },
   })
-  return { channel, open, seal, dispose }
+  return { channel, open, seal, canEncode, dispose }
+}
+
+function fakeNegotiation(channel: SnowCompanionProtocolChannel) {
+  let open = true
+  return {
+    finish: vi.fn(() => {
+      if (!open) throw new Error('fake negotiation is settled')
+      open = false
+      return channel
+    }),
+    cancel: vi.fn(() => {
+      if (!open) return
+      open = false
+      channel.dispose()
+    }),
+  }
 }
 
 function liveSummary(sessionId: string, updatedAt: number) {

@@ -289,6 +289,7 @@ describe('MobileCompanionSurface', () => {
         nodes: [{ kind: 'user', seq: 8, time: 1, content: [], source: {} }],
       })),
     })
+    expect(surface.getSnapshot().conversations['session-one' as SessionId]?.hasMore).toBe(true)
     surface.loadOlder(sid('session-one'))
     surface.loadOlder(sid('session-one'))
     expect(firstChannel.mutations.loadOlder).toHaveBeenCalledWith('session-one', 8)

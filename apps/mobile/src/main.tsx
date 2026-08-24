@@ -181,7 +181,7 @@ async function mountMobileProduct(): Promise<void> {
         const begun = await attachmentOwner.begin(ready)
         await relay.sendCiphertext(begun.targetAttachmentId, begun.payload)
       },
-      onCiphertext: (ciphertext, sourceAttachmentId) => {
+      onCiphertext: async (ciphertext, sourceAttachmentId) => {
         if (receiver !== undefined && sourceAttachmentId === activeSourceAttachmentId) {
           receiver.receive(ciphertext)
           return
@@ -190,8 +190,16 @@ async function mountMobileProduct(): Promise<void> {
         if (pendingGeneration === undefined) throw new Error('Mobile Relay ciphertext has no Snow generation')
         if (pendingPairingSelector === undefined) throw new Error('Mobile Relay ciphertext has no pairing selector')
         const pairingSelector = pendingPairingSelector
-        const nextChannel = attachmentOwner.finish(ciphertext, sourceAttachmentId)
+        const negotiation = attachmentOwner.finish(ciphertext, sourceAttachmentId)
         attachmentOwner.dispose()
+        let nextChannel: SnowCompanionProtocolChannel
+        try {
+          await relay.sendCiphertext(negotiation.targetAttachmentId, negotiation.payload)
+          nextChannel = negotiation.finish()
+        } catch (error) {
+          negotiation.cancel()
+          throw error
+        }
         channel?.dispose()
         channel = nextChannel
         connectionGeneration = pendingGeneration

@@ -141,6 +141,63 @@ describe('Mobile Noise Companion receiver', () => {
     }))
   })
 
+  it('refreshes a later baseline on the same physical channel without replacing surface state', () => {
+    const runtime = connectedRuntime()
+    const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
+    const acceptValidatedCompanionProjection = vi.fn(() => true)
+    const surface = { acceptValidatedDesktopResync, acceptValidatedCompanionProjection }
+    const surfaceReceiver = vi.fn(() => surface)
+    const refreshSurface = vi.fn()
+    const reconcileOperations = vi.fn()
+    const messages = [
+      foregroundSync(),
+      surfacePage(0, 'session-retained', false, 'surface-first'),
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'conversation-snapshot' as const,
+          operationId: parseCompanionOperationId('history-retained'),
+          generation: 2, desktopRevision: 8,
+          sessionId: parseCompanionSessionId('session-retained'),
+          conversation: {
+            ...validConversation(), sessionId: 'session-retained', hasMore: true,
+            nodes: [{ kind: 'user', seq: 8, time: 8, content: [], source: {} }],
+          },
+        },
+      },
+      {
+        type: 'projection' as const,
+        projection: {
+          type: 'foreground-sync' as const,
+          desktopName: 'Renamed Desktop', generation: 2, desktopRevision: 9,
+        },
+      },
+      {
+        ...surfacePage(0, 'session-retained', false, 'surface-second'),
+        projection: {
+          ...surfacePage(0, 'session-retained', false, 'surface-second').projection,
+          desktopRevision: 10,
+          desktopName: 'Renamed Desktop',
+        },
+      },
+    ]
+    const receiver = new MobileNoiseCompanionReceiver(
+      { open: () => messages.shift()! }, 2, runtime, undefined,
+      surfaceReceiver, refreshSurface, reconcileOperations,
+    )
+
+    for (let index = 0; index < 5; index += 1) receiver.receive(Uint8Array.of(index))
+
+    expect(surfaceReceiver).toHaveBeenCalledOnce()
+    expect(reconcileOperations).toHaveBeenCalledOnce()
+    expect(refreshSurface.mock.calls).toEqual([[0], [0]])
+    expect(acceptValidatedDesktopResync.mock.lastCall?.[0]).toMatchObject({
+      desktopName: 'Renamed Desktop',
+      sessions: { ids: ['session-retained'] },
+      conversations: [{ sessionId: 'session-retained', hasMore: true }],
+    })
+  })
+
   it('applies higher-revision hidden summaries and opened conversation replacements without refresh', () => {
     const runtime = connectedRuntime()
     const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})

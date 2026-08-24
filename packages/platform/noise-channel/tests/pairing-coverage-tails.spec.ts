@@ -214,9 +214,16 @@ describe('Snow pairing hostile persisted and wire state', () => {
     await expect(mobile.begin({ ...ready, peers: [...ready.peers, ...ready.peers] }))
       .rejects.toThrow('exactly one Desktop peer')
     await mobile.begin(ready)
+    const missingOffer = new TextEncoder().encode(JSON.stringify({
+      type: 'snow-ik-2', version: 1, generation: 1, routeId,
+      desktopAttachmentId, mobileAttachmentId, pairingSelector: selector,
+      message: [1], companionOffer: [],
+    }))
+    expect(() => mobile.finish(missingOffer, desktopAttachmentId)).toThrow('offer must contain bytes')
     const mismatched = new TextEncoder().encode(JSON.stringify({
       type: 'snow-ik-2', version: 1, generation: 1, routeId,
-      desktopAttachmentId: 'desktop-other', mobileAttachmentId, pairingSelector: selector, message: [1],
+      desktopAttachmentId: 'desktop-other', mobileAttachmentId, pairingSelector: selector,
+      message: [1], companionOffer: [2],
     }))
     expect(() => mobile.finish(mismatched, desktopAttachmentId)).toThrow('does not match')
     mobile.cancel()

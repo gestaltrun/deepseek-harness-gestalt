@@ -556,9 +556,11 @@ export async function projectDesktopCompanionLiveSession(
   const archived = parseArchivedSessionIds(workspaceResponse.value)
   if (archived === undefined) throw new Error('Desktop Host live Workspace projection returned an invalid value')
   if (archived.has(sessionId)) return { sessionId, removed: true }
-  const position = sessionResponse.value.items.findIndex(item => isRecord(item) && item.sessionId === sessionId)
+  const visibleSessions = surfaceSessionValues(sessionResponse.value, archived)
+  if (visibleSessions === undefined) throw new Error('Desktop Host live Session list returned an invalid value')
+  const position = visibleSessions.findIndex(item => isRecord(item) && item.sessionId === sessionId)
   if (position === -1) return { sessionId, removed: true }
-  const summary = parseSurfaceSessionRow(sessionResponse.value.items[position])
+  const summary = parseSurfaceSessionRow(visibleSessions[position])
   if (summary === undefined || summary.sessionId !== sessionId) {
     throw new Error('Desktop Host live Session summary returned an invalid value')
   }

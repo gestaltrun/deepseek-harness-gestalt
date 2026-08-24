@@ -101,6 +101,73 @@ describe('PairingCompanionKeyVault', () => {
     expect(restored.relayAuthority()).toBeUndefined()
   })
 
+  it('migrates an unversioned IndexedDB singleton grant and restores its derived selection after restart', async () => {
+    const databaseName = `mobile-pairing-legacy-${crypto.randomUUID()}`
+    const accountId = parsePlatformAccountId('account-indexeddb-legacy')
+    const pairingId = parsePersonalPairingId('pairing-indexeddb-legacy')
+    const reconnectState = new Uint8Array(96).fill(61)
+    await writeIndexedDbPairingDocument(databaseName, accountId, {
+      active: [{
+        pairingId,
+        attachmentKey: MATERIAL.slice(),
+        reconnectState,
+        grant: {
+          routeId: 'route-indexeddb-legacy', endpoint: 'mobile',
+          credential: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE', revision: 5,
+        },
+      }],
+    })
+    const store = new IndexedDbMobilePairingStateStore(databaseName)
+
+    const migrated = new PairingCompanionKeyVault(store)
+    await migrated.selectAccount(accountId)
+    expect(migrated.attachmentKeyMaterial(pairingId)).toEqual(MATERIAL)
+    expect(migrated.reconnectState(pairingId)).toEqual(reconnectState)
+    expect(migrated.selectedPairingId()).toBe(pairingId)
+    expect(migrated.relayAuthority()).toEqual({
+      routeId: parseRelayRouteId('route-indexeddb-legacy'), endpoint: 'mobile',
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 5,
+      pairingSelector: parseRelayPairingSelector(pairingId),
+    })
+    await expect(readIndexedDbPairingDocument(databaseName, accountId)).resolves.toMatchObject({
+      version: 2,
+      selectedPairingId: pairingId,
+      active: [{ pairingId, grant: { pairingSelector: pairingId } }],
+    })
+
+    const restarted = new PairingCompanionKeyVault(new IndexedDbMobilePairingStateStore(databaseName))
+    await restarted.selectAccount(accountId)
+    expect(restarted.selectedPairingId()).toBe(pairingId)
+    expect(restarted.relayAuthority()?.pairingSelector).toBe(parseRelayPairingSelector(pairingId))
+  })
+
+  it('rejects an ambiguous unversioned IndexedDB document without rewriting it', async () => {
+    const databaseName = `mobile-pairing-legacy-ambiguous-${crypto.randomUUID()}`
+    const accountId = parsePlatformAccountId('account-indexeddb-legacy-ambiguous')
+    const legacy = {
+      active: [
+        { pairingId: 'pairing-indexeddb-a', attachmentKey: MATERIAL.slice() },
+        { pairingId: 'pairing-indexeddb-b', attachmentKey: OTHER.slice() },
+      ],
+    }
+    await writeIndexedDbPairingDocument(databaseName, accountId, legacy)
+    const store = new IndexedDbMobilePairingStateStore(databaseName)
+
+    await expect(store.load(accountId)).rejects.toThrow('ambiguous')
+    await expect(readIndexedDbPairingDocument(databaseName, accountId)).resolves.toEqual(legacy)
+  })
+
+  it('does not treat an explicit undefined IndexedDB version as the unversioned predecessor', async () => {
+    const databaseName = `mobile-pairing-legacy-disguised-${crypto.randomUUID()}`
+    const accountId = parsePlatformAccountId('account-indexeddb-legacy-disguised')
+    const disguised = { version: undefined, active: [] }
+    await writeIndexedDbPairingDocument(databaseName, accountId, disguised)
+    const store = new IndexedDbMobilePairingStateStore(databaseName)
+
+    await expect(store.load(accountId)).rejects.toThrow('version is unsupported')
+    await expect(readIndexedDbPairingDocument(databaseName, accountId)).resolves.toEqual(disguised)
+  })
+
   it('persists every Paired Desktop and restores only the explicit selection', async () => {
     const store = new IndexedDbMobilePairingStateStore(`mobile-pairing-selection-${crypto.randomUUID()}`)
     const accountId = parsePlatformAccountId('account-selection')
@@ -207,3 +274,41 @@ describe('PairingCompanionKeyVault', () => {
     expect(vault.attachmentKeyMaterial(first)).toBeUndefined()
   })
 })
+
+async function writeIndexedDbPairingDocument(
+  databaseName: string,
+  accountId: ReturnType<typeof parsePlatformAccountId>,
+  document: unknown,
+): Promise<void> {
+  const database = await openPairingDatabase(databaseName)
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction('pairings', 'readwrite')
+    transaction.objectStore('pairings').put(document, accountId)
+    transaction.oncomplete = () => { resolve() }
+    transaction.onerror = () => { reject(transaction.error ?? new Error('legacy IndexedDB write failed')) }
+  })
+  database.close()
+}
+
+async function readIndexedDbPairingDocument(
+  databaseName: string,
+  accountId: ReturnType<typeof parsePlatformAccountId>,
+): Promise<unknown> {
+  const database = await openPairingDatabase(databaseName)
+  const document = await new Promise<unknown>((resolve, reject) => {
+    const request = database.transaction('pairings', 'readonly').objectStore('pairings').get(accountId)
+    request.onsuccess = () => { resolve(request.result) }
+    request.onerror = () => { reject(request.error ?? new Error('legacy IndexedDB read failed')) }
+  })
+  database.close()
+  return document
+}
+
+async function openPairingDatabase(databaseName: string): Promise<IDBDatabase> {
+  return await new Promise((resolve, reject) => {
+    const request = indexedDB.open(databaseName, 1)
+    request.onupgradeneeded = () => { request.result.createObjectStore('pairings') }
+    request.onsuccess = () => { resolve(request.result) }
+    request.onerror = () => { reject(request.error ?? new Error('legacy IndexedDB open failed')) }
+  })
+}

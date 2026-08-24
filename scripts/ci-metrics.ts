@@ -54,7 +54,9 @@ const OBSERVATIONAL_JOB_NAMES = new Set([
 ])
 
 function isBookkeepingJob(name: string): boolean {
-  return AGGREGATE_JOB_NAMES.has(name) || name.endsWith(' / plan targets')
+  return AGGREGATE_JOB_NAMES.has(name)
+    || name.endsWith(' / plan targets')
+    || name.startsWith('windows node 24 / native coverage shard ')
 }
 
 /**

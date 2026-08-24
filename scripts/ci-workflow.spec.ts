@@ -224,6 +224,7 @@ describe('CI workflow', () => {
       'pnpm run check:ci:coverage',
       'pnpm run check:ci:linux-primary',
       'pnpm run check:ci:windows-complete',
+      'pnpm run test:coverage:partitioned',
     ])
     const coverageJobIds = [
       'consolidated-runner-benchmark',
@@ -231,7 +232,7 @@ describe('CI workflow', () => {
       'serial-linux-selfhosted',
       'serial-macos',
       'serial-windows',
-      'windows-native-coverage',
+      'windows-native-coverage-shards',
     ] as const
     const coverageJobs = workflows.flatMap((workflow) => {
       if (!isRecord(workflow.jobs)) throw new TypeError('CI workflows must define jobs')
@@ -276,6 +277,7 @@ describe('CI workflow', () => {
     if (!isRecord(workflow.jobs)
       || !isRecord(workflow.jobs.windows)
       || !isRecord(workflow.jobs['windows-native-core'])
+      || !isRecord(workflow.jobs['windows-native-coverage-shards'])
       || !isRecord(workflow.jobs['windows-native-coverage'])
       || !isRecord(workflow.jobs['windows-native-static'])
       || !isRecord(workflow.jobs['windows-native-verdict'])
@@ -291,6 +293,7 @@ describe('CI workflow', () => {
 
     const windows = workflow.jobs.windows
     const windowsNativeCore = workflow.jobs['windows-native-core']
+    const windowsNativeCoverageShards = workflow.jobs['windows-native-coverage-shards']
     const windowsNativeCoverage = workflow.jobs['windows-native-coverage']
     const windowsNativeStatic = workflow.jobs['windows-native-static']
     const windowsNativeVerdict = workflow.jobs['windows-native-verdict']
@@ -303,6 +306,7 @@ describe('CI workflow', () => {
     if (!Array.isArray(windows.steps)
       || !Array.isArray(aggregate.needs)
       || !isRecord(windowsNativeCore.env)
+      || !isRecord(windowsNativeCoverageShards.env)
       || !isRecord(windowsNativeCoverage.env)
       || !isRecord(windowsNativeStatic.env)
       || !Array.isArray(windowsNativeVerdict.needs)
@@ -332,14 +336,30 @@ describe('CI workflow', () => {
     }
     expect(windowsNativeCore['runs-on']).toContain('windows-latest')
     expect(windowsNativeStatic['runs-on']).toContain('windows-latest')
-    expect(windowsNativeCoverage['runs-on']).toContain('dsh-windows-2025-8core')
-    expect(windowsNativeCoverage.env).toMatchObject({
-      DSH_COVERAGE_MAX_WORKERS: '8',
+    expect(windowsNativeCoverage['runs-on']).toContain('windows-latest')
+    expect(windowsNativeCoverageShards['runs-on']).toContain('windows-latest')
+    expect(windowsNativeCoverageShards.strategy).toMatchObject({
+      'fail-fast': false,
+      matrix: {
+        include: [
+          { shard: 1, indexes: '1,2,3,4' },
+          { shard: 2, indexes: '5,6,7,8' },
+        ],
+      },
+    })
+    expect(windowsNativeCoverageShards.env).toMatchObject({
+      DSH_COVERAGE_EXEMPT_HEAVY: '1',
       DSH_COVERAGE_PARTITIONS: '8',
-      DSH_COVERAGE_PARTITION_CONCURRENCY: '8',
+      DSH_COVERAGE_PARTITION_CONCURRENCY: '4',
+      DSH_COVERAGE_PARTITION_INDEXES: '${{ matrix.indexes }}',
+      DSH_COVERAGE_PRESERVE_BLOBS: '1',
+    })
+    expect(windowsNativeCoverage.env).toMatchObject({
+      DSH_COVERAGE_MAX_WORKERS: '4',
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000',
       DSH_GATE_CONCURRENCY: '2',
     })
+    expect(windowsNativeCoverage.needs).toEqual(['preflight', 'windows-native-coverage-shards'])
     expect(windowsNativeVerdict.needs).toEqual([
       'preflight',
       'windows-native-core',
@@ -356,7 +376,7 @@ describe('CI workflow', () => {
     }).flat()
     expect(nativeCommands).toEqual(expect.arrayContaining([
       'pnpm run check:ci:windows-native-core',
-      'pnpm run check:ci:coverage',
+      'pnpm run check:ci:windows-native-coverage-merge',
       'pnpm run check:ci:windows-native-static',
     ]))
 

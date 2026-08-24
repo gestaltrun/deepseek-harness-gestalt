@@ -126,7 +126,7 @@ Each main CI run uploads the planner JSON and versioned gate reports. Reports id
 
 A Draft pull request with fully known low-risk paths runs tests for changed packages and every reverse consumer, with 100% thresholds applied to existing changed source files. GUI and model-visible paths also run assembled snapshots. Ready pull requests and changes to workflows, lockfiles, vendor source, protocols, session lifecycle, agent loop, build configuration, multiple product areas, or unknown paths run the exhaustive plan. `pnpm ci:impact --base <ref> --head <ref> --plan-only` prints the same Draft command locally; omit `--plan-only` to execute it.
 
-Exhaustive plans keep Wine as the required Windows signal and run native Windows build/runtime, coverage, and static portability as three parallel observational jobs. Their single native verdict fails on any failed, cancelled, or skipped partition without delaying `all checks passed`. Each partition publishes its own gate report; the complete local inventory remains `pnpm run check:ci:windows-complete`.
+Exhaustive plans keep Wine as the required Windows signal and run native Windows build/runtime, coverage, and static portability as parallel observational evidence. Coverage uses two blob-producing workers before one threshold merger; build/runtime and static portability each retain an independent worker. Their single native verdict fails on any failed, cancelled, or skipped owner without delaying `all checks passed`. Each owner publishes inspectable evidence; the complete local inventory remains `pnpm run check:ci:windows-complete`.
 
 ### Daily commands
 

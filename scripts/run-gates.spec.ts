@@ -62,6 +62,7 @@ describe('gate graph validation', () => {
     'ci-static',
     'ci-lint-contracts-ready',
     'ci-coverage',
+    'ci-windows-native-coverage-merge',
     'ci-snapshot',
     'ci-artifacts',
     'ci-consumers',
@@ -234,6 +235,19 @@ describe('gate graph validation', () => {
       args: ['/private/pnpm.cjs', 'run', 'test:coverage:partitioned'],
       streamOutput: true,
     })
+  })
+
+  it('merges cross-job Windows blobs with the exempt-heavy inventory', () => {
+    const gates = withEnv('DSH_COVERAGE_MAX_WORKERS', '8', () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-coverage-merge')))
+
+    expect(gates.map(gate => gate.id)).toEqual(['coverage', 'coverage-exempt-heavy'])
+    expect(gates[0]?.args).toEqual(expect.arrayContaining([
+      '--merge-reports=coverage/.partitioned/blobs',
+      '--coverage',
+    ]))
+    expect(gates[0]?.env).toMatchObject({ DSH_COVERAGE_EXEMPT_HEAVY: '1' })
+    expect(gates[1]?.args).toContain('--maxWorkers=6')
   })
 
   it('rejects an invalid coverage partition count before starting a gate', () => {

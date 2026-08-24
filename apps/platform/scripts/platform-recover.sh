@@ -12,7 +12,7 @@ fi
 : "${RECOVERY_COMMAND:?}"
 
 state_object="oss://${PLATFORM_OSS_BUCKET}/${PLATFORM_DEPLOY_OSS_OBJECT_PREFIX}/active-state.json"
-state=$(aliyun oss cat "$state_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT")
+state=$(aliyun oss cat "$state_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT")
 phase=$(jq -er 'select(.version == 1) | .phase | select(. == "rollbackable" or . == "commit-pending" or . == "committed")' <<< "$state")
 object_root=$(jq -er '.objectRoot' <<< "$state")
 state_instance_ids=()
@@ -69,15 +69,15 @@ else
     jq -nc --arg objectRoot "$object_root" --argjson instanceIds "$instance_ids_json" \
       '{version:1, phase:"committed", objectRoot:$objectRoot, instanceIds:$instanceIds}' > "${RECOVERY_COMMAND}.state"
     aliyun oss cp "${RECOVERY_COMMAND}.state" "$state_object" \
-      --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null
+      --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null
   fi
   run_recovery_on_all complete-commit 2100
 fi
 
 aliyun oss rm "oss://${PLATFORM_OSS_BUCKET}/${object_root}/platform.tar.gz" \
-  --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1 || true
+  --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1 || true
 aliyun oss rm "oss://${PLATFORM_OSS_BUCKET}/${object_root}/platform.env.enc" \
-  --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1 || true
+  --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1 || true
 aliyun oss rm "oss://${PLATFORM_OSS_BUCKET}/${object_root}/platform-host-deploy.sh" \
-  --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1 || true
-aliyun oss rm "$state_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null
+  --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1 || true
+aliyun oss rm "$state_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null

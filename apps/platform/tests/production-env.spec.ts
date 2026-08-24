@@ -38,6 +38,10 @@ function bashPath(filePath: string, platform: NodeJS.Platform = process.platform
     .replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`)
 }
 
+function shellLogicalLines(source: string): string[] {
+  return source.replace(/\\\r?\n\s*/g, ' ').split(/\r?\n/)
+}
+
 function completeDeployEnv(): NodeJS.Dict<string> {
   return {
     PLATFORM_ORIGIN: 'https://platform.example.test',
@@ -636,6 +640,13 @@ describe('Platform release workflows', () => {
     expect(applySource).toContain('source apps/platform/scripts/platform-public-readiness.sh')
     expect(applySource).toContain('aliyun oss cp')
     expect(applySource).toContain('aliyun oss sign')
+    for (const source of [applySource, recoverySource]) {
+      const ossCommands = shellLogicalLines(source).filter(line => line.includes('aliyun oss '))
+      expect(ossCommands.length).toBeGreaterThan(0)
+      for (const command of ossCommands) {
+        expect(command).toContain('--region "$PLATFORM_ALIYUN_REGION"')
+      }
+    }
     expect(applySource).toContain('| head -1')
     expect(applySource).toContain('SCRIPT_SHA256')
     expect(applySource).toContain('rollback_platform')

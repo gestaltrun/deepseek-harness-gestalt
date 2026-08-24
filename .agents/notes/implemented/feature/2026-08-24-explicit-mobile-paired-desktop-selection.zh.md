@@ -16,11 +16,11 @@ Mobile 会保留多组 Personal Pairing 密钥与 Relay grant，但产品会隐�
 
 Mobile 页面按稳定顺序列出每组 retained pairing，准确标记一个 selected Desktop，只使用已鉴权 Desktop 名称，并在尚未观察到名称时展示不透明 pairing id。页面允许在不删除已有记录的情况下配对另一台 Desktop。解除配对只撤销所选 Personal Pairing，只删除其 Companion Cache 与 Operation Receipt，只清零它的本地 secret，并且不自动回退选择。其他 pairing 会继续列出，直到用户选择其中一组。
 
-Paired Desktop 选择属于 endpoint 本地行为。它不会新增 Relay 或 Encrypted Companion message，也绝不跨 Desktop 合并 Session、Workspace、cache、receipt 或 attachment authority。所选 pairing 的 grant 会在 Relay attachment 前选择一个 route 与 pairing selector；每项 mutation 仍绑定当前已鉴权物理 generation。
+Paired Desktop 选择属于 endpoint 本地行为。它不会新增 Relay 或 Encrypted Companion message，也绝不跨 Desktop 合并 Session、Workspace、cache、receipt 或 attachment authority。所选 pairing 的 grant 会在 Relay attachment 前选择一个 route 与 pairing selector。每份 Relay ready 与 peer-update projection 都必须在 Mobile 读取 reconnect state、开始 IK，或保留 channel 派生的名称、cache、Session 与 mutation authority 前匹配这个当前 selector。不匹配会让产品连接与 mutation 失效，但不会删除所选 Desktop 的只读缓存。每项 mutation 仍绑定当前已鉴权物理 generation。
 
 ## Verification
 
-Vault 测试会通过 IndexedDB 与原生受保护存储 adapter 持久化两组独立 grant、名称、密钥、reconnect record 和显式 selection，并证明重复 id 拒绝、只释放所选记录及账号隔离。Controller 测试证明在激活新 grant 前会释放旧 projection 与 Relay，持久保存 offline 与 capacity-shed selection，拒绝 stale activation，只在 Platform 撤销所选记录，保留另一组 pairing，并且在移除后不做隐式选择。独立的英文与中文打包 Mobile snapshot 会先渲染本地化的 selected 与 unselected Desktop 控件，再执行共享 Session 与 conversation 组件。
+Vault 测试会通过 IndexedDB 与原生受保护存储 adapter 持久化两组独立 grant、名称、密钥、reconnect record 和显式 selection，并证明重复 id 拒绝、只释放所选记录及账号隔离。Controller 测试证明在激活新 grant 前会释放旧 projection 与 Relay，持久保存 offline 与 capacity-shed selection，拒绝 stale activation，只在 Platform 撤销所选记录，保留另一组 pairing，并且在移除后不做隐式选择。打包入口测试会保留同一 Account 的两组 pairing，并证明 initial ready 拒绝、鉴权后的 peer-update 重验，以及所选 selector 的 IK 路径。已鉴权 receiver 测试证明只有加密 Desktop projection 能提供 retained name。独立的英文与中文打包 Mobile snapshot 会先渲染本地化的 selected 与 unselected Desktop 控件，再执行共享 Session 与 conversation 组件。
 
 ## Alternatives considered
 

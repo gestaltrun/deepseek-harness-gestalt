@@ -163,6 +163,12 @@ async function mountMobileProduct(): Promise<void> {
           if (ready.peers.length > 1) throw new Error('Mobile Relay has multiple Desktop pairing peers')
           return
         }
+        const selectedPairingSelector = attachmentKeys.relayAuthority()?.pairingSelector
+        if (selectedPairingSelector === undefined || peer.pairingSelector !== selectedPairingSelector) {
+          clearNoiseConnection()
+          companionRuntime()?.invalidateAuthenticatedPeer()
+          throw new Error('Mobile Relay peer does not match the selected Paired Desktop')
+        }
         if (peer.generation === connectionGeneration || peer.generation === pendingGeneration) return
         clearNoiseConnection()
         companionRuntime()?.invalidateAuthenticatedPeer()

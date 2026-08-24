@@ -59,5 +59,5 @@ None.
 
 ## Known Limitations and Deferred Work
 
-- Session creation is not part of Companion major 3. Mobile can browse, open history, submit, cancel, settle current interactions, read image bytes, search, and attach files to an existing Desktop Session.
+- Session rename, archive, deletion, and fork; Workspace administration; terminal input; and settings, credential, plugin, model, and preset mutations are not part of Companion major 3.
 - Pairing handshakes, credential persistence, challenge lifecycle, and production Companion message encryption belong to service or reviewed endpoint integrations, not these codecs.

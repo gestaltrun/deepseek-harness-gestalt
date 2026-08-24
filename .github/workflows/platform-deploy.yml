@@ -319,16 +319,16 @@ jobs:
           state_resolved=0
           cleanup_artifacts() {
             set +e
-            aliyun oss rm "$image_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
-            aliyun oss rm "$env_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
-            aliyun oss rm "$script_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
+            aliyun oss rm "$image_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
+            aliyun oss rm "$env_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
+            aliyun oss rm "$script_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
             if [ "$state_resolved" = 1 ]; then
-              aliyun oss rm "$state_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
+              aliyun oss rm "$state_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
             fi
           }
           trap cleanup_artifacts EXIT
           set +e
-          state_probe=$(aliyun oss cat "$state_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" 2>&1)
+          state_probe=$(aliyun oss cat "$state_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" 2>&1)
           state_probe_status=$?
           set -e
           if [ "$state_probe_status" = 0 ]; then
@@ -339,14 +339,14 @@ jobs:
             exit 1
           fi
           aliyun oss cp "$DEPLOY_DIR/platform.tar.gz" "$image_object" \
-            --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force
+            --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force
           aliyun oss cp "$DEPLOY_DIR/platform.env.enc" "$env_object" \
-            --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force
+            --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force
           aliyun oss cp "$DEPLOY_DIR/platform-host-deploy.sh" "$script_object" \
-            --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force
-          image_url=$(aliyun oss sign "$image_object" --endpoint "$PLATFORM_OSS_ENDPOINT" --timeout 21600 | head -1)
-          env_url=$(aliyun oss sign "$env_object" --endpoint "$PLATFORM_OSS_ENDPOINT" --timeout 21600 | head -1)
-          script_url=$(aliyun oss sign "$script_object" --endpoint "$PLATFORM_OSS_ENDPOINT" --timeout 21600 | head -1)
+            --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force
+          image_url=$(aliyun oss sign "$image_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_OSS_ENDPOINT" --timeout 21600 | head -1)
+          env_url=$(aliyun oss sign "$env_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_OSS_ENDPOINT" --timeout 21600 | head -1)
+          script_url=$(aliyun oss sign "$script_object" --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_OSS_ENDPOINT" --timeout 21600 | head -1)
           echo "::add-mask::$image_url"
           echo "::add-mask::$env_url"
           echo "::add-mask::$script_url"
@@ -355,7 +355,7 @@ jobs:
             jq -nc --arg phase "$1" --arg objectRoot "$object_root" --argjson instanceIds "$instance_ids_json" \
               '{version:1, phase:$phase, objectRoot:$objectRoot, instanceIds:$instanceIds}' > "$state_file"
             aliyun oss cp "$state_file" "$state_object" \
-              --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null
+              --region "$PLATFORM_ALIYUN_REGION" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null
           }
           write_deploy_state rollbackable
 

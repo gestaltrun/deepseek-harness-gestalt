@@ -117,7 +117,7 @@ describe('coverage forwarded arguments', () => {
 })
 
 describe('coverage partition coordinator', () => {
-  it('runs real PowerShell coverage once after concurrent partitions', async () => {
+  it('runs resource-bound coverage once after concurrent partitions', async () => {
     const root = await temporaryRoot()
     const commands: CoverageCommand[] = []
     const coordinator = new CoveragePartitionCoordinator({
@@ -133,7 +133,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/3',
       'partition 2/3',
       'partition 3/3',
-      'exclusive real-process coverage',
+      'exclusive resource-bound coverage',
       'merged coverage report',
     ])
     const exclusive = commands[3]
@@ -144,6 +144,9 @@ describe('coverage partition coordinator', () => {
       '--maxWorkers=1',
       ...coverageExclusiveSuites,
     ]))
+    expect(coverageExclusiveSuites).toContain(
+      'packages/attachment/attachment-local/tests/normalization.spec.ts',
+    )
     expect(exclusive.args.some(argument => argument.startsWith('--shard='))).toBe(false)
     expect(exclusive.env).toMatchObject({
       [COVERAGE_PARTITION_MODE_ENV]: undefined,
@@ -171,9 +174,9 @@ describe('coverage partition coordinator', () => {
       'partition 2/8',
       'partition 3/8',
       'partition 4/8',
-      'exclusive real-process coverage',
+      'exclusive resource-bound coverage',
     ])
-    await expect(access(join(root, 'coverage/.partitioned/blobs/exclusive-real-process.json')))
+    await expect(access(join(root, 'coverage/.partitioned/blobs/exclusive-resource-bound.json')))
       .resolves.toBeUndefined()
   })
 
@@ -230,7 +233,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/3',
       'partition 2/3',
       'partition 3/3',
-      'exclusive real-process coverage',
+      'exclusive resource-bound coverage',
       'merged coverage report',
     ])
   })
@@ -253,7 +256,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/3',
       'partition 2/3',
       'partition 3/3',
-      'exclusive real-process coverage',
+      'exclusive resource-bound coverage',
       'merged coverage report',
     ])
     for (const [index, command] of commands.slice(0, 3).entries()) {
@@ -337,7 +340,7 @@ describe('coverage partition coordinator', () => {
     const reported = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const runCommand = vi.fn(async (command: CoverageCommand) => {
       await writeBlob(command)
-      return command.label === 'exclusive real-process coverage'
+      return command.label === 'exclusive resource-bound coverage'
         ? { exitCode: 1, signalCode: null, outputTail: 'specific PowerShell failure' }
         : passed
     })
@@ -350,15 +353,15 @@ describe('coverage partition coordinator', () => {
 
     await expect(coordinator.run()).resolves.toBe(1)
     expect(reported).toHaveBeenCalledWith(
-      'coverage-partitions: FAIL exclusive real-process coverage (exit 1)',
+      'coverage-partitions: FAIL exclusive resource-bound coverage (exit 1)',
     )
     expect(reported).toHaveBeenCalledWith(
-      'coverage-partitions: output tail for exclusive real-process coverage:\nspecific PowerShell failure',
+      'coverage-partitions: output tail for exclusive resource-bound coverage:\nspecific PowerShell failure',
     )
     expect(runCommand.mock.calls.map(([command]) => command.label)).toEqual([
       'partition 1/2',
       'partition 2/2',
-      'exclusive real-process coverage',
+      'exclusive resource-bound coverage',
       'merged coverage report',
     ])
   })
@@ -397,7 +400,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/2',
       'partition 1/2',
       'partition 2/2',
-      'exclusive real-process coverage',
+      'exclusive resource-bound coverage',
       'merged coverage report',
     ])
   })

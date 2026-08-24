@@ -1,4 +1,4 @@
-/** Coordinate parallel Vitest coverage partitions, exclusive real-process suites, and one merged report. */
+/** Coordinate parallel Vitest coverage partitions, exclusive resource-bound suites, and one merged report. */
 import { spawn } from 'node:child_process'
 import { lstat, mkdir, readdir, rm, unlink } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
@@ -19,14 +19,15 @@ export const COVERAGE_PRESERVE_BLOBS_ENV = 'DSH_COVERAGE_PRESERVE_BLOBS'
 /** Internal marker that suppresses reports and thresholds inside a partition process. */
 export const COVERAGE_PARTITION_MODE_ENV = 'DSH_COVERAGE_PARTITION_MODE'
 
-/** Internal marker selecting the serialized real-process coverage suites. */
+/** Internal marker selecting the serialized resource-bound coverage suites. */
 export const COVERAGE_EXCLUSIVE_MODE_ENV = 'DSH_COVERAGE_EXCLUSIVE_MODE'
 
 /** Environment variable overriding instrumented test and polling timeouts. */
 export const COVERAGE_TEST_TIMEOUT_ENV = 'DSH_COVERAGE_TEST_TIMEOUT_MS'
 
-/** Real-process suites that must not overlap other instrumented processes. */
+/** Resource-bound suites that must not overlap other instrumented processes. */
 export const coverageExclusiveSuites = [
+  'packages/attachment/attachment-local/tests/normalization.spec.ts',
   'packages/shell/pwsh-local/tests/executor.spec.ts',
   'packages/shell/pwsh-sandbox/tests/sandbox.spec.ts',
   'packages/shell/tool-pwsh-persistent/tests/loader-composition.spec.ts',
@@ -186,7 +187,7 @@ export class CoveragePartitionCoordinator {
   }
 
   /**
-   * Run every partition, then exclusive real-process suites, before one merged threshold check.
+   * Run every partition, then exclusive resource-bound suites, before one merged threshold check.
    * @returns zero only when every partition and the merge command succeed.
    */
   public async run(): Promise<number> {
@@ -306,8 +307,8 @@ export class CoveragePartitionCoordinator {
   }
 
   private exclusiveCommand(): CoverageCommand {
-    const blobPath = join(this.blobsRoot, 'exclusive-real-process.json')
-    const reportsDirectory = join(this.temporaryRoot, 'coverage-exclusive-real-process')
+    const blobPath = join(this.blobsRoot, 'exclusive-resource-bound.json')
+    const reportsDirectory = join(this.temporaryRoot, 'coverage-exclusive-resource-bound')
     const invocation = pnpmInvocation([
       'exec',
       'vitest',
@@ -323,7 +324,7 @@ export class CoveragePartitionCoordinator {
       ...this.vitestArgs,
     ], { npm_execpath: this.pnpmEntrypoint })
     return {
-      label: 'exclusive real-process coverage',
+      label: 'exclusive resource-bound coverage',
       ...invocation,
       env: {
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,

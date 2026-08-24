@@ -150,6 +150,9 @@ describe('coverage partition coordinator', () => {
     expect(coverageProcessBoundSuites).toContain(
       'packages/attachment/attachment-local/tests/normalization.spec.ts',
     )
+    expect(coverageProcessBoundSuites).toContain(
+      'packages/util/atomic-write/tests/atomic-write.spec.ts',
+    )
     const persistentState = commands[4]
     if (persistentState === undefined) throw new Error('persistent-state coverage command was not observed')
     expect(persistentState.args).toEqual(expect.arrayContaining([

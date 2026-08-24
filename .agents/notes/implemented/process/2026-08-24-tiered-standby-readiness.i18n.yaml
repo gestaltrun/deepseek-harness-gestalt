@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-24-tiered-standby-readiness.md
-2026-08-24-tiered-standby-readiness.md: 4e18ddadc44ce24e0bf131dff336d059c339e203
-2026-08-24-tiered-standby-readiness.zh.md: 45cda0108dd7cfa865c0688f1aae97d3b67bef11
+2026-08-24-tiered-standby-readiness.md: 74c8653d80e82a8591ab70f998247a6b489d8fdd
+2026-08-24-tiered-standby-readiness.zh.md: c0653d2cb3fc2568e6b2c70805769c90670f4984

@@ -32,6 +32,14 @@ peerDependencyRules:
   allowedVersions:
     typescript: '>=5 <7'
 
+# Runner-global pnpm settings must not expand a clean install into every
+# platform payload. Each checkout materializes only the binaries executable by
+# its host; cross-platform packaging lanes override this in their isolated tree.
+supportedArchitectures:
+  os: [current]
+  cpu: [current]
+  libc: [current]
+
 # pnpm 10+ blocks any dependency shipping an install/build script until it is
 # explicitly reviewed here (strictDepBuilds defaults to true: an unlisted script
 # is a hard install error). Every such package MUST be listed; we deny by

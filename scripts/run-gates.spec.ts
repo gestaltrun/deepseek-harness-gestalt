@@ -109,6 +109,7 @@ describe('gate graph validation', () => {
     const gates = withPnpmEntrypoint(() => gatesForMode(mode))
 
     expect(gates.map(gate => gate.id)).toEqual([
+      'platform-payloads',
       'optional-dependency-imports',
       'build',
       'build:web',

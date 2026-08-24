@@ -47,9 +47,10 @@ export function openCurrentProcessToken(api: Win32Bindings): NativePtr {
  * other per-logon objects; the POC extracts it the same way.
  * @param api - the binding table.
  * @param token - the token whose groups are scanned.
- * @returns a copied logon SID (thrown when the token carries none).
+ * @returns a copied logon SID, or undefined for a non-interactive token that
+ * carries none.
  */
-export function findLogonSid(api: Win32Bindings, token: NativePtr): NativePtr {
+export function findLogonSid(api: Win32Bindings, token: NativePtr): NativePtr | undefined {
   const neededSlot = allocUint32()
   api.getTokenInformation(token, abi.TokenGroups, null, 0, neededSlot) // expected to fail with ERROR_INSUFFICIENT_BUFFER
   const needed = decodeUint32(neededSlot)
@@ -73,7 +74,7 @@ export function findLogonSid(api: Win32Bindings, token: NativePtr): NativePtr {
     if (api.copySid(sidLength, copy, sidPtr) === 0) throwLastError(api, 'CopySid', `logon SID group ${index}`)
     return copy
   }
-  throw new Error(`CreateRestrictedToken prerequisite failed: no logon SID found among ${groupCount} token groups`)
+  return undefined
 }
 
 /**
@@ -161,10 +162,10 @@ export interface RestrictingSidSet {
 /**
  * Create the write-restricted token with the mode-selected restricting list
  * (verified on Win11 26200, see the POC-worktree restrict-variant harness):
- *  - read-only:       [logon SID, EVERYONE]
- *  - workspace-write: [logon SID, EVERYONE, workspace SID, optional temp SID]
+ *  - read-only:       [optional logon SID, EVERYONE]
+ *  - workspace-write: [optional logon SID, EVERYONE, workspace SID, optional temp SID]
  *
- * The logon SID + EVERYONE keep-alive group is shared by both modes: early
+ * The available logon SID + EVERYONE keep-alive group is shared by both modes: early
  * DLL init dies with 0xC0000142 and CNG (`\Device\CNG` write trustee —
  * pwsh crashes 0xE0434352) fails without them. The write SIDs join ONLY
  * workspace-write — read-only carries no write SID, so a standing grant ACE
@@ -185,7 +186,8 @@ export interface RestrictingSidSet {
  * spawn unrestricted.
  * @param api - the binding table.
  * @param currentToken - the process token to restrict.
- * @param logonSid - the copied logon session SID.
+ * @param logonSid - the copied logon session SID, absent for service tokens
+ * that do not carry one.
  * @param writeSids - the distinct write SIDs forming the workspace and
  * optional temp allowlists (workspace-write only; empty under read-only).
  * @param known - the well-known SIDs entering the restricting list.
@@ -195,16 +197,17 @@ export interface RestrictingSidSet {
 export function createRestrictedToken(
   api: Win32Bindings,
   currentToken: NativePtr,
-  logonSid: NativePtr,
+  logonSid: NativePtr | undefined,
   writeSids: readonly NativePtr[],
   known: RestrictingSidSet,
   mode: 'read-only' | 'workspace-write',
 ): NativePtr {
+  const keepAliveSids = logonSid === undefined ? [known.world] : [logonSid, known.world]
   const restrictingSids = buildRestrictingSids(mode === 'read-only'
-    ? [logonSid, known.world]
+    ? keepAliveSids
     : writeSids.length === 0
       ? (() => { throw new Error('createRestrictedToken: workspace-write restricting list requires at least one write SID') })()
-      : [logonSid, known.world, ...writeSids])
+      : [...keepAliveSids, ...writeSids])
   const tokenSlot = allocPtrSlot()
   const created = api.createRestrictedToken(
     currentToken,

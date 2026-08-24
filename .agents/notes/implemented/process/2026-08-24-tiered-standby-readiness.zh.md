@@ -10,7 +10,7 @@
 
 ## 决策
 
-每次 master push 会在两个 standby 平台上各运行一次有界 smoke。每个 job 都会清理全部被忽略和未跟踪的 workspace 状态，在启用 optional dependency 的情况下重建 `node_modules`，并且只在 checkout 外保留内容寻址的 pnpm store。Smoke 验证 optional dependency import、官方 package 与 Web build、Browser Runtime 行为，以及平台特定的文件系统、进程、Session 或 Electron fixture。每个 job 的 timeout 为 20 分钟，并发布结构化就绪报告；summary 会标出独立的 failover 开关。
+每次 master push 会在两个 standby 平台上各运行一次有界 smoke。每个 job 都会清理全部被忽略和未跟踪的 workspace 状态，在启用 optional dependency 的情况下重建 `node_modules`，并且只在 checkout 外保留内容寻址的 pnpm store。仓库自有的 `supportedArchitectures` 将普通安装限定到当前 OS、CPU 和 libc，因此持久 Runner 的全局 pnpm 配置不能把依赖树扩张到全部平台；隔离的 Wine 快照会显式把 Windows 加入该矩阵。每个 standby job 会在安装后立即执行当前平台的 Codex 与 Claude Code 载荷，让 optional download 缺失在 build 或完整清单开始前就失败。随后 Smoke 会验证 optional dependency import、官方 package 与 Web build、Browser Runtime 行为，以及平台特定的文件系统、进程、Session 或 Electron fixture。每个 job 的 timeout 为 20 分钟，并发布结构化就绪报告；summary 会标出独立的 failover 开关。
 
 完整的非分片 Linux 与 Windows 清单按日运行，也可以通过显式的 `standby-exhaustive` workflow dispatch 启动。它们会在运行现有串行聚合流程前执行相同的干净安装，timeout 为 120 分钟。其报告会把失败分类覆盖为 `failover-readiness`；有界 smoke gate 则直接携带该 failure domain。因此 CI 指标会保留这些证据，但不会把 standby 失败计为产品回归。
 

@@ -176,14 +176,14 @@ describe('findLogonSid failure paths', () => {
     expect((caught as Win32Error).api).toBe('GetTokenInformation')
   })
 
-  it('skips a NULL group SID pointer and throws when no logon SID remains', () => {
+  it('skips a NULL group SID pointer when no logon SID remains', () => {
     const { api } = logonApi({ needed: 24, groupCount: 1, sidPtr: 0n, logon: true })
-    expect(() => findLogonSid(api, token)).toThrow(/no logon SID found/u)
+    expect(findLogonSid(api, token)).toBeUndefined()
   })
 
-  it('skips a non-logon group and throws when no logon SID remains', () => {
+  it('returns undefined for a service token carrying no logon SID', () => {
     const { api } = logonApi({ needed: 24, groupCount: 1, sidPtr: 77n, logon: false })
-    expect(() => findLogonSid(api, token)).toThrow(/no logon SID found/u)
+    expect(findLogonSid(api, token)).toBeUndefined()
   })
 
   it('reports a zero logon-SID length', () => {
@@ -384,6 +384,19 @@ describe('createRestrictedToken failure paths', () => {
     const api = { createRestrictedToken: create } as unknown as Win32Bindings
     const logon = allocBytes(12)
     expect(createRestrictedToken(api, 1n as NativePtr, logon, [], { world: 2n as NativePtr }, 'read-only')).toBe(9n)
+  })
+
+  it('builds a service-token read-only list from Everyone alone', () => {
+    const create = vi.fn((
+      _existing: unknown, _flags: unknown, _dc: unknown, _ds: unknown, _pc: unknown, _pd: unknown,
+      count: number, _sids: unknown, slot: NativePtr,
+    ) => {
+      koffi.encode(slot, PVOID, 9n)
+      expect(count).toBe(1)
+      return 1
+    })
+    const api = { createRestrictedToken: create } as unknown as Win32Bindings
+    expect(createRestrictedToken(api, 1n as NativePtr, undefined, [], { world: 2n as NativePtr }, 'read-only')).toBe(9n)
   })
 
   it('builds the workspace-write restricting list with the write SID', () => {

@@ -444,6 +444,7 @@ function nodeCompatSmokeGates(options: { cliSmoke?: boolean } = {}): Gate[] {
 
 function standbySmokeGates(platform: 'linux' | 'windows'): Gate[] {
   const common: Gate[] = [
+    pnpmScript('platform-payloads', 'verify-platform-payloads', { label: 'current platform payloads' }),
     pnpmScript('optional-dependency-imports', 'verify-optional-dependency-imports'),
     ciBuildGate(),
     pnpmScript('build:web', 'build:web', { label: 'Web frontend build', needs: ['build'] }),

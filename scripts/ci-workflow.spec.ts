@@ -472,7 +472,24 @@ describe('CI workflow', () => {
       expect(install, `${jobName} must rebuild persistent node_modules with optional dependencies`).toMatchObject({
         run: 'pnpm install --frozen-lockfile --force',
       })
+      const payloads = (job.steps as unknown[]).find(
+        step => isRecord(step) && step.name === 'Verify current platform payloads',
+      )
+      expect(payloads, `${jobName} must execute the installed native payloads`).toMatchObject({
+        run: 'pnpm run verify-platform-payloads',
+      })
     }
+  })
+
+  it('pins ordinary installs to current-platform optional payloads', () => {
+    const workspace = yaml.load(readFileSync(resolve(root, 'pnpm-workspace.yaml'), 'utf8'))
+    if (!isRecord(workspace)) throw new TypeError('pnpm-workspace.yaml must define a mapping')
+
+    expect(workspace.supportedArchitectures).toEqual({
+      os: ['current'],
+      cpu: ['current'],
+      libc: ['current'],
+    })
   })
 
   it('keeps bounded push smokes separate from exhaustive failover readiness drills', () => {

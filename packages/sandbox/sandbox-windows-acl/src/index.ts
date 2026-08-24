@@ -7,7 +7,7 @@
  * intersection check then allows writes exactly where either capability has
  * a Write ACE, and nowhere else those SIDs are concerned (the check ALSO
  * inherits the ambient write ACEs of the other restricting SIDs — the
- * keep-alive group logon SID + Everyone; Authenticated Users, INTERACTIVE,
+ * keep-alive group available logon SID + Everyone; Authenticated Users, INTERACTIVE,
  * and LOCAL are absent from both lists — see the seam's dual-list contract
  * in `packages/sandbox/sandbox-local` and the package README's Modes section
  * for the complete boundary). The write SID is the per-WORKSPACE identity
@@ -272,7 +272,7 @@ export class AclSandbox {
         }
       }
       const logonSid = findLogonSid(api, currentToken)
-      this.sidAllocations.push(logonSid)
+      if (logonSid !== undefined) this.sidAllocations.push(logonSid)
       const worldSid = makeWellKnownSid(api, abi.WinWorldSid)
       this.sidAllocations.push(worldSid)
       const writeSids = [this.writeSidPtr, this.tempWriteSidPtr].filter((sid): sid is NativePtr => sid !== undefined)

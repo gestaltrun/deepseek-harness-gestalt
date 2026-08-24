@@ -119,6 +119,7 @@
     "verify-package-readme-limitations": "tsx scripts/verify-package-readme-limitations.ts",
     "verify-node-next-types": "tsx scripts/verify-node-next-types.ts",
     "verify-optional-dependency-imports": "tsx scripts/verify-optional-dependency-imports.ts",
+    "verify-platform-payloads": "tsx scripts/verify-platform-payloads.ts",
     "verify-runtime-closure": "tsx scripts/verify-runtime-closure.ts",
     "verify-client-packages": "tsx scripts/verify-client-packages.ts",
     "verify-vendored-links": "tsx scripts/verify-vendored-links.ts",

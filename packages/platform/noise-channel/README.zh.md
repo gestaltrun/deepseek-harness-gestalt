@@ -16,7 +16,9 @@
 
 `beginSnowMobileReconnect` 与 `acceptSnowDesktopReconnect` 为每条物理 Relay attachment 创建一条 IK channel。Snow 为每次尝试生成新的临时密钥。IK prologue 绑定 Relay route、credential-bound pairing selector、相互独立的 Desktop 与 Mobile attachment id，以及正数 connection generation，因此其他 route、配对、attachment 组合或 generation 不能复用该 transcript。`SnowMobileAttachmentOwner` 与 `SnowDesktopAttachmentOwner` 把这些 IK 消息作为不透明 Relay ciphertext payload 携带；Desktop 只选择由非秘密 selector 命名的本地 static state，而 Snow 会认证该 static identity。
 
-`SnowCompanionProtocolChannel` 只加密由 `@deepseek-ai/dsh-remote-protocol` 接纳的值。Snow 的有序 transport 会拒绝重放和乱序 ciphertext。Foreground Synchronization 是带有 attachment generation 与 Desktop revision 的版本化 `foreground-sync` Companion projection；原始 1 字节 frame 无法解码成同步 authority。
+IK 完成后，`SnowDesktopAttachmentOwner` 会把 Desktop 的加密 Companion 版本 offer 放入消息 2，并保留 pending negotiation，而不创建应用 codec。Mobile 解密该 offer，把自己的加密 offer 作为下一条 Relay ciphertext 发出，并且只在发送成功后创建 codec。Desktop 只有在打开 Mobile offer 后才创建 codec，随后发送第一条版本化 `foreground-sync`。不支持的版本交叉会在任一 endpoint 发送应用数据前以 `COMPANION_UPDATE_REQUIRED` 失败，并指出必须更新的 endpoint。任一半协商被放弃都会释放原始 Snow transport。
+
+`SnowCompanionProtocolChannel` 只能通过完成的对端 offer 交换构造，并且只加密由 `@deepseek-ai/dsh-remote-protocol` 接纳的值。Snow 的有序 transport 会拒绝重放和乱序 ciphertext。Foreground Synchronization 携带 attachment generation 与 Desktop revision；原始 1 字节 frame 无法解码成同步 authority。wire 尺寸探测使用从已收到对端 offer 协商出的协议，而不会在本地虚构对端 capability。
 
 ## Model Experience
 

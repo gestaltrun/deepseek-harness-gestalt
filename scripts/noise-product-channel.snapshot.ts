@@ -19,7 +19,7 @@ import { RemoteRelayProvider } from '@deepseek-ai/dsh-remote-access/relay-provid
 import { createDeferred } from '../packages/platform/remote-access/src/deferred.ts'
 import { parseAccountProofJti, parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
-  SnowCompanionProtocolChannel,
+  beginSnowCompanionProtocol,
   SnowDesktopEndpointPairingOwner,
   SnowMobileHandshakeClient,
   acceptSnowDesktopReconnect,
@@ -197,8 +197,10 @@ describe('Snow product channel runnable snapshot', () => {
     }
     const first = await beginSnowMobileReconnect(mobile.exportReconnectState(), binding)
     const responder = await acceptSnowDesktopReconnect(desktop.exportReconnectState(), binding, first.message1)
-    const mobileChannel = new SnowCompanionProtocolChannel(first.finish(responder.message2))
-    const desktopChannel = new SnowCompanionProtocolChannel(responder.channel)
+    const mobileNegotiation = beginSnowCompanionProtocol(first.finish(responder.message2), 'mobile')
+    const desktopNegotiation = beginSnowCompanionProtocol(responder.channel, 'desktop')
+    const mobileChannel = mobileNegotiation.finish(desktopNegotiation.payload)
+    const desktopChannel = desktopNegotiation.finish(mobileNegotiation.payload)
     const synchronization = {
       type: 'projection' as const,
       projection: { type: 'foreground-sync' as const, desktopName: 'Snapshot Desktop', generation, desktopRevision: 1 },

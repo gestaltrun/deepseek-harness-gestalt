@@ -20,7 +20,10 @@ const relayLifecycle = vi.hoisted(() => ({
   stop: vi.fn(async () => {}),
   isConnected: vi.fn(() => false),
   sendCiphertext: vi.fn(async () => {}),
-  onCiphertext: undefined as ((ciphertext: Uint8Array, sourceAttachmentId: ReturnType<typeof parseRelayAttachmentId>) => void) | undefined,
+  onCiphertext: undefined as ((
+    ciphertext: Uint8Array,
+    sourceAttachmentId: ReturnType<typeof parseRelayAttachmentId>,
+  ) => Promise<void>) | undefined,
   onPeerAttachments: undefined as ((ready: { peers: readonly unknown[] }) => Promise<void>) | undefined,
   onConnectionReady: undefined as (() => void) | undefined,
   onConnectionLost: undefined as (() => void) | undefined,
@@ -32,11 +35,19 @@ const snowAttachmentOwners = vi.hoisted(() => ({
     targetAttachmentId: ready.peers[0]?.attachmentId,
     payload: Uint8Array.of(1),
   })),
-  finish: vi.fn(() => ({
-    dispose: vi.fn(),
-    seal: vi.fn(() => Uint8Array.of(2)),
-    open: vi.fn(),
-  })),
+  finish: vi.fn((_ciphertext: Uint8Array, sourceAttachmentId: ReturnType<typeof parseRelayAttachmentId>) => {
+    const channel = {
+      dispose: vi.fn(),
+      seal: vi.fn(() => Uint8Array.of(2)),
+      open: vi.fn(),
+    }
+    return {
+      targetAttachmentId: sourceAttachmentId,
+      payload: Uint8Array.of(3),
+      finish: vi.fn(() => channel),
+      cancel: vi.fn(),
+    }
+  }),
   dispose: vi.fn(),
 }))
 const projectionCaches = vi.hoisted(() => ({
@@ -70,7 +81,7 @@ vi.mock('@deepseek-ai/dsh-remote-access-client', async (importOriginal) => {
     ...actual,
     MobileRelayEndpointLifecycle: class {
       constructor(options: {
-        onCiphertext?: () => void
+        onCiphertext?: typeof relayLifecycle.onCiphertext
         onPeerAttachments?: (ready: { peers: readonly unknown[] }) => Promise<void>
         onConnectionReady?: () => void
         onConnectionLost?: () => void
@@ -282,9 +293,9 @@ describe('Mobile Platform Account entry', () => {
       operationId: 'op-approve', kind: 'approval', summary: 'write a.ts', authorized: ['once'],
     }, { accepted: true, decision: 'once' }, runtime.getState()).settled).toBeUndefined()
 
-    expect(() => {
-      relayLifecycle.onCiphertext?.(Uint8Array.of(1), parseRelayAttachmentId('unexpected-desktop'))
-    }).toThrow('pending Snow IK owner')
+    await expect(relayLifecycle.onCiphertext?.(
+      Uint8Array.of(1), parseRelayAttachmentId('unexpected-desktop'),
+    )).rejects.toThrow('pending Snow IK owner')
     expect(runtime.getState().synchronized).toBe(false)
     relayLifecycle.onConnectionReady?.()
     const firstResync = runtime.bindValidatedDesktopResync()
@@ -344,7 +355,7 @@ describe('Mobile Platform Account entry', () => {
     await relayLifecycle.onPeerAttachments?.(relayPeerProjection(
       'ready', product.databaseIdentity, 'home', 1,
     ))
-    relayLifecycle.onCiphertext?.(Uint8Array.of(2), parseRelayAttachmentId('desktop-home'))
+    await relayLifecycle.onCiphertext?.(Uint8Array.of(2), parseRelayAttachmentId('desktop-home'))
     const resync = product.runtime.bindValidatedDesktopResync()
     if (resync === undefined) throw new Error('expected authenticated Desktop resync receiver')
     resync.acceptValidatedDesktopResync({ type: 'desktop-resync', version: 1, authenticated: true })

@@ -197,6 +197,7 @@ export async function apply(_ctx: Context, config: Config): Promise<void> {
     let desktopAttachmentId = parseRelayAttachmentId(`desktop-${randomUUID()}`)
     let desktopProjection: RelayReadyMessage | RelayPeerUpdateMessage | undefined
     let desktopChannel: SnowCompanionProtocolChannel | undefined
+    let desktopNegotiation: Awaited<ReturnType<SnowDesktopAttachmentOwner['accept']>> | undefined
     let mobileChannel: SnowCompanionProtocolChannel | undefined
     const synchronized = deferred<void>()
     const result = deferred<'accepted' | 'attachment-rejected'>()
@@ -220,6 +221,19 @@ export async function apply(_ctx: Context, config: Config): Promise<void> {
       onPeerAttachments: (update) => { desktopProjection = update },
       onCiphertext: async (ciphertext, sourceAttachmentId) => {
         if (desktopChannel === undefined) {
+          if (desktopNegotiation !== undefined) {
+            if (desktopNegotiation.targetAttachmentId !== sourceAttachmentId) {
+              throw new Error('Desktop Companion offer did not match its authenticated Mobile attachment')
+            }
+            desktopChannel = desktopNegotiation.negotiation.finish(ciphertext)
+            const synchronizedGeneration = desktopNegotiation.generation
+            desktopNegotiation = undefined
+            await desktopLifecycle.sendCiphertext(desktopGrant.pairingSelector, sourceAttachmentId, desktopChannel.seal({
+              type: 'projection',
+              projection: { type: 'foreground-sync', desktopName: 'Assembled Desktop', generation: synchronizedGeneration, desktopRevision: 1 },
+            }))
+            return
+          }
           const projection = desktopProjection
           if (projection === undefined) throw new Error('Desktop Snow IK has no Relay peer projection')
           const accepted = await desktopOwner.accept(
@@ -229,12 +243,8 @@ export async function apply(_ctx: Context, config: Config): Promise<void> {
           if (peer?.generation !== accepted.generation || peer.pairingSelector !== accepted.pairingSelector) {
             throw new Error('Desktop Snow IK did not match the live Relay projection')
           }
-          desktopChannel = accepted.channel
+          desktopNegotiation = accepted
           await desktopLifecycle.sendCiphertext(accepted.pairingSelector, accepted.targetAttachmentId, accepted.payload)
-          await desktopLifecycle.sendCiphertext(accepted.pairingSelector, accepted.targetAttachmentId, accepted.channel.seal({
-            type: 'projection',
-            projection: { type: 'foreground-sync', desktopName: 'Assembled Desktop', generation: accepted.generation, desktopRevision: 1 },
-          }))
           return
         }
         const message = desktopChannel.open(ciphertext)
@@ -248,7 +258,13 @@ export async function apply(_ctx: Context, config: Config): Promise<void> {
         await desktopLifecycle.sendCiphertext(desktopGrant.pairingSelector, sourceAttachmentId,
           desktopChannel.seal({ type: 'result', result: response }))
       },
-      onConnectionLost: () => { desktopChannel?.dispose(); desktopChannel = undefined; desktopProjection = undefined },
+      onConnectionLost: () => {
+        desktopNegotiation?.negotiation.cancel()
+        desktopNegotiation = undefined
+        desktopChannel?.dispose()
+        desktopChannel = undefined
+        desktopProjection = undefined
+      },
     })
     const mobile = new RemoteRelayEndpointController({
       endpoint: 'mobile',
@@ -265,7 +281,14 @@ export async function apply(_ctx: Context, config: Config): Promise<void> {
       },
       onCiphertext: async (ciphertext, sourceAttachmentId) => {
         if (mobileChannel === undefined) {
-          mobileChannel = mobileOwner.finish(ciphertext, sourceAttachmentId)
+          const negotiation = mobileOwner.finish(ciphertext, sourceAttachmentId)
+          try {
+            await mobile.sendCiphertext(negotiation.targetAttachmentId, negotiation.payload)
+            mobileChannel = negotiation.finish()
+          } catch (error) {
+            negotiation.cancel()
+            throw error
+          }
           return
         }
         const message = mobileChannel.open(ciphertext)

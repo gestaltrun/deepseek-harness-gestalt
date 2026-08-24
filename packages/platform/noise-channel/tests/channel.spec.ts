@@ -12,7 +12,7 @@ import {
   SnowDesktopAttachmentOwner,
   SnowDesktopEndpointPairingOwner,
   SnowPairingHandshakeProvider,
-  SnowCompanionProtocolChannel,
+  beginSnowCompanionProtocol,
   initializeSnowChannel,
   acceptSnowDesktopReconnect,
   beginSnowMobileReconnect,
@@ -190,16 +190,95 @@ describe('Snow product Companion channel', () => {
   it('admits foreground synchronization only as a versioned authenticated Companion message', async () => {
     const paired = await completePairingAndOpenGrant()
     const connected = await connect(paired.mobileState, paired.desktopState, binding('desktop-sync', 'mobile-sync', 4))
-    const desktop = new SnowCompanionProtocolChannel(connected.desktop)
-    const mobile = new SnowCompanionProtocolChannel(connected.mobile)
+    const desktopNegotiation = beginSnowCompanionProtocol(connected.desktop, 'desktop')
+    const mobileNegotiation = beginSnowCompanionProtocol(connected.mobile, 'mobile')
+    expect(new TextDecoder().decode(desktopNegotiation.payload)).not.toContain('versions')
+    expect(new TextDecoder().decode(mobileNegotiation.payload)).not.toContain('versions')
+    const desktop = desktopNegotiation.finish(mobileNegotiation.payload)
+    const mobile = mobileNegotiation.finish(desktopNegotiation.payload)
     const sync = {
       type: 'projection' as const,
       projection: { type: 'foreground-sync' as const, desktopName: 'Authenticated Desktop', generation: 4, desktopRevision: 19 },
     }
 
+    expect(desktop.canEncode(sync)).toBe(true)
+    const sessionId = 'session-oversized' as never
+    expect(desktop.canEncode({
+      type: 'projection',
+      projection: {
+        type: 'session-live', generation: 4, desktopRevision: 20, sessionId, position: 0,
+        summary: { sessionId, displayTitle: 'Oversized', running: false, blank: false, updatedAt: 1 },
+        workspaces: [],
+        conversation: {
+          sessionId,
+          nodes: [{
+            kind: 'assistant', seq: 1, time: 1,
+            blocks: [{ kind: 'text', text: 'x'.repeat(55 * 1_024) }],
+          }],
+          turnTimings: [], turnEnds: [], partial: null, runningCalls: [], pending: [], queue: [],
+          running: false, subagent: null, composerPhase: 'active', removed: false,
+          openState: 'open', openError: null, hasMore: false, loadingOlder: false,
+          promptError: null, blank: false, lastAgentError: null,
+        },
+      },
+    })).toBe(false)
     expect(mobile.open(desktop.seal(sync))).toEqual(sync)
     const oneByte = connected.desktop.seal(Uint8Array.of(1))
     expect(() => mobile.open(oneByte)).toThrow()
+    expect(() => mobileNegotiation.finish(desktopNegotiation.payload)).toThrow('already settled')
+    desktopNegotiation.cancel()
+    desktop.dispose()
+    mobile.dispose()
+
+    const abandoned = await connect(
+      paired.mobileState, paired.desktopState, binding('desktop-abandoned', 'mobile-abandoned', 7),
+    )
+    const abandonedNegotiation = beginSnowCompanionProtocol(abandoned.mobile, 'mobile')
+    abandonedNegotiation.cancel()
+    abandonedNegotiation.cancel()
+    expect(() => abandonedNegotiation.finish(Uint8Array.of(1))).toThrow('already settled')
+  })
+
+  it('rejects cross-version and same-direction encrypted offers before application data', async () => {
+    const paired = await completePairingAndOpenGrant()
+    const crossed = await connect(paired.mobileState, paired.desktopState, binding('desktop-cross', 'mobile-cross', 5))
+    const newDesktop = beginSnowCompanionProtocol(crossed.desktop, 'desktop', [4])
+    const oldMobile = beginSnowCompanionProtocol(crossed.mobile, 'mobile', [3])
+    expect(() => newDesktop.finish(oldMobile.payload)).toThrow(expect.objectContaining({
+      code: 'COMPANION_UPDATE_REQUIRED', updateEndpoint: 'mobile',
+    }))
+    expect(() => oldMobile.finish(newDesktop.payload)).toThrow(expect.objectContaining({
+      code: 'COMPANION_UPDATE_REQUIRED', updateEndpoint: 'mobile',
+    }))
+
+    const sameDirection = await connect(
+      paired.mobileState, paired.desktopState, binding('desktop-direction', 'mobile-direction', 6),
+    )
+    const firstMobile = beginSnowCompanionProtocol(sameDirection.mobile, 'mobile')
+    const secondMobile = beginSnowCompanionProtocol(sameDirection.desktop, 'mobile')
+    expect(() => firstMobile.finish(secondMobile.payload)).toThrow('wrong endpoints')
+
+    const preceding = await connect(
+      paired.mobileState, paired.desktopState, binding('desktop-preceding', 'mobile-preceding', 7),
+    )
+    const precedingDesktop = beginSnowCompanionProtocol(preceding.desktop, 'desktop', [3])
+    const precedingMobile = beginSnowCompanionProtocol(preceding.mobile, 'mobile', [3])
+    const oldDesktop = precedingDesktop.finish(precedingMobile.payload)
+    precedingMobile.finish(precedingDesktop.payload)
+    expect(oldDesktop.applicationMajor).toBe(3)
+    const oldSessionId = 'session-major-four' as never
+    expect(() => oldDesktop.canEncode({
+      type: 'projection',
+      projection: {
+        type: 'session-live', generation: 7, desktopRevision: 1,
+        sessionId: oldSessionId, position: 0,
+        summary: {
+          sessionId: oldSessionId, displayTitle: 'Major four', running: false,
+          blank: false, updatedAt: 1,
+        },
+        workspaces: [],
+      },
+    })).toThrow(expect.objectContaining({ code: 'COMPANION_UPDATE_REQUIRED' }))
   })
 
   it('assembles endpoint-owned IK over route-bound Relay ready metadata', async () => {
@@ -218,12 +297,14 @@ describe('Snow product Companion channel', () => {
       peers: [{ attachmentId: desktopAttachmentId, pairingSelector, generation: 9 }],
     })
     const accepted = await desktop.accept(begun.payload, mobileAttachmentId, routeId, desktopAttachmentId)
-    const mobileChannel = mobile.finish(accepted.payload, desktopAttachmentId)
+    const mobileNegotiation = mobile.finish(accepted.payload, desktopAttachmentId)
+    const desktopChannel = accepted.negotiation.finish(mobileNegotiation.payload)
+    const mobileChannel = mobileNegotiation.finish()
     const synchronization = {
       type: 'projection' as const,
       projection: { type: 'foreground-sync' as const, desktopName: 'Authenticated Desktop', generation: 9, desktopRevision: 4 },
     }
-    expect(mobileChannel.open(accepted.channel.seal(synchronization))).toEqual(synchronization)
+    expect(mobileChannel.open(desktopChannel.seal(synchronization))).toEqual(synchronization)
     expect(() => mobile.finish(accepted.payload, desktopAttachmentId)).toThrow('no pending attempt')
     await expect(desktop.accept(
       begun.payload,
@@ -231,10 +312,19 @@ describe('Snow product Companion channel', () => {
       routeId,
       desktopAttachmentId,
     )).rejects.toThrow('does not belong')
+    const next = await mobile.begin({
+      type: 'ready', transportVersion: 1, routeId, attachmentId: mobileAttachmentId,
+      peers: [{ attachmentId: desktopAttachmentId, pairingSelector, generation: 10 }],
+    })
+    const nextAccepted = await desktop.accept(next.payload, mobileAttachmentId, routeId, desktopAttachmentId)
+    const nextNegotiation = mobile.finish(nextAccepted.payload, desktopAttachmentId)
+    nextNegotiation.cancel()
+    nextNegotiation.cancel()
+    nextAccepted.negotiation.cancel()
     mobile.dispose()
     await expect(mobile.begin({
       type: 'ready', transportVersion: 1, routeId, attachmentId: mobileAttachmentId,
-      peers: [{ attachmentId: desktopAttachmentId, pairingSelector, generation: 10 }],
+      peers: [{ attachmentId: desktopAttachmentId, pairingSelector, generation: 11 }],
     })).rejects.toThrow('disposed')
   })
 })

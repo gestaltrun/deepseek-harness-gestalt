@@ -4,12 +4,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
 import {
-  createCompanionNegotiationChannel,
-  createCompanionVersionOffer,
-  encodeCompanionMessage,
-  negotiateCompanionProtocol,
   parseRelayAttachmentId,
-  RemoteProtocolError,
   REMOTE_PROTOCOL_LIMITS,
   type RelayAttachmentId,
   type RelayPairingSelector,
@@ -43,12 +38,6 @@ import type { DesktopCompanionLiveProjectionPayload } from './companion-product.
 
 const CRYPTO_GATE = 'Personal Pairing requires an independently reviewed handshake and Relay crypto provider.'
 const SURFACE_CHANGE_KEY = '\0surface'
-const COMPANION_V4 = negotiateCompanionProtocol(
-  createCompanionNegotiationChannel(),
-  createCompanionVersionOffer('mobile', [4]),
-  createCompanionVersionOffer('desktop', [4]),
-)
-
 /** Validated Desktop endpoint deployment inputs. */
 export interface DesktopRemoteRelayConfig {
   url: string
@@ -137,9 +126,17 @@ interface DesktopSnowActiveChannel {
   retired: boolean
 }
 
+interface DesktopSnowPendingProtocol {
+  readonly projection: DesktopSnowProjection
+  readonly peer: RelayPeerDescriptor
+  readonly finish: (payload: Uint8Array) => SnowCompanionProtocolChannel
+  readonly cancel: () => void
+}
+
 /** Attachment-generation owner that rejects late Snow accept results before channel publication. */
 export class DesktopSnowRelayChannelOwner {
   private readonly channels = new Map<RelayAttachmentId, DesktopSnowActiveChannel>()
+  private readonly pendingProtocols = new Map<RelayAttachmentId, DesktopSnowPendingProtocol>()
   private readonly projections = new Map<RelayPairingSelector, DesktopSnowProjection>()
   private readonly tasks = new Set<Promise<void>>()
   private desktopRevision = 0
@@ -168,6 +165,11 @@ export class DesktopSnowRelayChannelOwner {
   invalidate(selector: RelayPairingSelector): void {
     this.projections.get(selector)?.cancellation.abort()
     this.projections.delete(selector)
+    for (const [attachmentId, pending] of this.pendingProtocols) {
+      if (pending.peer.pairingSelector !== selector) continue
+      pending.cancel()
+      this.pendingProtocols.delete(attachmentId)
+    }
     for (const [attachmentId, active] of this.channels) {
       if (active.peer.pairingSelector !== selector) continue
       active.retired = true
@@ -233,10 +235,24 @@ export class DesktopSnowRelayChannelOwner {
       }
       return
     }
+    const pending = this.pendingProtocols.get(sourceAttachmentId)
+    if (pending !== undefined) {
+      if (projected === undefined || pending.projection !== current
+        || projected.generation !== pending.peer.generation
+        || projected.pairingSelector !== pending.peer.pairingSelector) {
+        this.pendingProtocols.delete(sourceAttachmentId)
+        pending.cancel()
+        throw new Error('Desktop Relay rejected a stale Companion negotiation')
+      }
+      this.pendingProtocols.delete(sourceAttachmentId)
+      const channel = pending.finish(ciphertext)
+      await this.publishActive(channel, current, projected, pairingSelector, sourceAttachmentId)
+      return
+    }
     if (projected === undefined) throw new Error('Desktop Relay rejected an unprojected Snow peer')
     const acceptedPromise = this.owner.accept(ciphertext, sourceAttachmentId, current.routeId, current.attachmentId)
     const accepted = await abortableAccept(acceptedPromise, [current.cancellation.signal, lifecycleSignal])
-    let published = false
+    let retained = false
     try {
       if (!this.isCurrent(current, pairingSelector, projected)
         || accepted.generation !== projected.generation
@@ -247,18 +263,42 @@ export class DesktopSnowRelayChannelOwner {
       if (!this.isCurrent(current, pairingSelector, projected)) {
         throw new Error('Desktop Relay rejected a stale Snow IK transcript')
       }
+      this.pendingProtocols.set(sourceAttachmentId, {
+        projection: current,
+        peer: projected,
+        finish: accepted.negotiation.finish,
+        cancel: accepted.negotiation.cancel,
+      })
+      retained = true
+    } finally {
+      if (!retained) accepted.negotiation.cancel()
+    }
+  }
+
+  private async publishActive(
+    channel: SnowCompanionProtocolChannel,
+    current: DesktopSnowProjection,
+    projected: RelayPeerDescriptor,
+    pairingSelector: RelayPairingSelector,
+    sourceAttachmentId: RelayAttachmentId,
+  ): Promise<void> {
+    let published = false
+    try {
+      if (!this.isCurrent(current, pairingSelector, projected)) {
+        throw new Error('Desktop Relay rejected a stale Companion negotiation')
+      }
       const nextRevision = this.allocateDesktopRevision()
       const desktopName = this.desktopName()
       if (desktopName === undefined) throw new Error('Desktop Relay has no authenticated Installation presentation')
       const synchronization = sealDesktopForegroundSynchronization(
-        accepted.channel, accepted.generation, nextRevision, desktopName,
+        channel, projected.generation, nextRevision, desktopName,
       )
-      await this.send(accepted.pairingSelector, accepted.targetAttachmentId, synchronization)
+      await this.send(pairingSelector, sourceAttachmentId, synchronization)
       if (!this.isCurrent(current, pairingSelector, projected)) {
-        throw new Error('Desktop Relay rejected a stale Snow IK transcript')
+        throw new Error('Desktop Relay rejected a stale Companion negotiation')
       }
       const active: DesktopSnowActiveChannel = {
-        channel: accepted.channel,
+        channel,
         peer: projected,
         cancellation: new AbortController(),
         pendingLive: new Map(),
@@ -266,7 +306,7 @@ export class DesktopSnowRelayChannelOwner {
         retired: false,
       }
       this.channels.set(sourceAttachmentId, active)
-      if (this.liveProjection !== undefined) {
+      if (this.liveProjection !== undefined && channel.applicationMajor >= 4) {
         try {
           active.liveDisposer = this.liveProjection.connect(
             pairingSelector,
@@ -282,7 +322,7 @@ export class DesktopSnowRelayChannelOwner {
       }
       published = true
     } finally {
-      if (!published) accepted.channel.dispose()
+      if (!published) channel.dispose()
     }
   }
 
@@ -338,7 +378,7 @@ export class DesktopSnowRelayChannelOwner {
       const projected = retainObservedConversation(payload, adapter.retainsConversation(change, active.peer.pairingSelector))
       await this.enqueueOutbound(active, () => ({
         type: 'projection',
-        projection: boundLiveSessionProjection({
+        projection: boundLiveSessionProjection(active.channel, {
           type: 'session-live', generation: active.peer.generation,
           desktopRevision: this.allocateDesktopRevision(),
           ...retainObservedConversation(
@@ -428,22 +468,23 @@ function retainObservedConversation(
 }
 
 function boundLiveSessionProjection(
+  channel: SnowCompanionProtocolChannel,
   projection: Extract<CompanionProjection, { type: 'session-live' }>,
 ): Extract<CompanionProjection, { type: 'session-live' }> {
   const message = (candidate: typeof projection): CompanionMessage => ({ type: 'projection', projection: candidate })
-  if (fitsCompanionProjection(message(projection))) return projection
+  if (channel.canEncode(message(projection))) return projection
   if (!('conversation' in projection) || projection.conversation === undefined
     || !isRecord(projection.conversation)) {
-    encodeCompanionMessage(COMPANION_V4, message(projection))
+    if (!channel.canEncode(message(projection))) throw new Error('Companion live projection summary exceeds its negotiated wire limit')
     return projection
   }
   const nodes = Array.isArray(projection.conversation.nodes) ? projection.conversation.nodes : []
   for (let offset = 0; offset < nodes.length; offset += 1) {
     const candidate = {
       ...projection,
-      conversation: { ...projection.conversation, nodes: nodes.slice(offset) },
+      conversation: { ...projection.conversation, nodes: nodes.slice(offset), hasMore: true },
     }
-    if (fitsCompanionProjection(message(candidate))) return candidate
+    if (channel.canEncode(message(candidate))) return candidate
   }
   let lower = 0
   let upper = REMOTE_PROTOCOL_LIMITS.transcriptPageBytes
@@ -454,10 +495,11 @@ function boundLiveSessionProjection(
       ...projection,
       conversation: truncateConversationText({
         ...projection.conversation,
+        hasMore: true,
         nodes: nodes.length === 0 ? [] : [nodes.at(-1)],
       }, limit),
     }
-    if (fitsCompanionProjection(message(candidate))) {
+    if (channel.canEncode(message(candidate))) {
       fitted = candidate
       lower = limit + 1
     } else {
@@ -466,18 +508,8 @@ function boundLiveSessionProjection(
   }
   if (fitted !== undefined) return fitted
   const { conversation: _conversation, ...summary } = projection
-  encodeCompanionMessage(COMPANION_V4, message(summary))
+  if (!channel.canEncode(message(summary))) throw new Error('Companion live projection summary exceeds its negotiated wire limit')
   return summary
-}
-
-function fitsCompanionProjection(message: CompanionMessage): boolean {
-  try {
-    encodeCompanionMessage(COMPANION_V4, message)
-    return true
-  } catch (error) {
-    if (!(error instanceof RemoteProtocolError) || error.code !== 'REMOTE_PROTOCOL_LIMIT_EXCEEDED') throw error
-    return false
-  }
 }
 
 function truncateConversationText(value: unknown, limit: number, key?: string): unknown {
@@ -602,7 +634,7 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
   }
 }
 
-async function abortableAccept<T extends { channel: SnowCompanionProtocolChannel }>(
+async function abortableAccept<T extends { negotiation: { cancel(): void } }>(
   promise: Promise<T>,
   signals: readonly AbortSignal[],
 ): Promise<T> {
@@ -621,7 +653,7 @@ async function abortableAccept<T extends { channel: SnowCompanionProtocolChannel
   try {
     return await Promise.race([promise, cancellation])
   } catch (error) {
-    void promise.then((result) => { result.channel.dispose() }, () => {})
+    void promise.then((result) => { result.negotiation.cancel() }, () => {})
     throw error
   } finally {
     for (const cleanup of cleanups) cleanup()

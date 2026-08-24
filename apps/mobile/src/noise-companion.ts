@@ -88,8 +88,18 @@ export class MobileNoiseCompanionReceiver {
     if (message.projection.generation !== this.generation) {
       throw new Error('Authenticated foreground synchronization belongs to another connection generation')
     }
+    if (this.desktopRevision !== undefined
+      && message.projection.desktopRevision <= this.desktopRevision) return message
     this.authenticatedDesktop?.(message.projection.desktopName)
     if (this.surfaceReceiver !== undefined) {
+      if (this.activeSurface !== undefined) {
+        this.desktopName = message.projection.desktopName
+        this.desktopRevision = message.projection.desktopRevision
+        this.surfaceComplete = false
+        this.pendingLive.clear()
+        this.refreshSurface?.(0)
+        return message
+      }
       const surface = this.surfaceReceiver()
       if (surface === undefined) throw new Error('Authenticated foreground synchronization has no Mobile surface')
       this.activeSurface = surface
@@ -116,6 +126,8 @@ export class MobileNoiseCompanionReceiver {
     })) {
       throw new Error('Authenticated foreground synchronization has no active connection owner')
     }
+    this.desktopName = message.projection.desktopName
+    this.desktopRevision = message.projection.desktopRevision
     return message
   }
 

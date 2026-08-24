@@ -31,8 +31,9 @@ import {
   type CompanionResult,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
-  acceptSnowDesktopReconnect, beginSnowMobileReconnect, initializeSnowChannel,
-  SnowCompanionProtocolChannel, SnowDesktopEndpointPairingOwner, SnowMobileHandshakeClient,
+  acceptSnowDesktopReconnect, beginSnowCompanionProtocol, beginSnowMobileReconnect, initializeSnowChannel,
+  SnowDesktopEndpointPairingOwner, SnowMobileHandshakeClient,
+  type SnowCompanionProtocolChannel,
 } from '@deepseek-ai/dsh-noise-channel'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SqliteSessionPersistence from '@deepseek-ai/dsh-session-persistence-sqlite'
@@ -283,8 +284,7 @@ describe('assembled Desktop Companion Host search', () => {
 
     const resultCount = received.length
     const image = surface.loadImage(assembled.sessionId, assembled.image)
-    await expect.poll(() => received.slice(resultCount)).not.toEqual([])
-    expect(received.slice(resultCount).every(result => result.type === 'image-chunk')).toBe(true)
+    await expect.poll(() => received.slice(resultCount).some(result => result.type === 'image-chunk')).toBe(true)
     await expect(image).resolves.toMatch(/^data:image\/png;base64,/u)
 
     const asked = assembled.ctx.userQuestions.ask({
@@ -356,7 +356,7 @@ describe('assembled Desktop Companion Host search', () => {
     const relayOwner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
       targetAttachmentId: channels.mobileAttachmentId,
       payload: Uint8Array.of(77),
-      channel: channels.desktop,
+      negotiation: { finish: () => channels.desktop, cancel: vi.fn() },
       pairingSelector: channels.pairingSelector,
       generation: channels.generation,
     }) }, async (_selector, _target, ciphertext) => {
@@ -428,6 +428,10 @@ describe('assembled Desktop Companion Host search', () => {
       Uint8Array.of(1), channels.mobileAttachmentId, channels.desktopAttachmentId,
       channels.pairingSelector, new AbortController().signal,
     )
+    await relayOwner.receive(
+      Uint8Array.of(2), channels.mobileAttachmentId, channels.desktopAttachmentId,
+      channels.pairingSelector, new AbortController().signal,
+    )
     await expect.poll(() => baselineSessionIds.every(id => surface.getSnapshot().sessions.ids.includes(id))).toBe(true)
     expect(surface.getSnapshot().sessions.ids).toHaveLength(REMOTE_PROTOCOL_LIMITS.surfaceSessionRows + 1)
     const observation = product.observeSession(assembled.sessionId)
@@ -461,6 +465,12 @@ describe('assembled Desktop Companion Host search', () => {
 
     const secondaryRoot = join(assembled.root, 'secondary')
     await mkdir(secondaryRoot)
+    const surfaceOperations = operationTypes.filter(type => type === 'refresh-surface').length
+    const secondaryWorkspace = await assembled.ctx.workspaceRegistry.create(secondaryRoot, 'Secondary')
+    await expect.poll(() => operationTypes.filter(type => type === 'refresh-surface').length)
+      .toBeGreaterThan(surfaceOperations)
+    expect(surface.getSnapshot().conversations[assembled.sessionId]?.partial)
+      .toMatchObject({ blocks: [{ kind: 'text', text: 'LIVE_PUSH_OK' }] })
     const secondaryId = SessionId('desktop-secondary-workspace-session')
     assembled.ctx.sessions.create(secondaryId, {
       meta: {
@@ -468,7 +478,6 @@ describe('assembled Desktop Companion Host search', () => {
         createdAt: 100, cwd: secondaryRoot,
       },
     })
-    const secondaryWorkspace = await assembled.ctx.workspaceRegistry.create(secondaryRoot, 'Secondary')
     await secondaryWorkspace.attachSession(secondaryId)
     const primaryWorkspace = await assembled.ctx.workspaceRegistry.create(assembled.root, 'Primary')
     await primaryWorkspace.attachSession(assembled.sessionId)
@@ -946,9 +955,11 @@ async function snowProductChannels(): Promise<{
   }
   const initiator = await beginSnowMobileReconnect(mobilePairing.exportReconnectState(), binding)
   const responder = await acceptSnowDesktopReconnect(desktopPairing.exportReconnectState(), binding, initiator.message1)
+  const mobileNegotiation = beginSnowCompanionProtocol(initiator.finish(responder.message2), 'mobile')
+  const desktopNegotiation = beginSnowCompanionProtocol(responder.channel, 'desktop')
   return {
-    mobile: new SnowCompanionProtocolChannel(initiator.finish(responder.message2)),
-    desktop: new SnowCompanionProtocolChannel(responder.channel),
+    mobile: mobileNegotiation.finish(desktopNegotiation.payload),
+    desktop: desktopNegotiation.finish(mobileNegotiation.payload),
     attachmentKey, pairingSelector, desktopAttachmentId, mobileAttachmentId, generation,
   }
 }

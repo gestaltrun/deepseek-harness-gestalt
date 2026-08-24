@@ -6,7 +6,7 @@ platform_cloud_run() {
   local attempt max_attempts
 
   command_content=$(base64 < "$command_file" | tr -d '\n')
-  response=$(aliyun ecs RunCommand \
+  response=$(aliyun ecs RunCommand --region "$PLATFORM_ALIYUN_REGION" \
     --RegionId "$PLATFORM_ALIYUN_REGION" \
     --Type RunShellScript \
     --CommandContent "$command_content" \
@@ -21,7 +21,7 @@ platform_cloud_run() {
   max_attempts=$((command_timeout / 5 + 12))
 
   for attempt in $(seq 1 "$max_attempts"); do
-    result=$(aliyun ecs DescribeInvocationResults \
+    result=$(aliyun ecs DescribeInvocationResults --region "$PLATFORM_ALIYUN_REGION" \
       --RegionId "$PLATFORM_ALIYUN_REGION" \
       --InvokeId "$invoke_id" \
       --InstanceId "$instance_id")

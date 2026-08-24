@@ -186,6 +186,40 @@ describe('Companion foreground lifecycle', () => {
     expect(companionMayMutate(runtime.getState())).toBe(true)
   })
 
+  it('retains a recognizable connection failure until a fresh attachment opens', () => {
+    const runtime = new CompanionForegroundRuntime()
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const resync = runtime.bindValidatedDesktopResync()
+    if (resync === undefined) throw new Error('expected Desktop resync receiver')
+    resync.acceptValidatedDesktopResync(validatedResync)
+
+    runtime.reportConnectionFailure({
+      code: 'COMPANION_UPDATE_REQUIRED',
+      message: 'Desktop update required',
+      updateEndpoint: 'desktop',
+    })
+
+    expect(runtime.getState()).toEqual({
+      foreground: true,
+      socketOpen: false,
+      synchronized: false,
+      connectionFailure: {
+        code: 'COMPANION_UPDATE_REQUIRED',
+        message: 'Desktop update required',
+        updateEndpoint: 'desktop',
+      },
+    })
+    expect(companionMayMutate(runtime.getState())).toBe(false)
+
+    runtime.markConnectionOpen()
+    expect(runtime.getState()).toEqual({
+      foreground: true,
+      socketOpen: true,
+      synchronized: false,
+    })
+  })
+
   it('replaces an authenticated peer without closing or reopening its Relay socket', () => {
     const runtime = new CompanionForegroundRuntime()
     runtime.configure(grant)

@@ -185,6 +185,38 @@ describe('Mobile Companion browse projection', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
+  it.each([
+    ['zh', 'mobile', '请升级 Mobile 后再连接此 Desktop。'],
+    ['zh', 'desktop', '请升级 Desktop 后再从 Mobile 连接。'],
+    ['en', 'mobile', 'Update Mobile to connect to this Desktop.'],
+    ['en', 'desktop', 'Update Desktop to connect from this Mobile.'],
+  ] as const)('renders an explicit %s %s update requirement', (locale, updateEndpoint, expected) => {
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces, conversations: {},
+      ...browsePresentation, locale,
+      connectionFailure: {
+        code: 'COMPANION_UPDATE_REQUIRED',
+        message: `${updateEndpoint} update required`,
+        updateEndpoint,
+      },
+    }))
+
+    expect(screen.getByRole('alert').textContent).toBe(expected)
+  })
+
+  it('renders Platform capacity as a retrying connection state', () => {
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces, conversations: {},
+      ...browsePresentation,
+      connectionFailure: {
+        code: 'PLATFORM_CAPACITY', message: 'Remote Relay returned PLATFORM_CAPACITY',
+        retryAfterMs: 5_000,
+      },
+    }))
+
+    expect(screen.getByRole('alert').textContent).toBe('Platform 当前容量已满，正在重试。')
+  })
+
   it('targets real Workspace ids and disables creation before foreground synchronization', () => {
     const onCreate = vi.fn()
     const view = render(createElement(MobileBrowse, {

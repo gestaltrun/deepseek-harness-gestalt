@@ -72,6 +72,8 @@ function MobileEntry({
     : {
       desktopName: projection.desktopName,
       connection: companionState.socketOpen && companionState.synchronized ? 'online' : 'offline',
+      ...(companionState.connectionFailure === undefined
+        ? {} : { connectionFailure: companionState.connectionFailure }),
       sessions: projection.sessions,
       workspaces: projection.workspaces,
       conversations: projection.conversations,

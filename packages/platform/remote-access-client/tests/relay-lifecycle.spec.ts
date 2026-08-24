@@ -2,10 +2,14 @@ import {
   decodeRelayMessage,
   encodeRelayMessage,
   generateRelayCredential,
+  createCompanionNegotiationChannel,
+  createCompanionVersionOffer,
+  negotiateCompanionProtocol,
   parseRelayAttachChallengeId,
   parseRelayAttachmentId,
   parseRelayPairingSelector,
   parseRelayRouteId,
+  RemoteProtocolError,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { describe, expect, it, vi } from 'vitest'
 import type { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
@@ -224,6 +228,49 @@ describe('RemoteRelayEndpointController', () => {
     await controller.stop()
     await controller.stop()
     vi.useRealTimers()
+  })
+
+  it('preserves an endpoint-specific Companion negotiation failure from the ciphertext owner', async () => {
+    const socket = new FakeSocket()
+    let failure: RemoteProtocolError | undefined
+    try {
+      negotiateCompanionProtocol(
+        createCompanionNegotiationChannel(),
+        createCompanionVersionOffer('mobile', [3]),
+        createCompanionVersionOffer('desktop', [4]),
+      )
+    } catch (error) {
+      if (error instanceof RemoteProtocolError) failure = error
+      else throw error
+    }
+    if (failure === undefined) throw new Error('expected incompatible peer offers to fail negotiation')
+    const onTransportError = vi.fn()
+    const controller = new RemoteRelayEndpointController({
+      endpoint: 'mobile',
+      route: async () => ({
+        routeId: parseRelayRouteId('route-companion-update'),
+        credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      }),
+      attachmentId: () => parseRelayAttachmentId('mobile-companion-update'),
+      connect: async () => socket,
+      attachTimeoutMs: 20,
+      heartbeatIntervalMs: 30_000,
+      reconnectDelayMs: 10_000,
+      onCiphertext: () => { throw failure },
+      onTransportError,
+    })
+    await controller.start()
+    socket.receive(encodeRelayMessage({
+      type: 'ciphertext', transportVersion: 1,
+      routeId: parseRelayRouteId('route-companion-update'),
+      sourceAttachmentId: parseRelayAttachmentId('desktop-companion-update'),
+      targetAttachmentId: parseRelayAttachmentId('mobile-companion-update'),
+      ciphertext: Uint8Array.of(3),
+    }))
+
+    await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledWith(failure) })
+    expect(onTransportError).not.toHaveBeenCalledWith(expect.objectContaining({ code: 'REMOTE_OFFLINE' }))
+    await controller.stop()
   })
 
   it('reconnects after protocol, socket, and route failures and reports stable transport errors', async () => {

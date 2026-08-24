@@ -36,6 +36,7 @@ const DEVELOPMENT = {
 const SOURCE = {
   DSH_REMOTE_RELAY_WSS_URL: 'wss://platform.example/v1/remote-access/relay',
   DSH_REMOTE_RELAY_ATTACH_TIMEOUT_MS: '1000',
+  DSH_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS: '5000',
   DSH_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: '30000',
   DSH_REMOTE_RELAY_RECONNECT_DELAY_MS: '1000',
   DSH_REMOTE_RELAY_INBOUND_MAX_BYTES: String(REMOTE_PROTOCOL_LIMITS.relayMessageBytes),
@@ -43,6 +44,7 @@ const SOURCE = {
 }
 
 const AUTHENTICATED_DESKTOP_NAME = (): string => 'Authenticated Desktop'
+const NEGOTIATION_TIMEOUT_MS = 1_000
 const UNUSED_OPERATION_HANDLER = async (operation: { operationId: string }) => ({
   type: 'operation-failed' as const,
   operationId: operation.operationId,
@@ -50,6 +52,104 @@ const UNUSED_OPERATION_HANDLER = async (operation: { operationId: string }) => (
 })
 
 describe('Desktop Remote Relay composition', () => {
+  it('expires a half-open Companion negotiation without publishing application authority', async () => {
+    vi.useFakeTimers()
+    try {
+      const selector = parseRelayPairingSelector('pairing-negotiation-timeout')
+      const desktopAttachmentId = parseRelayAttachmentId('desktop-negotiation-timeout')
+      const mobileAttachmentId = parseRelayAttachmentId('mobile-negotiation-timeout')
+      const channel = fakeSnowChannel()
+      const negotiation = fakeNegotiation(channel.channel)
+      const send = vi.fn(async () => {})
+      const reconnect = vi.fn()
+      expect(() => new DesktopSnowRelayChannelOwner(
+        { accept: async () => await new Promise<never>(() => {}) },
+        send, undefined, AUTHENTICATED_DESKTOP_NAME, 0,
+      )).toThrow('positive safe integer')
+      const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation,
+        pairingSelector: selector, generation: 1,
+      }) }, send, undefined, AUTHENTICATED_DESKTOP_NAME, 10, {
+        connect: vi.fn(() => () => {}),
+        project: vi.fn(),
+        retainsConversation: () => false,
+        reconnect,
+      })
+      owner.updatePeers({
+        type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-negotiation-timeout'),
+        attachmentId: desktopAttachmentId,
+        peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+      }, selector)
+
+      await owner.receive(
+        Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector,
+        new AbortController().signal,
+      )
+      await vi.advanceTimersByTimeAsync(10)
+
+      expect(send).toHaveBeenCalledOnce()
+      expect(channel.seal).not.toHaveBeenCalled()
+      expect(negotiation.cancel).toHaveBeenCalledOnce()
+      expect(channel.dispose).toHaveBeenCalledOnce()
+      expect(reconnect).toHaveBeenCalledWith(
+        selector, expect.objectContaining({ message: 'Desktop Companion negotiation timed out' }),
+      )
+      await expect(owner.receive(
+        Uint8Array.of(3), mobileAttachmentId, desktopAttachmentId, selector,
+        new AbortController().signal,
+      )).rejects.toThrow('no peer projection')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the negotiation deadline after the Mobile offer publishes the channel', async () => {
+    vi.useFakeTimers()
+    try {
+      const selector = parseRelayPairingSelector('pairing-negotiation-complete')
+      const desktopAttachmentId = parseRelayAttachmentId('desktop-negotiation-complete')
+      const mobileAttachmentId = parseRelayAttachmentId('mobile-negotiation-complete')
+      const channel = fakeSnowChannel()
+      const negotiation = fakeNegotiation(channel.channel)
+      const send = vi.fn(async () => {})
+      const reconnect = vi.fn()
+      const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+        targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation,
+        pairingSelector: selector, generation: 1,
+      }) }, send, undefined, AUTHENTICATED_DESKTOP_NAME, 10, {
+        connect: vi.fn(() => () => {}),
+        project: vi.fn(),
+        retainsConversation: () => false,
+        reconnect,
+      })
+      owner.updatePeers({
+        type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-negotiation-complete'),
+        attachmentId: desktopAttachmentId,
+        peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+      }, selector)
+
+      await owner.receive(
+        Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector,
+        new AbortController().signal,
+      )
+      await owner.receive(
+        Uint8Array.of(3), mobileAttachmentId, desktopAttachmentId, selector,
+        new AbortController().signal,
+      )
+      await vi.advanceTimersByTimeAsync(10)
+
+      expect(send).toHaveBeenCalledTimes(2)
+      expect(channel.seal.mock.calls[0]?.[0]).toMatchObject({
+        type: 'projection', projection: { type: 'foreground-sync' },
+      })
+      expect(negotiation.cancel).not.toHaveBeenCalled()
+      expect(reconnect).not.toHaveBeenCalled()
+      owner.invalidate(selector)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.each(['replacement', 'revocation', 'connection-lost'] as const)(
     'cancels a pending IK accept before %s can install or send a stale channel',
     async (event) => {
@@ -60,6 +160,7 @@ describe('Desktop Remote Relay composition', () => {
       const send = vi.fn(async () => {})
       const owner = new DesktopSnowRelayChannelOwner(
         { accept: async () => await accepted.promise }, send, undefined, AUTHENTICATED_DESKTOP_NAME,
+        NEGOTIATION_TIMEOUT_MS,
       )
       const selector = parseRelayPairingSelector('pairing-race')
       const desktopAttachmentId = parseRelayAttachmentId('desktop-race')
@@ -101,7 +202,7 @@ describe('Desktop Remote Relay composition', () => {
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
       targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: otherSelector, generation: 2,
-    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME)
+    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
     await expect(owner.receive(Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, signal))
       .rejects.toThrow('no peer projection')
     owner.updatePeers({
@@ -128,7 +229,7 @@ describe('Desktop Remote Relay composition', () => {
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
       targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: selector, generation: 1,
-    }) }, send, undefined, AUTHENTICATED_DESKTOP_NAME)
+    }) }, send, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
     const ready = {
       type: 'ready' as const, transportVersion: 1 as const, routeId: parseRelayRouteId('route-installed'),
       attachmentId: desktopAttachmentId,
@@ -167,7 +268,7 @@ describe('Desktop Remote Relay composition', () => {
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
       targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2),
       negotiation: fakeNegotiation(channel.channel), pairingSelector: selector, generation: 1,
-    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS, {
       connect,
       project: async () => ({ sessionId: 'unused' as never, removed: true }),
       retainsConversation: () => false,
@@ -212,7 +313,7 @@ describe('Desktop Remote Relay composition', () => {
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
       targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: selector, generation: 1,
-    }) }, send, handleOperation, AUTHENTICATED_DESKTOP_NAME)
+    }) }, send, handleOperation, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
     owner.updatePeers({
       type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-product'),
       attachmentId: desktopAttachmentId,
@@ -260,7 +361,7 @@ describe('Desktop Remote Relay composition', () => {
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
       targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: selector, generation: 1,
-    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS, {
       connect: (_pairingSelector, listener) => { changed = listener; return disposeLive },
       project,
       retainsConversation: () => false,
@@ -329,7 +430,7 @@ describe('Desktop Remote Relay composition', () => {
       const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
         targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
         pairingSelector: selector, generation: 1,
-      }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+      }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS, {
         connect: (_selector, listener, disconnect) => source.connect(pairingId, listener, disconnect),
         project,
         retainsConversation: change => source.retainsConversation(pairingId, change),
@@ -408,7 +509,7 @@ describe('Desktop Remote Relay composition', () => {
       const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
         targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
         pairingSelector: selector, generation: 1,
-      }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+      }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS, {
         connect: (_selector, listener) => { changed = listener; return () => {} },
         project: async () => ({
           sessionId: 'session-live-bytes', position: 0,
@@ -467,7 +568,7 @@ describe('Desktop Remote Relay composition', () => {
     const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
       targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: selector, generation: 1,
-    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, {
+    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS, {
       connect: (_pairingSelector, listener) => { changed = listener; return disposeLive },
       project: async () => await firstProjection.promise,
       retainsConversation: () => false,
@@ -519,6 +620,7 @@ describe('Desktop Remote Relay composition', () => {
     const firstChannel = fakeSnowChannel()
     const first = new DesktopSnowRelayChannelOwner(
       { accept: async () => await firstAccept.promise }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME,
+      NEGOTIATION_TIMEOUT_MS,
     )
     first.updatePeers(ready, selector)
     const staleAfterAccept = first.receive(
@@ -538,7 +640,7 @@ describe('Desktop Remote Relay composition', () => {
     const second = new DesktopSnowRelayChannelOwner({ accept: async () => ({
       targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(secondChannel.channel),
       pairingSelector: selector, generation: 1,
-    }) }, async () => { secondPeers.splice(0) }, undefined, AUTHENTICATED_DESKTOP_NAME)
+    }) }, async () => { secondPeers.splice(0) }, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
     second.updatePeers({ ...ready, peers: secondPeers }, selector)
     await expect(second.receive(
       Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
@@ -554,7 +656,7 @@ describe('Desktop Remote Relay composition', () => {
     }) }, async () => {
       thirdSend += 1
       if (thirdSend === 2) thirdPeers.splice(0)
-    }, undefined, AUTHENTICATED_DESKTOP_NAME)
+    }, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
     third.updatePeers({ ...ready, peers: thirdPeers }, selector)
     await third.receive(
       Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
@@ -590,7 +692,9 @@ describe('Desktop Remote Relay composition', () => {
         sends += 1
         if (sends === failedSend) throw new Error('Relay send failed')
       })
-      const owner = new DesktopSnowRelayChannelOwner({ accept }, send, undefined, AUTHENTICATED_DESKTOP_NAME)
+      const owner = new DesktopSnowRelayChannelOwner(
+        { accept }, send, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS,
+      )
       owner.updatePeers({
         type: 'ready', transportVersion: 1, routeId: parseRelayRouteId(`route-send-${String(failedSend)}`),
         attachmentId: desktopAttachmentId,
@@ -647,7 +751,9 @@ describe('Desktop Remote Relay composition', () => {
       owner.invalidate(selector)
       throw new Error('Relay send lost the attachment')
     })
-    const owner = new DesktopSnowRelayChannelOwner({ accept }, send, undefined, AUTHENTICATED_DESKTOP_NAME)
+    const owner = new DesktopSnowRelayChannelOwner(
+      { accept }, send, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS,
+    )
     const ready = {
       type: 'ready' as const, transportVersion: 1 as const, routeId: parseRelayRouteId('route-race-send'),
       attachmentId: desktopAttachmentId,
@@ -692,6 +798,7 @@ describe('Desktop Remote Relay composition', () => {
     aborted.abort()
     const cancelled = new DesktopSnowRelayChannelOwner(
       { accept: async () => await pending.promise }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME,
+      NEGOTIATION_TIMEOUT_MS,
     )
     cancelled.updatePeers(ready, selector)
     await expect(cancelled.receive(
@@ -699,7 +806,7 @@ describe('Desktop Remote Relay composition', () => {
     )).rejects.toThrow('cancelled')
     const rejected = new DesktopSnowRelayChannelOwner({ accept: async () => {
       throw new Error('Snow rejected')
-    } }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME)
+    } }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
     rejected.updatePeers(ready, selector)
     await expect(rejected.receive(
       Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
@@ -801,6 +908,7 @@ describe('Desktop Remote Relay composition', () => {
     expect(loadDesktopRemoteRelayConfig(SOURCE)).toEqual({
       url: SOURCE.DSH_REMOTE_RELAY_WSS_URL,
       attachTimeoutMs: 1_000,
+      negotiationTimeoutMs: 5_000,
       heartbeatIntervalMs: 30_000,
       reconnectDelayMs: 1_000,
       inboundMaxBytes: REMOTE_PROTOCOL_LIMITS.relayMessageBytes,
@@ -809,6 +917,7 @@ describe('Desktop Remote Relay composition', () => {
     for (const [field, value] of [
       ['DSH_REMOTE_RELAY_WSS_URL', 'ws://platform.example/relay'],
       ['DSH_REMOTE_RELAY_ATTACH_TIMEOUT_MS', '0'],
+      ['DSH_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS', '1.5'],
       ['DSH_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS', '1.5'],
       ['DSH_REMOTE_RELAY_RECONNECT_DELAY_MS', ''],
       ['DSH_REMOTE_RELAY_INBOUND_MAX_BYTES', String(REMOTE_PROTOCOL_LIMITS.relayMessageBytes - 1)],

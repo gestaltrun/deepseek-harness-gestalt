@@ -266,7 +266,19 @@ async function mountMobileProduct(): Promise<void> {
       },
       onConnectionReady: () => { companionRuntime()?.markConnectionOpen() },
       onConnectionLost: () => { clearNoiseConnection(); companionRuntime()?.forgetConnection() },
-      onTransportError: () => { clearNoiseConnection(); companionRuntime()?.forgetConnection() },
+      onTransportError: (error) => {
+        clearNoiseConnection()
+        companionRuntime()?.reportConnectionFailure({
+          code: error.code,
+          message: error.message,
+          ...('updateEndpoint' in error && error.updateEndpoint !== undefined
+            ? { updateEndpoint: error.updateEndpoint }
+            : {}),
+          ...('retryAfterMs' in error && error.retryAfterMs !== undefined
+            ? { retryAfterMs: error.retryAfterMs }
+            : {}),
+        })
+      },
     })
     companion = new CompanionForegroundRuntime({ relay })
     installCompanionRuntime(companion)

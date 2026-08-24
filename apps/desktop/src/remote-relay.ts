@@ -42,6 +42,7 @@ const SURFACE_CHANGE_KEY = '\0surface'
 export interface DesktopRemoteRelayConfig {
   url: string
   attachTimeoutMs: number
+  negotiationTimeoutMs: number
   heartbeatIntervalMs: number
   reconnectDelayMs: number
   inboundMaxBytes: number
@@ -137,18 +138,31 @@ interface DesktopSnowPendingProtocol {
 export class DesktopSnowRelayChannelOwner {
   private readonly channels = new Map<RelayAttachmentId, DesktopSnowActiveChannel>()
   private readonly pendingProtocols = new Map<RelayAttachmentId, DesktopSnowPendingProtocol>()
+  private readonly pendingProtocolDeadlines = new Map<RelayAttachmentId, ReturnType<typeof setTimeout>>()
   private readonly projections = new Map<RelayPairingSelector, DesktopSnowProjection>()
   private readonly tasks = new Set<Promise<void>>()
   private desktopRevision = 0
 
-  /** @param owner - Desktop Snow IK responder. @param send - current Relay attachment sender. */
+  /**
+   * @param owner - Desktop Snow IK responder.
+   * @param send - current Relay attachment sender.
+   * @param handleOperation - authenticated application operation owner.
+   * @param desktopName - current authenticated Installation presentation.
+   * @param negotiationTimeoutMs - maximum wait after IK2 for Mobile's encrypted offer.
+   * @param liveProjection - optional major 4 Host projection and reconnect owner.
+   */
   constructor(
     private readonly owner: DesktopSnowAcceptOwner,
     private readonly send: DesktopRelaySender,
     private readonly handleOperation: DesktopCompanionOperationHandler | undefined,
     private readonly desktopName: () => string | undefined,
+    private readonly negotiationTimeoutMs: number,
     private readonly liveProjection?: DesktopCompanionLiveProjectionAdapter,
-  ) {}
+  ) {
+    if (!Number.isSafeInteger(negotiationTimeoutMs) || negotiationTimeoutMs <= 0) {
+      throw new TypeError('Desktop Companion negotiation timeout must be a positive safe integer')
+    }
+  }
 
   /** @param update - current route-bound peer projection. @param selector - owned pairing selector. */
   updatePeers(update: RelayReadyMessage | RelayPeerUpdateMessage, selector: RelayPairingSelector): void {
@@ -167,8 +181,7 @@ export class DesktopSnowRelayChannelOwner {
     this.projections.delete(selector)
     for (const [attachmentId, pending] of this.pendingProtocols) {
       if (pending.peer.pairingSelector !== selector) continue
-      pending.cancel()
-      this.pendingProtocols.delete(attachmentId)
+      this.clearPendingProtocol(attachmentId, pending, true)
     }
     for (const [attachmentId, active] of this.channels) {
       if (active.peer.pairingSelector !== selector) continue
@@ -240,11 +253,10 @@ export class DesktopSnowRelayChannelOwner {
       if (projected === undefined || pending.projection !== current
         || projected.generation !== pending.peer.generation
         || projected.pairingSelector !== pending.peer.pairingSelector) {
-        this.pendingProtocols.delete(sourceAttachmentId)
-        pending.cancel()
+        this.clearPendingProtocol(sourceAttachmentId, pending, true)
         throw new Error('Desktop Relay rejected a stale Companion negotiation')
       }
-      this.pendingProtocols.delete(sourceAttachmentId)
+      this.clearPendingProtocol(sourceAttachmentId, pending, false)
       const channel = pending.finish(ciphertext)
       await this.publishActive(channel, current, projected, pairingSelector, sourceAttachmentId)
       return
@@ -263,12 +275,16 @@ export class DesktopSnowRelayChannelOwner {
       if (!this.isCurrent(current, pairingSelector, projected)) {
         throw new Error('Desktop Relay rejected a stale Snow IK transcript')
       }
-      this.pendingProtocols.set(sourceAttachmentId, {
+      const pending: DesktopSnowPendingProtocol = {
         projection: current,
         peer: projected,
         finish: accepted.negotiation.finish,
         cancel: accepted.negotiation.cancel,
-      })
+      }
+      this.pendingProtocols.set(sourceAttachmentId, pending)
+      this.pendingProtocolDeadlines.set(sourceAttachmentId, setTimeout(() => {
+        this.expirePendingProtocol(sourceAttachmentId, pending)
+      }, this.negotiationTimeoutMs))
       retained = true
     } finally {
       if (!retained) accepted.negotiation.cancel()
@@ -441,6 +457,33 @@ export class DesktopSnowRelayChannelOwner {
     }
   }
 
+  private expirePendingProtocol(
+    attachmentId: RelayAttachmentId,
+    pending: DesktopSnowPendingProtocol,
+  ): void {
+    if (!this.clearPendingProtocol(attachmentId, pending, true)) return
+    const selector = pending.peer.pairingSelector
+    const error = new Error('Desktop Companion negotiation timed out')
+    this.invalidate(selector)
+    try { this.liveProjection?.reconnect(selector, error) } catch (failure) {
+      console.error('[desktop-companion] negotiation timeout reconnect failed:', failure)
+    }
+  }
+
+  private clearPendingProtocol(
+    attachmentId: RelayAttachmentId,
+    pending: DesktopSnowPendingProtocol,
+    cancel: boolean,
+  ): boolean {
+    if (this.pendingProtocols.get(attachmentId) !== pending) return false
+    this.pendingProtocols.delete(attachmentId)
+    const deadline = this.pendingProtocolDeadlines.get(attachmentId)
+    if (deadline !== undefined) clearTimeout(deadline)
+    this.pendingProtocolDeadlines.delete(attachmentId)
+    if (cancel) pending.cancel()
+    return true
+  }
+
   private isActive(active: DesktopSnowActiveChannel): boolean {
     return !active.retired && !active.cancellation.signal.aborted
       && this.channels.get(active.peer.attachmentId) === active
@@ -572,6 +615,7 @@ export function loadDesktopRemoteRelayConfig(
   const config: DesktopRemoteRelayConfig = {
     url,
     attachTimeoutMs: positiveInteger(source, 'DSH_REMOTE_RELAY_ATTACH_TIMEOUT_MS'),
+    negotiationTimeoutMs: positiveInteger(source, 'DSH_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS'),
     heartbeatIntervalMs: positiveInteger(source, 'DSH_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS'),
     reconnectDelayMs: positiveInteger(source, 'DSH_REMOTE_RELAY_RECONNECT_DELAY_MS'),
     inboundMaxBytes: positiveInteger(source, 'DSH_REMOTE_RELAY_INBOUND_MAX_BYTES'),
@@ -593,17 +637,18 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
   const config = loadDesktopRemoteRelayConfig(options.source)
   ;(options.initializeWasm ?? initializeDesktopSnowWasm)()
   const owner = new SnowDesktopAttachmentOwner(selector => options.snowPairingVault.reconnectState(selector))
-  const channelOwner = new DesktopSnowRelayChannelOwner(owner, async (...input) => {
-    await lifecycle.sendCiphertext(...input)
-  }, options.handleOperation, () => options.desktopName(), options.liveProjection === undefined ? undefined : {
+  const liveProjection = options.liveProjection === undefined ? undefined : {
     ...options.liveProjection,
-    reconnect: (selector, error) => {
+    reconnect: (selector: RelayPairingSelector, error: unknown) => {
       console.error('[desktop-companion] live projection requires Relay reconnect:', error)
       void lifecycle.reconnect(selector).catch((failure: unknown) => {
         console.error('[desktop-companion] Relay reconnect failed:', failure)
       })
     },
-  })
+  }
+  const channelOwner = new DesktopSnowRelayChannelOwner(owner, async (...input) => {
+    await lifecycle.sendCiphertext(...input)
+  }, options.handleOperation, () => options.desktopName(), config.negotiationTimeoutMs, liveProjection)
   const lifecycle = new DesktopRelayEndpointLifecycle({
     attachmentId: () => parseRelayAttachmentId(crypto.randomUUID()),
     connect: async signal => options.connect === undefined

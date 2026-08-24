@@ -26,7 +26,7 @@ import { registerSettingsNavIcon } from './settings-nav-icon.ts'
 import { loadExternalDisable, loadPrefs } from './prefs.ts'
 import { SideCardSection } from './SideCardSection.tsx'
 import {
-  api, isKnownSidechatSession, noteSidechatDraftSelection, settleSidechatDraft,
+  api, isKnownSidechatSession, noteSidechatDraftSelection, settleSidechatDraft, SidebarApiError,
   sidechatDraftOf,
 } from './api.ts'
 import { SIDE_LABEL_PREFIX } from '../sidechat-core.ts'
@@ -38,7 +38,7 @@ import './layout.css'
  *  locale service backs the sidebar's copy — see locales.ts). `modules`
  *  (rc.8+) is the client module system the chunk loader resolves its
  *  externals through — Cordis guards service access without inject. */
-export const inject = ['connection', 'slots', 'sessions', 'workspaces', 'locale', 'modules', 'uiRenderer']
+export const inject = ['connection', 'remote', 'slots', 'sessions', 'workspaces', 'locale', 'modules', 'uiRenderer']
 
 /**
  * Error boundary over the sidebar tree (root scope): a render error in the
@@ -77,6 +77,7 @@ export function apply(ctx: Context): void {
       return summary?.origin === 'subagent' && summary.displayTitle.startsWith(SIDE_LABEL_PREFIX)
     },
     historyScope: 'owned-suffix',
+    skillCatalogSessionId: (sessionId) => sidechatDraftOf(sessionId)?.parentSessionId ?? sessionId,
     prompt: async (sessionId, content, mode, signal) => {
       if (content.some(part => part.type !== 'text')) {
         return {
@@ -108,6 +109,46 @@ export function apply(ctx: Context): void {
       if (sidechatDraftOf(sessionId) !== undefined) return { ok: true, value: { accepted: true } }
       await api.sidechatCancel(sessionId)
       return { ok: true, value: { accepted: true } }
+    },
+    updateQueue: async (sessionId, itemId, action) => {
+      try {
+        await api.sidechatUpdateQueue(sessionId, itemId, action)
+        return { ok: true, value: { accepted: true } }
+      } catch (cause) {
+        if (cause instanceof SidebarApiError && cause.code === 'queue-item-not-found') {
+          return {
+            ok: false,
+            error: { code: 'queue-item-not-found', message: cause.message, details: { itemId } },
+          }
+        }
+        if (cause instanceof SidebarApiError && cause.code === 'steer-unavailable') {
+          return {
+            ok: false,
+            error: { code: 'steer-unavailable', message: cause.message, details: { itemId } },
+          }
+        }
+        return routeFailure(cause)
+      }
+    },
+    command: async (sessionId, line) => {
+      const match = /^\/permission\s+(\S+)\s*$/u.exec(line)
+      const preset = match?.[1]
+      if (preset === undefined) return { ok: true, value: { matched: false } }
+      try {
+        const draft = sidechatDraftOf(sessionId)
+        const summary = ctx.sessions.list.getSnapshot().byId[sessionId]
+        const parentSessionId = draft?.parentSessionId ?? summary?.parentId
+        if (parentSessionId === undefined) throw new Error(`Side Chat session "${sessionId}" has no parent`)
+        if (draft !== undefined) {
+          const result = await ctx.remote.commands.execute(parentSessionId, line, [])
+          if (!result.ok) return result
+          return { ok: true, value: { matched: result.value !== undefined } }
+        }
+        await api.sidechatPermission(sessionId, parentSessionId, preset)
+        return { ok: true, value: { matched: true } }
+      } catch (cause) {
+        return routeFailure(cause)
+      }
     },
     modelRoute: (sessionId) => ({
       models: async (signal) => {

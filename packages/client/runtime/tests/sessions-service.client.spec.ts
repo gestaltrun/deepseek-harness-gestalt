@@ -108,7 +108,7 @@ describe('list store projection', () => {
 
     expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({
       id: 'draft', parentId: 'parent', origin: 'subagent',
-      displayTitle: 'Side: New thread', blank: true,
+      displayTitle: 'Side: New thread', blank: true, provisional: true,
     })
     expect(b.svc.provideInfoFor(sid('draft')).sessionId).toBe(sid('draft'))
     b.svc.openForRender(sid('draft'))
@@ -128,6 +128,7 @@ describe('list store projection', () => {
     release()
     await Promise.resolve()
     expect(b.svc.list.getSnapshot().byId[sid('draft')]).toMatchObject({ blank: false })
+    expect(b.svc.list.getSnapshot().byId[sid('draft')]?.provisional).toBeUndefined()
   })
 })
 

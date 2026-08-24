@@ -469,7 +469,10 @@ export class LocalPtySession implements TerminalBackendSession {
       const startupHasOutput = !this.initializing || this.scrollback.snapshot().text.length > 0
       const acceptsStdinWait = startupHasOutput && foreground !== undefined
         && operation.acceptsStdinWait(foreground.processGroupId, foreground.inputWaiting)
-      if (elapsed >= this.config.exactProbeAfterMs && acceptsStdinWait) {
+      const exactWaitOwnsGeneration = foreground !== undefined
+        && (this.config.shellDialect !== 'pwsh'
+          || (this.shellPgid !== undefined && foreground.processGroupId !== this.shellPgid))
+      if (elapsed >= this.config.exactProbeAfterMs && acceptsStdinWait && exactWaitOwnsGeneration) {
         this.settleActive('stdin_read')
         return
       }

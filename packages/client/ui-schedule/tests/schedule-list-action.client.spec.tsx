@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { ScheduleProjection, ScheduleProjectionItem } from '@deepseek-ai/dsh-schedule/client'
-import { ScheduleListAction, type ScheduleListActionProps } from '../src/client/ScheduleListAction.tsx'
+import {
+  ScheduleListAction, schedulePopoverPosition, type ScheduleListActionProps,
+} from '../src/client/ScheduleListAction.tsx'
 import { zh } from '../src/client/locales.ts'
 
 const NOW = Date.parse('2026-08-17T06:00:00.000Z')
@@ -43,6 +45,19 @@ function props(schedules: ScheduleProjection | undefined): ScheduleListActionPro
 }
 
 describe('ScheduleListAction visibility and count', () => {
+  it('portals the board and opens it leftward from a right-edge trigger', () => {
+    const trigger = document.createElement('button')
+    trigger.getBoundingClientRect = () => ({
+      x: 960, y: 20, width: 24, height: 24, top: 20, right: 984, bottom: 44, left: 960,
+      toJSON: () => ({}),
+    })
+    expect(schedulePopoverPosition(trigger)).toEqual({ top: 49, left: 424 })
+
+    render(<ScheduleListAction {...props([schedule()])} />)
+    fireEvent.click(screen.getByRole('button', { name: '1 个定时任务等待执行' }))
+    expect(screen.getByRole('list', { name: '定时任务' }).parentElement?.parentElement).toBe(document.body)
+  })
+
   it('renders only for retained schedules and counts scheduled plus overdue but not paused', () => {
     expect(render(<ScheduleListAction {...props(undefined)} />).container.firstChild).toBeNull()
     cleanup()

@@ -20,7 +20,7 @@
   - img
   - text: "Failed Bash Error: tool call aborted before dispatch"
 - textbox "Message the agent"
-- button "Commands":
+- button "Commands and skills":
   - img
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash":

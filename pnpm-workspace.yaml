@@ -33,13 +33,11 @@ peerDependencyRules:
     typescript: '>=5 <7'
 
 # Runner-global pnpm settings must not expand a clean install into every
-# platform payload. Each checkout materializes the native binaries executable
-# by its host plus the portable WASI fallback used when a native optional
-# binding cannot load; cross-platform packaging lanes override this in their
-# isolated tree.
+# platform payload. Each checkout materializes only the binaries executable by
+# its host; cross-platform packaging lanes override this in their isolated tree.
 supportedArchitectures:
   os: [current]
-  cpu: [current, wasm32]
+  cpu: [current]
   libc: [current]
 
 # pnpm 10+ blocks any dependency shipping an install/build script until it is

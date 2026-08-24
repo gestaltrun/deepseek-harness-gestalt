@@ -227,6 +227,16 @@ describe('gate graph validation', () => {
     expect(staticGates.map(gate => gate.id)).toContain('duplication')
   })
 
+  it('omits Linux-owned resolver analysis only from the portable Windows failover inventory', () => {
+    const hosted = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static').map(gate => gate.id))
+    const portable = withEnv('DSH_WINDOWS_STATIC_PORTABLE_ONLY', '1', () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static').map(gate => gate.id)))
+
+    expect(hosted).toEqual([...portable, 'knip', 'duplication'])
+    expect(portable).toContain('module-graph')
+    expect(portable).toContain('package-invariants')
+  })
+
   it.each(['ci-coverage', 'ci-primary'] as const)(
     'keeps %s coverage free of a workspace-build dependency',
     (mode) => {

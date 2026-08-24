@@ -974,6 +974,12 @@ jobs:
     timeout-minutes: 20
     env:
       DSH_GATE_CONCURRENCY: '4'
+      DSH_WINDOWS_STATIC_PORTABLE_ONLY: >-
+        ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+            && github.event_name == 'pull_request'
+            && github.event.pull_request.user.login != 'dependabot[bot]'
+            && '1'
+            || '0' }}
     steps:
       - uses: actions/checkout@v6
         with:

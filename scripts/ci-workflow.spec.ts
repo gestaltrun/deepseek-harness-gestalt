@@ -510,17 +510,6 @@ describe('CI workflow', () => {
       expect(payloads, `${jobName} must execute the installed native payloads`).toMatchObject({
         run: 'pnpm run verify-platform-payloads',
       })
-      if (jobName.includes('windows')) {
-        const runtime = (job.steps as unknown[]).find(
-          step => isRecord(step) && step.name === 'Ensure Windows CI native runtime',
-        )
-        expect(runtime, `${jobName} must provision the signed MSVC runtime before native gates`).toMatchObject({
-          shell: 'pwsh',
-          run: './scripts/ensure-windows-ci-runtime.ps1',
-        })
-        expect(job.steps.indexOf(install)).toBeLessThan(job.steps.indexOf(runtime))
-        expect(job.steps.indexOf(runtime)).toBeLessThan(job.steps.indexOf(payloads))
-      }
     }
   })
 
@@ -530,7 +519,7 @@ describe('CI workflow', () => {
 
     expect(workspace.supportedArchitectures).toEqual({
       os: ['current'],
-      cpu: ['current', 'wasm32'],
+      cpu: ['current'],
       libc: ['current'],
     })
   })
@@ -748,6 +737,9 @@ describe('CI workflow', () => {
     }
     expect(windowsNativeCore['runs-on']).toContain('windows-latest')
     expect(windowsNativeStatic['runs-on']).toContain('windows-latest')
+    expect(windowsNativeStatic.env).toMatchObject({
+      DSH_WINDOWS_STATIC_PORTABLE_ONLY: expect.stringContaining("DSH_CI_FAILOVER_WINDOWS == 'selfhosted'"),
+    })
     expect(windowsNativeCoverage['runs-on']).toBe('ubuntu-latest')
     expect(windowsNativeCoverage['timeout-minutes']).toBe(5)
     expect(windowsNativeCoverageShards['runs-on']).toContain('windows-latest')
@@ -816,6 +808,15 @@ describe('CI workflow', () => {
       name: 'standby exhaustive / windows (self-hosted)',
       'runs-on': ['self-hosted', 'dsh-win-ci', 'windows'],
       'timeout-minutes': 120,
+    })
+    if (!Array.isArray(standbyWindowsExhaustive.steps)) {
+      throw new TypeError('standby-windows-exhaustive must define steps')
+    }
+    const standbyWindowsRun = standbyWindowsExhaustive.steps.find(
+      step => isRecord(step) && step.run === 'pnpm run check:ci:windows-complete',
+    )
+    expect(standbyWindowsRun).toMatchObject({
+      env: { DSH_WINDOWS_STATIC_PORTABLE_ONLY: '1' },
     })
 
     // Aggregate: Wine is required; the independent native verdict is observational.

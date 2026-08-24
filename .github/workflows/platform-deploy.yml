@@ -288,6 +288,18 @@ jobs:
                    && printf '%s' \"\$body\" | grep -Fq '\"attachmentStorage\":\"'$(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE")'\"'; then ready=1; break; fi; sleep 1; \
                done; test \"\$ready\" = 1"
           done
+
+          echo 'public readiness through the production HTTPS origin'
+          public_ready=0
+          for attempt in $(seq 1 30); do
+            if body=$(curl -fsS --connect-timeout 5 --max-time 5 "${PLATFORM_ORIGIN}/readyz") \
+              && printf '%s' "$body" | grep -Fq '"attachmentStorage":"'"$PLATFORM_REMOTE_ATTACHMENT_STORAGE"'"'; then
+              public_ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$public_ready" = 1
           trap - ERR
 
           # A stopped rollback container is removed on every host before the irreversible phase

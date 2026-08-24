@@ -148,6 +148,9 @@ describe('coverage partition coordinator', () => {
       'packages/attachment/attachment-local/tests/normalization.spec.ts',
     )
     expect(coverageExclusiveSuites).toContain(
+      'packages/experimental/agent-team/tests/persistence.spec.ts',
+    )
+    expect(coverageExclusiveSuites).toContain(
       'packages/session/session-persistence-sqlite/tests/differential.spec.ts',
     )
     expect(exclusive.args.some(argument => argument.startsWith('--shard='))).toBe(false)

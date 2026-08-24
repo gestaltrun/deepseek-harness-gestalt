@@ -9,11 +9,13 @@ function summary(
   parentId?: SessionId,
   origin?: 'subagent',
   running = false,
+  provisional = false,
 ): SessionSummary {
   return {
     id: sid(id), displayTitle: id, running, blank: false, updatedAt: 0,
     ...(parentId === undefined ? {} : { parentId }),
     ...(origin === undefined ? {} : { origin }),
+    ...(provisional ? { provisional: true } : {}),
   }
 }
 
@@ -49,5 +51,12 @@ describe('indexSubagentDescendants', () => {
     expect(result.get(sid('missing'))).toEqual({ count: 1, runningCount: 1 })
     expect(result.get(cycleA.id)).toEqual({ count: 2, runningCount: 0 })
     expect(result.get(cycleB.id)).toEqual({ count: 2, runningCount: 0 })
+  })
+
+  it('does not count renderer-only provisional children as subagents', () => {
+    const owner = summary('owner')
+    const draft = summary('draft', owner.id, 'subagent', false, true)
+
+    expect(index(owner, draft).get(owner.id)).toBeUndefined()
   })
 })

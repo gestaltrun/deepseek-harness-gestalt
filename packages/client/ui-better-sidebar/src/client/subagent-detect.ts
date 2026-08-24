@@ -24,7 +24,8 @@ import { SIDE_LABEL_PREFIX } from '../sidechat-core.ts'
  * keeps the auto-open trigger and the Subagent page counts clean.
  */
 export function isSideThreadSummary(summary: SidebarSessionSummary): boolean {
-  return summary.origin === 'subagent' && summary.displayTitle.startsWith(SIDE_LABEL_PREFIX)
+  return summary.origin === 'subagent'
+    && (summary.provisional === true || summary.displayTitle.startsWith(SIDE_LABEL_PREFIX))
 }
 
 /** Count the direct subagent children of one session (durable `origin` rows). */

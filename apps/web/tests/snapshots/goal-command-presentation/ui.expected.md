@@ -12,7 +12,7 @@
   - img
   - text: "goal No goal is currently set. Usage: /goal [<objective>|clear|edit <objective>|pause|resume]"
 - textbox "Message the agent"
-- button "Commands":
+- button "Commands and skills":
   - img
 - 'button "Access mode, current: Workspace Write"': Workspace Write
 - button "Select model, current DeepSeek-V4-Flash":

@@ -340,12 +340,16 @@ export interface ConversationSessionOwnerProps {
 export interface ConversationSessionHeaderOwnerProps {
   /** Side Chat keeps canonical Session chrome visible before its first prompt. */
   renderMode?: 'sidechat' | undefined
+  /** Retarget the explicit secondary renderer while preserving shell selection. */
+  openSession?: ((sessionId: SessionId) => void) | undefined
 }
 
 /** Header actions derive their state from the standard session/global kit. */
 export interface ConversationHeaderActionOwnerProps {
   /** Side Chat suppresses context labels while retaining Session-owned actions. */
   renderMode?: 'sidechat' | undefined
+  /** Retarget the explicit secondary renderer while preserving shell selection. */
+  openSession?: ((sessionId: SessionId) => void) | undefined
 }
 
 /** Plain breadcrumb data handed to the optional lineage renderer. */

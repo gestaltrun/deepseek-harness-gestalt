@@ -1271,6 +1271,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Record a changed preset, then update each changed knob through its own setter. Selecting the effective preset again appends nothing.',
         parameters: [{ name: 'session', description: 'the session the switch belongs to.' }, { name: 'name', description: 'the preset to switch to; unknown names throw.' }],
       },
+      {
+        signature: 'setAgent(agent: Agent, name: string): void',
+        description: 'Switch one live Agent and queue approval-policy narration for its next step.',
+        parameters: [{ name: 'agent', description: 'live Agent whose Session and approval policy change together.' }, { name: 'name', description: 'configured preset name.' }],
+      },
     ],
   },
   {

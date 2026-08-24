@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId, SessionListState, JobView } from '@deepseek-ai/dsh-client-runtime/client'
-import { JobListAction, type JobListActionProps } from '../src/client/JobListAction.tsx'
+import { JobListAction, jobMenuPosition, type JobListActionProps } from '../src/client/JobListAction.tsx'
 import { zh } from '../src/client/locales.ts'
 
 // Live rows render `now - startedAt`, so every assertion needs a pinned clock.
@@ -63,6 +63,19 @@ function rowCells(): string[][] {
 }
 
 describe('JobListAction visibility', () => {
+  it('portals the menu and opens it leftward from a right-edge trigger', () => {
+    const trigger = document.createElement('button')
+    trigger.getBoundingClientRect = () => ({
+      x: 960, y: 20, width: 24, height: 24, top: 20, right: 984, bottom: 44, left: 960,
+      toJSON: () => ({}),
+    })
+    expect(jobMenuPosition(trigger)).toEqual({ top: 49, left: 648 })
+
+    render(<JobListAction {...props([job()])} />)
+    fireEvent.click(screen.getByRole('button'))
+    expect(screen.getByRole('list', { name: zh['list.aria'] }).parentElement).toBe(document.body)
+  })
+
   it('renders nothing while the session has no jobs', () => {
     const { container } = render(<JobListAction {...props(undefined)} />)
     expect(container.innerHTML).toBe('')

@@ -1,5 +1,6 @@
 /** Side Chat tab shell over the canonical explicit-Session conversation renderer. */
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { Context } from '../context-types.ts'
 import { SIDE_LABEL_PREFIX, SIDE_NEW_THREAD_TITLE } from '../sidechat-core.ts'
 import { registerSidechatDraft } from './api.ts'
@@ -9,9 +10,15 @@ import type { SidebarTab } from './state.ts'
 import css from './SideChatView.module.css'
 
 /** The thread a tab is bound to (durable in tab.meta across refreshes). */
-export function sidechatThreadIdOf(tab: SidebarTab): string | undefined {
+export function sidechatThreadIdOf(tab: SidebarTab): SessionId | undefined {
   const meta = tab.meta as { threadId?: unknown } | undefined
-  return typeof meta?.threadId === 'string' ? meta.threadId : undefined
+  return typeof meta?.threadId === 'string' ? meta.threadId as SessionId : undefined
+}
+
+/** Root Side Chat identity whose live handle belongs to this navigable tab. */
+export function sidechatRootThreadIdOf(tab: SidebarTab): SessionId | undefined {
+  const meta = tab.meta as { rootThreadId?: unknown } | undefined
+  return typeof meta?.rootThreadId === 'string' ? meta.rootThreadId as SessionId : sidechatThreadIdOf(tab)
 }
 
 function threadDisplayTitle(title: string): string {
@@ -32,10 +39,16 @@ export function SideChatView(props: {
     useCallback(() => ctx.sessions.list.getSnapshot(), [ctx]),
   )
   const threadId = sidechatThreadIdOf(tab)
+  const rootThreadId = sidechatRootThreadIdOf(tab)
   const provisional = (tab.meta as { provisional?: unknown } | undefined)?.provisional === true
   const summary = threadId === undefined ? undefined : list.byId[threadId]
   const published = summary?.blank === false
   const conversationHost = useRef<HTMLDivElement | null>(null)
+  const openSession = useCallback((sessionId: SessionId): void => {
+    ctx.betterSidebar?.updateTab(tab.id, {
+      meta: { threadId: sessionId, ...(rootThreadId === undefined ? {} : { rootThreadId }) },
+    })
+  }, [ctx.betterSidebar, rootThreadId, tab.id])
 
   useEffect(() => {
     if (threadId === undefined || !provisional || published) return
@@ -72,8 +85,8 @@ export function SideChatView(props: {
   useEffect(() => {
     const host = conversationHost.current
     if (host === null || threadId === undefined) return
-    return ctx.uiRenderer.mountSession(host, 'conversation', threadId, { renderMode: 'sidechat' })
-  }, [ctx.uiRenderer, threadId])
+    return ctx.uiRenderer.mountSession(host, 'conversation', threadId, { renderMode: 'sidechat', openSession })
+  }, [ctx.uiRenderer, openSession, threadId])
 
   if (threadId === undefined) return null
 

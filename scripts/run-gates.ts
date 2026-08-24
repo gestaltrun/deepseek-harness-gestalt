@@ -18,7 +18,7 @@ import {
   parseCoveragePartitionCount,
 } from './coverage-partitions.ts'
 import { pnpmInvocation } from './pnpm-invocation.ts'
-import { buildGateReport, writeGateReport } from './ci-evidence.ts'
+import { buildGateReport, parseCiCacheEvidence, writeGateReport } from './ci-evidence.ts'
 
 /** A named aggregate exposed by the gate runner. */
 export type Mode =
@@ -131,6 +131,7 @@ async function main(args: string[]): Promise<number> {
       startedAtDate,
       completedAtDate,
       artifactRefs,
+      parseCiCacheEvidence(process.env.DSH_CI_CACHE_STATUS),
     ))
   }
   return results.some(result => result.gate.allowFailure !== true && (result.status === 'failed' || result.status === 'skipped'))

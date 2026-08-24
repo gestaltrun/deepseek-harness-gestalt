@@ -13,6 +13,7 @@ permissions:
 
 env:
   PRIMARY_NODE_VERSION: '24'
+  PNPM_VERSION: '11.7.0'
   # CI runs must never report to the production telemetry endpoint baked
   # into apps/cli/cordis.yml (AppCLIEntry disables the row when set).
   DSH_TELEMETRY_DISABLED: '1'
@@ -167,18 +168,21 @@ jobs:
       # compression and upload on the paid latency-critical path. Skipped
       # under failover — see the coverage lane's identical rationale.
       - uses: actions/cache/restore@v4
+        id: pnpm-cache
         if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
 
       - name: Install (immutable)
         run: pnpm install --frozen-lockfile
 
       - name: Run static gates
         env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
           DSH_ARCHIVE_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha) }}
           DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/static.json
           DSH_CI_ARTIFACT_REFS: ci-gates-static
@@ -238,12 +242,13 @@ jobs:
       # already serves warm installs, while restoring the hosted archive
       # would spend ~52 s pulling ~180 MB into that populated store.
       - uses: actions/cache/restore@v4
+        id: pnpm-cache
         if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
 
       - name: Install dependencies and prepare bubblewrap
         run: |
@@ -260,6 +265,8 @@ jobs:
 
       - name: Run exhaustive coverage
         env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
           DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/coverage.json
           DSH_CI_ARTIFACT_REFS: ci-gates-coverage
         run: pnpm run check:ci:coverage
@@ -312,27 +319,28 @@ jobs:
           store_path=$(PNPM_CONFIG_STORE_DIR="$store_root" pnpm store path --silent)
           echo "path=$store_path" >> "$GITHUB_OUTPUT"
 
-      # Pull requests restore the pnpm store and Playwright caches without paying
-      # compression and upload on the required path. No master job saves these
-      # hosted cache keys, so each restore-keys fallback hits the matching archived
-      # entry until it evicts, after which the store is cold. Skipped under failover
-      # — the self-hosted VM's persistent store is already warm.
+      # Pull requests restore the default-branch producer's pnpm and Playwright
+      # caches without paying compression and upload on the required path.
+      # Skipped under failover because the self-hosted VM's persistent stores
+      # are already warm.
       - uses: actions/cache/restore@v4
+        id: pnpm-cache
         if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
 
       # Skipped under failover: the VM's persistent browser cache is already warm.
       - uses: actions/cache/restore@v4
+        id: playwright-cache
         if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-playwright-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-playwright-
 
       - name: Install dependencies and prepare bubblewrap
         run: |
@@ -359,6 +367,8 @@ jobs:
 
       - name: Run compatibility, snapshot, and artifact gates
         env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}},{"id":"playwright","primaryKey":"${{ steps.playwright-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.playwright-cache.outputs.cache-matched-key }}","exactHit":${{ steps.playwright-cache.outputs.cache-hit == 'true' }}}]
           DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/consumers.json
           DSH_CI_ARTIFACT_REFS: ci-gates-consumers
         run: pnpm run check:ci:consumers
@@ -524,11 +534,12 @@ jobs:
           echo "path=$store_path" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache/restore@v4
+        id: pnpm-cache
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
 
       # Master's wine-apt-cache job in ci-master.yml seeds the default-branch
       # scope every pull request can read; a save from this job only reaches
@@ -617,6 +628,24 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
+      - name: Configure pnpm store path
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $storePath = pnpm store path --silent
+          echo "path=$storePath" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache/restore@v4
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_WINDOWS != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
       - name: Install (immutable)
         shell: pwsh
         run: pnpm install --frozen-lockfile
@@ -624,6 +653,8 @@ jobs:
       - name: Run native build and runtime gates
         shell: pwsh
         env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
           DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-core.json
           DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-core
         run: pnpm run check:ci:windows-native-core
@@ -684,6 +715,24 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
+      - name: Configure pnpm store path
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $storePath = pnpm store path --silent
+          echo "path=$storePath" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache/restore@v4
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_WINDOWS != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
       - name: Install (immutable)
         shell: pwsh
         run: pnpm install --frozen-lockfile
@@ -735,6 +784,24 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
+      - name: Configure pnpm store path
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $storePath = pnpm store path --silent
+          echo "path=$storePath" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache/restore@v4
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_WINDOWS != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
       - name: Install (immutable)
         shell: pwsh
         run: pnpm install --frozen-lockfile
@@ -749,6 +816,8 @@ jobs:
       - name: Merge native coverage and run exempt-heavy suites
         shell: pwsh
         env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
           DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-coverage.json
           DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-coverage
         run: pnpm run check:ci:windows-native-coverage-merge
@@ -795,6 +864,24 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
+      - name: Configure pnpm store path
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $storePath = pnpm store path --silent
+          echo "path=$storePath" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache/restore@v4
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_WINDOWS != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
       - name: Install (immutable)
         shell: pwsh
         run: pnpm install --frozen-lockfile
@@ -802,6 +889,8 @@ jobs:
       - name: Run native static portability gates
         shell: pwsh
         env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
           DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-static.json
           DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-static
         run: pnpm run check:ci:windows-native-static

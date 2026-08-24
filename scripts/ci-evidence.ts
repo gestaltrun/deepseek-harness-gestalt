@@ -40,6 +40,38 @@ export interface CiGateReport {
   firstFailure: { gateId: string; classification: CiFailureClassification } | null
   gates: CiGateEvidence[]
   artifactRefs: string[]
+  caches: CiCacheEvidence[]
+}
+
+/** One cache restore outcome recorded beside gate evidence. */
+export interface CiCacheEvidence {
+  id: string
+  primaryKey: string
+  matchedKey: string
+  exactHit: boolean
+}
+
+/** Parse structured cache evidence supplied by the workflow boundary. */
+export function parseCiCacheEvidence(raw: string | undefined): CiCacheEvidence[] {
+  if (raw === undefined || raw === '') return []
+  const value = JSON.parse(raw) as unknown
+  if (!Array.isArray(value)) throw new Error('CI cache evidence must be an array')
+  return value.map((entry, index) => {
+    if (!isRecord(entry)
+      || typeof entry.id !== 'string'
+      || entry.id === ''
+      || typeof entry.primaryKey !== 'string'
+      || typeof entry.matchedKey !== 'string'
+      || typeof entry.exactHit !== 'boolean') {
+      throw new Error(`CI cache evidence entry ${String(index)} is invalid`)
+    }
+    return {
+      id: entry.id,
+      primaryKey: entry.primaryKey,
+      matchedKey: entry.matchedKey,
+      exactHit: entry.exactHit,
+    }
+  })
 }
 
 const GENERATED_GATE_IDS = new Set([
@@ -130,6 +162,7 @@ export function buildGateReport(
   startedAt: Date,
   completedAt: Date,
   artifactRefs: readonly string[],
+  caches: readonly CiCacheEvidence[] = [],
 ): CiGateReport {
   const blockingFailure = settledResults.find(result =>
     result.gate.allowFailure !== true && (result.status === 'failed' || result.status === 'skipped'))
@@ -162,7 +195,12 @@ export function buildGateReport(
       error: result.error ?? null,
     })),
     artifactRefs: [...new Set(artifactRefs)].sort(),
+    caches: [...caches],
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /**

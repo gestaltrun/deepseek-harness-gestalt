@@ -131,6 +131,85 @@ describe('CI workflow', () => {
     }
   })
 
+  it('keeps hosted cache producer and consumers on one versioned key contract', () => {
+    const producer = loadWorkflow('.github/workflows/ci-cache-producer.yml')
+    const workflow = loadWorkflow('.github/workflows/ci.yml')
+    if (!isRecord(producer.on) || !isRecord(producer.env) || !isRecord(producer.jobs)
+      || !isRecord(workflow.env) || !isRecord(workflow.jobs)) {
+      throw new TypeError('cache producer and CI workflow must define events, environment, and jobs')
+    }
+    expect(Object.keys(producer.on).sort()).toEqual(['push', 'schedule', 'workflow_dispatch'])
+    expect(producer.env).toMatchObject({ PRIMARY_NODE_VERSION: '24', PNPM_VERSION: '11.7.0' })
+    expect(workflow.env.PNPM_VERSION).toBe('11.7.0')
+    const producerJob = workflowJob(producer, 'produce')
+    if (!Array.isArray(producerJob.steps) || !isRecord(producerJob.strategy)) {
+      throw new TypeError('cache producer must define steps and a platform matrix')
+    }
+    expect(producerJob.strategy).toMatchObject({
+      'fail-fast': false,
+      matrix: {
+        include: [
+          expect.objectContaining({ os: 'Linux', arch: 'X64', runner: 'ubuntu-latest' }),
+          expect.objectContaining({ os: 'Windows', arch: 'X64', runner: 'windows-latest' }),
+        ],
+      },
+    })
+    const producerSteps = producerJob.steps as unknown[]
+    const producerPnpm = producerSteps.find(step => isRecord(step) && step.id === 'pnpm-cache')
+    const producerPlaywright = producerSteps.find(step => isRecord(step) && step.id === 'playwright-cache')
+    if (!isRecord(producerPnpm) || !isRecord(producerPnpm.with)
+      || !isRecord(producerPlaywright) || !isRecord(producerPlaywright.with)) {
+      throw new TypeError('cache producer must define pnpm and Playwright cache steps')
+    }
+    const pnpmKey = 'dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles(\'pnpm-lock.yaml\') }}'
+    const pnpmFallback = 'dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-\n'
+    const playwrightKey = 'dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-playwright-${{ hashFiles(\'pnpm-lock.yaml\') }}'
+    expect(producerPnpm.with).toMatchObject({ key: pnpmKey, 'restore-keys': pnpmFallback })
+    expect(producerPlaywright.with).toMatchObject({ key: playwrightKey })
+    for (const step of producerSteps) {
+      if (!isRecord(step) || !isRecord(step.with) || typeof step.with.path !== 'string') continue
+      expect(step.with.path).not.toContain('node_modules')
+    }
+    expect(producerSteps).toContainEqual(expect.objectContaining({
+      name: 'Install dependencies from a clean workspace',
+      run: 'pnpm install --frozen-lockfile',
+    }))
+
+    for (const jobId of ['node-24', 'node-24-coverage', 'node-24-consumers']) {
+      const job = workflowJob(workflow, jobId)
+      if (!Array.isArray(job.steps)) throw new TypeError(`${jobId} must define steps`)
+      const steps = job.steps as unknown[]
+      const restore = steps.find(step => isRecord(step) && step.id === 'pnpm-cache')
+      if (!isRecord(restore) || !isRecord(restore.with)) throw new TypeError(`${jobId} must restore pnpm cache`)
+      expect(restore).toMatchObject({ uses: 'actions/cache/restore@v4' })
+      expect(restore.with).toMatchObject({ key: pnpmKey, 'restore-keys': pnpmFallback })
+      const command = steps.find(step => isRecord(step)
+        && isRecord(step.env)
+        && typeof step.env.DSH_CI_REPORT_PATH === 'string')
+      if (!isRecord(command) || !isRecord(command.env)) throw new TypeError(`${jobId} must publish gate evidence`)
+      expect(command.env.DSH_CI_CACHE_STATUS).toContain('"id":"pnpm-store"')
+    }
+    for (const jobId of [
+      'windows-native-core',
+      'windows-native-coverage-shards',
+      'windows-native-coverage',
+      'windows-native-static',
+    ]) {
+      const job = workflowJob(workflow, jobId)
+      if (!Array.isArray(job.steps)) throw new TypeError(`${jobId} must define steps`)
+      const restore = (job.steps as unknown[]).find(step => isRecord(step) && step.id === 'pnpm-cache')
+      if (!isRecord(restore) || !isRecord(restore.with)) throw new TypeError(`${jobId} must restore pnpm cache`)
+      expect(restore.with).toMatchObject({ key: pnpmKey, 'restore-keys': pnpmFallback })
+    }
+    const consumers = workflowJob(workflow, 'node-24-consumers')
+    if (!Array.isArray(consumers.steps)) throw new TypeError('consumer lane must define steps')
+    const browserRestore = (consumers.steps as unknown[]).find(step => isRecord(step) && step.id === 'playwright-cache')
+    if (!isRecord(browserRestore) || !isRecord(browserRestore.with)) {
+      throw new TypeError('consumer lane must restore Playwright cache')
+    }
+    expect(browserRestore.with.key).toBe(playwrightKey)
+  })
+
   it('runs only selected Draft evidence while keeping ready plans exhaustive', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     if (!isRecord(workflow.jobs)) throw new TypeError('CI workflow must define jobs')
@@ -329,7 +408,11 @@ describe('CI workflow', () => {
   })
 
   it('isolates every pnpm action setup destination per runner', () => {
-    const files = ['.github/workflows/ci.yml', '.github/workflows/ci-master.yml']
+    const files = [
+      '.github/workflows/ci.yml',
+      '.github/workflows/ci-master.yml',
+      '.github/workflows/ci-cache-producer.yml',
+    ]
     const setups: Array<{ jobName: string; step: unknown }> = []
     for (const file of files) {
       const workflow: unknown = yaml.load(readFileSync(resolve(root, file), 'utf8'))

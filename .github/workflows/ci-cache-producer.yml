@@ -1,0 +1,95 @@
+name: CI cache producer
+
+on:
+  push:
+    branches: [master]
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cache-producer-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PRIMARY_NODE_VERSION: '24'
+  PNPM_VERSION: '11.7.0'
+
+jobs:
+  produce:
+    name: ${{ matrix.os }} ${{ matrix.arch }} / hosted dependency caches
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: Linux
+            arch: X64
+            runner: ubuntu-latest
+            playwright-path: ~/.cache/ms-playwright
+          - os: Windows
+            arch: X64
+            runner: windows-latest
+            playwright-path: ~/AppData/Local/ms-playwright
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Configure content-addressed pnpm store
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $storeRoot = if ($IsWindows) { "$env:LOCALAPPDATA\pnpm\store" } else { "$env:HOME/.local/share/pnpm/store" }
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $storePath = pnpm store path --silent
+          echo "path=$storePath" >> $env:GITHUB_OUTPUT
+
+      - name: Produce pnpm store cache
+        id: pnpm-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
+      - name: Install dependencies from a clean workspace
+        run: pnpm install --frozen-lockfile
+
+      - name: Produce Playwright cache
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.playwright-path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-playwright-
+
+      - name: Install Playwright Chromium
+        shell: pwsh
+        run: |
+          if ($IsWindows) {
+            pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install chromium
+          } else {
+            pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium
+          }
+
+      - name: Report producer cache outcomes
+        shell: pwsh
+        run: |
+          echo "pnpm exact hit: ${{ steps.pnpm-cache.outputs.cache-hit }}" >> $env:GITHUB_STEP_SUMMARY
+          echo "playwright exact hit: ${{ steps.playwright-cache.outputs.cache-hit }}" >> $env:GITHUB_STEP_SUMMARY

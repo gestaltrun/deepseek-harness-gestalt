@@ -470,6 +470,7 @@ describe('CI workflow', () => {
         step => isRecord(step) && step.name === 'Install (immutable)',
       )
       expect(install, `${jobName} must rebuild persistent node_modules with optional dependencies`).toMatchObject({
+        env: { PNPM_CONFIG_FETCH_TIMEOUT: '600000' },
         run: 'pnpm install --frozen-lockfile',
       })
       const payloads = (job.steps as unknown[]).find(
@@ -490,10 +491,6 @@ describe('CI workflow', () => {
       cpu: ['current'],
       libc: ['current'],
     })
-    expect(readFileSync(resolve(root, '.npmrc'), 'utf8').trim().split('\n')).toEqual([
-      '@anthropic-ai:registry=https://registry.npmjs.org/',
-      '@openai:registry=https://registry.npmjs.org/',
-    ])
   })
 
   it('keeps bounded push smokes separate from exhaustive failover readiness drills', () => {

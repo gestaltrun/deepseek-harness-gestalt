@@ -59,6 +59,10 @@ describe('gate graph validation', () => {
     'ci-primary',
     'ci-linux-primary',
     'ci-preflight',
+    'ci-preflight-core',
+    'ci-preflight-cordis',
+    'ci-preflight-docs',
+    'ci-preflight-graphs',
     'ci-static',
     'ci-lint-contracts-ready',
     'ci-coverage',
@@ -90,16 +94,29 @@ describe('gate graph validation', () => {
     expect(ids).toEqual([
       'constraints',
       'translation-pairing',
-      'cordis-catalog',
-      'cordis-api',
       'client-catalog',
       'tool-catalog',
+      'cordis-catalog',
+      'cordis-api',
       'config-catalog',
       'doc-graphs',
       'persistence-catalog',
       'module-graph',
       'scoped-events',
     ])
+  })
+
+  it('partitions CI preflight without dropping or duplicating a gate', () => {
+    const all = withPnpmEntrypoint(() => gatesForMode('ci-preflight').map(subject => subject.id))
+    const partitions = withPnpmEntrypoint(() => [
+      ...gatesForMode('ci-preflight-core'),
+      ...gatesForMode('ci-preflight-cordis'),
+      ...gatesForMode('ci-preflight-docs'),
+      ...gatesForMode('ci-preflight-graphs'),
+    ].map(subject => subject.id))
+
+    expect(partitions).toEqual(all)
+    expect(new Set(partitions)).toHaveProperty('size', partitions.length)
   })
 
   it.each([

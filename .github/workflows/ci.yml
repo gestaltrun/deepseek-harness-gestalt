@@ -213,6 +213,7 @@ jobs:
       # coverage workers per assigned job.
       DSH_COVERAGE_MAX_WORKERS: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '2' }}
       DSH_COVERAGE_PARTITIONS: '4'
+      DSH_COVERAGE_PARTITION_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '4' || '2' }}
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
       DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '3' || '2' }}
       DSH_TEST_REQUIRE_PWSH: '1'

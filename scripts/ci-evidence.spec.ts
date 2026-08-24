@@ -8,6 +8,7 @@ import {
   classifyGateFailure,
   isTransientInfrastructureFailure,
   parseCiCacheEvidence,
+  parseCiFailureClassificationOverride,
   writeGateReport,
   type CiFailureClassification,
 } from './ci-evidence.ts'
@@ -19,7 +20,7 @@ function result(
     output?: string
     signalCode?: NodeJS.Signals
     allowFailure?: boolean
-    failureDomain?: 'infrastructure'
+    failureDomain?: 'infrastructure' | 'failover-readiness'
     status?: GateResult['status']
   } = {},
 ): GateResult {
@@ -55,6 +56,7 @@ describe('CI failure classification', () => {
       output: 'Client.Timeout exceeded while awaiting headers',
       failureDomain: 'infrastructure',
     }, 'transient-infrastructure'],
+    ['test', { failureDomain: 'failover-readiness' }, 'failover-readiness'],
   ] as const)('classifies %s diagnostics', (id, options, expected: CiFailureClassification) => {
     expect(classifyGateFailure(result(id, options))).toBe(expected)
   })
@@ -90,6 +92,13 @@ describe('CI gate reports', () => {
     expect(parseCiCacheEvidence(undefined)).toEqual([])
     expect(() => parseCiCacheEvidence('[{"id":"missing-fields"}]'))
       .toThrow('CI cache evidence entry 0 is invalid')
+  })
+
+  it('accepts only the failover-readiness report override', () => {
+    expect(parseCiFailureClassificationOverride('failover-readiness')).toBe('failover-readiness')
+    expect(parseCiFailureClassificationOverride(undefined)).toBeNull()
+    expect(() => parseCiFailureClassificationOverride('product-regression'))
+      .toThrow('must be failover-readiness')
   })
 
   it('records actual first blocking failure and all stage durations', () => {

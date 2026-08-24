@@ -128,6 +128,8 @@ keyless [CI 工作流](../.github/workflows/ci.yml) 将独立门禁分组到若�
 
 每次主 CI 运行都会上传 Planner JSON 和带版本的 gate 报告。报告按实际完成顺序标识首个阻塞失败，对失败 gate 分类，保留每个阶段的耗时，并列出相关 artifact。只有精确诊断被分类为瞬时基础设施故障的命令才允许自动重试一次，其 artifact 会保留两次尝试。运行 `pnpm ci:metrics --repo <owner/name>` 可计算成功率、排队、执行和首个结论分布，并排除记账任务、cancelled、skipped、stale 和观察性样本。
 
+每次 master push 还会在重建干净依赖树后运行有界的 Linux 与 Windows standby smoke。完整的非分片 standby 清单按日运行，或通过 `standby-exhaustive` dispatch 启动。其报告使用 `failover-readiness` 分类，因此就绪失败保持可见，但不会降低产品回归成功率；两个独立接管开关由[故障切换手册](../.agents/notes/implemented/process/2026-07-26-ci-failover-runbook.zh.md)负责。
+
 默认分支与每日 schedule 会生成 hosted Linux 和 Windows 的 pnpm store 与 Playwright 缓存。key 包含 OS、架构、Node、pnpm 和 lockfile；PR consumer 先尝试精确 key，随后只尝试环境一致的前缀。Gate 报告会记录每个 primary key、matched key 和精确命中结果。未命中时仍会从干净 workspace 执行同一 immutable install 与浏览器准备；workspace `node_modules` 和构建输出绝不进入缓存。
 
 当 Draft PR 的所有路径都已知且风险较低时，CI 会运行变更 package 及其全部反向 consumer 的测试，并对仍存在的变更源文件应用 100% 阈值。GUI 和模型可见路径还会运行组装态 snapshot。Ready PR，以及涉及 workflow、lockfile、vendor 源码、protocol、session lifecycle、agent loop、构建配置、多个产品 area 或未知路径的改动，都会运行穷尽计划。`merge_group` 事件会针对 GitHub 的候选合并树运行该计划，并以 `candidate verdict` 作为唯一的故障关闭结论。其 attestation 以 Git tree、lockfile、workflow 与 Planner、toolchain 和 gate inventory 组成证据键。master push 只有在 tree 与完整证据键相同时才会复用证明并只运行具名 master smoke；证明缺失或不匹配时会运行穷尽 fallback。`pnpm ci:impact --base <ref> --head <ref> --plan-only` 会在本地打印同一条 Draft 命令；移除 `--plan-only` 即可执行。

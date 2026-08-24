@@ -16,6 +16,7 @@ export type CiFailureClassification =
   | 'workflow-policy'
   | 'runner-contamination'
   | 'transient-infrastructure'
+  | 'failover-readiness'
 
 interface CiGateEvidence {
   id: string
@@ -72,6 +73,17 @@ export function parseCiCacheEvidence(raw: string | undefined): CiCacheEvidence[]
       exactHit: entry.exactHit,
     }
   })
+}
+
+/** Parse the only workflow-level classification override. */
+export function parseCiFailureClassificationOverride(
+  raw: string | undefined,
+): CiFailureClassification | null {
+  if (raw === undefined || raw === '') return null
+  if (raw !== 'failover-readiness') {
+    throw new Error(`CI failure classification override must be failover-readiness, got ${JSON.stringify(raw)}`)
+  }
+  return raw
 }
 
 const GENERATED_GATE_IDS = new Set([
@@ -132,6 +144,7 @@ export function classifyGateFailure(result: GateResult): CiFailureClassification
     result.error ?? '',
     ...result.output.map(chunk => chunk.text),
   ].join('\n')
+  if (result.gate.failureDomain === 'failover-readiness') return 'failover-readiness'
   if (result.gate.failureDomain === 'infrastructure' && isTransientInfrastructureFailure(diagnostics)) {
     return 'transient-infrastructure'
   }
@@ -163,6 +176,7 @@ export function buildGateReport(
   completedAt: Date,
   artifactRefs: readonly string[],
   caches: readonly CiCacheEvidence[] = [],
+  classificationOverride: CiFailureClassification | null = null,
 ): CiGateReport {
   const blockingFailure = settledResults.find(result =>
     result.gate.allowFailure !== true && (result.status === 'failed' || result.status === 'skipped'))
@@ -181,7 +195,7 @@ export function buildGateReport(
       ? null
       : {
         gateId: blockingFailure.gate.id,
-        classification: classifyGateFailure(blockingFailure),
+        classification: classificationOverride ?? classifyGateFailure(blockingFailure),
       },
     gates: results.map(result => ({
       id: result.gate.id,
@@ -189,7 +203,9 @@ export function buildGateReport(
       status: result.status,
       blocking: result.gate.allowFailure !== true,
       durationMs: result.durationMs,
-      classification: result.status === 'passed' ? null : classifyGateFailure(result),
+      classification: result.status === 'passed'
+        ? null
+        : classificationOverride ?? classifyGateFailure(result),
       exitCode: result.exitCode,
       signalCode: result.signalCode,
       error: result.error ?? null,

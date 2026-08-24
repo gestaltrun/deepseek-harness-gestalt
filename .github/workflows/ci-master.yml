@@ -3,6 +3,8 @@ name: CI master
 on:
   push:
     branches: [master]
+  schedule:
+    - cron: '47 3 * * *'
   workflow_dispatch:
     inputs:
       suite:
@@ -13,12 +15,11 @@ on:
         options:
           - larger-runner-benchmark
           - consolidated-runner-benchmark
+          - standby-exhaustive
 
-# A master push may carry only the two self-hosted standby drills and the Wine
-# apt cache seeder; those drills outlast the interval between master merges, so
-# push is exempt from cancellation (see ci-failover-runbook). workflow_dispatch
-# keeps cancelling: a re-dispatched runner benchmark holds up to 12 larger
-# runners for 15 minutes in this same group.
+# A master push carries only two bounded self-hosted standby smokes and the Wine
+# apt cache seeder, so push runs do not cancel one another. Daily exhaustive
+# drills and re-dispatched manual benchmarks may replace a stale non-push run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
@@ -66,28 +67,133 @@ jobs:
           cp /var/cache/apt/archives/*.deb "$HOME/wine-debs/"
           du -sh "$HOME/wine-debs"
 
-  # Hot-standby drill for the in-house self-hosted pool: every master move
-  # re-runs the complete unsharded aggregate on the persistent 64-core VM,
-  # continuously proving that environment can take over a required lane if
-  # the hosted pools degrade (the switch is then setting the writer-manageable
-  # DSH_CI_FAILOVER_LINUX variable — see the failover runbook, no merge required).
-  # Push-triggered, so this lane always executes the base branch's own
-  # workflow definition. This workflow never listens to pull_request, so the
-  # drill does not appear in PR checks. No cache steps because the VM's
-  # persistent pnpm store and tool caches make them redundant (and saving here
-  # would poison the hosted cache namespace with self-hosted paths).
-  serial-linux-selfhosted:
+  standby-linux-smoke:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    name: serial / linux (self-hosted standby)
+    name: standby smoke / linux (self-hosted)
     runs-on: [self-hosted, linux, x64, vm-backup]
+    timeout-minutes: 20
     steps:
-      # DSH_ARCHIVE_BASE_REF below compares the frozen-archive gate against
-      # github.event.before, so full history is required: depth 2 would miss it
-      # on multi-commit or force pushes; full fetch is cheap here because
-      # checkout resolves against the VM's local mirror.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Rebuild workspace state
+        run: git clean -ffdx
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Configure persistent content-addressed pnpm store
+        run: echo "PNPM_CONFIG_STORE_DIR=$HOME/.local/share/pnpm/store" >> "$GITHUB_ENV"
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile --force
+
+      - name: Run bounded Linux failover smoke
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/standby-linux-smoke.json
+          DSH_CI_ARTIFACT_REFS: standby-linux-smoke
+          DSH_GATE_CONCURRENCY: '2'
+        run: pnpm run check:ci:standby-linux-smoke
+
+      - name: Publish Linux failover readiness
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: standby-linux-smoke
+          path: ${{ runner.temp }}/ci-evidence/standby-linux-smoke.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Report Linux failover switch
+        if: always()
+        run: echo 'Linux takeover uses DSH_CI_FAILOVER_LINUX=selfhosted; see standby-linux-smoke artifact.' >> "$GITHUB_STEP_SUMMARY"
+
+  standby-windows-smoke:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    name: standby smoke / windows (self-hosted)
+    runs-on: [self-hosted, dsh-win-ci, windows]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild workspace state
+        shell: pwsh
+        run: git clean -ffdx
+
+      - name: Enable Developer Mode (symlink support)
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Configure persistent content-addressed pnpm store
+        shell: pwsh
+        run: |
+          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+
+      - name: Install (immutable)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile --force
+
+      - name: Run bounded Windows failover smoke
+        shell: pwsh
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/standby-windows-smoke.json
+          DSH_CI_ARTIFACT_REFS: standby-windows-smoke
+          DSH_GATE_CONCURRENCY: '2'
+        run: pnpm run check:ci:standby-windows-smoke
+
+      - name: Publish Windows failover readiness
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: standby-windows-smoke
+          path: ${{ runner.temp }}/ci-evidence/standby-windows-smoke.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Report Windows failover switch
+        if: always()
+        shell: pwsh
+        run: echo 'Windows takeover uses DSH_CI_FAILOVER_WINDOWS=selfhosted; see standby-windows-smoke artifact.' >> $env:GITHUB_STEP_SUMMARY
+
+  # Daily/manual complete Linux reference for the persistent standby pool.
+  # Failures are readiness evidence, not product regressions. Promotion to a
+  # required PR lane remains the explicit DSH_CI_FAILOVER_LINUX=selfhosted
+  # switch in ci.yml. The runner keeps its content-addressed store outside the
+  # checkout while every drill rebuilds node_modules from a clean workspace.
+  standby-linux-exhaustive:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'standby-exhaustive')
+    name: standby exhaustive / linux (self-hosted)
+    runs-on: [self-hosted, linux, x64, vm-backup]
+    timeout-minutes: 120
+    steps:
+      # DSH_ARCHIVE_BASE_REF below compares the frozen-archive gate with HEAD^;
+      # full history keeps that reference available on scheduled and manual
+      # runs. Checkout resolves against the VM's local mirror.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild workspace state
+        run: git clean -ffdx
 
       - uses: pnpm/action-setup@v4
         with:
@@ -113,7 +219,10 @@ jobs:
 
       - name: Run complete unsharded primary Node CI serially
         env:
-          DSH_ARCHIVE_BASE_REF: ${{ github.event.before }}
+          DSH_CI_FAILURE_CLASSIFICATION: failover-readiness
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/standby-linux-exhaustive.json
+          DSH_CI_ARTIFACT_REFS: standby-linux-exhaustive
+          DSH_ARCHIVE_BASE_REF: HEAD^
           DSH_COVERAGE_MAX_WORKERS: '1'
           DSH_E2E_MAX_WORKERS: '1'
           DSH_GATE_CONCURRENCY: '1'
@@ -122,10 +231,18 @@ jobs:
           DSH_SNAPSHOT_MAX_CONCURRENCY: '1'
         run: pnpm run check:ci:linux-primary
 
-  # TODO(hosted-serial-ci): Re-enable the one remaining disabled hosted serial
-  # reference job (serial-macos) before release. Re-enabling serial-macos does
-  # not restore a Linux hosted-cache producer: decide whether to add a master
-  # seeder or remove the restore-only steps if cold starts become a concern.
+      - name: Publish exhaustive Linux failover readiness
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: standby-linux-exhaustive
+          path: ${{ runner.temp }}/ci-evidence/standby-linux-exhaustive.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  # TODO(hosted-serial-ci): Re-enable the remaining disabled hosted macOS serial
+  # reference job before release. Hosted Linux and Windows dependency caches
+  # are produced independently by ci-cache-producer.yml.
   serial-macos:
     if: false
     name: serial / macos
@@ -155,26 +272,24 @@ jobs:
           DSH_SNAPSHOT_MAX_CONCURRENCY: '1'
         run: pnpm run check:ci
 
-  # Hot-standby drill for the in-house self-hosted Windows pool: every master
-  # move re-runs the complete unsharded Windows gate inventory on the persistent
-  # VM, continuously proving that environment can take over the required
-  # `windows` lane if the hosted pool degrades (the switch is setting the
-  # writer-manageable DSH_CI_FAILOVER_WINDOWS variable — see the failover
-  # runbook, no merge required). Push-triggered, so this lane always executes
-  # the base branch's own workflow definition. This workflow never listens to
-  # pull_request, so the drill does not appear in PR checks. No cache steps
-  # because the VM's persistent pnpm store and tool caches make them redundant
-  # (and saving here would poison the hosted cache namespace with self-hosted
-  # paths).
-  serial-windows:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    name: serial / windows (self-hosted standby)
+  # Daily/manual complete Windows reference for the persistent standby pool.
+  # Promotion to a required native PR lane remains the explicit
+  # DSH_CI_FAILOVER_WINDOWS=selfhosted switch in ci.yml. The runner keeps its
+  # content-addressed store outside the checkout while every drill rebuilds
+  # node_modules from a clean workspace.
+  standby-windows-exhaustive:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.suite == 'standby-exhaustive')
+    name: standby exhaustive / windows (self-hosted)
     runs-on: [self-hosted, dsh-win-ci, windows]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Rebuild workspace state
+        shell: pwsh
+        run: git clean -ffdx
 
       - name: Enable Developer Mode (symlink support)
         shell: pwsh
@@ -203,10 +318,22 @@ jobs:
       - name: Run complete unsharded Windows gate inventory serially
         shell: pwsh
         env:
+          DSH_CI_FAILURE_CLASSIFICATION: failover-readiness
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/standby-windows-exhaustive.json
+          DSH_CI_ARTIFACT_REFS: standby-windows-exhaustive
           DSH_COVERAGE_MAX_WORKERS: '1'
           DSH_GATE_CONCURRENCY: '1'
           DSH_PUBLINT_CONCURRENCY: '1'
         run: pnpm run check:ci:windows-complete
+
+      - name: Publish exhaustive Windows failover readiness
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: standby-windows-exhaustive
+          path: ${{ runner.temp }}/ci-evidence/standby-windows-exhaustive.json
+          if-no-files-found: warn
+          retention-days: 30
 
   # Manual, bounded comparison of the actual critical Linux and Windows lanes.
   # The named pools are restricted at the organization level to this repository.

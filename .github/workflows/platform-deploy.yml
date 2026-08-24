@@ -361,6 +361,7 @@ jobs:
             {
               echo 'set -eEuo pipefail'
               echo 'umask 077'
+              # shellcheck disable=SC2016
               printf 'workdir=$(mktemp -d /run/dsh-platform-command.XXXXXX)\n'
               # shellcheck disable=SC2016
               echo 'cleanup_command() { find "$workdir" -type f -delete; rmdir "$workdir"; }'

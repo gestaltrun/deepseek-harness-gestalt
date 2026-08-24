@@ -3,7 +3,7 @@
  * change, reconnect re-baselining, pre-instantiation buffering, editable-text
  * projection, and snapshot reference stability.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, UserMessage } from '@deepseek-ai/dsh-llm/types'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
@@ -219,6 +219,28 @@ describe('queue operation transport', () => {
       },
     ])
     expect(session.getSnapshot().queue).toBe(before)
+  })
+
+  it('routes queue mutations through a feature admission adapter', async () => {
+    const api = new FakeApiClient()
+    const updateQueue = vi.fn(() => Promise.resolve({
+      ok: true as const,
+      value: { accepted: true as const },
+    }))
+    const session = new Session(SID, api, fakeRemote(), {
+      admission: () => ({
+        id: 'sidechat',
+        handles: () => true,
+        prompt: () => Promise.resolve({ ok: true, value: { accepted: true } }),
+        cancel: () => Promise.resolve({ ok: true, value: { accepted: true } }),
+        updateQueue,
+      }),
+    })
+
+    await expect(session.updateQueue(iid('q-side'), { kind: 'steer' }))
+      .resolves.toEqual({ ok: true, value: { accepted: true } })
+    expect(updateQueue).toHaveBeenCalledWith(SID, iid('q-side'), { kind: 'steer' })
+    expect(api.callsOf('session.updateQueue')).toEqual([])
   })
 })
 

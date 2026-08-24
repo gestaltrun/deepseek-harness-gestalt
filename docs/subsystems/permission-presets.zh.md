@@ -123,9 +123,16 @@ optionOf(name: string): PresetOption
  * @param name - the preset to switch to; unknown names throw.
  */
 set(session: Session, name: string): void
+
+/**
+ * Switch one live Agent and queue approval-policy narration for its next step.
+ * @param agent - live Agent whose Session and approval policy change together.
+ * @param name - configured preset name.
+ */
+setAgent(agent: Agent, name: string): void
 ```
 
-Types: [Session](session.zh.md) · [SessionEvent](session.zh.md)
+Types: [Agent](core.zh.md) · [Session](session.zh.md) · [SessionEvent](session.zh.md)
 
 Source: [`packages/interaction/permission-presets/src/index.ts`](../../packages/interaction/permission-presets/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -19,6 +19,8 @@ export type SidebarErrorCode =
   | 'pty-deps-missing'
   | 'job-error'
   | 'sidechat-error'
+  | 'queue-item-not-found'
+  | 'steer-unavailable'
   | 'subagents-unavailable'
   | 'settings-rejected'
   | 'settings-conflict'

@@ -304,6 +304,9 @@ jobs:
           PLATFORM_REMOTE_ATTACHMENT_STORAGE: ${{ inputs.attachment_storage }}
         run: |
           set -eEuo pipefail
+          export OSS_ACCESS_KEY_ID="$ALIBABA_CLOUD_ACCESS_KEY_ID"
+          export OSS_ACCESS_KEY_SECRET="$ALIBABA_CLOUD_ACCESS_KEY_SECRET"
+          export OSS_SESSION_TOKEN="$ALIBABA_CLOUD_SECURITY_TOKEN"
           source apps/platform/scripts/platform-cloud-assistant.sh
           source apps/platform/scripts/platform-public-readiness.sh
           IFS=',' read -r -a instance_ids <<< "$PLATFORM_ECS_INSTANCE_IDS"
@@ -506,4 +509,8 @@ jobs:
           PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_DEPLOY_OSS_OBJECT_PREFIX }}
           RECOVERY_COMMAND: ${{ runner.temp }}/platform-recovery.sh
         run: |
+          set -euo pipefail
+          export OSS_ACCESS_KEY_ID="$ALIBABA_CLOUD_ACCESS_KEY_ID"
+          export OSS_ACCESS_KEY_SECRET="$ALIBABA_CLOUD_ACCESS_KEY_SECRET"
+          export OSS_SESSION_TOKEN="$ALIBABA_CLOUD_SECURITY_TOKEN"
           bash apps/platform/scripts/platform-recover.sh

@@ -105,13 +105,11 @@ describe('web e2e: workspace management (create / rename / flat view / hover aff
    * the row before its hover-only button becomes visible.
    */
   async function clickHoverAction(row: Locator, name: string): Promise<void> {
-    const button = row.getByRole('button', { name })
     await expect.poll(async () => {
       await row.hover()
-      return await button.isVisible()
+      await row.getByRole('button', { name }).click({ timeout: 1_000 })
+      return true
     }, { timeout: 10_000 }).toBe(true)
-    await row.hover()
-    await button.click()
   }
 
   beforeAll(async () => {

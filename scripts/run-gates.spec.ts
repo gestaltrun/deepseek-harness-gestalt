@@ -58,15 +58,21 @@ describe('gate graph validation', () => {
   it.each([
     'ci-primary',
     'ci-linux-primary',
+    'ci-preflight',
     'ci-static',
     'ci-lint-contracts-ready',
     'ci-coverage',
+    'ci-windows-native-coverage-merge',
     'ci-snapshot',
     'ci-artifacts',
     'ci-consumers',
     'ci-windows-blocking',
     'ci-windows-complete',
+    'ci-windows-native-core',
+    'ci-windows-native-static',
     'ci-windows-observational',
+    'ci-standby-linux-smoke',
+    'ci-standby-windows-smoke',
     'node-compat',
     'check-all',
     'hygiene',
@@ -76,6 +82,42 @@ describe('gate graph validation', () => {
     const execute = vi.fn(async (item: Gate) => resultFor(item))
 
     await expect(runGates(subject, subject.length, execute)).resolves.toHaveLength(subject.length)
+  })
+
+  it('keeps fail-fast generated state and repository constraints in CI preflight', () => {
+    const ids = withPnpmEntrypoint(() => gatesForMode('ci-preflight').map(subject => subject.id))
+
+    expect(ids).toEqual([
+      'constraints',
+      'translation-pairing',
+      'cordis-catalog',
+      'cordis-api',
+      'client-catalog',
+      'tool-catalog',
+      'config-catalog',
+      'doc-graphs',
+      'persistence-catalog',
+      'module-graph',
+      'scoped-events',
+    ])
+  })
+
+  it.each([
+    ['ci-standby-linux-smoke', 'Linux platform fixture smoke'],
+    ['ci-standby-windows-smoke', 'Windows platform fixture smoke'],
+  ] as const)('keeps %s bounded and classified as failover readiness', (mode, platformLabel) => {
+    const gates = withPnpmEntrypoint(() => gatesForMode(mode))
+
+    expect(gates.map(gate => gate.id)).toEqual([
+      'optional-dependency-imports',
+      'build',
+      'build:web',
+      'browser-runtime-smoke',
+      'platform-fixture-smoke',
+    ])
+    expect(gates.every(gate => gate.failureDomain === 'failover-readiness')).toBe(true)
+    expect(gates.find(gate => gate.id === 'build:web')?.needs).toEqual(['build'])
+    expect(gates.at(-1)?.label).toBe(platformLabel)
   })
 
   it('keeps the public repository link policy in the documentation gate', () => {
@@ -136,29 +178,33 @@ describe('gate graph validation', () => {
     },
   )
 
-  it('keeps native Windows coverage blocking while retaining the observational inventory', () => {
+  it('partitions the complete native Windows inventory without losing or weakening gates', () => {
     const complete = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
-    const observational = withPnpmEntrypoint(() => gatesForMode('ci-windows-observational'))
-      .filter(gate => gate.id !== 'build' && gate.id !== 'docs-site-build')
-    const byId = new Map(complete.map(subject => [subject.id, subject]))
+    const core = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-core'))
+    const coverage = withPnpmEntrypoint(() => gatesForMode('ci-coverage'))
+    const staticGates = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static'))
 
-    expect(byId.get('coverage')?.allowFailure).not.toBe(true)
-    expect(byId.get('coverage-exempt-heavy')?.allowFailure).not.toBe(true)
-    expect(byId.get('coverage')?.needs).toEqual(['build'])
-    expect(byId.get('coverage-exempt-heavy')?.needs).toEqual(['build'])
-    expect(byId.get('electron-runtime-e2e')?.allowFailure).not.toBe(true)
-    expect(byId.get('electron-runtime-e2e')?.displayCommand).toBe('pnpm run test:electron-runtime-e2e')
-    expect(byId.get('duplication')?.allowFailure).toBe(true)
-    expect(observational).not.toHaveLength(0)
-    for (const gate of observational) {
-      const completeGate = byId.get(gate.id)
-      expect(completeGate?.allowFailure).toBe(true)
-      expect(completeGate?.after).toEqual(expect.arrayContaining([
-        'coverage',
-        'coverage-exempt-heavy',
-      ]))
-      expect(completeGate?.needs).toEqual(gate.needs)
-    }
+    expect(complete.map(gate => gate.id)).toEqual([
+      ...core.map(gate => gate.id),
+      ...coverage.map(gate => gate.id),
+      ...staticGates.map(gate => gate.id),
+    ])
+    expect(new Set(complete.map(gate => gate.id)).size).toBe(complete.length)
+    expect(complete.every(gate => gate.allowFailure !== true)).toBe(true)
+    expect(core.map(gate => gate.id)).toEqual([
+      'build',
+      'windows-site',
+      'electron-runtime-e2e',
+      'publint',
+      'node-next-types',
+      'doc-typecheck',
+      'built-package-invariants',
+      'built-bin-smoke',
+    ])
+    expect(coverage.map(gate => gate.id)).toEqual(['coverage', 'coverage-exempt-heavy'])
+    expect(staticGates.map(gate => gate.id)).not.toContain('doc-typecheck')
+    expect(staticGates.map(gate => gate.id)).not.toContain('docs-site-build')
+    expect(staticGates.map(gate => gate.id)).toContain('duplication')
   })
 
   it.each(['ci-coverage', 'ci-primary'] as const)(
@@ -209,6 +255,19 @@ describe('gate graph validation', () => {
       args: ['/private/pnpm.cjs', 'run', 'test:coverage:partitioned'],
       streamOutput: true,
     })
+  })
+
+  it('merges cross-job Windows blobs with the exempt-heavy inventory', () => {
+    const gates = withEnv('DSH_COVERAGE_MAX_WORKERS', '8', () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-coverage-merge')))
+
+    expect(gates.map(gate => gate.id)).toEqual(['coverage', 'coverage-exempt-heavy'])
+    expect(gates[0]?.args).toEqual(expect.arrayContaining([
+      '--merge-reports=coverage/.partitioned/blobs',
+      '--coverage',
+    ]))
+    expect(gates[0]?.env).toMatchObject({ DSH_COVERAGE_EXEMPT_HEAVY: '1' })
+    expect(gates[1]?.args).toContain('--maxWorkers=6')
   })
 
   it('rejects an invalid coverage partition count before starting a gate', () => {

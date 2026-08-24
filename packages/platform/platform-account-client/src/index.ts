@@ -465,7 +465,7 @@ export class PlatformAccountInstallation {
     this.publish({ ...withoutError(this.snapshot), privacyAccepted: true })
   }
 
-  /** Restore a current-installation session, or resume a still-valid pending login. */
+  /** Restore a current-installation session, or resume a pending login unless this process awaits its user activation. */
   async load(): Promise<void> {
     await this.transitions.run(async () => { await this.loadTransition() })
   }
@@ -479,6 +479,7 @@ export class PlatformAccountInstallation {
         await this.options.store.clearPending(this.options.environment.environment)
         return
       }
+      if (this.preparedAuthorizationUrl !== undefined) return
       this.publish({ status: 'polling', privacyAccepted: true })
       return
     }

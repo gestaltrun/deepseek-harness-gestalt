@@ -33,6 +33,10 @@ describe('Desktop release workflow', () => {
     expect(workflow).toContain('version:')
     expect(workflow).toContain('node apps/desktop/scripts/prepare-release.mjs')
     expect(workflow.match(/needs: prepare/g)).toHaveLength(2)
+
+    const dispatch = record(record(record(parsed).on).workflow_dispatch)
+    const inputs = record(dispatch.inputs)
+    expect(record(inputs.version).default).toBe(record(desktopPackage).version)
   })
 
   it('keeps release credentials out of preparation and dry-run packaging', () => {

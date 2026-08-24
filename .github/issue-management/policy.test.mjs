@@ -18,6 +18,7 @@ import {
   validateBody,
   validateIssue,
   validatePullRequest,
+  validatePullRequestMetadata,
 } from './policy.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -54,7 +55,9 @@ const preparePullRequestCli = async (
     pullStatus = 200,
     pullDraft = false,
     pullAuthorType = 'User',
+    pullLabels = ['kind/bug-fix', 'area/infra'],
     reviewEndpointStatus = 200,
+    requiredAreas = [],
     token = 'test-token',
   },
 ) => {
@@ -76,7 +79,7 @@ const preparePullRequestCli = async (
       send({
         body: 'Fixes #49',
         draft: pullDraft,
-        labels: [{ name: 'kind/bug-fix' }, { name: 'area/infra' }],
+        labels: pullLabels.map((name) => ({ name })),
         user: { type: pullAuthorType },
       }, pullStatus)
       return
@@ -153,13 +156,14 @@ const preparePullRequestCli = async (
   return {
     requests,
     requestDetails,
-    run: () =>
-      execFileAsync(process.execPath, [entrypoint, 'pr'], {
+    run: (command = 'pr') =>
+      execFileAsync(process.execPath, [entrypoint, command], {
         env: {
           ...(token === null ? {} : { GH_TOKEN: token }),
           GITHUB_API_URL: `http://127.0.0.1:${address.port}`,
           GITHUB_EVENT_PATH: eventPath,
           GITHUB_REPOSITORY: 'BeiKeJieDeLiuLangMao/deepseek-harness-gestalt',
+          DSH_REQUIRED_PR_AREAS: JSON.stringify(requiredAreas),
         },
       }),
   }
@@ -281,6 +285,51 @@ test('Draft, Bot, and App pull requests stop after the initial PR read', async (
       })
     }
   }
+})
+
+test('preflight validates Draft PR metadata and resolves its same-repository Issue', async (t) => {
+  const fixture = await preparePullRequestCli(t, {
+    priorityField: null,
+    pullDraft: true,
+  })
+
+  const result = await fixture.run('pr-metadata')
+
+  assert.match(result.stdout, /PR metadata 通过。/)
+  assert.deepEqual(
+    fixture.requestDetails.map(({ path }) => path),
+    [
+      '/repos/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt/pulls/49',
+      '/repos/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt/issues/49',
+    ],
+  )
+})
+
+test('preflight rejects malformed Draft PR labels', async (t) => {
+  const fixture = await preparePullRequestCli(t, {
+    priorityField: null,
+    pullDraft: true,
+    pullLabels: [],
+  })
+
+  await assert.rejects(fixture.run('pr-metadata'), (error) => {
+    assert.match(error.stdout, /PR 必须恰好有一个允许的 kind\/\*/)
+    assert.match(error.stdout, /PR 必须至少有一个 area\/\*/)
+    return true
+  })
+})
+
+test('preflight rejects a Draft PR missing a planner-selected area', async (t) => {
+  const fixture = await preparePullRequestCli(t, {
+    priorityField: null,
+    pullDraft: true,
+    requiredAreas: ['area/infra', 'area/web'],
+  })
+
+  await assert.rejects(fixture.run('pr-metadata'), (error) => {
+    assert.match(error.stdout, /PR 缺少相关 area\/\*：area\/web/)
+    return true
+  })
 })
 
 test('eligible non-draft pull requests keep downstream API failures fatal', async (t) => {
@@ -854,6 +903,34 @@ test('allows informational references without cross-object constraints', () => {
     issues: new Map([[4, { type: 'Bug', priority: 'P0', labels: ['area/web'] }]]),
   })
   assert.deepEqual(errors, [])
+})
+
+test('validates metadata independently of Draft policy activation', () => {
+  const input = {
+    isDraft: true,
+    authorType: 'User',
+    reviewRequestCount: 0,
+    reviewCount: 0,
+    labels: [],
+    references: { all: [], resolving: [], related: [] },
+    issues: new Map(),
+  }
+
+  assert.deepEqual(validatePullRequest(input), [])
+  assert.ok(validatePullRequestMetadata(input).includes('PR 正文必须引用至少一个同仓库 Issue'))
+  assert.ok(validatePullRequestMetadata(input).includes('PR 必须恰好有一个允许的 kind/*，当前为 0'))
+})
+
+test('requires every planner-selected area label', () => {
+  const input = {
+    authorType: 'User',
+    labels: ['kind/feature', 'area/infra'],
+    references: { all: [256], resolving: [], related: [256] },
+    issues: new Map([[256, { priority: null }]]),
+    requiredAreas: ['area/infra', 'area/web'],
+  }
+
+  assert.deepEqual(validatePullRequestMetadata(input), ['PR 缺少相关 area/*：area/web'])
 })
 
 test('enforces highest resolving Priority without Type or area synchronization', () => {

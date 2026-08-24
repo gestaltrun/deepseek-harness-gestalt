@@ -2,11 +2,18 @@ name: CI
 
 on:
   pull_request:
+  merge_group:
+  push:
+    branches: [master]
 permissions:
+  actions: read
   contents: read
+  issues: read
+  pull-requests: read
 
 env:
   PRIMARY_NODE_VERSION: '24'
+  PNPM_VERSION: '11.7.0'
   # CI runs must never report to the production telemetry endpoint baked
   # into apps/cli/cordis.yml (AppCLIEntry disables the row when set).
   DSH_TELEMETRY_DISABLED: '1'
@@ -19,6 +26,92 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      DSH_GATE_CONCURRENCY: '8'
+    outputs:
+      level: ${{ steps.plan.outputs.level }}
+      lanes: ${{ steps.plan.outputs.lanes }}
+      affected-areas: ${{ steps.plan.outputs.affected_areas }}
+      affected-packages: ${{ steps.plan.outputs.affected_packages }}
+      changed-sources: ${{ steps.plan.outputs.changed_sources }}
+      escalation-reasons: ${{ steps.plan.outputs.escalation_reasons }}
+      evidence-key: ${{ steps.plan.outputs.evidence_key }}
+      proof-tree: ${{ steps.identity.outputs.tree || steps.reuse.outputs.tree }}
+      proof-key: ${{ steps.identity.outputs.proof_key || steps.reuse.outputs.proof_key }}
+      proof-reused: ${{ steps.reuse.outputs.reused || 'false' }}
+      proof-reason: ${{ steps.reuse.outputs.reason || 'not-master-push' }}
+      proof-source-run-id: ${{ steps.reuse.outputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate GitHub Actions workflows
+        uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Compute CI plan
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha) }}
+          HEAD_SHA: ${{ github.event_name == 'merge_group' && github.event.merge_group.head_sha || (github.event_name == 'push' && github.sha || github.event.pull_request.head.sha) }}
+          READINESS: ${{ github.event_name != 'pull_request' && 'ready' || (github.event.pull_request.draft && 'draft' || 'ready') }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-evidence"
+          pnpm --silent run ci:plan --event "$GITHUB_EVENT_NAME" --readiness "$READINESS" --base "$BASE_SHA" --head "$HEAD_SHA" \
+            | tee "$RUNNER_TEMP/ci-evidence/plan.json"
+
+      - name: Validate pull request metadata
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DSH_REQUIRED_PR_AREAS: ${{ steps.plan.outputs.affected_areas }}
+        run: node .github/issue-management/policy.mjs pr-metadata
+
+      - name: Validate generated state and repository constraints
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/preflight.json
+          DSH_CI_ARTIFACT_REFS: ci-plan
+        run: pnpm run check:ci:preflight
+
+      - name: Compute candidate evidence identity
+        id: identity
+        if: github.event_name == 'merge_group'
+        run: pnpm --silent ci:attestation identity --output "$RUNNER_TEMP/ci-evidence/candidate-identity.json"
+
+      - name: Resolve reusable candidate proof
+        id: reuse
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm --silent ci:attestation resolve --repository "$GITHUB_REPOSITORY" --output "$RUNNER_TEMP/ci-evidence/master-proof.json"
+
+      - name: Publish CI plan
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-plan
+          path: ${{ runner.temp }}/ci-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 30
 
   # Three standard hosted jobs isolate coverage, static analysis, and the
   # build-backed consumer tail. The consumer job owns the only Linux build so
@@ -37,15 +130,17 @@ jobs:
   # switch is the separate DSH_CI_FAILOVER_WINDOWS variable on the windows-native
   # job below.
   node-24:
-    if: github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'static')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+          && github.event_name == 'pull_request'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
     name: node 24 / static
     env:
-      DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '4' }}
+      DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '4' }}
     steps:
       # Fetch complete history so the archive gate can read the trusted PR base from a reused shallow checkout.
       - uses: actions/checkout@v6
@@ -73,25 +168,41 @@ jobs:
       # compression and upload on the paid latency-critical path. Skipped
       # under failover — see the coverage lane's identical rationale.
       - uses: actions/cache/restore@v4
-        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event.pull_request.user.login == 'dependabot[bot]'
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
 
       - name: Install (immutable)
         run: pnpm install --frozen-lockfile
 
       - name: Run static gates
         env:
-          DSH_ARCHIVE_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
+          DSH_ARCHIVE_BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha) }}
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/static.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-static
         run: pnpm run check:ci:static
 
+      - name: Publish static gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-static
+          path: ${{ runner.temp }}/ci-evidence/static.json
+          if-no-files-found: warn
+          retention-days: 30
+
   node-24-coverage:
-    if: github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'coverage')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+          && github.event_name == 'pull_request'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
@@ -100,9 +211,12 @@ jobs:
       # Standard hosted runners keep process fan-out bounded. The failover pool
       # shares one 64-core VM across its runner instances and may use eight
       # coverage workers per assigned job.
-      DSH_COVERAGE_MAX_WORKERS: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '2' }}
+      DSH_COVERAGE_MAX_WORKERS: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '2' }}
       DSH_COVERAGE_PARTITIONS: '4'
-      DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '3' || '2' }}
+      DSH_COVERAGE_PARTITION_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '4' || '2' }}
+      DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
+      DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '3' || '2' }}
+      DSH_TEST_REQUIRE_PWSH: '1'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -129,12 +243,13 @@ jobs:
       # already serves warm installs, while restoring the hosted archive
       # would spend ~52 s pulling ~180 MB into that populated store.
       - uses: actions/cache/restore@v4
-        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event.pull_request.user.login == 'dependabot[bot]'
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
 
       - name: Install dependencies and prepare bubblewrap
         run: |
@@ -150,24 +265,40 @@ jobs:
           exit "$sandbox_status"
 
       - name: Run exhaustive coverage
+        env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/coverage.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-coverage
         run: pnpm run check:ci:coverage
 
+      - name: Publish coverage gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-coverage
+          path: ${{ runner.temp }}/ci-evidence/coverage.json
+          if-no-files-found: warn
+          retention-days: 30
+
   node-24-consumers:
-    if: github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'consumers')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+          && github.event_name == 'pull_request'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
     name: node 24 / snapshots and artifacts
     env:
-      DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '4' }}
+      DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '4' }}
       DSH_NODE_COMPAT_SKIP_TYPECHECK: '1'
       DSH_OXLINT_THREADS: '8'
-      DSH_PUBLINT_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '4' }}
+      DSH_PUBLINT_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '4' }}
       DSH_WEB_SNAPSHOT_WORKERS: '6'
       # Failover halves snapshot concurrency for the shared 64-core VM.
-      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '8' }}
+      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '8' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -189,27 +320,28 @@ jobs:
           store_path=$(PNPM_CONFIG_STORE_DIR="$store_root" pnpm store path --silent)
           echo "path=$store_path" >> "$GITHUB_OUTPUT"
 
-      # Pull requests restore the pnpm store and Playwright caches without paying
-      # compression and upload on the required path. No master job saves these
-      # hosted cache keys, so each restore-keys fallback hits the matching archived
-      # entry until it evicts, after which the store is cold. Skipped under failover
-      # — the self-hosted VM's persistent store is already warm.
+      # Pull requests restore the default-branch producer's pnpm and Playwright
+      # caches without paying compression and upload on the required path.
+      # Skipped under failover because the self-hosted VM's persistent stores
+      # are already warm.
       - uses: actions/cache/restore@v4
-        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event.pull_request.user.login == 'dependabot[bot]'
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
 
       # Skipped under failover: the VM's persistent browser cache is already warm.
       - uses: actions/cache/restore@v4
-        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event.pull_request.user.login == 'dependabot[bot]'
+        id: playwright-cache
+        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
         with:
           path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-playwright-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-playwright-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-playwright-
 
       - name: Install dependencies and prepare bubblewrap
         run: |
@@ -225,21 +357,65 @@ jobs:
           exit "$sandbox_status"
 
       - name: Install Playwright Chromium and hosted dependencies
-        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event.pull_request.user.login == 'dependabot[bot]'
+        if: vars.DSH_CI_FAILOVER_LINUX != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
         run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install --with-deps chromium
 
       # The persistent VM image owns Playwright's Linux system packages; do
       # not mutate the shared host with apt on every failover run.
       - name: Install Playwright Chromium on the failover VM
-        if: vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
         run: pnpm --filter @deepseek-ai/dsh-web-frontend exec playwright install chromium
 
       - name: Run compatibility, snapshot, and artifact gates
+        env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}},{"id":"playwright","primaryKey":"${{ steps.playwright-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.playwright-cache.outputs.cache-matched-key }}","exactHit":${{ steps.playwright-cache.outputs.cache-hit == 'true' }}}]
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/consumers.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-consumers
         run: pnpm run check:ci:consumers
+
+      - name: Publish consumer gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-consumers
+          path: ${{ runner.temp }}/ci-evidence/consumers.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  draft-impact:
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'draft-impact')
+    runs-on: ubuntu-latest
+    name: Draft changed packages and consumers
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run changed packages and reverse consumers
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: pnpm ci:impact --base "$BASE_SHA" --head "$HEAD_SHA"
 
 
   node-compat:
-    if: github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'node-compat')
     # Each compatibility contract receives an independent standard hosted job.
     runs-on: ${{ matrix.runner }}
     name: ${{ matrix.name }}
@@ -276,10 +452,22 @@ jobs:
       - name: Run compatibility smokes
         env:
           DSH_BUILD_CLIENT_PROFILE: official
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/node-${{ matrix.node }}.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-node-${{ matrix.node }}
         run: pnpm run check:node-compat
 
+      - name: Publish compatibility gate evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-node-${{ matrix.node }}
+          path: ${{ runner.temp }}/ci-evidence/node-${{ matrix.node }}.json
+          if-no-files-found: warn
+          retention-days: 30
+
   python-sdk:
-    if: github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'python-sdk')
     runs-on: ubuntu-latest
     name: python 3.10 / keyless SDK
     steps:
@@ -301,7 +489,8 @@ jobs:
   # The reusable builder owns the executable, snapshot, wheel, clean-install,
   # GLIBC, and manylinux checks; release validation retains all native targets.
   python-runtime:
-    if: github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'python-runtime')
     name: python runtime / release-shaped Linux x64
     uses: ./.github/workflows/build-exe-for-python-sdk.yml
     with:
@@ -319,7 +508,8 @@ jobs:
   # Current topology and fidelity limits live in
   # .agents/notes/implemented/process/2026-08-08-native-windows-pull-request-ci.md
   windows:
-    if: github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-wine')
     runs-on: ubuntu-latest
     name: windows node 24 / wine blocking
     timeout-minutes: 15
@@ -345,11 +535,12 @@ jobs:
           echo "path=$store_path" >> "$GITHUB_OUTPUT"
 
       - uses: actions/cache/restore@v4
+        id: pnpm-cache
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
-            ${{ runner.os }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
 
       # Master's wine-apt-cache job in ci-master.yml seeds the default-branch
       # scope every pull request can read; a save from this job only reaches
@@ -398,36 +589,26 @@ jobs:
         if: always()
         run: wineserver -k 2>/dev/null || true
 
-  # Every pull request also gets a real Windows-kernel signal. This job keeps
-  # its own unmasked conclusion but is deliberately absent from
-  # all-checks-passed.needs, so it never delays or changes that required
-  # verdict. Under normal operation it runs on the standard hosted runner; under
-  # Windows failover (DSH_CI_FAILOVER_WINDOWS=selfhosted) it retargets onto the
-  # in-house self-hosted Windows pool. Dependabot PRs are excluded from the
-  # self-hosted pool and stay queued for the hosted runner — see the failover
-  # runbook. This Windows switch is independent of the Linux
-  # DSH_CI_FAILOVER_LINUX variable that retargets the three required Linux jobs
-  # and the all-checks-passed verdict above.
-  windows-native:
-    if: github.event_name == 'pull_request'
+  # The real Windows-kernel inventory separates build, coverage, and static
+  # portability ownership. Coverage fans out across two blob-producing workers
+  # before one threshold merger; the other owners retain independent clocks.
+  # One unmasked verdict requires all three evidence owners, but remains outside
+  # all-checks-passed because native Windows is observational for pull requests.
+  # Every worker follows the independent Windows failover switch.
+  windows-native-core:
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+          && github.event_name == 'pull_request'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
           || 'windows-latest' }}
-    name: windows node 24 / native complete
-    timeout-minutes: 120
+    name: windows node 24 / native build and runtime
+    timeout-minutes: 20
     env:
-      DSH_COVERAGE_MAX_WORKERS: ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '2' || '1' }}
-      DSH_COVERAGE_PARTITIONS: '8'
-      # Standard hosted capacity executes the eight isolated shards one at a
-      # time. The failover pool retains the measured eight-way fan-out.
-      DSH_COVERAGE_PARTITION_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '1' }}
-      # Instrumented process and polling fixtures can exceed Vitest's defaults
-      # under the complete lane's concurrent gate load.
-      DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
-      DSH_GATE_CONCURRENCY: '1'
-      DSH_PUBLINT_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '1' }}
+      DSH_GATE_CONCURRENCY: '4'
+      DSH_PUBLINT_CONCURRENCY: '4'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -448,23 +629,302 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
-      # Extracting the many-file pnpm store cache is slower than a clean
-      # install on hosted Windows runners, and saving it adds latency after
-      # the gates. The self-hosted VM's persistent store makes caching
-      # redundant.
+      - name: Configure pnpm store path
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $storePath = pnpm store path --silent
+          echo "path=$storePath" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache/restore@v4
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_WINDOWS != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
       - name: Install (immutable)
         shell: pwsh
         run: pnpm install --frozen-lockfile
 
-      - name: Run complete native Windows gate inventory
+      - name: Run native build and runtime gates
         shell: pwsh
-        run: pnpm run check:ci:windows-complete
+        env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-core.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-core
+        run: pnpm run check:ci:windows-native-core
+
+      - name: Publish native build and runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-windows-native-core
+          path: ${{ runner.temp }}/ci-evidence/windows-native-core.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows-native-coverage-shards:
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    runs-on: >-
+      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
+          || 'windows-latest' }}
+    name: windows node 24 / native coverage shard ${{ matrix.shard }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            indexes: 1,2,3,4
+          - shard: 2
+            indexes: 5,6,7,8
+    env:
+      DSH_COVERAGE_EXEMPT_HEAVY: '1'
+      DSH_COVERAGE_PARTITIONS: '8'
+      DSH_COVERAGE_PARTITION_CONCURRENCY: '2'
+      DSH_COVERAGE_PARTITION_INDEXES: ${{ matrix.indexes }}
+      DSH_COVERAGE_PRESERVE_BLOBS: '1'
+      DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
+      DSH_TEST_REQUIRE_PWSH: '1'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Enable Developer Mode (symlink support)
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-js
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Configure pnpm store path
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $storePath = pnpm store path --silent
+          echo "path=$storePath" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache/restore@v4
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_WINDOWS != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
+      - name: Install (immutable)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Run native coverage shard
+        shell: pwsh
+        run: pnpm run test:coverage:partitioned
+
+      - name: Publish native coverage blobs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-windows-native-coverage-shard-${{ matrix.shard }}
+          path: coverage/.partitioned/blobs/*.json
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-native-coverage:
+    needs: [preflight, windows-native-coverage-shards]
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    runs-on: >-
+      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
+          || 'windows-latest' }}
+    name: windows node 24 / native coverage
+    timeout-minutes: 20
+    env:
+      DSH_COVERAGE_MAX_WORKERS: '4'
+      DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
+      DSH_GATE_CONCURRENCY: '2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Enable Developer Mode (symlink support)
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-js
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Configure pnpm store path
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $storePath = pnpm store path --silent
+          echo "path=$storePath" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache/restore@v4
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_WINDOWS != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
+      - name: Install (immutable)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Download native coverage blobs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ci-gates-windows-native-coverage-shard-*
+          path: coverage/.partitioned/blobs
+          merge-multiple: true
+
+      - name: Merge native coverage and run exempt-heavy suites
+        shell: pwsh
+        env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-coverage.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-coverage
+        run: pnpm run check:ci:windows-native-coverage-merge
+
+      - name: Publish native coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-windows-native-coverage
+          path: ${{ runner.temp }}/ci-evidence/windows-native-coverage.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows-native-static:
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    runs-on: >-
+      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
+          || 'windows-latest' }}
+    name: windows node 24 / native static portability
+    timeout-minutes: 20
+    env:
+      DSH_GATE_CONCURRENCY: '4'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Enable Developer Mode (symlink support)
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-js
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Configure pnpm store path
+        id: pnpm-store
+        shell: pwsh
+        run: |
+          $storeRoot = "$env:LOCALAPPDATA\pnpm\store"
+          echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $storePath = pnpm store path --silent
+          echo "path=$storePath" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/cache/restore@v4
+        id: pnpm-cache
+        if: vars.DSH_CI_FAILOVER_WINDOWS != 'selfhosted' || github.event_name != 'pull_request' || github.event.pull_request.user.login == 'dependabot[bot]'
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            dsh-${{ runner.os }}-${{ runner.arch }}-node-${{ env.PRIMARY_NODE_VERSION }}-pnpm-${{ env.PNPM_VERSION }}-store-
+
+      - name: Install (immutable)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Run native static portability gates
+        shell: pwsh
+        env:
+          DSH_CI_CACHE_STATUS: >-
+            [{"id":"pnpm-store","primaryKey":"${{ steps.pnpm-cache.outputs.cache-primary-key }}","matchedKey":"${{ steps.pnpm-cache.outputs.cache-matched-key }}","exactHit":${{ steps.pnpm-cache.outputs.cache-hit == 'true' }}}]
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-static.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-static
+        run: pnpm run check:ci:windows-native-static
+
+      - name: Publish native static portability evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-windows-native-static
+          path: ${{ runner.temp }}/ci-evidence/windows-native-static.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows-native-verdict:
+    needs: [preflight, windows-native-core, windows-native-coverage, windows-native-static]
+    if: always() && needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    runs-on: ubuntu-latest
+    name: windows node 24 / native verdict
+    steps:
+      - name: Fail if any native Windows partition did not succeed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "::error::Native Windows partition results: ${{ join(needs.*.result, ', ') }}"
+          exit 1
+      - name: Native Windows partitions passed
+        run: echo "Native Windows partitions passed (${{ join(needs.*.result, ', ') }})"
 
   # macOS PR owner for the declared Electron Browser Runtime e2e. The master
   # workflow's serial macOS lane is disabled; this focused job keeps the real
   # cookie-isolation launcher visible without joining the required aggregate.
   electron-runtime-e2e-macos:
-    if: github.event_name == 'pull_request'
+    needs: preflight
+    if: needs.preflight.result == 'success' && (github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true') && contains(fromJSON(needs.preflight.outputs.lanes), 'electron-macos')
     runs-on: macos-latest
     name: macos electron runtime e2e
     timeout-minutes: 20
@@ -494,10 +954,10 @@ jobs:
   # deliberately absent so its independent result never delays or changes this
   # verdict. (`needs` cannot reach across workflow files; the master-only jobs in
   # ci-master.yml are intentionally not part of this PR verdict.)
-  # `if: always()` is load-bearing: without it a failed dependency
-  # would SKIP this job, and GitHub counts a skipped required check as passing
-  # — so this job always runs and fails on any non-success result, including
-  # 'cancelled' and 'skipped'.
+  # `if: always()` is load-bearing: without it a failed dependency would SKIP
+  # this job, and GitHub counts a skipped required check as passing. The
+  # verdict reads the plan and rejects any selected job that failed, was
+  # cancelled, or was skipped; deliberately unselected Draft jobs stay skipped.
   all-checks-passed:
     name: all checks passed
     # This bookkeeping-only verdict must not depend on custom-pool
@@ -508,16 +968,207 @@ jobs:
     # required Linux workers and runs on the vm-backup pool.
     runs-on: >-
       ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted'
+          && github.event_name == 'pull_request'
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
-    needs: [node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows]
+    needs: [preflight, draft-impact, node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows]
     if: always() && github.event_name == 'pull_request'
     steps:
-      - name: Fail if any needed job did not succeed
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+      - name: Validate selected required jobs
+        env:
+          CI_LEVEL: ${{ needs.preflight.outputs.level }}
+          CI_LANES: ${{ needs.preflight.outputs.lanes }}
+          CI_RESULTS: ${{ toJSON(needs) }}
         run: |
-          echo "::error::Needed job results: ${{ join(needs.*.result, ', ') }}"
-          exit 1
-      - name: All checks passed
-        run: echo "All needed jobs succeeded (${{ join(needs.*.result, ', ') }})"
+          node <<'NODE'
+          const level = process.env.CI_LEVEL
+          const lanes = JSON.parse(process.env.CI_LANES || '[]')
+          const results = JSON.parse(process.env.CI_RESULTS || '{}')
+          const required = level === 'exhaustive'
+            ? ['preflight', 'node-24', 'node-24-coverage', 'node-24-consumers', 'node-compat', 'python-sdk', 'python-runtime', 'windows']
+            : [
+                'preflight',
+                ...(lanes.includes('draft-impact') ? ['draft-impact'] : []),
+                ...(lanes.includes('static') ? ['node-24'] : []),
+                ...(lanes.includes('consumers') ? ['node-24-consumers'] : []),
+              ]
+          const failed = required.filter(job => results[job]?.result !== 'success')
+          if (failed.length > 0) {
+            console.error(`Required jobs did not succeed: ${failed.map(job => `${job}=${results[job]?.result}`).join(', ')}`)
+            process.exit(1)
+          }
+          console.log(`Required jobs succeeded: ${required.join(', ')}`)
+          NODE
+
+  # Merge Queue checks out GitHub's synthetic candidate merge commit. This is
+  # the sole branch-protection conclusion for that candidate tree: every
+  # exhaustive lane, including the otherwise observational platform evidence,
+  # must complete successfully before the queue may land it.
+  candidate-verdict:
+    name: candidate verdict
+    runs-on: ubuntu-latest
+    needs:
+      - preflight
+      - draft-impact
+      - node-24
+      - node-24-coverage
+      - node-24-consumers
+      - node-compat
+      - python-sdk
+      - python-runtime
+      - windows
+      - windows-native-verdict
+      - electron-runtime-e2e-macos
+    if: always() && github.event_name == 'merge_group'
+    steps:
+      - name: Validate the exhaustive candidate tree
+        env:
+          CI_LEVEL: ${{ needs.preflight.outputs.level }}
+          CI_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node <<'NODE'
+          const level = process.env.CI_LEVEL
+          const results = JSON.parse(process.env.CI_RESULTS || '{}')
+          const required = [
+            'preflight',
+            'node-24',
+            'node-24-coverage',
+            'node-24-consumers',
+            'node-compat',
+            'python-sdk',
+            'python-runtime',
+            'windows',
+            'windows-native-verdict',
+            'electron-runtime-e2e-macos',
+          ]
+          if (level !== 'exhaustive') {
+            console.error(`Candidate plan was not exhaustive: ${level}`)
+            process.exit(1)
+          }
+          const failed = required.filter(job => results[job]?.result !== 'success')
+          if (failed.length > 0) {
+            console.error(`Candidate jobs did not succeed: ${failed.map(job => `${job}=${results[job]?.result}`).join(', ')}`)
+            process.exit(1)
+          }
+          console.log(`Candidate jobs succeeded: ${required.join(', ')}`)
+          NODE
+
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Download candidate identity
+        uses: actions/download-artifact@v8
+        with:
+          name: ci-plan
+          path: ${{ runner.temp }}/candidate-proof
+
+      - name: Complete candidate attestation
+        id: attestation
+        env:
+          IDENTITY_PATH: ${{ runner.temp }}/candidate-proof/candidate-identity.json
+          OUTPUT_PATH: ${{ runner.temp }}/candidate-proof/candidate-attestation.json
+        run: >-
+          pnpm --silent ci:attestation complete
+          --input "$IDENTITY_PATH"
+          --repository "$GITHUB_REPOSITORY"
+          --run-id "$GITHUB_RUN_ID"
+          --output "$OUTPUT_PATH"
+
+      - name: Publish candidate attestation
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.attestation.outputs.artifact_name }}
+          path: ${{ runner.temp }}/candidate-proof/candidate-attestation.json
+          if-no-files-found: error
+          retention-days: 30
+
+  master-smoke:
+    name: master reuse smoke
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify checked-out tree and proof decision
+        env:
+          EXPECTED_TREE: ${{ needs.preflight.outputs.proof-tree }}
+          PROOF_REUSED: ${{ needs.preflight.outputs.proof-reused }}
+          PROOF_REASON: ${{ needs.preflight.outputs.proof-reason }}
+          PROOF_SOURCE_RUN_ID: ${{ needs.preflight.outputs.proof-source-run-id }}
+        run: |
+          actual_tree=$(git rev-parse 'HEAD^{tree}')
+          test "$actual_tree" = "$EXPECTED_TREE"
+          echo "Candidate proof reused: $PROOF_REUSED"
+          echo "Candidate proof reason: $PROOF_REASON"
+          echo "Candidate proof source run: ${PROOF_SOURCE_RUN_ID:-none}"
+
+  master-verdict:
+    name: master evidence verdict
+    runs-on: ubuntu-latest
+    needs:
+      - preflight
+      - master-smoke
+      - draft-impact
+      - node-24
+      - node-24-coverage
+      - node-24-consumers
+      - node-compat
+      - python-sdk
+      - python-runtime
+      - windows
+      - windows-native-verdict
+      - electron-runtime-e2e-macos
+    if: always() && github.event_name == 'push'
+    steps:
+      - name: Validate proof reuse or exhaustive fallback
+        env:
+          PROOF_REUSED: ${{ needs.preflight.outputs.proof-reused }}
+          PROOF_REASON: ${{ needs.preflight.outputs.proof-reason }}
+          PROOF_SOURCE_RUN_ID: ${{ needs.preflight.outputs.proof-source-run-id }}
+          CI_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node <<'NODE'
+          const reused = process.env.PROOF_REUSED === 'true'
+          const results = JSON.parse(process.env.CI_RESULTS || '{}')
+          const required = reused
+            ? ['preflight', 'master-smoke']
+            : [
+                'preflight',
+                'master-smoke',
+                'node-24',
+                'node-24-coverage',
+                'node-24-consumers',
+                'node-compat',
+                'python-sdk',
+                'python-runtime',
+                'windows',
+                'windows-native-verdict',
+                'electron-runtime-e2e-macos',
+              ]
+          const failed = required.filter(job => results[job]?.result !== 'success')
+          if (failed.length > 0) {
+            console.error(`Master evidence jobs did not succeed: ${failed.map(job => `${job}=${results[job]?.result}`).join(', ')}`)
+            process.exit(1)
+          }
+          if (reused) {
+            console.log(`Reused candidate proof from run ${process.env.PROOF_SOURCE_RUN_ID}`)
+          } else {
+            console.log(`Completed exhaustive fallback: ${process.env.PROOF_REASON}`)
+          }
+          NODE

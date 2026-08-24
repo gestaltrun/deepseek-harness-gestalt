@@ -1,0 +1,12 @@
+self-hosted-runner:
+  labels:
+    - vm-backup
+    - dsh-win-ci
+    - mobile-release
+    - dsh-ubuntu-24-04-*
+    - dsh-windows-2025-*
+
+paths:
+  .github/workflows/ci-master.yml:
+    ignore:
+      - 'constant expression "false" in condition'

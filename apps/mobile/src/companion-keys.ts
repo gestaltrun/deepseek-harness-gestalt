@@ -523,18 +523,29 @@ function requirePairingGrant(pairingId: PersonalPairingId, grant: RelayCredentia
 }
 
 function validatedDocument(document: StoredMobilePairingDocument): StoredMobilePairingDocument {
+  const pairingIds = new Set<PersonalPairingId>()
+  for (const record of document.active) {
+    if (pairingIds.has(record.pairingId)) {
+      rejectStoredDocument(document, 'Mobile pairing document contains a duplicate Personal Pairing id')
+    }
+    pairingIds.add(record.pairingId)
+  }
   if (document.selectedPairingId !== undefined) {
     const selected = document.active.find(record => record.pairingId === document.selectedPairingId)
     if (selected?.reconnectState === undefined || selected.grant === undefined) {
-      for (const record of document.active) {
-        record.attachmentKey.fill(0)
-        record.reconnectState?.fill(0)
-      }
-      wipeEndpointRecovery(document.pending)
-      throw new TypeError('Selected Paired Desktop has no complete retained authority')
+      rejectStoredDocument(document, 'Selected Paired Desktop has no complete retained authority')
     }
   }
   return document
+}
+
+function rejectStoredDocument(document: StoredMobilePairingDocument, message: string): never {
+  for (const record of document.active) {
+    record.attachmentKey.fill(0)
+    record.reconnectState?.fill(0)
+  }
+  wipeEndpointRecovery(document.pending)
+  throw new TypeError(message)
 }
 
 function parseDesktopName(value: unknown): string {

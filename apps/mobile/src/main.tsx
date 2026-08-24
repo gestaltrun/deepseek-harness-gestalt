@@ -341,7 +341,10 @@ async function mountMobileProduct(): Promise<void> {
       completeLink: async (link, signal) => { await productPairingController.completeLink(link, signal) },
       scanQr: async (video, signal) => { await productPairingController.scanQr(video, signal) },
       retryPairing: async () => { await productPairingController.retryPairing() },
-      selectDesktop: async (pairingId) => { await productPairingController.selectDesktop(pairingId) },
+      selectDesktop: async (pairingId) => {
+        await productPairingController.selectDesktop(pairingId)
+        await installRetainedProjectionCache()
+      },
       activate: async () => {
         await productPairingController.activate()
         await installRetainedProjectionCache()

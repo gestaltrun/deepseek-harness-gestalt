@@ -277,6 +277,7 @@ export class MobilePairingController implements MobilePairingActions {
   private accountId: PlatformAccountId | undefined
   private active = true
   private lifecycleBarrier: Promise<void> = Promise.resolve()
+  private relayActivationGeneration = 0
 
   /** @param options - Account authority, Remote Access transport, reviewed handshake, and QR scanner. */
   constructor(private readonly options: MobilePairingControllerOptions) {
@@ -331,8 +332,8 @@ export class MobilePairingController implements MobilePairingActions {
     }
     const restoredGrant = this.options.attachmentKeys?.relayAuthority?.()
     if (restoredGrant !== undefined && this.options.relay !== undefined) {
-      await this.options.relay.configure(restoredGrant)
-      await this.options.relay.start()
+      if (this.pairingId === undefined) throw new Error('Selected Relay authority has no retained Personal Pairing')
+      await this.activateRelayPairing(this.pairingId, restoredGrant)
     }
     if (this.attempt === undefined && this.pairedDesktops().length > 0) this.publishPaired()
   }
@@ -767,6 +768,7 @@ export class MobilePairingController implements MobilePairingActions {
   }
 
   private async resetAccountScope(): Promise<void> {
+    this.relayActivationGeneration += 1
     this.clearVolatileAttempt()
     const operations: Array<() => void | Promise<void>> = [() => this.options.companion?.forgetConnection()]
     if (this.options.companion !== undefined) operations.push(() => this.options.companion?.releasePairing())
@@ -825,15 +827,20 @@ export class MobilePairingController implements MobilePairingActions {
 
   private async activateRelayPairing(pairingId: PersonalPairingId, grant: RelayCredentialGrant): Promise<void> {
     if (this.options.relay === undefined) throw new Error('Selected Paired Desktop has no Relay lifecycle owner')
+    const relay = this.options.relay
+    const generation = ++this.relayActivationGeneration
     await this.options.relay.configure(grant)
     this.assertActiveAccount()
-    await this.options.relay.start()
-    this.assertActiveAccount()
     this.pairingId = pairingId
+    void Promise.resolve().then(async () => { await relay.start() }).catch((error: unknown) => {
+      if (!this.active || this.relayActivationGeneration !== generation || this.pairingId !== pairingId) return
+      this.publishPaired(errorMessage(error))
+    })
   }
 
   private async releaseRelayPairingForSwitch(nextPairingId: PersonalPairingId): Promise<void> {
     if (this.pairingId === undefined || this.pairingId === nextPairingId) return
+    this.relayActivationGeneration += 1
     this.options.companion?.forgetConnection()
     const operations: Array<() => void | Promise<void>> = [
       () => this.options.releaseProjectionAuthority?.(false),

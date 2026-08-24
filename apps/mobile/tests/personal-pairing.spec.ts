@@ -95,6 +95,122 @@ describe('MobilePairingController', () => {
     })
   })
 
+  it.each(['Remote Offline', 'Platform capacity'])('publishes and persists an offline selection while %s retries', async () => {
+    const accountId = parsePlatformAccountId('account-offline-selection')
+    const home = parsePersonalPairingId('pairing-offline-home')
+    const work = parsePersonalPairingId('pairing-offline-work')
+    const homeGrant = {
+      routeId: parseRelayRouteId('route-offline-home'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(home),
+    }
+    const workGrant = {
+      routeId: parseRelayRouteId('route-offline-work'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(work),
+    }
+    const save = vi.fn(async () => {})
+    const vault = new PairingCompanionKeyVault({ load: vi.fn(async () => ({ active: [] })), save })
+    await vault.selectAccount(accountId)
+    vault.retainConfirmedPairing(home, new Uint8Array(96).fill(1), new Uint8Array(32).fill(2), homeGrant)
+    vault.retainConfirmedPairing(work, new Uint8Array(96).fill(3), new Uint8Array(32).fill(4), workGrant)
+    vault.selectPairing(home)
+    await vault.flush()
+    save.mockClear()
+
+    const retries: Array<ReturnType<typeof deferred<undefined>>> = []
+    const relay = {
+      configure: vi.fn(),
+      start: vi.fn(async () => {
+        const retry = deferred<undefined>()
+        retries.push(retry)
+        await retry.promise
+      }),
+      stop: vi.fn(async () => { retries.at(-1)?.resolve(undefined) }),
+      isConnected: vi.fn(() => false),
+    }
+    const companion = new CompanionForegroundRuntime({ relay })
+    const controller = new MobilePairingController({
+      installation: installationFixture(() => accountId), transport: transportFixture(),
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn() }, scanner: { scan: vi.fn() },
+      attachmentKeys: vault, relay: companion, companion,
+      releaseProjectionAuthority: vi.fn(async () => {}),
+    })
+    const selectedSnapshots: PersonalPairingId[] = []
+    controller.subscribe(() => {
+      const snapshot = controller.getSnapshot()
+      if (snapshot.status === 'paired' && snapshot.selectedPairingId !== undefined) {
+        selectedSnapshots.push(snapshot.selectedPairingId)
+      }
+    })
+    await controller.activate()
+    expect(relay.configure).toHaveBeenCalledWith(homeGrant)
+    await vi.waitFor(() => { expect(relay.start).toHaveBeenCalledOnce() })
+    selectedSnapshots.length = 0
+
+    let settled = false
+    const selecting = controller.selectDesktop(work).then(() => { settled = true })
+    await vi.waitFor(() => { expect(settled).toBe(true) })
+    await selecting
+
+    expect(vault.selectedPairingId()).toBe(work)
+    expect(save).toHaveBeenCalledWith(accountId, expect.objectContaining({ selectedPairingId: work }))
+    expect(selectedSnapshots.at(-1)).toBe(work)
+    expect(controller.getSnapshot()).toMatchObject({ status: 'paired', selectedPairingId: work })
+    expect(companionMayMutate(companion.getState())).toBe(false)
+    await vi.waitFor(() => { expect(relay.start).toHaveBeenCalledTimes(2) })
+    retries.at(-1)?.resolve()
+  })
+
+  it('ignores a replaced Relay activation generation after another Desktop is selected', async () => {
+    const accountId = parsePlatformAccountId('account-generation-selection')
+    const home = parsePersonalPairingId('pairing-generation-home')
+    const work = parsePersonalPairingId('pairing-generation-work')
+    const grant = (pairingId: PersonalPairingId, routeId: string, credential: string) => ({
+      routeId: parseRelayRouteId(routeId), endpoint: 'mobile' as const,
+      credential: parseRelayCredential(credential), revision: 1,
+      pairingSelector: parseRelayPairingSelector(pairingId),
+    })
+    const homeGrant = grant(home, 'route-generation-home', 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE')
+    const workGrant = grant(work, 'route-generation-work', 'AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI')
+    const vault = new PairingCompanionKeyVault()
+    await vault.selectAccount(accountId)
+    vault.retainConfirmedPairing(home, new Uint8Array(96).fill(1), new Uint8Array(32).fill(2), homeGrant)
+    vault.retainConfirmedPairing(work, new Uint8Array(96).fill(3), new Uint8Array(32).fill(4), workGrant)
+    vault.selectPairing(home)
+    const activations: Array<{ promise: Promise<void>; reject(error: Error): void }> = []
+    const relay = {
+      configure: vi.fn(),
+      start: vi.fn(() => {
+        let reject!: (error: Error) => void
+        const promise = new Promise<void>((_resolve, onReject) => { reject = onReject })
+        activations.push({ promise, reject })
+        return promise
+      }),
+      stop: vi.fn(async () => {}),
+    }
+    const controller = new MobilePairingController({
+      installation: installationFixture(), transport: transportFixture(),
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn() }, scanner: { scan: vi.fn() },
+      attachmentKeys: vault, relay,
+      releaseProjectionAuthority: vi.fn(async () => {}),
+    })
+
+    await controller.selectDesktop(work)
+    await vi.waitFor(() => { expect(activations).toHaveLength(1) })
+    await controller.selectDesktop(home)
+    await vi.waitFor(() => { expect(activations).toHaveLength(2) })
+    activations[0]?.reject(new Error('replaced Relay activation stopped'))
+    await Promise.resolve()
+
+    expect(vault.selectedPairingId()).toBe(home)
+    expect(controller.getSnapshot()).toEqual({
+      status: 'paired',
+      desktops: [{ pairingId: home }, { pairingId: work }],
+      selectedPairingId: home,
+    })
+  })
+
   it('revokes a durable selection even when no Relay channel is active', async () => {
     const accountId = parsePlatformAccountId('account-mobile')
     const pairingId = parsePersonalPairingId('pairing-durable-offline')
@@ -188,7 +304,10 @@ describe('MobilePairingController', () => {
     await second.activate()
     scheduledTwo.shift()?.()
     await vi.waitFor(() => {
-      expect(second.getSnapshot()).toEqual({ status: 'retryable', error: 'Relay start failed after durable commit' })
+      expect(second.getSnapshot()).toMatchObject({
+        status: 'paired', selectedPairingId: pairingId,
+        error: 'Relay start failed after durable commit',
+      })
     })
     expect(open).toHaveBeenCalledOnce()
     await second.deactivate()
@@ -252,7 +371,7 @@ describe('MobilePairingController', () => {
     const vault = new PairingCompanionKeyVault()
     const relay = {
       configure: vi.fn(),
-      start: vi.fn().mockRejectedValueOnce(new Error('Relay start failed')).mockResolvedValueOnce(undefined),
+      start: vi.fn().mockRejectedValueOnce(new Error('Relay start failed')),
       stop: vi.fn(),
     }
     const controller = new MobilePairingController({
@@ -276,15 +395,17 @@ describe('MobilePairingController', () => {
     scheduled.shift()?.()
     await vi.waitFor(() => { expect(transport.getEndpointPairingStatus).toHaveBeenCalledTimes(2) })
     scheduled.shift()?.()
-    await vi.waitFor(() => { expect(controller.getSnapshot()).toEqual({ status: 'retryable', error: 'Relay start failed' }) })
-    await controller.retryPairing()
-    scheduled.shift()?.()
-    await vi.waitFor(() => { expect(controller.getSnapshot()).toMatchObject({ status: 'paired' }) })
+    await vi.waitFor(() => {
+      expect(controller.getSnapshot()).toMatchObject({
+        status: 'paired', selectedPairingId: 'pairing-endpoint', error: 'Relay start failed',
+      })
+    })
     expect(handshake.openRelayAuthorityDurably).toHaveBeenCalledWith(Uint8Array.of(8, 9), expect.any(Function))
     expect(handshake.openRelayAuthorityDurably).toHaveBeenCalledTimes(1)
     expect(vault.attachmentKeyMaterial(parsePersonalPairingId('pairing-endpoint'))).toEqual(attachmentKey)
     expect(vault.reconnectState(parsePersonalPairingId('pairing-endpoint'))).toEqual(reconnectState)
     expect(relay.configure).toHaveBeenCalledWith(grant)
+    expect(relay.start).toHaveBeenCalledOnce()
   })
 
   it('finishes XKpsk3 with a fresh Installation proof before exposing authentication words', async () => {

@@ -143,6 +143,20 @@ describe('PairingCompanionKeyVault', () => {
     expect(restored.attachmentKeyMaterial(work)).toBeUndefined()
   })
 
+  it('rejects duplicate Personal Pairing ids in an IndexedDB version-2 document', async () => {
+    const store = new IndexedDbMobilePairingStateStore(`mobile-pairing-duplicate-${crypto.randomUUID()}`)
+    const accountId = parsePlatformAccountId('account-duplicate')
+    const pairingId = parsePersonalPairingId('pairing-duplicate')
+    await store.save(accountId, {
+      active: [
+        { pairingId, attachmentKey: MATERIAL.slice() },
+        { pairingId, attachmentKey: OTHER.slice() },
+      ],
+    })
+
+    await expect(store.load(accountId)).rejects.toThrow('duplicate Personal Pairing id')
+  })
+
   it('retains a copy and zeroes released keys', () => {
     const vault = new PairingCompanionKeyVault()
     const pairing = parsePersonalPairingId('pairing-one')

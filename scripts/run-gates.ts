@@ -615,10 +615,14 @@ function ciWindowsNativeCoreGates(): Gate[] {
 }
 
 function ciWindowsNativeStaticGates(): Gate[] {
-  return [
+  const portableGates = [
     ...ciSharedStaticGates(),
     ...docSyncLeafGates().filter(gate => gate.id !== 'docs-site-build' && gate.id !== 'doc-typecheck'),
     pnpmScript('module-graph', 'verify-module-graph', { label: 'module graph' }),
+  ]
+  if (process.env.DSH_WINDOWS_STATIC_PORTABLE_ONLY === '1') return portableGates
+  return [
+    ...portableGates,
     pnpmScript('knip', 'knip'),
     pnpmScript('duplication', 'duplication'),
   ]

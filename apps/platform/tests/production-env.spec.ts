@@ -61,10 +61,11 @@ function completeDeployEnv(): NodeJS.Dict<string> {
 }
 
 function spawnCli(env: NodeJS.Dict<string>) {
-  return spawnSync(process.execPath, ['--experimental-strip-types', script], {
+  return spawnSync(process.execPath, ['--import', 'tsx/esm', script], {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
+      TSX_TSCONFIG_PATH: resolve(repoRoot, 'tsconfig.json'),
       ...(process.platform === 'win32'
         ? {
           SYSTEMROOT: process.env.SYSTEMROOT,

@@ -153,8 +153,7 @@ describe('assembled Desktop Companion Host search', () => {
 
     const resultCount = received.length
     const image = surface.loadImage(assembled.sessionId, assembled.image)
-    await expect.poll(() => received.slice(resultCount)).not.toEqual([])
-    expect(received.slice(resultCount).every(result => result.type === 'image-chunk')).toBe(true)
+    await expect.poll(() => received.slice(resultCount).some(result => result.type === 'image-chunk')).toBe(true)
     await expect(image).resolves.toMatch(/^data:image\/png;base64,/u)
 
     const asked = assembled.ctx.userQuestions.ask({

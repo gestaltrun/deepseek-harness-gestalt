@@ -10,14 +10,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { IconBrowseOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ToolCallViewProps } from '../../contract/slots.ts'
+import type { ToolPresentationViewProps } from '../../contract/slots.ts'
 import { readCardModel } from '../models/read-card-model.ts'
 import { toolRowModel } from '../models/tool-call-model.ts'
 import { ToolRow } from '../components/ToolRow.tsx'
 import { CONVERSATION_NS as NS } from '../../locale.ts'
 
 /** Full row props: the toolview runtime share plus the standard locale seat. */
-type ReadRowProps = ToolCallViewProps & PropsLocale<'conversation'>
+type ReadRowProps = ToolPresentationViewProps & PropsLocale<'conversation'>
 
 /**
  * Read row: icon + Read · {path} in the shared ToolRow chrome, with the file's

@@ -34,10 +34,12 @@ describe('Remote Protocol keyless assembled path', () => {
     expect(result.stderr).toBe('')
     expect(result.stdout).toMatchInlineSnapshot(`
       "TRANSPORT version=1
-      COMPANION version=2 security=preserved
+      COMPANION version=4 security=preserved
       MOBILE_REQUEST encrypted=true relayPlaintext=false type=submit-prompt
       DESKTOP_RESPONSE confirmed=true outcome=accepted
-      ATTACHMENT platformPlaintext=false hashVerified=true submitted=true controlFrameBytes=388 rejectionReason=hash-mismatch
+      ATTACHMENT platformPlaintext=false hashVerified=true submitted=true controlFrameBytes=413 rejectionReason=hash-mismatch
+      SESSION_SEARCH authority=desktop hits=1 hasMore=false
+      HOST_FAILURE kind=http code=HOST_HTTP_STATUS status=400
       RECONNECT_QUERY operationId=operation-keyless committed=true original=accepted
       RECONNECT_QUERY operationId=operation-never-submitted committed=false notSubmitted=true
       NEGOTIATION mismatch=COMPANION_UPDATE_REQUIRED update=mobile applicationPlaintextSent=false
@@ -75,8 +77,8 @@ describe('Remote Protocol keyless assembled path', () => {
       type: 'ciphertext',
       transportVersion: 1,
       routeId: parseRelayRouteId('route-near-limit'),
-      sourceAttachmentId: parseRelayAttachmentId('mobile-near-limit'),
-      targetAttachmentId: parseRelayAttachmentId('desktop-near-limit'),
+      sourceAttachmentId: parseRelayAttachmentId(`mobile-${crypto.randomUUID()}`),
+      targetAttachmentId: parseRelayAttachmentId(`desktop-${crypto.randomUUID()}`),
       ciphertext,
     })
     expect(relayFrame.byteLength).toBeLessThanOrEqual(REMOTE_PROTOCOL_LIMITS.relayMessageBytes)

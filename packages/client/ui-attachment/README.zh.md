@@ -2,7 +2,9 @@
 
 [English](README.md) | 中文
 
-对话 UI 的动态附件呈现插件。它通过 `ctx.slots.inject` 等待 conversation 包声明 `conversation.input.attachments` 与 `conversation.message.images`，随后注册输入框草稿图片栏、文档拖放目标、聊天历史图片画廊和原图灯箱。conversation slot 持有方提供附件数据、图片加载、回调及其命名空间翻译器；呈现组件保持纯 props，且不从包入口导出。
+对话 UI 的动态附件呈现插件。它通过 `ctx.slots.inject` 等待 conversation 包声明 `conversation.input.attachments` 与 `conversation.message.images`，随后注册输入框草稿图片栏、文档拖放目标、聊天历史图片画廊和原图灯箱。conversation slot 持有方提供附件数据、图片加载、回调及其命名空间翻译器；呈现组件保持纯 props。
+
+显式的 `./presentation` 入口为不挂载 Desktop slot tree 的产品 composition 导出 `ImageGallery`、`MessageImage` 与 `MessageImages`。调用方仍须提供会话授权的 loader 与共享 conversation 文案；该入口不会增加存储或附件 authority。
 
 ## 附件栏
 

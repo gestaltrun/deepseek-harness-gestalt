@@ -8,17 +8,23 @@ import {
   PLATFORM_DEPLOY_REQUIRED_ENV,
   PLATFORM_PRODUCTION_REQUIRED_ENV,
   assertOperatedPlatformEnvironment,
+  loadOperatedPlatformConfig,
   missingPlatformDeployEnv,
   missingPlatformProductionEnv,
   readPlatformSigningKey,
   requiredPlatformEnv,
   runPlatformProductionEnvCli,
+  validatePlatformEcsHosts,
 } from '../src/production-env.ts'
 
 const HEX = 'ab'.repeat(32)
 const DISTINCTIVE_SECRET = 'super-secret-token-value-do-not-print'
 const script = fileURLToPath(new URL('../src/production-env-cli.ts', import.meta.url))
 const bootSource = readFileSync(new URL('../src/boot.ts', import.meta.url), 'utf8')
+const launchSource = readFileSync(new URL('../src/launch.ts', import.meta.url), 'utf8')
+const remoteAccessResourcesSource = readFileSync(new URL('../src/remote-access-resources.ts', import.meta.url), 'utf8')
+const dockerfileSource = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8')
+const publicReadinessSource = readFileSync(new URL('../scripts/platform-public-readiness.sh', import.meta.url), 'utf8')
 const repoRoot = resolve(import.meta.dirname, '../../..')
 
 function completeDeployEnv(): NodeJS.Dict<string> {
@@ -27,11 +33,37 @@ function completeDeployEnv(): NodeJS.Dict<string> {
     PLATFORM_GITHUB_CLIENT_ID: 'client',
     PLATFORM_GITHUB_CLIENT_SECRET: DISTINCTIVE_SECRET,
     PLATFORM_GITHUB_CALLBACK: 'https://platform.example.test/v1/account/oauth/github/callback',
+    PLATFORM_GITHUB_CREDENTIAL_REFERENCE: 'credentials://github-oauth/production',
     PLATFORM_POSTGRES_HOST: 'postgres.example.test',
     PLATFORM_POSTGRES_USER: 'gestalt',
     PLATFORM_POSTGRES_PASSWORD: DISTINCTIVE_SECRET,
+    PLATFORM_POSTGRES_DATABASE: 'gestalt',
+    PLATFORM_IDENTITY_NAMESPACE: 'gestalt-production',
     PLATFORM_REDIS_HOST: 'redis.example.test',
+    PLATFORM_REDIS_USER: 'gestalt',
     PLATFORM_REDIS_PASSWORD: DISTINCTIVE_SECRET,
+    PLATFORM_OSS_ENDPOINT: 'oss-cn-hangzhou-internal.aliyuncs.com',
+    PLATFORM_OSS_BUCKET: 'gestalt-secret',
+    PLATFORM_OSS_AUTH: 'ecs-ram-role/gestalt-vpc',
+    PLATFORM_OSS_OBJECT_PREFIX: 'remote-attachments/production',
+    PLATFORM_OSS_TIMEOUT_MS: '10000',
+    PLATFORM_RELAY_REDIS_KEY_PREFIX: 'gestalt:relay',
+    PLATFORM_RELAY_INSTANCE_ID: 'platform-production',
+    PLATFORM_RELAY_CAPACITY_RETRY_AFTER_MS: '1000',
+    PLATFORM_RELAY_DELIVERY_ACK_TIMEOUT_MS: '5000',
+    PLATFORM_RELAY_DIRECTORY_TTL_MS: '60000',
+    PLATFORM_RELAY_HEARTBEAT_TIMEOUT_MS: '45000',
+    PLATFORM_RELAY_MAX_BUFFERED_CIPHERTEXT_BYTES: '1048576',
+    PLATFORM_RELAY_MAX_CONNECTIONS: '10000',
+    PLATFORM_RELAY_MAX_PENDING_DELIVERIES: '10000',
+    PLATFORM_RELAY_MAX_PENDING_CHALLENGES: '10000',
+    PLATFORM_RELAY_ATTACH_TIMEOUT_MS: '10000',
+    PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES: '104857600',
+    PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS: '900000',
+    PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS: '10000',
+    PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'oss',
+    PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS: '60000',
+    PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY: '8',
     PLATFORM_TOKEN_SIGNING_KEY: HEX,
     PLATFORM_POLLING_SIGNING_KEY: HEX,
     PLATFORM_ECS_SSH_KEY: '-----BEGIN DISTINCTIVE KEY-----',
@@ -40,10 +72,11 @@ function completeDeployEnv(): NodeJS.Dict<string> {
 }
 
 function spawnCli(env: NodeJS.Dict<string>) {
-  return spawnSync(process.execPath, ['--experimental-strip-types', script], {
+  return spawnSync(process.execPath, ['--import', 'tsx/esm', script], {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
+      TSX_TSCONFIG_PATH: resolve(repoRoot, 'tsconfig.json'),
       ...(process.platform === 'win32'
         ? {
           SYSTEMROOT: process.env.SYSTEMROOT,
@@ -52,6 +85,43 @@ function spawnCli(env: NodeJS.Dict<string>) {
         }
         : {}),
       ...env,
+    },
+  })
+}
+
+function runPublicReadinessHarness(result: 'success' | 'one-backend' | 'unreachable' | 'wrong-storage') {
+  const harness = [
+    'set -eEuo pipefail',
+    'hosts=(10.0.0.1 10.0.0.2)',
+    'READINESS_COUNTER=$(mktemp)',
+    'curl() {',
+    '  if [ "$READINESS_RESULT" = unreachable ]; then return 22; fi',
+    '  count=$(cat "$READINESS_COUNTER")',
+    '  count=$((count + 1))',
+    '  printf \'%s\' "$count" > "$READINESS_COUNTER"',
+    '  if [ "$READINESS_RESULT" = wrong-storage ]; then',
+    '    printf \'{"attachmentStorage":"postgres","instanceId":"relay-1"}\'',
+    '  elif [ "$READINESS_RESULT" = one-backend ] || [ "$count" = 1 ]; then',
+    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-1"}\'',
+    '  else',
+    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-2"}\'',
+    '  fi',
+    '}',
+    'sleep() { :; }',
+    'ssh() { printf \'ROLLBACK:%s\\n\' "$*"; }',
+    publicReadinessSource,
+    'trap on_deploy_error ERR',
+    'platform_public_readiness 2',
+    'trap - ERR',
+    'printf \'CLEANUP\\n\'',
+  ].join('\n')
+  return spawnSync('bash', ['-c', harness], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      PLATFORM_ORIGIN: 'https://platform.example.test',
+      PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'oss',
+      READINESS_RESULT: result,
     },
   })
 }
@@ -97,6 +167,68 @@ describe('production and deploy names', () => {
       .toEqual(['PLATFORM_ECS_SSH_KEY', 'PLATFORM_ECS_HOSTS'])
   })
 
+  it('parses the complete operated identity and verified durable-store configuration before traffic', () => {
+    expect(loadOperatedPlatformConfig(completeDeployEnv())).toMatchObject({
+      environment: {
+        environment: 'production',
+        origin: 'https://platform.example.test',
+        credentialReference: 'credentials://github-oauth/production',
+        databaseIdentity: 'gestalt',
+        identityNamespace: 'gestalt-production',
+      },
+      postgres: { host: 'postgres.example.test', user: 'gestalt', database: 'gestalt', ssl: { rejectUnauthorized: true } },
+      redis: { host: 'redis.example.test', username: 'gestalt', tls: true },
+      relayRedisKeyPrefix: 'gestalt:relay',
+      remoteAttachments: {
+        storage: 'oss',
+        maxBlobBytes: 104857600,
+        capabilityLifetimeMs: 900000,
+        maxRetainedBlobs: 10000,
+        sweepIntervalMs: 60000,
+        cleanupConcurrency: 8,
+      },
+      oss: {
+        endpoint: 'oss-cn-hangzhou-internal.aliyuncs.com',
+        bucket: 'gestalt-secret',
+        auth: 'ecs-ram-role/gestalt-vpc',
+        objectPrefix: 'remote-attachments/production',
+        timeoutMs: 10000,
+      },
+    })
+    expect(loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'postgres',
+    }).remoteAttachments.storage).toBe('postgres')
+    expect(() => loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'mixed',
+    })).toThrow('PLATFORM_REMOTE_ATTACHMENT_STORAGE')
+    expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_ORIGIN: 'https://localhost' }))
+      .toThrow('must not use a local host')
+    expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_POSTGRES_SSL: 'disable' }))
+      .toThrow('PLATFORM_POSTGRES_SSL')
+    expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_REDIS_TLS: '0' }))
+      .toThrow('PLATFORM_REDIS_TLS')
+    expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_POSTGRES_PORT: 'invalid' }))
+      .toThrow('PLATFORM_POSTGRES_PORT')
+    expect(() => loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES: '104857601',
+    })).toThrow('PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES')
+    expect(() => loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_OSS_ENDPOINT: 'example.com',
+    })).toThrow('PLATFORM_OSS_ENDPOINT')
+    expect(() => loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_OSS_BUCKET: 'Bad_Bucket',
+    })).toThrow('PLATFORM_OSS_BUCKET')
+    expect(() => loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_OSS_AUTH: 'access-key/plaintext',
+    })).toThrow('PLATFORM_OSS_AUTH')
+    expect(() => loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_OSS_OBJECT_PREFIX: 'remote-attachments//production',
+    })).toThrow('PLATFORM_OSS_OBJECT_PREFIX')
+    expect(() => loadOperatedPlatformConfig({
+      ...completeDeployEnv(), PLATFORM_OSS_TIMEOUT_MS: '60001',
+    })).toThrow('PLATFORM_OSS_TIMEOUT_MS')
+  })
+
   it('reports missing names in declaration order and reads present values', () => {
     expect(missingPlatformProductionEnv({})).toEqual([...PLATFORM_PRODUCTION_REQUIRED_ENV])
     expect(missingPlatformDeployEnv({
@@ -106,10 +238,36 @@ describe('production and deploy names', () => {
       'PLATFORM_GITHUB_CLIENT_ID',
       'PLATFORM_GITHUB_CLIENT_SECRET',
       'PLATFORM_GITHUB_CALLBACK',
+      'PLATFORM_GITHUB_CREDENTIAL_REFERENCE',
       'PLATFORM_POSTGRES_HOST',
       'PLATFORM_POSTGRES_USER',
       'PLATFORM_POSTGRES_PASSWORD',
+      'PLATFORM_POSTGRES_DATABASE',
+      'PLATFORM_IDENTITY_NAMESPACE',
+      'PLATFORM_REDIS_USER',
       'PLATFORM_REDIS_PASSWORD',
+      'PLATFORM_OSS_ENDPOINT',
+      'PLATFORM_OSS_BUCKET',
+      'PLATFORM_OSS_AUTH',
+      'PLATFORM_OSS_OBJECT_PREFIX',
+      'PLATFORM_OSS_TIMEOUT_MS',
+      'PLATFORM_RELAY_REDIS_KEY_PREFIX',
+      'PLATFORM_RELAY_INSTANCE_ID',
+      'PLATFORM_RELAY_CAPACITY_RETRY_AFTER_MS',
+      'PLATFORM_RELAY_DELIVERY_ACK_TIMEOUT_MS',
+      'PLATFORM_RELAY_DIRECTORY_TTL_MS',
+      'PLATFORM_RELAY_HEARTBEAT_TIMEOUT_MS',
+      'PLATFORM_RELAY_MAX_BUFFERED_CIPHERTEXT_BYTES',
+      'PLATFORM_RELAY_MAX_CONNECTIONS',
+      'PLATFORM_RELAY_MAX_PENDING_DELIVERIES',
+      'PLATFORM_RELAY_MAX_PENDING_CHALLENGES',
+      'PLATFORM_RELAY_ATTACH_TIMEOUT_MS',
+      'PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES',
+      'PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS',
+      'PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS',
+      'PLATFORM_REMOTE_ATTACHMENT_STORAGE',
+      'PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS',
+      'PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY',
       'PLATFORM_TOKEN_SIGNING_KEY',
       'PLATFORM_POLLING_SIGNING_KEY',
       'PLATFORM_ECS_SSH_KEY',
@@ -120,6 +278,11 @@ describe('production and deploy names', () => {
     expect(readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', completeDeployEnv())).toEqual(
       Uint8Array.from(Buffer.from(HEX, 'hex')),
     )
+    expect(validatePlatformEcsHosts(completeDeployEnv())).toEqual(['10.0.0.1', '10.0.0.2'])
+    for (const hosts of ['10.0.0.1', '10.0.0.1,', '10.0.0.1,10.0.0.1', 'a,b,c']) {
+      expect(() => validatePlatformEcsHosts({ ...completeDeployEnv(), PLATFORM_ECS_HOSTS: hosts }))
+        .toThrow('exactly two distinct hosts')
+    }
     expect(() => readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', {
       ...completeDeployEnv(),
       PLATFORM_TOKEN_SIGNING_KEY: 'zz',
@@ -171,17 +334,28 @@ describe('runPlatformProductionEnvCli', () => {
 })
 
 describe('operated Platform composition', () => {
-  it('selects production before loading the pair and keeps dummy development on an invalid origin', () => {
-    const envSource = readFileSync(new URL('../src/production-env.ts', import.meta.url), 'utf8')
-    expect(bootSource).toContain('assertOperatedPlatformEnvironment')
-    expect(bootSource).toContain('https://dev.gestaltrun.invalid')
-    expect(bootSource).toContain('PostgresPersonalPairingAuthorityStore')
-    expect(bootSource).toContain('PostgresRelayRouteStore')
-    expect(bootSource).not.toContain('PersonalPairingProvider')
-    expect(bootSource).not.toContain('DevelopmentKeylessPairingHandshakeProvider')
-    expect(bootSource).not.toContain('RemoteRelayProvider')
-    expect(bootSource).not.toContain('production-env-cli')
-    expect(envSource).not.toContain('process.exit')
+  it('loads one operated identity and mounts endpoint-owned pairing over durable stores', () => {
+    expect(bootSource).toContain('launchOperatedPlatform()')
+    expect(launchSource).toContain('loadOperatedPlatformConfig')
+    expect(remoteAccessResourcesSource).toContain('PostgresPersonalPairingAuthorityStore')
+    expect(remoteAccessResourcesSource).toContain('PostgresRelayRouteStore')
+    expect(remoteAccessResourcesSource).toContain('RedisRelayCoordinator')
+    expect(launchSource).toContain('OperatedRemoteAccessResources')
+    const productComposition = bootSource + launchSource
+    expect(productComposition).not.toContain('loadPlatformEnvironment')
+    expect(productComposition).not.toContain('dev.gestaltrun.invalid')
+    expect(productComposition).not.toContain('rejectUnauthorized: false')
+    expect(productComposition).not.toContain('PLATFORM_REDIS_TLS')
+    expect(productComposition).toContain('PersonalPairingProvider')
+    expect(productComposition).not.toContain('DevelopmentKeylessPairingHandshakeProvider')
+    expect(productComposition).not.toContain('MemoryPersonalPairingAuthorityStore')
+    expect(productComposition).toContain('RemoteRelayProvider')
+    expect(productComposition).toContain('OssRemoteAttachmentStore')
+    expect(productComposition).toContain('createEcsRamRoleOssClient')
+    expect(dockerfileSource).toContain('ali-oss@6.23.0')
+    expect(productComposition).toContain('PostgresRemoteAttachmentStore')
+    expect(productComposition).not.toContain('production-env-cli')
+    expect(readFileSync(new URL('../src/production-env.ts', import.meta.url), 'utf8')).not.toContain('process.exit')
   })
 })
 
@@ -192,6 +366,7 @@ describe('Platform release workflows', () => {
       workflow_dispatch: {
         inputs: {
           deploy: { type: 'boolean', default: false },
+          attachment_storage: { type: 'choice', default: 'postgres' },
         },
       },
     })
@@ -201,22 +376,61 @@ describe('Platform release workflows', () => {
     expect(deploy.environment).toBe('production')
     expect(deploy.needs).toBe('validate')
     expect(deploy.if).toBe('${{ inputs.deploy }}')
+    expect(steps(deploy)[0]).toMatchObject({
+      uses: 'actions/checkout@v6',
+      with: { 'persist-credentials': false },
+    })
     const validateStep = steps(validate).find(step => typeof step.run === 'string'
       && step.run.includes('apps/platform/src/production-env-cli.ts'))
     if (validateStep === undefined) throw new TypeError('validate job must run production-env.ts')
-    expect(String(validateStep.run)).toContain('--experimental-strip-types')
+    expect(String(validateStep.run)).toContain('--import tsx/esm')
     if (!isRecord(validateStep.env)) throw new TypeError('validate step must define env')
     for (const name of PLATFORM_DEPLOY_REQUIRED_ENV) {
       expect(validateStep.env, name).toHaveProperty(name)
     }
     const apply = steps(deploy).find(step => typeof step.run === 'string' && step.run.includes('docker run'))
     if (apply === undefined) throw new TypeError('deploy job must run docker')
-    expect(String(apply.run)).toContain('--log-opt max-size=20m')
-    expect(String(apply.run)).toContain('--log-opt max-file=3')
+    const applySource = String(apply.run)
+    expect(applySource).toContain('set -eEuo pipefail')
+    expect(applySource).toContain('source apps/platform/scripts/platform-public-readiness.sh')
+    expect(applySource).toContain('--log-opt max-size=20m')
+    expect(applySource).toContain('--log-opt max-file=3')
+    expect(applySource).toContain('dist/oss-lifecycle-cli.mjs')
+    expect(applySource).toContain('dsh-platform-candidate')
+    expect(applySource).toContain('127.0.0.1:18080/readyz')
+    expect(applySource).toContain('attachmentStorage')
+    expect(publicReadinessSource).toContain('rollback_platform')
+    expect(applySource).toContain('docker inspect dsh-platform >/dev/null; ! docker inspect dsh-platform-rollback')
+    expect(publicReadinessSource).toContain('if docker inspect dsh-platform-rollback')
+    expect(publicReadinessSource.indexOf('if docker inspect dsh-platform-rollback'))
+      .toBeLessThan(publicReadinessSource.indexOf('docker rm -f dsh-platform >/dev/null 2>&1 || true'))
+    expect(applySource).not.toContain('Stop every predecessor before')
+    expect(publicReadinessSource).toContain('docker stop --time 60 dsh-platform >/dev/null')
+    expect(applySource).toContain('docker stop --time 60 dsh-platform-rollback')
+    expect(applySource).toContain('rolling replacement keeps the other host serving')
+    expect(publicReadinessSource).toContain('public readiness through the production HTTPS origin')
+    expect(publicReadinessSource).toContain('${PLATFORM_ORIGIN}/readyz')
+    expect(applySource).toContain('relay_instance="relay-${relay_index}"')
+    expect(publicReadinessSource).toContain('expected_instances+=("relay-${expected_index}")')
+    expect(applySource).not.toContain('relay-${host//./-}')
+    expect(publicReadinessSource).not.toContain('expected_host//./-')
+    expect(applySource.indexOf('platform_public_readiness 30'))
+      .toBeLessThan(applySource.indexOf('rollback_cleanup_failed=0'))
+    expect(applySource).toContain('rollback_cleanup_failed=0')
+    expect(applySource).toContain('attachment-storage-cutover-cli.mjs')
+    expect(applySource).toContain('grep -Eq')
+    expect(applySource).toContain('attachmentStorage\\\":\\\"(postgres|oss)')
+    expect(applySource).not.toContain("grep -Fq '\"attachmentStorage\":\"postgres\"'")
+    expect(applySource.indexOf('rollback_cleanup_failed=0'))
+      .toBeLessThan(applySource.indexOf('attachment-storage-cutover-cli.mjs'))
+    expect(String(apply.run)).toContain('--env-file /run/dsh-platform-candidate.env')
+    expect(String(apply.run)).toContain('PLATFORM_REMOTE_ATTACHMENT_STORAGE')
     expect(String(apply.run)).toContain('dsh-loongcollector')
     expect(String(apply.run)).toContain('gestalt-platform')
     if (!isRecord(apply.env)) throw new TypeError('deploy apply step must define env')
     expect(apply.env).toHaveProperty('PLATFORM_SLS_ACCOUNT_ID')
+    expect(apply.env).toHaveProperty('PLATFORM_OSS_OBJECT_PREFIX')
+    expect(apply.env).toHaveProperty('PLATFORM_OSS_TIMEOUT_MS')
     expect(String(apply.run)).toContain('100.100.100.200')
     expect(String(apply.run)).toContain('X-aliyun-ecs-metadata-token')
     expect(String(apply.run)).toContain('PLATFORM_SLS_ACCOUNT_ID')
@@ -228,6 +442,28 @@ describe('Platform release workflows', () => {
       if (!isRecord(value)) throw new TypeError(`${name} must be a job`)
       expect(value.environment, name).toBe('production')
     }
+  })
+
+  it.each(['unreachable', 'wrong-storage', 'one-backend'] as const)(
+    'restores both predecessors before cleanup when public readiness is %s',
+    (result) => {
+      const failed = runPublicReadinessHarness(result)
+      expect(failed.status).toBe(1)
+      expect(failed.stdout).toContain('public readiness through the production HTTPS origin')
+      expect(failed.stdout).not.toContain('CLEANUP')
+      const rollbacks = failed.stdout.split('\n').filter(line => line.startsWith('ROLLBACK:'))
+      expect(rollbacks).toHaveLength(2)
+      expect(rollbacks[0]).toContain('root@10.0.0.1')
+      expect(rollbacks[1]).toContain('root@10.0.0.2')
+    },
+  )
+
+  it('reaches cleanup without rollback only after public readiness succeeds', () => {
+    const succeeded = runPublicReadinessHarness('success')
+    expect(succeeded.status).toBe(0)
+    expect(succeeded.stdout).toContain('public readiness through the production HTTPS origin')
+    expect(succeeded.stdout).toContain('CLEANUP')
+    expect(succeeded.stdout).not.toContain('ROLLBACK:')
   })
 
   it('builds the image on master path changes without publishing to GHCR', () => {

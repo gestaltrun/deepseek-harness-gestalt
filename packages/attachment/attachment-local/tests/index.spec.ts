@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
 import LocalAttachmentStore, {
+  DEFAULT_MAX_FILE_BYTES,
   DEFAULT_NORMALIZED_IMAGE_MAX_BYTES,
   DEFAULT_NORMALIZED_IMAGE_MAX_DIMENSION,
   DEFAULT_IMAGE_COMPRESSION_CONCURRENCY,
@@ -24,6 +25,7 @@ describe('local attachment service', () => {
     expect(DEFAULT_MAX_MESSAGE_IMAGE_BYTES).toBe(200 * 1024 * 1024)
     expect(DEFAULT_MAX_IMAGE_PIXELS).toBe(64_000_000)
     expect(DEFAULT_MAX_IMAGE_DIMENSION).toBe(8192)
+    expect(DEFAULT_MAX_FILE_BYTES).toBe(100 * 1024 * 1024)
     expect(service.imageLimits).toEqual({
       maxImageBytes: DEFAULT_MAX_IMAGE_BYTES,
       maxImagesPerMessage: DEFAULT_MAX_IMAGES_PER_MESSAGE,
@@ -32,6 +34,7 @@ describe('local attachment service', () => {
       maxImageDimension: DEFAULT_MAX_IMAGE_DIMENSION,
       mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
     })
+    expect(service.maxFileBytes).toBe(DEFAULT_MAX_FILE_BYTES)
     expect(service.normalizationPolicy).toEqual({
       maxDimension: DEFAULT_NORMALIZED_IMAGE_MAX_DIMENSION,
       maxBytes: DEFAULT_NORMALIZED_IMAGE_MAX_BYTES,
@@ -57,6 +60,19 @@ describe('local attachment service', () => {
       ))
       const ref = await service.saveImage({ data, mediaType: 'image/png' })
       await expect(service.readImage(ref)).resolves.toEqual({ ref, data })
+    } finally {
+      await rm(dshHome, { recursive: true, force: true })
+    }
+  })
+
+  it('persists exact generic file bytes through the immutable binary seam', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-attachment-file-service-'))
+    try {
+      const service = new LocalAttachmentStore(new Context(), { dshHome })
+      const data = Uint8Array.of(0, 255, 1, 2, 0)
+      const ref = await service.saveFile({ data, mediaType: 'application/octet-stream', name: '/tmp/payload.bin' })
+      expect(ref).toMatchObject({ mediaType: 'application/octet-stream', bytes: data.byteLength, name: 'payload.bin' })
+      await expect(service.readFile(ref)).resolves.toEqual({ ref, data })
     } finally {
       await rm(dshHome, { recursive: true, force: true })
     }

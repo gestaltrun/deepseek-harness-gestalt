@@ -34,9 +34,9 @@ export class MobileRelayEndpointLifecycle {
   isConnected(): boolean { return this.endpoint.isConnected() }
 
   /**
-   * Send only on the current live Mobile attachment; offline sends are never retained.
+   * Send endpoint-owned handshake or Companion ciphertext only on the current live attachment.
    * @param targetAttachmentId - current Desktop attachment receiving the ciphertext.
-   * @param ciphertext - bounded encrypted Companion Protocol frame.
+   * @param ciphertext - opaque handshake or bounded encrypted Companion bytes.
    */
   async sendCiphertext(targetAttachmentId: RelayAttachmentId, ciphertext: Uint8Array): Promise<void> {
     await this.endpoint.sendCiphertext(targetAttachmentId, ciphertext)

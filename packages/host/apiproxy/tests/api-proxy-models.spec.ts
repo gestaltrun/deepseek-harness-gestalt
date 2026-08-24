@@ -267,6 +267,70 @@ describe('Web session model selection', () => {
     expect(readImage).toHaveBeenCalledOnce()
     await ctx.fiber.dispose()
   })
+
+  it('durably admits exact generic file bytes without adding them to model history', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const ref = {
+      attachmentId: 'sha256:file' as never,
+      mediaType: 'application/octet-stream', bytes: 4,
+      sha256: '2f87beacb6a71f75e3243ce005faf5d99405e02b5e729c7c9c216ef2e2a0544a', name: 'payload.bin',
+    }
+    const saveFile = vi.fn(async () => ref)
+    ctx.provide('attachments', { saveFile, maxFileBytes: 100 * 1024 * 1024 } as never)
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp',
+    })
+
+    const response = await api.sessions.admitAttachment(request({
+      sessionId, operationId: 'operation-file', mediaType: ref.mediaType,
+      name: 'payload.bin', data: 'AP8BAg==',
+    }))
+
+    expect(response.result).toEqual({ ok: true, value: { attachment: ref } })
+    expect(saveFile).toHaveBeenCalledWith({
+      data: Uint8Array.of(0, 255, 1, 2), mediaType: ref.mediaType, name: 'payload.bin',
+    })
+    expect(agent.session.events.at(-1)).toMatchObject({
+      type: 'session/attachment-admitted',
+      data: { attachment: ref, operationId: 'operation-file', source: 'companion' },
+    })
+    expect(agent.session.deriveMessages()).toEqual([])
+    await expect(api.sessions.admitAttachment(request({
+      sessionId, operationId: 'operation-file', mediaType: ref.mediaType,
+      name: 'payload.bin', data: 'AP8BAg==',
+    }))).resolves.toMatchObject({ result: { ok: true, value: { attachment: ref } } })
+    expect(saveFile).toHaveBeenCalledOnce()
+    await expect(api.sessions.admitAttachment(request({
+      sessionId, operationId: 'operation-file', mediaType: 'text/plain',
+      name: 'payload.bin', data: 'AP8BAg==',
+    }))).resolves.toMatchObject({
+      result: { ok: false, error: { details: { reason: 'ATTACHMENT_OPERATION_COLLISION' } } },
+    })
+    await ctx.fiber.dispose()
+  })
+
+  it('reconciles a restored attachment admission event without republishing bytes', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const attachment = {
+      attachmentId: 'sha256:restored' as never, mediaType: 'application/octet-stream', bytes: 4,
+      sha256: '2f87beacb6a71f75e3243ce005faf5d99405e02b5e729c7c9c216ef2e2a0544a', name: 'payload.bin',
+    }
+    agent.session.append('session/attachment-admitted', {
+      attachment, operationId: 'operation-restored', source: 'companion',
+    })
+    const saveFile = vi.fn()
+    ctx.provide('attachments', { saveFile, maxFileBytes: 100 * 1024 * 1024 } as never)
+    const api = createApiProxy(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp',
+    })
+
+    await expect(api.sessions.admitAttachment(request({
+      sessionId, operationId: 'operation-restored', mediaType: attachment.mediaType,
+      name: attachment.name, data: 'AP8BAg==',
+    }))).resolves.toMatchObject({ result: { ok: true, value: { attachment } } })
+    expect(saveFile).not.toHaveBeenCalled()
+    await ctx.fiber.dispose()
+  })
   it('groups successful providers and leaves an unlisted current selection out of the catalog', async () => {
     const { ctx, sessionId } = await harness({
       provider: 'deepseek-official',

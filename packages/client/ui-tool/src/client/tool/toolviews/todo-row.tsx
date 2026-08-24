@@ -10,14 +10,14 @@
 import { IconChecklistOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ToolCallViewProps } from '../../contract/slots.ts'
+import type { ToolPresentationViewProps } from '../../contract/slots.ts'
 import { toolRowModel } from '../models/tool-call-model.ts'
 import { ToolRow } from '../components/ToolRow.tsx'
 import { CONVERSATION_NS as NS } from '../../locale.ts'
 import { planSummary, type PlanItemLike } from './plan-summary.ts'
 
 /** Todo row props: the toolview runtime share plus the standard locale seat. */
-type TodoRowProps = ToolCallViewProps & PropsLocale<'conversation'>
+type TodoRowProps = ToolPresentationViewProps & PropsLocale<'conversation'>
 
 function isItem(value: unknown): value is PlanItemLike {
   return typeof value === 'object' && value !== null

@@ -58,7 +58,7 @@ describe('Platform Account HTTP consumer', () => {
       headers: { origin, 'content-type': 'application/json' },
       body: JSON.stringify({
         installationId: 'desktop-1',
-        installationKind: 'desktop',
+        installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
         publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
       }),
     })
@@ -99,6 +99,25 @@ describe('Platform Account HTTP consumer', () => {
     const signOut = await fetch(`${server.origin}/v1/account/session`, { method: 'DELETE', headers: proofHeaders })
     expect(signOut.status).toBe(204)
     expect(account.signOut).toHaveBeenCalledOnce()
+  })
+
+  it('binds validated Mobile Installation presentation to the Login Attempt', async () => {
+    const account = accountService()
+    const server = await start(account)
+    const response = await post(server.origin, '/v1/account/login-attempts', {
+      installationId: 'mobile-authenticated',
+      installationKind: 'mobile',
+      presentation: { name: 'Authenticated device name', platform: 'android' },
+      publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
+
+    expect(response.status).toBe(201)
+    expect(account.beginLogin).toHaveBeenCalledWith({
+      installationId: 'mobile-authenticated',
+      installationKind: 'mobile',
+      presentation: { name: 'Authenticated device name', platform: 'android' },
+      publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+    })
   })
 
   it('handles preflight and rejects untrusted or malformed origins', async () => {
@@ -145,7 +164,7 @@ describe('Platform Account HTTP consumer', () => {
     })
     expect(await error(expired)).toEqual([400, 'LOGIN_ATTEMPT_EXPIRED'])
     const capacity = await post(server.origin, '/v1/account/login-attempts', {
-      installationId: 'desktop-1', installationKind: 'desktop', publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+      installationId: 'desktop-1', installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
     })
     expect(capacity.status).toBe(429)
     expect(capacity.headers.get('retry-after')).toBe('45')
@@ -210,13 +229,36 @@ describe('Platform Account HTTP consumer', () => {
     })
     expect(await error(nonObject)).toEqual([400, 'INVALID_JSON'])
     const emptyInstallation = await post(server.origin, '/v1/account/login-attempts', {
-      installationId: '', installationKind: 'desktop', publicKey: {},
+      installationId: '', installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: {},
     })
     expect(await error(emptyInstallation)).toEqual([400, 'INVALID_REQUEST'])
     const invalidPublicKey = await post(server.origin, '/v1/account/login-attempts', {
-      installationId: 'desktop-1', installationKind: 'desktop', publicKey: null,
+      installationId: 'desktop-1', installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: null,
     })
     expect(await error(invalidPublicKey)).toEqual([400, 'INVALID_REQUEST'])
+    const missingMobilePresentation = await post(server.origin, '/v1/account/login-attempts', {
+      installationId: 'mobile-1', installationKind: 'mobile', publicKey: {},
+    })
+    expect(await error(missingMobilePresentation)).toEqual([400, 'INVALID_REQUEST'])
+    const missingDesktopPresentation = await post(server.origin, '/v1/account/login-attempts', {
+      installationId: 'desktop-1', installationKind: 'desktop', publicKey: {},
+    })
+    expect(await error(missingDesktopPresentation)).toEqual([400, 'INVALID_REQUEST'])
+    const invalidDesktopPlatform = await post(server.origin, '/v1/account/login-attempts', {
+      installationId: 'desktop-1', installationKind: 'desktop',
+      presentation: { name: 'Desktop', platform: 'web' }, publicKey: {},
+    })
+    expect(await error(invalidDesktopPlatform)).toEqual([400, 'INVALID_REQUEST'])
+    const invalidDesktopName = await post(server.origin, '/v1/account/login-attempts', {
+      installationId: 'desktop-1', installationKind: 'desktop',
+      presentation: { name: '', platform: 'linux' }, publicKey: {},
+    })
+    expect(await error(invalidDesktopName)).toEqual([400, 'INVALID_REQUEST'])
+    const invalidMobilePlatform = await post(server.origin, '/v1/account/login-attempts', {
+      installationId: 'mobile-1', installationKind: 'mobile',
+      presentation: { name: 'Browser', platform: 'web' }, publicKey: {},
+    })
+    expect(await error(invalidMobilePlatform)).toEqual([400, 'INVALID_REQUEST'])
     const invalidProof = await post(server.origin, '/v1/account/login-poll', {
       attemptId: 'attempt-1', pollingToken: 'poll', proof: null,
     })
@@ -230,7 +272,7 @@ describe('Platform Account HTTP consumer', () => {
 
     const encoded = await start(accountService(), (req) => { req.setEncoding('utf8') })
     const encodedBody = await post(encoded.origin, '/v1/account/login-attempts', {
-      installationId: 'desktop-1', installationKind: 'desktop', publicKey: {},
+      installationId: 'desktop-1', installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: {},
     })
     expect(encodedBody.status).toBe(201)
 

@@ -37,11 +37,14 @@ export interface ToolCallOwnerProps {
   cwd?: string | undefined
   /** Host account home; POSIX home-rooted summaries display as `~`. */
   home?: string | undefined
-  /** Open a Tool argument path through the Host. */
-  openFile: (path: string) => void
+  /** Open a Tool argument path through the Host; absent hosts keep paths read-only. */
+  openFile?: ((path: string) => void) | undefined
   /** Inspect this call in the trajectory view when available. */
   inspect?: (() => void) | undefined
 }
+
+/** Owner-defined props shared by keyed Desktop Tool rows and direct Web compositions. */
+export type ToolPresentationViewProps = ToolCallOwnerProps & PropsLocale<'conversation'>
 
 /** Full props of a registered atomic Tool view. */
 export type ToolCallViewProps = PropsRuntime<'tool.call.toolview'>

@@ -83,6 +83,7 @@
     "verify-dsh-package-licenses": "tsx scripts/verify-dsh-package-licenses.ts",
     "verify-config-source-ownership": "tsx scripts/verify-config-source-ownership.ts",
     "verify-companion-no-push": "tsx scripts/verify-companion-no-push.ts",
+    "verify-companion-product-entry": "tsx scripts/verify-companion-product-entry.ts",
     "verify-package-invariants": "tsx scripts/verify-package-invariants.ts",
     "verify-built-package-invariants": "node scripts/verify-built-package-invariants.mjs",
     "verify-package-readme-model-experience": "tsx scripts/verify-package-readme-model-experience.ts",
@@ -153,7 +154,7 @@
     "mock:llm": "node --import tsx packages/test-support/llm-mock-server/src/bin.ts",
     "dev:web": "tsx scripts/dev-web.ts --poll",
     "gestalt:dev": "pnpm --filter @deepseek-ai/dsh-desktop dev",
-    "gestalt:smoke": "pnpm --filter @deepseek-ai/dsh-client-ui-desktop bundle && pnpm --filter @deepseek-ai/dsh-desktop build:main && DSH_DESKTOP_SMOKE=1 vitest run apps/desktop/tests/electron-smoke.spec.ts",
+    "gestalt:smoke": "pnpm --filter @deepseek-ai/dsh-client-ui-desktop bundle && pnpm --filter @deepseek-ai/dsh-desktop exec node scripts/build-main.mjs tests/fixtures/operated-platform.json && DSH_DESKTOP_SMOKE=1 vitest run apps/desktop/tests/electron-smoke.spec.ts",
     "gestalt:smoke:packaged": "DSH_DESKTOP_SMOKE=1 vitest run apps/desktop/tests/electron-smoke-packaged.spec.ts",
     "postinstall": "node scripts/install-lefthook.mjs"
   },

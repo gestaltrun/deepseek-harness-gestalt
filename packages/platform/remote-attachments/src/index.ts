@@ -4,10 +4,9 @@
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
-import { randomBytes } from 'node:crypto'
-import type { PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import { createHash, randomBytes } from 'node:crypto'
+import type { AttachmentBlobReservationId, PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
-  parseAttachmentCapability,
   REMOTE_PROTOCOL_LIMITS,
   type AttachmentCapability,
 } from '@deepseek-ai/dsh-remote-protocol'
@@ -21,11 +20,12 @@ export type RemoteAttachmentErrorCode =
   | 'ATTACHMENT_PAIRING_MISMATCH'
   | 'ATTACHMENT_LIMIT_EXCEEDED'
   | 'ATTACHMENT_CAPACITY'
+  | 'PLATFORM_CAPACITY'
 
 /** Attachment blob store failure. */
 export class RemoteAttachmentError extends Error {
-  /** @param code - failure category. @param message - operator-facing diagnosis. */
-  constructor(readonly code: RemoteAttachmentErrorCode, message: string) {
+  /** @param code - failure category. @param message - operator-facing diagnosis. @param retryAfter - retry seconds. */
+  constructor(readonly code: RemoteAttachmentErrorCode, message: string, readonly retryAfter?: number) {
     super(message)
     this.name = 'RemoteAttachmentError'
   }
@@ -33,7 +33,8 @@ export class RemoteAttachmentError extends Error {
 
 /** Capability, ciphertext, and pairing scope retained for one not-yet-consumed blob. */
 export interface RemoteAttachmentBlob {
-  capability: AttachmentCapability
+  /** SHA-256 digest of the bearer capability; the retained state never exposes the bearer itself. */
+  capabilityDigest: Uint8Array
   pairingId: PersonalPairingId
   ciphertext: Uint8Array
   expiresAt: number
@@ -44,6 +45,24 @@ export interface RemoteAttachmentGrant {
   capability: AttachmentCapability
   byteLength: number
   expiresAt: number
+}
+
+/** One exclusively claimed ciphertext response whose delivery must be settled exactly once. */
+export interface RemoteAttachmentConsumption {
+  ciphertext: Uint8Array
+  /** Commit successful response delivery and permanently release the capability. */
+  complete(): Promise<void>
+  /** Restore a failed in-flight response when the capability remains unexpired. */
+  abandon(now: number): Promise<void>
+}
+
+/** Account-complete blob quota reservation owned by one retained attachment. */
+export interface RemoteAttachmentQuotaReservation {
+  id: AttachmentBlobReservationId
+  /** Durable Account quota lease; a blob authority must not remain active after this instant. */
+  expiresAt: number
+  /** Release the durable quota reservation idempotently. */
+  release(): Promise<void>
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -71,7 +90,12 @@ export abstract class RemoteAttachmentStoreService extends Service {
    * @param input - owning Personal Pairing, endpoint-encrypted ciphertext, and current time.
    * @returns the capability grant Mobile forwards to Desktop.
    */
-  abstract publish(input: { pairingId: PersonalPairingId; ciphertext: Uint8Array; now: number }): Promise<RemoteAttachmentGrant>
+  abstract publish(input: {
+    pairingId: PersonalPairingId
+    ciphertext: Uint8Array
+    now: number
+    quota?: RemoteAttachmentQuotaReservation
+  }): Promise<RemoteAttachmentGrant>
 
   /**
    * Return a copy of one retained ciphertext without consuming the capability.
@@ -81,11 +105,15 @@ export abstract class RemoteAttachmentStoreService extends Service {
   abstract inspect(input: { pairingId: PersonalPairingId; capability: AttachmentCapability; now: number }): Promise<Uint8Array>
 
   /**
-   * Exchange one capability for its ciphertext exactly once, then remove both.
+   * Exclusively claim one capability for a single HTTP response.
    * @param input - requesting Personal Pairing, one-time capability, and current time.
-   * @returns a copy of the retained ciphertext bytes.
+   * @returns claimed ciphertext plus delivery settlement operations.
    */
-  abstract consume(input: { pairingId: PersonalPairingId; capability: AttachmentCapability; now: number }): Promise<Uint8Array>
+  abstract consume(input: {
+    pairingId: PersonalPairingId
+    capability: AttachmentCapability
+    now: number
+  }): Promise<RemoteAttachmentConsumption>
 
   /**
    * Remove one blob and its capability regardless of remaining lifetime.
@@ -98,13 +126,14 @@ export abstract class RemoteAttachmentStoreService extends Service {
    * Project every retained blob for Platform-side operations.
    * @returns copies of ciphertext and metadata only; no plaintext exists on this side of the boundary.
    */
-  abstract observe(): readonly RemoteAttachmentBlob[]
+  abstract observe(): readonly RemoteAttachmentBlob[] | Promise<readonly RemoteAttachmentBlob[]>
 }
 
 interface StoredEntry {
   pairingId: PersonalPairingId
   ciphertext: Uint8Array
   expiresAt: number
+  quota?: RemoteAttachmentQuotaReservation
 }
 
 /** Deployment bounds for the in-process store, reachable from cordis.yml. */
@@ -157,6 +186,7 @@ export class RemoteAttachmentStoreProvider extends RemoteAttachmentStoreService 
   private readonly maxRetainedBlobs: number
   private readonly entries = new Map<string, StoredEntry>()
   private sweepTimer: { unref(): void; cancel(): void } | undefined
+  private sweepOperation: Promise<void> = Promise.resolve()
   private disposed = false
 
   /** @param ctx - Platform composition context. @param options - validated deployment bounds. */
@@ -187,66 +217,101 @@ export class RemoteAttachmentStoreProvider extends RemoteAttachmentStoreService 
       }
     })
     this.sweepTimer = this.armSweep(schedule, options.sweepIntervalMs)
-    ctx.effect(() => () => { this.dispose() }, 'remote-attachments: retained blobs')
+    ctx.effect(() => async () => { await this.dispose() }, 'remote-attachments: retained blobs')
   }
 
   /** Arm the next sweep tick; the timer re-arms itself until disposal cancels it. */
   private armSweep(schedule: NonNullable<RemoteAttachmentStoreOptions['schedule']>, ms: number): { unref(): void; cancel(): void } {
     const timer = schedule(() => {
-      this.sweep(Date.now())
-      if (!this.disposed) this.sweepTimer = this.armSweep(schedule, ms)
+      void this.queueSweep(Date.now()).finally(() => {
+        if (!this.disposed) this.sweepTimer = this.armSweep(schedule, ms)
+      })
     }, ms)
     timer.unref()
     return timer
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps the failure a rejection, not a synchronous throw
   override async publish(input: {
     pairingId: PersonalPairingId
     ciphertext: Uint8Array
     now: number
+    quota?: RemoteAttachmentQuotaReservation
   }): Promise<RemoteAttachmentGrant> {
     if (input.ciphertext.byteLength === 0) {
+      await input.quota?.release()
       throw new RemoteAttachmentError('ATTACHMENT_EMPTY', 'Remote attachment ciphertext must not be empty')
     }
     if (input.ciphertext.byteLength > this.maxBlobBytes) {
+      await input.quota?.release()
       throw new RemoteAttachmentError('ATTACHMENT_LIMIT_EXCEEDED', 'Remote attachment exceeds the per-blob byte ceiling')
     }
-    this.sweep(input.now)
+    const expiresAt = input.now + this.capabilityLifetimeMs
+    if (input.quota !== undefined
+      && (!Number.isSafeInteger(input.quota.expiresAt) || input.quota.expiresAt < expiresAt)) {
+      await input.quota.release()
+      throw new TypeError('Remote attachment quota lease expires before blob authority')
+    }
+    await this.queueSweep(input.now)
     if (this.entries.size >= this.maxRetainedBlobs) {
+      await input.quota?.release()
       throw new RemoteAttachmentError('ATTACHMENT_CAPACITY', 'Remote attachment store is at capacity')
     }
     const capability = randomBytes(32).toString('base64url') as AttachmentCapability
     const entry: StoredEntry = {
       pairingId: input.pairingId,
       ciphertext: input.ciphertext.slice(),
-      expiresAt: input.now + this.capabilityLifetimeMs,
+      expiresAt,
+      ...(input.quota === undefined ? {} : { quota: input.quota }),
     }
     this.entries.set(capability, entry)
     return { capability, byteLength: entry.ciphertext.byteLength, expiresAt: entry.expiresAt }
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps the failure a rejection, not a synchronous throw
   override async inspect(input: {
     pairingId: PersonalPairingId
     capability: AttachmentCapability
     now: number
   }): Promise<Uint8Array> {
-    return this.requireEntry(input).ciphertext.slice()
+    const entry = this.requireEntry(input)
+    if (input.now >= entry.expiresAt) {
+      this.entries.delete(input.capability)
+      await this.releaseExpiredQuota(entry)
+      throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
+    }
+    return entry.ciphertext.slice()
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps the failure a rejection, not a synchronous throw
   override async consume(input: {
     pairingId: PersonalPairingId
     capability: AttachmentCapability
     now: number
-  }): Promise<Uint8Array> {
+  }): Promise<RemoteAttachmentConsumption> {
     const entry = this.requireEntry(input)
     this.entries.delete(input.capability)
-    return entry.ciphertext.slice()
+    if (input.now >= entry.expiresAt) {
+      await this.releaseExpiredQuota(entry)
+      throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
+    }
+    let settled = false
+    return {
+      ciphertext: entry.ciphertext.slice(),
+      complete: async () => {
+        if (settled) return
+        settled = true
+        await entry.quota?.release()
+      },
+      abandon: async (now) => {
+        if (settled) return
+        settled = true
+        if (now < entry.expiresAt) {
+          this.entries.set(input.capability, entry)
+        } else {
+          await entry.quota?.release()
+        }
+      },
+    }
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps the failure a rejection, not a synchronous throw
   override async revoke(input: { pairingId: PersonalPairingId; capability: AttachmentCapability }): Promise<void> {
     const entry = this.entries.get(input.capability)
     if (entry === undefined) return
@@ -254,11 +319,12 @@ export class RemoteAttachmentStoreProvider extends RemoteAttachmentStoreService 
       throw new RemoteAttachmentError('ATTACHMENT_PAIRING_MISMATCH', 'Remote attachment capability belongs to another Personal Pairing')
     }
     this.entries.delete(input.capability)
+    await entry.quota?.release()
   }
 
   override observe(): readonly RemoteAttachmentBlob[] {
     return [...this.entries].map(([capability, entry]) => ({
-      capability: parseAttachmentCapability(capability),
+      capabilityDigest: new Uint8Array(createHash('sha256').update(capability).digest()),
       pairingId: entry.pairingId,
       ciphertext: entry.ciphertext.slice(),
       expiresAt: entry.expiresAt,
@@ -266,11 +332,12 @@ export class RemoteAttachmentStoreProvider extends RemoteAttachmentStoreService 
   }
 
   /** Remove every retained blob and capability, and cancel the background sweep. */
-  dispose(): void {
+  async dispose(): Promise<void> {
     this.disposed = true
     this.sweepTimer?.cancel()
     this.sweepTimer = undefined
-    this.sweep(Number.MAX_SAFE_INTEGER)
+    await this.sweepOperation
+    await this.queueSweep(Number.MAX_SAFE_INTEGER)
   }
 
   private requireEntry(input: {
@@ -282,19 +349,34 @@ export class RemoteAttachmentStoreProvider extends RemoteAttachmentStoreService 
     if (entry === undefined) {
       throw new RemoteAttachmentError('ATTACHMENT_CAPABILITY_INVALID', 'Remote attachment capability is unknown, consumed, or revoked')
     }
-    if (input.now >= entry.expiresAt) {
-      this.entries.delete(input.capability)
-      throw new RemoteAttachmentError('ATTACHMENT_EXPIRED', 'Remote attachment capability has expired')
-    }
     if (entry.pairingId !== input.pairingId) {
       throw new RemoteAttachmentError('ATTACHMENT_PAIRING_MISMATCH', 'Remote attachment capability belongs to another Personal Pairing')
     }
     return entry
   }
 
-  private sweep(now: number): void {
+  private queueSweep(now: number): Promise<void> {
+    const operation = this.sweepOperation.then(async () => { await this.sweep(now) })
+    this.sweepOperation = operation
+    return operation
+  }
+
+  private async sweep(now: number): Promise<void> {
+    const expired: StoredEntry[] = []
     for (const [capability, entry] of this.entries) {
-      if (now >= entry.expiresAt) this.entries.delete(capability)
+      if (now >= entry.expiresAt) {
+        this.entries.delete(capability)
+        expired.push(entry)
+      }
+    }
+    await Promise.all(expired.map(async (entry) => { await this.releaseExpiredQuota(entry) }))
+  }
+
+  private async releaseExpiredQuota(entry: StoredEntry): Promise<void> {
+    try {
+      await entry.quota?.release()
+    } catch (error) {
+      console.error('[remote-attachments] quota release failed:', error)
     }
   }
 }

@@ -3,7 +3,7 @@
  * narrow RpcRequest<P> and echoes request.rpcId on the RpcResponse<T>.
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
@@ -13,7 +13,7 @@ import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
-import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
@@ -2523,6 +2523,49 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             code: 'internal',
             message: 'Unable to read image attachment.',
             details: {},
+          })
+        }
+      },
+
+      async admitAttachment(request) {
+        const { sessionId, operationId, mediaType, name, data } = request.payload
+        const resolved = await turnAgentFor<{ attachment: FileAttachmentRef }>(request, sessionId)
+        if ('refused' in resolved) return resolved.refused
+        const bytes = new Uint8Array(Buffer.from(data, 'base64'))
+        if (Buffer.from(bytes).toString('base64') !== data || bytes.byteLength > ctx.attachments.maxFileBytes) {
+          return err(request, {
+            code: 'attachment-error', message: 'File attachment encoding or byte length is invalid.',
+            details: { reason: 'INVALID_ATTACHMENT_REF' },
+          })
+        }
+        const sha256 = createHash('sha256').update(bytes).digest('hex')
+        const prior = resolved.agent.session.events.find(event => event.type === 'session/attachment-admitted'
+          && event.data.operationId === operationId)
+        if (prior?.type === 'session/attachment-admitted') {
+          if (prior.data.attachment.sha256 !== sha256 || prior.data.attachment.bytes !== bytes.byteLength
+            || prior.data.attachment.mediaType !== mediaType || prior.data.attachment.name !== name) {
+            return err(request, {
+              code: 'attachment-error', message: 'Attachment operation id belongs to different file content.',
+              details: { reason: 'ATTACHMENT_OPERATION_COLLISION' },
+            })
+          }
+          return ok(request, { attachment: prior.data.attachment })
+        }
+        try {
+          const attachment = await ctx.attachments.saveFile({ data: bytes, mediaType, name })
+          resolved.agent.session.append('session/attachment-admitted', {
+            attachment, operationId, source: 'companion',
+          })
+          await ctx.sessions.flush(resolved.agent.session)
+          return ok(request, { attachment })
+        } catch (error: unknown) {
+          if (error instanceof AttachmentError) {
+            return err(request, {
+              code: 'attachment-error', message: error.message, details: { reason: error.code },
+            })
+          }
+          return err(request, {
+            code: 'internal', message: 'Unable to admit file attachment.', details: {},
           })
         }
       },

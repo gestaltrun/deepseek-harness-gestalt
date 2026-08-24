@@ -20,14 +20,14 @@ import {
   IconApiOutline14, IconChevronDownOutline14, IconInspectOutline12, StateDot, TerminalBlock,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ToolCallViewProps } from '../../contract/slots.ts'
+import type { ToolPresentationViewProps } from '../../contract/slots.ts'
 import { terminalBlockLabels, terminalCardModel, terminalFailed } from '../models/terminal-card-model.ts'
 import { toolRowModel, type ToolRowState } from '../models/tool-call-model.ts'
 import { CONVERSATION_NS as NS } from '../../locale.ts'
 import css from './bash-sample.module.css'
 
 /** Bash row props: the toolview runtime share plus the standard locale seat. */
-type BashRowProps = ToolCallViewProps & PropsLocale<'conversation'>
+type BashRowProps = ToolPresentationViewProps & PropsLocale<'conversation'>
 
 function leadingFor(state: ToolRowState) {
   switch (state) {
@@ -53,11 +53,8 @@ function stateStatus(state: ToolRowState, t: BashRowProps['t']): string | null {
  * whole row toggling the command's terminal or generic error card (ToolRow's unified
  * expand interaction, replicated locally per the registrant posture).
  */
-export function BashRow({ toolName, block, sessionId, useSessions, inspect, t }: BashRowProps) {
+export function BashRow({ toolName, block, cwd, inspect, t }: BashRowProps) {
   const model = toolRowModel(toolName, block)
-  // Session workspace root: the terminal view's cwd resolves against it (an
-  // omitted workdir IS the workspace), which the pure presenter cannot do.
-  const cwd = useSessions(list => list.byId[sessionId]?.cwd)
   const terminal = terminalCardModel(block, cwd)
   // A failing exit status is the terminal card's own error signal (the call
   // itself settles isError:false), surfaced as the row's red state dot.

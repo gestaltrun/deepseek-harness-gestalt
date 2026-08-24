@@ -8,10 +8,19 @@
   "include": ["src", "tests"],
   "references": [
     { "path": "../../packages/util/brand" },
+    { "path": "../../packages/attachment/attachment" },
+    { "path": "../../packages/client/runtime" },
+    { "path": "../../packages/client/ui-attachment" },
+    { "path": "../../packages/client/ui-conversation" },
+    { "path": "../../packages/client/ui-primitives" },
+    { "path": "../../packages/client/ui-tool" },
+    { "path": "../../packages/client/ui-user-questions" },
+    { "path": "../../packages/client/ui-workspace" },
     { "path": "../../packages/platform/platform-account" },
     { "path": "../../packages/platform/platform-account-client" },
     { "path": "../../packages/platform/remote-access" },
     { "path": "../../packages/platform/remote-access-client" },
+    { "path": "../../packages/platform/noise-channel" },
     { "path": "../../packages/platform/remote-protocol" }
   ]
 }

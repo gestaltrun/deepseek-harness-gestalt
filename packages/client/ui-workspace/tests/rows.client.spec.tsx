@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, createEvent, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
@@ -8,6 +8,7 @@ import type { RowDragProps } from '../src/client/rows/Rows.tsx'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from '../src/client/rows/Rows.tsx'
 import type { GroupNode, SearchResultNode, SessionNode } from '../src/client/tree.ts'
 import { zh } from '../src/client/locales.ts'
+import { SessionListPresentation } from '../src/presentation.tsx'
 
 afterEach(cleanup)
 
@@ -57,6 +58,91 @@ function fireDrag(row: HTMLElement, kind: 'dragOver' | 'drop', clientY: number):
 }
 
 describe('workspace browser rows', () => {
+  it('gives the public Session tree one roving tab stop with keyboard activation', () => {
+    const onOpen = vi.fn()
+    const nodes: SessionNode[] = [
+      {
+        id: sid('first'), title: 'First', blank: false, running: false,
+        runningSubagentCount: 0, completed: false, updatedAt: 0,
+      },
+      {
+        id: sid('second'), title: 'Second', blank: false, running: false,
+        runningSubagentCount: 0, completed: false, updatedAt: 0,
+      },
+    ]
+    render(<SessionListPresentation label="Work sessions" nodes={nodes} now={0} onOpen={onOpen} t={t} />)
+    expect(screen.getByRole('tree', { name: 'Work sessions' })).toBeTruthy()
+    const rows = screen.getAllByRole('treeitem')
+    expect(rows.map(row => row.tabIndex)).toEqual([0, -1])
+
+    rows[0]?.focus()
+    fireEvent.keyDown(rows[0] as HTMLElement, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(rows[1])
+    expect(rows.map(row => row.tabIndex)).toEqual([-1, 0])
+    fireEvent.keyDown(rows[1] as HTMLElement, { key: ' ' })
+    expect(onOpen).toHaveBeenCalledWith(nodes[1]?.id)
+    fireEvent.keyDown(rows[1] as HTMLElement, { key: 'ArrowUp' })
+    fireEvent.keyDown(rows[0] as HTMLElement, { key: 'Enter' })
+    expect(onOpen).toHaveBeenLastCalledWith(nodes[0]?.id)
+  })
+
+  it('moves the public tree tab stop when the selected row leaves its projection', async () => {
+    const first: SessionNode = {
+      id: sid('first'), title: 'First', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, updatedAt: 0,
+    }
+    const second: SessionNode = { ...first, id: sid('second'), title: 'Second' }
+    const view = render(<SessionListPresentation
+      label="Selected sessions"
+      nodes={[first, second]}
+      currentId={second.id}
+      now={0}
+      onOpen={vi.fn()}
+      t={t}
+    />)
+    expect(screen.getAllByRole('treeitem').map(row => row.tabIndex)).toEqual([-1, 0])
+
+    view.rerender(<SessionListPresentation
+      label="Selected sessions" nodes={[first]} now={0} onOpen={vi.fn()} t={t}
+    />)
+    await waitFor(() => { expect(screen.getByRole('treeitem').tabIndex).toBe(0) })
+  })
+
+  it('keeps row keyboard activation away from nested actions and unrelated keys', () => {
+    const onOpen = vi.fn()
+    const node: SessionNode = {
+      id: sid('keyboard'), title: 'Keyboard', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, updatedAt: 0,
+    }
+    render(<SessionNodeItem
+      node={node}
+      currentId={undefined}
+      now={0}
+      onOpen={onOpen}
+      onRename={vi.fn()}
+      t={t}
+    />)
+    const row = screen.getByRole('treeitem')
+    expect(row.tabIndex).toBe(-1)
+    fireEvent.keyDown(row, { key: 'Escape' })
+    fireEvent.keyDown(screen.getByRole('button', { name: /“Keyboard”/ }), { key: 'Enter' })
+    fireEvent.keyDown(row, { key: 'ArrowDown' })
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('gives sibling public Session trees distinct accessible names', () => {
+    const node: SessionNode = {
+      id: sid('named'), title: 'Named', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, updatedAt: 0,
+    }
+    render(<>
+      <SessionListPresentation label="Work sessions" nodes={[node]} now={0} onOpen={vi.fn()} t={t} />
+      <SessionListPresentation label="Ungrouped sessions" nodes={[node]} now={0} onOpen={vi.fn()} t={t} />
+    </>)
+    expect(screen.getByRole('tree', { name: 'Work sessions' })).toBeTruthy()
+    expect(screen.getByRole('tree', { name: 'Ungrouped sessions' })).toBeTruthy()
+  })
+
   it('omits only an empty leading status slot in the hierarchy-free flat list', () => {
     const idle: SessionNode = {
       id: sid('flat'), title: 'Flat Session', blank: false, running: false,

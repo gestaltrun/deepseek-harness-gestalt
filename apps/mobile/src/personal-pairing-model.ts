@@ -1,5 +1,13 @@
 /** Mobile Personal Pairing state shared by the controller and React view. */
 
+import type { PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+
+/** Credential-free Mobile presentation for one retained Personal Pairing. */
+export interface MobilePairedDesktop {
+  pairingId: PersonalPairingId
+  desktopName?: string
+}
+
 /** Mobile Personal Pairing presentation state. */
 export type MobilePairingSnapshot =
   | { status: 'ready'; error?: string }
@@ -10,7 +18,13 @@ export type MobilePairingSnapshot =
     deviceName: string
     authenticationWords: readonly [string, string, string, string, string, string]
   }
-  | { status: 'paired' }
+  | {
+    status: 'paired'
+    desktops: readonly MobilePairedDesktop[]
+    selectedPairingId: PersonalPairingId | undefined
+    error?: string
+  }
+  | { status: 'unpair-failed'; error: string }
   | { status: 'unavailable'; error: string }
 
 /** Mobile adapter for full-link/QR completion and handshake state. */
@@ -20,15 +34,23 @@ export interface MobilePairingActions {
   /** Subscribe to pairing transitions. */
   subscribe(listener: () => void): () => void
   /** Complete the exact high-entropy link produced by Desktop. */
-  completeLink(link: string): void | Promise<void>
-  /** Open the native QR scanner and complete its exact payload. */
-  scanQr(): void | Promise<void>
+  completeLink(link: string, signal?: AbortSignal): void | Promise<void>
+  /** Open the browser camera scanner and complete its exact payload. */
+  scanQr(video: HTMLVideoElement, signal?: AbortSignal): void | Promise<void>
   /** Retry the retained completion attempt without regenerating handshake material. */
   retryPairing(): void | Promise<void>
+  /**
+   * Select one retained Paired Desktop as the only Relay and Session authority.
+   * @param pairingId - retained Personal Pairing selected by the person.
+   */
+  selectDesktop(pairingId: PersonalPairingId): void | Promise<void>
   /** Activate this signed-in Mobile lifecycle owner. */
   activate(): Promise<void>
   /** Stop timers and drain in-flight work on sign-out or unmount. */
   deactivate(): Promise<void>
-  /** Unpair this installation: wipe handshake material, drop Relay authority, and stop the connection. */
+  /**
+   * Unpair this installation by attempting every owned cleanup.
+   * A rejected cleanup publishes `unpair-failed`, preserves an unresolved product state, and rejects with every failure.
+   */
   unpair(): Promise<void>
 }

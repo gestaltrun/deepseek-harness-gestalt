@@ -7,7 +7,9 @@ import {
   ACCOUNT_MOBILE_INSTALLATION_LIMIT,
   AccountError,
   OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
+  parseDesktopInstallationPresentation,
   parseInstallationId,
+  parseMobileInstallationPresentation,
   parseLoginAttemptId,
   parsePlatformAccountId,
   type AccountProofJti,
@@ -34,6 +36,7 @@ CREATE TABLE IF NOT EXISTS account_attempts (
   identity_namespace text NOT NULL,
   installation_id text NOT NULL,
   installation_kind text NOT NULL,
+  installation_presentation jsonb,
   public_key jsonb NOT NULL,
   state text NOT NULL UNIQUE,
   code_verifier text NOT NULL,
@@ -55,6 +58,7 @@ CREATE TABLE IF NOT EXISTS account_sessions (
   account_id text NOT NULL,
   installation_id text NOT NULL,
   installation_kind text NOT NULL,
+  installation_presentation jsonb,
   public_key jsonb NOT NULL,
   revision integer NOT NULL,
   active boolean NOT NULL,
@@ -69,6 +73,10 @@ CREATE TABLE IF NOT EXISTS account_proofs (
   jti text PRIMARY KEY,
   expires_at bigint NOT NULL
 );
+ALTER TABLE account_attempts ADD COLUMN IF NOT EXISTS installation_presentation jsonb;
+ALTER TABLE account_sessions ADD COLUMN IF NOT EXISTS installation_presentation jsonb;
+ALTER TABLE account_attempts DROP COLUMN IF EXISTS mobile_presentation;
+ALTER TABLE account_sessions DROP COLUMN IF EXISTS mobile_presentation;
 `
 
 interface AttemptRow {
@@ -77,6 +85,7 @@ interface AttemptRow {
   identity_namespace: string
   installation_id: string
   installation_kind: string
+  installation_presentation: unknown
   public_key: JsonWebKey
   state: string
   code_verifier: string
@@ -99,6 +108,7 @@ interface SessionRow {
   account_id: string
   installation_id: string
   installation_kind: string
+  installation_presentation: unknown
   public_key: JsonWebKey
   revision: number
   active: boolean
@@ -126,11 +136,12 @@ export class PostgresAccountBackend implements AccountBackend {
     await this.pool.query(
       `INSERT INTO account_attempts (
         id, environment, identity_namespace, installation_id, installation_kind,
-        public_key, state, code_verifier, expires_at, status, identity
-      ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11::jsonb)`,
+        installation_presentation, public_key, state, code_verifier, expires_at, status, identity
+      ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12::jsonb)`,
       [
         record.id, record.environment, record.identityNamespace, record.installationId,
-        record.installationKind, JSON.stringify(record.publicKey), record.state,
+        record.installationKind, record.presentation === undefined ? null : JSON.stringify(record.presentation),
+        JSON.stringify(record.publicKey), record.state,
         record.codeVerifier, record.expiresAt, record.status,
         record.identity === undefined ? null : JSON.stringify(record.identity),
       ],
@@ -209,12 +220,15 @@ export class PostgresAccountBackend implements AccountBackend {
       const sessionResult = await client.query<SessionRow>(
         `INSERT INTO account_sessions (
           id, identity_namespace, account_id, installation_id, installation_kind,
-          public_key, revision, active, refresh_hash, refresh_expires_at
-        ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,1,TRUE,$7,$8)
+          installation_presentation, public_key, revision, active, refresh_hash, refresh_expires_at
+        ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,1,TRUE,$8,$9)
         RETURNING *`,
         [
           sessionId, attemptRow.identity_namespace, account.id, attemptRow.installation_id,
-          attemptRow.installation_kind, JSON.stringify(attemptRow.public_key), refreshHash, refreshExpiresAt,
+          attemptRow.installation_kind, attemptRow.installation_presentation === null
+            ? null
+            : JSON.stringify(attemptRow.installation_presentation),
+          JSON.stringify(attemptRow.public_key), refreshHash, refreshExpiresAt,
         ],
       )
       await client.query(
@@ -312,16 +326,16 @@ export class PostgresAccountBackend implements AccountBackend {
     return result.rows[0] === undefined ? undefined : accountFromRow(result.rows[0])
   }
 
-  async findActiveSessionByInstallation(
+  async hasActiveSessionByInstallation(
     identityNamespace: string,
     installationId: InstallationId,
-  ): Promise<SessionRecord | undefined> {
-    const result = await this.pool.query<SessionRow>(
-      `SELECT * FROM account_sessions
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT 1 FROM account_sessions
         WHERE identity_namespace = $1 AND installation_id = $2 AND active = TRUE`,
       [identityNamespace, installationId],
     )
-    return result.rows[0] === undefined ? undefined : sessionFromRow(result.rows[0])
+    return result.rows[0] !== undefined
   }
 }
 
@@ -352,12 +366,14 @@ async function upsertAccount(client: PoolClient, namespace: string, identity: Gi
 }
 
 function attemptFromRow(row: AttemptRow): LoginAttemptRecord {
+  const installationKind = installationKindFromRow(row.installation_kind)
   return {
     id: parseLoginAttemptId(row.id),
     environment: row.environment as PlatformEnvironment,
     identityNamespace: row.identity_namespace,
     installationId: parseInstallationId(row.installation_id),
-    installationKind: row.installation_kind as InstallationKind,
+    installationKind,
+    ...installationPresentationFromRow(installationKind, row.installation_presentation),
     publicKey: row.public_key,
     state: row.state,
     codeVerifier: row.code_verifier,
@@ -378,16 +394,37 @@ function accountFromRow(row: AccountRow): AccountRecord {
 }
 
 function sessionFromRow(row: SessionRow): SessionRecord {
+  const installationKind = installationKindFromRow(row.installation_kind)
   return {
     id: row.id as AccountSessionId,
     identityNamespace: row.identity_namespace,
     accountId: parsePlatformAccountId(row.account_id),
     installationId: parseInstallationId(row.installation_id),
-    installationKind: row.installation_kind as InstallationKind,
+    installationKind,
+    ...installationPresentationFromRow(installationKind, row.installation_presentation),
     publicKey: row.public_key,
     revision: row.revision,
     active: row.active,
     refreshHash: row.refresh_hash ?? '',
     refreshExpiresAt: Number(row.refresh_expires_at),
+  }
+}
+
+function installationKindFromRow(value: string): InstallationKind {
+  if (value !== 'desktop' && value !== 'mobile') {
+    throw new TypeError('installation kind must be desktop or mobile')
+  }
+  return value
+}
+
+function installationPresentationFromRow(
+  kind: InstallationKind,
+  value: unknown,
+): { presentation?: ReturnType<typeof parseMobileInstallationPresentation> | ReturnType<typeof parseDesktopInstallationPresentation> } {
+  if (value === null) return {}
+  return {
+    presentation: kind === 'desktop'
+      ? parseDesktopInstallationPresentation(value)
+      : parseMobileInstallationPresentation(value),
   }
 }

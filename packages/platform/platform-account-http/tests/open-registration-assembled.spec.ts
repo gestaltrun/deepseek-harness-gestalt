@@ -159,7 +159,7 @@ describe('assembled open-registration Account quotas', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         installationId: 'capacity-desktop',
-        installationKind: 'desktop',
+        installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
         publicKey: installationKey().publicKey,
       }),
     })
@@ -213,6 +213,9 @@ async function beginAndAuthorize(
     body: JSON.stringify({
       installationId,
       installationKind,
+      ...(installationKind === 'mobile'
+        ? { presentation: { name: `Phone ${installationId}`, platform: 'android' } }
+        : { presentation: { name: `Desktop ${installationId}`, platform: 'linux' } }),
       publicKey: key.publicKey,
     }),
   })

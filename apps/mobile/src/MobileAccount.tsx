@@ -1,13 +1,12 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { companionRuntime } from './companion-lifecycle.ts'
 import type { ReactNode } from 'react'
 import type { PlatformAccountInstallation } from '@deepseek-ai/dsh-platform-account-client'
 import { ACCOUNT_PRIVACY_NOTICE } from '@deepseek-ai/dsh-platform-account/privacy'
 import css from './MobileAccount.module.css'
-import type { CompanionInteraction } from './companion-approval.ts'
-import { createCompanionSession, type CompanionSessionSummary } from './companion-history.ts'
+import type { MobileCompanionPresentation } from './companion-history.ts'
 import { MobileBrowse } from './MobileBrowse.tsx'
 import { MobilePairing, type MobilePairingActions } from './MobilePairing.tsx'
+import type { MobilePresentationClock } from './mobile-clock.ts'
 
 /** Mobile Account page props. */
 export interface MobileAccountProps {
@@ -15,32 +14,23 @@ export interface MobileAccountProps {
   installation: PlatformAccountInstallation
   /** Personal Pairing adapter available after the current Installation signs in. */
   pairing?: MobilePairingActions
-  /** Desktop-confirmed Companion Surface and mutation callbacks. */
-  companionSurface?: {
-    sessions: readonly CompanionSessionSummary[]
-    onCreate?: (input: { workspace?: string }) => void
-    onSubmit?: (sessionId: string, text: string) => void
-    onCancel?: (sessionId: string) => void
-    onAttach?: (sessionId: string) => void
-    streaming?: boolean
-    onSettled?: (interaction: CompanionInteraction) => void
-  }
+  /** Desktop-authoritative Companion presentation supplied by the product entry. */
+  companion?: MobileCompanionPresentation | undefined
+  /** Product locale shared by Mobile browse and conversation presentation. */
+  locale: 'zh' | 'en'
+  /** Product theme shared by Mobile browse and conversation presentation. */
+  theme: 'light' | 'dark'
+  /** Live clock owner shared by every Session list. */
+  clock: MobilePresentationClock
 }
 
 /** Mobile Account landing with an optional same-installation Personal Pairing projection. */
-export function MobileAccount({ installation, pairing, companionSurface }: MobileAccountProps): ReactNode {
+export function MobileAccount({ installation, pairing, companion, locale, theme, clock }: MobileAccountProps): ReactNode {
   const snapshot = useSyncExternalStore(
     listener => installation.subscribe(listener),
     () => installation.getSnapshot(),
   )
-  const companion = companionRuntime()
-  const companionState = useSyncExternalStore(
-    listener => companion?.subscribe(listener) ?? (() => {}),
-    () => companion?.getState(),
-  )
   const [accepted, setAccepted] = useState(false)
-  const [sessions, setSessions] = useState<readonly CompanionSessionSummary[]>([])
-  const [committed] = useState(() => new Set<string>())
 
   useEffect(() => { void installation.load() }, [installation])
   useEffect(() => {
@@ -127,33 +117,15 @@ export function MobileAccount({ installation, pairing, companionSurface }: Mobil
         </>
       )}
       {snapshot.error !== undefined && <p className={css.error} role="alert">{snapshot.error}</p>}
-      {signedIn && pairing !== undefined && <MobilePairing actions={pairing} />}
-      {signedIn && (
+      {signedIn && companion !== undefined && 'message' in companion.attachment
+        && <p className={css.error} role="alert">{companion.attachment.message}</p>}
+      {signedIn && pairing !== undefined && <MobilePairing actions={pairing} locale={locale} />}
+      {signedIn && companion !== undefined && (
         <MobileBrowse
-          desktopName="Paired Desktop"
-          connection="offline"
-          sessions={companionSurface?.sessions ?? sessions}
-          {...(companionState === undefined ? {} : { companionState })}
-          {...(companionSurface?.onSubmit === undefined ? {} : { onSubmit: companionSurface.onSubmit })}
-          {...(companionSurface?.onCancel === undefined ? {} : { onCancel: companionSurface.onCancel })}
-          {...(companionSurface?.onAttach === undefined ? {} : { onAttach: companionSurface.onAttach })}
-          {...(companionSurface?.streaming === undefined ? {} : { streaming: companionSurface.streaming })}
-          {...(companionSurface?.onSettled === undefined ? {} : { onSettled: companionSurface.onSettled })}
-          onCreate={(input) => {
-            if (companionSurface?.onCreate !== undefined) {
-              companionSurface.onCreate(input)
-              return
-            }
-            const operationId = crypto.randomUUID()
-            const next = createCompanionSession(sessions, committed, {
-              operationId,
-              title: input.workspace === undefined ? 'Ungrouped Session' : 'Workspace Session',
-              ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
-              devicePrincipalId: 'current-mobile',
-            }, companionState)
-            if (next.created) committed.add(operationId)
-            setSessions(next.sessions)
-          }}
+          {...companion}
+          locale={locale}
+          theme={theme}
+          clock={clock}
         />
       )}
       <footer>此账号仅识别你的安装；它不会授予任何 Desktop 访问权限。</footer>

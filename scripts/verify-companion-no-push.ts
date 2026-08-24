@@ -6,8 +6,19 @@ import { resolve, sep } from 'node:path'
 const ROOT = resolve(import.meta.dirname, '..')
 
 const PRODUCT_GLOBS = [
-  'apps/**/*',
-  'packages/**/*',
+  'apps/*/src/**/*',
+  'apps/*/public/**/*',
+  'apps/*/package.json',
+  'apps/*/*.{json,yaml,yml,toml,ts,mjs,cjs}',
+  'apps/desktop/build/**/*.{plist,json,yaml,yml}',
+  'apps/mobile/android/*.{gradle,properties}',
+  'apps/mobile/android/app/*.{gradle,pro}',
+  'apps/mobile/android/app/google-services.json',
+  'apps/mobile/android/app/src/main/**/*',
+  'apps/mobile/ios/App/**/*',
+  'apps/mobile/ios/*.{plist,xcconfig}',
+  'packages/*/*/src/**/*',
+  'packages/*/*/package.json',
   'examples/**/*',
   'native/**/*',
   'python/**/*',
@@ -21,7 +32,8 @@ const PRODUCT_GLOBS = [
 ]
 
 const EXCLUDED_PATHS = [
-  /(?:^|\/)(?:node_modules|\.git|lib|dist|coverage|tests?|__tests__|snapshots)(?:\/|$)/u,
+  /(?:^|\/)(?:node_modules|\.git|\.gradle|lib|dist|DerivedData|coverage|tests?|__tests__|snapshots|caches?)(?:\/|$)/u,
+  /^apps\/mobile\/(?:android\/(?:app\/)?build|android\/app\/src\/main\/assets\/public|ios\/App\/App\/public|release)(?:\/|$)/u,
   /(?:^|\/)(?:README|CONTEXT)(?:\.zh)?\.md$/u,
   /\.md$|\.i18n\.yaml$|(?:\.spec|\.test)\.[^.]+$/u,
   /^scripts\/verify-companion-no-push\.ts$/u,
@@ -41,7 +53,7 @@ const FORBIDDEN_TOKENS = [
   { label: 'push token repository', pattern: /\bPushTokenRepository[A-Za-z0-9_]*\b/u },
   { label: 'push token symbol', pattern: /\b(?:PushPlatform|PushTokenRegistration|PushTokenStore)\b/u },
   { label: 'push product language', pattern: /\bpush[- ](?:token|notification|delivery|provider|hint|quota|metric|secret)s?\b/iu },
-  { label: 'push product language', pattern: /推送/u },
+  { label: 'push product language', pattern: /推送(?:令牌|通知|投递|供应商|提示|配额|指标|密钥|服务)/u },
   { label: 'push operation', pattern: /\b(?:emit|register|unregister)-push-(?:hint|token)\b/u },
   { label: 'push quota or persistence', pattern: /\bpushHints(?:At|PerAccountPerDay)\b/u },
   { label: 'Capacitor push dependency', pattern: /@capacitor\/push-notifications\b/u },

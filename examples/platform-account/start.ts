@@ -78,7 +78,7 @@ export async function apply(ctx: Context): Promise<void> {
   console.log(`NOTICE en=${ACCOUNT_PRIVACY_NOTICE.en}`)
   const attempt = await first.beginLogin({
     installationId: parseInstallationId('desktop-keyless-1'),
-    installationKind: 'desktop',
+    installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
     publicKey: pair.publicKey.export({ format: 'jwk' }),
   })
   const opened = attempt.authorizationUrl

@@ -3,15 +3,20 @@
 import { createHash, randomBytes as secureRandomBytes } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
 import {
-  parseRelayCredential,
+  deriveRelayCredentialPublicKeyDigest,
+  parseRelayPairingSelector,
+  verifyRelayAttachmentProof,
   type RelayAttachMessage,
   type RelayAttachmentId,
   type RelayCiphertextMessage,
-  type RelayCredential,
   type RelayHeartbeatMessage,
+  type RelayPairingSelector,
+  type RelayPeerUpdateMessage,
+  type RelayReadyMessage,
   type RelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
+  parseRelayCredentialFingerprint,
   RemoteRelayError,
   RemoteRelayService,
 } from '@deepseek-ai/dsh-remote-access'
@@ -19,19 +24,21 @@ import type {
   RelayConnectionToken,
   RelayCoordinationEvent,
   RelayCoordinator,
-  RelayCredentialGrant,
   RelayDeliveryId,
   RelayDirectoryEntry,
   RelayInstanceId,
   RelayRouteStore,
+  RelayPairingActivitySink,
   RemoteRelayAttachment,
   RemoteRelayConfig,
 } from './relay.ts'
+import { createDeferred } from './deferred.ts'
 
 interface LocalAttachment {
   entry: RelayDirectoryEntry
-  deliver: (message: RelayCiphertextMessage) => Promise<void>
+  deliver: (message: RelayCiphertextMessage | RelayPeerUpdateMessage) => Promise<void>
   credentialDigest: Uint8Array
+  credentialFingerprint: ReturnType<typeof parseRelayCredentialFingerprint>
   close?: () => void | Promise<void>
   writer: Promise<void>
   bufferedBytes: number
@@ -42,6 +49,7 @@ interface LocalAttachment {
   writerDrained: boolean
   socketClosed: boolean
   capacityHeld: boolean
+  activityReleased: boolean
 }
 
 interface PendingDelivery {
@@ -75,6 +83,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
     clock?: { now(): number }
     schedule?: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>
     capacity?: { tryAcquire(): boolean; release(): void; retryAfterMs: number }
+    pairingActivity?: RelayPairingActivitySink
   }) {
     super(ctx)
     this.config = validateRemoteRelayConfig(options.config)
@@ -84,30 +93,75 @@ export class RemoteRelayProvider extends RemoteRelayService {
     ctx.effect(() => async () => { await this.dispose() }, 'remote-access: Relay resources')
   }
 
-  async rotateCredential(routeId: RelayRouteId, endpoint: 'mobile' | 'desktop' = 'desktop'): Promise<RelayCredentialGrant> {
+  async activateCredentialDigest(
+    routeId: RelayRouteId,
+    endpoint: 'mobile' | 'desktop',
+    credentialDigest: Uint8Array,
+    pairingSelector?: RelayPairingSelector,
+  ): Promise<number> {
     this.assertOpen()
-    const credential = this.newCredential()
-    const revision = await this.options.routeStore.rotate(routeId, endpoint, credentialDigest(credential))
+    if (credentialDigest.byteLength !== 32) throw new TypeError('Relay credential digest must contain 32 bytes')
+    const revision = await this.options.routeStore.rotate(routeId, endpoint, credentialDigest.slice())
+    if (pairingSelector !== undefined) {
+      const issued = await this.options.routeStore.issue(routeId, endpoint, credentialDigest.slice(), pairingSelector)
+      if (issued !== revision) throw new RemoteRelayError('RELAY_ROUTE_REVOKED', 'Relay route activation diverged')
+    }
     if (revision > 1) await this.options.coordinator.invalidate({ type: 'invalidate', routeId, revision })
-    return { routeId, endpoint, credential, revision }
+    return revision
   }
 
-  async issueCredential(routeId: RelayRouteId, endpoint: 'mobile' | 'desktop' = 'mobile'): Promise<RelayCredentialGrant> {
+  /**
+   * @param routeId - active route.
+   * @param endpoint - credential endpoint.
+   * @param digest - endpoint-created SHA-256 digest.
+   * @param pairingSelector - optional non-secret pairing selector.
+   * @returns active route revision.
+   */
+  async registerCredentialDigest(
+    routeId: RelayRouteId,
+    endpoint: 'mobile' | 'desktop',
+    digest: Uint8Array,
+    pairingSelector?: RelayPairingSelector,
+  ): Promise<number> {
     this.assertOpen()
-    const credential = this.newCredential()
-    const revision = await this.options.routeStore.issue(routeId, endpoint, credentialDigest(credential))
+    if (digest.byteLength !== 32) throw new TypeError('Relay credential digest must contain 32 bytes')
+    const revision = await this.options.routeStore.issue(routeId, endpoint, digest.slice(), pairingSelector)
     if (revision === undefined) throw new RemoteRelayError('RELAY_ROUTE_REVOKED', 'Relay route is inactive')
-    return { routeId, endpoint, credential, revision }
+    return revision
   }
 
-  async revokeCredential(grant: RelayCredentialGrant): Promise<void> {
+  async registerPairingCredentialDigests(
+    routeId: RelayRouteId,
+    pairingSelector: RelayPairingSelector,
+    desktopCredentialDigest: Uint8Array,
+    mobileCredentialDigest: Uint8Array,
+  ): Promise<number> {
     this.assertOpen()
-    const revision = await this.options.routeStore.revokeCredential(
-      grant.routeId,
-      grant.endpoint,
-      credentialDigest(grant.credential),
+    if (desktopCredentialDigest.byteLength !== 32 || mobileCredentialDigest.byteLength !== 32) {
+      throw new TypeError('Relay credential digests must each contain 32 bytes')
+    }
+    if (desktopCredentialDigest.every((byte, index) => byte === mobileCredentialDigest[index])) {
+      throw new TypeError('Relay credential digests must be distinct')
+    }
+    return await this.options.routeStore.registerPairing(
+      routeId, pairingSelector, desktopCredentialDigest.slice(), mobileCredentialDigest.slice(),
     )
-    await this.options.coordinator.invalidate({ type: 'invalidate', routeId: grant.routeId, revision })
+  }
+
+  /**
+   * @param routeId - active route.
+   * @param endpoint - credential endpoint.
+   * @param digest - endpoint-created SHA-256 digest.
+   */
+  async revokeCredentialDigest(
+    routeId: RelayRouteId,
+    endpoint: 'mobile' | 'desktop',
+    digest: Uint8Array,
+  ): Promise<void> {
+    this.assertOpen()
+    if (digest.byteLength !== 32) throw new TypeError('Relay credential digest must contain 32 bytes')
+    const revision = await this.options.routeStore.revokeCredential(routeId, endpoint, digest.slice())
+    await this.options.coordinator.invalidate({ type: 'invalidate', routeId, revision })
   }
 
   async revokeRoute(routeId: RelayRouteId): Promise<void> {
@@ -118,13 +172,13 @@ export class RemoteRelayProvider extends RemoteRelayService {
 
   async attach(input: {
     message: RelayAttachMessage
-    deliver: (message: RelayCiphertextMessage) => Promise<void>
+    deliver: (message: RelayCiphertextMessage | RelayPeerUpdateMessage) => Promise<void>
     close?: () => void | Promise<void>
     signal?: AbortSignal
-    announce?: () => Promise<void>
+    announce?: (message: RelayReadyMessage) => Promise<void>
   }): Promise<RemoteRelayAttachment> {
     this.assertOpen()
-    const quiescence = deferred<void>()
+    const quiescence = createDeferred<void>()
     this.attachmentQuiescence.add(quiescence.promise)
     try {
       return await this.attachReserved(input)
@@ -136,10 +190,10 @@ export class RemoteRelayProvider extends RemoteRelayService {
 
   private async attachReserved(input: {
     message: RelayAttachMessage
-    deliver: (message: RelayCiphertextMessage) => Promise<void>
+    deliver: (message: RelayCiphertextMessage | RelayPeerUpdateMessage) => Promise<void>
     close?: () => void | Promise<void>
     signal?: AbortSignal
-    announce?: () => Promise<void>
+    announce?: (message: RelayReadyMessage) => Promise<void>
   }): Promise<RemoteRelayAttachment> {
     const signal = input.signal ?? NEVER_ABORTED
     throwIfAborted(signal)
@@ -167,10 +221,13 @@ export class RemoteRelayProvider extends RemoteRelayService {
     this.attachmentReservations.add(key)
     let local: LocalAttachment | undefined
     try {
-      const digest = credentialDigest(input.message.credential)
-      let revision: number | undefined
+      if (input.message.expiresAt <= this.now() || !await verifyRelayAttachmentProof(input.message)) {
+        throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay attachment proof is invalid or expired')
+      }
+      const digest = await deriveRelayCredentialPublicKeyDigest(input.message.credentialPublicKey)
+      let authorization
       try {
-        revision = await this.options.routeStore.authorize(
+        authorization = await this.options.routeStore.authorize(
           input.message.routeId,
           input.message.endpoint,
           digest,
@@ -180,7 +237,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
         throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay route authority is unavailable')
       }
       this.assertOpen()
-      if (revision === undefined) {
+      if (authorization === undefined) {
         throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay credential is invalid')
       }
       const entry: RelayDirectoryEntry = {
@@ -189,7 +246,8 @@ export class RemoteRelayProvider extends RemoteRelayService {
         endpoint: input.message.endpoint,
         instanceId: this.options.instanceId,
         connectionToken: this.connectionToken(),
-        revision,
+        revision: authorization.revision,
+        ...(authorization.pairingSelector === undefined ? {} : { pairingSelector: authorization.pairingSelector }),
         expiresAt: this.now() + this.config.directoryTtlMs,
       }
       const existing = this.attachments.get(key)
@@ -206,6 +264,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
         entry,
         deliver: input.deliver,
         credentialDigest: digest,
+        credentialFingerprint: fingerprintFromDigest(digest),
         ...(input.close === undefined ? {} : { close: input.close }),
         writer: Promise.resolve(),
         bufferedBytes: 0,
@@ -216,23 +275,29 @@ export class RemoteRelayProvider extends RemoteRelayService {
         writerDrained: false,
         socketClosed: input.close === undefined,
         capacityHeld,
+        activityReleased: false,
       }
       local = attached
       this.attachments.set(key, attached)
       try {
-        if (input.announce !== undefined) await input.announce()
+        const routeEntries = await this.options.coordinator.list(entry.routeId)
+        const ready = relayReady(entry, routeEntries, this.now())
+        if (input.announce !== undefined) await input.announce(ready)
         throwIfAborted(signal)
         await this.options.coordinator.register(entry, signal)
         throwIfAborted(signal)
-        const currentRevision = await this.options.routeStore.authorize(entry.routeId, entry.endpoint, digest, signal)
-        if (this.disposed || currentRevision !== entry.revision) {
+        const current = await this.options.routeStore.authorize(entry.routeId, entry.endpoint, digest, signal)
+        if (this.disposed || current?.revision !== entry.revision
+          || current.pairingSelector !== entry.pairingSelector) {
           await this.closeAndDrain(attached)
           throw new RemoteRelayError(
             this.disposed ? 'REMOTE_OFFLINE' : 'RELAY_ATTACHMENT_REJECTED',
             this.disposed ? 'Platform Instance is offline' : 'Relay credential was superseded during attachment',
           )
         }
+        await this.recordPairingActivity(attached, this.now())
         this.armHeartbeat(attached)
+        await this.publishPeerUpdates(entry.routeId, entry.connectionToken)
       } catch (error) {
         if (!attached.closed) await this.closeAndDrain(attached)
         throw error
@@ -291,6 +356,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
     if (message.routeId !== local.entry.routeId || message.sourceAttachmentId !== local.entry.attachmentId) {
       throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay ciphertext source does not match its attachment')
     }
+    await this.recordPairingActivity(local, this.now())
     const target = await this.options.coordinator.locate(message.routeId, message.targetAttachmentId)
     if (target === undefined || target.expiresAt <= this.now()) {
       throw new RemoteRelayError('REMOTE_OFFLINE', 'Relay target is offline')
@@ -326,9 +392,9 @@ export class RemoteRelayProvider extends RemoteRelayService {
     if (message.attachmentId !== local.entry.attachmentId) {
       throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay heartbeat does not match its attachment')
     }
-    let revision: number | undefined
+    let authorization
     try {
-      revision = await this.options.routeStore.authorize(
+      authorization = await this.options.routeStore.authorize(
         local.entry.routeId,
         local.entry.endpoint,
         local.credentialDigest,
@@ -337,7 +403,8 @@ export class RemoteRelayProvider extends RemoteRelayService {
       await this.closeAndDrain(local)
       throw new RemoteRelayError('RELAY_ROUTE_REVOKED', 'Relay route authority could not be revalidated')
     }
-    if (revision === undefined || revision !== local.entry.revision) {
+    if (authorization === undefined || authorization.revision !== local.entry.revision
+      || authorization.pairingSelector !== local.entry.pairingSelector) {
       await this.closeAndDrain(local)
       throw new RemoteRelayError('RELAY_ROUTE_REVOKED', 'Relay route authority changed')
     }
@@ -347,6 +414,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
       throw new RemoteRelayError('REMOTE_OFFLINE', 'Relay directory entry is no longer current')
     }
     local.entry = refreshed
+    await this.recordPairingActivity(local, this.now())
     this.armHeartbeat(local)
   }
 
@@ -362,6 +430,15 @@ export class RemoteRelayProvider extends RemoteRelayService {
     }
     if (event.type === 'delivered') {
       this.pendingDeliveries.get(event.deliveryId)?.(true)
+      return
+    }
+    if (event.type === 'peer-update') {
+      const target = this.attachments.get(attachmentKey(event.routeId, event.attachmentId))
+      if (target === undefined || target.closed
+        || target.entry.connectionToken !== event.targetConnectionToken
+        || target.entry.revision !== event.revision) return
+      const { targetConnectionToken: _targetConnectionToken, revision: _revision, ...message } = event
+      await this.deliver(target, message)
       return
     }
     const target = this.attachments.get(attachmentKey(event.routeId, event.targetAttachmentId))
@@ -380,8 +457,11 @@ export class RemoteRelayProvider extends RemoteRelayService {
     }
   }
 
-  private async deliver(local: LocalAttachment, message: RelayCiphertextMessage): Promise<boolean> {
-    const size = message.ciphertext.byteLength
+  private async deliver(
+    local: LocalAttachment,
+    message: RelayCiphertextMessage | RelayPeerUpdateMessage,
+  ): Promise<boolean> {
+    const size = message.type === 'ciphertext' ? message.ciphertext.byteLength : 0
     if (local.bufferedBytes + size > this.config.maxBufferedCiphertextBytes) {
       await this.closeAndDrain(local)
       throw new RemoteRelayError('RELAY_SLOW_CONSUMER', 'Relay target exceeded its ciphertext buffer limit')
@@ -429,6 +509,16 @@ export class RemoteRelayProvider extends RemoteRelayService {
       complete: () => { local.socketClosed = true },
       promise: Promise.resolve().then(local.close),
     })
+    if (!local.activityReleased && local.entry.endpoint === 'mobile' && this.options.pairingActivity !== undefined) {
+      operations.push({
+        complete: () => { local.activityReleased = true },
+        promise: this.options.pairingActivity.releaseRelayLease({
+          credentialFingerprint: local.credentialFingerprint,
+          connectionToken: local.entry.connectionToken,
+          observedAt: this.now(),
+        }),
+      })
+    }
     const results = await Promise.allSettled(operations.map(operation => operation.promise))
     const errors: unknown[] = []
     for (const [index, result] of results.entries()) {
@@ -442,6 +532,34 @@ export class RemoteRelayProvider extends RemoteRelayService {
       local.capacityHeld = false
       this.options.capacity?.release()
     }
+    await this.publishPeerUpdates(local.entry.routeId)
+  }
+
+  private async publishPeerUpdates(routeId: RelayRouteId, exclude?: RelayConnectionToken): Promise<void> {
+    const entries = await this.options.coordinator.list(routeId)
+    const now = this.now()
+    const active = entries.filter(entry => entry.expiresAt > now)
+    await Promise.all(active.filter(target => target.connectionToken !== exclude).map(async (target) => {
+      const update = relayPeerUpdate(target, active, now)
+      await this.options.coordinator.publish(target.instanceId, {
+        ...update,
+        targetConnectionToken: target.connectionToken,
+        revision: target.revision,
+      })
+    }))
+  }
+
+  private async recordPairingActivity(
+    local: LocalAttachment,
+    accessedAt: number,
+  ): Promise<void> {
+    if (local.entry.endpoint !== 'mobile' || this.options.pairingActivity === undefined) return
+    await this.options.pairingActivity.recordRelayLease({
+      credentialFingerprint: local.credentialFingerprint,
+      connectionToken: local.entry.connectionToken,
+      expiresAt: local.entry.expiresAt,
+      accessedAt,
+    })
   }
 
   private connectionToken(): RelayConnectionToken {
@@ -475,7 +593,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
   }
 
   private awaitDelivery(deliveryId: RelayDeliveryId): PendingDelivery {
-    const result = deferred<boolean>()
+    const result = createDeferred<boolean>()
     const settle = (delivered: boolean): void => {
       clearTimeout(timeout)
       this.pendingDeliveries.delete(deliveryId)
@@ -503,13 +621,6 @@ export class RemoteRelayProvider extends RemoteRelayService {
     if (this.disposed) throw new RemoteRelayError('REMOTE_OFFLINE', 'Platform Instance is offline')
   }
 
-  private newCredential(): RelayCredential {
-    const bytes = this.randomBytes(32)
-    if (bytes.byteLength !== 32) throw new TypeError('Relay credential source must return 32 bytes')
-    const credential = parseRelayCredential(Buffer.from(bytes).toString('base64url'))
-    bytes.fill(0)
-    return credential
-  }
 }
 
 function throwIfAborted(signal: AbortSignal): void {
@@ -518,12 +629,60 @@ function throwIfAborted(signal: AbortSignal): void {
 
 const NEVER_ABORTED = new AbortController().signal
 
-function credentialDigest(credential: RelayCredential): Uint8Array {
-  return new Uint8Array(createHash('sha256').update(credential).digest())
+function fingerprintFromDigest(digest: Uint8Array): ReturnType<typeof parseRelayCredentialFingerprint> {
+  return parseRelayCredentialFingerprint(Buffer.from(digest).toString('base64url'))
 }
 
 function attachmentKey(routeId: RelayRouteId, attachmentId: RelayAttachmentId): string {
   return `${routeId}:${attachmentId}`
+}
+
+function relayReady(
+  local: RelayDirectoryEntry,
+  entries: readonly RelayDirectoryEntry[],
+  now: number,
+): RelayReadyMessage {
+  const candidates = entries.filter(peer => peer.routeId === local.routeId
+    && peer.endpoint !== local.endpoint
+    && peer.expiresAt > now
+    && peer.revision === local.revision
+    && (local.pairingSelector === undefined || peer.pairingSelector === local.pairingSelector))
+  const peersBySelector = new Map<RelayPairingSelector, RelayReadyMessage['peers'][number]>()
+  for (const peer of candidates) {
+    const pairingSelector = peer.pairingSelector ?? local.pairingSelector
+      ?? parseRelayPairingSelector('development-keyless-pairing')
+    peersBySelector.set(pairingSelector, {
+      attachmentId: peer.attachmentId,
+      pairingSelector,
+      generation: connectionGeneration(local, peer, pairingSelector),
+    })
+  }
+  return {
+    type: 'ready', transportVersion: 1, routeId: local.routeId,
+    attachmentId: local.attachmentId,
+    peers: [...peersBySelector.values()],
+  }
+}
+
+function relayPeerUpdate(
+  local: RelayDirectoryEntry,
+  entries: readonly RelayDirectoryEntry[],
+  now: number,
+): RelayPeerUpdateMessage {
+  const ready = relayReady(local, entries, now)
+  return { ...ready, type: 'peer-update' }
+}
+
+function connectionGeneration(
+  local: RelayDirectoryEntry,
+  peer: RelayDirectoryEntry,
+  pairingSelector: RelayPairingSelector,
+): number {
+  const tokens = [local.connectionToken, peer.connectionToken].sort()
+  const digest = createHash('sha256')
+    .update(`${local.routeId}\0${pairingSelector}\0${tokens[0]}\0${tokens[1]}`)
+    .digest()
+  return digest.readUIntBE(0, 6) + 1
 }
 
 function validateRemoteRelayConfig(config: RemoteRelayConfig): RemoteRelayConfig {
@@ -531,10 +690,4 @@ function validateRemoteRelayConfig(config: RemoteRelayConfig): RemoteRelayConfig
     if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`Remote Relay ${name} must be a positive integer`)
   }
   return { ...config }
-}
-
-function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((settle) => { resolve = settle })
-  return { promise, resolve }
 }

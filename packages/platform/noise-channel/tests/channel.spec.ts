@@ -1,0 +1,402 @@
+import { readFileSync } from 'node:fs'
+import { beforeAll, describe, expect, it } from 'vitest'
+import {
+  parseRelayAttachmentId,
+  parseRelayCredential,
+  parseRelayPairingSelector,
+  parseRelayRouteId,
+} from '@deepseek-ai/dsh-remote-protocol'
+import {
+  SnowMobileHandshakeClient,
+  SnowMobileAttachmentOwner,
+  SnowDesktopAttachmentOwner,
+  SnowDesktopEndpointPairingOwner,
+  SnowPairingHandshakeProvider,
+  beginSnowCompanionProtocol,
+  initializeSnowChannel,
+  acceptSnowDesktopReconnect,
+  beginSnowMobileReconnect,
+  decodeRelayAuthorityEnvelope,
+  encodeRelayAuthorityEnvelope,
+} from '../src/index.ts'
+
+beforeAll(() => {
+  initializeSnowChannel(readFileSync(new URL('../pkg/dsh_noise_channel_bg.wasm', import.meta.url)))
+})
+
+describe('Snow product Companion channel', () => {
+  it('validates the endpoint-secret Relay authority envelope before retention', () => {
+    const grant = {
+      endpoint: 'mobile' as const,
+      routeId: parseRelayRouteId('route-envelope'),
+      credential: parseRelayCredential('A'.repeat(43)),
+      revision: 1,
+      pairingSelector: parseRelayPairingSelector('pairing-envelope'),
+    }
+    const attachmentKey = new Uint8Array(32).fill(17)
+    expect(decodeRelayAuthorityEnvelope(encodeRelayAuthorityEnvelope(grant, attachmentKey)))
+      .toEqual({ grant, attachmentKey })
+    expect(() => encodeRelayAuthorityEnvelope(grant, new Uint8Array(31))).toThrow('exactly 32 bytes')
+
+    const encoded = (value: unknown) => new TextEncoder().encode(JSON.stringify(value))
+    const valid = {
+      grant,
+      attachmentKey: 'ERERERERERERERERERERERERERERERERERERERERERE',
+    }
+    for (const [value, message] of [
+      [null, 'envelope must be an object'],
+      [{ ...valid, extra: true }, 'unsupported fields'],
+      [{ ...valid, grant: null }, 'authority must be an object'],
+      [{ ...valid, grant: { ...grant, extra: true } }, 'authority contains unsupported fields'],
+      [{ ...valid, grant: { ...grant, endpoint: 'desktop' } }, 'endpoint must be mobile'],
+      [{ ...valid, grant: { ...grant, revision: 0 } }, 'revision must be positive'],
+      [{ ...valid, attachmentKey: '*' }, 'canonical base64url'],
+      [{ ...valid, attachmentKey: 'AQ' }, 'exactly 32 bytes'],
+    ] as const) {
+      expect(() => decodeRelayAuthorityEnvelope(encoded(value))).toThrow(message)
+    }
+  })
+
+  it('keeps XKpsk3 Desktop private state endpoint-owned across opaque mailbox messages', async () => {
+    const desktop = new SnowDesktopEndpointPairingOwner()
+    const invitation = await desktop.createInvitation(Date.now() + 60_000)
+    const mobile = new SnowMobileHandshakeClient()
+    const message1 = await mobile.beginEndpointInvitation(invitation.invitationPayload)
+    const message2 = await desktop.acceptMessage1(message1)
+    await mobile.acceptDesktopHandshake(message2)
+    const recovery = mobile.exportRecoveryState()
+    const restoredMobile = new SnowMobileHandshakeClient()
+    restoredMobile.restoreRecoveryState(recovery)
+    recovery.fill(0)
+    const message3 = restoredMobile.exportFinishMessage()
+    const desktopHash = await desktop.finishMessage3(message3)
+    expect(desktopHash).toEqual(restoredMobile.exportAuthenticationHash())
+    const mobileAuthenticationHash = restoredMobile.exportAuthenticationHash()
+    const grant = {
+      endpoint: 'mobile' as const,
+      routeId: parseRelayRouteId('route-endpoint'),
+      credential: parseRelayCredential('A'.repeat(43)),
+      revision: 1,
+      pairingSelector: parseRelayPairingSelector('pairing-endpoint'),
+    }
+    const attachmentKey = new Uint8Array(32).fill(37)
+    const sealed = await desktop.sealMobileRelayAuthority(grant, attachmentKey)
+    expect(new TextDecoder().decode(sealed)).not.toContain(grant.credential)
+    for (const observed of [invitation.invitationPayload, message1, message2, message3, sealed]) {
+      expect(containsBytes(observed, attachmentKey)).toBe(false)
+    }
+    let writes = 0
+    await expect(restoredMobile.openRelayAuthorityDurably(sealed, async () => {
+      writes += 1
+      throw new Error('IndexedDB commit failed')
+    })).rejects.toThrow('IndexedDB commit failed')
+    expect(restoredMobile.exportRecoveryState()).not.toHaveLength(0)
+    await expect(restoredMobile.openRelayAuthorityDurably(sealed, async (opened, reconnectState, openedAttachmentKey) => {
+      writes += 1
+      expect(opened).toEqual(grant)
+      expect(reconnectState).toHaveLength(96)
+      expect(openedAttachmentKey).toEqual(attachmentKey)
+    })).resolves.toEqual(grant)
+    expect(writes).toBe(2)
+    expect(() => restoredMobile.exportRecoveryState()).toThrow('no prepared invitation')
+    expect(desktop.exportReconnectState()).toHaveLength(96)
+    expect(restoredMobile.exportReconnectState()).toHaveLength(96)
+    expect(restoredMobile.exportAttachmentKey()).toEqual(attachmentKey)
+    expect(restoredMobile.exportAttachmentKey()).not.toEqual(mobileAuthenticationHash)
+  })
+
+  it('seals Mobile Relay authority in the completed XKpsk3 channel', async () => {
+    const paired = await completePairing()
+    const grant = {
+      endpoint: 'mobile' as const,
+      routeId: parseRelayRouteId('route-one'),
+      credential: parseRelayCredential('A'.repeat(43)),
+      revision: 1,
+      pairingSelector: parseRelayPairingSelector('pairing-one'),
+    }
+
+    const sealed = await paired.desktop.sealMobileRelayAuthority({
+      activePairingKey: paired.activePairingKey,
+      grant,
+    })
+
+    expect(new TextDecoder().decode(sealed)).not.toContain(grant.credential)
+    await expect(paired.mobile.openRelayAuthority(sealed)).resolves.toEqual(grant)
+    expect(paired.desktop.exportReconnectState(paired.activePairingKey)).toHaveLength(96)
+    expect(paired.mobile.exportReconnectState()).toHaveLength(96)
+  })
+
+  it('uses a fresh IK ephemeral and attachment-bound transcript for every physical Relay connection', async () => {
+    const paired = await completePairingAndOpenGrant()
+    const firstBinding = binding('desktop-one', 'mobile-one', 1)
+    const firstMobile = await beginSnowMobileReconnect(paired.mobileState, firstBinding)
+    const firstDesktop = await acceptSnowDesktopReconnect(paired.desktopState, firstBinding, firstMobile.message1)
+    const firstMobileChannel = firstMobile.finish(firstDesktop.message2)
+    const sync = new TextEncoder().encode(JSON.stringify({ type: 'desktop-resync', version: 1, generation: 1 }))
+    const sealed = firstDesktop.channel.seal(sync)
+    expect(firstMobileChannel.open(sealed)).toEqual(sync)
+
+    const secondBinding = binding('desktop-two', 'mobile-two', 2)
+    const secondMobile = await beginSnowMobileReconnect(paired.mobileState, secondBinding)
+    expect(secondMobile.message1.slice(0, 32)).not.toEqual(firstMobile.message1.slice(0, 32))
+    await expect(acceptSnowDesktopReconnect(paired.desktopState, secondBinding, firstMobile.message1))
+      .rejects.toThrow()
+    secondMobile.cancel()
+    expect(() => { secondMobile.cancel() }).not.toThrow()
+    expect(() => secondMobile.finish(Uint8Array.of())).toThrow('already settled')
+  })
+
+  it('rejects replay, ordering, cross-pairing, and stale attachment transcripts', async () => {
+    const paired = await completePairingAndOpenGrant()
+    const connected = await connect(paired.mobileState, paired.desktopState, binding('desktop-one', 'mobile-one', 1))
+    const first = connected.mobile.seal(Uint8Array.of(1))
+    expect(connected.desktop.open(first)).toEqual(Uint8Array.of(1))
+    expect(() => connected.desktop.open(first)).toThrow()
+
+    const ordered = await connect(paired.mobileState, paired.desktopState, binding('desktop-two', 'mobile-two', 2))
+    const earlier = ordered.mobile.seal(Uint8Array.of(2))
+    const later = ordered.mobile.seal(Uint8Array.of(3))
+    expect(() => ordered.desktop.open(later)).toThrow()
+    expect(ordered.desktop.open(earlier)).toEqual(Uint8Array.of(2))
+
+    const other = await completePairingAndOpenGrant()
+    const wrongMobile = await beginSnowMobileReconnect(other.mobileState, binding('desktop-three', 'mobile-three', 3))
+    await expect(acceptSnowDesktopReconnect(paired.desktopState, binding('desktop-three', 'mobile-three', 3), wrongMobile.message1))
+      .rejects.toThrow()
+    wrongMobile.cancel()
+
+    const wrongRoute = await beginSnowMobileReconnect(paired.mobileState, {
+      ...binding('desktop-four', 'mobile-four', 4), routeId: parseRelayRouteId('route-other'),
+    })
+    await expect(acceptSnowDesktopReconnect(
+      paired.desktopState,
+      binding('desktop-four', 'mobile-four', 4),
+      wrongRoute.message1,
+    )).rejects.toThrow()
+    wrongRoute.cancel()
+
+    const wrongSelector = await beginSnowMobileReconnect(paired.mobileState, {
+      ...binding('desktop-five', 'mobile-five', 5),
+      pairingSelector: parseRelayPairingSelector('pairing-other'),
+    })
+    await expect(acceptSnowDesktopReconnect(
+      paired.desktopState,
+      binding('desktop-five', 'mobile-five', 5),
+      wrongSelector.message1,
+    )).rejects.toThrow()
+    wrongSelector.cancel()
+  })
+
+  it('admits foreground synchronization only as a versioned authenticated Companion message', async () => {
+    const paired = await completePairingAndOpenGrant()
+    const connected = await connect(paired.mobileState, paired.desktopState, binding('desktop-sync', 'mobile-sync', 4))
+    const desktopNegotiation = beginSnowCompanionProtocol(connected.desktop, 'desktop')
+    const mobileNegotiation = beginSnowCompanionProtocol(connected.mobile, 'mobile')
+    expect(new TextDecoder().decode(desktopNegotiation.payload)).not.toContain('versions')
+    expect(new TextDecoder().decode(mobileNegotiation.payload)).not.toContain('versions')
+    const desktop = desktopNegotiation.finish(mobileNegotiation.payload)
+    const mobile = mobileNegotiation.finish(desktopNegotiation.payload)
+    const sync = {
+      type: 'projection' as const,
+      projection: { type: 'foreground-sync' as const, desktopName: 'Authenticated Desktop', generation: 4, desktopRevision: 19 },
+    }
+
+    expect(desktop.canEncode(sync)).toBe(true)
+    const sessionId = 'session-oversized' as never
+    expect(desktop.canEncode({
+      type: 'projection',
+      projection: {
+        type: 'session-live', generation: 4, desktopRevision: 20, sessionId, position: 0,
+        summary: { sessionId, displayTitle: 'Oversized', running: false, blank: false, updatedAt: 1 },
+        workspaces: [],
+        conversation: {
+          sessionId,
+          nodes: [{
+            kind: 'assistant', seq: 1, time: 1,
+            blocks: [{ kind: 'text', text: 'x'.repeat(55 * 1_024) }],
+          }],
+          turnTimings: [], turnEnds: [], partial: null, runningCalls: [], pending: [], queue: [],
+          running: false, subagent: null, composerPhase: 'active', removed: false,
+          openState: 'open', openError: null, hasMore: false, loadingOlder: false,
+          promptError: null, blank: false, lastAgentError: null,
+        },
+      },
+    })).toBe(false)
+    expect(mobile.open(desktop.seal(sync))).toEqual(sync)
+    const oneByte = connected.desktop.seal(Uint8Array.of(1))
+    expect(() => mobile.open(oneByte)).toThrow()
+    expect(() => mobileNegotiation.finish(desktopNegotiation.payload)).toThrow('already settled')
+    desktopNegotiation.cancel()
+    desktop.dispose()
+    mobile.dispose()
+
+    const abandoned = await connect(
+      paired.mobileState, paired.desktopState, binding('desktop-abandoned', 'mobile-abandoned', 7),
+    )
+    const abandonedNegotiation = beginSnowCompanionProtocol(abandoned.mobile, 'mobile')
+    abandonedNegotiation.cancel()
+    abandonedNegotiation.cancel()
+    expect(() => abandonedNegotiation.finish(Uint8Array.of(1))).toThrow('already settled')
+  })
+
+  it('rejects cross-version and same-direction encrypted offers before application data', async () => {
+    const paired = await completePairingAndOpenGrant()
+    const crossed = await connect(paired.mobileState, paired.desktopState, binding('desktop-cross', 'mobile-cross', 5))
+    const newDesktop = beginSnowCompanionProtocol(crossed.desktop, 'desktop', [4])
+    const oldMobile = beginSnowCompanionProtocol(crossed.mobile, 'mobile', [3])
+    expect(() => newDesktop.finish(oldMobile.payload)).toThrow(expect.objectContaining({
+      code: 'COMPANION_UPDATE_REQUIRED', updateEndpoint: 'mobile',
+    }))
+    expect(() => oldMobile.finish(newDesktop.payload)).toThrow(expect.objectContaining({
+      code: 'COMPANION_UPDATE_REQUIRED', updateEndpoint: 'mobile',
+    }))
+
+    const sameDirection = await connect(
+      paired.mobileState, paired.desktopState, binding('desktop-direction', 'mobile-direction', 6),
+    )
+    const firstMobile = beginSnowCompanionProtocol(sameDirection.mobile, 'mobile')
+    const secondMobile = beginSnowCompanionProtocol(sameDirection.desktop, 'mobile')
+    expect(() => firstMobile.finish(secondMobile.payload)).toThrow('wrong endpoints')
+
+    const preceding = await connect(
+      paired.mobileState, paired.desktopState, binding('desktop-preceding', 'mobile-preceding', 7),
+    )
+    const precedingDesktop = beginSnowCompanionProtocol(preceding.desktop, 'desktop', [3])
+    const precedingMobile = beginSnowCompanionProtocol(preceding.mobile, 'mobile', [3])
+    const oldDesktop = precedingDesktop.finish(precedingMobile.payload)
+    precedingMobile.finish(precedingDesktop.payload)
+    expect(oldDesktop.applicationMajor).toBe(3)
+    const oldSessionId = 'session-major-four' as never
+    expect(() => oldDesktop.canEncode({
+      type: 'projection',
+      projection: {
+        type: 'session-live', generation: 7, desktopRevision: 1,
+        sessionId: oldSessionId, position: 0,
+        summary: {
+          sessionId: oldSessionId, displayTitle: 'Major four', running: false,
+          blank: false, updatedAt: 1,
+        },
+        workspaces: [],
+      },
+    })).toThrow(expect.objectContaining({ code: 'COMPANION_UPDATE_REQUIRED' }))
+  })
+
+  it('assembles endpoint-owned IK over route-bound Relay ready metadata', async () => {
+    const paired = await completePairingAndOpenGrant()
+    const routeId = parseRelayRouteId('route-owner')
+    const pairingSelector = parseRelayPairingSelector('pairing-owner')
+    const desktopAttachmentId = parseRelayAttachmentId('desktop-owner')
+    const mobileAttachmentId = parseRelayAttachmentId('mobile-owner')
+    const mobile = new SnowMobileAttachmentOwner(paired.mobileState, pairingSelector)
+    paired.mobileState.fill(0)
+    const desktop = new SnowDesktopAttachmentOwner(selector => selector === pairingSelector
+      ? paired.desktopState
+      : undefined)
+    const begun = await mobile.begin({
+      type: 'ready', transportVersion: 1, routeId, attachmentId: mobileAttachmentId,
+      peers: [{ attachmentId: desktopAttachmentId, pairingSelector, generation: 9 }],
+    })
+    const accepted = await desktop.accept(begun.payload, mobileAttachmentId, routeId, desktopAttachmentId)
+    const mobileNegotiation = mobile.finish(accepted.payload, desktopAttachmentId)
+    const desktopChannel = accepted.negotiation.finish(mobileNegotiation.payload)
+    const mobileChannel = mobileNegotiation.finish()
+    const synchronization = {
+      type: 'projection' as const,
+      projection: { type: 'foreground-sync' as const, desktopName: 'Authenticated Desktop', generation: 9, desktopRevision: 4 },
+    }
+    expect(mobileChannel.open(desktopChannel.seal(synchronization))).toEqual(synchronization)
+    expect(() => mobile.finish(accepted.payload, desktopAttachmentId)).toThrow('no pending attempt')
+    await expect(desktop.accept(
+      begun.payload,
+      parseRelayAttachmentId('mobile-forged'),
+      routeId,
+      desktopAttachmentId,
+    )).rejects.toThrow('does not belong')
+    const next = await mobile.begin({
+      type: 'ready', transportVersion: 1, routeId, attachmentId: mobileAttachmentId,
+      peers: [{ attachmentId: desktopAttachmentId, pairingSelector, generation: 10 }],
+    })
+    const nextAccepted = await desktop.accept(next.payload, mobileAttachmentId, routeId, desktopAttachmentId)
+    const nextNegotiation = mobile.finish(nextAccepted.payload, desktopAttachmentId)
+    nextNegotiation.cancel()
+    nextNegotiation.cancel()
+    nextAccepted.negotiation.cancel()
+    mobile.dispose()
+    await expect(mobile.begin({
+      type: 'ready', transportVersion: 1, routeId, attachmentId: mobileAttachmentId,
+      peers: [{ attachmentId: desktopAttachmentId, pairingSelector, generation: 11 }],
+    })).rejects.toThrow('disposed')
+  })
+})
+
+function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
+  for (let offset = 0; offset <= haystack.byteLength - needle.byteLength; offset += 1) {
+    if (needle.every((byte, index) => haystack[offset + index] === byte)) return true
+  }
+  return false
+}
+
+async function completePairing() {
+  const invitationSecret = crypto.getRandomValues(new Uint8Array(32))
+  const desktop = new SnowPairingHandshakeProvider()
+  const challenge = await desktop.createChallenge({ invitationSecret, expiresAt: Date.now() + 60_000 })
+  const mobile = new SnowMobileHandshakeClient()
+  const link = new URL('https://www.gestaltrun.com/pair')
+  link.searchParams.set('challenge', 'challenge-one')
+  link.searchParams.set('secret', Buffer.from(invitationSecret).toString('base64url'))
+  link.searchParams.set('fingerprint', challenge.desktopFingerprint)
+  link.searchParams.set('spk', Buffer.from(challenge.desktopStaticPublicKey).toString('base64url'))
+  link.searchParams.set('rendezvous', 'rendezvous-one')
+  link.searchParams.set('expires', String(Date.now() + 60_000))
+  link.searchParams.set('protocol', '1')
+  const begun = await mobile.begin(link.toString())
+  const opened = await desktop.completeChallenge({
+    invitationSecret,
+    challengeState: challenge.state,
+    mobileHandshake: begun.mobileHandshake,
+  })
+  await mobile.acceptDesktopHandshake(opened.desktopHandshake)
+  const finished = await desktop.finishChallenge({
+    pendingPairingKey: opened.pendingPairingKey,
+    mobileFinish: mobile.exportFinishMessage(),
+  })
+  const activated = await desktop.activatePairing({ pendingPairingKey: finished.pendingPairingKey })
+  return { desktop, mobile, activePairingKey: activated.activePairingKey }
+}
+
+async function completePairingAndOpenGrant() {
+  const paired = await completePairing()
+  const sealed = await paired.desktop.sealMobileRelayAuthority({
+    activePairingKey: paired.activePairingKey,
+    grant: {
+      endpoint: 'mobile', routeId: parseRelayRouteId('route-one'),
+      credential: parseRelayCredential('A'.repeat(43)), revision: 1,
+      pairingSelector: parseRelayPairingSelector('pairing-one'),
+    },
+  })
+  await paired.mobile.openRelayAuthority(sealed)
+  return {
+    mobileState: paired.mobile.exportReconnectState(),
+    desktopState: paired.desktop.exportReconnectState(paired.activePairingKey),
+  }
+}
+
+function binding(desktopAttachmentId: string, mobileAttachmentId: string, generation: number) {
+  return {
+    routeId: parseRelayRouteId('route-one'),
+    pairingSelector: parseRelayPairingSelector('pairing-one'),
+    desktopAttachmentId: parseRelayAttachmentId(desktopAttachmentId),
+    mobileAttachmentId: parseRelayAttachmentId(mobileAttachmentId),
+    generation,
+  }
+}
+
+async function connect(
+  mobileState: Uint8Array,
+  desktopState: Uint8Array,
+  channelBinding: ReturnType<typeof binding>,
+) {
+  const mobile = await beginSnowMobileReconnect(mobileState, channelBinding)
+  const desktop = await acceptSnowDesktopReconnect(desktopState, channelBinding, mobile.message1)
+  return { mobile: mobile.finish(desktop.message2), desktop: desktop.channel }
+}

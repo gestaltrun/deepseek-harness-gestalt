@@ -3,11 +3,14 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { AttachmentError } from './error.ts'
 import type {
+  FileAttachmentRef,
   ImageAttachmentLimits,
   ImageAttachmentRef,
   ImageRequestPolicy,
   RequestImageAttachment,
+  SaveFileAttachment,
   SaveImageAttachment,
+  StoredFileAttachment,
   StoredImageAttachment,
 } from './types.ts'
 
@@ -18,11 +21,14 @@ export { admitEncodedImages } from './admission.ts'
 export type {
   AttachmentId as AttachmentIdType,
   EncodedImageAttachment,
+  FileAttachmentRef,
   ImageAttachmentLimits,
   ImageAttachmentRef,
   ImageRequestPolicy,
   ImageMediaType,
   RequestImageAttachment,
+  SaveFileAttachment,
+  StoredFileAttachment,
   SaveImageAttachment,
   StoredImageAttachment,
 } from './types.ts'
@@ -41,6 +47,9 @@ export abstract class AttachmentStore extends Service {
 
   /** Deployment-resolved image policy used by authoritative and fast-path validation. */
   abstract readonly imageLimits: ImageAttachmentLimits
+
+  /** Deployment-resolved exact byte ceiling for one generic file. */
+  readonly maxFileBytes: number = 100 * 1024 * 1024
 
   /**
    * Validate one image without persisting it.
@@ -108,6 +117,28 @@ export abstract class AttachmentStore extends Service {
   abstract readImage(ref: ImageAttachmentRef, signal?: AbortSignal): Promise<StoredImageAttachment>
 
   /**
+   * Validate and durably commit one immutable generic file.
+   * @param input - exact bytes plus bounded display metadata.
+   * @returns a content-addressed reference after durable publication.
+   */
+  saveFile(input: SaveFileAttachment): Promise<FileAttachmentRef> {
+    void input
+    return Promise.reject(new AttachmentError('Generic file attachment storage is not composed.', 'ATTACHMENT_WRITE_FAILED'))
+  }
+
+  /**
+   * Read one generic file and verify its digest and metadata.
+   * @param ref - durable reference from a Session event.
+   * @param signal - optional cancellation for backend reads.
+   * @returns verified exact bytes and canonical reference.
+   */
+  readFile(ref: FileAttachmentRef, signal?: AbortSignal): Promise<StoredFileAttachment> {
+    void ref
+    void signal
+    return Promise.reject(new AttachmentError('Generic file attachment storage is not composed.', 'ATTACHMENT_READ_FAILED'))
+  }
+
+  /**
    * Generate or read one deterministic model-request version from the stored normalized image.
    * @param ref - durable provider-independent normalized attachment reference.
    * @param policy - exact route pixel and encoded-byte budget.
@@ -127,7 +158,6 @@ export abstract class AttachmentStore extends Service {
       'ATTACHMENT_PROJECTION_UNSUPPORTED',
     ))
   }
-
 }
 
 export default AttachmentStore

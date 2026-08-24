@@ -151,13 +151,29 @@ export function clientBundle(
  * @returns ENV-selected tsdown config for the Client build face.
  */
 export function staticLinked(id: string, libEntry: readonly string[]): BuildFaceConfig {
+  return browserEntries(id, libEntry, true)
+}
+
+function browserEntries(id: string, libEntry: readonly string[], roster: boolean): BuildFaceConfig {
   // Each entry names its own output file, so two entries with the same basename
   // would overwrite one artifact instead of emitting two.
   const names = new Set(libEntry.map(entry => basename(entry, '.js')))
   if (names.size !== libEntry.length) {
     throw new Error(`tsdown: ${id} entries collide on an output name: ${libEntry.join(', ')}`)
   }
-  return clientOnly(libEntry.map(entry => staticLinkedConfig(id, entry)))
+  return clientOnly(libEntry.map(entry => staticLinkedConfig(id, entry, basename(entry, '.js'), roster)))
+}
+
+/**
+ * Build browser-only ESM subpaths for a product shell while the package's primary Client plugin remains dynamic.
+ * Bare dependencies and CSS remain shell-owned exactly as in a static-linked package, but the package is not added
+ * to the Desktop static-linked roster because its `dsh.client` entry still owns the module-table artifact.
+ * @param id - package name used in build diagnostics.
+ * @param libEntry - emitted JavaScript entries consumed from `lib/types`.
+ * @returns Client-face configs for the browser subpaths.
+ */
+export function browserSubpath(id: string, libEntry: readonly string[]): BuildFaceConfig {
+  return browserEntries(id, libEntry, false)
 }
 
 /**
@@ -252,8 +268,14 @@ interface AssetEmitter {
   }): string
 }
 
-function staticLinkedConfig(id: string, entry: string, outputName = basename(entry, '.js')): UserConfig {
+function staticLinkedConfig(
+  id: string,
+  entry: string,
+  outputName = basename(entry, '.js'),
+  roster = true,
+): UserConfig {
   const emitted = new Set<string>()
+  const inlineStyles = new Map<string, string>()
   return {
     name: id,
     entry: { [outputName]: entry },
@@ -272,7 +294,7 @@ function staticLinkedConfig(id: string, entry: string, outputName = basename(ent
       // resolve and inline every specifier missing from the npm production
       // sections, which is the coupling this preset exists to remove. The name
       // is also the roster marker {@link isStaticLinkedConfig} reads.
-      name: STATIC_LINKED_PLUGIN,
+      name: roster ? STATIC_LINKED_PLUGIN : BROWSER_SUBPATH_PLUGIN,
       resolveId: {
         order: 'pre' as const,
         handler(source: string, importer: string | undefined) {
@@ -297,17 +319,28 @@ function staticLinkedConfig(id: string, entry: string, outputName = basename(ent
       // JavaScript, so the shell's CSS Modules pipeline sees a real stylesheet.
       name: 'dsh-css-asset',
       async resolveId(this: AssetEmitter, source: string, importer: string | undefined) {
-        if (!source.endsWith('.css') || importer === undefined) return null
-        const { file, fileName } = stylesheetAsset(source, importer)
+        const inline = source.endsWith(`${INLINE_CSS_QUERY}`)
+        const stylesheet = inline ? source.slice(0, -INLINE_CSS_QUERY.length) : source
+        if (!stylesheet.endsWith('.css') || importer === undefined) return null
+        const { file, fileName } = stylesheetAsset(stylesheet, importer)
         if (!emitted.has(fileName)) {
           emitted.add(fileName)
           // originalFileName also puts the physical sheet in the watch graph.
           this.emitFile({ type: 'asset', fileName, source: await readFile(file), originalFileName: file })
         }
+        if (inline) {
+          const id = `\0dsh-browser-subpath-inline:${file}.mjs`
+          inlineStyles.set(id, file)
+          return id
+        }
         // Every emitted chunk sits at the lib/ root, so the src-relative name
         // is what resolves from there. Rolldown keeps relative externals as
         // written instead of re-normalizing them.
         return { id: `./${fileName}`, external: true }
+      },
+      async load(id: string) {
+        const file = inlineStyles.get(id)
+        return file === undefined ? null : `export default ${JSON.stringify(await readFile(file, 'utf8'))}`
       },
     }],
   }
@@ -571,6 +604,7 @@ const TYPES_MARKER = `${sep}lib${sep}types${sep}`
 
 /** Plugin name carrying contract 1, and the marker that identifies a statically linked config. */
 const STATIC_LINKED_PLUGIN = 'dsh-static-linked-external'
+const BROWSER_SUBPATH_PLUGIN = 'dsh-browser-subpath-external'
 
 /** Path segment a package's sources hang under, and the root emitted assets mirror. */
 const SOURCE_MARKER = `${sep}src${sep}`

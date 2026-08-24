@@ -13,6 +13,7 @@ import type {
   AccountProof,
   InstallationId,
   AccountSessionView,
+  DesktopInstallationPresentation,
   LoginAttemptView,
   LoginPollResult,
   SelectedPlatformEnvironment,
@@ -86,6 +87,7 @@ export interface DesktopAccountControllerOptions {
   transport: PlatformAccountTransport
   store: DesktopAccountStore
   systemBrowser: SystemBrowser
+  presentation: DesktopInstallationPresentation
   transitions?: AccountLifecycleTransitions
   now?: () => number
   schedule?: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>
@@ -99,6 +101,8 @@ export interface DesktopAccountActions {
   signOut(): Promise<DesktopAccountSnapshot>
   /** Authorize a Host-owned current-Installation operation without exposing the private key. */
   authorizeCurrentInstallation(): Promise<CurrentInstallationAuthorization>
+  /** @returns the Platform-registered presentation while this Installation is signed in. */
+  installationPresentation(): DesktopInstallationPresentation | undefined
   subscribe(listener: (snapshot: DesktopAccountSnapshot) => void): () => void
   start(): Promise<void>
   dispose(): Promise<void>
@@ -128,6 +132,10 @@ export class DesktopAccountController implements DesktopAccountActions {
 
   getSnapshot(): DesktopAccountSnapshot {
     return this.snapshot
+  }
+
+  installationPresentation(): DesktopInstallationPresentation | undefined {
+    return this.record?.session === undefined ? undefined : { ...this.options.presentation }
   }
 
   subscribe(listener: (snapshot: DesktopAccountSnapshot) => void): () => void {
@@ -176,6 +184,7 @@ export class DesktopAccountController implements DesktopAccountActions {
       const attempt = await this.options.transport.beginLogin({
         installationId: record.installationId,
         installationKind: 'desktop',
+        presentation: this.options.presentation,
         publicKey: publicKey.export({ format: 'jwk' }),
       })
       record.pending = attempt
@@ -403,6 +412,7 @@ export class UnavailableDesktopAccountController implements DesktopAccountAction
   authorizeCurrentInstallation(): Promise<CurrentInstallationAuthorization> {
     return Promise.reject(new AccountError('SESSION_REVOKED', 'Desktop Platform Account is unavailable'))
   }
+  installationPresentation(): DesktopInstallationPresentation | undefined { return undefined }
   subscribe(): () => void { return () => {} }
   start(): Promise<void> { return Promise.resolve() }
   dispose(): Promise<void> { return Promise.resolve() }

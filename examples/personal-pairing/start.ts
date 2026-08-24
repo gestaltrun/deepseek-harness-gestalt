@@ -54,8 +54,9 @@ export async function apply(ctx: Context): Promise<void> {
   const authentication = (
     kind: 'desktop' | 'mobile',
     accountId = 'account-one',
+    installationId = `${kind}-installation`,
   ): PairingAccountAuthentication => ({
-    accessToken: `${accountId}:${kind}:${kind}-installation`,
+    accessToken: `${accountId}:${kind}:${installationId}`,
     proof: {
       jti: parseAccountProofJti(`proof-${String(++proof)}`),
       issuedAt: Date.parse('2026-08-18T10:00:00.000Z'),
@@ -64,7 +65,7 @@ export async function apply(ctx: Context): Promise<void> {
   })
 
   const desktop = () => authentication('desktop')
-  const mobile = () => authentication('mobile')
+  const mobile = () => authentication('mobile', 'account-one', 'mobile-ios')
   console.log(`MOBILE_ACCESS default=${String((await transport.getMobileAccessState(desktop())).enabled)}`)
   await transport.setMobileAccess({ authentication: desktop(), enabled: true })
 
@@ -78,7 +79,6 @@ export async function apply(ctx: Context): Promise<void> {
       authentication: authentication('mobile', 'account-two'),
       completionId: parsePairingCompletionId('completion-cross'),
       oneTimeLink: cross.oneTimeLink,
-      device: { name: 'Other phone', platform: 'android' },
       mobileHandshake: Uint8Array.of(0),
     })
   } catch (error) {
@@ -98,7 +98,6 @@ export async function apply(ctx: Context): Promise<void> {
     authentication: mobile(),
     completionId: parsePairingCompletionId('completion-same'),
     oneTimeLink: challenge.oneTimeLink,
-    device: { name: 'Alice phone', platform: 'ios' },
     mobileHandshake,
   })
   const desktopPending = (await transport.listPendingPairings(desktop()))[0]
@@ -113,6 +112,31 @@ export async function apply(ctx: Context): Promise<void> {
   console.log(`CONFIRM mobile=${mobileStatus.status} active=${String(active.length)} authority=${active[0]?.devicePrincipal.authority}`)
   console.log(`PAIRING_KEY bits=${String(expectedKey.byteLength * 8)} desktopEqualsMobile=${String(bytesEqual(pending.desktopHandshake, expectedKey))}`)
 
+  const secondChallenge = await transport.createChallenge({
+    authentication: desktop(),
+    rendezvousId: parsePairingRendezvousId('rendezvous-second-mobile'),
+  })
+  const secondInvitation = parsePairingInvitationLink(secondChallenge.oneTimeLink)
+  const secondHandshake = await deriveKeylessMobileHandshake(secondInvitation.invitationSecret)
+  secondInvitation.invitationSecret.fill(0)
+  const secondPending = await transport.completeChallenge({
+    authentication: authentication('mobile', 'account-one', 'mobile-android'),
+    completionId: parsePairingCompletionId('completion-second-mobile'),
+    oneTimeLink: secondChallenge.oneTimeLink,
+    mobileHandshake: secondHandshake,
+  })
+  const secondPairing = await transport.confirmPairing({
+    authentication: desktop(),
+    pendingPairingId: secondPending.pendingPairingId,
+  })
+  const twoPhones = await transport.listPersonalPairings(desktop())
+  console.log(`DEVICES active=${String(twoPhones.length)} names=${twoPhones.map(pairing => pairing.device.name).join(',')} platforms=${twoPhones.map(pairing => pairing.device.platform).join(',')} principalsDistinct=${String(twoPhones[0]?.devicePrincipal.id !== twoPhones[1]?.devicePrincipal.id)}`)
+  const firstPairing = active[0]
+  if (firstPairing === undefined) throw new Error('confirmed Personal Pairing is missing')
+  await transport.revokePersonalPairing({ authentication: desktop(), pairingId: firstPairing.id })
+  const remaining = await transport.listPersonalPairings(desktop())
+  console.log(`REVOKE remaining=${String(remaining.length)} name=${remaining[0]?.device.name} kept=${String(remaining[0]?.id === secondPairing.id)}`)
+
   const reused = await transport.createChallenge({
     authentication: desktop(),
     rendezvousId: parsePairingRendezvousId('rendezvous-reuse'),
@@ -124,7 +148,6 @@ export async function apply(ctx: Context): Promise<void> {
     authentication: mobile(),
     completionId: parsePairingCompletionId('completion-reuse-first'),
     oneTimeLink: reused.oneTimeLink,
-    device: { name: 'Alice phone', platform: 'ios' },
     mobileHandshake: reusedHandshake,
   })
   let singleUse = 'unexpected'
@@ -133,7 +156,6 @@ export async function apply(ctx: Context): Promise<void> {
       authentication: mobile(),
       completionId: parsePairingCompletionId('completion-reuse-second'),
       oneTimeLink: reused.oneTimeLink,
-      device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: reusedHandshake,
     })
   } catch (error) {
@@ -153,7 +175,6 @@ export async function apply(ctx: Context): Promise<void> {
     authentication: mobile(),
     completionId: parsePairingCompletionId('completion-live'),
     oneTimeLink: expiring.oneTimeLink,
-    device: { name: 'Alice phone', platform: 'ios' },
     mobileHandshake: liveHandshake,
   })
   if (stillLive.device.platform !== 'ios') throw new Error('live completion is not the submitted Mobile device')
@@ -173,7 +194,6 @@ export async function apply(ctx: Context): Promise<void> {
       authentication: mobile(),
       completionId: parsePairingCompletionId('completion-expired'),
       oneTimeLink: expired.oneTimeLink,
-      device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: expiredHandshake,
     })
   } catch (error) {

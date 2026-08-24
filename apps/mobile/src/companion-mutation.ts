@@ -15,7 +15,16 @@ export type CompanionMutationName =
   | 'approval'
   | 'question'
   | 'attachment'
+  | 'history'
   | 'other-mutation'
+
+/** Dynamic authority owned by one physical Companion connection generation. */
+export interface CompanionMutationPermit {
+  /** @returns whether the physical connection generation still owns the active decoder. */
+  isCurrent(): boolean
+  /** Reject unless this generation still owns synchronized foreground mutation authority. */
+  requireCurrent(): void
+}
 
 /**
  * Whether the process may submit a Companion mutation.

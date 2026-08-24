@@ -48,7 +48,7 @@ export function companionAttachmentReasonFromHttpStatus(status: number): Compani
  * Other HTTP statuses and transport failures become `transfer-interrupted`.
  * Product Session submit wiring remains the `submit` callback on {@link receiveCompanionAttachment}.
  * @param offer - decoded Companion control message from Mobile.
- * @param input - consume origin, pairing scope sent as `x-gestalt-pairing-id`, and optional fetch/headers.
+ * @param input - consume origin, pairing selector, and current-Installation authorization headers.
  * @returns the downloaded ciphertext bytes.
  */
 export async function downloadCompanionAttachment(
@@ -63,7 +63,7 @@ export async function downloadCompanionAttachment(
   const fetchImpl = input.fetch ?? fetch
   const headers = new Headers(input.headers)
   headers.set('content-type', 'application/json')
-  headers.set('x-gestalt-pairing-id', input.pairingId)
+  headers.set('x-gestalt-pairing-selector', input.pairingId)
   let response: Response
   try {
     response = await fetchImpl(`${input.origin}/v1/remote-attachments/consume`, {
@@ -90,14 +90,14 @@ export async function downloadCompanionAttachment(
  * a hash mismatch never reaches the decryption key. A post-hash AES-GCM failure
  * reuses `hash-mismatch` as the authentication-failure reason.
  * @param offer - decoded Companion control message from Mobile.
- * @param input - pairing scope, pairing key material, blob download, clock, and Session submit.
+ * @param input - pairing scope, attachment key, blob download, clock, and Session submit.
  * @returns the submitted attachment values.
  */
 export async function receiveCompanionAttachment(
   offer: CompanionOfferAttachmentOperation,
   input: {
     pairingId: PersonalPairingId
-    pairingKey: Uint8Array
+    attachmentKey: Uint8Array
     now: number
     download: (offer: CompanionOfferAttachmentOperation, pairingId: PersonalPairingId) => Promise<Uint8Array>
     submit: (attachment: { fileName: string; plaintext: Uint8Array }) => Promise<void> | void
@@ -123,7 +123,7 @@ export async function receiveCompanionAttachment(
     throw new CompanionAttachmentReceiveError('hash-mismatch', 'Companion attachment ciphertext hash does not match the offer')
   }
   // oxlint-disable-next-line typescript/no-unsafe-assignment -- tsc resolves CryptoKey via @types/node; oxlint's program misses that global
-  const key = await deriveCompanionAttachmentKey(input.pairingKey)
+  const key = await deriveCompanionAttachmentKey(input.attachmentKey)
   const plaintext = await openCompanionAttachment(key, ciphertext).catch(() => {
     // AES-GCM authentication failure is the only remaining failure after the hash check.
     throw new CompanionAttachmentReceiveError('hash-mismatch', 'Companion attachment did not authenticate')

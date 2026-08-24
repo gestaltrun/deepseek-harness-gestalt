@@ -27,6 +27,8 @@ import AccountService, {
   type AccountSessionView,
   type InstallationKind,
   type InstallationId,
+  type InstallationLoginIdentity,
+  type InstallationPresentation,
   type LoginAttemptId,
   type LoginAttemptView,
   type LoginPollResult,
@@ -37,8 +39,17 @@ import AccountService, {
   type SelectedPlatformEnvironment,
 } from '@deepseek-ai/dsh-platform-account'
 
-export { loadPlatformEnvironment, selectPlatformEnvironment, validatePlatformEnvironmentPair } from '@deepseek-ai/dsh-platform-account'
-export type { PlatformEnvironmentIdentity, PlatformEnvironmentPair } from '@deepseek-ai/dsh-platform-account'
+export {
+  loadOperatedPlatformEnvironment,
+  loadPlatformEnvironment,
+  selectPlatformEnvironment,
+  validatePlatformEnvironmentPair,
+} from '@deepseek-ai/dsh-platform-account'
+export type {
+  OperatedPlatformEnvironmentInput,
+  PlatformEnvironmentIdentity,
+  PlatformEnvironmentPair,
+} from '@deepseek-ai/dsh-platform-account'
 
 /** Fixed five-minute Login Attempt lifetime. */
 export const LOGIN_ATTEMPT_TTL_MS = 5 * 60 * 1000
@@ -166,6 +177,8 @@ export interface LoginAttemptRecord {
   installationId: InstallationId
   /** Desktop or Mobile installation class. */
   installationKind: InstallationKind
+  /** Device-owned presentation committed with this attempt. */
+  presentation?: InstallationPresentation
   /** Installation P-256 public key. */
   publicKey: JsonWebKey
   /** Random OAuth state bound to the attempt. */
@@ -198,6 +211,8 @@ export interface SessionRecord {
   installationId: InstallationId
   /** Desktop or Mobile installation class. */
   installationKind: InstallationKind
+  /** Device-owned presentation present on every Installation session. */
+  presentation?: InstallationPresentation
   /** Installation P-256 public key. */
   publicKey: JsonWebKey
   /** Monotonic refresh-token generation. */
@@ -250,11 +265,11 @@ export interface AccountBackend {
   countActiveInstallations(accountId: PlatformAccountId, kind: InstallationKind): Promise<number>
   /** Read the Account bound to one GitHub subject inside an identity namespace. */
   findAccountByIdentity(identityNamespace: string, providerSubject: number): Promise<AccountRecord | undefined>
-  /** Read the live session bound to one installation, when present. */
-  findActiveSessionByInstallation(
+  /** Report whether one installation already owns a live session without decoding its obsolete payload. */
+  hasActiveSessionByInstallation(
     identityNamespace: string,
     installationId: InstallationId,
-  ): Promise<SessionRecord | undefined>
+  ): Promise<boolean>
 }
 
 /** Shared invalidation channel used by every Platform Instance. */
@@ -348,6 +363,7 @@ export class MemoryAccountBackend implements AccountBackend {
       accountId,
       installationId: attempt.installationId,
       installationKind: attempt.installationKind,
+      ...(attempt.presentation === undefined ? {} : { presentation: structuredClone(attempt.presentation) }),
       publicKey: structuredClone(attempt.publicKey),
       revision: 1,
       active: true,
@@ -427,15 +443,14 @@ export class MemoryAccountBackend implements AccountBackend {
     return Promise.resolve(accountId === undefined ? undefined : structuredClone(this.accounts.get(accountId)))
   }
 
-  findActiveSessionByInstallation(
+  hasActiveSessionByInstallation(
     identityNamespace: string,
     installationId: InstallationId,
-  ): Promise<SessionRecord | undefined> {
+  ): Promise<boolean> {
     const sessionId = this.installationIndex.get(`${identityNamespace}:${installationId}`)
-    if (sessionId === undefined) return Promise.resolve(undefined)
+    if (sessionId === undefined) return Promise.resolve(false)
     const session = this.sessions.get(sessionId)
-    if (session?.active !== true) return Promise.resolve(undefined)
-    return Promise.resolve(this.cloneSession(session))
+    return Promise.resolve(session?.active === true)
   }
 
   private revoke(sessionId: AccountSessionId): void {
@@ -582,11 +597,7 @@ export class PlatformAccount extends AccountService {
     ctx.effect(() => async () => { await this.dispose() }, 'platform-account: invalidation subscription')
   }
 
-  async beginLogin(input: {
-    installationId: InstallationId
-    installationKind: InstallationKind
-    publicKey: JsonWebKey
-  }): Promise<LoginAttemptView> {
+  async beginLogin(input: InstallationLoginIdentity & { publicKey: JsonWebKey }): Promise<LoginAttemptView> {
     this.assertCapacity()
     validateP256PublicKey(input.publicKey)
     const now = this.clock.now()
@@ -601,6 +612,7 @@ export class PlatformAccount extends AccountService {
       identityNamespace: this.environment.identityNamespace,
       installationId: input.installationId,
       installationKind: input.installationKind,
+      presentation: structuredClone(input.presentation),
       publicKey: structuredClone(input.publicKey),
       state,
       codeVerifier,
@@ -687,6 +699,7 @@ export class PlatformAccount extends AccountService {
       throw new AccountError('SESSION_EXPIRED', 'Account Session cannot issue a full access-token lifetime')
     }
     await this.verifyProof(session.publicKey, 'refresh', currentHash, input.proof)
+    await this.rejectLegacyMobileSession(session)
     const replacement = randomBytes(32).toString('base64url')
     const rotated = await this.backend.rotateRefresh(session.id, currentHash, hashAccountToken(replacement))
     if (rotated === undefined) throw new AccountError('SESSION_REVOKED', 'Account Session refresh token was already rotated')
@@ -697,6 +710,7 @@ export class PlatformAccount extends AccountService {
   async current(input: { accessToken: string; proof: AccountProof }): Promise<PlatformAccountView> {
     const { payload, session } = await this.authorizeAccess(input.accessToken)
     await this.verifyProof(session.publicKey, 'current', hashAccountToken(input.accessToken), input.proof)
+    await this.rejectLegacyMobileSession(session)
     return accountView(await this.requireAccount(payload.accountId))
   }
 
@@ -706,9 +720,14 @@ export class PlatformAccount extends AccountService {
   }): Promise<AuthenticatedInstallationView> {
     const { payload, session } = await this.authorizeAccess(input.accessToken)
     await this.verifyProof(session.publicKey, 'current', hashAccountToken(input.accessToken), input.proof)
+    await this.rejectLegacyMobileSession(session)
+    const presentation = structuredClone(session.presentation as InstallationPresentation)
+    const installation = session.installationKind === 'desktop'
+      ? { id: session.installationId, kind: 'desktop' as const, presentation: presentation as Extract<InstallationPresentation, { platform: 'macos' | 'windows' | 'linux' }> }
+      : { id: session.installationId, kind: 'mobile' as const, presentation: presentation as Extract<InstallationPresentation, { platform: 'ios' | 'android' }> }
     return {
       account: accountView(await this.requireAccount(payload.accountId)),
-      installation: { id: session.installationId, kind: session.installationKind },
+      installation,
     }
   }
 
@@ -827,6 +846,12 @@ export class PlatformAccount extends AccountService {
     if (await this.backend.revokeSession(sessionId)) await this.invalidation.publish(sessionId)
   }
 
+  private async rejectLegacyMobileSession(session: SessionRecord): Promise<void> {
+    if (session.presentation !== undefined) return
+    await this.revoke(session.id)
+    throw new AccountError('SESSION_REVOKED', 'Account Session has no Installation presentation')
+  }
+
   private async closeConnections(sessionId: AccountSessionId): Promise<void> {
     const connections = this.connections.get(sessionId)
     this.connections.delete(sessionId)
@@ -861,11 +886,11 @@ export class PlatformAccount extends AccountService {
   }
 
   private async assertInstallationQuota(attempt: LoginAttemptRecord): Promise<void> {
-    const existing = await this.backend.findActiveSessionByInstallation(
+    const existing = await this.backend.hasActiveSessionByInstallation(
       attempt.identityNamespace,
       attempt.installationId,
     )
-    if (existing !== undefined) return
+    if (existing) return
     const identity = attempt.identity
     if (identity === undefined) return
     const account = await this.backend.findAccountByIdentity(attempt.identityNamespace, identity.providerSubject)

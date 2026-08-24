@@ -15,12 +15,13 @@
 
 import { useState } from 'react'
 import { Button, IconEditOutline16, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PendingQuestion, PlanReview, QuestionComposerProps } from './contract/slots.ts'
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PendingQuestion, PlanReview } from './contract/slots.ts'
 import css from './PlanReviewPanel.module.css'
 
 /** The panel's own props: the question domain face, the narrowed review, and the locale seat. */
 export type PlanReviewPanelProps =
-  { pending: PendingQuestion; review: PlanReview } & Pick<QuestionComposerProps, 't'>
+  { pending: PendingQuestion; review: PlanReview; t: TranslateNS<'question'> }
 
 /**
  * Optional-prop spread for a decision button's tooltip: `title` is optional on

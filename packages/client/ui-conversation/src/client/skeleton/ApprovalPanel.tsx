@@ -14,7 +14,8 @@
 
 import { useMemo, useState } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { RunningToolCall } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ConversationSnapshot, PendingWait, RunningToolCall } from '@deepseek-ai/dsh-client-runtime/client'
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { PendingApproval, type ApprovalComposerProps } from '../contract/slots.ts'
 import { rootToolCall } from '../chat/tool-node-reader.ts'
 import css from './ApprovalPanel.module.css'
@@ -32,27 +33,67 @@ export function commandOf(call: RunningToolCall | undefined): string | undefined
 }
 
 /**
+ * Resolve the optional paired shell command from an authoritative Session projection.
+ * @param snapshot - authoritative Session conversation projection.
+ * @param approval - pending Approval whose command may still be running.
+ * @returns paired shell command when the projection contains one.
+ */
+export function approvalCommandOf(
+  snapshot: ConversationSnapshot,
+  approval: PendingApproval,
+): string | undefined {
+  if (approval.callId === undefined) return undefined
+  const root = rootToolCall(snapshot, approval.callId)
+  if (root === undefined) return undefined
+  return root.callId === approval.callId && !('kind' in root) ? commandOf(root) : undefined
+}
+
+/** Owner-defined Approval presentation props shared by Desktop and direct Web compositions. */
+export interface ApprovalPresentationProps {
+  wait: PendingWait<'approval'>
+  command?: string | undefined
+  t: TranslateNS<'conversation'>
+  disabled?: boolean | undefined
+}
+
+/**
+ * Render one Approval without constructing a Client Runtime standard kit.
+ * @param props - pending Approval, optional command, translator, and mutation state.
+ * @returns owner-defined Approval presentation.
+ */
+export function ApprovalPresentation({
+  wait, command, t, disabled = false,
+}: ApprovalPresentationProps) {
+  const approval = useMemo(() => new PendingApproval(wait), [wait])
+  return (
+    <ApprovalFlow
+      key={approval.key}
+      pending={approval}
+      t={t}
+      disabled={disabled}
+      {...command === undefined ? {} : { command }}
+    />
+  )
+}
+
+/**
  * Composer takeover boundary: mints the domain face on the carrier's stable
  * identity and remounts the flow per request key, so the one-shot answered
  * latch never leaks to the next pending approval.
  * @param props - the selector-matched pending approval carrier plus the framework standard kit.
  * @returns The approval prompt for this request.
  */
-export function ApprovalPanel(props: ApprovalComposerProps) {
+export function ApprovalPanel(props: ApprovalComposerProps & { disabled?: boolean | undefined }) {
   const approval = useMemo(() => new PendingApproval(props.matched), [props.matched])
-  const command = props.useSession((snapshot) => {
-    if (approval.callId === undefined) return undefined
-    const root = rootToolCall(snapshot, approval.callId)
-    if (root === undefined) return undefined
-    return root.callId === approval.callId && !('kind' in root) ? commandOf(root) : undefined
-  })
-  return <ApprovalFlow key={approval.key} pending={approval} t={props.t} {...command === undefined ? {} : { command }} />
+  const command = props.useSession(snapshot => approvalCommandOf(snapshot, approval))
+  return <ApprovalPresentation wait={props.matched} command={command} t={props.t} disabled={props.disabled} />
 }
 
-function ApprovalFlow({ pending, command, t }: {
+function ApprovalFlow({ pending, command, t, disabled }: {
   pending: PendingApproval
   command?: string
   t: ApprovalComposerProps['t']
+  disabled: boolean
 }) {
   // Local one-shot latch: the panel leaves only when the resolved frame
   // lands; until then the buttons must not re-fire. An answer failure
@@ -74,10 +115,10 @@ function ApprovalFlow({ pending, command, t }: {
           {command !== undefined && <div className={css.command}>{command}</div>}
         </div>
         <div className={css.actionRow}>
-          <Button variant="outline" className={css.reject} disabled={answered} onClick={() => { answer('rejected') }}>
+          <Button variant="outline" className={css.reject} disabled={answered || disabled} onClick={() => { answer('rejected') }}>
             {t('approval.reject')}
           </Button>
-          <Button variant="primary" disabled={answered} onClick={() => { answer('allowed-once') }}>
+          <Button variant="primary" disabled={answered || disabled} onClick={() => { answer('allowed-once') }}>
             {t('approval.allowOnce')}
           </Button>
         </div>

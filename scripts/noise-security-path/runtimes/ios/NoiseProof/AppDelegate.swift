@@ -5,8 +5,11 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
     private let allowedPaths: Set<String> = [
         "/web/index.html",
         "/web/proof.js",
+        "/web/shipped-proof.js",
         "/pkg/dsh_noise_security_path_proof.js",
         "/pkg/dsh_noise_security_path_proof_bg.wasm",
+        "/pkg/dsh_noise_channel.js",
+        "/pkg/dsh_noise_channel_bg.wasm",
     ]
 
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {

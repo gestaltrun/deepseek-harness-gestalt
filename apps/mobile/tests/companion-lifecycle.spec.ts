@@ -186,6 +186,92 @@ describe('Companion foreground lifecycle', () => {
     expect(companionMayMutate(runtime.getState())).toBe(true)
   })
 
+  it('retains a recognizable connection failure until a fresh attachment opens', () => {
+    const runtime = new CompanionForegroundRuntime()
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const resync = runtime.bindValidatedDesktopResync()
+    if (resync === undefined) throw new Error('expected Desktop resync receiver')
+    resync.acceptValidatedDesktopResync(validatedResync)
+
+    runtime.reportConnectionFailure({
+      code: 'COMPANION_SECURITY_CAPABILITY_MISSING',
+      message: 'Desktop update required',
+      updateEndpoint: 'desktop',
+    })
+
+    expect(runtime.getState()).toEqual({
+      foreground: true,
+      socketOpen: false,
+      synchronized: false,
+      connectionFailure: {
+        code: 'COMPANION_SECURITY_CAPABILITY_MISSING',
+        message: 'Desktop update required',
+        updateEndpoint: 'desktop',
+      },
+    })
+    expect(companionMayMutate(runtime.getState())).toBe(false)
+
+    runtime.markConnectionOpen()
+    expect(runtime.getState()).toEqual({
+      foreground: true,
+      socketOpen: true,
+      synchronized: false,
+    })
+  })
+
+  it('replaces an authenticated peer without closing or reopening its Relay socket', () => {
+    const runtime = new CompanionForegroundRuntime()
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const first = runtime.bindValidatedDesktopResync()
+    if (first === undefined) throw new Error('expected first peer resync receiver')
+    first.acceptValidatedDesktopResync(validatedResync)
+
+    runtime.invalidateAuthenticatedPeer()
+    expect(runtime.getState()).toMatchObject({ socketOpen: true, synchronized: false })
+    first.acceptValidatedDesktopResync(validatedResync)
+    expect(companionMayMutate(runtime.getState())).toBe(false)
+
+    runtime.markAuthenticatedPeer()
+    const replacement = runtime.bindValidatedDesktopResync()
+    if (replacement === undefined) throw new Error('expected same-socket replacement resync receiver')
+    replacement.acceptValidatedDesktopResync(validatedResync)
+    expect(runtime.getState()).toMatchObject({ socketOpen: true, synchronized: true })
+    expect(companionMayMutate(runtime.getState())).toBe(true)
+  })
+
+  it('invalidates a mutation permit across backgrounding and physical replacement', async () => {
+    const runtime = new CompanionForegroundRuntime()
+    runtime.configure(grant)
+    expect(runtime.bindCompanionMutationPermit('attachment')).toBeUndefined()
+    runtime.markConnectionOpen()
+    const permit = runtime.bindCompanionMutationPermit('attachment')
+    const resync = runtime.bindValidatedDesktopResync()
+    if (permit === undefined || resync === undefined) throw new Error('expected current generation authority')
+    expect(() => { permit.requireCurrent() }).toThrow(/foreground synchronization/)
+    resync.acceptValidatedDesktopResync(validatedResync)
+    expect(() => { permit.requireCurrent() }).not.toThrow()
+
+    await runtime.setForeground(false)
+    expect(permit.isCurrent()).toBe(false)
+    expect(() => { permit.requireCurrent() }).toThrow(/connection generation/)
+
+    await runtime.setForeground(true)
+    runtime.markConnectionOpen()
+    const replacement = runtime.bindValidatedDesktopResync()
+    if (replacement === undefined) throw new Error('expected replacement generation authority')
+    replacement.acceptValidatedDesktopResync(validatedResync)
+    expect(() => { permit.requireCurrent() }).toThrow(/connection generation/)
+
+    const replacementPermit = runtime.bindCompanionMutationPermit('attachment')
+    if (replacementPermit === undefined) throw new Error('expected replacement mutation permit')
+    expect(() => { replacementPermit.requireCurrent() }).not.toThrow()
+    runtime.configure({ ...grant, revision: 2 })
+    expect(replacementPermit.isCurrent()).toBe(false)
+    expect(() => { replacementPermit.requireCurrent() }).toThrow(/connection generation/)
+  })
+
   it('removes a Capacitor listener that resolves after dispose starts', async () => {
     let resolveHandle: ((handle: { remove: () => Promise<void> }) => void) | undefined
     const remove = vi.fn(async () => {})

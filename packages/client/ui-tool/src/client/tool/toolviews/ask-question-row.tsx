@@ -9,7 +9,7 @@
 import { IconQuestionOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Context } from '@deepseek-ai/cordis'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ToolCallViewProps } from '../../contract/slots.ts'
+import type { ToolPresentationViewProps } from '../../contract/slots.ts'
 import { toolRowModel } from '../models/tool-call-model.ts'
 import { ToolRow } from '../components/ToolRow.tsx'
 import { CONVERSATION_NS as NS } from '../../locale.ts'
@@ -40,7 +40,7 @@ function answeredSummary(text: string, t: AskQuestionRowProps['t']): string | nu
 }
 
 /** Full row props: the toolview runtime share plus the standard locale seat. */
-type AskQuestionRowProps = ToolCallViewProps & PropsLocale<'conversation'>
+type AskQuestionRowProps = ToolPresentationViewProps & PropsLocale<'conversation'>
 
 /** One-line question-interaction row (the whole row toggles the call's
  *  Input/Output sections, ToolRow's unified expand). */

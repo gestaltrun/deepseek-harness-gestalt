@@ -1,13 +1,32 @@
 /** Foreground Relay lifecycle and Desktop-authoritative synchronization. */
 
-import { registerPlugin } from '@capacitor/core'
+import { App } from '@capacitor/app'
 import type { RelayCredentialGrant } from '@deepseek-ai/dsh-remote-access'
-import type { CompanionConnectionState } from './companion-mutation.ts'
+import type { RelayErrorCode, RemoteProtocolErrorCode } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  requireCompanionMutation,
+  type CompanionConnectionState,
+  type CompanionMutationName,
+  type CompanionMutationPermit,
+} from './companion-mutation.ts'
 
 export {
   companionMayMutate,
   type CompanionConnectionState,
 } from './companion-mutation.ts'
+
+/** Stable connection failure projected by the shipped Mobile surface while retrying fail closed. */
+export interface CompanionConnectionFailure {
+  readonly code: RelayErrorCode | RemoteProtocolErrorCode
+  readonly message: string
+  readonly updateEndpoint?: 'mobile' | 'desktop'
+  readonly retryAfterMs?: number
+}
+
+/** Foreground authority plus the latest recognizable connection failure. */
+export interface CompanionForegroundState extends CompanionConnectionState {
+  readonly connectionFailure?: CompanionConnectionFailure
+}
 
 /** Authenticated, decoded Desktop resynchronization message supplied by the Encrypted Companion decoder. */
 interface ValidatedDesktopResync {
@@ -29,13 +48,6 @@ export interface CompanionRelayLifecycle {
   start(): Promise<void>
   stop(): Promise<void>
   isConnected(): boolean
-}
-
-interface CapacitorAppPlugin {
-  addListener(
-    eventName: 'appStateChange',
-    listenerFunc: (state: { isActive: boolean }) => void,
-  ): Promise<{ remove: () => Promise<void> }>
 }
 
 let installed: CompanionForegroundRuntime | undefined
@@ -78,7 +90,7 @@ function markCompanionSynchronized(state: CompanionConnectionState): CompanionCo
 
 /** Process-owned foreground, socket, and synchronization state. */
 export class CompanionForegroundRuntime {
-  private state: CompanionConnectionState
+  private state: CompanionForegroundState
   private granted = false
   private transition: Promise<void> = Promise.resolve()
   private connectionGeneration = 0
@@ -93,7 +105,7 @@ export class CompanionForegroundRuntime {
   }
 
   /** @returns the current process visibility and synchronization snapshot. */
-  getState(): CompanionConnectionState {
+  getState(): CompanionForegroundState {
     return this.state
   }
 
@@ -108,18 +120,19 @@ export class CompanionForegroundRuntime {
   }
 
   /**
-   * Set or drop pairing-delivered Relay authority. Clearing the grant is
-   * synchronous so a later visibility `start()` cannot attach.
+   * Set or drop pairing-delivered Relay authority. Every authority change
+   * synchronously invalidates the current connection generation; clearing the
+   * grant also prevents a later visibility `start()` from attaching.
    * @param grant - Mobile-specific authority, or `undefined` to drop it.
    */
   configure(grant?: RelayCredentialGrant): void {
     this.granted = grant !== undefined
     this.relay?.configure?.(grant)
-    if (grant === undefined) {
-      this.activeConnectionGeneration = undefined
-      this.state = { ...this.state, socketOpen: false, synchronized: false }
-      this.publish()
+    this.activeConnectionGeneration = undefined
+    this.state = {
+      foreground: this.state.foreground, socketOpen: false, synchronized: false,
     }
+    this.publish()
   }
 
   /**
@@ -150,7 +163,27 @@ export class CompanionForegroundRuntime {
     if (!this.granted || !this.state.foreground) return
     this.connectionGeneration += 1
     this.activeConnectionGeneration = this.connectionGeneration
-    this.state = markCompanionSocketOpen(this.state)
+    this.state = markCompanionSocketOpen({
+      foreground: this.state.foreground,
+      socketOpen: this.state.socketOpen,
+      synchronized: this.state.synchronized,
+    })
+    this.publish()
+  }
+
+  /** Invalidate authenticated peer work while retaining the current foreground Relay socket. */
+  invalidateAuthenticatedPeer(): void {
+    this.activeConnectionGeneration = undefined
+    this.state = { ...this.state, synchronized: false }
+    this.publish()
+  }
+
+  /** Establish a fresh generation after IK authenticates a replacement peer on the same Relay socket. */
+  markAuthenticatedPeer(): void {
+    if (!this.granted || !this.state.foreground || !this.state.socketOpen) return
+    this.connectionGeneration += 1
+    this.activeConnectionGeneration = this.connectionGeneration
+    this.state = { ...this.state, synchronized: false }
     this.publish()
   }
 
@@ -173,16 +206,60 @@ export class CompanionForegroundRuntime {
     }
   }
 
+  /**
+   * Bind dynamic mutation authority to the current physical connection generation.
+   * Long-running controllers must re-check it after every external await.
+   * @param mutation - operation named in a foreground-synchronization refusal.
+   * @returns generation permit, or `undefined` while no physical connection is active.
+   */
+  bindCompanionMutationPermit(mutation: CompanionMutationName): CompanionMutationPermit | undefined {
+    const generation = this.activeConnectionGeneration
+    if (generation === undefined || !this.state.socketOpen) return undefined
+    const isCurrent = (): boolean => this.granted
+      && this.activeConnectionGeneration === generation
+      && this.state.foreground
+      && this.state.socketOpen
+    return {
+      isCurrent,
+      requireCurrent: () => {
+        if (!isCurrent()) {
+          throw new Error(`Companion ${mutation} connection generation is no longer current`)
+        }
+        requireCompanionMutation(this.state, mutation)
+      },
+    }
+  }
+
   /** Drop pairing-delivered authority, reset connection state, and stop Relay. */
   async releasePairing(): Promise<void> {
     this.configure(undefined)
-    await this.enqueue(() => this.stopOwned())
+    const pendingTransition = this.transition
+    const [stopped] = await Promise.allSettled([
+      this.relay?.stop() ?? Promise.resolve(),
+      pendingTransition,
+    ])
+    if (stopped.status === 'rejected') throw stopped.reason
   }
 
   /** Reset socket and synchronization state after connection loss. */
   forgetConnection(): void {
     this.activeConnectionGeneration = undefined
     this.state = { ...this.state, socketOpen: false, synchronized: false }
+    this.publish()
+  }
+
+  /**
+   * Fail closed and retain one stable connection error until a fresh attachment is acknowledged.
+   * @param failure - recognizable Relay or Companion protocol failure.
+   */
+  reportConnectionFailure(failure: CompanionConnectionFailure): void {
+    this.activeConnectionGeneration = undefined
+    this.state = {
+      ...this.state,
+      socketOpen: false,
+      synchronized: false,
+      connectionFailure: { ...failure },
+    }
     this.publish()
   }
 
@@ -283,6 +360,5 @@ export function bindCompanionProcessVisibility(
 function listenCapacitorAppState(
   listener: (active: boolean) => void,
 ): Promise<{ remove: () => Promise<void> }> {
-  const App = registerPlugin<CapacitorAppPlugin>('App')
   return App.addListener('appStateChange', (state) => { listener(state.isActive) })
 }

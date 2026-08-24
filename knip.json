@@ -6,11 +6,15 @@
   "ignoreBinaries": [
     "bwrap",
     "icacls",
+    "initdb",
     "jar",
     "javac",
     "keytool",
     "musl-gcc",
+    "openssl",
+    "postgres",
     "python3",
+    "postgres",
     "redis-server",
     "sandbox-exec",
     "tar",
@@ -87,11 +91,6 @@
         "two-instance-relay/start.ts",
         "personal-pairing/start.ts",
         "personal-pairing/src/provider.ts",
-        "local-companion-platform/start.ts",
-        "local-companion-platform/src/listen.ts",
-        "local-companion-platform/tests/fixtures/listen-driver.ts",
-        "local-companion-platform/tests/fixtures/desktop-challenge.ts",
-        "local-companion-platform/tests/fixtures/desktop-confirm.ts",
         "*/tests/**/*.e2e.ts",
         "*/tests/**/*.snapshot.ts"
       ],
@@ -735,9 +734,29 @@
         "tests/**/*.ts"
       ]
     },
+    "apps/platform": {
+      "entry": [
+        "tests/**/*.spec.ts",
+        "tests/fixtures/oss-metadata-fetch.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
     "apps/mobile": {
       "entry": [
+        "tests/**/*.spec.ts",
         "tests/**/*.snapshot.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "tests/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "@capacitor/ios",
+        "@deepseek-ai/dsh-client-ui-primitives"
       ]
     },
     "packages/client/modules": {

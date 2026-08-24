@@ -48,7 +48,7 @@ interface RetryCountdown {
   seconds: number
 }
 
-function ModelRetryItem({ node, active, t }: {
+export function ModelRetryItem({ node, active, t }: {
   node: ModelRetryNode
   active: boolean
   t: ChatViewSlotProps['t']
@@ -115,7 +115,7 @@ function ModelRetryItem({ node, active, t }: {
 }
 
 /** Persistent, turn-positioned feedback for a terminal failure. */
-function TurnErrorItem({ node, t }: {
+export function TurnErrorItem({ node, t }: {
   node: TurnErrorNode
   t: ChatViewSlotProps['t']
 }) {
@@ -132,7 +132,7 @@ function TurnErrorItem({ node, t }: {
 }
 
 /** Persistent, turn-positioned notice for a turn ended at the output-token cap. */
-function TurnMaxTokensItem({ t }: {
+export function TurnMaxTokensItem({ t }: {
   t: ChatViewSlotProps['t']
 }) {
   return (
@@ -215,7 +215,7 @@ function projectUserText(text: string, sessionLabels: readonly string[]): ReactN
 }
 
 /** Right-aligned bubble shared by user and steering rows. */
-function UserStyleBubble({
+export function UserStyleBubble({
   content, renderMessageImages, actions, pending = false, referenceLabels = [], t,
   annotations = [], addImagePin, updateImagePin,
 }: {

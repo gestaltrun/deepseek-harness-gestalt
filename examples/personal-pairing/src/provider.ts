@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   DevelopmentKeylessPairingHandshakeProvider,
+  MemoryPersonalPairingAuthorityStore,
   PersonalPairingProvider,
   type PairingHandshakeProvider,
 } from '@deepseek-ai/dsh-remote-access'
@@ -21,6 +22,7 @@ export const keylessClock = { now: Date.parse('2026-08-18T10:00:00.000Z') }
 export function apply(ctx: Context): void {
   const handshake = countedHandshake(new DevelopmentKeylessPairingHandshakeProvider())
   let id = 0
+  let entropy = 0
   new PersonalPairingProvider(ctx, {
     account: {
       async currentInstallation({ accessToken }) {
@@ -35,13 +37,23 @@ export function apply(ctx: Context): void {
             githubLogin: accountId,
             avatarUrl: 'https://avatars.example/account',
           },
-          installation: { id: parseInstallationId(installationId), kind },
+          installation: kind === 'mobile'
+            ? {
+              id: parseInstallationId(installationId),
+              kind,
+              presentation: {
+                name: `${installationId} installation`,
+                platform: installationId.includes('android') ? 'android' : 'ios',
+              },
+            }
+            : { id: parseInstallationId(installationId), kind: 'desktop' as const, presentation: { name: 'Test Desktop', platform: 'linux' as const } },
         }
       },
     },
     handshake,
+    authority: new MemoryPersonalPairingAuthorityStore(),
     clock: { now: () => keylessClock.now },
-    randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index),
+    randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index + entropy++),
     randomId: kind => `${kind}-${String(++id)}`,
     pairingLinkOrigin: 'https://platform.example.com/pair',
   })

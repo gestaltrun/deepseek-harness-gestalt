@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import {
-  KeylessResourceOwner,
+  ScenarioResourceOwner,
   validateBundledConfig,
   withResources,
   type Config,
@@ -9,6 +9,7 @@ import {
 
 const CONFIG: Config = {
   attachTimeoutMs: 1_000,
+  maxPendingChallenges: 16,
   capacityRetryAfterMs: 100,
   deliveryAckTimeoutMs: 500,
   directoryTtlMs: 2_000,
@@ -36,7 +37,7 @@ describe('two-instance Relay composition ownership', () => {
 
   it('closes every staged owner in reverse order and aggregates cleanup failures', async () => {
     const calls: string[] = []
-    const owner = new KeylessResourceOwner()
+    const owner = new ScenarioResourceOwner()
     owner.add({ close: vi.fn(async () => { calls.push('first'); throw new Error('first cleanup failed') }) })
     owner.add({ close: vi.fn(async () => { calls.push('second'); throw new Error('second cleanup failed') }) })
 

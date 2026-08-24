@@ -10,7 +10,7 @@ import type {
   AuthenticatedInstallationView,
   AccountSessionView,
   AccountSessionId,
-  InstallationId,
+  InstallationLoginIdentity,
   LoginAttemptId,
   LoginAttemptView,
   LoginPollResult,
@@ -45,15 +45,11 @@ export abstract class AccountService extends Service {
 
   /**
    * Start one GitHub Authorization Code attempt for an installation key.
-   * @param input - installation identity, kind, and public P-256 JWK.
+   * @param input - installation identity, Mobile presentation when applicable, and public P-256 JWK.
    * @returns the system-browser URL and signed polling capability.
    * @throws AccountError `PLATFORM_CAPACITY` with `retryAfter` when the shared watermark is shedding.
    */
-  abstract beginLogin(input: {
-    installationId: InstallationId
-    installationKind: 'desktop' | 'mobile'
-    publicKey: JsonWebKey
-  }): Promise<LoginAttemptView>
+  abstract beginLogin(input: InstallationLoginIdentity & { publicKey: JsonWebKey }): Promise<LoginAttemptView>
 
   /**
    * Settle the fixed HTTPS GitHub callback; provider credentials never leave the provider.
@@ -92,7 +88,7 @@ export abstract class AccountService extends Service {
   /**
    * Authenticate the Account and Installation identity bound to one current session.
    * @param input - access token and proof from the session's Installation key.
-   * @returns provider-owned Account id, Installation id, and Installation kind.
+   * @returns provider-owned Account and Installation identity, including authenticated Mobile presentation.
    */
   abstract currentInstallation(input: {
     accessToken: string

@@ -23,6 +23,8 @@ describe('Desktop overlay isolation', () => {
     expect(desktop).toMatch(/id: browser-runtime-electron-http/)
     expect(desktop).toMatch(/@deepseek-ai\/dsh-browser-runtime-tandem/)
     expect(desktop).toMatch(/DSH_ELECTRON_BROWSER_ORIGIN/)
+    expect(desktop).toMatch(/id: session-query-sqlite[\s\S]*openAt: first-search/)
+    expect(desktop).toMatch(/id: session-query-sqlite[\s\S]*dshHomePath\('session-search\.sqlite'\)/)
     expect(desktop).toMatch(/sidecar: false/)
     expect(desktop).toMatch(/id: browser-runtime-deterministic[\s\S]*disabled: !!js process\.env\.DSH_ELECTRON_BROWSER_ORIGIN/)
     expect(desktop).toMatch(/id: browser-runtime-electron-http[\s\S]*disabled: !!js process\.env\.DSH_ELECTRON_BROWSER_ORIGIN == null/)
@@ -69,6 +71,8 @@ describe('Desktop overlay isolation', () => {
       expect(desktop).toMatch(/@deepseek-ai\/dsh-browser-runtime-tandem/)
       expect(desktop).toMatch(/sidecar: false/)
       expect(desktop).toMatch(/disabled: true/)
+      expect(desktop).toMatch(/id: session-query-sqlite[\s\S]*openAt: first-search/)
+      expect(desktop).toContain("path: !!js dshHomePath('session-search.sqlite')")
       expect(desktop).toMatch(/openBrowser: false/)
       expect(web).toMatch(/openBrowser: !!js ctx\.webStartup\.openBrowser/)
     } finally {

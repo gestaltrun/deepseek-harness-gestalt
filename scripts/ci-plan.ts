@@ -154,7 +154,10 @@ export function planCi(input: CiPlanInput): CiPlan {
     || input.readiness !== 'draft'
     || reasons.length > 0
   const lanes = exhaustive
-    ? EXHAUSTIVE_LANES.map(lane => ({ ...lane }))
+    ? EXHAUSTIVE_LANES.map(lane => ({
+      ...lane,
+      classification: input.event === 'merge_group' ? 'required' as const : lane.classification,
+    }))
     : impactedLanes(normalizedPaths ?? [], affectedPackages)
 
   const normalizedInput = {

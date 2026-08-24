@@ -199,10 +199,12 @@ describe('gate graph validation', () => {
   )
 
   it('partitions the complete native Windows inventory without losing or weakening gates', () => {
-    const complete = withPnpmEntrypoint(() => gatesForMode('ci-windows-complete'))
+    const complete = withEnv('DSH_WINDOWS_STATIC_PORTABLE_ONLY', undefined, () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-complete')))
     const core = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-core'))
     const coverage = withPnpmEntrypoint(() => gatesForMode('ci-coverage'))
-    const staticGates = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static'))
+    const staticGates = withEnv('DSH_WINDOWS_STATIC_PORTABLE_ONLY', undefined, () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static')))
 
     expect(complete.map(gate => gate.id)).toEqual([
       ...core.map(gate => gate.id),
@@ -228,7 +230,8 @@ describe('gate graph validation', () => {
   })
 
   it('omits Linux-owned resolver analysis only from the portable Windows failover inventory', () => {
-    const hosted = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static').map(gate => gate.id))
+    const hosted = withEnv('DSH_WINDOWS_STATIC_PORTABLE_ONLY', undefined, () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static').map(gate => gate.id)))
     const portable = withEnv('DSH_WINDOWS_STATIC_PORTABLE_ONLY', '1', () =>
       withPnpmEntrypoint(() => gatesForMode('ci-windows-native-static').map(gate => gate.id)))
 

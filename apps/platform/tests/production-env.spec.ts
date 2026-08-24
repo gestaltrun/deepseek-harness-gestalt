@@ -31,6 +31,13 @@ const recoveryScript = fileURLToPath(new URL('../scripts/platform-recover.sh', i
 const recoverySource = readFileSync(recoveryScript, 'utf8')
 const repoRoot = resolve(import.meta.dirname, '../../..')
 
+function bashPath(filePath: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'win32') return filePath
+  return filePath
+    .replaceAll('\\', '/')
+    .replace(/^([A-Za-z]):\//, (_match, drive: string) => `/${drive.toLowerCase()}/`)
+}
+
 function completeDeployEnv(): NodeJS.Dict<string> {
   return {
     PLATFORM_ORIGIN: 'https://platform.example.test',
@@ -207,7 +214,7 @@ function runRecoveryHarness(
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
-      RECOVERY_SCRIPT: recoveryScript,
+      RECOVERY_SCRIPT: bashPath(recoveryScript),
       RECOVERY_PHASE: phase,
       RECOVERY_FAILURE: failure,
       PLATFORM_ALIYUN_REGION: 'cn-hangzhou',
@@ -534,6 +541,12 @@ describe('operated Platform composition', () => {
 })
 
 describe('Platform release workflows', () => {
+  it('converts a native Windows path for Git Bash recovery harnesses', () => {
+    expect(bashPath(String.raw`D:\a\deepseek-harness\platform-recover.sh`, 'win32'))
+      .toBe('/d/a/deepseek-harness/platform-recover.sh')
+    expect(bashPath('/tmp/platform-recover.sh', 'darwin')).toBe('/tmp/platform-recover.sh')
+  })
+
   it('validates Environment production without applying ECS unless deploy is set', () => {
     const workflow = loadWorkflow('.github/workflows/platform-deploy.yml')
     expect(workflow.on).toMatchObject({

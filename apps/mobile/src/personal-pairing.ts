@@ -67,24 +67,6 @@ interface PreparedMobilePairingAttempt {
   pendingProjection?: PairingCompletionView
 }
 
-declare global {
-  interface Window {
-    /** Native shell hook returning the exact QR payload without text reconstruction. */
-    dshMobileScanPairingQr?: () => Promise<string>
-  }
-}
-
-/** QR scanner bridge supplied by the native Mobile shell. */
-export class NativeMobilePairingQrScanner implements MobilePairingQrScanner {
-  async scan(): Promise<string> {
-    const scan = window.dshMobileScanPairingQr
-    if (scan === undefined) throw new Error('Native Personal Pairing QR scanner is unavailable')
-    const payload = await scan()
-    if (payload === '') throw new TypeError('Personal Pairing QR payload must be non-empty')
-    return payload
-  }
-}
-
 /** Mobile controller construction inputs. */
 export interface MobilePairingControllerOptions {
   installation: Pick<PlatformAccountInstallation, 'authorizeCurrentInstallation' | 'getSnapshot'>

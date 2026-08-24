@@ -12,6 +12,8 @@ Mobile Companion has production-capable Account, pairing, Relay, attachment, Ses
 
 Product Desktop and Mobile compose only the operated HTTPS Platform identity, real GitHub Account flow, durable Platform providers, and the reviewed per-pairing encrypted channel. Test identities, memory providers, test certificates, keyless handshakes, fixed Relay attachment ids, and proof-only synchronization frames remain available only to bounded tests whose names and assertions cannot be cited as product acceptance.
 
+The operated identity, durable resource composition, and product-entry import gate are implemented by [Bind Companion products to one operated Platform identity](../../implemented/architecture/2026-08-22-operated-companion-platform-identity.md).
+
 Each Personal Pairing owns its Mobile and Desktop attachment identities, route credentials, application keys, and authenticated synchronization. Snow completes XKpsk3 pairing and IK reconnect with fresh ephemeral keys. A versioned Encrypted Companion message carries synchronization; Relay authority is sealed to the pairing-derived channel and never appears as application or Platform-visible plaintext.
 
 Mobile presents the authenticated Installation name and platform, scans the complete Pairing Challenge through browser camera APIs, and retains the full-link fallback. Two phones remain independently paired and revocable without sharing a key, attachment id, device record, or online state.

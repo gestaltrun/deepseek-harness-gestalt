@@ -23,7 +23,6 @@ import {
   type UpdaterStatus,
 } from '@deepseek-ai/dsh-client-ui-desktop/protocol'
 import { PlatformAccountHttpTransport } from '@deepseek-ai/dsh-platform-account-client'
-import { RemoteAccessHttpTransport } from '@deepseek-ai/dsh-remote-access-client'
 import type { DesktopRelayLifecycle } from '@deepseek-ai/dsh-remote-access-client/desktop-relay-lifecycle'
 import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
 import { ensureLaunchDirectory } from './launch-directory.ts'
@@ -36,13 +35,12 @@ import {
 } from './updater.ts'
 import { windowChromeOptions } from './window-options.ts'
 import { desktopIconOptions } from './app-icon.ts'
-import { loadDesktopPlatformEnvironment } from './platform-environment.ts'
+import { readDesktopPlatformEnvironment } from './platform-environment.ts'
 import {
   DesktopAccountController, EncryptedDesktopAccountStore,
   UnavailableDesktopAccountController, type DesktopAccountActions,
 } from './platform-account.ts'
 import {
-  DesktopPairingController,
   UnavailableDesktopPairingController,
   confirmPairingFromIpc,
   rejectPairingFromIpc,
@@ -50,7 +48,6 @@ import {
   setPairingEnabledFromIpc,
   type DesktopPairingActions,
 } from './personal-pairing.ts'
-import { DesktopPairingKeyVault } from './pairing-keys.ts'
 import { disposeDesktopOwners } from './shutdown.ts'
 import { startDesktopBrowserRuntime, type DesktopBrowserRuntime } from './browser-runtime.ts'
 import { parseBrowserPresentRequest, parseBrowserPresentTarget } from './browser-present.ts'
@@ -60,10 +57,10 @@ import {
   syncChromeOverlayBounds,
 } from './chrome-overlay.ts'
 import { createDesktopRemoteRelay } from './remote-relay.ts'
-import { createLoopbackListenFetch, isLoopbackListenUrl, openDesktopAuthorizationUrl } from './loopback-listen-trust.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const PRELOAD = join(here, 'preload.cjs')
+const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
 
 function smokeLog(line: string): void {
   const file = process.env.DSH_DESKTOP_SMOKE_FILE
@@ -91,6 +88,7 @@ let stopPairingEvents: (() => void) | undefined
 let accountSignedIn = false
 const hostStartController = new AbortController()
 let pendingHost: Promise<RunningWebHost> | undefined
+const accountEnvironment = readDesktopPlatformEnvironment(OPERATED_PLATFORM_CONFIG)
 
 smokeLog('main loaded')
 const gotLock = app.requestSingleInstanceLock()
@@ -123,40 +121,29 @@ async function boot(): Promise<void> {
   smokeLog('boot start')
   window = createWindow()
   smokeLog('window created')
-  let accountEnvironment: SelectedPlatformEnvironment | undefined
+  const relay = createDesktopRemoteRelay()
+  account = createDesktopAccount(accountEnvironment)
+  let accountReady = true
   try {
-    accountEnvironment = loadDesktopPlatformEnvironment(process.env)
+    await account.start()
   } catch (error) {
-    smokeLog('account environment unavailable ' + (error instanceof Error ? error.message : String(error)))
+    accountReady = false
+    smokeLog('account start failed ' + (error instanceof Error ? error.message : String(error)))
+    const failed = account
+    account = new UnavailableDesktopAccountController(
+      error instanceof Error ? error.message : String(error),
+    )
+    void failed.dispose().catch((disposeError: unknown) => {
+      console.error('[desktop-platform-account] dispose after failed start:', disposeError)
+    })
   }
-  if (accountEnvironment === undefined) {
-    account = new UnavailableDesktopAccountController('Platform environment is not configured')
-    pairing = new UnavailableDesktopPairingController('Platform environment is not configured')
-  } else {
-    const relay = createDesktopRemoteRelay({ environment: accountEnvironment, source: process.env })
-    account = createDesktopAccount(accountEnvironment)
-    let accountReady = true
-    try {
-      await account.start()
-    } catch (error) {
-      accountReady = false
-      smokeLog('account start failed ' + (error instanceof Error ? error.message : String(error)))
-      const failed = account
-      account = new UnavailableDesktopAccountController(
-        error instanceof Error ? error.message : String(error),
-      )
-      void failed.dispose().catch((disposeError: unknown) => {
-        console.error('[desktop-platform-account] dispose after failed start:', disposeError)
-      })
-    }
-    if (accountReady) smokeLog('account ready')
-    pairing = createDesktopPairing(accountEnvironment, account, relay)
-    accountSignedIn = account.getSnapshot().status === 'signed-in'
-    if (accountSignedIn) {
-      await pairing.start().catch((error: unknown) => {
-        console.error('[desktop-personal-pairing] initial Remote Access load failed:', error)
-      })
-    }
+  if (accountReady) smokeLog('account ready')
+  pairing = createDesktopPairing(relay)
+  accountSignedIn = account.getSnapshot().status === 'signed-in'
+  if (accountSignedIn) {
+    await pairing.start().catch((error: unknown) => {
+      console.error('[desktop-personal-pairing] initial Remote Access load failed:', error)
+    })
   }
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)
@@ -648,54 +635,25 @@ function pushPairingSnapshot(snapshot: ReturnType<DesktopPairingActions['getSnap
 }
 
 function createDesktopAccount(environment: SelectedPlatformEnvironment): DesktopAccountActions {
-  const fetch = createLoopbackListenFetch(environment.origin)
-  const transport = new PlatformAccountHttpTransport({
-    environment,
-    ...(fetch === undefined ? {} : { fetch }),
-  })
+  const transport = new PlatformAccountHttpTransport({ environment })
   const store = new EncryptedDesktopAccountStore(
     join(app.getPath('userData'), `platform-account-${environment.databaseIdentity}.bin`),
-    isLoopbackListenUrl(environment.origin)
-      ? {
-        encrypt: value => Buffer.from(value),
-        decrypt: value => Buffer.from(value).toString('utf8'),
-      }
-      : {
-        encrypt: value => safeStorage.encryptString(value),
-        decrypt: value => safeStorage.decryptString(Buffer.from(value)),
-      },
+    {
+      encrypt: value => safeStorage.encryptString(value),
+      decrypt: value => safeStorage.decryptString(Buffer.from(value)),
+    },
   )
   return new DesktopAccountController({
     environment,
     transport,
     store,
-    systemBrowser: {
-      open: async (url) => {
-        await openDesktopAuthorizationUrl(url, async (target) => { await shell.openExternal(target) })
-      },
-    },
+    systemBrowser: { open: async (url) => { await shell.openExternal(url) } },
   })
 }
 
-function createDesktopPairing(
-  environment: SelectedPlatformEnvironment,
-  currentAccount: DesktopAccountActions,
-  relay: DesktopRelayLifecycle,
-): DesktopPairingActions {
+function createDesktopPairing(relay: DesktopRelayLifecycle): DesktopPairingActions {
   const unavailableReason = 'Personal Pairing requires an independently reviewed handshake and Relay crypto provider.'
-  if (environment.environment !== 'development' || process.env.DSH_PERSONAL_PAIRING_KEYLESS !== '1') {
-    return new UnavailableDesktopPairingController(`${unavailableReason} Development proof mode is disabled.`, relay)
-  }
-  const fetch = createLoopbackListenFetch(environment.origin)
-  return new DesktopPairingController({
-    account: currentAccount,
-    transport: new RemoteAccessHttpTransport({
-      environment,
-      ...(fetch === undefined ? {} : { fetch }),
-    }),
-    relay,
-    pairingKeys: new DesktopPairingKeyVault(),
-  })
+  return new UnavailableDesktopPairingController(unavailableReason, relay)
 }
 
 async function showError(target: BrowserWindow, error: unknown): Promise<void> {

@@ -31,7 +31,7 @@ import { RemoteAccessHttpTransport } from '@deepseek-ai/dsh-remote-access-client
 import { DesktopPairingKeyVault } from '../src/pairing-keys.ts'
 import { DesktopPairingController } from '../src/personal-pairing.ts'
 import { PairingCompanionKeyVault } from '../../mobile/src/companion-keys.ts'
-import { DevelopmentKeylessMobileHandshakeClient } from '../../mobile/src/development-keyless-pairing.ts'
+import { KeylessMobileHandshakeFixture } from '../../mobile/tests/fixtures/development-keyless-pairing.fixture.ts'
 import { MobilePairingController } from '../../mobile/src/personal-pairing.ts'
 import * as RemoteAccessHttp from '../../../packages/platform/remote-access-http/src/index.ts'
 
@@ -90,7 +90,7 @@ describe('Personal Pairing assembled controllers', () => {
     const mobile = new MobilePairingController({
       installation: accountActions('mobile'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => { throw new Error('assembled path uses the full one-time link') } },
       pairingKeys: mobileKeys,
       device: { name: 'Alice phone', platform: 'ios' },
@@ -112,7 +112,7 @@ describe('Personal Pairing assembled controllers', () => {
     const foreign = new MobilePairingController({
       installation: accountActions('mobile', 'account-two'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => foreignChallenge.oneTimeLink },
       device: { name: 'Other phone', platform: 'android' },
       now: () => clock.now,
@@ -152,7 +152,7 @@ describe('Personal Pairing assembled controllers', () => {
     await desktop.createChallenge()
     const reused = desktop.getSnapshot().challenge
     if (reused === undefined) throw new Error('single-use challenge was not created')
-    const firstMobile = new DevelopmentKeylessMobileHandshakeClient()
+    const firstMobile = new KeylessMobileHandshakeFixture()
     const firstAttempt = await firstMobile.begin(reused.oneTimeLink)
     const firstCompletion = await transport.completeChallenge({
       authentication: authentication('mobile'),
@@ -168,7 +168,7 @@ describe('Personal Pairing assembled controllers', () => {
       device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: firstAttempt.mobileHandshake,
     })).resolves.toMatchObject({ pendingPairingId: firstCompletion.pendingPairingId })
-    const secondAttempt = await new DevelopmentKeylessMobileHandshakeClient().begin(reused.oneTimeLink)
+    const secondAttempt = await new KeylessMobileHandshakeFixture().begin(reused.oneTimeLink)
     await expect(transport.completeChallenge({
       authentication: authentication('mobile'),
       completionId: secondAttempt.completionId,
@@ -184,7 +184,7 @@ describe('Personal Pairing assembled controllers', () => {
     const liveMobile = new MobilePairingController({
       installation: accountActions('mobile'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => expiring.oneTimeLink },
       device: { name: 'Bound phone', platform: 'ios' },
       now: () => clock.now,
@@ -210,7 +210,7 @@ describe('Personal Pairing assembled controllers', () => {
     const expiredMobile = new MobilePairingController({
       installation: accountActions('mobile'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => expired.oneTimeLink },
       device: { name: 'Late phone', platform: 'ios' },
       now: () => clock.now,

@@ -8,6 +8,7 @@ import {
   PLATFORM_DEPLOY_REQUIRED_ENV,
   PLATFORM_PRODUCTION_REQUIRED_ENV,
   assertOperatedPlatformEnvironment,
+  loadOperatedPlatformConfig,
   missingPlatformDeployEnv,
   missingPlatformProductionEnv,
   readPlatformSigningKey,
@@ -19,6 +20,8 @@ const HEX = 'ab'.repeat(32)
 const DISTINCTIVE_SECRET = 'super-secret-token-value-do-not-print'
 const script = fileURLToPath(new URL('../src/production-env-cli.ts', import.meta.url))
 const bootSource = readFileSync(new URL('../src/boot.ts', import.meta.url), 'utf8')
+const launchSource = readFileSync(new URL('../src/launch.ts', import.meta.url), 'utf8')
+const remoteAccessResourcesSource = readFileSync(new URL('../src/remote-access-resources.ts', import.meta.url), 'utf8')
 const repoRoot = resolve(import.meta.dirname, '../../..')
 
 function completeDeployEnv(): NodeJS.Dict<string> {
@@ -27,11 +30,16 @@ function completeDeployEnv(): NodeJS.Dict<string> {
     PLATFORM_GITHUB_CLIENT_ID: 'client',
     PLATFORM_GITHUB_CLIENT_SECRET: DISTINCTIVE_SECRET,
     PLATFORM_GITHUB_CALLBACK: 'https://platform.example.test/v1/account/oauth/github/callback',
+    PLATFORM_GITHUB_CREDENTIAL_REFERENCE: 'credentials://github-oauth/production',
     PLATFORM_POSTGRES_HOST: 'postgres.example.test',
     PLATFORM_POSTGRES_USER: 'gestalt',
     PLATFORM_POSTGRES_PASSWORD: DISTINCTIVE_SECRET,
+    PLATFORM_POSTGRES_DATABASE: 'gestalt',
+    PLATFORM_IDENTITY_NAMESPACE: 'gestalt-production',
     PLATFORM_REDIS_HOST: 'redis.example.test',
+    PLATFORM_REDIS_USER: 'gestalt',
     PLATFORM_REDIS_PASSWORD: DISTINCTIVE_SECRET,
+    PLATFORM_RELAY_REDIS_KEY_PREFIX: 'gestalt:relay',
     PLATFORM_TOKEN_SIGNING_KEY: HEX,
     PLATFORM_POLLING_SIGNING_KEY: HEX,
     PLATFORM_ECS_SSH_KEY: '-----BEGIN DISTINCTIVE KEY-----',
@@ -97,6 +105,29 @@ describe('production and deploy names', () => {
       .toEqual(['PLATFORM_ECS_SSH_KEY', 'PLATFORM_ECS_HOSTS'])
   })
 
+  it('parses the complete operated identity and verified durable-store configuration before traffic', () => {
+    expect(loadOperatedPlatformConfig(completeDeployEnv())).toMatchObject({
+      environment: {
+        environment: 'production',
+        origin: 'https://platform.example.test',
+        credentialReference: 'credentials://github-oauth/production',
+        databaseIdentity: 'gestalt',
+        identityNamespace: 'gestalt-production',
+      },
+      postgres: { host: 'postgres.example.test', user: 'gestalt', database: 'gestalt', ssl: { rejectUnauthorized: true } },
+      redis: { host: 'redis.example.test', username: 'gestalt', tls: true },
+      relayRedisKeyPrefix: 'gestalt:relay',
+    })
+    expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_ORIGIN: 'https://localhost' }))
+      .toThrow('must not use a local host')
+    expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_POSTGRES_SSL: 'disable' }))
+      .toThrow('PLATFORM_POSTGRES_SSL')
+    expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_REDIS_TLS: '0' }))
+      .toThrow('PLATFORM_REDIS_TLS')
+    expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_POSTGRES_PORT: 'invalid' }))
+      .toThrow('PLATFORM_POSTGRES_PORT')
+  })
+
   it('reports missing names in declaration order and reads present values', () => {
     expect(missingPlatformProductionEnv({})).toEqual([...PLATFORM_PRODUCTION_REQUIRED_ENV])
     expect(missingPlatformDeployEnv({
@@ -106,10 +137,15 @@ describe('production and deploy names', () => {
       'PLATFORM_GITHUB_CLIENT_ID',
       'PLATFORM_GITHUB_CLIENT_SECRET',
       'PLATFORM_GITHUB_CALLBACK',
+      'PLATFORM_GITHUB_CREDENTIAL_REFERENCE',
       'PLATFORM_POSTGRES_HOST',
       'PLATFORM_POSTGRES_USER',
       'PLATFORM_POSTGRES_PASSWORD',
+      'PLATFORM_POSTGRES_DATABASE',
+      'PLATFORM_IDENTITY_NAMESPACE',
+      'PLATFORM_REDIS_USER',
       'PLATFORM_REDIS_PASSWORD',
+      'PLATFORM_RELAY_REDIS_KEY_PREFIX',
       'PLATFORM_TOKEN_SIGNING_KEY',
       'PLATFORM_POLLING_SIGNING_KEY',
       'PLATFORM_ECS_SSH_KEY',
@@ -171,17 +207,23 @@ describe('runPlatformProductionEnvCli', () => {
 })
 
 describe('operated Platform composition', () => {
-  it('selects production before loading the pair and keeps dummy development on an invalid origin', () => {
-    const envSource = readFileSync(new URL('../src/production-env.ts', import.meta.url), 'utf8')
-    expect(bootSource).toContain('assertOperatedPlatformEnvironment')
-    expect(bootSource).toContain('https://dev.gestaltrun.invalid')
-    expect(bootSource).toContain('PostgresPersonalPairingAuthorityStore')
-    expect(bootSource).toContain('PostgresRelayRouteStore')
-    expect(bootSource).not.toContain('PersonalPairingProvider')
-    expect(bootSource).not.toContain('DevelopmentKeylessPairingHandshakeProvider')
-    expect(bootSource).not.toContain('RemoteRelayProvider')
-    expect(bootSource).not.toContain('production-env-cli')
-    expect(envSource).not.toContain('process.exit')
+  it('loads one operated identity and opens only durable PostgreSQL and Redis resources', () => {
+    expect(bootSource).toContain('launchOperatedPlatform()')
+    expect(launchSource).toContain('loadOperatedPlatformConfig')
+    expect(remoteAccessResourcesSource).toContain('PostgresPersonalPairingAuthorityStore')
+    expect(remoteAccessResourcesSource).toContain('PostgresRelayRouteStore')
+    expect(remoteAccessResourcesSource).toContain('RedisRelayCoordinator')
+    expect(launchSource).toContain('OperatedRemoteAccessResources')
+    const productComposition = bootSource + launchSource
+    expect(productComposition).not.toContain('loadPlatformEnvironment')
+    expect(productComposition).not.toContain('dev.gestaltrun.invalid')
+    expect(productComposition).not.toContain('rejectUnauthorized: false')
+    expect(productComposition).not.toContain('PLATFORM_REDIS_TLS')
+    expect(productComposition).not.toContain('PersonalPairingProvider')
+    expect(productComposition).not.toContain('DevelopmentKeylessPairingHandshakeProvider')
+    expect(productComposition).not.toContain('RemoteRelayProvider')
+    expect(productComposition).not.toContain('production-env-cli')
+    expect(readFileSync(new URL('../src/production-env.ts', import.meta.url), 'utf8')).not.toContain('process.exit')
   })
 })
 

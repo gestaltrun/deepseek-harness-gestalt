@@ -4,9 +4,9 @@
 
 Platform 监听进程以容器发布。GitHub Actions 会为触及 Platform 树的拉取请求以及匹配的 master 推送构建镜像。推送到 GHCR 必须显式派发 Platform Image 并勾选 **push**。ECS 拉取已发布的 tag。密钥在部署时从 GitHub Environment `production` 注入，不会写入镜像层。
 
-实际运行的监听进程只接受 `PLATFORM_ENVIRONMENT=production`。客户端打包仍可解析开发／生产环境对，以便选错 origin 时在产生流量前失败。不存在 staging 选择器，也不运行第二套 Platform。
+实际运行的监听进程与产品客户端只接受一套生产身份。`PLATFORM_ORIGIN`、固定回调、GitHub client id 与 credential reference、PostgreSQL database identity、identity namespace、Redis ACL identity 和 Relay Redis key prefix 都是必填项；不存在开发、staging 或默认身份。
 
-`GET /` 提供 DeepSeek Gestalt 产品首页。在所需部署密钥齐备后，`GET /healthz` 与 `GET /readyz` 返回 `{ ok: true }`。缺失密钥会在监听前失败退出。Account HTTP 挂在 `/v1/account/*`，持久化走 PostgreSQL 与 Redis。监听进程还会迁移共享的 Personal Pairing 权威表和 Relay route 表。在通过已评审的 Noise handshake 之前，不挂载配对 HTTP 和 Relay WSS。
+`GET /` 提供 DeepSeek Gestalt 产品首页。在所需部署密钥齐备后，`GET /healthz` 与 `GET /readyz` 返回 `{ ok: true }`。身份、TLS、`PORT` 或 `PLATFORM_LISTEN_HOST` 配置缺失或不一致时，会在连接 PostgreSQL 或 Redis 前失败；监听 host 只能是 `0.0.0.0` 或 `127.0.0.1`。可执行入口调用 `launchOperatedPlatform`，由它拥有校验、事务式 PostgreSQL 与 Redis 资源获取、迁移、GitHub OAuth、Account HTTP、健康路由和排空式关闭。每个 Redis owner 在活动期间保留 error listener，连接失败时销毁 client，并在失败或关闭后移除 listener。并发的 `SIGINT` 与 `SIGTERM` 请求会共享一次关闭；进程只在 HTTP 与持久 store owner 都关闭后退出，关闭失败则会报告错误并产生非零退出码。`OperatedRemoteAccessResources` 会在监听前用 Redis Relay coordinator 构造 PostgreSQL Personal Pairing authority 与 Relay route store。在通过已评审的 Noise handshake 之前，不挂载配对 HTTP 和 Relay WSS。
 
 ```sh
 docker build -f apps/platform/Dockerfile -t dsh-platform .
@@ -17,4 +17,4 @@ docker build -f apps/platform/Dockerfile -t dsh-platform .
 ## 已知限制与暂缓事项
 
 - 本镜像不挂载配对 HTTP 和 Remote Relay WSS。
-- Redis 使用 TLS（`PLATFORM_REDIS_TLS=1`）。RDS 开启 SSL 后 PostgreSQL 使用 `sslmode=require`。
+- 产品配置不能关闭 Redis 与 PostgreSQL 的证书校验。产品入口测试会先校验实际运行的 TLS 配置，再用临时非 TLS store adapter 驱动 `launchOperatedPlatform`；这不构成实际运行验收。

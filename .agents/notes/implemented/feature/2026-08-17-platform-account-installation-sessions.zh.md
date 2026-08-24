@@ -18,9 +18,9 @@ Desktop 与 Mobile 需要先建立一个 Platform 身份，个人配对与远程
 
 账号提供方先提交撤销，再等待 `AccountInvalidationBus` 发布账号会话 id。投递会分别隔离每个订阅方的同步抛错与异步拒绝；每个 Platform 实例也会运行全部连接 closer 后再汇总报告失败。退出只清除当前安装的授权。个人配对与账号域材料保留在包含环境和账号 id 的命名空间中；切换账号会选择另一个命名空间，而不会覆盖或共享上一个命名空间。
 
-Desktop Host 拥有私钥、会话令牌、Electron `shell.openExternal` 调用和 `safeStorage` 加密的按环境文件。文件使用随机独占 atomic-write 同级文件与仅所有者可读的 rename 提交。renderer 只经 preload 取得账号快照和生命周期动词。Desktop 只在「手机配对」Settings 分区展示账号状态；普通侧边栏和 Session 交互保持不变。Desktop 关闭时会关闭并排空 lifecycle transition owner，进行中的轮询不能在 dispose 后变更存储或发布。Mobile 在 IndexedDB 中拥有不可导出的 WebCrypto 密钥；parser 要求真正的 `CryptoKey` 身份，以及私有 P-256 ECDSA 签名属性，composition 内置 `@capacitor/browser` 适配器。授权按钮激活前会先准备登录尝试，因此点击会直接调用原生浏览器 API，不使用弹窗或自定义 URL 回退。两种呈现都在授权前导入同一份完整中英文保留说明，并明确首个版本不提供账号删除。两侧的快照 dispatcher 都分别隔离每个 listener，并在后续 listener 运行后才汇总报告失败。
+Desktop Host 拥有私钥、会话令牌、Electron `shell.openExternal` 调用和 `safeStorage` 加密的按环境文件。文件使用随机独占 atomic-write 同级文件与仅所有者可读的 rename 提交。renderer 只经 preload 取得账号快照和生命周期动词。Desktop 只在「手机配对」Settings 分区展示账号状态；普通侧边栏和 Session 交互保持不变。Desktop 关闭时会关闭并排空 lifecycle transition owner，进行中的轮询不能在 dispose 后变更存储或发布。Mobile 在 IndexedDB 中拥有不可导出的 WebCrypto 密钥；parser 要求真正的 `CryptoKey` 身份，以及私有 P-256 ECDSA 签名属性，composition 内置 `@capacitor/browser` 适配器。Mobile Login Attempt 还会绑定 Capacitor Device 适配器提供的有长度限制的设备名称与 iOS 或 Android 平台；Platform 会将这些字段随账号 Session 持久化，并且只会为经过认证的 Mobile Installation 返回它们。授权按钮激活前会先准备登录尝试，因此点击会直接调用原生浏览器 API，不使用弹窗或自定义 URL 回退。两种呈现都在授权前导入同一份完整中英文保留说明，并明确首个版本不提供账号删除。两侧的快照 dispatcher 都分别隔离每个 listener，并在后续 listener 运行后才汇总报告失败。
 
-开发与生产使用不同的 HTTPS origin、固定回调、GitHub OAuth App、凭证引用、数据库身份和身份命名空间。每个 Desktop 与 Mobile composition 都会解析两侧完整身份，并在渲染或流量前要求显式选择。所选值绑定 HTTP Consumer 唯一且必填的 CORS origin、客户端 transport、OAuth adapter、backend 数据库身份、本地存储、回调与签发身份命名空间；Consumer origin 缺失或不匹配会在注册路由前失败，单环境配置也不能绕过环境对校验。HTTP 响应、IndexedDB 记录与 Desktop 加密文件都有显式 parser。一个 lifecycle transition owner 串行化加载、登录、轮询、刷新、账号切换与退出。
+开发与生产使用不同的 HTTPS origin、固定回调、GitHub OAuth App、凭证引用、数据库身份和身份命名空间。通用能力 example 可以校验完整身份对，而 Desktop 与 Mobile 产品只在渲染或流量前接受实际运行的生产身份。Desktop 从应用 archive 读取发布流程投影的公开字段，Mobile 则通过构建接收同一身份。实际运行的值绑定 HTTP Consumer 唯一且必填的 CORS origin、客户端 transport、OAuth adapter、backend 数据库身份、本地存储、回调与签发身份命名空间。HTTP 响应、IndexedDB 记录与 Desktop 加密文件都有显式 parser。一个 lifecycle transition owner 串行化加载、登录、轮询、刷新、账号切换与退出。
 
 ## Alternatives considered
 
@@ -36,7 +36,7 @@ Desktop Host 拥有私钥、会话令牌、Electron `shell.openExternal` 调用�
 
 ## Consequences
 
-Platform 部署必须提供原子账号持久化、分布式失效、OAuth 凭证、签名密钥、审计保留和 HTTPS edge 行为。实际运行的监听进程只接受生产环境；[仅生产环境的发布 CI](../process/2026-08-20-platform-production-release-ci.zh.md) 负责该限制，而 Desktop 与 Mobile composition 仍在选择 origin 前解析完整环境对。规格固定的开放注册安装与连接上限由账号提供方执行（[开放注册配额](2026-08-19-open-registration-quotas-capacity.zh.md)）。内存后端和总线只用于验收与开发，不是生产持久性。原生 Mobile 打包必须提供稳定 WebView origin；Mobile composition 自己拥有 Capacitor Browser 适配器。账号删除、会话列表、远程退出、全部退出、恢复、身份关联、个人配对与远程访问仍是独立能力。
+Platform 部署必须提供原子账号持久化、分布式失效、OAuth 凭证、签名密钥、审计保留和 HTTPS edge 行为。实际运行的监听进程与产品客户端只接受生产环境；[仅生产环境的发布 CI](../process/2026-08-20-platform-production-release-ci.zh.md) 负责服务端限制，Desktop 与 Mobile 打包则把公开的实际运行身份投影进发布产物。规格固定的开放注册安装与连接上限由账号提供方执行（[开放注册配额](2026-08-19-open-registration-quotas-capacity.zh.md)）。内存后端和总线是 fixture adapter，不是生产持久性。原生 Mobile 打包必须提供稳定 WebView origin；Mobile composition 自己拥有 Capacitor Browser 适配器。账号删除、会话列表、远程退出、全部退出、恢复、身份关联、个人配对与远程访问仍是独立能力。
 
 ## Testing
 

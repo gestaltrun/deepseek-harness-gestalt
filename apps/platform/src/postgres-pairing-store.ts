@@ -350,5 +350,5 @@ function decodeRouteIds(value: unknown): string[] {
 }
 
 function accessKey(accountId: string, installationId: InstallationId): string {
-  return `${accountId}\u0000${installationId}`
+  return JSON.stringify([accountId, installationId])
 }

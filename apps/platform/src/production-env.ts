@@ -6,11 +6,16 @@ export const PLATFORM_PRODUCTION_REQUIRED_ENV = [
   'PLATFORM_GITHUB_CLIENT_ID',
   'PLATFORM_GITHUB_CLIENT_SECRET',
   'PLATFORM_GITHUB_CALLBACK',
+  'PLATFORM_GITHUB_CREDENTIAL_REFERENCE',
   'PLATFORM_POSTGRES_HOST',
   'PLATFORM_POSTGRES_USER',
   'PLATFORM_POSTGRES_PASSWORD',
+  'PLATFORM_POSTGRES_DATABASE',
+  'PLATFORM_IDENTITY_NAMESPACE',
   'PLATFORM_REDIS_HOST',
+  'PLATFORM_REDIS_USER',
   'PLATFORM_REDIS_PASSWORD',
+  'PLATFORM_RELAY_REDIS_KEY_PREFIX',
   'PLATFORM_TOKEN_SIGNING_KEY',
   'PLATFORM_POLLING_SIGNING_KEY',
 ] as const
@@ -24,6 +29,41 @@ export const PLATFORM_DEPLOY_REQUIRED_ENV = [
 
 /** A required production or deploy Environment name. */
 export type PlatformDeployEnvName = (typeof PLATFORM_DEPLOY_REQUIRED_ENV)[number]
+
+/** Validated operated identity before the Account package brands it. */
+export interface OperatedPlatformIdentity {
+  environment: 'production'
+  origin: string
+  callbackUrl: string
+  githubClientId: string
+  credentialReference: string
+  databaseIdentity: string
+  identityNamespace: string
+}
+
+/** Complete product configuration parsed before any durable-store connection. */
+export interface OperatedPlatformConfig {
+  environment: OperatedPlatformIdentity
+  githubClientSecret: string
+  postgres: {
+    host: string
+    port: number
+    user: string
+    password: string
+    database: string
+    ssl: { rejectUnauthorized: true }
+  }
+  redis: {
+    host: string
+    port: number
+    username: string
+    password: string
+    tls: true
+  }
+  relayRedisKeyPrefix: string
+  tokenSigningKey: Uint8Array
+  pollingSigningKey: Uint8Array
+}
 
 const SIGNING_KEY_NAMES = ['PLATFORM_TOKEN_SIGNING_KEY', 'PLATFORM_POLLING_SIGNING_KEY'] as const
 
@@ -99,6 +139,69 @@ export function readPlatformSigningKey(
 }
 
 /**
+ * Parse the operated identity and durable-store configuration before traffic.
+ * @param env - process environment supplied by Environment `production`.
+ * @returns validated identity, credentials, verified TLS settings, and store namespaces.
+ */
+export function loadOperatedPlatformConfig(
+  env: NodeJS.Dict<string> = process.env,
+): OperatedPlatformConfig {
+  const missing = missingPlatformProductionEnv(env)
+  if (missing.length > 0) throw new Error(`platform: missing deployment secrets: ${missing.join(', ')}`)
+  assertOperatedPlatformEnvironment(env.PLATFORM_ENVIRONMENT)
+  requireSafeTlsSelection(env.PLATFORM_POSTGRES_SSL, 'PLATFORM_POSTGRES_SSL', 'require')
+  requireSafeTlsSelection(env.PLATFORM_REDIS_TLS, 'PLATFORM_REDIS_TLS', '1')
+  return {
+    environment: operatedIdentity({
+      environment: 'production',
+      origin: requiredPlatformEnv('PLATFORM_ORIGIN', env),
+      callbackUrl: requiredPlatformEnv('PLATFORM_GITHUB_CALLBACK', env),
+      githubClientId: requiredPlatformEnv('PLATFORM_GITHUB_CLIENT_ID', env),
+      credentialReference: requiredPlatformEnv('PLATFORM_GITHUB_CREDENTIAL_REFERENCE', env),
+      databaseIdentity: requiredPlatformEnv('PLATFORM_POSTGRES_DATABASE', env),
+      identityNamespace: requiredPlatformEnv('PLATFORM_IDENTITY_NAMESPACE', env),
+    }),
+    githubClientSecret: requiredPlatformEnv('PLATFORM_GITHUB_CLIENT_SECRET', env),
+    postgres: {
+      host: requiredPlatformEnv('PLATFORM_POSTGRES_HOST', env),
+      port: optionalPort(env.PLATFORM_POSTGRES_PORT, 'PLATFORM_POSTGRES_PORT', 5432),
+      user: requiredPlatformEnv('PLATFORM_POSTGRES_USER', env),
+      password: requiredPlatformEnv('PLATFORM_POSTGRES_PASSWORD', env),
+      database: requiredPlatformEnv('PLATFORM_POSTGRES_DATABASE', env),
+      ssl: { rejectUnauthorized: true },
+    },
+    redis: {
+      host: requiredPlatformEnv('PLATFORM_REDIS_HOST', env),
+      port: optionalPort(env.PLATFORM_REDIS_PORT, 'PLATFORM_REDIS_PORT', 6379),
+      username: requiredPlatformEnv('PLATFORM_REDIS_USER', env),
+      password: requiredPlatformEnv('PLATFORM_REDIS_PASSWORD', env),
+      tls: true,
+    },
+    relayRedisKeyPrefix: requiredPlatformEnv('PLATFORM_RELAY_REDIS_KEY_PREFIX', env),
+    tokenSigningKey: readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', env),
+    pollingSigningKey: readPlatformSigningKey('PLATFORM_POLLING_SIGNING_KEY', env),
+  }
+}
+
+function operatedIdentity(identity: OperatedPlatformIdentity): OperatedPlatformIdentity {
+  const origin = new URL(identity.origin)
+  const callback = new URL(identity.callbackUrl)
+  const hostname = origin.hostname.toLowerCase()
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '0.0.0.0'
+    || hostname === '[::1]' || hostname === '::1' || /^127(?:\.[0-9]{1,3}){3}$/u.test(hostname)) {
+    throw new TypeError('Operated Platform origin must not use a local host')
+  }
+  if (origin.protocol !== 'https:' || identity.origin !== origin.origin
+    || callback.protocol !== 'https:' || callback.origin !== origin.origin) {
+    throw new TypeError('production Platform origin and callback must share one HTTPS origin')
+  }
+  if (callback.pathname !== '/v1/account/oauth/github/callback' || callback.search !== '' || callback.hash !== '') {
+    throw new TypeError('production Platform callback path is invalid')
+  }
+  return Object.freeze(identity)
+}
+
+/**
  * Accepts only the operated production selection.
  * @param selection - `PLATFORM_ENVIRONMENT` or an explicit selection
  * @returns `production`
@@ -124,13 +227,26 @@ export function runPlatformProductionEnvCli(env: NodeJS.Dict<string> = process.e
     return 1
   }
   try {
-    assertOperatedPlatformEnvironment(env.PLATFORM_ENVIRONMENT)
-    readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', env)
-    readPlatformSigningKey('PLATFORM_POLLING_SIGNING_KEY', env)
+    loadOperatedPlatformConfig(env)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(message)
     return 1
   }
   return 0
+}
+
+function optionalPort(value: string | undefined, name: string, fallback: number): number {
+  if (value === undefined || value === '') return fallback
+  const port = Number(value)
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    throw new TypeError(`${name} must be an integer from 1 through 65535`)
+  }
+  return port
+}
+
+function requireSafeTlsSelection(value: string | undefined, name: string, accepted: string): void {
+  if (value !== undefined && value !== '' && value !== accepted) {
+    throw new TypeError(`${name} accepts only ${accepted}`)
+  }
 }

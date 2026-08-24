@@ -580,6 +580,9 @@ importers:
       '@deepseek-ai/dsh-remote-access':
         specifier: workspace:^
         version: link:../../packages/platform/remote-access
+      '@deepseek-ai/dsh-remote-access-redis':
+        specifier: workspace:^
+        version: link:../../packages/platform/remote-access-redis
       '@deepseek-ai/dsh-remote-protocol':
         specifier: workspace:^
         version: link:../../packages/platform/remote-protocol
@@ -13550,7 +13553,6 @@ packages:
     resolution: {integrity: sha512-T4EDRUBVZYRldYApjEJiU0e1stYWaRAX7CuSnKzrpwdZKo53zGV8/pqfzV6FfwNl9YThD2OumQYvqtvjvgG7aQ==}
     engines: {node: '>=10.0.0'}
     deprecated: this version has critical issues, please update to the latest version
-
   '@xterm/addon-fit@0.11.0':
     resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
 

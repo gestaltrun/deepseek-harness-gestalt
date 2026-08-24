@@ -1,19 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 import { deriveKeylessMobileHandshake, deriveKeylessPairingKey } from '@deepseek-ai/dsh-remote-access'
-import { DevelopmentKeylessMobileHandshakeClient } from '../src/development-keyless-pairing.ts'
+import { KeylessMobileHandshakeFixture } from './fixtures/development-keyless-pairing.fixture.ts'
 
 const SECRET = new Uint8Array(32)
 const LINK = invitationLink(SECRET)
 
-describe('DevelopmentKeylessMobileHandshakeClient', () => {
+describe('KeylessMobileHandshakeFixture', () => {
   it('derives handshake bytes from the invitation and retains the pairing key after Desktop match', async () => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000001')
-    const client = new DevelopmentKeylessMobileHandshakeClient()
+    const client = new KeylessMobileHandshakeFixture()
     const mobileHandshake = await deriveKeylessMobileHandshake(SECRET)
     const pairingKey = await deriveKeylessPairingKey(SECRET)
 
     await expect(client.begin(LINK)).resolves.toEqual({
-      completionId: 'development-00000000-0000-4000-8000-000000000001',
+      completionId: 'fixture-00000000-0000-4000-8000-000000000001',
       mobileHandshake,
     })
     await expect(client.acceptDesktopHandshake(Uint8Array.of(1))).rejects.toThrow('does not match')
@@ -47,7 +47,7 @@ describe('DevelopmentKeylessMobileHandshakeClient', () => {
     ['{"endpoint":"mobile","revision":1,"routeId":"","credential":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"}', 'routeId must be'],
     ['{"endpoint":"mobile","revision":1,"routeId":"route","credential":"short"}', 'Relay credential'],
   ])('rejects malformed development authority %s', async (encoded, message) => {
-    const client = new DevelopmentKeylessMobileHandshakeClient()
+    const client = new KeylessMobileHandshakeFixture()
     await expect(client.openRelayAuthority(new TextEncoder().encode(encoded))).rejects.toThrow(message)
   })
 })

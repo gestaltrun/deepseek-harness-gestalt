@@ -4,9 +4,9 @@ English | [中文](README.zh.md)
 
 Platform listen process packaged as a container. GitHub Actions builds the image for pull requests that touch the Platform tree and for matching master pushes. Publishing to GHCR requires an explicit Platform Image dispatch with **push**. ECS pulls a published tag. Secrets come from GitHub Environment `production` at deploy time and are never stored in image layers.
 
-The operated listen process accepts only `PLATFORM_ENVIRONMENT=production`. Client packaging may still parse a development/production pair so a mis-selected origin fails before traffic. There is no staging selector and no second operated Platform.
+The operated listen process and product clients accept one production identity. `PLATFORM_ORIGIN`, the fixed callback, GitHub client id and credential reference, PostgreSQL database identity, identity namespace, Redis ACL identity, and Relay Redis key prefix are mandatory; there is no development, staging, or default identity.
 
-`GET /` serves the DeepSeek Gestalt product homepage. `GET /healthz` and `GET /readyz` answer `{ ok: true }` after required deployment secrets are present. Missing secrets fail the process before listen. Account HTTP is mounted on `/v1/account/*` against PostgreSQL and Redis. Listen also migrates the shared Personal Pairing authority and Relay route tables. Pairing HTTP and Relay WSS stay unmounted until a reviewed Noise handshake is approved.
+`GET /` serves the DeepSeek Gestalt product homepage. `GET /healthz` and `GET /readyz` answer `{ ok: true }` after required deployment secrets are present. Missing or inconsistent identity, TLS, `PORT`, or `PLATFORM_LISTEN_HOST` configuration fails before a PostgreSQL or Redis connection; the listen host is either `0.0.0.0` or `127.0.0.1`. The executable calls `launchOperatedPlatform`, which owns validation, transactional PostgreSQL and Redis acquisition, migrations, GitHub OAuth, Account HTTP, health routes, and quiescent teardown. Each Redis owner keeps an error listener while active, destroys a client whose connect fails, and removes the listener after failure or close. Concurrent `SIGINT` and `SIGTERM` requests share one shutdown; the process exits only after HTTP and durable-store owners close, while a close failure is reported and produces a nonzero exit. `OperatedRemoteAccessResources` constructs the PostgreSQL Personal Pairing authority and Relay route stores with the Redis Relay coordinator before listen. Pairing HTTP and Relay WSS stay unmounted until a reviewed Noise handshake is approved.
 
 ```sh
 docker build -f apps/platform/Dockerfile -t dsh-platform .
@@ -17,4 +17,4 @@ Publish: Actions → Platform Image → Run workflow → set **push**. Deploy: A
 ## Known Limitations and Deferred Work
 
 - Pairing HTTP and Remote Relay WSS are not mounted in this image.
-- Redis uses TLS (`PLATFORM_REDIS_TLS=1`). PostgreSQL uses `sslmode=require` when the RDS instance has SSL enabled.
+- Redis and PostgreSQL certificate verification cannot be disabled by product configuration. The product-entry test drives `launchOperatedPlatform` with disposable non-TLS store adapters after validating the operated TLS configuration; it is not live operated acceptance.

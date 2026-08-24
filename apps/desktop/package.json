@@ -52,6 +52,7 @@
     "files": [
       "out/main.mjs",
       "out/preload.cjs",
+      "out/operated-platform.json",
       "cordis.patch.yml",
       "package.json"
     ],

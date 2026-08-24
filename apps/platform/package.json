@@ -23,6 +23,7 @@
     "@deepseek-ai/dsh-platform-account-core": "workspace:^",
     "@deepseek-ai/dsh-platform-account-http": "workspace:^",
     "@deepseek-ai/dsh-remote-access": "workspace:^",
+    "@deepseek-ai/dsh-remote-access-redis": "workspace:^",
     "@deepseek-ai/dsh-remote-protocol": "workspace:^",
     "pg": "^8.16.3",
     "redis": "^6.2.1"

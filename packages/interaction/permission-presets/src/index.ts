@@ -13,6 +13,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { SANDBOX_MODES, effectiveSandboxMode, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
@@ -286,7 +287,7 @@ export class PermissionPresetService extends Service {
           if (!this.names.includes(name)) {
             return { kind: 'error', text: `unknown preset "${name}" (available: ${this.names.join(', ')})` }
           }
-          this.apply(agent.session, name, (policy) =>{  this.ctx.approval.setPolicy(agent, policy) })
+          this.setAgent(agent, name)
           return { kind: 'success', text: `preset ${name}` }
         },
       })
@@ -390,6 +391,15 @@ export class PermissionPresetService extends Service {
    */
   set(session: Session, name: string): void {
     this.apply(session, name, (policy) =>{  setApprovalPolicy(session, policy) })
+  }
+
+  /**
+   * Switch one live Agent and queue approval-policy narration for its next step.
+   * @param agent - live Agent whose Session and approval policy change together.
+   * @param name - configured preset name.
+   */
+  setAgent(agent: Agent, name: string): void {
+    this.apply(agent.session, name, (policy) => { this.ctx.approval.setPolicy(agent, policy) })
   }
 
   /** Apply one preset with the caller-selected live or initialization policy writer. */

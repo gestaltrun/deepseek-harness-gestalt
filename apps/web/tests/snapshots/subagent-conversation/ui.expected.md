@@ -49,7 +49,7 @@
   - img
 - text: {{clock}} Ran for {{duration}} TTFT {{duration}} {{throughput}} tok/s
 - textbox "Message the agent"
-- button "Commands":
+- button "Commands and skills":
   - img
 - 'button "Access mode, current: Custom"': Custom
 - button "6% of context used"

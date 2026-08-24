@@ -12,7 +12,7 @@ fi
 : "${RECOVERY_COMMAND:?}"
 
 state_object="oss://${PLATFORM_OSS_BUCKET}/${PLATFORM_DEPLOY_OSS_OBJECT_PREFIX}/active-state.json"
-state=$(aliyun oss cat "$state_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" | head -1)
+state=$(aliyun oss cat "$state_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT")
 phase=$(jq -er 'select(.version == 1) | .phase | select(. == "rollbackable" or . == "commit-pending" or . == "committed")' <<< "$state")
 object_root=$(jq -er '.objectRoot' <<< "$state")
 state_instance_ids=()
@@ -65,7 +65,7 @@ else
     run_recovery_on_all complete-rollback-cleanup 2100
     write_recovery_command cutover
     platform_cloud_run "${instance_ids[0]// /}" "$RECOVERY_COMMAND" 300
-    instance_ids_json=$(printf '%s\n' "${state_instance_ids[@]}" | jq -R . | jq -s .)
+    instance_ids_json=$(jq -nc --args '$ARGS.positional' -- "${state_instance_ids[@]}")
     jq -nc --arg objectRoot "$object_root" --argjson instanceIds "$instance_ids_json" \
       '{version:1, phase:"committed", objectRoot:$objectRoot, instanceIds:$instanceIds}' > "${RECOVERY_COMMAND}.state"
     aliyun oss cp "${RECOVERY_COMMAND}.state" "$state_object" \

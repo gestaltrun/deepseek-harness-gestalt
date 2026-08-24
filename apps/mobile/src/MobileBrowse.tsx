@@ -225,7 +225,8 @@ function companionConnectionFailureMessage(
   failure: CompanionConnectionFailure,
   locale: ConversationPresentationLocale,
 ): string {
-  if (failure.code === 'COMPANION_UPDATE_REQUIRED') {
+  if (failure.code === 'COMPANION_UPDATE_REQUIRED'
+    || failure.code === 'COMPANION_SECURITY_CAPABILITY_MISSING') {
     if (failure.updateEndpoint === 'mobile') {
       return locale === 'zh'
         ? '请升级 Mobile 后再连接此 Desktop。'
@@ -238,9 +239,16 @@ function companionConnectionFailureMessage(
     }
   }
   if (failure.code === 'PLATFORM_CAPACITY') {
+    const retry = failure.retryAfterMs === undefined
+      ? undefined
+      : formatRetryDelay(failure.retryAfterMs, locale)
     return locale === 'zh'
-      ? 'Platform 当前容量已满，正在重试。'
-      : 'Platform capacity is full. Retrying.'
+      ? retry === undefined
+        ? 'Platform 当前容量已满，正在重试。'
+        : `Platform 当前容量已满，将在 ${retry}后重试。`
+      : retry === undefined
+        ? 'Platform capacity is full. Retrying.'
+        : `Platform capacity is full. Retrying in ${retry}.`
   }
   if (failure.code === 'REMOTE_OFFLINE') {
     return locale === 'zh'
@@ -250,6 +258,12 @@ function companionConnectionFailureMessage(
   return locale === 'zh'
     ? `远程连接失败（${failure.code}），正在重试。`
     : `Remote connection failed (${failure.code}). Retrying.`
+}
+
+function formatRetryDelay(milliseconds: number, locale: ConversationPresentationLocale): string {
+  const seconds = (milliseconds / 1_000).toFixed(3).replace(/(?:\.0+|(\.\d*?)0+)$/u, '$1')
+  if (locale === 'zh') return `${seconds} 秒`
+  return `${seconds} ${seconds === '1' ? 'second' : 'seconds'}`
 }
 
 function AuthoritativeSearchResults({

@@ -193,12 +193,19 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     `)
 
     runtime.reportConnectionFailure({
-      code: 'COMPANION_UPDATE_REQUIRED',
+      code: 'COMPANION_SECURITY_CAPABILITY_MISSING',
       message: 'Desktop update required',
       updateEndpoint: 'desktop',
     })
     expect((await screen.findByText('Update Desktop to connect from this Mobile.')).textContent)
       .toMatchInlineSnapshot('"Update Desktop to connect from this Mobile."')
+    runtime.reportConnectionFailure({
+      code: 'PLATFORM_CAPACITY',
+      message: 'Remote Relay returned PLATFORM_CAPACITY',
+      retryAfterMs: 5_000,
+    })
+    expect((await screen.findByText('Platform capacity is full. Retrying in 5 seconds.')).textContent)
+      .toMatchInlineSnapshot('"Platform capacity is full. Retrying in 5 seconds."')
 
     fireEvent.click(screen.getByRole('treeitem', { name: /Guarded Session/ }))
     expect(visibleMutationControls()).toMatchInlineSnapshot(`

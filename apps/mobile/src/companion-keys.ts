@@ -535,18 +535,16 @@ function parsePairingDocument(
   if (legacy && Object.hasOwn(record, 'selectedPairingId')) {
     throw new TypeError(`Legacy ${subject} document contains an unsupported explicit selection`)
   }
-  if (legacy && record.active.length > 1) {
-    throw new TypeError(`Legacy ${subject} document is ambiguous`)
-  }
   const active = record.active.map(parseState)
   const pending = record.pending === undefined ? undefined : parseRecovery(record.pending)
   if (legacy) {
-    const singleton = active[0]
+    let selected: StoredMobilePairingState | undefined
+    for (const candidate of active) {
+      if (candidate.reconnectState !== undefined && candidate.grant !== undefined) selected = candidate
+    }
     return validatedDocument({
       active,
-      ...(singleton?.reconnectState === undefined || singleton.grant === undefined
-        ? {}
-        : { selectedPairingId: singleton.pairingId }),
+      ...(selected === undefined ? {} : { selectedPairingId: selected.pairingId }),
       ...(pending === undefined ? {} : { pending }),
     })
   }

@@ -119,27 +119,76 @@ describe('native Mobile protected storage', () => {
     expect(restarted.relayAuthority()?.pairingSelector).toBe(parseRelayPairingSelector(pairingId))
   })
 
-  it('rejects ambiguous and selector-conflicting native version-1 documents without rewriting them', async () => {
+  it('migrates every native version-1 pairing and selects the last complete authority after restart', async () => {
     const storage = new MemoryProtectedStorage()
     const store = new NativeMobilePairingStateStore(storage, 'gestalt')
-    const complete = (pairingId: string, pairingSelector?: string): Record<string, unknown> => ({
+    const complete = (pairingId: string, fill: number): Record<string, unknown> => ({
+      pairingId,
+      attachmentKey: bytesBase64(new Uint8Array(32).fill(fill)),
+      reconnectState: bytesBase64(new Uint8Array(96).fill(fill + 1)),
+      grant: {
+        routeId: `route-${pairingId}`, endpoint: 'mobile',
+        credential: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE', revision: 1,
+      },
+    })
+    const home = parsePersonalPairingId('pairing-native-a')
+    const work = parsePersonalPairingId('pairing-native-b')
+    const pending = parsePersonalPairingId('pairing-native-pending')
+    storage.values.set('pairings:gestalt:account-native-multiple', JSON.stringify({
+      version: 1,
+      active: [
+        complete(home, 51),
+        complete(work, 61),
+        { pairingId: pending, attachmentKey: bytesBase64(new Uint8Array(32).fill(71)) },
+      ],
+    }))
+    const accountId = parsePlatformAccountId('account-native-multiple')
+
+    const migrated = new PairingCompanionKeyVault(store)
+    await migrated.selectAccount(accountId)
+    expect(migrated.attachmentKeyMaterial(home)).toEqual(new Uint8Array(32).fill(51))
+    expect(migrated.reconnectState(home)).toEqual(new Uint8Array(96).fill(52))
+    expect(migrated.attachmentKeyMaterial(work)).toEqual(new Uint8Array(32).fill(61))
+    expect(migrated.reconnectState(work)).toEqual(new Uint8Array(96).fill(62))
+    expect(migrated.attachmentKeyMaterial(pending)).toEqual(new Uint8Array(32).fill(71))
+    expect(migrated.selectedPairingId()).toBe(work)
+    expect(migrated.relayAuthority()?.pairingSelector).toBe(parseRelayPairingSelector(work))
+    expect(JSON.parse(storage.values.get('pairings:gestalt:account-native-multiple') ?? '{}')).toMatchObject({
+      version: 2,
+      selectedPairingId: work,
+      active: [
+        { pairingId: home, grant: { pairingSelector: home } },
+        { pairingId: work, grant: { pairingSelector: work } },
+        { pairingId: pending },
+      ],
+    })
+
+    const restarted = new PairingCompanionKeyVault(store)
+    await restarted.selectAccount(accountId)
+    expect(restarted.pairedDesktops()).toEqual([{ pairingId: home }, { pairingId: work }])
+    expect(restarted.selectedPairingId()).toBe(work)
+    expect(restarted.attachmentKeyMaterial(pending)).toEqual(new Uint8Array(32).fill(71))
+    restarted.selectPairing(home)
+    expect(restarted.relayAuthority()).toEqual({
+      routeId: parseRelayRouteId(`route-${home}`), endpoint: 'mobile',
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(home),
+    })
+  })
+
+  it('rejects a selector-conflicting native version-1 document without rewriting it', async () => {
+    const storage = new MemoryProtectedStorage()
+    const store = new NativeMobilePairingStateStore(storage, 'gestalt')
+    const complete = (pairingId: string, pairingSelector: string): Record<string, unknown> => ({
       pairingId,
       attachmentKey: bytesBase64(new Uint8Array(32).fill(51)),
       reconnectState: bytesBase64(new Uint8Array(96).fill(52)),
       grant: {
         routeId: `route-${pairingId}`, endpoint: 'mobile',
         credential: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE', revision: 1,
-        ...(pairingSelector === undefined ? {} : { pairingSelector }),
+        pairingSelector,
       },
     })
-    const ambiguous = JSON.stringify({
-      version: 1,
-      active: [complete('pairing-native-a'), complete('pairing-native-b')],
-    })
-    storage.values.set('pairings:gestalt:account-native-ambiguous', ambiguous)
-    await expect(store.load(parsePlatformAccountId('account-native-ambiguous')))
-      .rejects.toThrow('ambiguous')
-    expect(storage.values.get('pairings:gestalt:account-native-ambiguous')).toBe(ambiguous)
 
     const conflicting = JSON.stringify({
       version: 1,

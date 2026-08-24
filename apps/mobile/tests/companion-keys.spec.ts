@@ -141,20 +141,61 @@ describe('PairingCompanionKeyVault', () => {
     expect(restarted.relayAuthority()?.pairingSelector).toBe(parseRelayPairingSelector(pairingId))
   })
 
-  it('rejects an ambiguous unversioned IndexedDB document without rewriting it', async () => {
-    const databaseName = `mobile-pairing-legacy-ambiguous-${crypto.randomUUID()}`
-    const accountId = parsePlatformAccountId('account-indexeddb-legacy-ambiguous')
+  it('migrates every unversioned IndexedDB pairing and selects the last complete authority after restart', async () => {
+    const databaseName = `mobile-pairing-legacy-multiple-${crypto.randomUUID()}`
+    const accountId = parsePlatformAccountId('account-indexeddb-legacy-multiple')
+    const home = parsePersonalPairingId('pairing-indexeddb-a')
+    const work = parsePersonalPairingId('pairing-indexeddb-b')
+    const pending = parsePersonalPairingId('pairing-indexeddb-pending')
+    const complete = (pairingId: string, attachmentKey: Uint8Array, fill: number): Record<string, unknown> => ({
+      pairingId,
+      attachmentKey,
+      reconnectState: new Uint8Array(96).fill(fill),
+      grant: {
+        routeId: `route-${pairingId}`, endpoint: 'mobile',
+        credential: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE', revision: fill,
+      },
+    })
     const legacy = {
       active: [
-        { pairingId: 'pairing-indexeddb-a', attachmentKey: MATERIAL.slice() },
-        { pairingId: 'pairing-indexeddb-b', attachmentKey: OTHER.slice() },
+        complete(home, MATERIAL.slice(), 7),
+        complete(work, OTHER.slice(), 8),
+        { pairingId: pending, attachmentKey: new Uint8Array(32).fill(91) },
       ],
     }
     await writeIndexedDbPairingDocument(databaseName, accountId, legacy)
     const store = new IndexedDbMobilePairingStateStore(databaseName)
 
-    await expect(store.load(accountId)).rejects.toThrow('ambiguous')
-    await expect(readIndexedDbPairingDocument(databaseName, accountId)).resolves.toEqual(legacy)
+    const migrated = new PairingCompanionKeyVault(store)
+    await migrated.selectAccount(accountId)
+    expect(migrated.attachmentKeyMaterial(home)).toEqual(MATERIAL)
+    expect(migrated.reconnectState(home)).toEqual(new Uint8Array(96).fill(7))
+    expect(migrated.attachmentKeyMaterial(work)).toEqual(OTHER)
+    expect(migrated.reconnectState(work)).toEqual(new Uint8Array(96).fill(8))
+    expect(migrated.attachmentKeyMaterial(pending)).toEqual(new Uint8Array(32).fill(91))
+    expect(migrated.selectedPairingId()).toBe(work)
+    expect(migrated.relayAuthority()?.pairingSelector).toBe(parseRelayPairingSelector(work))
+    await expect(readIndexedDbPairingDocument(databaseName, accountId)).resolves.toMatchObject({
+      version: 2,
+      selectedPairingId: work,
+      active: [
+        { pairingId: home, grant: { pairingSelector: home } },
+        { pairingId: work, grant: { pairingSelector: work } },
+        { pairingId: pending },
+      ],
+    })
+
+    const restarted = new PairingCompanionKeyVault(new IndexedDbMobilePairingStateStore(databaseName))
+    await restarted.selectAccount(accountId)
+    expect(restarted.pairedDesktops()).toEqual([{ pairingId: home }, { pairingId: work }])
+    expect(restarted.selectedPairingId()).toBe(work)
+    expect(restarted.attachmentKeyMaterial(pending)).toEqual(new Uint8Array(32).fill(91))
+    restarted.selectPairing(home)
+    expect(restarted.relayAuthority()).toEqual({
+      routeId: parseRelayRouteId(`route-${home}`), endpoint: 'mobile',
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 7,
+      pairingSelector: parseRelayPairingSelector(home),
+    })
   })
 
   it('does not treat an explicit undefined IndexedDB version as the unversioned predecessor', async () => {

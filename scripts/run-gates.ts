@@ -37,6 +37,7 @@ export type Mode =
   | 'ci-lint-contracts-ready'
   | 'ci-coverage'
   | 'ci-windows-native-coverage-merge'
+  | 'ci-windows-native-coverage-exempt'
   | 'ci-snapshot'
   | 'ci-artifacts'
   | 'ci-consumers'
@@ -162,6 +163,7 @@ function parseMode(raw: string | undefined): Mode {
     case 'ci-lint-contracts-ready':
     case 'ci-coverage':
     case 'ci-windows-native-coverage-merge':
+    case 'ci-windows-native-coverage-exempt':
     case 'ci-snapshot':
     case 'ci-artifacts':
     case 'ci-consumers':
@@ -179,7 +181,7 @@ function parseMode(raw: string | undefined): Mode {
       return raw
     default:
       throw new Error(
-        `run-gates: expected mode ci-preflight | ci-preflight-core | ci-preflight-cordis | ci-preflight-graphs | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | ci-standby-linux-smoke | ci-standby-windows-smoke | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
+        `run-gates: expected mode ci-preflight | ci-preflight-core | ci-preflight-cordis | ci-preflight-graphs | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-windows-native-coverage-exempt | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | ci-standby-linux-smoke | ci-standby-windows-smoke | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
       )
   }
 }
@@ -277,6 +279,8 @@ export function gatesForMode(selected: Mode): Gate[] {
       return coverageGates()
     case 'ci-windows-native-coverage-merge':
       return coverageMergeGates()
+    case 'ci-windows-native-coverage-exempt':
+      return coverageExemptHeavyGates()
     case 'ci-snapshot':
       return [ciBuildGate(), snapshotGate()]
     case 'ci-artifacts':
@@ -752,17 +756,23 @@ function coverageGates(needs?: string[]): Gate[] {
 }
 
 function coverageMergeGates(): Gate[] {
-  const workers = coverageWorkerArgs()
-  const timeouts = coverageTestTimeoutArgs(process.env[COVERAGE_TEST_TIMEOUT_ENV])
   return [
     pnpmExec('coverage', [
       'vitest',
       '--merge-reports=coverage/.partitioned/blobs',
       '--coverage',
+      '--passWithNoTests',
     ], {
       label: 'merge native coverage',
       env: { [COVERAGE_EXEMPT_ENV]: '1' },
     }),
+  ]
+}
+
+function coverageExemptHeavyGates(): Gate[] {
+  const workers = coverageWorkerArgs()
+  const timeouts = coverageTestTimeoutArgs(process.env[COVERAGE_TEST_TIMEOUT_ENV])
+  return [
     pnpmExec('coverage-exempt-heavy', [
       'vitest',
       'run',

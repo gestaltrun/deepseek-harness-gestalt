@@ -6,6 +6,7 @@ import {
   deriveRelayCredentialPublicKey,
   encodeRelayMessage,
   signRelayAttachmentChallenge,
+  RemoteProtocolError,
   type RelayAttachmentId,
   type RelayCredential,
   type RelayReadyMessage,
@@ -13,6 +14,9 @@ import {
   type RelayPeerUpdateMessage,
   type RelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
+
+/** Stable Relay or encrypted-Companion failure safe for endpoint UI projection. */
+export type RemoteRelayClientError = RemoteRelayError | RemoteProtocolError
 
 /** One connected WSS carrier supplied by a native or browser adapter. */
 export interface RelayEndpointSocket {
@@ -58,8 +62,8 @@ export interface RemoteRelayEndpointOptions {
   onPeerAttachments?: (message: RelayReadyMessage | RelayPeerUpdateMessage) => void | Promise<void>
   /** Observer invoked whenever an acknowledged physical attachment ends. */
   onConnectionLost?: (attachmentId: RelayAttachmentId) => void
-  /** Content-free transport error observer. */
-  onTransportError?: (error: RemoteRelayError) => void
+  /** Content-free transport or protocol error observer. */
+  onTransportError?: (error: RemoteRelayClientError) => void
   clock?: { now(): number }
 }
 
@@ -347,7 +351,7 @@ export class RemoteRelayEndpointController {
 
   private observeError(error: unknown): void {
     try {
-      this.options.onTransportError?.(error instanceof RemoteRelayError
+      this.options.onTransportError?.(error instanceof RemoteRelayError || error instanceof RemoteProtocolError
         ? error
         : new RemoteRelayError('REMOTE_OFFLINE', 'Relay connection was lost'))
     } catch {

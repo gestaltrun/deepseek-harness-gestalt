@@ -2,6 +2,7 @@
 
 import { App } from '@capacitor/app'
 import type { RelayCredentialGrant } from '@deepseek-ai/dsh-remote-access'
+import type { RelayErrorCode, RemoteProtocolErrorCode } from '@deepseek-ai/dsh-remote-protocol'
 import {
   requireCompanionMutation,
   type CompanionConnectionState,
@@ -13,6 +14,19 @@ export {
   companionMayMutate,
   type CompanionConnectionState,
 } from './companion-mutation.ts'
+
+/** Stable connection failure projected by the shipped Mobile surface while retrying fail closed. */
+export interface CompanionConnectionFailure {
+  readonly code: RelayErrorCode | RemoteProtocolErrorCode
+  readonly message: string
+  readonly updateEndpoint?: 'mobile' | 'desktop'
+  readonly retryAfterMs?: number
+}
+
+/** Foreground authority plus the latest recognizable connection failure. */
+export interface CompanionForegroundState extends CompanionConnectionState {
+  readonly connectionFailure?: CompanionConnectionFailure
+}
 
 /** Authenticated, decoded Desktop resynchronization message supplied by the Encrypted Companion decoder. */
 interface ValidatedDesktopResync {
@@ -76,7 +90,7 @@ function markCompanionSynchronized(state: CompanionConnectionState): CompanionCo
 
 /** Process-owned foreground, socket, and synchronization state. */
 export class CompanionForegroundRuntime {
-  private state: CompanionConnectionState
+  private state: CompanionForegroundState
   private granted = false
   private transition: Promise<void> = Promise.resolve()
   private connectionGeneration = 0
@@ -91,7 +105,7 @@ export class CompanionForegroundRuntime {
   }
 
   /** @returns the current process visibility and synchronization snapshot. */
-  getState(): CompanionConnectionState {
+  getState(): CompanionForegroundState {
     return this.state
   }
 
@@ -115,7 +129,9 @@ export class CompanionForegroundRuntime {
     this.granted = grant !== undefined
     this.relay?.configure?.(grant)
     this.activeConnectionGeneration = undefined
-    this.state = { ...this.state, socketOpen: false, synchronized: false }
+    this.state = {
+      foreground: this.state.foreground, socketOpen: false, synchronized: false,
+    }
     this.publish()
   }
 
@@ -147,7 +163,11 @@ export class CompanionForegroundRuntime {
     if (!this.granted || !this.state.foreground) return
     this.connectionGeneration += 1
     this.activeConnectionGeneration = this.connectionGeneration
-    this.state = markCompanionSocketOpen(this.state)
+    this.state = markCompanionSocketOpen({
+      foreground: this.state.foreground,
+      socketOpen: this.state.socketOpen,
+      synchronized: this.state.synchronized,
+    })
     this.publish()
   }
 
@@ -225,6 +245,21 @@ export class CompanionForegroundRuntime {
   forgetConnection(): void {
     this.activeConnectionGeneration = undefined
     this.state = { ...this.state, socketOpen: false, synchronized: false }
+    this.publish()
+  }
+
+  /**
+   * Fail closed and retain one stable connection error until a fresh attachment is acknowledged.
+   * @param failure - recognizable Relay or Companion protocol failure.
+   */
+  reportConnectionFailure(failure: CompanionConnectionFailure): void {
+    this.activeConnectionGeneration = undefined
+    this.state = {
+      ...this.state,
+      socketOpen: false,
+      synchronized: false,
+      connectionFailure: { ...failure },
+    }
     this.publish()
   }
 

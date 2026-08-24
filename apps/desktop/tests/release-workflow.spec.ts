@@ -68,12 +68,22 @@ describe('Desktop release workflow', () => {
   it('projects the deployment Platform identity into every packaged artifact', () => {
     expect(workflow.match(/Project operated Platform identity/g)).toHaveLength(2)
     expect(workflow.match(/write-operated-platform-config\.mjs/g)).toHaveLength(2)
-    expect(workflow.match(/DSH_DESKTOP_OPERATED_PLATFORM_CONFIG/g)).toHaveLength(4)
+    expect(workflow.match(/DSH_DESKTOP_OPERATED_PLATFORM_CONFIG/g)).toHaveLength(6)
     expect(workflow.match(/vars\.PLATFORM_ORIGIN/g)).toHaveLength(2)
     expect(workflow.match(/vars\.PLATFORM_GITHUB_CALLBACK/g)).toHaveLength(2)
     expect(workflow.match(/vars\.PLATFORM_GITHUB_CLIENT_ID/g)).toHaveLength(2)
     expect(workflow).not.toContain('PLATFORM_GITHUB_CLIENT_SECRET')
     expect(record(record(desktopPackage).build).files).toContain('out/operated-platform.json')
+
+    for (const name of ['pack-mac', 'pack-win']) {
+      expect(record(job(name).env)).not.toHaveProperty('DSH_DESKTOP_OPERATED_PLATFORM_CONFIG')
+      for (const stepName of ['Project operated Platform identity', 'Build']) {
+        const releaseStep = steps(name).find(step => step.name === stepName)
+        expect(record(releaseStep?.env).DSH_DESKTOP_OPERATED_PLATFORM_CONFIG).toBe(
+          '${{ runner.temp }}/operated-platform.json',
+        )
+      }
+    }
   })
 
   it('keeps the prepared workspace dependencies intact while packaging', () => {

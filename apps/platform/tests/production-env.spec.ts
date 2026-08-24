@@ -14,6 +14,7 @@ import {
   readPlatformSigningKey,
   requiredPlatformEnv,
   runPlatformProductionEnvCli,
+  validatePlatformEcsHosts,
 } from '../src/production-env.ts'
 
 const HEX = 'ab'.repeat(32)
@@ -99,11 +100,11 @@ function runPublicReadinessHarness(result: 'success' | 'one-backend' | 'unreacha
     '  count=$((count + 1))',
     '  printf \'%s\' "$count" > "$READINESS_COUNTER"',
     '  if [ "$READINESS_RESULT" = wrong-storage ]; then',
-    '    printf \'{"attachmentStorage":"postgres","instanceId":"relay-10-0-0-1"}\'',
+    '    printf \'{"attachmentStorage":"postgres","instanceId":"relay-1"}\'',
     '  elif [ "$READINESS_RESULT" = one-backend ] || [ "$count" = 1 ]; then',
-    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-10-0-0-1"}\'',
+    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-1"}\'',
     '  else',
-    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-10-0-0-2"}\'',
+    '    printf \'{"attachmentStorage":"oss","instanceId":"relay-2"}\'',
     '  fi',
     '}',
     'sleep() { :; }',
@@ -277,6 +278,11 @@ describe('production and deploy names', () => {
     expect(readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', completeDeployEnv())).toEqual(
       Uint8Array.from(Buffer.from(HEX, 'hex')),
     )
+    expect(validatePlatformEcsHosts(completeDeployEnv())).toEqual(['10.0.0.1', '10.0.0.2'])
+    for (const hosts of ['10.0.0.1', '10.0.0.1,', '10.0.0.1,10.0.0.1', 'a,b,c']) {
+      expect(() => validatePlatformEcsHosts({ ...completeDeployEnv(), PLATFORM_ECS_HOSTS: hosts }))
+        .toThrow('exactly two distinct hosts')
+    }
     expect(() => readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', {
       ...completeDeployEnv(),
       PLATFORM_TOKEN_SIGNING_KEY: 'zz',
@@ -370,6 +376,10 @@ describe('Platform release workflows', () => {
     expect(deploy.environment).toBe('production')
     expect(deploy.needs).toBe('validate')
     expect(deploy.if).toBe('${{ inputs.deploy }}')
+    expect(steps(deploy)[0]).toMatchObject({
+      uses: 'actions/checkout@v6',
+      with: { 'persist-credentials': false },
+    })
     const validateStep = steps(validate).find(step => typeof step.run === 'string'
       && step.run.includes('apps/platform/src/production-env-cli.ts'))
     if (validateStep === undefined) throw new TypeError('validate job must run production-env.ts')
@@ -400,6 +410,10 @@ describe('Platform release workflows', () => {
     expect(applySource).toContain('rolling replacement keeps the other host serving')
     expect(publicReadinessSource).toContain('public readiness through the production HTTPS origin')
     expect(publicReadinessSource).toContain('${PLATFORM_ORIGIN}/readyz')
+    expect(applySource).toContain('relay_instance="relay-${relay_index}"')
+    expect(publicReadinessSource).toContain('expected_instances+=("relay-${expected_index}")')
+    expect(applySource).not.toContain('relay-${host//./-}')
+    expect(publicReadinessSource).not.toContain('expected_host//./-')
     expect(applySource.indexOf('platform_public_readiness 30'))
       .toBeLessThan(applySource.indexOf('rollback_cleanup_failed=0'))
     expect(applySource).toContain('rollback_cleanup_failed=0')

@@ -53,7 +53,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       NODE_OPTIONS: --max-old-space-size=8192
-      DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
     environment:
       name: ${{ inputs.publish && 'desktop-release' || 'desktop-dry-run' }}
     strategy:
@@ -104,6 +103,7 @@ jobs:
 
       - name: Project operated Platform identity
         env:
+          DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
           PLATFORM_ORIGIN: ${{ vars.PLATFORM_ORIGIN }}
           PLATFORM_GITHUB_CALLBACK: ${{ vars.PLATFORM_GITHUB_CALLBACK }}
           PLATFORM_GITHUB_CLIENT_ID: ${{ vars.PLATFORM_GITHUB_CLIENT_ID }}
@@ -114,6 +114,8 @@ jobs:
         run: node apps/desktop/scripts/write-operated-platform-config.mjs "$DSH_DESKTOP_OPERATED_PLATFORM_CONFIG"
 
       - name: Build
+        env:
+          DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
         run: |
           pnpm run build
           pnpm --filter @deepseek-ai/dsh-desktop build:main
@@ -179,7 +181,6 @@ jobs:
     runs-on: windows-2025
     env:
       NODE_OPTIONS: --max-old-space-size=8192
-      DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
     environment:
       name: ${{ inputs.publish && 'desktop-release' || 'desktop-dry-run' }}
     steps:
@@ -204,6 +205,7 @@ jobs:
 
       - name: Project operated Platform identity
         env:
+          DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
           PLATFORM_ORIGIN: ${{ vars.PLATFORM_ORIGIN }}
           PLATFORM_GITHUB_CALLBACK: ${{ vars.PLATFORM_GITHUB_CALLBACK }}
           PLATFORM_GITHUB_CLIENT_ID: ${{ vars.PLATFORM_GITHUB_CLIENT_ID }}
@@ -214,6 +216,8 @@ jobs:
         run: node apps/desktop/scripts/write-operated-platform-config.mjs "$env:DSH_DESKTOP_OPERATED_PLATFORM_CONFIG"
 
       - name: Build
+        env:
+          DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
         run: |
           pnpm run build
           pnpm --filter @deepseek-ai/dsh-desktop build:main

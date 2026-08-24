@@ -24,12 +24,11 @@ on_deploy_error() {
 }
 
 platform_public_readiness() {
-  local attempts="$1" public_ready=0 expected_host expected_instance body
+  local attempts="$1" public_ready=0 expected_index expected_instance body
   local ready_instances='|' ready_instance_count=0
   local -a expected_instances=()
-  for expected_host in "${hosts[@]}"; do
-    expected_host="${expected_host// /}"
-    expected_instances+=("relay-${expected_host//./-}")
+  for ((expected_index = 1; expected_index <= ${#hosts[@]}; expected_index += 1)); do
+    expected_instances+=("relay-${expected_index}")
   done
   echo 'public readiness through the production HTTPS origin'
   for ((attempt = 1; attempt <= attempts; attempt += 1)); do

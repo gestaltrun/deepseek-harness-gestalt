@@ -150,6 +150,24 @@ export function missingPlatformDeployEnv(env: NodeJS.Dict<string> = process.env)
 }
 
 /**
+ * Validates the two distinct ECS targets required by the operated deployment.
+ * @param env - Process environment to inspect
+ * @returns The ordered pair used for rolling replacement and public readiness
+ */
+export function validatePlatformEcsHosts(
+  env: NodeJS.Dict<string> = process.env,
+): readonly [string, string] {
+  const hosts = requiredPlatformEnv('PLATFORM_ECS_HOSTS', env).split(',').map(host => host.trim())
+  const first = hosts[0]
+  const second = hosts[1]
+  if (hosts.length !== 2 || first === undefined || second === undefined || first === '' || second === ''
+    || first === second) {
+    throw new TypeError('PLATFORM_ECS_HOSTS must contain exactly two distinct hosts')
+  }
+  return Object.freeze([first, second])
+}
+
+/**
  * Reads one required production or deploy name.
  * @param name - Environment name
  * @param env - Process environment to inspect
@@ -311,6 +329,7 @@ export function runPlatformProductionEnvCli(env: NodeJS.Dict<string> = process.e
   }
   try {
     loadOperatedPlatformConfig(env)
+    validatePlatformEcsHosts(env)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(message)

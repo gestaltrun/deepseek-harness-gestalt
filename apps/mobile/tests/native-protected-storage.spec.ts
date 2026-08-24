@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
-import { parseRelayCredential, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
+import { parseRelayCredential, parseRelayPairingSelector, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
 import { NativeMobilePairingStateStore, PairingCompanionKeyVault } from '../src/companion-keys.ts'
 import { loadProtectedInstallationId, type MobileProtectedStorage } from '../src/native-protected-storage.ts'
 
@@ -34,10 +34,12 @@ describe('native Mobile protected storage', () => {
     const grant = {
       routeId: parseRelayRouteId('route-native'), endpoint: 'mobile' as const,
       credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 3,
+      pairingSelector: parseRelayPairingSelector(pairingId),
     }
     const vault = new PairingCompanionKeyVault(store)
     await vault.selectAccount(accountId)
     vault.retainConfirmedPairing(pairingId, reconnect, attachment, grant)
+    vault.recordDesktopName(pairingId, 'Native Desktop')
     await vault.flush()
 
     const retainedJson = [...storage.values.values()][0]
@@ -47,18 +49,20 @@ describe('native Mobile protected storage', () => {
     expect(restored.reconnectState(pairingId)).toEqual(reconnect)
     expect(restored.attachmentKeyMaterial(pairingId)).toEqual(attachment)
     expect(restored.relayAuthority()).toEqual(grant)
+    expect(restored.pairedDesktops()).toEqual([{ pairingId, desktopName: 'Native Desktop' }])
+    expect(restored.selectedPairingId()).toBe(pairingId)
   })
 
   it('rejects damaged protected documents instead of silently re-pairing', async () => {
     const storage = new MemoryProtectedStorage()
-    storage.values.set('pairings:gestalt:account-damaged', '{"version":1,"active":[{"pairingId":"pairing","attachmentKey":"***"}]}')
+    storage.values.set('pairings:gestalt:account-damaged', '{"version":2,"active":[{"pairingId":"pairing","attachmentKey":"***"}]}')
     const store = new NativeMobilePairingStateStore(storage, 'gestalt')
     await expect(store.load(parsePlatformAccountId('account-damaged'))).rejects.toThrow(/base64/)
   })
 
   it('rejects a protected pairing document from an unsupported format version', async () => {
     const storage = new MemoryProtectedStorage()
-    storage.values.set('pairings:gestalt:account-version', '{"version":2,"active":[]}')
+    storage.values.set('pairings:gestalt:account-version', '{"version":1,"active":[]}')
     const store = new NativeMobilePairingStateStore(storage, 'gestalt')
     await expect(store.load(parsePlatformAccountId('account-version'))).rejects.toThrow(/version is unsupported/)
   })

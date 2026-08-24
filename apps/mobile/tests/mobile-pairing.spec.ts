@@ -17,6 +17,7 @@ describe('MobilePairing', () => {
       completeLink,
       scanQr,
       retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
       activate: vi.fn().mockResolvedValue(undefined),
       deactivate: vi.fn().mockResolvedValue(undefined),
       unpair: vi.fn().mockResolvedValue(undefined),
@@ -49,6 +50,7 @@ describe('MobilePairing', () => {
       completeLink: vi.fn(),
       scanQr: vi.fn(),
       retryPairing,
+      selectDesktop: vi.fn(),
       activate: vi.fn().mockResolvedValue(undefined),
       deactivate: vi.fn().mockResolvedValue(undefined),
       unpair: vi.fn().mockResolvedValue(undefined),
@@ -70,6 +72,7 @@ describe('MobilePairing', () => {
       completeLink: vi.fn(),
       scanQr: vi.fn(),
       retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
       activate,
       deactivate,
       unpair: vi.fn().mockResolvedValue(undefined),
@@ -91,6 +94,7 @@ describe('MobilePairing', () => {
       completeLink: vi.fn(),
       scanQr: vi.fn(),
       retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
       activate: vi.fn().mockRejectedValue(activateFailure),
       deactivate: vi.fn().mockRejectedValue(deactivateFailure),
       unpair: vi.fn(),
@@ -106,14 +110,25 @@ describe('MobilePairing', () => {
   it('reports failed unpairing and keeps the product in an explicit unresolved state', async () => {
     const failure = new AggregateError([new Error('Relay revoke failed')], 'Mobile Personal Pairing unpair failed')
     const reportLifecycleError = vi.fn()
-    let snapshot: ReturnType<MobilePairingActions['getSnapshot']> = { status: 'paired' }
+    const home = 'pairing-home' as never
+    const work = 'pairing-work' as never
+    let snapshot: ReturnType<MobilePairingActions['getSnapshot']> = {
+      status: 'paired',
+      desktops: [
+        { pairingId: home, desktopName: 'Home Mac' },
+        { pairingId: work, desktopName: 'Work Mac' },
+      ],
+      selectedPairingId: home,
+    }
     let notify = (): void => {}
+    const selectDesktop = vi.fn()
     const actions: MobilePairingActions = {
       getSnapshot: () => snapshot,
       subscribe: (listener) => { notify = listener; return () => {} },
       completeLink: vi.fn(),
       scanQr: vi.fn(),
       retryPairing: vi.fn(),
+      selectDesktop,
       activate: vi.fn().mockResolvedValue(undefined),
       deactivate: vi.fn().mockResolvedValue(undefined),
       unpair: vi.fn(async () => {
@@ -124,7 +139,9 @@ describe('MobilePairing', () => {
     }
     render(createElement(MobilePairing, { actions, reportLifecycleError }))
 
-    fireEvent.click(screen.getByRole('button', { name: '解除配对' }))
+    fireEvent.click(screen.getByRole('button', { name: /Work Mac/ }))
+    expect(selectDesktop).toHaveBeenCalledWith(work)
+    fireEvent.click(screen.getByRole('button', { name: '解除所选 Desktop 配对' }))
 
     await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(failure) })
     expect(screen.getByRole('heading', { name: '解除配对失败' })).toBeTruthy()

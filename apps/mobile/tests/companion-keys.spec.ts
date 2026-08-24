@@ -101,6 +101,48 @@ describe('PairingCompanionKeyVault', () => {
     expect(restored.relayAuthority()).toBeUndefined()
   })
 
+  it('persists every Paired Desktop and restores only the explicit selection', async () => {
+    const store = new IndexedDbMobilePairingStateStore(`mobile-pairing-selection-${crypto.randomUUID()}`)
+    const accountId = parsePlatformAccountId('account-selection')
+    const personal = parsePersonalPairingId('pairing-personal')
+    const work = parsePersonalPairingId('pairing-work')
+    const personalGrant = {
+      routeId: parseRelayRouteId('route-personal'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(personal),
+    }
+    const workGrant = {
+      routeId: parseRelayRouteId('route-work'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI'), revision: 2,
+      pairingSelector: parseRelayPairingSelector(work),
+    }
+    const vault = new PairingCompanionKeyVault(store)
+    await vault.selectAccount(accountId)
+    vault.retainConfirmedPairing(personal, new Uint8Array(96).fill(1), MATERIAL, personalGrant)
+    vault.recordDesktopName(personal, 'Home Mac')
+    vault.retainConfirmedPairing(work, new Uint8Array(96).fill(2), OTHER, workGrant)
+    vault.recordDesktopName(work, 'Work Mac')
+    vault.selectPairing(personal)
+    await vault.flush()
+
+    const restored = new PairingCompanionKeyVault(store)
+    await restored.selectAccount(accountId)
+    expect(restored.pairedDesktops()).toEqual([
+      { pairingId: personal, desktopName: 'Home Mac' },
+      { pairingId: work, desktopName: 'Work Mac' },
+    ])
+    expect(restored.selectedPairingId()).toBe(personal)
+    expect(restored.relayAuthority()).toEqual(personalGrant)
+
+    restored.selectPairing(work)
+    restored.release(work)
+    await restored.flush()
+    expect(restored.pairedDesktops()).toEqual([{ pairingId: personal, desktopName: 'Home Mac' }])
+    expect(restored.selectedPairingId()).toBeUndefined()
+    expect(restored.attachmentKeyMaterial(personal)).toEqual(MATERIAL)
+    expect(restored.attachmentKeyMaterial(work)).toBeUndefined()
+  })
+
   it('retains a copy and zeroes released keys', () => {
     const vault = new PairingCompanionKeyVault()
     const pairing = parsePersonalPairingId('pairing-one')
@@ -117,9 +159,11 @@ describe('PairingCompanionKeyVault', () => {
   })
 
   it('recovers its durable save queue after a failed confirmed-pairing write', async () => {
+    const pairingId = parsePersonalPairingId('pairing-retry')
     const grant = {
       routeId: parseRelayRouteId('route-retry'), endpoint: 'mobile' as const,
       credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(pairingId),
     }
     const save = vi.fn()
       .mockRejectedValueOnce(new Error('IndexedDB write failed'))
@@ -127,7 +171,6 @@ describe('PairingCompanionKeyVault', () => {
     const store = { load: vi.fn(async () => ({ active: [] })), save } as unknown as IndexedDbMobilePairingStateStore
     const vault = new PairingCompanionKeyVault(store)
     const accountId = parsePlatformAccountId('account-retry')
-    const pairingId = parsePersonalPairingId('pairing-retry')
     await vault.selectAccount(accountId)
     vault.retainConfirmedPairing(pairingId, new Uint8Array(96).fill(4), MATERIAL, grant)
     await expect(vault.flush()).rejects.toThrow('IndexedDB write failed')

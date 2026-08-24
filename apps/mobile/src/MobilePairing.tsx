@@ -95,9 +95,53 @@ export function MobilePairing({
   if (snapshot.status === 'paired') {
     return (
       <section className={css.card} data-mobile-pairing="paired">
-        <h2>已配对</h2>
-        <p>Companion Surface 已激活。</p>
-        <button type="button" className={css.continue} onClick={unpair}>解除配对</button>
+        <h2>Paired Desktops</h2>
+        <p>每次只选择一台 Desktop 作为 Relay、Session 和缓存权限来源。</p>
+        {snapshot.error === undefined ? null : <p role="alert">{snapshot.error}</p>}
+        <ul className={css.desktops}>
+          {snapshot.desktops.map((desktop) => {
+            const selected = desktop.pairingId === snapshot.selectedPairingId
+            const label = desktop.desktopName ?? desktop.pairingId
+            return (
+              <li key={desktop.pairingId}>
+                <button
+                  type="button"
+                  className={css.desktop}
+                  aria-pressed={selected}
+                  onClick={() => { void Promise.resolve(actions.selectDesktop(desktop.pairingId)).catch(reportLifecycleError) }}
+                >
+                  <strong>{label}</strong>
+                  <small>{selected ? '当前选择' : '选择此 Desktop'}</small>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+        {snapshot.selectedPairingId === undefined && <p role="status">请选择一台 Paired Desktop 以连接。</p>}
+        <button
+          type="button"
+          className={css.continue}
+          disabled={snapshot.selectedPairingId === undefined}
+          onClick={unpair}
+        >解除所选 Desktop 配对</button>
+        <h3>配对另一台 Desktop</h3>
+        <p>扫描另一台 Desktop Settings 中的 QR，或粘贴同一个完整的一次性链接。</p>
+        <button type="button" className={css.scan} onClick={startCamera}>扫描 QR</button>
+        <div className={css.camera} hidden={!cameraActive}>
+          <video ref={video} muted playsInline aria-label="Personal Pairing QR camera" />
+          <p>将 Desktop Settings 中的 QR 对准取景框</p>
+          <button type="button" className={css.scan} onClick={cancelCamera}>取消扫描</button>
+        </div>
+        <label>
+          <span>完整的一次性配对链接</span>
+          <input type="url" value={link} onChange={(event) => { setLink(event.target.value) }} />
+        </label>
+        <button
+          type="button"
+          className={css.continue}
+          disabled={link === ''}
+          onClick={() => { void Promise.resolve(actions.completeLink(link)).catch(() => undefined) }}
+        >继续配对</button>
       </section>
     )
   }

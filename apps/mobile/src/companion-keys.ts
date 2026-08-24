@@ -8,20 +8,25 @@ import {
   parseRelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { MobileEndpointPairingRecovery, MobilePairingKeyRetention } from './personal-pairing.ts'
+import type { MobilePairedDesktop } from './personal-pairing-model.ts'
 import type { MobileProtectedStorage } from './native-protected-storage.ts'
 
 /** Maximum Personal Pairings whose attachment key one Mobile installation retains. */
 export const MAX_RETAINED_PAIRING_KEYS = 16
+const MOBILE_PAIRING_DOCUMENT_VERSION = 2
 
 interface StoredMobilePairingState {
   pairingId: PersonalPairingId
   attachmentKey: Uint8Array
   reconnectState?: Uint8Array
   grant?: RelayCredentialGrant
+  desktopName?: string
 }
 
 export interface StoredMobilePairingDocument {
   active: readonly StoredMobilePairingState[]
+  /** Personal Pairing explicitly selected for Relay and Session authority. */
+  selectedPairingId?: PersonalPairingId
   pending?: MobileEndpointPairingRecovery
 }
 
@@ -58,24 +63,33 @@ export class IndexedDbMobilePairingStateStore {
       throw new TypeError('Mobile pairing state must contain an object')
     }
     const document = value as Record<string, unknown>
+    if (document.version !== MOBILE_PAIRING_DOCUMENT_VERSION) {
+      throw new TypeError('Mobile pairing document version is unsupported')
+    }
     if (!Array.isArray(document.active) || document.active.length > MAX_RETAINED_PAIRING_KEYS) {
       throw new TypeError('Mobile pairing active state must contain a bounded array')
     }
-    return {
+    return validatedDocument({
       active: document.active.map(parseStoredState),
+      ...(document.selectedPairingId === undefined
+        ? {}
+        : { selectedPairingId: parsePersonalPairingId(document.selectedPairingId) }),
       ...(document.pending === undefined ? {} : { pending: parseEndpointRecovery(document.pending) }),
-    }
+    })
   }
 
   async save(accountId: PlatformAccountId, document: StoredMobilePairingDocument): Promise<void> {
     const database = await this.database
     const encoded = {
+      version: MOBILE_PAIRING_DOCUMENT_VERSION,
       active: document.active.map(record => ({
         pairingId: record.pairingId,
         attachmentKey: record.attachmentKey.slice(),
         ...(record.reconnectState === undefined ? {} : { reconnectState: record.reconnectState.slice() }),
         ...(record.grant === undefined ? {} : { grant: { ...record.grant } }),
+        ...(record.desktopName === undefined ? {} : { desktopName: record.desktopName }),
       })),
+      ...(document.selectedPairingId === undefined ? {} : { selectedPairingId: document.selectedPairingId }),
       ...(document.pending === undefined ? {} : { pending: cloneEndpointRecovery(document.pending) }),
     }
     await new Promise<void>((resolve, reject) => {
@@ -105,25 +119,32 @@ export class NativeMobilePairingStateStore implements MobilePairingStateStore {
       throw new TypeError('Native Mobile pairing document must contain an object')
     }
     const record = document as Record<string, unknown>
-    if (record.version !== 1) throw new TypeError('Native Mobile pairing document version is unsupported')
+    if (record.version !== MOBILE_PAIRING_DOCUMENT_VERSION) {
+      throw new TypeError('Native Mobile pairing document version is unsupported')
+    }
     if (!Array.isArray(record.active) || record.active.length > MAX_RETAINED_PAIRING_KEYS) {
       throw new TypeError('Native Mobile pairing active state must contain a bounded array')
     }
-    return {
+    return validatedDocument({
       active: record.active.map(parseNativeState),
+      ...(record.selectedPairingId === undefined
+        ? {}
+        : { selectedPairingId: parsePersonalPairingId(record.selectedPairingId) }),
       ...(record.pending === undefined ? {} : { pending: parseNativeRecovery(record.pending) }),
-    }
+    })
   }
 
   async save(accountId: PlatformAccountId, document: StoredMobilePairingDocument): Promise<void> {
     const encoded = {
-      version: 1,
+      version: MOBILE_PAIRING_DOCUMENT_VERSION,
       active: document.active.map(record => ({
         pairingId: record.pairingId,
         attachmentKey: encodeBytes(record.attachmentKey),
         ...(record.reconnectState === undefined ? {} : { reconnectState: encodeBytes(record.reconnectState) }),
         ...(record.grant === undefined ? {} : { grant: { ...record.grant } }),
+        ...(record.desktopName === undefined ? {} : { desktopName: record.desktopName }),
       })),
+      ...(document.selectedPairingId === undefined ? {} : { selectedPairingId: document.selectedPairingId }),
       ...(document.pending === undefined ? {} : {
         pending: {
           ...document.pending,
@@ -145,7 +166,9 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
   private readonly attachmentKeys = new Map<string, Uint8Array>()
   private readonly reconnectStates = new Map<string, Uint8Array>()
   private readonly grants = new Map<string, RelayCredentialGrant>()
+  private readonly desktopNames = new Map<string, string>()
   private pending: MobileEndpointPairingRecovery | undefined
+  private selected: PersonalPairingId | undefined
   private accountId: PlatformAccountId | undefined
   private persistence: Promise<void> = Promise.resolve()
   private selection: Promise<void> = Promise.resolve()
@@ -156,7 +179,7 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
     const selected = this.selection.then(async () => {
       if (this.accountId === accountId) return
       await this.persistence
-      const state = await this.store?.load(accountId) ?? { active: [] }
+      const state = validatedDocument(await this.store?.load(accountId) ?? { active: [] })
       try {
         this.clearMemory()
         this.accountId = accountId
@@ -164,7 +187,9 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
           this.attachmentKeys.set(record.pairingId, record.attachmentKey.slice())
           if (record.reconnectState !== undefined) this.reconnectStates.set(record.pairingId, record.reconnectState.slice())
           if (record.grant !== undefined) this.grants.set(record.pairingId, { ...record.grant })
+          if (record.desktopName !== undefined) this.desktopNames.set(record.pairingId, record.desktopName)
         }
+        this.selected = state.selectedPairingId
         this.pending = state.pending === undefined ? undefined : cloneEndpointRecovery(state.pending)
       } finally {
         for (const record of state.active) {
@@ -203,6 +228,7 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
   ): void {
     if (reconnectState.byteLength !== 96) throw new TypeError('Mobile Snow reconnect state must contain 96 bytes')
     if (attachmentKey.byteLength < 32) throw new TypeError('Personal Pairing attachment key must contain at least 256 bits')
+    requirePairingGrant(pairingId, grant)
     if (!this.attachmentKeys.has(pairingId) && this.attachmentKeys.size >= MAX_RETAINED_PAIRING_KEYS) {
       throw new Error('Mobile retained Personal Pairing attachment-key limit reached')
     }
@@ -211,6 +237,7 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
     this.attachmentKeys.set(pairingId, attachmentKey.slice())
     this.reconnectStates.set(pairingId, reconnectState.slice())
     this.grants.set(pairingId, { ...grant })
+    this.selected = pairingId
     this.clearPendingMemory()
     this.persist()
   }
@@ -233,18 +260,69 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
 
   retainRelayAuthority(pairingId: PersonalPairingId, grant: RelayCredentialGrant): void {
     if (!this.attachmentKeys.has(pairingId)) throw new Error('Mobile Relay grant has no retained Snow pairing state')
+    requirePairingGrant(pairingId, grant)
     this.grants.set(pairingId, { ...grant })
     this.persist()
   }
 
+  /**
+   * Persist the authenticated Desktop name carried by its Companion channel.
+   * @param pairingId - Personal Pairing authenticated by the current channel.
+   * @param desktopName - Desktop Installation name from the encrypted foreground projection.
+   */
+  recordDesktopName(pairingId: PersonalPairingId, desktopName: string): void {
+    if (!this.attachmentKeys.has(pairingId)) throw new Error('Mobile Desktop name has no retained Personal Pairing')
+    if (desktopName.trim() === '' || desktopName.length > 128) {
+      throw new TypeError('Paired Desktop name must contain 1-128 characters')
+    }
+    if (this.desktopNames.get(pairingId) === desktopName) {
+      this.persist()
+      return
+    }
+    this.desktopNames.set(pairingId, desktopName)
+    this.persist()
+  }
+
+  /**
+   * Select one complete retained Personal Pairing for Relay and projection authority.
+   * @param pairingId - retained Personal Pairing selected by the person.
+   */
+  selectPairing(pairingId: PersonalPairingId): void {
+    if (!this.reconnectStates.has(pairingId) || !this.grants.has(pairingId)) {
+      throw new Error('Selected Paired Desktop has no complete retained authority')
+    }
+    if (this.selected === pairingId) {
+      this.persist()
+      return
+    }
+    this.selected = pairingId
+    this.persist()
+  }
+
+  /** @returns credential-free retained Desktops in stable pairing order. */
+  pairedDesktops(): readonly MobilePairedDesktop[] {
+    return [...this.attachmentKeys.keys()]
+      .filter(pairingId => this.reconnectStates.has(pairingId) && this.grants.has(pairingId))
+      .map((pairingId) => {
+        const desktopName = this.desktopNames.get(pairingId)
+        return {
+          pairingId: parsePersonalPairingId(pairingId),
+          ...(desktopName === undefined ? {} : { desktopName }),
+        }
+      })
+  }
+
+  /** @returns the explicitly selected retained Personal Pairing. */
+  selectedPairingId(): PersonalPairingId | undefined { return this.selected }
+
   relayAuthority(): RelayCredentialGrant | undefined {
-    const grant = [...this.grants.values()].at(-1)
+    const grant = this.selected === undefined ? undefined : this.grants.get(this.selected)
     return grant === undefined ? undefined : { ...grant }
   }
 
-  /** @returns latest retained confirmed Personal Pairing for the selected Account. */
+  /** @returns explicitly selected confirmed Personal Pairing for the selected Account. */
   retainedPairingId(): PersonalPairingId | undefined {
-    return [...this.attachmentKeys.keys()].at(-1) as PersonalPairingId | undefined
+    return this.selected
   }
 
   /**
@@ -270,6 +348,8 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
     this.attachmentKeys.delete(pairingId)
     this.reconnectStates.delete(pairingId)
     this.grants.delete(pairingId)
+    this.desktopNames.delete(pairingId)
+    if (this.selected === pairingId) this.selected = undefined
     this.persist()
   }
 
@@ -287,6 +367,8 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
     for (const state of this.reconnectStates.values()) state.fill(0)
     this.reconnectStates.clear()
     this.grants.clear()
+    this.desktopNames.clear()
+    this.selected = undefined
     this.clearPendingMemory()
   }
 
@@ -296,16 +378,25 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
     const active = [...this.attachmentKeys].map(([pairingId, attachmentKey]) => {
       const grant = this.grants.get(pairingId)
       const reconnectState = this.reconnectStates.get(pairingId)
+      const desktopName = this.desktopNames.get(pairingId)
       return {
         pairingId: parsePersonalPairingId(pairingId),
         attachmentKey: attachmentKey.slice(),
         ...(reconnectState === undefined ? {} : { reconnectState: reconnectState.slice() }),
         ...(grant === undefined ? {} : { grant: { ...grant } }),
+        ...(desktopName === undefined ? {} : { desktopName }),
       }
     })
+    const selectedPairingId = this.selected
     const pending = this.pending === undefined ? undefined : cloneEndpointRecovery(this.pending)
     this.persistence = this.persistence.catch(() => undefined).then(async () => {
-      try { await this.store?.save(accountId, { active, ...(pending === undefined ? {} : { pending }) }) } finally {
+      try {
+        await this.store?.save(accountId, {
+          active,
+          ...(selectedPairingId === undefined ? {} : { selectedPairingId }),
+          ...(pending === undefined ? {} : { pending }),
+        })
+      } finally {
         for (const record of active) {
           record.attachmentKey.fill(0)
           record.reconnectState?.fill(0)
@@ -397,6 +488,7 @@ function parseStoredState(value: unknown): StoredMobilePairingState {
       && (!(record.reconnectState instanceof Uint8Array) || record.reconnectState.byteLength !== 96))) {
     throw new TypeError('Mobile pairing state record is invalid')
   }
+  const pairingId = parsePersonalPairingId(record.pairingId)
   let grant: RelayCredentialGrant | undefined
   if (record.grant !== undefined) {
     if (!(record.reconnectState instanceof Uint8Array)) {
@@ -414,10 +506,40 @@ function parseStoredState(value: unknown): StoredMobilePairingState {
       credential: parseRelayCredential(value.credential), revision: value.revision as number,
       ...(value.pairingSelector === undefined ? {} : { pairingSelector: parseRelayPairingSelector(value.pairingSelector) }),
     }
+    requirePairingGrant(pairingId, grant)
   }
   return {
-    pairingId: parsePersonalPairingId(record.pairingId), attachmentKey: record.attachmentKey.slice(),
+    pairingId, attachmentKey: record.attachmentKey.slice(),
     ...(record.reconnectState instanceof Uint8Array ? { reconnectState: record.reconnectState.slice() } : {}),
     ...(grant === undefined ? {} : { grant }),
+    ...(record.desktopName === undefined ? {} : { desktopName: parseDesktopName(record.desktopName) }),
   }
+}
+
+function requirePairingGrant(pairingId: PersonalPairingId, grant: RelayCredentialGrant): void {
+  if (grant.endpoint !== 'mobile' || String(grant.pairingSelector) !== String(pairingId)) {
+    throw new TypeError('Mobile Relay grant must select its retained Personal Pairing')
+  }
+}
+
+function validatedDocument(document: StoredMobilePairingDocument): StoredMobilePairingDocument {
+  if (document.selectedPairingId !== undefined) {
+    const selected = document.active.find(record => record.pairingId === document.selectedPairingId)
+    if (selected?.reconnectState === undefined || selected.grant === undefined) {
+      for (const record of document.active) {
+        record.attachmentKey.fill(0)
+        record.reconnectState?.fill(0)
+      }
+      wipeEndpointRecovery(document.pending)
+      throw new TypeError('Selected Paired Desktop has no complete retained authority')
+    }
+  }
+  return document
+}
+
+function parseDesktopName(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '' || value.length > 128) {
+    throw new TypeError('Paired Desktop name must contain 1-128 characters')
+  }
+  return value
 }

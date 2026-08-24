@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import 'fake-indexeddb/auto'
-import { parseAccountProofJti } from '@deepseek-ai/dsh-platform-account'
+import { parseAccountProofJti, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   PAIRING_REPLAY_RETENTION_MS,
   parsePairingCompletionId,
@@ -21,6 +21,107 @@ import { companionMayMutate, CompanionForegroundRuntime } from '../src/companion
 import { MobilePairingController } from '../src/personal-pairing.ts'
 
 describe('MobilePairingController', () => {
+  it('switches the real Relay lifecycle to one explicit Paired Desktop and unpairs only that selection', async () => {
+    const accountId = parsePlatformAccountId('account-mobile')
+    const home = parsePersonalPairingId('pairing-home')
+    const work = parsePersonalPairingId('pairing-work')
+    const homeGrant = {
+      routeId: parseRelayRouteId('route-home'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(home),
+    }
+    const workGrant = {
+      routeId: parseRelayRouteId('route-work'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(work),
+    }
+    const vault = new PairingCompanionKeyVault()
+    await vault.selectAccount(accountId)
+    vault.retainConfirmedPairing(home, new Uint8Array(96).fill(1), new Uint8Array(32).fill(2), homeGrant)
+    vault.recordDesktopName(home, 'Home Mac')
+    vault.retainConfirmedPairing(work, new Uint8Array(96).fill(3), new Uint8Array(32).fill(4), workGrant)
+    vault.recordDesktopName(work, 'Work Mac')
+    vault.selectPairing(home)
+    const transitions: string[] = []
+    const companion = {
+      configure: vi.fn((grant?: typeof homeGrant) => { transitions.push(`configure:${grant?.routeId ?? 'none'}`) }),
+      start: vi.fn(async () => { transitions.push('start') }),
+      stop: vi.fn(async () => { transitions.push('stop') }),
+      forgetConnection: vi.fn(() => { transitions.push('forget') }),
+      releasePairing: vi.fn(async () => { transitions.push('release') }),
+    }
+    const releaseProjectionAuthority = vi.fn(async (deleteStored: boolean) => {
+      transitions.push(`projection:${String(deleteStored)}`)
+    })
+    const transport = transportFixture()
+    const controller = new MobilePairingController({
+      installation: installationFixture(),
+      transport,
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn(), wipe: vi.fn() },
+      scanner: { scan: vi.fn() },
+      relay: companion,
+      companion,
+      attachmentKeys: vault,
+      releaseProjectionAuthority,
+    })
+
+    await controller.activate()
+    expect(controller.getSnapshot()).toEqual({
+      status: 'paired',
+      desktops: [
+        { pairingId: home, desktopName: 'Home Mac' },
+        { pairingId: work, desktopName: 'Work Mac' },
+      ],
+      selectedPairingId: home,
+    })
+    transitions.length = 0
+
+    await controller.selectDesktop(work)
+
+    expect(transitions).toEqual(['forget', 'projection:false', 'release', 'configure:route-work', 'start'])
+    expect(vault.selectedPairingId()).toBe(work)
+    expect(vault.relayAuthority()).toEqual(workGrant)
+    expect(controller.getSnapshot()).toMatchObject({ status: 'paired', selectedPairingId: work })
+
+    await controller.unpair()
+
+    expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledWith(expect.objectContaining({ pairingId: work }))
+    expect(vault.attachmentKeyMaterial(work)).toBeUndefined()
+    expect(vault.attachmentKeyMaterial(home)).toEqual(new Uint8Array(32).fill(2))
+    expect(controller.getSnapshot()).toEqual({
+      status: 'paired',
+      desktops: [{ pairingId: home, desktopName: 'Home Mac' }],
+      selectedPairingId: undefined,
+    })
+  })
+
+  it('revokes a durable selection even when no Relay channel is active', async () => {
+    const accountId = parsePlatformAccountId('account-mobile')
+    const pairingId = parsePersonalPairingId('pairing-durable-offline')
+    const grant = {
+      routeId: parseRelayRouteId('route-durable-offline'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(pairingId),
+    }
+    const vault = new PairingCompanionKeyVault()
+    await vault.selectAccount(accountId)
+    vault.retainConfirmedPairing(
+      pairingId, new Uint8Array(96).fill(1), new Uint8Array(32).fill(2), grant,
+    )
+    const transport = transportFixture()
+    const controller = new MobilePairingController({
+      installation: installationFixture(), transport,
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn(), wipe: vi.fn() },
+      attachmentKeys: vault, scanner: { scan: vi.fn() },
+    })
+
+    await controller.unpair()
+
+    expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledWith(expect.objectContaining({ pairingId }))
+    expect(vault.attachmentKeyMaterial(pairingId)).toBeUndefined()
+    expect(controller.getSnapshot()).toEqual({ status: 'ready' })
+  })
+
   it('recovers a pending Snow transcript and post-open authority across full controller restarts', async () => {
     initializeSnowChannel(readFileSync(new URL(
       '../../../packages/platform/noise-channel/pkg/dsh_noise_channel_bg.wasm', import.meta.url,
@@ -128,6 +229,7 @@ describe('MobilePairingController', () => {
     const grant = {
       routeId: parseRelayRouteId('route-endpoint'), endpoint: 'mobile' as const,
       credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(parsePersonalPairingId('pairing-endpoint')),
     }
     const reconnectState = new Uint8Array(96).fill(5)
     const attachmentKey = new Uint8Array(32).fill(7)
@@ -177,7 +279,7 @@ describe('MobilePairingController', () => {
     await vi.waitFor(() => { expect(controller.getSnapshot()).toEqual({ status: 'retryable', error: 'Relay start failed' }) })
     await controller.retryPairing()
     scheduled.shift()?.()
-    await vi.waitFor(() => { expect(controller.getSnapshot()).toEqual({ status: 'paired' }) })
+    await vi.waitFor(() => { expect(controller.getSnapshot()).toMatchObject({ status: 'paired' }) })
     expect(handshake.openRelayAuthorityDurably).toHaveBeenCalledWith(Uint8Array.of(8, 9), expect.any(Function))
     expect(handshake.openRelayAuthorityDurably).toHaveBeenCalledTimes(1)
     expect(vault.attachmentKeyMaterial(parsePersonalPairingId('pairing-endpoint'))).toEqual(attachmentKey)
@@ -265,7 +367,7 @@ describe('MobilePairingController', () => {
 
     await controller.completeLink(pairingLink(Date.parse('2026-08-18T10:02:00.000Z')))
     scheduled.shift()?.()
-    await vi.waitFor(() => { expect(controller.getSnapshot()).toEqual({ status: 'paired' }) })
+    await vi.waitFor(() => { expect(controller.getSnapshot()).toMatchObject({ status: 'paired' }) })
 
     expect(handshake.openRelayAuthority).toHaveBeenCalledWith(sealedRelayAuthority)
     expect(relay.configure).toHaveBeenCalledWith(mobileGrant)
@@ -299,7 +401,7 @@ describe('MobilePairingController', () => {
     await controller.completeLink(pairingLink(Date.parse('2026-08-18T10:02:00.000Z')))
     expect(vault.attachmentKeyMaterial(parsePersonalPairingId('pairing-key'))).toBeUndefined()
     scheduled.shift()?.()
-    await vi.waitFor(() => { expect(controller.getSnapshot()).toEqual({ status: 'paired' }) })
+    await vi.waitFor(() => { expect(controller.getSnapshot()).toMatchObject({ status: 'paired' }) })
     expect(vault.attachmentKeyMaterial(parsePersonalPairingId('pairing-key'))).toEqual(material)
     await controller.unpair()
     expect(vault.attachmentKeyMaterial(parsePersonalPairingId('pairing-key'))).toBeUndefined()
@@ -335,7 +437,7 @@ describe('MobilePairingController', () => {
     })
     await controller.completeLink(pairingLink(Date.parse('2026-08-18T10:02:00.000Z')))
     scheduled.shift()?.()
-    await vi.waitFor(() => { expect(controller.getSnapshot()).toEqual({ status: 'paired' }) })
+    await vi.waitFor(() => { expect(controller.getSnapshot()).toMatchObject({ status: 'paired' }) })
 
     await controller.unpair()
 
@@ -360,7 +462,18 @@ describe('MobilePairingController', () => {
       acceptDesktopHandshake: vi.fn(),
       wipe: vi.fn(async () => { throw new Error('handshake wipe failed') }),
     }
-    const attachmentKeys = { retain: vi.fn(), wipe: vi.fn(() => { throw new Error('pairing key wipe failed') }) }
+    const pairingId = parsePersonalPairingId('pairing-cleanup-failures')
+    const attachmentKeys = {
+      retain: vi.fn(),
+      retainedPairingId: vi.fn(() => pairingId),
+      pairedDesktops: vi.fn(() => [{ pairingId }]),
+      selectedPairingId: vi.fn(() => pairingId),
+      selectAccount: vi.fn(),
+      relayAuthority: vi.fn(),
+      release: vi.fn(() => { throw new Error('pairing key release failed') }),
+      flush: vi.fn(),
+      wipe: vi.fn(),
+    }
     const companion = {
       forgetConnection: vi.fn(),
       releasePairing: vi.fn(async () => { throw new Error('Companion release failed') }),
@@ -379,6 +492,7 @@ describe('MobilePairingController', () => {
       relay,
       scanner: { scan: vi.fn() },
     })
+    await controller.activate()
 
     const failure = await controller.unpair().then(
       () => undefined,
@@ -389,13 +503,13 @@ describe('MobilePairingController', () => {
     expect(failure?.message).toBe('Mobile Personal Pairing unpair failed')
     expect(failure?.errors).toEqual([
       expect.objectContaining({ message: 'handshake wipe failed' }),
-      expect.objectContaining({ message: 'pairing key wipe failed' }),
+      expect.objectContaining({ message: 'pairing key release failed' }),
       expect.objectContaining({ message: 'Companion release failed' }),
       expect.objectContaining({ message: 'Relay revoke failed' }),
       expect.objectContaining({ message: 'Relay stop failed' }),
     ])
     expect(handshake.wipe).toHaveBeenCalledOnce()
-    expect(attachmentKeys.wipe).toHaveBeenCalledOnce()
+    expect(attachmentKeys.release).toHaveBeenCalledWith(pairingId)
     expect(companion.releasePairing).toHaveBeenCalledOnce()
     expect(relay.configure).toHaveBeenCalledWith(undefined)
     expect(relay.stop).toHaveBeenCalledOnce()
@@ -424,10 +538,13 @@ describe('MobilePairingController', () => {
       retainedPairingId: vi.fn(() => retainedPairingId),
       relayAuthority: vi.fn(() => retainedGrant),
       selectAccount: vi.fn(),
-      wipe: vi.fn(() => {
+      pairedDesktops: vi.fn(() => retainedPairingId === undefined ? [] : [{ pairingId: retainedPairingId }]),
+      selectedPairingId: vi.fn(() => retainedPairingId),
+      release: vi.fn(() => {
         retainedPairingId = undefined
         retainedGrant = undefined
       }),
+      wipe: vi.fn(),
       flush: vi.fn(),
     }
     const relay = { configure: vi.fn(), start: vi.fn(), stop: vi.fn() }
@@ -459,23 +576,27 @@ describe('MobilePairingController', () => {
       scanner: { scan: vi.fn() },
     })
     await restartedController.activate()
-    expect(restartedController.getSnapshot()).toEqual({ status: 'paired' })
+    expect(restartedController.getSnapshot()).toMatchObject({ status: 'paired' })
     await expect(restartedController.unpair()).resolves.toBeUndefined()
     expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledTimes(2)
     expect(transport.revokeMobilePersonalPairing).toHaveBeenLastCalledWith(expect.objectContaining({ pairingId }))
-    expect(attachmentKeys.wipe).toHaveBeenCalledOnce()
+    expect(attachmentKeys.release).toHaveBeenCalledOnce()
     expect(restartedController.getSnapshot()).toEqual({ status: 'ready' })
   })
 
   it('keeps unpair retryable until pairing-owned projection deletion succeeds', async () => {
     const pairingId = parsePersonalPairingId('pairing-cache-retry')
+    let retainedPairingId: PersonalPairingId | undefined = pairingId
     const releaseProjectionAuthority = vi.fn()
       .mockRejectedValueOnce(new Error('projection delete failed'))
       .mockResolvedValueOnce(undefined)
     const attachmentKeys = {
       retain: vi.fn(),
-      retainedPairingId: vi.fn(() => pairingId),
+      retainedPairingId: vi.fn(() => retainedPairingId),
+      pairedDesktops: vi.fn(() => retainedPairingId === undefined ? [] : [{ pairingId: retainedPairingId }]),
+      selectedPairingId: vi.fn(() => retainedPairingId),
       selectAccount: vi.fn(),
+      release: vi.fn(() => { retainedPairingId = undefined }),
       wipe: vi.fn(),
       flush: vi.fn(),
     }
@@ -495,12 +616,12 @@ describe('MobilePairingController', () => {
       status: 'unpair-failed', error: 'Mobile Personal Pairing unpair failed',
     })
     expect(handshake.wipe).not.toHaveBeenCalled()
-    expect(attachmentKeys.wipe).not.toHaveBeenCalled()
+    expect(attachmentKeys.release).not.toHaveBeenCalled()
 
     await expect(controller.unpair()).resolves.toBeUndefined()
     expect(releaseProjectionAuthority).toHaveBeenCalledTimes(2)
     expect(handshake.wipe).toHaveBeenCalledOnce()
-    expect(attachmentKeys.wipe).toHaveBeenCalledOnce()
+    expect(attachmentKeys.release).toHaveBeenCalledOnce()
     expect(controller.getSnapshot()).toEqual({ status: 'ready' })
   })
 
@@ -643,7 +764,7 @@ describe('MobilePairingController', () => {
     expect(handshake.acceptDesktopHandshake).toHaveBeenCalledTimes(2)
     expect(authorizeCurrentInstallation).toHaveBeenCalledTimes(2)
     scheduled?.()
-    await vi.waitFor(() => { expect(controller.getSnapshot()).toEqual({ status: 'paired' }) })
+    await vi.waitFor(() => { expect(controller.getSnapshot()).toMatchObject({ status: 'paired' }) })
   })
 
   it.each([

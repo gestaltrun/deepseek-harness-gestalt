@@ -68,6 +68,7 @@ describe('Mobile Noise Companion receiver', () => {
     const acceptValidatedDesktopResync = vi.fn((_message: MobileCompanionProjectionDto) => {})
     const acceptValidatedCompanionProjection = vi.fn(() => true)
     const refreshSurface = vi.fn()
+    const authenticatedDesktop = vi.fn()
     const messages = [
       {
         type: 'projection' as const,
@@ -118,6 +119,7 @@ describe('Mobile Noise Companion receiver', () => {
     const receiver = new MobileNoiseCompanionReceiver(
       { open: () => messages.shift()! }, 2, runtime, undefined,
       () => ({ acceptValidatedDesktopResync, acceptValidatedCompanionProjection }), refreshSurface,
+      undefined, authenticatedDesktop,
     )
     receiver.receive(Uint8Array.of(1))
     receiver.receive(Uint8Array.of(2))
@@ -125,6 +127,7 @@ describe('Mobile Noise Companion receiver', () => {
     receiver.receive(Uint8Array.of(4))
     expect(refreshSurface).toHaveBeenCalledOnce()
     expect(refreshSurface).toHaveBeenCalledWith(0)
+    expect(authenticatedDesktop).toHaveBeenCalledWith('Authenticated Desktop')
     const resync = acceptValidatedDesktopResync.mock.lastCall?.[0]
     expect(resync?.desktopName).toBe('Authenticated Desktop')
     expect(resync?.sessions.ids).toEqual(['session-v3'])

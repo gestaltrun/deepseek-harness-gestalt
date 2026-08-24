@@ -10,6 +10,12 @@ export const COVERAGE_PARTITIONS_ENV = 'DSH_COVERAGE_PARTITIONS'
 /** Environment variable bounding concurrently active coverage partition processes. */
 export const COVERAGE_PARTITION_CONCURRENCY_ENV = 'DSH_COVERAGE_PARTITION_CONCURRENCY'
 
+/** Optional comma-separated one-based partition indexes owned by this process. */
+export const COVERAGE_PARTITION_INDEXES_ENV = 'DSH_COVERAGE_PARTITION_INDEXES'
+
+/** Marker retaining partition blobs for a later cross-job merge. */
+export const COVERAGE_PRESERVE_BLOBS_ENV = 'DSH_COVERAGE_PRESERVE_BLOBS'
+
 /** Internal marker that suppresses reports and thresholds inside a partition process. */
 export const COVERAGE_PARTITION_MODE_ENV = 'DSH_COVERAGE_PARTITION_MODE'
 
@@ -55,6 +61,12 @@ export interface CoveragePartitionCoordinatorOptions {
   partitions: number
   /** Maximum number of partition processes allowed to execute concurrently. */
   maxConcurrency?: number
+  /** One-based partition indexes executed by this coordinator. */
+  partitionIndexes?: readonly number[]
+  /** Whether to merge this coordinator's complete blob set. */
+  mergeReports?: boolean
+  /** Whether blobs remain after completion for artifact upload. */
+  preserveBlobs?: boolean
   /** pnpm JavaScript or executable entrypoint from `npm_execpath`. */
   pnpmEntrypoint: string
   /** Additional arguments shared by every partition. */
@@ -83,6 +95,23 @@ export function parseCoveragePartitionConcurrency(raw: string | undefined): numb
   return parsed
 }
 
+/** Parse an optional comma-separated subset of one-based coverage partitions. */
+export function parseCoveragePartitionIndexes(
+  raw: string | undefined,
+  partitions: number,
+): number[] | undefined {
+  if (raw === undefined || raw === '') return undefined
+  const parts = raw.split(',')
+  const indexes = parts.map(value => Number.parseInt(value, 10))
+  if (indexes.length === 0
+    || indexes.some((index, offset) => !Number.isSafeInteger(index) || String(index) !== parts[offset])
+    || new Set(indexes).size !== indexes.length
+    || indexes.some(index => index < 1 || index > partitions)) {
+    throw new Error(`${COVERAGE_PARTITION_INDEXES_ENV} must contain unique integers within 1..${String(partitions)}.`)
+  }
+  return indexes
+}
+
 /** Resolve the paired Vitest timeout arguments used by coverage partitions. */
 export function coverageTestTimeoutArgs(raw: string | undefined): string[] {
   if (raw === undefined || raw === '') return []
@@ -103,6 +132,9 @@ export class CoveragePartitionCoordinator {
   private readonly root: string
   private readonly partitions: number
   private readonly maxConcurrency: number
+  private readonly partitionIndexes: readonly number[]
+  private readonly mergeReports: boolean
+  private readonly preserveBlobs: boolean
   private readonly pnpmEntrypoint: string
   private readonly vitestArgs: string[]
   private readonly runCommand: CoverageCommandRunner
@@ -120,6 +152,19 @@ export class CoveragePartitionCoordinator {
     if (!Number.isSafeInteger(this.maxConcurrency) || this.maxConcurrency < 1) {
       throw new Error(`coverage partition concurrency must be a positive integer, got ${String(this.maxConcurrency)}.`)
     }
+    this.partitionIndexes = options.partitionIndexes ?? Array.from(
+      { length: options.partitions },
+      (_, index) => index + 1,
+    )
+    if (this.partitionIndexes.length === 0
+      || new Set(this.partitionIndexes).size !== this.partitionIndexes.length
+      || this.partitionIndexes.some(index => !Number.isSafeInteger(index)
+        || index < 1
+        || index > options.partitions)) {
+      throw new Error(`coverage partition indexes must be unique integers within 1..${String(options.partitions)}.`)
+    }
+    this.mergeReports = options.mergeReports ?? true
+    this.preserveBlobs = options.preserveBlobs ?? false
     this.pnpmEntrypoint = options.pnpmEntrypoint
     this.vitestArgs = options.vitestArgs ?? []
     this.runCommand = options.runCommand ?? runCoverageCommand
@@ -136,10 +181,7 @@ export class CoveragePartitionCoordinator {
     await mkdir(this.blobsRoot, { recursive: true })
 
     try {
-      const commands = Array.from(
-        { length: this.partitions },
-        (_, index) => this.partitionCommand(index + 1),
-      )
+      const commands = this.partitionIndexes.map(index => this.partitionCommand(index))
       const results = new Array<CoverageCommandResult>(commands.length)
       let nextIndex = 0
       const worker = async (): Promise<void> => {
@@ -170,12 +212,13 @@ export class CoveragePartitionCoordinator {
       ))
       await this.assertCompleteBlobSet(commands)
 
+      if (!this.mergeReports) return results.some(commandFailed) ? 1 : 0
       const mergeCommand = this.mergeCommand()
       console.log(`coverage-partitions: start ${mergeCommand.label}`)
       const mergeResult = await this.runCommand(mergeCommand)
       return results.some(commandFailed) || commandFailed(mergeResult) ? 1 : 0
     } finally {
-      await removeOwnedTree(this.temporaryRoot)
+      if (!this.preserveBlobs) await removeOwnedTree(this.temporaryRoot)
     }
   }
 
@@ -201,8 +244,10 @@ export class CoveragePartitionCoordinator {
       ...invocation,
       env: {
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
+        [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: '1',
+        [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       },
       cwd: this.root,
       blobPath,
@@ -221,8 +266,10 @@ export class CoveragePartitionCoordinator {
       ...invocation,
       env: {
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
+        [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: undefined,
+        [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       },
       cwd: this.root,
     }

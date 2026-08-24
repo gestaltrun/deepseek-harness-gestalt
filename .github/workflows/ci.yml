@@ -185,6 +185,7 @@ jobs:
       # coverage workers per assigned job.
       DSH_COVERAGE_MAX_WORKERS: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '2' }}
       DSH_COVERAGE_PARTITIONS: '4'
+      DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
       DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '3' || '2' }}
     steps:
       - uses: actions/checkout@v6
@@ -550,17 +551,13 @@ jobs:
         if: always()
         run: wineserver -k 2>/dev/null || true
 
-  # Every pull request also gets a real Windows-kernel signal. This job keeps
-  # its own unmasked conclusion but is deliberately absent from
-  # all-checks-passed.needs, so it never delays or changes that required
-  # verdict. Under normal operation it runs on the standard hosted runner; under
-  # Windows failover (DSH_CI_FAILOVER_WINDOWS=selfhosted) it retargets onto the
-  # in-house self-hosted Windows pool. Dependabot PRs are excluded from the
-  # self-hosted pool and stay queued for the hosted runner — see the failover
-  # runbook. This Windows switch is independent of the Linux
-  # DSH_CI_FAILOVER_LINUX variable that retargets the three required Linux jobs
-  # and the all-checks-passed verdict above.
-  windows-native:
+  # The real Windows-kernel inventory separates build, coverage, and static
+  # portability ownership. Coverage fans out across two blob-producing workers
+  # before one threshold merger; the other owners retain independent clocks.
+  # One unmasked verdict requires all three evidence owners, but remains outside
+  # all-checks-passed because native Windows is observational for pull requests.
+  # Every worker follows the independent Windows failover switch.
+  windows-native-core:
     needs: preflight
     if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
     runs-on: >-
@@ -568,19 +565,11 @@ jobs:
           && github.event.pull_request.user.login != 'dependabot[bot]'
           && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
           || 'windows-latest' }}
-    name: windows node 24 / native complete
-    timeout-minutes: 120
+    name: windows node 24 / native build and runtime
+    timeout-minutes: 20
     env:
-      DSH_COVERAGE_MAX_WORKERS: ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '2' || '1' }}
-      DSH_COVERAGE_PARTITIONS: '8'
-      # Standard hosted capacity executes the eight isolated shards one at a
-      # time. The failover pool retains the measured eight-way fan-out.
-      DSH_COVERAGE_PARTITION_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '1' }}
-      # Instrumented process and polling fixtures can exceed Vitest's defaults
-      # under the complete lane's concurrent gate load.
-      DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
-      DSH_GATE_CONCURRENCY: '1'
-      DSH_PUBLINT_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '8' || '1' }}
+      DSH_GATE_CONCURRENCY: '4'
+      DSH_PUBLINT_CONCURRENCY: '4'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -601,29 +590,213 @@ jobs:
         with:
           node-version: ${{ env.PRIMARY_NODE_VERSION }}
 
-      # Extracting the many-file pnpm store cache is slower than a clean
-      # install on hosted Windows runners, and saving it adds latency after
-      # the gates. The self-hosted VM's persistent store makes caching
-      # redundant.
       - name: Install (immutable)
         shell: pwsh
         run: pnpm install --frozen-lockfile
 
-      - name: Run complete native Windows gate inventory
+      - name: Run native build and runtime gates
         shell: pwsh
         env:
-          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native.json
-          DSH_CI_ARTIFACT_REFS: ci-gates-windows-native
-        run: pnpm run check:ci:windows-complete
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-core.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-core
+        run: pnpm run check:ci:windows-native-core
 
-      - name: Publish native Windows gate evidence
+      - name: Publish native build and runtime evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ci-gates-windows-native
-          path: ${{ runner.temp }}/ci-evidence/windows-native.json
+          name: ci-gates-windows-native-core
+          path: ${{ runner.temp }}/ci-evidence/windows-native-core.json
           if-no-files-found: warn
           retention-days: 30
+
+  windows-native-coverage-shards:
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    runs-on: >-
+      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
+          || 'windows-latest' }}
+    name: windows node 24 / native coverage shard ${{ matrix.shard }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            indexes: 1,2,3,4
+          - shard: 2
+            indexes: 5,6,7,8
+    env:
+      DSH_COVERAGE_EXEMPT_HEAVY: '1'
+      DSH_COVERAGE_PARTITIONS: '8'
+      DSH_COVERAGE_PARTITION_CONCURRENCY: '4'
+      DSH_COVERAGE_PARTITION_INDEXES: ${{ matrix.indexes }}
+      DSH_COVERAGE_PRESERVE_BLOBS: '1'
+      DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Enable Developer Mode (symlink support)
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-js
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Run native coverage shard
+        shell: pwsh
+        run: pnpm run test:coverage:partitioned
+
+      - name: Publish native coverage blobs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-windows-native-coverage-shard-${{ matrix.shard }}
+          path: coverage/.partitioned/blobs/*.json
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-native-coverage:
+    needs: [preflight, windows-native-coverage-shards]
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    runs-on: >-
+      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
+          || 'windows-latest' }}
+    name: windows node 24 / native coverage
+    timeout-minutes: 20
+    env:
+      DSH_COVERAGE_MAX_WORKERS: '4'
+      DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
+      DSH_GATE_CONCURRENCY: '2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Enable Developer Mode (symlink support)
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-js
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Download native coverage blobs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ci-gates-windows-native-coverage-shard-*
+          path: coverage/.partitioned/blobs
+          merge-multiple: true
+
+      - name: Merge native coverage and run exempt-heavy suites
+        shell: pwsh
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-coverage.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-coverage
+        run: pnpm run check:ci:windows-native-coverage-merge
+
+      - name: Publish native coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-windows-native-coverage
+          path: ${{ runner.temp }}/ci-evidence/windows-native-coverage.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows-native-static:
+    needs: preflight
+    if: needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    runs-on: >-
+      ${{ vars.DSH_CI_FAILOVER_WINDOWS == 'selfhosted'
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && fromJSON('["self-hosted", "dsh-win-ci", "windows"]')
+          || 'windows-latest' }}
+    name: windows node 24 / native static portability
+    timeout-minutes: 20
+    env:
+      DSH_GATE_CONCURRENCY: '4'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Enable Developer Mode (symlink support)
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm-js
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Run native static portability gates
+        shell: pwsh
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/windows-native-static.json
+          DSH_CI_ARTIFACT_REFS: ci-gates-windows-native-static
+        run: pnpm run check:ci:windows-native-static
+
+      - name: Publish native static portability evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-gates-windows-native-static
+          path: ${{ runner.temp }}/ci-evidence/windows-native-static.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows-native-verdict:
+    needs: [preflight, windows-native-core, windows-native-coverage, windows-native-static]
+    if: always() && needs.preflight.result == 'success' && github.event_name == 'pull_request' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')
+    runs-on: ubuntu-latest
+    name: windows node 24 / native verdict
+    steps:
+      - name: Fail if any native Windows partition did not succeed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "::error::Native Windows partition results: ${{ join(needs.*.result, ', ') }}"
+          exit 1
+      - name: Native Windows partitions passed
+        run: echo "Native Windows partitions passed (${{ join(needs.*.result, ', ') }})"
 
   # macOS PR owner for the declared Electron Browser Runtime e2e. The master
   # workflow's serial macOS lane is disabled; this focused job keeps the real

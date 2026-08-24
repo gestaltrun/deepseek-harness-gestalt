@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   COVERAGE_PARTITION_MODE_ENV,
   COVERAGE_PARTITION_CONCURRENCY_ENV,
+  COVERAGE_PARTITION_INDEXES_ENV,
+  COVERAGE_PRESERVE_BLOBS_ENV,
   COVERAGE_PARTITIONS_ENV,
   COVERAGE_TEST_TIMEOUT_ENV,
   CoveragePartitionCoordinator,
@@ -12,6 +14,7 @@ import {
   forwardedCoverageArgs,
   parseCoveragePartitionConcurrency,
   parseCoveragePartitionCount,
+  parseCoveragePartitionIndexes,
   type CoverageCommand,
   type CoverageCommandResult,
 } from './coverage-partitions.ts'
@@ -70,6 +73,18 @@ describe('coverage partition concurrency', () => {
   })
 })
 
+describe('coverage partition indexes', () => {
+  it('parses an explicit cross-job subset', () => {
+    expect(parseCoveragePartitionIndexes('1,3,8', 8)).toEqual([1, 3, 8])
+    expect(parseCoveragePartitionIndexes(undefined, 8)).toBeUndefined()
+  })
+
+  it.each(['0,1', '1,9', '1,1', '01,2', '1,two'])('rejects %j', (raw) => {
+    expect(() => parseCoveragePartitionIndexes(raw, 8))
+      .toThrow(`${COVERAGE_PARTITION_INDEXES_ENV} must contain unique integers within 1..8`)
+  })
+})
+
 describe('coverage partition timeout', () => {
   it('applies one configured timeout to tests and polling', () => {
     expect(coverageTestTimeoutArgs('30000')).toEqual([
@@ -100,6 +115,31 @@ describe('coverage forwarded arguments', () => {
 })
 
 describe('coverage partition coordinator', () => {
+  it('retains an explicit subset without merging it', async () => {
+    const root = await temporaryRoot()
+    const commands: CoverageCommand[] = []
+    const coordinator = new CoveragePartitionCoordinator({
+      root,
+      partitions: 8,
+      partitionIndexes: [5, 6, 7, 8],
+      mergeReports: false,
+      preserveBlobs: true,
+      maxConcurrency: 4,
+      pnpmEntrypoint: '/pnpm.cjs',
+      runCommand: successfulCommandRecorder(commands),
+    })
+
+    await expect(coordinator.run()).resolves.toBe(0)
+    expect(commands.map(command => command.label)).toEqual([
+      'partition 5/8',
+      'partition 6/8',
+      'partition 7/8',
+      'partition 8/8',
+    ])
+    await expect(access(join(root, 'coverage/.partitioned/blobs/partition-8.json')))
+      .resolves.toBeUndefined()
+  })
+
   it('limits concurrently active partition processes without changing the shard count', async () => {
     const root = await temporaryRoot()
     let active = 0
@@ -166,8 +206,10 @@ describe('coverage partition coordinator', () => {
       ]))
       expect(command.env).toEqual({
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
+        [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
         [COVERAGE_PARTITIONS_ENV]: undefined,
         [COVERAGE_PARTITION_MODE_ENV]: '1',
+        [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       })
     }
     const mergeCommand = commands[3]
@@ -176,8 +218,10 @@ describe('coverage partition coordinator', () => {
     expect(mergeCommand.args.some(argument => argument.startsWith('--merge-reports='))).toBe(true)
     expect(mergeCommand.env).toEqual({
       [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,
+      [COVERAGE_PARTITION_INDEXES_ENV]: undefined,
       [COVERAGE_PARTITIONS_ENV]: undefined,
       [COVERAGE_PARTITION_MODE_ENV]: undefined,
+      [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
     })
   })
 

@@ -28,11 +28,14 @@ export type Mode =
   | 'ci-static'
   | 'ci-lint-contracts-ready'
   | 'ci-coverage'
+  | 'ci-windows-native-coverage-merge'
   | 'ci-snapshot'
   | 'ci-artifacts'
   | 'ci-consumers'
   | 'ci-windows-blocking'
   | 'ci-windows-complete'
+  | 'ci-windows-native-core'
+  | 'ci-windows-native-static'
   | 'ci-windows-observational'
   | 'node-compat'
   | 'check-all'
@@ -143,11 +146,14 @@ function parseMode(raw: string | undefined): Mode {
     case 'ci-static':
     case 'ci-lint-contracts-ready':
     case 'ci-coverage':
+    case 'ci-windows-native-coverage-merge':
     case 'ci-snapshot':
     case 'ci-artifacts':
     case 'ci-consumers':
     case 'ci-windows-blocking':
     case 'ci-windows-complete':
+    case 'ci-windows-native-core':
+    case 'ci-windows-native-static':
     case 'ci-windows-observational':
     case 'node-compat':
     case 'check-all':
@@ -156,7 +162,7 @@ function parseMode(raw: string | undefined): Mode {
       return raw
     default:
       throw new Error(
-        `run-gates: expected mode ci-preflight | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-observational | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
+        `run-gates: expected mode ci-preflight | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
       )
   }
 }
@@ -246,6 +252,8 @@ export function gatesForMode(selected: Mode): Gate[] {
       ]
     case 'ci-coverage':
       return coverageGates()
+    case 'ci-windows-native-coverage-merge':
+      return coverageMergeGates()
     case 'ci-snapshot':
       return [ciBuildGate(), snapshotGate()]
     case 'ci-artifacts':
@@ -256,6 +264,10 @@ export function gatesForMode(selected: Mode): Gate[] {
       return ciWindowsBlockingGates()
     case 'ci-windows-complete':
       return ciWindowsCompleteGates()
+    case 'ci-windows-native-core':
+      return ciWindowsNativeCoreGates()
+    case 'ci-windows-native-static':
+      return ciWindowsNativeStaticGates()
     case 'ci-windows-observational':
       return ciWindowsObservationalGates()
     case 'node-compat':
@@ -521,25 +533,42 @@ function ciWindowsBlockingGates(): Gate[] {
 }
 
 function ciWindowsCompleteGates(): Gate[] {
-  const coverage = coverageGates(['build'])
-  const coverageAfter = coverage.map(gate => gate.id)
-  const observational = ciWindowsObservationalGates()
-    // The required production site replaces the observational MPA build; both
-    // VitePress modes write the same output directory and cannot overlap.
-    .filter(gate => gate.id !== 'build' && gate.id !== 'docs-site-build')
-    .map(gate => ({
-      ...gate,
-      allowFailure: true,
-      after: [...new Set([...coverageAfter, ...(gate.after ?? [])])],
-    }))
+  return [
+    ...ciWindowsNativeCoreGates(),
+    ...coverageGates(),
+    ...ciWindowsNativeStaticGates(),
+  ]
+}
+
+function ciWindowsNativeCoreGates(): Gate[] {
+  const build = ['build']
   return [
     ciBuildGate(),
     pnpmScript('windows-site', 'docs:build', { label: 'production site' }),
     pnpmScript('electron-runtime-e2e', 'test:electron-runtime-e2e', {
       label: 'electron runtime e2e',
     }),
-    ...coverage,
-    ...observational,
+    pnpmScript('publint', 'publint', { needs: build }),
+    pnpmScript('node-next-types', 'verify-node-next-types', {
+      label: 'node-next types',
+      needs: build,
+    }),
+    pnpmScript('doc-typecheck', 'doc-typecheck:contracts-ready', {
+      needs: build,
+      env: { DSH_DOC_TYPECHECK_USE_BUILD_OUTPUT: '1' },
+    }),
+    builtPackageInvariantsGate(build),
+    builtBinSmokeGate(build),
+  ]
+}
+
+function ciWindowsNativeStaticGates(): Gate[] {
+  return [
+    ...ciSharedStaticGates(),
+    ...docSyncLeafGates().filter(gate => gate.id !== 'docs-site-build' && gate.id !== 'doc-typecheck'),
+    pnpmScript('module-graph', 'verify-module-graph', { label: 'module graph' }),
+    pnpmScript('knip', 'knip'),
+    pnpmScript('duplication', 'duplication'),
   ]
 }
 
@@ -637,6 +666,28 @@ function coverageGates(needs?: string[]): Gate[] {
       label: 'test:coverage-exempt-heavy',
       ...dependency,
     }),
+  ]
+}
+
+function coverageMergeGates(): Gate[] {
+  const workers = coverageWorkerArgs()
+  const timeouts = coverageTestTimeoutArgs(process.env[COVERAGE_TEST_TIMEOUT_ENV])
+  return [
+    pnpmExec('coverage', [
+      'vitest',
+      '--merge-reports=coverage/.partitioned/blobs',
+      '--coverage',
+    ], {
+      label: 'merge native coverage',
+      env: { [COVERAGE_EXEMPT_ENV]: '1' },
+    }),
+    pnpmExec('coverage-exempt-heavy', [
+      'vitest',
+      'run',
+      ...coverageExemptHeavySuites.map(suite => suite.filter),
+      ...workers.instrumented,
+      ...timeouts,
+    ], { label: 'test:coverage-exempt-heavy' }),
   ]
 }
 

@@ -136,8 +136,9 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     if (locale === undefined) throw new Error('ui-commands: locale service unavailable')
     this.t = locale.bind('command')
     this.directory = new CommandDirectory(async (sessionId) => {
-      if (this.sessions().subagentAddress(sessionId) !== undefined) return []
-      const result = await ctx.remote.commands.list(sessionId)
+      const commandSessionId = this.sessions().commandCatalogSessionId(sessionId)
+      if (commandSessionId === undefined) return []
+      const result = await ctx.remote.commands.list(commandSessionId)
       if (!result.ok) throw new Error(`command.list failed: ${result.error.code}: ${result.error.message}`)
       return result.value
     })
@@ -401,7 +402,11 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     line: string,
     images: readonly SubmitImageAttachment[] = [],
   ): Promise<SubmitOutcome> {
-    const result = await this.ctx.remote.commands.execute(session.sessionId, line, images)
+    const commandSessionId = this.sessions().commandCatalogSessionId(session.sessionId)
+    if (commandSessionId === undefined) {
+      return { kind: 'error', text: 'commands are unavailable for this session' }
+    }
+    const result = await this.ctx.remote.commands.execute(commandSessionId, line, images)
     if (!result.ok) throw new Error(`command.execute failed: ${result.error.code}: ${result.error.message}`)
     if (result.value === undefined) return { kind: 'error', text: `unknown or malformed command: ${line}` }
     this.notifyExecuted(session.sessionId, submittedCommandName(line), result.value.result)

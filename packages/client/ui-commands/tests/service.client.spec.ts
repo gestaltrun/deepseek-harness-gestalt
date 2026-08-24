@@ -39,6 +39,7 @@ interface BenchOptions {
   commands?: (payload: { sessionId: SessionId }) => Promise<{ commands: CommandDescriptor[] }>
   execute?: (payload: { sessionId: SessionId; line: string }) => Promise<ExecuteValue>
   addressed?: SessionId
+  commandUnavailable?: SessionId
 }
 
 /**
@@ -111,6 +112,9 @@ async function bench(opts: BenchOptions = {}) {
     subagentAddress: (id: SessionId) => id === opts.addressed
       ? { parentSessionId: sid('parent'), childSessionId: id, mode: 'continuable' as const }
       : undefined,
+    commandCatalogSessionId: (id: SessionId) => id === opts.commandUnavailable || id === opts.addressed
+      ? undefined
+      : id,
   })
   const forwarded = new Map<string, Array<(...args: never[]) => void>>()
   ctx.provide('remote', {
@@ -213,6 +217,12 @@ describe('candidates', () => {
   it('does not fetch Agent-bound commands for an addressed child', async () => {
     const b = await bench({ addressed: sid('child') })
     await expect(b.warm(proj('child'))).resolves.toBeUndefined()
+    expect(b.listCalls).toEqual([])
+  })
+
+  it('does not fetch commands when the feature-owned Session omits a catalog route', async () => {
+    const b = await bench({ commandUnavailable: sid('draft') })
+    await expect(b.warm(proj('draft'))).resolves.toBeUndefined()
     expect(b.listCalls).toEqual([])
   })
 

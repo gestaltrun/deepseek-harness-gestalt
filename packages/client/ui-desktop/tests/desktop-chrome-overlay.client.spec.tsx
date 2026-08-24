@@ -32,6 +32,7 @@ describe('overlayMenuIcon', () => {
     expect(overlayMenuIcon('editor')).toBeTruthy()
     expect(overlayMenuIcon('git')).toBeTruthy()
     expect(overlayMenuIcon('subagent')).toBeTruthy()
+    expect(overlayMenuIcon('sidechat')).toBeTruthy()
     expect(overlayMenuIcon('browser')).toBeTruthy()
     expect(overlayMenuIcon('terminal')).toBeTruthy()
   })

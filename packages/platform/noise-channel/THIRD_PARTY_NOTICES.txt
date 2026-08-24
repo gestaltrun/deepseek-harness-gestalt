@@ -1,0 +1,6 @@
+Snow 0.10.0
+Copyright (c) 2018-2025 the Snow contributors
+Licensed under the Apache License, Version 2.0 or the MIT License.
+https://github.com/mcginty/snow
+
+This package compiles Snow with RustCrypto Curve25519, ChaCha20-Poly1305, and SHA-2 implementations through Snow's maintained default resolver.

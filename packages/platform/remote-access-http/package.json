@@ -34,6 +34,7 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "@deepseek-ai/dsh-host-webserver": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
+    "@deepseek-ai/dsh-noise-channel": "workspace:^",
     "@deepseek-ai/dsh-platform-account": "workspace:^",
     "@deepseek-ai/dsh-remote-access": "workspace:^",
     "@deepseek-ai/dsh-remote-access-client": "workspace:^",

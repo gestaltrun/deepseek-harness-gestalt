@@ -36,6 +36,7 @@ describe.skipIf(!redisServerAvailable)('RedisRelayCoordinator with disposable Re
       const original = entry('connection-original', now + 5_000)
       const replacement = entry('connection-replacement', now + 8_000)
       const key = 'dsh:integration:relay:directory:route-integration:desktop-integration'
+      const routeDirectoryKey = 'dsh:integration:relay:route-directory:route-integration'
 
       await coordinator.register(original)
       await coordinator.register(replacement)
@@ -55,9 +56,12 @@ describe.skipIf(!redisServerAvailable)('RedisRelayCoordinator with disposable Re
         type: 'delivered', deliveryId: parseRelayDeliveryId('delivery-missing'),
       })
       expect(published).toBe(false)
-      const keys = await command.keys('dsh:integration:relay:*')
-      expect(keys).toEqual([key])
-      expect(await Promise.all(keys.map(async item => await command.type(item)))).toEqual(['string'])
+      const keys = (await command.keys('dsh:integration:relay:*')).sort()
+      expect(keys).toEqual([key, routeDirectoryKey].sort())
+      expect((await Promise.all(keys.map(async item => await command.type(item)))).sort()).toEqual(['set', 'string'])
+      expect(await command.sMembers(routeDirectoryKey)).toEqual(['desktop-integration'])
+      await coordinator.unregister(replacement)
+      expect(await command.keys('dsh:integration:relay:*')).toEqual([])
     } finally {
       await Promise.allSettled([command.close(), subscriber.close()])
       await runtime.close()

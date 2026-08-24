@@ -68,7 +68,7 @@ export function platformEnvironmentSurfaces(environment: PlatformEnvironment): P
  */
 export function requirePlatformSecret(
   references: ReadonlyMap<string, string>,
-  name: 'postgres' | 'redis' | 'oss' | 'github' | 'apns' | 'fcm',
+  name: 'postgres' | 'redis' | 'oss' | 'github',
 ): string {
   const value = references.get(name)
   if (value === undefined || value === '') throw new Error(`Platform secret ${name} is missing`)
@@ -82,7 +82,7 @@ export interface PlatformOperationEvent {
   /** HMAC-style rotating account pseudonym. */
   pseudonym: string
   /** Outcome category. */
-  category: 'authentication' | 'forwarding' | 'reconnect' | 'revocation' | 'blob' | 'push' | 'dependency' | 'capacity'
+  category: 'authentication' | 'forwarding' | 'reconnect' | 'revocation' | 'blob' | 'dependency' | 'capacity'
   /** Structured error code, if any. */
   error?: string
 }

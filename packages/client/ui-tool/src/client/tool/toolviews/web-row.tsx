@@ -12,14 +12,14 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { IconBrowseOutline16, IconGlobeOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { ToolCallViewProps } from '../../contract/slots.ts'
+import type { ToolPresentationViewProps } from '../../contract/slots.ts'
 import { webCardModel } from '../models/web-card-model.ts'
 import { toolRowModel } from '../models/tool-call-model.ts'
 import { ToolRow } from '../components/ToolRow.tsx'
 import { CONVERSATION_NS as NS } from '../../locale.ts'
 
 /** Full row props: the toolview runtime share plus the standard locale seat. */
-type WebRowProps = ToolCallViewProps & PropsLocale<'conversation'>
+type WebRowProps = ToolPresentationViewProps & PropsLocale<'conversation'>
 
 /** web_fetch reads one URL; web_search queries. Titles are figma literals. */
 const WEB_TITLES: Record<string, string> = {

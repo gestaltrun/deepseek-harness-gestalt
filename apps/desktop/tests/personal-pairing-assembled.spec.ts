@@ -1,6 +1,7 @@
 /** REAL Loader composition: Desktop and Mobile controllers pair through keyless HTTP. */
 
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -18,6 +19,7 @@ import {
 } from '@deepseek-ai/dsh-platform-account'
 import {
   DevelopmentKeylessPairingHandshakeProvider,
+  MemoryPersonalPairingAuthorityStore,
   PAIRING_CHALLENGE_TTL_MS,
   PersonalPairingProvider,
   RemoteAccessError,
@@ -31,7 +33,7 @@ import { RemoteAccessHttpTransport } from '@deepseek-ai/dsh-remote-access-client
 import { DesktopPairingKeyVault } from '../src/pairing-keys.ts'
 import { DesktopPairingController } from '../src/personal-pairing.ts'
 import { PairingCompanionKeyVault } from '../../mobile/src/companion-keys.ts'
-import { DevelopmentKeylessMobileHandshakeClient } from '../../mobile/src/development-keyless-pairing.ts'
+import { KeylessMobileHandshakeFixture } from '../../mobile/tests/fixtures/development-keyless-pairing.fixture.ts'
 import { MobilePairingController } from '../../mobile/src/personal-pairing.ts'
 import * as RemoteAccessHttp from '../../../packages/platform/remote-access-http/src/index.ts'
 
@@ -58,6 +60,11 @@ const ENVIRONMENT = selectPlatformEnvironment(validatePlatformEnvironmentPair({
 }), 'development')
 
 const clock = { now: Date.parse('2026-08-19T10:00:00.000Z') }
+const MOBILE_INSTALLATION_ID = parseInstallationId(`mobile-${randomUUID()}`)
+const MOBILE_PRESENTATION = {
+  name: `Mobile ${MOBILE_INSTALLATION_ID}`,
+  platform: randomUUID().charCodeAt(0) % 2 === 0 ? 'ios' as const : 'android' as const,
+}
 const roots: string[] = []
 const contexts: Context[] = []
 
@@ -83,17 +90,16 @@ describe('Personal Pairing assembled controllers', () => {
     const desktop = new DesktopPairingController({
       account: accountActions('desktop'),
       transport,
-      pairingKeys: desktopKeys,
+      attachmentKeys: desktopKeys,
       now: () => clock.now,
       pollIntervalMs: 20,
     })
     const mobile = new MobilePairingController({
       installation: accountActions('mobile'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => { throw new Error('assembled path uses the full one-time link') } },
-      pairingKeys: mobileKeys,
-      device: { name: 'Alice phone', platform: 'ios' },
+      attachmentKeys: mobileKeys,
       now: () => clock.now,
       pollIntervalMs: 20,
     })
@@ -112,9 +118,8 @@ describe('Personal Pairing assembled controllers', () => {
     const foreign = new MobilePairingController({
       installation: accountActions('mobile', 'account-two'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => foreignChallenge.oneTimeLink },
-      device: { name: 'Other phone', platform: 'android' },
       now: () => clock.now,
       pollIntervalMs: 20,
     })
@@ -140,40 +145,41 @@ describe('Personal Pairing assembled controllers', () => {
     await waitFor(() => mobile.getSnapshot().status === 'paired')
     const paired = desktop.getSnapshot().pairings[0]
     if (paired === undefined) throw new Error('Desktop confirmation did not activate a Personal Pairing')
-    expect(paired.platform).toBe('ios')
+    expect(paired.platform).toBe(MOBILE_PRESENTATION.platform)
     const invitation = parsePairingInvitationLink(challenge.oneTimeLink)
     const expectedKey = await deriveKeylessPairingKey(invitation.invitationSecret)
     invitation.invitationSecret.fill(0)
-    expect(desktopKeys.pairingKeyMaterial(paired.id)).toEqual(expectedKey)
-    expect(mobileKeys.pairingKeyMaterial(paired.id)).toEqual(expectedKey)
+    expect(desktopKeys.attachmentKeyMaterial(paired.id)).toEqual(expectedKey)
+    expect(mobileKeys.attachmentKeyMaterial(paired.id)).toEqual(expectedKey)
     expect((await transport.listPersonalPairings(authentication('desktop'))).map(record =>
       record.devicePrincipal.authority)).toEqual(['companion-surface'])
+
+    await mobile.unpair()
+    expect(await transport.listPersonalPairings(authentication('desktop'))).toEqual([])
+    expect(mobileKeys.attachmentKeyMaterial(paired.id)).toBeUndefined()
 
     await desktop.createChallenge()
     const reused = desktop.getSnapshot().challenge
     if (reused === undefined) throw new Error('single-use challenge was not created')
-    const firstMobile = new DevelopmentKeylessMobileHandshakeClient()
+    const firstMobile = new KeylessMobileHandshakeFixture()
     const firstAttempt = await firstMobile.begin(reused.oneTimeLink)
     const firstCompletion = await transport.completeChallenge({
       authentication: authentication('mobile'),
       completionId: firstAttempt.completionId,
       oneTimeLink: reused.oneTimeLink,
-      device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: firstAttempt.mobileHandshake,
     })
     await expect(transport.completeChallenge({
       authentication: authentication('mobile'),
       completionId: firstAttempt.completionId,
       oneTimeLink: reused.oneTimeLink,
-      device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: firstAttempt.mobileHandshake,
     })).resolves.toMatchObject({ pendingPairingId: firstCompletion.pendingPairingId })
-    const secondAttempt = await new DevelopmentKeylessMobileHandshakeClient().begin(reused.oneTimeLink)
+    const secondAttempt = await new KeylessMobileHandshakeFixture().begin(reused.oneTimeLink)
     await expect(transport.completeChallenge({
       authentication: authentication('mobile'),
       completionId: secondAttempt.completionId,
       oneTimeLink: reused.oneTimeLink,
-      device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: secondAttempt.mobileHandshake,
     })).rejects.toMatchObject({ code: 'PAIRING_CHALLENGE_INVALID' } satisfies Partial<RemoteAccessError>)
 
@@ -184,9 +190,8 @@ describe('Personal Pairing assembled controllers', () => {
     const liveMobile = new MobilePairingController({
       installation: accountActions('mobile'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => expiring.oneTimeLink },
-      device: { name: 'Bound phone', platform: 'ios' },
       now: () => clock.now,
       pollIntervalMs: 20,
     })
@@ -204,15 +209,13 @@ describe('Personal Pairing assembled controllers', () => {
       authentication: authentication('mobile'),
       completionId: parsePairingCompletionId('completion-expired'),
       oneTimeLink: expired.oneTimeLink,
-      device: { name: 'Late phone', platform: 'android' },
       mobileHandshake: expiredHandshake,
     })).rejects.toMatchObject({ code: 'PAIRING_CHALLENGE_EXPIRED' } satisfies Partial<RemoteAccessError>)
     const expiredMobile = new MobilePairingController({
       installation: accountActions('mobile'),
       transport,
-      handshake: new DevelopmentKeylessMobileHandshakeClient(),
+      handshake: new KeylessMobileHandshakeFixture(),
       scanner: { scan: async () => expired.oneTimeLink },
-      device: { name: 'Late phone', platform: 'ios' },
       now: () => clock.now,
       pollIntervalMs: 20,
     })
@@ -244,8 +247,9 @@ function accountActions(kind: 'desktop' | 'mobile', accountId = 'account-one') {
 }
 
 function authentication(kind: 'desktop' | 'mobile', accountId = 'account-one'): PairingAccountAuthentication {
+  const installationId = kind === 'mobile' ? MOBILE_INSTALLATION_ID : parseInstallationId('desktop-installation')
   return {
-    accessToken: `${accountId}:${kind}:${kind}-installation`,
+    accessToken: `${accountId}:${kind}:${installationId}`,
     proof: {
       jti: parseAccountProofJti(`${kind}-${accountId}-proof`),
       issuedAt: clock.now,
@@ -309,11 +313,14 @@ async function loadComposition(): Promise<{ port: number }> {
                 githubLogin: accountId,
                 avatarUrl: `https://avatars.example/${accountId}`,
               },
-              installation: { id: parseInstallationId(`${kind}-installation`), kind },
+              installation: kind === 'desktop'
+                ? { id: parseInstallationId(installationId), kind }
+                : { id: parseInstallationId(installationId), kind, presentation: MOBILE_PRESENTATION },
             }
           },
         },
         handshake: new DevelopmentKeylessPairingHandshakeProvider(),
+        authority: new MemoryPersonalPairingAuthorityStore(),
         clock: { now: () => clock.now },
         randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index + 1),
         randomId: kind => `${kind}-${String(++id)}`,

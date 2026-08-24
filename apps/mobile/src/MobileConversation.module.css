@@ -1,58 +1,73 @@
 .page {
+  /* Public conversation components normally inherit these geometry values
+     from Desktop ConversationRoot. Mobile owns the equivalent narrow shell,
+     so it binds the same card, gutter, and long-draft caps locally. */
+  --dsh-chat-content-width: 748px;
+  --dsh-composer-card-max-width: calc(var(--dsh-chat-content-width) + 32px);
+  --dsh-composer-side-clearance: 16px;
+  --dsh-composer-text-max-height: 336px;
+
   box-sizing: border-box;
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100dvh;
+  min-height: 0;
   width: 100%;
   max-width: 430px;
   margin: 0 auto;
   overflow-x: hidden;
+  background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-primary);
+}
+
+.page[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 .header {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0 0 16px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--dsw-alias-stroke-secondary);
+}
+
+.header h1 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .back {
-  align-self: flex-start;
+  flex: 0 0 auto;
 }
 
 .blocks {
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-.markdown,
-.code,
-.diff,
-.card,
-.image {
-  overflow-wrap: anywhere;
-  max-width: 100%;
-}
-
-.code,
-.diff,
-.card pre {
+  min-width: 0;
+  padding: 16px;
+  overflow-y: auto;
   overflow-x: auto;
-  white-space: pre-wrap;
-}
-
-.image {
-  height: auto;
-}
-
-.card {
-  padding: 12px;
-  border-radius: 12px;
-  background: var(--dsw-alias-fill-secondary);
+  overflow-wrap: anywhere;
 }
 
 .composer {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 16px;
+  min-width: 0;
+  background: var(--dsw-alias-bg-base);
+}
+
+@media (max-width: 360px) {
+  .header,
+  .blocks {
+    padding-inline: 10px;
+  }
 }

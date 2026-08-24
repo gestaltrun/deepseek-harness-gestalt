@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { settleCompanionInteraction, type CompanionInteraction } from '../src/companion-approval.ts'
 
-const ready = { token: 'tok', foreground: true, socketOpen: true, synchronized: true }
-const blocked = { token: 'tok', foreground: true, socketOpen: true, synchronized: false }
+const ready = { foreground: true, socketOpen: true, synchronized: true }
+const blocked = { foreground: true, socketOpen: true, synchronized: false }
 
 const approval: CompanionInteraction = {
   operationId: 'op-approve',

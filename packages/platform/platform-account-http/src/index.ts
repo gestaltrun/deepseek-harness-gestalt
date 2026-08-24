@@ -10,7 +10,9 @@ import z from '@deepseek-ai/schemastery'
 import {
   AccountError,
   parseAccountProofJti,
+  parseDesktopInstallationPresentation,
   parseInstallationId,
+  parseMobileInstallationPresentation,
   parseLoginAttemptId,
   type AccountProof,
 } from '@deepseek-ai/dsh-platform-account'
@@ -69,11 +71,22 @@ export function apply(ctx: Context, config: Config): void {
   route('/v1/account/login-attempts', async (req, res) => {
     requireMethod(req, 'POST')
     const body = await readJson(req)
-    const attempt = await ctx.platformAccount.beginLogin({
-      installationId: parseInstallationId(requiredString(body, 'installationId')),
-      installationKind: requiredKind(body.installationKind),
-      publicKey: requiredObject(body, 'publicKey'),
-    })
+    const installationId = parseInstallationId(requiredString(body, 'installationId'))
+    const installationKind = requiredKind(body.installationKind)
+    const publicKey = requiredObject(body, 'publicKey')
+    const attempt = await ctx.platformAccount.beginLogin(installationKind === 'mobile'
+      ? {
+        installationId,
+        installationKind,
+        presentation: requiredMobilePresentation(body.presentation),
+        publicKey,
+      }
+      : {
+        installationId,
+        installationKind,
+        presentation: requiredDesktopPresentation(body.presentation),
+        publicKey,
+      })
     writeJson(res, 201, attempt)
   })
 
@@ -176,6 +189,26 @@ function requiredKind(value: unknown): 'desktop' | 'mobile' {
     throw new HttpError(400, 'INVALID_REQUEST', 'installationKind must be desktop or mobile')
   }
   return value
+}
+
+function requiredMobilePresentation(value: unknown) {
+  try {
+    return parseMobileInstallationPresentation(value)
+  } catch (error) {
+    throw new HttpError(
+      400,
+      'INVALID_REQUEST',
+      (error as Error).message,
+    )
+  }
+}
+
+function requiredDesktopPresentation(value: unknown) {
+  try {
+    return parseDesktopInstallationPresentation(value)
+  } catch (error) {
+    throw new HttpError(400, 'INVALID_REQUEST', (error as Error).message)
+  }
 }
 
 function requiredProof(value: unknown): AccountProof {

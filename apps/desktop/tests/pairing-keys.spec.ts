@@ -12,14 +12,14 @@ describe('DesktopPairingKeyVault', () => {
     const pairing = parsePersonalPairingId('pairing-one')
     vault.capturePending(pending, MATERIAL)
     vault.activate(pending, pairing)
-    const exported = vault.pairingKeyMaterial(pairing)
+    const exported = vault.attachmentKeyMaterial(pairing)
     expect(exported).toEqual(MATERIAL)
     expect(exported).not.toBe(MATERIAL)
     if (exported === undefined) throw new Error('retained pairing key was missing')
     exported[0] = 0
-    expect(vault.pairingKeyMaterial(pairing)).toEqual(MATERIAL)
+    expect(vault.attachmentKeyMaterial(pairing)).toEqual(MATERIAL)
     vault.release(pairing)
-    expect(vault.pairingKeyMaterial(pairing)).toBeUndefined()
+    expect(vault.attachmentKeyMaterial(pairing)).toBeUndefined()
   })
 
   it('drops stale pending keys and rejects short material', () => {
@@ -51,8 +51,8 @@ describe('DesktopPairingKeyVault', () => {
     const first = parsePersonalPairingId('pairing-0')
     vault.capturePending(parsePendingPairingId('pending-replace'), OTHER)
     vault.activate(parsePendingPairingId('pending-replace'), first)
-    expect(vault.pairingKeyMaterial(first)).toEqual(OTHER)
+    expect(vault.attachmentKeyMaterial(first)).toEqual(OTHER)
     vault.clear()
-    expect(vault.pairingKeyMaterial(first)).toBeUndefined()
+    expect(vault.attachmentKeyMaterial(first)).toBeUndefined()
   })
 })

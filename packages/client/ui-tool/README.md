@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Client Tool presentation plugin. `ui-conversation` dispatches each ordered `tool-call` Conversation Node through the matching key of `conversation.chat.node`; this package renders its root and Code Dispatch children, then dispatches every atomic call through the keyed `tool.call.toolview` slot. Unregistered Tool names use the generic card.
 
+The `./presentation` entry exposes `ToolPresentation` for compositions outside the Desktop slot tree. Its small interface accepts one authoritative `ToolCallBlock`, Workspace/home display roots, optional open/inspect callbacks, and the shared translator. Desktop keyed-slot registration and direct compositions dispatch ordinary Tool names through one built-in roster and the same Bash, read, write/edit, grep/glob, Web, todo, and question row implementations; only an unclaimed wire Tool name reaches `GenericToolCard`. `DirectToolCallTree` accepts the authoritative root directly, so a caller never fabricates a Chat Node or Host description.
+
 Business UI packages register only their wire Tool names and atomic views. They do not pair Session events, rebuild the transcript, or own root/subcall topology. The Runtime remains authoritative for call/result pairing, lifecycle, and recursive `subCalls` projection; the conversation view remains authoritative for ChatFlow placement.
 
 ## Rendering contract
@@ -28,7 +30,7 @@ ctx.slots.inject('tool.call.toolview', () =>
   }, BusinessToolRow))
 ```
 
-The owner payload is `ToolCallOwnerProps`: `callId`, `toolName`, the frozen `block`, optional `cwd` and `home`, and plain `openFile`/`inspect` callbacks. Path summaries relativize to the session cwd first, then replace a leftover POSIX host home with `~`; `filePath` and Host open keep the authored filesystem path. The registration receives the normal session slot runtime share. It does not receive React nodes, Runtime services, or root/subcall knowledge.
+The owner payload is `ToolCallOwnerProps`: `callId`, `toolName`, the frozen `block`, optional `cwd` and `home`, and optional plain `openFile`/`inspect` callbacks. A composition without a Host file opener leaves paths read-only. Path summaries relativize to the session cwd first, then replace a leftover POSIX host home with `~`; `filePath` and Host open keep the authored filesystem path. The registration receives the normal session slot runtime share. It does not receive React nodes, Runtime services, or root/subcall knowledge.
 
 This package currently owns the generic fallback and the built-in shell/pwsh, read, write/edit, grep/glob, web, todo, question, and Code Dispatch presentations. `ui-skill` demonstrates a business-owned registration for `skill`.
 

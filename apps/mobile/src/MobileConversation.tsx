@@ -1,7 +1,22 @@
-import { useState, type ReactNode } from 'react'
-import { settleCompanionInteraction, type CompanionInteraction } from './companion-approval.ts'
-import { companionMayMutate, type CompanionPushState } from './companion-push.ts'
-import { formatToolArgs, previewTerminalLines, type MobileContentBlock } from './mobile-content.ts'
+import { useMemo, useRef, type ReactNode } from 'react'
+import type {
+  ConversationSnapshot, PendingWait,
+} from '@deepseek-ai/dsh-client-runtime/client'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import type { CompanionHostFailure } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  AssistantMarkdown,
+  ConversationApproval,
+  ConversationComposer,
+  ConversationNodePresentation,
+  conversationPresentationTranslate,
+  type ConversationPresentationLocale,
+} from '@deepseek-ai/dsh-client-ui-conversation/presentation'
+import { ToolPresentation } from '@deepseek-ai/dsh-client-ui-tool/presentation'
+import { ImageGallery, messageImageLabels } from '@deepseek-ai/dsh-client-ui-attachment/presentation'
+import {
+  QuestionPresentation, questionPresentationTranslate,
+} from '@deepseek-ai/dsh-client-ui-user-questions/presentation'
 import css from './MobileConversation.module.css'
 
 /** Full-screen Mobile conversation props. */
@@ -10,212 +25,143 @@ export interface MobileConversationProps {
   title: string
   /** Return to the list. */
   onBack: () => void
-  /** Desktop-confirmed content blocks. */
-  blocks: readonly MobileContentBlock[]
+  /** Desktop-authoritative Session projection. */
+  snapshot: ConversationSnapshot
+  /** Product locale applied to all shared presentation components. */
+  locale?: ConversationPresentationLocale | undefined
+  /** Product theme selected by the Mobile shell. */
+  theme?: 'light' | 'dark' | undefined
+  /** Session-authorized historical-image loader. */
+  loadImage: (attachment: ImageAttachmentRef) => Promise<string>
+  /** Session Workspace root used by shared Tool rows. */
+  cwd?: string | undefined
+  /** Desktop account home used by shared path summaries. */
+  home?: string | undefined
   /** Submit a prompt through Desktop acceptance. */
-  onSubmit?: (text: string) => void
+  onSubmit?: ((text: string) => void | Promise<void>) | undefined
   /** Cancel active execution through Desktop cancellation. */
-  onCancel?: () => void
-  /** Whether Desktop is currently streaming. */
-  streaming?: boolean
-  /** Process visibility required before any interaction settlement. */
-  companionState?: CompanionPushState
-  /** Receive the Desktop-authoritative interaction after a successful UI settlement. */
-  onSettled?: (interaction: CompanionInteraction) => void
-  /** Offer one local file through Encrypted Companion after Desktop confirmation. */
-  onAttach?: (file: File) => void
+  onCancel?: (() => void) | undefined
+  /** Select an attachment for encrypted transfer through Desktop. */
+  onAttach?: ((file: File) => void) | undefined
+  /** Load the preceding Desktop-authoritative history window. */
+  onLoadOlder?: (() => void) | undefined
+  /** Whether current foreground synchronization admits mutations. */
+  mutationEnabled?: boolean | undefined
+  /** Latest correlated Companion operation failure. */
+  operationFailure?: CompanionHostFailure | undefined
 }
 
-/** Phone conversation that reuses Gestalt tokens and never exposes terminal input. */
+/** Phone conversation using Desktop-authoritative projections and exported DSH Web presentation. */
 export function MobileConversation({
-  title, onBack, blocks, onSubmit, onCancel, streaming = false, companionState, onSettled, onAttach,
+  title,
+  onBack,
+  snapshot,
+  locale = 'zh',
+  theme = 'light',
+  loadImage,
+  cwd,
+  home,
+  onSubmit,
+  onCancel,
+  onAttach,
+  onLoadOlder,
+  mutationEnabled = false,
+  operationFailure,
 }: MobileConversationProps): ReactNode {
-  const [draft, setDraft] = useState('')
-  const mayMutate = companionState === undefined || companionMayMutate(companionState)
+  const attachmentInput = useRef<HTMLInputElement>(null)
+  const t = useMemo(() => conversationPresentationTranslate(locale), [locale])
+  const tq = useMemo(() => questionPresentationTranslate(locale), [locale])
+  const imageLabels = useMemo(() => messageImageLabels(t), [t])
+  const renderMessageImages = ({ images, align }: {
+    images: readonly { attachment: ImageAttachmentRef }[]
+    align: 'start' | 'end'
+  }): ReactNode => <ImageGallery images={images} load={loadImage} align={align} labels={imageLabels} />
+  const renderTool = (node: Parameters<typeof ToolPresentation>[0]['block']): ReactNode => (
+    <ToolPresentation block={node} cwd={cwd} home={home} t={t} />
+  )
+  const question = snapshot.pending.find((wait): wait is PendingWait<'question'> => wait.kind === 'question')
+  const approval = snapshot.pending.find((wait): wait is PendingWait<'approval'> => wait.kind === 'approval')
   return (
-    <section className={css.page} data-mobile-conversation="detail">
+    <section
+      className={css.page}
+      data-mobile-conversation="detail"
+      data-locale={locale}
+      data-theme={theme}
+      data-ds-dark-theme={theme === 'dark' ? '' : undefined}
+      lang={locale === 'zh' ? 'zh-CN' : 'en'}
+    >
       <header className={css.header}>
-        <button type="button" className={css.back} onClick={onBack}>返回</button>
+        <button type="button" className={css.back} onClick={onBack}>{locale === 'zh' ? '返回' : 'Back'}</button>
         <h1>{title}</h1>
       </header>
-      <div className={css.blocks}>
-        {blocks.map((block, index) => (
-          <ContentBlock
-            key={index}
-            block={block}
-            {...(companionState === undefined ? {} : { companionState })}
-            {...(onSettled === undefined ? {} : { onSettled })}
+      {operationFailure !== undefined && <p role="alert">{operationFailure.message}</p>}
+      <div className={css.blocks} data-conversation-scroll="">
+        {snapshot.openState === 'loading' && <p role="status">{t('chat.loadingHistory')}</p>}
+        {snapshot.openState === 'error' && snapshot.openError !== null && (
+          <p role="status">{t('chat.loadError', { message: snapshot.openError.message, code: snapshot.openError.code })}</p>
+        )}
+        {snapshot.hasMore && onLoadOlder !== undefined && (
+          <button type="button" disabled={snapshot.loadingOlder || !mutationEnabled} onClick={onLoadOlder}>
+            {snapshot.loadingOlder ? t('chat.loadingHistory') : t('chat.loadOlder')}
+          </button>
+        )}
+        {snapshot.nodes.map(node => (
+          <ConversationNodePresentation
+            key={`${node.kind}:${String(node.seq)}`}
+            node={node}
+            renderMessageImages={renderMessageImages}
+            renderTool={renderTool}
+            t={t}
           />
         ))}
-      </div>
-      {onSubmit !== undefined && (
-        <form
-          className={css.composer}
-          onSubmit={(event) => {
-            event.preventDefault()
-            if (!mayMutate || draft === '') return
-            onSubmit(draft)
-            setDraft('')
-          }}
-        >
-          {!mayMutate && <p role="alert">Remote Offline 拒绝发送</p>}
-          <textarea
-            aria-label="继续会话"
-            value={draft}
-            disabled={!mayMutate}
-            onChange={(event) => { setDraft(event.target.value) }}
+        {snapshot.partial !== null && (
+          <AssistantMarkdown
+            blocks={snapshot.partial.blocks}
+            streaming
+            renderMessageImages={renderMessageImages}
+            t={t}
           />
-          {onAttach !== undefined && (
+        )}
+        {snapshot.runningCalls.map(call => (
+          <ToolPresentation key={call.callId} block={call} cwd={cwd} home={home} t={t} />
+        ))}
+      </div>
+      <div className={css.composer}>
+        {question !== undefined
+          ? <QuestionPresentation wait={question} t={tq} disabled={!mutationEnabled} />
+          : approval !== undefined
+            ? <ConversationApproval wait={approval} snapshot={snapshot} t={t} disabled={!mutationEnabled} />
+            : onSubmit !== undefined
+              ? <ConversationComposer
+                snapshot={snapshot}
+                onSubmit={onSubmit}
+                onCancel={onCancel}
+                t={t}
+                disabled={!mutationEnabled}
+              />
+              : null}
+        {onAttach !== undefined && (
+          <>
             <input
+              ref={attachmentInput}
               type="file"
-              aria-label="添加附件"
-              disabled={!mayMutate}
+              aria-label={locale === 'zh' ? '添加附件' : 'Add attachment'}
+              hidden
+              disabled={!mutationEnabled}
               onChange={(event) => {
                 const file = event.target.files?.[0]
-                if (file === undefined || !mayMutate) return
-                onAttach(file)
+                if (file !== undefined && mutationEnabled) onAttach(file)
                 event.target.value = ''
               }}
             />
-          )}
-          <button type="submit" disabled={!mayMutate}>发送</button>
-          {onCancel !== undefined && streaming && (
-            <button type="button" onClick={onCancel}>取消</button>
-          )}
-        </form>
-      )}
+            <button
+              type="button"
+              disabled={!mutationEnabled}
+              onClick={() => { if (mutationEnabled) attachmentInput.current?.click() }}
+            >{locale === 'zh' ? '添加附件' : 'Add attachment'}</button>
+          </>
+        )}
+      </div>
     </section>
   )
-}
-
-function ContentBlock({
-  block, companionState, onSettled,
-}: {
-  block: MobileContentBlock
-  companionState?: CompanionPushState
-  onSettled?: (interaction: CompanionInteraction) => void
-}): ReactNode {
-  switch (block.kind) {
-    case 'markdown':
-      return <article className={css.markdown}>{block.text}</article>
-    case 'code':
-      return <pre className={css.code} data-language={block.language}><code>{block.text}</code></pre>
-    case 'image':
-      return <img className={css.image} alt={block.alt} src={block.src} />
-    case 'tool':
-      return (
-        <section className={css.card} data-kind="tool">
-          <h2>{block.name}</h2>
-          <pre>{formatToolArgs(block.args)}</pre>
-          {block.result !== undefined ? <pre>{formatToolArgs(block.result)}</pre> : null}
-        </section>
-      )
-    case 'diff':
-      return (
-        <section className={css.card} data-kind="diff">
-          <h2>{block.path}</h2>
-          <pre className={css.diff}>{block.text}</pre>
-        </section>
-      )
-    case 'approval':
-      return (
-        <section className={css.card} data-kind="approval">
-          <p>{block.summary}</p>
-          {block.settled !== undefined
-            ? <p>已允许: {block.settled.decision}</p>
-            : companionState !== undefined && (
-              <SettlementActions
-                interaction={{
-                  operationId: block.interactionId ?? block.summary,
-                  kind: 'approval',
-                  summary: block.summary,
-                  authorized: block.authorized ?? ['once'],
-                }}
-                companionState={companionState}
-                {...(onSettled === undefined ? {} : { onSettled })}
-              />
-            )}
-        </section>
-      )
-    case 'ask-user':
-      return (
-        <section className={css.card} data-kind="ask-user">
-          <p>{block.question}</p>
-          {block.settled !== undefined
-            ? <p>已回答: {block.settled.decision}</p>
-            : companionState !== undefined && (
-              <SettlementActions
-                interaction={{
-                  operationId: block.interactionId ?? block.question,
-                  kind: 'ask-user',
-                  summary: block.question,
-                  authorized: block.authorized ?? ['A'],
-                }}
-                companionState={companionState}
-                {...(onSettled === undefined ? {} : { onSettled })}
-              />
-            )}
-        </section>
-      )
-    case 'terminal': {
-      const preview = previewTerminalLines(block.lines)
-      return (
-        <section className={css.card} data-kind="terminal">
-          <p>{block.summary}</p>
-          <pre>{preview.visible.join('\n')}</pre>
-          {preview.spilled > 0 ? <small>还有 {preview.spilled} 行</small> : null}
-        </section>
-      )
-    }
-    case 'unknown-tool':
-      return (
-        <section className={css.card} data-kind="unknown-tool">
-          <h2>{block.name}</h2>
-          <pre>{formatToolArgs(block.args)}</pre>
-          {block.result !== undefined ? <pre>{formatToolArgs(block.result)}</pre> : null}
-        </section>
-      )
-    default: {
-      const never: never = block
-      return never
-    }
-  }
-}
-
-function SettlementActions({
-  interaction, companionState, onSettled,
-}: {
-  interaction: CompanionInteraction
-  companionState: CompanionPushState
-  onSettled?: (interaction: CompanionInteraction) => void
-}): ReactNode {
-  const mayMutate = companionMayMutate(companionState)
-  const decisions = interaction.authorized.length > 0 ? interaction.authorized : ['once']
-  return (
-    <>
-      {decisions.map(decision => (
-        <button
-          key={decision}
-          type="button"
-          disabled={!mayMutate}
-          onClick={() => {
-            const next = settleCompanionInteraction(interaction, {
-              accepted: true,
-              decision,
-              ...(decision === 'always' ? { persistent: true } : {}),
-            }, companionState)
-            onSettled?.(next)
-          }}
-        >
-          {settlementLabel(interaction.kind, decision)}
-        </button>
-      ))}
-    </>
-  )
-}
-
-function settlementLabel(kind: CompanionInteraction['kind'], decision: string): string {
-  if (kind === 'approval' && decision === 'once') return '允许'
-  if (kind === 'approval' && decision === 'always') return '始终允许'
-  return decision
 }

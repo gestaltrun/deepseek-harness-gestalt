@@ -70,6 +70,14 @@ export class FakeApiClient implements IApiClient {
   onPrompt: (payload: unknown) => Promise<RpcResponse<{ accepted: true }>> = () => Promise.resolve(ok({ accepted: true as const }))
   onAttachment: (payload: unknown) => Promise<RpcResponse<{ attachment: { attachmentId: never; mediaType: 'image/png'; bytes: number; width: number; height: number }; data: string }>> =
     () => Promise.resolve(ok({ attachment: { attachmentId: 'a' as never, mediaType: 'image/png', bytes: 1, width: 1, height: 1 }, data: 'AA==' }))
+  onAdmitAttachment: (payload: unknown) => Promise<RpcResponse<{ attachment: {
+    attachmentId: never
+    mediaType: string
+    bytes: number
+    sha256: string
+    name: string
+  } }>> =
+    () => Promise.resolve(ok({ attachment: { attachmentId: 'sha256:a' as never, mediaType: 'application/octet-stream', bytes: 1, sha256: 'a'.repeat(64), name: 'file.bin' } }))
   onUpdateQueue: (payload: unknown) => Promise<RpcResponse<{ accepted: true }>> = () => Promise.resolve(ok({ accepted: true as const }))
   onCancel: (payload: unknown) => Promise<RpcResponse<{ accepted: true }>> = () => Promise.resolve(ok({ accepted: true as const }))
   onDescribe: (payload: unknown) => Promise<RpcResponse<{
@@ -123,6 +131,7 @@ export class FakeApiClient implements IApiClient {
     fork: (payload: unknown) => this.record('session.fork', payload, this.onFork(payload)),
     prompt: (payload: unknown) => this.record('session.prompt', payload, this.onPrompt(payload)),
     attachment: (payload: unknown) => this.record('session.attachment', payload, this.onAttachment(payload)),
+    admitAttachment: (payload: unknown) => this.record('session.admitAttachment', payload, this.onAdmitAttachment(payload)),
     updateQueue: (payload: unknown) => this.record('session.updateQueue', payload, this.onUpdateQueue(payload)),
     cancel: (payload: unknown) => this.record('session.cancel', payload, this.onCancel(payload)),
   }

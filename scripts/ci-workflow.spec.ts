@@ -10,6 +10,38 @@ const evidenceAfterPreflight = "needs.preflight.result == 'success'"
 const masterFallback = "(github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true')"
 
 describe('CI workflow', () => {
+  it('scopes Mobile signing secrets to their consuming steps', () => {
+    const workflow = loadWorkflow('.github/workflows/mobile-release.yml')
+    if (!isRecord(workflow.jobs)) throw new TypeError('mobile-release workflow must define jobs')
+    for (const [jobName, job] of Object.entries(workflow.jobs)) {
+      if (!isRecord(job) || !Array.isArray(job.steps)) throw new TypeError(`${jobName} must define steps`)
+      expect(Object.values(isRecord(job.env) ? job.env : {}).some(value => String(value).includes('secrets.')))
+        .toBe(false)
+    }
+    const android = workflow.jobs.android
+    const ios = workflow.jobs.ios
+    if (!isRecord(android) || !Array.isArray(android.steps) || !isRecord(ios) || !Array.isArray(ios.steps)) {
+      throw new TypeError('mobile-release workflow must define Android and iOS steps')
+    }
+    const androidBuild = (android.steps as unknown[])
+      .find(step => isRecord(step) && step.name === 'Build and verify signed APK')
+    const iosBuild = (ios.steps as unknown[])
+      .find(step => isRecord(step) && step.name === 'Build signed App Store candidate')
+    const upload = (ios.steps as unknown[])
+      .find(step => isRecord(step) && step.name === 'Upload TestFlight')
+    expect(androidBuild).toMatchObject({ env: {
+      ANDROID_KEYSTORE_BASE64: '${{ secrets.ANDROID_KEYSTORE_BASE64 }}',
+      ANDROID_KEYSTORE_PASSWORD: '${{ secrets.ANDROID_KEYSTORE_PASSWORD }}',
+      ANDROID_KEY_ALIAS: '${{ secrets.ANDROID_KEY_ALIAS }}',
+      ANDROID_KEY_PASSWORD: '${{ secrets.ANDROID_KEY_PASSWORD }}',
+    } })
+    expect(iosBuild).toMatchObject({ env: { APPLE_TEAM_ID: '${{ secrets.APPLE_TEAM_ID }}' } })
+    expect(upload).toMatchObject({ env: {
+      APPLE_ID: '${{ secrets.APPLE_ID }}',
+      APPLE_APP_SPECIFIC_PASSWORD: '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}',
+    } })
+  })
+
   it('rejects runner-only contexts before job construction', () => {
     expect(() => {
       assertJobConstructionContexts({

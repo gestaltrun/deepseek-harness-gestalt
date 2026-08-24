@@ -17,10 +17,9 @@ describe('Platform operations', () => {
   })
 
   it('fails closed on a missing deployment-managed secret', () => {
-    const refs = new Map([['postgres', 'ref-pg'], ['redis', 'ref-redis'], ['oss', 'ref-oss'], ['github', 'ref-gh'], ['apns', 'ref-apns'], ['fcm', 'ref-fcm']])
+    const refs = new Map([['postgres', 'ref-pg'], ['redis', 'ref-redis'], ['oss', 'ref-oss'], ['github', 'ref-gh']])
     expect(requirePlatformSecret(refs, 'postgres')).toBe('ref-pg')
     expect(() => requirePlatformSecret(new Map(), 'redis')).toThrow('redis is missing')
-    expect(() => requirePlatformSecret(new Map([['apns', '']]), 'apns')).toThrow('apns is missing')
   })
 
   it('emits content-free events and expires raw IP, security, and live-route logs', () => {

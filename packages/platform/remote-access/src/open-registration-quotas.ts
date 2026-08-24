@@ -10,7 +10,7 @@ import {
 export const PLATFORM_CAPACITY = 'PLATFORM_CAPACITY'
 /** Sliding pairing-challenge window. */
 export const PAIRING_CHALLENGE_QUOTA_WINDOW_MS = 60 * 60 * 1000
-/** Sliding blob-upload and push-hint window. */
+/** Sliding blob-upload window. */
 export const ACCOUNT_DAILY_QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000
 
 export { OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS }
@@ -24,7 +24,6 @@ export const OPEN_REGISTRATION_QUOTAS = {
   concurrentBlobs: 5,
   blobBytes: 100 * 1024 * 1024,
   blobBytesPerAccountPerDay: 1024 * 1024 * 1024,
-  pushHintsPerAccountPerDay: 500,
 } as const
 
 /** Shared capacity watermark that sheds new acquisitions while live attachments remain. */

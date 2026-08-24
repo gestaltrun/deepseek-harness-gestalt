@@ -174,7 +174,7 @@ describe('QuestionComposer', () => {
     expect(screen.getByText('2 / 3')).toBeTruthy()
     expect(respond).not.toHaveBeenCalled()
 
-    fireEvent.keyDown(custom, { key: 'Enter', keyCode: 229 })
+    fireEvent.keyDown(custom, { key: 'Process' })
     expect(screen.getByText('2 / 3')).toBeTruthy()
     expect(respond).not.toHaveBeenCalled()
 

@@ -1,207 +1,421 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
+import { Device } from '@capacitor/device'
 import {
   IndexedDbInstallationAccountStore,
   PlatformAccountHttpTransport,
   PlatformAccountInstallation,
 } from '@deepseek-ai/dsh-platform-account-client'
-import { loadPlatformEnvironment, parseInstallationId } from '@deepseek-ai/dsh-platform-account'
-import { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
+import { parseInstallationId } from '@deepseek-ai/dsh-platform-account'
+import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
   BrowserRelayEndpointSocket,
   MobileRelayEndpointLifecycle,
   RemoteAccessHttpTransport,
 } from '@deepseek-ai/dsh-remote-access-client'
-import { parseRelayAttachmentId, REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
-import '@deepseek-ai/dsh-client-ui-theme/src/styles/base.css'
-import '@deepseek-ai/dsh-client-ui-theme/src/styles/design-platform.css'
-import '@deepseek-ai/dsh-client-ui-theme/src/styles/gradient-shadow-text.css'
+import {
+  parseRelayAttachmentId,
+  REMOTE_PROTOCOL_LIMITS,
+  type RelayPairingSelector,
+} from '@deepseek-ai/dsh-remote-protocol'
+import {
+  SnowMobileAttachmentOwner,
+  SnowMobileHandshakeClient,
+  type SnowCompanionProtocolChannel,
+} from '@deepseek-ai/dsh-noise-channel'
+import '@deepseek-ai/dsh-client-ui-theme/styles/base.css'
+import '@deepseek-ai/dsh-client-ui-theme/styles/design-platform.css'
+import '@deepseek-ai/dsh-client-ui-theme/styles/scrollbar.css'
+import '@deepseek-ai/dsh-client-ui-theme/styles/gradient-shadow-text.css'
+import '@deepseek-ai/dsh-client-ui-theme/styles/shiki.css'
 import {
   bindCompanionProcessVisibility,
   CompanionForegroundRuntime,
+  companionRuntime,
   installCompanionRuntime,
-} from './companion-push.ts'
-import { MobileAccount } from './MobileAccount.tsx'
+} from './companion-lifecycle.ts'
+import { mountMobileEntry } from './mobile-entry.tsx'
+import { MobileNoiseCompanionReceiver } from './noise-companion.ts'
+import {
+  MobileSnowCompanionConnection,
+  MobileSnowCompanionProductChannel,
+} from './noise-companion-product.ts'
+import type {
+  MobileCompanionConnectionChannel,
+  MobileCompanionSurface,
+} from './companion-surface.ts'
 import type { MobilePairingActions } from './MobilePairing.tsx'
 import { MobilePairingController, NativeMobilePairingQrScanner } from './personal-pairing.ts'
+import { NativeMobilePairingStateStore, PairingCompanionKeyVault } from './companion-keys.ts'
+import { mobileInstallationPresentation } from './mobile-installation.ts'
 import {
-  DevelopmentCompanionClient,
-  DevelopmentCompanionSessionStore,
-  bindDevelopmentCompanionCache,
-  createDevelopmentCompanionCache,
-  installDevelopmentCompanionClient,
-} from './development-keyless-companion.ts'
+  CapacitorMobileProtectedStorage,
+  loadProtectedInstallationId,
+} from './native-protected-storage.ts'
 import { mobileSystemBrowser } from './system-browser.ts'
-import {
-  createLoopbackPageFetch,
-  rewriteLoopbackPlatformUrl,
-  rewriteLoopbackRelayUrl,
-} from './loopback-page-origin.ts'
+import { loadMobilePlatformEnvironment } from './platform-environment.ts'
+import { MobileCompanionProjectionCacheRuntime } from './companion-cache-runtime.ts'
+import { launchMobileProduct } from './mobile-product-launch.ts'
 import './root.css'
 
-const DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID = parseRelayAttachmentId('desktop-development-keyless')
-const DEVELOPMENT_KEYLESS_MOBILE_ATTACHMENT_ID = parseRelayAttachmentId('mobile-development-keyless')
-const DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT = Uint8Array.of(1)
-
-const environment = loadPlatformEnvironment({
-  selection: import.meta.env.VITE_PLATFORM_ENV,
-  development: {
-    origin: import.meta.env.VITE_PLATFORM_DEVELOPMENT_ORIGIN,
-    callbackUrl: import.meta.env.VITE_PLATFORM_DEVELOPMENT_CALLBACK_URL,
-    githubClientId: import.meta.env.VITE_PLATFORM_DEVELOPMENT_GITHUB_CLIENT_ID,
-    credentialReference: import.meta.env.VITE_PLATFORM_DEVELOPMENT_CREDENTIAL_REFERENCE,
-    databaseIdentity: import.meta.env.VITE_PLATFORM_DEVELOPMENT_DATABASE_IDENTITY,
-    identityNamespace: import.meta.env.VITE_PLATFORM_DEVELOPMENT_IDENTITY_NAMESPACE,
-  },
-  production: {
-    origin: import.meta.env.VITE_PLATFORM_PRODUCTION_ORIGIN,
-    callbackUrl: import.meta.env.VITE_PLATFORM_PRODUCTION_CALLBACK_URL,
-    githubClientId: import.meta.env.VITE_PLATFORM_PRODUCTION_GITHUB_CLIENT_ID,
-    credentialReference: import.meta.env.VITE_PLATFORM_PRODUCTION_CREDENTIAL_REFERENCE,
-    databaseIdentity: import.meta.env.VITE_PLATFORM_PRODUCTION_DATABASE_IDENTITY,
-    identityNamespace: import.meta.env.VITE_PLATFORM_PRODUCTION_IDENTITY_NAMESPACE,
-  },
-})
-const installationIdKey = `deepseek-gestalt:${environment.identityNamespace}:mobile-installation-id`
-let installationId = localStorage.getItem(installationIdKey)
-if (installationId === null) {
-  if (typeof crypto.randomUUID !== 'function') {
-    throw new TypeError('Mobile requires a secure browsing context (HTTPS or http://127.0.0.1) to create an Installation id')
-  }
-  installationId = crypto.randomUUID()
-  localStorage.setItem(installationIdKey, installationId)
-}
-const parsedInstallationId = parseInstallationId(installationId)
-const pageOrigin = window.location.origin
-const fetch = createLoopbackPageFetch(pageOrigin, environment.origin)
-const installation = new PlatformAccountInstallation({
-  environment,
-  installationId: parsedInstallationId,
-  installationKind: 'mobile',
-  transport: new PlatformAccountHttpTransport({ environment, fetch }),
-  store: new IndexedDbInstallationAccountStore(`deepseek-gestalt-platform-account:${environment.databaseIdentity}`),
-  systemBrowser: {
-    open(url) {
-      return mobileSystemBrowser.open(rewriteLoopbackPlatformUrl(url, pageOrigin, environment.origin))
-    },
-  },
-})
+const environment = loadMobilePlatformEnvironment(import.meta.env)
 let companionVisibilityDisposer: (() => Promise<void>) | undefined
+let companionAccountDisposer: (() => void) | undefined
+let companionSurface: MobileCompanionSurface | undefined
 
 /**
  * Remove the process-lifetime visibility listeners bound by the Mobile entry.
  * @returns settled after document listeners and a pending Capacitor handle are removed.
  */
 export function disposeCompanionVisibility(): Promise<void> {
-  return companionVisibilityDisposer?.() ?? Promise.resolve()
+  return Promise.all([
+    companionVisibilityDisposer?.() ?? Promise.resolve(),
+    Promise.resolve(companionAccountDisposer?.()),
+  ]).then(() => undefined)
 }
 
-const unavailablePairing = {
-  status: 'unavailable',
-  error: 'Personal Pairing waits for the independent Noise security review.',
-} as const
-const pairingUnavailable = (): Promise<never> => Promise.reject(new Error(unavailablePairing.error))
-let pairing: MobilePairingActions = {
-  getSnapshot: () => unavailablePairing,
-  subscribe: () => () => {},
-  completeLink: pairingUnavailable,
-  scanQr: pairingUnavailable,
-  retryPairing: pairingUnavailable,
-  activate: () => Promise.resolve(),
-  deactivate: () => Promise.resolve(),
-  unpair: pairingUnavailable,
-}
-if (environment.environment === 'development' && import.meta.env.VITE_PERSONAL_PAIRING_KEYLESS === '1') {
-  const { DevelopmentKeylessMobileHandshakeClient } = await import('./development-keyless-pairing.ts')
-  const { PairingCompanionKeyVault } = await import('./companion-keys.ts')
-  const relayUrl = rewriteLoopbackRelayUrl(
-    requiredWss(import.meta.env.VITE_REMOTE_RELAY_WSS_URL),
-    pageOrigin,
-    environment.origin,
-  )
-  const inboundMaxBytes = positiveInteger(import.meta.env.VITE_REMOTE_RELAY_INBOUND_MAX_BYTES, 'inbound bytes')
-  const inboundMaxMessages = positiveInteger(import.meta.env.VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES, 'inbound messages')
-  if (inboundMaxBytes < REMOTE_PROTOCOL_LIMITS.relayMessageBytes) {
-    throw new TypeError('Mobile Relay inbound bytes must admit one maximum Relay message')
+/** Settles after the native Installation presentation is bound and the Mobile product surface mounts. */
+export const mobileProductStarted = launchMobileProduct(mountMobileProduct)
+
+async function mountMobileProduct(): Promise<void> {
+  const protectedStorage = new CapacitorMobileProtectedStorage()
+  const parsedInstallationId = parseInstallationId(await loadProtectedInstallationId(
+    protectedStorage,
+    environment.identityNamespace,
+  ))
+  const presentation = mobileInstallationPresentation(await Device.getInfo())
+  const installation = new PlatformAccountInstallation({
+    environment,
+    installationId: parsedInstallationId,
+    installationKind: 'mobile',
+    presentation,
+    transport: new PlatformAccountHttpTransport({ environment }),
+    store: new IndexedDbInstallationAccountStore(`deepseek-gestalt-platform-account:${environment.databaseIdentity}`),
+    systemBrowser: mobileSystemBrowser,
+  })
+
+  const unavailablePairing = {
+    status: 'unavailable',
+    error: 'Personal Pairing waits for the independent Noise security review.',
+  } as const
+  const pairingUnavailable = (): Promise<never> => Promise.reject(new Error(unavailablePairing.error))
+  let pairing: MobilePairingActions = {
+    getSnapshot: () => unavailablePairing,
+    subscribe: () => () => {},
+    completeLink: pairingUnavailable,
+    scanQr: pairingUnavailable,
+    retryPairing: pairingUnavailable,
+    selectDesktop: pairingUnavailable,
+    activate: () => Promise.resolve(),
+    deactivate: () => Promise.resolve(),
+    unpair: pairingUnavailable,
   }
-  const companionSessions = new DevelopmentCompanionSessionStore()
-  const companionRef: { client?: DevelopmentCompanionClient } = {}
-  const relay = new MobileRelayEndpointLifecycle({
-    attachmentId: () => DEVELOPMENT_KEYLESS_MOBILE_ATTACHMENT_ID,
-    connect: async signal => await BrowserRelayEndpointSocket.connect(relayUrl, signal, {
-      maxBytes: inboundMaxBytes,
-      maxMessages: inboundMaxMessages,
-    }),
-    attachTimeoutMs: positiveInteger(import.meta.env.VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS, 'attach timeout'),
-    heartbeatIntervalMs: positiveInteger(import.meta.env.VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS, 'heartbeat interval'),
-    reconnectDelayMs: positiveInteger(import.meta.env.VITE_REMOTE_RELAY_RECONNECT_DELAY_MS, 'reconnect delay'),
-    onCiphertext: (ciphertext) => { void companionRef.client?.receive(ciphertext) },
-  })
-  const developmentCompanion = new DevelopmentCompanionClient(
-    companionSessions,
-    async (target, ciphertext) => { await relay.sendCiphertext(target, ciphertext) },
-    DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID,
-  )
-  companionRef.client = developmentCompanion
-  installDevelopmentCompanionClient(developmentCompanion)
-  const boundAccounts = new Set<string>()
-  installation.subscribe(() => {
-    const snapshot = installation.getSnapshot()
-    if (snapshot.status !== 'signed-in' || snapshot.account === undefined) return
-    if (boundAccounts.has(snapshot.account.id)) return
-    boundAccounts.add(snapshot.account.id)
-    const cache = createDevelopmentCompanionCache(environment.environment, snapshot.account.id)
-    void bindDevelopmentCompanionCache(companionSessions, cache)
-  })
-  const companion = new CompanionForegroundRuntime({
-    relay: {
-      configure: (grant) => { relay.configure(grant) },
-      start: async () => {
-        await relay.start()
-        if (!relay.isConnected()) return
+  let companion: CompanionForegroundRuntime
+  let companionChannel: MobileSnowCompanionProductChannel | undefined
+  let companionConnectionChannel: MobileCompanionConnectionChannel | undefined
+  if (environment.environment === 'production') {
+    const relayUrl = requiredWss(import.meta.env.VITE_REMOTE_RELAY_WSS_URL)
+    const inboundMaxBytes = positiveInteger(import.meta.env.VITE_REMOTE_RELAY_INBOUND_MAX_BYTES, 'inbound bytes')
+    const inboundMaxMessages = positiveInteger(import.meta.env.VITE_REMOTE_RELAY_INBOUND_MAX_MESSAGES, 'inbound messages')
+    if (inboundMaxBytes < REMOTE_PROTOCOL_LIMITS.relayMessageBytes) {
+      throw new TypeError('Mobile Relay inbound bytes must admit one maximum Relay message')
+    }
+    const handshake = new SnowMobileHandshakeClient()
+    const attachmentKeys = new PairingCompanionKeyVault(new NativeMobilePairingStateStore(
+      protectedStorage,
+      environment.databaseIdentity,
+    ))
+    let attachmentOwner: SnowMobileAttachmentOwner | undefined
+    let channel: SnowCompanionProtocolChannel | undefined
+    let receiver: MobileNoiseCompanionReceiver | undefined
+    let projectionCache: MobileCompanionProjectionCacheRuntime | undefined
+    let projectionOwner: string | undefined
+    const productConnection = new MobileSnowCompanionConnection()
+    const pairingControllerRef: { current?: MobilePairingController } = {}
+    let connectionGeneration: number | undefined
+    let activeSourceAttachmentId: ReturnType<typeof parseRelayAttachmentId> | undefined
+    let pendingGeneration: number | undefined
+    let pendingPairingSelector: RelayPairingSelector | undefined
+    const clearNoiseConnection = (): void => {
+      productConnection.disconnect()
+      attachmentOwner?.dispose()
+      attachmentOwner = undefined
+      channel?.dispose()
+      channel = undefined
+      receiver = undefined
+      connectionGeneration = undefined
+      activeSourceAttachmentId = undefined
+      pendingGeneration = undefined
+      pendingPairingSelector = undefined
+    }
+    const relay = new MobileRelayEndpointLifecycle({
+      attachmentId: () => parseRelayAttachmentId(crypto.randomUUID()),
+      connect: async signal => await BrowserRelayEndpointSocket.connect(relayUrl, signal, {
+        maxBytes: inboundMaxBytes,
+        maxMessages: inboundMaxMessages,
+      }),
+      attachTimeoutMs: positiveInteger(import.meta.env.VITE_REMOTE_RELAY_ATTACH_TIMEOUT_MS, 'attach timeout'),
+      heartbeatIntervalMs: positiveInteger(import.meta.env.VITE_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS, 'heartbeat interval'),
+      reconnectDelayMs: positiveInteger(import.meta.env.VITE_REMOTE_RELAY_RECONNECT_DELAY_MS, 'reconnect delay'),
+      onPeerAttachments: async (ready) => {
+        const peer = ready.peers[0]
+        if (peer === undefined || ready.peers.length !== 1) {
+          clearNoiseConnection()
+          companionRuntime()?.invalidateAuthenticatedPeer()
+          if (ready.peers.length > 1) throw new Error('Mobile Relay has multiple Desktop pairing peers')
+          return
+        }
+        const selectedPairingSelector = attachmentKeys.relayAuthority()?.pairingSelector
+        if (selectedPairingSelector === undefined || peer.pairingSelector !== selectedPairingSelector) {
+          clearNoiseConnection()
+          companionRuntime()?.invalidateAuthenticatedPeer()
+          throw new Error('Mobile Relay peer does not match the selected Paired Desktop')
+        }
+        if (peer.generation === connectionGeneration || peer.generation === pendingGeneration) return
+        clearNoiseConnection()
+        companionRuntime()?.invalidateAuthenticatedPeer()
+        const reconnectState = attachmentKeys.reconnectState(parsePersonalPairingId(peer.pairingSelector))
+        if (reconnectState === undefined) throw new Error('Mobile Relay peer has no retained Snow pairing state')
+        pendingGeneration = peer.generation
+        pendingPairingSelector = peer.pairingSelector
+        attachmentOwner = new SnowMobileAttachmentOwner(reconnectState, peer.pairingSelector)
+        reconnectState.fill(0)
+        const begun = await attachmentOwner.begin(ready)
+        await relay.sendCiphertext(begun.targetAttachmentId, begun.payload)
+      },
+      onCiphertext: async (ciphertext, sourceAttachmentId) => {
+        if (receiver !== undefined && sourceAttachmentId === activeSourceAttachmentId) {
+          receiver.receive(ciphertext)
+          return
+        }
+        if (attachmentOwner === undefined) throw new Error('Mobile Relay ciphertext has no pending Snow IK owner')
+        if (pendingGeneration === undefined) throw new Error('Mobile Relay ciphertext has no Snow generation')
+        if (pendingPairingSelector === undefined) throw new Error('Mobile Relay ciphertext has no pairing selector')
+        const pairingSelector = pendingPairingSelector
+        const negotiation = attachmentOwner.finish(ciphertext, sourceAttachmentId)
+        attachmentOwner.dispose()
+        let nextChannel: SnowCompanionProtocolChannel
         try {
-          await relay.sendCiphertext(DEVELOPMENT_KEYLESS_DESKTOP_ATTACHMENT_ID, DEVELOPMENT_KEYLESS_SYNC_CIPHERTEXT)
+          await relay.sendCiphertext(negotiation.targetAttachmentId, negotiation.payload)
+          nextChannel = negotiation.finish()
         } catch (error) {
-          if (error instanceof RemoteRelayError && error.code === 'REMOTE_OFFLINE') return
+          negotiation.cancel()
           throw error
         }
+        channel?.dispose()
+        channel = nextChannel
+        connectionGeneration = pendingGeneration
+        pendingGeneration = undefined
+        pendingPairingSelector = undefined
+        activeSourceAttachmentId = sourceAttachmentId
+        attachmentOwner = undefined
+        productConnection.connect({
+          channel,
+          targetAttachmentId: sourceAttachmentId,
+          pairingSelector,
+          generation: connectionGeneration,
+        })
+        companionRuntime()?.markAuthenticatedPeer()
+        const accountSnapshot = installation.getSnapshot()
+        if (accountSnapshot.status !== 'signed-in' || accountSnapshot.account === undefined) {
+          throw new Error('Mobile Companion cache requires the signed-in Platform Account')
+        }
+        const projectionCache = new MobileCompanionProjectionCacheRuntime({
+          environment: environment.environment,
+          accountId: accountSnapshot.account.id,
+          pairingId: parsePersonalPairingId(pairingSelector),
+          keys: attachmentKeys,
+        })
+        selectProjectionCache(
+          `${accountSnapshot.account.id}\0${pairingSelector}`,
+          projectionCache,
+        )
+        void companionSurface?.restoreProjectionCache().catch((error: unknown) => {
+          console.error('[companion-cache] offline projection restore failed:', error)
+        })
+        receiver = new MobileNoiseCompanionReceiver(
+          channel,
+          connectionGeneration,
+          companion,
+          () => ({
+            acceptValidatedCompanionResult: (result) => {
+              companionChannel?.acceptResult(result)
+              companionSurface?.bindValidatedCompanionResults()?.acceptValidatedCompanionResult(result)
+            },
+          }),
+          () => companionConnectionChannel === undefined
+            ? undefined
+            : companionSurface?.bindAuthenticatedConnection(companionConnectionChannel),
+          (offset) => {
+            const submission = companionChannel?.refreshSurface(offset)
+            if (submission !== undefined) companionSurface?.trackSurfaceRefresh(submission)
+          },
+          () => {
+            void companionChannel?.reconcileUnknown().catch((error: unknown) => {
+              console.error('[mobile-companion] operation reconciliation failed:', error)
+            })
+          },
+          (desktopName) => {
+            void Promise.resolve().then(() => {
+              pairingControllerRef.current?.recordAuthenticatedDesktopName(
+                parsePersonalPairingId(pairingSelector), desktopName,
+              )
+            }).catch((error: unknown) => {
+              console.error('[mobile-companion] Paired Desktop name retention failed:', error)
+            })
+          },
+        )
       },
-      stop: async () => { await relay.stop() },
-      isConnected: () => relay.isConnected(),
-    },
-  })
-  installCompanionRuntime(companion)
-  companionVisibilityDisposer = bindCompanionProcessVisibility(companion)
-  pairing = new MobilePairingController({
+      onConnectionReady: () => { companionRuntime()?.markConnectionOpen() },
+      onConnectionLost: () => { clearNoiseConnection(); companionRuntime()?.forgetConnection() },
+      onTransportError: (error) => {
+        clearNoiseConnection()
+        companionRuntime()?.reportConnectionFailure({
+          code: error.code,
+          message: error.message,
+          ...('updateEndpoint' in error && error.updateEndpoint !== undefined
+            ? { updateEndpoint: error.updateEndpoint }
+            : {}),
+          ...('retryAfterMs' in error && error.retryAfterMs !== undefined
+            ? { retryAfterMs: error.retryAfterMs }
+            : {}),
+        })
+      },
+    })
+    companion = new CompanionForegroundRuntime({ relay })
+    installCompanionRuntime(companion)
+    companionVisibilityDisposer = bindCompanionProcessVisibility(companion)
+    const productChannel = new MobileSnowCompanionProductChannel({
+      runtime: companion,
+      connection: productConnection,
+      installation,
+      attachmentKeys,
+      platformOrigin: environment.origin,
+      sendCiphertext: async (targetAttachmentId, ciphertext) => {
+        await relay.sendCiphertext(targetAttachmentId, ciphertext)
+      },
+      reportFailure: (error) => { console.error('[mobile-companion] encrypted operation failed:', error) },
+      trackHistoryRefresh: (sessionId, submission) => {
+        companionSurface?.trackHistoryRefresh(sessionId, submission)
+      },
+      trackSurfaceRefresh: (submission) => { companionSurface?.trackSurfaceRefresh(submission) },
+      recoveredReceipt: (receipt) => { companionSurface?.acceptRecoveredOperation(receipt) },
+    })
+    companionChannel = productChannel
+    companionConnectionChannel = {
+      mutations: productChannel,
+      content: {
+        loadImage: async (sessionId, attachment) => await productChannel.loadImage(sessionId, attachment),
+      },
+    }
+    const productPairingController = new MobilePairingController({
+      installation,
+      transport: new RemoteAccessHttpTransport({ environment }),
+      handshake,
+      attachmentKeys,
+      scanner: new NativeMobilePairingQrScanner(),
+      relay: companion,
+      companion,
+      releaseProjectionAuthority: async (deleteStored) => { await releaseProjectionAuthority(deleteStored) },
+    })
+    pairingControllerRef.current = productPairingController
+    const selectProjectionCache = (
+      owner: string,
+      cache: MobileCompanionProjectionCacheRuntime,
+    ): void => {
+      if (projectionOwner === owner) return
+      projectionOwner = owner
+      projectionCache = cache
+      companionSurface?.setProjectionCache(cache)
+      productChannel.setOperationSettlement(cache.operationSettlement)
+    }
+    const releaseProjectionAuthority = async (deleteStored: boolean): Promise<void> => {
+      if (projectionOwner === undefined && projectionCache === undefined) return
+      const releasedCache = projectionCache
+      productChannel.setOperationSettlement(undefined)
+      companionRuntime()?.invalidateAuthenticatedPeer()
+      await companionSurface?.releaseProjectionCache(deleteStored)
+      if (projectionCache !== releasedCache) return
+      projectionOwner = undefined
+      projectionCache = undefined
+    }
+    const installRetainedProjectionCache = async (): Promise<void> => {
+      const accountSnapshot = installation.getSnapshot()
+      const grant = attachmentKeys.relayAuthority()
+      if (accountSnapshot.status !== 'signed-in' || accountSnapshot.account === undefined
+        || grant?.pairingSelector === undefined || companionSurface === undefined) {
+        await releaseProjectionAuthority(false)
+        return
+      }
+      const cache = new MobileCompanionProjectionCacheRuntime({
+        environment: environment.environment,
+        accountId: accountSnapshot.account.id,
+        pairingId: parsePersonalPairingId(grant.pairingSelector),
+        keys: attachmentKeys,
+      })
+      selectProjectionCache(`${accountSnapshot.account.id}\0${grant.pairingSelector}`, cache)
+      await companionSurface.restoreProjectionCache()
+    }
+    productPairingController.subscribe(() => {
+      if (productPairingController.getSnapshot().status === 'paired') {
+        void installRetainedProjectionCache().catch((error: unknown) => {
+          console.error('[companion-cache] paired projection restore failed:', error)
+        })
+      }
+    })
+    pairing = {
+      getSnapshot: () => productPairingController.getSnapshot(),
+      subscribe: listener => productPairingController.subscribe(listener),
+      completeLink: async (link, signal) => { await productPairingController.completeLink(link, signal) },
+      scanQr: async (video, signal) => { await productPairingController.scanQr(video, signal) },
+      retryPairing: async () => { await productPairingController.retryPairing() },
+      selectDesktop: async (pairingId) => {
+        await productPairingController.selectDesktop(pairingId)
+        await installRetainedProjectionCache()
+      },
+      activate: async () => {
+        await productPairingController.activate()
+        await installRetainedProjectionCache()
+      },
+      deactivate: async () => {
+        await releaseProjectionAuthority(false)
+        await productPairingController.deactivate()
+      },
+      unpair: async () => {
+        await productPairingController.unpair()
+      },
+    }
+    let selectedAccountId: string | undefined
+    companionAccountDisposer = installation.subscribe(() => {
+      const snapshot = installation.getSnapshot()
+      const accountId = snapshot.status === 'signed-in' ? snapshot.account?.id : undefined
+      if (accountId === selectedAccountId) return
+      selectedAccountId = accountId
+      void (async () => {
+        await releaseProjectionAuthority(false)
+      })().catch((error: unknown) => {
+        console.error('[companion-cache] Account authority release failed:', error)
+      })
+    })
+  } else {
+    companion = new CompanionForegroundRuntime()
+    installCompanionRuntime(companion)
+  }
+
+  function positiveInteger(value: unknown, name: string): number {
+    const parsed = Number(value)
+    if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new TypeError(`Mobile Relay ${name} must be a positive integer`)
+    return parsed
+  }
+
+  function requiredWss(value: unknown): string {
+    if (typeof value !== 'string' || new URL(value).protocol !== 'wss:') throw new TypeError('Mobile Relay endpoint must use WSS')
+    return value
+  }
+  const root = document.getElementById('root')
+  if (root === null) throw new Error('mobile app: missing #root')
+  const mounted = mountMobileEntry(root, {
     installation,
-    transport: new RemoteAccessHttpTransport({ environment, fetch }),
-    handshake: new DevelopmentKeylessMobileHandshakeClient(),
-    scanner: new NativeMobilePairingQrScanner(),
-    relay: companion,
+    pairing,
     companion,
-    pairingKeys: new PairingCompanionKeyVault(),
-    device: {
-      name: navigator.userAgent.includes('Android') ? 'Android phone' : 'iPhone',
-      platform: navigator.userAgent.includes('Android') ? 'android' : 'ios',
-    },
   })
+  companionSurface = mounted.companionSurface
 }
-
-function positiveInteger(value: unknown, name: string): number {
-  const parsed = Number(value)
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new TypeError(`Mobile Relay ${name} must be a positive integer`)
-  return parsed
-}
-
-function requiredWss(value: unknown): string {
-  if (typeof value !== 'string' || new URL(value).protocol !== 'wss:') throw new TypeError('Mobile Relay endpoint must use WSS')
-  return value
-}
-
-const root = document.getElementById('root')
-if (root === null) throw new Error('mobile app: missing #root')
-createRoot(root).render(
-  <StrictMode>
-    <MobileAccount installation={installation} pairing={pairing} />
-  </StrictMode>,
-)

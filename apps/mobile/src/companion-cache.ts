@@ -5,10 +5,17 @@ import type { PlatformAccountId, PlatformEnvironment } from '@deepseek-ai/dsh-pl
 import { accountStorageNamespace } from '@deepseek-ai/dsh-platform-account-client'
 import {
   parseCompanionOperationId,
+  parseCompanionSessionId,
   REMOTE_PROTOCOL_LIMITS,
-  type CompanionConfirmedResult,
+  type CompanionMutationResult,
   type CompanionOperationId,
+  type CompanionSessionId,
 } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  companionMayMutate,
+  requireCompanionMutation,
+  type CompanionConnectionState,
+} from './companion-mutation.ts'
 
 /** Opaque Paired Desktop identity injected by the Personal Pairing seam. */
 export type CompanionDesktopId = Branded<'CompanionDesktopId'>
@@ -44,7 +51,11 @@ export function companionCacheDatabaseName(
 }
 
 /** Content kinds the Companion Cache may automatically seal. */
-export type CompanionCacheContentKind = 'workspace-metadata' | 'session-metadata' | 'transcript'
+export type CompanionCacheContentKind =
+  | 'workspace-metadata'
+  | 'session-metadata'
+  | 'transcript'
+  | 'projection-snapshot'
 
 /** Content kind that must never be automatically cached. */
 type CompanionCacheExcludedKind = 'attachment-bytes' | 'terminal-content' | 'spill-file' | 'credential'
@@ -61,6 +72,7 @@ const ADMITTED_CONTENT_KINDS: readonly CompanionCacheContentKind[] = [
   'workspace-metadata',
   'session-metadata',
   'transcript',
+  'projection-snapshot',
 ]
 
 /**
@@ -74,8 +86,9 @@ export function companionCacheAdmits(kind: string): kind is CompanionCacheConten
   return (ADMITTED_CONTENT_KINDS as readonly string[]).includes(kind)
 }
 
-/** Mutations Remote Offline disables; cache reads stay permitted. */
+/** Mutations foreground synchronization gates; cache reads stay permitted. */
 const COMPANION_OFFLINE_MUTATIONS = [
+  'session-create',
   'prompt',
   'cancel',
   'approval',
@@ -88,12 +101,15 @@ export type CompanionMutationKind = (typeof COMPANION_OFFLINE_MUTATIONS)[number]
 
 /**
  * Whether a mutation may run in the current connection state.
- * @param online - Remote Online.
+ * @param connection - foreground connection and validated synchronization state.
  * @param _kind - mutation kind reserved for future per-kind policy.
- * @returns false for every mutation while Remote Offline.
+ * @returns false until foreground reconnect and validated Desktop resynchronization complete.
  */
-export function companionMutationAllowed(online: boolean, _kind: CompanionMutationKind): boolean {
-  return online
+export function companionMutationAllowed(
+  connection: CompanionConnectionState | undefined,
+  _kind: CompanionMutationKind,
+): boolean {
+  return companionMayMutate(connection)
 }
 
 /** Encrypted-at-rest cache row for one Paired Desktop. */
@@ -182,15 +198,19 @@ export class WebCryptoCompanionCacheCipher implements CompanionCacheCipher {
   }
 }
 
-/** Settlement state of one transmitted operation. */
-type CompanionReceiptStatus = 'unknown' | 'committed' | 'not-submitted'
+/** Durable lifecycle state of one proposed operation. */
+type CompanionReceiptStatus = 'prepared' | 'unknown' | 'committed' | 'not-submitted'
 
-/** Operation Receipt row stored only after transmission. */
+/** Operation Receipt row reserved before transmission and settled afterward. */
 export interface CompanionOperationReceipt {
   operationId: CompanionOperationId
   status: CompanionReceiptStatus
+  /** Original mutation kind used to restore product presentation after restart. */
+  kind?: CompanionMutationKind
+  /** Session scope for prompt, cancel, interaction, and attachment recovery. */
+  sessionId?: CompanionSessionId
   /** Desktop's original result once reconciliation returned committed. */
-  original?: CompanionConfirmedResult
+  original?: CompanionMutationResult
 }
 
 /**
@@ -199,6 +219,10 @@ export interface CompanionOperationReceipt {
  * transcript of one Desktop coexist.
  */
 export interface CompanionCacheStore {
+  /** Reserve bounded capacity before a mutation can leave the device. */
+  reserveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void>
+  /** Remove a prepared reservation when the transport never installed its send fence. */
+  deleteReceipt(desktopId: CompanionDesktopId, operationId: CompanionOperationId): Promise<void>
   /**
    * @param desktopId - Paired Desktop whose row is written.
    * @param kind - admitted content kind of the row.
@@ -214,8 +238,10 @@ export interface CompanionCacheStore {
     desktopId: CompanionDesktopId,
     kind: CompanionCacheContentKind,
   ): Promise<CompanionCacheRecord | undefined>
+  /** Remove cached presentation content without changing operation receipts. */
+  clearContent(desktopId: CompanionDesktopId): Promise<void>
   /**
-   * Drop one Paired Desktop's cached rows; pairing-key records stay untouched.
+   * Drop one Paired Desktop's cached content and receipts during authority teardown.
    * @param desktopId - Paired Desktop to clear.
    */
   clearDesktop(desktopId: CompanionDesktopId): Promise<void>
@@ -284,45 +310,78 @@ function parseCompanionCacheRecord(value: unknown): CompanionCacheRecord {
   }
 }
 
-function parseCompanionConfirmedResult(value: unknown): CompanionConfirmedResult {
+function parseCompanionMutationResult(value: unknown): CompanionMutationResult {
   const record = durableRecord(value, 'Companion confirmed result')
-  if (record.type !== 'confirmed' || record.outcome !== 'accepted') {
-    throw new TypeError('Companion confirmed result type is unsupported')
+  const operationId = parseCompanionOperationId(record.operationId)
+  if (record.type === 'confirmed' && record.outcome === 'accepted'
+    && typeof record.committedAt === 'number' && Number.isSafeInteger(record.committedAt) && record.committedAt > 0) {
+    return { type: 'confirmed', operationId, committedAt: record.committedAt, outcome: 'accepted' }
   }
-  if (typeof record.committedAt !== 'number' || !Number.isSafeInteger(record.committedAt) || record.committedAt <= 0) {
-    throw new TypeError('Companion committedAt must be a positive safe integer')
+  if (record.type === 'session-created'
+    && typeof record.committedAt === 'number' && Number.isSafeInteger(record.committedAt) && record.committedAt > 0) {
+    return {
+      type: 'session-created', operationId,
+      sessionId: parseCompanionSessionId(record.sessionId), committedAt: record.committedAt,
+    }
   }
-  return {
-    type: 'confirmed',
-    operationId: parseCompanionOperationId(record.operationId),
-    committedAt: record.committedAt,
-    outcome: 'accepted',
+  if (record.type === 'attachment-rejected'
+    && (record.reason === 'cross-pairing' || record.reason === 'hash-mismatch' || record.reason === 'expired'
+      || record.reason === 'absent' || record.reason === 'transfer-interrupted' || record.reason === 'limit-exceeded')) {
+    return { type: 'attachment-rejected', operationId, reason: record.reason }
   }
+  if (record.type === 'interaction-receipt' && record.accepted === true) {
+    return { type: 'interaction-receipt', operationId, accepted: true }
+  }
+  if (record.type === 'interaction-receipt' && record.accepted === false
+    && (record.reason === 'not-pending' || record.reason === 'bad-response')) {
+    return { type: 'interaction-receipt', operationId, accepted: false, reason: record.reason }
+  }
+  if (record.type === 'operation-failed' && typeof record.failure === 'object' && record.failure !== null) {
+    return structuredClone(record) as unknown as CompanionMutationResult
+  }
+  throw new TypeError('Companion terminal mutation result is unsupported')
 }
 
 function parseReceiptStatus(value: unknown): CompanionReceiptStatus {
-  if (value === 'unknown' || value === 'committed' || value === 'not-submitted') return value
+  if (value === 'prepared' || value === 'unknown' || value === 'committed' || value === 'not-submitted') return value
   throw new TypeError('Companion receipt status is unsupported')
+}
+
+function parseReceiptKind(value: unknown): CompanionMutationKind | undefined {
+  if (value === undefined) return undefined
+  if (value === 'session-create' || value === 'prompt' || value === 'cancel' || value === 'approval'
+    || value === 'question' || value === 'attachment' || value === 'other-mutation') return value
+  throw new TypeError('Companion receipt mutation kind is unsupported')
 }
 
 function parseCompanionOperationReceipt(value: unknown): CompanionOperationReceipt {
   const record = durableRecord(value, 'Companion Operation Receipt')
   const operationId = parseCompanionOperationId(record.operationId)
   const status = parseReceiptStatus(record.status)
+  const kind = parseReceiptKind(record.kind)
+  const sessionId = record.sessionId === undefined ? undefined : parseCompanionSessionId(record.sessionId)
   if (status === 'committed') {
     if (record.original === undefined) {
       throw new TypeError('Companion committed receipt must embed its original result')
     }
-    const original = parseCompanionConfirmedResult(record.original)
+    const original = parseCompanionMutationResult(record.original)
     if (original.operationId !== operationId) {
       throw new TypeError('Companion committed receipt original must name the same operation id')
     }
-    return { operationId, status, original }
+    return {
+      operationId, status, original,
+      ...(kind === undefined ? {} : { kind }),
+      ...(sessionId === undefined ? {} : { sessionId }),
+    }
   }
   if (record.original !== undefined) {
     throw new TypeError('Companion uncommitted receipt cannot embed an original result')
   }
-  return { operationId, status }
+  return {
+    operationId, status,
+    ...(kind === undefined ? {} : { kind }),
+    ...(sessionId === undefined ? {} : { sessionId }),
+  }
 }
 
 function assertRecordDesktop(
@@ -356,13 +415,40 @@ export class InMemoryCompanionCacheStore implements CompanionCacheStore {
     return Promise.resolve(this.#content.get(contentKey(desktopId, kind)))
   }
 
-  clearDesktop(desktopId: CompanionDesktopId): Promise<void> {
+  clearContent(desktopId: CompanionDesktopId): Promise<void> {
     const prefix = desktopPrefix(desktopId)
-    for (const key of [...this.#content.keys(), ...this.#receipts.keys()]) {
+    for (const key of this.#content.keys()) {
       if (!key.startsWith(prefix)) continue
       this.#content.delete(key)
-      this.#receipts.delete(key)
     }
+    return Promise.resolve()
+  }
+
+  async clearDesktop(desktopId: CompanionDesktopId): Promise<void> {
+    await this.clearContent(desktopId)
+    const prefix = desktopPrefix(desktopId)
+    for (const key of this.#receipts.keys()) {
+      if (key.startsWith(prefix)) this.#receipts.delete(key)
+    }
+  }
+
+  reserveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void> {
+    const prefix = desktopPrefix(desktopId)
+    const key = `${prefix}${receipt.operationId}`
+    if (!this.#receipts.has(key)) {
+      const owned = [...this.#receipts.entries()].filter(([candidate]) => candidate.startsWith(prefix))
+      if (owned.length >= COMPANION_CACHE_RECEIPT_LIMIT) {
+        const terminal = owned.find(([, row]) => row.status === 'committed' || row.status === 'not-submitted')
+        if (terminal === undefined) requireReceiptCapacity(owned.length, false)
+        else this.#receipts.delete(terminal[0])
+      }
+    }
+    this.#receipts.set(key, receipt)
+    return Promise.resolve()
+  }
+
+  deleteReceipt(desktopId: CompanionDesktopId, operationId: CompanionOperationId): Promise<void> {
+    this.#receipts.delete(`${desktopPrefix(desktopId)}${operationId}`)
     return Promise.resolve()
   }
 
@@ -425,6 +511,16 @@ export class IndexedDbCompanionCacheStore implements CompanionCacheStore {
     return value === undefined ? undefined : assertRecordDesktop(parseCompanionCacheRecord(value), desktopId)
   }
 
+  async clearContent(desktopId: CompanionDesktopId): Promise<void> {
+    const database = await this.#database
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('content', 'readwrite')
+      transaction.objectStore('content').delete(desktopRange(desktopId))
+      transaction.oncomplete = () => { resolve() }
+      transaction.onerror = () => { reject(transaction.error ?? new Error('Companion cache content delete failed')) }
+    })
+  }
+
   async clearDesktop(desktopId: CompanionDesktopId): Promise<void> {
     const database = await this.#database
     await new Promise<void>((resolve, reject) => {
@@ -435,6 +531,46 @@ export class IndexedDbCompanionCacheStore implements CompanionCacheStore {
       transaction.oncomplete = () => { resolve() }
       transaction.onerror = () => { reject(transaction.error ?? new Error('Companion cache IndexedDB delete failed')) }
     })
+  }
+
+  async reserveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void> {
+    const database = await this.#database
+    await new Promise<void>((resolve, reject) => {
+      const key = `${desktopPrefix(desktopId)}${receipt.operationId}`
+      let limitError: Error | undefined
+      const transaction = database.transaction('receipts', 'readwrite')
+      const store = transaction.objectStore('receipts')
+      const keysRequest = store.getAllKeys(desktopRange(desktopId))
+      const rowsRequest = store.getAll(desktopRange(desktopId))
+      const reserve = (): void => {
+        if (keysRequest.readyState !== 'done' || rowsRequest.readyState !== 'done') return
+        if (!keysRequest.result.includes(key) && keysRequest.result.length >= COMPANION_CACHE_RECEIPT_LIMIT) {
+          const terminalIndex = rowsRequest.result.findIndex((row: unknown) => (
+            ['committed', 'not-submitted'].includes(parseCompanionOperationReceipt(row).status)
+          ))
+          if (terminalIndex < 0) {
+            try { requireReceiptCapacity(keysRequest.result.length, false) } catch (error) {
+              limitError = error instanceof Error ? error : new Error(String(error))
+            }
+            transaction.abort()
+            return
+          }
+          const terminalKey = keysRequest.result[terminalIndex]
+          if (terminalKey === undefined) throw new Error('Companion cache terminal receipt key is unavailable')
+          store.delete(terminalKey)
+        }
+        store.put(receipt, key)
+      }
+      keysRequest.onsuccess = reserve
+      rowsRequest.onsuccess = reserve
+      transaction.oncomplete = () => { resolve() }
+      transaction.onabort = () => { reject(limitError ?? transaction.error ?? new Error('Companion cache receipt reservation failed')) }
+      transaction.onerror = () => { reject(limitError ?? transaction.error ?? new Error('Companion cache receipt reservation failed')) }
+    })
+  }
+
+  async deleteReceipt(desktopId: CompanionDesktopId, operationId: CompanionOperationId): Promise<void> {
+    await this.writeDelete('receipts', `${desktopPrefix(desktopId)}${operationId}`)
   }
 
   async saveReceipt(desktopId: CompanionDesktopId, receipt: CompanionOperationReceipt): Promise<void> {
@@ -506,6 +642,16 @@ export class IndexedDbCompanionCacheStore implements CompanionCacheStore {
       transaction.onerror = () => { reject(transaction.error ?? new Error('Companion cache IndexedDB write failed')) }
     })
   }
+
+  private async writeDelete(store: 'content' | 'receipts', key: string): Promise<void> {
+    const database = await this.#database
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(store, 'readwrite')
+      transaction.objectStore(store).delete(key)
+      transaction.oncomplete = () => { resolve() }
+      transaction.onerror = () => { reject(transaction.error ?? new Error('Companion cache IndexedDB delete failed')) }
+    })
+  }
 }
 
 function desktopRange(desktopId: CompanionDesktopId): IDBKeyRange {
@@ -563,46 +709,53 @@ export class CompanionCache {
   }
 
   /**
-   * Clear one Paired Desktop's cached rows; pairing-key records live in the
-   * pairing seam's own store and survive this operation.
+   * Clear one Paired Desktop's presentation content while retaining operation
+   * receipts and pairing-key authority.
    * @param desktopId - Paired Desktop to clear.
    */
-  async clearDesktopCache(desktopId: CompanionDesktopId): Promise<void> {
+  async clearDesktopContent(desktopId: CompanionDesktopId): Promise<void> {
+    await this.#store.clearContent(desktopId)
+  }
+
+  /** Remove cached content and receipts after the pairing authority is revoked. */
+  async destroyDesktopCache(desktopId: CompanionDesktopId): Promise<void> {
     await this.#store.clearDesktop(desktopId)
   }
 }
 
 /** Desktop answer to one operation-status query. */
 export type CompanionStatusAnswer =
-  | { readonly committed: true; readonly original: CompanionConfirmedResult }
+  | { readonly committed: true; readonly original: CompanionMutationResult }
   | { readonly committed: false }
 
 /** One proposed mutation with its Desktop-authoritative operation id. */
 export interface CompanionMutationRequest {
   kind: CompanionMutationKind
   operationId: CompanionOperationId
+  sessionId?: CompanionSessionId
 }
 
 /** Transport result once the mutation's fate is known, or explicitly unknown. */
 export type CompanionMutationOutcome =
-  | { readonly known: true; readonly result: CompanionConfirmedResult }
+  | { readonly known: true; readonly result: CompanionMutationResult }
   | { readonly known: false }
 
-/** Hook invoked after a mutation left this device and before `send` returns. */
-export type CompanionTransmissionAck = () => void | Promise<void>
+/** Durable fence invoked immediately before a mutation may leave this device. */
+export type CompanionTransmissionFence = () => void | Promise<void>
 
 /** Relay-backed transport the settlement controller drives. */
 export interface CompanionMutationTransport {
   /**
-   * Transmit one mutation; await `onTransmitted` exactly once after the request
-   * left this device and before returning or rejecting.
+   * Transmit one mutation; await `beforeSend` exactly once immediately before
+   * the first external send attempt. Any later success or failure is uncertain
+   * until Desktop reconciliation.
    * @param mutation - proposed mutation.
-   * @param onTransmitted - transmission acknowledgment hook.
+   * @param beforeSend - durable unknown-outcome fence.
    * @returns the Desktop result, or an explicitly unknown outcome.
    */
   send(
     mutation: CompanionMutationRequest,
-    onTransmitted: CompanionTransmissionAck,
+    beforeSend: CompanionTransmissionFence,
   ): Promise<CompanionMutationOutcome>
   /**
    * Query Desktop for the authoritative outcome of one transmitted operation.
@@ -616,6 +769,9 @@ export interface CompanionMutationTransport {
 export class CompanionUncertainOperationSettlement {
   readonly #store: CompanionCacheStore
   readonly #desktopId: CompanionDesktopId
+  readonly #inFlight = new Set<CompanionOperationId>()
+  #transitions: Promise<void> = Promise.resolve()
+  #reconciliation: Promise<readonly CompanionOperationReceipt[]> | undefined
 
   /** @param store - durable receipt rows. @param desktopId - owning Paired Desktop. */
   constructor(store: CompanionCacheStore, desktopId: CompanionDesktopId) {
@@ -624,25 +780,38 @@ export class CompanionUncertainOperationSettlement {
   }
 
   /**
-   * Transmit one mutation, storing an Operation Receipt only after the request
-   * left this device. Offline proposals never reach the transport. An existing
-   * `unknown` receipt must be reconciled first; a `committed` receipt is
-   * returned without resending.
+   * Transmit one mutation after reserving bounded capacity and durably changing
+   * that reservation to `unknown` immediately before the external send. An
+   * existing `unknown` receipt must be reconciled first; a `committed` receipt
+   * is returned without resending.
    * @param mutation - proposed mutation.
    * @param transport - Relay-backed transport.
-   * @param online - whether Remote is currently Online.
+   * @param connection - foreground connection and validated synchronization state.
    * @returns the settled receipt, or the unknown receipt awaiting reconciliation.
    */
   async transmit(
     mutation: CompanionMutationRequest,
     transport: CompanionMutationTransport,
-    online: boolean,
+    connection: CompanionConnectionState | undefined,
   ): Promise<CompanionOperationReceipt> {
-    if (!companionMutationAllowed(online, mutation.kind)) {
-      throw new Error(`Remote Offline disables Companion ${mutation.kind} mutations`)
-    }
-    const existing = (await this.#store.loadReceipts(this.#desktopId))
-      .find(row => row.operationId === mutation.operationId)
+    requireCompanionMutation(connection, mutation.kind)
+    const existing = await this.transition(async () => {
+      const found = (await this.#store.loadReceipts(this.#desktopId))
+        .find(row => row.operationId === mutation.operationId)
+      if (found?.status === 'prepared' && this.#inFlight.has(mutation.operationId)) {
+        throw new Error(`Companion operation ${mutation.operationId} is already transmitting`)
+      }
+      if (found === undefined) {
+        await this.#store.reserveReceipt(this.#desktopId, {
+          operationId: mutation.operationId, status: 'prepared', kind: mutation.kind,
+          ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+        })
+      }
+      if (found?.status !== 'unknown' && found?.status !== 'committed') {
+        this.#inFlight.add(mutation.operationId)
+      }
+      return found
+    })
     if (existing?.status === 'unknown') {
       throw new Error(
         `Companion operation ${mutation.operationId} is unknown and must be reconciled before another transmit`,
@@ -651,31 +820,49 @@ export class CompanionUncertainOperationSettlement {
     if (existing?.status === 'committed') {
       return existing
     }
-    let transmissionReceipt: Promise<void> | undefined
-    let outcome: CompanionMutationOutcome
     try {
-      outcome = await transport.send(mutation, () => {
-        transmissionReceipt = this.#store.saveReceipt(
-          this.#desktopId,
-          { operationId: mutation.operationId, status: 'unknown' },
-        )
-        return transmissionReceipt
-      })
-    } catch (error) {
-      // The transmission acknowledgment write must settle before its rejection
-      // escapes; otherwise the promise rejects unobserved.
-      await transmissionReceipt
-      throw error
+      let transmissionFence: Promise<void> | undefined
+      let outcome: CompanionMutationOutcome
+      try {
+        outcome = await transport.send(mutation, () => {
+          if (transmissionFence !== undefined) {
+            throw new Error('Companion transport installed its durable send fence more than once')
+          }
+          transmissionFence = this.transition(async () => {
+            await this.#store.saveReceipt(this.#desktopId, {
+              operationId: mutation.operationId, status: 'unknown', kind: mutation.kind,
+              ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+            })
+          })
+          return transmissionFence
+        })
+      } catch (error) {
+        if (transmissionFence === undefined) {
+          await this.transition(async () => { await this.#store.deleteReceipt(this.#desktopId, mutation.operationId) })
+        } else {
+          await transmissionFence
+        }
+        throw error
+      }
+      await transmissionFence
+      if (transmissionFence === undefined) {
+        await this.transition(async () => { await this.#store.deleteReceipt(this.#desktopId, mutation.operationId) })
+        throw new Error('Companion transport returned without installing its durable send fence')
+      }
+      const receipt: CompanionOperationReceipt = outcome.known
+        ? {
+          operationId: mutation.operationId, status: 'committed', original: outcome.result, kind: mutation.kind,
+          ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+        }
+        : {
+          operationId: mutation.operationId, status: 'unknown', kind: mutation.kind,
+          ...(mutation.sessionId === undefined ? {} : { sessionId: mutation.sessionId }),
+        }
+      await this.transition(async () => { await this.#store.saveReceipt(this.#desktopId, receipt) })
+      return receipt
+    } finally {
+      this.#inFlight.delete(mutation.operationId)
     }
-    await transmissionReceipt
-    if (!outcome.known && transmissionReceipt === undefined) {
-      throw new Error('Companion transport reported an unknown outcome without acknowledging transmission')
-    }
-    const receipt: CompanionOperationReceipt = outcome.known
-      ? { operationId: mutation.operationId, status: 'committed', original: outcome.result }
-      : { operationId: mutation.operationId, status: 'unknown' }
-    await this.#store.saveReceipt(this.#desktopId, receipt)
-    return receipt
   }
 
   /**
@@ -686,14 +873,50 @@ export class CompanionUncertainOperationSettlement {
    * @returns receipts after reconciliation.
    */
   async reconcileUnknown(transport: CompanionMutationTransport): Promise<readonly CompanionOperationReceipt[]> {
-    const rows = await this.#store.loadReceipts(this.#desktopId)
+    if (this.#reconciliation !== undefined) return await this.#reconciliation
+    const reconciliation = this.reconcileOwned(transport)
+    this.#reconciliation = reconciliation
+    try { return await reconciliation } finally {
+      if (this.#reconciliation === reconciliation) this.#reconciliation = undefined
+    }
+  }
+
+  private async reconcileOwned(transport: CompanionMutationTransport): Promise<readonly CompanionOperationReceipt[]> {
+    const rows = await this.transition(async () => await this.#store.loadReceipts(this.#desktopId))
+    const reconciled: CompanionOperationReceipt[] = []
     for (const row of rows) {
+      if (row.status === 'prepared') {
+        const next = { ...row, status: 'not-submitted' as const }
+        const accepted = await this.transition(async () => {
+          const current = (await this.#store.loadReceipts(this.#desktopId))
+            .find(candidate => candidate.operationId === row.operationId)
+          if (current?.status !== 'prepared' || this.#inFlight.has(row.operationId)) return false
+          await this.#store.saveReceipt(this.#desktopId, next)
+          return true
+        })
+        if (accepted) reconciled.push(next)
+        continue
+      }
       if (row.status !== 'unknown') continue
       const answer = await transport.queryStatus(row.operationId)
-      await this.#store.saveReceipt(this.#desktopId, answer.committed
-        ? { operationId: row.operationId, status: 'committed', original: answer.original }
-        : { operationId: row.operationId, status: 'not-submitted' })
+      const next: CompanionOperationReceipt = answer.committed
+        ? { ...row, status: 'committed', original: answer.original }
+        : { ...row, status: 'not-submitted' }
+      const accepted = await this.transition(async () => {
+        const current = (await this.#store.loadReceipts(this.#desktopId))
+          .find(candidate => candidate.operationId === row.operationId)
+        if (current?.status !== 'unknown') return false
+        await this.#store.saveReceipt(this.#desktopId, next)
+        return true
+      })
+      if (accepted) reconciled.push(next)
     }
-    return await this.#store.loadReceipts(this.#desktopId)
+    return reconciled
+  }
+
+  private transition<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.#transitions.then(operation, operation)
+    this.#transitions = result.then(() => undefined, () => undefined)
+    return result
   }
 }

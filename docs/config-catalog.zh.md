@@ -355,6 +355,8 @@ export interface Config {
   maxImagePixels?: number
   /** Maximum intrinsic width and maximum intrinsic height accepted for one submitted image. Default: 8192px. */
   maxImageDimension?: number
+  /** Maximum exact bytes accepted for one generic file. */
+  maxFileBytes?: number
   /** Long-edge pixel cap of the stored provider-independent normalized image. */
   normalizedImageMaxDimension?: number
   /** Encoded-byte safety cap of the stored provider-independent normalized image. */
@@ -364,7 +366,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/attachment/attachment-local/src/index.ts:51`](../packages/attachment/attachment-local/src/index.ts)
+来源：[`packages/attachment/attachment-local/src/index.ts:72`](../packages/attachment/attachment-local/src/index.ts)
 
 <a id="deepseek-aidsh-bash-local"></a>
 
@@ -1746,11 +1748,11 @@ export interface AccountBackend {
   countActiveInstallations(accountId: PlatformAccountId, kind: InstallationKind): Promise<number>
   /** Read the Account bound to one GitHub subject inside an identity namespace. */
   findAccountByIdentity(identityNamespace: string, providerSubject: number): Promise<AccountRecord | undefined>
-  /** Read the live session bound to one installation, when present. */
-  findActiveSessionByInstallation(
+  /** Report whether one installation already owns a live session without decoding its obsolete payload. */
+  hasActiveSessionByInstallation(
     identityNamespace: string,
     installationId: InstallationId,
-  ): Promise<SessionRecord | undefined>
+  ): Promise<boolean>
 }
 
 /** Shared invalidation channel used by every Platform Instance. */
@@ -1797,6 +1799,8 @@ export interface LoginAttemptRecord {
   installationId: InstallationId
   /** Desktop or Mobile installation class. */
   installationKind: InstallationKind
+  /** Device-owned presentation committed with this attempt. */
+  presentation?: InstallationPresentation
   /** Installation P-256 public key. */
   publicKey: JsonWebKey
   /** Random OAuth state bound to the attempt. */
@@ -1843,6 +1847,8 @@ export interface SessionRecord {
   installationId: InstallationId
   /** Desktop or Mobile installation class. */
   installationKind: InstallationKind
+  /** Device-owned presentation present on every Installation session. */
+  presentation?: InstallationPresentation
   /** Installation P-256 public key. */
   publicKey: JsonWebKey
   /** Monotonic refresh-token generation. */
@@ -1862,9 +1868,9 @@ export interface AccountRecord extends PlatformAccountView {
 }
 ```
 
-依赖：[`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.zh.md) · [`InstallationId`](subsystems/platform-account.zh.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.zh.md) · [`PlatformAccountId`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountView`](subsystems/platform-account.zh.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
+依赖：[`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.zh.md) · [`InstallationId`](subsystems/platform-account.zh.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.zh.md) · [`PlatformAccountId`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountView`](subsystems/platform-account.zh.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
 
-来源：[`packages/platform/platform-account-core/src/index.ts:491`](../packages/platform/platform-account-core/src/index.ts)
+来源：[`packages/platform/platform-account-core/src/index.ts:506`](../packages/platform/platform-account-core/src/index.ts)
 
 <a id="deepseek-aidsh-platform-account-http"></a>
 
@@ -1880,7 +1886,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/platform-account-http/src/index.ts:28`](../packages/platform/platform-account-http/src/index.ts)
+来源：[`packages/platform/platform-account-http/src/index.ts:30`](../packages/platform/platform-account-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 
@@ -1951,7 +1957,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/remote-access-http/src/index.ts:28`](../packages/platform/remote-access-http/src/index.ts)
+来源：[`packages/platform/remote-access-http/src/index.ts:29`](../packages/platform/remote-access-http/src/index.ts)
 
 <a id="deepseek-aidsh-remote-attachments"></a>
 
@@ -1971,7 +1977,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/remote-attachments/src/index.ts:111`](../packages/platform/remote-attachments/src/index.ts)
+来源：[`packages/platform/remote-attachments/src/index.ts:140`](../packages/platform/remote-attachments/src/index.ts)
 
 <a id="deepseek-aidsh-repeat-tool-reminder"></a>
 
@@ -3786,6 +3792,7 @@ export interface Config {
 - `@deepseek-ai/dsh-llm-mock-server`（[`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts)）
 - `@deepseek-ai/dsh-loader-smoke`（[`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts)）
 - `@deepseek-ai/dsh-native-command`（[`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts)）
+- `@deepseek-ai/dsh-noise-channel`（[`packages/platform/noise-channel/src/index.ts`](../packages/platform/noise-channel/src/index.ts)）
 - `@deepseek-ai/dsh-output-retention`（[`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts)）
 - `@deepseek-ai/dsh-platform-account-client`（[`packages/platform/platform-account-client/src/index.ts`](../packages/platform/platform-account-client/src/index.ts)）
 - `@deepseek-ai/dsh-remote-access-client`（[`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts)）

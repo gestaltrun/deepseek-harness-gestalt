@@ -4,6 +4,8 @@ Status: proposed
 
 [English](2026-08-17-mobile-companion.md) | 中文
 
+真实产品链路与仅前台生命周期由[使用真实 Companion 产品链路](../architecture/2026-08-22-real-companion-product-path.zh.md)所有；该提案取代本文的推送投递与证明链路验收条款。[以有界替换投影实时 Session](../../implemented/architecture/2026-08-24-companion-live-session-projection.zh.md)实现了这里描述的已打开 transcript 与隐藏摘要 projection；提案的其余部分继续有效。
+
 ## 问题
 
 DeepSeek Gestalt 仅通过 Desktop Host 加载其回环 Web Host 来展示 Session Surface。用户无法在另一网络上通过手机检查正在进行的工作、回答交互请求或继续 Session。现有 Web Host 不是远程访问服务：直接暴露它会让 agent 能力在缺少设备认证、传输安全、撤销机制与面向独立发布客户端的版本化协议时被访问。
@@ -32,11 +34,11 @@ Desktop 和 Mobile 必须认证同一个 Platform Account，Personal Pairing 才
 
 首版没有 Platform Account 删除、跨安装 Account Session 管理或安装丢失恢复流程。Desktop 和 Mobile 显示 GitHub login 与 avatar、当前安装 session、当前安装退出以及现有 Personal Pairing 控制；HTTPS OAuth callback 页面只报告成功或失败。退出登录后，账号身份和元数据仍遵循已接受的保留规则。
 
-开放注册使用已校验资源配额，而不是白名单。一个账号最多保留十个 Desktop 安装、十个 Mobile 安装、五十条 Personal Pairing 和二十条并发 Platform 连接。每账号每小时最多创建十个 Pairing Challenge，每个 IP 每小时最多创建三十个。一个账号同时最多保留五个密文 blob，在现有单 blob 100 MiB 上限下每天最多上传 1 GiB，并且每天最多发出五百条 push hint。超过配额会返回稳定错误与重试时间。IP 限制只保护认证和配对，不限速已建立的密文流。
+开放注册使用已校验资源配额，而不是白名单。一个账号最多保留十个 Desktop 安装、十个 Mobile 安装、五十条 Personal Pairing 和二十条并发 Platform 连接。每账号每小时最多创建十个 Pairing Challenge，每个 IP 每小时最多创建三十个。一个账号同时最多保留五个密文 blob，并在现有单 blob 100 MiB 上限下每天最多上传 1 GiB。超过配额会返回稳定错误与重试时间。IP 限制只保护认证和配对，不限速已建立的密文流。
 
 双实例部署不设置账号总数上限，也不自动扩缩容。整体连接或资源水位达到上限时，Platform 保留现有连接，并以 `PLATFORM_CAPACITY` 和 `retryAfter` 拒绝新的登录、配对、blob 上传或 WSS 挂接；CloudMonitor 告警运维人员扩容。首版没有运营侧账号停用控制或管理控制台。
 
-GitHub 授权前，Platform 会展示中英文隐私说明，涵盖 GitHub id、login 与 avatar、安装和配对元数据、push token、七天原始 IP 日志、三十天无内容安全事件、会失效密文 blob，以及产品内不存在 Platform Account 删除流程。继续登录即接受该说明，无需单独勾选框。
+GitHub 授权前，Platform 会展示中英文隐私说明，涵盖 GitHub id、login 与 avatar、安装和配对元数据、七天原始 IP 日志、三十天无内容安全事件、会失效密文 blob，以及产品内不存在 Platform Account 删除流程。继续登录即接受该说明，无需单独勾选框。
 
 已配对 Desktop 是 Session 事件、Workspace、凭证和 agent 执行的唯一权威。移动端修改只有在 Desktop 提交或确认后才成功；Mobile Companion 和云端都不保留可写 Session 副本。
 
@@ -58,13 +60,13 @@ Personal Pairing 使用 `Noise_XKpsk3_25519_ChaChaPoly_SHA256`，Mobile Companio
 
 Companion Surface 源码在当前 monorepo 中共享 DSH Client Runtime 和页面组件，每个移动版本则捆绑其编译后的页面资源。已配对 Desktop 和中继都不会在连接时向应用提供可执行页面代码。
 
-`apps/mobile` 使用 Capacitor 作为本地捆绑 Companion Surface 的原生容器。Web Client 拥有页面渲染；原生适配器拥有摄像头访问、设备密钥、深链、推送注册、文件选择和本地加密存储。之前的 Expo 与 React Native 实现仅作为行为参考材料，不作为页面代码来源。
+`apps/mobile` 使用 Capacitor 作为本地捆绑 Companion Surface 的原生容器。Web Client 拥有页面渲染；原生适配器拥有摄像头访问、设备密钥、深链、文件选择和本地加密存储。之前的 Expo 与 React Native 实现仅作为行为参考材料，不作为页面代码来源。
 
-新的 Remote Access Platform Capability 替换之前的明文 Java 网关。它作为一个深模块拥有 Personal Pairing registry、Remote Relay、加密 blob capability 和无内容 push hint。Mobile Companion 和 Desktop 都与其中的 Remote Relay 建立出站 WSS 连接；其接口不包含 Workspace、Session、提示词、工具、模型、审批或其他 DSH 业务类型。
+新的 Remote Access Platform Capability 替换之前的明文 Java 网关。它作为一个深模块拥有 Personal Pairing registry、Remote Relay 和加密 blob capability。Mobile Companion 和 Desktop 都与其中的 Remote Relay 建立出站 WSS 连接；其接口不包含 Workspace、Session、提示词、工具、模型、审批或其他 DSH 业务类型。
 
 `apps/platform` 是当前 monorepo 中可独立部署的 Cordis 组合根，用于承载中心化 Platform Capability，且不挂载 Harness Engine。Account 和 Remote Access 是其初始能力，而不是应用的部署身份。拟新增的 `@deepseek-ai/dsh-platform-account` package 是深 Account plugin，拥有 GitHub OAuth、Platform Account、Account Session、安装密钥绑定和当前安装退出。Remote Access 消费其 Account Service 来校验 session 和同账号配对，不读取账号表或 GitHub 字段。Platform 其他共享内容仅包括进程生命周期、已校验配置、健康端点，以及 PostgreSQL、Redis、OSS、日志和 secret 适配器；每个 capability 分别拥有其授权、数据表、Redis namespace、路由和可观测字段。后续 capability 可以识别 Platform Account 身份，但不能在没有新决策时复用 Remote Access Device Principal、数据或解密值。
 
-Remote Access 使用四个拟新增的深 package。`@deepseek-ai/dsh-remote-protocol` 拥有 wire codec、版本与 capability 协商、稳定错误、branded id、解析限制和 Noise 向量。`@deepseek-ai/dsh-remote-platform` 拥有完整 Platform plugin，并将配对、Relay、blob、push 和跨实例协调保留为内部实现。`@deepseek-ai/dsh-remote-desktop` 拥有 Desktop 连接生命周期、DSH 投影、操作幂等和审计归因。`@deepseek-ai/dsh-remote-client` 拥有 Mobile 同步状态机、operation receipt 和缓存接口。各 app 目录只组合这些模块，不复制其状态机。
+Remote Access 使用四个拟新增的深 package。`@deepseek-ai/dsh-remote-protocol` 拥有 wire codec、版本与 capability 协商、稳定错误、branded id、解析限制和 Noise 向量。`@deepseek-ai/dsh-remote-platform` 拥有完整 Platform plugin，并将配对、Relay、blob 和跨实例协调保留为内部实现。`@deepseek-ai/dsh-remote-desktop` 拥有 Desktop 连接生命周期、DSH 投影、操作幂等和审计归因。`@deepseek-ai/dsh-remote-client` 拥有 Mobile 同步状态机、operation receipt 和缓存接口。各 app 目录只组合这些模块，不复制其状态机。
 
 网络使用两种协议。Relay Transport Protocol 对路由挂接、密文、心跳、撤销、传输错误以及 Relay 可读的传输版本协商进行分帧。Encrypted Companion Protocol 在该密文内运行，仅携带 Companion Surface 允许的投影、操作、结果和应用版本协商。Desktop 适配器将该精简协议映射到现有 DSH Session 和 Host 能力；远程路径永远不隧道传输完整 `/api/*` 或 Host WebSocket 接口。
 
@@ -86,21 +88,21 @@ Companion Cache 保留静态加密的 Workspace 和 Session 元数据，以及�
 
 附件使用端到端加密 blob 传输，而不是在实时流中传输应用明文或大消息。Mobile Companion 在上传前加密字节；Relay 签发限制 Personal Pairing、大小和期限的 capability；Desktop 验证密文哈希、下载并解密。失效、撤销或成功领取都会移除 blob。WSS 路径仅携带控制消息和有界小帧。
 
-首个可用移动版本会针对待处理审批、人机问题、轮次完成和失败发送推送通知。APNs、FCM 或其他推送提供方只会收到不敏感的路由引用和通用状态；Mobile Companion 在打开后获取加密详情。流式分片不产生推送通知。Push Hint 保持为 Remote Access 内部实现，不升级为通用 Platform 通知总线。
+Mobile Companion 只在用户打开应用或把应用切回前台后获取当前状态。进入后台会暂停 WSS；回到前台会重连到选中的 Paired Desktop，并在启用任何 mutation 前完成鉴权与 Desktop 权威同步。产品不提供后台通知投递。
 
 首个部署是单区域初始服务，按约五十台 Desktop 的规模准备，但向每个经过 GitHub 认证的账号开放。它从首版起就支持多个并发 Platform Instance。当 Mobile 和 Desktop 挂接到不同 Platform Instance 时，Remote Relay 实时路由和密文转发仍可工作。多区域路由不属于首个部署，部署也可让对等端重连，而不迁移实时 socket。
 
-试点在两个独立阿里云计算实例上部署恰好两个无状态 Platform Instance，位于一个无连接亲和的 TLS 负载均衡器之后。阿里云托管 PostgreSQL 存储持久配对、撤销、推送 token、blob 元数据和无内容安全审计记录。托管 Redis 保存会失效的在线连接目录，并通过跨实例密文 Pub/Sub 转发消息，但不成为离线队列。OSS 通过对象存储适配器只保留会失效的密文 blob。当一个 Platform Instance 退出或滚动部署替换它时，已连接对等端会通过另一实例重连并重新同步。
+试点在两个独立阿里云计算实例上部署恰好两个无状态 Platform Instance，位于一个无连接亲和的 TLS 负载均衡器之后。阿里云托管 PostgreSQL 存储持久配对、撤销、blob 元数据和无内容安全审计记录。托管 Redis 保存会失效的在线连接目录，并通过跨实例密文 Pub/Sub 转发消息，但不成为离线队列。OSS 通过对象存储适配器只保留会失效的密文 blob。当一个 Platform Instance 退出或滚动部署替换它时，已连接对等端会通过另一实例重连并重新同步。
 
-阿里云 SLS 和 CloudMonitor 接收无内容运维信号：连接数、认证失败类别、跨实例转发延迟、重连、撤销传播、blob 字节与失效总量、推送提供方结果、依赖健康和结构化错误码。日志和 trace 永远不包含密文 body、公钥、push token、设备名称、Pairing Challenge、完整链接或完整 route 和 pairing id。跨实例关联使用随机 request id；暴露给聚合遥测的标识使用定期轮换部署密钥生成的 HMAC 假名。
+阿里云 SLS 和 CloudMonitor 接收无内容运维信号：连接数、认证失败类别、跨实例转发延迟、重连、撤销传播、blob 字节与失效总量、依赖健康和结构化错误码。日志和 trace 永远不包含密文 body、公钥、设备名称、Pairing Challenge、完整链接或完整 route 和 pairing id。跨实例关联使用随机 request id；暴露给聚合遥测的标识使用定期轮换部署密钥生成的 HMAC 假名。
 
-Platform 配置引用阿里云 KMS 或 Secrets Manager 值，或由部署注入的 secret。PostgreSQL、Redis、OSS、GitHub、APNs 和 FCM 凭证永远不会进入数据库、仓库、`cordis.yml` 或日志。缺少必需凭证的 capability 会用明确诊断加载失败，而不是静默停用或削弱行为。
+Platform 配置引用阿里云 KMS 或 Secrets Manager 值，或由部署注入的 secret。PostgreSQL、Redis、OSS 和 GitHub 凭证永远不会进入数据库、仓库、`cordis.yml` 或日志。缺少必需凭证的 capability 会用明确诊断加载失败，而不是静默停用或削弱行为。
 
 首版依赖阿里云托管备份和容灾能力。它不实现应用层 restore epoch、恢复后暂停全部配对、跨地域故障切换编排、Redis 连接状态备份或会失效密文 blob 恢复。Desktop 删除相应 Personal Pairing 密钥后，陈旧 Relay 记录仍无法认证已撤销设备；云恢复流程和可用性目标属于部署配置，而不是产品协议。
 
 开发和生产分别使用独立 GitHub OAuth App、Platform origin、callback、client credential、数据库和身份 namespace。每个构建只信任对应 Platform origin。首版没有预发环境，也不接受用户或 Pairing Challenge 提供的任意服务器 URL；QR 和完整链接只标识该可信 origin 内的 rendezvous 与 challenge。自托管 Platform 选择和自定义信任根需要后续部署决策。
 
-Capacitor 项目保持 iOS 和 Android 构建可用。初始分发使用 TestFlight 和已签名 Android APK；公开 App Store 与 Google Play 发布要等待真实设备的配对、密钥存储、深链、推送、缓存和升级验收。Capacitor 直接获取 APNs 和 FCM token，Remote Access 调用这些提供方接口，不使用 Expo Push Service。
+Capacitor 项目保持 iOS 和 Android 构建可用。初始分发使用 TestFlight 和已签名 Android APK；公开 App Store 与 Google Play 发布要等待真实设备的配对、密钥存储、深链、前台同步、缓存和升级验收。
 
 远程操作归因可持久，但不对模型可见。已配对 Desktop 记录 operation id、Device Principal、操作类别、接受和结果；普通会话展示保持不变，设备来源可在详情中查看。模型永远不会收到设备名称、IP 地址或网络来源。
 
@@ -108,9 +110,9 @@ Capacitor 项目保持 iOS 和 Android 构建可用。初始分发使用 TestFli
 
 Mobile 审批渲染 Desktop Approval Service 授权的相同精确参数、cwd、diff、终端摘要和决策选项。它不会移除持久授权或其他有效 Desktop 选择，也不创建移动端专用策略层。Desktop 仍是提交该决策及其 Device Principal 归因的权威。
 
-推送通知永远不会执行操作。点击通知会打开目标已配对 Desktop、Session 和交互；Mobile Companion 重连并同步后，才展示当前 Desktop 拥有的操作或已结算结果。
+Deep link 永远不携带交互权威。配对链接只标识一个短期 Pairing Challenge；Mobile Companion 重连并同步后，才展示当前 Desktop 拥有的操作或已结算结果。
 
-Mobile Companion 进入后台时暂停 WSS 连接。APNs 或 FCM 提供无内容唤醒信号，应用回到前台后重连并同步权威状态。首版不依赖 silent background task，也不保持后台 socket。
+Mobile Companion 进入后台时暂停 WSS 连接。打开应用或把应用切回前台后会重连并同步权威状态。首版不依赖 silent background task，也不保持后台 socket。
 
 Mobile 导航不复制 Desktop 多列。根页面选择一台已配对 Desktop，Workspace 筛选其 Session 列表，一个 Session 占据完整对话视图。显眼的交互收件箱和会话内卡片暴露审批和人机问题。只有已打开 transcript 接收实时详情；隐藏 Session 更新摘要。
 
@@ -120,9 +122,9 @@ Ungrouped Session 行为与 Desktop 保持一致。Mobile Companion 可查看和
 
 Mobile Companion 没有单独的生物特征或应用锁功能。它依赖操作系统设备访问控制、受保护密钥存储和本地加密存储。
 
-撤销会先在 PostgreSQL 中提交更高的 pairing revision，再更新 Redis 当前 revision 并发布跨实例撤销事件。每个 Relay 会立即关闭匹配的活跃 socket，并在心跳时再次验证当前 revision，使遗漏的 Pub/Sub 事件不能保留访问权。Redis 无法确认有效性时，新挂接会 fail closed，活跃配对也会在下次检查时关闭。单独撤销会删除该配对的 Desktop 密钥和 push token；全部撤销或停用 Mobile Access 还会轮换 Desktop Relay 凭据并关闭 Desktop 路由。
+撤销会先在 PostgreSQL 中提交更高的 pairing revision，再更新 Redis 当前 revision 并发布跨实例撤销事件。每个 Relay 会立即关闭匹配的活跃 socket，并在心跳时再次验证当前 revision，使遗漏的 Pub/Sub 事件不能保留访问权。Redis 无法确认有效性时，新挂接会 fail closed，活跃配对也会在下次检查时关闭。单独撤销会删除该配对的 Desktop 密钥；全部撤销或停用 Mobile Access 还会轮换 Desktop Relay 凭据并关闭 Desktop 路由。
 
-Relay 持久保留公钥、配对状态和 revision 以及撤销记录。它在配对结束时删除推送 token，并在领取或失效时删除密文 blob。在线状态、心跳、路由和密文帧只存在于进程内。无内容安全事件保留三十天，原始 IP 访问日志最长保留七天。
+Relay 持久保留公钥、配对状态和 revision 以及撤销记录。它在领取或失效时删除密文 blob。在线状态、心跳、路由和密文帧只存在于进程内。无内容安全事件保留三十天，原始 IP 访问日志最长保留七天。
 
 已配对 Desktop 按权威接受与提交顺序排列并发的本地和移动端操作。每个远程修改都携带全局唯一的 operation id 和 Device Principal，使重试保持幂等。一次性交互、取消或其他 first-commit-wins 操作会向后到调用方返回已结算的权威结果，而不是覆盖它。
 
@@ -130,9 +132,9 @@ Mobile Companion 仅在修改已发送但结果未知时持久保存 operation r
 
 系统与商店名称为 **DeepSeek Gestalt**，Mobile Companion 仍是其移动端角色的领域术语。移动应用使用 bundle identifier `com.gestalt.deepseek.mobile`。它继承 DSH 设计 token、共享渲染器、中英文术语以及明暗主题，而不保留之前移动应用的米色和橙色身份。初始主题和语言跟随操作系统，之后由与 DSH 相同的显式用户选择优先。
 
-交付按依赖顺序推进：有界密码原型和安全评审入口；Remote Protocol 与跨运行时向量；Platform Remote Access plugin 和双实例路由；Desktop 适配器、Mobile Access 设置和审计；Mobile Client Runtime 加 Capacitor 密钥与缓存适配器；最后才是组装页面、blob、push、真实设备验收和故障测试。后续层不能用 mock 替代尚未完成的下层验收路径。
+交付按依赖顺序推进：有界密码原型和安全评审入口；Remote Protocol 与跨运行时向量；Platform Remote Access plugin 和双实例路由；Desktop 适配器、Mobile Access 设置和审计；Mobile Client Runtime 加 Capacitor 密钥与缓存适配器；最后才是组装页面、blob、真实设备验收和故障测试。后续层不能用 mock 替代尚未完成的下层验收路径。
 
-Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨账号拒绝配对、同账号创建 Workspace Session 与 Ungrouped Session、Mobile prompt 归因且设备数据不对模型可见、Mobile 完成 Approval 与 Ask User、Remote Offline 加结果未知操作恢复，以及撤销后拒绝。Package 与 integration test 拥有 OAuth、Noise、解析上限、幂等、revision 失效和双实例故障路径；iOS 与 Android 真实设备拥有原生密钥、push、缓存和页面验收。
+Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨账号拒绝配对、同账号创建 Workspace Session 与 Ungrouped Session、Mobile prompt 归因且设备数据不对模型可见、Mobile 完成 Approval 与 Ask User、Remote Offline 加结果未知操作恢复，以及撤销后拒绝。Package 与 integration test 拥有 OAuth、Noise、解析上限、幂等、revision 失效和双实例故障路径；iOS 与 Android 真实设备拥有原生密钥、前台生命周期、缓存和页面验收。
 
 ## 曾考虑的替代方案
 
@@ -170,7 +172,7 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 
 **通过 GitHub id 白名单限制账号创建。** 不采用，因为首个服务向每个经过认证的 GitHub 账号开放，而不是封闭试点群体。
 
-**把开放注册视为无限资源权限。** 不采用，因为按账号、安装、配对、blob、push 和认证的配额可限制单个身份的成本，同时不关闭注册。
+**把开放注册视为无限资源权限。** 不采用，因为按账号、安装、配对、blob 和认证的配额可限制单个身份的成本，同时不关闭注册。
 
 **自动扩缩 Platform 或在容量不足时终止现有连接。** 不纳入首个部署，因为已采购的两个实例保持固定；load shedding 会保护现有连接，并报告明确重试时间，直到运维人员扩容。
 
@@ -208,7 +210,7 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 
 **从已配对 Desktop 下载可执行 Companion Surface 代码。** 不采用，因为独立审核的移动版本需要确定的应用代码和离线可用外壳；兼容性应由明确的远程协议承担。
 
-**将推送通知延后到交互客户端之后。** 不采用，因为当后台应用无法提醒用户时，审批和人机问题会失去其远程价值。
+**在产品具备原生投递链路前增加后台通知。** 不采用，因为休眠的 token、凭证、持久化、隐私、配额与兼容性表面不能投递提醒。前台同步是已接受的生命周期。
 
 **用客户端时钟或 last-writer-wins 解决并发操作。** 不采用，因为只有已配对 Desktop 才能排列已提交的 Session 和交互状态，且重试不得复制修改。
 
@@ -222,7 +224,7 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 
 **让 Platform 变成共享业务网关，或让 capability 继承全部账号权限。** 不采用，因为组合根共享基础设施，而不是权限或明文。每个 Platform Capability 分别授权 Platform Account 可以执行的操作。
 
-**把配对、Relay、blob 和 push 拆成独立的浅 Platform 服务。** 不采用，因为它们共同实现一个 Remote Access 生命周期和授权模型；深 capability 将这些实现保留在内部，而 Remote Relay 仍是精简传输组件。
+**把配对、Relay 和 blob 拆成独立的浅 Platform 服务。** 不采用，因为它们共同实现一个 Remote Access 生命周期和授权模型；深 capability 将这些实现保留在内部，而 Remote Relay 仍是精简传输组件。
 
 **保留 Expo 和 React Native 作为页面运行时。** 不采用，因为已接受的 Companion Surface 共享现有 React Web Client；Capacitor 可提供所需原生适配器，且不创建另一个页面渲染器。
 
@@ -250,8 +252,6 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 
 **立即通过公开移动应用商店发布。** 不采用，因为受控的 TestFlight 和已签名 APK 分发可在创建公开升级义务之前验证原生安全与生命周期行为。
 
-**通过 Expo Push Service 发送推送。** 不采用，因为 Capacitor 应用可直接向 APNs 和 FCM 注册，避免另一个路由中介。
-
 **让设备来源对模型可见或在视觉上突出。** 不采用，因为来源归因是审计和详情问题，不是模型上下文或主会话内容。
 
 **持久化实时路由、心跳、密文帧或无期访问日志。** 不采用，因为重连会重建实时路由，加密帧不是应用权威，无限期元数据保留也不服务于试点。
@@ -268,9 +268,9 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 
 **在 Mobile 限制持久审批选择。** 不采用，因为 Desktop Approval Service 已拥有哪些决策有效。Mobile 不增加另一策略层地渲染该接口，并保留 Desktop 提交权威与设备归因。
 
-**从通知操作执行审批或取消。** 不采用，因为通知状态可能陈旧；每次修改前都会打开应用并重新同步。
+**从外部 deep link 执行审批或取消。** 不采用，因为链接状态可能陈旧；每次修改前都会打开应用并重新同步。
 
-**在后台保持移动 WebSocket 或执行 silent synchronization。** 不采用，因为无内容推送加前台重新同步可处理已接受事件，无需依赖受平台限制的后台执行。
+**在后台保持移动 WebSocket 或执行 silent synchronization。** 不采用，因为前台重新同步可处理已接受生命周期，无需依赖受平台限制的后台执行。
 
 **复用 Desktop 多列导航。** 不采用，因为移动导航围绕一台选中 Desktop 和一个活跃 Session，摘要和交互通过移动端专用路由提供。
 
@@ -300,7 +300,7 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 - 撤销 GitHub OAuth 会阻止以后登录，但首版不会使现有有界 Platform session 失效。
 - 当前安装退出通过 PostgreSQL、Redis 和两个 Platform Instance 传播 `sessionRevision`；首版不提供 Account Session 列表、远程退出、退出全部、安装丢失恢复或 Platform Account 删除。
 - Platform Account 使用一条 `account_identity(provider, subject)`，首版只接受 GitHub numeric id，且不支持身份绑定、解绑或合并。
-- 开放注册使用已接受的账号、安装、配对、连接、challenge、blob、字节、push 和认证配额，并返回稳定错误与重试时间。
+- 开放注册使用已接受的账号、安装、配对、连接、challenge、blob、字节和认证配额，并返回稳定错误与重试时间。
 - 整体容量会保留已建立连接，并以 `PLATFORM_CAPACITY` 拒绝新资源获取；双实例部署既不自动扩缩，也不提供运营侧账号停用控制。
 - 登录前中英文隐私说明披露已接受的数据和保留类别，并明确首版没有产品内账号删除流程。
 - 开发和生产使用不同 GitHub OAuth App、Platform origin、callback、凭证、数据库和身份 namespace；首版没有预发环境。
@@ -323,11 +323,11 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 - Transport 与 Companion 版本区间独立协商，Desktop 支持当前和前一个 Companion major，不兼容对等端快速失败并提示升级。
 - Relay 在滚动部署中使用 expand-contract 数据库 migration；Mobile 配对密钥记录可经受可丢弃缓存重建，不受支持的客户端必须升级而不能安全降级。
 - 附件明文仅存在于 Mobile Companion 和 Desktop，Relay 仅保留会过期且限定配对的密文 blob。
-- 待处理审批、人机问题、轮次完成和失败产生无内容推送通知；普通流式输出不产生。
+- 打开 Mobile 或将其切回前台会重连，并在任何 mutation 可用前完成 Desktop 权威同步；产品不提供后台通知投递。
 - `apps/platform` 是中心化 Platform Capability 的 Cordis 组合根，且不挂载 Harness Engine；Account 和 Remote Access 是其初始独立授权 plugin，后续 capability 既不共享 Remote Access Device Principal，也不共享其明文。
 - 拟新增的 `@deepseek-ai/dsh-platform-account` package 在 Account Service 后拥有 OAuth 与 Account Session 生命周期；Remote Access 校验 session 和同账号配对，但不读取账号存储。
-- 深 package 划分让 protocol、Platform Remote Access、Desktop 适配和 Mobile 同步各有一个拥有模块；配对、Relay、blob、push 和跨实例行为保持为 Remote Access 内部实现，而不是独立浅服务。
-- 试点通过阿里云单区域中恰好两个 Platform Instance 支持约五十台 Desktop，并使用 TestFlight、已签名 Android APK 以及直接 APNs 与 FCM 提供方集成。
+- 深 package 划分让 protocol、Platform Remote Access、Desktop 适配和 Mobile 同步各有一个拥有模块；配对、Relay、blob 和跨实例行为保持为 Remote Access 内部实现，而不是独立浅服务。
+- 试点通过阿里云单区域中恰好两个 Platform Instance 支持约五十台 Desktop，并使用 TestFlight 和已签名 Android APK 分发。
 - 两个 Platform Instance 运行在独立阿里云计算实例上，位于一个无 sticky session 的 TLS 端点后；托管 PostgreSQL 存储持久元数据，托管 Redis 保存会失效的连接目录并转发密文 Pub/Sub，OSS 保留会失效的密文 blob；实例丢失只触发重连，不丢失已提交状态。
 - 阿里云负责试点的备份和容灾能力；应用不增加 restore epoch、恢复时配对暂停、跨地域编排、Redis 备份或密文 blob 恢复。
 - 每个版本信任其配置好的 Platform origin，Pairing Challenge 不能选择任意服务器或信任根。
@@ -339,11 +339,11 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 - Desktop Mobile Access 与 Mobile 已配对 Desktop 页面暴露已接受的启用、配对、状态、最近访问、撤销、解除配对和缓存控制，且不显示 IP 地址。
 - Relay 保留遵循已接受的持久配对、三十天安全事件、七天原始 IP、临时在线状态和 blob 失效规则。
 - SLS 与 CloudMonitor 仅接收已接受的指标、健康、结构化错误、随机 request id 和定期轮换 HMAC 假名；敏感标识、设备数据、token、密钥、challenge、链接和密文 body 永远不进入遥测。
-- Platform 只通过部署管理的 secret 引用加载 PostgreSQL、Redis、OSS、GitHub、APNs 和 FCM 凭证，并在必需 secret 缺失时使所属 capability 失败。
+- Platform 只通过部署管理的 secret 引用加载 PostgreSQL、Redis、OSS 和 GitHub 凭证，并在必需 secret 缺失时使所属 capability 失败。
 - 首个协议目录仅暴露已接受的查看、在现有 Workspace 中或作为 Ungrouped Session 创建 Session、提示词、附件、取消、交互、审批和自行撤销操作。
 - Mobile 审批暴露 Desktop Approval Service 提供的每个决策，包括持久授权，而不增加移动端专用策略。
-- 通知点击在操作前同步，移动导航使用选中 Desktop 与单 Session 流，且只有已打开 transcript 接收实时详情。
-- 进入后台会暂停 WSS；收到无内容 APNs 或 FCM 通知后，前台激活会重连并同步，且不执行 silent background task。
+- 配对链接不携带交互权威，移动导航使用选中 Desktop 与单 Session 流，且只有已打开 transcript 接收实时详情。
+- 进入后台会暂停 WSS；打开应用或将其切回前台会重连并同步，且不执行 silent background task。
 - 共享 Markdown、代码、图片、工具、diff、审批和 Ask User 渲染器保持可用；终端内容有界且只读，未知工具使用可见通用卡片。
 - Mobile 支持查看和继续 Ungrouped Session；新建时省略 Workspace 会与 Desktop 一致创建 Ungrouped Session。
 - 结果未知的已发送修改只保留 operation receipt；重连会先解析其 operation id，再允许用户决定重试，不存在自动重放或离线 outbox。
@@ -358,7 +358,7 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 ## 风险
 
 - 当前 Client 与 Host 协议假定两者锁步发布。独立发布的移动应用需要在首次持久分发前建立明确的兼容策略。
-- 开放 GitHub 注册会把 Platform 计算、连接、推送和 blob 资源暴露给每个已认证 GitHub 用户；有界协议限制不能替代账号级滥用控制。
+- 开放 GitHub 注册会把 Platform 计算、连接和 blob 资源暴露给每个已认证 GitHub 用户；有界协议限制不能替代账号级滥用控制。
 - 首版没有运营侧停用或账号删除控制，因此恶意或废弃账号只能由自动配额、容量 shedding、Account Session 失效、GitHub 提供方对后续登录的动作以及 Personal Pairing 撤销来约束。
 - 丢弃 GitHub token 会保持 Platform 凭证最小化，但也意味着外部 OAuth 撤销不会在现有 Platform session 有界失效前终止它。
 - 首版无法远程退出一台丢失且已登录的安装；其 Account Session 会一直有效到 refresh token 生命周期结束，但仍可从一台可达的已配对 Desktop 单独撤销其 Personal Pairing。
@@ -371,9 +371,9 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 - 支持两个相邻 Companion major 会为每次破坏性协议变更产生持续的兼容与移除成本。
 - 多实例路由使首个试点即使用户量很小，也要增加共享连接目录和跨实例转发路径。
 - 滚动部署可断开实时 socket；重连路径必须在不复制修改或把传输连续性当作 Session 权威的情况下恢复。
-- Capacitor 中的硬件支持密钥、加密存储、推送和本地 Web 资源适配器，需要平台专用证明才能让容器选择不可逆。
+- Capacitor 中的硬件支持密钥、加密存储和本地 Web 资源适配器，需要平台专用证明才能让容器选择不可逆。
 - 密文 blob 删除依赖失效与领取处理；必须对废弃上传和丢失确认设置确定性清理。
-- 即使应用内容保持加密，推送提供方仍可观察投递 token、时序和通用事件类别。
+- 没有后台投递时，用户必须打开 Mobile Companion 或将其切回前台，才能获知 Desktop 当前状态。
 - 超出缓存与配对密钥记录兼容范围的 Mobile 回滚可能不可用；重新配对不是可接受的常规升级路径。
 - 试点将基础设施备份与容灾交给阿里云，因此可用性和恢复点保证取决于采购的服务配置，而不是应用自有控制器。
 - 要求 Desktop 窗口保持打开会让远程可用性有意保持脆弱；以后恢复后台可用性需要一项新的生命周期决策。

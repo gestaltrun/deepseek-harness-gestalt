@@ -69,6 +69,37 @@ describe('Desktop release workflow', () => {
     expect(workflow).not.toContain('dist/**/*')
   })
 
+  it('projects the deployment Platform identity into every packaged artifact', () => {
+    expect(workflow.match(/Project operated Platform identity/g)).toHaveLength(2)
+    expect(workflow.match(/write-operated-platform-config\.mjs/g)).toHaveLength(2)
+    expect(workflow.match(/DSH_DESKTOP_OPERATED_PLATFORM_CONFIG/g)).toHaveLength(6)
+    expect(workflow.match(/vars\.PLATFORM_ORIGIN/g)).toHaveLength(2)
+    expect(workflow.match(/vars\.PLATFORM_GITHUB_CALLBACK/g)).toHaveLength(2)
+    expect(workflow.match(/vars\.PLATFORM_GITHUB_CLIENT_ID/g)).toHaveLength(2)
+    for (const name of [
+      'DESKTOP_REMOTE_RELAY_ATTACH_TIMEOUT_MS',
+      'DESKTOP_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS',
+      'DESKTOP_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS',
+      'DESKTOP_REMOTE_RELAY_RECONNECT_DELAY_MS',
+      'DESKTOP_REMOTE_RELAY_INBOUND_MAX_BYTES',
+      'DESKTOP_REMOTE_RELAY_INBOUND_MAX_MESSAGES',
+    ]) {
+      expect(workflow.match(new RegExp(`vars\\.${name}`, 'g'))).toHaveLength(2)
+    }
+    expect(workflow).not.toContain('PLATFORM_GITHUB_CLIENT_SECRET')
+    expect(record(record(desktopPackage).build).files).toContain('out/operated-platform.json')
+
+    for (const name of ['pack-mac', 'pack-win']) {
+      expect(record(job(name).env)).not.toHaveProperty('DSH_DESKTOP_OPERATED_PLATFORM_CONFIG')
+      for (const stepName of ['Project operated Platform identity', 'Build']) {
+        const releaseStep = steps(name).find(step => step.name === stepName)
+        expect(record(releaseStep?.env).DSH_DESKTOP_OPERATED_PLATFORM_CONFIG).toBe(
+          '${{ runner.temp }}/operated-platform.json',
+        )
+      }
+    }
+  })
+
   it('keeps the prepared workspace dependencies intact while packaging', () => {
     expect(record(record(desktopPackage).build).npmRebuild).toBe(false)
     expect(workflow).not.toContain('dsh-desktop exec electron-builder')
@@ -113,6 +144,7 @@ describe('Desktop release workflow', () => {
     expect(packagedSmoke).toContain("child.stdout?.on('data'")
     expect(packagedSmoke).toContain("child.stderr?.on('data'")
     expect(packagedSmoke).toContain('ELECTRON_ENABLE_LOGGING')
+    expect(packagedSmoke).toContain("name.startsWith('DSH_REMOTE_RELAY_')")
     expect(packagedSmoke).toContain('exited ${String(exitCode)} before ok')
     expect(workflow.match(/node_modules\/\.bin\/vitest/g)).toHaveLength(2)
     const macSmoke = workflow.indexOf('app_bin=$(find apps/desktop/release')

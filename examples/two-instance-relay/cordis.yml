@@ -1,7 +1,8 @@
-- id: two-instance-relay-keyless-scenario
+- id: two-instance-relay-snow-scenario
   name: './start.ts'
   config:
     attachTimeoutMs: 1000
+    maxPendingChallenges: 16
     capacityRetryAfterMs: 100
     deliveryAckTimeoutMs: 500
     directoryTtlMs: 2000

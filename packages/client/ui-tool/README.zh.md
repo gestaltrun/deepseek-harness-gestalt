@@ -4,6 +4,8 @@
 
 Client 工具展示插件。`ui-conversation` 通过 `conversation.chat.node` 的匹配 key 分发每个已排序的 `tool-call` Conversation Node；本包渲染其中的 root 及其 Code Dispatch 子调用，并把每个原子调用通过 keyed slot `tool.call.toolview` 分发。没有注册的工具名称使用通用卡片。
 
+`./presentation` 入口为 Desktop slot tree 之外的 composition 导出 `ToolPresentation`。它的小型 interface 只接收一个权威 `ToolCallBlock`、Workspace/home 展示根、可选的打开／检查回调以及共享翻译器。Desktop keyed-slot registration 与直接 composition 通过同一份内置 roster 分发普通 Tool 名称，并共用 Bash、read、write/edit、grep/glob、Web、todo 与 question row 实现；只有未被认领的 wire Tool 名称进入 `GenericToolCard`。`DirectToolCallTree` 直接接收权威 root，因此调用方不必伪造 Chat Node 或 Host description。
+
 业务 UI 包只注册 wire 工具名称和原子视图，不配对会话事件、不重建 transcript（文本记录），也不拥有 root/subcall 拓扑。运行时仍对 call/result 配对、生命周期和递归 `subCalls` 投影拥有最终决定权；conversation view 仍对 ChatFlow 位置拥有最终决定权。
 
 ## 渲染约定
@@ -28,7 +30,7 @@ ctx.slots.inject('tool.call.toolview', () =>
   }, BusinessToolRow))
 ```
 
-owner 载荷为 `ToolCallOwnerProps`：`callId`、`toolName`、冻结的 `block`、可选 `cwd` 与 `home`，以及普通的 `openFile`、`inspect` 回调。路径摘要先相对会话 cwd 缩短，再把剩余的 POSIX 宿主家目录写成 `~`；`filePath` 与 Host 打开仍使用作者给出的文件系统路径。注册项会收到常规的会话 slot 运行时共享数据，但不会收到 React node、运行时服务或 root/subcall 知识。
+owner 载荷为 `ToolCallOwnerProps`：`callId`、`toolName`、冻结的 `block`、可选 `cwd` 与 `home`，以及可选的普通 `openFile`、`inspect` 回调。没有 Host 文件打开器的组合会保持路径只读。路径摘要先相对会话 cwd 缩短，再把剩余的 POSIX 宿主家目录写成 `~`；`filePath` 与 Host 打开仍使用作者给出的文件系统路径。注册项会收到常规的会话 slot 运行时共享数据，但不会收到 React node、运行时服务或 root/subcall 知识。
 
 本包当前拥有 generic fallback，以及 shell/pwsh、read、write/edit、grep/glob、web、todo、question 和 Code Dispatch 的内置展示。`ui-skill` 展示了业务包自行拥有的 `skill` 注册项。
 

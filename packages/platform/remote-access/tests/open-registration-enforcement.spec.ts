@@ -6,15 +6,18 @@ import {
   ACCOUNT_DAILY_QUOTA_WINDOW_MS,
   MemoryPersonalPairingAuthorityStore,
   MemoryPlatformCapacityGate,
+  MAX_ATTACHMENT_RESERVATION_LIFETIME_MS,
   OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
   OPEN_REGISTRATION_QUOTAS,
   PAIRING_CHALLENGE_QUOTA_WINDOW_MS,
   PAIRING_REPLAY_RETENTION_MS,
   PersonalPairingProvider,
+  parseAttachmentBlobReservationId,
   parsePairingCompletionId,
   parsePairingRendezvousId,
   retryAfterSecondsUntil,
   type PairingHandshakeProvider,
+  type AttachmentBlobReservationId,
 } from '../src/index.ts'
 
 const NOW = Date.parse('2026-08-19T10:00:00.000Z')
@@ -70,7 +73,6 @@ describe('open-registration enforcement', () => {
       mobile,
       completionId: parsePairingCompletionId('keep'),
       oneTimeLink: first.oneTimeLink,
-      device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: Uint8Array.of(9),
     })
     const pairing = await provider.confirmPairing({ desktop, pendingPairingId: pending.pendingPairingId })
@@ -119,7 +121,6 @@ describe('open-registration enforcement', () => {
         mobile: authentication(`mobile-${String(index)}`, 'account-one'),
         completionId: parsePairingCompletionId(`pair-${String(index)}`),
         oneTimeLink: challenge.oneTimeLink,
-        device: { name: `Phone ${String(index)}`, platform: 'ios' },
         mobileHandshake: Uint8Array.of(9),
       })
       await provider.confirmPairing({ desktop, pendingPairingId: pending.pendingPairingId })
@@ -134,7 +135,6 @@ describe('open-registration enforcement', () => {
       mobile: authentication('mobile-over', 'account-one'),
       completionId: parsePairingCompletionId('pair-over'),
       oneTimeLink: extra.oneTimeLink,
-      device: { name: 'Over', platform: 'android' },
       mobileHandshake: Uint8Array.of(9),
     })
     await expect(provider.confirmPairing({ desktop, pendingPairingId: pending.pendingPairingId }))
@@ -144,12 +144,12 @@ describe('open-registration enforcement', () => {
       })
   }, 30_000)
 
-  it('enforces concurrent, per-blob, and daily blob ceilings and the daily push ceiling', async () => {
+  it('enforces concurrent, per-blob, and daily blob ceilings', async () => {
     const now = { value: NOW }
     const provider = uniqueProvider(now)
     const owner = authentication('desktop-installation', 'account-one')
     await provider.setMobileAccess({ desktop: owner, enabled: true })
-    const held: string[] = []
+    const held: AttachmentBlobReservationId[] = []
     for (let index = 0; index < OPEN_REGISTRATION_QUOTAS.concurrentBlobs; index += 1) {
       held.push((await provider.admitAttachmentBlob({ owner, bytes: 1 })).reservationId)
     }
@@ -157,12 +157,18 @@ describe('open-registration enforcement', () => {
       code: 'QUOTA',
       retryAfter: OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
     })
-    await provider.releaseAttachmentBlob({ owner, reservationId: held[0] as string })
+    const firstHeld = held[0]
+    if (firstHeld === undefined) throw new Error('attachment reservation was not retained')
+    await provider.releaseAttachmentBlob({ owner, reservationId: firstHeld })
     const exactLimit = await provider.admitAttachmentBlob({
       owner,
       bytes: OPEN_REGISTRATION_QUOTAS.blobBytes,
     })
     expect(exactLimit.reservationId.length).toBeGreaterThan(0)
+    const cleanup = provider.attachmentReservationCleanup()
+    await cleanup.release(exactLimit.reservationId)
+    await cleanup.release(exactLimit.reservationId)
+    expect(() => parseAttachmentBlobReservationId('')).toThrow(TypeError)
     await expect(provider.admitAttachmentBlob({
       owner,
       bytes: OPEN_REGISTRATION_QUOTAS.blobBytes + 1,
@@ -203,14 +209,58 @@ describe('open-registration enforcement', () => {
     const afterDailyWindow = await daily.admitAttachmentBlob({ owner, bytes: 1 })
     expect(afterDailyWindow.reservationId.length).toBeGreaterThan(0)
     await expect(daily.admitAttachmentBlob({ owner, bytes: -1 })).rejects.toBeInstanceOf(TypeError)
-    await expect(daily.releaseAttachmentBlob({ owner, reservationId: 'missing' })).rejects.toBeInstanceOf(TypeError)
+    await expect(daily.releaseAttachmentBlob({
+      owner, reservationId: parseAttachmentBlobReservationId('missing'),
+    })).rejects.toBeInstanceOf(TypeError)
 
-    for (let index = 0; index < OPEN_REGISTRATION_QUOTAS.pushHintsPerAccountPerDay; index += 1) {
-      await provider.emitPushHint(owner)
-    }
-    await expect(provider.emitPushHint(owner)).rejects.toMatchObject({ code: 'QUOTA' })
-    now.value += ACCOUNT_DAILY_QUOTA_WINDOW_MS + 1
-    await expect(provider.emitPushHint(owner)).resolves.toBeUndefined()
+  })
+
+  it('expires durable blob reservations before admitting replacement capacity', async () => {
+    const now = { value: NOW }
+    const provider = uniqueProvider(now, undefined, undefined, 'lease-', 100)
+    const owner = authentication('desktop-lease', 'account-lease')
+    const reservations = await Promise.all(Array.from(
+      { length: OPEN_REGISTRATION_QUOTAS.concurrentBlobs },
+      async () => await provider.admitAttachmentBlob({ owner, bytes: 1 }),
+    ))
+    expect(reservations.every(reservation => reservation.expiresAt === NOW + 100)).toBe(true)
+    await expect(provider.admitAttachmentBlob({ owner, bytes: 1 })).rejects.toMatchObject({ code: 'QUOTA' })
+
+    now.value += 100
+    await expect(provider.admitAttachmentBlob({ owner, bytes: 1 })).resolves.toMatchObject({ expiresAt: NOW + 200 })
+    const first = reservations[0]
+    if (first === undefined) throw new Error('blob lease fixture requires one reservation')
+    await expect(provider.attachmentReservationCleanup().release(first.reservationId)).resolves.toBeUndefined()
+    expect(() => uniqueProvider(
+      now,
+      undefined,
+      undefined,
+      'invalid-lease-',
+      MAX_ATTACHMENT_RESERVATION_LIFETIME_MS + 1,
+    )).toThrow('reservation lifetime exceeds the protocol safety ceiling')
+  })
+
+  it('migrates a legacy durable blob reservation to the bounded lease', async () => {
+    const now = { value: NOW }
+    const authority = new MemoryPersonalPairingAuthorityStore()
+    const reservationId = parseAttachmentBlobReservationId('legacy-lease')
+    await authority.runPairingTransaction((state) => {
+      state.blobs.set(reservationId, { accountId: 'account-legacy-lease', bytes: 1 })
+      return Promise.resolve()
+    })
+    const provider = uniqueProvider(now, undefined, authority, 'legacy-lease-', 100)
+    const owner = authentication('desktop-legacy-lease', 'account-legacy-lease')
+
+    await provider.setMobileAccess({ desktop: owner, enabled: true })
+    await expect(authority.runPairingTransaction(state => Promise.resolve(
+      state.blobs.get(reservationId)?.expiresAt,
+    ))).resolves.toBe(NOW + 100)
+
+    now.value += 100
+    await provider.setMobileAccess({ desktop: owner, enabled: false })
+    await expect(authority.runPairingTransaction(state => Promise.resolve(
+      state.blobs.has(reservationId),
+    ))).resolves.toBe(false)
   })
 
   it('sheds new pairing and blob acquisition at capacity while an established pairing remains listed', async () => {
@@ -228,7 +278,6 @@ describe('open-registration enforcement', () => {
       mobile,
       completionId: parsePairingCompletionId('keep-capacity'),
       oneTimeLink: challenge.oneTimeLink,
-      device: { name: 'Alice phone', platform: 'ios' },
       mobileHandshake: Uint8Array.of(9),
     })
     const pairing = await provider.confirmPairing({ desktop, pendingPairingId: pending.pendingPairingId })
@@ -240,11 +289,10 @@ describe('open-registration enforcement', () => {
     })).rejects.toMatchObject({ code: 'PLATFORM_CAPACITY', retryAfter: 5 })
     await expect(provider.admitAttachmentBlob({ owner: desktop, bytes: 1 }))
       .rejects.toMatchObject({ code: 'PLATFORM_CAPACITY', retryAfter: 5 })
-    await expect(provider.emitPushHint(desktop)).resolves.toBeUndefined()
     expect(await provider.listPersonalPairings(desktop)).toMatchObject([{ id: pairing.id }])
   })
 
-  it('rejects the eleventh challenge, sixth blob, and 501st push through a second shared-authority provider', async () => {
+  it('rejects the eleventh challenge and sixth blob through a second shared-authority provider', async () => {
     const now = { value: NOW }
     const authority = new MemoryPersonalPairingAuthorityStore()
     const first = uniqueProvider(now, undefined, authority, 'a-')
@@ -270,7 +318,7 @@ describe('open-registration enforcement', () => {
       retryAfter: Math.ceil(PAIRING_CHALLENGE_QUOTA_WINDOW_MS / 1_000),
     })
 
-    const held: string[] = []
+    const held: AttachmentBlobReservationId[] = []
     for (let index = 0; index < OPEN_REGISTRATION_QUOTAS.concurrentBlobs; index += 1) {
       held.push((await first.admitAttachmentBlob({ owner: desktopA, bytes: 1 })).reservationId)
     }
@@ -278,12 +326,10 @@ describe('open-registration enforcement', () => {
       code: 'QUOTA',
       retryAfter: OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
     })
-    await first.releaseAttachmentBlob({ owner: desktopA, reservationId: held[0] as string })
+    const firstReservation = held[0]
+    if (firstReservation === undefined) throw new Error('attachment reservation was not retained')
+    await first.releaseAttachmentBlob({ owner: desktopA, reservationId: firstReservation })
 
-    for (let index = 0; index < OPEN_REGISTRATION_QUOTAS.pushHintsPerAccountPerDay; index += 1) {
-      await first.emitPushHint(desktopA)
-    }
-    await expect(second.emitPushHint(desktopB)).rejects.toMatchObject({ code: 'QUOTA' })
   })
 
   it('rejects a Pairing Challenge when the client IP is missing', async () => {
@@ -308,6 +354,7 @@ function uniqueProvider(
   capacity?: MemoryPlatformCapacityGate,
   authority?: MemoryPersonalPairingAuthorityStore,
   idPrefix = '',
+  attachmentReservationLifetimeMs?: number,
 ) {
   let id = 0
   return new PersonalPairingProvider(new Context(), {
@@ -321,20 +368,24 @@ function uniqueProvider(
             githubLogin: accountId,
             avatarUrl: 'https://avatars.example/account',
           },
-          installation: {
-            id: parseInstallationId(installationId),
-            kind: installationId.includes('mobile') ? 'mobile' as const : 'desktop' as const,
-          },
+          installation: installationId.includes('mobile')
+            ? {
+              id: parseInstallationId(installationId),
+              kind: 'mobile' as const,
+              presentation: { name: `${installationId} installation`, platform: 'ios' as const },
+            }
+            : { id: parseInstallationId(installationId), kind: 'desktop' as const, presentation: { name: 'Test Desktop', platform: 'linux' as const } },
         }
       }),
     },
     handshake: handshakeProvider(),
+    authority: authority ?? new MemoryPersonalPairingAuthorityStore(),
     clock: { now: () => now.value },
+    ...(attachmentReservationLifetimeMs === undefined ? {} : { attachmentReservationLifetimeMs }),
     randomBytes: size => Uint8Array.from({ length: size }, (_, index) => index + 1),
     randomId: kind => `${kind}-${idPrefix}${String(++id)}`,
     pairingLinkOrigin: 'https://platform.example.com/pair',
     ...(capacity === undefined ? {} : { capacity }),
-    ...(authority === undefined ? {} : { authority }),
   })
 }
 

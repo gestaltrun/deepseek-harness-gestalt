@@ -1,16 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   decodeRelayMessage,
+  deriveRelayCredentialDigest,
+  deriveRelayCredentialPublicKey,
   encodeRelayMessage,
+  generateRelayCredential,
   negotiateRelayTransportVersion,
   parseRelayAttachmentId,
+  parseRelayAttachChallengeId,
   parseRelayCredential,
+  parseRelayCredentialPublicKey,
+  parseRelayPairingSelector,
   parseRelayRouteId,
   REMOTE_PROTOCOL_LIMITS,
   RemoteProtocolError,
+  signRelayAttachmentChallenge,
+  verifyRelayAttachmentProof,
 } from '../src/index.ts'
 
 describe('Relay Transport Protocol codec', () => {
+  it('derives stable authority from an endpoint-owned signing credential', async () => {
+    const credential = await generateRelayCredential()
+    await expect(deriveRelayCredentialDigest(credential)).resolves.toHaveLength(32)
+    await expect(deriveRelayCredentialDigest(credential)).resolves.toEqual(await deriveRelayCredentialDigest(credential))
+  })
+
   it('round-trips only routing metadata and opaque ciphertext', () => {
     const applicationPlaintext = 'submit the private prompt'
     const encoded = encodeRelayMessage({
@@ -33,15 +47,31 @@ describe('Relay Transport Protocol codec', () => {
     })
   })
 
-  it('admits only attachment, forwarding, heartbeat, revocation, and transport errors', () => {
+  it('admits only proof-based attachment, forwarding, heartbeat, revocation, and transport errors', async () => {
     const routeId = parseRelayRouteId('route-keyless')
     const attachmentId = parseRelayAttachmentId('mobile-keyless')
-    const credential = parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')
+    const credential = await generateRelayCredential()
+    const credentialPublicKey = await deriveRelayCredentialPublicKey(credential)
+    const request = { type: 'attach-challenge' as const, transportVersion: 1 as const, routeId, attachmentId, endpoint: 'mobile' as const, credentialPublicKey }
+    const challenge = {
+      ...request, type: 'attach-challenge-response' as const,
+      challengeId: parseRelayAttachChallengeId('challenge-one'), nonce: new Uint8Array(32).fill(7),
+      expiresAt: 1_787_027_200_000,
+    }
+    const proof = await signRelayAttachmentChallenge(credential, challenge)
     const messages = [
-      { type: 'attach', transportVersion: 1, routeId, attachmentId, endpoint: 'mobile', credential },
-      { type: 'attach', transportVersion: 1, routeId, attachmentId, endpoint: 'desktop', credential },
+      request,
+      challenge,
+      proof,
       { type: 'heartbeat', transportVersion: 1, attachmentId, sentAt: 1_787_027_200_000 },
-      { type: 'ready', transportVersion: 1, attachmentId },
+      {
+        type: 'ready', transportVersion: 1, routeId, attachmentId,
+        peers: [{
+          attachmentId: parseRelayAttachmentId('desktop-peer'),
+          pairingSelector: parseRelayPairingSelector('pairing-one'),
+          generation: 7,
+        }],
+      },
       { type: 'revoke', transportVersion: 1, routeId, attachmentId, reason: 'device' },
       { type: 'revoke', transportVersion: 1, routeId, attachmentId, reason: 'all' },
       { type: 'revoke', transportVersion: 1, routeId, attachmentId, reason: 'disabled' },
@@ -64,7 +94,11 @@ describe('Relay Transport Protocol codec', () => {
       routeId,
       attachmentId,
       endpoint: 'mobile',
-      credential,
+      credentialPublicKey,
+      challengeId: challenge.challengeId,
+      nonce: Buffer.from(challenge.nonce).toString('base64url'),
+      expiresAt: challenge.expiresAt,
+      signature: Buffer.from(proof.signature).toString('base64url'),
       prompt: 'must never reach Relay',
     }))
     expect(() => decodeRelayMessage(forbidden)).toThrow(
@@ -79,6 +113,25 @@ describe('Relay Transport Protocol codec', () => {
     expect(() => negotiateRelayTransportVersion([1], [2])).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'RELAY_TRANSPORT_INCOMPATIBLE' }),
     )
+  })
+
+  it('binds attachment proofs to the exact challenge tuple', async () => {
+    const credential = await generateRelayCredential()
+    const challenge = {
+      type: 'attach-challenge-response' as const, transportVersion: 1 as const,
+      routeId: parseRelayRouteId('route-proof'), attachmentId: parseRelayAttachmentId('mobile-proof'),
+      endpoint: 'mobile' as const, credentialPublicKey: await deriveRelayCredentialPublicKey(credential),
+      challengeId: parseRelayAttachChallengeId('challenge-proof'), nonce: new Uint8Array(32).fill(3),
+      expiresAt: 1_787_027_200_000,
+    }
+    const proof = await signRelayAttachmentChallenge(credential, challenge)
+    await expect(verifyRelayAttachmentProof(proof)).resolves.toBe(true)
+    await expect(verifyRelayAttachmentProof({ ...proof, routeId: parseRelayRouteId('route-tampered') }))
+      .resolves.toBe(false)
+    await expect(verifyRelayAttachmentProof({ ...proof, attachmentId: parseRelayAttachmentId('mobile-tampered') }))
+      .resolves.toBe(false)
+    await expect(verifyRelayAttachmentProof({ ...proof, expiresAt: proof.expiresAt + 1 }))
+      .resolves.toBe(false)
   })
 
   it('enforces message, parser-depth, encoded-value, and ciphertext limits before dispatch', () => {
@@ -132,6 +185,12 @@ describe('Relay Transport Protocol codec', () => {
   })
 
   it('rejects malformed transport fields with stable errors', () => {
+    expect(() => parseRelayCredentialPublicKey('short')).toThrow('canonical base64url SPKI')
+    const invalidEndpoint = new TextEncoder().encode(JSON.stringify({
+      type: 'attach-challenge', transportVersion: 1, routeId: 'route', attachmentId: 'mobile',
+      endpoint: 'relay', credentialPublicKey: 'A'.repeat(64),
+    }))
+    expect(() => decodeRelayMessage(invalidEndpoint)).toThrow('Relay endpoint must be mobile or desktop')
     const attach = {
       type: 'attach', transportVersion: 1, routeId: 'route', attachmentId: 'mobile', endpoint: 'mobile',
       credential: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
@@ -151,6 +210,18 @@ describe('Relay Transport Protocol codec', () => {
       { type: 'heartbeat', transportVersion: 1, attachmentId: 'mobile', sentAt: 1.5 },
       { type: 'heartbeat', transportVersion: 1, attachmentId: 'mobile', sentAt: -1 },
       { type: 'ready', transportVersion: 1 },
+      { type: 'ready', transportVersion: 1, routeId: 'route', attachmentId: 'mobile', peers: {} },
+      {
+        type: 'ready', transportVersion: 1, routeId: 'route', attachmentId: 'mobile',
+        peers: [{ attachmentId: 'desktop', pairingSelector: 'pairing', generation: 0 }],
+      },
+      {
+        type: 'ready', transportVersion: 1, routeId: 'route', attachmentId: 'mobile',
+        peers: [
+          { attachmentId: 'desktop-one', pairingSelector: 'pairing', generation: 1 },
+          { attachmentId: 'desktop-two', pairingSelector: 'pairing', generation: 2 },
+        ],
+      },
       { type: 'revoke', transportVersion: 1, routeId: 'route', attachmentId: 'mobile', reason: 'unknown' },
       { type: 'error', transportVersion: 1, code: 'UNKNOWN' },
       { type: 'error', transportVersion: 1, code: 'PLATFORM_CAPACITY', retryAfterMs: -1 },
@@ -233,7 +304,7 @@ describe('Relay Transport Protocol codec', () => {
       )
     }
     expect(parseRelayAttachmentId('attachment_valid-1')).toBe('attachment_valid-1')
-    for (const value of [undefined, '', 'route-only', 'A'.repeat(42), 'A'.repeat(44)]) {
+    for (const value of [undefined, '', 'route-only', 'A'.repeat(42), 'A'.repeat(513), 'not+canonical']) {
       expect(() => parseRelayCredential(value)).toThrow(
         expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
       )

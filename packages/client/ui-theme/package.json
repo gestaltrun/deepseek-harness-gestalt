@@ -26,6 +26,11 @@
       "types": "./lib/types/client/index.d.ts",
       "default": "./lib/client.js"
     },
+    "./styles/base.css": "./lib/styles/base.css",
+    "./styles/design-platform.css": "./lib/styles/design-platform.css",
+    "./styles/scrollbar.css": "./lib/styles/scrollbar.css",
+    "./styles/gradient-shadow-text.css": "./lib/styles/gradient-shadow-text.css",
+    "./styles/shiki.css": "./lib/styles/shiki.css",
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },

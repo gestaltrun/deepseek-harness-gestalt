@@ -7,13 +7,19 @@ import {
   type PlatformAccountId,
 } from '@deepseek-ai/dsh-platform-account'
 import {
+  parseRelayCredentialFingerprint,
   RemoteAccessError,
   type DesktopRemoteAccessAuthority,
   type MobilePairingAuthority,
+  parsePendingPairingId,
+  parsePersonalPairingId,
   type PendingPairingId,
   type PersonalPairingAuthorityStore,
   type PersonalPairingId,
+  type PersonalPairingActivity,
   type PersonalPairingTransactionState,
+  type RelayConnectionToken,
+  type RelayCredentialFingerprint,
 } from '@deepseek-ai/dsh-remote-access'
 import { parseRelayRouteId, type RelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
 import {
@@ -39,6 +45,9 @@ CREATE TABLE IF NOT EXISTS remote_access_mobile_pairings (
   account_id text NOT NULL,
   desktop_installation_id text NOT NULL,
   mobile_installation_id text NOT NULL,
+  credential_fingerprint text,
+  last_access_at bigint,
+  presence_leases jsonb NOT NULL DEFAULT '{}'::jsonb,
   sealed_relay_authority bytea,
   PRIMARY KEY (database_identity, pending_pairing_id)
 );
@@ -48,6 +57,10 @@ CREATE TABLE IF NOT EXISTS remote_access_pairing_transactions (
   database_identity text PRIMARY KEY,
   state jsonb NOT NULL
 );
+ALTER TABLE remote_access_mobile_pairings ADD COLUMN IF NOT EXISTS credential_fingerprint text;
+ALTER TABLE remote_access_mobile_pairings ADD COLUMN IF NOT EXISTS last_access_at bigint;
+ALTER TABLE remote_access_mobile_pairings ADD COLUMN IF NOT EXISTS presence_leases jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE remote_access_mobile_pairings DROP COLUMN IF EXISTS online;
 `
 
 interface DesktopRow {
@@ -61,6 +74,9 @@ interface MobileRow {
   account_id: string
   desktop_installation_id: string
   mobile_installation_id: string
+  credential_fingerprint: string | null
+  last_access_at: string | null
+  presence_leases: unknown
   sealed_relay_authority: Buffer | Uint8Array | null
 }
 
@@ -94,6 +110,68 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
   /** Create pairing-authority tables if they are absent. */
   async migrate(): Promise<void> {
     await this.pool.query(SCHEMA)
+  }
+
+  /**
+   * Verify that one authenticated Installation is an endpoint of a confirmed Personal Pairing.
+   * @param accountId - authenticated Platform Account.
+   * @param installationId - authenticated Desktop or Mobile Installation.
+   * @param pairingId - caller-selected opaque pairing identity.
+   * @returns whether the durable confirmed pairing contains that Installation.
+   */
+  async ownsConfirmedPairing(
+    accountId: PlatformAccountId,
+    installationId: InstallationId,
+    pairingId: PersonalPairingId,
+  ): Promise<boolean> {
+    const result = await this.pool.query(
+      `SELECT pairing_id
+         FROM remote_access_mobile_pairings
+        WHERE database_identity = $1 AND pairing_id = $2 AND account_id = $3
+          AND (desktop_installation_id = $4 OR mobile_installation_id = $4)
+        LIMIT 1`,
+      [this.databaseIdentity, pairingId, accountId, installationId],
+    )
+    return result.rows.length === 1
+  }
+
+  /**
+   * @param pairingIds - bounded attachment owners to check.
+   * @returns candidate ids that still own confirmed pairing authority.
+   */
+  async filterConfirmedPairingIds(pairingIds: readonly PersonalPairingId[]): Promise<readonly PersonalPairingId[]> {
+    if (pairingIds.length === 0) return []
+    const result = await this.pool.query(
+      `SELECT pairing_id FROM remote_access_mobile_pairings
+        WHERE database_identity = $1 AND pairing_id = ANY($2::text[])
+        ORDER BY pairing_id`,
+      [this.databaseIdentity, pairingIds],
+    )
+    return result.rows.map((row) => {
+      if (typeof row.pairing_id !== 'string') throw new TypeError('confirmed pairing row is invalid')
+      return parsePersonalPairingId(row.pairing_id)
+    })
+  }
+
+  /**
+   * @param pairingIds - bounded attachment-owner candidates from one sweep snapshot.
+   * @returns only candidates that lack confirmed pairing authority at query time.
+   */
+  async filterInactivePairingIds(pairingIds: readonly PersonalPairingId[]): Promise<readonly PersonalPairingId[]> {
+    if (pairingIds.length === 0) return []
+    const result = await this.pool.query(
+      `SELECT candidate.pairing_id
+         FROM unnest($2::text[]) AS candidate(pairing_id)
+         LEFT JOIN remote_access_mobile_pairings AS pairing
+           ON pairing.database_identity = $1 AND pairing.pairing_id = candidate.pairing_id
+        WHERE pairing.pairing_id IS NULL
+        ORDER BY candidate.pairing_id`,
+      [this.databaseIdentity, pairingIds],
+    )
+    return result.rows.map((row) => {
+      if (typeof row.pairing_id !== 'string') throw new TypeError('inactive pairing row is invalid')
+      return parsePersonalPairingId(row.pairing_id)
+    })
   }
 
   async runPairingTransaction<T>(
@@ -203,6 +281,14 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
         WHERE database_identity = $1 AND account_id = $2 AND desktop_installation_id = $3`,
       [this.databaseIdentity, accountId, desktopInstallationId],
     )
+    const retained = await this.pool.query(
+      `SELECT pending_pairing_id
+         FROM remote_access_mobile_pairings
+        WHERE database_identity = $1 AND account_id = $2 AND desktop_installation_id = $3
+        LIMIT 1`,
+      [this.databaseIdentity, accountId, desktopInstallationId],
+    )
+    if (retained.rows.length > 0) throw new Error('pairing disable left Mobile authority registered')
     return [...revoking].map(parseRelayRouteId)
   }
 
@@ -244,8 +330,9 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
       await client.query(
         `INSERT INTO remote_access_mobile_pairings (
            database_identity, pending_pairing_id, pairing_id, account_id,
-           desktop_installation_id, mobile_installation_id, sealed_relay_authority
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+           desktop_installation_id, mobile_installation_id, credential_fingerprint,
+           last_access_at, sealed_relay_authority
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          ON CONFLICT (database_identity, pending_pairing_id) DO NOTHING`,
         [
           this.databaseIdentity,
@@ -254,6 +341,8 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
           authority.accountId,
           authority.desktopInstallationId,
           authority.mobileInstallationId,
+          authority.credentialFingerprint ?? null,
+          authority.lastAccessAt ?? null,
           authority.sealedRelayAuthority === undefined
             ? null
             : Buffer.from(authority.sealedRelayAuthority),
@@ -288,7 +377,8 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
   ): Promise<MobilePairingAuthority | undefined> {
     const result = await client.query(
       `SELECT pending_pairing_id, pairing_id, account_id, desktop_installation_id,
-              mobile_installation_id, sealed_relay_authority
+              mobile_installation_id, credential_fingerprint, last_access_at,
+              presence_leases, sealed_relay_authority
          FROM remote_access_mobile_pairings
         WHERE database_identity = $1 AND pending_pairing_id = $2${exclusive ? '\n        FOR UPDATE' : ''}`,
       [this.databaseIdentity, pendingPairingId],
@@ -302,6 +392,80 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
       `DELETE FROM remote_access_mobile_pairings
         WHERE database_identity = $1 AND pairing_id = $2`,
       [this.databaseIdentity, pairingId],
+    )
+    const retained = await this.pool.query(
+      `SELECT pending_pairing_id
+         FROM remote_access_mobile_pairings
+        WHERE database_identity = $1 AND pairing_id = $2
+        LIMIT 1`,
+      [this.databaseIdentity, pairingId],
+    )
+    if (retained.rows.length > 0) throw new Error('pairing revocation left Mobile authority registered')
+  }
+
+  async getPersonalPairingActivity(pairingId: PersonalPairingId, observedAt: number): Promise<PersonalPairingActivity | undefined> {
+    const result = await this.pool.query(
+      `UPDATE remote_access_mobile_pairings
+          SET presence_leases = COALESCE((
+            SELECT jsonb_object_agg(entry.key, entry.value)
+              FROM jsonb_each(remote_access_mobile_pairings.presence_leases) AS entry
+             WHERE (entry.value #>> '{}')::bigint > $3
+          ), '{}'::jsonb)
+        WHERE database_identity = $1 AND pairing_id = $2
+        RETURNING last_access_at, presence_leases`,
+      [this.databaseIdentity, pairingId, observedAt],
+    )
+    const row = result.rows[0]
+    if (row === undefined || row.last_access_at === null || row.last_access_at === undefined) return undefined
+    const leases = parsePresenceLeases(row.presence_leases)
+    return { lastAccessAt: Number(row.last_access_at), online: Object.values(leases).some(expiresAt => expiresAt > observedAt) }
+  }
+
+  async recordRelayLease(input: {
+    credentialFingerprint: RelayCredentialFingerprint
+    connectionToken: RelayConnectionToken
+    expiresAt: number
+    accessedAt: number
+  }): Promise<void> {
+    await this.pool.query(
+      `UPDATE remote_access_mobile_pairings
+          SET presence_leases = COALESCE((
+                SELECT jsonb_object_agg(entry.key, entry.value)
+                  FROM jsonb_each(remote_access_mobile_pairings.presence_leases) AS entry
+                 WHERE (entry.value #>> '{}')::bigint > $5
+              ), '{}'::jsonb) || jsonb_build_object(
+                $3::text,
+                GREATEST(
+                  $4::bigint,
+                  COALESCE((remote_access_mobile_pairings.presence_leases ->> $3::text)::bigint, $4::bigint)
+                )
+              ),
+              last_access_at = GREATEST(COALESCE(last_access_at, $5::bigint), $5::bigint)
+        WHERE database_identity = $1 AND credential_fingerprint = $2`,
+      [
+        this.databaseIdentity,
+        input.credentialFingerprint,
+        input.connectionToken,
+        input.expiresAt,
+        input.accessedAt,
+      ],
+    )
+  }
+
+  async releaseRelayLease(input: {
+    credentialFingerprint: RelayCredentialFingerprint
+    connectionToken: RelayConnectionToken
+    observedAt: number
+  }): Promise<void> {
+    await this.pool.query(
+      `UPDATE remote_access_mobile_pairings
+          SET presence_leases = COALESCE((
+            SELECT jsonb_object_agg(entry.key, entry.value)
+              FROM jsonb_each(remote_access_mobile_pairings.presence_leases) AS entry
+             WHERE entry.key <> $3 AND (entry.value #>> '{}')::bigint > $4
+          ), '{}'::jsonb)
+        WHERE database_identity = $1 AND credential_fingerprint = $2`,
+      [this.databaseIdentity, input.credentialFingerprint, input.connectionToken, input.observedAt],
     )
   }
 }
@@ -319,12 +483,28 @@ function mobileFromRow(row: MobileRow): MobilePairingAuthority {
     accountId: parsePlatformAccountId(row.account_id),
     desktopInstallationId: parseInstallationId(row.desktop_installation_id),
     mobileInstallationId: parseInstallationId(row.mobile_installation_id),
-    pendingPairingId: row.pending_pairing_id as PendingPairingId,
-    pairingId: row.pairing_id as PersonalPairingId,
+    pendingPairingId: parsePendingPairingId(row.pending_pairing_id),
+    pairingId: parsePersonalPairingId(row.pairing_id),
+    ...(row.credential_fingerprint === null
+      ? {}
+      : { credentialFingerprint: parseRelayCredentialFingerprint(row.credential_fingerprint) }),
+    ...(row.last_access_at === null ? {} : { lastAccessAt: Number(row.last_access_at) }),
     ...(row.sealed_relay_authority === null
       ? {}
       : { sealedRelayAuthority: Uint8Array.from(row.sealed_relay_authority) }),
   }
+}
+
+function parsePresenceLeases(value: unknown): Record<string, number> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('presence leases must be an object')
+  }
+  const leases: Record<string, number> = {}
+  for (const [token, expiresAt] of Object.entries(value)) {
+    if (!Number.isSafeInteger(expiresAt)) throw new TypeError('presence lease expiry must be a safe integer')
+    leases[token] = expiresAt as number
+  }
+  return leases
 }
 
 function sameMobileAuthority(left: MobilePairingAuthority, right: MobilePairingAuthority): boolean {
@@ -333,6 +513,7 @@ function sameMobileAuthority(left: MobilePairingAuthority, right: MobilePairingA
     && left.mobileInstallationId === right.mobileInstallationId
     && left.pendingPairingId === right.pendingPairingId
     && left.pairingId === right.pairingId
+    && left.credentialFingerprint === right.credentialFingerprint
     && bytesEqual(left.sealedRelayAuthority, right.sealedRelayAuthority)
 }
 
@@ -350,5 +531,5 @@ function decodeRouteIds(value: unknown): string[] {
 }
 
 function accessKey(accountId: string, installationId: InstallationId): string {
-  return `${accountId}\u0000${installationId}`
+  return JSON.stringify([accountId, installationId])
 }

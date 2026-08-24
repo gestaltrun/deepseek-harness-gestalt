@@ -8,6 +8,10 @@ import {
 import type {
   MobileAccessState,
   MobilePairingStatus,
+  EndpointPairingChallengeView,
+  EndpointPairingConfirmation,
+  EndpointPairingDesktopView,
+  EndpointPairingMobileView,
   PairingAccountAuthentication,
   PairingChallengeId,
   PairingChallengeView,
@@ -24,15 +28,12 @@ import type {
 import {
   parseRelayCredential,
   parseRelayRouteId,
-  type CompanionPushToken,
-  type RelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 
 export * from './relay.ts'
 export * from './browser-relay-socket.ts'
 export * from './relay-queue.ts'
 export * from './mobile-relay-lifecycle.ts'
-export * from './development-keyless-companion.ts'
 import {
   PERSONAL_PAIRING_PROTOCOL_MAJOR,
   RemoteAccessError,
@@ -56,6 +57,43 @@ export interface RemoteAccessTransport {
     authentication: PairingAccountAuthentication
     rendezvousId: PairingRendezvousId
   }): Promise<PairingChallengeView>
+  /** @param input - Desktop authorization and invitation routing metadata. @returns allocated opaque route. */
+  createEndpointChallenge(input: {
+    authentication: PairingAccountAuthentication
+    rendezvousId: PairingRendezvousId
+    expiresAt: number
+  }): Promise<EndpointPairingChallengeView>
+  /** Cancel one unused endpoint-owned invitation. */
+  cancelEndpointChallenge(input: {
+    authentication: PairingAccountAuthentication
+    challengeId: PairingChallengeId
+  }): Promise<void>
+  /** @param authentication - current Desktop authorization. @returns endpoint-owned pairing work. */
+  listEndpointPending(authentication: PairingAccountAuthentication): Promise<readonly EndpointPairingDesktopView[]>
+  /** @param input - Desktop authorization, pending identity, and local Snow message 2. */
+  submitEndpointMessage2(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+    message2: Uint8Array
+  }): Promise<void>
+  /** @param input - Desktop authorization and locally authenticated pending identity. */
+  confirmEndpointPairing(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+    desktopCredentialDigest: Uint8Array
+    mobileCredentialDigest: Uint8Array
+  }): Promise<EndpointPairingConfirmation>
+  /** Reject one endpoint-owned pending handshake. */
+  rejectEndpointPairing(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+  }): Promise<void>
+  /** @param input - Desktop authorization and locally sealed Mobile Relay authority. */
+  deliverEndpointRelayAuthority(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+    sealedRelayAuthority: Uint8Array
+  }): Promise<void>
   /** @param input - current Desktop authorization and challenge id. */
   cancelChallenge(input: {
     authentication: PairingAccountAuthentication
@@ -70,6 +108,11 @@ export interface RemoteAccessTransport {
     authentication: PairingAccountAuthentication
     pairingId: PersonalPairingId
   }): Promise<void>
+  /** @param input - current Mobile authorization and its confirmed pairing id. */
+  revokeMobilePersonalPairing(input: {
+    authentication: PairingAccountAuthentication
+    pairingId: PersonalPairingId
+  }): Promise<void>
   /** @param input - current Desktop authorization and pending id. @returns activated pairing. */
   confirmPairing(input: {
     authentication: PairingAccountAuthentication
@@ -80,25 +123,42 @@ export interface RemoteAccessTransport {
     authentication: PairingAccountAuthentication
     pendingPairingId: PendingPairingId
   }): Promise<void>
-  /** @param input - current Mobile authorization, invitation, device, and handshake. @returns pending pairing. */
+  /** @param input - current Mobile authorization, invitation, and handshake. @returns pending pairing. */
   completeChallenge(input: {
     authentication: PairingAccountAuthentication
     completionId: PairingCompletionId
     oneTimeLink: string
-    device: PairingDeviceDescription
     mobileHandshake: Uint8Array
+  }): Promise<PairingCompletionView>
+  /** @param input - Mobile authorization and local Snow message 1. @returns stable pending identity. */
+  submitEndpointMessage1(input: {
+    authentication: PairingAccountAuthentication
+    challengeId: PairingChallengeId
+    completionId: PairingCompletionId
+    message1: Uint8Array
+  }): Promise<{ pendingPairingId: PendingPairingId }>
+  /** @param input - Mobile authorization and completion identity. @returns current endpoint mailbox stage. */
+  getEndpointPairingStatus(input: {
+    authentication: PairingAccountAuthentication
+    completionId: PairingCompletionId
+  }): Promise<EndpointPairingMobileView>
+  /** @param input - Mobile authorization, completion identity, and local Snow message 3. */
+  submitEndpointMessage3(input: {
+    authentication: PairingAccountAuthentication
+    completionId: PairingCompletionId
+    message3: Uint8Array
+  }): Promise<void>
+  /** @param input - fresh Mobile authorization, pending id, and message 3. @returns finished pending pairing. */
+  finishChallenge(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+    mobileFinish: Uint8Array
   }): Promise<PairingCompletionView>
   /** @param input - current Mobile authorization and pending id. @returns Desktop decision state. */
   getMobilePairingStatus(input: {
     authentication: PairingAccountAuthentication
     pendingPairingId: PendingPairingId
   }): Promise<MobilePairingStatus>
-  /** Drop the current device token after Mobile unpair when the route still exists. */
-  unregisterPushToken(input: {
-    authentication: PairingAccountAuthentication
-    routeId: RelayRouteId
-    token: CompanionPushToken
-  }): Promise<void>
 }
 
 /** HTTP transport construction inputs. */
@@ -144,6 +204,75 @@ export class RemoteAccessHttpTransport implements RemoteAccessTransport {
     }))
   }
 
+  async createEndpointChallenge(input: {
+    authentication: PairingAccountAuthentication
+    rendezvousId: PairingRendezvousId
+    expiresAt: number
+  }): Promise<EndpointPairingChallengeView> {
+    return parseEndpointChallenge(await this.call(input.authentication, {
+      operation: 'create-endpoint-challenge',
+      rendezvousId: input.rendezvousId,
+      expiresAt: input.expiresAt,
+    }))
+  }
+
+  async cancelEndpointChallenge(input: {
+    authentication: PairingAccountAuthentication
+    challengeId: PairingChallengeId
+  }): Promise<void> {
+    await this.call(input.authentication, {
+      operation: 'cancel-endpoint-challenge', challengeId: input.challengeId,
+    })
+  }
+
+  async listEndpointPending(authentication: PairingAccountAuthentication): Promise<readonly EndpointPairingDesktopView[]> {
+    return parseArray(await this.call(authentication, { operation: 'list-endpoint-pending' }), parseEndpointDesktop)
+  }
+
+  async submitEndpointMessage2(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+    message2: Uint8Array
+  }): Promise<void> {
+    await this.call(input.authentication, {
+      operation: 'submit-endpoint-message2', pendingPairingId: input.pendingPairingId,
+      message2: encodeBytes(input.message2),
+    })
+  }
+
+  async confirmEndpointPairing(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+    desktopCredentialDigest: Uint8Array
+    mobileCredentialDigest: Uint8Array
+  }): Promise<EndpointPairingConfirmation> {
+    return parseEndpointConfirmation(await this.call(input.authentication, {
+      operation: 'confirm-endpoint-pairing', pendingPairingId: input.pendingPairingId,
+      desktopCredentialDigest: encodeBytes(input.desktopCredentialDigest),
+      mobileCredentialDigest: encodeBytes(input.mobileCredentialDigest),
+    }))
+  }
+
+  async rejectEndpointPairing(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+  }): Promise<void> {
+    await this.call(input.authentication, {
+      operation: 'reject-endpoint-pairing', pendingPairingId: input.pendingPairingId,
+    })
+  }
+
+  async deliverEndpointRelayAuthority(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+    sealedRelayAuthority: Uint8Array
+  }): Promise<void> {
+    await this.call(input.authentication, {
+      operation: 'deliver-endpoint-relay-authority', pendingPairingId: input.pendingPairingId,
+      sealedRelayAuthority: encodeBytes(input.sealedRelayAuthority),
+    })
+  }
+
   async cancelChallenge(input: {
     authentication: PairingAccountAuthentication
     challengeId: PairingChallengeId
@@ -166,6 +295,13 @@ export class RemoteAccessHttpTransport implements RemoteAccessTransport {
     await this.call(input.authentication, { operation: 'revoke-pairing', pairingId: input.pairingId })
   }
 
+  async revokeMobilePersonalPairing(input: {
+    authentication: PairingAccountAuthentication
+    pairingId: PersonalPairingId
+  }): Promise<void> {
+    await this.call(input.authentication, { operation: 'revoke-mobile-pairing', pairingId: input.pairingId })
+  }
+
   async confirmPairing(input: {
     authentication: PairingAccountAuthentication
     pendingPairingId: PendingPairingId
@@ -186,15 +322,58 @@ export class RemoteAccessHttpTransport implements RemoteAccessTransport {
     authentication: PairingAccountAuthentication
     completionId: PairingCompletionId
     oneTimeLink: string
-    device: PairingDeviceDescription
     mobileHandshake: Uint8Array
   }): Promise<PairingCompletionView> {
     return parseCompletion(await this.call(input.authentication, {
       operation: 'complete-challenge',
       completionId: input.completionId,
       oneTimeLink: input.oneTimeLink,
-      device: input.device,
       mobileHandshake: encodeBytes(input.mobileHandshake),
+    }))
+  }
+
+  async submitEndpointMessage1(input: {
+    authentication: PairingAccountAuthentication
+    challengeId: PairingChallengeId
+    completionId: PairingCompletionId
+    message1: Uint8Array
+  }): Promise<{ pendingPairingId: PendingPairingId }> {
+    const value = requiredRecord(await this.call(input.authentication, {
+      operation: 'submit-endpoint-message1', challengeId: input.challengeId,
+      completionId: input.completionId, message1: encodeBytes(input.message1),
+    }), 'Endpoint Pairing message 1 response')
+    return { pendingPairingId: parsePendingPairingId(value.pendingPairingId) }
+  }
+
+  async getEndpointPairingStatus(input: {
+    authentication: PairingAccountAuthentication
+    completionId: PairingCompletionId
+  }): Promise<EndpointPairingMobileView> {
+    return parseEndpointMobile(await this.call(input.authentication, {
+      operation: 'get-endpoint-pairing-status', completionId: input.completionId,
+    }))
+  }
+
+  async submitEndpointMessage3(input: {
+    authentication: PairingAccountAuthentication
+    completionId: PairingCompletionId
+    message3: Uint8Array
+  }): Promise<void> {
+    await this.call(input.authentication, {
+      operation: 'submit-endpoint-message3', completionId: input.completionId,
+      message3: encodeBytes(input.message3),
+    })
+  }
+
+  async finishChallenge(input: {
+    authentication: PairingAccountAuthentication
+    pendingPairingId: PendingPairingId
+    mobileFinish: Uint8Array
+  }): Promise<PairingCompletionView> {
+    return parseCompletion(await this.call(input.authentication, {
+      operation: 'finish-challenge',
+      pendingPairingId: input.pendingPairingId,
+      mobileFinish: encodeBytes(input.mobileFinish),
     }))
   }
 
@@ -206,18 +385,6 @@ export class RemoteAccessHttpTransport implements RemoteAccessTransport {
       operation: 'get-mobile-pairing-status',
       pendingPairingId: input.pendingPairingId,
     }))
-  }
-
-  async unregisterPushToken(input: {
-    authentication: PairingAccountAuthentication
-    routeId: RelayRouteId
-    token: CompanionPushToken
-  }): Promise<void> {
-    await this.call(input.authentication, {
-      operation: 'unregister-push-token',
-      routeId: input.routeId,
-      token: input.token,
-    })
   }
 
   private async call(authentication: PairingAccountAuthentication, body: Record<string, unknown>): Promise<unknown> {
@@ -298,11 +465,68 @@ function parseChallenge(value: unknown): PairingChallengeView {
   return {
     challengeId: parsePairingChallengeId(record.challengeId),
     desktopFingerprint: requiredString(record.desktopFingerprint, 'Pairing Challenge desktopFingerprint'),
+    ...(record.desktopStaticPublicKey === undefined
+      ? {}
+      : { desktopStaticPublicKey: decodeFixedBytes(record.desktopStaticPublicKey, 'Pairing Challenge Desktop public key', 32) }),
     rendezvousId: parsePairingRendezvousId(record.rendezvousId),
     expiresAt,
     protocolMajor: PERSONAL_PAIRING_PROTOCOL_MAJOR,
     oneTimeLink,
     qrPayload,
+  }
+}
+
+function parseEndpointChallenge(value: unknown): EndpointPairingChallengeView {
+  const record = requiredRecord(value, 'Endpoint Pairing challenge response')
+  return {
+    challengeId: parsePairingChallengeId(record.challengeId),
+    expiresAt: requiredPositiveInteger(record.expiresAt, 'Endpoint Pairing challenge expiresAt'),
+    routingLink: requiredString(record.routingLink, 'Endpoint Pairing challenge routingLink'),
+  }
+}
+
+function parseEndpointDesktop(value: unknown): EndpointPairingDesktopView {
+  const record = requiredRecord(value, 'Endpoint Pairing Desktop response')
+  const pendingPairingId = parsePendingPairingId(record.pendingPairingId)
+  const challengeId = parsePairingChallengeId(record.challengeId)
+  const device = parseDevice(record.device)
+  if (record.stage === 'confirmed') return { pendingPairingId, challengeId, stage: 'confirmed', device }
+  const message1 = decodeBytes(record.message1, 'Endpoint Pairing message 1')
+  if (record.stage === 'message1') return { pendingPairingId, challengeId, stage: 'message1', message1, device }
+  if (record.stage === 'message3') return {
+    pendingPairingId, challengeId, stage: 'message3', message1,
+    message2: decodeBytes(record.message2, 'Endpoint Pairing message 2'),
+    message3: decodeBytes(record.message3, 'Endpoint Pairing message 3'), device,
+  }
+  throw new TypeError('Endpoint Pairing Desktop stage is invalid')
+}
+
+function parseEndpointMobile(value: unknown): EndpointPairingMobileView {
+  const record = requiredRecord(value, 'Endpoint Pairing Mobile response')
+  const pendingPairingId = parsePendingPairingId(record.pendingPairingId)
+  if (record.stage === 'awaiting-desktop' || record.stage === 'awaiting-authority') {
+    return { stage: record.stage, pendingPairingId }
+  }
+  if (record.stage === 'rejected') return { stage: 'rejected', pendingPairingId }
+  if (record.stage === 'message2') return {
+    stage: 'message2', pendingPairingId,
+    message2: decodeBytes(record.message2, 'Endpoint Pairing message 2'),
+    device: parseDevice(record.device),
+  }
+  if (record.stage === 'confirmed') return {
+    stage: 'confirmed', pendingPairingId,
+    pairingId: parsePersonalPairingId(record.pairingId),
+    sealedRelayAuthority: decodeBytes(record.sealedRelayAuthority, 'Endpoint Pairing sealed Relay authority'),
+  }
+  throw new TypeError('Endpoint Pairing Mobile stage is invalid')
+}
+
+function parseEndpointConfirmation(value: unknown): EndpointPairingConfirmation {
+  const record = requiredRecord(value, 'Endpoint Pairing confirmation response')
+  return {
+    pairing: parsePairing(record.pairing),
+    routeId: parseRelayRouteId(record.routeId),
+    relayRevision: requiredPositiveInteger(record.relayRevision, 'Endpoint Pairing Relay revision'),
   }
 }
 
@@ -365,6 +589,12 @@ function decodeBytes(value: unknown, name: string): Uint8Array {
   const decoded = Uint8Array.from(binary, character => character.charCodeAt(0))
   if (encodeBytes(decoded) !== encoded) throw new TypeError(`${name} must be canonical base64url`)
   return decoded
+}
+
+function decodeFixedBytes(value: unknown, name: string, length: number): Uint8Array {
+  const bytes = decodeBytes(value, name)
+  if (bytes.byteLength !== length) throw new TypeError(`${name} must contain ${String(length)} bytes`)
+  return bytes
 }
 
 const REMOTE_ACCESS_ERROR_CODES: ReadonlySet<RemoteAccessErrorCode> = new Set([

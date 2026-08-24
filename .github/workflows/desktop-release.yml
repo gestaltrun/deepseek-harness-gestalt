@@ -101,7 +101,27 @@ jobs:
       - name: Electron cookie-isolation e2e
         run: pnpm run test:electron-runtime-e2e
 
+      - name: Project operated Platform identity
+        env:
+          DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
+          PLATFORM_ORIGIN: ${{ vars.PLATFORM_ORIGIN }}
+          PLATFORM_GITHUB_CALLBACK: ${{ vars.PLATFORM_GITHUB_CALLBACK }}
+          PLATFORM_GITHUB_CLIENT_ID: ${{ vars.PLATFORM_GITHUB_CLIENT_ID }}
+          PLATFORM_GITHUB_CREDENTIAL_REFERENCE: ${{ vars.PLATFORM_GITHUB_CREDENTIAL_REFERENCE }}
+          PLATFORM_POSTGRES_DATABASE: ${{ vars.PLATFORM_POSTGRES_DATABASE }}
+          PLATFORM_IDENTITY_NAMESPACE: ${{ vars.PLATFORM_IDENTITY_NAMESPACE }}
+          DESKTOP_COMPANION_ATTACHMENT_HOST_TIMEOUT_MS: ${{ vars.DESKTOP_COMPANION_ATTACHMENT_HOST_TIMEOUT_MS }}
+          DESKTOP_REMOTE_RELAY_ATTACH_TIMEOUT_MS: ${{ vars.DESKTOP_REMOTE_RELAY_ATTACH_TIMEOUT_MS }}
+          DESKTOP_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS: ${{ vars.DESKTOP_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS }}
+          DESKTOP_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: ${{ vars.DESKTOP_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS }}
+          DESKTOP_REMOTE_RELAY_RECONNECT_DELAY_MS: ${{ vars.DESKTOP_REMOTE_RELAY_RECONNECT_DELAY_MS }}
+          DESKTOP_REMOTE_RELAY_INBOUND_MAX_BYTES: ${{ vars.DESKTOP_REMOTE_RELAY_INBOUND_MAX_BYTES }}
+          DESKTOP_REMOTE_RELAY_INBOUND_MAX_MESSAGES: ${{ vars.DESKTOP_REMOTE_RELAY_INBOUND_MAX_MESSAGES }}
+        run: node apps/desktop/scripts/write-operated-platform-config.mjs "$DSH_DESKTOP_OPERATED_PLATFORM_CONFIG"
+
       - name: Build
+        env:
+          DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
         run: |
           pnpm run build
           pnpm --filter @deepseek-ai/dsh-desktop build:main
@@ -167,6 +187,8 @@ jobs:
     runs-on: windows-2025
     env:
       NODE_OPTIONS: --max-old-space-size=8192
+    environment:
+      name: ${{ inputs.publish && 'desktop-release' || 'desktop-dry-run' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -187,7 +209,27 @@ jobs:
       - name: Electron cookie-isolation e2e
         run: pnpm run test:electron-runtime-e2e
 
+      - name: Project operated Platform identity
+        env:
+          DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
+          PLATFORM_ORIGIN: ${{ vars.PLATFORM_ORIGIN }}
+          PLATFORM_GITHUB_CALLBACK: ${{ vars.PLATFORM_GITHUB_CALLBACK }}
+          PLATFORM_GITHUB_CLIENT_ID: ${{ vars.PLATFORM_GITHUB_CLIENT_ID }}
+          PLATFORM_GITHUB_CREDENTIAL_REFERENCE: ${{ vars.PLATFORM_GITHUB_CREDENTIAL_REFERENCE }}
+          PLATFORM_POSTGRES_DATABASE: ${{ vars.PLATFORM_POSTGRES_DATABASE }}
+          PLATFORM_IDENTITY_NAMESPACE: ${{ vars.PLATFORM_IDENTITY_NAMESPACE }}
+          DESKTOP_COMPANION_ATTACHMENT_HOST_TIMEOUT_MS: ${{ vars.DESKTOP_COMPANION_ATTACHMENT_HOST_TIMEOUT_MS }}
+          DESKTOP_REMOTE_RELAY_ATTACH_TIMEOUT_MS: ${{ vars.DESKTOP_REMOTE_RELAY_ATTACH_TIMEOUT_MS }}
+          DESKTOP_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS: ${{ vars.DESKTOP_REMOTE_RELAY_NEGOTIATION_TIMEOUT_MS }}
+          DESKTOP_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS: ${{ vars.DESKTOP_REMOTE_RELAY_HEARTBEAT_INTERVAL_MS }}
+          DESKTOP_REMOTE_RELAY_RECONNECT_DELAY_MS: ${{ vars.DESKTOP_REMOTE_RELAY_RECONNECT_DELAY_MS }}
+          DESKTOP_REMOTE_RELAY_INBOUND_MAX_BYTES: ${{ vars.DESKTOP_REMOTE_RELAY_INBOUND_MAX_BYTES }}
+          DESKTOP_REMOTE_RELAY_INBOUND_MAX_MESSAGES: ${{ vars.DESKTOP_REMOTE_RELAY_INBOUND_MAX_MESSAGES }}
+        run: node apps/desktop/scripts/write-operated-platform-config.mjs "$env:DSH_DESKTOP_OPERATED_PLATFORM_CONFIG"
+
       - name: Build
+        env:
+          DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: ${{ runner.temp }}/operated-platform.json
         run: |
           pnpm run build
           pnpm --filter @deepseek-ai/dsh-desktop build:main

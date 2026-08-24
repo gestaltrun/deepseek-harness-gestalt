@@ -131,7 +131,18 @@ async function login(
   installationId = parseInstallationId('installation-1'),
   installationKind: 'desktop' | 'mobile' = 'desktop',
 ): Promise<{ key: ReturnType<typeof installationKey>; session: Extract<Awaited<ReturnType<PlatformAccount['pollLogin']>>, { status: 'complete' }> }> {
-  const attempt = await account.beginLogin({ installationId, installationKind, publicKey: key.publicKey })
+  const attempt = await account.beginLogin(installationKind === 'mobile'
+    ? {
+      installationId,
+      installationKind,
+      presentation: { name: `${installationId} presentation`, platform: 'ios' },
+      publicKey: key.publicKey,
+    }
+    : {
+      installationId, installationKind,
+      presentation: { name: `${installationId} presentation`, platform: 'linux' },
+      publicKey: key.publicKey,
+    })
   await account.completeGitHubCallback({ code: 'code', state: attempt.state })
   const result = await account.pollLogin({
     attemptId: attempt.id,
@@ -175,6 +186,29 @@ function proxyBackend(base: AccountBackend, overrides: Partial<AccountBackend>):
 }
 
 describe('PlatformAccount', () => {
+  it('preserves absence when consuming a durable login attempt from before Installation presentation', async () => {
+    const backend = new MemoryAccountBackend(ENVIRONMENT.databaseIdentity)
+    const attemptId = parseLoginAttemptId('legacy-attempt')
+    await backend.createAttempt({
+      id: attemptId,
+      environment: ENVIRONMENT.environment,
+      identityNamespace: ENVIRONMENT.identityNamespace,
+      installationId: parseInstallationId('legacy-installation'),
+      installationKind: 'desktop',
+      publicKey: installationKey().publicKey,
+      state: 'legacy-state',
+      codeVerifier: 'legacy-verifier',
+      expiresAt: NOW + LOGIN_ATTEMPT_TTL_MS,
+      status: 'pending',
+    })
+    await backend.authorizeAttempt(attemptId, {
+      providerSubject: 13994321, login: 'octocat', avatarUrl: 'https://avatars.example/octocat',
+    })
+
+    const created = await backend.consumeAuthorizedAttempt(attemptId, 'refresh-hash', NOW + MAX_REFRESH_TOKEN_TTL_MS)
+
+    expect(created.session).not.toHaveProperty('presentation')
+  })
   it('rejects a backend from another database identity before serving traffic', () => {
     expect(() => new PlatformAccount(new Context(), {
       backend: new MemoryAccountBackend('database-production'),
@@ -211,7 +245,7 @@ describe('PlatformAccount', () => {
     const key = installationKey()
     const attempt = await first.beginLogin({
       installationId: parseInstallationId('desktop-installation-1'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       publicKey: key.publicKey,
     })
     const authorization = new URL(attempt.authorizationUrl)
@@ -248,6 +282,7 @@ describe('PlatformAccount', () => {
     const attempt = await first.beginLogin({
       installationId: parseInstallationId('mobile-installation-1'),
       installationKind: 'mobile',
+      presentation: { name: 'Authenticated mobile installation', platform: 'ios' },
       publicKey: key.publicKey,
     })
     await first.completeGitHubCallback({ code: 'code', state: attempt.state })
@@ -273,8 +308,35 @@ describe('PlatformAccount', () => {
       proof: key.proof('current', hashAccountToken(refreshed.accessToken)),
     })).resolves.toEqual({
       account: refreshed.account,
-      installation: { id: 'mobile-installation-1', kind: 'mobile' },
+      installation: {
+        id: 'mobile-installation-1',
+        kind: 'mobile',
+        presentation: { name: 'Authenticated mobile installation', platform: 'ios' },
+      },
     })
+  })
+
+  it('revokes a durable Mobile session that predates Installation presentation', async () => {
+    const { first, backend } = accountHarness()
+    const key = installationKey()
+    const { session } = await login(
+      first,
+      key,
+      parseInstallationId('legacy-mobile-installation'),
+      'mobile',
+    )
+    const readSession = backend.getSession.bind(backend)
+    vi.spyOn(backend, 'getSession').mockImplementation(async (sessionId) => {
+      const legacy = await readSession(sessionId)
+      if (legacy !== undefined) delete legacy.presentation
+      return legacy
+    })
+
+    await expect(first.currentInstallation({
+      accessToken: session.accessToken,
+      proof: key.proof('current', hashAccountToken(session.accessToken)),
+    })).rejects.toMatchObject({ code: 'SESSION_REVOKED' })
+    await expect(readSession(session.sessionId)).resolves.toMatchObject({ active: false })
   })
 
   it('invalidates and closes only the current installation across instances', async () => {
@@ -282,7 +344,7 @@ describe('PlatformAccount', () => {
     const key = installationKey()
     const attempt = await first.beginLogin({
       installationId: parseInstallationId('desktop-installation-2'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       publicKey: key.publicKey,
     })
     await first.completeGitHubCallback({ code: 'code', state: attempt.state })
@@ -299,6 +361,16 @@ describe('PlatformAccount', () => {
       accessToken: login.accessToken,
       proof: key.proof('current', hashAccountToken(login.accessToken)),
     })).resolves.toEqual(login.account)
+    await expect(second.currentInstallation({
+      accessToken: login.accessToken,
+      proof: key.proof('current', hashAccountToken(login.accessToken)),
+    })).resolves.toEqual({
+      account: login.account,
+      installation: {
+        id: 'desktop-installation-2', kind: 'desktop',
+        presentation: { name: 'Test Desktop', platform: 'linux' },
+      },
+    })
     await first.signOut({
       accessToken: login.accessToken,
       proof: key.proof('sign-out', hashAccountToken(login.accessToken)),
@@ -349,7 +421,7 @@ describe('PlatformAccount', () => {
     const key = installationKey()
     await first.beginLogin({
       installationId: parseInstallationId('desktop-installation-3'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       publicKey: key.publicKey,
     })
     await expect(first.completeGitHubCallback({ code: 'code', state: 'wrong-state' }))
@@ -361,7 +433,7 @@ describe('PlatformAccount', () => {
     const { first, second } = accountHarness()
     const key = installationKey()
     const attempt = await first.beginLogin({
-      installationId: parseInstallationId('desktop-reused'), installationKind: 'desktop', publicKey: key.publicKey,
+      installationId: parseInstallationId('desktop-reused'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: key.publicKey,
     })
     await expect(first.pollLogin({
       attemptId: attempt.id, pollingToken: attempt.pollingToken,
@@ -389,7 +461,7 @@ describe('PlatformAccount', () => {
     let now = NOW
     const expiring = accountHarness({ clock: { now: () => now } }).first
     const attempt = await expiring.beginLogin({
-      installationId: parseInstallationId('desktop-expired'), installationKind: 'desktop', publicKey: installationKey().publicKey,
+      installationId: parseInstallationId('desktop-expired'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: installationKey().publicKey,
     })
     now += LOGIN_ATTEMPT_TTL_MS + 1
     await expect(expiring.completeGitHubCallback({ code: 'code', state: attempt.state }))
@@ -409,7 +481,7 @@ describe('PlatformAccount', () => {
       }
       const account = accountHarness({ provider }).first
       const next = await account.beginLogin({
-        installationId: parseInstallationId(randomUUID()), installationKind: 'desktop', publicKey: installationKey().publicKey,
+        installationId: parseInstallationId(randomUUID()), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: installationKey().publicKey,
       })
       await expect(account.completeGitHubCallback({ code: 'code', state: next.state })).rejects.toThrow()
     }
@@ -419,7 +491,7 @@ describe('PlatformAccount', () => {
     let callbackNow = NOW
     const callbackAccount = accountHarness({ clock: { now: () => callbackNow } }).first
     const callbackAttempt = await callbackAccount.beginLogin({
-      installationId: parseInstallationId('callback-boundary'), installationKind: 'desktop', publicKey: installationKey().publicKey,
+      installationId: parseInstallationId('callback-boundary'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: installationKey().publicKey,
     })
     callbackNow = callbackAttempt.expiresAt
     await expect(callbackAccount.completeGitHubCallback({ code: 'code', state: callbackAttempt.state }))
@@ -429,7 +501,10 @@ describe('PlatformAccount', () => {
     const pollingAccount = accountHarness({ clock: { now: () => pollingNow } }).first
     const pollingKey = installationKey()
     const pollingAttempt = await pollingAccount.beginLogin({
-      installationId: parseInstallationId('poll-boundary'), installationKind: 'mobile', publicKey: pollingKey.publicKey,
+      installationId: parseInstallationId('poll-boundary'),
+      installationKind: 'mobile',
+      presentation: { name: 'Poll boundary installation', platform: 'android' },
+      publicKey: pollingKey.publicKey,
     })
     await pollingAccount.completeGitHubCallback({ code: 'code', state: pollingAttempt.state })
     pollingNow = pollingAttempt.expiresAt
@@ -482,7 +557,7 @@ describe('PlatformAccount', () => {
     { kty: 'EC', crv: 'P-256', x: 'x', y: 'y', d: 'private' },
   ])('rejects a non-public P-256 installation key %#', async (publicKey) => {
     await expect(accountHarness().first.beginLogin({
-      installationId: parseInstallationId('invalid-key'), installationKind: 'desktop', publicKey,
+      installationId: parseInstallationId('invalid-key'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey,
     })).rejects.toMatchObject({ code: 'PROOF_INVALID' })
   })
 
@@ -497,7 +572,7 @@ describe('PlatformAccount', () => {
     const { first } = accountHarness()
     const key = installationKey()
     const attempt = await first.beginLogin({
-      installationId: parseInstallationId('poll-validation'), installationKind: 'desktop', publicKey: key.publicKey,
+      installationId: parseInstallationId('poll-validation'), installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: key.publicKey,
     })
     const proof = () => key.proof('login-poll', `${attempt.id}:${hashAccountToken(attempt.pollingToken)}`)
     for (const token of ['encoded-only', 'a.b.c']) {
@@ -620,7 +695,7 @@ describe('PlatformAccount', () => {
     await backend.createAttempt({
       id: 'attempt' as LoginAttemptId,
       environment: 'development', identityNamespace: 'namespace', installationId: parseInstallationId('installation'),
-      installationKind: 'desktop', publicKey: key.publicKey, state: 'state', codeVerifier: 'verifier',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: key.publicKey, state: 'state', codeVerifier: 'verifier',
       expiresAt: NOW, status: 'pending',
     })
     expect(await backend.findAttemptByState('state')).toMatchObject({ status: 'pending' })
@@ -642,7 +717,7 @@ describe('PlatformAccount', () => {
     await backend.createAttempt({
       id: 'replacement' as LoginAttemptId,
       environment: 'development', identityNamespace: 'namespace', installationId: parseInstallationId('installation'),
-      installationKind: 'desktop', publicKey: key.publicKey, state: 'replacement-state', codeVerifier: 'verifier',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const }, publicKey: key.publicKey, state: 'replacement-state', codeVerifier: 'verifier',
       expiresAt: NOW, status: 'pending',
     })
     await backend.authorizeAttempt('replacement' as LoginAttemptId, {
@@ -778,7 +853,7 @@ describe('PlatformAccount', () => {
     capacity.shedding = true
     await expect(first.beginLogin({
       installationId: parseInstallationId('capacity-desktop'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       publicKey: installationKey().publicKey,
     })).rejects.toMatchObject({ code: 'PLATFORM_CAPACITY', retryAfter: 45 })
     expect(await first.current({
@@ -849,10 +924,10 @@ describe('PlatformAccount', () => {
     const backend = new MemoryAccountBackend(ENVIRONMENT.databaseIdentity)
     const internals = backend as unknown as { installationIndex: Map<string, string> }
     internals.installationIndex.set(`${ENVIRONMENT.identityNamespace}:ghost`, 'missing-session')
-    expect(await backend.findActiveSessionByInstallation(
+    expect(await backend.hasActiveSessionByInstallation(
       ENVIRONMENT.identityNamespace,
       parseInstallationId('ghost'),
-    )).toBeUndefined()
+    )).toBe(false)
   })
 
   it('skips installation quota when an authorized attempt has not bound a GitHub identity', async () => {
@@ -860,7 +935,7 @@ describe('PlatformAccount', () => {
     const key = installationKey()
     const attempt = await harness.first.beginLogin({
       installationId: parseInstallationId('identity-less'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       publicKey: key.publicKey,
     })
     await harness.first.completeGitHubCallback({ code: 'code', state: attempt.state })
@@ -890,7 +965,7 @@ describe('PlatformAccount', () => {
     const key = installationKey()
     const attempt = await first.beginLogin({
       installationId: parseInstallationId('capacity-poll'),
-      installationKind: 'desktop',
+      installationKind: 'desktop', presentation: { name: 'Test Desktop', platform: 'linux' as const },
       publicKey: key.publicKey,
     })
     await first.completeGitHubCallback({ code: 'code', state: attempt.state })

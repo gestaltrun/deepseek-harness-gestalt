@@ -1,6 +1,6 @@
 /** Mobile settlement of Desktop-authorized approvals and Ask User questions. */
 
-import { companionMayMutate, type CompanionPushState } from './companion-push.ts'
+import { companionMayMutate, type CompanionConnectionState } from './companion-lifecycle.ts'
 
 /** One Desktop-authorized interaction presented on Mobile. */
 export interface CompanionInteraction {
@@ -34,7 +34,7 @@ export interface CompanionInteraction {
 export function settleCompanionInteraction(
   interaction: CompanionInteraction,
   input: { accepted: boolean; decision: string; persistent?: boolean; stale?: boolean },
-  state: CompanionPushState,
+  state: CompanionConnectionState,
 ): CompanionInteraction {
   if (!companionMayMutate(state)) return interaction
   if (interaction.settled !== undefined) return interaction

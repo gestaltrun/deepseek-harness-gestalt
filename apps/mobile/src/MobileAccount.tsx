@@ -2,21 +2,11 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { PlatformAccountInstallation } from '@deepseek-ai/dsh-platform-account-client'
 import { ACCOUNT_PRIVACY_NOTICE } from '@deepseek-ai/dsh-platform-account/privacy'
-import {
-  parseAttachmentCapability,
-  parseCompanionOperationId,
-  parseCompanionSessionId,
-} from '@deepseek-ai/dsh-remote-protocol'
-import { companionMayMutate, companionRuntime } from './companion-push.ts'
 import css from './MobileAccount.module.css'
-import { sealCompanionAttachment, buildCompanionAttachmentOffer } from './companion-attachment.ts'
-import type { CompanionInteraction } from './companion-approval.ts'
-import type { CompanionSessionSummary } from './companion-history.ts'
-import { developmentCompanionClient } from './development-keyless-companion.ts'
+import type { MobileCompanionPresentation } from './companion-history.ts'
 import { MobileBrowse } from './MobileBrowse.tsx'
 import { MobilePairing, type MobilePairingActions } from './MobilePairing.tsx'
-
-const EMPTY_SESSIONS: readonly CompanionSessionSummary[] = []
+import type { MobilePresentationClock } from './mobile-clock.ts'
 
 /** Mobile Account page props. */
 export interface MobileAccountProps {
@@ -24,25 +14,23 @@ export interface MobileAccountProps {
   installation: PlatformAccountInstallation
   /** Personal Pairing adapter available after the current Installation signs in. */
   pairing?: MobilePairingActions
+  /** Desktop-authoritative Companion presentation supplied by the product entry. */
+  companion?: MobileCompanionPresentation | undefined
+  /** Product locale shared by Mobile browse and conversation presentation. */
+  locale: 'zh' | 'en'
+  /** Product theme shared by Mobile browse and conversation presentation. */
+  theme: 'light' | 'dark'
+  /** Live clock owner shared by every Session list. */
+  clock: MobilePresentationClock
 }
 
 /** Mobile Account landing with an optional same-installation Personal Pairing projection. */
-export function MobileAccount({ installation, pairing }: MobileAccountProps): ReactNode {
+export function MobileAccount({ installation, pairing, companion, locale, theme, clock }: MobileAccountProps): ReactNode {
   const snapshot = useSyncExternalStore(
     listener => installation.subscribe(listener),
     () => installation.getSnapshot(),
   )
-  const companion = companionRuntime()
-  const companionState = useSyncExternalStore(
-    listener => companion?.subscribe(listener) ?? (() => {}),
-    () => companion?.getState(),
-  )
   const [accepted, setAccepted] = useState(false)
-  const companionClient = developmentCompanionClient()
-  const sessions = useSyncExternalStore(
-    listener => companionClient?.sessions().subscribe(listener) ?? (() => {}),
-    () => companionClient?.sessions().getSnapshot() ?? EMPTY_SESSIONS,
-  )
 
   useEffect(() => { void installation.load() }, [installation])
   useEffect(() => {
@@ -129,97 +117,18 @@ export function MobileAccount({ installation, pairing }: MobileAccountProps): Re
         </>
       )}
       {snapshot.error !== undefined && <p className={css.error} role="alert">{snapshot.error}</p>}
-      {signedIn && pairing !== undefined && <MobilePairing actions={pairing} />}
-      {signedIn && (
+      {signedIn && companion !== undefined && 'message' in companion.attachment
+        && <p className={css.error} role="alert">{companion.attachment.message}</p>}
+      {signedIn && pairing !== undefined && <MobilePairing actions={pairing} locale={locale} />}
+      {signedIn && companion !== undefined && (
         <MobileBrowse
-          desktopName="Paired Desktop"
-          connection={companionState !== undefined && companionMayMutate(companionState) ? 'online' : 'offline'}
-          sessions={sessions}
-          {...(companionState === undefined ? {} : { companionState })}
-          {...(companionClient !== undefined
-            ? {
-              onCreate: (input: { workspace?: string }) => {
-                if (companionState === undefined || !companionMayMutate(companionState)) return
-                const title = input.workspace === undefined ? 'Ungrouped Session' : 'Workspace Session'
-                ignoreUnconfirmedCompanion(companionClient.createSession({
-                  operationId: crypto.randomUUID(),
-                  sessionId: crypto.randomUUID(),
-                  title,
-                  ...(input.workspace === undefined ? {} : { workspace: input.workspace }),
-                }))
-              },
-              onSubmit: (sessionId: string, text: string) => {
-                if (companionState === undefined || !companionMayMutate(companionState)) return
-                ignoreUnconfirmedCompanion(companionClient.submitPrompt({
-                  operationId: crypto.randomUUID(),
-                  sessionId,
-                  text,
-                }))
-              },
-              onCancel: (sessionId: string) => {
-                if (companionState === undefined || !companionMayMutate(companionState)) return
-                ignoreUnconfirmedCompanion(companionClient.cancelPrompt({
-                  operationId: crypto.randomUUID(),
-                  sessionId,
-                }))
-              },
-              onAttach: (sessionId: string, file: File) => {
-                if (companionState === undefined || !companionMayMutate(companionState)) return
-                ignoreUnconfirmedCompanion(offerDevelopmentAttachment(companionClient, sessionId, file))
-              },
-              onSettled: (sessionId: string, interaction: CompanionInteraction) => {
-                if (companionState === undefined || !companionMayMutate(companionState)) return
-                ignoreUnconfirmedCompanion(settleDevelopmentInteraction(companionClient, sessionId, interaction))
-              },
-            }
-            : {})}
+          {...companion}
+          locale={locale}
+          theme={theme}
+          clock={clock}
         />
       )}
       <footer>此账号仅识别你的安装；它不会授予任何 Desktop 访问权限。</footer>
     </main>
   )
-}
-
-function ignoreUnconfirmedCompanion(operation: Promise<unknown>): void {
-  void operation.catch((error: unknown) => {
-    // Unconfirmed or offline mutations must not invent Session rows.
-    void error
-  })
-}
-
-async function offerDevelopmentAttachment(
-  client: NonNullable<ReturnType<typeof developmentCompanionClient>>,
-  sessionId: string,
-  file: File,
-): Promise<unknown> {
-  const sealed = await sealCompanionAttachment(
-    new Uint8Array(32).fill(29),
-    new Uint8Array(await file.arrayBuffer()),
-  )
-  return await client.offerAttachment(buildCompanionAttachmentOffer({
-    capability: parseAttachmentCapability('A'.repeat(43)),
-    ciphertextSha256: sealed.ciphertextSha256,
-    byteLength: sealed.ciphertext.byteLength,
-    expiresAt: Date.now() + 900_000,
-    fileName: file.name.length === 0 ? 'attachment.bin' : file.name,
-  }, parseCompanionOperationId(crypto.randomUUID()), parseCompanionSessionId(sessionId)))
-}
-
-async function settleDevelopmentInteraction(
-  client: NonNullable<ReturnType<typeof developmentCompanionClient>>,
-  sessionId: string,
-  interaction: CompanionInteraction,
-): Promise<unknown> {
-  const decision = interaction.settled?.decision ?? interaction.authorized[0]
-  if (decision === undefined) return
-  const input = {
-    operationId: crypto.randomUUID(),
-    sessionId,
-    interactionId: interaction.operationId,
-    decision,
-    ...(interaction.settled?.persistent === undefined ? {} : { persistent: interaction.settled.persistent }),
-  }
-  return interaction.kind === 'approval'
-    ? await client.settleApproval(input)
-    : await client.answerAskUser(input)
 }

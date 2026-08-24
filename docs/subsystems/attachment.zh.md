@@ -177,6 +177,21 @@ abstract saveImage(input: SaveImageAttachment): Promise<ImageAttachmentRef>
 abstract readImage(ref: ImageAttachmentRef, signal?: AbortSignal): Promise<StoredImageAttachment>
 
 /**
+ * Validate and durably commit one immutable generic file.
+ * @param input - exact bytes plus bounded display metadata.
+ * @returns a content-addressed reference after durable publication.
+ */
+saveFile(input: SaveFileAttachment): Promise<FileAttachmentRef>
+
+/**
+ * Read one generic file and verify its digest and metadata.
+ * @param ref - durable reference from a Session event.
+ * @param signal - optional cancellation for backend reads.
+ * @returns verified exact bytes and canonical reference.
+ */
+readFile(ref: FileAttachmentRef, signal?: AbortSignal): Promise<StoredFileAttachment>
+
+/**
  * Generate or read one deterministic model-request version from the stored normalized image.
  * @param ref - durable provider-independent normalized attachment reference.
  * @param policy - exact route pixel and encoded-byte budget.

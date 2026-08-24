@@ -22,6 +22,18 @@ function complete(): CompanionReleaseEvidence {
 }
 
 describe('Companion release validation', () => {
+  it('does not register an interceptable custom scheme for the pairing invitation', () => {
+    const android = readFileSync(new URL('../android/app/src/main/AndroidManifest.xml', import.meta.url), 'utf8')
+    const ios = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8')
+    expect(android).not.toContain('android:scheme="deepseek-gestalt"')
+    expect(ios).not.toContain('<string>deepseek-gestalt</string>')
+    expect(COMPANION_RELEASE_DEVICE_CHECKS).not.toContain('deep-link')
+  })
+
+  it('contains no notification-provider release evidence', () => {
+    expect(COMPANION_RELEASE_DEVICE_CHECKS).not.toContain('push')
+  })
+
   it('requires every flow, both platforms, upgrade, UI, failure, and Noise review', () => {
     expect(companionReleaseReady(complete())).toBe(true)
     expect(companionReleaseReady({ ...complete(), noiseReview: false })).toBe(false)
@@ -39,3 +51,4 @@ describe('Companion release validation', () => {
       .toThrow('incomplete')
   })
 })
+import { readFileSync } from 'node:fs'

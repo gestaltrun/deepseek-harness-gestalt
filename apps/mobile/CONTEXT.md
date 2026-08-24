@@ -40,6 +40,10 @@ _Avoid_: mobile replica, offline outbox, synchronized Session store
 The durable record that one Companion mutation was sent but its Desktop result is not yet known. Reconnection resolves the same operation id before any deliberate retry; the receipt never authorizes automatic or offline replay.
 _Avoid_: offline outbox, queued mutation, retry job
 
+**Foreground Synchronization**:
+The authenticated refresh that Mobile Companion completes after opening or returning to the foreground before it enables Companion mutations. It reads current state from the selected Paired Desktop and does not depend on push delivery, a background socket, or stale notification authority.
+_Avoid_: push wake, background sync, silent wake
+
 **Companion Surface**:
 The mobile interaction surface for Workspace and Session browsing, history and streaming, prompts and cancellation, attachments, approvals, and human questions. It does not include the full Desktop settings, credentials, plugin configuration, terminal, or tool-inspection experience.
 _Avoid_: responsive Desktop page, full Desktop parity, read-only viewer

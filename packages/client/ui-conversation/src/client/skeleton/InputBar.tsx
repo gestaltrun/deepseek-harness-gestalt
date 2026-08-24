@@ -32,6 +32,7 @@ import { useComposerImagePinOverlay } from '../annotation/composer-image-pins.ts
 import { ContextMeter } from './ContextMeter.tsx'
 import { PermissionSelect } from './PermissionSelect.tsx'
 import { isSafariBrowser, repairSafariTextareaLayout } from './safari.ts'
+import { InputBarEditor, InputBarPrimaryAction } from './InputBarPresentation.tsx'
 import css from './InputBar.module.css'
 
 /** Decoration product of the no-session state (no machine, empty draft). */
@@ -815,49 +816,37 @@ export function InputBar({
             glyphs to the backdrop, so they can only stay together by moving together: one scroll
             offset the browser applies to both layers at once, never a JS mirror between two boxes,
             which a compositor-driven gesture outruns and leaves the words trailing the caret. */}
-        <div ref={scrollRef} className={css.scroll} data-input-scroll>
-          <div className={css.grow}>
-            <div
-              aria-hidden
-              className={clsx(css.backdrop, textareaDisabled && css.backdropDisabled)}
-              data-input-backdrop
-              data-disabled={textareaDisabled || undefined}
-            >
-              {backdrop}
-            </div>
-            <textarea
-              ref={inputRef}
-              className={css.input}
-              value={draft}
-              disabled={textareaDisabled}
-              readOnly={machineBusy || workspaceTrigger}
-              aria-label={workspaceTrigger ? t('hero.chooseWorkspace') : undefined}
-              aria-haspopup={workspaceTrigger ? 'menu' : undefined}
-              aria-expanded={workspaceTrigger ? workspacePickerOpen : undefined}
-              data-phase={input?.phase ?? 'inert'}
-              placeholder={placeholder ?? (parentOffline
-                ? t('placeholder.parentOffline')
-                : disabled
-                  ? t('placeholder.unavailable')
-                  // The steer hint deliberately outranks the plan placeholder:
-                  // while it shows, the whole-queue gesture is genuinely available
-                  // (the gate never consults plan mode), so the actionable hint wins.
-                  : canSteerQueue
-                    ? t('placeholder.steerQueue')
-                    : planActive ? t('placeholder.plan') : t('placeholder.default'))}
-              rows={2}
-              onChange={onChange}
-              onKeyDown={onKeyDown}
-              onSelect={onSelect}
-              onCopy={(e) => { onCopyOrCut(e, false) }}
-              onCut={(e) => { onCopyOrCut(e, true) }}
-              onPaste={onPaste}
-              onCompositionStart={onCompositionStart}
-              onCompositionEnd={onCompositionEnd}
-            />
-            <div ref={mirrorRef} aria-hidden className={css.mirror} data-input-mirror>{`${draft}\n`}</div>
-          </div>
-        </div>
+        <InputBarEditor
+          ref={inputRef}
+          scrollRef={scrollRef}
+          mirrorRef={mirrorRef}
+          draft={draft}
+          backdrop={backdrop}
+          disabled={textareaDisabled}
+          readOnly={machineBusy || workspaceTrigger}
+          ariaLabel={workspaceTrigger ? t('hero.chooseWorkspace') : undefined}
+          ariaHasPopup={workspaceTrigger ? 'menu' : undefined}
+          ariaExpanded={workspaceTrigger ? workspacePickerOpen : undefined}
+          phase={input?.phase ?? 'inert'}
+          placeholder={placeholder ?? (parentOffline
+            ? t('placeholder.parentOffline')
+            : disabled
+              ? t('placeholder.unavailable')
+              // The steer hint deliberately outranks the plan placeholder:
+              // while it shows, the whole-queue gesture is genuinely available
+              // (the gate never consults plan mode), so the actionable hint wins.
+              : canSteerQueue
+                ? t('placeholder.steerQueue')
+                : planActive ? t('placeholder.plan') : t('placeholder.default'))}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          onSelect={onSelect}
+          onCopy={(e) => { onCopyOrCut(e, false) }}
+          onCut={(e) => { onCopyOrCut(e, true) }}
+          onPaste={onPaste}
+          onCompositionStart={onCompositionStart}
+          onCompositionEnd={onCompositionEnd}
+        />
         <div className={css.row}>
           <div className={css.tools}>
             <Tooltip label={t('input.commands')} side="top" delayMs={500}>
@@ -885,41 +874,21 @@ export function InputBar({
             {renderSlot('conversation.input.model', { locked: modelSeatLocked })}
             <ContextMeter useProjection={useProjection} t={t} />
             {interruptible && (
-              <Tooltip label={t('input.stop')} side="top" delayMs={500}>
-                <button
-                  type="button"
-                  className={css.primary}
-                  aria-label={t('input.stop')}
-                  disabled={stop === undefined}
-                  onMouseDown={keepFocus}
-                  onClick={stop}
-                >
-                  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
-                    <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
-                  </svg>
-                </button>
-              </Tooltip>
-            )}
-            <Tooltip label={primaryLabel} side="top" delayMs={500}>
-              <button
-                type="button"
-                className={css.primary}
-                aria-label={primaryLabel}
-                disabled={primaryStops ? stop === undefined : empty || disabled || machineBusy}
+              <InputBarPrimaryAction
+                kind="stop"
+                label={t('input.stop')}
+                disabled={stop === undefined}
                 onMouseDown={keepFocus}
-                onClick={onPrimary}
-              >
-                {primaryStops ? (
-                  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
-                    <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
-                    <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />
-                  </svg>
-                )}
-              </button>
-            </Tooltip>
+                onClick={() => { stop?.() }}
+              />
+            )}
+            <InputBarPrimaryAction
+              kind={primaryStops ? 'stop' : 'send'}
+              label={primaryLabel}
+              disabled={primaryStops ? stop === undefined : empty || disabled || machineBusy}
+              onMouseDown={keepFocus}
+              onClick={onPrimary}
+            />
           </div>
         </div>
       </div>

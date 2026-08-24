@@ -16,6 +16,10 @@ Relay route and attachment ids and Companion operation, Session-projection, and 
 
 The package owns no encryption implementation. Endpoint adapters encrypt offers and application messages with the reviewed paired channel. The keyless Loader example uses a harness-local cipher only to prove that Relay decoding and forwarding never require application plaintext.
 
-## Content-free push hints
+## Companion operations and results
 
-`CompanionPushHint` is a protocol-native record: a generic category (`approval`, `question`, `turn-complete`, or `failure`), a branded `routeId`, and an optional opaque `sessionRef`. `CompanionPushToken` is the branded APNs or FCM registration token. Streaming has no category and `companionPushHintForEvent` returns `undefined`. Parsers reject extra fields. APNs and FCM projections copy only that pair plus a category-repeating title; they do not carry transcript, interaction, device, or credential values. Token fan-out and vendor credentials belong to Remote Access.
+`CompanionOperation` is a closed union of prompt submission, attachment offer, authoritative `search-sessions`, and reconnect-time `query-operation-status`. A search request carries one non-blank query of at most 500 UTF-16 code units. Its correlated `session-search` result carries at most 20 unique Session id/snippet pairs, each snippet limited to 240 Unicode code points; the protocol supplies no cached title, Workspace, or transcript fields.
+
+`CompanionResult` is a closed union of confirmed mutation, `session-created`, attachment rejection, `session-search`, `operation-failed`, and `status`. Every result carries the originating operation id. Successful `create-session` returns `session-created` with the branded protocol-native Session id and positive commit time returned by Desktop. `operation-failed` preserves exactly one Host failure category: an HTTP status including its numeric code, invalid wire response, typed business code/message, or timeout. Failure messages are limited to 4 KiB of UTF-8. A `status` result either embeds the original terminal mutation result for the same operation id, including the exact `session-created` result, or states `{ absent: true }`.
+
+When Mobile loses its physical connection generation after transmitting an operation, transmission is uncertain: it retains the operation id and later sends `query-operation-status`. It never resends the operation while the outcome is unknown because Desktop may already have committed it.

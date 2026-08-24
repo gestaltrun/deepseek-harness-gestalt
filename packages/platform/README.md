@@ -10,6 +10,7 @@ Platform packages own installation-independent identity and session behavior use
 | [`platform-account-core/`](platform-account-core/README.md) | `@deepseek-ai/dsh-platform-account-core` | GitHub identity and current-installation Account Session provider | provides `ctx.platformAccount` |
 | [`platform-account-http/`](platform-account-http/README.md) | `@deepseek-ai/dsh-platform-account-http` | Fixed callback and installation-session HTTP routes | Consumer |
 | [`platform-account-client/`](platform-account-client/README.md) | `@deepseek-ai/dsh-platform-account-client` | Desktop/Mobile proof, protected storage, and account-scoped namespace client | Consumer library |
+| [`noise-channel/`](noise-channel/README.md) | `@deepseek-ai/dsh-noise-channel` | Snow XKpsk3 pairing, attachment-bound IK, and encrypted Companion message channel | Endpoint library |
 | [`remote-access/`](remote-access/README.md) | `@deepseek-ai/dsh-remote-access` | Mobile Access and Personal Pairing lifecycle, crypto adapter, and Companion-only Device Principals | `ctx.remoteAccess` |
 | [`remote-access-client/`](remote-access-client/README.md) | `@deepseek-ai/dsh-remote-access-client` | Pairing HTTP transport and reconnecting Mobile/Desktop Relay lifecycle | Consumer library |
 | [`remote-access-http/`](remote-access-http/README.md) | `@deepseek-ai/dsh-remote-access-http` | Pairing HTTP and Relay WSS Consumers | Consumer |

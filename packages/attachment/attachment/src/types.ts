@@ -67,6 +67,33 @@ export interface StoredImageAttachment {
   data: Uint8Array
 }
 
+/** Durable, serializable metadata for one immutable generic file object. */
+export interface FileAttachmentRef {
+  /** Opaque content-addressed storage identifier; never a filesystem path or bearer URL. */
+  attachmentId: AttachmentId
+  /** Bounded caller-declared media type retained as display metadata. */
+  mediaType: string
+  /** Exact immutable byte length. */
+  bytes: number
+  /** Lowercase SHA-256 digest of the exact stored bytes. */
+  sha256: string
+  /** Bounded display name stripped of local path information. */
+  name: string
+}
+
+/** Request to durably commit one generic file. */
+export interface SaveFileAttachment {
+  data: Uint8Array
+  mediaType: string
+  name: string
+}
+
+/** Stored generic file bytes returned after reference and digest verification. */
+export interface StoredFileAttachment {
+  ref: FileAttachmentRef
+  data: Uint8Array
+}
+
 /** Deterministic request-image policy selected by one exact model route. */
 export interface ImageRequestPolicy {
   /** Maximum width multiplied by height after aspect-preserving projection. */

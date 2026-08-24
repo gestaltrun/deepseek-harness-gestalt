@@ -1,7 +1,7 @@
 /** Runnable keyless snapshot for the selected cross-runtime Noise security path. */
 
 import { execFile } from 'node:child_process'
-import { access, mkdir, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
@@ -13,6 +13,14 @@ const expected = join(root, 'scripts/snapshots/noise-security-path/report.expect
 const refreshing = process.env.DSH_SNAPSHOT === 'record' || process.env.DSH_SNAPSHOT === 'refresh'
 
 describe('Noise security path runnable snapshot', () => {
+  it('packages the exact product Noise implementation for native WebViews', async () => {
+    for (const file of ['dsh_noise_channel.js', 'dsh_noise_channel_bg.wasm']) {
+      const product = await readFile(join(root, 'packages/platform/noise-channel/pkg', file))
+      const nativeProof = await readFile(join(root, 'scripts/noise-security-path/pkg', file))
+      expect(nativeProof).toEqual(product)
+    }
+  })
+
   it('runs the selected engine through official vectors and bounded attack cases', async () => {
     const { stdout, stderr } = await execFileAsync(process.execPath, [runner, 'snapshot'], {
       cwd: root,

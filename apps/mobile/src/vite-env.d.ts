@@ -1,9 +1,12 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_PLATFORM_ENV?: string
-  readonly VITE_PLATFORM_DEVELOPMENT_ORIGIN?: string
-  readonly VITE_PLATFORM_PRODUCTION_ORIGIN?: string
+  readonly VITE_PLATFORM_ORIGIN?: string
+  readonly VITE_PLATFORM_CALLBACK_URL?: string
+  readonly VITE_PLATFORM_GITHUB_CLIENT_ID?: string
+  readonly VITE_PLATFORM_CREDENTIAL_REFERENCE?: string
+  readonly VITE_PLATFORM_DATABASE_IDENTITY?: string
+  readonly VITE_PLATFORM_IDENTITY_NAMESPACE?: string
 }
 
 interface ImportMeta {

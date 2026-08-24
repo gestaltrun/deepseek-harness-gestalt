@@ -3,6 +3,7 @@
  * @module @deepseek-ai/dsh-desktop/main
  */
 import { appendFileSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -24,8 +25,18 @@ import {
 } from '@deepseek-ai/dsh-client-ui-desktop/protocol'
 import { PlatformAccountHttpTransport } from '@deepseek-ai/dsh-platform-account-client'
 import { RemoteAccessHttpTransport } from '@deepseek-ai/dsh-remote-access-client'
+import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import type { DesktopRelayLifecycle } from '@deepseek-ai/dsh-remote-access-client/desktop-relay-lifecycle'
 import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
+import {
+  parseCompanionOperationId,
+  REMOTE_PROTOCOL_LIMITS,
+  type CompanionOperation,
+  type CompanionResult,
+  type CompanionSessionSearchResult,
+  type RelayPairingSelector,
+  type CompanionSearchSessionsOperation,
+} from '@deepseek-ai/dsh-remote-protocol'
 import { ensureLaunchDirectory } from './launch-directory.ts'
 import { isElectronExecutable, resolveDesktopRuntime } from './runtime-paths.ts'
 import { planHostExit, shouldPreventQuit, startWithOneRetry } from './host-exit.ts'
@@ -36,7 +47,7 @@ import {
 } from './updater.ts'
 import { windowChromeOptions } from './window-options.ts'
 import { desktopIconOptions } from './app-icon.ts'
-import { loadDesktopPlatformEnvironment } from './platform-environment.ts'
+import { readDesktopPlatformEnvironment } from './platform-environment.ts'
 import {
   DesktopAccountController, EncryptedDesktopAccountStore,
   UnavailableDesktopAccountController, type DesktopAccountActions,
@@ -50,7 +61,7 @@ import {
   setPairingEnabledFromIpc,
   type DesktopPairingActions,
 } from './personal-pairing.ts'
-import { DesktopPairingKeyVault } from './pairing-keys.ts'
+import { DesktopSnowPairingVault, EncryptedDesktopSnowPairingStore } from './snow-pairing-vault.ts'
 import { disposeDesktopOwners } from './shutdown.ts'
 import { startDesktopBrowserRuntime, type DesktopBrowserRuntime } from './browser-runtime.ts'
 import { parseBrowserPresentRequest, parseBrowserPresentTarget } from './browser-present.ts'
@@ -60,10 +71,18 @@ import {
   syncChromeOverlayBounds,
 } from './chrome-overlay.ts'
 import { createDesktopRemoteRelay } from './remote-relay.ts'
-import { createLoopbackListenFetch, isLoopbackListenUrl, openDesktopAuthorizationUrl } from './loopback-listen-trust.ts'
+import { DesktopCompanionProductOwner } from './companion-product.ts'
+import type { DesktopCompanionOperationOutput } from './companion-product.ts'
+import {
+  DesktopCompanionOperationLedger, FileDesktopCompanionOperationStore,
+} from './companion-operation-ledger.ts'
+import { createDesktopHostRpc } from './host-rpc.ts'
+import { desktopInstallationPresentation } from './desktop-installation.ts'
+import { downloadCompanionAttachment } from './companion-attachments.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const PRELOAD = join(here, 'preload.cjs')
+const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
 
 function smokeLog(line: string): void {
   const file = process.env.DSH_DESKTOP_SMOKE_FILE
@@ -91,6 +110,12 @@ let stopPairingEvents: (() => void) | undefined
 let accountSignedIn = false
 const hostStartController = new AbortController()
 let pendingHost: Promise<RunningWebHost> | undefined
+const accountEnvironment = readDesktopPlatformEnvironment(OPERATED_PLATFORM_CONFIG)
+const companionProduct = new DesktopCompanionProductOwner({
+  responseMaxBytes: REMOTE_PROTOCOL_LIMITS.companionMessageBytes,
+  attachmentTimeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
+})
+let uninstallCompanionHost: (() => void) | undefined
 
 smokeLog('main loaded')
 const gotLock = app.requestSingleInstanceLock()
@@ -123,40 +148,66 @@ async function boot(): Promise<void> {
   smokeLog('boot start')
   window = createWindow()
   smokeLog('window created')
-  let accountEnvironment: SelectedPlatformEnvironment | undefined
+  const snowPairingVault = await DesktopSnowPairingVault.load(new EncryptedDesktopSnowPairingStore(
+    join(app.getPath('userData'), `snow-pairings-${accountEnvironment.databaseIdentity}.bin`),
+    {
+      encrypt: value => safeStorage.encryptString(value),
+      decrypt: value => safeStorage.decryptString(Buffer.from(value)),
+    },
+  ))
+  companionProduct.installLedger(await DesktopCompanionOperationLedger.load(
+    new FileDesktopCompanionOperationStore(join(
+      app.getPath('userData'), `companion-operations-${accountEnvironment.databaseIdentity}.json`,
+    )),
+  ))
+  account = createDesktopAccount(accountEnvironment)
+  const relay = createDesktopRemoteRelay({
+    environment: accountEnvironment,
+    config: accountEnvironment.remoteRelay,
+    snowPairingVault,
+    desktopName: () => account.installationPresentation()?.name,
+    handleOperation: async (operation, selector, context) => await handleDesktopCompanionOperation(
+      operation, selector, context, snowPairingVault,
+    ),
+    liveProjection: {
+      connect: (selector, changed, disconnect) => companionProduct.connectLiveProjection(
+        parsePersonalPairingId(selector), changed, disconnect,
+      ),
+      project: async (change, selector, signal) => {
+        const attachmentKey = snowPairingVault.attachmentKey(selector)
+        if (attachmentKey === undefined) throw new Error('Personal Pairing is no longer active')
+        try {
+          return await companionProduct.projectLiveSession(change, attachmentKey, signal)
+        } finally {
+          attachmentKey.fill(0)
+        }
+      },
+      retainsConversation: (change, selector) => companionProduct.retainsLiveConversation(
+        parsePersonalPairingId(selector), change,
+      ),
+    },
+  })
+  let accountReady = true
   try {
-    accountEnvironment = loadDesktopPlatformEnvironment(process.env)
+    await account.start()
   } catch (error) {
-    smokeLog('account environment unavailable ' + (error instanceof Error ? error.message : String(error)))
+    accountReady = false
+    smokeLog('account start failed ' + (error instanceof Error ? error.message : String(error)))
+    const failed = account
+    account = new UnavailableDesktopAccountController(
+      error instanceof Error ? error.message : String(error),
+    )
+    void failed.dispose().catch((disposeError: unknown) => {
+      console.error('[desktop-platform-account] dispose after failed start:', disposeError)
+    })
   }
-  if (accountEnvironment === undefined) {
-    account = new UnavailableDesktopAccountController('Platform environment is not configured')
-    pairing = new UnavailableDesktopPairingController('Platform environment is not configured')
-  } else {
-    const relay = createDesktopRemoteRelay({ environment: accountEnvironment, source: process.env })
-    account = createDesktopAccount(accountEnvironment)
-    let accountReady = true
-    try {
-      await account.start()
-    } catch (error) {
-      accountReady = false
-      smokeLog('account start failed ' + (error instanceof Error ? error.message : String(error)))
-      const failed = account
-      account = new UnavailableDesktopAccountController(
-        error instanceof Error ? error.message : String(error),
-      )
-      void failed.dispose().catch((disposeError: unknown) => {
-        console.error('[desktop-platform-account] dispose after failed start:', disposeError)
-      })
-    }
-    if (accountReady) smokeLog('account ready')
-    pairing = createDesktopPairing(accountEnvironment, account, relay)
-    accountSignedIn = account.getSnapshot().status === 'signed-in'
-    if (accountSignedIn) {
-      await pairing.start().catch((error: unknown) => {
-        console.error('[desktop-personal-pairing] initial Remote Access load failed:', error)
-      })
-    }
+  if (accountReady) smokeLog('account ready')
+  pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
+  accountSignedIn = account.getSnapshot().status === 'signed-in'
+  if (accountSignedIn) {
+    await pairing.start().catch((error: unknown) => {
+      console.error('[desktop-personal-pairing] initial Remote Access load failed:', error)
+    })
   }
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)
@@ -170,11 +221,12 @@ async function boot(): Promise<void> {
         () => !hostStartController.signal.aborted,
       )
     host = started.value
+    installCompanionHost(host)
     observeHostExit(host)
     smokeLog('host ' + host.url + ' pid ' + String(host.child.pid))
     await window.loadURL(host.url)
     if (process.env.DSH_DESKTOP_SMOKE === '1') {
-      await finishSmoke(window)
+      await finishSmoke(window, host.url)
       return
     }
     void ensureChromeOverlay(window, host.url)
@@ -207,6 +259,58 @@ async function boot(): Promise<void> {
       lastCheckedAt: null,
       errorMessage: error instanceof Error ? error.message : String(error),
     })
+  }
+}
+
+async function handleDesktopCompanionOperation(
+  operation: CompanionOperation,
+  selector: RelayPairingSelector,
+  context: { generation: number; desktopRevision: number },
+  snowPairingVault: DesktopSnowPairingVault,
+): Promise<DesktopCompanionOperationOutput> {
+  const pairingId = parsePersonalPairingId(selector)
+  if (operation.type === 'query-operation-status') {
+    return await companionProduct.queryOperationStatus(pairingId, operation.operationId)
+  }
+  const attachmentKey = snowPairingVault.attachmentKey(selector)
+  if (attachmentKey === undefined) {
+    return {
+      type: 'operation-failed', operationId: operation.operationId,
+      failure: { kind: 'business', code: 'pairing-revoked', message: 'Personal Pairing is no longer active' },
+    }
+  }
+  const desktopName = account.installationPresentation()?.name
+  if (desktopName === undefined) {
+    attachmentKey.fill(0)
+    return {
+      type: 'operation-failed', operationId: operation.operationId,
+      failure: { kind: 'business', code: 'installation-unavailable', message: 'Desktop Installation presentation is unavailable' },
+    }
+  }
+  try {
+    const authorization = await account.authorizeCurrentInstallation()
+    const headers = {
+      Authorization: `Bearer ${authorization.accessToken}`,
+      'X-Gestalt-Proof-Jti': authorization.proof.jti,
+      'X-Gestalt-Proof-Issued-At': String(authorization.proof.issuedAt),
+      'X-Gestalt-Proof-Signature': authorization.proof.signature,
+    }
+    return await companionProduct.handle(operation, {
+      pairingId,
+      attachmentKey,
+      now: Date.now,
+      downloadAttachment: async offer => await downloadCompanionAttachment(offer, {
+        pairingId, origin: accountEnvironment.origin, headers,
+      }),
+      submitAttachment: async input => await companionProduct.submitAttachment(input),
+      generation: context.generation,
+      desktopRevision: context.desktopRevision,
+      desktopName,
+      resolveInteraction: interactionId => companionProduct.resolveInteraction(interactionId, attachmentKey),
+      pendingInteractions: sessionId => companionProduct.pendingInteractions(sessionId, attachmentKey),
+    })
+  } finally {
+    attachmentKey.fill(0)
   }
 }
 
@@ -344,6 +448,7 @@ function observeHostExit(running: RunningWebHost): void {
 
 async function onHostExit(exited: RunningWebHost): Promise<void> {
   if (shuttingDown || host !== exited) return
+  clearCompanionHost()
   host = undefined
   const plan = planHostExit(window !== undefined && !window.isDestroyed(), respawned)
   if (plan === 'ignore' || window === undefined) return
@@ -351,6 +456,7 @@ async function onHostExit(exited: RunningWebHost): Promise<void> {
     respawned = true
     try {
       host = await startHost()
+      installCompanionHost(host)
       observeHostExit(host)
       await window.loadURL(host.url)
       void ensureChromeOverlay(window, host.url)
@@ -380,7 +486,7 @@ function installIntegrationsOnce(): void {
   })
 }
 
-async function finishSmoke(target: BrowserWindow): Promise<void> {
+async function finishSmoke(target: BrowserWindow, hostUrl: string): Promise<void> {
   const evidence: unknown = await target.webContents.executeJavaScript(`(async () => {
     const bridge = window.dshDesktop
     const updaterStatus = await bridge?.getStatus()
@@ -442,6 +548,66 @@ async function finishSmoke(target: BrowserWindow): Promise<void> {
     requestShutdown(1)
     return
   }
+  const smokeRpc = createDesktopHostRpc(hostUrl, {
+    timeoutMs: 10_000,
+    responseMaxBytes: REMOTE_PROTOCOL_LIMITS.companionMessageBytes,
+  })
+  const sessionId = 'desktop-smoke-indexed-session'
+  const needle = 'desktop-companion-smoke-indexed-needle'
+  const created = await smokeRpc.call('session.create', { sessionId })
+  const prompted = created.ok
+    ? await smokeRpc.call('session.prompt', {
+      sessionId,
+      mode: 'queue',
+      content: [{ type: 'text', text: needle }],
+    })
+    : created
+  if (!created.ok || !prompted.ok) {
+    smokeLog(`companion entry seed failed ${JSON.stringify(!created.ok ? created : prompted)}`)
+    console.error('dsh desktop smoke: Companion Session seed failed', !created.ok ? created : prompted)
+    requestShutdown(1)
+    return
+  }
+  const hitOperation: CompanionSearchSessionsOperation = {
+    type: 'search-sessions',
+    operationId: parseCompanionOperationId('desktop-smoke-search-hit'),
+    query: needle,
+  }
+  const dependencies = {
+    pairingId: parsePersonalPairingId('desktop-smoke-pairing'),
+    attachmentKey: new Uint8Array(32),
+    now: Date.now,
+    downloadAttachment: () => Promise.reject(new Error('Desktop smoke search must not download an attachment')),
+    submitAttachment: () => Promise.reject(new Error('Desktop smoke search must not submit an attachment')),
+  }
+  let hitEvidence = await companionProduct.handle(hitOperation, dependencies)
+  const searchDeadline = Date.now() + 10_000
+  while (
+    Date.now() < searchDeadline
+    && (!isSessionSearchResult(hitEvidence)
+      || hitEvidence.items.every(item => item.sessionId !== sessionId || !item.snippet.includes(needle)))
+  ) {
+    await new Promise(resolve => setTimeout(resolve, 50))
+    hitEvidence = await companionProduct.handle(hitOperation, dependencies)
+  }
+  smokeLog(`companion entry search hit ${JSON.stringify(hitEvidence)}`)
+  if (!isSessionSearchResult(hitEvidence)
+    || hitEvidence.items.every(item => item.sessionId !== sessionId || !item.snippet.includes(needle))) {
+    console.error('dsh desktop smoke: Companion entry indexed search failed', hitEvidence)
+    requestShutdown(1)
+    return
+  }
+  const noHitEvidence = await companionProduct.handle({
+    type: 'search-sessions',
+    operationId: parseCompanionOperationId('desktop-smoke-search-no-hit'),
+    query: 'desktop-companion-smoke-no-hit',
+  }, dependencies)
+  smokeLog(`companion entry search no-hit ${JSON.stringify(noHitEvidence)}`)
+  if (!isSessionSearchResult(noHitEvidence) || noHitEvidence.items.length !== 0) {
+    console.error('dsh desktop smoke: Companion entry no-hit search failed', noHitEvidence)
+    requestShutdown(1)
+    return
+  }
   smokeLog('ok')
   console.log('dsh desktop smoke: ok')
   smokeLog(`relay production-gate ${JSON.stringify(pairing.getRelayState())}`)
@@ -467,6 +633,7 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
   hostStartController.abort()
   const starting = pendingHost
   const running = host
+  clearCompanionHost()
   host = undefined
   void (async () => {
     try {
@@ -484,6 +651,16 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
       if (mode === 'exit') app.exit(1)
     }
   })()
+}
+
+function installCompanionHost(running: RunningWebHost): void {
+  clearCompanionHost()
+  uninstallCompanionHost = companionProduct.installHost(running.url)
+}
+
+function clearCompanionHost(): void {
+  uninstallCompanionHost?.()
+  uninstallCompanionHost = undefined
 }
 
 function installIpc(): void {
@@ -648,32 +825,20 @@ function pushPairingSnapshot(snapshot: ReturnType<DesktopPairingActions['getSnap
 }
 
 function createDesktopAccount(environment: SelectedPlatformEnvironment): DesktopAccountActions {
-  const fetch = createLoopbackListenFetch(environment.origin)
-  const transport = new PlatformAccountHttpTransport({
-    environment,
-    ...(fetch === undefined ? {} : { fetch }),
-  })
+  const transport = new PlatformAccountHttpTransport({ environment })
   const store = new EncryptedDesktopAccountStore(
     join(app.getPath('userData'), `platform-account-${environment.databaseIdentity}.bin`),
-    isLoopbackListenUrl(environment.origin)
-      ? {
-        encrypt: value => Buffer.from(value),
-        decrypt: value => Buffer.from(value).toString('utf8'),
-      }
-      : {
-        encrypt: value => safeStorage.encryptString(value),
-        decrypt: value => safeStorage.decryptString(Buffer.from(value)),
-      },
+    {
+      encrypt: value => safeStorage.encryptString(value),
+      decrypt: value => safeStorage.decryptString(Buffer.from(value)),
+    },
   )
   return new DesktopAccountController({
     environment,
     transport,
     store,
-    systemBrowser: {
-      open: async (url) => {
-        await openDesktopAuthorizationUrl(url, async (target) => { await shell.openExternal(target) })
-      },
-    },
+    presentation: desktopInstallationPresentation({ hostname: hostname(), platform: process.platform }),
+    systemBrowser: { open: async (url) => { await shell.openExternal(url) } },
   })
 }
 
@@ -681,20 +846,17 @@ function createDesktopPairing(
   environment: SelectedPlatformEnvironment,
   currentAccount: DesktopAccountActions,
   relay: DesktopRelayLifecycle,
+  snowPairingVault: DesktopSnowPairingVault,
 ): DesktopPairingActions {
   const unavailableReason = 'Personal Pairing requires an independently reviewed handshake and Relay crypto provider.'
-  if (environment.environment !== 'development' || process.env.DSH_PERSONAL_PAIRING_KEYLESS !== '1') {
-    return new UnavailableDesktopPairingController(`${unavailableReason} Development proof mode is disabled.`, relay)
+  if (environment.environment !== 'production') {
+    return new UnavailableDesktopPairingController(`${unavailableReason} Product mode is disabled.`, relay)
   }
-  const fetch = createLoopbackListenFetch(environment.origin)
   return new DesktopPairingController({
     account: currentAccount,
-    transport: new RemoteAccessHttpTransport({
-      environment,
-      ...(fetch === undefined ? {} : { fetch }),
-    }),
+    transport: new RemoteAccessHttpTransport({ environment }),
     relay,
-    pairingKeys: new DesktopPairingKeyVault(),
+    snowPairingVault,
   })
 }
 
@@ -716,4 +878,16 @@ function escapeHtml(value: string): string {
     if (ch === '"') return '&quot;'
     return '&#39;'
   })
+}
+
+function isSessionSearchResult(
+  output: DesktopCompanionOperationOutput,
+): output is CompanionSessionSearchResult {
+  return !isCompanionResultList(output) && output.type === 'session-search'
+}
+
+function isCompanionResultList(
+  output: DesktopCompanionOperationOutput,
+): output is readonly CompanionResult[] {
+  return Array.isArray(output)
 }

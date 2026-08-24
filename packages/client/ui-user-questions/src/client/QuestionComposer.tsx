@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import clsx from 'clsx'
+import type { PendingWait } from '@deepseek-ai/dsh-client-runtime/client'
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   Button, IconCheckOutline14, IconChevronDownOutline14, IconChevronLeftOutline14,
   IconChevronRightOutline14, IconChevronUpOutline14, IconCloseOutline16,
@@ -42,7 +44,14 @@ export function parseRecommendedLabel(label: string): { label: string; recommend
 function isComposing(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
   // keyCode 229 is the legacy IME-composition signal engines emit without isComposing.
   // oxlint-disable-next-line typescript/no-deprecated
-  return event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
+  return event.nativeEvent.isComposing || event.nativeEvent.key === 'Process' || event.nativeEvent.keyCode === 229
+}
+
+/** Owner-defined question presentation props shared by Desktop and direct Web compositions. */
+export interface QuestionPresentationViewProps {
+  wait: PendingWait<'question'>
+  t: TranslateNS<'question'>
+  disabled?: boolean | undefined
 }
 
 /** The free-text answer field shared by both question shapes. */
@@ -101,29 +110,34 @@ function AnswerField(props: AnswerFieldProps) {
 }
 
 /**
- * Composer takeover boundary; the carrier key keys local drafts, so a
- * same-request replay (same key, new carrier object) preserves them.
- *
- * One takeover, two shapes: a request that declares a presentation intent this
- * package renders takes that shape (a plan review is one decision over one
- * plan, not a question set), and every other request takes the generic flow.
- * The routing lives here, at the one entry that owns the composer seat, so
- * neither shape can claim a request the other is already rendering.
- *
- * @param props - the selector-matched pending question carrier plus the framework standard kit.
- * @returns The question flow, or the intent's own surface, for this request.
+ * Present one pending question without constructing a Client Runtime standard kit.
+ * @param props - pending question, translator, and mutation state.
+ * @returns generic question flow or its declared owner presentation.
  */
-export function QuestionComposer(props: QuestionComposerProps) {
+export function QuestionPresentationView({ wait, t, disabled = false }: QuestionPresentationViewProps) {
   // Domain-face mint rides the carrier's stable identity (never minted in a
   // select/render dispatch — per-dispatch minting would churn memo identity).
-  const question = useMemo(() => new PendingQuestion(props.matched), [props.matched])
+  const question = useMemo(() => new PendingQuestion(wait), [wait])
   const review = useMemo(() => planReviewOf(question.questions), [question])
-  return review === undefined
-    ? <QuestionFlow key={question.key} pending={question} t={props.t} />
-    : <PlanReviewPanel key={question.key} pending={question} review={review} t={props.t} />
+  return (
+    <fieldset className={css.mutationScope} disabled={disabled} role="presentation">
+      {review === undefined
+        ? <QuestionFlow key={question.key} pending={question} t={t} />
+        : <PlanReviewPanel key={question.key} pending={question} review={review} t={t} />}
+    </fieldset>
+  )
 }
 
-function QuestionFlow({ pending, t }: { pending: PendingQuestion } & Pick<QuestionComposerProps, 't'>) {
+/**
+ * Mount the owner-defined question presentation in the Desktop composer chain.
+ * @param props - selector-matched pending question and Desktop standard kit.
+ * @returns shared question presentation.
+ */
+export function QuestionComposer(props: QuestionComposerProps) {
+  return <QuestionPresentationView wait={props.matched} t={props.t} />
+}
+
+function QuestionFlow({ pending, t }: { pending: PendingQuestion; t: TranslateNS<'question'> }) {
   const questions = pending.questions
   const [index, setIndex] = useState(0)
   const [drafts, setDrafts] = useState<DraftAnswer[]>(() => questions.map(() => ({

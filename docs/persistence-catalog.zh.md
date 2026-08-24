@@ -626,6 +626,27 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 ### `session/*`
 
+<a id="sessionattachment-admitted--log-only"></a>
+
+#### `session/attachment-admitted` — log-only
+
+```ts persistence-catalog
+/**
+ * Records one immutable file admitted through the authenticated Companion path.
+ * This log-only event never enters model history.
+ * @param attachment - durable verified file reference.
+ * @param operationId - idempotency identity from the encrypted Companion operation.
+ * @param source - authenticated Companion admission source.
+ */
+'session/attachment-admitted': {
+  attachment: FileAttachmentRef
+  operationId: string
+  source: 'companion'
+}
+```
+
+来源：[`packages/host/apiproxy/src/api/sessions.ts:29`](../packages/host/apiproxy/src/api/sessions.ts)
+
 <a id="sessionend-seed--log-only"></a>
 
 #### `session/end-seed` — log-only

@@ -4,6 +4,8 @@ Status: proposed
 
 English | [中文](2026-08-17-mobile-companion.zh.md)
 
+The real product path and foreground-only lifecycle are owned by [Use the real Companion product path](../architecture/2026-08-22-real-companion-product-path.md), which supersedes this proposal's push delivery and proof-path acceptance clauses. [Project live Sessions as bounded replacements](../../implemented/architecture/2026-08-24-companion-live-session-projection.md) implements the open-transcript and hidden-summary projection described here; the remaining proposal stays active.
+
 ## Problem
 
 DeepSeek Gestalt exposes the Session Surface only through a Desktop Host that loads its loopback Web Host. A person cannot use a phone on another network to inspect ongoing work, answer an interaction, or continue a Session. The existing Web Host is not a remote-access service: exposing it directly would make agent capabilities reachable without device authentication, transport security, revocation, or a versioned independently released client protocol.
@@ -32,11 +34,11 @@ Desktop and Mobile must authenticate the same Platform Account before Personal P
 
 The first version has no Platform Account deletion, cross-installation Account Session management, or lost-installation recovery flow. Desktop and Mobile show GitHub login and avatar, the current installation session, current-installation sign-out, and their existing Personal Pairing controls; the HTTPS OAuth callback page only reports success or failure. Account identity and metadata remain under the accepted retention rules after sign-out.
 
-Open registration uses validated resource quotas rather than an allowlist. One account may retain at most ten Desktop installations, ten Mobile installations, fifty Personal Pairings, and twenty concurrent Platform connections. It may create ten Pairing Challenges per hour, while one IP may create thirty per hour. It may hold five concurrent ciphertext blobs, upload at most 1 GiB per day under the existing 100 MiB per-blob ceiling, and emit at most five hundred push hints per day. Exceeding a quota returns a stable error and retry time. IP limits protect authentication and pairing only; they do not throttle established ciphertext streams.
+Open registration uses validated resource quotas rather than an allowlist. One account may retain at most ten Desktop installations, ten Mobile installations, fifty Personal Pairings, and twenty concurrent Platform connections. It may create ten Pairing Challenges per hour, while one IP may create thirty per hour. It may hold five concurrent ciphertext blobs and upload at most 1 GiB per day under the existing 100 MiB per-blob ceiling. Exceeding a quota returns a stable error and retry time. IP limits protect authentication and pairing only; they do not throttle established ciphertext streams.
 
 The two-instance deployment has no account-count ceiling or automatic scaling. When aggregate connection or resource watermarks are reached, Platform preserves existing connections and rejects new login, pairing, blob upload, or WSS attachment with `PLATFORM_CAPACITY` and `retryAfter`; CloudMonitor alerts operators to expand capacity. The first version has no operator account-disable control or administration console.
 
-Before GitHub authorization, Platform presents a bilingual privacy notice covering GitHub id, login and avatar, installation and pairing metadata, push tokens, seven-day raw-IP logs, thirty-day content-free security events, expiring ciphertext blobs, and the absence of an in-product Platform Account deletion flow. Continuing sign-in accepts that notice without a separate checkbox.
+Before GitHub authorization, Platform presents a bilingual privacy notice covering GitHub id, login and avatar, installation and pairing metadata, seven-day raw-IP logs, thirty-day content-free security events, expiring ciphertext blobs, and the absence of an in-product Platform Account deletion flow. Continuing sign-in accepts that notice without a separate checkbox.
 
 The Paired Desktop is the sole authority for Session events, Workspaces, credentials, and agent execution. A mobile mutation succeeds only after the Desktop commits or confirms it; neither Mobile Companion nor the cloud keeps a writable Session replica.
 
@@ -58,13 +60,13 @@ The first version has no global cryptographic Desktop Principal. Enabling remote
 
 The Companion Surface source shares the DSH Client Runtime and page components in this monorepo, while each mobile release bundles its compiled page assets. A Paired Desktop and the relay never supply executable page code to the application at connection time.
 
-`apps/mobile` uses Capacitor as the native container for the locally bundled Companion Surface. The web Client owns page rendering; native adapters own camera access, device keys, deep links, push registration, file selection, and encrypted local storage. The prior Expo and React Native implementation remains behavioral reference material rather than a source of page code.
+`apps/mobile` uses Capacitor as the native container for the locally bundled Companion Surface. The web Client owns page rendering; native adapters own camera access, device keys, deep links, file selection, and encrypted local storage. The prior Expo and React Native implementation remains behavioral reference material rather than a source of page code.
 
-A new Remote Access Platform Capability replaces the prior plaintext Java gateway. It owns the Personal Pairing registry, Remote Relay, encrypted-blob capability, and content-free push hints as one deep module. Both Mobile Companion and Desktop establish outbound WSS connections to its Remote Relay, whose interface contains no Workspace, Session, prompt, tool, model, approval, or other DSH business type.
+A new Remote Access Platform Capability replaces the prior plaintext Java gateway. It owns the Personal Pairing registry, Remote Relay, and encrypted-blob capability as one deep module. Both Mobile Companion and Desktop establish outbound WSS connections to its Remote Relay, whose interface contains no Workspace, Session, prompt, tool, model, approval, or other DSH business type.
 
 `apps/platform` is the independently deployable Cordis composition root for centralized Platform Capabilities in this monorepo and does not mount Harness Engine. Account and Remote Access are its initial capabilities rather than the application's deployment identity. The proposed `@deepseek-ai/dsh-platform-account` package is a deep Account plugin that owns GitHub OAuth, Platform Account, Account Session, installation-key binding, and current-installation sign-out. Remote Access consumes its Account Service to validate sessions and same-account pairing without reading account tables or GitHub fields. Platform otherwise shares only process lifecycle, validated configuration, health endpoints, and PostgreSQL, Redis, OSS, logging, and secret adapters; every capability owns its authorization, tables, Redis namespace, routes, and observability fields. Later capabilities may recognize Platform Account identity but cannot reuse Remote Access Device Principals, data, or decrypted values without a separate decision.
 
-Remote Access uses four proposed deep packages. `@deepseek-ai/dsh-remote-protocol` owns wire codecs, version and capability negotiation, stable errors, branded ids, parser limits, and Noise vectors. `@deepseek-ai/dsh-remote-platform` owns the complete Platform plugin and keeps pairing, relay, blob, push, and cross-instance coordination internal. `@deepseek-ai/dsh-remote-desktop` owns Desktop connection lifecycle, DSH projections, operation idempotency, and audit attribution. `@deepseek-ai/dsh-remote-client` owns the Mobile synchronization state machine, operation receipts, and cache interface. Application directories compose these modules but do not duplicate their state machines.
+Remote Access uses four proposed deep packages. `@deepseek-ai/dsh-remote-protocol` owns wire codecs, version and capability negotiation, stable errors, branded ids, parser limits, and Noise vectors. `@deepseek-ai/dsh-remote-platform` owns the complete Platform plugin and keeps pairing, relay, blob, and cross-instance coordination internal. `@deepseek-ai/dsh-remote-desktop` owns Desktop connection lifecycle, DSH projections, operation idempotency, and audit attribution. `@deepseek-ai/dsh-remote-client` owns the Mobile synchronization state machine, operation receipts, and cache interface. Application directories compose these modules but do not duplicate their state machines.
 
 The network uses two protocols. Relay Transport Protocol frames route attachment, ciphertext, heartbeat, revocation, transport errors, and transport-version negotiation that the Relay can read. Encrypted Companion Protocol runs inside that ciphertext and carries only the projections, operations, results, and application-version negotiation approved for the Companion Surface. A Desktop adapter maps that narrow protocol to existing DSH Session and Host capabilities; the remote route never tunnels the complete `/api/*` or Host WebSocket interface.
 
@@ -86,21 +88,21 @@ Companion Cache retains encrypted-at-rest Workspace and Session metadata plus tr
 
 Attachments use end-to-end encrypted blob transfer instead of application plaintext or large messages in the live stream. Mobile Companion encrypts the bytes before upload; the Relay issues a Personal-Pairing-scoped capability with size and expiry limits; Desktop verifies the ciphertext hash, downloads, and decrypts it. Expiry, revocation, or successful receipt removes the blob. The WSS path carries control messages and bounded small frames only.
 
-The first usable mobile release sends push notifications for pending approvals and human questions plus turn completion and failure. APNs, FCM, or another push provider receives only a non-sensitive routing reference and generic state; Mobile Companion fetches the encrypted details after opening. Streaming chunks do not generate push notifications. Push Hint remains internal to Remote Access instead of becoming a generic Platform notification bus.
+Mobile Companion learns current state only after the user opens or foregrounds the application. Backgrounding pauses WSS; foregrounding reconnects to the selected Paired Desktop and completes authenticated Desktop-authoritative synchronization before enabling any mutation. The product has no background notification delivery.
 
 The first deployment is a single-region initial service sized for roughly fifty Desktops but open to every GitHub-authenticated account. It supports multiple concurrent Platform Instances from its first release. Remote Relay routing and ciphertext forwarding work when Mobile and Desktop attach to different Platform Instances. Multi-region routing remains outside the initial deployment, and deploys may reconnect peers rather than migrate live sockets.
 
-The pilot deploys exactly two stateless Platform Instances on separate Alibaba Cloud compute instances behind one TLS load balancer without connection affinity. Alibaba Cloud managed PostgreSQL stores durable pairing, revocation, push-token, blob-metadata, and content-free security-audit records. Managed Redis keeps the expiring online connection directory and carries cross-instance ciphertext Pub/Sub without becoming an offline queue. OSS retains only expiring ciphertext blobs through the object-storage adapter. When a Platform Instance exits or a rolling deployment replaces it, attached peers reconnect and resynchronize through the other instance.
+The pilot deploys exactly two stateless Platform Instances on separate Alibaba Cloud compute instances behind one TLS load balancer without connection affinity. Alibaba Cloud managed PostgreSQL stores durable pairing, revocation, blob-metadata, and content-free security-audit records. Managed Redis keeps the expiring online connection directory and carries cross-instance ciphertext Pub/Sub without becoming an offline queue. OSS retains only expiring ciphertext blobs through the object-storage adapter. When a Platform Instance exits or a rolling deployment replaces it, attached peers reconnect and resynchronize through the other instance.
 
-Alibaba Cloud SLS and CloudMonitor receive content-free operational signals: connection counts, authentication failure categories, cross-instance forwarding latency, reconnects, revocation propagation, blob byte and expiry totals, push-provider outcomes, dependency health, and structured error codes. Logs and traces never contain ciphertext bodies, public keys, push tokens, device names, Pairing Challenges, full links, or complete route and pairing ids. Cross-instance correlation uses random request ids, while identifiers exposed to aggregate telemetry use HMAC pseudonyms under a rotating deployment key.
+Alibaba Cloud SLS and CloudMonitor receive content-free operational signals: connection counts, authentication failure categories, cross-instance forwarding latency, reconnects, revocation propagation, blob byte and expiry totals, dependency health, and structured error codes. Logs and traces never contain ciphertext bodies, public keys, device names, Pairing Challenges, full links, or complete route and pairing ids. Cross-instance correlation uses random request ids, while identifiers exposed to aggregate telemetry use HMAC pseudonyms under a rotating deployment key.
 
-Platform configuration references Alibaba Cloud KMS or Secrets Manager values, or secrets injected by deployment. PostgreSQL, Redis, OSS, GitHub, APNs, and FCM credentials never enter the database, repository, `cordis.yml`, or logs. A capability with a missing required credential fails to load with a specific diagnostic instead of silently disabling or weakening its behavior.
+Platform configuration references Alibaba Cloud KMS or Secrets Manager values, or secrets injected by deployment. PostgreSQL, Redis, OSS, and GitHub credentials never enter the database, repository, `cordis.yml`, or logs. A capability with a missing required credential fails to load with a specific diagnostic instead of silently disabling or weakening its behavior.
 
 The first version relies on Alibaba Cloud's managed backup and disaster-recovery facilities. It does not implement an application-level restore epoch, suspend all pairings after restore, orchestrate cross-region failover, back up Redis connection state, or recover expiring ciphertext blobs. A stale Relay record still cannot authenticate a revoked device after Desktop deletes that Personal Pairing's key, but cloud restore procedure and availability targets remain deployment configuration rather than product protocol.
 
 Development and production each use a separate GitHub OAuth App, Platform origin, callback, client credential, database, and identity namespace. Each build trusts only its corresponding Platform origin. The first version has no staging environment and does not accept an arbitrary server URL from a user or Pairing Challenge; the QR and full link identify only a rendezvous and challenge within that trusted origin. Self-hosted Platform selection and custom trust roots require a later deployment decision.
 
-The Capacitor project keeps both iOS and Android builds healthy. Initial distribution uses TestFlight and a signed Android APK; public App Store and Google Play publication wait for real-device pairing, key storage, deep-link, push, cache, and upgrade acceptance. Capacitor obtains APNs and FCM tokens directly, and Remote Access calls those provider interfaces without Expo Push Service.
+The Capacitor project keeps both iOS and Android builds healthy. Initial distribution uses TestFlight and a signed Android APK; public App Store and Google Play publication wait for real-device pairing, key storage, deep-link, foreground synchronization, cache, and upgrade acceptance.
 
 Remote operation attribution is durable but not model-visible. The Paired Desktop records operation id, Device Principal, operation category, acceptance, and result; ordinary conversation presentation remains unchanged, with device origin available in details. The model never receives device name, IP address, or network origin.
 
@@ -108,9 +110,9 @@ The first Encrypted Companion Protocol catalog can list Paired Desktops, Workspa
 
 Mobile approval renders the same exact arguments, cwd, diff, terminal summary, and decision options that the Desktop Approval Service authorizes. It does not remove persistent authorization or other valid Desktop choices, and it does not invent a mobile-specific policy layer. The Desktop remains the authority that commits the decision and its Device Principal attribution.
 
-A push notification never performs an operation. Tapping it opens the target Paired Desktop, Session, and interaction; Mobile Companion reconnects and synchronizes before presenting the current Desktop-owned actions or settled outcome.
+A deep link never carries interaction authority. Pairing links identify one short-lived Pairing Challenge; Mobile Companion reconnects and synchronizes before presenting any current Desktop-owned action or settled outcome.
 
-Mobile Companion pauses its WSS connection while backgrounded. APNs or FCM provides the content-free wake signal, and foreground activation reconnects and resynchronizes authoritative state. The first version does not depend on a silent background task or keep a background socket alive.
+Mobile Companion pauses its WSS connection while backgrounded. Opening or foregrounding the application reconnects and resynchronizes authoritative state. The first version does not depend on a silent background task or keep a background socket alive.
 
 Mobile navigation does not reproduce Desktop columns. The root selects a Paired Desktop, Workspace filters its Session list, and one Session occupies the full conversation view. A visible interaction inbox and in-conversation cards expose approvals and human questions. Only the open transcript receives live detail; hidden Sessions update summaries.
 
@@ -120,9 +122,9 @@ Ungrouped Session behavior remains consistent with Desktop. Mobile Companion can
 
 Mobile Companion has no separate biometric or application-lock feature. It relies on operating-system device access control, protected key storage, and encrypted local storage.
 
-Revocation first commits a higher pairing revision in PostgreSQL, updates its current Redis revision, and publishes a cross-instance revocation event. Each Relay closes matching active sockets immediately and verifies the current revision again on heartbeat so a missed Pub/Sub event cannot preserve access. If Redis cannot confirm validity, new attachment fails closed and an active pairing closes at its next check. Individual revocation deletes that pairing's Desktop key and push token; revoke-all or disabling Mobile Access also rotates the Desktop Relay credential and closes the Desktop route.
+Revocation first commits a higher pairing revision in PostgreSQL, updates its current Redis revision, and publishes a cross-instance revocation event. Each Relay closes matching active sockets immediately and verifies the current revision again on heartbeat so a missed Pub/Sub event cannot preserve access. If Redis cannot confirm validity, new attachment fails closed and an active pairing closes at its next check. Individual revocation deletes that pairing's Desktop key; revoke-all or disabling Mobile Access also rotates the Desktop Relay credential and closes the Desktop route.
 
-The Relay durably retains public keys, pairing state and revision, and revocations. It deletes push tokens when their pairing ends and ciphertext blobs on receipt or expiry. Presence, heartbeats, routes, and ciphertext frames remain process-local. Content-free security events remain for thirty days, while raw IP access logs remain for no more than seven days.
+The Relay durably retains public keys, pairing state and revision, and revocations. It deletes ciphertext blobs on receipt or expiry. Presence, heartbeats, routes, and ciphertext frames remain process-local. Content-free security events remain for thirty days, while raw IP access logs remain for no more than seven days.
 
 The Paired Desktop orders concurrent local and mobile operations by authoritative acceptance and commit. Each remote mutation carries a globally unique operation id and Device Principal so retries are idempotent. A one-shot interaction, cancellation, or other first-commit-wins operation returns the already-settled authoritative result to a later caller instead of overwriting it.
 
@@ -130,9 +132,9 @@ Mobile Companion durably keeps an operation receipt only after sending a mutatio
 
 The system and store name is **DeepSeek Gestalt**, while Mobile Companion remains the domain term for its mobile role. The mobile application uses bundle identifier `com.gestalt.deepseek.mobile`. It inherits DSH design tokens, shared renderers, Chinese and English terminology, and light and dark themes rather than the prior mobile application's beige and orange identity. The initial theme and language follow the operating system, after which the same explicit user choices as DSH take precedence.
 
-Delivery proceeds in dependency order: bounded cryptographic prototypes and the security-review entry point; Remote Protocol and cross-runtime vectors; the Platform Remote Access plugin and two-instance routing; the Desktop adapter, Mobile Access settings, and audit trail; Mobile Client Runtime plus Capacitor key and cache adapters; then assembled pages, blobs, push, real-device acceptance, and failure testing. A later layer does not substitute mocks for an unfinished lower-layer acceptance path.
+Delivery proceeds in dependency order: bounded cryptographic prototypes and the security-review entry point; Remote Protocol and cross-runtime vectors; the Platform Remote Access plugin and two-instance routing; the Desktop adapter, Mobile Access settings, and audit trail; Mobile Client Runtime plus Capacitor key and cache adapters; then assembled pages, blobs, real-device acceptance, and failure testing. A later layer does not substitute mocks for an unfinished lower-layer acceptance path.
 
-Keyless assembled-application snapshots cover logged-out Pairing Challenge refusal, cross-account pairing refusal, same-account Workspace and Ungrouped Session creation, Mobile prompt attribution without model-visible device data, Mobile Approval and Ask User completion, Remote Offline plus uncertain-operation recovery, and post-revocation rejection. Package and integration tests own OAuth, Noise, parser ceilings, idempotency, revision invalidation, and two-instance failure paths; iOS and Android devices own native key, push, cache, and page acceptance.
+Keyless assembled-application snapshots cover logged-out Pairing Challenge refusal, cross-account pairing refusal, same-account Workspace and Ungrouped Session creation, Mobile prompt attribution without model-visible device data, Mobile Approval and Ask User completion, Remote Offline plus uncertain-operation recovery, and post-revocation rejection. Package and integration tests own OAuth, Noise, parser ceilings, idempotency, revision invalidation, and two-instance failure paths; iOS and Android devices own native key, foreground lifecycle, cache, and page acceptance.
 
 ## Alternatives considered
 
@@ -170,7 +172,7 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 
 **Restrict account creation to a GitHub id allowlist.** Rejected because the first service is open to every authenticated GitHub account rather than a closed pilot cohort.
 
-**Treat open registration as unlimited resource authority.** Rejected because per-account, installation, pairing, blob, push, and authentication quotas bound the cost of one identity without closing registration.
+**Treat open registration as unlimited resource authority.** Rejected because per-account, installation, pairing, blob, and authentication quotas bound the cost of one identity without closing registration.
 
 **Automatically scale Platform or terminate existing connections at capacity.** Rejected from the first deployment because two purchased instances remain fixed; load shedding protects existing connections and reports explicit retry timing until an operator expands them.
 
@@ -208,7 +210,7 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 
 **Download executable Companion Surface code from the Paired Desktop.** Rejected because independently reviewed mobile releases need deterministic application code and an offline-capable shell; compatibility belongs in an explicit remote protocol.
 
-**Defer push notifications until after the interactive client.** Rejected because approvals and human questions lose their remote value when a backgrounded application cannot alert the user.
+**Add background notifications before the product has a native delivery path.** Rejected because dormant token, credential, persistence, privacy, quota, and compatibility surfaces do not deliver an alert. Foreground synchronization is the accepted lifecycle.
 
 **Resolve concurrent operations with client clocks or last-writer-wins.** Rejected because only the Paired Desktop can order committed Session and interaction state, and retries must not duplicate mutations.
 
@@ -222,7 +224,7 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 
 **Let Platform become a shared business gateway or let capabilities inherit every account permission.** Rejected because the composition root shares infrastructure, not authority or plaintext. Each Platform Capability separately authorizes what a Platform Account may do.
 
-**Split pairing, relay, blobs, and push into independent shallow Platform services.** Rejected because they jointly implement one Remote Access lifecycle and authorization model; the deep capability keeps their implementation internal while Remote Relay remains a narrow transport component.
+**Split pairing, relay, and blobs into independent shallow Platform services.** Rejected because they jointly implement one Remote Access lifecycle and authorization model; the deep capability keeps their implementation internal while Remote Relay remains a narrow transport component.
 
 **Keep Expo and React Native as the page runtime.** Rejected because the accepted Companion Surface shares the existing React web Client; Capacitor provides the required native adapters without creating another page renderer.
 
@@ -250,8 +252,6 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 
 **Publish immediately through the public mobile stores.** Rejected because controlled TestFlight and signed-APK distribution can validate native security and lifecycle behavior before creating public upgrade obligations.
 
-**Send push through Expo Push Service.** Rejected because the Capacitor application can register directly with APNs and FCM, avoiding another routing intermediary.
-
 **Make device origin model-visible or visually prominent.** Rejected because source attribution is an audit and detail concern, not model context or primary conversation content.
 
 **Persist live routes, heartbeats, ciphertext frames, or indefinite access logs.** Rejected because reconnect reconstructs live routing, encrypted frames are not application authority, and indefinite metadata retention does not serve the pilot.
@@ -268,9 +268,9 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 
 **Restrict persistent approval choices on Mobile.** Rejected because the Desktop Approval Service already owns which decisions are valid. Mobile renders that interface without another policy layer and preserves Desktop commit authority and device attribution.
 
-**Execute approval or cancellation from notification actions.** Rejected because notification state can be stale; opening the application and resynchronizing precedes every mutation.
+**Execute approval or cancellation from an external deep link.** Rejected because link state can be stale; opening the application and resynchronizing precedes every mutation.
 
-**Keep the mobile WebSocket alive or execute silent synchronization in the background.** Rejected because content-free push plus foreground resynchronization handles the accepted events without depending on constrained platform background execution.
+**Keep the mobile WebSocket alive or execute silent synchronization in the background.** Rejected because foreground resynchronization handles the accepted lifecycle without depending on constrained platform background execution.
 
 **Reuse the Desktop multi-column navigation.** Rejected because mobile navigation centers one selected Desktop and one active Session, with summaries and interactions available through mobile-specific routes.
 
@@ -300,7 +300,7 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 - GitHub OAuth revocation blocks later login but does not invalidate an existing bounded Platform session in the first version.
 - Current-installation sign-out propagates `sessionRevision` through PostgreSQL, Redis, and both Platform Instances; the first version provides no Account Session list, remote sign-out, sign-out-all, lost-installation recovery, or Platform Account deletion.
 - Platform Account uses one `account_identity(provider, subject)` row, accepts only GitHub numeric id in the first version, and supports no identity link, unlink, or merge.
-- Open registration enforces the accepted per-account, installation, pairing, connection, challenge, blob, byte, push, and authentication quotas with stable errors and retry timing.
+- Open registration enforces the accepted per-account, installation, pairing, connection, challenge, blob, byte, and authentication quotas with stable errors and retry timing.
 - Aggregate capacity preserves established connections and rejects new resource acquisition with `PLATFORM_CAPACITY`; the two-instance deployment neither auto-scales nor exposes an operator account-disable control.
 - A bilingual pre-login privacy notice discloses the accepted data and retention classes and explicitly states that the first version has no in-product account deletion flow.
 - Development and production use distinct GitHub OAuth Apps, Platform origins, callbacks, credentials, databases, and identity namespaces; the first version has no staging environment.
@@ -323,11 +323,11 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 - Transport and Companion version intervals negotiate independently, Desktop supports the current and preceding Companion major, and incompatible peers fail closed with an update requirement.
 - Relay uses expand-contract database migration during rolling deployment; mobile pairing-key records survive disposable-cache rebuilds and unsupported clients update instead of taking a security downgrade.
 - Attachment plaintext exists only at Mobile Companion and Desktop, with the Relay retaining an expiring, pairing-scoped ciphertext blob.
-- Pending approvals, human questions, turn completion, and failure produce content-free push notifications; ordinary streaming output does not.
+- Opening or foregrounding Mobile reconnects and completes Desktop-authoritative synchronization before any mutation becomes available; the product has no background notification delivery.
 - `apps/platform` is the Cordis composition root for centralized Platform Capabilities without mounting Harness Engine; Account and Remote Access are its initial independently authorized plugins, while future capabilities share neither Remote Access Device Principals nor its plaintext.
 - The proposed `@deepseek-ai/dsh-platform-account` package owns OAuth and Account Session lifecycle behind an Account Service; Remote Access validates sessions and same-account pairing without reading account storage.
-- The deep package split gives protocol, Platform Remote Access, Desktop adaptation, and Mobile synchronization one owning module each; pairing, Relay, blob, push, and cross-instance behavior remain internal to Remote Access rather than separate shallow services.
-- The pilot supports roughly fifty Desktops across exactly two Platform Instances in one Alibaba Cloud region, plus TestFlight and signed Android APK distribution with direct APNs and FCM provider integration.
+- The deep package split gives protocol, Platform Remote Access, Desktop adaptation, and Mobile synchronization one owning module each; pairing, Relay, blob, and cross-instance behavior remain internal to Remote Access rather than separate shallow services.
+- The pilot supports roughly fifty Desktops across exactly two Platform Instances in one Alibaba Cloud region, plus TestFlight and signed Android APK distribution.
 - The two Platform Instances run on separate Alibaba Cloud compute instances behind one non-sticky TLS endpoint, with managed PostgreSQL for durable metadata, managed Redis for the expiring connection directory and ciphertext Pub/Sub, and OSS for expiring ciphertext blobs; instance loss causes reconnect rather than lost committed state.
 - Alibaba Cloud owns backup and disaster-recovery facilities for the pilot; the application does not add restore epochs, restore-time pairing suspension, cross-region orchestration, Redis backup, or ciphertext-blob recovery.
 - Each release trusts its configured Platform origin, and Pairing Challenges cannot select an arbitrary server or trust root.
@@ -339,11 +339,11 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 - Desktop Mobile Access and Mobile Paired Desktop surfaces expose the accepted enablement, pairing, status, last-access, revocation, unpair, and cache controls without IP addresses.
 - Relay retention follows the accepted durable-pairing, thirty-day security-event, seven-day raw-IP, ephemeral-presence, and blob-expiry rules.
 - SLS and CloudMonitor receive only the accepted metrics, health, structured errors, random request ids, and rotating HMAC pseudonyms; sensitive identifiers, device data, tokens, keys, challenges, links, and ciphertext bodies never enter telemetry.
-- Platform loads PostgreSQL, Redis, OSS, GitHub, APNs, and FCM credentials only through deployment-managed secret references and fails the owning capability when a required secret is absent.
+- Platform loads PostgreSQL, Redis, OSS, and GitHub credentials only through deployment-managed secret references and fails the owning capability when a required secret is absent.
 - The first protocol catalog exposes only the accepted viewing, Session creation in an existing Workspace or as an Ungrouped Session, prompt, attachment, cancellation, interaction, approval, and self-revocation operations.
 - Mobile approval exposes every decision the Desktop Approval Service provides, including persistent authorization, without a separate mobile policy.
-- Notification taps synchronize before action, mobile navigation uses a selected-Desktop and single-Session flow, and only the open transcript receives live detail.
-- Backgrounding pauses WSS; foreground activation reconnects and synchronizes after content-free APNs or FCM notification, without silent background execution.
+- Pairing links carry no interaction authority, mobile navigation uses a selected-Desktop and single-Session flow, and only the open transcript receives live detail.
+- Backgrounding pauses WSS; opening or foregrounding the application reconnects and synchronizes without silent background execution.
 - Shared Markdown, code, image, tool, diff, approval, and Ask User renderers remain available; terminal content is bounded and read-only, while unknown tools use a visible generic card.
 - Mobile supports viewing and continuing Ungrouped Sessions, and omitting Workspace during creation creates an Ungrouped Session consistently with Desktop.
 - An uncertain sent mutation retains only an operation receipt; reconnect resolves its operation id before any user-directed retry, with no automatic replay or offline outbox.
@@ -358,7 +358,7 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 ## Risks
 
 - The current Client and Host wire assumes lockstep publication. A separately released mobile application needs an explicit compatibility policy before the first durable distribution.
-- Open GitHub registration exposes Platform compute, connection, push, and blob resources to any authenticated GitHub user; bounded protocol limits do not replace account-level abuse controls.
+- Open GitHub registration exposes Platform compute, connection, and blob resources to any authenticated GitHub user; bounded protocol limits do not replace account-level abuse controls.
 - Without an operator disable or account-deletion control, a malicious or abandoned account can be contained only by automatic quotas, capacity shedding, Account Session expiry, GitHub provider action on future login, and Personal Pairing revocation in the first version.
 - Discarding GitHub tokens keeps Platform credentials minimal but means external OAuth revocation does not terminate an existing Platform session before its bounded expiry.
 - A lost signed-in installation cannot be remotely signed out in the first version; its Account Session remains valid until its refresh-token lifetime ends, although a reachable paired Desktop can separately revoke its Personal Pairing.
@@ -371,9 +371,9 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 - Supporting two adjacent Companion majors creates a standing compatibility and removal cost for every breaking protocol change.
 - Multi-instance routing adds a shared connection directory and cross-instance forwarding path to the first pilot even though its user count is small.
 - Rolling deploys may disconnect live sockets; the reconnect path must recover without duplicating a mutation or treating transport continuity as Session authority.
-- Capacitor adapters for hardware-backed keys, encrypted storage, push, and local web assets require platform-specific proof before the container choice is irreversible.
+- Capacitor adapters for hardware-backed keys, encrypted storage, and local web assets require platform-specific proof before the container choice is irreversible.
 - Ciphertext blob deletion depends on expiry and receipt processing; abandoned uploads and lost acknowledgements require deterministic cleanup.
-- Push providers observe a delivery token, timing, and generic event category even when application content stays encrypted.
+- Without background delivery, a person must open or foreground Mobile Companion before learning current Desktop state.
 - A mobile rollback outside its cache and pairing-key record compatibility may be unavailable; re-pairing is not an accepted normal upgrade path.
 - The pilot delegates infrastructure backup and disaster recovery to Alibaba Cloud, so availability and recovery-point guarantees depend on the purchased service configuration rather than an application-owned controller.
 - Requiring an open Desktop window makes remote availability intentionally fragile; restoring background availability later would require a new lifecycle decision.

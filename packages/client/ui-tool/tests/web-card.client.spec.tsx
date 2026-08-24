@@ -129,11 +129,9 @@ describe('chat row web body', () => {
   const ownerProps = (block: RunningToolCall | ToolResultNode, toolName: string): ToolCallOwnerProps => ({
     callId: block.callId, toolName, block, openFile: vi.fn(),
   })
-  // WebRow reads only toolName/block off the full runtime share plus the locale
-  // seat; the standard kit is unused, so the cast supplies the owner slice and
-  // `t` alone (as BashRow's tests do for the terminal card).
+  // WebRow reads only the owner slice plus the locale seat; the standard kit is unused.
   const rowProps = (block: RunningToolCall | ToolResultNode, toolName: string): Parameters<typeof WebRow>[0] =>
-    ({ ...ownerProps(block, toolName), t } as unknown as Parameters<typeof WebRow>[0])
+    ({ ...ownerProps(block, toolName), t })
 
   /** The whole summary row is the expand toggle (ToolRow's unified interaction). */
   const toggleRow = (view: { container: HTMLElement }) => {

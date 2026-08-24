@@ -1,9 +1,16 @@
 import {
   decodeRelayMessage,
   encodeRelayMessage,
+  generateRelayCredential,
+  createCompanionNegotiationChannel,
+  createCompanionVersionOffer,
+  decodeCompanionVersionOffer,
+  negotiateCompanionProtocol,
+  parseRelayAttachChallengeId,
   parseRelayAttachmentId,
-  parseRelayCredential,
+  parseRelayPairingSelector,
   parseRelayRouteId,
+  RemoteProtocolError,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { describe, expect, it, vi } from 'vitest'
 import type { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
@@ -12,6 +19,14 @@ import {
   RemoteRelayEndpointController,
   type RelayEndpointSocket,
 } from '../src/index.ts'
+import {
+  DesktopRelayEndpointLifecycle,
+  FailClosedDesktopRelayLifecycle,
+} from '../src/desktop-relay-lifecycle.ts'
+
+const TEST_RELAY_CREDENTIAL = await generateRelayCredential()
+const parseRelayCredential = (_value: string): typeof TEST_RELAY_CREDENTIAL => TEST_RELAY_CREDENTIAL
+const MAX_RUNTIME_TIMER_DELAY_MS = 2_147_483_647
 
 describe('RemoteRelayEndpointController', () => {
   it('starts Mobile only after pairing-delivered authority configures its lifecycle', async () => {
@@ -47,13 +62,10 @@ describe('RemoteRelayEndpointController', () => {
 
     await lifecycle.start()
     expect(lifecycle.isConnected()).toBe(true)
-    expect(socket.decoded()[0]).toMatchObject({ type: 'attach', endpoint: 'mobile', routeId: 'route-product' })
-    await lifecycle.sendCiphertext(parseRelayAttachmentId('desktop-product'), Uint8Array.of(1))
-    expect(socket.decoded()[1]).toMatchObject({
-      type: 'ciphertext',
-      targetAttachmentId: 'desktop-product',
-      ciphertext: Uint8Array.of(1),
-    })
+    expect(socket.decoded()[0]).toMatchObject({ type: 'attach-challenge', endpoint: 'mobile', routeId: 'route-product' })
+    expect(socket.decoded()[1]).toMatchObject({ type: 'attach', endpoint: 'mobile', routeId: 'route-product' })
+    await lifecycle.sendCiphertext(parseRelayAttachmentId('desktop-product'), Uint8Array.of(7))
+    expect(socket.decoded().at(-1)).toMatchObject({ type: 'ciphertext', ciphertext: Uint8Array.of(7) })
     await lifecycle.stop()
     expect(lifecycle.isConnected()).toBe(false)
   })
@@ -111,6 +123,7 @@ describe('RemoteRelayEndpointController', () => {
       await send(parseRelayAttachmentId('mobile-one'), Uint8Array.of(9))
     })
     let attachment = 0
+    const connectionEvents: string[] = []
     const controller = new RemoteRelayEndpointController({
       endpoint: 'desktop',
       route: async () => ({
@@ -127,18 +140,23 @@ describe('RemoteRelayEndpointController', () => {
       heartbeatIntervalMs: 30_000,
       reconnectDelayMs: 1,
       resynchronize,
+      onConnectionReady: (attachmentId) => { connectionEvents.push(`ready:${attachmentId}`) },
+      onConnectionLost: (attachmentId) => { connectionEvents.push(`lost:${attachmentId}`) },
     })
 
     await controller.start()
     expect(controller.isConnected()).toBe(true)
     expect(resynchronize).toHaveBeenCalledTimes(1)
-    expect(first.decoded().map(message => message.type)).toEqual(['attach', 'ciphertext'])
+    expect(connectionEvents).toEqual(['ready:desktop-1'])
+    expect(first.decoded().map(message => message.type)).toEqual(['attach-challenge', 'attach', 'ciphertext'])
     first.end()
     await vi.waitFor(() => { expect(resynchronize).toHaveBeenCalledTimes(2) })
-    expect(replacement.decoded().map(message => message.type)).toEqual(['attach', 'ciphertext'])
-    expect(first.decoded()).toHaveLength(2)
+    expect(connectionEvents).toEqual(['ready:desktop-1', 'lost:desktop-1', 'ready:desktop-2'])
+    expect(replacement.decoded().map(message => message.type)).toEqual(['attach-challenge', 'attach', 'ciphertext'])
+    expect(first.decoded()).toHaveLength(3)
 
     await controller.stop()
+    expect(connectionEvents).toEqual(['ready:desktop-1', 'lost:desktop-1', 'ready:desktop-2', 'lost:desktop-2'])
     expect(controller.isConnected()).toBe(false)
     await expect(controller.sendCiphertext(parseRelayAttachmentId('mobile-one'), Uint8Array.of(1)))
       .rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
@@ -214,6 +232,168 @@ describe('RemoteRelayEndpointController', () => {
     vi.useRealTimers()
   })
 
+  it.each([
+    [50, 10, 50],
+    [5, 10, 10],
+    [undefined, 10, 10],
+  ] as const)(
+    'combines Platform retry %i ms with local retry %i ms before reconnecting after %i ms',
+    async (serverRetryAfterMs, reconnectDelayMs, expectedDelayMs) => {
+      vi.useFakeTimers()
+      try {
+        const first = new FakeSocket(false)
+        const second = new FakeSocket()
+        const sockets: RelayEndpointSocket[] = [first, second]
+        const connect = vi.fn(async () => {
+          const socket = sockets.shift()
+          if (socket === undefined) throw new Error('unexpected reconnect')
+          return socket
+        })
+        const onTransportError = vi.fn()
+        const controller = new RemoteRelayEndpointController({
+          ...mobileOptions(connect), attachTimeoutMs: 1_000, reconnectDelayMs, onTransportError,
+        })
+        const starting = controller.start()
+        await vi.waitFor(() => { expect(first.decoded()).toHaveLength(1) })
+        first.receive(encodeRelayMessage({
+          type: 'error', transportVersion: 1, code: 'PLATFORM_CAPACITY',
+          ...(serverRetryAfterMs === undefined ? {} : { retryAfterMs: serverRetryAfterMs }),
+        }))
+        await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledOnce() }, { interval: 1 })
+
+        expect(onTransportError).toHaveBeenCalledWith(expect.objectContaining({ retryAfterMs: expectedDelayMs }))
+        expect(connect).toHaveBeenCalledOnce()
+        await vi.advanceTimersByTimeAsync(expectedDelayMs - 2)
+        expect(connect).toHaveBeenCalledOnce()
+        await vi.advanceTimersByTimeAsync(1)
+        await starting
+        expect(connect).toHaveBeenCalledTimes(2)
+        await controller.stop()
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it('chunks a capacity retry longer than one runtime timer', async () => {
+    vi.useFakeTimers()
+    try {
+      const first = new FakeSocket(false)
+      const second = new FakeSocket()
+      const sockets: RelayEndpointSocket[] = [first, second]
+      const connect = vi.fn(async () => {
+        const socket = sockets.shift()
+        if (socket === undefined) throw new Error('unexpected reconnect')
+        return socket
+      })
+      const controller = new RemoteRelayEndpointController({
+        ...mobileOptions(connect), attachTimeoutMs: 1_000, reconnectDelayMs: 10,
+      })
+      const starting = controller.start()
+      await vi.waitFor(() => { expect(first.decoded()).toHaveLength(1) })
+      first.receive(encodeRelayMessage({
+        type: 'error', transportVersion: 1, code: 'PLATFORM_CAPACITY',
+        retryAfterMs: MAX_RUNTIME_TIMER_DELAY_MS + 5,
+      }))
+      await vi.advanceTimersByTimeAsync(0)
+
+      await vi.advanceTimersByTimeAsync(MAX_RUNTIME_TIMER_DELAY_MS)
+      expect(connect).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(4)
+      expect(connect).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(1)
+      await starting
+      expect(connect).toHaveBeenCalledTimes(2)
+      await controller.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels a chunked capacity retry when the lifecycle stops', async () => {
+    vi.useFakeTimers()
+    try {
+      const socket = new FakeSocket(false)
+      const onTransportError = vi.fn()
+      const controller = new RemoteRelayEndpointController({
+        ...mobileOptions(async () => socket), attachTimeoutMs: 1_000, reconnectDelayMs: 10,
+        onTransportError,
+      })
+      const starting = controller.start()
+      await vi.waitFor(() => { expect(socket.decoded()).toHaveLength(1) })
+      socket.receive(encodeRelayMessage({
+        type: 'error', transportVersion: 1, code: 'PLATFORM_CAPACITY',
+        retryAfterMs: MAX_RUNTIME_TIMER_DELAY_MS + 5,
+      }))
+      await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledOnce() }, { interval: 1 })
+
+      const stopping = controller.stop()
+      await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+      await stopping
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    ['version crossing', 'COMPANION_UPDATE_REQUIRED', 'mobile'],
+    ['weakened Mobile', 'COMPANION_SECURITY_CAPABILITY_MISSING', 'mobile'],
+    ['weakened Desktop', 'COMPANION_SECURITY_CAPABILITY_MISSING', 'desktop'],
+  ] as const)('preserves %s negotiation failure from the ciphertext owner', async (_crossing, code, endpoint) => {
+    const socket = new FakeSocket()
+    let failure: RemoteProtocolError | undefined
+    try {
+      const weakened = decodeCompanionVersionOffer(new TextEncoder().encode(JSON.stringify({
+        endpoint,
+        versions: [{
+          major: 4,
+          capabilities: ['authenticated-encryption', 'pairing-key-separation'],
+        }],
+      })))
+      negotiateCompanionProtocol(
+        createCompanionNegotiationChannel(),
+        code === 'COMPANION_UPDATE_REQUIRED' || endpoint === 'desktop'
+          ? createCompanionVersionOffer('mobile', code === 'COMPANION_UPDATE_REQUIRED' ? [3] : [4])
+          : weakened,
+        code === 'COMPANION_UPDATE_REQUIRED' || endpoint === 'mobile'
+          ? createCompanionVersionOffer('desktop', [4])
+          : weakened,
+      )
+    } catch (error) {
+      if (error instanceof RemoteProtocolError) failure = error
+      else throw error
+    }
+    if (failure === undefined) throw new Error('expected incompatible peer offers to fail negotiation')
+    expect(failure).toMatchObject({ code, updateEndpoint: endpoint })
+    const onTransportError = vi.fn()
+    const controller = new RemoteRelayEndpointController({
+      endpoint: 'mobile',
+      route: async () => ({
+        routeId: parseRelayRouteId('route-companion-update'),
+        credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      }),
+      attachmentId: () => parseRelayAttachmentId('mobile-companion-update'),
+      connect: async () => socket,
+      attachTimeoutMs: 20,
+      heartbeatIntervalMs: 30_000,
+      reconnectDelayMs: 10_000,
+      onCiphertext: () => { throw failure },
+      onTransportError,
+    })
+    await controller.start()
+    socket.receive(encodeRelayMessage({
+      type: 'ciphertext', transportVersion: 1,
+      routeId: parseRelayRouteId('route-companion-update'),
+      sourceAttachmentId: parseRelayAttachmentId('desktop-companion-update'),
+      targetAttachmentId: parseRelayAttachmentId('mobile-companion-update'),
+      ciphertext: Uint8Array.of(3),
+    }))
+
+    await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledWith(failure) })
+    expect(onTransportError).not.toHaveBeenCalledWith(expect.objectContaining({ code: 'REMOTE_OFFLINE' }))
+    await controller.stop()
+  })
+
   it('reconnects after protocol, socket, and route failures and reports stable transport errors', async () => {
     const firstSocket = new FakeSocket()
     const secondSocket = new FakeSocket()
@@ -247,9 +427,8 @@ describe('RemoteRelayEndpointController', () => {
     }))
     await vi.waitFor(() => { expect(routeCalls).toBeGreaterThanOrEqual(3) })
     secondSocket.receive(encodeRelayMessage({
-      type: 'attach', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
-      attachmentId: parseRelayAttachmentId('desktop-invalid'), endpoint: 'desktop',
-      credential: parseRelayCredential('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'),
+      type: 'heartbeat', transportVersion: 1,
+      attachmentId: parseRelayAttachmentId('desktop-invalid'), sentAt: Date.now(),
     }))
     await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'RELAY_ATTACHMENT_REJECTED' }),
@@ -365,7 +544,8 @@ describe('RemoteRelayEndpointController', () => {
     const socket = new FakeSocket(false)
     const connect = vi.fn(async () => socket)
     const resynchronize = vi.fn(async () => {})
-    const controller = desktopController({ connect, resynchronize, attachTimeoutMs: 1_000 })
+    const onPeerAttachments = vi.fn()
+    const controller = desktopController({ connect, resynchronize, onPeerAttachments, attachTimeoutMs: 1_000 })
 
     const first = controller.start()
     const second = controller.start()
@@ -378,14 +558,26 @@ describe('RemoteRelayEndpointController', () => {
     expect(secondResolved).not.toHaveBeenCalled()
     expect(resynchronize).not.toHaveBeenCalled()
 
-    const attach = socket.decoded()[0]
+    respondToChallenge(socket)
+    await vi.waitFor(() => { expect(socket.decoded()).toHaveLength(2) })
+    const attach = socket.decoded()[1]
     if (attach?.type !== 'attach') throw new Error('expected attach')
     socket.receive(encodeRelayMessage({
-      type: 'ready', transportVersion: 1, attachmentId: attach.attachmentId,
+      type: 'ready', transportVersion: 1, routeId: attach.routeId,
+      attachmentId: attach.attachmentId,
+      peers: [{
+        attachmentId: parseRelayAttachmentId('mobile-peer'),
+        pairingSelector: parseRelayPairingSelector('pairing-peer'),
+        generation: 7,
+      }],
     }))
     await Promise.all([first, second])
     expect(connect).toHaveBeenCalledOnce()
     expect(resynchronize).toHaveBeenCalledOnce()
+    expect(onPeerAttachments).toHaveBeenCalledWith(expect.objectContaining({
+      routeId: attach.routeId,
+      peers: [expect.objectContaining({ pairingSelector: 'pairing-peer', generation: 7 })],
+    }))
     await controller.stop()
   })
 
@@ -429,7 +621,8 @@ describe('RemoteRelayEndpointController', () => {
     const starting = controller.start()
     await vi.waitFor(() => { expect(socket.decoded()).toHaveLength(1) })
     socket.receive(encodeRelayMessage({
-      type: 'ready', transportVersion: 1, attachmentId: parseRelayAttachmentId('wrong-attachment'),
+      type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+      attachmentId: parseRelayAttachmentId('wrong-attachment'), peers: [],
     }))
     await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'RELAY_ATTACHMENT_REJECTED' }),
@@ -467,13 +660,33 @@ describe('RemoteRelayEndpointController', () => {
     vi.useRealTimers()
   })
 
+  it('times out after challenge proof when Platform withholds the ready acknowledgement', async () => {
+    const socket = new FakeSocket(false)
+    const onTransportError = vi.fn()
+    const controller = new RemoteRelayEndpointController({
+      ...mobileOptions(async () => socket), attachTimeoutMs: 50,
+      reconnectDelayMs: 100, onTransportError,
+    })
+    const starting = controller.start()
+    await vi.waitFor(() => { expect(socket.decoded()).toHaveLength(1) })
+    respondToChallenge(socket)
+    await vi.waitFor(() => { expect(socket.decoded()).toHaveLength(2) })
+    await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'REMOTE_OFFLINE' }),
+    ) })
+    const stopping = controller.stop()
+    await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+    await stopping
+  })
+
   it('does not publish a connection when stop wins immediately after ready', async () => {
     const socket = new FakeSocket(false)
     const controller = new RemoteRelayEndpointController(mobileOptions(async () => socket))
     const starting = controller.start()
     await vi.waitFor(() => { expect(socket.decoded()).toHaveLength(1) })
     socket.receive(encodeRelayMessage({
-      type: 'ready', transportVersion: 1, attachmentId: parseRelayAttachmentId('mobile-one'),
+      type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+      attachmentId: parseRelayAttachmentId('mobile-one'), peers: [],
     }))
     await Promise.resolve()
     const stopping = controller.stop()
@@ -540,6 +753,81 @@ describe('RemoteRelayEndpointController', () => {
     await starting
     expect(onTransportError).toHaveBeenCalledWith(expect.objectContaining({ code: 'RELAY_ROUTE_REVOKED' }))
     expect(onTransportError).toHaveBeenCalledWith(expect.objectContaining({ code: 'REMOTE_OFFLINE' }))
+    await controller.stop()
+  })
+
+  it('rejects a closed or mismatched ready response and a peer update for another attachment', async () => {
+    const closed = new FakeSocket(false)
+    const mismatched = new FakeSocket(false)
+    const ready = new FakeSocket()
+    const sockets: RelayEndpointSocket[] = [closed, mismatched, ready]
+    const onTransportError = vi.fn()
+    const controller = new RemoteRelayEndpointController({
+      ...mobileOptions(async () => {
+        const socket = sockets.shift()
+        if (socket === undefined) throw new Error('no replacement')
+        return socket
+      }),
+      attachTimeoutMs: 1_000,
+      onTransportError,
+    })
+    const starting = controller.start()
+    await vi.waitFor(() => { expect(closed.decoded()).toHaveLength(1) })
+    respondToChallenge(closed)
+    await vi.waitFor(() => { expect(closed.decoded()).toHaveLength(2) })
+    closed.end()
+    await vi.waitFor(() => { expect(mismatched.decoded()).toHaveLength(1) })
+    respondToChallenge(mismatched)
+    await vi.waitFor(() => { expect(mismatched.decoded()).toHaveLength(2) })
+    const attach = mismatched.decoded().at(-1)
+    if (attach?.type !== 'attach') throw new Error('expected attach')
+    mismatched.receive(encodeRelayMessage({
+      type: 'ready', transportVersion: 1, routeId: attach.routeId,
+      attachmentId: parseRelayAttachmentId('mobile-wrong'), peers: [],
+    }))
+    await starting
+
+    onTransportError.mockClear()
+    ready.receive(encodeRelayMessage({
+      type: 'peer-update', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+      attachmentId: parseRelayAttachmentId('mobile-wrong'), peers: [],
+    }))
+    await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'RELAY_ATTACHMENT_REJECTED' }),
+    ) })
+    await controller.stop()
+  })
+
+  it('reconnects after a ready-stage error and accepts a matching peer update', async () => {
+    const rejected = new FakeSocket(false)
+    const ready = new FakeSocket()
+    const sockets: RelayEndpointSocket[] = [rejected, ready]
+    const onPeerAttachments = vi.fn()
+    const controller = new RemoteRelayEndpointController({
+      ...mobileOptions(async () => {
+        const socket = sockets.shift()
+        if (socket === undefined) throw new Error('no replacement')
+        return socket
+      }),
+      attachTimeoutMs: 1_000,
+      onPeerAttachments,
+    })
+    const starting = controller.start()
+    await vi.waitFor(() => { expect(rejected.decoded()).toHaveLength(1) })
+    respondToChallenge(rejected)
+    await vi.waitFor(() => { expect(rejected.decoded()).toHaveLength(2) })
+    rejected.receive(encodeRelayMessage({
+      type: 'error', transportVersion: 1, code: 'RELAY_ROUTE_REVOKED',
+    }))
+    await starting
+    onPeerAttachments.mockClear()
+    ready.receive(encodeRelayMessage({
+      type: 'peer-update', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+      attachmentId: parseRelayAttachmentId('mobile-one'), peers: [],
+    }))
+    await vi.waitFor(() => { expect(onPeerAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'peer-update', attachmentId: 'mobile-one' }),
+    ) })
     await controller.stop()
   })
 
@@ -613,7 +901,7 @@ describe('RemoteRelayEndpointController', () => {
       type: 'error', transportVersion: 1, code: 'RELAY_ROUTE_REVOKED',
     }))
 
-    await vi.waitFor(() => { expect(second.decoded()).toHaveLength(1) })
+    await vi.waitFor(() => { expect(second.decoded()).toHaveLength(2) })
     expect(onTransportError).toHaveBeenCalledOnce()
     await controller.stop()
   })
@@ -637,6 +925,269 @@ describe('RemoteRelayEndpointController', () => {
     await cancelled.promise
     await stopping
     expect(await startResult).toMatchObject({ code: 'REMOTE_OFFLINE' })
+  })
+})
+
+describe('DesktopRelayEndpointLifecycle', () => {
+  it('keeps the pre-approval lifecycle observably fail closed', async () => {
+    const lifecycle = new FailClosedDesktopRelayLifecycle('security review required')
+    expect(lifecycle.getState()).toEqual({ connected: false })
+    await expect(lifecycle.configure()).rejects.toThrow('security review required')
+    await expect(lifecycle.start()).rejects.toThrow('security review required')
+    await lifecycle.stop()
+    expect(lifecycle.getState()).toEqual({ connected: false, stopReason: 'quit' })
+    await lifecycle.stop('sleep')
+    expect(lifecycle.getState()).toEqual({ connected: false, stopReason: 'sleep' })
+  })
+
+  it('rejects invalid and duplicate Desktop grant ownership', async () => {
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(async () => new FakeSocket()))
+    expect(() => lifecycle.configure({
+      ...desktopGrant('route-one', 'pairing-one', 1), endpoint: 'mobile',
+    })).toThrow('must belong to one Personal Pairing')
+    const grant = desktopGrant('route-one', 'pairing-one', 1)
+    expect(() => lifecycle.synchronize([grant, { ...grant }])).toThrow('selectors must be unique')
+    await expect(lifecycle.sendCiphertext(
+      parseRelayPairingSelector('pairing-missing'), parseRelayAttachmentId('mobile-missing'), Uint8Array.of(1),
+    )).rejects.toThrow('pairing authority is unavailable')
+  })
+
+  it('keeps an identical pairing grant on one physical attachment across Settings polls', async () => {
+    const socket = new FakeSocket()
+    const connect = vi.fn(async () => socket)
+    const onCiphertext = vi.fn()
+    const lifecycle = new DesktopRelayEndpointLifecycle({
+      ...desktopOptions(connect),
+      onPeerAttachments: vi.fn(),
+      onCiphertext,
+    })
+    const grant = desktopGrant('route-one', 'pairing-one', 1)
+
+    await lifecycle.configure(grant)
+    await lifecycle.start()
+    await lifecycle.configure({ ...grant })
+    await lifecycle.synchronize([{ ...grant }])
+
+    expect(connect).toHaveBeenCalledOnce()
+    expect(socket.closed).toBe(false)
+    socket.receive(encodeRelayMessage({
+      type: 'ciphertext', transportVersion: 1, routeId: grant.routeId,
+      sourceAttachmentId: parseRelayAttachmentId('mobile-one'),
+      targetAttachmentId: parseRelayAttachmentId('desktop-test'), ciphertext: Uint8Array.of(7),
+    }))
+    await vi.waitFor(() => { expect(onCiphertext).toHaveBeenCalledOnce() })
+    await lifecycle.sendCiphertext(
+      grant.pairingSelector, parseRelayAttachmentId('mobile-one'), Uint8Array.of(8),
+    )
+    expect(socket.decoded().at(-1)).toMatchObject({ type: 'ciphertext', ciphertext: Uint8Array.of(8) })
+    await lifecycle.stop()
+  })
+
+  it('reconnects one pairing with the same durable grant and a fresh physical attachment', async () => {
+    const first = new FakeSocket()
+    const second = new FakeSocket()
+    const sockets: RelayEndpointSocket[] = [first, second]
+    const connect = vi.fn(async () => {
+      const socket = sockets.shift()
+      if (socket === undefined) throw new Error('unexpected connection')
+      return socket
+    })
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(connect))
+    const grant = desktopGrant('route-reconnect', 'pairing-reconnect', 1)
+    await lifecycle.configure(grant)
+    await lifecycle.start()
+
+    await lifecycle.reconnect(grant.pairingSelector)
+
+    expect(first.closed).toBe(true)
+    expect(second.closed).toBe(false)
+    expect(connect).toHaveBeenCalledTimes(2)
+    await lifecycle.sendCiphertext(
+      grant.pairingSelector, parseRelayAttachmentId('mobile-reconnect'), Uint8Array.of(8),
+    )
+    expect(second.decoded().at(-1)).toMatchObject({ type: 'ciphertext', ciphertext: Uint8Array.of(8) })
+    await lifecycle.stop()
+  })
+
+  it('keeps reconnect inert for a missing or currently stopped pairing', async () => {
+    const connect = vi.fn(async () => new FakeSocket())
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(connect))
+    const grant = desktopGrant('route-reconnect-stopped', 'pairing-reconnect-stopped', 1)
+
+    await lifecycle.reconnect(grant.pairingSelector)
+    await lifecycle.configure(grant)
+    await lifecycle.reconnect(grant.pairingSelector)
+
+    expect(connect).not.toHaveBeenCalled()
+    await lifecycle.start()
+    expect(connect).toHaveBeenCalledOnce()
+    await lifecycle.stop()
+  })
+
+  it('preempts a start that never reaches attachment readiness', async () => {
+    const socket = new FakeSocket(false)
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(async () => socket))
+    await lifecycle.configure(desktopGrant('route-one', 'pairing-one', 1))
+
+    const starting = lifecycle.start()
+    void starting.catch(() => {})
+    await vi.waitFor(() => { expect(socket.sent).toHaveLength(1) })
+    await lifecycle.stop('sleep')
+
+    await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+    expect(socket.closed).toBe(true)
+    expect(lifecycle.getState()).toEqual({ connected: false, stopReason: 'sleep' })
+  })
+
+  it.each(['replacement', 'revocation', 'stop'] as const)(
+    'settles %s while an inbound callback is pending without a lifecycle lock cycle',
+    async (event) => {
+      const first = new FakeSocket()
+      const second = new FakeSocket()
+      const sockets: RelayEndpointSocket[] = [first, second]
+      const entered = deferred<undefined>()
+      const retired = deferred<undefined>()
+      const lifecycle = new DesktopRelayEndpointLifecycle({
+        ...desktopOptions(async () => {
+          const socket = sockets.shift()
+          if (socket === undefined) throw new Error('unexpected connection')
+          return socket
+        }),
+        onPairingRetired: () => { retired.resolve(undefined) },
+        onCiphertext: async (_ciphertext, _source, _local, _selector, signal) => {
+          entered.resolve(undefined)
+          if (event === 'stop') {
+            await new Promise<void>((resolve) => { signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+          } else {
+            await retired.promise
+          }
+        },
+      })
+      const grant = desktopGrant('route-one', 'pairing-one', 1)
+      await lifecycle.configure(grant)
+      await lifecycle.start()
+      first.receive(encodeRelayMessage({
+        type: 'ciphertext', transportVersion: 1, routeId: grant.routeId,
+        sourceAttachmentId: parseRelayAttachmentId('mobile-pending'),
+        targetAttachmentId: parseRelayAttachmentId('desktop-test'), ciphertext: Uint8Array.of(1),
+      }))
+      await entered.promise
+
+      if (event === 'replacement') await lifecycle.configure(desktopGrant('route-two', 'pairing-one', 2))
+      else if (event === 'revocation') await lifecycle.synchronize([])
+      else await lifecycle.stop('sleep')
+
+      expect(first.closed).toBe(true)
+      if (event === 'replacement') await lifecycle.stop()
+    },
+  )
+
+  it('quiesces a replaced or revoked grant and ignores callbacks from its retired attachment', async () => {
+    const releaseClose = deferred<undefined>()
+    const first = new BlockingCloseSocket(releaseClose.promise)
+    const second = new FakeSocket()
+    const sockets: RelayEndpointSocket[] = [first, second]
+    const connect = vi.fn(async () => {
+      const socket = sockets.shift()
+      if (socket === undefined) throw new Error('unexpected connection')
+      return socket
+    })
+    const onCiphertext = vi.fn()
+    const lifecycle = new DesktopRelayEndpointLifecycle({
+      ...desktopOptions(connect),
+      onCiphertext,
+    })
+    await lifecycle.configure(desktopGrant('route-one', 'pairing-one', 1))
+    await lifecycle.start()
+
+    const replacing = lifecycle.configure(desktopGrant('route-two', 'pairing-one', 2))
+    await first.closeStarted.promise
+    first.receive(encodeRelayMessage({
+      type: 'ciphertext', transportVersion: 1, routeId: parseRelayRouteId('route-one'),
+      sourceAttachmentId: parseRelayAttachmentId('mobile-old'),
+      targetAttachmentId: parseRelayAttachmentId('desktop-test'), ciphertext: Uint8Array.of(7),
+    }))
+    await Promise.resolve()
+    expect(onCiphertext).not.toHaveBeenCalled()
+    expect(connect).toHaveBeenCalledOnce()
+
+    releaseClose.resolve(undefined)
+    await replacing
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(first.closed).toBe(true)
+
+    await lifecycle.synchronize([])
+    expect(second.closed).toBe(true)
+    expect(lifecycle.getState()).toMatchObject({ connected: false })
+  })
+
+  it('serializes concurrent replacement and deactivation without exposing an overlapping attachment', async () => {
+    const releaseClose = deferred<undefined>()
+    const first = new BlockingCloseSocket(releaseClose.promise)
+    const second = new FakeSocket()
+    const sockets: RelayEndpointSocket[] = [first, second]
+    const connect = vi.fn(async () => {
+      const socket = sockets.shift()
+      if (socket === undefined) throw new Error('unexpected connection')
+      return socket
+    })
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(connect))
+    await lifecycle.configure(desktopGrant('route-one', 'pairing-one', 1))
+    await lifecycle.start()
+
+    const replacing = lifecycle.configure(desktopGrant('route-two', 'pairing-one', 2))
+    const deactivating = lifecycle.stop('sleep')
+    await first.closeStarted.promise
+    expect(connect).toHaveBeenCalledOnce()
+    releaseClose.resolve(undefined)
+    await Promise.all([replacing, deactivating])
+
+    expect(connect).toHaveBeenCalledOnce()
+    expect(second.closed).toBe(false)
+    expect(lifecycle.getState()).toEqual({ connected: false, stopReason: 'sleep' })
+  })
+
+  it('preempts a replacement that never reaches attachment readiness', async () => {
+    const first = new FakeSocket()
+    const replacement = new FakeSocket(false)
+    const sockets: RelayEndpointSocket[] = [first, replacement]
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(async () => {
+      const socket = sockets.shift()
+      if (socket === undefined) throw new Error('unexpected connection')
+      return socket
+    }))
+    await lifecycle.configure(desktopGrant('route-one', 'pairing-one', 1))
+    await lifecycle.start()
+
+    const replacing = lifecycle.configure(desktopGrant('route-two', 'pairing-one', 2))
+    void replacing.catch(() => {})
+    await vi.waitFor(() => { expect(replacement.sent).toHaveLength(1) })
+    await lifecycle.stop('sleep')
+
+    await expect(replacing).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+    expect(first.closed).toBe(true)
+    expect(replacement.closed).toBe(true)
+    expect(lifecycle.getState()).toEqual({ connected: false, stopReason: 'sleep' })
+  })
+
+  it('reports one and multiple endpoint stop failures after quiescing every controller', async () => {
+    const one = new DesktopRelayEndpointLifecycle(desktopOptions(async () => new RejectingCloseSocket()))
+    await one.configure(desktopGrant('route-one', 'pairing-one', 1))
+    await one.start()
+    await expect(one.stop()).rejects.toThrow('Remote Relay stop failed')
+
+    const sockets: RelayEndpointSocket[] = [new RejectingCloseSocket(), new RejectingCloseSocket()]
+    const multiple = new DesktopRelayEndpointLifecycle(desktopOptions(async () => {
+      const socket = sockets.shift()
+      if (socket === undefined) throw new Error('unexpected connection')
+      return socket
+    }))
+    await multiple.synchronize([
+      desktopGrant('route-one', 'pairing-one', 1),
+      desktopGrant('route-two', 'pairing-two', 1),
+    ])
+    await multiple.start()
+    await expect(multiple.stop()).rejects.toThrow(AggregateError)
   })
 })
 
@@ -665,6 +1216,16 @@ function desktopController(overrides: Partial<ConstructorParameters<typeof Remot
   })
 }
 
+function respondToChallenge(socket: FakeSocket): void {
+  const request = socket.decoded().at(-1)
+  if (request?.type !== 'attach-challenge') throw new Error('expected attach challenge')
+  socket.receive(encodeRelayMessage({
+    ...request, type: 'attach-challenge-response',
+    challengeId: parseRelayAttachChallengeId(`challenge-${String(socket.sent.length)}`),
+    nonce: new Uint8Array(32).fill(4), expiresAt: Date.now() + 10_000,
+  }))
+}
+
 class FakeSocket implements RelayEndpointSocket {
   readonly sent: Uint8Array[] = []
   closed = false
@@ -676,9 +1237,16 @@ class FakeSocket implements RelayEndpointSocket {
     if (this.closed) throw new Error('socket closed')
     this.sent.push(value)
     const message = decodeRelayMessage(value)
-    if (this.autoReady && message.type === 'attach') {
+    if (this.autoReady && message.type === 'attach-challenge') {
       this.receive(encodeRelayMessage({
-        type: 'ready', transportVersion: 1, attachmentId: message.attachmentId,
+        ...message, type: 'attach-challenge-response',
+        challengeId: parseRelayAttachChallengeId('challenge-test'),
+        nonce: new Uint8Array(32).fill(9), expiresAt: Date.now() + 10_000,
+      }))
+    } else if (this.autoReady && message.type === 'attach') {
+      this.receive(encodeRelayMessage({
+        type: 'ready', transportVersion: 1, routeId: message.routeId,
+        attachmentId: message.attachmentId, peers: [],
       }))
     }
   }
@@ -706,6 +1274,18 @@ class DeferredCloseSocket extends FakeSocket {
     this.end()
     this.closeStarted.resolve(undefined)
     await this.releaseClose
+  }
+}
+
+class BlockingCloseSocket extends FakeSocket {
+  readonly closeStarted = deferred<undefined>()
+
+  constructor(private readonly releaseClose: Promise<undefined>) { super() }
+
+  override async close(): Promise<void> {
+    this.closeStarted.resolve(undefined)
+    await this.releaseClose
+    this.end()
   }
 }
 
@@ -770,7 +1350,7 @@ class DualFailureSocket extends RejectingCloseSocket {
 
   override async send(value: Uint8Array): Promise<void> {
     this.sends += 1
-    if (this.sends > 1) throw new Error('heartbeat failed')
+    if (this.sends > 2) throw new Error('heartbeat failed')
     await super.send(value)
   }
 }
@@ -808,4 +1388,25 @@ function deferred<T>() {
   let reject!: (error: unknown) => void
   const promise = new Promise<T>((onResolve, onReject) => { resolve = onResolve; reject = onReject })
   return { promise, resolve, reject }
+}
+
+function desktopOptions(connect: (signal: AbortSignal) => Promise<RelayEndpointSocket>) {
+  return {
+    attachmentId: () => parseRelayAttachmentId('desktop-test'),
+    connect,
+    attachTimeoutMs: 20,
+    heartbeatIntervalMs: 30_000,
+    reconnectDelayMs: 1,
+    resynchronize: async () => {},
+  }
+}
+
+function desktopGrant(routeId: string, pairingSelector: string, revision: number) {
+  return {
+    endpoint: 'desktop' as const,
+    routeId: parseRelayRouteId(routeId),
+    credential: TEST_RELAY_CREDENTIAL,
+    pairingSelector: parseRelayPairingSelector(pairingSelector),
+    revision,
+  }
 }

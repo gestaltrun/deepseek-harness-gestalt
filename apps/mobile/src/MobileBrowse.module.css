@@ -28,6 +28,16 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+.search {
+  display: flex;
+  gap: 8px;
+}
+
+.search input {
+  min-width: 0;
+  flex: 1;
+}
+
 .back {
   align-self: flex-start;
   margin-bottom: 8px;
@@ -58,6 +68,11 @@
   text-align: left;
 }
 
+.searchResult {
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
 .summary,
 .transcript {
   margin: 0;

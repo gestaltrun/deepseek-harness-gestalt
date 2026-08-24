@@ -8,9 +8,9 @@ import {
   encodeCompanionMessage,
   encodeCompanionVersionOffer,
   negotiateCompanionProtocol,
-  parseCompanionInteractionId,
   parseCompanionOperationId,
   parseCompanionSessionId,
+  parseCompanionWorkspaceId,
   parseCompanionTranscriptEntryId,
   REMOTE_PROTOCOL_LIMITS,
   RemoteProtocolError,
@@ -50,135 +50,6 @@ describe('Encrypted Companion Protocol codec', () => {
     expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, result))).toEqual(result)
   })
 
-  it('round-trips Session creation with and without a Workspace and rejects empty fields', () => {
-    const negotiated = negotiateFresh(
-      createCompanionVersionOffer('mobile'),
-      createCompanionVersionOffer('desktop'),
-    )
-    const operationId = parseCompanionOperationId('operation-create')
-    const sessionId = parseCompanionSessionId('session-create')
-    const ungrouped = {
-      type: 'operation',
-      operation: {
-        type: 'create-session',
-        operationId,
-        sessionId,
-        title: 'Ungrouped Session',
-      },
-    } as const
-    const workspace = {
-      type: 'operation',
-      operation: {
-        type: 'create-session',
-        operationId,
-        sessionId,
-        title: 'Workspace Session',
-        workspace: 'Work',
-      },
-    } as const
-    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, ungrouped))).toEqual(ungrouped)
-    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, workspace))).toEqual(workspace)
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'operation',
-      operation: { type: 'create-session', operationId, sessionId, title: '' },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'operation',
-      operation: { type: 'create-session', operationId, sessionId, title: 'Work', workspace: '' },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'operation',
-      operation: { type: 'create-session', operationId, sessionId, title: 'Work', extra: true },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-  })
-
-  it('round-trips a prompt cancellation targeting one Session', () => {
-    const negotiated = negotiateFresh(
-      createCompanionVersionOffer('mobile'),
-      createCompanionVersionOffer('desktop'),
-    )
-    const cancel = {
-      type: 'operation',
-      operation: {
-        type: 'cancel-prompt',
-        operationId: parseCompanionOperationId('operation-cancel'),
-        sessionId: parseCompanionSessionId('session-cancel'),
-      },
-    } as const
-    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, cancel))).toEqual(cancel)
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'operation',
-      operation: { type: 'cancel-prompt', operationId: 'operation-cancel' },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-  })
-
-  it('round-trips settle-approval and answer-ask-user operations', () => {
-    const negotiated = negotiateFresh(
-      createCompanionVersionOffer('mobile'),
-      createCompanionVersionOffer('desktop'),
-    )
-    const settle = {
-      type: 'operation',
-      operation: {
-        type: 'settle-approval',
-        operationId: parseCompanionOperationId('operation-settle'),
-        sessionId: parseCompanionSessionId('session-settle'),
-        interactionId: parseCompanionInteractionId('approval-1'),
-        decision: 'once',
-        persistent: true,
-      },
-    } as const
-    const answer = {
-      type: 'operation',
-      operation: {
-        type: 'answer-ask-user',
-        operationId: parseCompanionOperationId('operation-answer'),
-        sessionId: parseCompanionSessionId('session-answer'),
-        interactionId: parseCompanionInteractionId('question-1'),
-        decision: 'A',
-      },
-    } as const
-    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, settle))).toEqual(settle)
-    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, {
-      type: 'operation',
-      operation: {
-        type: 'settle-approval',
-        operationId: parseCompanionOperationId('operation-settle-once'),
-        sessionId: parseCompanionSessionId('session-settle'),
-        interactionId: parseCompanionInteractionId('approval-1'),
-        decision: 'once',
-      },
-    }))).toMatchObject({ operation: { type: 'settle-approval', decision: 'once' } })
-    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, answer))).toEqual(answer)
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'operation',
-      operation: {
-        type: 'settle-approval',
-        operationId: 'operation-settle',
-        sessionId: 'session-settle',
-        interactionId: 'approval-1',
-        decision: '',
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'operation',
-      operation: {
-        type: 'answer-ask-user',
-        operationId: 'operation-answer',
-        sessionId: 'session-answer',
-        interactionId: 'question-1',
-        decision: 'A',
-        extra: true,
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-  })
-
   it('round-trips a reconnect operation-status query and its committed or absent answer', () => {
     const negotiated = negotiateFresh(
       createCompanionVersionOffer('mobile'),
@@ -206,11 +77,106 @@ describe('Encrypted Companion Protocol codec', () => {
     } as const
     expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, committed))).toEqual(committed)
 
+    const rejected = {
+      type: 'result',
+      result: {
+        type: 'status',
+        operationId,
+        committed: { type: 'attachment-rejected', operationId, reason: 'expired' },
+      },
+    } as const
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, rejected))).toEqual(rejected)
+
+    for (const terminal of [
+      {
+        type: 'operation-failed' as const,
+        operationId,
+        failure: { kind: 'business' as const, code: 'session-refused', message: 'Desktop refused the operation' },
+      },
+      { type: 'interaction-receipt' as const, operationId, accepted: true as const },
+    ]) {
+      const status = { type: 'result' as const, result: { type: 'status' as const, operationId, committed: terminal } }
+      expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, status))).toEqual(status)
+    }
+
     const absent = {
       type: 'result',
       result: { type: 'status', operationId, absent: true },
     } as const
     expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, absent))).toEqual(absent)
+  })
+
+  it('round-trips Workspace-owned and Ungrouped Session creation', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile'),
+      createCompanionVersionOffer('desktop'),
+    )
+    for (const operation of [
+      {
+        type: 'operation' as const,
+        operation: {
+          type: 'create-session' as const,
+          operationId: parseCompanionOperationId('operation-create-workspace'),
+          workspaceId: parseCompanionWorkspaceId('workspace-product'),
+        },
+      },
+      {
+        type: 'operation' as const,
+        operation: {
+          type: 'create-session' as const,
+          operationId: parseCompanionOperationId('operation-create-ungrouped'),
+        },
+      },
+    ]) {
+      expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, operation))).toEqual(operation)
+    }
+    const result = {
+      type: 'result' as const,
+      result: {
+        type: 'session-created' as const,
+        operationId: parseCompanionOperationId('operation-create-workspace'),
+        sessionId: parseCompanionSessionId('session-created-workspace'),
+        committedAt: 1,
+      },
+    }
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, result))).toEqual(result)
+    const status = {
+      type: 'result' as const,
+      result: {
+        type: 'status' as const,
+        operationId: result.result.operationId,
+        committed: result.result,
+      },
+    }
+    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, status))).toEqual(status)
+  })
+
+  it('round-trips versioned foreground synchronization and rejects a one-byte substitute', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile'),
+      createCompanionVersionOffer('desktop'),
+    )
+    const synchronization = {
+      type: 'projection',
+      projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 3, desktopRevision: 11 },
+    } as const
+    expect(decodeCompanionMessage(
+      negotiated,
+      encodeCompanionMessage(negotiated, synchronization),
+    )).toEqual(synchronization)
+    expect(() => decodeCompanionMessage(negotiated, Uint8Array.of(1))).toThrow(
+      expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+    )
+    for (const value of [
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'foreground-sync', desktopName: '', generation: 1, desktopRevision: 1 } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'x'.repeat(129), generation: 1, desktopRevision: 1 } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 0, desktopRevision: 1 } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'foreground-sync', desktopName: 'Authenticated Desktop', generation: 1, desktopRevision: 0 } },
+    ]) {
+      expect(() => decodeCompanionMessage(negotiated, json(value))).toThrow(
+        expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+      )
+    }
   })
 
   it('rejects forged operation-status answers that misstate the queried operation', () => {
@@ -227,11 +193,11 @@ describe('Encrypted Companion Protocol codec', () => {
       outcome: 'accepted',
     } as const
     const forged = [
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried, committed: original } },
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried, absent: false } },
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried } },
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried, committed: original, absent: true } },
-      { applicationVersion: 2, type: 'result', result: { type: 'status', operationId: queried, committed: { type: 'confirmed', operationId: queried, committedAt: 0, outcome: 'accepted' } } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried, committed: original } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried, absent: false } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried, committed: original, absent: true } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'status', operationId: queried, committed: { type: 'confirmed', operationId: queried, committedAt: 0, outcome: 'accepted' } } },
     ]
     for (const message of forged) {
       expect(() => decodeCompanionMessage(negotiated, json(message))).toThrow(
@@ -398,200 +364,6 @@ describe('Encrypted Companion Protocol codec', () => {
       encodeCompanionMessage(negotiated, projection),
     )).toEqual(projection)
 
-    const streaming = {
-      type: 'projection' as const,
-      projection: {
-        type: 'transcript-page' as const,
-        sessionId: parseCompanionSessionId('session-stream'),
-        streaming: true,
-        entries: [{
-          type: 'text' as const,
-          entryId: parseCompanionTranscriptEntryId('entry-stream'),
-          role: 'user' as const,
-          text: 'in flight',
-        }],
-      },
-    }
-    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, streaming))).toEqual(streaming)
-
-    const mixed = {
-      type: 'projection' as const,
-      projection: {
-        type: 'transcript-page' as const,
-        sessionId: parseCompanionSessionId('session-mixed'),
-        entries: [
-          {
-            type: 'image' as const,
-            entryId: parseCompanionTranscriptEntryId('entry-image'),
-            fileName: 'shot.png',
-            alt: 'shot.png',
-          },
-          {
-            type: 'approval' as const,
-            entryId: parseCompanionTranscriptEntryId('entry-approval'),
-            interactionId: parseCompanionInteractionId('approval-1'),
-            summary: 'Allow Desktop development action',
-            authorized: ['once', 'always'],
-            cwd: '/tmp',
-            settled: { decision: 'once', persistent: false },
-          },
-          {
-            type: 'ask-user' as const,
-            entryId: parseCompanionTranscriptEntryId('entry-question'),
-            interactionId: parseCompanionInteractionId('question-1'),
-            summary: 'Which Desktop path?',
-            authorized: ['A', 'B'],
-          },
-        ],
-      },
-    }
-    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, mixed))).toEqual(mixed)
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'projection',
-      projection: {
-        type: 'transcript-page',
-        sessionId: 'session-mixed',
-        streaming: 'yes',
-        entries: [],
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'projection',
-      projection: {
-        type: 'transcript-page',
-        sessionId: 'session-mixed',
-        entries: [{
-          type: 'approval',
-          entryId: 'entry-approval',
-          interactionId: 'approval-1',
-          summary: 'Allow',
-          authorized: ['once'],
-          settled: { decision: 'always' },
-        }],
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'operation',
-      operation: {
-        type: 'settle-approval',
-        operationId: 'operation-settle',
-        sessionId: 'session-settle',
-        interactionId: 'approval-1',
-        decision: 'once',
-        persistent: 'yes',
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    const idle = {
-      type: 'projection' as const,
-      projection: {
-        type: 'transcript-page' as const,
-        sessionId: parseCompanionSessionId('session-idle'),
-        streaming: false,
-        entries: [{
-          type: 'approval' as const,
-          entryId: parseCompanionTranscriptEntryId('entry-idle-approval'),
-          interactionId: parseCompanionInteractionId('approval-idle'),
-          summary: 'Allow with extras',
-          authorized: ['once'],
-          diff: '-old\n+new',
-          terminal: 'echo hi',
-          settled: { decision: 'once' },
-        }, {
-          type: 'approval' as const,
-          entryId: parseCompanionTranscriptEntryId('entry-minimal-approval'),
-          interactionId: parseCompanionInteractionId('approval-minimal'),
-          summary: 'Allow without extras',
-          authorized: ['once'],
-        }, {
-          type: 'ask-user' as const,
-          entryId: parseCompanionTranscriptEntryId('entry-idle-question'),
-          interactionId: parseCompanionInteractionId('question-idle'),
-          summary: 'Pick one',
-          authorized: ['A'],
-          settled: { decision: 'A', persistent: false },
-        }],
-      },
-    }
-    expect(decodeCompanionMessage(negotiated, encodeCompanionMessage(negotiated, idle))).toEqual(idle)
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'projection',
-      projection: {
-        type: 'transcript-page',
-        sessionId: 'session-idle',
-        entries: [{
-          type: 'approval',
-          entryId: 'entry-empty-auth',
-          interactionId: 'approval-empty',
-          summary: 'Allow',
-          authorized: [],
-        }],
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'projection',
-      projection: {
-        type: 'transcript-page',
-        sessionId: 'session-idle',
-        entries: [{
-          type: 'approval',
-          entryId: 'entry-dup-auth',
-          interactionId: 'approval-dup',
-          summary: 'Allow',
-          authorized: ['once', 'once'],
-        }],
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'projection',
-      projection: {
-        type: 'transcript-page',
-        sessionId: 'session-idle',
-        entries: [{
-          type: 'ask-user',
-          entryId: 'entry-blank-auth',
-          interactionId: 'question-blank',
-          summary: 'Pick',
-          authorized: [''],
-        }],
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'projection',
-      projection: {
-        type: 'transcript-page',
-        sessionId: 'session-idle',
-        entries: [{
-          type: 'approval',
-          entryId: 'entry-bad-persistent',
-          interactionId: 'approval-bad',
-          summary: 'Allow',
-          authorized: ['once'],
-          settled: { decision: 'once', persistent: 'yes' },
-        }],
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-    expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
-      type: 'projection',
-      projection: {
-        type: 'transcript-page',
-        sessionId: 'session-idle',
-        entries: [{
-          type: 'image',
-          entryId: 'entry-image-empty',
-          fileName: 'shot.png',
-          alt: '',
-        }],
-      },
-    }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
-
     const oversized = {
       ...projection,
       projection: {
@@ -625,12 +397,12 @@ describe('Encrypted Companion Protocol codec', () => {
     expect(() => encodeCompanionMessage(negotiated, tooManyEntries)).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
     )
-    expect(() => decodeCompanionMessage(negotiated, json({ applicationVersion: 2, ...tooManyEntries }))).toThrow(
+    expect(() => decodeCompanionMessage(negotiated, json({ applicationVersion: negotiated.major, ...tooManyEntries }))).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
     )
 
     const oneByteOverflow = transcriptPageWithEncodedBytes(negotiated, 1, (48 * 1_024) + 1)
-    const oneByteOverflowWire = json({ applicationVersion: 2, ...oneByteOverflow })
+    const oneByteOverflowWire = json({ applicationVersion: negotiated.major, ...oneByteOverflow })
     expect(oneByteOverflowWire).toHaveLength((48 * 1_024) + 1)
     expect(() => encodeCompanionMessage(negotiated, oneByteOverflow)).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
@@ -657,11 +429,14 @@ describe('Encrypted Companion Protocol codec', () => {
         }],
       },
     }
-    expect(new TextEncoder().encode(JSON.stringify({ applicationVersion: 2, ...multibyteOverflow })).byteLength).toBeGreaterThan(48 * 1_024)
+    expect(new TextEncoder().encode(JSON.stringify({
+      applicationVersion: negotiated.major,
+      ...multibyteOverflow,
+    })).byteLength).toBeGreaterThan(48 * 1_024)
     expect(() => encodeCompanionMessage(negotiated, multibyteOverflow)).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
     )
-    expect(() => decodeCompanionMessage(negotiated, json({ applicationVersion: 2, ...multibyteOverflow }))).toThrow(
+    expect(() => decodeCompanionMessage(negotiated, json({ applicationVersion: negotiated.major, ...multibyteOverflow }))).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
     )
   })
@@ -684,7 +459,7 @@ describe('Encrypted Companion Protocol codec', () => {
       { endpoint: 'mobile', versions: [null] },
       { endpoint: 'mobile', versions: [{ major: 1, wrong: [] }] },
       { endpoint: 'mobile', versions: [{ major: 0, capabilities: [] }] },
-      { endpoint: 'mobile', versions: [{ major: 3, capabilities: [] }] },
+      { endpoint: 'mobile', versions: [{ major: 5, capabilities: [] }] },
       { endpoint: 'mobile', versions: [{ major: 1, capabilities: null }] },
       { endpoint: 'mobile', versions: [{ major: 1, capabilities: ['replay-protection', 'replay-protection'] }] },
       { endpoint: 'mobile', versions: [{ major: 1, capabilities: ['plaintext'] }] },
@@ -744,28 +519,31 @@ describe('Encrypted Companion Protocol codec', () => {
       [],
       'message',
       { applicationVersion: 1, type: 'operation', operation: baseOperation },
-      { applicationVersion: 2, type: 'host-request', operation: baseOperation },
-      { applicationVersion: 2, type: 'operation', result: baseOperation },
-      { applicationVersion: 2, type: 'operation', operation: null },
-      { applicationVersion: 2, type: 'operation', operation: { ...baseOperation, type: 'terminal-input' } },
-      { applicationVersion: 2, type: 'operation', operation: { ...baseOperation, extra: true } },
-      { applicationVersion: 2, type: 'operation', operation: { ...baseOperation, text: '' } },
-      { applicationVersion: 2, type: 'operation', operation: { ...baseOperation, text: 1 } },
-      { applicationVersion: 2, type: 'result', result: null },
-      { applicationVersion: 2, type: 'result', result: { type: 'pending' } },
-      { applicationVersion: 2, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1, outcome: 'accepted', extra: true } },
-      { applicationVersion: 2, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1, outcome: 'unknown' } },
-      { applicationVersion: 2, type: 'result', result: { type: 'confirmed', operationId, committedAt: -1, outcome: 'accepted' } },
-      { applicationVersion: 2, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1.5, outcome: 'accepted' } },
-      { applicationVersion: 2, type: 'projection', projection: null },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'workspace-admin' } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: null } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [], extra: true } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [null] } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'tool', entryId: 'entry', role: 'assistant', text: '' }] } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'assistant', text: '', extra: true }] } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'system', text: '' }] } },
-      { applicationVersion: 2, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'user', text: 1 }] } },
+      { applicationVersion: negotiated.major, type: 'host-request', operation: baseOperation },
+      { applicationVersion: negotiated.major, type: 'operation', result: baseOperation },
+      { applicationVersion: negotiated.major, type: 'operation', operation: null },
+      { applicationVersion: negotiated.major, type: 'operation', operation: { ...baseOperation, type: 'terminal-input' } },
+      { applicationVersion: negotiated.major, type: 'operation', operation: { ...baseOperation, extra: true } },
+      { applicationVersion: negotiated.major, type: 'operation', operation: { ...baseOperation, text: '' } },
+      { applicationVersion: negotiated.major, type: 'operation', operation: { ...baseOperation, text: 1 } },
+      { applicationVersion: negotiated.major, type: 'result', result: null },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'pending' } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1, outcome: 'accepted', extra: true } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1, outcome: 'unknown' } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: -1, outcome: 'accepted' } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'confirmed', operationId, committedAt: 1.5, outcome: 'accepted' } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'session-created', operationId, sessionId: '', committedAt: 1 } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'session-created', operationId, sessionId: 'created', committedAt: 0 } },
+      { applicationVersion: negotiated.major, type: 'result', result: { type: 'session-created', operationId, sessionId: 'created', committedAt: 1, extra: true } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: null },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'workspace-admin' } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: null } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [], extra: true } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [null] } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'tool', entryId: 'entry', role: 'assistant', text: '' }] } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'assistant', text: '', extra: true }] } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'system', text: '' }] } },
+      { applicationVersion: negotiated.major, type: 'projection', projection: { type: 'transcript-page', sessionId, entries: [{ type: 'text', entryId: 'entry', role: 'user', text: 1 }] } },
     ]
     for (const value of malformed) {
       expect(() => decodeCompanionMessage(negotiated, json(value))).toThrow(
@@ -778,7 +556,7 @@ describe('Encrypted Companion Protocol codec', () => {
       (_, index) => ({ type: 'text', entryId: `entry-${String(index)}`, role: 'assistant', text: '' }),
     )
     expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2,
+      applicationVersion: negotiated.major,
       type: 'projection',
       projection: { type: 'transcript-page', sessionId, entries: oversizedEntries },
     }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }))
@@ -798,7 +576,7 @@ describe('Encrypted Companion Protocol codec', () => {
       negotiated,
       REMOTE_PROTOCOL_LIMITS.companionMessageBytes + 1,
     )
-    const oneByteOverflowWire = json({ applicationVersion: 2, ...oneByteOverflow })
+    const oneByteOverflowWire = json({ applicationVersion: negotiated.major, ...oneByteOverflow })
     expect(oneByteOverflowWire).toHaveLength((60 * 1_024) + 1)
     expect(() => encodeCompanionMessage(negotiated, oneByteOverflow)).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }),
@@ -812,7 +590,7 @@ describe('Encrypted Companion Protocol codec', () => {
     multibyteBase.operation.text = '界'.repeat(
       Math.floor((REMOTE_PROTOCOL_LIMITS.companionMessageBytes - (multibyteBaseBytes - 1)) / 3) + 1,
     )
-    const multibyteWire = json({ applicationVersion: 2, ...multibyteBase })
+    const multibyteWire = json({ applicationVersion: negotiated.major, ...multibyteBase })
     expect(multibyteWire.byteLength).toBeGreaterThan(REMOTE_PROTOCOL_LIMITS.companionMessageBytes)
     expect(multibyteBase.operation.text.length).toBeLessThan(REMOTE_PROTOCOL_LIMITS.companionMessageBytes)
     expect(() => encodeCompanionMessage(negotiated, multibyteBase)).toThrow(
@@ -824,16 +602,13 @@ describe('Encrypted Companion Protocol codec', () => {
 
     const manyValues = Array.from({ length: 17 }, () => Array.from({ length: 256 }, () => null))
     expect(() => decodeCompanionMessage(negotiated, json({
-      applicationVersion: 2, type: 'operation', operation: { type: 'submit-prompt', operationId: 'operation', sessionId: 'session', text: 'x', extra: manyValues },
+      applicationVersion: negotiated.major, type: 'operation', operation: { type: 'submit-prompt', operationId: 'operation', sessionId: 'session', text: 'x', extra: manyValues },
     }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' }))
   })
 
   it('brands only bounded canonical Companion identifiers', () => {
     for (const value of [undefined, '', 'x'.repeat(129), 'not valid']) {
       expect(() => parseCompanionOperationId(value)).toThrow(
-        expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
-      )
-      expect(() => parseCompanionInteractionId(value)).toThrow(
         expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
       )
     }
@@ -855,6 +630,7 @@ describe('Encrypted Companion Protocol codec', () => {
         byteLength: 4_096,
         expiresAt: 1_787_027_200_000,
         fileName: 'notes.txt',
+        mediaType: 'text/plain',
       },
     }
     const encoded = encodeCompanionMessage(negotiated, message)
@@ -879,6 +655,7 @@ describe('Encrypted Companion Protocol codec', () => {
         byteLength: 4_096,
         expiresAt: 1_787_027_200_000,
         fileName: 'notes.txt',
+        mediaType: 'text/plain',
       },
     }
     const invalid = (mutate: (operation: Record<string, unknown>) => void): Uint8Array => {
@@ -901,6 +678,11 @@ describe('Encrypted Companion Protocol codec', () => {
     expect(() => decodeCompanionMessage(negotiated, invalid((operation) => {
       operation.fileName = ''
     }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    for (const mediaType of [undefined, 'not-a-media-type', 'x'.repeat(128)]) {
+      expect(() => decodeCompanionMessage(negotiated, invalid((operation) => {
+        operation.mediaType = mediaType
+      }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    }
     expect(() => decodeCompanionMessage(negotiated, invalid((operation) => {
       operation.extra = 'unsupported'
     }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
@@ -955,6 +737,122 @@ describe('Encrypted Companion Protocol codec', () => {
       result: { type: 'attachment-rejected', operationId: 'operation-attachment', reason: 'unknown' },
     }))).toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
   })
+
+  it('round-trips authoritative Session search and stable Host failures', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile', [1, 2]),
+      createCompanionVersionOffer('desktop', [1, 2]),
+    )
+    const operationId = parseCompanionOperationId('operation-search')
+    const search = json({
+      applicationVersion: 2,
+      type: 'operation',
+      operation: { type: 'search-sessions', operationId, query: 'attachment receipt' },
+    })
+    expect(decodeCompanionMessage(negotiated, search)).toEqual({
+      type: 'operation',
+      operation: { type: 'search-sessions', operationId, query: 'attachment receipt' },
+    })
+
+    const result = json({
+      applicationVersion: 2,
+      type: 'result',
+      result: {
+        type: 'session-search',
+        operationId,
+        items: [{ sessionId: 'session-attachment', snippet: 'matching attachment receipt' }],
+        hasMore: false,
+      },
+    })
+    expect(decodeCompanionMessage(negotiated, result)).toEqual({
+      type: 'result',
+      result: {
+        type: 'session-search',
+        operationId,
+        items: [{
+          sessionId: parseCompanionSessionId('session-attachment'),
+          snippet: 'matching attachment receipt',
+        }],
+        hasMore: false,
+      },
+    })
+
+    const failures = [
+      { kind: 'http', code: 'HOST_HTTP_STATUS', message: 'Desktop Host returned HTTP 400', status: 400 },
+      { kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Desktop Host response was not valid RPC JSON' },
+      { kind: 'business', code: 'bad-request', message: 'invalid payload for session.search' },
+      { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'Desktop Host request timed out' },
+    ] as const
+    for (const failure of failures) {
+      const encoded = json({
+        applicationVersion: 2,
+        type: 'result',
+        result: { type: 'operation-failed', operationId, failure },
+      })
+      expect(decodeCompanionMessage(negotiated, encoded)).toEqual({
+        type: 'result',
+        result: { type: 'operation-failed', operationId, failure },
+      })
+    }
+  })
+
+  it('rejects malformed Session search and Host failure values at the Companion boundary', () => {
+    const negotiated = negotiateFresh(
+      createCompanionVersionOffer('mobile', [1, 2]),
+      createCompanionVersionOffer('desktop', [1, 2]),
+    )
+    const decodeOperation = (operation: unknown) => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2, type: 'operation', operation,
+    }))
+    for (const query of [undefined, ' ', 'bad\0query', 'x'.repeat(501)]) {
+      expect(() => decodeOperation({ type: 'search-sessions', operationId: 'search-invalid', query }))
+        .toThrow(expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }))
+    }
+
+    const decodeResult = (result: unknown) => decodeCompanionMessage(negotiated, json({
+      applicationVersion: 2, type: 'result', result,
+    }))
+    const searchBase = {
+      type: 'session-search',
+      operationId: 'search-invalid',
+      items: [{ sessionId: 'session-one', snippet: 'one' }],
+      hasMore: false,
+    }
+    const invalidSearchResults = [
+      { ...searchBase, items: null },
+      { ...searchBase, items: Array.from({ length: 21 }, (_, index) => ({ sessionId: `s-${String(index)}`, snippet: '' })) },
+      { ...searchBase, hasMore: 'false' },
+      { ...searchBase, items: [null] },
+      { ...searchBase, items: [{ sessionId: 'session-one' }] },
+      { ...searchBase, items: [{ sessionId: 'session-one', snippet: '😀'.repeat(241) }] },
+      { ...searchBase, items: [{ sessionId: 'session-one', snippet: 'one' }, { sessionId: 'session-one', snippet: 'two' }] },
+    ]
+    for (const result of invalidSearchResults) {
+      expect(() => decodeResult(result)).toThrow(
+        expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+      )
+    }
+
+    const failure = (value: unknown) => ({ type: 'operation-failed', operationId: 'search-invalid', failure: value })
+    const invalidFailures = [
+      failure({ kind: 'wire', code: 'HOST_WIRE_INVALID', message: 1 }),
+      failure({ kind: 'wire', code: 'HOST_WIRE_INVALID', message: '' }),
+      failure({ kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'x'.repeat(4_097) }),
+      failure({ kind: 'http', code: 'WRONG', message: 'bad', status: 400 }),
+      failure({ kind: 'http', code: 'HOST_HTTP_STATUS', message: 'bad', status: 99 }),
+      failure({ kind: 'http', code: 'HOST_HTTP_STATUS', message: 'bad', status: 600 }),
+      failure({ kind: 'http', code: 'HOST_HTTP_STATUS', message: 'bad', status: '400' }),
+      failure({ kind: 'wire', code: 'WRONG', message: 'bad' }),
+      failure({ kind: 'business', code: 'not valid', message: 'bad' }),
+      failure({ kind: 'timeout', code: 'WRONG', message: 'bad' }),
+      failure({ kind: 'unknown', code: 'UNKNOWN', message: 'bad' }),
+    ]
+    for (const result of invalidFailures) {
+      expect(() => decodeResult(result)).toThrow(
+        expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+      )
+    }
+  })
 })
 
 function attachmentOffer(overrides: { fileName: string }): CompanionOfferAttachmentOperation {
@@ -967,6 +865,7 @@ function attachmentOffer(overrides: { fileName: string }): CompanionOfferAttachm
     byteLength: 4_096,
     expiresAt: 1_787_027_200_000,
     fileName: overrides.fileName,
+    mediaType: 'application/octet-stream',
   }
 }
 

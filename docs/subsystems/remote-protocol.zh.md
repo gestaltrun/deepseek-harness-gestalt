@@ -20,6 +20,6 @@ Relay route/attachment id 与 Companion operation、Session projection、transcr
 
 `CompanionOperation` 是由 prompt 提交、attachment offer、权威 `search-sessions` 与重连时使用的 `query-operation-status` 组成的闭合 union。搜索请求携带一个非空查询，最多包含 500 个 UTF-16 code unit。关联的 `session-search` result 最多携带 20 个唯一的 Session id/snippet 对，每个 snippet 最多包含 240 个 Unicode code point；协议不提供缓存标题、Workspace 或 transcript 字段。
 
-`CompanionResult` 是由已确认 mutation、attachment 拒绝、`session-search`、`operation-failed` 与 `status` 组成的闭合 union。每个 result 都携带发起它的 operation id。`operation-failed` 只保留一种 Host 失败类别：包含数值 code 的 HTTP 状态、无效 wire response、类型化业务 code/message 或超时。失败 message 最多包含 4 KiB UTF-8 字节。`status` result 要么内嵌同一 operation id 的原始 confirmed result，要么声明 `{ absent: true }`。
+`CompanionResult` 是由已确认 mutation、`session-created`、attachment 拒绝、`session-search`、`operation-failed` 与 `status` 组成的闭合 union。每个 result 都携带发起它的 operation id。成功的 `create-session` 会返回 `session-created`，其中包含 Desktop 返回的品牌化协议原生 Session id 与正数提交时间。`operation-failed` 只保留一种 Host 失败类别：包含数值 code 的 HTTP 状态、无效 wire response、类型化业务 code/message 或超时。失败 message 最多包含 4 KiB UTF-8 字节。`status` result 要么内嵌同一 operation id 的原始终态 mutation result（包括准确的 `session-created` result），要么声明 `{ absent: true }`。
 
 Mobile 在发送 operation 后丢失物理连接 generation 时，传输结果处于未知状态：Mobile 会保留 operation id，并在稍后发送 `query-operation-status`。结果未知期间，Mobile 绝不会重新发送该 operation，因为 Desktop 可能已经提交它。

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   parseInstallationId,
@@ -139,6 +139,41 @@ describe('Mobile shipped entry foreground mutation gate', () => {
 
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected current Companion result receiver')
+    fireEvent.click(screen.getByRole('button', { name: 'New Session in Work' }))
+    expect(firstChannel.mutations.create).toHaveBeenCalledWith({ workspace: 'guarded-workspace' })
+    results.acceptValidatedCompanionResult({
+      type: 'session-created',
+      operationId: parseCompanionOperationId('create-workspace-snapshot'),
+      sessionId: parseCompanionSessionId('created-workspace-session'),
+      committedAt: 1,
+    })
+    firstResync.acceptValidatedDesktopResync(createdSessionsProjection('workspace'))
+    await screen.findByRole('heading', { name: 'Workspace created' })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(within(screen.getByRole('region', { name: 'Work' })).getByRole('treeitem', { name: /New Session/ }))
+      .toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'New ungrouped Session' }))
+    expect(firstChannel.mutations.create).toHaveBeenLastCalledWith({})
+    results.acceptValidatedCompanionResult({
+      type: 'session-created',
+      operationId: parseCompanionOperationId('create-ungrouped-snapshot'),
+      sessionId: parseCompanionSessionId('created-ungrouped-session'),
+      committedAt: 2,
+    })
+    firstResync.acceptValidatedDesktopResync(createdSessionsProjection('ungrouped'))
+    await screen.findByRole('heading', { name: 'Ungrouped created' })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect([
+      screen.getByRole('region', { name: 'Work' }).textContent,
+      screen.getByRole('region', { name: 'Ungrouped' }).textContent,
+    ]).toMatchInlineSnapshot(`
+      [
+        "WorkNew Session in WorkWorkspace creatednowWaiting for approvalGuarded Sessionnow",
+        "UngroupedNew Session",
+      ]
+    `)
+
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search Desktop Sessions' }), {
       target: { value: 'authoritative' },
     })
@@ -221,6 +256,45 @@ function guardedSessions() {
   }
 }
 
+function createdSessionsProjection(
+  created: 'workspace' | 'ungrouped',
+): ValidatedDesktopSurfaceResync {
+  const workspaceBlank = created === 'workspace'
+  const ungroupedBlank = created === 'ungrouped'
+  return {
+    type: 'desktop-resync', version: 1, authenticated: true, desktopName: 'Guarded Desktop',
+    sessions: {
+      ids: [
+        ...(ungroupedBlank ? ['created-ungrouped-session'] : []),
+        'created-workspace-session',
+        'guarded-session',
+      ],
+      byId: {
+        'guarded-session': guardedSessions().byId['guarded-session'],
+        'created-workspace-session': {
+          id: 'created-workspace-session', title: 'Workspace created', displayTitle: 'Workspace created',
+          cwd: '/work', running: false, blank: workspaceBlank, updatedAt: 2,
+        },
+        ...(ungroupedBlank
+          ? {
+            'created-ungrouped-session': {
+              id: 'created-ungrouped-session', title: 'Ungrouped created', displayTitle: 'Ungrouped created',
+              running: false, blank: true, updatedAt: 3,
+            },
+          }
+          : {}),
+      },
+      current: null, phase: 'ready', subagentsByParent: {}, jobsBySession: {}, currentAddress: null,
+    },
+    workspaces: [{
+      workspaceId: 'guarded-workspace', path: '/work', title: 'Work',
+      sessionIds: ['created-workspace-session', 'guarded-session'],
+      createdAt: '2026-08-22T00:00:00.000Z', updatedAt: '2026-08-22T00:00:00.000Z',
+    }],
+    conversations: [guardedConversation(true)],
+  }
+}
+
 function installationWithCompletedLogin(): PlatformAccountInstallation {
   const transport: PlatformAccountTransport = {
     environment,
@@ -286,8 +360,15 @@ function guardedConversation(complete = false): ValidatedDesktopSurfaceResync['c
 }
 
 function connectionChannel(attachmentCompletion: Promise<void>) {
+  const createOperationIds = ['create-workspace-snapshot', 'create-ungrouped-snapshot'] as const
+  let createIndex = 0
   const mutations = {
-    create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(),
+    create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(() => {
+      const operationId = createOperationIds[createIndex]
+      if (operationId === undefined) throw new Error('unexpected extra Session creation')
+      createIndex += 1
+      return { operationId: parseCompanionOperationId(operationId), completion: Promise.resolve() }
+    }),
     submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(() => ({
       operationId: parseCompanionOperationId('submit-snapshot'), completion: Promise.resolve(),
     })),

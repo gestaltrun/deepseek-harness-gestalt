@@ -154,6 +154,8 @@ describe('assembled Desktop Companion Host search', () => {
     await waitFor(() => { expect(surface.getSnapshot().sessions.ids).toHaveLength(initialIds.size + 1) })
     const workspaceSessionId = surface.getSnapshot().sessions.ids.find(id => !initialIds.has(id))
     if (workspaceSessionId === undefined) throw new Error('Workspace-owned Session was not projected')
+    await screen.findByRole('heading', { name: workspaceSessionId })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(within(screen.getByRole('region', { name: 'Assembled Workspace' }))
       .getByRole('treeitem', { name: 'New Session' }).getAttribute('data-session-row')).toBe(workspaceSessionId)
 
@@ -163,6 +165,8 @@ describe('assembled Desktop Companion Host search', () => {
       !initialIds.has(id) && id !== workspaceSessionId
     ))
     if (ungroupedSessionId === undefined) throw new Error('Ungrouped Session was not projected')
+    await screen.findByRole('heading', { name: ungroupedSessionId })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(within(screen.getByRole('region', { name: 'Ungrouped' }))
       .getByRole('treeitem', { name: 'New Session' }).getAttribute('data-session-row')).toBe(ungroupedSessionId)
 

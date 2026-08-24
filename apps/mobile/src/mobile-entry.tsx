@@ -82,6 +82,7 @@ function MobileEntry({
       operationFailure: projection.operationFailure,
       cacheFailure: projection.cacheFailure,
       onCreate: companionSurface.create,
+      onSessionOpened: companionSurface.acknowledgeSessionOpened,
       onSubmit: companionSurface.submit,
       onCancel: companionSurface.cancel,
       onLoadOlder: companionSurface.loadOlder,

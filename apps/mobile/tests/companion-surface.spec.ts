@@ -92,7 +92,7 @@ describe('MobileCompanionSurface', () => {
     expect(surface.getSnapshot().sessions.ids).toEqual(['session-replacement'])
   })
 
-  it('selects a Desktop-confirmed created Session only after the current generation projects it', () => {
+  it('retains a Desktop-confirmed blank Session selection across pagination and repeated refreshes until Mobile opens it', () => {
     const runtime = connectedRuntime()
     const channel = connectionChannel()
     const surface = new MobileCompanionSurface(runtime)
@@ -111,12 +111,47 @@ describe('MobileCompanionSurface', () => {
     expect(surface.getSnapshot().sessions.ids).toEqual(['session-existing'])
     expect(surface.getSnapshot().sessions.current).toBeUndefined()
 
-    receiver.acceptValidatedDesktopResync(blankProjection('session-created', 'workspace-product'))
-    expect(surface.getSnapshot().sessions.ids).toEqual(['session-created'])
+    receiver.acceptValidatedDesktopResync(manyProjection(20))
+    expect(surface.getSnapshot().sessions.ids).toHaveLength(20)
+    expect(surface.getSnapshot().sessions.current).toBeUndefined()
+
+    const pageIncludingCreated = manyProjection(21, 'session-created', 'workspace-product')
+    receiver.acceptValidatedDesktopResync(pageIncludingCreated)
+    expect(surface.getSnapshot().sessions.ids).toHaveLength(21)
     expect(surface.getSnapshot().sessions.current).toBe('session-created')
 
-    results.acceptValidatedCompanionResult(created)
-    receiver.acceptValidatedDesktopResync(blankProjection('session-created', 'workspace-product'))
+    receiver.acceptValidatedDesktopResync(pageIncludingCreated)
+    receiver.acceptValidatedDesktopResync(pageIncludingCreated)
+    expect(surface.getSnapshot().sessions.current).toBe('session-created')
+
+    surface.acknowledgeSessionOpened(sid('session-other'))
+    receiver.acceptValidatedDesktopResync(pageIncludingCreated)
+    expect(surface.getSnapshot().sessions.current).toBe('session-created')
+
+    surface.acknowledgeSessionOpened(sid('session-created'))
+    receiver.acceptValidatedDesktopResync(pageIncludingCreated)
+    expect(surface.getSnapshot().sessions.current).toBeUndefined()
+  })
+
+  it('releases a pending created Session selection when the authoritative row becomes non-blank', () => {
+    const runtime = connectedRuntime()
+    const surface = new MobileCompanionSurface(runtime)
+    const receiver = surface.bindAuthenticatedConnection(connectionChannel())
+    if (receiver === undefined) throw new Error('expected Desktop resync receiver')
+    receiver.acceptValidatedDesktopResync(projection('session-existing', 'Existing'))
+    const results = surface.bindValidatedCompanionResults()
+    if (results === undefined) throw new Error('expected Companion result receiver')
+    surface.create({})
+    results.acceptValidatedCompanionResult({
+      type: 'session-created', operationId: parseCompanionOperationId('create-default'),
+      sessionId: parseCompanionSessionId('session-created'), committedAt: 1,
+    })
+
+    receiver.acceptValidatedDesktopResync(blankProjection('session-created'))
+    expect(surface.getSnapshot().sessions.current).toBe('session-created')
+    receiver.acceptValidatedDesktopResync(projection('session-created', 'First prompt'))
+    expect(surface.getSnapshot().sessions.current).toBeUndefined()
+    receiver.acceptValidatedDesktopResync(blankProjection('session-created'))
     expect(surface.getSnapshot().sessions.current).toBeUndefined()
   })
 
@@ -153,7 +188,7 @@ describe('MobileCompanionSurface', () => {
     expect(surface.getSnapshot().sessions.current).toBeUndefined()
   })
 
-  it('restores a committed create focus once and never focuses a not-submitted retry', () => {
+  it('restores a committed create focus until Mobile opens it and never focuses a not-submitted retry', () => {
     const runtime = connectedRuntime()
     const surface = new MobileCompanionSurface(runtime)
     const receiver = surface.bindAuthenticatedConnection(connectionChannel())
@@ -169,6 +204,9 @@ describe('MobileCompanionSurface', () => {
     receiver.acceptValidatedDesktopResync(blankProjection('session-recovered'))
     expect(surface.getSnapshot().sessions.current).toBe('session-recovered')
 
+    receiver.acceptValidatedDesktopResync(blankProjection('session-recovered'))
+    expect(surface.getSnapshot().sessions.current).toBe('session-recovered')
+    surface.acknowledgeSessionOpened(sid('session-recovered'))
     receiver.acceptValidatedDesktopResync(blankProjection('session-recovered'))
     expect(surface.getSnapshot().sessions.current).toBeUndefined()
     surface.acceptRecoveredOperation({
@@ -958,6 +996,37 @@ function blankProjection(id: string, workspaceId?: string): ValidatedDesktopSurf
       ? []
       : [{
         workspaceId, path: `/${workspaceId}`, title: workspaceId, sessionIds: [id],
+        createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z',
+      }],
+    conversations: [],
+  }
+}
+
+function manyProjection(
+  count: number,
+  createdId?: string,
+  workspaceId?: string,
+): ValidatedDesktopSurfaceResync {
+  const existingIds = Array.from({ length: Math.min(count, 20) }, (_, index) => `session-${String(index)}`)
+  const ids = createdId === undefined || count <= 20 ? existingIds : [...existingIds, createdId]
+  const byId = Object.fromEntries(ids.map((id, index) => [id, {
+    id,
+    title: id,
+    displayTitle: id,
+    running: false,
+    blank: id === createdId,
+    updatedAt: ids.length - index,
+  }]))
+  return {
+    type: 'desktop-resync', version: 1, authenticated: true, desktopName: 'Paged Desktop',
+    sessions: {
+      ids, byId, current: null, phase: 'ready',
+      subagentsByParent: {}, jobsBySession: {}, currentAddress: null,
+    },
+    workspaces: workspaceId === undefined || createdId === undefined
+      ? []
+      : [{
+        workspaceId, path: `/${workspaceId}`, title: workspaceId, sessionIds: [createdId],
         createdAt: '2026-08-24T00:00:00.000Z', updatedAt: '2026-08-24T00:00:00.000Z',
       }],
     conversations: [],

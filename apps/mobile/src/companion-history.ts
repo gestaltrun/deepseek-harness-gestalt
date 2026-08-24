@@ -42,6 +42,8 @@ export interface MobileCompanionPresentation {
   cacheFailure?: string | undefined
   /** Create one Desktop-default Session when mutation authority is available. */
   onCreate?: ((input: { workspace?: string }) => void) | undefined
+  /** Acknowledge that Mobile committed the selected Session detail view. */
+  onSessionOpened?: ((sessionId: SessionId) => void) | undefined
   /** Submit a prompt through Desktop authority when transport is available. */
   onSubmit?: ((sessionId: SessionId, text: string) => void | Promise<void>) | undefined
   /** Cancel a running Desktop Session when transport is available. */

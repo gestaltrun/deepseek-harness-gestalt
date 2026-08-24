@@ -321,9 +321,11 @@ export class MobileCompanionSurface {
         assertCompanionJsonProjection(message)
         const active = { token, channel }
         const pendingFocus = this.#createdSessionFocus
-        const focusCreatedSession = pendingFocus?.token === token
-          && message.sessions.byId[pendingFocus.sessionId] !== undefined
-        const presentationMessage = focusCreatedSession
+        const pendingCreatedSession = pendingFocus?.token === token
+          ? message.sessions.byId[pendingFocus.sessionId]
+          : undefined
+        const releaseCreatedSession = pendingCreatedSession?.blank === false
+        const presentationMessage = pendingFocus !== undefined && pendingCreatedSession?.blank === true
           ? { ...message, sessions: { ...message.sessions, current: pendingFocus.sessionId } }
           : message
         const projection = adaptMobileCompanionProjection(
@@ -373,7 +375,7 @@ export class MobileCompanionSurface {
           this.#searchOperationId = undefined
           this.#refreshOperationId = undefined
           this.#createdSessionFocus = undefined
-        } else if (focusCreatedSession && this.#createdSessionFocus === pendingFocus) {
+        } else if (releaseCreatedSession && this.#createdSessionFocus === pendingFocus) {
           this.#createdSessionFocus = undefined
         }
         this.publish()
@@ -400,6 +402,18 @@ export class MobileCompanionSurface {
       }
       this.publish()
     })
+  }
+
+  /**
+   * Retire one created-Session selection after the current Mobile view has opened it.
+   * @param sessionId - exact Session identity committed by the rendered detail view.
+   */
+  readonly acknowledgeSessionOpened = (sessionId: SessionId): void => {
+    const pending = this.#createdSessionFocus
+    const active = this.#activeConnection
+    if (pending === undefined || active === undefined
+      || pending.token !== active.token || pending.sessionId !== sessionId) return
+    this.#createdSessionFocus = undefined
   }
 
   readonly submit = async (sessionId: SessionId, text: string): Promise<void> => {

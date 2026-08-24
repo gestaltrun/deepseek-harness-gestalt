@@ -91,6 +91,15 @@ describe('Encrypted Companion Protocol v3 product surface', () => {
       },
     } as const
     expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, history))).toEqual(history)
+    const tail = {
+      ...history,
+      projection: {
+        type: 'conversation-snapshot' as const,
+        operationId, sessionId, generation: 2, desktopRevision: 8,
+        conversation: { sessionId, nodes: [], hasMore: false },
+      },
+    }
+    expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, tail))).toEqual(tail)
 
     const image = {
       type: 'result',

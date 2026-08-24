@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   COMPANION_HISTORY_PAGE_SIZE,
   pageCompanionHistory,
@@ -45,6 +45,8 @@ export interface MobileBrowseProps {
   clock: MobilePresentationClock
   /** Optional create handler used by Workspace and global create actions. */
   onCreate?: ((input: { workspace?: string }) => void) | undefined
+  /** Notify the connection owner after the selected Session detail view commits. */
+  onSessionOpened?: ((sessionId: SessionId) => void) | undefined
   /** Submit one prompt to the selected Desktop Session. */
   onSubmit?: ((sessionId: SessionId, text: string) => void | Promise<void>) | undefined
   /** Cancel one active Desktop Session. */
@@ -64,13 +66,36 @@ export interface MobileBrowseProps {
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
   desktopName, connection, sessions, workspaces, conversations, locale, theme, loadImage,
-  canMutate, clock, onCreate, onSubmit, onCancel, onAttach, onLoadOlder, search, onSearch, onClearCache, operationFailure,
+  canMutate, clock, onCreate, onSessionOpened, onSubmit, onCancel, onAttach, onLoadOlder, search, onSearch, onClearCache,
+  operationFailure,
   cacheFailure,
 }: MobileBrowseProps): ReactNode {
   const [openId, setOpenId] = useState<SessionId>()
   const [page, setPage] = useState(0)
   const [searchDraft, setSearchDraft] = useState(search.query)
+  const adoptedCurrent = useRef<SessionId>()
+  const historyRequested = useRef<SessionId>()
   useEffect(() => { setSearchDraft(search.query) }, [search.query])
+  useEffect(() => {
+    const current = sessions.current
+    if (current === undefined || sessions.byId[current] === undefined) {
+      adoptedCurrent.current = undefined
+      return
+    }
+    if (adoptedCurrent.current === current) return
+    adoptedCurrent.current = current
+    setOpenId(current)
+  }, [sessions.byId, sessions.current])
+  useEffect(() => {
+    if (openId === undefined) {
+      historyRequested.current = undefined
+      return
+    }
+    onSessionOpened?.(openId)
+    if (conversations[openId] !== undefined || historyRequested.current === openId) return
+    historyRequested.current = openId
+    onLoadOlder?.(openId)
+  }, [conversations, onLoadOlder, onSessionOpened, openId])
   const searchActive = search.query !== ''
   const paged = useMemo(
     () => pageCompanionHistory(sessions, workspaces, page, COMPANION_HISTORY_PAGE_SIZE),
@@ -97,7 +122,6 @@ export function MobileBrowse({
     : undefined
   const openSession = (id: SessionId): void => {
     setOpenId(id)
-    if (conversations[id] === undefined) onLoadOlder?.(id)
   }
 
   if (openId !== undefined && openTitle !== undefined) {

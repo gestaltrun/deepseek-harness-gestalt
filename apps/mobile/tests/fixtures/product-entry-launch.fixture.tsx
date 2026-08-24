@@ -1,4 +1,5 @@
 import type { PlatformAccountInstallation } from '@deepseek-ai/dsh-platform-account-client'
+import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
   parseRelayCredential,
   parseRelayRouteId,
@@ -7,6 +8,7 @@ import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { CompanionForegroundRuntime } from '../../src/companion-lifecycle.ts'
 import { fixedMobilePresentationClock } from '../../src/mobile-clock.ts'
 import { mountMobileEntry } from '../../src/mobile-entry.tsx'
+import type { MobilePairingActions } from '../../src/personal-pairing-model.ts'
 import type {
   MobileCompanionConnectionChannel,
   ValidatedDesktopSurfaceResync,
@@ -40,6 +42,7 @@ export function launchMobileProduct(_start: () => Promise<void>): Promise<void> 
   runtime.markConnectionOpen()
   const mounted = mountMobileEntry(root, {
     installation: signedInInstallation(),
+    pairing: pairedDesktops(),
     companion: runtime,
     clock: fixedMobilePresentationClock(10_000),
   })
@@ -51,6 +54,29 @@ export function launchMobileProduct(_start: () => Promise<void>): Promise<void> 
   window.__DSH_MOBILE_PRODUCT_EVIDENCE__ = { show }
   show('approval')
   return Promise.resolve()
+}
+
+function pairedDesktops(): MobilePairingActions {
+  const selected = parsePersonalPairingId('pairing-product-entry')
+  const snapshot = {
+    status: 'paired' as const,
+    desktops: [
+      { pairingId: selected, desktopName: 'Authenticated Shared Desktop' },
+      { pairingId: parsePersonalPairingId('pairing-secondary'), desktopName: 'Secondary Desktop' },
+    ],
+    selectedPairingId: selected,
+  }
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: () => () => {},
+    completeLink: () => {},
+    scanQr: () => {},
+    retryPairing: () => {},
+    selectDesktop: () => {},
+    activate: async () => {},
+    deactivate: async () => {},
+    unpair: async () => {},
+  }
 }
 
 function signedInInstallation(): PlatformAccountInstallation {

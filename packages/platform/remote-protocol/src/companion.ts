@@ -716,65 +716,12 @@ function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProject
     throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion surface exceeds its Workspace row ceiling')
   }
   if (typeof record.hasMore !== 'boolean') invalid('Companion surface hasMore must be boolean')
-  const sessions = record.sessions.map((valueSession) => {
-    const session = object(valueSession, 'Companion Session summary')
-    const keys = [
-      'sessionId', 'displayTitle', 'cwd', 'running', 'blank', 'updatedAt', 'pendingInteraction',
-    ].filter(key => session[key] !== undefined)
-    exactKeys(session, keys, 'Companion Session summary')
-    if (typeof session.displayTitle !== 'string' || session.displayTitle.trim() === '') {
-      invalid('Companion Session displayTitle must be non-blank')
-    }
-    if (session.cwd !== undefined && typeof session.cwd !== 'string') invalid('Companion Session cwd must be a string')
-    if (typeof session.running !== 'boolean' || typeof session.blank !== 'boolean') {
-      invalid('Companion Session running and blank must be boolean')
-    }
-    const pendingInteraction = parsePendingInteraction(session.pendingInteraction)
-    return {
-      sessionId: parseCompanionSessionId(session.sessionId),
-      displayTitle: session.displayTitle,
-      ...session.cwd === undefined ? {} : { cwd: session.cwd },
-      running: session.running,
-      blank: session.blank,
-      updatedAt: nonNegativeSafeInteger(session.updatedAt, 'Companion Session updatedAt'),
-      ...pendingInteraction === undefined ? {} : {
-        pendingInteraction,
-      },
-    }
-  })
+  const sessions = record.sessions.map(parseSessionSummary)
   if (new Set(sessions.map(session => session.sessionId)).size !== sessions.length) {
     invalid('Companion surface Session ids must be unique')
   }
   const visibleIds = new Set(sessions.map(session => session.sessionId))
-  const workspaces = record.workspaces.map((valueWorkspace) => {
-    const workspace = object(valueWorkspace, 'Companion Workspace projection')
-    exactKeys(
-      workspace,
-      ['workspaceId', 'path', 'title', 'sessionIds', 'createdAt', 'updatedAt'],
-      'Companion Workspace projection',
-    )
-    const workspaceId = parseCompanionWorkspaceId(workspace.workspaceId)
-    for (const key of ['path', 'title', 'createdAt', 'updatedAt'] as const) {
-      if (typeof workspace[key] !== 'string' || workspace[key].length === 0) {
-        invalid(`Companion Workspace ${key} must be non-empty`)
-      }
-    }
-    if (!Array.isArray(workspace.sessionIds) || workspace.sessionIds.length > REMOTE_PROTOCOL_LIMITS.surfaceSessionRows) {
-      invalid('Companion Workspace sessionIds exceed the current surface page')
-    }
-    const sessionIds = workspace.sessionIds.map(parseCompanionSessionId)
-    if (new Set(sessionIds).size !== sessionIds.length || sessionIds.some(id => !visibleIds.has(id))) {
-      invalid('Companion Workspace sessionIds must be unique ids from the current surface page')
-    }
-    return {
-      workspaceId,
-      path: workspace.path as string,
-      title: workspace.title as string,
-      sessionIds,
-      createdAt: workspace.createdAt as string,
-      updatedAt: workspace.updatedAt as string,
-    }
-  })
+  const workspaces = record.workspaces.map(valueWorkspace => parseWorkspaceProjection(valueWorkspace, visibleIds))
   return {
     type: 'surface-snapshot',
     operationId: parseCompanionOperationId(record.operationId),

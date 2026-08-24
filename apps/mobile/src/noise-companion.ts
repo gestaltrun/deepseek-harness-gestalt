@@ -51,6 +51,7 @@ export class MobileNoiseCompanionReceiver {
     private readonly surfaceReceiver?: () => MobileCompanionSurfaceReceiver | undefined,
     private readonly refreshSurface?: (offset: number) => void,
     private readonly reconcileOperations?: () => void,
+    private readonly authenticatedDesktop?: (desktopName: string) => void,
   ) {
     if (!Number.isSafeInteger(generation) || generation <= 0) {
       throw new TypeError('Mobile Noise Companion generation must be a positive safe integer')
@@ -87,6 +88,7 @@ export class MobileNoiseCompanionReceiver {
     if (message.projection.generation !== this.generation) {
       throw new Error('Authenticated foreground synchronization belongs to another connection generation')
     }
+    this.authenticatedDesktop?.(message.projection.desktopName)
     if (this.surfaceReceiver !== undefined) {
       const surface = this.surfaceReceiver()
       if (surface === undefined) throw new Error('Authenticated foreground synchronization has no Mobile surface')

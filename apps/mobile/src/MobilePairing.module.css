@@ -1,5 +1,5 @@
 .card { display: grid; gap: 14px; padding: 20px; border: 1px solid color-mix(in srgb, currentColor 14%, transparent); border-radius: 20px; background: color-mix(in srgb, var(--dsw-alias-background-primary) 94%, transparent); }
-.card h2, .card p { margin: 0; }
+.card h2, .card h3, .card p { margin: 0; }
 .card p, .card small { color: var(--dsw-alias-label-secondary); line-height: 1.55; }
 .card label { display: grid; gap: 7px; font-size: 13px; }
 .card input { width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-background-primary); color: inherit; }
@@ -11,3 +11,7 @@
 .continue { border: 0; background: var(--dsw-alias-button-info-fill); color: var(--dsw-alias-button-info-label); }
 .continue:disabled { opacity: .45; }
 .card output { padding: 14px; border-radius: 12px; background: var(--dsw-alias-fill-secondary); font-size: 18px; font-weight: 800; letter-spacing: .04em; line-height: 1.5; }
+.desktops { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.desktop { display: grid; width: 100%; gap: 3px; padding: 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; background: transparent; color: inherit; text-align: left; }
+.desktop[aria-pressed="true"] { border-color: var(--dsw-alias-button-info-fill); background: color-mix(in srgb, var(--dsw-alias-button-info-fill) 10%, transparent); }
+.desktop small { overflow-wrap: anywhere; }

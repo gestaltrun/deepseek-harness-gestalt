@@ -8,6 +8,8 @@ Remote Access 的纯 codec 与协商器。本包拥有两个独立版本化的�
 
 版本 1 只暴露路由 attachment、不透明密文转发、心跳、撤销、稳定 transport 错误与 transport 版本协商。Attachment 授权使用端点持有的 P-256 签名密钥：Relay 签发绑定 route、attachment id、端点类型、公钥、challenge id、nonce 的新鲜限时挑战，并只接受对完整元组的一次签名。Platform 只持久化公钥摘要；attach 帧不携带可重放 bearer authority。认证完成后，`ready` 会绑定本地 route 与 attachment，并投影当前对端 attachment id、credential-bound 非秘密 pairing selector 和 connection generation。selector 用于选择端点本地 Snow static state，但不授予 Relay 或应用 authority。Relay 标识符是协议原生的品牌化值。`REMOTE_OFFLINE` 报告在线目标缺失，但不表示存在排队投递。解码会拒绝未知消息类型、重复的 ready peer 和额外字段，因此完整 Host 请求不能夹带在 transport 元数据旁。
 
+Mobile endpoint 会在 attachment 前选择一个已保留 Personal Pairing。每个 pairing 都拥有独立 Mobile route grant、pairing selector、Snow static state 与 Companion projection。选择属于 endpoint 本地行为，不会新增 Relay 或 Companion wire operation。切换会先让上一条物理 channel 失效并排空，再只用所选 grant attach；Relay 绝不跨 Paired Desktop multiplex 或合并 Session authority。
+
 ## Encrypted Companion Protocol
 
 Companion major 4 和 3 是当前及紧邻的前一应用版本。双方 endpoint 必须在所选 major 上声明已认证加密、配对密钥隔离与重放保护。协商不受 offer 数组顺序影响，始终选择最高的安全共同 major，因此不安全的共同 major 只能降级到安全的紧邻前一 major。每条逻辑 endpoint 连接拥有一个 negotiation channel。在该 channel 上开始新协商时，会在求值 offer 前让此前的应用 codec token 失效；失败的协商会让 channel 保持未激活，而其他 channel 仍然有效。不存在安全版本交集时，会在编码应用明文前失败，并指出必须更新的 endpoint。

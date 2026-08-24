@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-`apps/mobile/ios` 与 `apps/mobile/android` 是 `com.alibaba.gestalt.mobile` 的仓库内 Capacitor 工程。Capacitor 会把编译后的 `apps/mobile/src/main.tsx` closure 复制到每个应用；两个工程都不会从 Desktop、Platform、Vite 或 `prototype-companion` 加载可执行应用代码。两个原生工程都注册 `GestaltProtectedStorage`。iOS 使用 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` 把 UTF-8 值保存为 generic-password Keychain 条目。Android 在 Android Keystore 中创建不可导出的 AES-GCM 密钥，把每个加密 SharedPreferences 值及其存储 key 绑定为 additional authenticated data，每次替换都使用新的系统 IV，并禁用应用备份。产品 composition 要求该原生插件，并在其中保存稳定 Installation id、Mobile Relay grant、96 字节 IK reconnect record、attachment key 与待处理配对恢复。IndexedDB 配对存储仍是可注入的浏览器测试 adapter，打包入口无法选择它。
+`apps/mobile/ios` 与 `apps/mobile/android` 是 `com.alibaba.gestalt.mobile` 的仓库内 Capacitor 工程。Capacitor 会把编译后的 `apps/mobile/src/main.tsx` closure 复制到每个应用；两个工程都不会从 Desktop、Platform、Vite 或 `prototype-companion` 加载可执行应用代码。两个原生工程都注册 `GestaltProtectedStorage`。iOS 使用 `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` 把 UTF-8 值保存为 generic-password Keychain 条目。Android 在 Android Keystore 中创建不可导出的 AES-GCM 密钥，把每个加密 SharedPreferences 值及其存储 key 绑定为 additional authenticated data，每次替换都使用新的系统 IV，并禁用应用备份。产品 composition 要求该原生插件，并在其中保存稳定 Installation id 与一份版本 2 的账号隔离 pairing 文档。该有界文档会保留每个 Personal Pairing 的 Mobile Relay grant、96 字节 IK reconnect record、attachment key、已鉴权 Desktop 名称、待处理配对恢复，以及[显式选择的 Paired Desktop](../feature/2026-08-24-explicit-mobile-paired-desktop-selection.zh.md)。IndexedDB 配对存储仍是可注入的浏览器测试 adapter，打包入口无法选择它。
 
 已鉴权 Account 与 Personal Pairing 会选择一个账号隔离的 Companion Cache 数据库。由配对所有的 attachment material 经过 HKDF-SHA-256 派生的密钥，会使用配对专属 AES-GCM additional data 加密一份带版本的 Workspace、Session 与 transcript projection 快照。只有完整且通过校验的缓存 projection 才能成为 Remote Offline 只读展示；它不能创建已鉴权连接或启用 mutation。真实已鉴权 projection 会替换缓存展示，密封新的缓存快照，并继续以 Desktop 为权威。清除一个 Desktop 的展示缓存只删除内容，保留 Operation Receipt 与受保护配对权限。已确认的解除配对会先在 Platform 撤销 Mobile 所有的配对并关闭 Relay 权限；产品随后才删除内容、回执与本地配对密钥。Session 创建、prompt、cancel、interaction settlement 与 attachment offer 都会在进入 transport 前预留不可淘汰的 `prepared` Operation Receipt，并在 Snow 推进发送 nonce 并尝试 Relay 投递之前持久改为 `unknown`。前台重连会向配对范围的 Desktop ledger 查询每个未知 operation id，应用其原始结果或明确的未提交状态，刷新展示，并且绝不重放 mutation。跨进程替换后遗留的 Desktop ledger prepared 记录，会在查询或重复执行时变成持久的 `companion-outcome-unknown` Host failure；它绝不回答 absent，也绝不重复 Host effect。
 
@@ -32,6 +32,6 @@ Status: implemented
 
 ## Consequences
 
-当操作系统保留 Keychain 或 Android 应用数据时，应用升级会保留 Installation 与配对权限；缓存损坏或格式替换可以通过清除可丢弃加密行恢复，无需正常重新配对。Android 卸载会移除应用数据，重装后会创建新 Installation。iOS Keychain 数据可能在卸载后继续存在，因此重装会保留 Installation，直到 iOS 或用户移除对应 Keychain 条目。Simulator 与 emulator build 会校验原生集成，但不声称物理设备 hardware-backed key 属性。
+当升级保留 pairing 文档版本 2，且操作系统保留 Keychain 或 Android 应用数据时，应用会保留 Installation 与配对权限；其他受保护文档版本会失败，而不会选择隐式 pairing。不兼容的预发布 candidate 需要移除保留的受保护值并重新创建 Personal Pairing。Android 卸载会移除应用数据，重装后会创建新 Installation。iOS Keychain 数据可能在卸载后继续存在，因此仅重装应用仍可能保留被拒绝的文档，直到 iOS 或用户移除对应 Keychain 条目。可丢弃 Companion Cache 行仍可独立清除。Simulator 与 emulator build 会校验原生集成，但不声称物理设备 hardware-backed key 属性。
 
 仓库内工程与脚本让 signed candidate 可重复生成，但 artifact 生成不等于 assembled 产品验收。TestFlight 与 signed APK 证据必须标明确切 reviewed commit 以及实际运行 Platform/Desktop；本地导出的中间 IPA、Vite origin 或 prototype 仍不充分。

@@ -17,15 +17,16 @@ describe('MobilePairing', () => {
       completeLink,
       scanQr,
       retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
       activate: vi.fn().mockResolvedValue(undefined),
       deactivate: vi.fn().mockResolvedValue(undefined),
       unpair: vi.fn().mockResolvedValue(undefined),
     }
-    const { rerender } = render(createElement(MobilePairing, { actions }))
+    const { rerender } = render(createElement(MobilePairing, { actions, locale: 'zh' }))
     const link = 'https://platform.example.com/pair?secret=complete-high-entropy-invitation'
-    fireEvent.click(screen.getByRole('button', { name: '扫描 QR' }))
+    fireEvent.click(screen.getByRole('button', { name: '扫描二维码' }))
     expect(scanQr).toHaveBeenCalledWith(expect.any(HTMLVideoElement), expect.any(AbortSignal))
-    expect(screen.getByText('将 Desktop Settings 中的 QR 对准取景框')).toBeTruthy()
+    expect(screen.getByText('将桌面端设置中的二维码对准取景框')).toBeTruthy()
     fireEvent.change(screen.getByRole('textbox', { name: '完整的一次性配对链接' }), { target: { value: link } })
     fireEvent.click(screen.getByRole('button', { name: '继续配对' }))
     expect(completeLink).toHaveBeenCalledWith(link)
@@ -35,9 +36,9 @@ describe('MobilePairing', () => {
       status: 'pending', deviceName: 'Alice phone',
       authenticationWords: ['amber', 'binary', 'cedar', 'delta', 'ember', 'frost'],
     }
-    rerender(createElement(MobilePairing, { actions }))
+    rerender(createElement(MobilePairing, { actions, locale: 'zh' }))
     expect(screen.getByText('amber binary cedar delta ember frost')).toBeTruthy()
-    expect(screen.getByText('请在 Desktop 确认后继续')).toBeTruthy()
+    expect(screen.getByText('请在桌面端确认后继续')).toBeTruthy()
   })
 
   it('offers an explicit retry for a retained pairing attempt', () => {
@@ -49,12 +50,13 @@ describe('MobilePairing', () => {
       completeLink: vi.fn(),
       scanQr: vi.fn(),
       retryPairing,
+      selectDesktop: vi.fn(),
       activate: vi.fn().mockResolvedValue(undefined),
       deactivate: vi.fn().mockResolvedValue(undefined),
       unpair: vi.fn().mockResolvedValue(undefined),
     }
 
-    render(createElement(MobilePairing, { actions }))
+    render(createElement(MobilePairing, { actions, locale: 'zh' }))
     expect(screen.getByRole('alert').textContent).toContain('completion response was lost')
     fireEvent.click(screen.getByRole('button', { name: '重试配对' }))
     expect(retryPairing).toHaveBeenCalledOnce()
@@ -70,11 +72,12 @@ describe('MobilePairing', () => {
       completeLink: vi.fn(),
       scanQr: vi.fn(),
       retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
       activate,
       deactivate,
       unpair: vi.fn().mockResolvedValue(undefined),
     }
-    const rendered = render(createElement(MobilePairing, { actions }))
+    const rendered = render(createElement(MobilePairing, { actions, locale: 'zh' }))
     expect(activate).toHaveBeenCalledOnce()
     rendered.unmount()
     expect(deactivate).toHaveBeenCalledOnce()
@@ -91,11 +94,12 @@ describe('MobilePairing', () => {
       completeLink: vi.fn(),
       scanQr: vi.fn(),
       retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
       activate: vi.fn().mockRejectedValue(activateFailure),
       deactivate: vi.fn().mockRejectedValue(deactivateFailure),
       unpair: vi.fn(),
     }
-    const rendered = render(createElement(MobilePairing, { actions, reportLifecycleError }))
+    const rendered = render(createElement(MobilePairing, { actions, locale: 'zh', reportLifecycleError }))
     await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(activateFailure) })
 
     rendered.unmount()
@@ -106,14 +110,25 @@ describe('MobilePairing', () => {
   it('reports failed unpairing and keeps the product in an explicit unresolved state', async () => {
     const failure = new AggregateError([new Error('Relay revoke failed')], 'Mobile Personal Pairing unpair failed')
     const reportLifecycleError = vi.fn()
-    let snapshot: ReturnType<MobilePairingActions['getSnapshot']> = { status: 'paired' }
+    const home = 'pairing-home' as never
+    const work = 'pairing-work' as never
+    let snapshot: ReturnType<MobilePairingActions['getSnapshot']> = {
+      status: 'paired',
+      desktops: [
+        { pairingId: home, desktopName: 'Home Mac' },
+        { pairingId: work, desktopName: 'Work Mac' },
+      ],
+      selectedPairingId: home,
+    }
     let notify = (): void => {}
+    const selectDesktop = vi.fn()
     const actions: MobilePairingActions = {
       getSnapshot: () => snapshot,
       subscribe: (listener) => { notify = listener; return () => {} },
       completeLink: vi.fn(),
       scanQr: vi.fn(),
       retryPairing: vi.fn(),
+      selectDesktop,
       activate: vi.fn().mockResolvedValue(undefined),
       deactivate: vi.fn().mockResolvedValue(undefined),
       unpair: vi.fn(async () => {
@@ -122,13 +137,47 @@ describe('MobilePairing', () => {
         throw failure
       }),
     }
-    render(createElement(MobilePairing, { actions, reportLifecycleError }))
+    render(createElement(MobilePairing, { actions, locale: 'zh', reportLifecycleError }))
 
-    fireEvent.click(screen.getByRole('button', { name: '解除配对' }))
+    fireEvent.click(screen.getByRole('button', { name: /Work Mac/ }))
+    expect(selectDesktop).toHaveBeenCalledWith(work)
+    fireEvent.click(screen.getByRole('button', { name: '解除所选桌面端配对' }))
 
     await waitFor(() => { expect(reportLifecycleError).toHaveBeenCalledWith(failure) })
     expect(screen.getByRole('heading', { name: '解除配对失败' })).toBeTruthy()
     expect(screen.getByRole('alert').textContent).toContain('可能仍然有效')
-    expect(screen.queryByText('连接 Paired Desktop')).toBeNull()
+    expect(screen.queryByText('连接已配对的桌面端')).toBeNull()
+  })
+
+  it('renders the Paired Desktop selector entirely in English', () => {
+    const home = 'pairing-home' as never
+    const work = 'pairing-work' as never
+    const snapshot = {
+      status: 'paired' as const,
+      desktops: [
+        { pairingId: home, desktopName: 'Home Mac' },
+        { pairingId: work, desktopName: 'Work Mac' },
+      ],
+      selectedPairingId: home,
+    }
+    const actions: MobilePairingActions = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
+      activate: vi.fn().mockResolvedValue(undefined),
+      deactivate: vi.fn().mockResolvedValue(undefined),
+      unpair: vi.fn().mockResolvedValue(undefined),
+    }
+
+    render(createElement(MobilePairing, { actions, locale: 'en' }))
+
+    expect(screen.getByRole('heading', { name: 'Paired Desktops' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Home MacSelected/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Work MacSelect this Desktop/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Unpair selected Desktop' })).toBeTruthy()
+    expect(screen.queryByText(/当前选择|选择此|解除所选|配对另一台/)).toBeNull()
   })
 })

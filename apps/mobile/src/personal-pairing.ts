@@ -16,7 +16,7 @@ import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import type { PlatformAccountInstallation } from '@deepseek-ai/dsh-platform-account-client'
 import type { RemoteAccessTransport } from '@deepseek-ai/dsh-remote-access-client'
 import { BrowserQRCodeReader } from '@zxing/browser'
-import type { MobilePairingActions, MobilePairingSnapshot } from './personal-pairing-model.ts'
+import type { MobilePairedDesktop, MobilePairingActions, MobilePairingSnapshot } from './personal-pairing-model.ts'
 
 /** Process-owned foreground Relay lifecycle released on unpair and Account change. */
 interface MobilePairingLifecycleOwner {
@@ -81,8 +81,18 @@ export interface MobilePairingKeyRetention {
   retainRelayAuthority?(pairingId: PersonalPairingId, grant: RelayCredentialGrant): void
   /** @returns latest retained Mobile Relay grant for this Account. */
   relayAuthority?(): RelayCredentialGrant | undefined
-  /** @returns retained confirmed Personal Pairing for this Account. */
+  /** @returns explicitly selected confirmed Personal Pairing for this Account. */
   retainedPairingId?(): PersonalPairingId | undefined
+  /** @returns credential-free retained Desktops in stable pairing order. */
+  pairedDesktops?(): readonly MobilePairedDesktop[]
+  /** @returns the explicitly selected retained Personal Pairing. */
+  selectedPairingId?(): PersonalPairingId | undefined
+  /** Select one complete retained Personal Pairing. */
+  selectPairing?(pairingId: PersonalPairingId): void
+  /** Persist the authenticated Desktop name carried by its Companion channel. */
+  recordDesktopName?(pairingId: PersonalPairingId, desktopName: string): void
+  /** Release only one retained Personal Pairing and zero its secret buffers. */
+  release?(pairingId: PersonalPairingId): void
   /** Persist one in-flight endpoint pairing before its next external effect. */
   retainEndpointRecovery?(recovery: MobileEndpointPairingRecovery): void
   /** @returns an Account-scoped endpoint pairing recovery copy. */
@@ -246,8 +256,8 @@ export interface MobilePairingControllerOptions {
   companion?: MobilePairingLifecycleOwner
   /** Optional retention sink receiving confirmed pairing key material for pairing-scoped consumers. */
   attachmentKeys?: MobilePairingKeyRetention
-  /** Delete the pairing-owned projection only after Platform revocation succeeds. */
-  releaseProjectionAuthority?: () => Promise<void>
+  /** Release the current projection, deleting stored rows only after Platform revocation. */
+  releaseProjectionAuthority?: (deleteStored: boolean) => Promise<void>
   schedule?: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   pollIntervalMs?: number
   now?: () => number
@@ -267,6 +277,7 @@ export class MobilePairingController implements MobilePairingActions {
   private accountId: PlatformAccountId | undefined
   private active = true
   private lifecycleBarrier: Promise<void> = Promise.resolve()
+  private relayActivationGeneration = 0
 
   /** @param options - Account authority, Remote Access transport, reviewed handshake, and QR scanner. */
   constructor(private readonly options: MobilePairingControllerOptions) {
@@ -321,17 +332,51 @@ export class MobilePairingController implements MobilePairingActions {
     }
     const restoredGrant = this.options.attachmentKeys?.relayAuthority?.()
     if (restoredGrant !== undefined && this.options.relay !== undefined) {
-      await this.options.relay.configure(restoredGrant)
-      await this.options.relay.start()
+      if (this.pairingId === undefined) throw new Error('Selected Relay authority has no retained Personal Pairing')
+      await this.activateRelayPairing(this.pairingId, restoredGrant)
     }
-    if (this.attempt === undefined && this.pairingId !== undefined && restoredGrant !== undefined) {
-      this.publish({ status: 'paired' })
-    }
+    if (this.attempt === undefined && this.pairedDesktops().length > 0) this.publishPaired()
+  }
+
+  async selectDesktop(pairingId: PersonalPairingId): Promise<void> {
+    await this.exclusive(async () => {
+      const retention = this.options.attachmentKeys
+      if (retention?.selectPairing === undefined) {
+        throw new Error('Mobile Personal Pairing selection has no durable owner')
+      }
+      if (!this.pairedDesktops().some(desktop => desktop.pairingId === pairingId)) {
+        throw new Error('Selected Paired Desktop is not retained for this Account')
+      }
+      if (this.pairingId === pairingId && retention.selectedPairingId?.() === pairingId) return
+      try {
+        await this.releaseRelayPairingForSwitch(pairingId)
+        retention.selectPairing(pairingId)
+        await retention.flush?.()
+        const grant = retention.relayAuthority?.()
+        if (grant === undefined) throw new Error('Selected Paired Desktop has no Relay authority')
+        await this.activateRelayPairing(pairingId, grant)
+        this.publishPaired()
+      } catch (error) {
+        this.publishPaired(errorMessage(error))
+        throw error
+      }
+    })
+  }
+
+  /**
+   * Retain an authenticated Desktop name without deriving identity from Mobile metadata.
+   * @param pairingId - Personal Pairing bound into the authenticated channel.
+   * @param desktopName - Desktop Installation name carried by foreground synchronization.
+   */
+  recordAuthenticatedDesktopName(pairingId: PersonalPairingId, desktopName: string): void {
+    this.options.attachmentKeys?.recordDesktopName?.(pairingId, desktopName)
+    if (this.pairingId === pairingId) this.publishPaired()
   }
 
   async unpair(): Promise<void> {
     await this.exclusive(async () => {
       this.assertActiveAccount()
+      const pairingId = this.pairingId ?? this.options.attachmentKeys?.selectedPairingId?.()
       const settleStage = async (operations: ReadonlyArray<() => void | Promise<void>>): Promise<void> => {
         try {
           await settleOwnedCleanup(operations, 'Mobile Personal Pairing unpair failed')
@@ -342,25 +387,31 @@ export class MobilePairingController implements MobilePairingActions {
       }
       await settleStage([
         async () => {
-          if (this.pairingId === undefined) return
+          if (pairingId === undefined) return
           await this.options.transport.revokeMobilePersonalPairing({
             authentication: await this.options.installation.authorizeCurrentInstallation(),
-            pairingId: this.pairingId,
+            pairingId,
           })
         },
       ])
       await settleStage([
-        () => this.options.releaseProjectionAuthority?.(),
+        () => this.options.releaseProjectionAuthority?.(true),
       ])
       this.attempt?.mobileHandshake.fill(0)
       this.clearAttempt()
       const operations: Array<() => void | Promise<void>> = [
         () => this.options.handshake.wipe?.(),
-        () => this.options.attachmentKeys?.wipe(),
+        () => {
+          if (pairingId === undefined || this.options.attachmentKeys === undefined) return
+          if (this.options.attachmentKeys.release === undefined) {
+            throw new Error('Mobile Personal Pairing release has no retained-key owner')
+          }
+          this.options.attachmentKeys.release(pairingId)
+        },
         () => this.options.attachmentKeys?.flush?.(),
       ]
       if (this.options.companion !== undefined) operations.push(() => this.options.companion?.releasePairing())
-      if (this.options.relay !== this.options.companion) {
+      if ((this.options.relay as unknown) !== this.options.companion) {
         operations.push(
           () => this.options.relay?.configure(undefined),
           () => this.options.relay?.stop(),
@@ -368,7 +419,8 @@ export class MobilePairingController implements MobilePairingActions {
       }
       await settleStage(operations)
       this.pairingId = undefined
-      this.publish({ status: 'ready' })
+      if (this.pairedDesktops().length === 0) this.publish({ status: 'ready' })
+      else this.publishPaired()
     })
   }
 
@@ -581,6 +633,7 @@ export class MobilePairingController implements MobilePairingActions {
           }
           const attempt = this.currentAttempt()
           if (attempt === undefined) throw new Error('Mobile Personal Pairing has no retained confirmation attempt')
+          await this.releaseRelayPairingForSwitch(status.pairingId)
           const confirmed = await this.prepareConfirmedEndpointAttempt(
             attempt, status.pairingId, status.sealedRelayAuthority,
           )
@@ -596,11 +649,9 @@ export class MobilePairingController implements MobilePairingActions {
             await this.options.attachmentKeys?.flush?.()
             confirmed.persisted = true
           }
-          await this.options.relay.configure(confirmed.grant)
-          await this.options.relay.start()
-          this.pairingId = confirmed.pairingId
+          await this.activateRelayPairing(confirmed.pairingId, confirmed.grant)
           this.clearAttempt()
-          this.publish({ status: 'paired' })
+          this.publishPaired()
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           const attempt = this.attempt
@@ -717,6 +768,7 @@ export class MobilePairingController implements MobilePairingActions {
   }
 
   private async resetAccountScope(): Promise<void> {
+    this.relayActivationGeneration += 1
     this.clearVolatileAttempt()
     const operations: Array<() => void | Promise<void>> = [() => this.options.companion?.forgetConnection()]
     if (this.options.companion !== undefined) operations.push(() => this.options.companion?.releasePairing())
@@ -755,6 +807,55 @@ export class MobilePairingController implements MobilePairingActions {
     }
     if (errors.length > 0) {
       console.error('[mobile-personal-pairing] subscriber failures:', new AggregateError(errors))
+    }
+  }
+
+  private pairedDesktops(): readonly MobilePairedDesktop[] {
+    const retained = this.options.attachmentKeys?.pairedDesktops?.()
+    if (retained !== undefined && retained.length > 0) return retained
+    return this.pairingId === undefined ? [] : [{ pairingId: this.pairingId }]
+  }
+
+  private publishPaired(error?: string): void {
+    this.publish({
+      status: 'paired',
+      desktops: this.pairedDesktops(),
+      selectedPairingId: this.options.attachmentKeys?.selectedPairingId?.() ?? this.pairingId,
+      ...(error === undefined ? {} : { error }),
+    })
+  }
+
+  private async activateRelayPairing(pairingId: PersonalPairingId, grant: RelayCredentialGrant): Promise<void> {
+    if (this.options.relay === undefined) throw new Error('Selected Paired Desktop has no Relay lifecycle owner')
+    const relay = this.options.relay
+    const generation = ++this.relayActivationGeneration
+    await this.options.relay.configure(grant)
+    this.assertActiveAccount()
+    this.pairingId = pairingId
+    void Promise.resolve().then(async () => { await relay.start() }).catch((error: unknown) => {
+      if (!this.active || this.relayActivationGeneration !== generation || this.pairingId !== pairingId) return
+      this.publishPaired(errorMessage(error))
+    })
+  }
+
+  private async releaseRelayPairingForSwitch(nextPairingId: PersonalPairingId): Promise<void> {
+    if (this.pairingId === undefined || this.pairingId === nextPairingId) return
+    this.relayActivationGeneration += 1
+    this.options.companion?.forgetConnection()
+    const operations: Array<() => void | Promise<void>> = [
+      () => this.options.releaseProjectionAuthority?.(false),
+    ]
+    if (this.options.companion !== undefined) operations.push(() => this.options.companion?.releasePairing())
+    if ((this.options.relay as unknown) !== this.options.companion) {
+      operations.push(
+        () => this.options.relay?.configure(undefined),
+        () => this.options.relay?.stop(),
+      )
+    }
+    try {
+      await settleOwnedCleanup(operations, 'Mobile Paired Desktop switch failed')
+    } finally {
+      this.pairingId = undefined
     }
   }
 
@@ -811,14 +912,12 @@ export class MobilePairingController implements MobilePairingActions {
               }
               const grant = await this.options.handshake.openRelayAuthority(status.sealedRelayAuthority)
               this.assertActiveAccount()
-              await this.options.relay.configure(grant)
-              this.assertActiveAccount()
-              await this.options.relay.start()
+              await this.activateRelayPairing(status.pairingId, grant)
               this.assertActiveAccount()
             }
             this.pairingId = status.pairingId
             this.clearAttempt()
-            this.publish({ status: 'paired' })
+            this.publishPaired()
           } else {
             this.clearAttempt()
             this.publish({ status: 'unavailable', error: 'Desktop rejected Personal Pairing.' })

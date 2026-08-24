@@ -111,7 +111,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     })
     await screen.findByRole('treeitem', { name: /Guarded Session/ })
 
-    expect(screen.queryByRole('button', { name: 'New ungrouped Session' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(false)
     fireEvent.click(screen.getByRole('treeitem', { name: /Guarded Session/ }))
     expect(screen.getByRole('button', { name: 'Allow once' }).hasAttribute('disabled')).toBe(false)
     firstChannel.mutations.settle.mockResolvedValueOnce({ accepted: false, reason: 'not-pending' })
@@ -182,9 +182,14 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       sessions: guardedSessions(), workspaces: [], conversations: [],
     })
 
-    await waitFor(() => { expect(screen.queryByRole('button', { name: 'New ungrouped Session' })).toBeNull() })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(true)
+    })
     expect(visibleMutationControls()).toMatchInlineSnapshot(`
-      []
+      [
+        "button:New ungrouped Session:disabled",
+        "button:New Session in Work:disabled",
+      ]
     `)
 
     fireEvent.click(screen.getByRole('treeitem', { name: /Guarded Session/ }))

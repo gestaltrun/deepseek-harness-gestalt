@@ -85,6 +85,7 @@ describe('MobileAccount', () => {
       completeLink: vi.fn(),
       scanQr: vi.fn(),
       retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
       activate: vi.fn().mockResolvedValue(undefined),
       deactivate,
       unpair: vi.fn().mockResolvedValue(undefined),

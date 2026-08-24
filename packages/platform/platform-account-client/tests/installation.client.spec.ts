@@ -384,6 +384,7 @@ describe('PlatformAccountInstallation', () => {
       environment: DEVELOPMENT,
       installationId: parseInstallationId('pending-prepared'),
       installationKind: 'mobile',
+      presentation: { name: 'Prepared installation', platform: 'ios' },
       transport: transport([]),
       store: new MemoryInstallationAccountStore(),
       systemBrowser: { open: openSystemBrowser },

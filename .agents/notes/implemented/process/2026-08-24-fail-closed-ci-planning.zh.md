@@ -12,7 +12,7 @@ pull-request workflow 的路由直接编码在 job 条件中，而 tracker 策�
 
 `planCi(input)` 根据事件、PR readiness、解析后的 base 与 head、变更路径、模块图摘要、版本化风险目录、锁文件摘要、workflow 摘要和工具链摘要生成版本化且确定的 plan。输出包含受影响 area、升级原因、required 与 observational lane，以及由规范化输入导出的 evidence key。未知或不可用输入会选择穷尽证据并记录原因。
 
-pull-request workflow 通过单一 `preflight` verdict 准入所有证据 job。plan worker 校验 workflow 语义、计算 plan，并要求 PR 元数据包含全部受影响 area。三个生成状态 worker 在相互独立的 immutable install 上分区执行生成目录、翻译配对、模块图和 workspace constraints。只有 plan worker 与每个生成状态分区都成功，verdict 才会通过，并且只把 plan worker 的路由与证明输出转发给证据 job。
+pull-request workflow 通过单一 `preflight` verdict 准入所有证据 job。plan worker 校验 workflow 语义、计算 plan，并要求 PR 元数据包含全部受影响 area。四个生成状态 worker 在相互独立的 immutable install 上分区执行生成目录、翻译配对、文档图、模块图和 workspace constraints。只有 plan worker 与每个生成状态分区都成功，verdict 才会通过，并且只把 plan worker 的路由与证明输出转发给证据 job。
 
 `pnpm ci:plan` 是同一 planner 的本地投影。`pnpm pr:create` 是受支持的发布路径：它验证同仓库 Issue，并创建包含一个声明 kind 以及声明 area 与 planner 所选 area 并集的 Draft PR。
 

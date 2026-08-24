@@ -66,6 +66,7 @@
     "check:ci:preflight": "tsx scripts/run-gates.ts ci-preflight",
     "check:ci:preflight:core": "tsx scripts/run-gates.ts ci-preflight-core",
     "check:ci:preflight:cordis": "tsx scripts/run-gates.ts ci-preflight-cordis",
+    "check:ci:preflight:docs": "tsx scripts/run-gates.ts ci-preflight-docs",
     "check:ci:preflight:graphs": "tsx scripts/run-gates.ts ci-preflight-graphs",
     "check:ci:linux-primary": "tsx scripts/run-gates.ts ci-linux-primary",
     "check:ci:static": "tsx scripts/run-gates.ts ci-static",

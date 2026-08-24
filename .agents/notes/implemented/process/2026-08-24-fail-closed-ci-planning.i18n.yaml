@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-24-fail-closed-ci-planning.md
-2026-08-24-fail-closed-ci-planning.md: 2622b352488c2fc73ea91a84e30a8bce28503705
-2026-08-24-fail-closed-ci-planning.zh.md: 95defb429249db820695d97d6a54605d1156479e
+2026-08-24-fail-closed-ci-planning.md: 4f8f190d0502eb9196ed54f84da0cbad647b187d
+2026-08-24-fail-closed-ci-planning.zh.md: f26075b3f1849a2f5986b39d873c55cf924b7830

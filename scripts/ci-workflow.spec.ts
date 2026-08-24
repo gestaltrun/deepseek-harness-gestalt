@@ -64,24 +64,52 @@ describe('CI workflow', () => {
   it('validates PR metadata, generated state, and the CI plan before admitting evidence jobs', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     const preflight = workflowJob(workflow, 'preflight')
-    if (!Array.isArray(preflight.steps) || !isRecord(workflow.jobs)) {
-      throw new TypeError('CI workflow must define preflight steps and jobs')
+    const preflightPlan = workflowJob(workflow, 'preflight-plan')
+    const preflightGenerated = workflowJob(workflow, 'preflight-generated')
+    if (!Array.isArray(preflight.steps) || !Array.isArray(preflightPlan.steps)
+      || !Array.isArray(preflightGenerated.steps) || !isRecord(workflow.jobs)) {
+      throw new TypeError('CI workflow must define preflight worker steps and jobs')
     }
-    const preflightSteps = preflight.steps as unknown[]
+    const preflightSteps = preflightPlan.steps as unknown[]
+    const generatedSteps = preflightGenerated.steps as unknown[]
 
     expect(preflight).toMatchObject({
       name: 'preflight',
       'runs-on': 'ubuntu-latest',
-      'timeout-minutes': 3,
-      env: { DSH_GATE_CONCURRENCY: '8' },
+      'timeout-minutes': 1,
+      needs: ['preflight-plan', 'preflight-generated'],
+      if: 'always()',
       outputs: {
-        level: '${{ steps.plan.outputs.level }}',
-        lanes: '${{ steps.plan.outputs.lanes }}',
-        'affected-areas': '${{ steps.plan.outputs.affected_areas }}',
-        'affected-packages': '${{ steps.plan.outputs.affected_packages }}',
-        'changed-sources': '${{ steps.plan.outputs.changed_sources }}',
-        'escalation-reasons': '${{ steps.plan.outputs.escalation_reasons }}',
-        'evidence-key': '${{ steps.plan.outputs.evidence_key }}',
+        level: '${{ needs.preflight-plan.outputs.level }}',
+        lanes: '${{ needs.preflight-plan.outputs.lanes }}',
+        'affected-areas': '${{ needs.preflight-plan.outputs.affected-areas }}',
+        'affected-packages': '${{ needs.preflight-plan.outputs.affected-packages }}',
+        'changed-sources': '${{ needs.preflight-plan.outputs.changed-sources }}',
+        'escalation-reasons': '${{ needs.preflight-plan.outputs.escalation-reasons }}',
+        'evidence-key': '${{ needs.preflight-plan.outputs.evidence-key }}',
+      },
+    })
+    expect(preflight.steps).toContainEqual(expect.objectContaining({
+      name: 'Admit evidence lanes',
+      env: {
+        PLAN_RESULT: '${{ needs.preflight-plan.result }}',
+        GENERATED_RESULT: '${{ needs.preflight-generated.result }}',
+      },
+    }))
+    expect(preflightGenerated).toMatchObject({
+      name: 'preflight / generated / ${{ matrix.partition }}',
+      'runs-on': 'ubuntu-latest',
+      'timeout-minutes': 2,
+      env: { DSH_GATE_CONCURRENCY: '2' },
+      strategy: {
+        'fail-fast': false,
+        matrix: {
+          include: [
+            { partition: 'core', command: 'check:ci:preflight:core' },
+            { partition: 'cordis', command: 'check:ci:preflight:cordis' },
+            { partition: 'graphs', command: 'check:ci:preflight:graphs' },
+          ],
+        },
       },
     })
     expect(preflightSteps).toContainEqual({
@@ -105,7 +133,7 @@ describe('CI workflow', () => {
     )
     expect(planner.run).toContain('tee "$RUNNER_TEMP/ci-evidence/plan.json"')
     expect(preflightSteps.some(step => isRecord(step) && step.name === 'Validate pull request metadata')).toBe(true)
-    expect(preflightSteps.some(step => isRecord(step) && step.name === 'Validate generated state and repository constraints')).toBe(true)
+    expect(generatedSteps.some(step => isRecord(step) && step.name === 'Validate generated state and repository constraints')).toBe(true)
     expect(preflightSteps.some(step => isRecord(step) && step.id === 'plan' && step.name === 'Compute CI plan')).toBe(true)
     const planUpload = preflightSteps.find(step => isRecord(step) && step.name === 'Publish CI plan')
     expect(planUpload).toEqual({
@@ -121,7 +149,7 @@ describe('CI workflow', () => {
     })
 
     for (const [jobName, job] of Object.entries(workflow.jobs)) {
-      if (jobName === 'preflight') continue
+      if (['preflight-plan', 'preflight-generated', 'preflight'].includes(jobName)) continue
       if (!isRecord(job)) throw new TypeError(`CI job ${jobName} must be an object`)
       const needs = typeof job.needs === 'string' ? [job.needs] : job.needs
       expect(needs, `${jobName} must wait for preflight`).toContain('preflight')
@@ -299,13 +327,13 @@ describe('CI workflow', () => {
     if (!isRecord(workflow.on) || !isRecord(workflow.jobs)) {
       throw new TypeError('CI workflow must define event routing and jobs')
     }
-    const preflight = workflowJob(workflow, 'preflight')
+    const preflightPlan = workflowJob(workflow, 'preflight-plan')
     const candidate = workflowJob(workflow, 'candidate-verdict')
-    if (!Array.isArray(preflight.steps) || !Array.isArray(candidate.needs)
+    if (!Array.isArray(preflightPlan.steps) || !Array.isArray(candidate.needs)
       || !Array.isArray(candidate.steps)) {
       throw new TypeError('candidate workflow must define preflight and verdict structure')
     }
-    const preflightSteps = preflight.steps as unknown[]
+    const preflightSteps = preflightPlan.steps as unknown[]
     const candidateSteps = candidate.steps as unknown[]
     const candidateNeeds = (candidate.needs as unknown[]).filter(
       (job): job is string => typeof job === 'string',
@@ -385,20 +413,21 @@ describe('CI workflow', () => {
     const workflow = loadWorkflow('.github/workflows/ci.yml')
     if (!isRecord(workflow.jobs)) throw new TypeError('CI workflow must define jobs')
     const preflight = workflowJob(workflow, 'preflight')
+    const preflightPlan = workflowJob(workflow, 'preflight-plan')
     const smoke = workflowJob(workflow, 'master-smoke')
     const verdict = workflowJob(workflow, 'master-verdict')
-    if (!Array.isArray(preflight.steps) || !Array.isArray(verdict.needs)
+    if (!Array.isArray(preflightPlan.steps) || !Array.isArray(verdict.needs)
       || !Array.isArray(verdict.steps)) {
       throw new TypeError('master proof workflow must define preflight and verdict structure')
     }
     expect(preflight.outputs).toMatchObject({
-      'proof-tree': '${{ steps.identity.outputs.tree || steps.reuse.outputs.tree }}',
-      'proof-key': '${{ steps.identity.outputs.proof_key || steps.reuse.outputs.proof_key }}',
-      'proof-reused': "${{ steps.reuse.outputs.reused || 'false' }}",
-      'proof-reason': "${{ steps.reuse.outputs.reason || 'not-master-push' }}",
-      'proof-source-run-id': '${{ steps.reuse.outputs.source_run_id }}',
+      'proof-tree': '${{ needs.preflight-plan.outputs.proof-tree }}',
+      'proof-key': '${{ needs.preflight-plan.outputs.proof-key }}',
+      'proof-reused': '${{ needs.preflight-plan.outputs.proof-reused }}',
+      'proof-reason': '${{ needs.preflight-plan.outputs.proof-reason }}',
+      'proof-source-run-id': '${{ needs.preflight-plan.outputs.proof-source-run-id }}',
     })
-    const preflightSteps = preflight.steps as unknown[]
+    const preflightSteps = preflightPlan.steps as unknown[]
     expect(preflightSteps).toContainEqual(expect.objectContaining({
       name: 'Resolve reusable candidate proof',
       id: 'reuse',

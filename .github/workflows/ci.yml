@@ -27,12 +27,10 @@ concurrency:
 
 jobs:
 
-  preflight:
-    name: preflight
+  preflight-plan:
+    name: preflight / plan
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    env:
-      DSH_GATE_CONCURRENCY: '8'
     outputs:
       level: ${{ steps.plan.outputs.level }}
       lanes: ${{ steps.plan.outputs.lanes }}
@@ -86,12 +84,6 @@ jobs:
           DSH_REQUIRED_PR_AREAS: ${{ steps.plan.outputs.affected_areas }}
         run: node .github/issue-management/policy.mjs pr-metadata
 
-      - name: Validate generated state and repository constraints
-        env:
-          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/preflight.json
-          DSH_CI_ARTIFACT_REFS: ci-plan
-        run: pnpm run check:ci:preflight
-
       - name: Compute candidate evidence identity
         id: identity
         if: github.event_name == 'merge_group'
@@ -112,6 +104,80 @@ jobs:
           path: ${{ runner.temp }}/ci-evidence/*.json
           if-no-files-found: warn
           retention-days: 30
+
+  preflight-generated:
+    name: preflight / generated / ${{ matrix.partition }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - partition: core
+            command: check:ci:preflight:core
+          - partition: cordis
+            command: check:ci:preflight:cordis
+          - partition: graphs
+            command: check:ci:preflight:graphs
+    env:
+      DSH_GATE_CONCURRENCY: '2'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate generated state and repository constraints
+        env:
+          DSH_CI_REPORT_PATH: ${{ runner.temp }}/ci-evidence/preflight-${{ matrix.partition }}.json
+        run: pnpm run ${{ matrix.command }}
+
+      - name: Publish generated-state evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preflight-generated-${{ matrix.partition }}
+          path: ${{ runner.temp }}/ci-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  preflight:
+    name: preflight
+    needs: [preflight-plan, preflight-generated]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    outputs:
+      level: ${{ needs.preflight-plan.outputs.level }}
+      lanes: ${{ needs.preflight-plan.outputs.lanes }}
+      affected-areas: ${{ needs.preflight-plan.outputs.affected-areas }}
+      affected-packages: ${{ needs.preflight-plan.outputs.affected-packages }}
+      changed-sources: ${{ needs.preflight-plan.outputs.changed-sources }}
+      escalation-reasons: ${{ needs.preflight-plan.outputs.escalation-reasons }}
+      evidence-key: ${{ needs.preflight-plan.outputs.evidence-key }}
+      proof-tree: ${{ needs.preflight-plan.outputs.proof-tree }}
+      proof-key: ${{ needs.preflight-plan.outputs.proof-key }}
+      proof-reused: ${{ needs.preflight-plan.outputs.proof-reused }}
+      proof-reason: ${{ needs.preflight-plan.outputs.proof-reason }}
+      proof-source-run-id: ${{ needs.preflight-plan.outputs.proof-source-run-id }}
+    steps:
+      - name: Admit evidence lanes
+        env:
+          PLAN_RESULT: ${{ needs.preflight-plan.result }}
+          GENERATED_RESULT: ${{ needs.preflight-generated.result }}
+        run: |
+          test "$PLAN_RESULT" = success
+          test "$GENERATED_RESULT" = success
 
   # Three standard hosted jobs isolate coverage, static analysis, and the
   # build-backed consumer tail. The consumer job owns the only Linux build so

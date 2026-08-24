@@ -28,6 +28,9 @@ import {
 /** A named aggregate exposed by the gate runner. */
 export type Mode =
   | 'ci-preflight'
+  | 'ci-preflight-core'
+  | 'ci-preflight-cordis'
+  | 'ci-preflight-graphs'
   | 'ci-primary'
   | 'ci-linux-primary'
   | 'ci-static'
@@ -150,6 +153,9 @@ async function main(args: string[]): Promise<number> {
 function parseMode(raw: string | undefined): Mode {
   switch (raw) {
     case 'ci-preflight':
+    case 'ci-preflight-core':
+    case 'ci-preflight-cordis':
+    case 'ci-preflight-graphs':
     case 'ci-primary':
     case 'ci-linux-primary':
     case 'ci-static':
@@ -173,7 +179,7 @@ function parseMode(raw: string | undefined): Mode {
       return raw
     default:
       throw new Error(
-        `run-gates: expected mode ci-preflight | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | ci-standby-linux-smoke | ci-standby-windows-smoke | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
+        `run-gates: expected mode ci-preflight | ci-preflight-core | ci-preflight-cordis | ci-preflight-graphs | ci-primary | ci-linux-primary | ci-static | ci-lint-contracts-ready | ci-coverage | ci-windows-native-coverage-merge | ci-snapshot | ci-artifacts | ci-consumers | ci-windows-blocking | ci-windows-complete | ci-windows-native-core | ci-windows-native-static | ci-windows-observational | ci-standby-linux-smoke | ci-standby-windows-smoke | node-compat | check-all | hygiene | doc-sync, got ${JSON.stringify(raw)}.`,
       )
   }
 }
@@ -250,6 +256,12 @@ export function gatesForMode(selected: Mode): Gate[] {
   switch (selected) {
     case 'ci-preflight':
       return ciPreflightGates()
+    case 'ci-preflight-core':
+      return ciPreflightCoreGates()
+    case 'ci-preflight-cordis':
+      return ciPreflightCordisGates()
+    case 'ci-preflight-graphs':
+      return ciPreflightGraphGates()
     case 'ci-primary':
       return ciPrimaryGates()
     case 'ci-linux-primary':
@@ -322,13 +334,31 @@ export function gatesForMode(selected: Mode): Gate[] {
 
 function ciPreflightGates(): Gate[] {
   return [
+    ...ciPreflightCoreGates(),
+    ...ciPreflightCordisGates(),
+    ...ciPreflightGraphGates(),
+  ]
+}
+
+function ciPreflightCoreGates(): Gate[] {
+  return [
     pnpmScript('constraints', 'constraints'),
     pnpmScript('translation-pairing', 'verify-translation-pairing', { label: 'translation pairing' }),
-    pnpmScript('cordis-catalog', 'verify-cordis-catalog', { label: 'cordis catalog' }),
-    pnpmScript('cordis-api', 'verify-cordis-api', { label: 'Cordis API' }),
     pnpmScript('client-catalog', 'verify-client-catalog', { label: 'client catalog' }),
     pnpmScript('tool-catalog', 'verify-tool-catalog', { label: 'tool catalog' }),
+  ]
+}
+
+function ciPreflightCordisGates(): Gate[] {
+  return [
+    pnpmScript('cordis-catalog', 'verify-cordis-catalog', { label: 'cordis catalog' }),
+    pnpmScript('cordis-api', 'verify-cordis-api', { label: 'Cordis API' }),
     pnpmScript('config-catalog', 'verify-config-catalog', { label: 'config catalog' }),
+  ]
+}
+
+function ciPreflightGraphGates(): Gate[] {
+  return [
     pnpmScript('doc-graphs', 'verify-doc-graphs', { label: 'doc graphs' }),
     pnpmScript('persistence-catalog', 'verify-persistence-catalog', { label: 'persistence catalog' }),
     pnpmScript('module-graph', 'verify-module-graph', { label: 'module graph' }),

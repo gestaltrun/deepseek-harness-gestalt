@@ -195,7 +195,7 @@ describe('Companion foreground lifecycle', () => {
     resync.acceptValidatedDesktopResync(validatedResync)
 
     runtime.reportConnectionFailure({
-      code: 'COMPANION_UPDATE_REQUIRED',
+      code: 'COMPANION_SECURITY_CAPABILITY_MISSING',
       message: 'Desktop update required',
       updateEndpoint: 'desktop',
     })
@@ -205,7 +205,7 @@ describe('Companion foreground lifecycle', () => {
       socketOpen: false,
       synchronized: false,
       connectionFailure: {
-        code: 'COMPANION_UPDATE_REQUIRED',
+        code: 'COMPANION_SECURITY_CAPABILITY_MISSING',
         message: 'Desktop update required',
         updateEndpoint: 'desktop',
       },

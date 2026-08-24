@@ -4,6 +4,7 @@ import {
   generateRelayCredential,
   createCompanionNegotiationChannel,
   createCompanionVersionOffer,
+  decodeCompanionVersionOffer,
   negotiateCompanionProtocol,
   parseRelayAttachChallengeId,
   parseRelayAttachmentId,
@@ -25,6 +26,7 @@ import {
 
 const TEST_RELAY_CREDENTIAL = await generateRelayCredential()
 const parseRelayCredential = (_value: string): typeof TEST_RELAY_CREDENTIAL => TEST_RELAY_CREDENTIAL
+const MAX_RUNTIME_TIMER_DELAY_MS = 2_147_483_647
 
 describe('RemoteRelayEndpointController', () => {
   it('starts Mobile only after pairing-delivered authority configures its lifecycle', async () => {
@@ -230,20 +232,139 @@ describe('RemoteRelayEndpointController', () => {
     vi.useRealTimers()
   })
 
-  it('preserves an endpoint-specific Companion negotiation failure from the ciphertext owner', async () => {
+  it.each([
+    [50, 10, 50],
+    [5, 10, 10],
+    [undefined, 10, 10],
+  ] as const)(
+    'combines Platform retry %i ms with local retry %i ms before reconnecting after %i ms',
+    async (serverRetryAfterMs, reconnectDelayMs, expectedDelayMs) => {
+      vi.useFakeTimers()
+      try {
+        const first = new FakeSocket(false)
+        const second = new FakeSocket()
+        const sockets: RelayEndpointSocket[] = [first, second]
+        const connect = vi.fn(async () => {
+          const socket = sockets.shift()
+          if (socket === undefined) throw new Error('unexpected reconnect')
+          return socket
+        })
+        const onTransportError = vi.fn()
+        const controller = new RemoteRelayEndpointController({
+          ...mobileOptions(connect), attachTimeoutMs: 1_000, reconnectDelayMs, onTransportError,
+        })
+        const starting = controller.start()
+        await vi.waitFor(() => { expect(first.decoded()).toHaveLength(1) })
+        first.receive(encodeRelayMessage({
+          type: 'error', transportVersion: 1, code: 'PLATFORM_CAPACITY',
+          ...(serverRetryAfterMs === undefined ? {} : { retryAfterMs: serverRetryAfterMs }),
+        }))
+        await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledOnce() }, { interval: 1 })
+
+        expect(onTransportError).toHaveBeenCalledWith(expect.objectContaining({ retryAfterMs: expectedDelayMs }))
+        expect(connect).toHaveBeenCalledOnce()
+        await vi.advanceTimersByTimeAsync(expectedDelayMs - 2)
+        expect(connect).toHaveBeenCalledOnce()
+        await vi.advanceTimersByTimeAsync(1)
+        await starting
+        expect(connect).toHaveBeenCalledTimes(2)
+        await controller.stop()
+      } finally {
+        vi.useRealTimers()
+      }
+    },
+  )
+
+  it('chunks a capacity retry longer than one runtime timer', async () => {
+    vi.useFakeTimers()
+    try {
+      const first = new FakeSocket(false)
+      const second = new FakeSocket()
+      const sockets: RelayEndpointSocket[] = [first, second]
+      const connect = vi.fn(async () => {
+        const socket = sockets.shift()
+        if (socket === undefined) throw new Error('unexpected reconnect')
+        return socket
+      })
+      const controller = new RemoteRelayEndpointController({
+        ...mobileOptions(connect), attachTimeoutMs: 1_000, reconnectDelayMs: 10,
+      })
+      const starting = controller.start()
+      await vi.waitFor(() => { expect(first.decoded()).toHaveLength(1) })
+      first.receive(encodeRelayMessage({
+        type: 'error', transportVersion: 1, code: 'PLATFORM_CAPACITY',
+        retryAfterMs: MAX_RUNTIME_TIMER_DELAY_MS + 5,
+      }))
+      await vi.advanceTimersByTimeAsync(0)
+
+      await vi.advanceTimersByTimeAsync(MAX_RUNTIME_TIMER_DELAY_MS)
+      expect(connect).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(4)
+      expect(connect).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(1)
+      await starting
+      expect(connect).toHaveBeenCalledTimes(2)
+      await controller.stop()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('cancels a chunked capacity retry when the lifecycle stops', async () => {
+    vi.useFakeTimers()
+    try {
+      const socket = new FakeSocket(false)
+      const onTransportError = vi.fn()
+      const controller = new RemoteRelayEndpointController({
+        ...mobileOptions(async () => socket), attachTimeoutMs: 1_000, reconnectDelayMs: 10,
+        onTransportError,
+      })
+      const starting = controller.start()
+      await vi.waitFor(() => { expect(socket.decoded()).toHaveLength(1) })
+      socket.receive(encodeRelayMessage({
+        type: 'error', transportVersion: 1, code: 'PLATFORM_CAPACITY',
+        retryAfterMs: MAX_RUNTIME_TIMER_DELAY_MS + 5,
+      }))
+      await vi.waitFor(() => { expect(onTransportError).toHaveBeenCalledOnce() }, { interval: 1 })
+
+      const stopping = controller.stop()
+      await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+      await stopping
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([
+    ['version crossing', 'COMPANION_UPDATE_REQUIRED', 'mobile'],
+    ['weakened Mobile', 'COMPANION_SECURITY_CAPABILITY_MISSING', 'mobile'],
+    ['weakened Desktop', 'COMPANION_SECURITY_CAPABILITY_MISSING', 'desktop'],
+  ] as const)('preserves %s negotiation failure from the ciphertext owner', async (_crossing, code, endpoint) => {
     const socket = new FakeSocket()
     let failure: RemoteProtocolError | undefined
     try {
+      const weakened = decodeCompanionVersionOffer(new TextEncoder().encode(JSON.stringify({
+        endpoint,
+        versions: [{
+          major: 4,
+          capabilities: ['authenticated-encryption', 'pairing-key-separation'],
+        }],
+      })))
       negotiateCompanionProtocol(
         createCompanionNegotiationChannel(),
-        createCompanionVersionOffer('mobile', [3]),
-        createCompanionVersionOffer('desktop', [4]),
+        code === 'COMPANION_UPDATE_REQUIRED' || endpoint === 'desktop'
+          ? createCompanionVersionOffer('mobile', code === 'COMPANION_UPDATE_REQUIRED' ? [3] : [4])
+          : weakened,
+        code === 'COMPANION_UPDATE_REQUIRED' || endpoint === 'mobile'
+          ? createCompanionVersionOffer('desktop', [4])
+          : weakened,
       )
     } catch (error) {
       if (error instanceof RemoteProtocolError) failure = error
       else throw error
     }
     if (failure === undefined) throw new Error('expected incompatible peer offers to fail negotiation')
+    expect(failure).toMatchObject({ code, updateEndpoint: endpoint })
     const onTransportError = vi.fn()
     const controller = new RemoteRelayEndpointController({
       endpoint: 'mobile',

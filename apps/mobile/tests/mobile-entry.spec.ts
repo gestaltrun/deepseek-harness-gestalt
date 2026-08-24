@@ -390,13 +390,15 @@ describe('Mobile Platform Account entry', () => {
   })
 
   it.each([
-    ['mobile', 'Update Mobile to connect to this Desktop.'],
-    ['desktop', 'Update Desktop to connect from this Mobile.'],
-  ] as const)('projects a Companion update requirement for %s through the shipped entry', async (endpoint, expected) => {
-    await mountSelectedDesktopProduct(`update-${endpoint}`)
+    ['COMPANION_UPDATE_REQUIRED', 'mobile', 'Update Mobile to connect to this Desktop.'],
+    ['COMPANION_UPDATE_REQUIRED', 'desktop', 'Update Desktop to connect from this Mobile.'],
+    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'mobile', 'Update Mobile to connect to this Desktop.'],
+    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'desktop', 'Update Desktop to connect from this Mobile.'],
+  ] as const)('projects a %s requirement for %s through the shipped entry', async (code, endpoint, expected) => {
+    await mountSelectedDesktopProduct(`${code}-${endpoint}`)
 
     relayLifecycle.onTransportError?.(new RemoteProtocolError(
-      'COMPANION_UPDATE_REQUIRED', `${endpoint} update required`, endpoint,
+      code, `${endpoint} update required`, endpoint,
     ))
 
     expect((await screen.findByRole('alert')).textContent).toBe(expected)
@@ -409,7 +411,7 @@ describe('Mobile Platform Account entry', () => {
       'PLATFORM_CAPACITY', 'Remote Relay returned PLATFORM_CAPACITY', 5_000,
     ))
 
-    expect((await screen.findByRole('alert')).textContent).toBe('Platform capacity is full. Retrying.')
+    expect((await screen.findByRole('alert')).textContent).toBe('Platform capacity is full. Retrying in 5 seconds.')
   })
 })
 

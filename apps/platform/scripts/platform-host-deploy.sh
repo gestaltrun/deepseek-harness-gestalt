@@ -82,15 +82,18 @@ case "$action" in
     fi
     account="${account:-${PLATFORM_SLS_ACCOUNT_ID:-}}"
     test -n "$account"
+    collector_image=aliyun-observability-release-registry.cn-hangzhou.cr.aliyuncs.com/loongcollector/loongcollector:v3.0.12.0-25723a1-aliyun
+    if ! docker pull "$collector_image"; then
+      docker image inspect "$collector_image" >/dev/null
+    fi
     docker rm -f dsh-loongcollector >/dev/null 2>&1 || true
-    docker pull aliyun-observability-release-registry.cn-hangzhou.cr.aliyuncs.com/loongcollector/loongcollector:v3.0.12.0-25723a1-aliyun
     docker run -d --name dsh-loongcollector --restart unless-stopped \
       -v /:/logtail_host:ro \
       -v /var/run/docker.sock:/var/run/docker.sock \
       --env ALIYUN_LOGTAIL_CONFIG=/etc/ilogtail/conf/cn-hangzhou/ilogtail_config.json \
       --env ALIYUN_LOGTAIL_USER_ID="$account" \
       --env ALIYUN_LOGTAIL_USER_DEFINED_ID=gestalt-platform \
-      aliyun-observability-release-registry.cn-hangzhou.cr.aliyuncs.com/loongcollector/loongcollector:v3.0.12.0-25723a1-aliyun
+      "$collector_image"
     ;;
   verify-predecessor)
     : "${DSH_DEPLOY_STORAGE:?}"

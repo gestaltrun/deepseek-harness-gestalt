@@ -499,7 +499,7 @@ describe('CI workflow', () => {
 
     expect(workspace.supportedArchitectures).toEqual({
       os: ['current'],
-      cpu: ['current'],
+      cpu: ['current', 'wasm32'],
       libc: ['current'],
     })
   })

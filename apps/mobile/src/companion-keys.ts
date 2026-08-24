@@ -14,6 +14,7 @@ import type { MobileProtectedStorage } from './native-protected-storage.ts'
 /** Maximum Personal Pairings whose attachment key one Mobile installation retains. */
 export const MAX_RETAINED_PAIRING_KEYS = 16
 const MOBILE_PAIRING_DOCUMENT_VERSION = 2
+const LEGACY_NATIVE_PAIRING_DOCUMENT_VERSION = 1
 
 interface StoredMobilePairingState {
   pairingId: PersonalPairingId
@@ -63,19 +64,19 @@ export class IndexedDbMobilePairingStateStore {
       throw new TypeError('Mobile pairing state must contain an object')
     }
     const document = value as Record<string, unknown>
-    if (document.version !== MOBILE_PAIRING_DOCUMENT_VERSION) {
+    const legacy = !Object.hasOwn(document, 'version')
+    if (!legacy && document.version !== MOBILE_PAIRING_DOCUMENT_VERSION) {
       throw new TypeError('Mobile pairing document version is unsupported')
     }
-    if (!Array.isArray(document.active) || document.active.length > MAX_RETAINED_PAIRING_KEYS) {
-      throw new TypeError('Mobile pairing active state must contain a bounded array')
-    }
-    return validatedDocument({
-      active: document.active.map(parseStoredState),
-      ...(document.selectedPairingId === undefined
-        ? {}
-        : { selectedPairingId: parsePersonalPairingId(document.selectedPairingId) }),
-      ...(document.pending === undefined ? {} : { pending: parseEndpointRecovery(document.pending) }),
-    })
+    const parsed = parsePairingDocument(
+      document,
+      legacy,
+      value => parseStoredState(value, legacy),
+      parseEndpointRecovery,
+      'Mobile pairing',
+    )
+    if (legacy) await persistMigratedDocument(parsed, document => this.save(accountId, document))
+    return parsed
   }
 
   async save(accountId: PlatformAccountId, document: StoredMobilePairingDocument): Promise<void> {
@@ -119,19 +120,19 @@ export class NativeMobilePairingStateStore implements MobilePairingStateStore {
       throw new TypeError('Native Mobile pairing document must contain an object')
     }
     const record = document as Record<string, unknown>
-    if (record.version !== MOBILE_PAIRING_DOCUMENT_VERSION) {
+    const legacy = record.version === LEGACY_NATIVE_PAIRING_DOCUMENT_VERSION
+    if (!legacy && record.version !== MOBILE_PAIRING_DOCUMENT_VERSION) {
       throw new TypeError('Native Mobile pairing document version is unsupported')
     }
-    if (!Array.isArray(record.active) || record.active.length > MAX_RETAINED_PAIRING_KEYS) {
-      throw new TypeError('Native Mobile pairing active state must contain a bounded array')
-    }
-    return validatedDocument({
-      active: record.active.map(parseNativeState),
-      ...(record.selectedPairingId === undefined
-        ? {}
-        : { selectedPairingId: parsePersonalPairingId(record.selectedPairingId) }),
-      ...(record.pending === undefined ? {} : { pending: parseNativeRecovery(record.pending) }),
-    })
+    const parsed = parsePairingDocument(
+      record,
+      legacy,
+      value => parseNativeState(value, legacy),
+      parseNativeRecovery,
+      'Native Mobile pairing',
+    )
+    if (legacy) await persistMigratedDocument(parsed, document => this.save(accountId, document))
+    return parsed
   }
 
   async save(accountId: PlatformAccountId, document: StoredMobilePairingDocument): Promise<void> {
@@ -412,7 +413,7 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
   }
 }
 
-function parseNativeState(value: unknown): StoredMobilePairingState {
+function parseNativeState(value: unknown, legacy = false): StoredMobilePairingState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError('Native Mobile pairing state record must be an object')
   }
@@ -421,7 +422,7 @@ function parseNativeState(value: unknown): StoredMobilePairingState {
     ...record,
     attachmentKey: decodeBytes(record.attachmentKey),
     ...(record.reconnectState === undefined ? {} : { reconnectState: decodeBytes(record.reconnectState) }),
-  })
+  }, legacy)
 }
 
 function parseNativeRecovery(value: unknown): MobileEndpointPairingRecovery {
@@ -477,7 +478,7 @@ function parseEndpointRecovery(value: unknown): MobileEndpointPairingRecovery {
   return cloneEndpointRecovery(record as unknown as MobileEndpointPairingRecovery)
 }
 
-function parseStoredState(value: unknown): StoredMobilePairingState {
+function parseStoredState(value: unknown, legacy = false): StoredMobilePairingState {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError('Mobile pairing state record must be an object')
   }
@@ -489,6 +490,9 @@ function parseStoredState(value: unknown): StoredMobilePairingState {
     throw new TypeError('Mobile pairing state record is invalid')
   }
   const pairingId = parsePersonalPairingId(record.pairingId)
+  if (legacy && Object.hasOwn(record, 'desktopName')) {
+    throw new TypeError('Legacy Mobile pairing state contains an unsupported Desktop name')
+  }
   let grant: RelayCredentialGrant | undefined
   if (record.grant !== undefined) {
     if (!(record.reconnectState instanceof Uint8Array)) {
@@ -504,7 +508,9 @@ function parseStoredState(value: unknown): StoredMobilePairingState {
     grant = {
       routeId: parseRelayRouteId(value.routeId), endpoint: 'mobile',
       credential: parseRelayCredential(value.credential), revision: value.revision as number,
-      ...(value.pairingSelector === undefined ? {} : { pairingSelector: parseRelayPairingSelector(value.pairingSelector) }),
+      pairingSelector: legacy && !Object.hasOwn(value, 'pairingSelector')
+        ? parseRelayPairingSelector(pairingId)
+        : parseRelayPairingSelector(value.pairingSelector),
     }
     requirePairingGrant(pairingId, grant)
   }
@@ -513,6 +519,55 @@ function parseStoredState(value: unknown): StoredMobilePairingState {
     ...(record.reconnectState instanceof Uint8Array ? { reconnectState: record.reconnectState.slice() } : {}),
     ...(grant === undefined ? {} : { grant }),
     ...(record.desktopName === undefined ? {} : { desktopName: parseDesktopName(record.desktopName) }),
+  }
+}
+
+function parsePairingDocument(
+  record: Record<string, unknown>,
+  legacy: boolean,
+  parseState: (value: unknown) => StoredMobilePairingState,
+  parseRecovery: (value: unknown) => MobileEndpointPairingRecovery,
+  subject: string,
+): StoredMobilePairingDocument {
+  if (!Array.isArray(record.active) || record.active.length > MAX_RETAINED_PAIRING_KEYS) {
+    throw new TypeError(`${subject} active state must contain a bounded array`)
+  }
+  if (legacy && Object.hasOwn(record, 'selectedPairingId')) {
+    throw new TypeError(`Legacy ${subject} document contains an unsupported explicit selection`)
+  }
+  if (legacy && record.active.length > 1) {
+    throw new TypeError(`Legacy ${subject} document is ambiguous`)
+  }
+  const active = record.active.map(parseState)
+  const pending = record.pending === undefined ? undefined : parseRecovery(record.pending)
+  if (legacy) {
+    const singleton = active[0]
+    return validatedDocument({
+      active,
+      ...(singleton?.reconnectState === undefined || singleton.grant === undefined
+        ? {}
+        : { selectedPairingId: singleton.pairingId }),
+      ...(pending === undefined ? {} : { pending }),
+    })
+  }
+  return validatedDocument({
+    active,
+    ...(record.selectedPairingId === undefined
+      ? {}
+      : { selectedPairingId: parsePersonalPairingId(record.selectedPairingId) }),
+    ...(pending === undefined ? {} : { pending }),
+  })
+}
+
+async function persistMigratedDocument(
+  document: StoredMobilePairingDocument,
+  save: (document: StoredMobilePairingDocument) => Promise<void>,
+): Promise<void> {
+  try {
+    await save(document)
+  } catch (error) {
+    wipeStoredDocument(document)
+    throw error
   }
 }
 
@@ -540,12 +595,16 @@ function validatedDocument(document: StoredMobilePairingDocument): StoredMobileP
 }
 
 function rejectStoredDocument(document: StoredMobilePairingDocument, message: string): never {
+  wipeStoredDocument(document)
+  throw new TypeError(message)
+}
+
+function wipeStoredDocument(document: StoredMobilePairingDocument): void {
   for (const record of document.active) {
     record.attachmentKey.fill(0)
     record.reconnectState?.fill(0)
   }
   wipeEndpointRecovery(document.pending)
-  throw new TypeError(message)
 }
 
 function parseDesktopName(value: unknown): string {

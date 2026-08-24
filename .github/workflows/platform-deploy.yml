@@ -1,4 +1,4 @@
-# Validate Environment production, then optionally pull a published image onto both ECS hosts.
+# Validate Environment production, then optionally deploy through Alibaba Cloud Assistant.
 name: Platform Deploy
 
 on:
@@ -11,6 +11,11 @@ on:
         default: latest
       deploy:
         description: Apply the image on both ECS hosts
+        required: true
+        type: boolean
+        default: false
+      recover:
+        description: Resolve an interrupted deployment from its durable phase
         required: true
         type: boolean
         default: false
@@ -27,18 +32,21 @@ concurrency:
   group: platform-deploy
   cancel-in-progress: false
 
-permissions:
-  contents: read
-  packages: read
+permissions: {}
 
 env:
   REGISTRY: ghcr.io
+  ALIYUN_CLI_VERSION: 3.4.11
+  ALIYUN_CLI_LINUX_AMD64_SHA256: a7e3df497db14c10d4d7587795e9fa7849b0c51dfce02908b9de5a41fe717d5c
 
 jobs:
   validate:
     name: Validate production Environment
     runs-on: ubuntu-24.04
     environment: production
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -88,20 +96,93 @@ jobs:
           PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY: '8'
           PLATFORM_TOKEN_SIGNING_KEY: ${{ secrets.PLATFORM_TOKEN_SIGNING_KEY }}
           PLATFORM_POLLING_SIGNING_KEY: ${{ secrets.PLATFORM_POLLING_SIGNING_KEY }}
-          PLATFORM_ECS_SSH_KEY: ${{ secrets.PLATFORM_ECS_SSH_KEY }}
-          PLATFORM_ECS_HOSTS: ${{ vars.PLATFORM_ECS_HOSTS }}
+          PLATFORM_ALIYUN_REGION: ${{ vars.PLATFORM_ALIYUN_REGION }}
+          PLATFORM_ALIYUN_OIDC_PROVIDER_ARN: ${{ vars.PLATFORM_ALIYUN_OIDC_PROVIDER_ARN }}
+          PLATFORM_ALIYUN_DEPLOY_ROLE_ARN: ${{ vars.PLATFORM_ALIYUN_DEPLOY_ROLE_ARN }}
+          PLATFORM_ECS_INSTANCE_IDS: ${{ vars.PLATFORM_ECS_INSTANCE_IDS }}
+          PLATFORM_ALB_SERVER_GROUP_ID: ${{ vars.PLATFORM_ALB_SERVER_GROUP_ID }}
+          PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT: ${{ vars.PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT }}
+          PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_DEPLOY_OSS_OBJECT_PREFIX }}
         run: node --import tsx/esm apps/platform/src/production-env-cli.ts
 
+      - name: Reject simultaneous deploy and recovery
+        env:
+          DEPLOY: ${{ inputs.deploy }}
+          RECOVER: ${{ inputs.recover }}
+        run: |
+          if [ "$DEPLOY" = true ] && [ "$RECOVER" = true ]; then
+            echo 'platform: deploy and recover are mutually exclusive' >&2
+            exit 1
+          fi
+
+      - name: Configure Alibaba Cloud OIDC credentials
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6
+        with:
+          oidc-provider-arn: ${{ vars.PLATFORM_ALIYUN_OIDC_PROVIDER_ARN }}
+          role-to-assume: ${{ vars.PLATFORM_ALIYUN_DEPLOY_ROLE_ARN }}
+          role-session-name: gestalt-platform-validate-${{ github.run_id }}
+          role-session-expiration: 1800
+          audience: sts.aliyuncs.com
+
+      - name: Install pinned Alibaba Cloud CLI
+        env:
+          ARCHIVE: ${{ runner.temp }}/aliyun-cli.tgz
+          BIN_DIR: ${{ runner.temp }}/aliyun-bin
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/aliyun/aliyun-cli/releases/download/v${ALIYUN_CLI_VERSION}/aliyun-cli-linux-${ALIYUN_CLI_VERSION}-amd64.tgz" -o "$ARCHIVE"
+          printf '%s  %s\n' "$ALIYUN_CLI_LINUX_AMD64_SHA256" "$ARCHIVE" | sha256sum -c -
+          mkdir -p "$BIN_DIR"
+          tar -xzf "$ARCHIVE" -C "$BIN_DIR"
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
+
+      - name: Verify private ECS Cloud Assistant targets
+        env:
+          PLATFORM_ALIYUN_REGION: ${{ vars.PLATFORM_ALIYUN_REGION }}
+          PLATFORM_ECS_INSTANCE_IDS: ${{ vars.PLATFORM_ECS_INSTANCE_IDS }}
+          PLATFORM_ALB_SERVER_GROUP_ID: ${{ vars.PLATFORM_ALB_SERVER_GROUP_ID }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a instance_ids <<< "$PLATFORM_ECS_INSTANCE_IDS"
+          response=$(aliyun ecs DescribeCloudAssistantStatus \
+            --RegionId "$PLATFORM_ALIYUN_REGION" \
+            --InstanceId.1 "${instance_ids[0]// /}" \
+            --InstanceId.2 "${instance_ids[1]// /}")
+          jq -e '.TotalCount == 2 and all(.InstanceCloudAssistantStatusSet.InstanceCloudAssistantStatus[]; .CloudAssistantStatus == "true")' \
+            <<< "$response" >/dev/null
+          server_group=$(aliyun alb ListServerGroupServers --region "$PLATFORM_ALIYUN_REGION" \
+            --ServerGroupId "$PLATFORM_ALB_SERVER_GROUP_ID")
+          jq -e --arg first "${instance_ids[0]// /}" --arg second "${instance_ids[1]// /}" \
+            '.TotalCount == 2 and (.Servers | length) == 2 and ([.Servers[] | select(.Status == "Available" and .Port == 80) | .ServerId] | sort == ([$first, $second] | sort))' \
+            <<< "$server_group" >/dev/null
+
   deploy:
-    name: Deploy to ECS
+    name: Deploy to private ECS through Cloud Assistant
     needs: validate
-    if: ${{ inputs.deploy }}
+    if: ${{ inputs.deploy && !inputs.recover }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 180
     environment: production
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+
+      - name: Install pinned Alibaba Cloud CLI
+        env:
+          ARCHIVE: ${{ runner.temp }}/aliyun-cli.tgz
+          BIN_DIR: ${{ runner.temp }}/aliyun-bin
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/aliyun/aliyun-cli/releases/download/v${ALIYUN_CLI_VERSION}/aliyun-cli-linux-${ALIYUN_CLI_VERSION}-amd64.tgz" -o "$ARCHIVE"
+          printf '%s  %s\n' "$ALIYUN_CLI_LINUX_AMD64_SHA256" "$ARCHIVE" | sha256sum -c -
+          mkdir -p "$BIN_DIR"
+          tar -xzf "$ARCHIVE" -C "$BIN_DIR"
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
 
       - uses: docker/login-action@v3
         with:
@@ -109,20 +190,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull and save image
+      - name: Pull image and encrypt operated configuration
         env:
           TAG: ${{ inputs.image_tag }}
-        run: |
-          set -euo pipefail
-          image="${REGISTRY}/$(echo "${GITHUB_REPOSITORY}/platform" | tr '[:upper:]' '[:lower:]'):${TAG}"
-          docker pull "$image"
-          docker save "$image" | gzip > /tmp/platform.tar.gz
-          echo "IMAGE=${image}" >> "$GITHUB_ENV"
-
-      - name: Install Docker and run on ECS
-        env:
-          SSH_KEY: ${{ secrets.PLATFORM_ECS_SSH_KEY }}
-          HOSTS: ${{ vars.PLATFORM_ECS_HOSTS }}
+          DEPLOY_DIR: ${{ runner.temp }}/platform-deploy
+          PLATFORM_ENVIRONMENT: production
           PLATFORM_ORIGIN: ${{ vars.PLATFORM_ORIGIN }}
           PLATFORM_GITHUB_CALLBACK: ${{ vars.PLATFORM_GITHUB_CALLBACK }}
           PLATFORM_GITHUB_CLIENT_ID: ${{ vars.PLATFORM_GITHUB_CLIENT_ID }}
@@ -131,178 +203,294 @@ jobs:
           PLATFORM_POSTGRES_HOST: ${{ vars.PLATFORM_POSTGRES_HOST }}
           PLATFORM_POSTGRES_USER: ${{ secrets.PLATFORM_POSTGRES_USER }}
           PLATFORM_POSTGRES_PASSWORD: ${{ secrets.PLATFORM_POSTGRES_PASSWORD }}
+          PLATFORM_POSTGRES_SSL: require
           PLATFORM_POSTGRES_DATABASE: ${{ vars.PLATFORM_POSTGRES_DATABASE }}
           PLATFORM_IDENTITY_NAMESPACE: ${{ vars.PLATFORM_IDENTITY_NAMESPACE }}
           PLATFORM_REDIS_HOST: ${{ vars.PLATFORM_REDIS_HOST }}
           PLATFORM_REDIS_USER: ${{ secrets.PLATFORM_REDIS_USER }}
           PLATFORM_REDIS_PASSWORD: ${{ secrets.PLATFORM_REDIS_PASSWORD }}
+          PLATFORM_REDIS_TLS: '1'
           PLATFORM_OSS_ENDPOINT: ${{ vars.PLATFORM_OSS_ENDPOINT }}
           PLATFORM_OSS_BUCKET: ${{ vars.PLATFORM_OSS_BUCKET }}
           PLATFORM_OSS_AUTH: ${{ vars.PLATFORM_OSS_AUTH }}
           PLATFORM_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_OSS_OBJECT_PREFIX }}
           PLATFORM_OSS_TIMEOUT_MS: '10000'
           PLATFORM_RELAY_REDIS_KEY_PREFIX: ${{ vars.PLATFORM_RELAY_REDIS_KEY_PREFIX }}
-          PLATFORM_REDIS_TLS: '1'
+          PLATFORM_RELAY_CAPACITY_RETRY_AFTER_MS: '1000'
+          PLATFORM_RELAY_DELIVERY_ACK_TIMEOUT_MS: '5000'
+          PLATFORM_RELAY_DIRECTORY_TTL_MS: '60000'
+          PLATFORM_RELAY_HEARTBEAT_TIMEOUT_MS: '45000'
+          PLATFORM_RELAY_MAX_BUFFERED_CIPHERTEXT_BYTES: '1048576'
+          PLATFORM_RELAY_MAX_CONNECTIONS: '10000'
+          PLATFORM_RELAY_MAX_PENDING_DELIVERIES: '10000'
+          PLATFORM_RELAY_MAX_PENDING_CHALLENGES: '10000'
+          PLATFORM_RELAY_ATTACH_TIMEOUT_MS: '10000'
+          PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES: '104857600'
+          PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS: '900000'
+          PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS: '10000'
+          PLATFORM_REMOTE_ATTACHMENT_STORAGE: ${{ inputs.attachment_storage }}
+          PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS: '60000'
+          PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY: '8'
           PLATFORM_TOKEN_SIGNING_KEY: ${{ secrets.PLATFORM_TOKEN_SIGNING_KEY }}
           PLATFORM_POLLING_SIGNING_KEY: ${{ secrets.PLATFORM_POLLING_SIGNING_KEY }}
           PLATFORM_SLS_ACCOUNT_ID: ${{ vars.PLATFORM_SLS_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$DEPLOY_DIR"
+          image="${REGISTRY}/$(echo "${GITHUB_REPOSITORY}/platform" | tr '[:upper:]' '[:lower:]'):${TAG}"
+          docker pull "$image"
+          docker save "$image" | gzip > "$DEPLOY_DIR/platform.tar.gz"
+          config_container=$(docker create \
+            -e PLATFORM_ENVIRONMENT -e PLATFORM_ORIGIN -e PLATFORM_GITHUB_CALLBACK \
+            -e PLATFORM_GITHUB_CLIENT_ID -e PLATFORM_GITHUB_CLIENT_SECRET \
+            -e PLATFORM_GITHUB_CREDENTIAL_REFERENCE -e PLATFORM_POSTGRES_HOST \
+            -e PLATFORM_POSTGRES_USER -e PLATFORM_POSTGRES_PASSWORD -e PLATFORM_POSTGRES_SSL \
+            -e PLATFORM_POSTGRES_DATABASE -e PLATFORM_IDENTITY_NAMESPACE -e PLATFORM_REDIS_HOST \
+            -e PLATFORM_REDIS_USER -e PLATFORM_REDIS_PASSWORD -e PLATFORM_REDIS_TLS \
+            -e PLATFORM_OSS_ENDPOINT -e PLATFORM_OSS_BUCKET -e PLATFORM_OSS_AUTH \
+            -e PLATFORM_OSS_OBJECT_PREFIX -e PLATFORM_OSS_TIMEOUT_MS \
+            -e PLATFORM_RELAY_REDIS_KEY_PREFIX -e PLATFORM_RELAY_CAPACITY_RETRY_AFTER_MS \
+            -e PLATFORM_RELAY_DELIVERY_ACK_TIMEOUT_MS -e PLATFORM_RELAY_DIRECTORY_TTL_MS \
+            -e PLATFORM_RELAY_HEARTBEAT_TIMEOUT_MS -e PLATFORM_RELAY_MAX_BUFFERED_CIPHERTEXT_BYTES \
+            -e PLATFORM_RELAY_MAX_CONNECTIONS -e PLATFORM_RELAY_MAX_PENDING_DELIVERIES \
+            -e PLATFORM_RELAY_MAX_PENDING_CHALLENGES -e PLATFORM_RELAY_ATTACH_TIMEOUT_MS \
+            -e PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES \
+            -e PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS \
+            -e PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS -e PLATFORM_REMOTE_ATTACHMENT_STORAGE \
+            -e PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS \
+            -e PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY \
+            -e PLATFORM_TOKEN_SIGNING_KEY -e PLATFORM_POLLING_SIGNING_KEY \
+            -e PLATFORM_SLS_ACCOUNT_ID "$image")
+          docker inspect "$config_container" --format '{{range .Config.Env}}{{println .}}{{end}}' \
+            | grep '^PLATFORM_' > "$DEPLOY_DIR/platform.env"
+          docker rm "$config_container" >/dev/null
+          deploy_env_key=$(openssl rand -hex 32)
+          echo "::add-mask::$deploy_env_key"
+          DEPLOY_ENV_KEY="$deploy_env_key" openssl enc -aes-256-cbc -pbkdf2 -salt \
+            -in "$DEPLOY_DIR/platform.env" -out "$DEPLOY_DIR/platform.env.enc" -pass env:DEPLOY_ENV_KEY
+          install -m 600 apps/platform/scripts/platform-host-deploy.sh "$DEPLOY_DIR/platform-host-deploy.sh"
+          printf 'IMAGE=%s\n' "$image" >> "$GITHUB_ENV"
+          printf 'DEPLOY_ENV_KEY=%s\n' "$deploy_env_key" >> "$GITHUB_ENV"
+          printf 'IMAGE_SHA256=%s\n' "$(sha256sum "$DEPLOY_DIR/platform.tar.gz" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+          printf 'ENV_SHA256=%s\n' "$(sha256sum "$DEPLOY_DIR/platform.env.enc" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+          printf 'SCRIPT_SHA256=%s\n' "$(sha256sum "$DEPLOY_DIR/platform-host-deploy.sh" | cut -d ' ' -f 1)" >> "$GITHUB_ENV"
+
+      - name: Configure fresh Alibaba Cloud OIDC credentials
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6
+        with:
+          oidc-provider-arn: ${{ vars.PLATFORM_ALIYUN_OIDC_PROVIDER_ARN }}
+          role-to-assume: ${{ vars.PLATFORM_ALIYUN_DEPLOY_ROLE_ARN }}
+          role-session-name: gestalt-platform-deploy-${{ github.run_id }}
+          role-session-expiration: 21600
+          audience: sts.aliyuncs.com
+
+      - name: Stage artifacts and deploy through private control plane
+        env:
+          DEPLOY_DIR: ${{ runner.temp }}/platform-deploy
+          PLATFORM_ALIYUN_REGION: ${{ vars.PLATFORM_ALIYUN_REGION }}
+          PLATFORM_ECS_INSTANCE_IDS: ${{ vars.PLATFORM_ECS_INSTANCE_IDS }}
+          PLATFORM_ORIGIN: ${{ vars.PLATFORM_ORIGIN }}
+          PLATFORM_OSS_ENDPOINT: ${{ vars.PLATFORM_OSS_ENDPOINT }}
+          PLATFORM_OSS_BUCKET: ${{ vars.PLATFORM_OSS_BUCKET }}
+          PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT: ${{ vars.PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT }}
+          PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_DEPLOY_OSS_OBJECT_PREFIX }}
           PLATFORM_REMOTE_ATTACHMENT_STORAGE: ${{ inputs.attachment_storage }}
         run: |
           set -eEuo pipefail
-          install -m 600 /dev/null /tmp/ecs.pem
-          printf '%s\n' "$SSH_KEY" > /tmp/ecs.pem
-          IFS=',' read -r -a hosts <<< "$HOSTS"
-          relay_index=0
-          for host in "${hosts[@]}"; do
-            host="${host// /}"
-            relay_index=$((relay_index + 1))
-            relay_instance="relay-${relay_index}"
-            echo "expand ${host}"
-            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              'dnf -y install docker >/dev/null 2>&1 || yum -y install docker >/dev/null 2>&1; systemctl enable --now docker'
-            gzip -dc /tmp/platform.tar.gz | ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" 'docker load'
-            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              "set -euo pipefail; if [ $(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE") = oss ]; then docker run --rm --network host \
-                -e PLATFORM_OSS_ENDPOINT=$(printf %q "$PLATFORM_OSS_ENDPOINT") \
-                -e PLATFORM_OSS_BUCKET=$(printf %q "$PLATFORM_OSS_BUCKET") \
-                -e PLATFORM_OSS_AUTH=$(printf %q "$PLATFORM_OSS_AUTH") \
-                -e PLATFORM_OSS_OBJECT_PREFIX=$(printf %q "$PLATFORM_OSS_OBJECT_PREFIX") \
-                -e PLATFORM_OSS_TIMEOUT_MS=$(printf %q "$PLATFORM_OSS_TIMEOUT_MS") \
-                ${IMAGE} node dist/oss-lifecycle-cli.mjs; fi; \
-               docker rm -f dsh-platform-candidate >/dev/null 2>&1 || true; docker run -d --name dsh-platform-candidate --restart no \
-                --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
-                -p 127.0.0.1:18080:8080 \
-                -e PLATFORM_ENVIRONMENT=production \
-                -e PLATFORM_ORIGIN=$(printf %q "$PLATFORM_ORIGIN") \
-                -e PLATFORM_GITHUB_CALLBACK=$(printf %q "$PLATFORM_GITHUB_CALLBACK") \
-                -e PLATFORM_GITHUB_CLIENT_ID=$(printf %q "$PLATFORM_GITHUB_CLIENT_ID") \
-                -e PLATFORM_GITHUB_CLIENT_SECRET=$(printf %q "$PLATFORM_GITHUB_CLIENT_SECRET") \
-                -e PLATFORM_GITHUB_CREDENTIAL_REFERENCE=$(printf %q "$PLATFORM_GITHUB_CREDENTIAL_REFERENCE") \
-                -e PLATFORM_POSTGRES_HOST=$(printf %q "$PLATFORM_POSTGRES_HOST") \
-                -e PLATFORM_POSTGRES_USER=$(printf %q "$PLATFORM_POSTGRES_USER") \
-                -e PLATFORM_POSTGRES_PASSWORD=$(printf %q "$PLATFORM_POSTGRES_PASSWORD") \
-                -e PLATFORM_POSTGRES_SSL=require \
-                -e PLATFORM_POSTGRES_DATABASE=$(printf %q "$PLATFORM_POSTGRES_DATABASE") \
-                -e PLATFORM_IDENTITY_NAMESPACE=$(printf %q "$PLATFORM_IDENTITY_NAMESPACE") \
-                -e PLATFORM_REDIS_HOST=$(printf %q "$PLATFORM_REDIS_HOST") \
-                -e PLATFORM_REDIS_USER=$(printf %q "$PLATFORM_REDIS_USER") \
-                -e PLATFORM_REDIS_PASSWORD=$(printf %q "$PLATFORM_REDIS_PASSWORD") \
-                -e PLATFORM_OSS_ENDPOINT=$(printf %q "$PLATFORM_OSS_ENDPOINT") \
-                -e PLATFORM_OSS_BUCKET=$(printf %q "$PLATFORM_OSS_BUCKET") \
-                -e PLATFORM_OSS_AUTH=$(printf %q "$PLATFORM_OSS_AUTH") \
-                -e PLATFORM_OSS_OBJECT_PREFIX=$(printf %q "$PLATFORM_OSS_OBJECT_PREFIX") \
-                -e PLATFORM_OSS_TIMEOUT_MS=10000 \
-                -e PLATFORM_RELAY_REDIS_KEY_PREFIX=$(printf %q "$PLATFORM_RELAY_REDIS_KEY_PREFIX") \
-                -e PLATFORM_REDIS_TLS=1 \
-                -e PLATFORM_RELAY_INSTANCE_ID=$(printf %q "$relay_instance") \
-                -e PLATFORM_RELAY_CAPACITY_RETRY_AFTER_MS=1000 \
-                -e PLATFORM_RELAY_DELIVERY_ACK_TIMEOUT_MS=5000 \
-                -e PLATFORM_RELAY_DIRECTORY_TTL_MS=60000 \
-                -e PLATFORM_RELAY_HEARTBEAT_TIMEOUT_MS=45000 \
-                -e PLATFORM_RELAY_MAX_BUFFERED_CIPHERTEXT_BYTES=1048576 \
-                -e PLATFORM_RELAY_MAX_CONNECTIONS=10000 \
-                -e PLATFORM_RELAY_MAX_PENDING_DELIVERIES=10000 \
-                -e PLATFORM_RELAY_MAX_PENDING_CHALLENGES=10000 \
-                -e PLATFORM_RELAY_ATTACH_TIMEOUT_MS=10000 \
-                -e PLATFORM_REMOTE_ATTACHMENT_MAX_BLOB_BYTES=104857600 \
-                -e PLATFORM_REMOTE_ATTACHMENT_CAPABILITY_LIFETIME_MS=900000 \
-                -e PLATFORM_REMOTE_ATTACHMENT_MAX_RETAINED_BLOBS=10000 \
-                -e PLATFORM_REMOTE_ATTACHMENT_STORAGE=$(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE") \
-                -e PLATFORM_REMOTE_ATTACHMENT_SWEEP_INTERVAL_MS=60000 \
-                -e PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY=8 \
-                -e PLATFORM_TOKEN_SIGNING_KEY=$(printf %q "$PLATFORM_TOKEN_SIGNING_KEY") \
-                -e PLATFORM_POLLING_SIGNING_KEY=$(printf %q "$PLATFORM_POLLING_SIGNING_KEY") \
-                ${IMAGE}; \
-               ready=0; for attempt in \$(seq 1 30); do \
-                 if body=\$(curl -fsS --max-time 2 http://127.0.0.1:18080/readyz) \
-                   && printf '%s' \"\$body\" | grep -Fq '\"attachmentStorage\":\"'$(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE")'\"'; then ready=1; break; fi; sleep 1; \
-               done; test \"\$ready\" = 1; \
-               install -m 600 /dev/null /run/dsh-platform-candidate.env; \
-               docker inspect dsh-platform-candidate --format '{{range .Config.Env}}{{println .}}{{end}}' > /run/dsh-platform-candidate.env"
-            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              "set -euo pipefail
-               token=\$(curl -fsS --max-time 5 -X PUT http://100.100.100.200/latest/api/token -H 'X-aliyun-ecs-metadata-token-ttl-seconds:60' || true)
-               account=
-               if [ -n \"\$token\" ]; then
-                 account=\$(curl -fsS --max-time 5 -H \"X-aliyun-ecs-metadata-token: \$token\" http://100.100.100.200/latest/meta-data/owner-account-id || true)
-               fi
-               account=\${account:-$(printf %q "${PLATFORM_SLS_ACCOUNT_ID:-}")}
-               test -n \"\$account\"
-               docker rm -f dsh-loongcollector >/dev/null 2>&1 || true
-               docker pull aliyun-observability-release-registry.cn-hangzhou.cr.aliyuncs.com/loongcollector/loongcollector:v3.0.12.0-25723a1-aliyun
-               docker run -d --name dsh-loongcollector --restart unless-stopped \\
-                 -v /:/logtail_host:ro \\
-                 -v /var/run/docker.sock:/var/run/docker.sock \\
-                 --env ALIYUN_LOGTAIL_CONFIG=/etc/ilogtail/conf/cn-hangzhou/ilogtail_config.json \\
-                 --env ALIYUN_LOGTAIL_USER_ID=\"\$account\" \\
-                 --env ALIYUN_LOGTAIL_USER_DEFINED_ID=gestalt-platform \\
-                 aliyun-observability-release-registry.cn-hangzhou.cr.aliyuncs.com/loongcollector/loongcollector:v3.0.12.0-25723a1-aliyun"
-          done
-
-          for host in "${hosts[@]}"; do
-            host="${host// /}"
-            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              'set -euo pipefail; docker inspect dsh-platform >/dev/null; ! docker inspect dsh-platform-rollback >/dev/null 2>&1; curl -fsS --max-time 5 http://127.0.0.1:80/readyz >/dev/null'
-          done
-          if [ "$PLATFORM_REMOTE_ATTACHMENT_STORAGE" = oss ]; then
-            for host in "${hosts[@]}"; do
-              host="${host// /}"
-              ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-                "set -euo pipefail; body=\$(curl -fsS --max-time 5 http://127.0.0.1:80/readyz); \
-                 printf '%s' \"\$body\" | grep -Eq '\"attachmentStorage\":\"(postgres|oss)\"'"
-            done
-          fi
-
+          source apps/platform/scripts/platform-cloud-assistant.sh
           source apps/platform/scripts/platform-public-readiness.sh
-          trap on_deploy_error ERR
+          IFS=',' read -r -a instance_ids <<< "$PLATFORM_ECS_INSTANCE_IDS"
+          for index in "${!instance_ids[@]}"; do
+            instance_ids[$index]="${instance_ids[$index]// /}"
+          done
+          object_root="${PLATFORM_DEPLOY_OSS_OBJECT_PREFIX}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          image_object="oss://${PLATFORM_OSS_BUCKET}/${object_root}/platform.tar.gz"
+          env_object="oss://${PLATFORM_OSS_BUCKET}/${object_root}/platform.env.enc"
+          script_object="oss://${PLATFORM_OSS_BUCKET}/${object_root}/platform-host-deploy.sh"
+          state_object="oss://${PLATFORM_OSS_BUCKET}/${PLATFORM_DEPLOY_OSS_OBJECT_PREFIX}/active-state.json"
+          state_file="$DEPLOY_DIR/active-state.json"
+          state_resolved=0
+          cleanup_artifacts() {
+            set +e
+            aliyun oss rm "$image_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
+            aliyun oss rm "$env_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
+            aliyun oss rm "$script_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
+            if [ "$state_resolved" = 1 ]; then
+              aliyun oss rm "$state_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null 2>&1
+            fi
+          }
+          trap cleanup_artifacts EXIT
+          set +e
+          state_probe=$(aliyun oss cat "$state_object" --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" 2>&1)
+          state_probe_status=$?
+          set -e
+          if [ "$state_probe_status" = 0 ]; then
+            echo 'platform: an unresolved deployment exists; dispatch recover before deploying again' >&2
+            exit 1
+          elif ! grep -Fq 'StatusCode=404' <<< "$state_probe"; then
+            echo 'platform: failed to determine whether an unresolved deployment exists' >&2
+            exit 1
+          fi
+          aliyun oss cp "$DEPLOY_DIR/platform.tar.gz" "$image_object" \
+            --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force
+          aliyun oss cp "$DEPLOY_DIR/platform.env.enc" "$env_object" \
+            --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force
+          aliyun oss cp "$DEPLOY_DIR/platform-host-deploy.sh" "$script_object" \
+            --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force
+          image_url=$(aliyun oss sign "$image_object" --endpoint "$PLATFORM_OSS_ENDPOINT" --timeout 21600 | head -1)
+          env_url=$(aliyun oss sign "$env_object" --endpoint "$PLATFORM_OSS_ENDPOINT" --timeout 21600 | head -1)
+          script_url=$(aliyun oss sign "$script_object" --endpoint "$PLATFORM_OSS_ENDPOINT" --timeout 21600 | head -1)
+          echo "::add-mask::$image_url"
+          echo "::add-mask::$env_url"
+          echo "::add-mask::$script_url"
+          write_deploy_state() {
+            instance_ids_json=$(printf '%s\n' "${instance_ids[@]}" | jq -R . | jq -s .)
+            jq -nc --arg phase "$1" --arg objectRoot "$object_root" --argjson instanceIds "$instance_ids_json" \
+              '{version:1, phase:$phase, objectRoot:$objectRoot, instanceIds:$instanceIds}' > "$state_file"
+            aliyun oss cp "$state_file" "$state_object" \
+              --endpoint "$PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT" --force >/dev/null
+          }
+          write_deploy_state rollbackable
 
-          # Each graceful rolling replacement keeps the other host serving. The shared authority
-          # remains in the predecessor-compatible phase until every replacement is healthy.
-          for host in "${hosts[@]}"; do
-            host="${host// /}"
-            echo "rolling replacement keeps the other host serving: ${host}"
-            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              "set -euo pipefail; \
-               docker rename dsh-platform dsh-platform-rollback; \
-               docker stop --time 60 dsh-platform-rollback; \
-               docker rm -f dsh-platform-candidate >/dev/null; \
-               docker run -d --name dsh-platform --restart unless-stopped \
-                 --log-driver json-file --log-opt max-size=20m --log-opt max-file=3 \
-                 -p 80:8080 --env-file /run/dsh-platform-candidate.env ${IMAGE}; \
-               ready=0; for attempt in \$(seq 1 30); do \
-                 if body=\$(curl -fsS --max-time 2 http://127.0.0.1:80/readyz) \
-                   && printf '%s' \"\$body\" | grep -Fq '\"attachmentStorage\":\"'$(printf %q "$PLATFORM_REMOTE_ATTACHMENT_STORAGE")'\"'; then ready=1; break; fi; sleep 1; \
-               done; test \"\$ready\" = 1"
+          remote_action() {
+            local instance_id="$1" relay_instance="$2" action="$3"
+            local wrapper="$DEPLOY_DIR/cloud-command.sh"
+            install -m 600 /dev/null "$wrapper"
+            {
+              echo 'set -eEuo pipefail'
+              echo 'umask 077'
+              printf 'workdir=$(mktemp -d /run/dsh-platform-command.XXXXXX)\n'
+              echo 'cleanup_command() { find "$workdir" -type f -delete; rmdir "$workdir"; }'
+              echo 'trap cleanup_command EXIT'
+              printf 'curl --proto "=https" --tlsv1.2 -fsS %q -o "$workdir/platform-host-deploy.sh"\n' "$script_url"
+              printf 'printf "%%s  %%s\\n" %q "$workdir/platform-host-deploy.sh" | sha256sum -c -\n' "$SCRIPT_SHA256"
+              printf 'export DSH_DEPLOY_IMAGE_URL=%q\n' "$image_url"
+              printf 'export DSH_DEPLOY_IMAGE_SHA256=%q\n' "$IMAGE_SHA256"
+              printf 'export DSH_DEPLOY_ENV_URL=%q\n' "$env_url"
+              printf 'export DSH_DEPLOY_ENV_SHA256=%q\n' "$ENV_SHA256"
+              printf 'export DSH_DEPLOY_ENV_KEY=%q\n' "$DEPLOY_ENV_KEY"
+              printf 'export DSH_DEPLOY_IMAGE=%q\n' "$IMAGE"
+              printf 'export DSH_DEPLOY_STORAGE=%q\n' "$PLATFORM_REMOTE_ATTACHMENT_STORAGE"
+              printf 'export DSH_RELAY_INSTANCE_ID=%q\n' "$relay_instance"
+              printf 'bash "$workdir/platform-host-deploy.sh" %q\n' "$action"
+            } > "$wrapper"
+            if [ "$action" = prepare ]; then
+              platform_cloud_run "$instance_id" "$wrapper" 1800
+            elif [ "$action" = rollback ]; then
+              platform_cloud_run "$instance_id" "$wrapper" 2100
+            else
+              platform_cloud_run "$instance_id" "$wrapper" 300
+            fi
+          }
+
+          rollback_platform() (
+            set +e
+            local rollback_failed=0 index
+            for index in "${!instance_ids[@]}"; do
+              remote_action "${instance_ids[$index]}" "relay-$((index + 1))" rollback || rollback_failed=1
+            done
+            exit "$rollback_failed"
+          )
+          on_deploy_error() {
+            local status=$?
+            trap - ERR INT TERM
+            if rollback_platform; then
+              state_resolved=1
+            else
+              echo 'platform: one or more instances failed to restore the predecessor' >&2
+            fi
+            exit "$status"
+          }
+          on_deploy_interrupt() {
+            local status="$1"
+            trap - ERR INT TERM
+            if rollback_platform; then
+              state_resolved=1
+            else
+              echo 'platform: one or more instances failed to restore the predecessor' >&2
+            fi
+            exit "$status"
+          }
+          trap on_deploy_error ERR
+          trap 'on_deploy_interrupt 130' INT
+          trap 'on_deploy_interrupt 143' TERM
+
+          for index in "${!instance_ids[@]}"; do
+            remote_action "${instance_ids[$index]}" "relay-$((index + 1))" prepare
+          done
+          for index in "${!instance_ids[@]}"; do
+            remote_action "${instance_ids[$index]}" "relay-$((index + 1))" verify-predecessor
+          done
+          for index in "${!instance_ids[@]}"; do
+            echo "rolling replacement keeps the other private ECS instance serving: ${instance_ids[$index]}"
+            remote_action "${instance_ids[$index]}" "relay-$((index + 1))" replace
           done
 
           platform_public_readiness 30
-          trap - ERR
+          write_deploy_state commit-pending
+          trap - ERR INT TERM
 
-          # A stopped rollback container is removed on every host before the irreversible phase
-          # transition. A partial cleanup leaves one active generation in the prior compatible mode.
           rollback_cleanup_failed=0
-          for host in "${hosts[@]}"; do
-            host="${host// /}"
-            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              'set -euo pipefail; docker rm dsh-platform-rollback >/dev/null' || rollback_cleanup_failed=1
+          for index in "${!instance_ids[@]}"; do
+            remote_action "${instance_ids[$index]}" "relay-$((index + 1))" cleanup-rollback \
+              || rollback_cleanup_failed=1
           done
           if [ "$rollback_cleanup_failed" != 0 ]; then
-            for host in "${hosts[@]}"; do
-              host="${host// /}"
-              ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-                'rm -f /run/dsh-platform-candidate.env' || true
-            done
             exit 1
           fi
 
-          cutover_host="${hosts[0]// /}"
-          ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${cutover_host}" \
-            "set -euo pipefail; docker run --rm --network host \
-               --env-file /run/dsh-platform-candidate.env ${IMAGE} \
-               node dist/attachment-storage-cutover-cli.mjs"
-          for host in "${hosts[@]}"; do
-            host="${host// /}"
-            ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${host}" \
-              'rm -f /run/dsh-platform-candidate.env'
+          remote_action "${instance_ids[0]}" relay-1 cutover
+          write_deploy_state committed
+          finalize_failed=0
+          for index in "${!instance_ids[@]}"; do
+            remote_action "${instance_ids[$index]}" "relay-$((index + 1))" finalize || finalize_failed=1
           done
-          rm -f /tmp/ecs.pem /tmp/platform.tar.gz
+          test "$finalize_failed" = 0
+          state_resolved=1
+
+  recover:
+    name: Resolve an interrupted private ECS deployment
+    needs: validate
+    if: ${{ inputs.recover }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Configure Alibaba Cloud OIDC credentials
+        uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6
+        with:
+          oidc-provider-arn: ${{ vars.PLATFORM_ALIYUN_OIDC_PROVIDER_ARN }}
+          role-to-assume: ${{ vars.PLATFORM_ALIYUN_DEPLOY_ROLE_ARN }}
+          role-session-name: gestalt-platform-recover-${{ github.run_id }}
+          role-session-expiration: 3600
+          audience: sts.aliyuncs.com
+
+      - name: Install pinned Alibaba Cloud CLI
+        env:
+          ARCHIVE: ${{ runner.temp }}/aliyun-cli.tgz
+          BIN_DIR: ${{ runner.temp }}/aliyun-bin
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/aliyun/aliyun-cli/releases/download/v${ALIYUN_CLI_VERSION}/aliyun-cli-linux-${ALIYUN_CLI_VERSION}-amd64.tgz" -o "$ARCHIVE"
+          printf '%s  %s\n' "$ALIYUN_CLI_LINUX_AMD64_SHA256" "$ARCHIVE" | sha256sum -c -
+          mkdir -p "$BIN_DIR"
+          tar -xzf "$ARCHIVE" -C "$BIN_DIR"
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
+
+      - name: Resolve every instance from the durable phase
+        env:
+          PLATFORM_ALIYUN_REGION: ${{ vars.PLATFORM_ALIYUN_REGION }}
+          PLATFORM_ECS_INSTANCE_IDS: ${{ vars.PLATFORM_ECS_INSTANCE_IDS }}
+          PLATFORM_OSS_BUCKET: ${{ vars.PLATFORM_OSS_BUCKET }}
+          PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT: ${{ vars.PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT }}
+          PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: ${{ vars.PLATFORM_DEPLOY_OSS_OBJECT_PREFIX }}
+          RECOVERY_COMMAND: ${{ runner.temp }}/platform-recovery.sh
+        run: |
+          bash apps/platform/scripts/platform-recover.sh

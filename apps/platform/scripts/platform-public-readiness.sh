@@ -1,33 +1,10 @@
 #!/usr/bin/env bash
 
-rollback_platform() (
-  set +e
-  local rollback_failed=0 rollback_host
-  for rollback_host in "${hosts[@]}"; do
-    rollback_host="${rollback_host// /}"
-    ssh -i /tmp/ecs.pem -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@${rollback_host}" \
-      "if docker inspect dsh-platform-rollback >/dev/null 2>&1; then \
-         docker stop --time 60 dsh-platform >/dev/null 2>&1 || true; \
-         docker rm -f dsh-platform >/dev/null 2>&1 || true; \
-         docker rename dsh-platform-rollback dsh-platform && docker start dsh-platform; \
-       fi; docker rm -f dsh-platform-candidate >/dev/null 2>&1 || true; \
-       rm -f /run/dsh-platform-candidate.env" || rollback_failed=1
-  done
-  exit "$rollback_failed"
-)
-
-on_deploy_error() {
-  local status=$?
-  trap - ERR
-  rollback_platform || echo 'platform: one or more hosts failed to restore the predecessor' >&2
-  exit "$status"
-}
-
 platform_public_readiness() {
   local attempts="$1" public_ready=0 expected_index expected_instance body
   local ready_instances='|' ready_instance_count=0
   local -a expected_instances=()
-  for ((expected_index = 1; expected_index <= ${#hosts[@]}; expected_index += 1)); do
+  for ((expected_index = 1; expected_index <= ${#instance_ids[@]}; expected_index += 1)); do
     expected_instances+=("relay-${expected_index}")
   done
   echo 'public readiness through the production HTTPS origin'

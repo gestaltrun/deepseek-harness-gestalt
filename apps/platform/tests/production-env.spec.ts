@@ -14,7 +14,7 @@ import {
   readPlatformSigningKey,
   requiredPlatformEnv,
   runPlatformProductionEnvCli,
-  validatePlatformEcsHosts,
+  validatePlatformEcsInstanceIds,
 } from '../src/production-env.ts'
 
 const HEX = 'ab'.repeat(32)
@@ -25,6 +25,10 @@ const launchSource = readFileSync(new URL('../src/launch.ts', import.meta.url), 
 const remoteAccessResourcesSource = readFileSync(new URL('../src/remote-access-resources.ts', import.meta.url), 'utf8')
 const dockerfileSource = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8')
 const publicReadinessSource = readFileSync(new URL('../scripts/platform-public-readiness.sh', import.meta.url), 'utf8')
+const cloudAssistantSource = readFileSync(new URL('../scripts/platform-cloud-assistant.sh', import.meta.url), 'utf8')
+const hostDeploySource = readFileSync(new URL('../scripts/platform-host-deploy.sh', import.meta.url), 'utf8')
+const recoveryScript = fileURLToPath(new URL('../scripts/platform-recover.sh', import.meta.url))
+const recoverySource = readFileSync(recoveryScript, 'utf8')
 const repoRoot = resolve(import.meta.dirname, '../../..')
 
 function completeDeployEnv(): NodeJS.Dict<string> {
@@ -66,8 +70,13 @@ function completeDeployEnv(): NodeJS.Dict<string> {
     PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY: '8',
     PLATFORM_TOKEN_SIGNING_KEY: HEX,
     PLATFORM_POLLING_SIGNING_KEY: HEX,
-    PLATFORM_ECS_SSH_KEY: '-----BEGIN DISTINCTIVE KEY-----',
-    PLATFORM_ECS_HOSTS: '10.0.0.1,10.0.0.2',
+    PLATFORM_ALIYUN_REGION: 'cn-hangzhou',
+    PLATFORM_ALIYUN_OIDC_PROVIDER_ARN: 'acs:ram::123456789:oidc-provider/gestalt-github-actions',
+    PLATFORM_ALIYUN_DEPLOY_ROLE_ARN: 'acs:ram::123456789:role/gestalt-platform-deploy',
+    PLATFORM_ECS_INSTANCE_IDS: 'i-first123,i-second456',
+    PLATFORM_ALB_SERVER_GROUP_ID: 'sgp-production123',
+    PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT: 'oss-cn-hangzhou.aliyuncs.com',
+    PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: 'deploy-artifacts/platform',
   }
 }
 
@@ -92,7 +101,7 @@ function spawnCli(env: NodeJS.Dict<string>) {
 function runPublicReadinessHarness(result: 'success' | 'one-backend' | 'unreachable' | 'wrong-storage') {
   const harness = [
     'set -eEuo pipefail',
-    'hosts=(10.0.0.1 10.0.0.2)',
+    'instance_ids=(i-first123 i-second456)',
     'READINESS_COUNTER=$(mktemp)',
     'curl() {',
     '  if [ "$READINESS_RESULT" = unreachable ]; then return 22; fi',
@@ -108,11 +117,8 @@ function runPublicReadinessHarness(result: 'success' | 'one-backend' | 'unreacha
     '  fi',
     '}',
     'sleep() { :; }',
-    'ssh() { printf \'ROLLBACK:%s\\n\' "$*"; }',
     publicReadinessSource,
-    'trap on_deploy_error ERR',
     'platform_public_readiness 2',
-    'trap - ERR',
     'printf \'CLEANUP\\n\'',
   ].join('\n')
   return spawnSync('bash', ['-c', harness], {
@@ -123,6 +129,160 @@ function runPublicReadinessHarness(result: 'success' | 'one-backend' | 'unreacha
       PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'oss',
       READINESS_RESULT: result,
     },
+  })
+}
+
+function runCloudAssistantHarness(result: 'success' | 'failure') {
+  const harness = [
+    'set -eEuo pipefail',
+    'STATE=$(mktemp)',
+    'printf 0 > "$STATE"',
+    'aliyun() {',
+    '  case "$2" in',
+    '    RunCommand) printf \'{"InvokeId":"invoke-test"}\' ;;',
+    '    DescribeInvocationResults)',
+    '      count=$(cat "$STATE")',
+    '      count=$((count + 1))',
+    '      printf \'%s\' "$count" > "$STATE"',
+    '      if [ "$ASSISTANT_RESULT" = success ] && [ "$count" = 1 ]; then',
+    '        printf \'{"Invocation":{"InvocationResults":{"InvocationResult":[]}}}\'',
+    '        return',
+    '      elif [ "$ASSISTANT_RESULT" = success ]; then',
+    '        status=Success; exit_code=0; error_code=; error_info=',
+    '      else',
+    '        status=Failed; exit_code=7; error_code=ExecutionError; error_info=failed,',
+    '      fi',
+    '      printf \'{"Invocation":{"InvocationResults":{"InvocationResult":[{"InvocationStatus":"%s","ExitCode":%s,"ErrorCode":"%s","ErrorInfo":"%s"}]}}}\' "$status" "$exit_code" "$error_code" "$error_info"',
+    '      ;;',
+    '  esac',
+    '}',
+    'sleep() { :; }',
+    cloudAssistantSource,
+    'COMMAND=$(mktemp)',
+    'printf true > "$COMMAND"',
+    'platform_cloud_run i-first123 "$COMMAND"',
+  ].join('\n')
+  return spawnSync('bash', ['-c', harness], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      ASSISTANT_RESULT: result,
+      PLATFORM_ALIYUN_REGION: 'cn-hangzhou',
+      GITHUB_RUN_ID: '123',
+      GITHUB_RUN_ATTEMPT: '1',
+    },
+  })
+}
+
+function runRecoveryHarness(
+  phase: 'rollbackable' | 'commit-pending' | 'committed',
+  failure: 'none' | 'second-rollback' | 'state-write' | 'target-mismatch' = 'none',
+) {
+  const harness = [
+    'set -u',
+    'LOG=$(mktemp)',
+    'RECOVERY_COMMAND=$(mktemp)',
+    'export RECOVERY_COMMAND',
+    'trap \'cat "$LOG"\' EXIT',
+    'aliyun() {',
+    '  if [ "$1 $2" = "oss cat" ]; then',
+    '    printf \'{"version":1,"phase":"%s","objectRoot":"deploy-artifacts/platform/123-1","instanceIds":["i-first123","i-second456"]}\\n\' "$RECOVERY_PHASE"',
+    '  elif [ "$1 $2" = "oss cp" ]; then',
+    '    printf \'STATE:committed\\n\' >> "$LOG"',
+    '    [ "$RECOVERY_FAILURE" != state-write ]',
+    '  elif [ "$1 $2" = "oss rm" ]; then',
+    '    printf \'DELETE:%s\\n\' "$3" >> "$LOG"',
+    '  fi',
+    '}',
+    'platform_cloud_run() {',
+    '  action=$(sed -n \'1s/set -- //p\' "$2")',
+    '  printf \'RUN:%s:%s:%s\\n\' "$action" "$1" "$3" >> "$LOG"',
+    '  if [ "$RECOVERY_FAILURE" = second-rollback ] && [ "$action:$1" = rollback:i-second456 ]; then',
+    '    return 1',
+    '  fi',
+    '}',
+    'source "$RECOVERY_SCRIPT"',
+  ].join('\n')
+  return spawnSync('bash', ['-c', harness], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      RECOVERY_SCRIPT: recoveryScript,
+      RECOVERY_PHASE: phase,
+      RECOVERY_FAILURE: failure,
+      PLATFORM_ALIYUN_REGION: 'cn-hangzhou',
+      PLATFORM_ECS_INSTANCE_IDS: failure === 'target-mismatch'
+        ? 'i-newfirst,i-newsecond'
+        : 'i-first123,i-second456',
+      PLATFORM_OSS_BUCKET: 'bucket',
+      PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT: 'oss-cn-hangzhou.aliyuncs.com',
+      PLATFORM_DEPLOY_OSS_OBJECT_PREFIX: 'deploy-artifacts/platform',
+    },
+  })
+}
+
+function runCommittedCleanupHarness(dockerState: 'absent' | 'rollback-remains' | 'ps-fails') {
+  const runnableHostDeploy = hostDeploySource
+    .replace('candidate_env=/run/dsh-platform-candidate.env', 'candidate_env="$CANDIDATE_ENV"')
+    .replace('exec 9>/run/dsh-platform-deploy.lock', 'exec 9>"$HOST_LOCK"')
+  const harness = [
+    'set -- complete-commit',
+    'HOST_LOCK=$(mktemp)',
+    'CANDIDATE_ENV=$(mktemp -u)',
+    'export HOST_LOCK CANDIDATE_ENV',
+    'flock() { :; }',
+    'docker() {',
+    '  case "$1" in',
+    '    info) return 0 ;;',
+    '    rm) return 0 ;;',
+    '    ps)',
+    '      [ "$DOCKER_STATE" = ps-fails ] && return 1',
+    '      [ "$DOCKER_STATE" = rollback-remains ] && printf \'dsh-platform-rollback\\n\'',
+    '      return 0',
+    '      ;;',
+    '  esac',
+    '}',
+    runnableHostDeploy,
+  ].join('\n')
+  return spawnSync('bash', ['-c', harness], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, DOCKER_STATE: dockerState },
+  })
+}
+
+function runRollbackProbeHarness(psFailure: 'none' | 'first' | 'second') {
+  const runnableHostDeploy = hostDeploySource
+    .replace('candidate_env=/run/dsh-platform-candidate.env', 'candidate_env="$CANDIDATE_ENV"')
+    .replace('exec 9>/run/dsh-platform-deploy.lock', 'exec 9>"$HOST_LOCK"')
+  const harness = [
+    'set -- rollback',
+    'HOST_LOCK=$(mktemp)',
+    'CANDIDATE_ENV=$(mktemp -u)',
+    'PS_COUNT=$(mktemp)',
+    'printf 0 > "$PS_COUNT"',
+    'export HOST_LOCK CANDIDATE_ENV',
+    'flock() { :; }',
+    'curl() { printf \'{"ok":true}\\n\'; }',
+    'sleep() { :; }',
+    'docker() {',
+    '  case "$1" in',
+    '    info) return 0 ;;',
+    '    ps)',
+    '      count=$(cat "$PS_COUNT")',
+    '      count=$((count + 1))',
+    '      printf \'%s\' "$count" > "$PS_COUNT"',
+    '      [ "$PS_FAILURE:$count" = first:1 ] && return 1',
+    '      [ "$PS_FAILURE:$count" = second:2 ] && return 1',
+    '      return 0',
+    '      ;;',
+    '    rm) return 0 ;;',
+    '  esac',
+    '}',
+    runnableHostDeploy,
+  ].join('\n')
+  return spawnSync('bash', ['-c', harness], {
+    encoding: 'utf8',
+    env: { PATH: process.env.PATH, PS_FAILURE: psFailure },
   })
 }
 
@@ -164,7 +324,15 @@ describe('production and deploy names', () => {
     expect(PLATFORM_DEPLOY_REQUIRED_ENV.slice(0, PLATFORM_PRODUCTION_REQUIRED_ENV.length))
       .toEqual([...PLATFORM_PRODUCTION_REQUIRED_ENV])
     expect(PLATFORM_DEPLOY_REQUIRED_ENV.slice(PLATFORM_PRODUCTION_REQUIRED_ENV.length))
-      .toEqual(['PLATFORM_ECS_SSH_KEY', 'PLATFORM_ECS_HOSTS'])
+      .toEqual([
+        'PLATFORM_ALIYUN_REGION',
+        'PLATFORM_ALIYUN_OIDC_PROVIDER_ARN',
+        'PLATFORM_ALIYUN_DEPLOY_ROLE_ARN',
+        'PLATFORM_ECS_INSTANCE_IDS',
+        'PLATFORM_ALB_SERVER_GROUP_ID',
+        'PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT',
+        'PLATFORM_DEPLOY_OSS_OBJECT_PREFIX',
+      ])
   })
 
   it('parses the complete operated identity and verified durable-store configuration before traffic', () => {
@@ -270,18 +438,24 @@ describe('production and deploy names', () => {
       'PLATFORM_REMOTE_ATTACHMENT_CLEANUP_CONCURRENCY',
       'PLATFORM_TOKEN_SIGNING_KEY',
       'PLATFORM_POLLING_SIGNING_KEY',
-      'PLATFORM_ECS_SSH_KEY',
-      'PLATFORM_ECS_HOSTS',
+      'PLATFORM_ALIYUN_REGION',
+      'PLATFORM_ALIYUN_OIDC_PROVIDER_ARN',
+      'PLATFORM_ALIYUN_DEPLOY_ROLE_ARN',
+      'PLATFORM_ECS_INSTANCE_IDS',
+      'PLATFORM_ALB_SERVER_GROUP_ID',
+      'PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT',
+      'PLATFORM_DEPLOY_OSS_OBJECT_PREFIX',
     ])
     expect(requiredPlatformEnv('PLATFORM_ORIGIN', completeDeployEnv())).toBe('https://platform.example.test')
     expect(() => requiredPlatformEnv('PLATFORM_ORIGIN', {})).toThrow('PLATFORM_ORIGIN')
     expect(readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', completeDeployEnv())).toEqual(
       Uint8Array.from(Buffer.from(HEX, 'hex')),
     )
-    expect(validatePlatformEcsHosts(completeDeployEnv())).toEqual(['10.0.0.1', '10.0.0.2'])
-    for (const hosts of ['10.0.0.1', '10.0.0.1,', '10.0.0.1,10.0.0.1', 'a,b,c']) {
-      expect(() => validatePlatformEcsHosts({ ...completeDeployEnv(), PLATFORM_ECS_HOSTS: hosts }))
-        .toThrow('exactly two distinct hosts')
+    expect(validatePlatformEcsInstanceIds(completeDeployEnv())).toEqual(['i-first123', 'i-second456'])
+    for (const instanceIds of ['i-first123', 'i-first123,', 'i-first123,i-first123', 'a,b', 'i-a,i-b,i-c']) {
+      expect(() => validatePlatformEcsInstanceIds({
+        ...completeDeployEnv(), PLATFORM_ECS_INSTANCE_IDS: instanceIds,
+      })).toThrow('exactly two distinct ECS instance ids')
     }
     expect(() => readPlatformSigningKey('PLATFORM_TOKEN_SIGNING_KEY', {
       ...completeDeployEnv(),
@@ -301,7 +475,7 @@ describe('runPlatformProductionEnvCli', () => {
       expect(runPlatformProductionEnvCli({
         ...completeDeployEnv(),
         PLATFORM_GITHUB_CLIENT_SECRET: DISTINCTIVE_SECRET,
-        PLATFORM_ECS_SSH_KEY: '',
+        PLATFORM_ALIYUN_DEPLOY_ROLE_ARN: '',
       })).toBe(1)
       expect(runPlatformProductionEnvCli({
         ...completeDeployEnv(),
@@ -311,7 +485,7 @@ describe('runPlatformProductionEnvCli', () => {
     } finally {
       console.error = write
     }
-    expect(stderr.join('\n')).toContain('PLATFORM_ECS_SSH_KEY')
+    expect(stderr.join('\n')).toContain('PLATFORM_ALIYUN_DEPLOY_ROLE_ARN')
     expect(stderr.join('\n')).toContain('only production')
     expect(stderr.join('\n')).not.toContain(DISTINCTIVE_SECRET)
   })
@@ -320,7 +494,7 @@ describe('runPlatformProductionEnvCli', () => {
     const missing = spawnCli({})
     expect(missing.status).toBe(1)
     expect(missing.stderr).toContain('PLATFORM_ORIGIN')
-    expect(missing.stderr).toContain('PLATFORM_ECS_HOSTS')
+    expect(missing.stderr).toContain('PLATFORM_ECS_INSTANCE_IDS')
     const refused = spawnCli({
       ...completeDeployEnv(),
       PLATFORM_ENVIRONMENT: 'development',
@@ -366,16 +540,22 @@ describe('Platform release workflows', () => {
       workflow_dispatch: {
         inputs: {
           deploy: { type: 'boolean', default: false },
+          recover: { type: 'boolean', default: false },
           attachment_storage: { type: 'choice', default: 'postgres' },
         },
       },
     })
     const validate = job(workflow, 'validate')
     const deploy = job(workflow, 'deploy')
+    const recover = job(workflow, 'recover')
     expect(validate.environment).toBe('production')
     expect(deploy.environment).toBe('production')
     expect(deploy.needs).toBe('validate')
-    expect(deploy.if).toBe('${{ inputs.deploy }}')
+    expect(deploy.if).toBe('${{ inputs.deploy && !inputs.recover }}')
+    expect(recover.if).toBe('${{ inputs.recover }}')
+    expect(validate.permissions).toEqual({ contents: 'read', 'id-token': 'write' })
+    expect(deploy.permissions).toEqual({ contents: 'read', packages: 'read', 'id-token': 'write' })
+    expect(JSON.stringify(deploy)).toContain('"role-session-expiration":21600')
     expect(steps(deploy)[0]).toMatchObject({
       uses: 'actions/checkout@v6',
       with: { 'persist-credentials': false },
@@ -388,55 +568,89 @@ describe('Platform release workflows', () => {
     for (const name of PLATFORM_DEPLOY_REQUIRED_ENV) {
       expect(validateStep.env, name).toHaveProperty(name)
     }
-    const apply = steps(deploy).find(step => typeof step.run === 'string' && step.run.includes('docker run'))
-    if (apply === undefined) throw new TypeError('deploy job must run docker')
+    const oidcSteps = [...steps(validate), ...steps(deploy)].filter(step => typeof step.uses === 'string'
+      && step.uses.startsWith('aliyun/configure-aliyun-credentials-action@'))
+    expect(oidcSteps).toHaveLength(2)
+    expect(oidcSteps.every(step => step.uses
+      === 'aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6')).toBe(true)
+    const prepare = steps(deploy).find(step => typeof step.run === 'string'
+      && step.run.includes('docker create'))
+    const apply = steps(deploy).find(step => typeof step.run === 'string'
+      && step.run.includes('platform_cloud_run'))
+    if (prepare === undefined || apply === undefined) {
+      throw new TypeError('deploy job must prepare encrypted artifacts and invoke Cloud Assistant')
+    }
+    const prepareSource = String(prepare.run)
     const applySource = String(apply.run)
     expect(applySource).toContain('set -eEuo pipefail')
+    expect(applySource).toContain('source apps/platform/scripts/platform-cloud-assistant.sh')
     expect(applySource).toContain('source apps/platform/scripts/platform-public-readiness.sh')
-    expect(applySource).toContain('--log-opt max-size=20m')
-    expect(applySource).toContain('--log-opt max-file=3')
-    expect(applySource).toContain('dist/oss-lifecycle-cli.mjs')
-    expect(applySource).toContain('dsh-platform-candidate')
-    expect(applySource).toContain('127.0.0.1:18080/readyz')
-    expect(applySource).toContain('attachmentStorage')
-    expect(publicReadinessSource).toContain('rollback_platform')
-    expect(applySource).toContain('docker inspect dsh-platform >/dev/null; ! docker inspect dsh-platform-rollback')
-    expect(publicReadinessSource).toContain('if docker inspect dsh-platform-rollback')
-    expect(publicReadinessSource.indexOf('if docker inspect dsh-platform-rollback'))
-      .toBeLessThan(publicReadinessSource.indexOf('docker rm -f dsh-platform >/dev/null 2>&1 || true'))
-    expect(applySource).not.toContain('Stop every predecessor before')
-    expect(publicReadinessSource).toContain('docker stop --time 60 dsh-platform >/dev/null')
-    expect(applySource).toContain('docker stop --time 60 dsh-platform-rollback')
-    expect(applySource).toContain('rolling replacement keeps the other host serving')
+    expect(applySource).toContain('aliyun oss cp')
+    expect(applySource).toContain('aliyun oss sign')
+    expect(applySource).toContain('| head -1')
+    expect(applySource).toContain('SCRIPT_SHA256')
+    expect(applySource).toContain('rollback_platform')
+    expect(applySource).toContain('rolling replacement keeps the other private ECS instance serving')
     expect(publicReadinessSource).toContain('public readiness through the production HTTPS origin')
     expect(publicReadinessSource).toContain('${PLATFORM_ORIGIN}/readyz')
-    expect(applySource).toContain('relay_instance="relay-${relay_index}"')
     expect(publicReadinessSource).toContain('expected_instances+=("relay-${expected_index}")')
-    expect(applySource).not.toContain('relay-${host//./-}')
-    expect(publicReadinessSource).not.toContain('expected_host//./-')
     expect(applySource.indexOf('platform_public_readiness 30'))
       .toBeLessThan(applySource.indexOf('rollback_cleanup_failed=0'))
     expect(applySource).toContain('rollback_cleanup_failed=0')
-    expect(applySource).toContain('attachment-storage-cutover-cli.mjs')
-    expect(applySource).toContain('grep -Eq')
-    expect(applySource).toContain('attachmentStorage\\\":\\\"(postgres|oss)')
-    expect(applySource).not.toContain("grep -Fq '\"attachmentStorage\":\"postgres\"'")
     expect(applySource.indexOf('rollback_cleanup_failed=0'))
-      .toBeLessThan(applySource.indexOf('attachment-storage-cutover-cli.mjs'))
-    expect(String(apply.run)).toContain('--env-file /run/dsh-platform-candidate.env')
-    expect(String(apply.run)).toContain('PLATFORM_REMOTE_ATTACHMENT_STORAGE')
-    expect(String(apply.run)).toContain('dsh-loongcollector')
-    expect(String(apply.run)).toContain('gestalt-platform')
-    if (!isRecord(apply.env)) throw new TypeError('deploy apply step must define env')
-    expect(apply.env).toHaveProperty('PLATFORM_SLS_ACCOUNT_ID')
-    expect(apply.env).toHaveProperty('PLATFORM_OSS_OBJECT_PREFIX')
-    expect(apply.env).toHaveProperty('PLATFORM_OSS_TIMEOUT_MS')
-    expect(String(apply.run)).toContain('100.100.100.200')
-    expect(String(apply.run)).toContain('X-aliyun-ecs-metadata-token')
-    expect(String(apply.run)).toContain('PLATFORM_SLS_ACCOUNT_ID')
-    expect(String(apply.run)).toContain('loongcollector:v3.0.12.0-25723a1-aliyun')
-    expect(String(apply.run)).toContain('/var/run/docker.sock')
-    expect(String(apply.run)).toContain('/etc/ilogtail/conf/cn-hangzhou/ilogtail_config.json')
+      .toBeLessThan(applySource.indexOf(' cutover'))
+    expect(prepareSource).toContain('openssl enc -aes-256-cbc -pbkdf2')
+    expect(prepareSource).toContain("grep '^PLATFORM_'")
+    expect(hostDeploySource).toContain('--log-opt max-size=20m')
+    expect(hostDeploySource).toContain('--log-opt max-file=3')
+    expect(hostDeploySource).toContain('dist/oss-lifecycle-cli.mjs')
+    expect(hostDeploySource).toContain('dsh-platform-candidate')
+    expect(hostDeploySource).toContain('wait_for_storage 18080')
+    expect(hostDeploySource).toContain('docker inspect dsh-platform-rollback')
+    expect(hostDeploySource).toContain('docker stop --time 60 dsh-platform')
+    expect(hostDeploySource).toContain('attachment-storage-cutover-cli.mjs')
+    expect(hostDeploySource).toContain('attachmentStorage\":\"(postgres|oss)')
+    expect(hostDeploySource).toContain('100.100.100.200')
+    expect(hostDeploySource).toContain('X-aliyun-ecs-metadata-token')
+    expect(hostDeploySource).toContain('loongcollector:v3.0.12.0-25723a1-aliyun')
+    expect(cloudAssistantSource).toContain('aliyun ecs RunCommand')
+    expect(cloudAssistantSource).toContain('DescribeInvocationResults')
+    expect(cloudAssistantSource).toContain('InvocationStatus')
+    expect(applySource).toContain("trap 'on_deploy_interrupt 130' INT")
+    expect(applySource).toContain('finalize_failed=0')
+    expect(hostDeploySource).toContain('flock -x 9')
+    const targetCheck = steps(validate).find(step => typeof step.run === 'string'
+      && step.run.includes('ListServerGroupServers'))
+    expect(String(targetCheck?.run)).toContain('.TotalCount == 2 and (.Servers | length) == 2')
+    expect(String(targetCheck?.run)).toContain('.Status == "Available" and .Port == 80')
+    const recoverWorkflowSource = String(steps(recover).find(step => typeof step.run === 'string'
+      && step.run.includes('platform-recover.sh'))?.run)
+    expect(recoverWorkflowSource.trim()).toBe('bash apps/platform/scripts/platform-recover.sh')
+    expect(recoverySource).toContain('active-state.json')
+    expect(recoverySource).toContain('run_recovery_on_all rollback 2100')
+    expect(recoverySource).toContain('run_recovery_on_all complete-rollback-cleanup 2100')
+    expect(recoverySource).toContain('write_recovery_command cutover')
+    expect(recoverySource).toContain('run_recovery_on_all complete-commit 2100')
+    expect(hostDeploySource).toContain('complete-commit)')
+    expect(hostDeploySource).toContain('complete-rollback-cleanup)')
+    expect(hostDeploySource).toContain("docker ps -a --format '{{.Names}}'")
+    expect(hostDeploySource).toContain('test ! -e "$candidate_env"')
+    expect(hostDeploySource).toContain('DSH_DEPLOY_IMAGE:-$(docker inspect dsh-platform')
+    expect(applySource).toContain('write_deploy_state rollbackable')
+    expect(applySource).toContain('write_deploy_state commit-pending')
+    expect(applySource).toContain('write_deploy_state committed')
+    expect(applySource).toContain("grep -Fq 'StatusCode=404'")
+    expect(applySource).toContain('failed to determine whether an unresolved deployment exists')
+    expect(String(targetCheck?.run)).toContain('aliyun alb ListServerGroupServers --region "$PLATFORM_ALIYUN_REGION"')
+    expect(hostDeploySource.indexOf('wait_for_ready 80 || rollback_failed=1'))
+      .toBeLessThan(hostDeploySource.indexOf('exit "$rollback_failed"'))
+    expect(applySource.indexOf('platform_public_readiness 30'))
+      .toBeLessThan(applySource.indexOf('write_deploy_state commit-pending'))
+    expect(applySource.indexOf('write_deploy_state commit-pending'))
+      .toBeLessThan(applySource.indexOf('rollback_cleanup_failed=0'))
+    expect(JSON.stringify(workflow)).not.toContain('PLATFORM_ECS_SSH_KEY')
+    expect(JSON.stringify(workflow)).not.toContain('PLATFORM_ECS_HOSTS')
+    expect(JSON.stringify(workflow)).not.toContain('ssh -i')
     if (!isRecord(workflow.jobs)) throw new TypeError('deploy workflow must define jobs')
     for (const [name, value] of Object.entries(workflow.jobs)) {
       if (!isRecord(value)) throw new TypeError(`${name} must be a job`)
@@ -445,16 +659,12 @@ describe('Platform release workflows', () => {
   })
 
   it.each(['unreachable', 'wrong-storage', 'one-backend'] as const)(
-    'restores both predecessors before cleanup when public readiness is %s',
+    'refuses cleanup when public readiness is %s',
     (result) => {
       const failed = runPublicReadinessHarness(result)
       expect(failed.status).toBe(1)
       expect(failed.stdout).toContain('public readiness through the production HTTPS origin')
       expect(failed.stdout).not.toContain('CLEANUP')
-      const rollbacks = failed.stdout.split('\n').filter(line => line.startsWith('ROLLBACK:'))
-      expect(rollbacks).toHaveLength(2)
-      expect(rollbacks[0]).toContain('root@10.0.0.1')
-      expect(rollbacks[1]).toContain('root@10.0.0.2')
     },
   )
 
@@ -463,7 +673,74 @@ describe('Platform release workflows', () => {
     expect(succeeded.status).toBe(0)
     expect(succeeded.stdout).toContain('public readiness through the production HTTPS origin')
     expect(succeeded.stdout).toContain('CLEANUP')
-    expect(succeeded.stdout).not.toContain('ROLLBACK:')
+  })
+
+  it('waits for Cloud Assistant terminal success and rejects a nonzero execution', () => {
+    expect(runCloudAssistantHarness('success').status).toBe(0)
+    const failed = runCloudAssistantHarness('failure')
+    expect(failed.status).toBe(1)
+    expect(failed.stderr).toContain('status=Failed exit=7 code=ExecutionError info=failed')
+  })
+
+  it('executes each durable recovery phase in authority order', () => {
+    const rollbackable = runRecoveryHarness('rollbackable')
+    expect(rollbackable.status).toBe(0)
+    expect(rollbackable.stdout).toContain('RUN:rollback:i-first123:2100')
+    expect(rollbackable.stdout).toContain('RUN:rollback:i-second456:2100')
+    expect(rollbackable.stdout).not.toContain('RUN:cutover')
+    expect(rollbackable.stdout).toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+
+    const pending = runRecoveryHarness('commit-pending')
+    expect(pending.status).toBe(0)
+    const cleanup = pending.stdout.indexOf('RUN:complete-rollback-cleanup:i-second456:2100')
+    const cutover = pending.stdout.indexOf('RUN:cutover:i-first123:300')
+    const committed = pending.stdout.indexOf('STATE:committed')
+    const finalize = pending.stdout.indexOf('RUN:complete-commit:i-first123:2100')
+    expect(cleanup).toBeGreaterThanOrEqual(0)
+    expect(cleanup).toBeLessThan(cutover)
+    expect(cutover).toBeLessThan(committed)
+    expect(committed).toBeLessThan(finalize)
+    expect(pending.stdout).toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+
+    const committedRun = runRecoveryHarness('committed')
+    expect(committedRun.status).toBe(0)
+    expect(committedRun.stdout).toContain('RUN:complete-commit:i-first123:2100')
+    expect(committedRun.stdout).toContain('RUN:complete-commit:i-second456:2100')
+    expect(committedRun.stdout).not.toContain('RUN:cutover')
+    expect(committedRun.stdout).not.toContain('STATE:committed')
+  })
+
+  it('keeps durable state after partial instance or state-write failure', () => {
+    const partial = runRecoveryHarness('rollbackable', 'second-rollback')
+    expect(partial.status).toBe(1)
+    expect(partial.stdout).toContain('RUN:rollback:i-first123:2100')
+    expect(partial.stdout).toContain('RUN:rollback:i-second456:2100')
+    expect(partial.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+
+    const stateWrite = runRecoveryHarness('commit-pending', 'state-write')
+    expect(stateWrite.status).toBe(1)
+    expect(stateWrite.stdout).toContain('RUN:cutover:i-first123:300')
+    expect(stateWrite.stdout).toContain('STATE:committed')
+    expect(stateWrite.stdout).not.toContain('RUN:complete-commit')
+    expect(stateWrite.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+
+    const targetMismatch = runRecoveryHarness('rollbackable', 'target-mismatch')
+    expect(targetMismatch.status).toBe(1)
+    expect(targetMismatch.stderr).toContain('recovery targets differ from the durable state')
+    expect(targetMismatch.stdout).not.toContain('RUN:')
+    expect(targetMismatch.stdout).not.toContain('DELETE:oss://bucket/deploy-artifacts/platform/active-state.json')
+  })
+
+  it('rejects committed recovery while a rollback container remains', () => {
+    expect(runCommittedCleanupHarness('absent').status).toBe(0)
+    expect(runCommittedCleanupHarness('rollback-remains').status).toBe(1)
+    expect(runCommittedCleanupHarness('ps-fails').status).toBe(1)
+  })
+
+  it('keeps rollback state when Docker container enumeration fails', () => {
+    expect(runRollbackProbeHarness('none').status).toBe(0)
+    expect(runRollbackProbeHarness('first').status).toBe(1)
+    expect(runRollbackProbeHarness('second').status).toBe(1)
   })
 
   it('builds the image on master path changes without publishing to GHCR', () => {

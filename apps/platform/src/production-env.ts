@@ -47,8 +47,13 @@ export const PLATFORM_PRODUCTION_REQUIRED_ENV = [
 /** Listen-process names plus the ECS apply names. */
 export const PLATFORM_DEPLOY_REQUIRED_ENV = [
   ...PLATFORM_PRODUCTION_REQUIRED_ENV,
-  'PLATFORM_ECS_SSH_KEY',
-  'PLATFORM_ECS_HOSTS',
+  'PLATFORM_ALIYUN_REGION',
+  'PLATFORM_ALIYUN_OIDC_PROVIDER_ARN',
+  'PLATFORM_ALIYUN_DEPLOY_ROLE_ARN',
+  'PLATFORM_ECS_INSTANCE_IDS',
+  'PLATFORM_ALB_SERVER_GROUP_ID',
+  'PLATFORM_DEPLOY_OSS_UPLOAD_ENDPOINT',
+  'PLATFORM_DEPLOY_OSS_OBJECT_PREFIX',
 ] as const
 
 /** A required production or deploy Environment name. */
@@ -154,15 +159,17 @@ export function missingPlatformDeployEnv(env: NodeJS.Dict<string> = process.env)
  * @param env - Process environment to inspect
  * @returns The ordered pair used for rolling replacement and public readiness
  */
-export function validatePlatformEcsHosts(
+export function validatePlatformEcsInstanceIds(
   env: NodeJS.Dict<string> = process.env,
 ): readonly [string, string] {
-  const hosts = requiredPlatformEnv('PLATFORM_ECS_HOSTS', env).split(',').map(host => host.trim())
-  const first = hosts[0]
-  const second = hosts[1]
-  if (hosts.length !== 2 || first === undefined || second === undefined || first === '' || second === ''
-    || first === second) {
-    throw new TypeError('PLATFORM_ECS_HOSTS must contain exactly two distinct hosts')
+  const instanceIds = requiredPlatformEnv('PLATFORM_ECS_INSTANCE_IDS', env)
+    .split(',')
+    .map(instanceId => instanceId.trim())
+  const first = instanceIds[0]
+  const second = instanceIds[1]
+  if (instanceIds.length !== 2 || first === undefined || second === undefined
+    || !/^i-[a-z0-9]+$/.test(first) || !/^i-[a-z0-9]+$/.test(second) || first === second) {
+    throw new TypeError('PLATFORM_ECS_INSTANCE_IDS must contain exactly two distinct ECS instance ids')
   }
   return Object.freeze([first, second])
 }
@@ -329,7 +336,7 @@ export function runPlatformProductionEnvCli(env: NodeJS.Dict<string> = process.e
   }
   try {
     loadOperatedPlatformConfig(env)
-    validatePlatformEcsHosts(env)
+    validatePlatformEcsInstanceIds(env)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(message)

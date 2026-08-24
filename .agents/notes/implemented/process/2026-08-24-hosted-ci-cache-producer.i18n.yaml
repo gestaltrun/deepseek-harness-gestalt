@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-24-hosted-ci-cache-producer.md
-2026-08-24-hosted-ci-cache-producer.md: 88f8b28dd904769acafbe6c52ad4f71acdb7e607
-2026-08-24-hosted-ci-cache-producer.zh.md: 2ed2f2c3cf4ac6e9fed0d5eae13fd5fd9b07fc53
+2026-08-24-hosted-ci-cache-producer.md: a625e7ee7531823680616400d8cc3c3cbf4387a9
+2026-08-24-hosted-ci-cache-producer.zh.md: 296b448e0cbbe2641239c75e1026ce52761e0dd5

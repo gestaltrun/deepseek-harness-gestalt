@@ -55,6 +55,7 @@ jobs:
         run: |
           $storeRoot = if ($IsWindows) { "$env:LOCALAPPDATA\pnpm\store" } else { "$env:HOME/.local/share/pnpm/store" }
           echo "PNPM_CONFIG_STORE_DIR=$storeRoot" >> $env:GITHUB_ENV
+          $env:PNPM_CONFIG_STORE_DIR = $storeRoot
           $storePath = pnpm store path --silent
           echo "path=$storePath" >> $env:GITHUB_OUTPUT
 

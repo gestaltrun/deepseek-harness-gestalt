@@ -147,6 +147,9 @@ describe('coverage partition coordinator', () => {
     expect(coverageExclusiveSuites).toContain(
       'packages/attachment/attachment-local/tests/normalization.spec.ts',
     )
+    expect(coverageExclusiveSuites).toContain(
+      'packages/session/session-persistence-sqlite/tests/differential.spec.ts',
+    )
     expect(exclusive.args.some(argument => argument.startsWith('--shard='))).toBe(false)
     expect(exclusive.env).toMatchObject({
       [COVERAGE_PARTITION_MODE_ENV]: undefined,

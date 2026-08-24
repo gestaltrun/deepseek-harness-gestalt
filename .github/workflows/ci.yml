@@ -191,6 +191,7 @@ jobs:
       DSH_COVERAGE_PARTITIONS: '4'
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
       DSH_GATE_CONCURRENCY: ${{ vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && '3' || '2' }}
+      DSH_TEST_REQUIRE_PWSH: '1'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -642,6 +643,7 @@ jobs:
       DSH_COVERAGE_PARTITION_INDEXES: ${{ matrix.indexes }}
       DSH_COVERAGE_PRESERVE_BLOBS: '1'
       DSH_COVERAGE_TEST_TIMEOUT_MS: '30000'
+      DSH_TEST_REQUIRE_PWSH: '1'
     steps:
       - uses: actions/checkout@v6
         with:

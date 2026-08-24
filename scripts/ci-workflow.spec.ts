@@ -415,6 +415,7 @@ describe('CI workflow', () => {
       DSH_COVERAGE_PARTITION_CONCURRENCY: '4',
       DSH_COVERAGE_PARTITION_INDEXES: '${{ matrix.indexes }}',
       DSH_COVERAGE_PRESERVE_BLOBS: '1',
+      DSH_TEST_REQUIRE_PWSH: '1',
     })
     expect(windowsNativeCoverage.env).toMatchObject({
       DSH_COVERAGE_MAX_WORKERS: '4',
@@ -492,6 +493,7 @@ describe('CI workflow', () => {
     expect(String(node24.env.DSH_GATE_CONCURRENCY)).toContain("|| '4'")
     expect(String(node24Coverage.env.DSH_COVERAGE_MAX_WORKERS)).toContain("|| '2'")
     expect(node24Coverage.env.DSH_COVERAGE_TEST_TIMEOUT_MS).toBe('30000')
+    expect(node24Coverage.env.DSH_TEST_REQUIRE_PWSH).toBe('1')
     expect(String(node24Coverage.env.DSH_GATE_CONCURRENCY)).toContain("|| '2'")
     expect(String(node24Consumers.env.DSH_GATE_CONCURRENCY)).toContain("|| '4'")
     expect(String(node24Consumers.env.DSH_SNAPSHOT_MAX_CONCURRENCY)).toContain("|| '8'")

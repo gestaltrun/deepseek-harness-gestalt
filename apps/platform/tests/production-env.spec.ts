@@ -19,6 +19,8 @@ import {
 
 const HEX = 'ab'.repeat(32)
 const DISTINCTIVE_SECRET = 'super-secret-token-value-do-not-print'
+const APSARADB_CA = readFileSync(new URL('../../../packages/platform/remote-access-http/tests/fixtures/localhost-cert.pem', import.meta.url), 'utf8')
+const LEAF_CERTIFICATE = readFileSync(new URL('./fixtures/leaf-cert.pem', import.meta.url), 'utf8')
 const script = fileURLToPath(new URL('../src/production-env-cli.ts', import.meta.url))
 const bootSource = readFileSync(new URL('../src/boot.ts', import.meta.url), 'utf8')
 const launchSource = readFileSync(new URL('../src/launch.ts', import.meta.url), 'utf8')
@@ -52,6 +54,7 @@ function completeDeployEnv(): NodeJS.Dict<string> {
     PLATFORM_POSTGRES_HOST: 'postgres.example.test',
     PLATFORM_POSTGRES_USER: 'gestalt',
     PLATFORM_POSTGRES_PASSWORD: DISTINCTIVE_SECRET,
+    PLATFORM_APSARADB_CA_BASE64: Buffer.from(APSARADB_CA).toString('base64'),
     PLATFORM_POSTGRES_DATABASE: 'gestalt',
     PLATFORM_IDENTITY_NAMESPACE: 'gestalt-production',
     PLATFORM_REDIS_HOST: 'redis.example.test',
@@ -396,8 +399,8 @@ describe('production and deploy names', () => {
         databaseIdentity: 'gestalt',
         identityNamespace: 'gestalt-production',
       },
-      postgres: { host: 'postgres.example.test', user: 'gestalt', database: 'gestalt', ssl: { rejectUnauthorized: true } },
-      redis: { host: 'redis.example.test', username: 'gestalt', tls: true },
+      postgres: { host: 'postgres.example.test', user: 'gestalt', database: 'gestalt', ssl: { ca: APSARADB_CA, rejectUnauthorized: true } },
+      redis: { host: 'redis.example.test', username: 'gestalt', tls: true, ca: APSARADB_CA },
       relayRedisKeyPrefix: 'gestalt:relay',
       remoteAttachments: {
         storage: 'oss',
@@ -425,6 +428,8 @@ describe('production and deploy names', () => {
       .toThrow('must not use a local host')
     expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_POSTGRES_SSL: 'disable' }))
       .toThrow('PLATFORM_POSTGRES_SSL')
+    expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_APSARADB_CA_BASE64: 'not-base64' }))
+      .toThrow('PLATFORM_APSARADB_CA_BASE64')
     expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_REDIS_TLS: '0' }))
       .toThrow('PLATFORM_REDIS_TLS')
     expect(() => loadOperatedPlatformConfig({ ...completeDeployEnv(), PLATFORM_POSTGRES_PORT: 'invalid' }))
@@ -462,6 +467,7 @@ describe('production and deploy names', () => {
       'PLATFORM_POSTGRES_HOST',
       'PLATFORM_POSTGRES_USER',
       'PLATFORM_POSTGRES_PASSWORD',
+      'PLATFORM_APSARADB_CA_BASE64',
       'PLATFORM_POSTGRES_DATABASE',
       'PLATFORM_IDENTITY_NAMESPACE',
       'PLATFORM_REDIS_USER',
@@ -513,6 +519,21 @@ describe('production and deploy names', () => {
       ...completeDeployEnv(),
       PLATFORM_TOKEN_SIGNING_KEY: 'zz',
     })).toThrow(/32 bytes of hex/)
+  })
+
+  it('rejects decoded ApsaraDB authorities that are not a clean CA-only PEM chain', () => {
+    const invalidAuthorities = [
+      'plain text instead of PEM',
+      `${APSARADB_CA}\ntrailing content`,
+      APSARADB_CA.replace('MIID', '!!!!'),
+      LEAF_CERTIFICATE,
+    ]
+    for (const authority of invalidAuthorities) {
+      expect(() => loadOperatedPlatformConfig({
+        ...completeDeployEnv(),
+        PLATFORM_APSARADB_CA_BASE64: Buffer.from(authority).toString('base64'),
+      })).toThrow('PLATFORM_APSARADB_CA_BASE64')
+    }
   })
 })
 
@@ -675,6 +696,7 @@ describe('Platform release workflows', () => {
       .toBeLessThan(applySource.indexOf(' cutover'))
     expect(prepareSource).toContain('openssl enc -aes-256-cbc -pbkdf2')
     expect(prepareSource).toContain("grep '^PLATFORM_'")
+    expect(prepareSource).toContain('-e PLATFORM_APSARADB_CA_BASE64')
     expect(hostDeploySource).toContain('--log-opt max-size=20m')
     expect(hostDeploySource).toContain('--log-opt max-file=3')
     expect(hostDeploySource).toContain('dist/oss-lifecycle-cli.mjs')

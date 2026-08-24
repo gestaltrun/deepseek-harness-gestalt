@@ -1,11 +1,35 @@
+import { readFileSync } from 'node:fs'
+import { connect as connectTls, createServer as createTlsServer } from 'node:tls'
 import type { RedisClientType } from 'redis'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const redis = vi.hoisted(() => ({ createClient: vi.fn() }))
+interface CapturedRedisOptions {
+  socket?: {
+    ca?: string
+    host?: string
+    port?: number
+    rejectUnauthorized?: boolean
+    servername?: string
+    tls?: boolean
+  }
+}
+
+const redis = vi.hoisted(() => ({
+  createClient: vi.fn<(options?: CapturedRedisOptions) => RedisClientType>(),
+}))
 
 vi.mock('redis', () => ({ createClient: redis.createClient }))
 
 import { connectRedis } from '../src/redis-bus.ts'
+
+const TLS_CERTIFICATE = readFileSync(
+  new URL('../../../packages/platform/remote-access-http/tests/fixtures/localhost-cert.pem', import.meta.url),
+  'utf8',
+)
+const TLS_PRIVATE_KEY = readFileSync(
+  new URL('../../../packages/platform/remote-access-http/tests/fixtures/localhost-key.pem', import.meta.url),
+  'utf8',
+)
 
 describe('operated Redis connection ownership', () => {
   beforeEach(() => {
@@ -24,12 +48,61 @@ describe('operated Redis connection ownership', () => {
     expectResourcesReleased(fixture.state)
   })
 
+  it('rejects a trusted Redis certificate for a different hostname', async () => {
+    const fixture = fakeRedisClient()
+    redis.createClient.mockReturnValue(fixture.client)
+    const connection = await connectRedis({
+      ...redisOptions(), host: 'redis.invalid.example', ca: TLS_CERTIFICATE,
+    })
+    const socketOptions = redis.createClient.mock.calls[0]?.[0]?.socket
+    await connection.close()
+    if (socketOptions === undefined
+      || socketOptions.host === undefined
+      || socketOptions.port === undefined
+      || socketOptions.servername === undefined) {
+      throw new TypeError('expected complete Redis TLS socket options')
+    }
+
+    const server = createTlsServer({ cert: TLS_CERTIFICATE, key: TLS_PRIVATE_KEY })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    try {
+      const address = server.address()
+      if (address === null || typeof address === 'string') throw new TypeError('expected TCP server address')
+      const failure = await new Promise<Error>((resolve, reject) => {
+        const socket = connectTls({
+          ca: socketOptions.ca,
+          host: '127.0.0.1',
+          port: address.port,
+          rejectUnauthorized: socketOptions.rejectUnauthorized,
+          servername: socketOptions.servername,
+        }, () => {
+          socket.destroy()
+          reject(new Error('TLS accepted a Redis certificate for a different hostname'))
+        })
+        socket.once('error', resolve)
+      })
+      expect(failure).toMatchObject({ code: 'ERR_TLS_CERT_ALTNAME_INVALID' })
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => { if (error) reject(error); else resolve() })
+      })
+    }
+  })
+
   it('uses the maintained graceful close and releases every process resource', async () => {
     const fixture = fakeRedisClient()
     redis.createClient.mockReturnValue(fixture.client)
 
     const connection = await connectRedis(redisOptions())
     expect(connection.client).toBe(fixture.client)
+    expect(redis.createClient.mock.calls[0]?.[0]?.socket)
+      .toEqual({
+        ca: 'fixture-ca', host: 'redis.fixture.example', port: 6379,
+        rejectUnauthorized: true, servername: 'redis.fixture.example', tls: true,
+      })
     expect(fixture.state.errorListeners).toHaveLength(1)
 
     await connection.close()
@@ -94,7 +167,10 @@ describe('operated Redis connection ownership', () => {
 })
 
 function redisOptions() {
-  return { host: 'redis.fixture.example', port: 6379, username: 'fixture', password: 'secret', tls: true }
+  return {
+    host: 'redis.fixture.example', port: 6379, username: 'fixture', password: 'secret',
+    tls: true as const, ca: 'fixture-ca',
+  }
 }
 
 interface FakeRedisState {

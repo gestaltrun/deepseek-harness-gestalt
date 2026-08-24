@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createHash, generateKeyPairSync } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { chmod, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
@@ -49,6 +50,10 @@ const durableProgramsAvailable = commandAvailable('initdb')
   && commandAvailable('postgres')
   && commandAvailable('redis-server')
   && commandAvailable('openssl')
+const APSARADB_CA = readFileSync(
+  new URL('../../../packages/platform/remote-access-http/tests/fixtures/localhost-cert.pem', import.meta.url),
+  'utf8',
+)
 const cleanups: Array<() => Promise<void>> = []
 const CUTOVER_OPTIONS = { maxBlobBytes: 1024, quotaCleanup: { release: async () => {} } }
 
@@ -1292,7 +1297,9 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       },
     })
     cleanups.push(async () => { await running.close() })
-    expect(postgresConfigs).toEqual([expect.objectContaining({ ssl: { rejectUnauthorized: true } })])
+    expect(postgresConfigs).toEqual([
+      expect.objectContaining({ ssl: { ca: APSARADB_CA, rejectUnauthorized: true } }),
+    ])
     expect(redisConfigs).toHaveLength(2)
     expect(redisConfigs).toEqual(expect.arrayContaining([
       expect.objectContaining({ tls: true, username: 'fixture' }),
@@ -1395,6 +1402,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
         ...process.env,
         ...operatedFixtureEnv(),
         NODE_EXTRA_CA_CERTS: tls.cert,
+        PLATFORM_APSARADB_CA_BASE64: Buffer.from(ca).toString('base64'),
         PLATFORM_POSTGRES_DATABASE: 'postgres',
         PLATFORM_POSTGRES_HOST: '127.0.0.1',
         PLATFORM_POSTGRES_PORT: String(postgres.port),
@@ -1436,6 +1444,7 @@ function operatedFixtureEnv(): NodeJS.Dict<string> {
     PLATFORM_POSTGRES_HOST: 'postgres.operated.fixture',
     PLATFORM_POSTGRES_USER: 'fixture',
     PLATFORM_POSTGRES_PASSWORD: 'postgres-secret-fixture',
+    PLATFORM_APSARADB_CA_BASE64: Buffer.from(APSARADB_CA).toString('base64'),
     PLATFORM_POSTGRES_DATABASE: 'product-entry-fixture',
     PLATFORM_IDENTITY_NAMESPACE: 'identity-fixture',
     PLATFORM_REDIS_HOST: 'redis.operated.fixture',

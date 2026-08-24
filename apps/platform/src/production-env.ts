@@ -1,5 +1,6 @@
 /** Production-only listen-process and deploy Environment names. */
 
+import { X509Certificate } from 'node:crypto'
 import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import { validateOperatedOssConfig, type OperatedOssConfig } from './oss-config.ts'
 
@@ -13,6 +14,7 @@ export const PLATFORM_PRODUCTION_REQUIRED_ENV = [
   'PLATFORM_POSTGRES_HOST',
   'PLATFORM_POSTGRES_USER',
   'PLATFORM_POSTGRES_PASSWORD',
+  'PLATFORM_APSARADB_CA_BASE64',
   'PLATFORM_POSTGRES_DATABASE',
   'PLATFORM_IDENTITY_NAMESPACE',
   'PLATFORM_REDIS_HOST',
@@ -80,13 +82,14 @@ export interface OperatedPlatformConfig {
     user: string
     password: string
     database: string
-    ssl: { rejectUnauthorized: true }
+    ssl: { ca: string; rejectUnauthorized: true }
   }
   redis: {
     host: string
     port: number
     username: string
     password: string
+    ca: string
     tls: true
   }
   relayRedisKeyPrefix: string
@@ -221,6 +224,10 @@ export function loadOperatedPlatformConfig(
   assertOperatedPlatformEnvironment(env.PLATFORM_ENVIRONMENT)
   requireSafeTlsSelection(env.PLATFORM_POSTGRES_SSL, 'PLATFORM_POSTGRES_SSL', 'require')
   requireSafeTlsSelection(env.PLATFORM_REDIS_TLS, 'PLATFORM_REDIS_TLS', '1')
+  const apsaraDbCa = decodeCertificateAuthority(
+    requiredPlatformEnv('PLATFORM_APSARADB_CA_BASE64', env),
+    'PLATFORM_APSARADB_CA_BASE64',
+  )
   return {
     environment: operatedIdentity({
       environment: 'production',
@@ -238,13 +245,14 @@ export function loadOperatedPlatformConfig(
       user: requiredPlatformEnv('PLATFORM_POSTGRES_USER', env),
       password: requiredPlatformEnv('PLATFORM_POSTGRES_PASSWORD', env),
       database: requiredPlatformEnv('PLATFORM_POSTGRES_DATABASE', env),
-      ssl: { rejectUnauthorized: true },
+      ssl: { ca: apsaraDbCa, rejectUnauthorized: true },
     },
     redis: {
       host: requiredPlatformEnv('PLATFORM_REDIS_HOST', env),
       port: optionalPort(env.PLATFORM_REDIS_PORT, 'PLATFORM_REDIS_PORT', 6379),
       username: requiredPlatformEnv('PLATFORM_REDIS_USER', env),
       password: requiredPlatformEnv('PLATFORM_REDIS_PASSWORD', env),
+      ca: apsaraDbCa,
       tls: true,
     },
     relayRedisKeyPrefix: requiredPlatformEnv('PLATFORM_RELAY_REDIS_KEY_PREFIX', env),
@@ -289,6 +297,29 @@ export function loadOperatedPlatformConfig(
 function attachmentStorage(value: string | undefined): 'postgres' | 'oss' {
   if (value === 'postgres' || value === 'oss') return value
   throw new TypeError('PLATFORM_REMOTE_ATTACHMENT_STORAGE must be postgres or oss')
+}
+
+function decodeCertificateAuthority(encoded: string, name: string): string {
+  if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+    throw new TypeError(`${name} must be base64-encoded PEM CA certificates`)
+  }
+  const authority = Buffer.from(encoded, 'base64').toString('utf8')
+  const certificates = authority.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g)
+  if (certificates === null) {
+    throw new TypeError(`${name} must be base64-encoded PEM CA certificates`)
+  }
+  const remainder = certificates.reduce((value, certificate) => value.replace(certificate, ''), authority)
+  if (remainder.trim() !== '') {
+    throw new TypeError(`${name} must be base64-encoded PEM CA certificates`)
+  }
+  try {
+    for (const certificate of certificates) {
+      if (!new X509Certificate(certificate).ca) throw new TypeError()
+    }
+  } catch {
+    throw new TypeError(`${name} must be base64-encoded PEM CA certificates`)
+  }
+  return authority
 }
 
 function operatedIdentity(identity: OperatedPlatformIdentity): OperatedPlatformIdentity {

@@ -194,6 +194,7 @@ function runRecoveryHarness(
     'aliyun() {',
     '  if [ "$1 $2" = "oss cat" ]; then',
     '    printf \'{"version":1,"phase":"%s","objectRoot":"deploy-artifacts/platform/123-1","instanceIds":["i-first123","i-second456"]}\\n\' "$RECOVERY_PHASE"',
+    '    printf \'%1000000s\' \'\'',
     '  elif [ "$1 $2" = "oss cp" ]; then',
     '    printf \'STATE:committed\\n\' >> "$LOG"',
     '    [ "$RECOVERY_FAILURE" != state-write ]',
@@ -213,9 +214,16 @@ function runRecoveryHarness(
     '      ;;',
     '    -R)',
     '      while IFS= read -r line; do printf \'"%s"\\n\' "$line"; done',
+    '      printf \'%1000000s\' \'\'',
     '      ;;',
     '    -s) printf \'["i-first123","i-second456"]\\n\' ;;',
-    '    -nc) printf \'{"version":1,"phase":"committed"}\\n\' ;;',
+    '    -nc)',
+    '      if [ "$2" = --args ]; then',
+    '        printf \'["i-first123","i-second456"]\\n\'',
+    '      else',
+    '        printf \'{"version":1,"phase":"committed"}\\n\'',
+    '      fi',
+    '      ;;',
     '    *) return 2 ;;',
     '  esac',
     '}',
@@ -588,13 +596,22 @@ describe('Platform release workflows', () => {
     expect(validate.permissions).toEqual({ contents: 'read', 'id-token': 'write' })
     expect(deploy.permissions).toEqual({ contents: 'read', packages: 'read', 'id-token': 'write' })
     expect(JSON.stringify(deploy)).toContain('"role-session-expiration":21600')
+    const validateSteps = steps(validate)
     expect(steps(deploy)[0]).toMatchObject({
       uses: 'actions/checkout@v6',
       with: { 'persist-credentials': false },
     })
-    const validateStep = steps(validate).find(step => typeof step.run === 'string'
+    const validateStep = validateSteps.find(step => typeof step.run === 'string'
       && step.run.includes('apps/platform/src/production-env-cli.ts'))
     if (validateStep === undefined) throw new TypeError('validate job must run production-env.ts')
+    const validateIndex = validateSteps.indexOf(validateStep)
+    const pnpmSetupIndex = validateSteps.findIndex(step => step.uses === 'pnpm/action-setup@v4')
+    const installIndex = validateSteps.findIndex(step => step.run
+      === 'pnpm install --frozen-lockfile --ignore-scripts')
+    expect(pnpmSetupIndex).toBeGreaterThanOrEqual(0)
+    expect(installIndex).toBeGreaterThanOrEqual(0)
+    expect(pnpmSetupIndex).toBeLessThan(validateIndex)
+    expect(installIndex).toBeLessThan(validateIndex)
     expect(String(validateStep.run)).toContain('--import tsx/esm')
     if (!isRecord(validateStep.env)) throw new TypeError('validate step must define env')
     for (const name of PLATFORM_DEPLOY_REQUIRED_ENV) {

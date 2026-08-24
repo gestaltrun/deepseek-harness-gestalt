@@ -186,16 +186,20 @@ describe('Mobile Companion browse projection', () => {
   })
 
   it.each([
-    ['zh', 'mobile', '请升级 Mobile 后再连接此 Desktop。'],
-    ['zh', 'desktop', '请升级 Desktop 后再从 Mobile 连接。'],
-    ['en', 'mobile', 'Update Mobile to connect to this Desktop.'],
-    ['en', 'desktop', 'Update Desktop to connect from this Mobile.'],
-  ] as const)('renders an explicit %s %s update requirement', (locale, updateEndpoint, expected) => {
+    ['COMPANION_UPDATE_REQUIRED', 'zh', 'mobile', '请升级 Mobile 后再连接此 Desktop。'],
+    ['COMPANION_UPDATE_REQUIRED', 'zh', 'desktop', '请升级 Desktop 后再从 Mobile 连接。'],
+    ['COMPANION_UPDATE_REQUIRED', 'en', 'mobile', 'Update Mobile to connect to this Desktop.'],
+    ['COMPANION_UPDATE_REQUIRED', 'en', 'desktop', 'Update Desktop to connect from this Mobile.'],
+    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'zh', 'mobile', '请升级 Mobile 后再连接此 Desktop。'],
+    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'zh', 'desktop', '请升级 Desktop 后再从 Mobile 连接。'],
+    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'en', 'mobile', 'Update Mobile to connect to this Desktop.'],
+    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'en', 'desktop', 'Update Desktop to connect from this Mobile.'],
+  ] as const)('renders an explicit %s %s %s requirement', (code, locale, updateEndpoint, expected) => {
     render(createElement(MobileBrowse, {
       desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces, conversations: {},
       ...browsePresentation, locale,
       connectionFailure: {
-        code: 'COMPANION_UPDATE_REQUIRED',
+        code,
         message: `${updateEndpoint} update required`,
         updateEndpoint,
       },
@@ -204,17 +208,24 @@ describe('Mobile Companion browse projection', () => {
     expect(screen.getByRole('alert').textContent).toBe(expected)
   })
 
-  it('renders Platform capacity as a retrying connection state', () => {
+  it.each([
+    ['zh', 5_000, 'Platform 当前容量已满，将在 5 秒后重试。'],
+    ['zh', 1_500, 'Platform 当前容量已满，将在 1.5 秒后重试。'],
+    ['en', 5_000, 'Platform capacity is full. Retrying in 5 seconds.'],
+    ['en', 1_000, 'Platform capacity is full. Retrying in 1 second.'],
+    ['zh', undefined, 'Platform 当前容量已满，正在重试。'],
+    ['en', undefined, 'Platform capacity is full. Retrying.'],
+  ] as const)('renders %s Platform capacity retry timing %s', (locale, retryAfterMs, expected) => {
     render(createElement(MobileBrowse, {
       desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces, conversations: {},
-      ...browsePresentation,
+      ...browsePresentation, locale,
       connectionFailure: {
         code: 'PLATFORM_CAPACITY', message: 'Remote Relay returned PLATFORM_CAPACITY',
-        retryAfterMs: 5_000,
+        ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
       },
     }))
 
-    expect(screen.getByRole('alert').textContent).toBe('Platform 当前容量已满，正在重试。')
+    expect(screen.getByRole('alert').textContent).toBe(expected)
   })
 
   it('targets real Workspace ids and disables creation before foreground synchronization', () => {

@@ -15,6 +15,8 @@ import {
   type RelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
 
+const MAX_RUNTIME_TIMER_DELAY_MS = 2_147_483_647
+
 /** Stable Relay or encrypted-Companion failure safe for endpoint UI projection. */
 export type RemoteRelayClientError = RemoteRelayError | RemoteProtocolError
 
@@ -44,7 +46,7 @@ export interface RemoteRelayEndpointOptions {
   heartbeatIntervalMs: number
   /** Maximum wait for Platform to authenticate and register an attach frame. */
   attachTimeoutMs: number
-  /** Validated delay before a fresh non-sticky connection acquisition. */
+  /** Local retry floor combined with a Platform capacity `retryAfterMs`. */
   reconnectDelayMs: number
   /** Desktop-only authoritative projection emitted after every successful attachment. */
   resynchronize?: (
@@ -62,7 +64,7 @@ export interface RemoteRelayEndpointOptions {
   onPeerAttachments?: (message: RelayReadyMessage | RelayPeerUpdateMessage) => void | Promise<void>
   /** Observer invoked whenever an acknowledged physical attachment ends. */
   onConnectionLost?: (attachmentId: RelayAttachmentId) => void
-  /** Content-free transport or protocol error observer. */
+  /** Content-free transport or protocol observer; capacity carries the effective reconnect delay. */
   onTransportError?: (error: RemoteRelayClientError) => void
   clock?: { now(): number }
 }
@@ -185,6 +187,7 @@ export class RemoteRelayEndpointController {
     let stopFailure: unknown
     const signal = owner.controller.signal
     while (!isAborted(signal)) {
+      let reconnectDelayMs = this.options.reconnectDelayMs
       try {
         await this.runConnection(owner)
       } catch (error) {
@@ -192,9 +195,11 @@ export class RemoteRelayEndpointController {
           if (error instanceof ConnectionTeardownError) stopFailure = error.cause
           break
         }
-        this.observeError(error)
+        const retry = this.reconnectFailure(error)
+        reconnectDelayMs = retry.delayMs
+        this.observeError(retry.error)
       }
-      if (!isAborted(signal)) await delay(this.options.reconnectDelayMs, signal)
+      if (!isAborted(signal)) await delay(reconnectDelayMs, signal)
     }
     owner.ready.reject(new RemoteRelayError('REMOTE_OFFLINE', 'Relay lifecycle stopped before attachment'))
     if (stopFailure !== undefined) throw errorFromUnknown(stopFailure)
@@ -359,6 +364,19 @@ export class RemoteRelayEndpointController {
     }
   }
 
+  private reconnectFailure(error: unknown): { error: unknown; delayMs: number } {
+    if (!(error instanceof RemoteRelayError) || error.code !== 'PLATFORM_CAPACITY') {
+      return { error, delayMs: this.options.reconnectDelayMs }
+    }
+    const delayMs = Math.max(this.options.reconnectDelayMs, error.retryAfterMs ?? 0)
+    return {
+      error: error.retryAfterMs === delayMs
+        ? error
+        : new RemoteRelayError(error.code, error.message, delayMs),
+      delayMs,
+    }
+  }
+
   private observeConnection(
     observer: ((attachmentId: RelayAttachmentId) => void) | undefined,
     attachmentId: RelayAttachmentId,
@@ -379,7 +397,16 @@ interface Deferred<T> {
 
 function isAborted(signal: AbortSignal): boolean { return signal.aborted }
 
-function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+async function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  let remaining = milliseconds
+  while (remaining > MAX_RUNTIME_TIMER_DELAY_MS && !signal.aborted) {
+    await timerDelay(MAX_RUNTIME_TIMER_DELAY_MS, signal)
+    remaining -= MAX_RUNTIME_TIMER_DELAY_MS
+  }
+  if (!signal.aborted) await timerDelay(remaining, signal)
+}
+
+function timerDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(done, milliseconds)
     signal.addEventListener('abort', done, { once: true })

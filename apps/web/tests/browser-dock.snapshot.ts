@@ -112,12 +112,12 @@ describe('assembled Browser Dock preview', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Expand Example Domain' }, { timeout: 10_000 }))
     await waitFor(() => { expect(pageShape(document)).not.toBe('page=hidden') }, { timeout: 10_000 })
     const closeButtons = await screen.findAllByRole('button', { name: 'Close' }, { timeout: 10_000 })
-    expect(closeButtons).toHaveLength(2)
-    fireEvent.click(closeButtons[1]!)
+    expect(closeButtons).toHaveLength(1)
+    fireEvent.click(closeButtons[0]!)
     const shape = await waitFor(() => {
       const current = [
         pageShape(document),
-        `browser-tab=${screen.queryAllByRole('button', { name: 'Close' }).length === 1 ? 'hidden' : 'shown'}`,
+        `browser-tab=${screen.queryAllByRole('button', { name: 'Close' }).length === 0 ? 'hidden' : 'shown'}`,
       ].join('\n')
       expect(current).toContain('page=hidden')
       expect(current).toContain('browser-tab=hidden')

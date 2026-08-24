@@ -162,7 +162,7 @@ async function scopedBench(register?: (inputTriggers: InputTriggerService) => vo
     resolveSubmitMode: () => 'queue',
     toggleCommandMenu: (selection) => {
       const snapshot = shell.snapshot
-      controller.toggleSource('command', {
+      controller.toggleTrigger({
         trigger: '/',
         query: '',
         quoted: false,

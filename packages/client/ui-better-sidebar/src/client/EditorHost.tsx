@@ -3,7 +3,7 @@
  * previewer through the sidebar registry (`matchFileViewer`), fetches bytes
  * per the matched viewer's fetch strategy, and renders its component — or
  * the shared download pane when nothing can render the file. A tab without
- * a path (the seeded "Files" home) renders an empty-state hint instead of
+ * a path (the "Files" home opened from the type picker) renders an empty-state hint instead of
  * the viewer loading flow; that path-less window IS the file explorer.
  *
  * The chrome depends on the `editorExplorer` mode (read reactively so
@@ -66,7 +66,7 @@ function metaOf(tab: SidebarTab): Record<string, unknown> {
 }
 
 /** Read the persisted tree-panel flag of one editor tab: an explicit
- *  boolean meta wins; otherwise path-less tabs (the seeded home) default
+ *  boolean meta wins; otherwise path-less tabs (the Files home) default
  *  open and file tabs default closed. */
 function treeOpenOf(tab: SidebarTab): boolean {
   const treeOpen = metaOf(tab).treeOpen
@@ -257,7 +257,7 @@ export function EditorHost(props: {
     // A (re)load or a path-less tab clears any hoisted toolbar state — the
     // fresh viewer re-registers its own.
     setToolbar(null)
-    // The seeded home tab (no path) never loads a viewer — the empty-state
+    // A Files home tab (no path) never loads a viewer — the empty-state
     // hint renders until the user picks a file.
     if (showEmpty) return
     let cancelled = false

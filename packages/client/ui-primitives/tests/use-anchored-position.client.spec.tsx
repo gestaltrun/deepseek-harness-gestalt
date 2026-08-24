@@ -12,7 +12,7 @@
  */
 import { useRef } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import { useAnchoredPosition } from '../src/useAnchoredPosition.ts'
 
 afterEach(() => {
@@ -52,10 +52,22 @@ function stubResizeObserver(): Recorded[] {
  * @param props - whether the panel is open.
  * @returns the anchor and, while open, the panel carrying the position.
  */
-function Host({ open }: { open: boolean }) {
+function Host({ open, align, width }: {
+  open: boolean
+  align?: 'start' | 'end'
+  width?: number
+}) {
   const anchorRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const position = useAnchoredPosition({ open, anchorRef, panelRef, gap: 4, margin: 12 })
+  const position = useAnchoredPosition({
+    open,
+    anchorRef,
+    panelRef,
+    gap: 4,
+    margin: 12,
+    ...(align === undefined ? {} : { align }),
+    ...(width === undefined ? {} : { width }),
+  })
   return (
     <>
       <button ref={anchorRef} type="button">anchor</button>
@@ -88,6 +100,18 @@ describe('useAnchoredPosition', () => {
     // the height without a scroll or resize event; the observer is the only
     // thing that notices, so driving its callback must not throw.
     expect(() => { before?.([], {} as ResizeObserver) }).not.toThrow()
+  })
+
+  it('aligns an unmounted portal width to the anchor end', () => {
+    const ui = render(<Host open align="end" width={336} />)
+    vi.spyOn(ui.getByRole('button'), 'getBoundingClientRect').mockReturnValue({
+      x: 960, y: 20, width: 24, height: 24, top: 20, right: 984, bottom: 44, left: 960,
+      toJSON: () => ({}),
+    })
+
+    act(() => { window.dispatchEvent(new Event('resize')) })
+
+    expect(ui.getByTestId('panel').style.left).toBe('648px')
   })
 
   it('still places the panel where ResizeObserver does not exist', () => {

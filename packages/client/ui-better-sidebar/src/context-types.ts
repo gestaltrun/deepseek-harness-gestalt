@@ -146,6 +146,8 @@ export interface SidebarSessionSummary {
   running?: boolean
   /** Whether the durable Session has no accepted user turn yet. */
   blank?: boolean
+  /** Renderer-only Side Chat identity that has not published a Host Session yet. */
+  provisional?: true
 }
 
 /** One healthy subagent catalog child row (structural mirror of the runtime). */

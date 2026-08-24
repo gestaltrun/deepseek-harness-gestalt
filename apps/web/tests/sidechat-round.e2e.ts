@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import type { Browser, Page } from 'playwright'
@@ -13,10 +14,33 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 const FIXTURE = fileURLToPath(new URL('./snapshots/live-interactions/session.jsonl', import.meta.url))
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/sidechat-round', import.meta.url))
 const EXPECTED = join(SNAPSHOT_DIR, 'ui.expected.md')
+const PICKER_EXPECTED = join(SNAPSHOT_DIR, 'picker.expected.md')
+const DESCENDANT_EXPECTED = join(SNAPSHOT_DIR, 'descendant.expected.md')
 const MODE = webSnapshotMode()
 const PROMPT = 'Reply with a one-sentence description of event sourcing, then stop.'
+const DESCENDANT_PROMPT = 'Describe event sourcing in one sentence for a nested Side Chat, then stop.'
 const SIDE_BOUNDARY_PREFIX = 'Side conversation boundary'
 const RESPONSE = 'Event sourcing is a pattern where all changes to an application\'s state are stored as an immutable, append-only sequence of events, rather than persisting only the current state, enabling full auditability, temporal queries, and event-driven architectures.'
+const SIDE_SKILL = 'side-chat-catalog'
+
+function latestPermissionPreset(events: readonly SessionEvent[]): string | undefined {
+  return events.findLast(event => event.type === 'permission/preset')?.data.preset
+}
+
+async function seedSideChatSkill(workspaceCwd: string): Promise<void> {
+  const directory = join(workspaceCwd, 'workspace', '.agents', 'skills', SIDE_SKILL)
+  await mkdir(directory, { recursive: true })
+  await writeFile(join(directory, 'SKILL.md'), [
+    '---',
+    `name: ${SIDE_SKILL}`,
+    'description: Verify the Side Chat composer catalog route',
+    'disable-model-invocation: true',
+    '---',
+    '',
+    'Reply through the ordinary Side Chat prompt route.',
+    '',
+  ].join('\n'))
+}
 
 describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workbench', () => {
   let scaffold: WebScaffold
@@ -27,9 +51,10 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
   beforeAll(async () => {
     scaffold = await launchWebScaffold({
       replayFixture: FIXTURE,
-      replayChildFixtures: [FIXTURE],
+      replayChildFixtures: [FIXTURE, FIXTURE],
       paceMs: 25,
     })
+    await seedSideChatSkill(scaffold.workspaceCwd)
     browser = await chromium.launch()
     page = await newEnglishPage(browser, 800)
     tripwire = watchConsole(page)
@@ -53,16 +78,32 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     const liveIdsBeforeSideChat = scaffold.ctx.agents.list().map(agent => agent.id)
 
     await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click()
+    const panel = page.locator('[data-dsh-panel]:visible')
+    await panel.getByRole('button', { name: 'Side Chat', exact: true }).waitFor({ timeout: 15_000 })
+    await compareOrRefreshGolden(
+      PICKER_EXPECTED,
+      await captureStableAria(page, '[data-dsh-panel]', scaffold.workspaceCwd),
+      MODE,
+    )
     await page.getByRole('button', { name: 'New tab', exact: true }).click()
     const menuLabels = await page.getByRole('menuitem').allTextContents()
     expect(menuLabels).toContain('Side Chat')
     const menuItem = page.getByRole('menuitem', { name: 'Side Chat', exact: true })
     expect(await menuItem.locator('svg').count()).toBe(1)
-    await menuItem.click()
-    const panel = page.locator('[data-dsh-panel]:visible')
+    await page.keyboard.press('Escape')
+    await panel.getByRole('button', { name: 'Side Chat', exact: true }).click()
     const sideComposer = panel.locator('textarea:enabled')
     await sideComposer.waitFor({ timeout: 15_000 })
     expect(scaffold.ctx.agents.list().map(agent => agent.id)).toEqual(liveIdsBeforeSideChat)
+
+    const launcher = panel.getByRole('button', { name: 'Commands and skills', exact: true })
+    await launcher.click()
+    const triggerMenu = page.getByRole('listbox', { name: 'Trigger suggestions' })
+    await triggerMenu.waitFor({ timeout: 15_000 })
+    await triggerMenu.getByRole('option', { name: new RegExp(SIDE_SKILL) }).waitFor({ timeout: 15_000 })
+    await sideComposer.press('Escape')
+    expect(scaffold.ctx.agents.list().map(agent => agent.id)).toEqual(liveIdsBeforeSideChat)
+
     const selectSideModel = async () => {
       const trigger = panel.getByRole('button', { name: /^Select model, current DeepSeek-V4-Flash$/u })
       await trigger.waitFor({ timeout: 15_000 })
@@ -93,6 +134,17 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     expect(selected.ok()).toBe(true)
     const child = scaffold.ctx.agents.get(childId)
     expect(child).toBeDefined()
+    const parent = scaffold.ctx.agents.get(parentId)
+    expect(parent).toBeDefined()
+
+    await panel.getByRole('button', { name: 'Access mode, current: Workspace Write' }).click()
+    await page.getByRole('menuitem', { name: 'Read Only', exact: true }).click()
+    await panel.getByRole('button', { name: 'Access mode, current: Read Only' }).waitFor({ timeout: 10_000 })
+    await expect.poll(() => [
+      latestPermissionPreset(parent?.session.events ?? []),
+      latestPermissionPreset(child?.session.events ?? []),
+    ], { timeout: 10_000 }).toEqual(['read-only', 'read-only'])
+
     const injection = child?.session.events.find((event: SessionEvent) => {
       if (event.type !== 'user/message') return false
       const first = event.data.content[0]
@@ -114,11 +166,45 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
       await captureStableAria(page, '[data-dsh-panel]', scaffold.workspaceCwd),
       MODE,
     )
+
+    const childAgent = scaffold.ctx.agents.get(childId)
+    if (childAgent === undefined) throw new Error('Side Chat child Agent was not live')
+    const descendantSettled = scaffold.whenTurnSettled()
+    const descendant = await scaffold.ctx.subagents.startContinuable({
+      provider: 'spawn',
+      label: 'Nested Side Chat',
+      signal: new AbortController().signal,
+      request: {
+        prompt: [{ type: 'text', text: DESCENDANT_PROMPT }],
+        parent: childAgent,
+      },
+    })
+    expect(await descendantSettled).toBe(descendant.childId)
+    const descendants = panel.getByRole('button', { name: '1 subagent', exact: true })
+    await descendants.waitFor({ timeout: 15_000 })
+    await descendants.hover()
+    const tree = page.getByRole('tree', { name: 'Subagent sessions' })
+    const nested = tree.getByRole('treeitem', { name: /Nested Side Chat/u })
+    await nested.waitFor({ timeout: 15_000 })
+    await nested.click()
+    await panel.getByText(DESCENDANT_PROMPT, { exact: true }).waitFor({ timeout: 30_000 })
+    await panel.getByText(RESPONSE, { exact: true }).waitFor({ timeout: 30_000 })
+    await compareOrRefreshGolden(
+      DESCENDANT_EXPECTED,
+      await captureStableAria(page, '[data-dsh-panel]', scaffold.workspaceCwd),
+      MODE,
+    )
+    await panel.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect.poll(() => scaffold.ctx.agents.get(childId)).toBeUndefined()
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   }, 90_000)
 
   it('keeps the fixture inventory closed', async () => {
-    await assertFixtureInventory(SNAPSHOT_DIR, ['ui.expected.md'])
+    await assertFixtureInventory(SNAPSHOT_DIR, [
+      'descendant.expected.md',
+      'picker.expected.md',
+      'ui.expected.md',
+    ])
   })
 })

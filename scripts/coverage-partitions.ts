@@ -28,6 +28,7 @@ export const COVERAGE_TEST_TIMEOUT_ENV = 'DSH_COVERAGE_TEST_TIMEOUT_MS'
 /** Resource-bound suites that must not overlap other instrumented processes. */
 export const coverageExclusiveSuites = [
   'packages/attachment/attachment-local/tests/normalization.spec.ts',
+  'packages/session/session-persistence-sqlite/tests/differential.spec.ts',
   'packages/shell/pwsh-local/tests/executor.spec.ts',
   'packages/shell/pwsh-sandbox/tests/sandbox.spec.ts',
   'packages/shell/tool-pwsh-persistent/tests/loader-composition.spec.ts',

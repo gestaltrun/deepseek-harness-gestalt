@@ -22,9 +22,7 @@ $runtimeUri = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
 try {
   Invoke-WebRequest -Uri $runtimeUri -OutFile $runtimeInstaller
   $runtimeSignature = Get-AuthenticodeSignature -FilePath $runtimeInstaller
-  if ($runtimeSignature.Status -ne 'Valid'
-    -or $null -eq $runtimeSignature.SignerCertificate
-    -or $runtimeSignature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+  if ($runtimeSignature.Status -ne 'Valid' -or $null -eq $runtimeSignature.SignerCertificate -or $runtimeSignature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
     throw "Microsoft Visual C++ Redistributable signature validation failed: $($runtimeSignature.Status) $($runtimeSignature.StatusMessage)"
   }
 

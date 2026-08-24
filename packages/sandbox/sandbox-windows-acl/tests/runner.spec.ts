@@ -25,6 +25,20 @@ function pwshAvailable(): boolean {
   return spawnSync(resolvePwshPath(), ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '$true'], { encoding: 'utf8' }).status === 0
 }
 
+function ambientPwshLanguageMode(): string {
+  const result = spawnSync(resolvePwshPath(), [
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    '$ExecutionContext.SessionState.LanguageMode',
+  ], { encoding: 'utf8' })
+  if (result.status !== 0 || result.stdout.trim() === '') {
+    throw new Error(`ambient PowerShell language-mode probe failed: ${result.stderr}`)
+  }
+  return result.stdout.trim()
+}
+
 function runRunner(args: string[], timeoutMs = 30_000) {
   return spawnSync(process.execPath, ['--import', 'tsx/esm', runnerEntry, ...args], {
     timeout: timeoutMs,
@@ -75,6 +89,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
   })
 
   it('workspace-write: the confined child writes granted directories only', () => {
+    const expectedLanguageMode = ambientPwshLanguageMode()
     const probe = [
       "$ErrorActionPreference='SilentlyContinue';",
       // The private-temp capability lets PowerShell complete its startup
@@ -97,7 +112,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
       '--', 'pwsh', '/NoLogo', '/NonInteractive', '/NoProfile', '/Command', probe,
     ])
     expect(result.status, `stderr: ${result.stderr}`).toBe(0)
-    expect(result.stdout).toContain('LANGMODE: FullLanguage')
+    expect(result.stdout).toContain(`LANGMODE: ${expectedLanguageMode}`)
     expect(result.stdout).toContain('TARGET-WRITE: OK')
     expect(result.stdout).toContain('TEMP-WRITE: OK')
     expect(result.stdout).toContain('ESCAPE-WRITE: DENIED')

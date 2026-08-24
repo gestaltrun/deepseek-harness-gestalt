@@ -12,6 +12,8 @@ Status: implemented
 
 分区覆盖率从每个普通 shard 中排除 6 个会启动真实 PowerShell 进程的测试文件，以及由 Sharp 支持的 attachment normalization 套件。全部普通 shard 结算后，协调器用一个专属的插桩 Vitest 命令执行这些文件；该命令只使用 1 个 worker，并且不与任何分区进程重叠。专属命令写出自己的 blob，像局部 shard 一样关闭阈值，并通过 `coverage.reportOnFailure` 保留普通测试失败输出与覆盖率。
 
+高频 normalization fixture 使用 256×256 像素，正好是分类器 128 像素有界采样边长的两倍。因此它仍能证明最近邻缩小而非平均采样，保留照片与低色彩图形的断言，同时避免 512 像素输入带来的四倍原生像素工作量；后者并不覆盖更多分支。
+
 拥有第一分区的协调器同时拥有专属命令。因此，单 job 的 Linux 运行会在合并阈值检查前执行它一次。拆分后的原生 Windows 覆盖率把它交给包含第一分区的 shard job；该 job 会把专属 blob 与自己的分区 blob 一同上传，既有合并 job 再下载完整集合。最终合并仍是仓库逐文件 100% 阈值的唯一所有者。
 
 专属清单包含 `pwsh-local`、`pwsh-sandbox`、`tool-pwsh`、`tool-pwsh-persistent` 的真实进程文件、`terminal-bash` 中的 PowerShell 部分，以及 `attachment-local` normalization。与这些套件同文件的纯测试会随之迁移；没有测试变成无插桩或可选。没有 PowerShell 的宿主继续使用既有显式源码排除和跳过行为，而 CI 继续设置 `DSH_TEST_REQUIRE_PWSH=1`，可执行文件不可用时必须失败。

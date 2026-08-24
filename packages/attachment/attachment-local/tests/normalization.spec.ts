@@ -279,7 +279,7 @@ describe('normalizeImage', () => {
 
 describe('hasLowColourCount', () => {
   it('distinguishes photographic rasters from low-colour graphics without averaged sampling', async () => {
-    const side = 512
+    const side = 256
     const highFrequency = sharp(noisePixels(side, side), { raw: { width: side, height: side, channels: 3 } })
     const gradientPixels = new Uint8Array(side * side * 3)
     for (let y = 0; y < side; y += 1) {
@@ -303,8 +303,8 @@ describe('hasLowColourCount', () => {
     const transparentData = await sharp({
       create: { width: side, height: side, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
     }).composite([{ input: Buffer.from(`
-      <svg width="512" height="512" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="256" cy="256" r="180" fill="#0f8" fill-opacity="0.7"/>
+      <svg width="256" height="256" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="128" cy="128" r="90" fill="#0f8" fill-opacity="0.7"/>
       </svg>
     `) }]).png().toBuffer()
     const transparent = sharp(transparentData)

@@ -40,6 +40,7 @@ export const coverageProcessBoundSuites = [
   'packages/shell/tool-pwsh/tests/integration.spec.ts',
   'packages/shell/tool-pwsh/tests/loader.spec.ts',
   'packages/terminal/terminal-bash/tests/local.spec.ts',
+  'packages/util/atomic-write/tests/atomic-write.spec.ts',
 ] as const
 
 /** Suites excluded from ordinary concurrent coverage partitions. */

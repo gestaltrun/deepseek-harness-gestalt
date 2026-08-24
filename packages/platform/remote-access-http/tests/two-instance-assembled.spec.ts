@@ -234,6 +234,7 @@ describe('two Loader-booted Platform Instances', () => {
     const desktopPeerGenerations = new Map<RelayPairingSelector, number>()
     const desktopProjections = new Map<RelayPairingSelector, Parameters<SnowMobileAttachmentOwner['begin']>[0]>()
     const desktopChannels = new Map<RelayPairingSelector, SnowCompanionProtocolChannel>()
+    const desktopNegotiations = new Map<RelayPairingSelector, Awaited<ReturnType<SnowDesktopAttachmentOwner['accept']>>>()
     const connectEndpoint = async (signal: AbortSignal) => await NodeRelayEndpointSocket.connect(
       endpoint.url,
       signal,
@@ -261,6 +262,8 @@ describe('two Loader-booted Platform Instances', () => {
         const peer = update.peers.find(candidate => candidate.pairingSelector === pairingSelector)
         const previousGeneration = desktopPeerGenerations.get(pairingSelector)
         if (peer !== undefined && previousGeneration !== undefined && previousGeneration !== peer.generation) {
+          desktopNegotiations.get(pairingSelector)?.negotiation.cancel()
+          desktopNegotiations.delete(pairingSelector)
           desktopChannels.get(pairingSelector)?.dispose()
           desktopChannels.delete(pairingSelector)
         }
@@ -270,6 +273,23 @@ describe('two Loader-booted Platform Instances', () => {
       onCiphertext: async (ciphertext, sourceAttachmentId, localAttachmentId, pairingSelector) => {
         let channel = desktopChannels.get(pairingSelector)
         if (channel === undefined) {
+          const pendingNegotiation = desktopNegotiations.get(pairingSelector)
+          if (pendingNegotiation !== undefined) {
+            if (pendingNegotiation.targetAttachmentId !== sourceAttachmentId) {
+              throw new Error('Desktop Companion offer did not match its authenticated Mobile attachment')
+            }
+            channel = pendingNegotiation.negotiation.finish(ciphertext)
+            desktopNegotiations.delete(pairingSelector)
+            desktopChannels.set(pairingSelector, channel)
+            await desktop.sendCiphertext(pairingSelector, sourceAttachmentId, channel.seal({
+              type: 'projection',
+              projection: { type: 'foreground-sync', desktopName: 'Assembled Desktop', generation: pendingNegotiation.generation, desktopRevision: 1 },
+            }))
+            const count = (synchronizationCounts.get(pairingSelector) ?? 0) + 1
+            synchronizationCounts.set(pairingSelector, count)
+            if (count > 1) failover.resolve('resync')
+            return
+          }
           const projection = desktopProjections.get(pairingSelector)
           if (projection === undefined) throw new Error('Desktop Snow IK has no Relay peer projection')
           const accepted = await desktopOwner.accept(
@@ -279,16 +299,8 @@ describe('two Loader-booted Platform Instances', () => {
           if (peer?.generation !== accepted.generation || peer.pairingSelector !== pairingSelector) {
             throw new Error('Desktop Snow IK did not match the live pairing projection')
           }
-          channel = accepted.channel
-          desktopChannels.set(pairingSelector, channel)
+          desktopNegotiations.set(pairingSelector, accepted)
           await desktop.sendCiphertext(pairingSelector, accepted.targetAttachmentId, accepted.payload)
-          await desktop.sendCiphertext(pairingSelector, accepted.targetAttachmentId, channel.seal({
-            type: 'projection',
-            projection: { type: 'foreground-sync', desktopName: 'Assembled Desktop', generation: accepted.generation, desktopRevision: 1 },
-          }))
-          const count = (synchronizationCounts.get(pairingSelector) ?? 0) + 1
-          synchronizationCounts.set(pairingSelector, count)
-          if (count > 1) failover.resolve('resync')
           return
         }
         const message = channel.open(ciphertext)
@@ -304,6 +316,8 @@ describe('two Loader-booted Platform Instances', () => {
       onConnectionLost: (attachmentId) => {
         for (const [pairingSelector, projection] of desktopProjections) {
           if (projection.attachmentId !== attachmentId) continue
+          desktopNegotiations.get(pairingSelector)?.negotiation.cancel()
+          desktopNegotiations.delete(pairingSelector)
           desktopChannels.get(pairingSelector)?.dispose()
           desktopChannels.delete(pairingSelector)
           desktopProjections.delete(pairingSelector)
@@ -526,9 +540,16 @@ function createSnowMobileAttachment(input: {
       targetAttachmentId = begun.targetAttachmentId
       await controller.sendCiphertext(begun.targetAttachmentId, begun.payload)
     },
-    onCiphertext: (ciphertext, sourceAttachmentId) => {
+    onCiphertext: async (ciphertext, sourceAttachmentId) => {
       if (channel === undefined) {
-        channel = owner.finish(ciphertext, sourceAttachmentId)
+        const negotiation = owner.finish(ciphertext, sourceAttachmentId)
+        try {
+          await controller.sendCiphertext(negotiation.targetAttachmentId, negotiation.payload)
+          channel = negotiation.finish()
+        } catch (error) {
+          negotiation.cancel()
+          throw error
+        }
         return
       }
       const message = channel.open(ciphertext)

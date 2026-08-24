@@ -125,12 +125,13 @@ describe('Desktop Companion live projection', () => {
     expect(calls).toEqual(['session.list', 'workspace.list'])
 
     calls.splice(0)
+    archivedSessionIds = ['session-hidden']
     const detailed = await projectDesktopCompanionLiveSession(
       opened, true, liveDependencies(host), new AbortController().signal,
     )
     expect(detailed).toMatchObject({
       sessionId: opened,
-      position: 1,
+      position: 0,
       conversation: {
         sessionId: opened,
         partial: { turn: 1, step: 1, blocks: [{ kind: 'text', text: 'live output' }] },

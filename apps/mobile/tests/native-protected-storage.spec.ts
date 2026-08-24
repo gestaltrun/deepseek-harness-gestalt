@@ -77,6 +77,80 @@ describe('native Mobile protected storage', () => {
     expect(afterRelease.attachmentKeyMaterial(work)).toEqual(workAttachment)
   })
 
+  it('migrates a native version-1 singleton grant and restores its derived selection after restart', async () => {
+    const storage = new MemoryProtectedStorage()
+    const store = new NativeMobilePairingStateStore(storage, 'gestalt')
+    const accountId = parsePlatformAccountId('account-native-v1')
+    const pairingId = parsePersonalPairingId('pairing-native-v1')
+    const attachmentKey = new Uint8Array(32).fill(41)
+    const reconnectState = new Uint8Array(96).fill(42)
+    storage.values.set('pairings:gestalt:account-native-v1', JSON.stringify({
+      version: 1,
+      active: [{
+        pairingId,
+        attachmentKey: bytesBase64(attachmentKey),
+        reconnectState: bytesBase64(reconnectState),
+        grant: {
+          routeId: 'route-native-v1', endpoint: 'mobile',
+          credential: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE', revision: 3,
+        },
+      }],
+    }))
+
+    const migrated = new PairingCompanionKeyVault(store)
+    await migrated.selectAccount(accountId)
+    expect(migrated.attachmentKeyMaterial(pairingId)).toEqual(attachmentKey)
+    expect(migrated.reconnectState(pairingId)).toEqual(reconnectState)
+    expect(migrated.relayAuthority()).toEqual({
+      routeId: parseRelayRouteId('route-native-v1'), endpoint: 'mobile',
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 3,
+      pairingSelector: parseRelayPairingSelector(pairingId),
+    })
+    expect(migrated.selectedPairingId()).toBe(pairingId)
+    expect(JSON.parse(storage.values.get('pairings:gestalt:account-native-v1') ?? '{}')).toMatchObject({
+      version: 2,
+      selectedPairingId: pairingId,
+      active: [{ pairingId, grant: { pairingSelector: pairingId } }],
+    })
+
+    const restarted = new PairingCompanionKeyVault(store)
+    await restarted.selectAccount(accountId)
+    expect(restarted.selectedPairingId()).toBe(pairingId)
+    expect(restarted.relayAuthority()?.pairingSelector).toBe(parseRelayPairingSelector(pairingId))
+  })
+
+  it('rejects ambiguous and selector-conflicting native version-1 documents without rewriting them', async () => {
+    const storage = new MemoryProtectedStorage()
+    const store = new NativeMobilePairingStateStore(storage, 'gestalt')
+    const complete = (pairingId: string, pairingSelector?: string): Record<string, unknown> => ({
+      pairingId,
+      attachmentKey: bytesBase64(new Uint8Array(32).fill(51)),
+      reconnectState: bytesBase64(new Uint8Array(96).fill(52)),
+      grant: {
+        routeId: `route-${pairingId}`, endpoint: 'mobile',
+        credential: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE', revision: 1,
+        ...(pairingSelector === undefined ? {} : { pairingSelector }),
+      },
+    })
+    const ambiguous = JSON.stringify({
+      version: 1,
+      active: [complete('pairing-native-a'), complete('pairing-native-b')],
+    })
+    storage.values.set('pairings:gestalt:account-native-ambiguous', ambiguous)
+    await expect(store.load(parsePlatformAccountId('account-native-ambiguous')))
+      .rejects.toThrow('ambiguous')
+    expect(storage.values.get('pairings:gestalt:account-native-ambiguous')).toBe(ambiguous)
+
+    const conflicting = JSON.stringify({
+      version: 1,
+      active: [complete('pairing-native-selected', 'pairing-native-other')],
+    })
+    storage.values.set('pairings:gestalt:account-native-conflicting', conflicting)
+    await expect(store.load(parsePlatformAccountId('account-native-conflicting')))
+      .rejects.toThrow('must select its retained Personal Pairing')
+    expect(storage.values.get('pairings:gestalt:account-native-conflicting')).toBe(conflicting)
+  })
+
   it('rejects damaged protected documents instead of silently re-pairing', async () => {
     const storage = new MemoryProtectedStorage()
     storage.values.set('pairings:gestalt:account-damaged', '{"version":2,"active":[{"pairingId":"pairing","attachmentKey":"***"}]}')
@@ -101,8 +175,12 @@ describe('native Mobile protected storage', () => {
 
   it('rejects a protected pairing document from an unsupported format version', async () => {
     const storage = new MemoryProtectedStorage()
-    storage.values.set('pairings:gestalt:account-version', '{"version":1,"active":[]}')
+    storage.values.set('pairings:gestalt:account-version', '{"version":3,"active":[]}')
     const store = new NativeMobilePairingStateStore(storage, 'gestalt')
     await expect(store.load(parsePlatformAccountId('account-version'))).rejects.toThrow(/version is unsupported/)
   })
 })
+
+function bytesBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes))
+}

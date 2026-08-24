@@ -7,6 +7,8 @@ const runtimeScript = readFileSync(resolve(import.meta.dirname, 'ensure-windows-
 describe('Windows CI native runtime provisioning', () => {
   it('executes the resolver probe before and after a signed Microsoft runtime install', () => {
     expect(runtimeScript.match(/Test-OxcResolverBinding/gu)).toHaveLength(3)
+    expect(runtimeScript).toContain('$ErrorActionPreference = \'Continue\'')
+    expect(runtimeScript).toContain('$ErrorActionPreference = $probeErrorActionPreference')
     expect(runtimeScript).toContain('https://aka.ms/vs/17/release/vc_redist.x64.exe')
     expect(runtimeScript).toContain('Get-AuthenticodeSignature')
     expect(runtimeScript).toContain('$runtimeSignature.Status -ne \'Valid\'')

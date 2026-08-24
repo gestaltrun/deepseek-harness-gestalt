@@ -2,8 +2,14 @@
 $ErrorActionPreference = 'Stop'
 
 function Test-OxcResolverBinding {
-  & node -e "require('oxc-resolver')" 2>$null
-  return $LASTEXITCODE -eq 0
+  $probeErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & node -e "require('oxc-resolver')" 2>$null
+    return $LASTEXITCODE -eq 0
+  } finally {
+    $ErrorActionPreference = $probeErrorActionPreference
+  }
 }
 
 if (Test-OxcResolverBinding) {

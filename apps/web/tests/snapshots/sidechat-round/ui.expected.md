@@ -1,8 +1,4 @@
 - img
-- text: Files
-- button "Close":
-  - img
-- img
 - text: Reply with a one-sentence description of …
 - button "Close":
   - img
@@ -34,9 +30,9 @@
   - img
 - text: {{clock}} Ran for {{duration}} TTFT {{duration}} {{throughput}} tok/s
 - textbox "Message the agent"
-- button "Commands":
+- button "Commands and skills":
   - img
-- 'button "Access mode, current: Workspace Write"': Workspace Write
+- 'button "Access mode, current: Read Only"': Read Only
 - button "Select model, current DeepSeek-V4-Flash":
   - text: DeepSeek-V4-Flash
   - img

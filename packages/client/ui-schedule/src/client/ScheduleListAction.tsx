@@ -1,6 +1,7 @@
 /** Session-header task board for durable Schedule reminders. */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { ScheduleProjectionItem } from '@deepseek-ai/dsh-schedule/client'
 import {
   IconChevronDownOutline14,
@@ -8,6 +9,8 @@ import {
   IconPlayOutline16,
   IconTrashOutline16,
   StateDot,
+  useAnchoredPosition,
+  useDismissOnOutsidePointer,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ScheduleActions } from './slots.ts'
@@ -20,6 +23,21 @@ export type ScheduleListActionProps = PropsRuntime<'conversation.session.header.
   & ScheduleActions
 
 type Translate = ScheduleListActionProps['t']
+const POPOVER_MARGIN = 16
+const POPOVER_WIDTH = 560
+
+/** Align the task board's right edge to its trigger and clamp it inside the viewport. */
+export function schedulePopoverPosition(trigger: HTMLButtonElement): CSSProperties {
+  const rect = trigger.getBoundingClientRect()
+  const width = Math.min(POPOVER_WIDTH, window.innerWidth - POPOVER_MARGIN * 2)
+  return {
+    top: rect.bottom + 5,
+    left: Math.min(
+      Math.max(POPOVER_MARGIN, rect.right - width),
+      window.innerWidth - width - POPOVER_MARGIN,
+    ),
+  }
+}
 
 function ClockGlyph() {
   return (
@@ -85,25 +103,27 @@ export function ScheduleListAction({
   const pendingRef = useRef(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const popoverRef = useRef<HTMLElement>(null)
 
   const active = useMemo(() => schedules?.filter(schedule => !schedule.paused) ?? [], [schedules])
   const next = useMemo(() => [...active].sort((left, right) =>
     Date.parse(left.scheduledAt) - Date.parse(right.scheduledAt))[0], [active])
+  const popoverPosition = useAnchoredPosition({
+    open,
+    anchorRef: triggerRef,
+    panelRef: popoverRef,
+    gap: 5,
+    margin: POPOVER_MARGIN,
+    align: 'end',
+    width: POPOVER_WIDTH,
+  })
+  useDismissOnOutsidePointer(rootRef, open, setOpen, popoverRef)
 
   useEffect(() => {
     if (!open) return
     setNow(Date.now())
     const timer = setInterval(() => { setNow(Date.now()) }, 30_000)
     return () => { clearInterval(timer) }
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    const closeOutside = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOutside)
-    return () => { document.removeEventListener('pointerdown', closeOutside) }
   }, [open])
 
   useEffect(() => {
@@ -149,16 +169,18 @@ export function ScheduleListAction({
         className={css.trigger}
         aria-expanded={open}
         aria-label={countLabel}
-        onClick={() => { setOpen(value => !value) }}
+        onClick={() => {
+          setOpen(value => !value)
+        }}
       >
         <ClockGlyph />
         <span>{t('count.short', { count: active.length })}</span>
         {next === undefined ? null : <time className={css.next}>{target(next.scheduledAt)}</time>}
         <IconChevronDownOutline14 className={open ? css.chevronOpen : undefined} />
       </button>
-      {open
-        ? (
-          <section className={css.popover} aria-label={t('list.aria')}>
+      {open && popoverPosition !== null
+        ? createPortal((
+          <section ref={popoverRef} className={css.popover} style={popoverPosition} aria-label={t('list.aria')}>
             <header className={css.header}>
               <div><strong>{t('list.title')}</strong><span>{t('list.scope')}</span></div>
               <span className={css.total}>{schedules.length}</span>
@@ -221,7 +243,7 @@ export function ScheduleListAction({
               })}
             </ul>
           </section>
-        )
+        ), document.body)
         : null}
     </div>
   )

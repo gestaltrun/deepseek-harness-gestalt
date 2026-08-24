@@ -6,6 +6,7 @@ import type {
   SessionId, SessionListState, SessionSummary, SubagentCatalogSnapshot,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import {
+  SubagentHeaderAction, type SubagentHeaderActionProps,
   SubagentHeaderLineage, type SubagentHeaderLineageProps,
 } from '../src/client/SubagentHeaderLineage.tsx'
 import { SubagentReadOnlyComposer } from '../src/client/SubagentReadOnlyComposer.tsx'
@@ -98,6 +99,51 @@ function hoverCatalog(trigger: HTMLElement): void {
 }
 
 describe('SubagentHeaderLineage', () => {
+  it('renders only the current Side Chat descendants as a header action', () => {
+    const side = 'side' as SessionId
+    const child = 'side-child' as SessionId
+    const state: SessionListState = {
+      ids: [side, child],
+      byId: {
+        [side]: { ...summary(side, 1), parentId: PARENT, origin: 'subagent' },
+        [child]: { ...summary(child, 2), parentId: side, origin: 'subagent' },
+      },
+      current: PARENT,
+      phase: 'ready',
+      subagentsByParent: {
+        [side]: catalog({
+          entries: [{
+            kind: 'child', id: child, mode: 'continuable', label: 'nested',
+            activity: 'inactive', hasChildren: false,
+          }],
+        }),
+      },
+      jobsBySession: {},
+      currentAddress: undefined,
+    }
+    const actionProps = {
+      sessionId: side,
+      renderMode: 'sidechat',
+      openSession: vi.fn(),
+      useSessions: <T,>(select: (snapshot: SessionListState) => T): T => select(state),
+      openChild: vi.fn(),
+      refresh: vi.fn(),
+      setCatalogOpen: vi.fn(),
+      t,
+    } as unknown as SubagentHeaderActionProps
+
+    const view = render(<SubagentHeaderAction {...actionProps} />)
+    const trigger = screen.getByRole('button', { name: '1 个子代理' })
+    expect(trigger).toBeTruthy()
+    hoverCatalog(trigger)
+    fireEvent.click(screen.getByRole('treeitem', { name: /nested/ }))
+    expect(actionProps.openChild).not.toHaveBeenCalled()
+    expect(actionProps.openSession).toHaveBeenCalledWith(child)
+
+    view.rerender(<SubagentHeaderAction {...actionProps} renderMode={undefined} />)
+    expect(screen.queryByRole('button', { name: '1 个子代理' })).toBeNull()
+  })
+
   it('aggregates live descendant activity onto the closed trigger', () => {
     const summaries: Record<SessionId, SessionSummary> = {
       [CHILD]: {

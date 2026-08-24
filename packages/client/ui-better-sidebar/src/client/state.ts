@@ -146,26 +146,12 @@ function maxCounterId(parsed: unknown): number {
   return max
 }
 
-/** The default tab a fresh session seeds. */
-export type DefaultSeed = 'editor-home' | 'none'
-
-/** A fresh default state: one seeded tab in one pane, open per the caller's
+/** A fresh default state: one empty pane, open per the caller's
  * preference. `width` is the caller's preferred panel width (default
  * PANEL_DEFAULT) and `panelOpen` whether the panel starts expanded (default
- * true); the store seeds new sessions from the user's side card prefs.
- * `seed` picks the seeded tab: 'editor-home' places the EMPTY files window
- * (an editor tab with no path whose tree panel starts open,
- * `meta.treeOpen: true`) — in BOTH editorExplorer modes that window is the
- * file explorer page — and 'none' starts with an empty pane (the store
- * passes it when the user disabled the editor tab type in settings). */
-export function makeDefaultState(width = PANEL_DEFAULT, panelOpen = true, seed: DefaultSeed = 'editor-home'): SidebarState {
+ * true); the empty pane renders the enabled tab types as selection cards. */
+export function makeDefaultState(width = PANEL_DEFAULT, panelOpen = true): SidebarState {
   const leaf: SidebarLeaf = { kind: 'leaf', id: uid('pane'), tabs: [], active: null }
-  if (seed === 'editor-home') {
-    // No path: the editor host renders its empty-state hint and the docked
-    // tree panel (treeOpen defaults open for path-less tabs; meta pins it).
-    leaf.tabs = [{ id: uid('tab'), type: 'editor', title: 'Files', meta: { treeOpen: true } }]
-    leaf.active = leaf.tabs[0]!.id
-  }
   // The bottom panel starts closed with an empty pane (its welcome cards
   // offer the openable types on first use).
   const bottomLeaf: SidebarLeaf = { kind: 'leaf', id: uid('pane'), tabs: [], active: null }
@@ -792,24 +778,20 @@ function loadState(sessionId: string, prefs: SidebarPrefs): SidebarState {
   } catch {
     // Corrupt or unavailable storage: fall through to the default.
   }
-  // New sessions seed from the user's side card prefs: the width is the
+  // New sessions start with the tab-type picker. Their width is the
   // chosen percent of the window (clamped to the panel floor and the
-  // viewport so a huge percent can never crush the app shell), the panel
-  // starts open only when the preference says so, and the seed tab is the
-  // empty files window (tree panel open) in BOTH editorExplorer modes — a
-  // disabled editor type seeds nothing. On a NARROW viewport a brand-new
+  // viewport so a huge percent can never crush the app shell), and the panel
+  // starts open only when the preference says so. On a NARROW viewport a brand-new
   // session starts collapsed instead — the panel is a full-screen drawer
   // there, and auto-opening it on first paint would cover the conversation
-  // before the user asked. Only the first seeding is affected: once the
-  // user expands the drawer, `panelOpen: true` persists like any other
-  // state.
+  // before the user asked. Once the user expands the drawer,
+  // `panelOpen: true` persists like any other state.
   const viewport = typeof window !== 'undefined' ? window.innerWidth : undefined
   const width = viewport === undefined
     ? PANEL_DEFAULT
     : defaultWidthFor(viewport, prefs.defaultWidthPercent)
   const openByDefault = prefs.openByDefault && (viewport === undefined || !isNarrowWidth(viewport))
-  const seed: DefaultSeed = prefs.tabsEnabled['editor'] === false ? 'none' : 'editor-home'
-  return makeDefaultState(width, openByDefault, seed)
+  return makeDefaultState(width, openByDefault)
 }
 
 /**
@@ -919,6 +901,19 @@ function uniqueNodeId(id: string, seen: Set<string>, reid: Map<string, string>):
   return fresh
 }
 
+/** Match the automatic Files home emitted before fresh panes used the type picker. */
+function isLegacySeededFilesTab(candidate: Record<string, unknown>): boolean {
+  const meta = candidate.meta
+  return candidate.type === 'editor'
+    && candidate.title === 'Files'
+    && candidate.path === undefined
+    && typeof candidate.id === 'string'
+    && /^tab:\d+$/.test(candidate.id)
+    && meta !== null
+    && typeof meta === 'object'
+    && !Array.isArray(meta)
+}
+
 /** Validate one split-tree node (leaf or split) and rebuild it cleanly. */
 function sanitizeNode(node: unknown, seen: Set<string>, reid: Map<string, string>): SplitNode | undefined {
   if (node === null || typeof node !== 'object') return undefined
@@ -926,7 +921,7 @@ function sanitizeNode(node: unknown, seen: Set<string>, reid: Map<string, string
   if (record.kind === 'leaf') {
     if (typeof record.id !== 'string' || !Array.isArray(record.tabs)) return undefined
     const tabs: SidebarTab[] = []
-    let droppedDiff = false
+    let droppedRecoverable = false
     for (const tab of record.tabs) {
       if (tab === null || typeof tab !== 'object') return undefined
       const candidate = tab as Record<string, unknown>
@@ -936,7 +931,11 @@ function sanitizeNode(node: unknown, seen: Set<string>, reid: Map<string, string
       // side persisted by an older build) cannot resurface as a dead tab
       // showing "no text changes" after every refresh.
       if (candidate.type === 'diff') {
-        droppedDiff = true
+        droppedRecoverable = true
+        continue
+      }
+      if (isLegacySeededFilesTab(candidate)) {
+        droppedRecoverable = true
         continue
       }
       // Tab types are an open set (external plugins register their own);
@@ -970,9 +969,9 @@ function sanitizeNode(node: unknown, seen: Set<string>, reid: Map<string, string
       })
     }
     const active = typeof record.active === 'string' ? record.active : null
-    // An active pointer into a dropped diff tab is expected after the drop;
-    // any other missing active is structural corruption → reset the state.
-    if (active !== null && !tabs.some(tab => tab.id === active) && !droppedDiff) return undefined
+    // A sanitizer-owned removal may invalidate the active pointer; any other
+    // missing active is structural corruption and resets the state.
+    if (active !== null && !tabs.some(tab => tab.id === active) && !droppedRecoverable) return undefined
     return { kind: 'leaf', id: uniqueNodeId(record.id, seen, reid), tabs, active: active !== null && tabs.some(tab => tab.id === active) ? active : null }
   }
   if (record.kind === 'split') {

@@ -159,7 +159,7 @@ describe('MobilePairingController', () => {
     expect(controller.getSnapshot()).toMatchObject({ status: 'paired', selectedPairingId: work })
     expect(companionMayMutate(companion.getState())).toBe(false)
     await vi.waitFor(() => { expect(relay.start).toHaveBeenCalledTimes(2) })
-    retries.at(-1)?.resolve()
+    retries.at(-1)?.resolve(undefined)
   })
 
   it('ignores a replaced Relay activation generation after another Desktop is selected', async () => {

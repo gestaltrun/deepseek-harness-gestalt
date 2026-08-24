@@ -192,6 +192,14 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       ]
     `)
 
+    runtime.reportConnectionFailure({
+      code: 'COMPANION_UPDATE_REQUIRED',
+      message: 'Desktop update required',
+      updateEndpoint: 'desktop',
+    })
+    expect((await screen.findByText('Update Desktop to connect from this Mobile.')).textContent)
+      .toMatchInlineSnapshot('"Update Desktop to connect from this Mobile."')
+
     fireEvent.click(screen.getByRole('treeitem', { name: /Guarded Session/ }))
     expect(visibleMutationControls()).toMatchInlineSnapshot(`
       [

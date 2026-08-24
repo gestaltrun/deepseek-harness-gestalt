@@ -247,7 +247,7 @@ describe('assembled Desktop Companion Host search', () => {
         )
       }
       return await owner.handle(operation, pairingDependencies(owner, channels))
-    }, () => 'Assembled Desktop', {
+    }, () => 'Assembled Desktop', 10_000, {
       connect: (selector, changed, disconnect) => owner.connectLiveProjection(
         parsePersonalPairingId(selector), changed, disconnect,
       ),

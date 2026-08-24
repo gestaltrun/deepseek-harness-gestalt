@@ -3,11 +3,13 @@ import 'fake-indexeddb/auto'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import { IndexedDbInstallationAccountStore } from '@deepseek-ai/dsh-platform-account-client'
+import { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
 import {
   parseRelayAttachmentId,
   parseRelayCredential,
   parseRelayPairingSelector,
   parseRelayRouteId,
+  RemoteProtocolError,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MobileCompanionProjectionDto } from '../src/companion-projection.ts'
@@ -27,7 +29,7 @@ const relayLifecycle = vi.hoisted(() => ({
   onPeerAttachments: undefined as ((ready: { peers: readonly unknown[] }) => Promise<void>) | undefined,
   onConnectionReady: undefined as (() => void) | undefined,
   onConnectionLost: undefined as (() => void) | undefined,
-  onTransportError: undefined as (() => void) | undefined,
+  onTransportError: undefined as ((error: RemoteRelayError | RemoteProtocolError) => void) | undefined,
 }))
 const snowAttachmentOwners = vi.hoisted(() => ({
   selectors: [] as string[],
@@ -85,7 +87,7 @@ vi.mock('@deepseek-ai/dsh-remote-access-client', async (importOriginal) => {
         onPeerAttachments?: (ready: { peers: readonly unknown[] }) => Promise<void>
         onConnectionReady?: () => void
         onConnectionLost?: () => void
-        onTransportError?: () => void
+        onTransportError?: typeof relayLifecycle.onTransportError
       } = {}) {
         relayLifecycle.onCiphertext = options.onCiphertext
         relayLifecycle.onPeerAttachments = options.onPeerAttachments
@@ -308,7 +310,7 @@ describe('Mobile Platform Account entry', () => {
     }, { accepted: true, decision: 'once' }, runtime.getState()).settled).toEqual({ decision: 'once' })
 
     relayLifecycle.onConnectionLost?.()
-    relayLifecycle.onTransportError?.()
+    relayLifecycle.onTransportError?.(new RemoteRelayError('REMOTE_OFFLINE', 'Paired Desktop is Remote Offline'))
     expect(companionMayMutate(runtime.getState())).toBe(false)
     relayLifecycle.onConnectionReady?.()
     firstResync.acceptValidatedDesktopResync({ type: 'desktop-resync', version: 1, authenticated: true })
@@ -385,6 +387,29 @@ describe('Mobile Platform Account entry', () => {
     expect(relayLifecycle.sendCiphertext).toHaveBeenCalledWith(
       parseRelayAttachmentId('desktop-home'), Uint8Array.of(1),
     )
+  })
+
+  it.each([
+    ['mobile', 'Update Mobile to connect to this Desktop.'],
+    ['desktop', 'Update Desktop to connect from this Mobile.'],
+  ] as const)('projects a Companion update requirement for %s through the shipped entry', async (endpoint, expected) => {
+    await mountSelectedDesktopProduct(`update-${endpoint}`)
+
+    relayLifecycle.onTransportError?.(new RemoteProtocolError(
+      'COMPANION_UPDATE_REQUIRED', `${endpoint} update required`, endpoint,
+    ))
+
+    expect((await screen.findByRole('alert')).textContent).toBe(expected)
+  })
+
+  it('projects Platform capacity through the shipped entry while retrying', async () => {
+    await mountSelectedDesktopProduct('capacity')
+
+    relayLifecycle.onTransportError?.(new RemoteRelayError(
+      'PLATFORM_CAPACITY', 'Remote Relay returned PLATFORM_CAPACITY', 5_000,
+    ))
+
+    expect((await screen.findByRole('alert')).textContent).toBe('Platform capacity is full. Retrying.')
   })
 })
 

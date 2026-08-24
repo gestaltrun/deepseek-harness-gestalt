@@ -9,6 +9,7 @@ import type {
   MobileCompanionOperationFailure,
   MobileCompanionSearchSnapshot,
 } from './companion-surface.ts'
+import type { CompanionConnectionFailure } from './companion-lifecycle.ts'
 
 /** Default history page ceiling for phone-sized paging. */
 export const COMPANION_HISTORY_PAGE_SIZE = 20
@@ -22,6 +23,8 @@ export interface MobileCompanionPresentation {
   desktopName: string
   /** Desktop reachability at the latest foreground synchronization. */
   connection: 'online' | 'offline'
+  /** Stable Relay or Companion failure retained while the foreground lifecycle retries. */
+  connectionFailure?: CompanionConnectionFailure | undefined
   /** Exact Desktop Session list projection. */
   sessions: SessionListState
   /** Exact Desktop Workspace list used by the shared grouping owner. */

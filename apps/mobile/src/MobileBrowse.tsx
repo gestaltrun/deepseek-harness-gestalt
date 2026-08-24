@@ -16,6 +16,7 @@ import {
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import css from './MobileBrowse.module.css'
 import type { MobilePresentationClock } from './mobile-clock.ts'
+import type { CompanionConnectionFailure } from './companion-lifecycle.ts'
 
 /** Mobile Companion browse props. */
 export interface MobileBrowseProps {
@@ -23,6 +24,8 @@ export interface MobileBrowseProps {
   desktopName: string
   /** Live Remote Online / Offline label. */
   connection: 'online' | 'offline'
+  /** Stable Relay or Companion failure retained while the foreground lifecycle retries. */
+  connectionFailure?: CompanionConnectionFailure | undefined
   /** Desktop-confirmed Session history. */
   sessions: SessionListState
   /** Desktop Workspace projection consumed by the shared grouping owner. */
@@ -65,7 +68,7 @@ export interface MobileBrowseProps {
 
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
-  desktopName, connection, sessions, workspaces, conversations, locale, theme, loadImage,
+  desktopName, connection, connectionFailure, sessions, workspaces, conversations, locale, theme, loadImage,
   canMutate, clock, onCreate, onSubmit, onCancel, onAttach, onLoadOlder, onObserveSession,
   search, onSearch, onClearCache, operationFailure,
   cacheFailure,
@@ -101,6 +104,9 @@ export function MobileBrowse({
     && (operationFailure.operation === 'refresh' || operationFailure.sessionId === openId)
     ? operationFailure.failure
     : undefined
+  const connectionAlert = connectionFailure === undefined
+    ? undefined
+    : companionConnectionFailureMessage(connectionFailure, locale)
   const openSession = (id: SessionId): void => {
     setOpenId(id)
     if (conversations[id] === undefined) onLoadOlder?.(id)
@@ -109,21 +115,24 @@ export function MobileBrowse({
   if (openId !== undefined && openTitle !== undefined) {
     if (conversation !== undefined) {
       return (
-        <MobileConversation
-          title={openTitle}
-          onBack={() => { setOpenId(undefined) }}
-          snapshot={conversation}
-          locale={locale}
-          theme={theme}
-          loadImage={attachment => loadImage(openId, attachment)}
-          cwd={open?.cwd}
-          mutationEnabled={canMutate}
-          operationFailure={detailFailure}
-          {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(openId, text) })}
-          {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(openId) } })}
-          {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(openId, file) } })}
-          {...(onLoadOlder === undefined ? {} : { onLoadOlder: () => { onLoadOlder(openId) } })}
-        />
+        <>
+          {connectionAlert !== undefined && <p role="alert">{connectionAlert}</p>}
+          <MobileConversation
+            title={openTitle}
+            onBack={() => { setOpenId(undefined) }}
+            snapshot={conversation}
+            locale={locale}
+            theme={theme}
+            loadImage={attachment => loadImage(openId, attachment)}
+            cwd={open?.cwd}
+            mutationEnabled={canMutate}
+            operationFailure={detailFailure}
+            {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(openId, text) })}
+            {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(openId) } })}
+            {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(openId, file) } })}
+            {...(onLoadOlder === undefined ? {} : { onLoadOlder: () => { onLoadOlder(openId) } })}
+          />
+        </>
       )
     }
     return (
@@ -132,6 +141,7 @@ export function MobileBrowse({
           <button type="button" className={css.back} onClick={() => { setOpenId(undefined) }}>{locale === 'zh' ? '返回' : 'Back'}</button>
           <h1>{openTitle}</h1>
         </header>
+        {connectionAlert !== undefined && <p role="alert">{connectionAlert}</p>}
         {detailFailure !== undefined && <p role="alert">{detailFailure.message}</p>}
         <p className={css.summary}>{locale === 'zh' ? '尚未加载此 Session 的对话。' : 'This Session conversation is not loaded.'}</p>
       </section>
@@ -143,6 +153,9 @@ export function MobileBrowse({
       <header className={css.header}>
         <p className={css.desktop}>{desktopName}</p>
         <p className={css.connection} data-connection={connection}>{connection === 'online' ? 'Remote Online' : 'Remote Offline'}</p>
+        {connectionAlert !== undefined && (
+          <p role="alert" data-connection-failure={connectionFailure?.code}>{connectionAlert}</p>
+        )}
         {onSearch !== undefined && (
           <form
             className={css.search}
@@ -206,6 +219,37 @@ export function MobileBrowse({
       )}
     </section>
   )
+}
+
+function companionConnectionFailureMessage(
+  failure: CompanionConnectionFailure,
+  locale: ConversationPresentationLocale,
+): string {
+  if (failure.code === 'COMPANION_UPDATE_REQUIRED') {
+    if (failure.updateEndpoint === 'mobile') {
+      return locale === 'zh'
+        ? '请升级 Mobile 后再连接此 Desktop。'
+        : 'Update Mobile to connect to this Desktop.'
+    }
+    if (failure.updateEndpoint === 'desktop') {
+      return locale === 'zh'
+        ? '请升级 Desktop 后再从 Mobile 连接。'
+        : 'Update Desktop to connect from this Mobile.'
+    }
+  }
+  if (failure.code === 'PLATFORM_CAPACITY') {
+    return locale === 'zh'
+      ? 'Platform 当前容量已满，正在重试。'
+      : 'Platform capacity is full. Retrying.'
+  }
+  if (failure.code === 'REMOTE_OFFLINE') {
+    return locale === 'zh'
+      ? 'Paired Desktop 当前离线，正在重试。'
+      : 'Paired Desktop is Remote Offline. Retrying.'
+  }
+  return locale === 'zh'
+    ? `远程连接失败（${failure.code}），正在重试。`
+    : `Remote connection failed (${failure.code}). Retrying.`
 }
 
 function AuthoritativeSearchResults({

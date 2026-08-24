@@ -149,7 +149,7 @@ jobs:
         run: |
           set -euo pipefail
           IFS=',' read -r -a instance_ids <<< "$PLATFORM_ECS_INSTANCE_IDS"
-          response=$(aliyun ecs DescribeCloudAssistantStatus \
+          response=$(aliyun ecs DescribeCloudAssistantStatus --region "$PLATFORM_ALIYUN_REGION" \
             --RegionId "$PLATFORM_ALIYUN_REGION" \
             --InstanceId.1 "${instance_ids[0]// /}" \
             --InstanceId.2 "${instance_ids[1]// /}")

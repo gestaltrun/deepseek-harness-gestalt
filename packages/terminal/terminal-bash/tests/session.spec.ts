@@ -241,6 +241,7 @@ describe('LocalPtySession readiness and output', () => {
       idleSilenceMs: 100,
       timeoutMs: 200,
     }))
+    await initialize(session, terminal)
 
     const operation = session.startSend({ text: 'Write-Output ready', submit: true })
     let settled = false

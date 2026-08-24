@@ -69,6 +69,7 @@ const TRANSIENT_INFRASTRUCTURE_PATTERNS = [
   /connection reset by peer/iu,
   /econnreset/iu,
   /etimedout/iu,
+  /gyp ERR! stack AssertionError[\s\S]*assert\(!this\.paused\)[\s\S]*undici[\\/]+lib[\\/]+dispatcher[\\/]+client-h1\.js/iu,
   /tls handshake timeout/iu,
   /temporary failure in name resolution/iu,
 ]

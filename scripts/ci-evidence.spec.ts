@@ -69,7 +69,13 @@ describe('CI failure classification', () => {
 
   it('keeps the transient signature allowlist narrow', () => {
     expect(isTransientInfrastructureFailure('Client.Timeout exceeded while awaiting headers')).toBe(true)
+    expect(isTransientInfrastructureFailure([
+      'gyp ERR! stack AssertionError [ERR_ASSERTION]',
+      'assert(!this.paused)',
+      'at Parser.finish (/pnpm/dist/node_modules/undici/lib/dispatcher/client-h1.js:302:5)',
+    ].join('\n'))).toBe(true)
     expect(isTransientInfrastructureFailure('AssertionError: request timed out in application code')).toBe(false)
+    expect(isTransientInfrastructureFailure('AssertionError: assert(!this.paused)')).toBe(false)
   })
 })
 

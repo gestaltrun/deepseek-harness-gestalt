@@ -7,6 +7,7 @@ const root = resolve(import.meta.dirname, '..')
 const runnerPrivatePnpmDestination = '${{ runner.temp }}/setup-pnpm'
 const nativeWindowsPnpmDestination = '${{ runner.temp }}/setup-pnpm-js'
 const evidenceAfterPreflight = "needs.preflight.result == 'success'"
+const masterFallback = "(github.event_name != 'push' || needs.preflight.outputs.proof-reused != 'true')"
 
 describe('CI workflow', () => {
   it('rejects runner-only contexts before job construction', () => {
@@ -92,7 +93,7 @@ describe('CI workflow', () => {
       if (!isRecord(job)) throw new TypeError(`CI job ${jobName} must be an object`)
       const needs = typeof job.needs === 'string' ? [job.needs] : job.needs
       expect(needs, `${jobName} must wait for preflight`).toContain('preflight')
-      if (jobName !== 'all-checks-passed' && jobName !== 'candidate-verdict') {
+      if (!['all-checks-passed', 'candidate-verdict', 'master-verdict'].includes(jobName)) {
         expect(job.if, `${jobName} must not run after invalid preflight input`)
           .toContain(evidenceAfterPreflight)
       }
@@ -141,14 +142,14 @@ describe('CI workflow', () => {
       throw new TypeError('CI workflow must define Draft impact, consumers, and aggregate jobs')
     }
     expect(draftImpact.if).toBe(
-      `${evidenceAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'draft-impact')`,
+      `${evidenceAfterPreflight} && ${masterFallback} && contains(fromJSON(needs.preflight.outputs.lanes), 'draft-impact')`,
     )
     expect(draftImpact.steps).toContainEqual(expect.objectContaining({
       name: 'Run changed packages and reverse consumers',
       run: 'pnpm ci:impact --base "$BASE_SHA" --head "$HEAD_SHA"',
     }))
     expect(consumers.if).toBe(
-      `${evidenceAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'consumers')`,
+      `${evidenceAfterPreflight} && ${masterFallback} && contains(fromJSON(needs.preflight.outputs.lanes), 'consumers')`,
     )
     const verdict = (aggregate.steps as unknown[]).find(step =>
       isRecord(step) && step.name === 'Validate selected required jobs')
@@ -181,14 +182,14 @@ describe('CI workflow', () => {
       throw new TypeError('candidate dependencies must be job id strings')
     }
 
-    expect(Object.keys(workflow.on).sort()).toEqual(['merge_group', 'pull_request'])
+    expect(Object.keys(workflow.on).sort()).toEqual(['merge_group', 'pull_request', 'push'])
     const planner = preflightSteps.find(step => isRecord(step) && step.name === 'Compute CI plan')
     const metadata = preflightSteps.find(step => isRecord(step) && step.name === 'Validate pull request metadata')
     expect(planner).toMatchObject({
       env: {
-        BASE_SHA: "${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.event.pull_request.base.sha }}",
-        HEAD_SHA: "${{ github.event_name == 'merge_group' && github.event.merge_group.head_sha || github.event.pull_request.head.sha }}",
-        READINESS: "${{ github.event_name == 'merge_group' && 'ready' || (github.event.pull_request.draft && 'draft' || 'ready') }}",
+        BASE_SHA: "${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || (github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha) }}",
+        HEAD_SHA: "${{ github.event_name == 'merge_group' && github.event.merge_group.head_sha || (github.event_name == 'push' && github.sha || github.event.pull_request.head.sha) }}",
+        READINESS: "${{ github.event_name != 'pull_request' && 'ready' || (github.event.pull_request.draft && 'draft' || 'ready') }}",
       },
     })
     expect(metadata).toMatchObject({ if: "github.event_name == 'pull_request'" })
@@ -220,6 +221,91 @@ describe('CI workflow', () => {
       expect(verdict.run, `candidate verdict must require ${job}`).toContain(`'${job}'`)
     }
     expect(verdict.run).toContain("results[job]?.result !== 'success'")
+    const attestationCompletion = candidateSteps.find(step => isRecord(step)
+      && step.name === 'Complete candidate attestation')
+    if (!isRecord(attestationCompletion) || typeof attestationCompletion.run !== 'string') {
+      throw new TypeError('candidate verdict must complete its attestation through the checked command')
+    }
+    expect(attestationCompletion.run).toContain('pnpm --silent ci:attestation complete')
+    expect(attestationCompletion.run).not.toContain("node <<'NODE'")
+    const attestationUpload = candidateSteps.find(step => isRecord(step)
+      && step.name === 'Publish candidate attestation')
+    expect(attestationUpload).toMatchObject({
+      uses: 'actions/upload-artifact@v7',
+      with: {
+        name: '${{ steps.attestation.outputs.artifact_name }}',
+        'if-no-files-found': 'error',
+      },
+    })
+  })
+
+  it('reuses an exact candidate proof on master and falls back exhaustively otherwise', () => {
+    const workflow = loadWorkflow('.github/workflows/ci.yml')
+    if (!isRecord(workflow.jobs)) throw new TypeError('CI workflow must define jobs')
+    const preflight = workflowJob(workflow, 'preflight')
+    const smoke = workflowJob(workflow, 'master-smoke')
+    const verdict = workflowJob(workflow, 'master-verdict')
+    if (!Array.isArray(preflight.steps) || !Array.isArray(verdict.needs)
+      || !Array.isArray(verdict.steps)) {
+      throw new TypeError('master proof workflow must define preflight and verdict structure')
+    }
+    expect(preflight.outputs).toMatchObject({
+      'proof-tree': '${{ steps.identity.outputs.tree || steps.reuse.outputs.tree }}',
+      'proof-key': '${{ steps.identity.outputs.proof_key || steps.reuse.outputs.proof_key }}',
+      'proof-reused': "${{ steps.reuse.outputs.reused || 'false' }}",
+      'proof-reason': "${{ steps.reuse.outputs.reason || 'not-master-push' }}",
+      'proof-source-run-id': '${{ steps.reuse.outputs.source_run_id }}',
+    })
+    const preflightSteps = preflight.steps as unknown[]
+    expect(preflightSteps).toContainEqual(expect.objectContaining({
+      name: 'Resolve reusable candidate proof',
+      id: 'reuse',
+      if: "github.event_name == 'push'",
+    }))
+    for (const jobName of [
+      'node-24',
+      'node-24-coverage',
+      'node-24-consumers',
+      'node-compat',
+      'python-sdk',
+      'python-runtime',
+      'windows',
+      'windows-native-core',
+      'windows-native-coverage',
+      'windows-native-static',
+      'windows-native-verdict',
+      'electron-runtime-e2e-macos',
+    ]) {
+      const job = workflowJob(workflow, jobName)
+      expect(job.if, `${jobName} must skip only on exact proof reuse`).toContain(masterFallback)
+    }
+    expect(smoke).toMatchObject({
+      name: 'master reuse smoke',
+      if: `${evidenceAfterPreflight} && github.event_name == 'push'`,
+      'runs-on': 'ubuntu-latest',
+    })
+    expect(verdict).toMatchObject({
+      name: 'master evidence verdict',
+      if: "always() && github.event_name == 'push'",
+      'runs-on': 'ubuntu-latest',
+    })
+    const masterNeeds = (verdict.needs as unknown[]).filter(
+      (job): job is string => typeof job === 'string',
+    )
+    expect(masterNeeds).toEqual(expect.arrayContaining([
+      'preflight',
+      'master-smoke',
+      'windows-native-verdict',
+      'electron-runtime-e2e-macos',
+    ]))
+    const decision = (verdict.steps as unknown[]).find(step => isRecord(step)
+      && step.name === 'Validate proof reuse or exhaustive fallback')
+    if (!isRecord(decision) || typeof decision.run !== 'string') {
+      throw new TypeError('master verdict must define its decision command')
+    }
+    expect(decision.run).toContain("process.env.PROOF_REUSED === 'true'")
+    expect(decision.run).toContain("? ['preflight', 'master-smoke']")
+    expect(decision.run).toContain("results[job]?.result !== 'success'")
   })
 
   it('makes optional dependencies mandatory for master standby installs', () => {
@@ -424,7 +510,7 @@ describe('CI workflow', () => {
     })
     expect(windowsNativeCoverage.needs).toEqual(['preflight', 'windows-native-coverage-shards'])
     expect(windowsNativeCoverage.if).toBe(
-      `${evidenceAfterPreflight} && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')`,
+      `${evidenceAfterPreflight} && ${masterFallback} && needs.windows-native-coverage-shards.result == 'success' && contains(fromJSON(needs.preflight.outputs.lanes), 'windows-native')`,
     )
     expect(windowsNativeVerdict.needs).toEqual([
       'preflight',
@@ -534,7 +620,7 @@ describe('CI workflow', () => {
       throw new TypeError('both CI workflows must define on')
     }
     expect(Object.keys(workflow.on).sort()).toEqual(['push', 'workflow_dispatch'])
-    expect(Object.keys(prWorkflow.on).sort()).toEqual(['merge_group', 'pull_request'])
+    expect(Object.keys(prWorkflow.on).sort()).toEqual(['merge_group', 'pull_request', 'push'])
 
     // Neither drill may carry a job-level group: it would not exempt the job
     // from run-scoped cancellation.
@@ -596,7 +682,7 @@ describe('CI workflow', () => {
     }
 
     expect(pythonRuntime).toMatchObject({
-      if: `${evidenceAfterPreflight} && contains(fromJSON(needs.preflight.outputs.lanes), 'python-runtime')`,
+      if: `${evidenceAfterPreflight} && ${masterFallback} && contains(fromJSON(needs.preflight.outputs.lanes), 'python-runtime')`,
       name: 'python runtime / release-shaped Linux x64',
       uses: './.github/workflows/build-exe-for-python-sdk.yml',
       with: {
@@ -748,9 +834,14 @@ describe('Python release workflows', () => {
     }
 
     const buildSteps: unknown[] = build.steps
+    const install = buildSteps.find(step => isRecord(step) && step.name === 'Install (immutable)')
     const manylinuxAddon = buildSteps.find(step => isRecord(step) && step.name === 'Rebuild Linux node-pty against manylinux 2.28')
     const macosCheck = buildSteps.find(step => isRecord(step) && step.name === 'Check macOS deployment target')
     const manylinuxSmoke = buildSteps.find(step => isRecord(step) && step.name === 'Run wheel in a manylinux 2.28 container')
+    const transientAttempts = buildSteps.find(step => isRecord(step) && step.name === 'Publish transient infrastructure attempts')
+    if (!isRecord(install) || typeof install.run !== 'string') {
+      throw new TypeError('Python wheel builder must define its immutable install command')
+    }
     expect(call.inputs).toHaveProperty('targets')
     expect(call.inputs).toMatchObject({
       ci: { type: 'boolean', default: false },
@@ -762,6 +853,13 @@ describe('Python release workflows', () => {
     expect(plan.if).toContain('inputs.ci')
     expect(plan.if).toContain('inputs.release')
     expect(JSON.stringify(plan.steps)).toContain('pep440_version')
+    expect(install.run).toContain('scripts/retry-transient-ci.ts')
+    expect(install.run).toContain('install-${{ matrix.target }}.json')
+    expect(install.run).toContain('-- pnpm install --frozen-lockfile')
+    expect(transientAttempts).toMatchObject({
+      if: "always() && runner.os == 'Linux'",
+      with: { path: '${{ runner.temp }}/ci-evidence/*.json' },
+    })
     const workflowJson = JSON.stringify(workflow)
     expect(workflowJson).toContain('macosx_14_0_arm64')
     expect(workflowJson).toContain('dist-python/$SDK_WHEEL')

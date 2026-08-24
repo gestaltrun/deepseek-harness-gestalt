@@ -43,7 +43,7 @@ interface Distribution {
 }
 
 const EXCLUDED_RUN_CONCLUSIONS = new Set(['cancelled', 'skipped', 'stale'])
-const AGGREGATE_JOB_NAMES = new Set(['all checks passed'])
+const AGGREGATE_JOB_NAMES = new Set(['all checks passed', 'candidate verdict', 'master evidence verdict'])
 const OBSERVATIONAL_JOB_NAMES = new Set([
   'macos electron runtime e2e',
   'windows node 24 / native complete',
@@ -73,7 +73,8 @@ export function computeCiMetrics(runs: readonly CiMetricRun[]): CiMetrics {
   let successfulRuns = 0
 
   for (const run of runs) {
-    if (run.status !== 'completed'
+    if (run.event !== 'pull_request'
+      || run.status !== 'completed'
       || run.conclusion === null
       || EXCLUDED_RUN_CONCLUSIONS.has(run.conclusion)) {
       excludedRunIds.push(run.databaseId)

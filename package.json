@@ -26,6 +26,7 @@
     "clean": "tsx scripts/clean.ts",
     "change-scope": "tsx scripts/change-scope.ts",
     "ci:plan": "tsx scripts/ci-plan.ts",
+    "ci:attestation": "tsx scripts/ci-attestation.ts",
     "ci:metrics": "tsx scripts/ci-metrics.ts",
     "ci:impact": "tsx scripts/ci-impact.ts",
     "pr:create": "tsx scripts/create-pull-request.ts",

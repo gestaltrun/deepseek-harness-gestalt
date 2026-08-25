@@ -37,16 +37,19 @@ afterEach(async () => {
 })
 
 describe('Platform Account HTTP consumer', () => {
-  it('rejects a missing or mismatched HTTP origin before registering routes', () => {
+  it('rejects missing, invalid, duplicate, or environment-mismatched HTTP origins before registering routes', () => {
     const ctx = {
       platformAccount: { environment: ENVIRONMENT },
       webServer: { register() { return () => {} } },
       effect(register: () => () => void) { register() },
     } as unknown as Context
-    expect(() => { apply(ctx, {} as never) }).toThrow('origin configuration is required')
-    expect(() => { apply(ctx, null as never) }).toThrow('origin configuration is required')
-    expect(() => { apply(ctx, { origin: 1 } as never) }).toThrow('origin configuration is required')
-    expect(() => { apply(ctx, { origin: 'https://other.example' }) }).toThrow('does not match the selected Platform environment')
+    expect(() => { apply(ctx, {} as never) }).toThrow('origins configuration is required')
+    expect(() => { apply(ctx, null as never) }).toThrow('origins configuration is required')
+    expect(() => { apply(ctx, { origins: 1 } as never) }).toThrow('origins configuration is required')
+    expect(() => { apply(ctx, { origins: [] }) }).toThrow('origins configuration is required')
+    expect(() => { apply(ctx, { origins: ['null'] }) }).toThrow('origin is invalid')
+    expect(() => { apply(ctx, { origins: [ENVIRONMENT.origin, ENVIRONMENT.origin] }) }).toThrow('origin is duplicated')
+    expect(() => { apply(ctx, { origins: ['https://other.example'] }) }).toThrow('do not include the selected Platform environment')
   })
 
   it('serves the complete lifecycle and bilingual fixed callback with exact CORS', async () => {
@@ -139,6 +142,27 @@ describe('Platform Account HTTP consumer', () => {
       headers: { origin: 'not an origin' },
     })
     expect(malformed.status).toBe(403)
+  })
+
+  it('admits the fixed Android and iOS Capacitor origins without admitting opaque origins', async () => {
+    const server = await start(accountService(), undefined, {
+      origins: [ENVIRONMENT.origin, 'https://localhost', 'capacitor://localhost'],
+    })
+
+    for (const origin of ['https://localhost', 'capacitor://localhost']) {
+      const preflight = await fetch(`${server.origin}/v1/account/login-attempts`, {
+        method: 'OPTIONS',
+        headers: { origin, 'access-control-request-method': 'POST' },
+      })
+      expect(preflight.status).toBe(204)
+      expect(preflight.headers.get('access-control-allow-origin')).toBe(origin)
+    }
+
+    const opaque = await fetch(`${server.origin}/v1/account/login-attempts`, {
+      method: 'OPTIONS',
+      headers: { origin: 'null', 'access-control-request-method': 'POST' },
+    })
+    expect(opaque.status).toBe(403)
   })
 
   it('returns stable validation, account, and internal error envelopes', async () => {
@@ -283,14 +307,14 @@ describe('Platform Account HTTP consumer', () => {
     expect(await error(callback)).toEqual([400, 'INVALID_REQUEST'])
   })
 
-  it('rejects a missing or mismatched Account HTTP origin at load', () => {
+  it('rejects a missing or mismatched Account HTTP origin set at load', () => {
     const ctx = {
       platformAccount: { environment: ENVIRONMENT },
       webServer: { register() { return () => {} } },
       effect(register: () => () => void) { register() },
     } as unknown as Context
-    expect(() => { apply(ctx, null as never) }).toThrow('origin configuration is required')
-    expect(() => { apply(ctx, { origin: 'https://other.example' }) }).toThrow('does not match')
+    expect(() => { apply(ctx, null as never) }).toThrow('origins configuration is required')
+    expect(() => { apply(ctx, { origins: ['https://other.example'] }) }).toThrow('do not include')
   })
 })
 
@@ -332,6 +356,7 @@ function session() {
 async function start(
   account: MockAccountService,
   mutateRequest?: (request: IncomingMessage, path: string) => void,
+  config: Parameters<typeof apply>[1] = { origins: [account.environment.origin] },
 ): Promise<{ origin: string }> {
   const routes = new Map<string, RegisteredRoute>()
   const ctx = {
@@ -344,7 +369,7 @@ async function start(
     },
     effect(register: () => () => void) { register() },
   } as unknown as Context
-  apply(ctx, { origin: account.environment.origin })
+  apply(ctx, config)
   const http = createServer((req, res) => {
     const path = new URL(req.url ?? '/', 'http://localhost').pathname
     const route = routes.get(path)

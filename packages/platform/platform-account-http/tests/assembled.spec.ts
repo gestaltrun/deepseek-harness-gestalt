@@ -72,7 +72,7 @@ describe('real Platform Account HTTP composition', () => {
       failure = error
     }
     expect(String(failure)).toContain(
-      origin === undefined ? 'origin' : 'does not match the selected Platform environment',
+      origin === undefined ? 'origins' : 'do not include the selected Platform environment',
     )
   })
 
@@ -425,7 +425,7 @@ async function loadComposition(
     '    port: 0',
     "- name: 'assembled-platform-account-provider'",
     "- name: '@deepseek-ai/dsh-platform-account-http'",
-    ...(origin === undefined ? [] : ['  config:', `    origin: '${origin}'`]),
+    ...(origin === undefined ? [] : ['  config:', '    origins:', `      - '${origin}'`]),
     '',
   ].join('\n'))
   const context = new Context()

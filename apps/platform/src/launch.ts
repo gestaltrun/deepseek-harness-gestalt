@@ -78,6 +78,7 @@ export async function launchOperatedPlatform(
   const env = options.env ?? process.env
   const config = loadOperatedPlatformConfig(env)
   const environment = loadOperatedPlatformEnvironment(config.environment)
+  const productOrigins = [environment.origin, 'https://localhost', 'capacitor://localhost']
   const listen = loadListenConfig(env)
   const createPostgres = options.adapters?.createPostgres ?? (value => new pg.Pool(value))
   const connect = options.adapters?.connectRedis ?? connectRedis
@@ -138,7 +139,7 @@ export async function launchOperatedPlatform(
         })
       },
     })
-    await context.plugin(PlatformAccountHttp, { origin: environment.origin })
+    await context.plugin(PlatformAccountHttp, { origins: productOrigins })
     const relay = new RemoteRelayProvider(context, {
       instanceId: parseRelayInstanceId(config.relay.instanceId),
       routeStore: remoteAccess.routeStore,
@@ -190,13 +191,13 @@ export async function launchOperatedPlatform(
       apply: applyRemoteAccessHttp,
       inject: remoteAccessHttpInject,
       name: remoteAccessHttpName,
-    }, { origin: environment.origin })
+    }, { origins: productOrigins })
     await context.plugin({
       Config: RemoteAttachmentsHttpConfig,
       apply: applyRemoteAttachmentsHttp,
       inject: remoteAttachmentsHttpInject,
       name: remoteAttachmentsHttpName,
-    }, { origin: environment.origin })
+    }, { origins: productOrigins })
     await context.plugin({
       Config: RemoteAccessRelayHttpConfig,
       apply: applyRemoteAccessRelayHttp,

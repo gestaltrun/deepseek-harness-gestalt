@@ -2,7 +2,7 @@
 
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
-import { writeRetryAfterError } from '@deepseek-ai/dsh-host-webserver'
+import { CorsOriginPolicy, writeRetryAfterError } from '@deepseek-ai/dsh-host-webserver'
 import { RemoteAccessError, type PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { parseAttachmentCapability, type AttachmentCapability } from '@deepseek-ai/dsh-remote-protocol'
 import z from '@deepseek-ai/schemastery'
@@ -16,11 +16,11 @@ const MAX_JSON_BYTES = 4 * 1024
 
 /** HTTP Consumer configuration. */
 export interface Config {
-  /** Trusted browser origin allowed to call the routes. */
-  origin: string
+  /** Exact product origins allowed to call the routes. */
+  origins: string[]
 }
 /** Validated HTTP Consumer configuration. */
-export const Config: z<Config> = z.object({ origin: z.string().required() })
+export const Config: z<Config> = z.object({ origins: z.array(z.string()).min(1).required() })
 /** Cordis plugin name. */
 export const name = 'remote-attachments-http'
 /** Required blob store, pairing authority, and HTTP route registry. */
@@ -66,13 +66,13 @@ type AttachmentRouteHandler = (
 
 /** Register the bounded attachment blob routes over the mounted blob store. */
 export function apply(ctx: Context, config: Config): void {
-  const origin = new URL(config.origin).origin
+  const origins = new CorsOriginPolicy(config.origins, 'Remote Attachments HTTP')
   const store = ctx.remoteAttachments
   /** Wrap one route with the shared CORS, method, pairing-authentication, and failure preludes. */
   const route = (handle: AttachmentRouteHandler) =>
     async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       try {
-        if (handleCors(req, res, origin)) return
+        if (handleCors(req, res, origins)) return
         if (req.method !== 'POST') throw new RemoteAttachmentHttpError(405, 'METHOD_NOT_ALLOWED', 'Remote Attachments route requires POST')
         await handle(req, res, await ctx.remoteAttachmentAuthority.authenticate({ headers: req.headers }))
       } catch (error) {
@@ -217,13 +217,14 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   return value as Record<string, unknown>
 }
 
-function handleCors(req: IncomingMessage, res: ServerResponse, allowedOrigin: string): boolean {
+function handleCors(req: IncomingMessage, res: ServerResponse, allowedOrigins: CorsOriginPolicy): boolean {
   const requestOrigin = req.headers.origin
   if (requestOrigin !== undefined) {
-    if (parseRequestOrigin(requestOrigin) !== allowedOrigin) {
+    const parsedOrigin = allowedOrigins.match(requestOrigin)
+    if (parsedOrigin === undefined) {
       throw new RemoteAttachmentHttpError(403, 'ORIGIN_DENIED', 'Remote Attachments request origin is not trusted')
     }
-    res.setHeader('access-control-allow-origin', allowedOrigin)
+    res.setHeader('access-control-allow-origin', parsedOrigin)
     res.setHeader('vary', 'Origin')
   }
   if (req.method !== 'OPTIONS') return false
@@ -234,16 +235,6 @@ function handleCors(req: IncomingMessage, res: ServerResponse, allowedOrigin: st
   })
   res.end()
   return true
-}
-
-/** Parse one Origin header; a malformed value can never equal the trusted origin. */
-function parseRequestOrigin(value: string): string | undefined {
-  try {
-    return new URL(value).origin
-  } catch {
-    // Only the equality check above consumes the parsed origin, so a malformed header falls through to denial.
-    return undefined
-  }
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } as const

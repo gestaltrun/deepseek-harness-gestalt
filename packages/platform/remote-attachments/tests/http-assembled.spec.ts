@@ -443,6 +443,20 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(trusted.headers.get('access-control-allow-origin')).toBe('https://mobile.example')
   })
 
+  it('answers encrypted attachment preflight for both shipped Capacitor origins', async () => {
+    const { origin } = await start({
+      origins: ['https://mobile.example', 'https://localhost', 'capacitor://localhost'],
+    })
+    for (const clientOrigin of ['https://localhost', 'capacitor://localhost']) {
+      const response = await fetch(`${origin}/v1/remote-attachments`, {
+        method: 'OPTIONS',
+        headers: { origin: clientOrigin, 'access-control-request-method': 'POST' },
+      })
+      expect(response.status).toBe(204)
+      expect(response.headers.get('access-control-allow-origin')).toBe(clientOrigin)
+    }
+  })
+
   it('rejects malformed, non-object, and oversized JSON bodies and non-canonical capabilities', async () => {
     const { origin } = await start()
     const headers = { 'content-type': 'application/json', 'x-test-pairing': 'pairing-a' }
@@ -711,7 +725,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
   })
 
   it('fails loud when the configured browser origin is not a URL', () => {
-    expect(() => { apply({} as Context, { origin: 'not a URL' }) }).toThrow()
+    expect(() => { apply({} as Context, { origins: ['not a URL'] }) }).toThrow()
   })
 })
 
@@ -868,6 +882,7 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
 async function start(options: {
   store?: Partial<RemoteAttachmentStoreOptions>
   admit?: (bytes: number) => Promise<RemoteAttachmentQuotaReservation>
+  origins?: string[]
 } = {}): Promise<{
   origin: string
   store: RemoteAttachmentStoreProvider
@@ -909,7 +924,7 @@ async function start(options: {
     },
     effect(register: () => () => void) { register() },
   } as unknown as Context
-  apply(fake, { origin: 'https://mobile.example' })
+  apply(fake, { origins: options.origins ?? ['https://mobile.example'] })
   const http = createServer((req, res) => {
     const route = routes.get(new URL(req.url ?? '/', 'http://localhost').pathname)
     if (route === undefined) { res.writeHead(404).end(); return }

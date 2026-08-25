@@ -6,6 +6,7 @@
   name: './src/provider.ts'
 - name: '@deepseek-ai/dsh-remote-access-http'
   config:
-    origin: 'https://mobile.example.com'
+    origins:
+      - 'https://mobile.example.com'
 - id: personal-pairing-keyless-scenario
   name: './start.ts'

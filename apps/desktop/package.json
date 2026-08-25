@@ -51,7 +51,6 @@
     "@deepseek-ai/dsh-platform-account-core": "workspace:^",
     "@deepseek-ai/dsh-platform-account-http": "workspace:^",
     "@deepseek-ai/dsh-remote-access-http": "workspace:^",
-    "@deepseek-ai/dsh-session": "workspace:^",
     "@deepseek-ai/dsh-session-persistence-sqlite": "workspace:^",
     "@deepseek-ai/dsh-session-query-sqlite": "workspace:^",
     "@deepseek-ai/dsh-storage": "workspace:^",

@@ -17,6 +17,7 @@ import {
   RemoteAccessService,
   RemoteAccessError,
   type PersonalPairingProviderOptions,
+  type PersonalPairingAccessTransaction,
   deriveAuthenticationWords,
   parseDevicePrincipalId,
   parsePairingChallengeId,
@@ -591,12 +592,12 @@ describe('PersonalPairingProvider', () => {
     const originalTransaction = settledAuthority.runPairingTransaction.bind(settledAuthority)
     let removeBeforeNextTransaction = false
     vi.spyOn(settledAuthority, 'runPairingTransaction').mockImplementation(async (operation) => {
-      return await originalTransaction(async (state) => {
+      return await originalTransaction(async (state, access) => {
         if (removeBeforeNextTransaction) {
           state.endpointPublicationRevocations.delete(pendingPairingId)
           removeBeforeNextTransaction = false
         }
-        const result = await operation(state)
+        const result = await operation(state, access)
         if (typeof result === 'object' && result !== null
           && 'pendingPairingId' in result && result.pendingPairingId === pendingPairingId) {
           removeBeforeNextTransaction = true
@@ -1097,14 +1098,14 @@ describe('PersonalPairingProvider', () => {
       })
       const transaction = authority.runPairingTransaction.bind(authority)
       let interfere = false
-      vi.spyOn(authority, 'runPairingTransaction').mockImplementation(async operation => await transaction(async (state) => {
+      vi.spyOn(authority, 'runPairingTransaction').mockImplementation(async operation => await transaction(async (state, access) => {
         if (interfere) {
           const retained = state.endpointPublicationRevocations.get(pairing.endpointPendingPairingId)
           if (race === 'deleted') state.endpointPublicationRevocations.delete(pairing.endpointPendingPairingId)
           else if (retained !== undefined) retained.pairingRemoved = true
           interfere = false
         }
-        const result = await operation(state)
+        const result = await operation(state, access)
         if (typeof result === 'object' && result !== null && 'pendingPairingId' in result) interfere = true
         return result
       }))
@@ -1719,6 +1720,38 @@ describe('PersonalPairingProvider', () => {
     expect(relay.revokeRoute).toHaveBeenCalledOnce()
     expect(await provider.getMobileAccessState(desktop)).toEqual({ enabled: false })
     await provider.dispose()
+  })
+
+  it('settles Desktop access through the pairing transaction access face', async () => {
+    const authority = new MemoryPersonalPairingAuthorityStore()
+    const runPairingTransaction = authority.runPairingTransaction.bind(authority)
+    const routeId = parseRelayRouteId('transaction-route')
+    const transactionGetDesktop = vi.fn(async () => ({ enabled: false }))
+    const transactionEnableDesktop = vi.fn(async () => routeId)
+    const access: PersonalPairingAccessTransaction = {
+      getDesktop: transactionGetDesktop,
+      enableDesktop: transactionEnableDesktop,
+      disableDesktop: vi.fn(async () => []),
+      completeRouteRevocation: vi.fn(async () => {}),
+    }
+    vi.spyOn(authority, 'runPairingTransaction').mockImplementation(async operation =>
+      await runPairingTransaction(async state => await operation(state, access)))
+    const getDesktop = vi.spyOn(authority, 'getDesktop')
+    const enableDesktop = vi.spyOn(authority, 'enableDesktop')
+    const provider = configuredProvider({
+      authority,
+      randomId: kind => kind === 'relay-route' ? routeId : `${kind}-transaction-access`,
+    })
+
+    await expect(provider.setMobileAccess({
+      desktop: authentication('desktop-installation'),
+      enabled: true,
+    })).resolves.toEqual({ enabled: true })
+
+    expect(transactionGetDesktop).toHaveBeenCalledOnce()
+    expect(transactionEnableDesktop).toHaveBeenCalledOnce()
+    expect(getDesktop).not.toHaveBeenCalled()
+    expect(enableDesktop).not.toHaveBeenCalled()
   })
 
   it('does not consult Relay credential generation while enabling a new route', async () => {

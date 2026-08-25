@@ -3,6 +3,7 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import { CorsOriginPolicy, writeRetryAfterError } from '@deepseek-ai/dsh-host-webserver'
+import { AccountError } from '@deepseek-ai/dsh-platform-account'
 import { RemoteAccessError, type PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { parseAttachmentCapability, type AttachmentCapability } from '@deepseek-ai/dsh-remote-protocol'
 import z from '@deepseek-ai/schemastery'
@@ -249,12 +250,23 @@ function answerError(res: ServerResponse, error: unknown): void {
     writeRetryAfterError(res, error, error.code === 'QUOTA' || error.code === 'PLATFORM_CAPACITY' ? 429 : 409)
     return
   }
+  if (error instanceof AccountError) {
+    writeRetryAfterError(
+      res,
+      error,
+      error.code === 'QUOTA' || error.code === 'PLATFORM_CAPACITY'
+        ? 429
+        : error.code.startsWith('SESSION_') || error.code.startsWith('PROOF_') ? 401 : 400,
+    )
+    return
+  }
   const storeError = remoteAttachmentFailure(error)
   if (storeError?.code === 'PLATFORM_CAPACITY') {
     writeRetryAfterError(res, storeError, 429)
     return
   }
   const { status, body } = toFailureView(error)
+  if (status === 500) console.error('[remote-attachments-http] unexpected request failure:', error)
   answerJson(res, status, body)
 }
 

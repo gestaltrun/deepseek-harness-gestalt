@@ -14,6 +14,7 @@ import {
   parsePendingPairingId,
   parsePersonalPairingId,
   type PendingPairingId,
+  type PersonalPairingAccessTransaction,
   type PersonalPairingAuthorityStore,
   type PersonalPairingId,
   type PersonalPairingActivity,
@@ -175,7 +176,10 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
   }
 
   async runPairingTransaction<T>(
-    operation: (state: PersonalPairingTransactionState) => Promise<T>,
+    operation: (
+      state: PersonalPairingTransactionState,
+      access: PersonalPairingAccessTransaction,
+    ) => Promise<T>,
   ): Promise<T> {
     const client = await this.pool.connect()
     try {
@@ -193,7 +197,7 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
         [this.databaseIdentity],
       )
       const state = decodePairingTransactionState(loaded.rows[0]?.state)
-      const result = await operation(state)
+      const result = await operation(state, this.transactionAccess(client))
       await client.query(
         `UPDATE remote_access_pairing_transactions
             SET state = $2::jsonb
@@ -218,7 +222,15 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
     accountId: PlatformAccountId,
     desktopInstallationId: InstallationId,
   ): Promise<DesktopRemoteAccessAuthority> {
-    const result = await this.pool.query(
+    return await this.getDesktopUsing(this.pool, accountId, desktopInstallationId)
+  }
+
+  private async getDesktopUsing(
+    client: PlatformSqlClient,
+    accountId: PlatformAccountId,
+    desktopInstallationId: InstallationId,
+  ): Promise<DesktopRemoteAccessAuthority> {
+    const result = await client.query(
       `SELECT active_route_id, revoking_route_ids
          FROM remote_access_desktops
         WHERE database_identity = $1 AND access_key = $2`,
@@ -235,8 +247,17 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
     desktopInstallationId: InstallationId,
     freshRouteId: RelayRouteId,
   ): Promise<RelayRouteId> {
+    return await this.enableDesktopUsing(this.pool, accountId, desktopInstallationId, freshRouteId)
+  }
+
+  private async enableDesktopUsing(
+    client: PlatformSqlClient,
+    accountId: PlatformAccountId,
+    desktopInstallationId: InstallationId,
+    freshRouteId: RelayRouteId,
+  ): Promise<RelayRouteId> {
     const key = accessKey(accountId, desktopInstallationId)
-    const result = await this.pool.query(
+    const result = await client.query(
       `INSERT INTO remote_access_desktops (
          database_identity, access_key, account_id, desktop_installation_id,
          active_route_id, revoking_route_ids
@@ -255,8 +276,16 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
     accountId: PlatformAccountId,
     desktopInstallationId: InstallationId,
   ): Promise<readonly RelayRouteId[]> {
+    return await this.disableDesktopUsing(this.pool, accountId, desktopInstallationId)
+  }
+
+  private async disableDesktopUsing(
+    client: PlatformSqlClient,
+    accountId: PlatformAccountId,
+    desktopInstallationId: InstallationId,
+  ): Promise<readonly RelayRouteId[]> {
     const key = accessKey(accountId, desktopInstallationId)
-    const current = await this.pool.query(
+    const current = await client.query(
       `SELECT active_route_id, revoking_route_ids
          FROM remote_access_desktops
         WHERE database_identity = $1 AND access_key = $2`,
@@ -267,7 +296,7 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
     if (row?.active_route_id !== undefined && row.active_route_id !== null) {
       revoking.add(row.active_route_id)
     }
-    await this.pool.query(
+    await client.query(
       `INSERT INTO remote_access_desktops (
          database_identity, access_key, account_id, desktop_installation_id,
          active_route_id, revoking_route_ids
@@ -276,12 +305,12 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
          SET active_route_id = NULL, revoking_route_ids = EXCLUDED.revoking_route_ids`,
       [this.databaseIdentity, key, accountId, desktopInstallationId, JSON.stringify([...revoking])],
     )
-    await this.pool.query(
+    await client.query(
       `DELETE FROM remote_access_mobile_pairings
         WHERE database_identity = $1 AND account_id = $2 AND desktop_installation_id = $3`,
       [this.databaseIdentity, accountId, desktopInstallationId],
     )
-    const retained = await this.pool.query(
+    const retained = await client.query(
       `SELECT pending_pairing_id
          FROM remote_access_mobile_pairings
         WHERE database_identity = $1 AND account_id = $2 AND desktop_installation_id = $3
@@ -297,8 +326,17 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
     desktopInstallationId: InstallationId,
     routeId: RelayRouteId,
   ): Promise<void> {
+    await this.completeRouteRevocationUsing(this.pool, accountId, desktopInstallationId, routeId)
+  }
+
+  private async completeRouteRevocationUsing(
+    client: PlatformSqlClient,
+    accountId: PlatformAccountId,
+    desktopInstallationId: InstallationId,
+    routeId: RelayRouteId,
+  ): Promise<void> {
     const key = accessKey(accountId, desktopInstallationId)
-    const current = await this.pool.query(
+    const current = await client.query(
       `SELECT active_route_id, revoking_route_ids
          FROM remote_access_desktops
         WHERE database_identity = $1 AND access_key = $2`,
@@ -308,19 +346,33 @@ export class PostgresPersonalPairingAuthorityStore implements PersonalPairingAut
     if (row === undefined) return
     const revoking = decodeRouteIds(row.revoking_route_ids).filter(id => id !== routeId)
     if (row.active_route_id === null && revoking.length === 0) {
-      await this.pool.query(
+      await client.query(
         `DELETE FROM remote_access_desktops
           WHERE database_identity = $1 AND access_key = $2`,
         [this.databaseIdentity, key],
       )
       return
     }
-    await this.pool.query(
+    await client.query(
       `UPDATE remote_access_desktops
           SET revoking_route_ids = $3::jsonb
         WHERE database_identity = $1 AND access_key = $2`,
       [this.databaseIdentity, key, JSON.stringify(revoking)],
     )
+  }
+
+  private transactionAccess(client: PlatformSqlClient): PersonalPairingAccessTransaction {
+    return {
+      getDesktop: async (accountId, desktopInstallationId) =>
+        await this.getDesktopUsing(client, accountId, desktopInstallationId),
+      enableDesktop: async (accountId, desktopInstallationId, freshRouteId) =>
+        await this.enableDesktopUsing(client, accountId, desktopInstallationId, freshRouteId),
+      disableDesktop: async (accountId, desktopInstallationId) =>
+        await this.disableDesktopUsing(client, accountId, desktopInstallationId),
+      completeRouteRevocation: async (accountId, desktopInstallationId, routeId) => {
+        await this.completeRouteRevocationUsing(client, accountId, desktopInstallationId, routeId)
+      },
+    }
   }
 
   async confirmMobilePairing(authority: MobilePairingAuthority): Promise<void> {

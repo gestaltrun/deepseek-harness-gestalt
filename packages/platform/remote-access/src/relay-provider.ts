@@ -69,6 +69,7 @@ export class RemoteRelayProvider extends RemoteRelayService {
   private readonly schedule: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   private disposed = false
   private deliverySequence = 0
+  private lastConnectedAt = 0
   private disposeTransaction: Promise<void> | undefined
   private coordinatorStopped = false
 
@@ -240,6 +241,8 @@ export class RemoteRelayProvider extends RemoteRelayService {
       if (authorization === undefined) {
         throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay credential is invalid')
       }
+      const observedAt = this.now()
+      const connectedAt = this.nextConnectedAt(observedAt)
       const entry: RelayDirectoryEntry = {
         routeId: input.message.routeId,
         attachmentId: input.message.attachmentId,
@@ -248,7 +251,8 @@ export class RemoteRelayProvider extends RemoteRelayService {
         connectionToken: this.connectionToken(),
         revision: authorization.revision,
         ...(authorization.pairingSelector === undefined ? {} : { pairingSelector: authorization.pairingSelector }),
-        expiresAt: this.now() + this.config.directoryTtlMs,
+        connectedAt,
+        expiresAt: observedAt + this.config.directoryTtlMs,
       }
       const existing = this.attachments.get(key)
       if (existing !== undefined) {
@@ -356,11 +360,20 @@ export class RemoteRelayProvider extends RemoteRelayService {
     if (message.routeId !== local.entry.routeId || message.sourceAttachmentId !== local.entry.attachmentId) {
       throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay ciphertext source does not match its attachment')
     }
-    await this.recordPairingActivity(local, this.now())
     const target = await this.options.coordinator.locate(message.routeId, message.targetAttachmentId)
-    if (target === undefined || target.expiresAt <= this.now()) {
+    const now = this.now()
+    if (target === undefined || target.expiresAt <= now) {
       throw new RemoteRelayError('REMOTE_OFFLINE', 'Relay target is offline')
     }
+    const entries = await this.options.coordinator.list(message.routeId)
+    const projected = relayReady(target, entries, now).peers.some(
+      (peer: RelayReadyMessage['peers'][number]) => peer.attachmentId === local.entry.attachmentId,
+    )
+    if (!projected) {
+      await this.closeAndDrain(local)
+      throw new RemoteRelayError('RELAY_ATTACHMENT_REJECTED', 'Relay ciphertext source was superseded')
+    }
+    await this.recordPairingActivity(local, now)
     if (this.pendingDeliveries.size >= this.config.maxPendingDeliveries) {
       throw new RemoteRelayError(
         'PLATFORM_CAPACITY',
@@ -617,6 +630,12 @@ export class RemoteRelayProvider extends RemoteRelayService {
 
   private now(): number { return this.options.clock?.now() ?? Date.now() }
 
+  private nextConnectedAt(observedAt: number): number {
+    const connectedAt = Math.max(observedAt, this.lastConnectedAt + 1)
+    this.lastConnectedAt = connectedAt
+    return connectedAt
+  }
+
   private assertOpen(): void {
     if (this.disposed) throw new RemoteRelayError('REMOTE_OFFLINE', 'Platform Instance is offline')
   }
@@ -647,20 +666,24 @@ function relayReady(
     && peer.expiresAt > now
     && peer.revision === local.revision
     && (local.pairingSelector === undefined || peer.pairingSelector === local.pairingSelector))
-  const peersBySelector = new Map<RelayPairingSelector, RelayReadyMessage['peers'][number]>()
+  const peersBySelector = new Map<RelayPairingSelector, RelayDirectoryEntry>()
   for (const peer of candidates) {
     const pairingSelector = peer.pairingSelector ?? local.pairingSelector
       ?? parseRelayPairingSelector('development-keyless-pairing')
-    peersBySelector.set(pairingSelector, {
-      attachmentId: peer.attachmentId,
-      pairingSelector,
-      generation: connectionGeneration(local, peer, pairingSelector),
-    })
+    const selected = peersBySelector.get(pairingSelector)
+    if (selected !== undefined && (selected.connectedAt > peer.connectedAt
+      || (selected.connectedAt === peer.connectedAt && selected.connectionToken > peer.connectionToken))) continue
+    peersBySelector.set(pairingSelector, peer)
   }
+  const peers = [...peersBySelector].map(([pairingSelector, peer]) => ({
+    attachmentId: peer.attachmentId,
+    pairingSelector,
+    generation: connectionGeneration(local, peer, pairingSelector),
+  }))
   return {
     type: 'ready', transportVersion: 1, routeId: local.routeId,
     attachmentId: local.attachmentId,
-    peers: [...peersBySelector.values()],
+    peers,
   }
 }
 

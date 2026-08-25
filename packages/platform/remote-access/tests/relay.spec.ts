@@ -399,6 +399,7 @@ describe('RemoteRelayProvider', () => {
     const selector = parseRelayPairingSelector('pairing-peer-update')
     const mobileGrant = await issueCredential(desktopPlatform, routeId, 'mobile', selector)
     const desktopUpdates: RelayReadyMessage[] = []
+    const desktopCiphertextSources: string[] = []
     const desktop = await desktopPlatform.attach({
       message: {
         type: 'attach', transportVersion: 1, routeId,
@@ -407,6 +408,7 @@ describe('RemoteRelayProvider', () => {
       },
       deliver: async (message) => {
         if (message.type === 'peer-update') desktopUpdates.push({ ...message, type: 'ready' })
+        if (message.type === 'ciphertext') desktopCiphertextSources.push(message.sourceAttachmentId)
       },
     })
     desktopUpdates.length = 0
@@ -434,6 +436,14 @@ describe('RemoteRelayProvider', () => {
       expect.objectContaining({ attachmentId: 'mobile-peer-new', pairingSelector: selector }),
     ])
     expect(desktopUpdates.at(-1)?.peers[0]?.generation).not.toBe(oldGeneration)
+    await expect(first.receive(ciphertext(
+      routeId, 'mobile-peer-old', 'desktop-peer-update', Uint8Array.of(1),
+    ))).rejects.toMatchObject({ code: 'RELAY_ATTACHMENT_REJECTED' })
+    expect(desktopCiphertextSources).toEqual([])
+    await replacement.receive(ciphertext(
+      routeId, 'mobile-peer-new', 'desktop-peer-update', Uint8Array.of(2),
+    ))
+    expect(desktopCiphertextSources).toEqual(['mobile-peer-new'])
     await first.close()
     expect(desktopUpdates.at(-1)?.peers[0]?.attachmentId).toBe('mobile-peer-new')
     await replacement.close()
@@ -1063,6 +1073,7 @@ describe('RemoteRelayProvider', () => {
       instanceId: parseRelayInstanceId('platform-ack-target'),
       connectionToken: parseRelayConnectionToken('stale-connection'),
       revision: grant.revision,
+      connectedAt: 1,
       expiresAt: Date.now() + 10_000,
     })
 
@@ -1133,7 +1144,7 @@ describe('RemoteRelayProvider', () => {
     await badCoordinator.register({
       routeId: badRoute, attachmentId: parseRelayAttachmentId('desktop-bad'), endpoint: 'desktop',
       instanceId: parseRelayInstanceId('platform-missing'), connectionToken: parseRelayConnectionToken('token-bad'),
-      revision: badGrant.revision, expiresAt: Date.now() + 1_000,
+      revision: badGrant.revision, connectedAt: 1, expiresAt: Date.now() + 1_000,
     })
     await expect(badMobile.receive(ciphertext(badRoute, 'mobile-bad', 'desktop-bad', Uint8Array.of(1))))
       .rejects.toThrow('delivery-id source must return 16 bytes')
@@ -1235,6 +1246,7 @@ describe('RemoteRelayProvider', () => {
     const grant = await rotateCredential(platform, routeId, 'mobile')
     const desktopGrant = await issueCredential(platform, routeId, 'desktop')
     const writer = deferred<undefined>()
+    const writerStarted = deferred<undefined>()
     const mobile = await platform.attach({
       message: {
         type: 'attach', transportVersion: 1, routeId,
@@ -1247,11 +1259,14 @@ describe('RemoteRelayProvider', () => {
         type: 'attach', transportVersion: 1, routeId,
         attachmentId: parseRelayAttachmentId('desktop-one'), endpoint: 'desktop', credential: desktopGrant.credential,
       },
-      deliver: async () => { await writer.promise },
+      deliver: async () => {
+        writerStarted.resolve(undefined)
+        await writer.promise
+      },
     })
     const forwarding = mobile.receive(ciphertext(routeId, 'mobile-one', 'desktop-one', Uint8Array.of(1)))
       .then(() => undefined, (error: unknown) => error as RemoteRelayError)
-    await Promise.resolve()
+    await writerStarted.promise
     let disposed = false
     const disposal = platform.dispose().then(() => { disposed = true })
     await new Promise<void>((resolve) => { setImmediate(resolve) })
@@ -1364,7 +1379,7 @@ describe('RemoteRelayProvider', () => {
     coordinator.put({
       routeId, attachmentId: parseRelayAttachmentId('desktop-expired'), endpoint: 'desktop',
       instanceId: parseRelayInstanceId('platform-missing'), connectionToken: parseRelayConnectionToken('expired'),
-      revision: grant.revision, expiresAt: 999,
+      revision: grant.revision, connectedAt: 1, expiresAt: 999,
     })
     await expect(attachment.receive(ciphertext(
       routeId, 'mobile-one', 'desktop-expired', Uint8Array.of(1),
@@ -1372,7 +1387,7 @@ describe('RemoteRelayProvider', () => {
     coordinator.put({
       routeId, attachmentId: parseRelayAttachmentId('desktop-live'), endpoint: 'desktop',
       instanceId: parseRelayInstanceId('platform-missing'), connectionToken: parseRelayConnectionToken('live'),
-      revision: grant.revision, expiresAt: 2_000,
+      revision: grant.revision, connectedAt: 1, expiresAt: 2_000,
     })
     await expect(attachment.receive(ciphertext(
       routeId, 'mobile-one', 'desktop-live', Uint8Array.of(1),

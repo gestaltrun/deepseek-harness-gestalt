@@ -40,6 +40,7 @@ describe('RedisRelayCoordinator', () => {
       instanceId: parseRelayInstanceId('platform-b'),
       connectionToken: parseRelayConnectionToken('connection-one'),
       revision: 3,
+      connectedAt: 1_000,
       expiresAt: 31_000,
     }
     const received: RelayCoordinationEvent[] = []
@@ -83,12 +84,14 @@ describe('RedisRelayCoordinator', () => {
     })).toBe(true)
     await platformA.invalidate({ type: 'invalidate', routeId, revision: 4 })
 
-    expect(received).toEqual([
-      expect.objectContaining({ type: 'ciphertext', ciphertext }),
-      { type: 'delivered', deliveryId: parseRelayDeliveryId('delivery-one') },
-      expect.objectContaining({ type: 'peer-update', attachmentId, revision: entry.revision }),
-      { type: 'invalidate', routeId, revision: 4 },
-    ])
+    await vi.waitFor(() => {
+      expect(received).toEqual([
+        expect.objectContaining({ type: 'ciphertext', ciphertext }),
+        { type: 'delivered', deliveryId: parseRelayDeliveryId('delivery-one') },
+        expect.objectContaining({ type: 'peer-update', attachmentId, revision: entry.revision }),
+        { type: 'invalidate', routeId, revision: 4 },
+      ])
+    })
     expect(bus.published.join('\n')).not.toContain('private prompt')
     expect(bus.queuedMessages).toBe(0)
     await platformA.unregister({ ...entry, expiresAt: 41_000 })
@@ -115,6 +118,59 @@ describe('RedisRelayCoordinator', () => {
 
     expect(await coordinator.publish(parseRelayInstanceId('platform-missing'), event)).toBe(false)
     expect(bus.queuedMessages).toBe(0)
+  })
+
+  it('delivers one instance coordination stream in Redis publication order', async () => {
+    const bus = new FakeRedisBus()
+    const coordinator = new RedisRelayCoordinator({
+      command: bus.client(), subscriber: bus.client(), keyPrefix: 'dsh:production:relay', clock: { now: () => 1_000 },
+    })
+    const instanceId = parseRelayInstanceId('platform-ordered')
+    const routeId = parseRelayRouteId('route-ordered')
+    const desktopAttachmentId = parseRelayAttachmentId('desktop-ordered')
+    const mobileAttachmentId = parseRelayAttachmentId('mobile-ordered')
+    const connectionToken = parseRelayConnectionToken('connection-ordered')
+    const observed: string[] = []
+    let releasePeerUpdate: (() => void) | undefined
+    const peerUpdateReleased = new Promise<void>((resolve) => { releasePeerUpdate = resolve })
+    const stop = await coordinator.listen(instanceId, async (event) => {
+      observed.push(`start:${event.type}`)
+      if (event.type === 'peer-update') await peerUpdateReleased
+      observed.push(`finish:${event.type}`)
+    })
+
+    await coordinator.publish(instanceId, {
+      type: 'peer-update', transportVersion: 1, routeId,
+      attachmentId: desktopAttachmentId,
+      peers: [{
+        attachmentId: mobileAttachmentId,
+        pairingSelector: parseRelayPairingSelector('pairing-ordered'),
+        generation: 1,
+      }],
+      targetConnectionToken: connectionToken,
+      revision: 1,
+    })
+    await coordinator.publish(instanceId, {
+      type: 'ciphertext', transportVersion: 1, routeId,
+      sourceAttachmentId: mobileAttachmentId,
+      targetAttachmentId: desktopAttachmentId,
+      ciphertext: Uint8Array.of(1),
+      sourceInstanceId: parseRelayInstanceId('platform-source'),
+      targetConnectionToken: connectionToken,
+      deliveryId: parseRelayDeliveryId('delivery-ordered'),
+      revision: 1,
+    })
+
+    await vi.waitFor(() => { expect(observed).toContain('start:peer-update') })
+    expect(observed).toEqual(['start:peer-update'])
+    releasePeerUpdate?.()
+    await vi.waitFor(() => {
+      expect(observed).toEqual([
+        'start:peer-update', 'finish:peer-update',
+        'start:ciphertext', 'finish:ciphertext',
+      ])
+    })
+    await stop()
   })
 
   it('validates namespaces, expiry, event kind, and default wall-clock TTL', async () => {
@@ -440,6 +496,7 @@ function directoryEntry(expiresAt: number): RelayDirectoryEntry {
     instanceId: parseRelayInstanceId('platform-a'),
     connectionToken: parseRelayConnectionToken('connection-one'),
     revision: 1,
+    connectedAt: 1,
     expiresAt,
   }
 }

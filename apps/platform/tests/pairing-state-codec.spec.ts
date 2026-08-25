@@ -22,9 +22,9 @@ describe('pairing transaction codec', () => {
   it('round-trips empty state and rejects an invalid document', () => {
     const empty = emptyPairingTransactionState()
     const encoded = encodePairingTransactionState(empty) as Record<string, unknown>
-    expect(encoded.formatVersion).toBe(1)
+    expect(encoded.formatVersion).toBe(2)
     expect(decodePairingTransactionState(encoded)).toEqual(empty)
-    expect(() => decodePairingTransactionState({ ...encoded, formatVersion: 2 })).toThrow(/unsupported/)
+    expect(() => decodePairingTransactionState({ ...encoded, formatVersion: 3 })).toThrow(/unsupported/)
     expect(() => decodePairingTransactionState({ ...encoded, formatVersion: {} })).toThrow(/safe integer/)
     expect(decodePairingTransactionState(undefined).challenges.size).toBe(0)
     expect(() => decodePairingTransactionState('nope')).toThrow(/object/)
@@ -32,6 +32,59 @@ describe('pairing transaction codec', () => {
       ...encodePairingTransactionState(empty) as object,
       settledChallenges: [['id', { outcome: 'unknown' }]],
     })).toThrow(/outcome/)
+  })
+
+  it('encodes endpoint access keys without PostgreSQL-forbidden NUL characters', () => {
+    const state = emptyPairingTransactionState()
+    const key = `${parsePlatformAccountId('account-one')}\u0000${parseInstallationId('desktop-one')}`
+    state.endpointAccessGenerations.set(key, {
+      generation: 1,
+      phase: 'enabled',
+      routeId: parseRelayRouteId('route-one'),
+    })
+
+    const encoded = encodePairingTransactionState(state)
+
+    expect(JSON.stringify(encoded)).not.toContain('\\u0000')
+    expect(decodePairingTransactionState(encoded).endpointAccessGenerations).toEqual(
+      state.endpointAccessGenerations,
+    )
+  })
+
+  it('round-trips a prepared endpoint publication before Relay assigns its revision', () => {
+    const state = emptyPairingTransactionState()
+    const pendingPairingId = parsePendingPairingId('pending-publication')
+    state.endpointPublications.set(pendingPairingId, {
+      accountId: parsePlatformAccountId('account-one'),
+      desktopInstallationId: parseInstallationId('desktop-one'),
+      mobileInstallationId: parseInstallationId('mobile-one'),
+      pendingPairingId,
+      routeId: parseRelayRouteId('route-one'),
+      desktopCredentialDigest: new Uint8Array(32).fill(1),
+      credentialDigest: new Uint8Array(32).fill(2),
+      pairing: {
+        id: parsePersonalPairingId('pairing-one'),
+        devicePrincipal: {
+          id: parseDevicePrincipalId('principal-one'),
+          accountId: parsePlatformAccountId('account-one'),
+          installationId: parseInstallationId('mobile-one'),
+          authority: 'companion-surface',
+        },
+        device: { name: 'Phone', platform: 'android' },
+        pairedAt: 2,
+        lastAccessAt: 3,
+        online: false,
+        desktopInstallationId: parseInstallationId('desktop-one'),
+        endpointPendingPairingId: pendingPairingId,
+        endpointRouteId: parseRelayRouteId('route-one'),
+        endpointDesktopCredentialDigest: new Uint8Array(32).fill(1),
+        endpointCredentialDigest: new Uint8Array(32).fill(2),
+      },
+      accessGeneration: 1,
+    })
+
+    expect(decodePairingTransactionState(encodePairingTransactionState(state)).endpointPublications)
+      .toEqual(state.endpointPublications)
   })
 
   it('persists publication compensation progress without retaining plaintext authority', () => {
@@ -325,7 +378,7 @@ describe('pairing transaction codec', () => {
       cleanup: { resource: Uint8Array.of(4) },
       activeCleanup: { resource: Uint8Array.of(5) },
     })
-    expect(encodePairingTransactionState(recovered)).toMatchObject({ formatVersion: 1 })
+    expect(encodePairingTransactionState(recovered)).toMatchObject({ formatVersion: 2 })
   })
 
   it('rejects malformed or ownership-inconsistent legacy recovery records', () => {

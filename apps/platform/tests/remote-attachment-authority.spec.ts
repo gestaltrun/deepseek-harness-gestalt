@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import { AccountError, parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import { parseAttachmentBlobReservationId, parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { OperatedRemoteAttachmentAuthority } from '../src/remote-attachment-authority.ts'
 
@@ -23,18 +23,23 @@ describe('operated remote attachment authority', () => {
         presentation: { name: 'Real phone', platform: 'ios' as const } },
     }))
     const ownsConfirmedPairing = vi.fn(async () => true)
-    const admitAttachmentBlob = vi.fn(async () => ({
+    const admitAuthenticatedAttachmentBlob = vi.fn(async () => ({
       reservationId: parseAttachmentBlobReservationId('quota-authorized'),
       expiresAt: 999_999,
     }))
     let finishRelease: (() => void) | undefined
-    const releaseAttachmentBlob = vi.fn(() => new Promise<void>((resolve) => {
+    const releaseAuthenticatedAttachmentBlob = vi.fn(() => new Promise<void>((resolve) => {
       finishRelease = resolve
     }))
     const authority = new OperatedRemoteAttachmentAuthority(
       { currentInstallation },
       { ownsConfirmedPairing },
-      { admitAttachmentBlob, releaseAttachmentBlob },
+      {
+        admitAttachmentBlob: async () => { throw new AccountError('PROOF_REPLAYED', 'installation proof was already used') },
+        releaseAttachmentBlob: async () => { throw new AccountError('PROOF_REPLAYED', 'installation proof was already used') },
+        admitAuthenticatedAttachmentBlob,
+        releaseAuthenticatedAttachmentBlob,
+      } as never,
     )
 
     const authenticated = await authority.authenticate({ headers: authenticationHeaders })
@@ -44,7 +49,7 @@ describe('operated remote attachment authority', () => {
     expect(quota.expiresAt).toBe(999_999)
     const firstRelease = quota.release()
     const concurrentRelease = quota.release()
-    expect(releaseAttachmentBlob).toHaveBeenCalledTimes(1)
+    expect(releaseAuthenticatedAttachmentBlob).toHaveBeenCalledTimes(1)
     finishRelease?.()
     await Promise.all([firstRelease, concurrentRelease])
     await quota.release()
@@ -55,8 +60,11 @@ describe('operated remote attachment authority', () => {
     expect(ownsConfirmedPairing).toHaveBeenCalledWith(
       'account-authorized', 'mobile-authorized', pairingId,
     )
-    expect(admitAttachmentBlob).toHaveBeenCalledWith(expect.objectContaining({ bytes: 17 }))
-    expect(releaseAttachmentBlob).toHaveBeenCalledTimes(1)
+    expect(admitAuthenticatedAttachmentBlob).toHaveBeenCalledWith({ accountId: 'account-authorized', bytes: 17 })
+    expect(releaseAuthenticatedAttachmentBlob).toHaveBeenCalledWith({
+      accountId: 'account-authorized', reservationId: 'quota-authorized',
+    })
+    expect(releaseAuthenticatedAttachmentBlob).toHaveBeenCalledTimes(1)
   })
 
   it('rejects a selector missing durable Installation membership', async () => {

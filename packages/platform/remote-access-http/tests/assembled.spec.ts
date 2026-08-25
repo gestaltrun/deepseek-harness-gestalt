@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parseAccountProofJti, parseInstallationId } from '@deepseek-ai/dsh-platform-account'
+import { AccountError, parseAccountProofJti, parseInstallationId } from '@deepseek-ai/dsh-platform-account'
 import {
   MemoryPersonalPairingAuthorityStore,
   PersonalPairingProvider,
@@ -458,6 +458,14 @@ describe('Remote Access HTTP assembled flow', () => {
       raw: JSON.stringify({ operation: 'get-mobile-access', padding: 'x'.repeat(65 * 1024) }),
     })).status).toBe(413)
 
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    remoteAccess.getMobileAccessState.mockRejectedValueOnce(
+      new AccountError('PROOF_REPLAYED', 'installation proof was already used'),
+    )
+    const replayed = await request({ operation: 'get-mobile-access' })
+    expect(replayed.status).toBe(401)
+    await expect(replayed.json()).resolves.toMatchObject({ error: { code: 'PROOF_REPLAYED' } })
+    expect(reported).not.toHaveBeenCalled()
     remoteAccess.getMobileAccessState.mockRejectedValueOnce(
       new RemoteAccessError('PAIRING_CHALLENGE_USED', 'used'),
     )
@@ -469,10 +477,17 @@ describe('Remote Access HTTP assembled flow', () => {
     expect(quota.status).toBe(429)
     expect(quota.headers.get('retry-after')).toBe('60')
     await expect(quota.json()).resolves.toMatchObject({ error: { code: 'QUOTA', retryAfter: 60 } })
+    expect(reported).not.toHaveBeenCalled()
     remoteAccess.getMobileAccessState.mockRejectedValueOnce(new Error('boom'))
     const internal = await request({ operation: 'get-mobile-access' })
     expect(internal.status).toBe(500)
     await expect(internal.json()).resolves.toMatchObject({ error: { code: 'INTERNAL_ERROR' } })
+    expect(reported).toHaveBeenCalledWith('[remote-access-http] unexpected request failure:', {
+      operation: 'get-mobile-access',
+      errorName: 'Error',
+      errorMessage: 'boom',
+    })
+    reported.mockRestore()
   })
 
   it('fails loud when the configured browser origin is not a URL', () => {

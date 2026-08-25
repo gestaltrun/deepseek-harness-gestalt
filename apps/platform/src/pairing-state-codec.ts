@@ -37,7 +37,8 @@ const CHALLENGE_OUTCOMES = new Set<ChallengeOutcome>([
 const PENDING_OUTCOMES = new Set<PendingOutcome>([
   'confirmed', 'rejected', 'disabled', 'collision', 'disposed',
 ])
-const PAIRING_TRANSACTION_FORMAT_VERSION = 1
+const PAIRING_TRANSACTION_FORMAT_VERSION = 2
+const LEGACY_PAIRING_TRANSACTION_FORMAT_VERSION = 1
 
 /** Empty exclusive pairing-transaction document. */
 export function emptyPairingTransactionState(): PersonalPairingTransactionState {
@@ -74,7 +75,7 @@ export function encodePairingTransactionState(state: PersonalPairingTransactionS
     endpointPublications: [...state.endpointPublications].map(([id, publication]) => [id, encodeEndpointPublication(publication)]),
     endpointPublicationRevocations: [...state.endpointPublicationRevocations]
       .map(([id, revocation]) => [id, encodeEndpointRevocation(revocation)]),
-    endpointAccessGenerations: [...state.endpointAccessGenerations],
+    endpointAccessGenerations: encodeEndpointAccessGenerations(state.endpointAccessGenerations),
     challenges: [...state.challenges].map(([id, record]) => [id, encodeChallenge(record)]),
     settledChallenges: [...state.settledChallenges].map(([id, record]) => [id, encodeSettledChallenge(record)]),
     completions: [...state.completions].map(([id, record]) => [id, encodeCompletion(record)]),
@@ -102,13 +103,17 @@ export function decodePairingTransactionState(value: unknown): PersonalPairingTr
   const record = asRecord(value, 'pairing transaction state')
   if (!Object.hasOwn(record, 'formatVersion')) return decodeLegacyPairingTransactionState(record)
   const formatVersion = asSafeInteger(record.formatVersion, 'pairing transaction formatVersion')
-  if (formatVersion !== PAIRING_TRANSACTION_FORMAT_VERSION) {
+  if (formatVersion !== PAIRING_TRANSACTION_FORMAT_VERSION
+    && formatVersion !== LEGACY_PAIRING_TRANSACTION_FORMAT_VERSION) {
     throw new TypeError('pairing transaction format version is unsupported')
   }
   return decodePairingTransactionFields(
     record,
     decodeMap(record.completions, 'completions', parsePairingCompletionId, decodeCompletion),
     decodeMap(record.pending, 'pending', parsePendingPairingId, decodePending),
+    formatVersion === LEGACY_PAIRING_TRANSACTION_FORMAT_VERSION
+      ? decodeLegacyEndpointAccessGenerations(record.endpointAccessGenerations)
+      : decodeEndpointAccessGenerations(record.endpointAccessGenerations),
   )
 }
 
@@ -116,6 +121,7 @@ function decodePairingTransactionFields(
   record: Record<string, unknown>,
   completions: PersonalPairingTransactionState['completions'],
   pending: PersonalPairingTransactionState['pending'],
+  endpointAccessGenerations: PersonalPairingTransactionState['endpointAccessGenerations'],
 ): PersonalPairingTransactionState {
   const orphans = new Map<CleanupRecord<Uint8Array>, OrphanPendingCleanupRecord>()
   for (const encoded of asArray(record.orphanPendingCleanups, 'orphanPendingCleanups')) {
@@ -131,7 +137,7 @@ function decodePairingTransactionFields(
       record.endpointPublicationRevocations, 'endpointPublicationRevocations',
       parsePendingPairingId, decodeEndpointRevocation,
     ),
-    endpointAccessGenerations: decodeEndpointAccessGenerations(record.endpointAccessGenerations),
+    endpointAccessGenerations,
     challenges: decodeMap(record.challenges, 'challenges', parsePairingChallengeId, decodeChallenge),
     settledChallenges: decodeMap(
       record.settledChallenges, 'settledChallenges', parsePairingChallengeId, decodeSettledChallenge,
@@ -139,7 +145,7 @@ function decodePairingTransactionFields(
     completions,
     pending,
     settledPending: decodeMap(record.settledPending, 'settledPending', parsePendingPairingId, decodeSettledPending),
-    pairings: decodeMap(record.pairings, 'pairings', parsePersonalPairingId, decodeStoredPairing),
+    pairings: decodeMap(record.pairings, 'pairings', parsePersonalPairingId, decodeConfirmedStoredPairing),
     principalIds: new Set(asArray(record.principalIds, 'principalIds').map(parseDevicePrincipalId)),
     orphanPendingCleanups: orphans,
     accountChallengeAt: decodeNumberListMap(record.accountChallengeAt, 'accountChallengeAt'),
@@ -184,7 +190,7 @@ function decodeLegacyPairingTransactionState(record: Record<string, unknown>): P
     endpointPublicationRevocations: [],
     endpointAccessGenerations: [],
     ...record,
-  }, safeCompletions, safePending)
+  }, safeCompletions, safePending, decodeLegacyEndpointAccessGenerations(record.endpointAccessGenerations))
   for (const completion of unsafeCompletions) recoverLegacyChallenge(state, completion)
   for (const [pendingId, pending] of unsafePending) {
     recoverLegacyChallenge(state, pending)
@@ -356,7 +362,43 @@ function decodeEndpointRevocation(value: unknown): EndpointPairingRevocation {
   return decoded
 }
 
+function encodeEndpointAccessGenerations(
+  value: PersonalPairingTransactionState['endpointAccessGenerations'],
+): unknown[] {
+  return [...value].map(([key, generation]) => {
+    const parts = key.split('\u0000')
+    if (parts.length !== 2) throw new TypeError('endpoint access generation key is invalid')
+    const accountId = parsePlatformAccountId(parts[0])
+    const desktopInstallationId = parseInstallationId(parts[1])
+    return [[accountId, desktopInstallationId], generation]
+  })
+}
+
 function decodeEndpointAccessGenerations(value: unknown): PersonalPairingTransactionState['endpointAccessGenerations'] {
+  const result = new Map<string, PersonalPairingTransactionState['endpointAccessGenerations'] extends Map<string, infer V> ? V : never>()
+  for (const entry of asArray(value, 'endpointAccessGenerations')) {
+    if (!Array.isArray(entry) || entry.length !== 2 || !Array.isArray(entry[0]) || entry[0].length !== 2) {
+      throw new TypeError('endpointAccessGenerations entry is invalid')
+    }
+    const accountId = parsePlatformAccountId(entry[0][0])
+    const desktopInstallationId = parseInstallationId(entry[0][1])
+    const record = asRecord(entry[1], 'endpoint access generation')
+    rejectUnsupportedKeys(record, ['generation', 'phase', 'routeId'], 'endpoint access generation')
+    if (record.phase !== 'enabled' && record.phase !== 'disabled') {
+      throw new TypeError('endpoint access generation phase is invalid')
+    }
+    result.set(`${accountId}\u0000${desktopInstallationId}`, {
+      generation: positiveSafeInteger(record.generation, 'endpoint access generation'),
+      phase: record.phase,
+      ...(record.routeId === undefined ? {} : { routeId: parseRelayRouteId(record.routeId) }),
+    })
+  }
+  return result
+}
+
+function decodeLegacyEndpointAccessGenerations(
+  value: unknown,
+): PersonalPairingTransactionState['endpointAccessGenerations'] {
   const result = new Map<string, PersonalPairingTransactionState['endpointAccessGenerations'] extends Map<string, infer V> ? V : never>()
   for (const entry of asArray(value, 'endpointAccessGenerations')) {
     if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') {
@@ -630,16 +672,28 @@ function decodeStoredPairing(value: unknown): StoredPersonalPairing {
         record.endpointRelayRevision, 'stored pairing endpoint Relay revision',
       ) }),
   }
-  const hasEndpointConfirmation = pairing.endpointCredentialDigest !== undefined
-    || pairing.endpointDesktopCredentialDigest !== undefined || pairing.endpointRelayRevision !== undefined
-  if (hasEndpointConfirmation && (pairing.endpointCredentialDigest === undefined
-    || pairing.endpointDesktopCredentialDigest === undefined || pairing.endpointRelayRevision === undefined)) {
+  const endpointFields = [
+    pairing.endpointPendingPairingId,
+    pairing.endpointRouteId,
+    pairing.endpointDesktopCredentialDigest,
+    pairing.endpointCredentialDigest,
+  ]
+  if ((endpointFields.some(field => field !== undefined) || pairing.endpointRelayRevision !== undefined)
+    && endpointFields.some(field => field === undefined)) {
     throw new TypeError('stored pairing endpoint confirmation is incomplete')
   }
   if (pairing.endpointCredentialDigest !== undefined && pairing.endpointDesktopCredentialDigest !== undefined) {
     assertDistinctCredentialDigests(
       pairing.endpointDesktopCredentialDigest, pairing.endpointCredentialDigest, 'stored pairing endpoint',
     )
+  }
+  return pairing
+}
+
+function decodeConfirmedStoredPairing(value: unknown): StoredPersonalPairing {
+  const pairing = decodeStoredPairing(value)
+  if (pairing.endpointPendingPairingId !== undefined && pairing.endpointRelayRevision === undefined) {
+    throw new TypeError('stored pairing endpoint confirmation is incomplete')
   }
   return pairing
 }

@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AccountError } from '@deepseek-ai/dsh-platform-account'
 import { parseAttachmentBlobReservationId, parsePersonalPairingId, RemoteAccessError } from '@deepseek-ai/dsh-remote-access'
 import {
   deriveCompanionAttachmentKey,
@@ -530,13 +531,22 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(overCapacity.status).toBe(503)
     expect(await errorBody(overCapacity)).toMatchObject({ code: 'ATTACHMENT_CAPACITY' })
 
-    const exploded = await fetch(`${crowded.origin}/v1/remote-attachments`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'explode' },
-      body: second.ciphertext,
-    })
-    expect(exploded.status).toBe(500)
-    expect(await errorBody(exploded)).toMatchObject({ code: 'INTERNAL_ERROR' })
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const exploded = await fetch(`${crowded.origin}/v1/remote-attachments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'explode' },
+        body: second.ciphertext,
+      })
+      expect(exploded.status).toBe(500)
+      expect(await errorBody(exploded)).toMatchObject({ code: 'INTERNAL_ERROR' })
+      expect(reported).toHaveBeenCalledWith(
+        '[remote-attachments-http] unexpected request failure:',
+        expect.objectContaining({ message: 'authority exploded' }),
+      )
+    } finally {
+      reported.mockRestore()
+    }
   })
 
   it('admits the product upload through Remote Access quota and preserves capacity retry guidance', async () => {
@@ -570,6 +580,24 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
     expect(response.status).toBe(409)
     expect(await errorBody(response)).toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+  })
+
+  it('projects consumed Installation proofs as authentication failures', async () => {
+    const { origin } = await start()
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const response = await fetch(`${origin}/v1/remote-attachments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'proof-replayed' },
+        body: Uint8Array.of(1),
+      })
+
+      expect(response.status).toBe(401)
+      expect(await errorBody(response)).toMatchObject({ code: 'PROOF_REPLAYED' })
+      expect(reported).not.toHaveBeenCalled()
+    } finally {
+      reported.mockRestore()
+    }
   })
 
   it.each([
@@ -906,6 +934,7 @@ async function start(options: {
         const value = headers['x-test-pairing'] ?? headers['x-gestalt-pairing-id']
         if (typeof value !== 'string') throw new Error('pairing header is required')
         if (value === 'explode') throw new Error('authority exploded')
+        if (value === 'proof-replayed') throw new AccountError('PROOF_REPLAYED', 'installation proof was already used')
         return {
           pairingId: parsePersonalPairingId(value),
           admit: options.admit ?? (async () => ({

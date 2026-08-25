@@ -21,7 +21,10 @@ export class OperatedRemoteAttachmentAuthority implements RemoteAttachmentAuthor
   constructor(
     private readonly account: Pick<PlatformAccount, 'currentInstallation'>,
     private readonly pairings: Pick<PostgresPersonalPairingAuthorityStore, 'ownsConfirmedPairing'>,
-    private readonly remoteAccess: Pick<PersonalPairingProvider, 'admitAttachmentBlob' | 'releaseAttachmentBlob'>,
+    private readonly remoteAccess: Pick<
+      PersonalPairingProvider,
+      'admitAuthenticatedAttachmentBlob' | 'releaseAuthenticatedAttachmentBlob'
+    >,
   ) {}
 
   async authenticate(input: { headers: IncomingHttpHeaders }): Promise<{
@@ -42,7 +45,10 @@ export class OperatedRemoteAttachmentAuthority implements RemoteAttachmentAuthor
     return {
       pairingId,
       admit: async (bytes) => {
-        const { reservationId, expiresAt } = await this.remoteAccess.admitAttachmentBlob({ owner, bytes })
+        const accountId = authenticated.account.id
+        const { reservationId, expiresAt } = await this.remoteAccess.admitAuthenticatedAttachmentBlob({
+          accountId, bytes,
+        })
         let released = false
         let releaseInFlight: Promise<void> | undefined
         return {
@@ -54,7 +60,7 @@ export class OperatedRemoteAttachmentAuthority implements RemoteAttachmentAuthor
               await releaseInFlight
               return
             }
-            releaseInFlight = this.remoteAccess.releaseAttachmentBlob({ owner, reservationId })
+            releaseInFlight = this.remoteAccess.releaseAuthenticatedAttachmentBlob({ accountId, reservationId })
             try {
               await releaseInFlight
               released = true

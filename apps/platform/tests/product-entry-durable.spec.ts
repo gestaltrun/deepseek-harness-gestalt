@@ -1223,11 +1223,11 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       })),
     }
     const authority = new OperatedRemoteAttachmentAuthority(account, pairings, {
-      admitAttachmentBlob: async () => ({
+      admitAuthenticatedAttachmentBlob: async () => ({
         reservationId: parseAttachmentBlobReservationId('attachment-http-quota'),
         expiresAt: Number.MAX_SAFE_INTEGER,
       }),
-      releaseAttachmentBlob: async () => {},
+      releaseAuthenticatedAttachmentBlob: async () => {},
     })
     const firstOrigin = await startAttachmentHttp(first, authority)
     const secondOrigin = await startAttachmentHttp(second, authority)
@@ -1370,6 +1370,7 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       instanceId: parseRelayInstanceId('instance-observer'),
       connectionToken: parseRelayConnectionToken('connection-fixture'),
       revision: 1,
+      connectedAt: Date.now(),
       expiresAt: Date.now() + 60_000,
     }
     await running.remoteAccess.coordinator.register(directory)

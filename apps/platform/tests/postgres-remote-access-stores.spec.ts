@@ -204,7 +204,7 @@ describe('PostgresPersonalPairingAuthorityStore', () => {
         WHERE database_identity = $1`,
       ['gestalt'],
     )
-    expect(migrated.rows[0]?.state).toMatchObject({ formatVersion: 1, blobSequence: { next: 9 } })
+    expect(migrated.rows[0]?.state).toMatchObject({ formatVersion: 2, blobSequence: { next: 9 } })
 
     const rejected = new PostgresPersonalPairingAuthorityStore('unknown-version', pool)
     await pool.query(
@@ -241,9 +241,11 @@ describe('PostgresPersonalPairingAuthorityStore', () => {
     }
     const store = new PostgresPersonalPairingAuthorityStore('gestalt', pool)
     await store.migrate()
-    await expect(store.runPairingTransaction(async (state) => {
+    await expect(store.runPairingTransaction(async (state, access) => {
+      await access.enableDesktop(ACCOUNT, DESKTOP, parseRelayRouteId('route-uncommitted'))
       state.principalIds.add('principal-uncommitted' as never)
     })).rejects.toThrow('final commit failed')
+    expect(await store.getDesktop(ACCOUNT, DESKTOP)).toEqual({ enabled: false })
     await store.runPairingTransaction(async (state) => {
       expect(state.principalIds.has('principal-uncommitted' as never)).toBe(false)
     })

@@ -470,6 +470,9 @@ importers:
       '@deepseek-ai/dsh-remote-protocol':
         specifier: workspace:^
         version: link:../../packages/platform/remote-protocol
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../packages/core/session
       electron-updater:
         specifier: ^6.8.3
         version: 6.8.9
@@ -519,9 +522,6 @@ importers:
       '@deepseek-ai/dsh-remote-access-http':
         specifier: workspace:^
         version: link:../../packages/platform/remote-access-http
-      '@deepseek-ai/dsh-session':
-        specifier: workspace:^
-        version: link:../../packages/core/session
       '@deepseek-ai/dsh-session-persistence-sqlite':
         specifier: workspace:^
         version: link:../../packages/session/session-persistence-sqlite
@@ -7139,6 +7139,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-platform-account':
+        specifier: workspace:^
+        version: link:../platform-account
       '@deepseek-ai/dsh-remote-access':
         specifier: workspace:^
         version: link:../remote-access

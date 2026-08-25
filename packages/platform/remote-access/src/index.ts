@@ -362,15 +362,30 @@ export interface PersonalPairingActivity {
   online: boolean
 }
 
+/** Desktop access operations that settle with one pairing-state transaction. */
+export interface PersonalPairingAccessTransaction {
+  /** Read current Desktop access. */
+  getDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<DesktopRemoteAccessAuthority>
+  /** Keep an active route or install the supplied fresh route. */
+  enableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, freshRouteId: RelayRouteId): Promise<RelayRouteId>
+  /** Disable access, remove Mobile grants, and return every route still requiring revocation. */
+  disableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<readonly RelayRouteId[]>
+  /** Mark one route's external Relay revocation complete without touching a replacement route. */
+  completeRouteRevocation(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, routeId: RelayRouteId): Promise<void>
+}
+
 /** Deployment-owned atomic authority store shared by non-sticky Platform Instances. */
-export interface PersonalPairingAuthorityStore extends RelayPairingActivitySink {
+export interface PersonalPairingAuthorityStore extends RelayPairingActivitySink, PersonalPairingAccessTransaction {
   /**
    * Exclusively own the durable short-lived pairing transaction state.
    * Mutations, including cleanup tombstones retained by a rejected operation, must be persisted before settlement.
-   * @param operation - bounded state transition serialized across every Platform Instance.
+   * @param operation - bounded state and Desktop-access transition serialized across every Platform Instance.
    * @returns the operation result after its state changes are durable.
    */
-  runPairingTransaction<T>(operation: (state: PersonalPairingTransactionState) => Promise<T>): Promise<T>
+  runPairingTransaction<T>(operation: (
+    state: PersonalPairingTransactionState,
+    access: PersonalPairingAccessTransaction,
+  ) => Promise<T>): Promise<T>
   /** Read current Desktop access without process-local caching. */
   getDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<DesktopRemoteAccessAuthority>
   /** Atomically keep an active route or install the supplied fresh route. */
@@ -460,11 +475,14 @@ export class MemoryPersonalPairingAuthorityStore implements PersonalPairingAutho
   private readonly pairingLeases = new Map<RelayCredentialFingerprint, Map<RelayConnectionToken, number>>()
   private pairingSerial: Promise<void> = Promise.resolve()
 
-  runPairingTransaction<T>(operation: (state: PersonalPairingTransactionState) => Promise<T>): Promise<T> {
+  runPairingTransaction<T>(operation: (
+    state: PersonalPairingTransactionState,
+    access: PersonalPairingAccessTransaction,
+  ) => Promise<T>): Promise<T> {
     const result = this.pairingSerial.then(
-      () => operation(this.pairingTransactions),
+      () => operation(this.pairingTransactions, this),
       /* v8 ignore next -- pairingSerial is always reassigned to a rejection-swallowing then() */
-      () => operation(this.pairingTransactions),
+      () => operation(this.pairingTransactions, this),
     )
     this.pairingSerial = result.then(() => undefined, () => undefined)
     return result
@@ -940,6 +958,7 @@ function isEndpointStoredPairing(pairing: StoredPersonalPairing): pairing is End
 /** Provider combining instance-local handshake work with deployment-owned confirmed authority. */
 export class PersonalPairingProvider extends RemoteAccessService {
   private transactionState: PersonalPairingTransactionState | undefined
+  private transactionAccess: PersonalPairingAccessTransaction | undefined
   private serial: Promise<void> = Promise.resolve()
   private readonly clock: { now(): number }
   private readonly randomBytes: (size: number) => Uint8Array
@@ -1460,8 +1479,8 @@ export class PersonalPairingProvider extends RemoteAccessService {
         const { account, installation } = await this.authenticate(input.desktop, 'desktop')
         this.evictExpiredRecords()
         if (input.enabled) {
-          const before = await this.authority.getDesktop(account.id, installation.id)
-          const routeId = await this.authority.enableDesktop(
+          const before = await this.requireTransactionAccess().getDesktop(account.id, installation.id)
+          const routeId = await this.requireTransactionAccess().enableDesktop(
             account.id,
             installation.id,
             this.options.relay === undefined
@@ -1478,7 +1497,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
           return { enabled: true }
         }
         this.acknowledgeStoredEndpointRevocations(account.id, installation.id, 'desktop')
-        const routeIds = await this.authority.disableDesktop(account.id, installation.id)
+        const routeIds = await this.requireTransactionAccess().disableDesktop(account.id, installation.id)
         const accessKeyValue = accessKey(account.id, installation.id)
         const retainedAccess = this.requireTransactions().endpointAccessGenerations.get(accessKeyValue)
         this.requireTransactions().endpointAccessGenerations.set(accessKeyValue, {
@@ -1492,11 +1511,11 @@ export class PersonalPairingProvider extends RemoteAccessService {
         if (this.options.relay !== undefined) {
           await cleanupAll(routeIds.map(routeId => async () => {
             await this.options.relay?.revokeRoute(routeId)
-            await this.authority.completeRouteRevocation(account.id, installation.id, routeId)
+            await this.requireTransactionAccess().completeRouteRevocation(account.id, installation.id, routeId)
           }))
         } else {
           await cleanupAll(routeIds.map(routeId => async () => {
-            await this.authority.completeRouteRevocation(account.id, installation.id, routeId)
+            await this.requireTransactionAccess().completeRouteRevocation(account.id, installation.id, routeId)
           }))
         }
         for (const challenge of [...this.challenges.values()]) {
@@ -1999,46 +2018,20 @@ export class PersonalPairingProvider extends RemoteAccessService {
   }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }> {
     return this.exclusive(async () => {
       const { account } = await this.authenticateOwner(input.owner)
-      this.evictExpiredBlobReservations()
-      this.assertCapacity()
-      if (!Number.isSafeInteger(input.bytes) || input.bytes < 0) {
-        throw new TypeError('Attachment blob size must be a non-negative integer')
-      }
-      const now = this.clock.now()
-      const uploads = this.pruneUploads(this.blobUploads.get(account.id) ?? [], now)
-      const concurrent = [...this.blobs.values()].filter(blob => blob.accountId === account.id).length
-      const bytesToday = uploads.reduce((total, upload) => total + upload.bytes, 0)
-      if (input.bytes > OPEN_REGISTRATION_QUOTAS.blobBytes || concurrent >= OPEN_REGISTRATION_QUOTAS.concurrentBlobs) {
-        throw new RemoteAccessError(
-          'QUOTA',
-          'Platform Account has reached its attachment blob limit',
-          OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
-        )
-      }
-      if (bytesToday + input.bytes > OPEN_REGISTRATION_QUOTAS.blobBytesPerAccountPerDay) {
-        const oldest = uploads[0]
-        /* v8 ignore next 6 -- the 100 MiB per-blob cap means a daily overflow always has a prior upload */
-        if (oldest === undefined) {
-          throw new RemoteAccessError(
-            'QUOTA',
-            'Platform Account has reached its attachment blob limit',
-            OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
-          )
-        }
-        throw new RemoteAccessError(
-          'QUOTA',
-          'Platform Account has reached its attachment blob limit',
-          retryAfterSecondsUntil(oldest.at, ACCOUNT_DAILY_QUOTA_WINDOW_MS, now),
-        )
-      }
-      this.blobSequence.next += 1
-      const reservationId = parseAttachmentBlobReservationId(`blob-${String(this.blobSequence.next)}`)
-      const expiresAt = now + this.attachmentReservationLifetimeMs
-      this.blobs.set(reservationId, { accountId: account.id, bytes: input.bytes, expiresAt })
-      uploads.push({ at: now, bytes: input.bytes })
-      this.blobUploads.set(account.id, uploads)
-      return { reservationId, expiresAt }
+      return this.admitAttachmentBlobForAccount(account.id, input.bytes)
     })
+  }
+
+  /**
+   * Reserve attachment quota after a same-process caller has verified the current Installation proof.
+   * @param input - authenticated Account id and declared ciphertext size.
+   * @returns opaque reservation id plus its durable absolute lease expiry.
+   */
+  async admitAuthenticatedAttachmentBlob(input: {
+    accountId: AuthenticatedInstallationView['account']['id']
+    bytes: number
+  }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }> {
+    return this.exclusive(() => this.admitAttachmentBlobForAccount(input.accountId, input.bytes))
   }
 
   async releaseAttachmentBlob(input: {
@@ -2047,12 +2040,19 @@ export class PersonalPairingProvider extends RemoteAccessService {
   }): Promise<void> {
     await this.exclusive(async () => {
       const { account } = await this.authenticateOwner(input.owner)
-      const blob = this.blobs.get(input.reservationId)
-      if (blob === undefined || blob.accountId !== account.id) {
-        throw new TypeError('Attachment blob reservation is invalid')
-      }
-      this.blobs.delete(input.reservationId)
+      this.releaseAttachmentBlobForAccount(account.id, input.reservationId)
     })
+  }
+
+  /**
+   * Release attachment quota after a same-process caller has verified the current Installation proof.
+   * @param input - authenticated Account id and owned reservation id.
+   */
+  async releaseAuthenticatedAttachmentBlob(input: {
+    accountId: AuthenticatedInstallationView['account']['id']
+    reservationId: AttachmentBlobReservationId
+  }): Promise<void> {
+    await this.exclusive(() => { this.releaseAttachmentBlobForAccount(input.accountId, input.reservationId) })
   }
 
   /**
@@ -2067,6 +2067,62 @@ export class PersonalPairingProvider extends RemoteAccessService {
     await this.exclusive(() => {
       this.blobs.delete(reservationId)
     })
+  }
+
+  private admitAttachmentBlobForAccount(
+    accountId: AuthenticatedInstallationView['account']['id'],
+    bytes: number,
+  ): { reservationId: AttachmentBlobReservationId; expiresAt: number } {
+    this.evictExpiredBlobReservations()
+    this.assertCapacity()
+    if (!Number.isSafeInteger(bytes) || bytes < 0) {
+      throw new TypeError('Attachment blob size must be a non-negative integer')
+    }
+    const now = this.clock.now()
+    const uploads = this.pruneUploads(this.blobUploads.get(accountId) ?? [], now)
+    const concurrent = [...this.blobs.values()].filter(blob => blob.accountId === accountId).length
+    const bytesToday = uploads.reduce((total, upload) => total + upload.bytes, 0)
+    if (bytes > OPEN_REGISTRATION_QUOTAS.blobBytes || concurrent >= OPEN_REGISTRATION_QUOTAS.concurrentBlobs) {
+      throw new RemoteAccessError(
+        'QUOTA',
+        'Platform Account has reached its attachment blob limit',
+        OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
+      )
+    }
+    if (bytesToday + bytes > OPEN_REGISTRATION_QUOTAS.blobBytesPerAccountPerDay) {
+      const oldest = uploads[0]
+      /* v8 ignore next 6 -- the 100 MiB per-blob cap means a daily overflow always has a prior upload */
+      if (oldest === undefined) {
+        throw new RemoteAccessError(
+          'QUOTA',
+          'Platform Account has reached its attachment blob limit',
+          OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
+        )
+      }
+      throw new RemoteAccessError(
+        'QUOTA',
+        'Platform Account has reached its attachment blob limit',
+        retryAfterSecondsUntil(oldest.at, ACCOUNT_DAILY_QUOTA_WINDOW_MS, now),
+      )
+    }
+    this.blobSequence.next += 1
+    const reservationId = parseAttachmentBlobReservationId(`blob-${String(this.blobSequence.next)}`)
+    const expiresAt = now + this.attachmentReservationLifetimeMs
+    this.blobs.set(reservationId, { accountId, bytes, expiresAt })
+    uploads.push({ at: now, bytes })
+    this.blobUploads.set(accountId, uploads)
+    return { reservationId, expiresAt }
+  }
+
+  private releaseAttachmentBlobForAccount(
+    accountId: AuthenticatedInstallationView['account']['id'],
+    reservationId: AttachmentBlobReservationId,
+  ): void {
+    const blob = this.blobs.get(reservationId)
+    if (blob === undefined || blob.accountId !== accountId) {
+      throw new TypeError('Attachment blob reservation is invalid')
+    }
+    this.blobs.delete(reservationId)
   }
 
   /** Drain instance-local incomplete crypto work while preserving durable confirmed authority. */
@@ -2423,13 +2479,15 @@ export class PersonalPairingProvider extends RemoteAccessService {
     const owned = async (): Promise<T> => {
       await this.reconcileEndpointPublicationRevocations()
       try {
-        return await this.authority.runPairingTransaction(async (state) => {
+        return await this.authority.runPairingTransaction(async (state, access) => {
           this.transactionState = state
+          this.transactionAccess = access
           try {
             this.evictExpiredBlobReservations()
             return await operation()
           } finally {
             this.transactionState = undefined
+            this.transactionAccess = undefined
           }
         })
       } finally {
@@ -2709,6 +2767,12 @@ export class PersonalPairingProvider extends RemoteAccessService {
     /* v8 ignore next -- exclusive() assigns transactionState before operation() and clears it in finally */
     if (this.transactionState === undefined) throw new Error('Personal Pairing transaction state is not owned')
     return this.transactionState
+  }
+
+  private requireTransactionAccess(): PersonalPairingAccessTransaction {
+    /* v8 ignore next -- runTransaction() assigns transactionAccess before operation() and clears it in finally */
+    if (this.transactionAccess === undefined) throw new Error('Personal Pairing access transaction is not owned')
+    return this.transactionAccess
   }
 }
 

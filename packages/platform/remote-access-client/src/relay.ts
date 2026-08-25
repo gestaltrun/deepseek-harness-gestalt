@@ -355,6 +355,9 @@ export class RemoteRelayEndpointController {
   }
 
   private observeError(error: unknown): void {
+    if (!(error instanceof RemoteRelayError) && !(error instanceof RemoteProtocolError)) {
+      console.error('[remote-relay-client] unexpected connection failure:', error)
+    }
     try {
       this.options.onTransportError?.(error instanceof RemoteRelayError || error instanceof RemoteProtocolError
         ? error

@@ -187,7 +187,7 @@ describe.skipIf(!postgresAvailable)('PostgresAccountBackend with disposable Post
           WHERE database_identity = $1`,
         ['gestalt-production'],
       )
-      expect(durable.rows[0]?.state).toMatchObject({ formatVersion: 1, blobSequence: { next: 12 } })
+      expect(durable.rows[0]?.state).toMatchObject({ formatVersion: 2, blobSequence: { next: 12 } })
     } finally {
       await runtime.close()
     }

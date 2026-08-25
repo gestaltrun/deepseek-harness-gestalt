@@ -263,7 +263,8 @@ async function loadComposition(provider: unknown): Promise<Context> {
     "- name: 'assembled-quota-account'",
     "- name: '@deepseek-ai/dsh-platform-account-http'",
     '  config:',
-    `    origin: '${ENVIRONMENT.origin}'`,
+    '    origins:',
+    `      - '${ENVIRONMENT.origin}'`,
     '',
   ].join('\n'))
   context = new Context()

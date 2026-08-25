@@ -16,6 +16,7 @@ import {
   type PairingCompletionView,
 } from '@deepseek-ai/dsh-remote-access'
 import {
+  CorsOriginPolicy,
   HttpError,
   readJsonObject,
   writeHttpError,
@@ -27,11 +28,11 @@ const MAX_JSON_BYTES = 64 * 1024
 
 /** HTTP Consumer configuration. */
 export interface Config {
-  /** Trusted browser origin allowed to call the route. */
-  origin: string
+  /** Exact product origins allowed to call the route. */
+  origins: string[]
 }
 /** Validated HTTP Consumer configuration. */
-export const Config: z<Config> = z.object({ origin: z.string().required() })
+export const Config: z<Config> = z.object({ origins: z.array(z.string()).min(1).required() })
 /** Cordis plugin name. */
 export const name = 'remote-access-http'
 /** Required Remote Access behavior and HTTP route registry. */
@@ -39,13 +40,13 @@ export const inject = ['remoteAccess', 'webServer']
 
 /** Register the authenticated Personal Pairing route. */
 export function apply(ctx: Context, config: Config): void {
-  const origin = new URL(config.origin).origin
+  const origins = new CorsOriginPolicy(config.origins, 'Remote Access HTTP')
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/v1/remote-access/personal-pairing',
     handler: async (req, res) => {
       try {
-        if (handleCors(req, res, origin)) return
+        if (handleCors(req, res, origins)) return
         if (req.method !== 'POST') throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Remote Access route requires POST')
         const authentication = pairingAuthenticationFromHeaders(req)
         const body = await readJsonObject(req, {
@@ -285,21 +286,14 @@ function singleHeader(req: { headers: IncomingHttpHeaders }, name: string): stri
   return value
 }
 
-function handleCors(req: IncomingMessage, res: ServerResponse, allowedOrigin: string): boolean {
+function handleCors(req: IncomingMessage, res: ServerResponse, allowedOrigins: CorsOriginPolicy): boolean {
   const requestOrigin = req.headers.origin
   if (requestOrigin !== undefined) {
-    let parsedOrigin: string
-    try {
-      parsedOrigin = new URL(requestOrigin).origin
-    } catch {
+    const parsedOrigin = allowedOrigins.match(requestOrigin)
+    if (parsedOrigin === undefined) {
       throw new HttpError(403, 'ORIGIN_DENIED', 'Remote Access request origin is not trusted')
     }
-    if (parsedOrigin !== allowedOrigin) {
-      throw new HttpError(403, 'ORIGIN_DENIED', 'Remote Access request origin is not trusted')
-    }
-  }
-  if (requestOrigin !== undefined) {
-    res.setHeader('access-control-allow-origin', allowedOrigin)
+    res.setHeader('access-control-allow-origin', parsedOrigin)
     res.setHeader('vary', 'Origin')
   }
   if (req.method !== 'OPTIONS') return false

@@ -188,7 +188,7 @@ async function startServer(remoteAccess: PersonalPairingProvider): Promise<{
     },
     effect(register: () => () => void) { register() },
   } as unknown as Context
-  apply(ctx, { origin: 'https://mobile.example' })
+  apply(ctx, { origins: ['https://mobile.example'] })
   const http = createServer((req, res) => {
     const route = routes.get(new URL(req.url ?? '/', 'http://localhost').pathname)
     if (route === undefined) { res.writeHead(404).end(); return }

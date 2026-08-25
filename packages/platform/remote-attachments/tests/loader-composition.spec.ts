@@ -95,7 +95,8 @@ async function loadComposition(): Promise<Context> {
     `- name: '${AUTHORITY}'`,
     `- name: '${HTTP}'`,
     '  config:',
-    "    origin: 'https://mobile.example'",
+    '    origins:',
+    "      - 'https://mobile.example'",
     '',
   ].join('\n'))
   context = new Context()

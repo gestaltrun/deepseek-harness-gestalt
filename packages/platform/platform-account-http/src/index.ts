@@ -17,6 +17,7 @@ import {
   type AccountProof,
 } from '@deepseek-ai/dsh-platform-account'
 import {
+  CorsOriginPolicy,
   HttpError,
   readJsonObject,
   writeHttpError,
@@ -28,13 +29,13 @@ const MAX_JSON_BYTES = 64 * 1024
 
 /** HTTP consumer configuration. */
 export interface Config {
-  /** Selected Platform environment origin allowed to call Account routes. */
-  origin: string
+  /** Exact product origins allowed to call Account routes. */
+  origins: string[]
 }
 
 /** Validated HTTP consumer configuration. */
 export const Config: z<Config> = z.object({
-  origin: z.string().required(),
+  origins: z.array(z.string()).min(1).required(),
 })
 
 /** Cordis plugin name. */
@@ -45,14 +46,13 @@ export const inject = ['platformAccount', 'webServer']
 /** Register the complete Account HTTP route set. */
 export function apply(ctx: Context, config: Config): void {
   const candidate: unknown = config
-  if (candidate === null || typeof candidate !== 'object' || typeof (candidate as { origin?: unknown }).origin !== 'string') {
-    throw new TypeError('Platform Account HTTP origin configuration is required')
+  if (candidate === null || typeof candidate !== 'object' || !Array.isArray((candidate as { origins?: unknown }).origins)) {
+    throw new TypeError('Platform Account HTTP origins configuration is required')
   }
-  const origin = (candidate as Config).origin
-  if (origin !== ctx.platformAccount.environment.origin) {
-    throw new TypeError('Platform Account HTTP origin does not match the selected Platform environment')
+  const origins = new CorsOriginPolicy((candidate as Config).origins, 'Platform Account HTTP')
+  if (origins.match(ctx.platformAccount.environment.origin) === undefined) {
+    throw new TypeError('Platform Account HTTP origins do not include the selected Platform environment')
   }
-  const origins = new Set([origin])
   const route = (path: string, handler: (req: IncomingMessage, res: ServerResponse) => Promise<void>): void => {
     ctx.effect(() => ctx.webServer.register({
       kind: 'exact',
@@ -138,16 +138,13 @@ export function apply(ctx: Context, config: Config): void {
   })
 }
 
-function handleCors(req: IncomingMessage, res: ServerResponse, origins: Set<string>): boolean {
+function handleCors(req: IncomingMessage, res: ServerResponse, origins: CorsOriginPolicy): boolean {
   const origin = req.headers.origin
   if (origin !== undefined) {
-    let normalized: string
-    try {
-      normalized = new URL(origin).origin
-    } catch {
-      throw new HttpError(403, 'ORIGIN_DENIED', 'Account request origin is invalid')
+    const normalized = origins.match(origin)
+    if (normalized === undefined) {
+      throw new HttpError(403, 'ORIGIN_DENIED', 'Account request origin is not trusted')
     }
-    if (!origins.has(normalized)) throw new HttpError(403, 'ORIGIN_DENIED', 'Account request origin is not trusted')
     res.setHeader('access-control-allow-origin', normalized)
     res.setHeader('vary', 'Origin')
   }

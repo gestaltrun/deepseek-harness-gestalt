@@ -12,7 +12,7 @@ store 插件（`name: '@deepseek-ai/dsh-remote-attachments'`）把这些边界�
 
 ## HTTP 路由
 
-`remote-attachments-http` 插件（`@deepseek-ai/dsh-remote-attachments/http`）在已挂载的 store 上注册三个精确路由，并要求 `webServer`、`remoteAttachments` 与 `remoteAttachmentAuthority` 配对 seam。它的 `origin` Config 是受信任的浏览器 origin。销毁插件 fiber 会注销这些路由。
+`remote-attachments-http` 插件（`@deepseek-ai/dsh-remote-attachments/http`）在已挂载的 store 上注册三个精确路由，并要求 `webServer`、`remoteAttachments` 与 `remoteAttachmentAuthority` 配对 seam。它的非空 `origins` 配置列出受信任的精确标准或自定义元组 origin；带路径的 origin、opaque `null`、畸形值与未配置 origin 都会被拒绝。销毁插件 fiber 会注销这些路由。
 
 - `POST /v1/remote-attachments`——带正数且精确 `Content-Length` 的原始密文体；账号完整 quota 准入先于 body 读取与 publish，然后返回 `201` 与 `{ capability, byteLength, expiresAt }`，空体或长度不匹配返回 `400 ATTACHMENT_EMPTY` / `CONTENT_LENGTH_MISMATCH`，缺少长度返回 `411 CONTENT_LENGTH_REQUIRED`，超限返回 `413 ATTACHMENT_LIMIT_EXCEEDED`，`429 QUOTA` / `PLATFORM_CAPACITY` 则携带 `retryAfter`。被拒绝或中断的 body 会释放 reservation。
 - `POST /v1/remote-attachments/consume`——`{ capability }` JSON；在写入前原子 claim，并返回 `200` 与原始密文，跨配对 `403`、未知或已 claim `404`、过期 `410`。body 写入失败会放弃 claim 以便重试；body 完成后即使结算清理失败也绝不重放。

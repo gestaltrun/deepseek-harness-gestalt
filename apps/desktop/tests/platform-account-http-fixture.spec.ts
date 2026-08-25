@@ -193,7 +193,7 @@ async function bootPlatform(provider: unknown): Promise<{ root: string; port: nu
     '    port: 0',
     "- name: 'desktop-fixture-platform-account-provider'",
     "- name: '@deepseek-ai/dsh-platform-account-http'",
-    `  config:\n    origin: '${ENVIRONMENT.origin}'`,
+    `  config:\n    origins:\n      - '${ENVIRONMENT.origin}'`,
     '',
   ].join('\n'))
   context = new Context()

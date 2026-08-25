@@ -404,7 +404,7 @@ describe('Remote Access HTTP assembled flow', () => {
     expect(preflight.headers.get('access-control-allow-origin')).toBe('https://mobile.example')
     expect((await request({ operation: 'get-mobile-access' }, {
       headers: { Origin: 'https://mobile.example/path' },
-    })).status).toBe(200)
+    })).status).toBe(403)
     expect((await request({ operation: 'get-mobile-access' }, {
       headers: { Origin: 'https://attacker.example' },
     })).status).toBe(403)
@@ -476,7 +476,21 @@ describe('Remote Access HTTP assembled flow', () => {
   })
 
   it('fails loud when the configured browser origin is not a URL', () => {
-    expect(() => { apply({} as Context, { origin: 'not a URL' }) }).toThrow()
+    expect(() => { apply({} as Context, { origins: ['not a URL'] }) }).toThrow()
+  })
+
+  it('answers Personal Pairing preflight for both shipped Capacitor origins', async () => {
+    const server = await start({} as PersonalPairingProvider, {
+      origins: ['https://mobile.example', 'https://localhost', 'capacitor://localhost'],
+    })
+    for (const origin of ['https://localhost', 'capacitor://localhost']) {
+      const response = await fetch(`${server.origin}/v1/remote-access/personal-pairing`, {
+        method: 'OPTIONS',
+        headers: { origin, 'access-control-request-method': 'POST' },
+      })
+      expect(response.status).toBe(204)
+      expect(response.headers.get('access-control-allow-origin')).toBe(origin)
+    }
   })
 
   it('accepts non-Buffer byte chunks from the process request stream', async () => {
@@ -486,7 +500,7 @@ describe('Remote Access HTTP assembled flow', () => {
       webServer: { register(value: RegisteredRoute) { route = value; return () => {} } },
       effect(register: () => () => void) { register() },
     } as unknown as Context
-    apply(ctx, { origin: 'https://mobile.example' })
+    apply(ctx, { origins: ['https://mobile.example'] })
     const response = { writeHead: vi.fn(), end: vi.fn(), setHeader: vi.fn() }
     const body = new TextEncoder().encode(JSON.stringify({ operation: 'get-mobile-access' }))
     const request = {
@@ -507,7 +521,7 @@ describe('Remote Access HTTP assembled flow', () => {
       webServer: { register(value: RegisteredRoute) { route = value; return () => {} } },
       effect(register: () => () => void) { register() },
     } as unknown as Context
-    apply(ctx, { origin: 'https://mobile.example' })
+    apply(ctx, { origins: ['https://mobile.example'] })
     const chunks: Buffer[] = []
     const response = {
       writeHead: vi.fn(),
@@ -560,7 +574,10 @@ function proofHeaders(authentication: PairingAccountAuthentication): Record<stri
   }
 }
 
-async function start(remoteAccess: PersonalPairingProvider): Promise<{ origin: string }> {
+async function start(
+  remoteAccess: PersonalPairingProvider,
+  config: Parameters<typeof apply>[1] = { origins: ['https://mobile.example'] },
+): Promise<{ origin: string }> {
   const routes = new Map<string, RegisteredRoute>()
   const ctx = {
     remoteAccess,
@@ -572,7 +589,7 @@ async function start(remoteAccess: PersonalPairingProvider): Promise<{ origin: s
     },
     effect(register: () => () => void) { register() },
   } as unknown as Context
-  apply(ctx, { origin: 'https://mobile.example' })
+  apply(ctx, config)
   const http = createServer((req, res) => {
     const route = routes.get(new URL(req.url ?? '/', 'http://localhost').pathname)
     if (route === undefined) { res.writeHead(404).end(); return }

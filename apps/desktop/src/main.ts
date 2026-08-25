@@ -7,7 +7,8 @@ import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, powerMonitor, safeStorage, shell,
+  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, net, powerMonitor, safeStorage,
+  session, shell,
   type IpcMainEvent, type IpcMainInvokeEvent,
 } from 'electron'
 import {
@@ -81,8 +82,10 @@ import { createDesktopHostRpc } from './host-rpc.ts'
 import { desktopInstallationPresentation } from './desktop-installation.ts'
 import { downloadCompanionAttachment } from './companion-attachments.ts'
 import { projectDesktopRendererEvent } from './renderer-projection.ts'
+import { desktopSystemFetch } from './system-network.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
+const systemFetch = desktopSystemFetch(async (input, init) => await net.fetch(input, init))
 const PRELOAD = join(here, 'preload.cjs')
 const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
 
@@ -168,6 +171,7 @@ async function boot(): Promise<void> {
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
     config: accountEnvironment.remoteRelay,
+    resolveProxy: async url => await session.defaultSession.resolveProxy(url),
     snowPairingVault,
     desktopName: () => account.installationPresentation()?.name,
     handleOperation: async (operation, selector, context) => await handleDesktopCompanionOperation(
@@ -299,7 +303,7 @@ async function handleDesktopCompanionOperation(
       attachmentKey,
       now: Date.now,
       downloadAttachment: async offer => await downloadCompanionAttachment(offer, {
-        pairingId, origin: accountEnvironment.origin, headers,
+        pairingId, origin: accountEnvironment.origin, headers, fetch: systemFetch,
       }),
       submitAttachment: async input => await companionProduct.submitAttachment(input),
       generation: context.generation,
@@ -692,11 +696,10 @@ async function startPairingForCurrentDesktop(): Promise<void> {
   await startDesktopPairingWhenHostReady({
     accountSignedIn,
     hostReady: companionHostReady,
-    start: async () => { await pairing.start() },
+    start: async authorityIsCurrent => await pairing.startForAuthority(authorityIsCurrent),
     authorityIsCurrent: () => accountSignedIn
       && companionHostReady
       && companionHostGeneration === hostGeneration,
-    stopStaleStart: async () => { await pairing.deactivate('host-unavailable') },
   }).catch((error: unknown) => {
     console.error('[desktop-personal-pairing] signed-in Remote Access load failed:', error)
   })
@@ -875,7 +878,7 @@ function pushPairingSnapshot(snapshot: ReturnType<DesktopPairingActions['getSnap
 }
 
 function createDesktopAccount(environment: SelectedPlatformEnvironment): DesktopAccountActions {
-  const transport = new PlatformAccountHttpTransport({ environment })
+  const transport = new PlatformAccountHttpTransport({ environment, fetch: systemFetch })
   const store = new EncryptedDesktopAccountStore(
     join(app.getPath('userData'), `platform-account-${environment.databaseIdentity}.bin`),
     {
@@ -904,7 +907,7 @@ function createDesktopPairing(
   }
   return new DesktopPairingController({
     account: currentAccount,
-    transport: new RemoteAccessHttpTransport({ environment }),
+    transport: new RemoteAccessHttpTransport({ environment, fetch: systemFetch }),
     relay,
     snowPairingVault,
   })

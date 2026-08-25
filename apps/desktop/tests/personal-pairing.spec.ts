@@ -508,6 +508,43 @@ describe('DesktopPairingController', () => {
     await controller.dispose()
   })
 
+  it('serializes a slow stale Host start before stopping and starting its replacement', async () => {
+    const firstRefresh = deferred<{ enabled: boolean }>()
+    const refreshEntered = deferred<undefined>()
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset()
+    transport.getMobileAccessState
+      .mockImplementationOnce(async () => {
+        refreshEntered.resolve(undefined)
+        return await firstRefresh.promise
+      })
+      .mockResolvedValue({ enabled: true })
+    transport.listEndpointPending.mockResolvedValue([])
+    const relay = {
+      synchronize: vi.fn(async () => {}),
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+    }
+    const controller = new DesktopPairingController({
+      account: accountFixture(), transport, relay, snowPairingVault: new DesktopSnowPairingVault(),
+    })
+
+    const staleStart = controller.start()
+    await refreshEntered.promise
+    const stoppingStaleHost = controller.deactivate('host-unavailable')
+    const replacementStart = controller.start()
+    firstRefresh.resolve({ enabled: true })
+
+    await staleStart
+    await expect(Promise.race([
+      Promise.all([stoppingStaleHost, replacementStart]).then(() => true),
+      new Promise<false>(resolve => setTimeout(() => { resolve(false) }, 100)),
+    ])).resolves.toBe(true)
+    expect(relay.start).toHaveBeenCalledOnce()
+    expect(relay.stop).toHaveBeenCalledWith('host-unavailable')
+    await controller.dispose()
+  })
+
   it('stays locally offline when the remote disable mutation fails and recovers only on explicit enable', async () => {
     const transport = transportFixture()
     const relay = { configure: vi.fn(async () => {}), start: vi.fn(async () => {}), stop: vi.fn(async () => {}) }

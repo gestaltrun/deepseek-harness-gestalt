@@ -998,6 +998,33 @@ describe('Desktop Remote Relay composition', () => {
       maxBytes: REMOTE_PROTOCOL_LIMITS.relayMessageBytes, maxMessages: 16,
     })
     await relay.stop()
+    connect.mockRestore()
+  })
+
+  it('applies the Electron system proxy to the product Node WSS adapter', async () => {
+    const socket = new TestRelaySocket()
+    const connect = vi.spyOn(NodeRelayEndpointSocket, 'connect').mockResolvedValue(socket)
+    const resolveProxy = vi.fn(async () => 'PROXY 127.0.0.1:6152; DIRECT')
+    const relay = createDesktopRemoteRelay({
+      environment: { ...DEVELOPMENT, environment: 'production' }, config: RELAY_CONFIG,
+      snowPairingVault: new DesktopSnowPairingVault(), initializeWasm: () => {}, resolveProxy,
+      desktopName: AUTHENTICATED_DESKTOP_NAME, handleOperation: UNUSED_OPERATION_HANDLER,
+    })
+    await relay.configure?.({
+      routeId: parseRelayRouteId('route-system-proxy'), endpoint: 'desktop',
+      credential: await generateRelayCredential(), revision: 1,
+      pairingSelector: parseRelayPairingSelector('pairing-system-proxy'),
+    })
+
+    const starting = relay.start()
+    await vi.waitFor(() => { expect(resolveProxy).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => { expect(connect).toHaveBeenCalledOnce() })
+    expect(resolveProxy).toHaveBeenCalledWith(SOURCE.DSH_REMOTE_RELAY_WSS_URL)
+    const connectionOptions = connect.mock.calls[0]?.[3]
+    expect(connectionOptions?.agent).toBeDefined()
+    await relay.stop('quit')
+    await expect(starting).rejects.toThrow()
+    connect.mockRestore()
   })
 
   it('validates Relay configuration independently from disabled composition', () => {

@@ -32,9 +32,16 @@ describe('Mobile Companion release evidence CLI', () => {
     expect(result.status).not.toBe(0)
     expect(result.stderr).toContain('acceptance verdict job did not succeed')
   })
+
+  it('rejects evidence produced by a different workflow on the same candidate', () => {
+    const fixture = setupRemoteEvidence('success', 'foreign')
+    const result = runVerifier(fixture)
+    expect(result.status).not.toBe(0)
+    expect(result.stderr).toContain('source run is not the Mobile Companion acceptance workflow')
+  })
 })
 
-function setupRemoteEvidence(verdict: 'success' | 'failure') {
+function setupRemoteEvidence(verdict: 'success' | 'failure', workflow: 'acceptance' | 'foreign' = 'acceptance') {
   const directory = mkdtempSync(join(tmpdir(), 'dsh-mobile-release-cli-'))
   temporary.push(directory)
   const candidateSha = git(['rev-parse', 'HEAD']).trim()
@@ -59,9 +66,10 @@ const { join } = require('node:path')
 const args = process.argv.slice(2)
 if (args[0] === 'api') {
   const endpoint = args[1]
-  if (endpoint.includes('/jobs?')) process.stdout.write(JSON.stringify({ jobs: [{ name: 'mobile companion acceptance verdict', status: 'completed', conclusion: process.env.FAKE_VERDICT }] }))
+  if (endpoint.includes('/actions/workflows/')) process.stdout.write(JSON.stringify({ id: 9001, path: '.github/workflows/mobile-companion-acceptance.yml' }))
+  else if (endpoint.includes('/jobs?')) process.stdout.write(JSON.stringify({ jobs: [{ name: 'mobile companion acceptance verdict', status: 'completed', conclusion: process.env.FAKE_VERDICT }] }))
   else if (endpoint.includes('/artifacts?')) process.stdout.write(JSON.stringify({ artifacts: [{ name: 'mobile-companion-acceptance-' + process.env.FAKE_SHA, expired: false }] }))
-  else process.stdout.write(JSON.stringify({ event: 'workflow_dispatch', head_sha: process.env.FAKE_SHA, status: 'completed', conclusion: 'success' }))
+  else process.stdout.write(JSON.stringify({ workflow_id: Number(process.env.FAKE_WORKFLOW_ID), path: process.env.FAKE_WORKFLOW_PATH, event: 'workflow_dispatch', head_sha: process.env.FAKE_SHA, status: 'completed', conclusion: 'success' }))
 } else if (args[0] === 'run' && args[1] === 'download') {
   const destination = args[args.indexOf('--dir') + 1]
   mkdirSync(destination, { recursive: true })
@@ -69,7 +77,7 @@ if (args[0] === 'api') {
 } else process.exit(2)
 `)
   chmodSync(gh, 0o755)
-  return { directory, candidateSha, repository, sourceRunId, source, verdict }
+  return { directory, candidateSha, repository, sourceRunId, source, verdict, workflow }
 }
 
 function runVerifier(fixture: ReturnType<typeof setupRemoteEvidence>) {
@@ -90,6 +98,10 @@ function runVerifier(fixture: ReturnType<typeof setupRemoteEvidence>) {
       PATH: `${fixture.directory}:${process.env.PATH ?? ''}`,
       FAKE_SHA: fixture.candidateSha,
       FAKE_VERDICT: fixture.verdict,
+      FAKE_WORKFLOW_ID: fixture.workflow === 'acceptance' ? '9001' : '9002',
+      FAKE_WORKFLOW_PATH: fixture.workflow === 'acceptance'
+        ? '.github/workflows/mobile-companion-acceptance.yml'
+        : '.github/workflows/foreign.yml',
       FAKE_ATTESTATION_SOURCE: fixture.source,
     },
   })

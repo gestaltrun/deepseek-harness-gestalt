@@ -95,28 +95,29 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
   }
 
   if (!signedIn) {
+    const text = LOGIN_TEXT[locale]
     return (
-      <main className={css.page} data-mobile-platform-account={snapshot.status}>
+      <main className={css.page} data-mobile-platform-account={snapshot.status} lang={locale === 'zh' ? 'zh-CN' : 'en'}>
         <header className={css.header}>
           <div className={css.mark} aria-hidden="true">深</div>
           <div>
             <p className={css.product}>DeepSeek Gestalt</p>
-            <h1>连接你的 Platform Account</h1>
+            <h1>{text.title}</h1>
           </div>
         </header>
         <section className={css.notice} aria-labelledby="privacy-title">
           <div className={css.noticeHead}>
-            <span>授权前必读</span>
-            <h2 id="privacy-title">隐私说明 / Privacy notice</h2>
+            <span>{text.readBefore}</span>
+            <h2 id="privacy-title">{text.privacyNotice}</h2>
           </div>
           <div className={css.languages}>
             <p lang="zh-CN">{ACCOUNT_PRIVACY_NOTICE.zh}</p>
             <p lang="en">{ACCOUNT_PRIVACY_NOTICE.en}</p>
           </div>
           <dl className={css.retention}>
-            <div><dt>GitHub 权限</dt><dd>公开身份 · 无 OAuth scope</dd></div>
-            <div><dt>保留期</dt><dd>IP ≤ 7 天 · 安全事件 ≤ 30 天</dd></div>
-            <div><dt>账号删除</dt><dd>首个版本暂不提供</dd></div>
+            <div><dt>{text.githubAccess}</dt><dd>{text.githubAccessValue}</dd></div>
+            <div><dt>{text.retention}</dt><dd>{text.retentionValue}</dd></div>
+            <div><dt>{text.accountDeletion}</dt><dd>{text.accountDeletionValue}</dd></div>
           </dl>
         </section>
         <label className={css.consent}>
@@ -131,7 +132,7 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
               }
             }}
           />
-          <span>我已阅读中英文隐私说明</span>
+          <span>{text.consent}</span>
         </label>
         <button
           type="button"
@@ -140,13 +141,13 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
           onClick={() => { installation.openLogin() }}
         >
           {snapshot.status === 'preparing'
-            ? '准备安全授权…'
+            ? text.preparing
             : snapshot.status === 'polling'
-              ? '等待 GitHub 授权…'
-              : '使用 GitHub 继续'}
+              ? text.polling
+              : text.continue}
         </button>
         {snapshot.error !== undefined && <p className={css.error} role="alert">{snapshot.error}</p>}
-        <footer>此账号仅识别你的安装；它不会授予任何 Desktop 访问权限。</footer>
+        <footer>{text.footer}</footer>
       </main>
     )
   }
@@ -213,6 +214,41 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
     </main>
   )
 }
+
+const LOGIN_TEXT = {
+  zh: {
+    title: '连接你的 Platform Account',
+    readBefore: '授权前必读',
+    privacyNotice: '隐私说明 / Privacy notice',
+    githubAccess: 'GitHub 权限',
+    githubAccessValue: '公开身份 · 无 OAuth scope',
+    retention: '保留期',
+    retentionValue: 'IP ≤ 7 天 · 安全事件 ≤ 30 天',
+    accountDeletion: '账号删除',
+    accountDeletionValue: '首个版本暂不提供',
+    consent: '我已阅读中英文隐私说明',
+    preparing: '准备安全授权…',
+    polling: '等待 GitHub 授权…',
+    continue: '使用 GitHub 继续',
+    footer: '此账号仅识别你的安装；它不会授予任何 Desktop 访问权限。',
+  },
+  en: {
+    title: 'Connect your Platform Account',
+    readBefore: 'Read before authorization',
+    privacyNotice: 'Privacy notice',
+    githubAccess: 'GitHub access',
+    githubAccessValue: 'Public identity · no OAuth scopes',
+    retention: 'Retention',
+    retentionValue: 'IP ≤ 7 days · security events ≤ 30 days',
+    accountDeletion: 'Account deletion',
+    accountDeletionValue: 'Not available in the first release',
+    consent: 'I have read both privacy notices',
+    preparing: 'Preparing secure authorization…',
+    polling: 'Waiting for GitHub authorization…',
+    continue: 'Continue with GitHub',
+    footer: 'This account identifies only this installation; it grants no Desktop access.',
+  },
+} as const
 
 function AccountView({
   login,

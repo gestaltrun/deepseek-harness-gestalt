@@ -43,4 +43,4 @@ Operated acceptance is recorded only after the bundled product entry passes GitH
 }
 ```
 
-The successful verdict uploads `mobile-companion-acceptance-<candidate_sha>`. Dispatch `Mobile Release` with that exact `candidate_sha`, the acceptance run id, and explicit transport-risk acceptance. The authorization job verifies the source run event, successful named verdict, unique unexpired artifact, repository, run id, commit, Git tree, exact evidence vocabulary, and distribution approval before either signing job receives its Environment or secrets.
+The successful verdict uploads `mobile-companion-acceptance-<candidate_sha>`. Dispatch `Mobile Release` with that exact `candidate_sha`, the acceptance run id, and explicit transport-risk acceptance. The authorization job requires the source run to belong to `.github/workflows/mobile-companion-acceptance.yml`, then verifies its event, successful named verdict, unique unexpired artifact, repository, run id, commit, Git tree, exact evidence vocabulary, and distribution approval before either signing job receives its Environment or secrets.

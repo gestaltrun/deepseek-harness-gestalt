@@ -30,6 +30,7 @@ import {
   type SnowCompanionProtocolChannel,
 } from '@deepseek-ai/dsh-noise-channel'
 import { sealDesktopForegroundSynchronization } from './noise-companion.ts'
+import { desktopRelayProxyAgent } from './system-network.ts'
 import type { DesktopSnowPairingVault } from './snow-pairing-vault.ts'
 import type {
   DesktopCompanionLiveProjectionChange,
@@ -54,6 +55,8 @@ export interface DesktopRemoteRelayOptions {
   environment: SelectedPlatformEnvironment
   config: DesktopRemoteRelayConfig
   connect?: (signal: AbortSignal, config: DesktopRemoteRelayConfig) => Promise<RelayEndpointSocket>
+  /** Resolve the current native system proxy for every fresh WSS acquisition. */
+  resolveProxy?: (url: string) => Promise<string>
   snowPairingVault: DesktopSnowPairingVault
   initializeWasm?: () => void
   /** Read the Platform-authenticated Desktop Installation name for each fresh synchronization. */
@@ -680,11 +683,15 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
   }, options.handleOperation, () => options.desktopName(), config.negotiationTimeoutMs, liveProjection)
   const lifecycle = new DesktopRelayEndpointLifecycle({
     attachmentId: () => parseRelayAttachmentId(crypto.randomUUID()),
-    connect: async signal => options.connect === undefined
-      ? await NodeRelayEndpointSocket.connect(config.url, signal, {
-        maxBytes: config.inboundMaxBytes, maxMessages: config.inboundMaxMessages,
-      })
-      : await options.connect(signal, config),
+    connect: async (signal) => {
+      if (options.connect !== undefined) return await options.connect(signal, config)
+      const limits = { maxBytes: config.inboundMaxBytes, maxMessages: config.inboundMaxMessages }
+      if (options.resolveProxy === undefined) return await NodeRelayEndpointSocket.connect(config.url, signal, limits)
+      const agent = desktopRelayProxyAgent(await options.resolveProxy(config.url))
+      return agent === undefined
+        ? await NodeRelayEndpointSocket.connect(config.url, signal, limits)
+        : await NodeRelayEndpointSocket.connect(config.url, signal, limits, { agent })
+    },
     attachTimeoutMs: config.attachTimeoutMs,
     heartbeatIntervalMs: config.heartbeatIntervalMs,
     reconnectDelayMs: config.reconnectDelayMs,

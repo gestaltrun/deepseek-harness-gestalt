@@ -76,6 +76,20 @@ describe('MobileAccount', () => {
     await waitFor(() => { expect(openSystemBrowser).toHaveBeenCalledWith(attempt.authorizationUrl) })
   })
 
+  it('localizes the complete signed-out Account surface in English', () => {
+    const { installation } = fixture()
+    render(createElement(MobileAccount, { installation, locale: 'en', theme: 'light', clock }))
+
+    expect(screen.getByRole('heading', { name: 'Connect your Platform Account' })).toBeTruthy()
+    expect(screen.getByText('Read before authorization')).toBeTruthy()
+    expect(screen.getByText('Public identity · no OAuth scopes')).toBeTruthy()
+    expect(screen.getByText('IP ≤ 7 days · security events ≤ 30 days')).toBeTruthy()
+    expect(screen.getByText('Not available in the first release')).toBeTruthy()
+    expect(screen.getByText('I have read both privacy notices')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Continue with GitHub' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByText('This account identifies only this installation; it grants no Desktop access.')).toBeTruthy()
+  })
+
   it('polls to the current-installation account and signs out only that installation', async () => {
     const { installation, api } = fixture()
     const unavailablePairing = { status: 'unavailable', error: 'independent review pending' } as const

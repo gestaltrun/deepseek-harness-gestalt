@@ -12,6 +12,8 @@ import {
 
 const ARTIFACT_FILE = 'companion-release-attestation.json'
 const VERDICT_JOB = 'mobile companion acceptance verdict'
+const ACCEPTANCE_WORKFLOW_FILE = 'mobile-companion-acceptance.yml'
+const ACCEPTANCE_WORKFLOW_PATH = `.github/workflows/${ACCEPTANCE_WORKFLOW_FILE}`
 
 const { values } = parseArgs({
   options: {
@@ -74,6 +76,14 @@ function verifySourceRun(repository: string, runId: number, candidateSha: string
     || run.status !== 'completed'
     || run.conclusion !== 'success') {
     throw new Error('companion-release-evidence: acceptance source run is not a successful candidate run')
+  }
+  const workflow = ghJson(`/repos/${repository}/actions/workflows/${ACCEPTANCE_WORKFLOW_FILE}`)
+  if (!isRecord(workflow)
+    || typeof workflow.id !== 'number'
+    || workflow.path !== ACCEPTANCE_WORKFLOW_PATH
+    || run.workflow_id !== workflow.id
+    || run.path !== ACCEPTANCE_WORKFLOW_PATH) {
+    throw new Error('companion-release-evidence: source run is not the Mobile Companion acceptance workflow')
   }
   const jobs = ghJson(`/repos/${repository}/actions/runs/${String(runId)}/jobs?per_page=100`)
   if (!isRecord(jobs) || !Array.isArray(jobs.jobs)

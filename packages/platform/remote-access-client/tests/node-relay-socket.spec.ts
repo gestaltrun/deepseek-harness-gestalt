@@ -41,10 +41,11 @@ afterEach(() => { vi.restoreAllMocks() })
 
 describe('NodeRelayEndpointSocket', () => {
   it('sets the wire maxPayload and owns successful send, receive, and close', async () => {
+    const agent = {} as never
     const socket = await NodeRelayEndpointSocket.connect(
       'wss://platform.example/relay', new AbortController().signal,
       { maxBytes: REMOTE_PROTOCOL_LIMITS.relayMessageBytes, maxMessages: 3 },
-      { rejectUnauthorized: false },
+      { agent, rejectUnauthorized: false },
     )
     const native = sockets[0]
     if (native === undefined) throw new Error('Node WebSocket was not allocated')
@@ -52,6 +53,7 @@ describe('NodeRelayEndpointSocket', () => {
       maxPayload: REMOTE_PROTOCOL_LIMITS.relayMessageBytes,
       perMessageDeflate: false,
       rejectUnauthorized: false,
+      agent,
     })
     await socket.send(Uint8Array.of(1))
     expect(native.sent).toEqual([Uint8Array.of(1)])

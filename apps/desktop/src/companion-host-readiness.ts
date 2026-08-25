@@ -8,15 +8,9 @@
 export async function startDesktopPairingWhenHostReady(input: {
   accountSignedIn: boolean
   hostReady: boolean
-  start(): Promise<void>
+  start(authorityIsCurrent: () => boolean): Promise<boolean>
   authorityIsCurrent(): boolean
-  stopStaleStart(): Promise<void>
 }): Promise<boolean> {
   if (!input.accountSignedIn || !input.hostReady) return false
-  await input.start()
-  if (!input.authorityIsCurrent()) {
-    await input.stopStaleStart()
-    return false
-  }
-  return true
+  return await input.start(() => input.authorityIsCurrent())
 }

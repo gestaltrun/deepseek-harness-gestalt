@@ -347,21 +347,48 @@ function answerError(res: ServerResponse, error: unknown, operation?: string): v
   writeJson(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Remote Access request failed' } })
 }
 
+type PersistenceFailure =
+  'persistence-unique-violation' | 'persistence-foreign-key-violation' | 'persistence-not-null-violation'
+  | 'persistence-check-violation' | 'persistence-missing-relation' | 'persistence-missing-column'
+  | 'persistence-invalid-text' | 'persistence-serialization-failure' | 'persistence-deadlock'
+  | 'persistence-connection' | 'persistence-other'
+
 function classifyUnexpectedFailure(error: unknown):
-  'persistence' | 'transport' | 'codec' | 'contract' | 'cleanup' | 'dependency' | 'unexpected' {
+  PersistenceFailure | 'transport' | 'codec' | 'contract' | 'cleanup' | 'dependency' | 'unexpected' {
   if (error instanceof AggregateError) return 'cleanup'
   if (error instanceof SyntaxError) return 'codec'
   if (error instanceof TypeError) return 'contract'
   if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') {
     return 'unexpected'
   }
-  if (/^[0-9A-Z]{5}$/u.test(error.code)) return 'persistence'
+  const persistenceCause = PERSISTENCE_FAILURES[error.code]
+  if (persistenceCause !== undefined) return persistenceCause
+  if (/^(?:[0-9A-Z]{5})$/u.test(error.code)) return 'persistence-other'
   if (['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ETIMEDOUT'].includes(error.code)) {
     return 'transport'
   }
   if (error.code.startsWith('UND_ERR_')) return 'transport'
   if (error.code.startsWith('ERR_')) return 'dependency'
   return 'unexpected'
+}
+
+const PERSISTENCE_FAILURES: Readonly<Record<string, PersistenceFailure>> = {
+  '23505': 'persistence-unique-violation',
+  '23503': 'persistence-foreign-key-violation',
+  '23502': 'persistence-not-null-violation',
+  '23514': 'persistence-check-violation',
+  '42P01': 'persistence-missing-relation',
+  '42703': 'persistence-missing-column',
+  '22P02': 'persistence-invalid-text',
+  '40001': 'persistence-serialization-failure',
+  '40P01': 'persistence-deadlock',
+  '08000': 'persistence-connection',
+  '08001': 'persistence-connection',
+  '08003': 'persistence-connection',
+  '08004': 'persistence-connection',
+  '08006': 'persistence-connection',
+  '08007': 'persistence-connection',
+  '08P01': 'persistence-connection',
 }
 
 function requiredString(value: unknown, name: string): string {

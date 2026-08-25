@@ -12,7 +12,7 @@ Mobile release validation required a boolean claiming an independent Noise secur
 
 Repository and operated native transport tests remain mandatory release evidence. Approved Android Emulators and iOS Simulators can supply device evidence; fixture Web pages and `prototype-companion` cannot. Independent external review is not a first-distribution prerequisite. A successful Mobile Companion Acceptance run validates the exact flow and device vocabulary, upgrade preservation, phone-size UI, assembled failures, and transport decision, then publishes one immutable artifact named for the tested `master` commit.
 
-Every Mobile Release dispatch supplies that acceptance run id and the candidate-scoped `accept_transport_risk` input. The authorization job verifies the source run event and named verdict, a unique unexpired artifact, repository, source run id, commit, Git tree, complete evidence, and risk acceptance before Android or iOS receives signing secrets. The verifier calls the in-process distribution helper; workflow syntax cannot bypass the same readiness rule.
+Every Mobile Release dispatch supplies that acceptance run id and the candidate-scoped `accept_transport_risk` input. The authorization job binds the source run's workflow id and path to `.github/workflows/mobile-companion-acceptance.yml`, then verifies its event and named verdict, a unique unexpired artifact, repository, source run id, commit, Git tree, complete evidence, and risk acceptance before Android or iOS receives signing secrets. The verifier calls the in-process distribution helper; another workflow and workflow syntax cannot bypass the same readiness rule.
 
 ## Alternatives considered
 
@@ -28,4 +28,4 @@ The first TestFlight and signed APK candidate can proceed after the documented o
 
 ## Testing
 
-Release-helper coverage rejects missing, duplicated, unknown, stale-candidate, foreign-repository, wrong-run, and risk-unaccepted evidence while retaining every product and device requirement. Workflow coverage requires the acceptance run id, executes the verifier, publishes evidence only after the named verdict succeeds, and makes both signing jobs depend on authorization.
+Release-helper coverage rejects missing, duplicated, unknown, stale-candidate, foreign-repository, foreign-workflow, wrong-run, and risk-unaccepted evidence while retaining every product and device requirement. CLI behavior coverage resolves the workflow identity, source run, named verdict, artifact listing, and download through `gh`. Workflow coverage requires the acceptance run id, executes the verifier, publishes evidence only after the named verdict succeeds, and makes both signing jobs depend on authorization.

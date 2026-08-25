@@ -44,6 +44,8 @@ export interface DesktopPairingActions {
   subscribe(listener: (snapshot: DesktopPairingSnapshot) => void): () => void
   /** Load Remote Access state after the Account installation has started. */
   start(): Promise<void>
+  /** Load Remote Access only while the supplied Web Host authority remains current. */
+  startForAuthority(authorityIsCurrent: () => boolean): Promise<boolean>
   /** Quiesce polling and Relay; Mobile Access disablement additionally resets protected Account scope. */
   deactivate(reason?: DesktopRelayStopReason): Promise<void>
   /** Drain lifecycle work during Desktop shutdown. */
@@ -80,8 +82,8 @@ export class DesktopPairingController implements DesktopPairingActions {
   private readonly schedule: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   private readonly pollIntervalMs: number
   private serial: Promise<unknown> = Promise.resolve()
-  private currentOperation: Promise<unknown> | undefined
   private lifecycleBarrier: Promise<void> = Promise.resolve()
+  private currentLifecycle: Promise<unknown> | undefined
   private lifecycleGeneration = 0
   private active = false
   private closed = false
@@ -325,53 +327,67 @@ export class DesktopPairingController implements DesktopPairingActions {
   }
 
   async start(): Promise<void> {
-    await this.exclusive(async () => {
-      await this.lifecycleBarrier
+    await this.startForAuthority(() => true)
+  }
+
+  startForAuthority(authorityIsCurrent: () => boolean): Promise<boolean> {
+    const generation = ++this.lifecycleGeneration
+    return this.enqueueLifecycle(async () => {
       if (this.closed) throw new Error('Desktop Personal Pairing is closed')
+      await this.serial
+      if (generation !== this.lifecycleGeneration || !authorityIsCurrent()) return false
       const accountId = this.currentAccountId()
       if (this.accountId !== undefined && this.accountId !== accountId) {
         this.resetAccountScope()
         await this.options.snowPairingVault?.flush()
       }
+      if (generation !== this.lifecycleGeneration || !authorityIsCurrent()) return false
       this.accountId = accountId
       this.active = true
-      await this.refresh()
+      await this.exclusive(async () => { await this.refresh() })
+      if (generation !== this.lifecycleGeneration || !authorityIsCurrent()) {
+        this.active = false
+        this.suspendProjection()
+        await this.options.relay?.stop('host-unavailable')
+        return false
+      }
+      return true
     })
   }
 
-  async deactivate(reason: DesktopRelayStopReason = 'quit'): Promise<void> {
+  deactivate(reason: DesktopRelayStopReason = 'quit'): Promise<void> {
     const generation = ++this.lifecycleGeneration
     this.active = false
     const resetsAccountScope = reason === 'mobile-access-disabled'
     this.suspendProjection()
-    const draining = this.currentOperation ?? this.serial
+    const draining = this.currentLifecycle ?? this.serial
     const stopping = this.options.relay?.stop(reason) ?? Promise.resolve()
-    const settled = Promise.allSettled([stopping, draining])
-    this.lifecycleBarrier = settled.then(() => {})
-    const results = await settled
-    if (this.lifecycleGeneration === generation) {
-      if (resetsAccountScope) this.resetAccountScope()
-      else this.suspendProjection()
-    }
-    await this.options.snowPairingVault?.flush()
-    throwSettled(results)
+    return this.enqueueLifecycle(async () => {
+      const results = await Promise.allSettled([stopping, draining])
+      if (this.lifecycleGeneration === generation) {
+        if (resetsAccountScope) this.resetAccountScope()
+        else this.suspendProjection()
+      }
+      await this.options.snowPairingVault?.flush()
+      throwSettled(results)
+    })
   }
 
-  async dispose(): Promise<void> {
+  dispose(): Promise<void> {
     const generation = ++this.lifecycleGeneration
     this.closed = true
     this.active = false
     if (this.timer !== undefined) clearTimeout(this.timer)
     this.timer = undefined
-    const draining = this.currentOperation ?? this.serial
+    const draining = this.currentLifecycle ?? this.serial
     const stopping = this.options.relay?.stop('quit') ?? Promise.resolve()
-    const settled = Promise.allSettled([stopping, draining])
-    this.lifecycleBarrier = settled.then(() => {})
-    const results = await settled
-    if (this.lifecycleGeneration !== generation) return
-    await this.options.snowPairingVault?.flush()
-    this.listeners.clear()
-    throwSettled(results)
+    return this.enqueueLifecycle(async () => {
+      const results = await Promise.allSettled([stopping, draining])
+      if (this.lifecycleGeneration !== generation) return
+      await this.options.snowPairingVault?.flush()
+      this.listeners.clear()
+      throwSettled(results)
+    })
   }
 
   private async refresh(): Promise<void> {
@@ -393,6 +409,7 @@ export class DesktopPairingController implements DesktopPairingActions {
       } else {
         for (const grant of grants) await this.options.relay?.configure?.(grant)
       }
+      if (!this.active || this.closed) return
       await this.options.relay?.start()
       if (this.options.snowPairingVault !== undefined) {
         const endpointPending = await this.options.transport.listEndpointPending(
@@ -559,13 +576,19 @@ export class DesktopPairingController implements DesktopPairingActions {
 
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.serial.then(operation)
-    this.currentOperation = result
     this.serial = result.then(() => undefined, () => undefined)
-    const release = (): void => {
-      if (this.currentOperation === result) this.currentOperation = undefined
-    }
-    void result.then(release, release)
     return result
+  }
+
+  private enqueueLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+    const transaction = this.lifecycleBarrier.then(operation, operation)
+    this.currentLifecycle = transaction
+    this.lifecycleBarrier = transaction.then(() => undefined, () => undefined)
+    const release = (): void => {
+      if (this.currentLifecycle === transaction) this.currentLifecycle = undefined
+    }
+    void transaction.then(release, release)
+    return transaction
   }
 
   private assertActive(): void {
@@ -628,6 +651,7 @@ export class UnavailableDesktopPairingController implements DesktopPairingAction
   revoke(_pairingId: PersonalPairingId): Promise<DesktopPairingSnapshot> { return this.rejectUnavailable() }
   subscribe(_listener: (snapshot: DesktopPairingSnapshot) => void): () => void { return () => {} }
   start(): Promise<void> { return Promise.resolve() }
+  startForAuthority(_authorityIsCurrent: () => boolean): Promise<boolean> { return Promise.resolve(false) }
   deactivate(reason: DesktopRelayStopReason = 'quit'): Promise<void> { return this.relay.stop(reason) }
   dispose(): Promise<void> { return this.relay.stop('quit') }
 

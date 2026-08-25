@@ -487,7 +487,7 @@ describe('Remote Access HTTP assembled flow', () => {
     expect(reported).toHaveBeenCalledWith('[remote-access-http] unexpected request failure:', {
       operation: 'get-mobile-access',
       failureKind: 'unexpected-error',
-      cause: 'persistence',
+      cause: 'persistence-unique-violation',
     })
     expect(JSON.stringify(reported.mock.calls)).not.toContain('secret-token')
     reported.mockRestore()

@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-25-packaged-desktop-esm-runtime-dependencies.md
+2026-08-25-packaged-desktop-esm-runtime-dependencies.md: f1b890d33115ae12c49cd7ace032e8e8f8e1fc01
+2026-08-25-packaged-desktop-esm-runtime-dependencies.zh.md: 0995c7c0bd9c0fc38e77d44f7038c53cf475d62f

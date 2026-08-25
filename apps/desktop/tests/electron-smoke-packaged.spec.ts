@@ -52,8 +52,11 @@ async function runPackagedSmoke(
         DEEPSEEK_API_KEY: 'keyless-desktop-packaged-smoke',
         DEEPSEEK_BASE_URL: provider.origin,
         ELECTRON_ENABLE_LOGGING: '1',
-        HOME: userHome,
-        USERPROFILE: userHome,
+        // macOS safeStorage uses the logged-in user's Keychain; DSH_HOME and userData stay isolated.
+        ...process.platform === 'darwin' ? {} : {
+          HOME: userHome,
+          USERPROFILE: userHome,
+        },
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     })

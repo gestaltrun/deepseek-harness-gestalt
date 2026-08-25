@@ -538,7 +538,7 @@ async function finishSmoke(target: BrowserWindow, hostUrl: string): Promise<void
     && 'updaterState' in evidence && evidence.updaterState === 'disabled'
     && 'pairingBridge' in evidence && evidence.pairingBridge === true
     && 'mobileAccessEnabled' in evidence && evidence.mobileAccessEnabled === false
-    && 'pairingState' in evidence && evidence.pairingState === 'unavailable'
+    && 'pairingState' in evidence && evidence.pairingState === 'ready'
     && 'rendererUpdaterState' in evidence && evidence.rendererUpdaterState === 'disabled'
     && 'updateControlAbsent' in evidence && evidence.updateControlAbsent === true
     && 'chrome' in evidence && evidence.chrome === expectedChrome
@@ -568,6 +568,23 @@ async function finishSmoke(target: BrowserWindow, hostUrl: string): Promise<void
     requestShutdown(1)
     return
   }
+  const turnDeadline = Date.now() + 10_000
+  let turnSettled = false
+  let turnEvidence: unknown
+  while (Date.now() < turnDeadline) {
+    const history = await smokeRpc.call('session.history', { sessionId, maxMessages: 1 })
+    turnEvidence = history
+    turnSettled = history.ok && smokeHistoryHasTurnEnd(history.value)
+    if (turnSettled) break
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  if (!turnSettled) {
+    smokeLog(`companion entry turn did not settle ${JSON.stringify(turnEvidence)}`)
+    console.error('dsh desktop smoke: Companion Session turn did not settle', turnEvidence)
+    requestShutdown(1)
+    return
+  }
+  smokeLog('companion entry turn settled')
   const hitOperation: CompanionSearchSessionsOperation = {
     type: 'search-sessions',
     operationId: parseCompanionOperationId('desktop-smoke-search-hit'),
@@ -616,6 +633,13 @@ async function finishSmoke(target: BrowserWindow, hostUrl: string): Promise<void
   await pairing.deactivate('mobile-access-disabled')
   smokeLog(`relay mobile-access-disabled ${JSON.stringify(pairing.getRelayState())}`)
   target.close()
+}
+
+function smokeHistoryHasTurnEnd(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || !('events' in value) || !Array.isArray(value.events)) return false
+  return value.events.some((entry: unknown) => entry !== null && typeof entry === 'object'
+    && 'event' in entry && entry.event !== null && typeof entry.event === 'object'
+    && 'type' in entry.event && entry.event.type === 'turn/end')
 }
 
 function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit'): void {

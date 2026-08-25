@@ -12,6 +12,11 @@ on:
         required: true
         type: boolean
         default: false
+      accept_transport_risk:
+        description: Accept the reviewed Companion transport test evidence without an external security review for this candidate.
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,9 +29,17 @@ env:
   PRIMARY_NODE_VERSION: '24'
 
 jobs:
+  release-authorization:
+    name: Verify explicit release authorization
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require Companion transport risk acceptance
+        run: test '${{ inputs.accept_transport_risk }}' = 'true'
+
   android:
     name: Signed Android APK
-    if: github.ref == 'refs/heads/master'
+    needs: release-authorization
+    if: github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'
     runs-on: ubuntu-24.04
     environment: mobile-release
     env:
@@ -83,7 +96,8 @@ jobs:
 
   ios:
     name: Signed iOS and TestFlight
-    if: github.ref == 'refs/heads/master'
+    needs: release-authorization
+    if: github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'
     runs-on: [self-hosted, macOS, ARM64, mobile-release]
     environment: mobile-release
     env:

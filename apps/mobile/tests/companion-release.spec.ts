@@ -17,7 +17,6 @@ function complete(): CompanionReleaseEvidence {
     upgradePreservedKeys: true,
     uiAcceptance: true,
     failureAcceptance: true,
-    noiseReview: true,
   }
 }
 
@@ -43,9 +42,25 @@ describe('Companion release validation', () => {
     expect(missingValue).not.toContain('call.resolve()')
   })
 
-  it('requires every flow, both platforms, upgrade, UI, failure, and Noise review', () => {
+  it('boots iOS through the bridge controller that registers protected storage', () => {
+    const storyboard = readFileSync(new URL('../ios/App/App/Base.lproj/Main.storyboard', import.meta.url), 'utf8')
+
+    expect(storyboard).toContain('customClass="GestaltBridgeViewController"')
+    expect(storyboard).toContain('customModule="App"')
+    expect(storyboard).not.toContain('customClass="CAPBridgeViewController"')
+  })
+
+  it('verifies Android release signatures with the Android SDK verifier only', () => {
+    const packaging = readFileSync(new URL('../scripts/build-android-release.sh', import.meta.url), 'utf8')
+
+    expect(packaging).toContain('ANDROID_SDK_ROOT')
+    expect(packaging).toContain('ANDROID_HOME')
+    expect(packaging).toContain('apksigner')
+    expect(packaging).not.toContain('jarsigner')
+  })
+
+  it('requires every flow, both platforms, upgrade, UI, and failure acceptance', () => {
     expect(companionReleaseReady(complete())).toBe(true)
-    expect(companionReleaseReady({ ...complete(), noiseReview: false })).toBe(false)
     expect(companionReleaseReady({ ...complete(), upgradePreservedKeys: false })).toBe(false)
     expect(companionReleaseReady({ ...complete(), uiAcceptance: false })).toBe(false)
     expect(companionReleaseReady({ ...complete(), failureAcceptance: false })).toBe(false)
@@ -55,8 +70,16 @@ describe('Companion release validation', () => {
 
   it('does not authorize TestFlight or Android APK without explicit approval', () => {
     expect(authorizeCompanionDistribution(complete(), {})).toEqual({ testFlight: false, androidApk: false })
-    expect(authorizeCompanionDistribution(complete(), { testFlight: true })).toEqual({ testFlight: true, androidApk: false })
-    expect(() => authorizeCompanionDistribution({ ...complete(), uiAcceptance: false }, { testFlight: true }))
+    expect(() => authorizeCompanionDistribution(complete(), { testFlight: true }))
+      .toThrow('transport risk')
+    expect(authorizeCompanionDistribution(complete(), {
+      testFlight: true,
+      transportRiskAccepted: true,
+    })).toEqual({ testFlight: true, androidApk: false })
+    expect(() => authorizeCompanionDistribution({ ...complete(), uiAcceptance: false }, {
+      testFlight: true,
+      transportRiskAccepted: true,
+    }))
       .toThrow('incomplete')
   })
 })

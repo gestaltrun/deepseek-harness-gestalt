@@ -23,6 +23,18 @@ describe('CI workflow', () => {
     if (!isRecord(android) || !Array.isArray(android.steps) || !isRecord(ios) || !Array.isArray(ios.steps)) {
       throw new TypeError('mobile-release workflow must define Android and iOS steps')
     }
+    const dispatch = workflowEvent(workflow, 'workflow_dispatch')
+    expect(dispatch).toMatchObject({ inputs: {
+      accept_transport_risk: { required: true, type: 'boolean', default: false },
+    } })
+    expect(android).toMatchObject({
+      needs: 'release-authorization',
+      if: "github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'",
+    })
+    expect(ios).toMatchObject({
+      needs: 'release-authorization',
+      if: "github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'",
+    })
     const androidBuild = (android.steps as unknown[])
       .find(step => isRecord(step) && step.name === 'Build and verify signed APK')
     const iosBuild = (ios.steps as unknown[])

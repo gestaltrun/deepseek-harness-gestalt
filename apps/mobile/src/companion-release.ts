@@ -39,8 +39,6 @@ export interface CompanionReleaseEvidence {
   uiAcceptance: boolean
   /** Assembled failure-path acceptance. */
   failureAcceptance: boolean
-  /** Independent Noise security review completed. */
-  noiseReview: boolean
 }
 
 /**
@@ -48,7 +46,7 @@ export interface CompanionReleaseEvidence {
  * @param evidence - collected device and assembled results.
  */
 export function companionReleaseReady(evidence: CompanionReleaseEvidence): boolean {
-  if (!evidence.upgradePreservedKeys || !evidence.uiAcceptance || !evidence.failureAcceptance || !evidence.noiseReview) {
+  if (!evidence.upgradePreservedKeys || !evidence.uiAcceptance || !evidence.failureAcceptance) {
     return false
   }
   for (const flow of COMPANION_RELEASE_FLOWS) {
@@ -69,9 +67,12 @@ export function companionReleaseReady(evidence: CompanionReleaseEvidence): boole
  */
 export function authorizeCompanionDistribution(
   evidence: CompanionReleaseEvidence,
-  approval: { testFlight?: boolean; androidApk?: boolean },
+  approval: { testFlight?: boolean; androidApk?: boolean; transportRiskAccepted?: boolean },
 ): { testFlight: boolean; androidApk: boolean } {
   if (!companionReleaseReady(evidence)) throw new Error('Companion release validation is incomplete')
+  if ((approval.testFlight === true || approval.androidApk === true) && approval.transportRiskAccepted !== true) {
+    throw new Error('Companion transport risk has not been explicitly accepted')
+  }
   return {
     testFlight: approval.testFlight === true,
     androidApk: approval.androidApk === true,

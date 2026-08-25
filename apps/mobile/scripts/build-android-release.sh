@@ -35,9 +35,23 @@ mkdir -p "${release_dir}"
 target_apk="${release_dir}/DeepSeek-Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.apk"
 cp "${source_apk}" "${target_apk}"
 
-if command -v apksigner >/dev/null 2>&1; then
-  apksigner verify --verbose "${target_apk}"
-else
-  jarsigner -verify -strict "${target_apk}"
+apksigner_path="$(command -v apksigner || true)"
+if [[ -z "${apksigner_path}" ]]; then
+  sdk_roots=("${ANDROID_SDK_ROOT:-}" "${ANDROID_HOME:-}")
+  local_properties="${mobile_root}/android/local.properties"
+  if [[ -f "${local_properties}" ]]; then
+    sdk_roots+=("$(sed -n 's/^sdk\.dir=//p' "${local_properties}" | head -n 1)")
+  fi
+  for sdk_root in "${sdk_roots[@]}"; do
+    [[ -d "${sdk_root}/build-tools" ]] || continue
+    while IFS= read -r candidate; do
+      apksigner_path="${candidate}"
+    done < <(find "${sdk_root}/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner -print | sort -V)
+  done
 fi
+if [[ -z "${apksigner_path}" ]]; then
+  echo 'Android SDK apksigner is unavailable' >&2
+  exit 1
+fi
+"${apksigner_path}" verify --verbose "${target_apk}"
 printf '%s\n' "${target_apk}"

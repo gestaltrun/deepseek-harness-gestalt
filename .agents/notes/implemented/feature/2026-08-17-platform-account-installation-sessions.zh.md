@@ -20,7 +20,7 @@ Desktop 与 Mobile 需要先建立一个 Platform 身份，个人配对与远程
 
 Desktop Host 拥有私钥、会话令牌、Electron `shell.openExternal` 调用和 `safeStorage` 加密的按环境文件。文件使用随机独占 atomic-write 同级文件与仅所有者可读的 rename 提交。renderer 只经 preload 取得账号快照和生命周期动词。Desktop 只在「手机配对」Settings 分区展示账号状态；普通侧边栏和 Session 交互保持不变。Desktop 关闭时会关闭并排空 lifecycle transition owner，进行中的轮询不能在 dispose 后变更存储或发布。Mobile 在 IndexedDB 中拥有不可导出的 WebCrypto 密钥；parser 要求真正的 `CryptoKey` 身份，以及私有 P-256 ECDSA 签名属性，composition 内置 `@capacitor/browser` 适配器。Mobile Login Attempt 还会绑定 Capacitor Device 适配器提供的有长度限制的设备名称与 iOS 或 Android 平台；Platform 会将这些字段随账号 Session 持久化，并且只会为经过认证的 Mobile Installation 返回它们。授权按钮激活前会先准备登录尝试，因此点击会直接调用原生浏览器 API，不使用弹窗或自定义 URL 回退。两种呈现都在授权前导入同一份完整中英文保留说明，并明确首个版本不提供账号删除。两侧的快照 dispatcher 都分别隔离每个 listener，并在后续 listener 运行后才汇总报告失败。
 
-开发与生产使用不同的 HTTPS origin、固定回调、GitHub OAuth App、凭证引用、数据库身份和身份命名空间。通用能力 example 可以校验完整身份对，而 Desktop 与 Mobile 产品只在渲染或流量前接受实际运行的生产身份。Desktop 从应用 archive 读取发布流程投影的公开字段，Mobile 则通过构建接收同一身份。实际运行的值绑定 HTTP Consumer 唯一且必填的 CORS origin、客户端 transport、OAuth adapter、backend 数据库身份、本地存储、回调与签发身份命名空间。HTTP 响应、IndexedDB 记录与 Desktop 加密文件都有显式 parser。一个 lifecycle transition owner 串行化加载、登录、轮询、刷新、账号切换与退出。
+开发与生产使用不同的 HTTPS origin、固定回调、GitHub OAuth App、凭证引用、数据库身份和身份命名空间。通用能力 example 可以校验完整身份对，而 Desktop 与 Mobile 产品只在渲染或流量前接受实际运行的生产身份。Desktop 从应用 archive 读取发布流程投影的公开字段，Mobile 则通过构建接收同一身份。实际运行的值会绑定客户端 transport、OAuth 适配器、后端数据库身份、本地存储、回调与签发身份命名空间；Platform HTTP 消费方依据[原生 CORS origin 决策](../bug-fix/2026-08-25-capacitor-platform-cors-origins.zh.md)，准入该 origin 与已发布的精确 Capacitor 元组 origin。HTTP 响应、IndexedDB 记录与 Desktop 加密文件都有显式解析器。一个 lifecycle transition owner 串行化加载、登录、轮询、刷新、账号切换与退出。
 
 ## Alternatives considered
 

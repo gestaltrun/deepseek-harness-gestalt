@@ -18,6 +18,7 @@ import { renderIndexInjections, type IndexInjection } from './injections.ts'
 
 export { renderIndexInjections } from './injections.ts'
 export type { IndexInjection, IndexInjectionPlacement } from './injections.ts'
+export { CorsOriginPolicy } from './cors-origin.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

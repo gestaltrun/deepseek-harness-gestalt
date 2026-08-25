@@ -287,7 +287,8 @@ async function loadComposition(): Promise<{ port: number }> {
     "- name: 'assembled-personal-pairing-provider'",
     "- name: '@deepseek-ai/dsh-remote-access-http'",
     '  config:',
-    `    origin: '${ORIGIN}'`,
+    '    origins:',
+    `      - '${ORIGIN}'`,
     '',
   ].join('\n'))
   const context = new Context()

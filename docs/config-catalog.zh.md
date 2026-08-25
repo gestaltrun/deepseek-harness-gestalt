@@ -1026,7 +1026,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/host/webserver/src/index.ts:59`](../packages/host/webserver/src/index.ts)
+来源：[`packages/host/webserver/src/index.ts:60`](../packages/host/webserver/src/index.ts)
 
 <a id="deepseek-aidsh-invariants"></a>
 
@@ -1881,12 +1881,12 @@ export interface AccountRecord extends PlatformAccountView {
 ```ts config-catalog
 /** HTTP consumer configuration. */
 export interface Config {
-  /** Selected Platform environment origin allowed to call Account routes. */
-  origin: string
+  /** Exact product origins allowed to call Account routes. */
+  origins: string[]
 }
 ```
 
-来源：[`packages/platform/platform-account-http/src/index.ts:30`](../packages/platform/platform-account-http/src/index.ts)
+来源：[`packages/platform/platform-account-http/src/index.ts:31`](../packages/platform/platform-account-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 
@@ -1952,12 +1952,12 @@ export type Config = LocalConfig
 ```ts config-catalog
 /** HTTP Consumer configuration. */
 export interface Config {
-  /** Trusted browser origin allowed to call the route. */
-  origin: string
+  /** Exact product origins allowed to call the route. */
+  origins: string[]
 }
 ```
 
-来源：[`packages/platform/remote-access-http/src/index.ts:29`](../packages/platform/remote-access-http/src/index.ts)
+来源：[`packages/platform/remote-access-http/src/index.ts:30`](../packages/platform/remote-access-http/src/index.ts)
 
 <a id="deepseek-aidsh-remote-attachments"></a>
 

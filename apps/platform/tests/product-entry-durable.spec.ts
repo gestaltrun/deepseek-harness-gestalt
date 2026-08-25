@@ -1305,6 +1305,27 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
       expect.objectContaining({ tls: true, username: 'fixture' }),
     ]))
 
+    const listenOrigin = `http://127.0.0.1:${String(running.context.webServer.port)}`
+    for (const path of [
+      '/v1/account/login-attempts',
+      '/v1/remote-access/personal-pairing',
+      '/v1/remote-attachments',
+    ]) {
+      for (const origin of ['https://localhost', 'capacitor://localhost']) {
+        const preflight = await fetch(`${listenOrigin}${path}`, {
+          method: 'OPTIONS',
+          headers: { origin, 'access-control-request-method': 'POST' },
+        })
+        expect(preflight.status).toBe(204)
+        expect(preflight.headers.get('access-control-allow-origin')).toBe(origin)
+      }
+      const denied = await fetch(`${listenOrigin}${path}`, {
+        method: 'OPTIONS',
+        headers: { origin: 'null', 'access-control-request-method': 'POST' },
+      })
+      expect(denied.status).toBe(403)
+    }
+
     const publicKey = generateKeyPairSync('ec', { namedCurve: 'P-256' }).publicKey.export({ format: 'jwk' })
     const attempt = await running.context.platformAccount.beginLogin({
       installationId: parseInstallationId('desktop-oauth-fixture'),
@@ -1494,7 +1515,11 @@ async function startAttachmentHttp(
   store: RemoteAttachmentStoreService,
   authority: RemoteAttachmentAuthority,
 ): Promise<string> {
-  return await startAttachmentHttpWith(applyRemoteAttachmentsHttp, store, authority)
+  return await startAttachmentHttpWith(
+    (context) => { applyRemoteAttachmentsHttp(context, { origins: ['https://mobile.example'] }) },
+    store,
+    authority,
+  )
 }
 
 async function startAttachmentHttpWith(

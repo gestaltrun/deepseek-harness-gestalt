@@ -12,7 +12,7 @@ The store plugin (`name: '@deepseek-ai/dsh-remote-attachments'`) exposes those b
 
 ## HTTP routes
 
-The `remote-attachments-http` plugin (`@deepseek-ai/dsh-remote-attachments/http`) registers three exact routes over the mounted store and requires `webServer`, `remoteAttachments`, and the `remoteAttachmentAuthority` pairing seam. Its `origin` Config is the trusted browser origin. Disposing the plugin fiber unregisters the routes.
+The `remote-attachments-http` plugin (`@deepseek-ai/dsh-remote-attachments/http`) registers three exact routes over the mounted store and requires `webServer`, `remoteAttachments`, and the `remoteAttachmentAuthority` pairing seam. Its non-empty `origins` Config lists exact trusted standard or custom tuple origins; paths, opaque `null`, malformed values, and unconfigured origins are denied. Disposing the plugin fiber unregisters the routes.
 
 - `POST /v1/remote-attachments` — raw ciphertext body with a positive exact `Content-Length`; Account-complete quota admission precedes body reads and publish, then the route responds `201` with `{ capability, byteLength, expiresAt }`, `400 ATTACHMENT_EMPTY` or `CONTENT_LENGTH_MISMATCH`, `411 CONTENT_LENGTH_REQUIRED`, `413 ATTACHMENT_LIMIT_EXCEEDED`, or `429 QUOTA` / `PLATFORM_CAPACITY` with `retryAfter`. A rejected or interrupted body releases its reservation.
 - `POST /v1/remote-attachments/consume` — `{ capability }` JSON; atomically claims before writing and responds `200` with raw ciphertext, `403` cross-pairing, `404` unknown or already claimed, or `410` expired. A failed body write abandons the claim for retry; a finished body is never replayed even if settlement cleanup fails.

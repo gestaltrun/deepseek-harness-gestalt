@@ -1024,7 +1024,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/host/webserver/src/index.ts:59`](../packages/host/webserver/src/index.ts)
+Source: [`packages/host/webserver/src/index.ts:60`](../packages/host/webserver/src/index.ts)
 
 <a id="deepseek-aidsh-invariants"></a>
 
@@ -1879,12 +1879,12 @@ Requires: `platformAccount` · `webServer`
 ```ts config-catalog
 /** HTTP consumer configuration. */
 export interface Config {
-  /** Selected Platform environment origin allowed to call Account routes. */
-  origin: string
+  /** Exact product origins allowed to call Account routes. */
+  origins: string[]
 }
 ```
 
-Source: [`packages/platform/platform-account-http/src/index.ts:30`](../packages/platform/platform-account-http/src/index.ts)
+Source: [`packages/platform/platform-account-http/src/index.ts:31`](../packages/platform/platform-account-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 
@@ -1950,12 +1950,12 @@ Requires: `remoteAccess` · `webServer`
 ```ts config-catalog
 /** HTTP Consumer configuration. */
 export interface Config {
-  /** Trusted browser origin allowed to call the route. */
-  origin: string
+  /** Exact product origins allowed to call the route. */
+  origins: string[]
 }
 ```
 
-Source: [`packages/platform/remote-access-http/src/index.ts:29`](../packages/platform/remote-access-http/src/index.ts)
+Source: [`packages/platform/remote-access-http/src/index.ts:30`](../packages/platform/remote-access-http/src/index.ts)
 
 <a id="deepseek-aidsh-remote-attachments"></a>
 

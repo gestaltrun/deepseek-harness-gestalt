@@ -12,15 +12,15 @@ store 插件（`name: '@deepseek-ai/dsh-remote-attachments'`）把这些边界�
 
 ## HTTP 路由
 
-`remote-attachments-http` 插件（`@deepseek-ai/dsh-remote-attachments/http`）在已挂载的 store 上注册三个精确路由，并要求 `webServer`、`remoteAttachments` 与 `remoteAttachmentAuthority` 配对 seam。它的非空 `origins` 配置列出受信任的精确标准或自定义元组 origin；带路径的 origin、opaque `null`、畸形值与未配置 origin 都会被拒绝。销毁插件 fiber 会注销这些路由。
+`createRemoteAttachmentsHttpPlugin(authenticate)` 会捕获实际运行的 request authenticator，并返回 `remote-attachments-http` 插件（`@deepseek-ai/dsh-remote-attachments/http`）。该插件在已挂载的 store 上注册三个精确路由，并且只要求 `webServer` 与 `remoteAttachments`；authenticator 不会发布为 Cordis service。它的非空 `origins` 配置列出受信任的精确标准或自定义元组 origin；带路径的 origin、opaque `null`、畸形值与未配置 origin 都会被拒绝。销毁插件 fiber 会注销这些路由。
 
 - `POST /v1/remote-attachments`——带正数且精确 `Content-Length` 的原始密文体；账号完整 quota 准入先于 body 读取与 publish，然后返回 `201` 与 `{ capability, byteLength, expiresAt }`，空体或长度不匹配返回 `400 ATTACHMENT_EMPTY` / `CONTENT_LENGTH_MISMATCH`，缺少长度返回 `411 CONTENT_LENGTH_REQUIRED`，超限返回 `413 ATTACHMENT_LIMIT_EXCEEDED`，`429 QUOTA` / `PLATFORM_CAPACITY` 则携带 `retryAfter`。被拒绝或中断的 body 会释放 reservation。
 - `POST /v1/remote-attachments/consume`——`{ capability }` JSON；在写入前原子 claim，并返回 `200` 与原始密文，跨配对 `403`、未知或已 claim `404`、过期 `410`。body 写入失败会放弃 claim 以便重试；body 完成后即使结算清理失败也绝不重放。
 - `POST /v1/remote-attachments/revoke`——`{ capability }` JSON；配对范围 revoke 成功后返回 `204`；已认证配对不拥有该 capability 时返回 `403`。
 
-## 配对 seam
+## 配对组合
 
-`RemoteAttachmentAuthority.authenticate({ headers })` 把一个 HTTPS 请求映射到恰好一个 `PersonalPairingId` 以及 `admit(bytes)`；后者会预留一条带绝对 `expiresAt` 且 `release()` 幂等的不透明账号完整 quota lease。实际运行的 Platform 实现会依据 PostgreSQL 校验当前 Mobile Installation 证明与确切的已确认 pairing selector；selector 本身没有 authority。它永远看不到 attachment 明文。缺失 authority 服务会使插件加载响亮失败。
+`createRemoteAttachmentsHttpPlugin()` 捕获的 authenticator 会把一个 HTTPS 请求映射到恰好一个 `PersonalPairingId` 以及 `admit(bytes)`；后者会预留一条带绝对 `expiresAt` 且 `release()` 幂等的不透明账号完整 quota lease。实际运行的 Platform 会用当前 Mobile Installation verifier、PostgreSQL 中确切的已确认 pairing membership，以及与 `PersonalPairingProvider` 一同返回的 construction-private quota closure 来构造该 authenticator；selector 本身没有 authority。authenticator 永远看不到 attachment 明文，也无法从 Cordis context 取得。
 
 ## 模型体验
 

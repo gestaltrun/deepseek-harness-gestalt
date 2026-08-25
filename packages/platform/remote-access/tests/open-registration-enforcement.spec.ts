@@ -146,7 +146,8 @@ describe('open-registration enforcement', () => {
 
   it('enforces concurrent, per-blob, and daily blob ceilings', async () => {
     const now = { value: NOW }
-    const provider = uniqueProvider(now)
+    const composition = uniqueComposition(now)
+    const provider = composition.provider
     const owner = authentication('desktop-installation', 'account-one')
     await provider.setMobileAccess({ desktop: owner, enabled: true })
     const held: AttachmentBlobReservationId[] = []
@@ -165,7 +166,7 @@ describe('open-registration enforcement', () => {
       bytes: OPEN_REGISTRATION_QUOTAS.blobBytes,
     })
     expect(exactLimit.reservationId.length).toBeGreaterThan(0)
-    const cleanup = provider.attachmentReservationCleanup()
+    const cleanup = composition.attachmentQuota.cleanup
     await cleanup.release(exactLimit.reservationId)
     await cleanup.release(exactLimit.reservationId)
     expect(() => parseAttachmentBlobReservationId('')).toThrow(TypeError)
@@ -217,7 +218,8 @@ describe('open-registration enforcement', () => {
 
   it('expires durable blob reservations before admitting replacement capacity', async () => {
     const now = { value: NOW }
-    const provider = uniqueProvider(now, undefined, undefined, 'lease-', 100)
+    const composition = uniqueComposition(now, undefined, undefined, 'lease-', 100)
+    const provider = composition.provider
     const owner = authentication('desktop-lease', 'account-lease')
     const reservations = await Promise.all(Array.from(
       { length: OPEN_REGISTRATION_QUOTAS.concurrentBlobs },
@@ -230,7 +232,7 @@ describe('open-registration enforcement', () => {
     await expect(provider.admitAttachmentBlob({ owner, bytes: 1 })).resolves.toMatchObject({ expiresAt: NOW + 200 })
     const first = reservations[0]
     if (first === undefined) throw new Error('blob lease fixture requires one reservation')
-    await expect(provider.attachmentReservationCleanup().release(first.reservationId)).resolves.toBeUndefined()
+    await expect(composition.attachmentQuota.cleanup.release(first.reservationId)).resolves.toBeUndefined()
     expect(() => uniqueProvider(
       now,
       undefined,
@@ -356,8 +358,18 @@ function uniqueProvider(
   idPrefix = '',
   attachmentReservationLifetimeMs?: number,
 ) {
+  return uniqueComposition(now, capacity, authority, idPrefix, attachmentReservationLifetimeMs).provider
+}
+
+function uniqueComposition(
+  now: { value: number },
+  capacity?: MemoryPlatformCapacityGate,
+  authority?: MemoryPersonalPairingAuthorityStore,
+  idPrefix = '',
+  attachmentReservationLifetimeMs?: number,
+) {
   let id = 0
-  return new PersonalPairingProvider(new Context(), {
+  return PersonalPairingProvider.compose(new Context(), {
     account: {
       currentInstallation: vi.fn(async ({ accessToken }: { accessToken: string }) => {
         const [accountId, installationId] = accessToken.split(':') as [string, string]

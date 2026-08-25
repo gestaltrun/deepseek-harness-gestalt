@@ -18,7 +18,7 @@ import {
   type RemoteAttachmentQuotaReservation,
   type RemoteAttachmentStoreOptions,
 } from '../src/index.ts'
-import { apply } from '../src/http.ts'
+import { createRemoteAttachmentsHttpPlugin } from '../src/http.ts'
 import {
   downloadCompanionAttachment,
   receiveCompanionAttachment,
@@ -542,8 +542,9 @@ describe('Remote attachment HTTP assembled transfer', () => {
       expect(await errorBody(exploded)).toMatchObject({ code: 'INTERNAL_ERROR' })
       expect(reported).toHaveBeenCalledWith(
         '[remote-attachments-http] unexpected request failure:',
-        expect.objectContaining({ message: 'authority exploded' }),
+        { operation: 'upload', failureKind: 'unexpected-error' },
       )
+      expect(JSON.stringify(reported.mock.calls)).not.toContain('authority exploded')
     } finally {
       reported.mockRestore()
     }
@@ -733,7 +734,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
       admit: async () => ({
         id: parseAttachmentBlobReservationId('quota-read-failure'),
         expiresAt: Number.MAX_SAFE_INTEGER,
-        release: async () => { throw new Error('quota cleanup failed') },
+        release: async () => { throw new Error('Bearer quota-cleanup-secret') },
       }),
     })
     const uploadRoute = routes.get('/v1/remote-attachments')
@@ -747,13 +748,15 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(response.status).toBe(400)
     expect(reported).toHaveBeenCalledWith(
       '[remote-attachments-http] quota release after rejected upload failed:',
-      expect.objectContaining({ message: 'quota cleanup failed' }),
+      { operation: 'upload', phase: 'quota-release', failureKind: 'unexpected-error' },
     )
+    expect(JSON.stringify(reported.mock.calls)).not.toContain('quota-cleanup-secret')
     reported.mockRestore()
   })
 
   it('fails loud when the configured browser origin is not a URL', () => {
-    expect(() => { apply({} as Context, { origins: ['not a URL'] }) }).toThrow()
+    const plugin = createRemoteAttachmentsHttpPlugin(async () => { throw new Error('unused authenticator') })
+    expect(() => { plugin.apply({} as Context, { origins: ['not a URL'] }) }).toThrow()
   })
 })
 
@@ -927,24 +930,22 @@ async function start(options: {
     schedule: () => ({ unref: vi.fn(), cancel: vi.fn() }),
     ...options.store,
   })
+  const authenticate = async ({ headers }: { headers: IncomingMessage['headers'] }) => {
+    const value = headers['x-test-pairing'] ?? headers['x-gestalt-pairing-id']
+    if (typeof value !== 'string') throw new Error('pairing header is required')
+    if (value === 'explode') throw new Error('authority exploded')
+    if (value === 'proof-replayed') throw new AccountError('PROOF_REPLAYED', 'installation proof was already used')
+    return {
+      pairingId: parsePersonalPairingId(value),
+      admit: options.admit ?? (async () => ({
+        id: parseAttachmentBlobReservationId(crypto.randomUUID()),
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        release: async () => {},
+      })),
+    }
+  }
   const fake = {
     remoteAttachments: store,
-    remoteAttachmentAuthority: {
-      authenticate: async ({ headers }: { headers: IncomingMessage['headers'] }) => {
-        const value = headers['x-test-pairing'] ?? headers['x-gestalt-pairing-id']
-        if (typeof value !== 'string') throw new Error('pairing header is required')
-        if (value === 'explode') throw new Error('authority exploded')
-        if (value === 'proof-replayed') throw new AccountError('PROOF_REPLAYED', 'installation proof was already used')
-        return {
-          pairingId: parsePersonalPairingId(value),
-          admit: options.admit ?? (async () => ({
-            id: parseAttachmentBlobReservationId(crypto.randomUUID()),
-            expiresAt: Number.MAX_SAFE_INTEGER,
-            release: async () => {},
-          })),
-        }
-      },
-    },
     webServer: {
       register(route: RegisteredRoute) {
         routes.set(route.path, route)
@@ -953,7 +954,10 @@ async function start(options: {
     },
     effect(register: () => () => void) { register() },
   } as unknown as Context
-  apply(fake, { origins: options.origins ?? ['https://mobile.example'] })
+  createRemoteAttachmentsHttpPlugin(authenticate).apply(
+    fake,
+    { origins: options.origins ?? ['https://mobile.example'] },
+  )
   const http = createServer((req, res) => {
     const route = routes.get(new URL(req.url ?? '/', 'http://localhost').pathname)
     if (route === undefined) { res.writeHead(404).end(); return }

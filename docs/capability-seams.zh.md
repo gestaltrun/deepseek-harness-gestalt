@@ -80,7 +80,6 @@ flowchart LR
   svc_remoteRelay["ctx.remoteRelay<br/>Stateless multi-instance Remote Relay seam"]
   pkg_remote_attachments["remote-attachments"]
   svc_remoteAttachments["ctx.remoteAttachments<br/>Pairing-scoped encrypted attachment blob seam"]
-  svc_remoteAttachmentAuthority["ctx.remoteAttachmentAuthority<br/>Attachment pairing-authentication seam"]
   svc_workspaceRegistry["ctx.workspaceRegistry<br/>Workspace entity registry"]
   svc_sessionQuery["ctx.sessionQuery<br/>Session reads, traces, filters, and search"]
   pkg_session_reference["session-reference"]
@@ -288,7 +287,6 @@ flowchart LR
   pkg_pwsh_local --> svc_shell
   pkg_remote_access --> svc_remoteAccess
   pkg_remote_access --> svc_remoteRelay
-  pkg_remote_attachments --> svc_remoteAttachmentAuthority
   pkg_remote_attachments --> svc_remoteAttachments
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
@@ -391,7 +389,6 @@ flowchart LR
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
   svc_remoteAccess --> pkg_remote_access_http
-  svc_remoteAttachmentAuthority --> pkg_remote_attachments
   svc_remoteAttachments --> pkg_remote_attachments
   svc_remoteRelay --> pkg_remote_access_http
   svc_sandbox --> pkg_bash_sandbox
@@ -501,7 +498,6 @@ flowchart LR
 | `ctx.remoteAccess` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | HTTP 消费方通过一个共用校验传输向 Desktop 设置与 Mobile 暴露 endpoint-owned mailbox 操作；Platform 只接收路由元数据、不透明握手消息、credential digest 与密封 authority。 |
 | `ctx.remoteRelay` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | 拥有由凭据鉴权的在线 attachment 和只含密文的转发；会过期的 Redis 目录与直达 Pub/Sub 协调非 sticky Platform Instance，且不建立离线 queue。 |
 | `ctx.remoteAttachments` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | - | 只保留 endpoint 加密的密文与元数据，签发限定于单个 Personal Pairing 的一次性会过期 capability，并在 consume、过期或撤销时移除 blob 及其 capability。 |
-| `ctx.remoteAttachmentAuthority` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | - | [`remote-attachments`](../packages/platform/remote-attachments) | - | 把每个 HTTPS 请求映射到恰好一个 PersonalPairingId，且不接触 attachment 字节；生产实现由 Personal Pairing 层拥有。 |
 | `ctx.workspaceRegistry` | `core` | [`workspace`](../packages/workspace/workspace) | - | `apiproxy` | - | 通过领域设施拥有带 WorkspaceId 品牌类型的记录；稳定的 sessionIds 账户驱动 Host RPC 与 GUI 投影。 |
 | `ctx.sessionQuery` | `seam` | [`session-query`](../packages/session-query/session-query) | [`session-query-sqlite`](../packages/session-query/session-query-sqlite) | [`session-reference`](../packages/context/session-reference), [`tool-session-query`](../packages/session-query/tool-session-query) | - | 该接口提供精确读取、过滤和追踪；具体后端还提供全文协调、排序、摘要片段和游标世代，而模型消费方负责工作区权限与不含游标的渲染。 |
 | `ctx.fileReferences` | `seam` | [`file-reference`](../packages/context/file-reference) | [`file-reference-local`](../packages/context/file-reference-local) | - | - | 该接口通过其一元 Remote 契约返回指定 Agent cwd 内仅含路径的补全候选；提供方负责命名空间访问和排序，但不会读取文件内容。 |

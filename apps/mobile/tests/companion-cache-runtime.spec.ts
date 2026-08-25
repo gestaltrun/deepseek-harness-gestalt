@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { describe, expect, it, vi } from 'vitest'
 import { parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
-import { parseCompanionOperationId } from '@deepseek-ai/dsh-remote-protocol'
+import { parseCompanionOperationId, REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import { MobileCompanionProjectionCacheRuntime } from '../src/companion-cache-runtime.ts'
 import { companionCacheDatabaseName } from '../src/companion-cache.ts'
 import { PairingCompanionKeyVault } from '../src/companion-keys.ts'
@@ -70,6 +70,41 @@ describe('Mobile Companion projection cache runtime', () => {
     })
   })
 
+  it('bounds complete metadata by UTF-8 bytes and replaces stale cache with a leading Session prefix', async () => {
+    const pairingId = parsePersonalPairingId(`pairing-cache-${crypto.randomUUID()}`)
+    const accountId = parsePlatformAccountId(`account-cache-${crypto.randomUUID()}`)
+    const keys = new PairingCompanionKeyVault()
+    keys.retain(pairingId, new Uint8Array(32).fill(45))
+    const cache = new MobileCompanionProjectionCacheRuntime({
+      environment: 'production', accountId, pairingId, keys,
+    })
+    const exactBase = projectionWithSessionText('Bounded metadata', '')
+    const remaining = REMOTE_PROTOCOL_LIMITS.companionMessageBytes - projectionSnapshotBytes(exactBase)
+    const exact = projectionWithSessionText('Bounded metadata', 'a'.repeat(remaining))
+    expect(projectionSnapshotBytes(exact)).toBe(REMOTE_PROTOCOL_LIMITS.companionMessageBytes)
+
+    await expect(cache.save(exact)).resolves.toBeUndefined()
+    await expect(cache.save(projectionWithSessionText('Bounded metadata', 'a'.repeat(remaining + 1))))
+      .resolves.toBeUndefined()
+    await expect(cache.restore()).resolves.toMatchObject({
+      desktopName: 'Bounded metadata',
+      sessions: { ids: [], byId: {}, current: null },
+      workspaces: [],
+    })
+
+    const multibyteBase = projectionWithSessionText('Multibyte metadata', '')
+    const multibyteRoom = REMOTE_PROTOCOL_LIMITS.companionMessageBytes - projectionSnapshotBytes(multibyteBase)
+    const multibyteText = '你'.repeat(Math.floor(multibyteRoom / 3) + 1)
+    expect(multibyteText.length).toBeLessThan(remaining)
+    await expect(cache.save(projectionWithSessionText('Multibyte metadata', multibyteText)))
+      .resolves.toBeUndefined()
+    await expect(cache.restore()).resolves.toMatchObject({
+      desktopName: 'Multibyte metadata',
+      sessions: { ids: [], byId: {}, current: null },
+      workspaces: [],
+    })
+  })
+
   it('retains an unknown operation receipt when presentation content is cleared', async () => {
     const pairingId = parsePersonalPairingId(`pairing-receipt-${crypto.randomUUID()}`)
     const accountId = parsePlatformAccountId(`account-receipt-${crypto.randomUUID()}`)
@@ -123,6 +158,34 @@ function emptyProjection(desktopName: string): MobileCompanionProjectionDto {
     },
     workspaces: [],
     conversations: [],
+  }
+}
+
+function projectionSnapshotBytes(projection: MobileCompanionProjectionDto): number {
+  return new TextEncoder().encode(JSON.stringify({ version: 1, projection })).byteLength
+}
+
+function projectionWithSessionText(desktopName: string, displayTitle: string): MobileCompanionProjectionDto {
+  const sessionId = 'oversized-session'
+  return {
+    ...emptyProjection(desktopName),
+    sessions: {
+      ids: [sessionId],
+      byId: {
+        [sessionId]: {
+          id: sessionId, displayTitle, running: false, blank: false, updatedAt: 1,
+        },
+      },
+      current: sessionId,
+      phase: 'ready',
+      subagentsByParent: {},
+      jobsBySession: {},
+      currentAddress: null,
+    },
+    workspaces: [{
+      workspaceId: 'oversized-workspace', path: '/work', title: 'Oversized', sessionIds: [sessionId],
+      createdAt: '2026-08-26T00:00:00.000Z', updatedAt: '2026-08-26T00:00:00.000Z',
+    }],
   }
 }
 

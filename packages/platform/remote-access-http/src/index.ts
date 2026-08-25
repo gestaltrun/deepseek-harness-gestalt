@@ -341,8 +341,7 @@ function answerError(res: ServerResponse, error: unknown, operation?: string): v
   }
   console.error('[remote-access-http] unexpected request failure:', {
     operation: operation ?? 'request-setup',
-    errorName: error instanceof Error ? error.name : 'NonErrorRejection',
-    errorMessage: error instanceof Error ? error.message : 'Remote Access handler rejected with a non-Error value',
+    failureKind: 'unexpected-error',
   })
   writeJson(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Remote Access request failed' } })
 }

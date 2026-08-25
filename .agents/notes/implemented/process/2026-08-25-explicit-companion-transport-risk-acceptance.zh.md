@@ -10,9 +10,9 @@ Mobile release validation 要求一个声称已完成独立 Noise security revie
 
 ## 决策
 
-Repository 与 real-device transport test 仍是强制 release evidence。独立外部评审不是第一次分发的前置条件。每次 Mobile Release dispatch 都必须设置 candidate-scoped `accept_transport_risk` input；该 input 为 false 时，authorization job 会在 Android 或 iOS 获得 signing secret 之前失败。
+Repository 与实际运行的 native transport test 仍是强制 release evidence。已批准的 Android Emulator 与 iOS Simulator 可以提供 device evidence；fixture Web page 与 `prototype-companion` 不可以。独立外部评审不是第一次分发的前置条件。成功的 Mobile Companion Acceptance run 会校验确切的 flow 与 device vocabulary、upgrade preservation、phone-size UI、assembled failure 与 transport decision，然后发布一份以已测试 `master` commit 命名的 immutable artifact。
 
-进程内 release helper 执行相同规则。Product flow、两个 native platform matrix、upgrade preservation、phone-size UI 和 assembled failure acceptance 决定 readiness。授权 TestFlight 或 Android APK 的请求还必须包含 `transportRiskAccepted: true`。
+每次 Mobile Release dispatch 都要提供该 acceptance run id 与 candidate-scoped `accept_transport_risk` input。authorization job 会在 Android 或 iOS 获得 signing secret 前，校验 source run event 与具名 verdict、唯一且未过期的 artifact、repository、source run id、commit、Git tree、完整 evidence 与 risk acceptance。verifier 会调用进程内 distribution helper；workflow syntax 无法绕过相同的 readiness rule。
 
 ## 考虑过的替代方案
 
@@ -24,8 +24,8 @@ Repository 与 real-device transport test 仍是强制 release evidence。独立
 
 ## 后果
 
-第一次 TestFlight 与 signed APK candidate 可以在记录 operator decision 后推进，无需虚构独立评审结果。GitHub 会为每次 dispatch 记录 exact candidate SHA 与显式 transport-risk input。未来的独立评审可以增加 evidence 或恢复更强的 release prerequisite，而无需改变 endpoint-owned Snow protocol。
+第一次 TestFlight 与 signed APK candidate 可以在记录 operator decision 后推进，无需虚构独立评审结果。GitHub 会保留 candidate-bound 的实际运行 acceptance artifact，以及确切 release dispatch 与 transport-risk input。Stale、foreign、partial、duplicated 或扩展 vocabulary 的 evidence 都无法进入 signing。未来的独立评审可以增加 evidence 或恢复更强的 release prerequisite，而无需改变 endpoint-owned Snow protocol。
 
 ## 测试
 
-Release-helper coverage 会在缺少显式 risk acceptance 时拒绝 distribution，同时保留全部 product 与 device evidence requirement。Workflow coverage 要求 manual input，并让两个 signing job 都依赖 authorization job。
+Release-helper coverage 会拒绝 missing、duplicated、unknown、stale-candidate、foreign-repository、wrong-run 与 risk-unaccepted evidence，同时保留全部 product 与 device requirement。Workflow coverage 要求 acceptance run id、执行 verifier、只在具名 verdict 成功后发布 evidence，并让两个 signing job 都依赖 authorization。

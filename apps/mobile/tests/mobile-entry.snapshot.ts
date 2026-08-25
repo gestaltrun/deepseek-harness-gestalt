@@ -19,6 +19,7 @@ import {
   parseRelayCredential,
   parseRelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
+import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { CompanionForegroundRuntime, installCompanionRuntime } from '../src/companion-lifecycle.ts'
 import { CompanionAttachmentDeliveryUncertainError } from '../src/companion-attachment.ts'
 import { mountMobileEntry } from '../src/mobile-entry.tsx'
@@ -75,6 +76,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
 
     const mounted = mountMobileEntry(root, {
       installation,
+      pairing: selectedPairing(),
       companion: runtime,
       clock: fixedMobilePresentationClock(10_000),
     })
@@ -191,7 +193,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     expect(screen.getByRole('region', { name: 'Desktop search results' }).textContent).toMatchInlineSnapshot(
       '"Desktop search resultsuncached-authoritative-sessionDesktop-only authoritative hit"',
     )
-    surface.search('')
+    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }))
     surface.attach(sid('guarded-session'), selectedFile())
     results.acceptValidatedCompanionResult({
       type: 'attachment-rejected',
@@ -334,6 +336,26 @@ function installationWithCompletedLogin(): PlatformAccountInstallation {
     systemBrowser: { open: vi.fn() },
     crypto: globalThis.crypto,
   })
+}
+
+function selectedPairing() {
+  const pairingId = parsePersonalPairingId('pairing-mobile-snapshot')
+  const snapshot = {
+    status: 'paired' as const,
+    desktops: [{ pairingId, desktopName: 'Guarded Desktop' }],
+    selectedPairingId: pairingId,
+  }
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: () => () => {},
+    completeLink: () => {},
+    scanQr: () => {},
+    retryPairing: () => {},
+    selectDesktop: () => {},
+    activate: async () => {},
+    deactivate: async () => {},
+    unpair: async () => {},
+  }
 }
 
 function guardedConversation(complete = false): ValidatedDesktopSurfaceResync['conversations'][number] {

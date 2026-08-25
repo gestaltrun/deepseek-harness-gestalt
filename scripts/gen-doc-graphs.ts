@@ -276,14 +276,6 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Retains endpoint-encrypted ciphertext and metadata only, issues single-use expiring capabilities scoped to one Personal Pairing, and removes blob plus capability on consume, expiry, or revocation.',
   },
   {
-    key: 'remoteAttachmentAuthority',
-    pkg: 'remote-attachments',
-    title: 'Attachment pairing-authentication seam',
-    mode: 'seam',
-    consumers: ['remote-attachments'],
-    note: 'Maps one HTTPS request to exactly one PersonalPairingId without seeing attachment bytes; the Personal Pairing layer owns the production implementation.',
-  },
-  {
     key: 'workspaceRegistry',
     pkg: 'workspace',
     title: 'Workspace entity registry',

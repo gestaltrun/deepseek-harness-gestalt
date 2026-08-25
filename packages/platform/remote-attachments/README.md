@@ -12,15 +12,15 @@ The store plugin (`name: '@deepseek-ai/dsh-remote-attachments'`) exposes those b
 
 ## HTTP routes
 
-The `remote-attachments-http` plugin (`@deepseek-ai/dsh-remote-attachments/http`) registers three exact routes over the mounted store and requires `webServer`, `remoteAttachments`, and the `remoteAttachmentAuthority` pairing seam. Its non-empty `origins` Config lists exact trusted standard or custom tuple origins; paths, opaque `null`, malformed values, and unconfigured origins are denied. Disposing the plugin fiber unregisters the routes.
+`createRemoteAttachmentsHttpPlugin(authenticate)` captures the operated request authenticator and returns the `remote-attachments-http` plugin (`@deepseek-ai/dsh-remote-attachments/http`). The plugin registers three exact routes over the mounted store and requires only `webServer` and `remoteAttachments`; the authenticator is not published as a Cordis service. Its non-empty `origins` Config lists exact trusted standard or custom tuple origins; paths, opaque `null`, malformed values, and unconfigured origins are denied. Disposing the plugin fiber unregisters the routes.
 
 - `POST /v1/remote-attachments` — raw ciphertext body with a positive exact `Content-Length`; Account-complete quota admission precedes body reads and publish, then the route responds `201` with `{ capability, byteLength, expiresAt }`, `400 ATTACHMENT_EMPTY` or `CONTENT_LENGTH_MISMATCH`, `411 CONTENT_LENGTH_REQUIRED`, `413 ATTACHMENT_LIMIT_EXCEEDED`, or `429 QUOTA` / `PLATFORM_CAPACITY` with `retryAfter`. A rejected or interrupted body releases its reservation.
 - `POST /v1/remote-attachments/consume` — `{ capability }` JSON; atomically claims before writing and responds `200` with raw ciphertext, `403` cross-pairing, `404` unknown or already claimed, or `410` expired. A failed body write abandons the claim for retry; a finished body is never replayed even if settlement cleanup fails.
 - `POST /v1/remote-attachments/revoke` — `{ capability }` JSON; responds `204` after a pairing-scoped revoke, or `403` when the authenticated pairing does not own the capability.
 
-## Pairing seam
+## Pairing composition
 
-`RemoteAttachmentAuthority.authenticate({ headers })` maps one HTTPS request to exactly one `PersonalPairingId` plus `admit(bytes)`, which reserves one opaque Account-complete quota lease with an absolute `expiresAt` and idempotent `release()`. The operated Platform implementation verifies the current Mobile Installation proof and exact confirmed pairing selector against PostgreSQL; a selector alone grants no authority. It never sees attachment plaintext. A missing authority service fails plugin load loudly.
+The authenticator captured by `createRemoteAttachmentsHttpPlugin()` maps one HTTPS request to exactly one `PersonalPairingId` plus `admit(bytes)`, which reserves one opaque Account-complete quota lease with an absolute `expiresAt` and idempotent `release()`. The operated Platform constructs it from the current Mobile Installation verifier, exact confirmed pairing membership in PostgreSQL, and construction-private quota closures returned beside `PersonalPairingProvider`; a selector alone grants no authority. The authenticator never sees attachment plaintext and cannot be obtained from the Cordis context.
 
 ## Model Experience
 

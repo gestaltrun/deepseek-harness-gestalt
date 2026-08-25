@@ -7,6 +7,10 @@ on:
         description: Exact reviewed master commit to build and sign.
         required: true
         type: string
+      acceptance_run_id:
+        description: Successful Mobile Companion Acceptance run for this exact candidate.
+        required: true
+        type: string
       upload_testflight:
         description: Upload the signed iOS candidate to TestFlight.
         required: true
@@ -20,6 +24,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: mobile-release
@@ -30,11 +35,41 @@ env:
 
 jobs:
   release-authorization:
-    name: Verify explicit release authorization
+    name: Verify candidate-bound release evidence
     runs-on: ubuntu-24.04
     steps:
-      - name: Require Companion transport risk acceptance
-        run: test '${{ inputs.accept_transport_risk }}' = 'true'
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify exact master candidate
+        env:
+          MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Verify immutable Companion acceptance evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOBILE_ACCEPTANCE_RUN_ID: ${{ inputs.acceptance_run_id }}
+          MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          MOBILE_TRANSPORT_RISK_ACCEPTED: ${{ inputs.accept_transport_risk }}
+        run: |
+          pnpm exec tsx apps/mobile/scripts/verify-companion-release-evidence.ts \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-run-id "$MOBILE_ACCEPTANCE_RUN_ID" \
+            --candidate-sha "$MOBILE_CANDIDATE_SHA" \
+            --transport-risk-accepted "$MOBILE_TRANSPORT_RISK_ACCEPTED" \
+            --test-flight true \
+            --android-apk true
 
   android:
     name: Signed Android APK

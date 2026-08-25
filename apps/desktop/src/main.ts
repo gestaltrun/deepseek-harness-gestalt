@@ -477,10 +477,7 @@ function installIntegrationsOnce(): void {
     })
   })
   powerMonitor.on('resume', () => {
-    if (!accountSignedIn) return
-    void pairing.start().catch((error: unknown) => {
-      console.error('[desktop-personal-pairing] resume startup failed:', error)
-    })
+    void startPairingForCurrentDesktop()
   })
 }
 

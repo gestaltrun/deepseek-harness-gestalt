@@ -333,6 +333,8 @@ describe('Mobile Companion browse projection', () => {
       onLoadOlder,
     }))
     expect(screen.getByRole('alert').textContent).toContain('HTTP 400')
+    fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
+    expect(onSearch).toHaveBeenLastCalledWith('')
   })
 
   it('renders authoritative search controls and status entirely in English', () => {

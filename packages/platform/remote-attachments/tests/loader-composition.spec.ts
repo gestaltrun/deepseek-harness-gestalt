@@ -19,7 +19,6 @@ import * as RemoteAttachmentsHttp from '../src/http.ts'
 
 const STORE = '@deepseek-ai/dsh-remote-attachments'
 const HTTP = '@deepseek-ai/dsh-remote-attachments/http'
-const AUTHORITY = 'test-remote-attachment-authority'
 
 let root: string | undefined
 let context: Context | undefined
@@ -59,23 +58,16 @@ describe('real Remote Attachments Loader composition', () => {
   })
 })
 
-function testAuthority(): unknown {
-  return {
-    name: AUTHORITY,
-    apply(ctx: Context) {
-      ctx.provide('remoteAttachmentAuthority', {
-        authenticate: async ({ headers }: { headers: { [key: string]: string | string[] | undefined } }) => {
-          const value = headers['x-gestalt-pairing-id'] ?? headers['x-test-pairing']
-          if (typeof value !== 'string') throw new Error('pairing header is required')
-          return {
-            pairingId: parsePersonalPairingId(value),
-            admit: async () => ({
-              id: 'loader-quota', expiresAt: Number.MAX_SAFE_INTEGER, release: async () => {},
-            }),
-          }
-        },
-      })
-    },
+function testAuthenticator() {
+  return async ({ headers }: { headers: { [key: string]: string | string[] | undefined } }) => {
+    const value = headers['x-gestalt-pairing-id'] ?? headers['x-test-pairing']
+    if (typeof value !== 'string') throw new Error('pairing header is required')
+    return {
+      pairingId: parsePersonalPairingId(value),
+      admit: async () => ({
+        id: 'loader-quota' as never, expiresAt: Number.MAX_SAFE_INTEGER, release: async () => {},
+      }),
+    }
   }
 }
 
@@ -92,7 +84,6 @@ async function loadComposition(): Promise<Context> {
     '    maxBlobBytes: 64',
     '    maxRetainedBlobs: 4',
     '    sweepIntervalMs: 60000',
-    `- name: '${AUTHORITY}'`,
     `- name: '${HTTP}'`,
     '  config:',
     '    origins:',
@@ -106,8 +97,7 @@ async function loadComposition(): Promise<Context> {
   const modules = new Map<string, unknown>([
     ['@deepseek-ai/dsh-host-webserver', HttpServer],
     [STORE, RemoteAttachments],
-    [AUTHORITY, testAuthority()],
-    [HTTP, RemoteAttachmentsHttp],
+    [HTTP, RemoteAttachmentsHttp.createRemoteAttachmentsHttpPlugin(testAuthenticator())],
   ])
   context.loader.internal = {
     version: 'v2',

@@ -169,6 +169,15 @@
   font: var(--dsw-font-xl-24);
 }
 
+.returnProjects {
+  border: 0;
+  padding: 6px 0;
+  color: var(--dsw-static-blue-600);
+  background: transparent;
+  font: var(--dsw-font-xs-13);
+  cursor: pointer;
+}
+
 .emptyState {
   min-height: 55dvh;
   display: grid;

@@ -27,10 +27,7 @@ import {
   name as remoteAccessRelayHttpName,
 } from '@deepseek-ai/dsh-remote-access-http/relay'
 import {
-  Config as RemoteAttachmentsHttpConfig,
-  apply as applyRemoteAttachmentsHttp,
-  inject as remoteAttachmentsHttpInject,
-  name as remoteAttachmentsHttpName,
+  createRemoteAttachmentsHttpPlugin,
 } from '@deepseek-ai/dsh-remote-attachments/http'
 import pg, { type Pool } from 'pg'
 import { PostgresAccountBackend } from './postgres-backend.ts'
@@ -40,7 +37,7 @@ import { OperatedRemoteAccessResources } from './remote-access-resources.ts'
 import { OssRemoteAttachmentStore } from './oss-attachment-store.ts'
 import { createEcsRamRoleOssClient, type OssObjectClient } from './oss-client.ts'
 import { PostgresRemoteAttachmentStore } from './postgres-attachment-store.ts'
-import { OperatedRemoteAttachmentAuthority } from './remote-attachment-authority.ts'
+import { createOperatedRemoteAttachmentAuthenticator } from './remote-attachment-authority.ts'
 
 type RedisConnection = Awaited<ReturnType<typeof connectRedis>>
 
@@ -154,7 +151,7 @@ export async function launchOperatedPlatform(
         maxPendingDeliveries: config.relay.maxPendingDeliveries,
       },
     })
-    const personalPairing = new PersonalPairingProvider(context, {
+    const personalPairingComposition = PersonalPairingProvider.compose(context, {
       account: context.platformAccount,
       handshake: endpointOnlyHandshake(),
       relay,
@@ -162,7 +159,7 @@ export async function launchOperatedPlatform(
       attachmentReservationLifetimeMs: config.remoteAttachments.capabilityLifetimeMs * 2,
       pairingLinkOrigin: `${environment.origin}/pair`,
     })
-    const quotaCleanup = personalPairing.attachmentReservationCleanup()
+    const quotaCleanup = personalPairingComposition.attachmentQuota.cleanup
     const remoteAttachments = config.remoteAttachments.storage === 'postgres'
       ? new PostgresRemoteAttachmentStore(context, environment.databaseIdentity, postgres, {
         ...config.remoteAttachments,
@@ -182,22 +179,18 @@ export async function launchOperatedPlatform(
         },
       )
     await remoteAttachments.migrate()
-    context.effect(() => context.provide(
-      'remoteAttachmentAuthority',
-      new OperatedRemoteAttachmentAuthority(context.platformAccount, remoteAccess.authority, personalPairing),
-    ), 'platform: operated remote attachment authority')
     await context.plugin({
       Config: RemoteAccessHttpConfig,
       apply: applyRemoteAccessHttp,
       inject: remoteAccessHttpInject,
       name: remoteAccessHttpName,
     }, { origins: productOrigins })
-    await context.plugin({
-      Config: RemoteAttachmentsHttpConfig,
-      apply: applyRemoteAttachmentsHttp,
-      inject: remoteAttachmentsHttpInject,
-      name: remoteAttachmentsHttpName,
-    }, { origins: productOrigins })
+    const authenticateAttachment = createOperatedRemoteAttachmentAuthenticator(
+      context.platformAccount,
+      remoteAccess.authority,
+      personalPairingComposition.attachmentQuota,
+    )
+    await context.plugin(createRemoteAttachmentsHttpPlugin(authenticateAttachment), { origins: productOrigins })
     await context.plugin({
       Config: RemoteAccessRelayHttpConfig,
       apply: applyRemoteAccessRelayHttp,

@@ -185,6 +185,38 @@ describe('MobileAccount', () => {
     expect(screen.queryByText('Stale Desktop')).toBeNull()
     expect(screen.queryByText('Remote Online')).toBeNull()
   })
+
+  it('waits for pairing activation before deactivating on sign-out', async () => {
+    const { installation } = fixture()
+    const ready = { status: 'ready' } as const
+    let finishActivation = (): void => {}
+    const activation = new Promise<void>((resolve) => { finishActivation = resolve })
+    const deactivate = vi.fn().mockResolvedValue(undefined)
+    const pairing: MobilePairingActions = {
+      getSnapshot: () => ready,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
+      activate: vi.fn(() => activation),
+      deactivate,
+      unpair: vi.fn().mockResolvedValue(undefined),
+    }
+    render(createElement(MobileAccount, { installation, pairing, locale: 'zh', theme: 'light', clock }))
+
+    fireEvent.click(screen.getByRole('checkbox'))
+    await waitFor(() => { expect(screen.getByRole('button', { name: '使用 GitHub 继续' }).hasAttribute('disabled')).toBe(false) })
+    fireEvent.click(screen.getByRole('button', { name: '使用 GitHub 继续' }))
+    await screen.findByText('未连接')
+    fireEvent.click(screen.getByRole('button', { name: '查看账号' }))
+    fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
+
+    await screen.findByRole('button', { name: '使用 GitHub 继续' })
+    expect(deactivate).not.toHaveBeenCalled()
+    finishActivation()
+    await waitFor(() => { expect(deactivate).toHaveBeenCalledOnce() })
+  })
 })
 
 function fixture(): {

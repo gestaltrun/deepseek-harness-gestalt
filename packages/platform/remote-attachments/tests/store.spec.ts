@@ -277,15 +277,16 @@ describe('Remote attachment blob store', () => {
       now,
       quota: {
         id: quotaId('quota-dispose'), expiresAt: Number.MAX_SAFE_INTEGER,
-        release: async () => { throw new Error('quota backend unavailable') },
+        release: async () => { throw new Error('Bearer quota-backend-secret') },
       },
     })
 
     await service.dispose()
     expect(reported).toHaveBeenCalledWith(
       '[remote-attachments] quota release failed:',
-      expect.objectContaining({ message: 'quota backend unavailable' }),
+      { phase: 'reservation-release', failureKind: 'unexpected-error' },
     )
+    expect(JSON.stringify(reported.mock.calls)).not.toContain('quota-backend-secret')
     reported.mockRestore()
   })
 

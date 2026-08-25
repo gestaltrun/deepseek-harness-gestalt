@@ -78,7 +78,6 @@ flowchart LR
   svc_remoteRelay["ctx.remoteRelay<br/>Stateless multi-instance Remote Relay seam"]
   pkg_remote_attachments["remote-attachments"]
   svc_remoteAttachments["ctx.remoteAttachments<br/>Pairing-scoped encrypted attachment blob seam"]
-  svc_remoteAttachmentAuthority["ctx.remoteAttachmentAuthority<br/>Attachment pairing-authentication seam"]
   svc_workspaceRegistry["ctx.workspaceRegistry<br/>Workspace entity registry"]
   svc_sessionQuery["ctx.sessionQuery<br/>Session reads, traces, filters, and search"]
   pkg_session_reference["session-reference"]
@@ -286,7 +285,6 @@ flowchart LR
   pkg_pwsh_local --> svc_shell
   pkg_remote_access --> svc_remoteAccess
   pkg_remote_access --> svc_remoteRelay
-  pkg_remote_attachments --> svc_remoteAttachmentAuthority
   pkg_remote_attachments --> svc_remoteAttachments
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
@@ -389,7 +387,6 @@ flowchart LR
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
   svc_remoteAccess --> pkg_remote_access_http
-  svc_remoteAttachmentAuthority --> pkg_remote_attachments
   svc_remoteAttachments --> pkg_remote_attachments
   svc_remoteRelay --> pkg_remote_access_http
   svc_sandbox --> pkg_bash_sandbox
@@ -499,7 +496,6 @@ flowchart LR
 | `ctx.remoteAccess` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | The HTTP consumer exposes endpoint-owned mailbox operations through one validated transport for Desktop Settings and Mobile; Platform receives routing metadata, opaque handshake messages, credential digests, and sealed authority only. |
 | `ctx.remoteRelay` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | Owns credential-authenticated live attachments and ciphertext-only forwarding; an expiring Redis directory and direct Pub/Sub coordinate non-sticky Platform Instances without an offline queue. |
 | `ctx.remoteAttachments` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | - | Retains endpoint-encrypted ciphertext and metadata only, issues single-use expiring capabilities scoped to one Personal Pairing, and removes blob plus capability on consume, expiry, or revocation. |
-| `ctx.remoteAttachmentAuthority` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | - | [`remote-attachments`](../packages/platform/remote-attachments) | - | Maps one HTTPS request to exactly one PersonalPairingId without seeing attachment bytes; the Personal Pairing layer owns the production implementation. |
 | `ctx.workspaceRegistry` | `core` | [`workspace`](../packages/workspace/workspace) | - | `apiproxy` | - | Owns WorkspaceId-branded records over the domain facility; stable sessionIds accounts drive Host RPC and GUI projections. |
 | `ctx.sessionQuery` | `seam` | [`session-query`](../packages/session-query/session-query) | [`session-query-sqlite`](../packages/session-query/session-query-sqlite) | [`session-reference`](../packages/context/session-reference), [`tool-session-query`](../packages/session-query/tool-session-query) | - | The interface supplies exact reads, filters, and traces; its concrete backend adds full-text reconciliation, ranking, snippets, and cursor generations, while the model consumer owns workspace authority and cursor-free rendering. |
 | `ctx.fileReferences` | `seam` | [`file-reference`](../packages/context/file-reference) | [`file-reference-local`](../packages/context/file-reference-local) | - | - | The interface returns path-only completion candidates within the addressed Agent cwd through its unary Remote contract; providers own namespace access and ranking without reading file contents. |

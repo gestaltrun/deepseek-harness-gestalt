@@ -151,6 +151,10 @@ export function MobileBrowse({
   const openSession = (id: SessionId): void => {
     setOpenId(id)
   }
+  const closeSearch = (): void => {
+    setSearchDraft('')
+    onSearch?.('')
+  }
 
   if (openId !== undefined && openTitle !== undefined) {
     if (conversation !== undefined) {
@@ -231,7 +235,14 @@ export function MobileBrowse({
           </div>
         ) : (
           <>
-            <div className={css.projectTitle}><h1>{locale === 'zh' ? '项目' : 'Projects'}</h1></div>
+            <div className={css.projectTitle}>
+              <h1>{searchActive ? locale === 'zh' ? '搜索' : 'Search' : locale === 'zh' ? '项目' : 'Projects'}</h1>
+              {searchActive && onSearch !== undefined && (
+                <button type="button" className={css.returnProjects} onClick={closeSearch}>
+                  {locale === 'zh' ? '返回项目' : 'Back to projects'}
+                </button>
+              )}
+            </div>
             {searchActive && (
               <AuthoritativeSearchResults search={search} locale={locale} onOpen={openSession} />
             )}

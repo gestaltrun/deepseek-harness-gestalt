@@ -12,7 +12,7 @@ Live presentation clock 每次 render 都通过新函数订阅。因此 React �
 
 ## 决策
 
-Packaged Desktop 只有在 Web Host 安装后才启动 signed-in Personal Pairing。Host startup 之后发生的 Account sign-in 使用同一个 readiness predicate。Host exit 仍会清除 Host authority，并保留已建立 Relay 足够长时间，以返回 typed Host failure；该 ordering rule 适用于初次或 replacement Desktop startup，此时 Mobile 不得过早得知新的 Desktop authority 已 ready。
+Packaged Desktop 只有在 Web Host 安装后才启动 signed-in Personal Pairing。Account sign-in 与 process resume 使用同一个 readiness predicate，因此在初次或 replacement Host startup 尚未完成时唤醒进程，不会重启 Relay access。Host exit 仍会清除 Host authority，并保留已建立 Relay 足够长时间，以返回 typed Host failure；该 ordering rule 适用于初次或 replacement Desktop startup，此时 Mobile 不得过早得知新的 Desktop authority 已 ready。
 
 `MobileBrowse` 在没有当前 mutation authority 时绝不请求 history。Synchronization 丢失会清除其本地 history-request fence，使后续 synchronized generation 可以请求缺失 conversation。Clock subscription callback 在其 clock owner 生命周期内保持稳定。
 

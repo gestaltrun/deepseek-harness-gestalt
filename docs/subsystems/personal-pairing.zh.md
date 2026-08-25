@@ -209,23 +209,6 @@ abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication rese
 
 Source: [`packages/platform/remote-access/src/index.ts`](../../packages/platform/remote-access/src/index.ts)
 
-<a id="ctxremoteattachmentauthority--remoteattachmentauthority"></a>
-
-### `ctx.remoteAttachmentAuthority` — `RemoteAttachmentAuthority`
-
-Pairing scope seam: the Personal Pairing layer authenticates one HTTPS request to exactly one Personal Pairing. Implementations never see attachment bytes.
-
-```ts cordis-catalog
-/**
- * Authenticate one attachment request to its owning Personal Pairing.
- * @param input - complete untrusted request headers.
- * @returns pairing authority plus Account-complete blob admission.
- */
-authenticate(input: { headers: IncomingHttpHeaders }): Promise<{ pairingId: PersonalPairingId admit(bytes: number): Promise<RemoteAttachmentQuotaReservation> }>
-```
-
-Source: [`packages/platform/remote-attachments/src/http.ts`](../../packages/platform/remote-attachments/src/http.ts)
-
 <a id="ctxremoteattachments--remoteattachmentstoreservice-abstract-seam"></a>
 
 ### `ctx.remoteAttachments` — `RemoteAttachmentStoreService` (abstract seam)

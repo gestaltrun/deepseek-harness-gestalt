@@ -1,0 +1,64 @@
+name: Mobile Companion Acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact tested master commit represented by this evidence.
+        required: true
+        type: string
+      evidence_json:
+        description: Complete operated flow, native device, upgrade, UI, failure, and transport-risk evidence JSON.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-companion-acceptance-${{ inputs.candidate_sha }}
+  cancel-in-progress: false
+
+env:
+  PRIMARY_NODE_VERSION: '24'
+
+jobs:
+  acceptance-verdict:
+    name: mobile companion acceptance verdict
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Verify exact master candidate
+        env:
+          MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Validate and bind operated acceptance
+        env:
+          MOBILE_ACCEPTANCE_EVIDENCE: ${{ inputs.evidence_json }}
+          MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          pnpm exec tsx apps/mobile/scripts/verify-companion-release-evidence.ts \
+            --create \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-run-id "$GITHUB_RUN_ID" \
+            --candidate-sha "$MOBILE_CANDIDATE_SHA" \
+            --output companion-release-attestation.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-companion-acceptance-${{ inputs.candidate_sha }}
+          path: companion-release-attestation.json
+          if-no-files-found: error
+          retention-days: 30

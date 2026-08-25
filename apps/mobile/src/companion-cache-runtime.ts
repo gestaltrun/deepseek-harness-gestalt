@@ -100,11 +100,51 @@ function encodeBoundedProjectionSnapshot(projection: MobileCompanionProjectionDt
       }
     }
   }
-  return encodeProjectionSnapshot({ ...projection, conversations: [] })
+  const metadataOnly = encodeProjectionSnapshot({ ...projection, conversations: [] })
+  if (projectionSnapshotBytes(metadataOnly) <= REMOTE_PROTOCOL_LIMITS.companionMessageBytes) return metadataOnly
+  for (let count = projection.sessions.ids.length - 1; count >= 0; count -= 1) {
+    const retainedIds = projection.sessions.ids.slice(0, count)
+      .filter(id => projection.sessions.byId[id] !== undefined)
+    const retained = new Set(retainedIds)
+    const candidate = encodeProjectionSnapshot({
+      ...projection,
+      sessions: {
+        ...projection.sessions,
+        ids: retainedIds,
+        byId: filterProjectionRecord(projection.sessions.byId, retained),
+        current: projection.sessions.current !== null && retained.has(projection.sessions.current)
+          ? projection.sessions.current
+          : null,
+        subagentsByParent: filterProjectionRecord(projection.sessions.subagentsByParent, retained),
+        jobsBySession: filterProjectionRecord(projection.sessions.jobsBySession, retained),
+        currentAddress: null,
+      },
+      workspaces: projection.workspaces.flatMap((workspace) => {
+        const sessionIds = workspace.sessionIds.filter(id => retained.has(id))
+        return sessionIds.length === 0 ? [] : [{ ...workspace, sessionIds }]
+      }),
+      conversations: [],
+    })
+    if (projectionSnapshotBytes(candidate) <= REMOTE_PROTOCOL_LIMITS.companionMessageBytes) return candidate
+  }
+  throw new TypeError(
+    `Companion Cache projection metadata exceeds the ${String(REMOTE_PROTOCOL_LIMITS.companionMessageBytes)}-byte ceiling`,
+  )
 }
 
 function encodeProjectionSnapshot(projection: MobileCompanionProjectionDto): string {
   return JSON.stringify({ version: 1, projection })
+}
+
+function projectionSnapshotBytes(snapshot: string): number {
+  return new TextEncoder().encode(snapshot).byteLength
+}
+
+function filterProjectionRecord<Value>(
+  record: Readonly<Record<string, Value>>,
+  retained: ReadonlySet<string>,
+): Readonly<Record<string, Value>> {
+  return Object.fromEntries(Object.entries(record).filter(([sessionId]) => retained.has(sessionId)))
 }
 
 function unknownJson(value: string): unknown {

@@ -83,6 +83,30 @@ export interface AttachmentBlobReservationCleanup {
   /** @param reservationId - branded id retained only beside attachment metadata. */
   release(reservationId: AttachmentBlobReservationId): Promise<void>
 }
+
+/** Construction-private Account-authenticated attachment quota closures. */
+export interface PersonalPairingAttachmentQuotaAuthority {
+  /** Reserve quota after the caller has authenticated the current Installation. */
+  admit(input: {
+    accountId: AuthenticatedInstallationView['account']['id']
+    bytes: number
+  }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }>
+  /** Release a reservation owned by the authenticated Account. */
+  release(input: {
+    accountId: AuthenticatedInstallationView['account']['id']
+    reservationId: AttachmentBlobReservationId
+  }): Promise<void>
+  /** Cleanup authority retained only beside durable attachment metadata. */
+  cleanup: AttachmentBlobReservationCleanup
+}
+
+/** Personal Pairing provider plus construction-private attachment quota authority. */
+export interface PersonalPairingComposition {
+  /** Public Remote Access provider mounted into the Cordis context. */
+  provider: PersonalPairingProvider
+  /** Private quota closures passed directly to the operated attachment composition. */
+  attachmentQuota: PersonalPairingAttachmentQuotaAuthority
+}
 /** Opaque provider reference for one active Personal Pairing key. */
 export type PersonalPairingKeyReference = Branded<'PersonalPairingKeyReference'>
 /** Opaque reference to crypto-provider state for one challenge. */
@@ -969,6 +993,24 @@ export class PersonalPairingProvider extends RemoteAccessService {
   private readonly authority: PersonalPairingAuthorityStore
   private readonly ownsAuthority: boolean
   private readonly localChallengeIds = new Set<PairingChallengeId>()
+
+  /**
+   * Construct the provider together with private attachment quota closures.
+   * @param ctx - Platform context receiving the public Remote Access provider.
+   * @param options - Account, crypto, time, random, and link adapters.
+   * @returns provider and same-composition attachment quota authority.
+   */
+  static compose(ctx: Context, options: PersonalPairingProviderOptions): PersonalPairingComposition {
+    const provider = new PersonalPairingProvider(ctx, options)
+    return {
+      provider,
+      attachmentQuota: {
+        admit: async input => await provider.admitAuthenticatedAttachmentBlob(input),
+        release: async (input) => { await provider.releaseAuthenticatedAttachmentBlob(input) },
+        cleanup: provider.attachmentReservationCleanup(),
+      },
+    }
+  }
 
   /** @param ctx - Platform context. @param options - Account, crypto, time, random, and link adapters. */
   constructor(ctx: Context, private readonly options: PersonalPairingProviderOptions) {
@@ -2027,7 +2069,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
    * @param input - authenticated Account id and declared ciphertext size.
    * @returns opaque reservation id plus its durable absolute lease expiry.
    */
-  async admitAuthenticatedAttachmentBlob(input: {
+  private async admitAuthenticatedAttachmentBlob(input: {
     accountId: AuthenticatedInstallationView['account']['id']
     bytes: number
   }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }> {
@@ -2048,7 +2090,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
    * Release attachment quota after a same-process caller has verified the current Installation proof.
    * @param input - authenticated Account id and owned reservation id.
    */
-  async releaseAuthenticatedAttachmentBlob(input: {
+  private async releaseAuthenticatedAttachmentBlob(input: {
     accountId: AuthenticatedInstallationView['account']['id']
     reservationId: AttachmentBlobReservationId
   }): Promise<void> {
@@ -2059,7 +2101,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
    * Create the provider-private cleanup authority for durable attachment metadata.
    * @returns cleanup capability owned by the durable attachment store.
    */
-  attachmentReservationCleanup(): AttachmentBlobReservationCleanup {
+  private attachmentReservationCleanup(): AttachmentBlobReservationCleanup {
     return { release: async (reservationId) => { await this.releaseAttachmentReservation(reservationId) } }
   }
 

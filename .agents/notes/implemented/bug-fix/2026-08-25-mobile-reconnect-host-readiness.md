@@ -12,7 +12,7 @@ The live presentation clock was subscribed through a new function on every rende
 
 ## Decision
 
-Packaged Desktop starts signed-in Personal Pairing only after the Web Host is installed. Account sign-in after Host startup uses the same readiness predicate. Host exit still clears Host authority and retains the established Relay long enough to return typed Host failures; the ordering rule applies to initial or replacement Desktop startup, when Mobile must not be told that a new Desktop authority is ready prematurely.
+Packaged Desktop starts signed-in Personal Pairing only after the Web Host is installed. Account sign-in and process resume use the same readiness predicate, so waking while initial or replacement Host startup is incomplete cannot restart Relay access. Host exit still clears Host authority and retains the established Relay long enough to return typed Host failures; the ordering rule applies to initial or replacement Desktop startup, when Mobile must not be told that a new Desktop authority is ready prematurely.
 
 `MobileBrowse` never requests history without current mutation authority. Losing synchronization clears its local history-request fence so a later synchronized generation can request the missing conversation. The clock subscription callback remains stable for the lifetime of its clock owner.
 

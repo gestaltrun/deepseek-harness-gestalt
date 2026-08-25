@@ -25,8 +25,16 @@ describe('CI workflow', () => {
     }
     const dispatch = workflowEvent(workflow, 'workflow_dispatch')
     expect(dispatch).toMatchObject({ inputs: {
+      acceptance_run_id: { required: true, type: 'string' },
       accept_transport_risk: { required: true, type: 'boolean', default: false },
     } })
+    const authorization = workflow.jobs['release-authorization']
+    if (!isRecord(authorization) || !Array.isArray(authorization.steps)) {
+      throw new TypeError('mobile-release workflow must define release authorization steps')
+    }
+    expect(authorization.steps).toContainEqual(expect.objectContaining({
+      name: 'Verify immutable Companion acceptance evidence',
+    }))
     expect(android).toMatchObject({
       needs: 'release-authorization',
       if: "github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'",
@@ -52,6 +60,23 @@ describe('CI workflow', () => {
       APPLE_ID: '${{ secrets.APPLE_ID }}',
       APPLE_APP_SPECIFIC_PASSWORD: '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}',
     } })
+  })
+
+  it('publishes candidate-bound Mobile Companion acceptance only after the verifier succeeds', () => {
+    const workflow = loadWorkflow('.github/workflows/mobile-companion-acceptance.yml')
+    const verdict = workflowJob(workflow, 'acceptance-verdict')
+    if (!Array.isArray(verdict.steps)) throw new TypeError('Mobile acceptance verdict must define steps')
+    expect(verdict).toMatchObject({ name: 'mobile companion acceptance verdict' })
+    expect(verdict.steps).toContainEqual(expect.objectContaining({
+      name: 'Validate and bind operated acceptance',
+    }))
+    expect(verdict.steps).toContainEqual(expect.objectContaining({
+      uses: 'actions/upload-artifact@v4',
+      with: expect.objectContaining({
+        name: 'mobile-companion-acceptance-${{ inputs.candidate_sha }}',
+        'if-no-files-found': 'error',
+      }),
+    }))
   })
 
   it('rejects runner-only contexts before job construction', () => {

@@ -10,9 +10,9 @@ Mobile release validation required a boolean claiming an independent Noise secur
 
 ## Decision
 
-Repository and real-device transport tests remain mandatory release evidence. Independent external review is not a first-distribution prerequisite. Every Mobile Release dispatch must instead set the candidate-scoped `accept_transport_risk` input; an authorization job fails before Android or iOS receives signing secrets when the input is false.
+Repository and operated native transport tests remain mandatory release evidence. Approved Android Emulators and iOS Simulators can supply device evidence; fixture Web pages and `prototype-companion` cannot. Independent external review is not a first-distribution prerequisite. A successful Mobile Companion Acceptance run validates the exact flow and device vocabulary, upgrade preservation, phone-size UI, assembled failures, and transport decision, then publishes one immutable artifact named for the tested `master` commit.
 
-The in-process release helper applies the same rule. Product flows, both native platform matrices, upgrade preservation, phone-size UI, and assembled failure acceptance determine readiness. A request to authorize TestFlight or Android APK additionally requires `transportRiskAccepted: true`.
+Every Mobile Release dispatch supplies that acceptance run id and the candidate-scoped `accept_transport_risk` input. The authorization job verifies the source run event and named verdict, a unique unexpired artifact, repository, source run id, commit, Git tree, complete evidence, and risk acceptance before Android or iOS receives signing secrets. The verifier calls the in-process distribution helper; workflow syntax cannot bypass the same readiness rule.
 
 ## Alternatives considered
 
@@ -24,8 +24,8 @@ The in-process release helper applies the same rule. Product flows, both native 
 
 ## Consequences
 
-The first TestFlight and signed APK candidate can proceed after the documented operator decision without fabricating an independent-review result. GitHub records the exact candidate SHA and explicit transport-risk input for each dispatch. A future independent review can add evidence or restore a stronger release prerequisite without changing the endpoint-owned Snow protocol.
+The first TestFlight and signed APK candidate can proceed after the documented operator decision without fabricating an independent-review result. GitHub retains a candidate-bound operated acceptance artifact plus the exact release dispatch and transport-risk input. Signing cannot proceed with stale, foreign, partial, duplicated, or vocabulary-expanding evidence. A future independent review can add evidence or restore a stronger release prerequisite without changing the endpoint-owned Snow protocol.
 
 ## Testing
 
-Release-helper coverage rejects distribution without explicit risk acceptance while retaining every product and device evidence requirement. Workflow coverage requires the manual input and makes both signing jobs depend on the authorization job.
+Release-helper coverage rejects missing, duplicated, unknown, stale-candidate, foreign-repository, wrong-run, and risk-unaccepted evidence while retaining every product and device requirement. Workflow coverage requires the acceptance run id, executes the verifier, publishes evidence only after the named verdict succeeds, and makes both signing jobs depend on authorization.

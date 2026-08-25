@@ -19,9 +19,11 @@ import {
   type PairingHandshakeProvider,
 } from '@deepseek-ai/dsh-remote-access'
 import { parseRelayAttachmentId, parseRelayRouteId } from '@deepseek-ai/dsh-remote-protocol'
-import { apply as applyRemoteAttachmentsHttp } from '@deepseek-ai/dsh-remote-attachments/http'
+import {
+  createRemoteAttachmentsHttpPlugin,
+  type RemoteAttachmentAuthenticator,
+} from '@deepseek-ai/dsh-remote-attachments/http'
 import type { RemoteAttachmentStoreService } from '@deepseek-ai/dsh-remote-attachments'
-import type { RemoteAttachmentAuthority } from '@deepseek-ai/dsh-remote-attachments/http'
 import pg from 'pg'
 import { createClient } from 'redis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -39,7 +41,7 @@ import {
   PostgresPersonalPairingAuthorityStore,
   type PlatformSqlPool,
 } from '../src/postgres-pairing-store.ts'
-import { OperatedRemoteAttachmentAuthority } from '../src/remote-attachment-authority.ts'
+import { createOperatedRemoteAttachmentAuthenticator } from '../src/remote-attachment-authority.ts'
 import {
   FIXED_BASE_ATTACHMENT_CONSUMER_SHA,
   FIXED_BASE_ATTACHMENT_HTTP_SOURCE_SHA256,
@@ -1222,15 +1224,16 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
           presentation: { name: 'Real phone', platform: 'ios' as const } },
       })),
     }
-    const authority = new OperatedRemoteAttachmentAuthority(account, pairings, {
-      admitAuthenticatedAttachmentBlob: async () => ({
+    const authenticate = createOperatedRemoteAttachmentAuthenticator(account, pairings, {
+      admit: async () => ({
         reservationId: parseAttachmentBlobReservationId('attachment-http-quota'),
         expiresAt: Number.MAX_SAFE_INTEGER,
       }),
-      releaseAuthenticatedAttachmentBlob: async () => {},
+      release: async () => {},
+      cleanup: { release: async () => {} },
     })
-    const firstOrigin = await startAttachmentHttp(first, authority)
-    const secondOrigin = await startAttachmentHttp(second, authority)
+    const firstOrigin = await startAttachmentHttp(first, authenticate)
+    const secondOrigin = await startAttachmentHttp(second, authenticate)
     const headers = {
       authorization: 'Bearer current-access',
       'x-gestalt-proof-jti': 'proof-http',
@@ -1514,12 +1517,14 @@ async function prepareBridgePhase(
 
 async function startAttachmentHttp(
   store: RemoteAttachmentStoreService,
-  authority: RemoteAttachmentAuthority,
+  authenticate: RemoteAttachmentAuthenticator,
 ): Promise<string> {
   return await startAttachmentHttpWith(
-    (context) => { applyRemoteAttachmentsHttp(context, { origins: ['https://mobile.example'] }) },
+    (context) => {
+      createRemoteAttachmentsHttpPlugin(authenticate).apply(context, { origins: ['https://mobile.example'] })
+    },
     store,
-    authority,
+    undefined,
   )
 }
 

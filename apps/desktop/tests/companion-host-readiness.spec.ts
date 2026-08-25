@@ -23,4 +23,14 @@ describe('Desktop Companion Host readiness', () => {
     })).resolves.toBe(true)
     expect(start).toHaveBeenCalledOnce()
   })
+
+  it('keeps resume stopped until replacement Host authority becomes ready', async () => {
+    const start = vi.fn(async () => {})
+    const state = { accountSignedIn: true, hostReady: false, start }
+
+    await expect(startDesktopPairingWhenHostReady(state)).resolves.toBe(false)
+    state.hostReady = true
+    await expect(startDesktopPairingWhenHostReady(state)).resolves.toBe(true)
+    expect(start).toHaveBeenCalledOnce()
+  })
 })

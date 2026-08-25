@@ -5,6 +5,8 @@ import {
   COMPANION_RELEASE_PLATFORMS,
   authorizeCompanionDistribution,
   companionReleaseReady,
+  createCompanionReleaseAttestation,
+  verifyCompanionReleaseAttestation,
   type CompanionReleaseEvidence,
 } from '../src/companion-release.ts'
 
@@ -17,6 +19,25 @@ function complete(): CompanionReleaseEvidence {
     upgradePreservedKeys: true,
     uiAcceptance: true,
     failureAcceptance: true,
+  }
+}
+
+const identity = {
+  repository: 'gestaltrun/deepseek-harness-gestalt',
+  sourceRunId: 123,
+  candidateSha: 'a'.repeat(40),
+  tree: 'b'.repeat(40),
+}
+
+function operatorEvidence() {
+  return {
+    flows: [...COMPANION_RELEASE_FLOWS],
+    devices: COMPANION_RELEASE_PLATFORMS.flatMap(platform =>
+      COMPANION_RELEASE_DEVICE_CHECKS.map(check => `${platform}:${check}` as const)),
+    upgradePreservedKeys: true,
+    uiAcceptance: true,
+    failureAcceptance: true,
+    transportRiskAccepted: true,
   }
 }
 
@@ -81,6 +102,41 @@ describe('Companion release validation', () => {
       transportRiskAccepted: true,
     }))
       .toThrow('incomplete')
+  })
+
+  it('binds complete acceptance to one repository, run, commit, and tree', () => {
+    const attestation = createCompanionReleaseAttestation(operatorEvidence(), identity)
+    expect(verifyCompanionReleaseAttestation(attestation, identity, {
+      testFlight: true,
+      androidApk: true,
+      transportRiskAccepted: true,
+    })).toEqual({ testFlight: true, androidApk: true })
+    expect(() => verifyCompanionReleaseAttestation(attestation, { ...identity, sourceRunId: 124 }, {
+      testFlight: true, androidApk: true, transportRiskAccepted: true,
+    })).toThrow('sourceRunId')
+    expect(() => verifyCompanionReleaseAttestation(attestation, { ...identity, candidateSha: 'c'.repeat(40) }, {
+      testFlight: true, androidApk: true, transportRiskAccepted: true,
+    })).toThrow('candidateSha')
+    expect(() => verifyCompanionReleaseAttestation(attestation, { ...identity, repository: 'other/repository' }, {
+      testFlight: true, androidApk: true, transportRiskAccepted: true,
+    })).toThrow('repository')
+  })
+
+  it('rejects missing, duplicate, unknown, and unapproved evidence', () => {
+    const completeEvidence = operatorEvidence()
+    expect(() => createCompanionReleaseAttestation({
+      ...completeEvidence, flows: COMPANION_RELEASE_FLOWS.slice(1),
+    }, identity)).toThrow('incomplete')
+    expect(() => createCompanionReleaseAttestation({
+      ...completeEvidence, flows: [...COMPANION_RELEASE_FLOWS, COMPANION_RELEASE_FLOWS[0]],
+    }, identity)).toThrow('duplicates')
+    expect(() => createCompanionReleaseAttestation({
+      ...completeEvidence, flows: [...COMPANION_RELEASE_FLOWS, 'unknown-flow'],
+    }, identity)).toThrow('unknown')
+    const attestation = createCompanionReleaseAttestation(completeEvidence, identity)
+    expect(() => verifyCompanionReleaseAttestation(attestation, identity, {
+      testFlight: true, androidApk: true, transportRiskAccepted: false,
+    })).toThrow('transport risk')
   })
 })
 import { readFileSync } from 'node:fs'

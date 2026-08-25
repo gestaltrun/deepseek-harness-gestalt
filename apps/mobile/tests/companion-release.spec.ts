@@ -34,6 +34,15 @@ describe('Companion release validation', () => {
     expect(COMPANION_RELEASE_DEVICE_CHECKS).not.toContain('push')
   })
 
+  it('returns an object when iOS protected storage has no retained value', () => {
+    const plugin = readFileSync(new URL(
+      '../ios/App/App/GestaltProtectedStoragePlugin.swift', import.meta.url,
+    ), 'utf8')
+    const missingValue = plugin.match(/if status == errSecItemNotFound \{([\s\S]*?)\n        \}/u)?.[1]
+    expect(missingValue).toContain('call.resolve([:])')
+    expect(missingValue).not.toContain('call.resolve()')
+  })
+
   it('requires every flow, both platforms, upgrade, UI, failure, and Noise review', () => {
     expect(companionReleaseReady(complete())).toBe(true)
     expect(companionReleaseReady({ ...complete(), noiseReview: false })).toBe(false)

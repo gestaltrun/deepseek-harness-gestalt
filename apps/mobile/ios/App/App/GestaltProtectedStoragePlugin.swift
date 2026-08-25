@@ -22,7 +22,7 @@ public final class GestaltProtectedStoragePlugin: CAPPlugin, CAPBridgedPlugin {
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound {
-            call.resolve()
+            call.resolve([:])
             return
         }
         guard status == errSecSuccess,

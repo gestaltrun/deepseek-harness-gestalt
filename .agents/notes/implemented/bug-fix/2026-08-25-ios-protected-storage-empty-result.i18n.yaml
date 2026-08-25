@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-25-ios-protected-storage-empty-result.md
+2026-08-25-ios-protected-storage-empty-result.md: 62bce6347684b4c78b10544175838cd158ad6f3b
+2026-08-25-ios-protected-storage-empty-result.zh.md: 81407104fff8ea7f8d5fee5ce653bfa24f05bbe3

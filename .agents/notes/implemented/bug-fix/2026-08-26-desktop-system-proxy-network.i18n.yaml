@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-26-desktop-system-proxy-network.md
-2026-08-26-desktop-system-proxy-network.md: 8664261e6cf17c4c00cf350a811411f1ad736658
-2026-08-26-desktop-system-proxy-network.zh.md: bd59eb798d4e95e17b58f2e65fd0fad70886090d
+2026-08-26-desktop-system-proxy-network.md: 09a6426aad00879565f59942651a09abfc5b3359
+2026-08-26-desktop-system-proxy-network.zh.md: e1239149cc84b2e52edbac044637ba96a6a1a203

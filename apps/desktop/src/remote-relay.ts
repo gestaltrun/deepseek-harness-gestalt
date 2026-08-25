@@ -83,6 +83,7 @@ export async function connectDesktopRelayThroughSystemProxy(input: {
   resolveTimeoutMs: number
   connect?: NodeRelayConnector
 }): Promise<RelayEndpointSocket> {
+  const deadline = Date.now() + input.resolveTimeoutMs
   const rules = await resolveSystemProxy(input.resolveProxy(input.url), input.signal, input.resolveTimeoutMs)
   const candidates = desktopRelayProxyCandidates(rules)
   const connect: NodeRelayConnector = async (...args) => input.connect === undefined
@@ -90,13 +91,20 @@ export async function connectDesktopRelayThroughSystemProxy(input: {
     : await input.connect(...args)
   let lastFailure: unknown
   for (const [index, candidate] of candidates.entries()) {
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) throw new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy acquisition timed out')
+    const candidateTimeoutMs = Math.max(1, Math.floor(remainingMs / (candidates.length - index)))
+    const candidateController = new AbortController()
+    const candidateSignal = AbortSignal.any([input.signal, candidateController.signal])
     try {
-      return candidate.agent === undefined
-        ? await connect(input.url, input.signal, input.limits)
-        : await connect(input.url, input.signal, input.limits, { agent: candidate.agent })
+      const acquisition = candidate.agent === undefined
+        ? connect(input.url, candidateSignal, input.limits)
+        : connect(input.url, candidateSignal, input.limits, { agent: candidate.agent })
+      return await withCandidateDeadline(acquisition, input.signal, candidateController, candidateTimeoutMs)
     } catch (error) {
       lastFailure = error
-      if (input.signal.aborted || index === candidates.length - 1 || !isProxyFallbackFailure(error)) throw error
+      if (input.signal.aborted || index === candidates.length - 1
+        || (!(error instanceof ProxyCandidateTimeoutError) && !isProxyFallbackFailure(error))) throw error
     }
   }
   throw new Error('Desktop Relay proxy list had no connection candidate', { cause: lastFailure })
@@ -754,6 +762,47 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
 }
 
 function resolveSystemProxy(source: Promise<string>, signal: AbortSignal, timeoutMs: number): Promise<string> {
+  return withRelayDeadline(source, signal, timeoutMs, {
+    cancelled: () => new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy resolution was cancelled'),
+    timedOut: () => new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy resolution timed out'),
+    failed: error => error instanceof Error ? error : new Error('Desktop Relay system proxy resolution failed'),
+  })
+}
+
+function isProxyFallbackFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') return false
+  return [
+    'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EPIPE', 'ETIMEDOUT',
+  ].includes(error.code)
+}
+
+class ProxyCandidateTimeoutError extends Error {
+  constructor() {
+    super('Desktop Relay proxy candidate timed out')
+    this.name = 'ProxyCandidateTimeoutError'
+  }
+}
+
+function withCandidateDeadline<T>(
+  source: Promise<T>,
+  signal: AbortSignal,
+  controller: AbortController,
+  timeoutMs: number,
+): Promise<T> {
+  return withRelayDeadline(source, signal, timeoutMs, {
+    cancelled: () => new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay acquisition was cancelled'),
+    timedOut: () => new ProxyCandidateTimeoutError(),
+    failed: error => error instanceof Error ? error : new Error('Desktop Relay acquisition failed'),
+  }, () => { controller.abort() })
+}
+
+function withRelayDeadline<T>(
+  source: Promise<T>,
+  signal: AbortSignal,
+  timeoutMs: number,
+  errors: { cancelled(): Error; timedOut(): Error; failed(error: unknown): Error },
+  cancel: () => void = () => {},
+): Promise<T> {
   return new Promise((resolve, reject) => {
     let settled = false
     const finish = (operation: () => void): void => {
@@ -764,28 +813,21 @@ function resolveSystemProxy(source: Promise<string>, signal: AbortSignal, timeou
       operation()
     }
     const abort = (): void => {
-      finish(() => { reject(new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy resolution was cancelled')) })
+      cancel()
+      finish(() => { reject(errors.cancelled()) })
     }
     const timer = setTimeout(() => {
-      finish(() => { reject(new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy resolution timed out')) })
+      cancel()
+      finish(() => { reject(errors.timedOut()) })
     }, timeoutMs)
     timer.unref()
     if (signal.aborted) abort()
     else signal.addEventListener('abort', abort, { once: true })
     void source.then(
       (value) => { finish(() => { resolve(value) }) },
-      (error: unknown) => {
-        finish(() => {
-          reject(error instanceof Error ? error : new Error('Desktop Relay system proxy resolution failed'))
-        })
-      },
+      (error: unknown) => { finish(() => { reject(errors.failed(error)) }) },
     )
   })
-}
-
-function isProxyFallbackFailure(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') return false
-  return ['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ETIMEDOUT'].includes(error.code)
 }
 
 async function abortableAccept<T extends { negotiation: { cancel(): void } }>(

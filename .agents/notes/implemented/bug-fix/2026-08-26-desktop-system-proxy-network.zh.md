@@ -24,4 +24,4 @@ Desktop HTTP 与 Relay WSS 共享操作系统路由决策，无需在产品产�
 
 ## 测试
 
-单元覆盖会证明 Electron Fetch 转发、有序 `DIRECT`、HTTP 与 HTTPS candidate、不支持指令拒绝、合格 fallback、certificate failure 不 fallback、pending resolution 取消，以及 WSS agent 注入。Packaged-main 测试会让 CommonJS proxy agent 保持在 ESM bundle 外部。实际运行验收使用启用 macOS 系统代理的打包 Desktop 与生产 Platform origin。
+单元覆盖会证明 Electron Fetch 转发、有序 `DIRECT`、HTTP 与 HTTPS candidate、不支持指令拒绝、DNS 与 connection fallback、有界 blackhole fallback、certificate failure 不 fallback、pending resolution 取消，以及 WSS agent 注入。Packaged-main 测试会让 CommonJS proxy agent 保持在 ESM bundle 外部。实际运行验收使用启用 macOS 系统代理的打包 Desktop 与生产 Platform origin。

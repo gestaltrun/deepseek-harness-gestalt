@@ -1028,29 +1028,28 @@ describe('Desktop Remote Relay composition', () => {
     connect.mockRestore()
   })
 
-  it('falls through the ordered system proxy list only for connection failures', async () => {
+  it('falls through the ordered system proxy list for DNS and connection failures only', async () => {
     const socket = new TestRelaySocket()
-    let attempt = 0
-    const connect = vi.fn(async (..._input: Parameters<typeof NodeRelayEndpointSocket.connect>) => {
-      attempt += 1
-      if (attempt === 1) throw Object.assign(new Error('proxy unavailable'), { code: 'ECONNREFUSED' })
-      return socket
-    })
+    for (const code of ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'] as const) {
+      let attempt = 0
+      const connect = vi.fn(async (..._input: Parameters<typeof NodeRelayEndpointSocket.connect>) => {
+        attempt += 1
+        if (attempt === 1) throw Object.assign(new Error('proxy unavailable'), { code })
+        return socket
+      })
+      await expect(connectDesktopRelayThroughSystemProxy({
+        url: RELAY_CONFIG.url,
+        signal: new AbortController().signal,
+        limits: { maxBytes: RELAY_CONFIG.inboundMaxBytes, maxMessages: RELAY_CONFIG.inboundMaxMessages },
+        resolveProxy: async () => 'PROXY first.example:6152; DIRECT',
+        resolveTimeoutMs: RELAY_CONFIG.attachTimeoutMs,
+        connect,
+      })).resolves.toBe(socket)
+      expect(connect).toHaveBeenCalledTimes(2)
+      expect(connect.mock.calls[0]?.[3]?.agent).toBeDefined()
+      expect(connect.mock.calls[1]?.[3]).toBeUndefined()
+    }
 
-    await expect(connectDesktopRelayThroughSystemProxy({
-      url: RELAY_CONFIG.url,
-      signal: new AbortController().signal,
-      limits: { maxBytes: RELAY_CONFIG.inboundMaxBytes, maxMessages: RELAY_CONFIG.inboundMaxMessages },
-      resolveProxy: async () => 'PROXY first.example:6152; DIRECT',
-      resolveTimeoutMs: RELAY_CONFIG.attachTimeoutMs,
-      connect,
-    })).resolves.toBe(socket)
-    expect(connect).toHaveBeenCalledTimes(2)
-    expect(connect.mock.calls[0]?.[3]?.agent).toBeDefined()
-    expect(connect.mock.calls[1]?.[3]).toBeUndefined()
-
-    attempt = 0
-    connect.mockClear()
     const certificateFailure = vi.fn(async (..._input: Parameters<typeof NodeRelayEndpointSocket.connect>) => {
       throw Object.assign(new Error('certificate expired'), { code: 'CERT_HAS_EXPIRED' })
     })
@@ -1063,6 +1062,28 @@ describe('Desktop Remote Relay composition', () => {
       connect: certificateFailure,
     })).rejects.toThrow('certificate expired')
     expect(certificateFailure).toHaveBeenCalledOnce()
+  })
+
+  it('bounds a blackholed first proxy and reaches the authorized DIRECT fallback', async () => {
+    const socket = new TestRelaySocket()
+    let attempt = 0
+    const connect = vi.fn(async (..._input: Parameters<typeof NodeRelayEndpointSocket.connect>) => {
+      attempt += 1
+      if (attempt === 1) return await new Promise<RelayEndpointSocket>(() => {})
+      return socket
+    })
+
+    await expect(connectDesktopRelayThroughSystemProxy({
+      url: RELAY_CONFIG.url,
+      signal: new AbortController().signal,
+      limits: { maxBytes: RELAY_CONFIG.inboundMaxBytes, maxMessages: RELAY_CONFIG.inboundMaxMessages },
+      resolveProxy: async () => 'PROXY blackhole.example:6152; DIRECT',
+      resolveTimeoutMs: 100,
+      connect,
+    })).resolves.toBe(socket)
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(connect.mock.calls[0]?.[1].aborted).toBe(true)
+    expect(connect.mock.calls[1]?.[3]).toBeUndefined()
   })
 
   it('cancels a pending system proxy resolution during Relay stop', async () => {

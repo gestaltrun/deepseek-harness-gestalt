@@ -24,4 +24,4 @@ Desktop HTTP and Relay WSS share the operating-system routing decision without e
 
 ## Testing
 
-Unit coverage proves Electron Fetch forwarding, ordered `DIRECT`, HTTP and HTTPS candidates, unsupported-directive rejection, qualified fallback, certificate failure without fallback, pending-resolution cancellation, and WSS agent injection. The packaged-main test keeps the CommonJS proxy agent external to the ESM bundle. Operated acceptance uses the packaged Desktop with the active macOS system proxy and the production Platform origin.
+Unit coverage proves Electron Fetch forwarding, ordered `DIRECT`, HTTP and HTTPS candidates, unsupported-directive rejection, DNS and connection fallback, bounded blackhole fallback, certificate failure without fallback, pending-resolution cancellation, and WSS agent injection. The packaged-main test keeps the CommonJS proxy agent external to the ESM bundle. Operated acceptance uses the packaged Desktop with the active macOS system proxy and the production Platform origin.

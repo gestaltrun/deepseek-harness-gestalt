@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { desktopRelayProxyAgent, desktopSystemFetch } from '../src/system-network.ts'
+import { desktopRelayProxyCandidates, desktopSystemFetch } from '../src/system-network.ts'
 
 describe('Desktop system network', () => {
   it('forwards Platform HTTP through the Electron session fetch owner', async () => {
@@ -11,11 +11,16 @@ describe('Desktop system network', () => {
     expect(electronFetch).toHaveBeenCalledWith('https://www.gestaltrun.com/healthz', { method: 'GET' })
   })
 
-  it('maps Electron HTTP proxy rules to CONNECT agents and preserves DIRECT', () => {
-    expect(desktopRelayProxyAgent('PROXY 127.0.0.1:6152; DIRECT')).toBeDefined()
-    expect(desktopRelayProxyAgent('HTTPS proxy.example:8443')).toBeDefined()
-    expect(desktopRelayProxyAgent('DIRECT')).toBeUndefined()
-    expect(() => desktopRelayProxyAgent('SOCKS5 proxy.example:1080; DIRECT')).toThrow('unsupported')
-    expect(() => desktopRelayProxyAgent('PROXY missing-port')).toThrow('invalid')
+  it('preserves Electron proxy fallback order including DIRECT', () => {
+    const candidates = desktopRelayProxyCandidates(
+      'PROXY first.example:6152; HTTPS second.example:8443; DIRECT',
+    )
+    expect(candidates.map(candidate => candidate.directive)).toEqual(['PROXY', 'HTTPS', 'DIRECT'])
+    expect(candidates[0]?.agent).toBeDefined()
+    expect(candidates[1]?.agent).toBeDefined()
+    expect(candidates[2]?.agent).toBeUndefined()
+    expect(desktopRelayProxyCandidates('')).toEqual([{ directive: 'DIRECT' }])
+    expect(() => desktopRelayProxyCandidates('SOCKS5 proxy.example:1080; DIRECT')).toThrow('unsupported')
+    expect(() => desktopRelayProxyCandidates('PROXY missing-port')).toThrow('invalid')
   })
 })

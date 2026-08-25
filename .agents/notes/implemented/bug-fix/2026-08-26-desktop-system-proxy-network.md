@@ -10,7 +10,7 @@ Desktop Platform Account and Remote Access HTTP used Node global Fetch, and Rela
 
 ## Decision
 
-Desktop-owned Platform Account, Remote Access, and attachment HTTP use Electron `net.fetch`, which follows the current Electron session network policy. Each fresh Relay WSS acquisition asks `Session.resolveProxy` for the operated WSS URL. `DIRECT` keeps the verified direct TLS path; `PROXY` and `HTTPS` directives create a maintained `https-proxy-agent` CONNECT agent passed only to that socket. Unsupported proxy directives fail visibly instead of silently bypassing policy.
+Desktop-owned Platform Account, Remote Access, and attachment HTTP use Electron `net.fetch`, which follows the current Electron session network policy. Each fresh Relay WSS acquisition asks `Session.resolveProxy` for the operated WSS URL, bounded by the attachment deadline and Relay cancellation. The ordered result retains every `PROXY`, `HTTPS`, and `DIRECT` candidate. Connection-refused, reset, unreachable, broken-pipe, and timeout failures advance to the next candidate; certificate, protocol, and other failures stop without bypassing the selected route. Unsupported proxy directives fail visibly instead of silently bypassing policy.
 
 ## Alternatives considered
 
@@ -24,4 +24,4 @@ Desktop HTTP and Relay WSS share the operating-system routing decision without e
 
 ## Testing
 
-Unit coverage proves Electron Fetch forwarding, `DIRECT`, HTTP and HTTPS proxy selection, unsupported-directive rejection, and WSS agent injection. Operated acceptance uses the packaged Desktop with the active macOS system proxy and the production Platform origin.
+Unit coverage proves Electron Fetch forwarding, ordered `DIRECT`, HTTP and HTTPS candidates, unsupported-directive rejection, qualified fallback, certificate failure without fallback, pending-resolution cancellation, and WSS agent injection. The packaged-main test keeps the CommonJS proxy agent external to the ESM bundle. Operated acceptance uses the packaged Desktop with the active macOS system proxy and the production Platform origin.

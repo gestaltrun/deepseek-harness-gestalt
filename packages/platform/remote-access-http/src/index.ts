@@ -350,7 +350,8 @@ function answerError(res: ServerResponse, error: unknown, operation?: string): v
 type PersistenceFailure =
   'persistence-unique-violation' | 'persistence-foreign-key-violation' | 'persistence-not-null-violation'
   | 'persistence-check-violation' | 'persistence-missing-relation' | 'persistence-missing-column'
-  | 'persistence-invalid-text' | 'persistence-serialization-failure' | 'persistence-deadlock'
+  | 'persistence-invalid-text' | 'persistence-untranslatable-character'
+  | 'persistence-serialization-failure' | 'persistence-deadlock'
   | 'persistence-connection' | 'persistence-other'
 
 function classifyUnexpectedFailure(error: unknown):
@@ -380,6 +381,7 @@ const PERSISTENCE_FAILURES: Readonly<Record<string, PersistenceFailure>> = {
   '42P01': 'persistence-missing-relation',
   '42703': 'persistence-missing-column',
   '22P02': 'persistence-invalid-text',
+  '22P05': 'persistence-untranslatable-character',
   '40001': 'persistence-serialization-failure',
   '40P01': 'persistence-deadlock',
   '08000': 'persistence-connection',

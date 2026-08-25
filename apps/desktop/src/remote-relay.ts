@@ -2,6 +2,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
 import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
 import {
   parseRelayAttachmentId,
@@ -30,7 +31,7 @@ import {
   type SnowCompanionProtocolChannel,
 } from '@deepseek-ai/dsh-noise-channel'
 import { sealDesktopForegroundSynchronization } from './noise-companion.ts'
-import { desktopRelayProxyAgent } from './system-network.ts'
+import { desktopRelayProxyCandidates } from './system-network.ts'
 import type { DesktopSnowPairingVault } from './snow-pairing-vault.ts'
 import type {
   DesktopCompanionLiveProjectionChange,
@@ -65,6 +66,40 @@ export interface DesktopRemoteRelayOptions {
   handleOperation: DesktopCompanionOperationHandler
   /** Bind authenticated Snow connections to current Host projection. */
   liveProjection?: Omit<DesktopCompanionLiveProjectionAdapter, 'reconnect'>
+}
+
+type NodeRelayConnector = typeof NodeRelayEndpointSocket.connect
+
+/**
+ * Resolve the bounded Electron proxy list and acquire WSS using qualified fallback only.
+ * @param input - operated URL, lifecycle cancellation, proxy resolver, and Node socket seam.
+ * @returns connected Relay socket.
+ */
+export async function connectDesktopRelayThroughSystemProxy(input: {
+  url: string
+  signal: AbortSignal
+  limits: Parameters<NodeRelayConnector>[2]
+  resolveProxy(url: string): Promise<string>
+  resolveTimeoutMs: number
+  connect?: NodeRelayConnector
+}): Promise<RelayEndpointSocket> {
+  const rules = await resolveSystemProxy(input.resolveProxy(input.url), input.signal, input.resolveTimeoutMs)
+  const candidates = desktopRelayProxyCandidates(rules)
+  const connect: NodeRelayConnector = async (...args) => input.connect === undefined
+    ? await NodeRelayEndpointSocket.connect(...args)
+    : await input.connect(...args)
+  let lastFailure: unknown
+  for (const [index, candidate] of candidates.entries()) {
+    try {
+      return candidate.agent === undefined
+        ? await connect(input.url, input.signal, input.limits)
+        : await connect(input.url, input.signal, input.limits, { agent: candidate.agent })
+    } catch (error) {
+      lastFailure = error
+      if (input.signal.aborted || index === candidates.length - 1 || !isProxyFallbackFailure(error)) throw error
+    }
+  }
+  throw new Error('Desktop Relay proxy list had no connection candidate', { cause: lastFailure })
 }
 
 interface DesktopSnowAcceptOwner {
@@ -687,10 +722,13 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
       if (options.connect !== undefined) return await options.connect(signal, config)
       const limits = { maxBytes: config.inboundMaxBytes, maxMessages: config.inboundMaxMessages }
       if (options.resolveProxy === undefined) return await NodeRelayEndpointSocket.connect(config.url, signal, limits)
-      const agent = desktopRelayProxyAgent(await options.resolveProxy(config.url))
-      return agent === undefined
-        ? await NodeRelayEndpointSocket.connect(config.url, signal, limits)
-        : await NodeRelayEndpointSocket.connect(config.url, signal, limits, { agent })
+      return await connectDesktopRelayThroughSystemProxy({
+        url: config.url,
+        signal,
+        limits,
+        resolveProxy: options.resolveProxy,
+        resolveTimeoutMs: config.attachTimeoutMs,
+      })
     },
     attachTimeoutMs: config.attachTimeoutMs,
     heartbeatIntervalMs: config.heartbeatIntervalMs,
@@ -713,6 +751,41 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
     },
     getState: () => lifecycle.getState(),
   }
+}
+
+function resolveSystemProxy(source: Promise<string>, signal: AbortSignal, timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (operation: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      operation()
+    }
+    const abort = (): void => {
+      finish(() => { reject(new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy resolution was cancelled')) })
+    }
+    const timer = setTimeout(() => {
+      finish(() => { reject(new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy resolution timed out')) })
+    }, timeoutMs)
+    timer.unref()
+    if (signal.aborted) abort()
+    else signal.addEventListener('abort', abort, { once: true })
+    void source.then(
+      (value) => { finish(() => { resolve(value) }) },
+      (error: unknown) => {
+        finish(() => {
+          reject(error instanceof Error ? error : new Error('Desktop Relay system proxy resolution failed'))
+        })
+      },
+    )
+  })
+}
+
+function isProxyFallbackFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') return false
+  return ['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ETIMEDOUT'].includes(error.code)
 }
 
 async function abortableAccept<T extends { negotiation: { cancel(): void } }>(

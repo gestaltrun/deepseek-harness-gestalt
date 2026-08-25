@@ -8,6 +8,7 @@ import {
   REMOTE_PROTOCOL_LIMITS,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
+  connectDesktopRelayThroughSystemProxy,
   createDesktopRemoteRelay,
   DesktopSnowRelayChannelOwner,
   loadDesktopRemoteRelayConfig,
@@ -1025,6 +1026,65 @@ describe('Desktop Remote Relay composition', () => {
     await relay.stop('quit')
     await expect(starting).rejects.toThrow()
     connect.mockRestore()
+  })
+
+  it('falls through the ordered system proxy list only for connection failures', async () => {
+    const socket = new TestRelaySocket()
+    let attempt = 0
+    const connect = vi.fn(async (..._input: Parameters<typeof NodeRelayEndpointSocket.connect>) => {
+      attempt += 1
+      if (attempt === 1) throw Object.assign(new Error('proxy unavailable'), { code: 'ECONNREFUSED' })
+      return socket
+    })
+
+    await expect(connectDesktopRelayThroughSystemProxy({
+      url: RELAY_CONFIG.url,
+      signal: new AbortController().signal,
+      limits: { maxBytes: RELAY_CONFIG.inboundMaxBytes, maxMessages: RELAY_CONFIG.inboundMaxMessages },
+      resolveProxy: async () => 'PROXY first.example:6152; DIRECT',
+      resolveTimeoutMs: RELAY_CONFIG.attachTimeoutMs,
+      connect,
+    })).resolves.toBe(socket)
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(connect.mock.calls[0]?.[3]?.agent).toBeDefined()
+    expect(connect.mock.calls[1]?.[3]).toBeUndefined()
+
+    attempt = 0
+    connect.mockClear()
+    const certificateFailure = vi.fn(async (..._input: Parameters<typeof NodeRelayEndpointSocket.connect>) => {
+      throw Object.assign(new Error('certificate expired'), { code: 'CERT_HAS_EXPIRED' })
+    })
+    await expect(connectDesktopRelayThroughSystemProxy({
+      url: RELAY_CONFIG.url,
+      signal: new AbortController().signal,
+      limits: { maxBytes: RELAY_CONFIG.inboundMaxBytes, maxMessages: RELAY_CONFIG.inboundMaxMessages },
+      resolveProxy: async () => 'PROXY first.example:6152; DIRECT',
+      resolveTimeoutMs: RELAY_CONFIG.attachTimeoutMs,
+      connect: certificateFailure,
+    })).rejects.toThrow('certificate expired')
+    expect(certificateFailure).toHaveBeenCalledOnce()
+  })
+
+  it('cancels a pending system proxy resolution during Relay stop', async () => {
+    const resolveProxy = vi.fn(async () => await new Promise<string>(() => {}))
+    const relay = createDesktopRemoteRelay({
+      environment: { ...DEVELOPMENT, environment: 'production' }, config: RELAY_CONFIG,
+      snowPairingVault: new DesktopSnowPairingVault(), initializeWasm: () => {}, resolveProxy,
+      desktopName: AUTHENTICATED_DESKTOP_NAME, handleOperation: UNUSED_OPERATION_HANDLER,
+    })
+    await relay.configure?.({
+      routeId: parseRelayRouteId('route-pending-proxy'), endpoint: 'desktop',
+      credential: await generateRelayCredential(), revision: 1,
+      pairingSelector: parseRelayPairingSelector('pairing-pending-proxy'),
+    })
+
+    const starting = relay.start()
+    await vi.waitFor(() => { expect(resolveProxy).toHaveBeenCalledOnce() })
+    await expect(Promise.race([
+      relay.stop('quit').then(() => true),
+      new Promise<false>(resolve => setTimeout(() => { resolve(false) }, 100)),
+    ])).resolves.toBe(true)
+    await expect(starting).rejects.toThrow('stopped before attachment')
   })
 
   it('validates Relay configuration independently from disabled composition', () => {

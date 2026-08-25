@@ -21,7 +21,7 @@ await build({
   format: 'esm',
   target: 'node22',
   // CommonJS runtime dependencies remain loadable by Electron's ESM main process.
-  external: ['electron', 'electron-updater', 'ws'],
+  external: ['electron', 'electron-updater', 'https-proxy-agent', 'ws'],
   logLevel: 'info',
 })
 await cp(join(root, 'src', 'preload.cjs'), join(root, 'out', 'preload.cjs'))

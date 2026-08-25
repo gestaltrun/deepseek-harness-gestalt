@@ -478,16 +478,16 @@ describe('Remote Access HTTP assembled flow', () => {
     expect(quota.headers.get('retry-after')).toBe('60')
     await expect(quota.json()).resolves.toMatchObject({ error: { code: 'QUOTA', retryAfter: 60 } })
     expect(reported).not.toHaveBeenCalled()
-    remoteAccess.getMobileAccessState.mockRejectedValueOnce(
-      Object.assign(new Error('Bearer secret-token'), { code: '23505' }),
+    remoteAccess.setMobileAccess.mockRejectedValueOnce(
+      Object.assign(new Error('Bearer secret-token with invalid jsonb character'), { code: '22P05' }),
     )
-    const internal = await request({ operation: 'get-mobile-access' })
+    const internal = await request({ operation: 'set-mobile-access', enabled: true })
     expect(internal.status).toBe(500)
     await expect(internal.json()).resolves.toMatchObject({ error: { code: 'INTERNAL_ERROR' } })
     expect(reported).toHaveBeenCalledWith('[remote-access-http] unexpected request failure:', {
-      operation: 'get-mobile-access',
+      operation: 'set-mobile-access',
       failureKind: 'unexpected-error',
-      cause: 'persistence-unique-violation',
+      cause: 'persistence-untranslatable-character',
     })
     expect(JSON.stringify(reported.mock.calls)).not.toContain('secret-token')
     reported.mockRestore()

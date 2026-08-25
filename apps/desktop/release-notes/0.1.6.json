@@ -1,0 +1,64 @@
+{
+  "version": "0.1.6",
+  "tag": "gestalt-v0.1.6",
+  "source": {
+    "baselineKind": "previous-release",
+    "baselineRepository": "BeiKeJieDeLiuLangMao/deepseek-harness-gestalt",
+    "releaseRepository": "BeiKeJieDeLiuLangMao/deepseek-harness-gestalt",
+    "baselineCommit": "36ae4cd9f852e0fea745df2f40fc4d202c18143b"
+  },
+  "content": {
+    "zh": {
+      "intro": "DeepSeek Gestalt 0.1.6 收录上一版本之后的 {{commitCount}} 个提交。",
+      "sections": [
+        {
+          "heading": "Mobile Companion 产品链路",
+          "items": [
+            "Desktop 与 Mobile 使用真实 Platform Account、Installation 和 Personal Pairing 身份，通过按配对隔离的凭据、Snow 握手与加密 Relay 通道建立访问，不依赖 APNs 或 FCM。",
+            "Companion Surface 提供 Workspace 与 Session 发现、对话历史、prompt、取消、Approval、Ask User、全文检索和加密附件操作；iOS 与 Android 复用 Desktop Web 组件，而不是 prototype-companion。"
+          ]
+        },
+        {
+          "heading": "Desktop 打包与运行",
+          "items": [
+            "Desktop Bundle 携带官方 Node 与隔离的 dsh 快照，并在 macOS arm64、macOS x64 和 Windows 安装包上执行真实 packaged smoke。",
+            "Electron ESM 主进程从安装包运行时依赖加载 CommonJS WebSocket 实现；macOS smoke 保留 Keychain 访问，并等待权威 Session turn 完成后验收搜索与关闭流程。"
+          ]
+        },
+        {
+          "heading": "Operated Platform 与交付门禁",
+          "items": [
+            "生产 Platform 组合覆盖 HTTPS Account、Personal Pairing、Relay、PostgreSQL、Redis、私有 OSS 附件与 SLS 观测，并允许已发布的 Capacitor HTTPS 与自定义 scheme 来源。",
+            "CI 增加发布预检、证据规划、跨平台原生门禁和可回滚部署验证；Desktop 发布仍在通过签名、公证、安装包 smoke 与资产核验后才创建 Personal Release Channel 版本。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "intro": "DeepSeek Gestalt 0.1.6 contains the {{commitCount}} commits after the previous Desktop Bundle.",
+      "sections": [
+        {
+          "heading": "Mobile Companion product path",
+          "items": [
+            "Desktop and Mobile use real Platform Account, Installation, and Personal Pairing identities, then establish access through pairing-scoped credentials, a Snow handshake, and an encrypted Relay channel without APNs or FCM.",
+            "The Companion Surface provides Workspace and Session discovery, conversation history, prompts, cancellation, Approval, Ask User, full-text search, and encrypted attachment operations. iOS and Android reuse the Desktop Web components instead of prototype-companion."
+          ]
+        },
+        {
+          "heading": "Desktop packaging and runtime",
+          "items": [
+            "The Desktop Bundle carries official Node and an isolated dsh snapshot, with real packaged smoke coverage for macOS arm64, macOS x64, and Windows installers.",
+            "The Electron ESM main process loads its CommonJS WebSocket implementation from installed runtime dependencies. The macOS smoke retains Keychain access and waits for the authoritative Session turn before accepting search and shutdown."
+          ]
+        },
+        {
+          "heading": "Operated Platform and delivery gates",
+          "items": [
+            "The production Platform composition covers HTTPS Account, Personal Pairing, Relay, PostgreSQL, Redis, private OSS attachments, and SLS observability, and admits the shipped Capacitor HTTPS and custom-scheme origins.",
+            "CI adds release preflight, evidence planning, cross-platform native gates, and rollback-aware deployment verification. Desktop publication still creates a Personal Release Channel version only after signing, notarization, packaged smoke, and asset verification pass."
+          ]
+        }
+      ]
+    }
+  }
+}

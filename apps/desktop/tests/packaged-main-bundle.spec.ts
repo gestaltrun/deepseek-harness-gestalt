@@ -77,7 +77,7 @@ describe('packaged Desktop main bundle', () => {
     }
   })
 
-  it('inlines workspace packages and leaves only Electron externals', () => {
+  it('inlines workspace packages and externalizes native runtime dependencies', () => {
     execFileSync(process.execPath, [
       join(desktop, 'scripts', 'build-main.mjs'),
       join(desktop, 'tests', 'fixtures', 'operated-platform.json'),
@@ -90,7 +90,12 @@ describe('packaged Desktop main bundle', () => {
     expect(source).not.toMatch(/import\s+['"]@deepseek-ai\//)
     expect(source).toMatch(/from\s+['"]electron['"]/)
     expect(source).toMatch(/import\s*\(\s*['"]electron-updater['"]\s*\)/)
-    expect(source).not.toMatch(/from\s+['"]ws['"]/)
+    expect(source).toMatch(/from\s+['"]ws['"]/)
+    expect(source).not.toContain('node_modules/ws/lib/websocket.js')
+    const desktopPackage = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+    }
+    expect(desktopPackage.dependencies?.ws).toBe('^8.21.0')
     expect(source).toContain('companion entry search')
     expect(source).not.toContain('DSH_PLATFORM_ORIGIN')
     expect(JSON.parse(readFileSync(join(desktop, 'out', 'operated-platform.json'), 'utf8'))).toEqual({

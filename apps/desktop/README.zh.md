@@ -41,6 +41,8 @@ DSH_DESKTOP_OPERATED_PLATFORM_CONFIG=/absolute/path/to/operated-platform.json pn
 
 配置文件包含 `production` 标记、上文所述六个公开身份字段、附件 Host deadline，以及公开的 Relay WSS endpoint 与 limit；它不包含 OAuth secret。进程还需要 `DSH_NODE` 或 `npm_node_execpath` 上的真正 Node（pnpm 会设置后者）。不要让 Electron 用自己的 execPath 去跑 `dsh`。
 
+ESM 主进程 bundle 会内联工作区代码，但把 Electron、`electron-updater` 和 CommonJS 运行时包 `ws` 保留为外部依赖。packaged 冒烟测试会隔离 `DSH_HOME` 与 Electron userData；在 macOS 上保留已登录用户的 home，使 `safeStorage` 能访问 login Keychain。
+
 ## 发布
 
 从 `master` 运行 `Desktop Release` workflow，填写包版本并选择 `publish`。两个打包 job 都会从 GitHub Environment 变量投影公开的实际运行 Platform 身份与 Relay 配置，并要求打包应用在没有运行时 Platform 或 Relay 环境变量时正常启动。macOS arm64 与 x64 会先在匹配架构的 GitHub runner 上安装依赖；发布构建通过 `desktop-release` environment 完成签名和公证，dry run 不接收发布凭据。Windows NSIS 未签名但仍更新。workflow 会校验每个官方 Node 归档、启动每个 packaged target、通过 Desktop bridge 往返读取 disabled 更新状态、等待 renderer 应用该状态、要求未激活的 Update Control 保持缺席、检查 Mac app 的签名和已装订公证票据，在已测试提交上创建 `gestalt-v<version>` 标签与 draft Release，上传并核验精确的 installer、blockmap 与 updater feed 集合，然后发布 Release。交接失败或中断时，workflow 会删除本次运行拥有的 tag 和 draft。macOS 在 zip 落地后由 Squirrel 把 bundle 拷到临时目录，Update Control 显示“正在准备更新”；该阶段结束后才出现“安装并重启”。普通退出仍不会安装。

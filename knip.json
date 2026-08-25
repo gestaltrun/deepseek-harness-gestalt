@@ -733,6 +733,9 @@
         "src/**/*.ts",
         "scripts/**/*.mjs",
         "tests/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "ws"
       ]
     },
     "apps/platform": {

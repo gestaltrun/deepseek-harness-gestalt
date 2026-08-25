@@ -12,7 +12,7 @@ Live presentation clock 每次 render 都通过新函数订阅。因此 React �
 
 ## 决策
 
-Packaged Desktop 只有在 Web Host 安装后才启动 signed-in Personal Pairing。Account sign-in 与 process resume 使用同一个 readiness predicate，因此在初次或 replacement Host startup 尚未完成时唤醒进程，不会重启 Relay access。Host exit 仍会清除 Host authority，并保留已建立 Relay 足够长时间，以返回 typed Host failure；该 ordering rule 适用于初次或 replacement Desktop startup，此时 Mobile 不得过早得知新的 Desktop authority 已 ready。
+Packaged Desktop 只有在 Web Host 安装后才启动 signed-in Personal Pairing。Account sign-in 与 process resume 使用同一个 readiness predicate，因此在初次或 replacement Host startup 尚未完成时唤醒进程，不会重启 Relay access。每次 start 都会捕获 Host generation，并在 Relay startup settle 后复核；等待期间发生 Host exit 时，会以 `host-unavailable` 停止 stale start。Host exit 仍会保留此前已建立的 Relay 足够长时间，以返回 typed Host failure；generation cancellation 只适用于尚未建立当前 Host authority 的 in-flight startup。
 
 `MobileBrowse` 在没有当前 mutation authority 时绝不请求 history。Synchronization 丢失会清除其本地 history-request fence，使后续 synchronized generation 可以请求缺失 conversation。Clock subscription callback 在其 clock owner 生命周期内保持稳定。
 
@@ -30,4 +30,4 @@ Desktop replacement 会让已打开 Mobile conversation 与 cached row 保持可
 
 ## 测试
 
-Desktop readiness coverage 会为所有不完整 Account/Host 组合保持 pairing stopped，并只在两者都 ready 时启动。Mobile coverage 会拒绝 offline history submission，并在多次 render 之间只保留一个 clock subscription。Packaged Desktop stop 与 replacement 期间，Android 已打开 conversation 保持 mounted，离线时 composer disabled，恢复时不出现 Host-unavailable error；in-place APK upgrade 还保留了 Account、pairing、key 与 cache。
+Desktop readiness coverage 会为所有不完整 Account/Host 组合保持 pairing stopped，只在两者都 ready 时启动，并停止 Host generation 在 settle 前退出的 delayed start。Mobile coverage 会拒绝 offline history submission，并在多次 render 之间只保留一个 clock subscription。Packaged Desktop stop 与 replacement 期间，Android 已打开 conversation 保持 mounted，离线时 composer disabled，恢复时不出现 Host-unavailable error；in-place APK upgrade 还保留了 Account、pairing、key 与 cache。

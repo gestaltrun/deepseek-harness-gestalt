@@ -119,6 +119,7 @@ const companionProduct = new DesktopCompanionProductOwner({
 })
 let uninstallCompanionHost: (() => void) | undefined
 let companionHostReady = false
+let companionHostGeneration = 0
 
 smokeLog('main loaded')
 const gotLock = app.requestSingleInstanceLock()
@@ -680,16 +681,22 @@ async function installCompanionHost(running: RunningWebHost): Promise<void> {
 }
 
 function clearCompanionHost(): void {
+  companionHostGeneration += 1
   companionHostReady = false
   uninstallCompanionHost?.()
   uninstallCompanionHost = undefined
 }
 
 async function startPairingForCurrentDesktop(): Promise<void> {
+  const hostGeneration = companionHostGeneration
   await startDesktopPairingWhenHostReady({
     accountSignedIn,
     hostReady: companionHostReady,
     start: async () => { await pairing.start() },
+    authorityIsCurrent: () => accountSignedIn
+      && companionHostReady
+      && companionHostGeneration === hostGeneration,
+    stopStaleStart: async () => { await pairing.deactivate('host-unavailable') },
   }).catch((error: unknown) => {
     console.error('[desktop-personal-pairing] signed-in Remote Access load failed:', error)
   })

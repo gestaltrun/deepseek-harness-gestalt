@@ -94,6 +94,28 @@ describe('RemoteRelayEndpointController', () => {
     await expect(clearedStart).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
   })
 
+  it('logs only a bounded cause for secret-bearing unexpected Relay failures', async () => {
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failure = Object.assign(new Error('Bearer relay-secret'), { code: 'ECONNRESET' })
+    const controller = new RemoteRelayEndpointController({
+      ...mobileOptions(async () => { throw failure }),
+      reconnectDelayMs: MAX_RUNTIME_TIMER_DELAY_MS,
+    })
+    const starting = controller.start()
+    void starting.catch(() => {})
+
+    await vi.waitFor(() => {
+      expect(reported).toHaveBeenCalledWith('[remote-relay-client] unexpected connection failure:', {
+        failureKind: 'unexpected-error',
+        cause: 'transport',
+      })
+    })
+    expect(JSON.stringify(reported.mock.calls)).not.toContain('relay-secret')
+    await controller.stop()
+    await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+    reported.mockRestore()
+  })
+
   it('rejects invalid lifecycle configuration and Desktop without authoritative resync', () => {
     const base = {
       endpoint: 'mobile' as const,
@@ -163,7 +185,7 @@ describe('RemoteRelayEndpointController', () => {
   })
 
   it('stops immediately for window close, sleep, quit, or Mobile Access disablement', async () => {
-    for (const reason of ['window-close', 'sleep', 'quit', 'mobile-access-disabled'] as const) {
+    for (const reason of ['window-close', 'sleep', 'quit', 'mobile-access-disabled', 'host-unavailable'] as const) {
       const socket = new FakeSocket()
       const controller = new RemoteRelayEndpointController({
         endpoint: 'desktop',

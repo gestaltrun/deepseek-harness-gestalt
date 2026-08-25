@@ -191,14 +191,19 @@ function exactEvidenceSet<Value extends string>(
   allowed: readonly Value[],
   name: string,
 ): ReadonlySet<Value> {
-  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+  if (!Array.isArray(value)) {
     throw new Error(`Companion release ${name} evidence must be a string array`)
   }
-  const unique = new Set(value)
-  if (unique.size !== value.length) throw new Error(`Companion release ${name} evidence contains duplicates`)
+  const strings: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') throw new Error(`Companion release ${name} evidence must be a string array`)
+    strings.push(item)
+  }
+  const unique = new Set(strings)
+  if (unique.size !== strings.length) throw new Error(`Companion release ${name} evidence contains duplicates`)
   const allowedSet = new Set<string>(allowed)
-  const unknown = value.find(item => !allowedSet.has(item as string))
-  if (unknown !== undefined) throw new Error(`Companion release ${name} evidence contains unknown value ${String(unknown)}`)
+  const unknown = strings.find(item => !allowedSet.has(item))
+  if (unknown !== undefined) throw new Error(`Companion release ${name} evidence contains unknown value ${unknown}`)
   return unique as Set<Value>
 }
 

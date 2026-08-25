@@ -342,8 +342,26 @@ function answerError(res: ServerResponse, error: unknown, operation?: string): v
   console.error('[remote-access-http] unexpected request failure:', {
     operation: operation ?? 'request-setup',
     failureKind: 'unexpected-error',
+    cause: classifyUnexpectedFailure(error),
   })
   writeJson(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Remote Access request failed' } })
+}
+
+function classifyUnexpectedFailure(error: unknown):
+  'persistence' | 'transport' | 'codec' | 'contract' | 'cleanup' | 'dependency' | 'unexpected' {
+  if (error instanceof AggregateError) return 'cleanup'
+  if (error instanceof SyntaxError) return 'codec'
+  if (error instanceof TypeError) return 'contract'
+  if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') {
+    return 'unexpected'
+  }
+  if (/^[0-9A-Z]{5}$/u.test(error.code)) return 'persistence'
+  if (['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ETIMEDOUT'].includes(error.code)) {
+    return 'transport'
+  }
+  if (error.code.startsWith('UND_ERR_')) return 'transport'
+  if (error.code.startsWith('ERR_')) return 'dependency'
+  return 'unexpected'
 }
 
 function requiredString(value: unknown, name: string): string {

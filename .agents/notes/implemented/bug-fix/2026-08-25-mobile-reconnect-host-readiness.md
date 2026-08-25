@@ -12,7 +12,7 @@ The live presentation clock was subscribed through a new function on every rende
 
 ## Decision
 
-Packaged Desktop starts signed-in Personal Pairing only after the Web Host is installed. Account sign-in and process resume use the same readiness predicate, so waking while initial or replacement Host startup is incomplete cannot restart Relay access. Host exit still clears Host authority and retains the established Relay long enough to return typed Host failures; the ordering rule applies to initial or replacement Desktop startup, when Mobile must not be told that a new Desktop authority is ready prematurely.
+Packaged Desktop starts signed-in Personal Pairing only after the Web Host is installed. Account sign-in and process resume use the same readiness predicate, so waking while initial or replacement Host startup is incomplete cannot restart Relay access. Each start captures the Host generation and rechecks it after Relay startup settles; a Host exit during that wait stops the stale start as `host-unavailable`. Host exit still retains a previously established Relay long enough to return typed Host failures; generation cancellation applies only to an in-flight startup that has not established current Host authority.
 
 `MobileBrowse` never requests history without current mutation authority. Losing synchronization clears its local history-request fence so a later synchronized generation can request the missing conversation. The clock subscription callback remains stable for the lifetime of its clock owner.
 
@@ -30,4 +30,4 @@ Desktop replacement keeps the opened Mobile conversation and cached rows visible
 
 ## Testing
 
-Desktop readiness coverage keeps pairing stopped for every incomplete Account/Host combination and starts it only when both are ready. Mobile coverage rejects offline history submission and keeps one clock subscription across renders. A packaged Desktop stop and replacement left the Android opened conversation mounted, disabled its composer while offline, restored it without a Host-unavailable error, and preserved the Account, pairing, keys, and cache across an in-place APK upgrade.
+Desktop readiness coverage keeps pairing stopped for every incomplete Account/Host combination, starts it only when both are ready, and stops a delayed start whose Host generation exits before settlement. Mobile coverage rejects offline history submission and keeps one clock subscription across renders. A packaged Desktop stop and replacement left the Android opened conversation mounted, disabled its composer while offline, restored it without a Host-unavailable error, and preserved the Account, pairing, keys, and cache across an in-place APK upgrade.

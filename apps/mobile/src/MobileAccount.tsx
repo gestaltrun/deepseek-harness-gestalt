@@ -72,11 +72,9 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
   }, [installation, snapshot.status])
   useEffect(() => {
     if (snapshot.status !== 'signed-in' || pairing === undefined) return
-    const activation = pairing.activate().catch(reportPairingLifecycleError)
+    void pairing.activate().catch(reportPairingLifecycleError)
     return () => {
-      void activation
-        .then(() => pairing.deactivate())
-        .catch(reportPairingLifecycleError)
+      void pairing.deactivate().catch(reportPairingLifecycleError)
     }
   }, [pairing, snapshot.status])
   useEffect(() => {

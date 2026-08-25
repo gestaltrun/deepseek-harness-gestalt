@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-25-remote-access-unexpected-failure-logging.md
-2026-08-25-remote-access-unexpected-failure-logging.md: c1120ac4b45c460138f31ef691c3c9571df4086d
-2026-08-25-remote-access-unexpected-failure-logging.zh.md: 138ebfeb23a39e8e9a580022ecf344e92bfb7ca2
+2026-08-25-remote-access-unexpected-failure-logging.md: 88128b18a8b835312752204d858676355f7cadd8
+2026-08-25-remote-access-unexpected-failure-logging.zh.md: 9fd97d8387caa8f8c73858152c59f5ae6b4dc560

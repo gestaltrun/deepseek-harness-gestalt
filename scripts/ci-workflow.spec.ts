@@ -70,13 +70,13 @@ describe('CI workflow', () => {
     expect(verdict.steps).toContainEqual(expect.objectContaining({
       name: 'Validate and bind operated acceptance',
     }))
-    expect(verdict.steps).toContainEqual(expect.objectContaining({
-      uses: 'actions/upload-artifact@v4',
-      with: expect.objectContaining({
-        name: 'mobile-companion-acceptance-${{ inputs.candidate_sha }}',
-        'if-no-files-found': 'error',
-      }),
-    }))
+    const upload = (verdict.steps as unknown[])
+      .find(step => isRecord(step) && step.uses === 'actions/upload-artifact@v4')
+    if (!isRecord(upload) || !isRecord(upload.with)) throw new TypeError('Mobile acceptance must upload an artifact')
+    expect(upload.with).toMatchObject({
+      name: 'mobile-companion-acceptance-${{ inputs.candidate_sha }}',
+      'if-no-files-found': 'error',
+    })
   })
 
   it('rejects runner-only contexts before job construction', () => {

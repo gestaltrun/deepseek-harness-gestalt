@@ -1094,6 +1094,49 @@ describe('MobilePairingController', () => {
     expect(controller.getSnapshot()).toEqual({ status: 'retryable', error: 'account B refresh failed' })
   })
 
+  it('serializes slow activation, sign-out, and the next signed-in generation', async () => {
+    const firstSelection = deferred<undefined>()
+    const pairingId = parsePersonalPairingId('pairing-lifecycle-generation')
+    const grant = {
+      routeId: parseRelayRouteId('route-lifecycle-generation'),
+      endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'),
+      revision: 1,
+    }
+    const selectAccount = vi.fn()
+      .mockReturnValueOnce(firstSelection.promise)
+      .mockResolvedValueOnce(undefined)
+    const relay = { configure: vi.fn(), start: vi.fn(), stop: vi.fn() }
+    const controller = new MobilePairingController({
+      installation: installationFixture(),
+      transport: transportFixture(),
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn() },
+      attachmentKeys: {
+        retain: vi.fn(),
+        wipe: vi.fn(),
+        selectAccount,
+        retainedPairingId: () => pairingId,
+        relayAuthority: () => grant,
+        pairedDesktops: () => [{ pairingId }],
+        selectedPairingId: () => pairingId,
+      },
+      relay,
+      scanner: { scan: vi.fn() },
+    })
+
+    const firstActivation = controller.activate()
+    await vi.waitFor(() => { expect(selectAccount).toHaveBeenCalledOnce() })
+    const deactivation = controller.deactivate()
+    const nextActivation = controller.activate()
+    firstSelection.resolve(undefined)
+    await Promise.all([firstActivation, deactivation, nextActivation])
+    await vi.waitFor(() => { expect(relay.start).toHaveBeenCalledOnce() })
+
+    expect(selectAccount).toHaveBeenCalledTimes(2)
+    expect(relay.stop).toHaveBeenCalledOnce()
+    expect(controller.getSnapshot()).toMatchObject({ status: 'paired', selectedPairingId: pairingId })
+  })
+
   it('serializes browser-camera scanning so deactivation drains the scanner and post-close scan is rejected', async () => {
     const scan = deferred<string>()
     const scanner = { scan: vi.fn().mockReturnValue(scan.promise) }

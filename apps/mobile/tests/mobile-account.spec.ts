@@ -186,7 +186,7 @@ describe('MobileAccount', () => {
     expect(screen.queryByText('Remote Online')).toBeNull()
   })
 
-  it('waits for pairing activation before deactivating on sign-out', async () => {
+  it('hands sign-out deactivation to the pairing lifecycle owner immediately', async () => {
     const { installation } = fixture()
     const ready = { status: 'ready' } as const
     let finishActivation = (): void => {}
@@ -213,9 +213,9 @@ describe('MobileAccount', () => {
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
 
     await screen.findByRole('button', { name: '使用 GitHub 继续' })
-    expect(deactivate).not.toHaveBeenCalled()
+    expect(deactivate).toHaveBeenCalledOnce()
     finishActivation()
-    await waitFor(() => { expect(deactivate).toHaveBeenCalledOnce() })
+    await activation
   })
 })
 

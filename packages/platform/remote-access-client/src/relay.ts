@@ -31,7 +31,7 @@ export interface RelayEndpointSocket {
 }
 
 /** Desktop lifecycle reasons that always make the paired route Remote Offline. */
-export type DesktopRelayStopReason = 'window-close' | 'sleep' | 'quit' | 'mobile-access-disabled'
+export type DesktopRelayStopReason = 'window-close' | 'sleep' | 'quit' | 'mobile-access-disabled' | 'host-unavailable'
 
 /** Construction inputs for one Mobile or Desktop outbound Relay endpoint. */
 export interface RemoteRelayEndpointOptions {
@@ -356,7 +356,10 @@ export class RemoteRelayEndpointController {
 
   private observeError(error: unknown): void {
     if (!(error instanceof RemoteRelayError) && !(error instanceof RemoteProtocolError)) {
-      console.error('[remote-relay-client] unexpected connection failure:', error)
+      console.error('[remote-relay-client] unexpected connection failure:', {
+        failureKind: 'unexpected-error',
+        cause: classifyUnexpectedRelayFailure(error),
+      })
     }
     try {
       this.options.onTransportError?.(error instanceof RemoteRelayError || error instanceof RemoteProtocolError
@@ -390,6 +393,21 @@ export class RemoteRelayEndpointController {
       // Connection observers cannot own or interrupt the Relay lifecycle.
     }
   }
+}
+
+function classifyUnexpectedRelayFailure(error: unknown): 'transport' | 'codec' | 'contract' | 'cleanup' | 'dependency' | 'unexpected' {
+  if (error instanceof AggregateError) return 'cleanup'
+  if (error instanceof SyntaxError) return 'codec'
+  if (error instanceof TypeError) return 'contract'
+  if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') {
+    return 'unexpected'
+  }
+  if (['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ETIMEDOUT'].includes(error.code)) {
+    return 'transport'
+  }
+  if (error.code.startsWith('UND_ERR_')) return 'transport'
+  if (error.code.startsWith('ERR_')) return 'dependency'
+  return 'unexpected'
 }
 
 interface Deferred<T> {

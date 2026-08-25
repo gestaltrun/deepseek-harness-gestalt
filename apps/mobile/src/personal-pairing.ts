@@ -277,6 +277,7 @@ export class MobilePairingController implements MobilePairingActions {
   private accountId: PlatformAccountId | undefined
   private active = true
   private lifecycleBarrier: Promise<void> = Promise.resolve()
+  private lifecycleGeneration = 0
   private relayActivationGeneration = 0
 
   /** @param options - Account authority, Remote Access transport, reviewed handshake, and QR scanner. */
@@ -296,46 +297,52 @@ export class MobilePairingController implements MobilePairingActions {
     return () => { this.listeners.delete(listener) }
   }
 
-  async activate(): Promise<void> {
-    await this.lifecycleBarrier
-    await this.serial
-    const accountId = this.currentAccountId()
-    if (this.accountId !== undefined && this.accountId !== accountId) await this.resetAccountScope()
-    this.accountId = accountId
-    await this.options.attachmentKeys?.selectAccount?.(accountId)
-    this.pairingId = this.options.attachmentKeys?.retainedPairingId?.()
-    this.active = true
-    const recovery = this.options.attachmentKeys?.endpointRecovery?.()
-    if (recovery !== undefined) {
-      if (recovery.accountId !== accountId || this.now() >= (recovery.replayExpiresAt ?? recovery.expiresAt)) {
-        recovery.mobileHandshake.fill(0)
-        recovery.handshakeRecovery.fill(0)
-        this.options.attachmentKeys?.clearEndpointRecovery?.()
-        await this.options.attachmentKeys?.flush?.()
-      } else {
-        if (this.options.handshake.restoreRecoveryState === undefined) {
-          throw new Error('Mobile endpoint pairing recovery has no handshake owner')
+  activate(): Promise<void> {
+    const generation = ++this.lifecycleGeneration
+    return this.enqueueLifecycle(async () => {
+      await this.serial
+      if (generation !== this.lifecycleGeneration) return
+      const accountId = this.currentAccountId()
+      if (this.accountId !== undefined && this.accountId !== accountId) await this.resetAccountScope()
+      if (generation !== this.lifecycleGeneration) return
+      this.accountId = accountId
+      await this.options.attachmentKeys?.selectAccount?.(accountId)
+      if (generation !== this.lifecycleGeneration) return
+      this.pairingId = this.options.attachmentKeys?.retainedPairingId?.()
+      this.active = true
+      const recovery = this.options.attachmentKeys?.endpointRecovery?.()
+      if (recovery !== undefined) {
+        if (recovery.accountId !== accountId || this.now() >= (recovery.replayExpiresAt ?? recovery.expiresAt)) {
+          recovery.mobileHandshake.fill(0)
+          recovery.handshakeRecovery.fill(0)
+          this.options.attachmentKeys?.clearEndpointRecovery?.()
+          await this.options.attachmentKeys?.flush?.()
+        } else {
+          if (this.options.handshake.restoreRecoveryState === undefined) {
+            throw new Error('Mobile endpoint pairing recovery has no handshake owner')
+          }
+          this.options.handshake.restoreRecoveryState(recovery.handshakeRecovery)
+          recovery.handshakeRecovery.fill(0)
+          const restoredAttempt: PreparedMobilePairingAttempt = {
+            link: recovery.link, expiresAt: recovery.expiresAt, accountId: recovery.accountId,
+            completionId: recovery.completionId, mobileHandshake: recovery.mobileHandshake,
+            transmission: recovery.transmission, endpointChallengeId: recovery.endpointChallengeId,
+            ...(recovery.replayExpiresAt === undefined ? {} : { replayExpiresAt: recovery.replayExpiresAt }),
+            endpointHandshakeFinished: recovery.endpointHandshakeFinished,
+          }
+          this.attempt = restoredAttempt
+          if (recovery.transmission === 'pending') this.scheduleEndpointStatus(recovery.completionId)
+          else await this.runAttempt(restoredAttempt)
         }
-        this.options.handshake.restoreRecoveryState(recovery.handshakeRecovery)
-        recovery.handshakeRecovery.fill(0)
-        const restoredAttempt: PreparedMobilePairingAttempt = {
-          link: recovery.link, expiresAt: recovery.expiresAt, accountId: recovery.accountId,
-          completionId: recovery.completionId, mobileHandshake: recovery.mobileHandshake,
-          transmission: recovery.transmission, endpointChallengeId: recovery.endpointChallengeId,
-          ...(recovery.replayExpiresAt === undefined ? {} : { replayExpiresAt: recovery.replayExpiresAt }),
-          endpointHandshakeFinished: recovery.endpointHandshakeFinished,
-        }
-        this.attempt = restoredAttempt
-        if (recovery.transmission === 'pending') this.scheduleEndpointStatus(recovery.completionId)
-        else await this.runAttempt(restoredAttempt)
       }
-    }
-    const restoredGrant = this.options.attachmentKeys?.relayAuthority?.()
-    if (restoredGrant !== undefined && this.options.relay !== undefined) {
-      if (this.pairingId === undefined) throw new Error('Selected Relay authority has no retained Personal Pairing')
-      await this.activateRelayPairing(this.pairingId, restoredGrant)
-    }
-    if (this.attempt === undefined && this.pairedDesktops().length > 0) this.publishPaired()
+      if (generation !== this.lifecycleGeneration) return
+      const restoredGrant = this.options.attachmentKeys?.relayAuthority?.()
+      if (restoredGrant !== undefined && this.options.relay !== undefined) {
+        if (this.pairingId === undefined) throw new Error('Selected Relay authority has no retained Personal Pairing')
+        await this.activateRelayPairing(this.pairingId, restoredGrant)
+      }
+      if (this.attempt === undefined && this.pairedDesktops().length > 0) this.publishPaired()
+    })
   }
 
   async selectDesktop(pairingId: PersonalPairingId): Promise<void> {
@@ -424,19 +431,17 @@ export class MobilePairingController implements MobilePairingActions {
     })
   }
 
-  async deactivate(): Promise<void> {
+  deactivate(): Promise<void> {
+    this.lifecycleGeneration += 1
     this.active = false
-    const transaction = (async () => {
-      await this.lifecycleBarrier
+    return this.enqueueLifecycle(async () => {
       const admitted = await Promise.allSettled([this.serial])
       const cleanup = await Promise.allSettled([
         this.resetAccountScope(),
         this.options.relay?.stop() ?? Promise.resolve(),
       ])
       throwRejected([...admitted, ...cleanup], 'Mobile Personal Pairing deactivation failed')
-    })()
-    this.lifecycleBarrier = transaction.then(() => undefined, () => undefined)
-    await transaction
+    })
   }
 
   async completeLink(link: string, signal?: AbortSignal): Promise<void> {
@@ -950,6 +955,12 @@ export class MobilePairingController implements MobilePairingActions {
     })
     this.serial = result.then(() => undefined, () => undefined)
     return result
+  }
+
+  private enqueueLifecycle(operation: () => Promise<void>): Promise<void> {
+    const transaction = this.lifecycleBarrier.then(operation, operation)
+    this.lifecycleBarrier = transaction.then(() => undefined, () => undefined)
+    return transaction
   }
 
   private assertActive(): void {

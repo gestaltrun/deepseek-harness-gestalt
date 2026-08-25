@@ -10,7 +10,7 @@ Remote Access HTTP 会为意外 service failure 返回通用 `INTERNAL_ERROR`，
 
 ## 决策
 
-`HttpError`、`RemoteAccessError` 与 `AccountError` 保留 typed status、body 和可选 retry behavior，不产生 unexpected-failure log。其他所有 rejection 都会向 stderr 写入一条只包含所选 Remote Access operation、Error name 与 message 的 diagnostic，然后返回不变的通用 HTTP 500 body。Diagnostic 绝不包含 authorization header、proof field、request body、pairing message、sealed Relay authority 或 attachment ciphertext；non-Error rejection 使用固定说明，而不是 rejected value。
+`HttpError`、`RemoteAccessError` 与 `AccountError` 保留 typed status、body 和可选 retry behavior，不产生 unexpected-failure log。其他所有 rejection 都会向 stderr 写入一条只包含所选 Remote Access operation、固定 unexpected-failure marker 与有界 cause taxonomy 的 diagnostic：persistence、transport、codec、contract、cleanup、dependency 或 unexpected。分类只使用代码拥有的 exception class 与 allowlisted code family，不记录外部提供的 code 或任何 exception 内容。Public response 保持为不变的通用 HTTP 500 body。Relay client 会对未知 connection failure 使用同样不含内容的分类，然后投影稳定的 `REMOTE_OFFLINE` error。
 
 ## 考虑过的替代方案
 
@@ -22,8 +22,8 @@ Remote Access HTTP 会为意外 service failure 返回通用 `INTERNAL_ERROR`，
 
 ## 后果
 
-Bounded Platform stderr 可以识别失败 operation 与具体 exception，而 public client 仍只获得通用 unexpected-failure response。已知 security 与 capacity outcome 保持 typed，也不会重复记录。由于 log 有意省略 request identity 与 authority material，operator 必须按时间与 operation 关联 diagnostic。
+Bounded Platform stderr 可以识别失败 operation 与有用的 failure family，而 public client 仍只获得通用 unexpected-failure response。已知 security 与 capacity outcome 保持 typed，也不会重复记录。由于 log 有意省略 request identity、authority material、exception message、stack、cause 与 custom field，operator 必须按时间与 operation 关联 diagnostic。
 
 ## 测试
 
-Assembled HTTP route 会把 `PROOF_REPLAYED` 映射为 HTTP 401 且不记录日志，保留 Remote Access quota behavior，并注入一个 unexpected Error；其 stderr record 只包含 operation、Error name 与 message，而 response 仍为通用 HTTP 500。
+Assembled HTTP route 会把 `PROOF_REPLAYED` 映射为 HTTP 401 且不记录日志，保留 Remote Access quota behavior，并注入一个包含 bearer secret 的 PostgreSQL-shaped Error。stderr record 只包含 operation、固定 marker 与 `persistence`；序列化后的 log argument 不包含 secret，而 response 仍为通用 HTTP 500。Relay lifecycle coverage 会注入含 secret 的 connection reset，并且只观察到固定 marker 与 `transport`。

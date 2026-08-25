@@ -10,7 +10,7 @@ Remote Access HTTP returned a generic `INTERNAL_ERROR` for unexpected service fa
 
 ## Decision
 
-`HttpError`, `RemoteAccessError`, and `AccountError` keep their typed status, body, and optional retry behavior without an unexpected-failure log. Every other rejection writes one stderr diagnostic containing only the selected Remote Access operation plus Error name and message, then returns the unchanged generic HTTP 500 body. The diagnostic never includes authorization headers, proof fields, request bodies, pairing messages, sealed Relay authority, or attachment ciphertext; non-Error rejections receive a fixed description rather than their rejected value.
+`HttpError`, `RemoteAccessError`, and `AccountError` keep their typed status, body, and optional retry behavior without an unexpected-failure log. Every other rejection writes one stderr diagnostic containing only the selected Remote Access operation, the fixed unexpected-failure marker, and a bounded cause taxonomy: persistence, transport, codec, contract, cleanup, dependency, or unexpected. Classification uses owned exception classes and allowlisted code families without recording the supplied code or any exception content. The public response remains the unchanged generic HTTP 500 body. The Relay client applies the same content-free classification to unknown connection failures before projecting its stable `REMOTE_OFFLINE` error.
 
 ## Alternatives considered
 
@@ -22,8 +22,8 @@ Remote Access HTTP returned a generic `INTERNAL_ERROR` for unexpected service fa
 
 ## Consequences
 
-Bounded Platform stderr identifies the failing operation and concrete exception while public clients retain a generic unexpected-failure response. Known security and capacity outcomes remain typed and do not duplicate logs. The operator must correlate a diagnostic by time and operation because the log intentionally omits request identity and authority material.
+Bounded Platform stderr identifies the failing operation and useful failure family while public clients retain a generic unexpected-failure response. Known security and capacity outcomes remain typed and do not duplicate logs. The operator must correlate a diagnostic by time and operation because the log intentionally omits request identity, authority material, exception messages, stacks, causes, and custom fields.
 
 ## Testing
 
-The assembled HTTP route maps `PROOF_REPLAYED` to HTTP 401 without logging, retains Remote Access quota behavior, and injects an unexpected Error whose stderr record contains only operation, Error name, and message while the response remains generic HTTP 500.
+The assembled HTTP route maps `PROOF_REPLAYED` to HTTP 401 without logging, retains Remote Access quota behavior, and injects a PostgreSQL-shaped Error containing a bearer secret. The stderr record contains only operation, the fixed marker, and `persistence`; serialized log arguments exclude the secret while the response remains generic HTTP 500. Relay lifecycle coverage injects a secret-bearing connection reset and observes only the fixed marker plus `transport`.

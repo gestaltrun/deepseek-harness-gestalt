@@ -12,7 +12,7 @@ Pull-request workflow routing was encoded directly in job conditions, while trac
 
 `planCi(input)` owns a versioned deterministic plan over the event, PR readiness, resolved base and head, changed paths, module-graph digest, versioned risk catalog, lockfile digest, workflow digest, and toolchain digest. Its output identifies affected areas, escalation reasons, required and observational lanes, and an evidence key derived from the normalized input. Unknown or unavailable input selects exhaustive evidence and records why.
 
-The pull-request workflow admits all evidence jobs through one `preflight` job. It validates workflow semantics, computes the plan, requires PR metadata to include every affected area, and checks the immutable install, generated catalogs, translation pairing, module graph, and workspace constraints before expensive jobs start.
+The pull-request workflow admits all evidence jobs through one `preflight` verdict. A plan worker validates workflow semantics, computes the plan, and requires PR metadata to include every affected area. Four generated-state workers partition the generated catalogs, translation pairing, documentation graphs, module graph, and workspace constraints over independent immutable installs. The verdict fails unless the plan worker and every generated-state partition succeed, then forwards only the plan worker's routing and proof outputs to evidence jobs.
 
 `pnpm ci:plan` is the local projection of the same planner. `pnpm pr:create` is the supported publication path: it verifies the same-repository Issue and creates a Draft PR with one declared kind plus the union of declared and planner-selected areas.
 
@@ -26,4 +26,4 @@ The pull-request workflow admits all evidence jobs through one `preflight` job. 
 
 ## Consequences
 
-Every pull request receives one inspectable plan before expensive work starts. Planner or repository uncertainty increases evidence instead of reducing it. Adding a new change surface requires extending the risk catalog and its plan fixtures; adding a new generated projection requires adding its check to the preflight gate inventory. The [Draft impact decision](2026-08-24-draft-impacted-evidence.md) owns the narrower plan level without changing this fail-closed input and evidence-key contract.
+Every pull request receives one inspectable plan before expensive work starts. Planner or repository uncertainty increases evidence instead of reducing it. Adding a new change surface requires extending the risk catalog and its plan fixtures; adding a new generated projection requires adding its check to exactly one preflight partition. The complete local `check:ci:preflight` aggregate remains the union of those partitions. The [Draft impact decision](2026-08-24-draft-impacted-evidence.md) owns the narrower plan level without changing this fail-closed input and evidence-key contract.

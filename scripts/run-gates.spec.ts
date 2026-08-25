@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { coverageExemptHeavySuites } from './coverage-exempt.ts'
 import {
   defaultConcurrency,
   formatGateResultReason,
@@ -59,10 +60,15 @@ describe('gate graph validation', () => {
     'ci-primary',
     'ci-linux-primary',
     'ci-preflight',
+    'ci-preflight-core',
+    'ci-preflight-cordis',
+    'ci-preflight-docs',
+    'ci-preflight-graphs',
     'ci-static',
     'ci-lint-contracts-ready',
     'ci-coverage',
     'ci-windows-native-coverage-merge',
+    'ci-windows-native-coverage-exempt',
     'ci-snapshot',
     'ci-artifacts',
     'ci-consumers',
@@ -90,16 +96,29 @@ describe('gate graph validation', () => {
     expect(ids).toEqual([
       'constraints',
       'translation-pairing',
-      'cordis-catalog',
-      'cordis-api',
       'client-catalog',
       'tool-catalog',
+      'cordis-catalog',
+      'cordis-api',
       'config-catalog',
       'doc-graphs',
       'persistence-catalog',
       'module-graph',
       'scoped-events',
     ])
+  })
+
+  it('partitions CI preflight without dropping or duplicating a gate', () => {
+    const all = withPnpmEntrypoint(() => gatesForMode('ci-preflight').map(subject => subject.id))
+    const partitions = withPnpmEntrypoint(() => [
+      ...gatesForMode('ci-preflight-core'),
+      ...gatesForMode('ci-preflight-cordis'),
+      ...gatesForMode('ci-preflight-docs'),
+      ...gatesForMode('ci-preflight-graphs'),
+    ].map(subject => subject.id))
+
+    expect(partitions).toEqual(all)
+    expect(new Set(partitions)).toHaveProperty('size', partitions.length)
   })
 
   it.each([
@@ -271,17 +290,27 @@ describe('gate graph validation', () => {
     })
   })
 
-  it('merges cross-job Windows blobs with the exempt-heavy inventory', () => {
-    const gates = withEnv('DSH_COVERAGE_MAX_WORKERS', '8', () =>
-      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-coverage-merge')))
+  it('merges cross-job Windows blobs without requiring local test paths', () => {
+    const gates = withPnpmEntrypoint(() => gatesForMode('ci-windows-native-coverage-merge'))
 
-    expect(gates.map(gate => gate.id)).toEqual(['coverage', 'coverage-exempt-heavy'])
+    expect(gates.map(gate => gate.id)).toEqual(['coverage'])
     expect(gates[0]?.args).toEqual(expect.arrayContaining([
       '--merge-reports=coverage/.partitioned/blobs',
       '--coverage',
+      '--passWithNoTests',
     ]))
     expect(gates[0]?.env).toMatchObject({ DSH_COVERAGE_EXEMPT_HEAVY: '1' })
-    expect(gates[1]?.args).toContain('--maxWorkers=6')
+  })
+
+  it('keeps cross-job Windows exempt-heavy suites in their native owner', () => {
+    const gates = withEnv('DSH_COVERAGE_MAX_WORKERS', '8', () =>
+      withPnpmEntrypoint(() => gatesForMode('ci-windows-native-coverage-exempt')))
+
+    expect(gates.map(gate => gate.id)).toEqual(['coverage-exempt-heavy'])
+    expect(gates[0]?.args).toContain('--maxWorkers=6')
+    expect(gates[0]?.args).toEqual(expect.arrayContaining(
+      coverageExemptHeavySuites.map(suite => suite.filter),
+    ))
   })
 
   it('rejects an invalid coverage partition count before starting a gate', () => {

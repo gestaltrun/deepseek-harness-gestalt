@@ -40,6 +40,7 @@ export interface CiMetrics {
 interface Distribution {
   p50: number | null
   p95: number | null
+  max: number | null
 }
 
 const EXCLUDED_RUN_CONCLUSIONS = new Set(['cancelled', 'skipped', 'stale'])
@@ -48,6 +49,7 @@ const OBSERVATIONAL_JOB_NAMES = new Set([
   'macos electron runtime e2e',
   'windows node 24 / native complete',
   'windows node 24 / native build and runtime',
+  'windows node 24 / native coverage exempt-heavy',
   'windows node 24 / native coverage',
   'windows node 24 / native static portability',
   'windows node 24 / native verdict',
@@ -137,7 +139,11 @@ function timestamp(value: string): number {
 }
 
 function distribution(values: readonly number[]): Distribution {
-  return { p50: percentile(values, 0.5), p95: percentile(values, 0.95) }
+  return {
+    p50: percentile(values, 0.5),
+    p95: percentile(values, 0.95),
+    max: values.length === 0 ? null : Math.max(...values),
+  }
 }
 
 function percentile(values: readonly number[], quantile: number): number | null {

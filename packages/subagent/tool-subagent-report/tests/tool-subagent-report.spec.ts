@@ -268,7 +268,7 @@ describe('dsh-tool-subagent-report', () => {
 
     expect((await callReport(ctx, child, 'ORDERED_REPORT')).isError).toBe(false)
     adapter.release(started.childId)
-    await vi.waitFor(() => { expect(ctx.agents.get(started.childId)).toBeUndefined() })
+    await vi.waitFor(() => { expect(ctx.agents.get(started.childId) === undefined).toBe(true) })
 
     expect(parent.inbox.nextStep.map(message => message.source.kind)).toEqual([
       'subagent-report',

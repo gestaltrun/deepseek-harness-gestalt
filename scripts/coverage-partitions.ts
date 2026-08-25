@@ -25,8 +25,14 @@ export const COVERAGE_EXCLUSIVE_MODE_ENV = 'DSH_COVERAGE_EXCLUSIVE_MODE'
 /** Environment variable overriding instrumented test and polling timeouts. */
 export const COVERAGE_TEST_TIMEOUT_ENV = 'DSH_COVERAGE_TEST_TIMEOUT_MS'
 
-/** Resource-bound suites that must not overlap other instrumented processes. */
-export const coverageExclusiveSuites = [
+/** Persistent-state suites that must run in their own instrumented process. */
+export const coveragePersistentStateSuites = [
+  'packages/experimental/agent-team/tests/persistence.spec.ts',
+  'packages/session/session-persistence-sqlite/tests/differential.spec.ts',
+] as const
+
+/** Process-bound suites that must not overlap other instrumented processes. */
+export const coverageProcessBoundSuites = [
   'packages/attachment/attachment-local/tests/normalization.spec.ts',
   'packages/shell/pwsh-local/tests/executor.spec.ts',
   'packages/shell/pwsh-sandbox/tests/sandbox.spec.ts',
@@ -34,6 +40,13 @@ export const coverageExclusiveSuites = [
   'packages/shell/tool-pwsh/tests/integration.spec.ts',
   'packages/shell/tool-pwsh/tests/loader.spec.ts',
   'packages/terminal/terminal-bash/tests/local.spec.ts',
+  'packages/util/atomic-write/tests/atomic-write.spec.ts',
+] as const
+
+/** Suites excluded from ordinary concurrent coverage partitions. */
+export const coverageExclusiveSuites = [
+  ...coveragePersistentStateSuites,
+  ...coverageProcessBoundSuites,
 ] as const
 
 /** One child command owned by the coverage coordinator. */
@@ -224,10 +237,21 @@ export class CoveragePartitionCoordinator {
         { length: Math.min(this.maxConcurrency, commands.length) },
         worker,
       ))
-      const exclusiveCommand = this.partitionIndexes.includes(1)
-        ? this.exclusiveCommand()
-        : undefined
-      if (exclusiveCommand !== undefined) {
+      const exclusiveCommands = this.partitionIndexes.includes(1)
+        ? [
+          this.exclusiveCommand(
+            'exclusive resource-bound coverage',
+            'exclusive-resource-bound.json',
+            coverageProcessBoundSuites,
+          ),
+          this.exclusiveCommand(
+            'exclusive persistent-state coverage',
+            'exclusive-persistent-state.json',
+            coveragePersistentStateSuites,
+          ),
+        ]
+        : []
+      for (const exclusiveCommand of exclusiveCommands) {
         console.log(`coverage-partitions: start ${exclusiveCommand.label}`)
         const result = await this.runCommand(exclusiveCommand)
         results.push(result)
@@ -306,9 +330,13 @@ export class CoveragePartitionCoordinator {
     }
   }
 
-  private exclusiveCommand(): CoverageCommand {
-    const blobPath = join(this.blobsRoot, 'exclusive-resource-bound.json')
-    const reportsDirectory = join(this.temporaryRoot, 'coverage-exclusive-resource-bound')
+  private exclusiveCommand(
+    label: string,
+    blobName: string,
+    suites: readonly string[],
+  ): CoverageCommand {
+    const blobPath = join(this.blobsRoot, blobName)
+    const reportsDirectory = join(this.temporaryRoot, `coverage-${blobName.slice(0, -'.json'.length)}`)
     const invocation = pnpmInvocation([
       'exec',
       'vitest',
@@ -320,11 +348,11 @@ export class CoveragePartitionCoordinator {
       '--reporter=blob',
       `--outputFile.blob=${this.relativePath(blobPath)}`,
       `--coverage.reportsDirectory=${this.relativePath(reportsDirectory)}`,
-      ...coverageExclusiveSuites,
+      ...suites,
       ...this.vitestArgs,
     ], { npm_execpath: this.pnpmEntrypoint })
     return {
-      label: 'exclusive resource-bound coverage',
+      label,
       ...invocation,
       env: {
         [COVERAGE_PARTITION_CONCURRENCY_ENV]: undefined,

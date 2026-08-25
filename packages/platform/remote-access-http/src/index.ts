@@ -24,7 +24,7 @@ import {
   writeRetryAfterError,
 } from '@deepseek-ai/dsh-host-webserver'
 
-const MAX_JSON_BYTES = 64 * 1024
+const MAX_REMOTE_ACCESS_JSON_BYTES = 64 * 1024
 
 /** HTTP Consumer configuration. */
 export interface Config {
@@ -50,7 +50,7 @@ export function apply(ctx: Context, config: Config): void {
         if (req.method !== 'POST') throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Remote Access route requires POST')
         const authentication = pairingAuthenticationFromHeaders(req)
         const body = await readJsonObject(req, {
-          maxBytes: MAX_JSON_BYTES,
+          maxBytes: MAX_REMOTE_ACCESS_JSON_BYTES,
           tooLarge: { status: 413, code: 'BODY_TOO_LARGE', message: 'Remote Access body is too large' },
           invalidJson: { status: 400, code: 'BODY_INVALID', message: 'Remote Access body must be JSON' },
           notObject: { status: 400, code: 'BODY_INVALID', message: 'Remote Access body must be an object' },

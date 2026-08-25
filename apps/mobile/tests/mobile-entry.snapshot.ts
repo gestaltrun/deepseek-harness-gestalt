@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   parseInstallationId,
   parseMobileInstallationPresentation,
@@ -62,7 +62,14 @@ const accountSession: AccountSessionView = {
   refreshExpiresAt: Date.now() + 2_592_000_000,
 }
 
-afterEach(cleanup)
+beforeEach(() => {
+  vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US'])
+})
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 describe('Mobile shipped entry foreground mutation gate', () => {
   it('binds receipts and history pages to the current-generation bundled entry', async () => {
@@ -83,7 +90,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     const surface = mounted.companionSurface
 
     fireEvent.click(await screen.findByRole('checkbox'))
-    const login = screen.getByRole('button', { name: '使用 GitHub 继续' })
+    const login = screen.getByRole('button', { name: 'Continue with GitHub' })
     await waitFor(() => { expect(login.hasAttribute('disabled')).toBe(false) })
     fireEvent.click(login)
     await screen.findByText('@fixture-account')

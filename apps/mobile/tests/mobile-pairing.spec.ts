@@ -83,6 +83,28 @@ describe('MobilePairing', () => {
     expect(deactivate).toHaveBeenCalledOnce()
   })
 
+  it('leaves lifecycle ownership with the signed-in navigation shell', () => {
+    const activate = vi.fn().mockResolvedValue(undefined)
+    const deactivate = vi.fn().mockResolvedValue(undefined)
+    const snapshot = { status: 'ready' } as const
+    const actions: MobilePairingActions = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
+      activate,
+      deactivate,
+      unpair: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const rendered = render(createElement(MobilePairing, { actions, locale: 'zh', manageLifecycle: false }))
+    expect(activate).not.toHaveBeenCalled()
+    rendered.unmount()
+    expect(deactivate).not.toHaveBeenCalled()
+  })
+
   it('contains and reports rejected mount and unmount lifecycle work', async () => {
     const activateFailure = new Error('activation failed')
     const deactivateFailure = new Error('deactivation failed')

@@ -13,10 +13,13 @@ export type { MobilePairingActions } from './personal-pairing-model.ts'
 export function MobilePairing({
   actions,
   locale,
+  manageLifecycle = true,
   reportLifecycleError = defaultLifecycleErrorReporter,
 }: {
   actions: MobilePairingActions
   locale: 'zh' | 'en'
+  /** Whether this visible page owns the signed-in pairing controller lifecycle. */
+  manageLifecycle?: boolean
   reportLifecycleError?: (error: unknown) => void
 }): ReactNode {
   const text = PAIRING_TEXT[locale]
@@ -29,12 +32,12 @@ export function MobilePairing({
   const video = useRef<HTMLVideoElement>(null)
   const cameraAbort = useRef<AbortController>()
   useEffect(() => {
-    void actions.activate().catch(reportLifecycleError)
+    if (manageLifecycle) void actions.activate().catch(reportLifecycleError)
     return () => {
       cameraAbort.current?.abort()
-      void actions.deactivate().catch(reportLifecycleError)
+      if (manageLifecycle) void actions.deactivate().catch(reportLifecycleError)
     }
-  }, [actions, reportLifecycleError])
+  }, [actions, manageLifecycle, reportLifecycleError])
 
   const startCamera = (): void => {
     const preview = video.current

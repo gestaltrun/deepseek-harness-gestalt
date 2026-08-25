@@ -21,9 +21,17 @@ import type { CompanionConnectionFailure } from './companion-lifecycle.ts'
 /** Mobile Companion browse props. */
 export interface MobileBrowseProps {
   /** Selected Desktop display name. */
-  desktopName: string
+  desktopName?: string | undefined
   /** Live Remote Online / Offline label. */
-  connection: 'online' | 'offline'
+  connection: 'unpaired' | 'online' | 'offline'
+  /** Signed-in Platform Account login shown in the navigation header. */
+  accountLogin: string
+  /** Signed-in Platform Account avatar shown in the navigation header. */
+  accountAvatarUrl: string
+  /** Open the separate current-Installation Account page. */
+  onOpenAccount: () => void
+  /** Open the separate Personal Pairing page while no Desktop is selected. */
+  onOpenPairing?: (() => void) | undefined
   /** Stable Relay or Companion failure retained while the foreground lifecycle retries. */
   connectionFailure?: CompanionConnectionFailure | undefined
   /** Desktop-confirmed Session history. */
@@ -70,9 +78,10 @@ export interface MobileBrowseProps {
 
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
-  desktopName, connection, connectionFailure, sessions, workspaces, conversations, locale, theme, loadImage,
+  desktopName, connection, accountLogin, accountAvatarUrl, onOpenAccount, onOpenPairing,
+  connectionFailure, sessions, workspaces, conversations, locale, theme, loadImage,
   canMutate, clock, onCreate, onSessionOpened, onSubmit, onCancel, onAttach, onLoadOlder, onObserveSession,
-  search, onSearch, onClearCache, operationFailure,
+  search, onSearch, operationFailure,
   cacheFailure,
 }: MobileBrowseProps): ReactNode {
   const [openId, setOpenId] = useState<SessionId>()
@@ -109,6 +118,9 @@ export function MobileBrowse({
     if (canMutate) onObserveSession?.(openId)
   }, [canMutate, onObserveSession, openId])
   const searchActive = search.query !== ''
+  const connectionLabel = connection === 'unpaired'
+    ? locale === 'zh' ? '未连接' : 'Not paired'
+    : connection === 'online' ? 'Remote Online' : 'Remote Offline'
   const paged = useMemo(
     () => pageCompanionHistory(sessions, workspaces, page, COMPANION_HISTORY_PAGE_SIZE),
     [sessions, workspaces, page],
@@ -178,72 +190,134 @@ export function MobileBrowse({
 
   return (
     <section className={css.page} data-mobile-browse="list" data-theme={theme} lang={locale === 'zh' ? 'zh-CN' : 'en'}>
-      <header className={css.header}>
-        <p className={css.desktop}>{desktopName}</p>
-        <p className={css.connection} data-connection={connection}>{connection === 'online' ? 'Remote Online' : 'Remote Offline'}</p>
-        {connectionAlert !== undefined && (
-          <p role="alert" data-connection-failure={connectionFailure?.code}>{connectionAlert}</p>
-        )}
-        {onSearch !== undefined && (
-          <form
-            className={css.search}
-            onSubmit={(event) => { event.preventDefault(); onSearch(searchDraft) }}
-          >
-            <input
-              type="search"
-              aria-label={locale === 'zh' ? '搜索 Desktop Sessions' : 'Search Desktop Sessions'}
-              value={searchDraft}
-              disabled={!canMutate}
-              onChange={(event) => { setSearchDraft(event.target.value) }}
-            />
-            <button type="submit" disabled={!canMutate}>{locale === 'zh' ? '搜索' : 'Search'}</button>
-          </form>
-        )}
-        {search.status === 'error' && <p role="alert">{search.error.message}</p>}
-        {(operationFailure?.operation === 'refresh' || operationFailure?.operation === 'create')
-          && <p role="alert">{operationFailure.failure.message}</p>}
-        {cacheFailure !== undefined && <p role="alert">{cacheFailure}</p>}
-        {onClearCache !== undefined && (
-          <button type="button" onClick={() => { void onClearCache() }}>
-            {locale === 'zh' ? '清除此 Desktop 的缓存' : 'Clear this Desktop cache'}
-          </button>
-        )}
-        {onCreate !== undefined && (
-          <button type="button" disabled={!canMutate} onClick={() => { if (canMutate) onCreate({}) }}>
-            {locale === 'zh' ? '新建 Ungrouped Session' : 'New ungrouped Session'}
-          </button>
-        )}
+      <header className={css.remoteHeader}>
+        <button type="button" className={css.account} aria-label={locale === 'zh' ? '查看账号' : 'View account'} onClick={onOpenAccount}>
+          <img src={accountAvatarUrl} alt="" />
+          <span>@{accountLogin}</span>
+        </button>
+        <div>
+          <strong>{locale === 'zh' ? '远程' : 'Remote'}</strong>
+          {connection !== 'unpaired' && (
+            <span>
+              <i className={connection === 'online' ? css.dotOnline : css.dotOffline} />
+              {laptopIcon}
+              {desktopName ?? (locale === 'zh' ? '已配对 Desktop' : 'Paired Desktop')}
+            </span>
+          )}
+          <p className={css.connection} data-connection={connection}>{connectionLabel}</p>
+        </div>
+        {connection === 'unpaired' && onOpenPairing !== undefined
+          ? (
+            <button
+              type="button"
+              className={css.iconButton}
+              aria-label={locale === 'zh' ? '扫描配对' : 'Scan to pair'}
+              onClick={onOpenPairing}
+            >{scanIcon}</button>
+          )
+          : <span className={css.headerSlot} />}
       </header>
-      {searchActive && (
-        <AuthoritativeSearchResults search={search} locale={locale} onOpen={openSession} />
-      )}
-      {!searchActive && groups.map((group) => {
-        const label = group.workspaceId === undefined ? tw('group.ungrouped') : group.label
-        return (
-          <section key={group.key} className={css.group} aria-label={label}>
-            <h2>{label}</h2>
-            {onCreate !== undefined && group.workspaceId !== undefined && (
-              <button type="button" disabled={!canMutate} onClick={() => {
-                if (canMutate && group.workspaceId !== undefined) onCreate({ workspace: group.workspaceId })
-              }}>
-                {locale === 'zh' ? `在 ${group.label} 新建 Session` : `New Session in ${group.label}`}
+      <main className={css.projectList}>
+        {connectionAlert !== undefined && (
+          <p className={css.error} role="alert" data-connection-failure={connectionFailure?.code}>{connectionAlert}</p>
+        )}
+        {search.status === 'error' && <p className={css.error} role="alert">{search.error.message}</p>}
+        {(operationFailure?.operation === 'refresh' || operationFailure?.operation === 'create')
+          && <p className={css.error} role="alert">{operationFailure.failure.message}</p>}
+        {cacheFailure !== undefined && <p className={css.error} role="alert">{cacheFailure}</p>}
+        {connection === 'unpaired' ? (
+          <div className={css.emptyState}>
+            <p>{locale === 'zh' ? '扫码连接 Desktop 后即可查看 Session' : 'Pair a Desktop to browse Sessions.'}</p>
+          </div>
+        ) : (
+          <>
+            <div className={css.projectTitle}><h1>{locale === 'zh' ? '项目' : 'Projects'}</h1></div>
+            {searchActive && (
+              <AuthoritativeSearchResults search={search} locale={locale} onOpen={openSession} />
+            )}
+            {!searchActive && groups.map((group) => {
+              const label = group.workspaceId === undefined ? tw('group.ungrouped') : group.label
+              return (
+                <section key={group.key} className={css.group} aria-label={label}>
+                  <header>
+                    <div className={css.projectName}>{folderIcon}<h2>{label}</h2></div>
+                    {onCreate !== undefined && (
+                      <button
+                        type="button"
+                        className={css.compose}
+                        disabled={!canMutate}
+                        aria-label={locale === 'zh' ? `在 ${label} 新建 Session` : `New Session in ${label}`}
+                        onClick={() => {
+                          if (!canMutate) return
+                          if (group.workspaceId === undefined) onCreate({})
+                          else onCreate({ workspace: group.workspaceId })
+                        }}
+                      >{composeIcon}</button>
+                    )}
+                  </header>
+                  <SessionListPresentation
+                    label={label}
+                    nodes={group.sessions}
+                    currentId={openId}
+                    now={now}
+                    onOpen={openSession}
+                    t={tw}
+                  />
+                </section>
+              )
+            })}
+            {!searchActive && paged.spilled > 0 && (
+              <button type="button" className={css.more} onClick={() => { setPage(current => current + 1) }}>
+                {locale === 'zh' ? `加载更多（还有 ${paged.spilled}）` : `Load more (${paged.spilled} remaining)`}
               </button>
             )}
-            <SessionListPresentation
-              label={label}
-              nodes={group.sessions}
-              currentId={openId}
-              now={now}
-              onOpen={openSession}
-              t={tw}
-            />
-          </section>
-        )
-      })}
-      {!searchActive && paged.spilled > 0 && (
-        <button type="button" className={css.more} onClick={() => { setPage(current => current + 1) }}>
-          {locale === 'zh' ? `加载更多（还有 ${paged.spilled}）` : `Load more (${paged.spilled} remaining)`}
-        </button>
+          </>
+        )}
+      </main>
+      {connection !== 'unpaired' && (
+        <footer className={css.dock}>
+          <div className={css.chatHeading}>
+            <span>{locale === 'zh' ? '聊天' : 'Chats'}</span>
+            {onCreate !== undefined && (
+              <button
+                type="button"
+                className={css.compose}
+                disabled={!canMutate}
+                aria-label={locale === 'zh' ? '新建聊天' : 'New chat'}
+                onClick={() => { if (canMutate) onCreate({}) }}
+              >{composeIcon}</button>
+            )}
+          </div>
+          <div className={css.dockActions}>
+            {onSearch !== undefined && (
+              <form className={css.search} onSubmit={(event) => { event.preventDefault(); onSearch(searchDraft) }}>
+                <button
+                  type="submit"
+                  className={css.searchSubmit}
+                  aria-label={locale === 'zh' ? '搜索' : 'Search'}
+                  disabled={!canMutate}
+                >{searchIcon}</button>
+                <input
+                  type="search"
+                  aria-label={locale === 'zh' ? '搜索 Desktop Sessions' : 'Search Desktop Sessions'}
+                  placeholder={locale === 'zh' ? '搜索聊天记录' : 'Search chat history'}
+                  value={searchDraft}
+                  disabled={!canMutate}
+                  onChange={(event) => { setSearchDraft(event.target.value) }}
+                />
+              </form>
+            )}
+            {onCreate !== undefined && (
+              <button
+                type="button"
+                className={css.round}
+                disabled={!canMutate}
+                aria-label={locale === 'zh' ? '新建 Ungrouped Session' : 'New ungrouped Session'}
+                onClick={() => { if (canMutate) onCreate({}) }}
+              >{composeIcon}</button>
+            )}
+          </div>
+        </footer>
       )}
     </section>
   )
@@ -337,3 +411,35 @@ function AuthoritativeSearchResults({
     </section>
   )
 }
+
+const scanIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M7 5H5v2M17 5h2v2M7 19H5v-2M17 19h2v-2M8 12h8" />
+  </svg>
+)
+
+const folderIcon = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v7A2.5 2.5 0 0 1 18.5 18h-13A2.5 2.5 0 0 1 3 15.5v-9Z" />
+  </svg>
+)
+
+const laptopIcon = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <rect x="4" y="5" width="16" height="11" rx="1.5" />
+    <path d="M2 19h20" />
+  </svg>
+)
+
+const searchIcon = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-4-4" />
+  </svg>
+)
+
+const composeIcon = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M13.5 5.5 18.5 10.5M4 20l3.2-.7L19 7.5a2.1 2.1 0 0 0-3-3L4.7 16.3 4 20Z" />
+  </svg>
+)

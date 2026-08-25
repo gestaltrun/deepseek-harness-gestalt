@@ -17,6 +17,7 @@ import {
 } from '@deepseek-ai/dsh-platform-account-client'
 import { MobileAccount } from '../src/MobileAccount.tsx'
 import type { MobilePairingActions } from '../src/MobilePairing.tsx'
+import type { MobileCompanionPresentation } from '../src/companion-history.ts'
 import { fixedMobilePresentationClock } from '../src/mobile-clock.ts'
 
 afterEach(cleanup)
@@ -95,16 +96,94 @@ describe('MobileAccount', () => {
     fireEvent.click(screen.getByRole('checkbox'))
     await waitFor(() => { expect(screen.getByRole('button', { name: '使用 GitHub 继续' }).hasAttribute('disabled')).toBe(false) })
     fireEvent.click(screen.getByRole('button', { name: '使用 GitHub 继续' }))
-    await screen.findByText('@octocat')
-    expect(screen.getByText('当前安装')).toBeTruthy()
+    expect(await screen.findByText('未连接')).toBeTruthy()
+    expect(screen.getByText('@octocat')).toBeTruthy()
     expect(screen.getByText('independent review pending')).toBeTruthy()
+    expect(screen.queryByText('当前安装')).toBeNull()
+    expect(screen.queryByText('个人配对')).toBeNull()
     expect(screen.queryByText('Paired Desktop')).toBeNull()
     expect(screen.queryByText('Remote Offline')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '退出此安装' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看账号' }))
+    expect(await screen.findByText('当前安装')).toBeTruthy()
+    expect(screen.queryByText('未连接')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '退出登录' }))
     await waitFor(() => { expect(api.signOut).toHaveBeenCalledOnce() })
     await screen.findByRole('button', { name: '使用 GitHub 继续' })
     expect(deactivate).toHaveBeenCalledOnce()
+  })
+
+  it('opens Personal Pairing from the unpaired home and returns without stacking the flow', async () => {
+    const { installation } = fixture()
+    const ready = { status: 'ready' } as const
+    const pairing: MobilePairingActions = {
+      getSnapshot: () => ready,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
+      activate: vi.fn().mockResolvedValue(undefined),
+      deactivate: vi.fn().mockResolvedValue(undefined),
+      unpair: vi.fn().mockResolvedValue(undefined),
+    }
+    render(createElement(MobileAccount, { installation, pairing, locale: 'zh', theme: 'light', clock }))
+
+    fireEvent.click(screen.getByRole('checkbox'))
+    await waitFor(() => { expect(screen.getByRole('button', { name: '使用 GitHub 继续' }).hasAttribute('disabled')).toBe(false) })
+    fireEvent.click(screen.getByRole('button', { name: '使用 GitHub 继续' }))
+
+    expect(await screen.findByText('未连接')).toBeTruthy()
+    expect(screen.getByText('扫码连接 Desktop 后即可查看 Session')).toBeTruthy()
+    expect(screen.queryByText('连接已配对的桌面端')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '扫描配对' }))
+    expect(await screen.findByText('连接已配对的桌面端')).toBeTruthy()
+    expect(screen.queryByText('未连接')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '返回' }))
+    expect(await screen.findByText('未连接')).toBeTruthy()
+    expect(screen.queryByText('连接已配对的桌面端')).toBeNull()
+  })
+
+  it('does not let a stale Companion projection override missing selected-pairing authority', async () => {
+    const { installation } = fixture()
+    const ready = { status: 'ready' } as const
+    const pairing: MobilePairingActions = {
+      getSnapshot: () => ready,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
+      activate: vi.fn().mockResolvedValue(undefined),
+      deactivate: vi.fn().mockResolvedValue(undefined),
+      unpair: vi.fn().mockResolvedValue(undefined),
+    }
+    const companion: MobileCompanionPresentation = {
+      desktopName: 'Stale Desktop',
+      connection: 'online',
+      sessions: {
+        ids: [], byId: {}, current: undefined, phase: 'ready',
+        subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
+      },
+      workspaces: [],
+      conversations: {},
+      loadImage: () => Promise.reject(new Error('unavailable')),
+      canMutate: true,
+      search: { query: '', status: 'idle', items: [], hasMore: false },
+      attachment: { status: 'idle' },
+    }
+    render(createElement(MobileAccount, { installation, pairing, companion, locale: 'zh', theme: 'light', clock }))
+
+    fireEvent.click(screen.getByRole('checkbox'))
+    await waitFor(() => { expect(screen.getByRole('button', { name: '使用 GitHub 继续' }).hasAttribute('disabled')).toBe(false) })
+    fireEvent.click(screen.getByRole('button', { name: '使用 GitHub 继续' }))
+
+    expect(await screen.findByText('未连接')).toBeTruthy()
+    expect(screen.queryByText('Stale Desktop')).toBeNull()
+    expect(screen.queryByText('Remote Online')).toBeNull()
   })
 })
 

@@ -169,7 +169,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       screen.getByRole('region', { name: 'Ungrouped' }).textContent,
     ]).toMatchInlineSnapshot(`
       [
-        "WorkNew Session in WorkWorkspace creatednowWaiting for approvalGuarded Sessionnow",
+        "WorkWorkspace creatednowWaiting for approvalGuarded Sessionnow",
         "UngroupedNew Session",
       ]
     `)
@@ -222,8 +222,8 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     })
     expect(visibleMutationControls()).toMatchInlineSnapshot(`
       [
-        "button:New ungrouped Session:disabled",
         "button:New Session in Work:disabled",
+        "button:New ungrouped Session:disabled",
       ]
     `)
 

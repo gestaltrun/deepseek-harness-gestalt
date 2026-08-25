@@ -1,5 +1,7 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as yaml from 'js-yaml'
@@ -26,7 +28,8 @@ const bootSource = readFileSync(new URL('../src/boot.ts', import.meta.url), 'utf
 const launchSource = readFileSync(new URL('../src/launch.ts', import.meta.url), 'utf8')
 const remoteAccessResourcesSource = readFileSync(new URL('../src/remote-access-resources.ts', import.meta.url), 'utf8')
 const dockerfileSource = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8')
-const publicReadinessSource = readFileSync(new URL('../scripts/platform-public-readiness.sh', import.meta.url), 'utf8')
+const publicReadinessScript = fileURLToPath(new URL('../scripts/platform-public-readiness.sh', import.meta.url))
+const publicReadinessSource = readFileSync(publicReadinessScript, 'utf8')
 const cloudAssistantSource = readFileSync(new URL('../scripts/platform-cloud-assistant.sh', import.meta.url), 'utf8')
 const hostDeploySource = readFileSync(new URL('../scripts/platform-host-deploy.sh', import.meta.url), 'utf8')
 const recoveryScript = fileURLToPath(new URL('../scripts/platform-recover.sh', import.meta.url))
@@ -112,13 +115,15 @@ function spawnCli(env: NodeJS.Dict<string>) {
   })
 }
 
-function runPublicReadinessHarness(result: 'success' | 'one-backend' | 'unreachable' | 'wrong-storage') {
+function runPublicReadinessHarness(
+  result: 'success' | 'one-backend' | 'redirect' | 'unreachable' | 'wrong-storage',
+) {
   const harness = [
     'set -eEuo pipefail',
     'instance_ids=(i-first123 i-second456)',
     'READINESS_COUNTER=$(mktemp)',
-    'curl() {',
-    '  if [ "$READINESS_RESULT" = unreachable ]; then return 22; fi',
+    'node() {',
+    '  if [ "$READINESS_RESULT" = unreachable ] || [ "$READINESS_RESULT" = redirect ]; then return 22; fi',
     '  count=$(cat "$READINESS_COUNTER")',
     '  count=$((count + 1))',
     '  printf \'%s\' "$count" > "$READINESS_COUNTER"',
@@ -143,6 +148,25 @@ function runPublicReadinessHarness(result: 'success' | 'one-backend' | 'unreacha
       PLATFORM_REMOTE_ATTACHMENT_STORAGE: 'oss',
       READINESS_RESULT: result,
     },
+  })
+}
+
+function runPublicHttpsGet(url: string): Promise<{ status: number | null; stderr: string; stdout: string }> {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const child = spawn('bash', ['-c', 'source "$PUBLIC_READINESS_SCRIPT"; platform_https_get "$READINESS_URL"'], {
+      env: {
+        PATH: process.env.PATH,
+        PUBLIC_READINESS_SCRIPT: bashPath(publicReadinessScript),
+        READINESS_URL: url,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stderr = ''
+    let stdout = ''
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk })
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => { stdout += chunk })
+    child.once('error', rejectPromise)
+    child.once('close', (status) => { resolvePromise({ status, stderr, stdout }) })
   })
 }
 
@@ -730,6 +754,9 @@ describe('Platform release workflows', () => {
     expect(oidcSteps).toHaveLength(2)
     expect(oidcSteps.every(step => step.uses
       === 'aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6')).toBe(true)
+    const deployNode = steps(deploy).find(step => step.uses === 'actions/setup-node@v6')
+    expect(deployNode?.with).toEqual({ 'node-version': 24 })
+    expect(steps(recover).some(step => step.uses === 'actions/setup-node@v6')).toBe(false)
     const prepare = steps(deploy).find(step => typeof step.run === 'string'
       && step.run.includes('docker create'))
     const apply = steps(deploy).find(step => typeof step.run === 'string'
@@ -757,6 +784,9 @@ describe('Platform release workflows', () => {
     expect(applySource).toContain('rolling replacement keeps the other private ECS instance serving')
     expect(publicReadinessSource).toContain('public readiness through the production HTTPS origin')
     expect(publicReadinessSource).toContain('${PLATFORM_ORIGIN}/readyz')
+    expect(publicReadinessSource).toContain('AbortSignal.timeout(5_000)')
+    expect(publicReadinessSource).toContain("redirect: 'error'")
+    expect(publicReadinessSource).not.toContain('curl ')
     expect(publicReadinessSource).toContain('expected_instances+=("relay-${expected_index}")')
     expect(applySource.indexOf('platform_public_readiness 30'))
       .toBeLessThan(applySource.indexOf('rollback_cleanup_failed=0'))
@@ -824,7 +854,7 @@ describe('Platform release workflows', () => {
     }
   })
 
-  it('replaces the collector only after the fixed image is pulled or found in cache', () => {
+  it('replaces the collector only after the fixed image is pulled or found in cache', { timeout: 60_000 }, () => {
     const pulled = runCollectorPrepareHarness('success', 'missing')
     expect(pulled.status).toBe(0)
     expect(pulled.stdout).toMatch(/pull .*loongcollector/)
@@ -848,7 +878,7 @@ describe('Platform release workflows', () => {
     expect(unavailable.stdout).not.toContain('run -d --name dsh-loongcollector')
   })
 
-  it.each(['unreachable', 'wrong-storage', 'one-backend'] as const)(
+  it.each(['unreachable', 'redirect', 'wrong-storage', 'one-backend'] as const)(
     'refuses cleanup when public readiness is %s',
     (result) => {
       const failed = runPublicReadinessHarness(result)
@@ -863,6 +893,46 @@ describe('Platform release workflows', () => {
     expect(succeeded.status).toBe(0)
     expect(succeeded.stdout).toContain('public readiness through the production HTTPS origin')
     expect(succeeded.stdout).toContain('CLEANUP')
+  })
+
+  it('executes the Node readiness request and rejects HTTP errors, redirects, timeouts, and connection failure', {
+    timeout: 15_000,
+  }, async () => {
+    const server = createServer((request, response) => {
+      if (request.url === '/ok') {
+        response.end('{"ok":true}')
+      } else if (request.url === '/redirect') {
+        response.writeHead(302, { location: '/ok' }).end()
+      } else if (request.url === '/error') {
+        response.writeHead(500).end('unavailable')
+      }
+    })
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      server.once('error', rejectPromise)
+      server.listen(0, '127.0.0.1', resolvePromise)
+    })
+    const address = server.address() as AddressInfo
+    const origin = `http://127.0.0.1:${address.port}`
+    try {
+      await expect(runPublicHttpsGet(`${origin}/ok`)).resolves.toEqual({
+        status: 0,
+        stderr: '',
+        stdout: '{"ok":true}',
+      })
+      for (const path of ['/error', '/redirect', '/slow']) {
+        const result = await runPublicHttpsGet(`${origin}${path}`)
+        expect(result.status, path).toBe(1)
+        expect(result.stderr, path).toContain('platform: public readiness request failed:')
+      }
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolvePromise) => {
+        server.close(() => { resolvePromise() })
+      })
+    }
+    const unavailable = await runPublicHttpsGet(origin)
+    expect(unavailable.status).toBe(1)
+    expect(unavailable.stderr).toContain('platform: public readiness request failed:')
   })
 
   it('waits for Cloud Assistant terminal success and rejects a nonzero execution', () => {

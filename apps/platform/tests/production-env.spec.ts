@@ -341,6 +341,75 @@ function runRollbackProbeHarness(psFailure: 'none' | 'first' | 'second') {
   })
 }
 
+function runCollectorPrepareHarness(
+  pullResult: 'success' | 'failure',
+  cacheResult: 'present' | 'missing',
+) {
+  const runnableHostDeploy = hostDeploySource
+    .replace('candidate_env=/run/dsh-platform-candidate.env', 'candidate_env="$CANDIDATE_ENV"')
+    .replace('exec 9>/run/dsh-platform-deploy.lock', 'exec 9>"$HOST_LOCK"')
+    .replace('workdir=$(mktemp -d /run/dsh-platform-prepare.XXXXXX)', 'workdir=$(mktemp -d)')
+  const harness = [
+    'LOG=$(mktemp)',
+    'HOST_LOCK=$(mktemp)',
+    'CANDIDATE_ENV=$(mktemp -u)',
+    'export LOG HOST_LOCK CANDIDATE_ENV',
+    'flock() { :; }',
+    'dnf() { :; }',
+    'yum() { :; }',
+    'systemctl() { :; }',
+    'sleep() { :; }',
+    'sha256sum() { cat >/dev/null; }',
+    'gzip() { :; }',
+    'openssl() { :; }',
+    'curl() {',
+    '  args="$*"',
+    '  while [ "$#" -gt 0 ]; do',
+    '    if [ "$1" = -o ]; then : > "$2"; return 0; fi',
+    '    shift',
+    '  done',
+    '  case "$args" in',
+    '    *latest/api/token*) printf token ;;',
+    '    *owner-account-id*) printf 1279431675399365 ;;',
+    '    */readyz*) printf \'{"ok":true,"attachmentStorage":"postgres"}\' ;;',
+    '  esac',
+    '}',
+    'docker() {',
+    '  printf \'%s\\n\' "$*" >> "$LOG"',
+    '  case "$1:${2:-}" in',
+    '    pull:*) [ "$PULL_RESULT" = success ] ;;',
+    '    image:inspect) [ "$CACHE_RESULT" = present ] ;;',
+    '    *) return 0 ;;',
+    '  esac',
+    '}',
+    'set +e',
+    '(',
+    '  set -- prepare',
+    runnableHostDeploy,
+    ')',
+    'status=$?',
+    'cat "$LOG"',
+    'rm -f "$LOG" "$HOST_LOCK" "$CANDIDATE_ENV"',
+    'exit "$status"',
+  ].join('\n')
+  return spawnSync('bash', ['-c', harness], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      PULL_RESULT: pullResult,
+      CACHE_RESULT: cacheResult,
+      DSH_DEPLOY_IMAGE_URL: 'https://image.fixture',
+      DSH_DEPLOY_IMAGE_SHA256: 'image-sha',
+      DSH_DEPLOY_ENV_URL: 'https://environment.fixture',
+      DSH_DEPLOY_ENV_SHA256: 'environment-sha',
+      DSH_DEPLOY_ENV_KEY: 'environment-key',
+      DSH_DEPLOY_IMAGE: 'platform-image:fixture',
+      DSH_DEPLOY_STORAGE: 'postgres',
+      DSH_RELAY_INSTANCE_ID: 'relay-1',
+    },
+  })
+}
+
 function loadWorkflow(path: string): Record<string, unknown> {
   const workflow: unknown = yaml.load(readFileSync(resolve(repoRoot, path), 'utf8'))
   if (!isRecord(workflow)) throw new TypeError(`${path} must define a workflow`)
@@ -753,6 +822,30 @@ describe('Platform release workflows', () => {
       if (!isRecord(value)) throw new TypeError(`${name} must be a job`)
       expect(value.environment, name).toBe('production')
     }
+  })
+
+  it('replaces the collector only after the fixed image is pulled or found in cache', () => {
+    const pulled = runCollectorPrepareHarness('success', 'missing')
+    expect(pulled.status).toBe(0)
+    expect(pulled.stdout).toMatch(/pull .*loongcollector/)
+    expect(pulled.stdout).not.toContain('image inspect')
+    expect(pulled.stdout.indexOf('pull ')).toBeLessThan(pulled.stdout.indexOf('rm -f dsh-loongcollector'))
+    expect(pulled.stdout.indexOf('rm -f dsh-loongcollector'))
+      .toBeLessThan(pulled.stdout.indexOf('run -d --name dsh-loongcollector'))
+
+    const cached = runCollectorPrepareHarness('failure', 'present')
+    expect(cached.status).toBe(0)
+    expect(cached.stdout.indexOf('pull ')).toBeLessThan(cached.stdout.indexOf('image inspect'))
+    expect(cached.stdout.indexOf('image inspect'))
+      .toBeLessThan(cached.stdout.indexOf('rm -f dsh-loongcollector'))
+    expect(cached.stdout.indexOf('rm -f dsh-loongcollector'))
+      .toBeLessThan(cached.stdout.indexOf('run -d --name dsh-loongcollector'))
+
+    const unavailable = runCollectorPrepareHarness('failure', 'missing')
+    expect(unavailable.status).toBe(1)
+    expect(unavailable.stdout).toContain('image inspect')
+    expect(unavailable.stdout).not.toContain('rm -f dsh-loongcollector')
+    expect(unavailable.stdout).not.toContain('run -d --name dsh-loongcollector')
   })
 
   it.each(['unreachable', 'wrong-storage', 'one-backend'] as const)(

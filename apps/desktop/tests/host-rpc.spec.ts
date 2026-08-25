@@ -106,6 +106,7 @@ describe('Desktop Host RPC', () => {
 
   it('accepts the exact response byte limit and rejects overflow and a fast cumulative flood', async () => {
     const padding = 'x'.repeat(1_024)
+    const historyPadding = 'h'.repeat(REMOTE_PROTOCOL_LIMITS.companionMessageBytes + 1)
     const responseBytes = Buffer.byteLength(successResponse('0'.repeat(36), padding))
     const server = createServer((request, response) => {
       const chunks: Buffer[] = []
@@ -113,7 +114,12 @@ describe('Desktop Host RPC', () => {
       request.on('end', () => {
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
           rpcId: string
+          method: string
           payload: { query: string }
+        }
+        if (body.method === 'session.history') {
+          response.end(successResponse(body.rpcId, historyPadding))
+          return
         }
         if (body.payload.query === 'fast-flood') {
           response.on('error', () => {})
@@ -153,6 +159,9 @@ describe('Desktop Host RPC', () => {
     } as const
     await expect(overflow.call('session.search', { query: 'overflow' })).resolves.toEqual(limitFailure)
     await expect(flood.call('session.search', { query: 'fast-flood' })).resolves.toEqual(limitFailure)
+    await expect(flood.call('session.history', { query: 'history' })).resolves.toMatchObject({
+      ok: true, value: { padding: historyPadding },
+    })
     await expect(attachment.call('session.attachment', { query: 'attachment' })).resolves.toMatchObject({
       ok: true, value: { padding },
     })

@@ -25,7 +25,6 @@ async function offer(overrides: Partial<CompanionOfferAttachmentOperation> = {})
   ciphertext: Uint8Array
   hash: string
 }> {
-  // oxlint-disable-next-line typescript/no-unsafe-assignment -- tsc resolves CryptoKey via @types/node; oxlint's program misses that global
   const key = await deriveCompanionAttachmentKey(attachmentKey)
   const sealed = await sealCompanionAttachment(key, plaintext)
   return {

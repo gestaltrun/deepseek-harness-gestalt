@@ -12,6 +12,8 @@ const DEFAULT_HOST_RPC_TIMEOUT_MS = 15_000
 const MAX_HOST_ATTACHMENT_RESPONSE_BYTES = Math.ceil(
   REMOTE_PROTOCOL_LIMITS.imageChunkBytes * REMOTE_PROTOCOL_LIMITS.imageChunks / 3,
 ) * 4 + REMOTE_PROTOCOL_LIMITS.companionMessageBytes
+const MAX_HOST_HISTORY_RESPONSE_BYTES = REMOTE_PROTOCOL_LIMITS.transcriptPageBytes
+  * REMOTE_PROTOCOL_LIMITS.transcriptPageEntries
 
 /** Unary Host call result after HTTP, JSON, envelope, and business validation. */
 export type DesktopHostRpcResult =
@@ -87,6 +89,7 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
   return {
     async call(method, payload, callOptions) {
       const attachmentRead = method === 'session.attachment'
+      const historyRead = method === 'session.history'
       const callTimeoutMs = callOptions?.timeoutMs
         ?? (attachmentRead ? options.attachmentTimeoutMs : undefined)
         ?? timeoutMs
@@ -98,7 +101,9 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
         new URL(`/api/${method}`, origin),
         { type: 'client-request', rpcId, method, payload },
         callTimeoutMs,
-        attachmentRead ? MAX_HOST_ATTACHMENT_RESPONSE_BYTES : responseMaxBytes,
+        attachmentRead
+          ? MAX_HOST_ATTACHMENT_RESPONSE_BYTES
+          : historyRead ? MAX_HOST_HISTORY_RESPONSE_BYTES : responseMaxBytes,
         callOptions?.signal,
       )
       if (response.kind === 'timeout') {

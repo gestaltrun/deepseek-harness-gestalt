@@ -610,7 +610,11 @@ export class MobilePairingController implements MobilePairingActions {
               throw new Error('Endpoint-owned Personal Pairing did not complete XKpsk3')
             }
             try {
-              await this.options.transport.submitEndpointMessage3({ authentication, completionId, message3 })
+              await this.options.transport.submitEndpointMessage3({
+                authentication: await this.options.installation.authorizeCurrentInstallation(),
+                completionId,
+                message3,
+              })
             } finally {
               message3.fill(0)
             }
@@ -664,7 +668,9 @@ export class MobilePairingController implements MobilePairingActions {
         }
       })
     }, this.pollIntervalMs)
-    this.timer.unref()
+    if (typeof this.timer === 'object' && 'unref' in this.timer) {
+      this.timer.unref()
+    }
   }
 
   private currentAttempt(): PreparedMobilePairingAttempt | undefined {

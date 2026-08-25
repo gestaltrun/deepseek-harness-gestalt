@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import {
   COMPANION_HISTORY_PAGE_SIZE,
   pageCompanionHistory,
@@ -97,10 +97,14 @@ export function MobileBrowse({
       return
     }
     onSessionOpened?.(openId)
+    if (!canMutate) {
+      historyRequested.current = undefined
+      return
+    }
     if (conversations[openId] !== undefined || historyRequested.current === openId) return
     historyRequested.current = openId
     onLoadOlder?.(openId)
-  }, [conversations, onLoadOlder, onSessionOpened, openId])
+  }, [canMutate, conversations, onLoadOlder, onSessionOpened, openId])
   useEffect(() => {
     if (canMutate) onObserveSession?.(openId)
   }, [canMutate, onObserveSession, openId])
@@ -114,8 +118,9 @@ export function MobileBrowse({
     [paged.sessions, paged.workspaces],
   )
   const tw = useMemo(() => workspacePresentationTranslate(locale), [locale])
+  const subscribeClock = useCallback((listener: () => void) => clock.subscribe(listener), [clock])
   const now = useSyncExternalStore(
-    listener => clock.subscribe(listener),
+    subscribeClock,
     () => clock.getSnapshot(),
   )
   const open = openId === undefined ? undefined : sessions.byId[openId]

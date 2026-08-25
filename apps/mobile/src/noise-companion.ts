@@ -181,11 +181,14 @@ export class MobileNoiseCompanionReceiver {
     if (this.activeSurface?.acceptValidatedCompanionProjection(projection) !== true) return
     const conversation = parseMobileConversationProjection(projection.conversation, projection.sessionId)
     if (projection.beforeSeq === undefined) {
-      this.conversations.set(projection.sessionId, conversation)
+      this.retainConversation(projection.sessionId, conversation)
     } else {
       const current = this.conversations.get(projection.sessionId)
       if (current === undefined) throw new Error('Authenticated older Companion page has no current conversation')
-      this.conversations.set(projection.sessionId, prependConversationPage(current, conversation, projection.beforeSeq))
+      this.retainConversation(
+        projection.sessionId,
+        prependConversationPage(current, conversation, projection.beforeSeq),
+      )
     }
     this.publishSurface()
   }
@@ -251,11 +254,16 @@ export class MobileNoiseCompanionReceiver {
     this.sessions = { ...this.sessions, ids: currentIds, byId }
     this.workspaces = workspaces
     if (projection.conversation !== undefined) {
-      this.conversations.set(
+      this.retainConversation(
         projection.sessionId,
         parseMobileConversationProjection(projection.conversation, projection.sessionId),
       )
     }
+  }
+
+  private retainConversation(sessionId: string, conversation: MobileConversationProjectionDto): void {
+    this.conversations.delete(sessionId)
+    this.conversations.set(sessionId, conversation)
   }
 
   private flushPendingLive(): void {

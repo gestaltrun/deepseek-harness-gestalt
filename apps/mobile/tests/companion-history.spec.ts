@@ -81,6 +81,28 @@ describe('Mobile Companion browse projection', () => {
     expect(screen.getAllByText('10分钟')).toHaveLength(2)
   })
 
+  it('keeps the clock subscription stable across presentation renders', () => {
+    let subscriptions = 0
+    const clock: MobilePresentationClock = {
+      getSnapshot: () => 10_000,
+      subscribe: () => {
+        subscriptions += 1
+        return () => {}
+      },
+    }
+    const view = render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces,
+      conversations: {}, ...browsePresentation, clock,
+    }))
+
+    view.rerender(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces,
+      conversations: {}, ...browsePresentation, clock,
+    }))
+
+    expect(subscriptions).toBe(1)
+  })
+
   it('pages the exact Desktop SessionListState without introducing another row model', () => {
     const ids = Array.from({ length: COMPANION_HISTORY_PAGE_SIZE + 3 }, (_, index) => sid(`id-${String(index)}`))
     const many = { ...sessions, ids }
@@ -164,6 +186,18 @@ describe('Mobile Companion browse projection', () => {
     await screen.findByRole('heading', { name: 'Created blank' })
     await waitFor(() => { expect(onSessionOpened).toHaveBeenCalledWith(createdId) })
     expect(onLoadOlder).toHaveBeenCalledWith(createdId)
+  })
+
+  it('does not request missing history after foreground synchronization is lost', async () => {
+    const onLoadOlder = vi.fn()
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'offline',
+      sessions: { ...sessions, current: alphaId }, workspaces, conversations: {},
+      ...browsePresentation, canMutate: false, onLoadOlder,
+    }))
+
+    await screen.findByRole('heading', { name: 'Alpha' })
+    expect(onLoadOlder).not.toHaveBeenCalled()
   })
 
   it('keeps a correlated operation failure visible in the opened conversation', () => {

@@ -200,10 +200,13 @@ describe('Desktop Remote Relay composition', () => {
     const routeId = parseRelayRouteId('route-guards')
     const signal = new AbortController().signal
     const channel = fakeSnowChannel()
-    const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+    const accept = vi.fn(async () => ({
       targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: otherSelector, generation: 2,
-    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
+    }))
+    const owner = new DesktopSnowRelayChannelOwner(
+      { accept }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS,
+    )
     await expect(owner.receive(Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, signal))
       .rejects.toThrow('no peer projection')
     owner.updatePeers({
@@ -215,9 +218,11 @@ describe('Desktop Remote Relay composition', () => {
     )).rejects.toThrow('stale local attachment')
     await expect(owner.receive(
       Uint8Array.of(1), parseRelayAttachmentId('mobile-unprojected'), desktopAttachmentId, selector, signal,
-    )).rejects.toThrow('unprojected')
+    )).resolves.toBeUndefined()
+    expect(accept).not.toHaveBeenCalled()
     await expect(owner.receive(Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, signal))
       .rejects.toThrow('stale Snow IK transcript')
+    expect(accept).toHaveBeenCalledOnce()
     expect(channel.dispose).toHaveBeenCalledOnce()
   })
 

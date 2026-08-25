@@ -267,6 +267,7 @@ async function mountMobileProduct(): Promise<void> {
       onConnectionReady: () => { companionRuntime()?.markConnectionOpen() },
       onConnectionLost: () => { clearNoiseConnection(); companionRuntime()?.forgetConnection() },
       onTransportError: (error) => {
+        console.error('[mobile-companion] Relay connection failed:', error)
         clearNoiseConnection()
         companionRuntime()?.reportConnectionFailure({
           code: error.code,

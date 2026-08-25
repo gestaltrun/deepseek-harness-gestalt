@@ -374,10 +374,23 @@ describe('MobilePairingController', () => {
       start: vi.fn().mockRejectedValueOnce(new Error('Relay start failed')),
       stop: vi.fn(),
     }
+    const installation = installationFixture()
+    let proofSequence = 0
+    vi.mocked(installation.authorizeCurrentInstallation).mockImplementation(async () => {
+      proofSequence += 1
+      return {
+        accessToken: 'mobile-access',
+        proof: {
+          jti: parseAccountProofJti(`proof-${String(proofSequence)}`),
+          issuedAt: proofSequence,
+          signature: `signature-${String(proofSequence)}`,
+        },
+      }
+    })
     const controller = new MobilePairingController({
-      installation: installationFixture(), transport, handshake, relay, attachmentKeys: vault,
+      installation, transport, handshake, relay, attachmentKeys: vault,
       scanner: { scan: vi.fn() },
-      schedule: (task) => { scheduled.push(task); return { unref: vi.fn() } as never },
+      schedule: (task) => { scheduled.push(task); return 1 as never },
       now: () => Date.parse('2026-08-18T10:01:00.000Z'),
     })
     const payload = btoa(String.fromCharCode(7, 8)).replaceAll('=', '')
@@ -391,6 +404,8 @@ describe('MobilePairingController', () => {
 
     scheduled.shift()?.()
     await vi.waitFor(() => { expect(transport.submitEndpointMessage3).toHaveBeenCalled() })
+    expect(transport.getEndpointPairingStatus.mock.calls[0]?.[0].authentication.proof.jti).toBe('proof-2')
+    expect(transport.submitEndpointMessage3.mock.calls[0]?.[0].authentication.proof.jti).toBe('proof-3')
     expect(controller.getSnapshot()).toMatchObject({ status: 'pending' })
     scheduled.shift()?.()
     await vi.waitFor(() => { expect(transport.getEndpointPairingStatus).toHaveBeenCalledTimes(2) })
@@ -1197,8 +1212,8 @@ function transportFixture() {
       device: { name: 'Fixture installation', platform: 'ios' },
     }),
     submitEndpointMessage1: vi.fn(),
-    getEndpointPairingStatus: vi.fn(),
-    submitEndpointMessage3: vi.fn(),
+    getEndpointPairingStatus: vi.fn<RemoteAccessTransport['getEndpointPairingStatus']>(),
+    submitEndpointMessage3: vi.fn<RemoteAccessTransport['submitEndpointMessage3']>(),
     finishChallenge: vi.fn<RemoteAccessTransport['finishChallenge']>().mockResolvedValue({
       pendingPairingId: parsePendingPairingId('pending-one'),
       authenticationWords: ['amber', 'binary', 'cedar', 'delta', 'ember', 'frost'],

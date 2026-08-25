@@ -2,6 +2,7 @@
 
 import type { PlatformAccountId, PlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
 import type { PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import {
   CompanionCache,
   CompanionUncertainOperationSettlement,
@@ -40,10 +41,11 @@ export class MobileCompanionProjectionCacheRuntime implements MobileCompanionPro
 
   async save(projection: MobileCompanionProjectionDto): Promise<void> {
     await this.enqueue(async () => {
-      await this.#cache.saveOpenedContent(this.#desktopId, 'projection-snapshot', JSON.stringify({
-        version: 1,
-        projection,
-      }))
+      await this.#cache.saveOpenedContent(
+        this.#desktopId,
+        'projection-snapshot',
+        encodeBoundedProjectionSnapshot(projection),
+      )
     })
   }
 
@@ -78,6 +80,31 @@ export class MobileCompanionProjectionCacheRuntime implements MobileCompanionPro
     this.#operations = result.then(() => undefined, () => undefined)
     return result
   }
+}
+
+function encodeBoundedProjectionSnapshot(projection: MobileCompanionProjectionDto): string {
+  const recent = projection.conversations.at(-1)
+  if (recent !== undefined) {
+    for (let offset = 0; offset <= recent.nodes.length; offset += 1) {
+      const candidate: MobileCompanionProjectionDto = {
+        ...projection,
+        conversations: [{
+          ...recent,
+          nodes: recent.nodes.slice(offset),
+          hasMore: recent.hasMore || offset > 0,
+        }],
+      }
+      const encoded = encodeProjectionSnapshot(candidate)
+      if (new TextEncoder().encode(encoded).byteLength <= REMOTE_PROTOCOL_LIMITS.companionMessageBytes) {
+        return encoded
+      }
+    }
+  }
+  return encodeProjectionSnapshot({ ...projection, conversations: [] })
+}
+
+function encodeProjectionSnapshot(projection: MobileCompanionProjectionDto): string {
+  return JSON.stringify({ version: 1, projection })
 }
 
 function unknownJson(value: string): unknown {

@@ -72,6 +72,7 @@ import {
 } from './chrome-overlay.ts'
 import { createDesktopRemoteRelay } from './remote-relay.ts'
 import { DesktopCompanionProductOwner } from './companion-product.ts'
+import { startDesktopPairingWhenHostReady } from './companion-host-readiness.ts'
 import type { DesktopCompanionOperationOutput } from './companion-product.ts'
 import {
   DesktopCompanionOperationLedger, FileDesktopCompanionOperationStore,
@@ -79,6 +80,7 @@ import {
 import { createDesktopHostRpc } from './host-rpc.ts'
 import { desktopInstallationPresentation } from './desktop-installation.ts'
 import { downloadCompanionAttachment } from './companion-attachments.ts'
+import { projectDesktopRendererEvent } from './renderer-projection.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const PRELOAD = join(here, 'preload.cjs')
@@ -116,6 +118,7 @@ const companionProduct = new DesktopCompanionProductOwner({
   attachmentTimeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
 })
 let uninstallCompanionHost: (() => void) | undefined
+let companionHostReady = false
 
 smokeLog('main loaded')
 const gotLock = app.requestSingleInstanceLock()
@@ -204,11 +207,6 @@ async function boot(): Promise<void> {
   if (accountReady) smokeLog('account ready')
   pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
   accountSignedIn = account.getSnapshot().status === 'signed-in'
-  if (accountSignedIn) {
-    await pairing.start().catch((error: unknown) => {
-      console.error('[desktop-personal-pairing] initial Remote Access load failed:', error)
-    })
-  }
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)
   installIntegrationsOnce()
@@ -221,7 +219,7 @@ async function boot(): Promise<void> {
         () => !hostStartController.signal.aborted,
       )
     host = started.value
-    installCompanionHost(host)
+    await installCompanionHost(host)
     observeHostExit(host)
     smokeLog('host ' + host.url + ' pid ' + String(host.child.pid))
     await window.loadURL(host.url)
@@ -456,7 +454,7 @@ async function onHostExit(exited: RunningWebHost): Promise<void> {
     respawned = true
     try {
       host = await startHost()
-      installCompanionHost(host)
+      await installCompanionHost(host)
       observeHostExit(host)
       await window.loadURL(host.url)
       void ensureChromeOverlay(window, host.url)
@@ -677,14 +675,27 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
   })()
 }
 
-function installCompanionHost(running: RunningWebHost): void {
+async function installCompanionHost(running: RunningWebHost): Promise<void> {
   clearCompanionHost()
   uninstallCompanionHost = companionProduct.installHost(running.url)
+  companionHostReady = true
+  await startPairingForCurrentDesktop()
 }
 
 function clearCompanionHost(): void {
+  companionHostReady = false
   uninstallCompanionHost?.()
   uninstallCompanionHost = undefined
+}
+
+async function startPairingForCurrentDesktop(): Promise<void> {
+  await startDesktopPairingWhenHostReady({
+    accountSignedIn,
+    hostReady: companionHostReady,
+    start: async () => { await pairing.start() },
+  }).catch((error: unknown) => {
+    console.error('[desktop-personal-pairing] signed-in Remote Access load failed:', error)
+  })
 }
 
 function installIpc(): void {
@@ -821,20 +832,27 @@ function installMenu(): void {
 }
 
 function pushStatus(status: UpdaterStatus): void {
-  window?.webContents.send(UPDATER_STATUS_CHANGED, status)
+  projectDesktopRendererEvent(
+    [window?.webContents, overlayView?.webContents],
+    UPDATER_STATUS_CHANGED,
+    status,
+  )
 }
 
 function pushAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnapshot']>): void {
-  window?.webContents.send(ACCOUNT_SNAPSHOT_CHANGED, snapshot)
+  projectDesktopRendererEvent(
+    [window?.webContents, overlayView?.webContents],
+    ACCOUNT_SNAPSHOT_CHANGED,
+    snapshot,
+  )
 }
 
 function handleAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnapshot']>): void {
   pushAccountSnapshot(snapshot)
   const signedIn = snapshot.status === 'signed-in'
   if (signedIn && !accountSignedIn) {
-    void pairing.start().catch((error: unknown) => {
-      console.error('[desktop-personal-pairing] signed-in Remote Access load failed:', error)
-    })
+    accountSignedIn = true
+    void startPairingForCurrentDesktop()
   }
   if (!signedIn && accountSignedIn) {
     void pairing.deactivate('mobile-access-disabled').catch((error: unknown) => {
@@ -845,7 +863,11 @@ function handleAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSn
 }
 
 function pushPairingSnapshot(snapshot: ReturnType<DesktopPairingActions['getSnapshot']>): void {
-  window?.webContents.send(PAIRING_SNAPSHOT_CHANGED, snapshot)
+  projectDesktopRendererEvent(
+    [window?.webContents, overlayView?.webContents],
+    PAIRING_SNAPSHOT_CHANGED,
+    snapshot,
+  )
 }
 
 function createDesktopAccount(environment: SelectedPlatformEnvironment): DesktopAccountActions {

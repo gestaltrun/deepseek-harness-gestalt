@@ -46,6 +46,30 @@ describe('Mobile Companion projection cache runtime', () => {
     await expect(contentKeys(companionCacheDatabaseName('production', accountId))).resolves.toEqual([])
   })
 
+  it('retains the most recent opened transcript when accumulated conversations exceed the cache ceiling', async () => {
+    const pairingId = parsePersonalPairingId(`pairing-cache-${crypto.randomUUID()}`)
+    const accountId = parsePlatformAccountId(`account-cache-${crypto.randomUUID()}`)
+    const keys = new PairingCompanionKeyVault()
+    keys.retain(pairingId, new Uint8Array(32).fill(44))
+    const cache = new MobileCompanionProjectionCacheRuntime({
+      environment: 'production', accountId, pairingId, keys,
+    })
+    const projection: MobileCompanionProjectionDto = {
+      ...emptyProjection('Bounded Desktop'),
+      conversations: [
+        conversationProjection('older', 'a'.repeat(35_000)),
+        conversationProjection('recent', 'b'.repeat(35_000)),
+      ],
+    }
+
+    await expect(cache.save(projection)).resolves.toBeUndefined()
+    await expect(cache.restore()).resolves.toMatchObject({
+      sessions: projection.sessions,
+      workspaces: projection.workspaces,
+      conversations: [{ sessionId: 'recent' }],
+    })
+  })
+
   it('retains an unknown operation receipt when presentation content is cleared', async () => {
     const pairingId = parsePersonalPairingId(`pairing-receipt-${crypto.randomUUID()}`)
     const accountId = parsePlatformAccountId(`account-receipt-${crypto.randomUUID()}`)
@@ -99,5 +123,19 @@ function emptyProjection(desktopName: string): MobileCompanionProjectionDto {
     },
     workspaces: [],
     conversations: [],
+  }
+}
+
+function conversationProjection(
+  sessionId: string,
+  text: string,
+): MobileCompanionProjectionDto['conversations'][number] {
+  return {
+    sessionId,
+    nodes: [{ kind: 'user', seq: 1, time: 1, content: [{ type: 'text', text }], source: {} }],
+    turnTimings: [], turnEnds: [], partial: null, runningCalls: [], pending: [], queue: [],
+    running: false, subagent: null, composerPhase: 'active', removed: false,
+    openState: 'open', openError: null, hasMore: false, loadingOlder: false,
+    promptError: null, blank: false, lastAgentError: null,
   }
 }

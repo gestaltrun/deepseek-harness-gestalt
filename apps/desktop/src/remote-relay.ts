@@ -261,7 +261,8 @@ export class DesktopSnowRelayChannelOwner {
       await this.publishActive(channel, current, projected, pairingSelector, sourceAttachmentId)
       return
     }
-    if (projected === undefined) throw new Error('Desktop Relay rejected an unprojected Snow peer')
+    // A superseded Relay attachment can remain briefly live, but an unprojected source has no Snow authority.
+    if (projected === undefined) return
     const acceptedPromise = this.owner.accept(ciphertext, sourceAttachmentId, current.routeId, current.attachmentId)
     const accepted = await abortableAccept(acceptedPromise, [current.cancellation.signal, lifecycleSignal])
     let retained = false

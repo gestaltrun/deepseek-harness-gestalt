@@ -122,7 +122,6 @@ export async function receiveCompanionAttachment(
   if (await hashCompanionCiphertext(ciphertext) !== offer.ciphertextSha256) {
     throw new CompanionAttachmentReceiveError('hash-mismatch', 'Companion attachment ciphertext hash does not match the offer')
   }
-  // oxlint-disable-next-line typescript/no-unsafe-assignment -- tsc resolves CryptoKey via @types/node; oxlint's program misses that global
   const key = await deriveCompanionAttachmentKey(input.attachmentKey)
   const plaintext = await openCompanionAttachment(key, ciphertext).catch(() => {
     // AES-GCM authentication failure is the only remaining failure after the hash check.

@@ -21,6 +21,7 @@ import {
   type CompanionSessionSearchResult,
   type CompanionSessionId,
 } from '@deepseek-ai/dsh-remote-protocol'
+import { contextForm, contextProvenance } from '@deepseek-ai/dsh-session/surface'
 import {
   CompanionAttachmentReceiveError,
   receiveCompanionAttachment,
@@ -178,7 +179,10 @@ export class DesktopCompanionProductOwner {
     this.interactions.clear()
     this.surfaceDiscovery.clear()
     this.installed = installed
-    if (this.liveProjection.hasConnections()) this.ensureHostStreams(installed)
+    if (this.liveProjection.hasConnections()) {
+      this.ensureHostStreams(installed)
+      this.liveProjection.surfaceChanged()
+    }
     return () => {
       cancellation.abort()
       installed.streams?.cancellation.abort()
@@ -895,7 +899,10 @@ function parseConversationHistory(
           content: event.data.content, source,
         })
       } else {
-        nodes.push({ kind: 'unknown', seq: event.seq, time: event.time, type: event.type, data: event.data })
+        nodes.push({
+          kind: 'context', seq: event.seq, time: event.time, content: event.data.content, source,
+          provenance: contextProvenance(source), form: contextForm(source),
+        })
       }
     } else if (event.type === 'assistant/message') {
       const message = event.data.message
@@ -912,16 +919,20 @@ function parseConversationHistory(
     } else if (event.type === 'tool/call') {
       const callId = event.data.callId
       if (typeof callId !== 'string') return undefined
+      const presentation = hostToolPresentation(entryValue.view, 'call')
+      if (presentation === undefined) return undefined
       calls.set(callId, {
         name: typeof event.data.name === 'string' ? event.data.name : callId,
         argsRaw: typeof event.data.arguments === 'string' ? event.data.arguments : '{}',
         time: event.time,
-        view: entryValue.view,
+        view: presentation.view,
       })
     } else if (event.type === 'tool/result') {
       const message = event.data.message
       if (!isRecord(message) || !isRecord(message.source) || typeof message.source.callId !== 'string'
         || !Array.isArray(message.content)) return undefined
+      const presentation = hostToolPresentation(entryValue.view, 'result')
+      if (presentation === undefined) return undefined
       const call = calls.get(message.source.callId)
       nodes.push({
         kind: 'tool-result', seq: event.seq, time: event.time, callId: message.source.callId,
@@ -931,7 +942,7 @@ function parseConversationHistory(
         ...(isRecord(event.data.error) && typeof event.data.error.name === 'string'
           && typeof event.data.error.code === 'string' ? { error: event.data.error } : {}),
         ...(event.data.meta === undefined ? {} : { meta: event.data.meta }),
-        resultView: entryValue.view ?? null, subCalls: [],
+        resultView: presentation.view, subCalls: [],
       })
     } else if (event.type === 'step/start') {
       if (!isSafeInteger(event.data.turn) || !isSafeInteger(event.data.step)) return undefined
@@ -988,10 +999,19 @@ function parseConversationHistory(
       blocks: partial.blocks.filter((block): block is Record<string, unknown> => block !== undefined),
     },
     runningCalls: [], pending, queue: [],
-    running, subagent: null, composerPhase: nodes.length === 0 && !running ? 'pristine' : 'active',
+    running, subagent: null, composerPhase: nodes.length === 0 && !running ? 'blank' : 'active',
     removed: false, openState: 'open', openError: null, hasMore: value.hasMore,
     loadingOlder: false, promptError: null, blank: nodes.length === 0, lastAgentError: null,
   }
+}
+
+function hostToolPresentation(
+  value: unknown,
+  expected: 'call' | 'result',
+): { view: Record<string, unknown> | null } | undefined {
+  if (value === undefined) return { view: null }
+  if (!isRecord(value) || value.for !== expected || !isRecord(value.view)) return undefined
+  return { view: value.view }
 }
 
 function applyLiveAssistantChunk(

@@ -29,6 +29,7 @@
     "@deepseek-ai/dsh-noise-channel": "workspace:^",
     "electron-updater": "^6.8.3",
     "@deepseek-ai/dsh-remote-protocol": "workspace:^",
+    "@deepseek-ai/dsh-session": "workspace:^",
     "ws": "^8.21.0"
   },
   "devDependencies": {

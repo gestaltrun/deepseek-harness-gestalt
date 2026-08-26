@@ -134,8 +134,8 @@ describe('Desktop release workflow', () => {
   })
 
   it('smokes every packaged app before artifact upload', () => {
-    expect(workflow.match(/electron-smoke-packaged\.spec\.ts/g)).toHaveLength(2)
-    expect(workflow.match(/DSH_PACKAGED_APP_BIN/g)).toHaveLength(2)
+    expect(workflow.match(/electron-smoke-packaged\.spec\.ts/g)).toHaveLength(3)
+    expect(workflow.match(/DSH_PACKAGED_APP_BIN/g)).toHaveLength(3)
     expect(workflow).not.toContain('pnpm exec vitest run apps/desktop/tests/electron-smoke-packaged.spec.ts')
     const packagedSmoke = readFileSync(
       join(process.cwd(), 'apps/desktop/tests/electron-smoke-packaged.spec.ts'),
@@ -146,7 +146,7 @@ describe('Desktop release workflow', () => {
     expect(packagedSmoke).toContain('ELECTRON_ENABLE_LOGGING')
     expect(packagedSmoke).toContain("name.startsWith('DSH_REMOTE_RELAY_')")
     expect(packagedSmoke).toContain('exited ${String(exitCode)} before ok')
-    expect(workflow.match(/node_modules\/\.bin\/vitest/g)).toHaveLength(2)
+    expect(workflow.match(/node_modules\/\.bin\/vitest/g)).toHaveLength(3)
     const macSmoke = workflow.indexOf('app_bin=$(find apps/desktop/release')
     const winSmoke = workflow.indexOf('$appBin = Get-ChildItem apps/desktop/release')
     expect(macSmoke).toBeGreaterThan(workflow.indexOf('electron-builder --mac'))
@@ -167,6 +167,24 @@ describe('Desktop release workflow', () => {
     expect(packageStep).toBeLessThan(verifyIcon)
     expect(verifyIcon).toBeLessThan(smoke)
     expect(verifyIcon).toBeLessThan(upload)
+  })
+
+  it('proves the Windows latest.yml checksum and smokes the NSIS install', () => {
+    const winSteps = steps('pack-win')
+    const verifyIcon = winSteps.findIndex(step => step.name === 'Verify packaged icon')
+    const verifyFeed = winSteps.findIndex(step => step.name === 'Verify Windows update feed')
+    const unpackedSmoke = winSteps.findIndex(step => step.name === 'Smoke packaged Desktop Host')
+    const nsisSmoke = winSteps.findIndex(step => step.name === 'Smoke NSIS-installed Desktop Host')
+    const upload = winSteps.findIndex(step => step.uses === 'actions/upload-artifact@v4')
+
+    expect(winSteps[verifyFeed]?.run).toContain('verify-windows-update-feed.mjs')
+    expect(winSteps[verifyFeed]?.run).toContain('needs.prepare.outputs.version')
+    expect(String(winSteps[nsisSmoke]?.run)).toContain("'/S', \"/D=$dest\"")
+    expect(String(winSteps[nsisSmoke]?.run)).toContain('DeepSeekGestalt-Setup-*-x64.exe')
+    expect(verifyIcon).toBeLessThan(verifyFeed)
+    expect(verifyFeed).toBeLessThan(unpackedSmoke)
+    expect(unpackedSmoke).toBeLessThan(nsisSmoke)
+    expect(nsisSmoke).toBeLessThan(upload)
   })
 
   it('forces and verifies signing and notarization before signed artifacts upload', () => {

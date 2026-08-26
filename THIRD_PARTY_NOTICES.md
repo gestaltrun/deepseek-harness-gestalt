@@ -5,9 +5,22 @@
 
 DeepSeek Harness is licensed under [MIT](LICENSE). It depends on the third-party software listed below. Each project remains under its own license; nothing in this file changes those terms.
 
-This file lists **direct** dependencies declared by the workspace and the explicitly disclosed official Claude Code platform payload closure. It is generated from the workspace manifests by `scripts/gen-third-party-notices.ts`: a pre-commit hook regenerates it whenever a staged file changes one of its inputs, and `scripts/gen-third-party-notices.spec.ts` asserts in the test lane that the committed bytes match. Deleting a manifest runs no hook, so that case is caught by the assertion instead. Run `pnpm run verify-third-party-notices` for the standalone check.
+This file lists **direct** dependencies declared by the workspace, copied repository Skills, and the explicitly disclosed official Claude Code platform payload closure. It is generated from the workspace manifests and `.agents/skills/SOURCES.json` by `scripts/gen-third-party-notices.ts`: a pre-commit hook regenerates it whenever a staged input changes, and `scripts/gen-third-party-notices.spec.ts` asserts in the test lane that the committed bytes match. Deleting a manifest runs no hook, so that case is caught by the assertion instead. Run `pnpm run verify-third-party-notices` for the standalone check.
 
 The complete npm transitive closure, including the Landlock launcher workspace, is recorded with exact pinned versions in [`pnpm-lock.yaml`](pnpm-lock.yaml) — inspect it with `pnpm licenses list`. The Python closure is recorded separately in [`python/sdk/uv.lock`](python/sdk/uv.lock).
+
+## Repository agent Skills (`.agents/skills/`)
+
+These third-party workflows are copied into the repository for contributor agents. Each Skill directory retains the upstream license. [`.agents/skills/SOURCES.json`](.agents/skills/SOURCES.json) records the pinned source and repository-specific changes.
+
+| Skill | Upstream | Source revision | License | Repository changes |
+| --- | --- | --- | --- | --- |
+| `ego-browser` | [github.com/citrolabs/ego-lite](https://github.com/citrolabs/ego-lite) | [`ego-lite-app-0.4.7.3`](https://github.com/citrolabs/ego-lite) | MIT | resolve and validate the DSH profile for every Task Space operation path; require manual installation through the signed macOS application flow; align GitHub learning manifests with their tool results |
+| `retro` | [github.com/mattpocock/skills](https://github.com/mattpocock/skills) | [`6654f6b60cd9d5be8b54c6fafe44346dabeb3b76`](https://github.com/mattpocock/skills/tree/6654f6b60cd9d5be8b54c6fafe44346dabeb3b76/skills/in-progress/retro) | MIT | use the Codex skill invocation policy and DeepSeek Harness standards sources |
+| `show-me` | [github.com/humanlayer/skills](https://github.com/humanlayer/skills) | [`3c2629142c5d437428269b1b722b08c0b87f574d`](https://github.com/humanlayer/skills/tree/3c2629142c5d437428269b1b722b08c0b87f574d/plugins/show-me/skills/show-me) | MIT | none |
+| `skill-doctor` | [github.com/warpdotdev/common-skills](https://github.com/warpdotdev/common-skills) | [`59d10d6d0fed69b76c392c7e12f8813a49edd6a2`](https://github.com/warpdotdev/common-skills/tree/59d10d6d0fed69b76c392c7e12f8813a49edd6a2/.agents/skills/skill-doctor) | MIT | render diffs with self-contained HTML instead of a bundled JavaScript dependency; cover Codex and Warp session parsing |
+| `unslop` | [github.com/cursor/plugins](https://github.com/cursor/plugins) | [`bdf7aa355337897f167153e05069aca505dae17c`](https://github.com/cursor/plugins/tree/bdf7aa355337897f167153e05069aca505dae17c/pstack/skills/unslop) | MIT | scope voice changes to user-facing prose and defer repository contracts to dsh-prose-standard |
+
 
 ## Vendored source (`vendor/`)
 

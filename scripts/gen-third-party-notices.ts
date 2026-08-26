@@ -2,8 +2,9 @@
  * Generate `THIRD_PARTY_NOTICES.md` from the workspace manifests: every
  * external dependency named by a workspace `package.json`, the vendored-package
  * manifest in `vendor/README.md`, the Python `pyproject.toml` files, and the
- * pnpm patch list. License and repository metadata come from the installed
- * store, so the tree must be installed. `--check` verifies the committed
+ * pnpm patch list, and the repository Skill source manifest. License and
+ * repository metadata come from the installed store or the checked source
+ * manifest, so the tree must be installed. `--check` verifies the committed
  * artifact. Tier policy and ownership live in
  * `.agents/notes/implemented/process/2026-07-30-generated-third-party-notices.md`.
  */
@@ -16,6 +17,7 @@ import parseSpdx from 'spdx-expression-parse'
 
 const root = resolve(import.meta.dirname, '..')
 const OUT = 'THIRD_PARTY_NOTICES.md'
+const REPOSITORY_SKILL_SOURCES = '.agents/skills/SOURCES.json'
 
 /** Dependency-declaration kinds a consumer resolves at runtime. */
 const RUNTIME_KINDS = ['dependencies', 'optionalDependencies'] as const
@@ -120,6 +122,84 @@ interface ExternalDep {
   repo: string
   /** True when some shipped workspace consumer reaches it through runtime dependency edges. */
   runtime: boolean
+}
+
+/** One copied third-party repository Skill and its pinned source. */
+export interface RepositorySkillSource {
+  name: string
+  path: string
+  source: string
+  sourcePath: string
+  revision: string
+  license: string
+  localChanges: string[]
+}
+
+interface RepositorySkillManifest {
+  formatVersion: number
+  skills: RepositorySkillSource[]
+}
+
+/**
+ * Read and validate the source record for copied repository Skills.
+ * @returns Skill sources sorted by name.
+ */
+export function collectRepositorySkillSources(): RepositorySkillSource[] {
+  const manifest = JSON.parse(
+    readFileSync(resolve(root, REPOSITORY_SKILL_SOURCES), 'utf8'),
+  ) as Partial<RepositorySkillManifest>
+  if (manifest.formatVersion !== 1 || !Array.isArray(manifest.skills)) {
+    throw new Error(`gen-third-party-notices: ${REPOSITORY_SKILL_SOURCES} must use formatVersion 1 and contain a skills array.`)
+  }
+
+  const names = new Set<string>()
+  for (const skill of manifest.skills) {
+    if (
+      typeof skill.name !== 'string'
+      || typeof skill.path !== 'string'
+      || typeof skill.source !== 'string'
+      || typeof skill.sourcePath !== 'string'
+      || typeof skill.revision !== 'string'
+      || skill.license !== 'MIT'
+      || !Array.isArray(skill.localChanges)
+      || skill.localChanges.some(change => typeof change !== 'string')
+    ) {
+      throw new Error(`gen-third-party-notices: ${REPOSITORY_SKILL_SOURCES} contains an invalid Skill source record.`)
+    }
+    if (names.has(skill.name) || skill.path !== `.agents/skills/${skill.name}`) {
+      throw new Error(`gen-third-party-notices: ${REPOSITORY_SKILL_SOURCES} contains a duplicate name or mismatched path for ${skill.name}.`)
+    }
+    names.add(skill.name)
+    if (!existsSync(resolve(root, skill.path, 'SKILL.md'))) {
+      throw new Error(`gen-third-party-notices: ${skill.path}/SKILL.md is missing.`)
+    }
+    const licensePath = resolve(root, skill.path, 'LICENSE')
+    if (!existsSync(licensePath) || !readFileSync(licensePath, 'utf8').startsWith('MIT License\n')) {
+      throw new Error(`gen-third-party-notices: ${skill.path}/LICENSE must preserve the upstream MIT notice.`)
+    }
+  }
+  return [...manifest.skills].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+function renderRepositorySkillSources(skills: RepositorySkillSource[]): string {
+  const rows = skills.map((skill) => {
+    const revisionUrl = /^[0-9a-f]{40}$/.test(skill.revision)
+      ? `${skill.source}/tree/${skill.revision}/${skill.sourcePath}`
+      : skill.source
+    const changes = skill.localChanges.length > 0
+      ? skill.localChanges.join('; ')
+      : 'none'
+    return `| \`${skill.name}\` | [${skill.source.replace('https://', '')}](${skill.source}) | [\`${skill.revision}\`](${revisionUrl}) | ${skill.license} | ${changes} |`
+  })
+  return `## Repository agent Skills (\`.agents/skills/\`)
+
+These third-party workflows are copied into the repository for contributor agents. Each Skill directory retains the upstream license. [\`${REPOSITORY_SKILL_SOURCES}\`](${REPOSITORY_SKILL_SOURCES}) records the pinned source and repository-specific changes.
+
+| Skill | Upstream | Source revision | License | Repository changes |
+| --- | --- | --- | --- | --- |
+${rows.join('\n')}
+
+`
 }
 
 /** Read and parse a workspace-relative `package.json`. */
@@ -671,6 +751,7 @@ export function render(): string {
   const vendored = collectVendored()
   const python = collectPython()
   const patched = collectPatched()
+  const repositorySkills = collectRepositorySkillSources()
   const claudeDistribution = runtimeDeps.some(
     dep => dep.name === CLAUDE_AGENT_SDK_PACKAGE,
   )
@@ -695,10 +776,11 @@ export function render(): string {
 
 DeepSeek Harness is licensed under [MIT](LICENSE). It depends on the third-party software listed below. Each project remains under its own license; nothing in this file changes those terms.
 
-This file lists **direct** dependencies declared by the workspace and the explicitly disclosed official Claude Code platform payload closure. It is generated from the workspace manifests by \`scripts/gen-third-party-notices.ts\`: a pre-commit hook regenerates it whenever a staged file changes one of its inputs, and \`scripts/gen-third-party-notices.spec.ts\` asserts in the test lane that the committed bytes match. Deleting a manifest runs no hook, so that case is caught by the assertion instead. Run \`pnpm run verify-third-party-notices\` for the standalone check.
+This file lists **direct** dependencies declared by the workspace, copied repository Skills, and the explicitly disclosed official Claude Code platform payload closure. It is generated from the workspace manifests and \`${REPOSITORY_SKILL_SOURCES}\` by \`scripts/gen-third-party-notices.ts\`: a pre-commit hook regenerates it whenever a staged input changes, and \`scripts/gen-third-party-notices.spec.ts\` asserts in the test lane that the committed bytes match. Deleting a manifest runs no hook, so that case is caught by the assertion instead. Run \`pnpm run verify-third-party-notices\` for the standalone check.
 
 The complete npm transitive closure, including the Landlock launcher workspace, is recorded with exact pinned versions in [\`pnpm-lock.yaml\`](pnpm-lock.yaml) — inspect it with \`pnpm licenses list\`. The Python closure is recorded separately in [\`python/sdk/uv.lock\`](python/sdk/uv.lock).
 
+${renderRepositorySkillSources(repositorySkills)}
 ## Vendored source (\`vendor/\`)
 
 The Cordis framework and its foundation libraries are source-vendored into this repository rather than consumed from npm, and republished under the \`@deepseek-ai\` scope. All are MIT-licensed; each directory preserves its upstream \`LICENSE\` file. Exact upstream commits and local modifications are recorded in [\`vendor/README.md\`](vendor/README.md).

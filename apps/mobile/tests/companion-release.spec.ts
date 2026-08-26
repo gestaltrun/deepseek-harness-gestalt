@@ -77,6 +77,18 @@ describe('Companion release validation', () => {
     expect(storyboard).not.toContain('customClass="CAPBridgeViewController"')
   })
 
+  it('keeps the operated iOS Simulator proxy out of release and physical-device builds', () => {
+    const bridge = readFileSync(new URL(
+      '../ios/App/App/GestaltBridgeViewController.swift', import.meta.url,
+    ), 'utf8')
+
+    expect(bridge).toContain('#if DEBUG && targetEnvironment(simulator)')
+    expect(bridge).toContain('DSH_IOS_SIMULATOR_PROXY_HOST')
+    expect(bridge).toContain('DSH_IOS_SIMULATOR_PROXY_PORT')
+    expect(bridge).toContain('DispatchQueue.main.asyncAfter(deadline: .now() + 1)')
+    expect(bridge).toContain('self?.webView?.configuration.websiteDataStore.proxyConfigurations = [proxy]')
+  })
+
   it('verifies Android release signatures with the Android SDK verifier only', () => {
     const packaging = readFileSync(new URL('../scripts/build-android-release.sh', import.meta.url), 'utf8')
 

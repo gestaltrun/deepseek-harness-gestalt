@@ -26,6 +26,8 @@ pnpm --filter @deepseek-ai/dsh-mobile build
 pnpm --filter @deepseek-ai/dsh-mobile native:sync
 ```
 
+An iOS 17 or newer Debug Simulator build can give only its Capacitor `WKWebView` an HTTP CONNECT proxy by launching it with both `DSH_IOS_SIMULATOR_PROXY_HOST` and `DSH_IOS_SIMULATOR_PROXY_PORT`. The bridge rejects a partial or invalid pair. Conditional compilation excludes this adapter from Release and physical-device builds; it does not require a supervised-device global proxy profile or a machine-wide network mode.
+
 Vite resolves workspace packages through [`tsconfig.base.json`](../../tsconfig.base.json) paths before Capacitor copies compiled assets into the checked-in iOS and Android projects. [PACKAGING.md](PACKAGING.md) owns signed APK and TestFlight candidate commands. Local Vite and its ports remain development-only and are not release evidence.
 
 ## Known Limitations and Deferred Work

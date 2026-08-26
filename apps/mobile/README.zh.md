@@ -26,6 +26,8 @@ pnpm --filter @deepseek-ai/dsh-mobile build
 pnpm --filter @deepseek-ai/dsh-mobile native:sync
 ```
 
+iOS 17 或更高版本的 Debug Simulator build 可以在启动时同时传入 `DSH_IOS_SIMULATOR_PROXY_HOST` 与 `DSH_IOS_SIMULATOR_PROXY_PORT`，仅为该应用的 Capacitor `WKWebView` 配置 HTTP CONNECT 代理。bridge 会拒绝不完整或无效的参数组合。条件编译会从 Release 与实体设备 build 中移除该 adapter；它既不需要受监督设备的全局代理描述文件，也不需要整机网络模式。
+
 Vite 会先通过 [`tsconfig.base.json`](../../tsconfig.base.json) 的 paths 解析工作区包，再由 Capacitor 把编译后的资源复制进仓库内 iOS 与 Android 工程。[PACKAGING.md](PACKAGING.md) 记录 signed APK 与 TestFlight candidate 命令。本地 Vite 及其端口仍只用于开发，不能作为发布证据。
 
 ## 已知限制与暂缓事项

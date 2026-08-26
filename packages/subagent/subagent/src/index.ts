@@ -502,6 +502,7 @@ export class SubagentRuntime extends Service {
       { when: request.toolFilter !== undefined, cap: 'toolFilter' },
       { when: request.persona !== undefined, cap: 'persona' },
       { when: request.agentOptions !== undefined, cap: 'agentOptions' },
+      { when: request.prompt.some(block => block.type === 'image'), cap: 'images' },
     ]
     for (const { when, cap } of needs) {
       if (when && !provider.capabilities[cap]) {

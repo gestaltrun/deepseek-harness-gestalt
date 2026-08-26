@@ -10,7 +10,7 @@ import { dirname } from 'node:path'
 import { z as zod } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
-import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatus } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
 import type { FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
@@ -2381,8 +2381,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         // it already carries. Now that no model-facing row sits in the host
         // plane, composing nothing would leave the child with no tools at all.
         const forkComposition = await composeAgent(resolveSessionPreset(source))
+        let child: AgentHandle
         try {
-          await ctx.agents.create({
+          child = await ctx.agents.create({
             sessionId: childId,
             seed: events.slice(0, cut),
             meta: {
@@ -2402,6 +2403,18 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             message: `failed to fork session "${sessionId}": ${String(error)}`,
             details: {},
           })
+        }
+        // A product fork starts its own thread: a goal that arrived only
+        // through the seed prefix is cleared so the thread begins goalless.
+        // The child is already published here; a sweep failure degrades to the
+        // inherited-goal view and is logged rather than failing the fork.
+        const goals = goalServiceFor(child.agent)
+        if (!('error' in goals)) {
+          try {
+            goals.clearInherited(child.agent)
+          } catch (error: unknown) {
+            ctx.logger.warn(`session.fork: goal inheritance sweep for "${childId}" failed (child keeps the inherited goal): ${String(error)}`)
+          }
         }
         // An ordinary source keeps its direct Workspace. A subagent source is
         // not listed there, so its ordinary fork joins the nearest owning

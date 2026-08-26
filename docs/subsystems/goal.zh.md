@@ -237,6 +237,23 @@ block(agent: Agent, ref: GoalRef, reason: GoalBlockReason): GoalView
 @Remote('clear') clear(agent: Agent, ref: GoalRef): GoalRef
 
 /**
+ * Clear a goal that arrived only through a fork's seed prefix, so a forked
+ * thread starts goalless instead of owning a copy of its parent's objective.
+ *
+ * A product fork seeds the child with a prefix of the parent's log, and any
+ * `goal/change` inside that prefix would otherwise fold into the child's
+ * current goal. This method appends one clear tombstone when — and only
+ * when — the child's current goal came entirely from the seed and the child
+ * has appended no goal mutation of its own beyond it. Callers invoke it once
+ * at fork creation; the durable tombstone keeps replay and later resumes
+ * stable without re-running the sweep.
+ *
+ * @param agent - owning live agent of the freshly created forked session.
+ * @returns the tombstone ref when a goal was cleared, otherwise `undefined`.
+ */
+clearInherited(agent: Agent): GoalRef | undefined
+
+/**
  * Create one Goal through the remote boundary.
  * @param agent - exact live Agent resolved from the wire identity.
  * @param request - objective and optional round cap.

@@ -389,6 +389,44 @@ export class GoalService extends TypertRemoteService {
     return { ...tombstone }
   }
 
+  /**
+   * Clear a goal that arrived only through a fork's seed prefix, so a forked
+   * thread starts goalless instead of owning a copy of its parent's objective.
+   *
+   * A product fork seeds the child with a prefix of the parent's log, and any
+   * `goal/change` inside that prefix would otherwise fold into the child's
+   * current goal. This method appends one clear tombstone when — and only
+   * when — the child's current goal came entirely from the seed and the child
+   * has appended no goal mutation of its own beyond it. Callers invoke it once
+   * at fork creation; the durable tombstone keeps replay and later resumes
+   * stable without re-running the sweep.
+   *
+   * @param agent - owning live agent of the freshly created forked session.
+   * @returns the tombstone ref when a goal was cleared, otherwise `undefined`.
+   */
+  clearInherited(agent: Agent): GoalRef | undefined {
+    const cache = this.prepareMutation(agent)
+    const seedLength = agent.session.header.seedLength
+    if (seedLength === undefined || seedLength <= 0) return undefined
+    // A goal mutation beyond the seed prefix means the thread already took
+    // goal ownership (including an earlier sweep's tombstone): leave it be.
+    for (const event of agent.session.events.slice(seedLength)) {
+      if (event.type === 'goal/change') return undefined
+    }
+    const current = cache.state.goal
+    if (current === undefined) return undefined
+    const tombstone: GoalRef = { id: current.id, revision: current.revision + 1 }
+    const change: GoalClearChangeMeta = {
+      kind: 'goal/change',
+      version: GOAL_CHANGE_VERSION,
+      operation: 'clear',
+      cleared: tombstone,
+      clearedAt: this.nextMutationTime(cache),
+    }
+    this.commit(agent, cache, change, 'disarmed')
+    return { ...tombstone }
+  }
+
   /** Resolve and validate the cache used by a mutation. */
   private prepareMutation(agent: Agent): GoalCache {
     this.assertLive(agent)

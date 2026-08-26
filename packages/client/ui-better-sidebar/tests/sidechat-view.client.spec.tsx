@@ -43,7 +43,9 @@ describe('SideChatView', () => {
   })
 
   it('releases the root Side Chat handle after descendant navigation', () => {
-    const descriptor = builtinTabs({} as Context).find(candidate => candidate.id === 'sidechat')!
+    const archiveSession = vi.fn(() => Promise.resolve())
+    const descriptor = builtinTabs({ workspaces: { archiveSession } } as unknown as Context)
+      .find(candidate => candidate.id === 'sidechat')!
     const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ ok: true })
 
     descriptor.onClose?.({
@@ -52,6 +54,19 @@ describe('SideChatView', () => {
     }, { sessionId: 'main-thread' })
 
     expect(dispose).toHaveBeenCalledWith('side-thread')
+    expect(archiveSession).toHaveBeenCalledWith('side-thread')
+  })
+
+  it('does not archive a provisional thread that has no durable Session', () => {
+    const archiveSession = vi.fn(() => Promise.resolve())
+    const descriptor = builtinTabs({ workspaces: { archiveSession } } as unknown as Context)
+      .find(candidate => candidate.id === 'sidechat')!
+    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ ok: true })
+
+    descriptor.onClose?.(tab('draft-thread'), { sessionId: 'main-thread' })
+
+    expect(dispose).toHaveBeenCalledWith('draft-thread')
+    expect(archiveSession).not.toHaveBeenCalled()
   })
 
   it('mounts the canonical conversation slot for the tab thread without changing the selected Session', () => {

@@ -20,3 +20,4 @@
 16. **`src/loopback-allowlist.ts` / `src/index.ts` / `src/client/browser.ts` / `src/client/BrowserView.tsx` / `src/prefs-shared.ts`** — Host 与 Client 共用同一个 loopback allowlist 解析器。安全说明区分默认的不透明来源沙箱，以及只授予显式白名单 loopback 页面自身来源的权限。
 17. **`src/client/locales-zh-HK.ts` / `src/client/locales-zh-MO.ts` / `src/client/locales-zh-TW.ts` / `src/client/locales.ts`** — 繁体中文地区字典使用描述性 export 名称，避免本仓 zh/en fallback 对称门禁把它们误判成缺少对侧的 fallback 配对。澳门与台湾模块说明使用各自实际 locale。
 18. **`src/client/intercept.tsx`** — 关闭对话文件打开接管时，produced-files turn tail 也继续由官方 `ui-deliverables` 持有；侧边栏 chip 不会绕过该设置。
+19. **`src/client/state.ts` / `src/client/Sidebar.tsx` / `src/client/subagent-detect.ts` / `src/client/builtins/tabs.tsx` / `src/sidechat-core.ts` / `src/client/SideChatView.tsx`** — 按 origin 隔离的标签条丢失后，Side Chat 标签页从持久化 Session 数据恢复。已发布、未归档的直属子线程会重新出现，但不会替换活动标签；关闭操作归档 Session，本地墓碑覆盖投影延迟；`?dsh-sidebar-reset` 会跳过恢复。共享 core helper 持有根线程身份。

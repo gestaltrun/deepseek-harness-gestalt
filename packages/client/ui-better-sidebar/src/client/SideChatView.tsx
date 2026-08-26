@@ -2,7 +2,9 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { Context } from '../context-types.ts'
-import { SIDE_LABEL_PREFIX, SIDE_NEW_THREAD_TITLE } from '../sidechat-core.ts'
+import {
+  SIDE_LABEL_PREFIX, SIDE_NEW_THREAD_TITLE, sidechatTabRootThreadId, sidechatTabThreadId,
+} from '../sidechat-core.ts'
 import { registerSidechatDraft } from './api.ts'
 import { t } from './locales.ts'
 import type { SessionScope } from './api.ts'
@@ -11,14 +13,12 @@ import css from './SideChatView.module.css'
 
 /** The thread a tab is bound to (durable in tab.meta across refreshes). */
 export function sidechatThreadIdOf(tab: SidebarTab): SessionId | undefined {
-  const meta = tab.meta as { threadId?: unknown } | undefined
-  return typeof meta?.threadId === 'string' ? meta.threadId as SessionId : undefined
+  return sidechatTabThreadId(tab.meta) as SessionId | undefined
 }
 
 /** Root Side Chat identity whose live handle belongs to this navigable tab. */
 export function sidechatRootThreadIdOf(tab: SidebarTab): SessionId | undefined {
-  const meta = tab.meta as { rootThreadId?: unknown } | undefined
-  return typeof meta?.rootThreadId === 'string' ? meta.rootThreadId as SessionId : sidechatThreadIdOf(tab)
+  return sidechatTabRootThreadId(tab.meta) as SessionId | undefined
 }
 
 function threadDisplayTitle(title: string): string {

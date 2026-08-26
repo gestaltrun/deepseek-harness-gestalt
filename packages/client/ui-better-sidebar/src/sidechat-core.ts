@@ -313,6 +313,18 @@ export function buildOpenTurnSnapshot(events: readonly SidechatLogEvent[]): stri
     : `Parent session in-progress turn (reference only):\n\n${body}`
 }
 
+/** The thread a Side Chat tab is bound to, read from its opaque tab meta. */
+export function sidechatTabThreadId(meta: unknown): string | undefined {
+  const record = meta as { threadId?: unknown } | undefined
+  return typeof record?.threadId === 'string' ? record.threadId : undefined
+}
+
+/** Return the root thread retained while a Side Chat tab displays a descendant. */
+export function sidechatTabRootThreadId(meta: unknown): string | undefined {
+  const record = meta as { rootThreadId?: unknown } | undefined
+  return typeof record?.rootThreadId === 'string' ? record.rootThreadId : sidechatTabThreadId(meta)
+}
+
 /** Truncate + prefix a question into a durable thread label. */
 export function sideLabel(question: string): string {
   const flat = question.replace(/\s+/g, ' ').trim()

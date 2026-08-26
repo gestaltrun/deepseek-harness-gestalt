@@ -459,14 +459,18 @@ export interface SidebarConversation {
 }
 
 /**
- * The client workspaces service face (mirror of the runtime IWorkspaces). Only
- * the chat's file-open funnel is touched: `openPath` hands an absolute path
- * to the Host OS's default application, and every chat-side file open
- * (tool rows, produced-files, prose mentions) funnels through it.
+ * The client workspaces service face (mirror of the runtime IWorkspaces).
  */
 export interface SidebarWorkspacesService {
   /** Open a filesystem path with the Host operating system's default application. */
   openPath(path: string): Promise<void>
+  /** Durably hide a closed Side Chat Session without deleting its log. */
+  archiveSession(sessionId: string): Promise<void>
+  /** Workspace projection carrying the durable global Session archive set. */
+  list: {
+    getSnapshot(): { phase: 'pending' | 'ready'; archivedSessionIds: readonly string[] }
+    subscribe(listener: () => void): () => void
+  }
 }
 
 /**

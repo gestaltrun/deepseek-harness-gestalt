@@ -494,7 +494,8 @@ async function mountSelectedDesktopProduct(suffix: string): Promise<{
 
   const { mobileProductStarted } = await import('../src/main.tsx')
   await mobileProductStarted
-  await screen.findByText(`@fixture-${suffix}`)
+  await screen.findByRole('button', { name: 'View account' })
+  expect(screen.queryByText(`@fixture-${suffix}`)).toBeNull()
   await waitFor(() => {
     expect(relayLifecycle.configure).toHaveBeenCalledWith(expect.objectContaining({ pairingSelector: 'home' }))
   })

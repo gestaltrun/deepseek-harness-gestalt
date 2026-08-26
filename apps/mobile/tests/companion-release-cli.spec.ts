@@ -16,7 +16,9 @@ const tsxLoader = import.meta.resolve('tsx/esm')
 const temporary: string[] = []
 
 afterEach(() => {
-  for (const path of temporary.splice(0)) rmSync(path, { recursive: true, force: true })
+  for (const path of temporary.splice(0)) {
+    rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  }
 })
 
 describe('Mobile Companion release evidence CLI', () => {

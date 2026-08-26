@@ -99,7 +99,8 @@ describe('Host HTTP failure Companion projection', () => {
     const login = screen.getByRole('button', { name: 'Continue with GitHub' })
     await waitFor(() => { expect(login.hasAttribute('disabled')).toBe(false) })
     fireEvent.click(login)
-    await screen.findByText('@octocat')
+    await screen.findByRole('button', { name: 'View account' })
+    expect(screen.queryByText('@octocat')).toBeNull()
     runtime.configure({
       routeId: parseRelayRouteId('visible-host-400-route'),
       endpoint: 'mobile',

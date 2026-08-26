@@ -121,6 +121,13 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     })
     await screen.findByRole('treeitem', { name: /Guarded Session/ })
 
+    const sessionList = document.querySelector('[data-mobile-browse="list"] > main')
+    if (!(sessionList instanceof HTMLElement)) throw new Error('expected shipped Session list')
+    fireEvent.touchStart(sessionList, { touches: [{ clientY: 20 }] })
+    fireEvent.touchMove(sessionList, { touches: [{ clientY: 108 }] })
+    fireEvent.touchEnd(sessionList, { changedTouches: [{ clientY: 108 }] })
+    expect(firstChannel.mutations.refreshSurface).toHaveBeenCalledWith(0)
+
     expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(false)
     fireEvent.click(screen.getByRole('treeitem', { name: /Guarded Session/ }))
     expect(screen.getByRole('button', { name: 'Allow once' }).hasAttribute('disabled')).toBe(false)
@@ -158,7 +165,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       committedAt: 1,
     })
     firstResync.acceptValidatedDesktopResync(createdSessionsProjection('workspace'))
-    await screen.findByRole('heading', { name: 'Workspace created' })
+    await screen.findByRole('heading', { name: 'New Session' })
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(within(screen.getByRole('region', { name: 'Work' })).getByRole('treeitem', { name: /New Session/ }))
       .toBeTruthy()
@@ -172,7 +179,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       committedAt: 2,
     })
     firstResync.acceptValidatedDesktopResync(createdSessionsProjection('ungrouped'))
-    await screen.findByRole('heading', { name: 'Ungrouped created' })
+    await screen.findByRole('heading', { name: 'New Session' })
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect([
       screen.getByRole('region', { name: 'Work' }).textContent,
@@ -228,15 +235,22 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       sessions: guardedSessions(), workspaces: [], conversations: [],
     })
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(true)
-    })
+    await screen.findByText('Remote Offline')
+    expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(false)
     expect(visibleMutationControls()).toMatchInlineSnapshot(`
       [
-        "button:New Session in Work:disabled",
-        "button:New ungrouped Session:disabled",
+        "button:New Session in Work:enabled",
+        "button:New ungrouped Session:enabled",
       ]
     `)
+    const createCallCount = firstChannel.mutations.create.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: 'New ungrouped Session' }))
+    expect(await screen.findByText('Remote Offline. Reconnect and synchronize before creating a Session.')).toBeTruthy()
+    expect(firstChannel.mutations.create).toHaveBeenCalledTimes(createCallCount)
+    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Search chat history' }))
+    expect(screen.getByRole('searchbox', { name: 'Search Desktop Sessions' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }))
 
     runtime.reportConnectionFailure({
       code: 'COMPANION_SECURITY_CAPABILITY_MISSING',
@@ -409,6 +423,9 @@ function connectionChannel(attachmentCompletion: Promise<void>) {
   const createOperationIds = ['create-workspace-snapshot', 'create-ungrouped-snapshot'] as const
   let createIndex = 0
   const mutations = {
+    refreshSurface: vi.fn<MobileCompanionConnectionChannel['mutations']['refreshSurface']>(() => ({
+      operationId: parseCompanionOperationId('refresh-snapshot'), completion: Promise.resolve(),
+    })),
     create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(() => {
       const operationId = createOperationIds[createIndex]
       if (operationId === undefined) throw new Error('unexpected extra Session creation')

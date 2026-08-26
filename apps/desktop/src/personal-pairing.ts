@@ -85,6 +85,7 @@ export class DesktopPairingController implements DesktopPairingActions {
   private serial: Promise<unknown> = Promise.resolve()
   private lifecycleBarrier: Promise<void> = Promise.resolve()
   private currentLifecycle: Promise<unknown> | undefined
+  private relayStart: Promise<void> | undefined
   private lifecycleGeneration = 0
   private active = false
   private closed = false
@@ -419,7 +420,6 @@ export class DesktopPairingController implements DesktopPairingActions {
         for (const grant of grants) await this.options.relay?.configure?.(grant)
       }
       if (!this.active || this.closed) return
-      await this.options.relay?.start()
       if (this.options.snowPairingVault !== undefined) {
         const endpointPending = await this.options.transport.listEndpointPending(
           await this.options.account.authorizeCurrentInstallation(),
@@ -468,6 +468,7 @@ export class DesktopPairingController implements DesktopPairingActions {
             },
           })
           hash.fill(0)
+          this.ensureRelayStarted()
           return
         }
       }
@@ -486,6 +487,7 @@ export class DesktopPairingController implements DesktopPairingActions {
         this.publish(challenge !== undefined && challenge.expiresAt > this.now()
           ? { status: 'challenge', enabled: true, pairings, challenge }
           : { status: 'ready', enabled: true, pairings })
+        this.ensureRelayStarted()
         return
       }
       this.publish({
@@ -496,6 +498,7 @@ export class DesktopPairingController implements DesktopPairingActions {
           authenticationWords: first.authenticationWords,
         },
       })
+      this.ensureRelayStarted()
     } catch (error) {
       this.fail(error)
       throw error
@@ -581,6 +584,23 @@ export class DesktopPairingController implements DesktopPairingActions {
       })
     }, this.pollIntervalMs)
     this.timer.unref()
+  }
+
+  private ensureRelayStarted(): void {
+    const relay = this.options.relay
+    if (relay === undefined || this.relayStart !== undefined || !this.active || this.closed) return
+    const generation = this.lifecycleGeneration
+    const starting = relay.start()
+    const observed = starting.then(
+      () => { if (this.relayStart === observed) this.relayStart = undefined },
+      (error: unknown) => {
+        if (this.relayStart === observed) this.relayStart = undefined
+        if (generation !== this.lifecycleGeneration || !this.active || this.closed) return
+        this.fail(error)
+        console.error('[desktop-personal-pairing] Relay start failed:', error)
+      },
+    )
+    this.relayStart = observed
   }
 
   private exclusive<T>(operation: () => Promise<T>): Promise<T> {

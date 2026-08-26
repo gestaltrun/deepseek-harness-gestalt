@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import {
+  useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore,
+  type CSSProperties, type ReactNode, type TouchEvent,
+} from 'react'
 import {
   COMPANION_HISTORY_PAGE_SIZE,
   pageCompanionHistory,
@@ -68,11 +71,16 @@ export interface MobileBrowseProps {
   search: MobileCompanionSearchSnapshot
   /** Request one full-text Session search from Desktop. */
   onSearch?: ((query: string) => void) | undefined
+  /** Request the current Desktop Session and Workspace baseline. */
+  onRefresh?: (() => void | Promise<void>) | undefined
   /** Clear cached content for this Paired Desktop without deleting pairing keys. */
   onClearCache?: (() => void | Promise<void>) | undefined
 }
 
 type MobileBrowseScreen = 'list' | 'search' | 'creating'
+type PullRefreshState = 'idle' | 'refreshing' | 'offline' | 'failed'
+
+const PULL_REFRESH_THRESHOLD = 72
 
 interface MobileCreateTarget {
   input: { workspace?: string }
@@ -84,17 +92,23 @@ export function MobileBrowse({
   desktopName, connection, onOpenAccount, onOpenPairing,
   connectionFailure, sessions, workspaces, conversations, locale, theme, loadImage,
   canMutate, clock, onCreate, onSessionOpened, onSubmit, onCancel, onAttach, onLoadOlder, onObserveSession,
-  search, onSearch, operationFailure,
+  search, onSearch, onRefresh, operationFailure,
   cacheFailure,
 }: MobileBrowseProps): ReactNode {
   const [openId, setOpenId] = useState<SessionId>()
   const [screen, setScreen] = useState<MobileBrowseScreen>(() => search.query === '' ? 'list' : 'search')
   const [returnScreen, setReturnScreen] = useState<'list' | 'search'>('list')
   const [createTarget, setCreateTarget] = useState<MobileCreateTarget>()
-  const [page, setPage] = useState(0)
+  const [pagesByGroup, setPagesByGroup] = useState<Readonly<Record<string, number>>>({})
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set())
   const [searchDraft, setSearchDraft] = useState(search.query)
+  const [pullDistance, setPullDistance] = useState(0)
+  const [refreshState, setRefreshState] = useState<PullRefreshState>('idle')
   const adoptedCurrent = useRef<SessionId>()
   const historyRequested = useRef<SessionId>()
+  const pullStart = useRef<number>()
+  const pullDistanceRef = useRef(0)
+  const refreshSessions = useRef(sessions)
   useEffect(() => {
     setSearchDraft(search.query)
     if (search.query !== '') setScreen(current => current === 'list' ? 'search' : current)
@@ -129,16 +143,21 @@ export function MobileBrowse({
   useEffect(() => {
     if (canMutate) onObserveSession?.(openId)
   }, [canMutate, onObserveSession, openId])
+  useEffect(() => {
+    if (refreshState === 'refreshing' && sessions !== refreshSessions.current) setRefreshState('idle')
+  }, [refreshState, sessions])
+  useEffect(() => {
+    if (refreshState === 'refreshing' && operationFailure?.operation === 'refresh') setRefreshState('failed')
+  }, [operationFailure, refreshState])
+  useEffect(() => {
+    if (connection === 'online' && refreshState === 'offline') setRefreshState('idle')
+  }, [connection, refreshState])
   const connectionLabel = connection === 'unpaired'
     ? locale === 'zh' ? '未连接' : 'Not paired'
     : connection === 'online' ? 'Remote Online' : 'Remote Offline'
-  const paged = useMemo(
-    () => pageCompanionHistory(sessions, workspaces, page, COMPANION_HISTORY_PAGE_SIZE),
-    [sessions, workspaces, page],
-  )
   const groups = useMemo(
-    () => expandedSessionGroups(paged.sessions, paged.workspaces),
-    [paged.sessions, paged.workspaces],
+    () => expandedSessionGroups(sessions, workspaces),
+    [sessions, workspaces],
   )
   const tw = useMemo(() => workspacePresentationTranslate(locale), [locale])
   const subscribeClock = useCallback((listener: () => void) => clock.subscribe(listener), [clock])
@@ -169,15 +188,65 @@ export function MobileBrowse({
     onSearch?.('')
   }
   const beginCreate = (target: MobileCreateTarget): void => {
-    if (!canMutate || onCreate === undefined) return
+    if (onCreate === undefined) return
     setCreateTarget(target)
     setScreen('creating')
-    onCreate(target.input)
+    if (canMutate) onCreate(target.input)
   }
   const closeConversation = (): void => {
     setOpenId(undefined)
     setScreen(returnScreen)
   }
+  const startPull = (event: TouchEvent<HTMLElement>): void => {
+    if (refreshState === 'refreshing' || event.currentTarget.scrollTop > 0) return
+    const firstTouch = event.touches[0]
+    if (firstTouch === undefined) return
+    pullStart.current = firstTouch.clientY
+    pullDistanceRef.current = 0
+    setPullDistance(0)
+    if (refreshState !== 'idle') setRefreshState('idle')
+  }
+  const movePull = (event: TouchEvent<HTMLElement>): void => {
+    const start = pullStart.current
+    const firstTouch = event.touches[0]
+    if (start === undefined || firstTouch === undefined) return
+    const distance = Math.max(0, firstTouch.clientY - start)
+    pullDistanceRef.current = distance
+    setPullDistance(distance)
+  }
+  const finishPull = (): void => {
+    const distance = pullDistanceRef.current
+    pullStart.current = undefined
+    pullDistanceRef.current = 0
+    setPullDistance(0)
+    if (distance < PULL_REFRESH_THRESHOLD) return
+    if (connection !== 'online' || !canMutate || onRefresh === undefined) {
+      setRefreshState('offline')
+      return
+    }
+    refreshSessions.current = sessions
+    setRefreshState('refreshing')
+    try {
+      const result = onRefresh()
+      void Promise.resolve(result).catch(() => { setRefreshState('failed') })
+    } catch {
+      setRefreshState('failed')
+    }
+  }
+  const refreshText = refreshState === 'refreshing'
+    ? locale === 'zh' ? '正在刷新…' : 'Refreshing…'
+    : refreshState === 'offline'
+      ? locale === 'zh' ? 'Remote Offline，重新连接后才能刷新。' : 'Remote Offline. Reconnect before refreshing.'
+      : refreshState === 'failed'
+        ? locale === 'zh' ? '刷新失败，请重试。' : 'Refresh failed. Try again.'
+        : pullDistance > 8
+          ? pullDistance >= PULL_REFRESH_THRESHOLD
+            ? locale === 'zh' ? '松开刷新' : 'Release to refresh'
+            : locale === 'zh' ? '下拉刷新' : 'Pull down to refresh'
+          : undefined
+  const refreshHeight = refreshState === 'idle'
+    ? Math.min(40, pullDistance * 0.45)
+    : 40
 
   if (openId !== undefined && openTitle !== undefined) {
     if (conversation !== undefined) {
@@ -273,7 +342,9 @@ export function MobileBrowse({
         <main className={css.creatingBody}>
           <span className={css.creatingIcon} aria-hidden="true">{composeIcon}</span>
           <p>{canMutate ? createText.pending : createText.offline}</p>
-          {createFailure !== undefined && <p className={css.error} role="alert">{createFailure.message}</p>}
+          {createFailure !== undefined && (
+            <p className={css.error} role="alert">{companionCreateFailureMessage(locale)}</p>
+          )}
           {createFailure !== undefined && (
             <button type="button" disabled={!canMutate} onClick={() => { beginCreate(createTarget) }}>{createText.retry}</button>
           )}
@@ -310,12 +381,29 @@ export function MobileBrowse({
           )
           : <span className={css.headerSlot} />}
       </header>
-      <main className={css.projectList}>
+      <main
+        className={css.projectList}
+        onTouchStart={startPull}
+        onTouchMove={movePull}
+        onTouchEnd={finishPull}
+        onTouchCancel={finishPull}
+      >
+        {refreshText !== undefined && (
+          <div
+            className={css.pullRefresh}
+            data-refresh-state={refreshState}
+            role="status"
+            style={{ '--mobile-pull-height': `${String(refreshHeight)}px` } as CSSProperties}
+          >
+            <span className={refreshState === 'refreshing' ? css.refreshSpinner : css.refreshArrow} aria-hidden="true">↓</span>
+            <span>{refreshText}</span>
+          </div>
+        )}
         {connectionAlert !== undefined && (
           <p className={css.error} role="alert" data-connection-failure={connectionFailure?.code}>{connectionAlert}</p>
         )}
         {search.status === 'error' && <p className={css.error} role="alert">{search.error.message}</p>}
-        {(operationFailure?.operation === 'refresh' || operationFailure?.operation === 'create')
+        {operationFailure?.operation === 'refresh'
           && <p className={css.error} role="alert">{operationFailure.failure.message}</p>}
         {cacheFailure !== undefined && <p className={css.error} role="alert">{cacheFailure}</p>}
         {connection === 'unpaired' ? (
@@ -329,15 +417,38 @@ export function MobileBrowse({
             </div>
             {groups.map((group) => {
               const label = group.workspaceId === undefined ? tw('group.ungrouped') : group.label
+              const collapsed = collapsedGroups.has(group.key)
+              const paged = pageCompanionHistory(
+                group.sessions,
+                pagesByGroup[group.key] ?? 0,
+                COMPANION_HISTORY_PAGE_SIZE,
+              )
               return (
                 <section key={group.key} className={css.group} aria-label={label}>
                   <header>
-                    <div className={css.projectName}>{folderIcon}<h2>{label}</h2></div>
+                    <button
+                      type="button"
+                      className={css.projectToggle}
+                      aria-expanded={!collapsed}
+                      aria-label={locale === 'zh'
+                        ? `${collapsed ? '展开' : '收起'} ${label}`
+                        : `${collapsed ? 'Expand' : 'Collapse'} ${label}`}
+                      onClick={() => {
+                        setCollapsedGroups((current) => {
+                          const next = new Set(current)
+                          if (next.has(group.key)) next.delete(group.key)
+                          else next.add(group.key)
+                          return next
+                        })
+                      }}
+                    >
+                      <span className={css.projectName}>{folderIcon}<h2>{label}</h2></span>
+                      <span className={css.disclosure} data-collapsed={collapsed}>{chevronIcon}</span>
+                    </button>
                     {onCreate !== undefined && (
                       <button
                         type="button"
                         className={css.compose}
-                        disabled={!canMutate}
                         aria-label={locale === 'zh' ? `在 ${label} 新建 Session` : `New Session in ${label}`}
                         onClick={() => {
                           beginCreate(group.workspaceId === undefined
@@ -347,22 +458,39 @@ export function MobileBrowse({
                       >{composeIcon}</button>
                     )}
                   </header>
-                  <SessionListPresentation
-                    label={label}
-                    nodes={group.sessions}
-                    currentId={openId}
-                    now={now}
-                    onOpen={openSession}
-                    t={tw}
-                  />
+                  {!collapsed && (
+                    <>
+                      <SessionListPresentation
+                        label={label}
+                        nodes={paged.items}
+                        currentId={openId}
+                        now={now}
+                        onOpen={openSession}
+                        t={tw}
+                      />
+                      {paged.spilled > 0 && (
+                        <button
+                          type="button"
+                          className={css.groupMore}
+                          aria-label={locale === 'zh'
+                            ? `在 ${label} 加载更多（还有 ${paged.spilled}）`
+                            : `Load more in ${label} (${paged.spilled} remaining)`}
+                          onClick={() => {
+                            setPagesByGroup(current => ({
+                              ...current,
+                              [group.key]: (current[group.key] ?? 0) + 1,
+                            }))
+                          }}
+                        >
+                          <span>{locale === 'zh' ? '加载更多' : 'Load more'}</span>
+                          <small>{locale === 'zh' ? `剩余 ${paged.spilled}` : `${paged.spilled} remaining`}</small>
+                        </button>
+                      )}
+                    </>
+                  )}
                 </section>
               )
             })}
-            {paged.spilled > 0 && (
-              <button type="button" className={css.more} onClick={() => { setPage(current => current + 1) }}>
-                {locale === 'zh' ? `加载更多（还有 ${paged.spilled}）` : `Load more (${paged.spilled} remaining)`}
-              </button>
-            )}
           </>
         )}
       </main>
@@ -374,7 +502,6 @@ export function MobileBrowse({
               <button
                 type="button"
                 className={css.compose}
-                disabled={!canMutate}
                 aria-label={locale === 'zh' ? '新建聊天' : 'New chat'}
                 onClick={() => { beginCreate({ input: {}, label: tw('group.ungrouped') }) }}
               >{composeIcon}</button>
@@ -386,7 +513,6 @@ export function MobileBrowse({
                 type="button"
                 className={css.searchPill}
                 aria-label={locale === 'zh' ? '搜索聊天记录' : 'Search chat history'}
-                disabled={!canMutate}
                 onClick={() => { setScreen('search') }}
               >{searchIcon}<span>{locale === 'zh' ? '搜索聊天记录' : 'Search chat history'}</span></button>
             )}
@@ -394,7 +520,6 @@ export function MobileBrowse({
               <button
                 type="button"
                 className={css.round}
-                disabled={!canMutate}
                 aria-label={locale === 'zh' ? '新建 Ungrouped Session' : 'New ungrouped Session'}
                 onClick={() => { beginCreate({ input: {}, label: tw('group.ungrouped') }) }}
               >{composeIcon}</button>
@@ -469,6 +594,12 @@ function formatRetryDelay(milliseconds: number, locale: ConversationPresentation
   return `${seconds} ${seconds === '1' ? 'second' : 'seconds'}`
 }
 
+function companionCreateFailureMessage(locale: ConversationPresentationLocale): string {
+  return locale === 'zh'
+    ? '无法创建 Session。目标 Workspace 可能已被删除，请返回后重试。'
+    : 'The Session could not be created. The target Workspace may have been removed. Go back and try again.'
+}
+
 function AuthoritativeSearchResults({
   search,
   locale,
@@ -534,6 +665,12 @@ const backIcon = (
 const folderIcon = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
     <path d="M3 6.5A2.5 2.5 0 0 1 5.5 4H9l2 2h7.5A2.5 2.5 0 0 1 21 8.5v7A2.5 2.5 0 0 1 18.5 18h-13A2.5 2.5 0 0 1 3 15.5v-9Z" />
+  </svg>
+)
+
+const chevronIcon = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="m6 9 6 6 6-6" />
   </svg>
 )
 

@@ -91,6 +91,7 @@ function MobileEntry({
       onObserveSession: companionSurface.observeSession,
       onAttach: companionSurface.attach,
       onSearch: companionSurface.search,
+      onRefresh: companionSurface.refresh,
       onClearCache: companionSurface.clearProjectionCache.bind(companionSurface),
     }
   return (

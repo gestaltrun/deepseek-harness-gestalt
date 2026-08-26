@@ -759,8 +759,7 @@
         "tests/**/*.ts"
       ],
       "ignoreDependencies": [
-        "@capacitor/ios",
-        "@deepseek-ai/dsh-client-ui-primitives"
+        "@capacitor/ios"
       ]
     },
     "packages/client/modules": {

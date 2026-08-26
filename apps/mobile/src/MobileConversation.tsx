@@ -17,6 +17,7 @@ import { ImageGallery, messageImageLabels } from '@deepseek-ai/dsh-client-ui-att
 import {
   QuestionPresentation, questionPresentationTranslate,
 } from '@deepseek-ai/dsh-client-ui-user-questions/presentation'
+import { IconChevronLeftOutline14, IconPlusOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './MobileConversation.module.css'
 
 /** Full-screen Mobile conversation props. */
@@ -81,6 +82,33 @@ export function MobileConversation({
   )
   const question = snapshot.pending.find((wait): wait is PendingWait<'question'> => wait.kind === 'question')
   const approval = snapshot.pending.find((wait): wait is PendingWait<'approval'> => wait.kind === 'approval')
+  const backLabel = locale === 'zh' ? '返回' : 'Back'
+  const attachmentLabel = locale === 'zh' ? '添加附件' : 'Add attachment'
+  const displayTitle = snapshot.blank ? locale === 'zh' ? '新会话' : 'New Session' : title
+  const attachmentControl = onAttach === undefined ? undefined : (
+    <>
+      <input
+        ref={attachmentInput}
+        type="file"
+        hidden
+        disabled={!mutationEnabled}
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          if (file !== undefined && mutationEnabled) onAttach(file)
+          event.target.value = ''
+        }}
+      />
+      <button
+        type="button"
+        className={css.attachment}
+        aria-label={attachmentLabel}
+        disabled={!mutationEnabled}
+        onClick={() => { if (mutationEnabled) attachmentInput.current?.click() }}
+      >
+        <IconPlusOutline16 />
+      </button>
+    </>
+  )
   return (
     <section
       className={css.page}
@@ -91,8 +119,10 @@ export function MobileConversation({
       lang={locale === 'zh' ? 'zh-CN' : 'en'}
     >
       <header className={css.header}>
-        <button type="button" className={css.back} onClick={onBack}>{locale === 'zh' ? '返回' : 'Back'}</button>
-        <h1>{title}</h1>
+        <button type="button" className={css.back} aria-label={backLabel} onClick={onBack}>
+          <IconChevronLeftOutline14 size={20} />
+        </button>
+        <h1>{displayTitle}</h1>
       </header>
       {operationFailure !== undefined && <p role="alert">{operationFailure.message}</p>}
       <div className={css.blocks} data-conversation-scroll="">
@@ -138,29 +168,9 @@ export function MobileConversation({
                 onCancel={onCancel}
                 t={t}
                 disabled={!mutationEnabled}
+                tools={attachmentControl}
               />
               : null}
-        {onAttach !== undefined && (
-          <>
-            <input
-              ref={attachmentInput}
-              type="file"
-              aria-label={locale === 'zh' ? '添加附件' : 'Add attachment'}
-              hidden
-              disabled={!mutationEnabled}
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file !== undefined && mutationEnabled) onAttach(file)
-                event.target.value = ''
-              }}
-            />
-            <button
-              type="button"
-              disabled={!mutationEnabled}
-              onClick={() => { if (mutationEnabled) attachmentInput.current?.click() }}
-            >{locale === 'zh' ? '添加附件' : 'Add attachment'}</button>
-          </>
-        )}
       </div>
     </section>
   )

@@ -525,6 +525,8 @@ describe('MobileCompanionSurface', () => {
     const results = surface.bindValidatedCompanionResults()
     if (results === undefined) throw new Error('expected current generation result receiver')
 
+    surface.refresh()
+    expect(channel.mutations.refreshSurface).toHaveBeenCalledWith(0)
     surface.trackSurfaceRefresh(tracked('refresh-a'))
     results.acceptValidatedCompanionResult({
       type: 'operation-failed', operationId: parseCompanionOperationId('refresh-a'),
@@ -906,6 +908,9 @@ function connectionChannel(options?: {
   historyCompletion?: Promise<void>
 }) {
   const mutations = {
+    refreshSurface: vi.fn<MobileCompanionConnectionChannel['mutations']['refreshSurface']>(() => (
+      tracked('refresh-default')
+    )),
     create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(() => tracked('create-default')),
     submit: vi.fn<MobileCompanionConnectionChannel['mutations']['submit']>(() => ({
       operationId: parseCompanionOperationId('submit-default'), completion: Promise.resolve(),

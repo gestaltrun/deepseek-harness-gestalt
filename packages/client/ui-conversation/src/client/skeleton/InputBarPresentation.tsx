@@ -126,13 +126,15 @@ export interface InputBarPresentationProps {
   onPaste?: ClipboardEventHandler<HTMLTextAreaElement> | undefined
   /** Latest composer-owned informational or failure notice. */
   notice?: { readonly level: 'info' | 'error'; readonly text: string } | undefined
+  /** Owner-supplied controls placed in the InputBar's leading tool row. */
+  tools?: ReactNode | undefined
   t: TranslateNS<'conversation'>
 }
 
 /** Narrow InputBar using the same editor and primary-action implementations as Desktop. */
 export function InputBarPresentation({
   draft, phase, running, busy, disabled = false, placeholder,
-  onDraftChange, onSubmit, onStop, onKeyDown, onPaste, notice, t,
+  onDraftChange, onSubmit, onStop, onKeyDown, onPaste, notice, tools, t,
 }: InputBarPresentationProps): ReactNode {
   const locked = disabled || busy
   const primaryStops = running
@@ -153,7 +155,7 @@ export function InputBarPresentation({
           onPaste={onPaste}
         />
         <div className={css.row}>
-          <div className={css.tools} />
+          <div className={css.tools}>{tools}</div>
           <div className={css.trailing}>
             <InputBarPrimaryAction
               kind={primaryStops ? 'stop' : 'send'}

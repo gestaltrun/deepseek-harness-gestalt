@@ -269,6 +269,26 @@ describe('Mobile shared Session presentation', () => {
     await waitFor(() => { expect(onSubmit).toHaveBeenCalledWith('继续') })
   })
 
+  it('presents a blank created Session with product-styled navigation and attachment controls', () => {
+    render(createElement(MobileConversation, {
+      title: 'session-9c9a3307-d18c-4987-81f8-0668c16741d0',
+      onBack: () => {},
+      locale: 'en',
+      snapshot: snapshot([], { blank: true }),
+      loadImage: imageLoader,
+      onSubmit: () => {},
+      onAttach: () => {},
+      mutationEnabled: true,
+    }))
+
+    expect(screen.getByRole('heading', { name: 'New Session' })).toBeTruthy()
+    expect(screen.queryByText(/session-9c9a3307/u)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Back' }).className).not.toBe('')
+    const attachment = screen.getByRole('button', { name: 'Add attachment' })
+    expect(attachment.className).not.toBe('')
+    expect(attachment.closest('[data-composer-card]')).not.toBeNull()
+  })
+
   it('binds both locale dictionaries, common labels, fallbacks, and template parameters', () => {
     const en = conversationPresentationTranslate('en')
     const zh = conversationPresentationTranslate('zh')
@@ -346,7 +366,7 @@ describe('Mobile shared Session presentation', () => {
   it('passes the real selected File to the encrypted attachment callback', () => {
     const onAttach = vi.fn()
     const file = new File([Uint8Array.of(0, 255, 1)], 'actual.bin', { type: 'application/octet-stream' })
-    render(createElement(MobileConversation, {
+    const view = render(createElement(MobileConversation, {
       title: 'Attachment',
       onBack: () => {},
       locale: 'zh',
@@ -356,7 +376,9 @@ describe('Mobile shared Session presentation', () => {
       onAttach,
       mutationEnabled: true,
     }))
-    fireEvent.change(screen.getByLabelText('添加附件'), { target: { files: [file] } })
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
+    if (input === null) throw new Error('expected attachment file input')
+    fireEvent.change(input, { target: { files: [file] } })
     expect(onAttach).toHaveBeenCalledWith(file)
   })
 })

@@ -20,7 +20,10 @@ import type { MobilePairingActions } from '../src/MobilePairing.tsx'
 import type { MobileCompanionPresentation } from '../src/companion-history.ts'
 import { fixedMobilePresentationClock } from '../src/mobile-clock.ts'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  localStorage.clear()
+})
 
 const ENVIRONMENT = selectPlatformEnvironment(validatePlatformEnvironmentPair({
   development: {
@@ -127,6 +130,26 @@ describe('MobileAccount', () => {
     await waitFor(() => { expect(api.signOut).toHaveBeenCalledOnce() })
     await screen.findByRole('button', { name: '使用 GitHub 继续' })
     expect(deactivate).toHaveBeenCalledOnce()
+  })
+
+  it('keeps account identity beside the avatar and switches the signed-in shell language', async () => {
+    const { installation } = fixture()
+    render(createElement(MobileAccount, { installation, locale: 'en', theme: 'light', clock }))
+
+    fireEvent.click(screen.getByRole('checkbox'))
+    const login = screen.getByRole('button', { name: 'Continue with GitHub' })
+    await waitFor(() => { expect(login.hasAttribute('disabled')).toBe(false) })
+    fireEvent.click(login)
+    fireEvent.click(await screen.findByRole('button', { name: 'View account' }))
+
+    const identity = screen.getByText('@octocat').closest('[data-account-identity]')
+    expect(identity?.querySelector('img')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '中文' }))
+    expect(screen.getByRole('heading', { name: '账号' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '退出登录' })).toBeTruthy()
+    expect(localStorage.getItem('dsh-mobile-locale')).toBe('zh')
+    fireEvent.click(screen.getByRole('button', { name: '返回' }))
+    expect(screen.getByText('远程')).toBeTruthy()
   })
 
   it('opens Personal Pairing from the unpaired home and returns without stacking the flow', async () => {

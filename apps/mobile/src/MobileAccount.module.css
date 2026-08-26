@@ -219,11 +219,61 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-.accountPage > img {
+.accountIdentity {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  margin-top: 18px;
+}
+
+.accountIdentity img {
   width: 64px;
   height: 64px;
-  margin-top: 18px;
   border-radius: 50%;
+}
+
+.languageSetting {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.languageSetting > span {
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+
+.languageOptions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.languageOptions button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-s-14);
+  cursor: pointer;
+}
+
+.languageOptions button[aria-pressed='true'] {
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  box-shadow: var(--dsw-shadow-lv1-blur);
+}
+
+.languageOptions button:focus-visible {
+  outline: 2px solid var(--dsw-alias-border-l2);
+  outline-offset: 1px;
 }
 
 .accountPage .secondary {

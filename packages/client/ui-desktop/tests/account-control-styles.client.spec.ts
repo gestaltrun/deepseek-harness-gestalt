@@ -28,13 +28,19 @@ describe('AccountControl theme styles', () => {
 
   it('keeps the disabled Mobile Access track and thumb visible in both themes', () => {
     const track = block('.toggle')
-    expect(track).toContain('background: var(--dsw-alias-button-primary-dimmed)')
-    expect(track).toContain('border: 1px solid var(--dsw-alias-border-l3)')
+    expect(track).toContain('background: var(--dsw-alias-button-primary-dimmed, rgba(127, 130, 135, 0.42))')
+    expect(track).toContain('border: 1px solid var(--dsw-alias-border-l3, rgba(127, 130, 135, 0.72))')
     expect(track).not.toContain('--dsw-alias-fill-tertiary')
-    expect(block('.toggle span')).toContain('background: var(--dsw-static-neutral-bluish-00)')
+    expect(block('.toggle span')).toContain('background: var(--dsw-static-neutral-bluish-00, rgb(255, 255, 255))')
   })
 
   it('keeps a visible keyboard focus indicator', () => {
-    expect(block('.toggle:focus-visible')).toContain('outline: 2px solid var(--dsw-alias-button-info-fill)')
+    expect(block('.toggle:focus-visible')).toContain('outline: 2px solid var(--dsw-alias-button-info-fill, rgb(65, 118, 230))')
+  })
+
+  it('keeps the enabled track visible without the shared palette', () => {
+    const enabled = block(".toggle\\[aria-checked='true'\\]")
+    expect(enabled).toContain('border-color: var(--dsw-alias-button-info-fill, rgb(65, 118, 230))')
+    expect(enabled).toContain('background: var(--dsw-alias-button-info-fill, rgb(65, 118, 230))')
   })
 })

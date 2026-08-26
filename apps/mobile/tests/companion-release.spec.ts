@@ -50,6 +50,46 @@ describe('Companion release validation', () => {
     expect(COMPANION_RELEASE_DEVICE_CHECKS).not.toContain('deep-link')
   })
 
+  it('locks both native applications to portrait presentation', () => {
+    const android = readFileSync(new URL('../android/app/src/main/AndroidManifest.xml', import.meta.url), 'utf8')
+    const ios = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8')
+
+    expect(android).toContain('android:screenOrientation="portrait"')
+    expect(ios).not.toContain('<string>UIInterfaceOrientationLandscapeLeft</string>')
+    expect(ios).not.toContain('<string>UIInterfaceOrientationLandscapeRight</string>')
+  })
+
+  it('keeps the Session action dock on the phone viewport and styles per-Workspace paging', () => {
+    const styles = readFileSync(new URL('../src/MobileBrowse.module.css', import.meta.url), 'utf8')
+
+    expect(styles).toMatch(/\.page\s*\{[\s\S]*?height:\s*100dvh;[\s\S]*?overflow:\s*hidden;/u)
+    expect(styles).toMatch(/\.dock\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?bottom:\s*0;/u)
+    expect(styles).toMatch(/\.groupMore\s*\{[\s\S]*?border-radius:\s*12px;[\s\S]*?background:/u)
+  })
+
+  it('keeps pairing controls beside one replaceable method stage', () => {
+    const styles = readFileSync(new URL('../src/MobilePairing.module.css', import.meta.url), 'utf8')
+    const actions = styles.match(/\.taskActions\s*\{([\s\S]*?)\}/u)?.[1]
+
+    expect(styles).toMatch(/\.methodStage\s*\{[\s\S]*?max-width:\s*360px;/u)
+    expect(actions).not.toContain('margin-top: auto')
+  })
+
+  it('styles the conversation header and attachment control as phone chrome', () => {
+    const styles = readFileSync(new URL('../src/MobileConversation.module.css', import.meta.url), 'utf8')
+    const back = styles.match(/\.back\s*\{([\s\S]*?)\}/u)?.[1]
+    const composer = styles.match(/\.composer\s*\{([\s\S]*?)\}/u)?.[1]
+    const attachment = styles.match(/\.attachment\s*\{([\s\S]*?)\}/u)?.[1]
+
+    expect(back).toContain('width: 40px')
+    expect(back).toContain('height: 40px')
+    expect(back).toContain('border: 0')
+    expect(back).toContain('background: transparent')
+    expect(composer).toContain('padding-bottom: env(safe-area-inset-bottom)')
+    expect(attachment).toContain('width: 28px')
+    expect(attachment).toContain('border-radius: 999px')
+  })
+
   it('contains no notification-provider release evidence', () => {
     expect(COMPANION_RELEASE_DEVICE_CHECKS).not.toContain('push')
   })

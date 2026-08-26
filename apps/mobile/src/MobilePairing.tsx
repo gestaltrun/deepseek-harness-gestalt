@@ -28,7 +28,7 @@ export function MobilePairing({
     () => actions.getSnapshot(),
   )
   const [link, setLink] = useState('')
-  const [linkFallbackOpen, setLinkFallbackOpen] = useState(false)
+  const [pairingMethod, setPairingMethod] = useState<'scan' | 'link'>('scan')
   const [cameraActive, setCameraActive] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
   const cameraAbort = useRef<AbortController>()
@@ -40,13 +40,13 @@ export function MobilePairing({
     }
   }, [actions, manageLifecycle, reportLifecycleError])
 
-  const startCamera = (): void => {
+  useEffect(() => {
+    if (!cameraActive) return
     const preview = video.current
     if (preview === null) return
     cameraAbort.current?.abort()
     const controller = new AbortController()
     cameraAbort.current = controller
-    setCameraActive(true)
     void Promise.resolve(actions.scanQr(preview, controller.signal))
       .catch(() => undefined)
       .finally(() => {
@@ -54,6 +54,15 @@ export function MobilePairing({
         cameraAbort.current = undefined
         setCameraActive(false)
       })
+    return () => {
+      if (cameraAbort.current !== controller) return
+      controller.abort()
+      cameraAbort.current = undefined
+    }
+  }, [actions, cameraActive])
+
+  const startCamera = (): void => {
+    setCameraActive(true)
   }
 
   const cancelCamera = (): void => {
@@ -164,39 +173,58 @@ export function MobilePairing({
   }
   return (
     <section className={`${css.card} ${css.taskCard}`} data-mobile-pairing={snapshot.status}>
-      <PairingHero kind="connect" />
+      <div className={css.methodStage} data-pairing-method={pairingMethod}>
+        {pairingMethod === 'link'
+          ? (
+            <div className={css.linkFallback}>
+              <label>
+                <span>{text.completeLink}</span>
+                <input
+                  autoFocus
+                  type="url"
+                  value={link}
+                  onChange={(event) => { setLink(event.target.value) }}
+                />
+              </label>
+              <button
+                type="button"
+                className={css.continue}
+                disabled={link === '' || snapshot.status === 'completing'}
+                onClick={() => { void Promise.resolve(actions.completeLink(link)).catch(() => undefined) }}
+              >{text.continuePairing}</button>
+            </div>
+          )
+          : cameraActive
+            ? (
+              <div className={css.camera}>
+                <video ref={video} muted playsInline aria-label={text.cameraLabel} />
+                <p>{text.cameraDetail}</p>
+                <button type="button" className={css.scan} onClick={cancelCamera}>{text.cancelScan}</button>
+              </div>
+            )
+            : <PairingHero kind="connect" />}
+      </div>
       <div className={css.taskCopy}>
         <h2>{text.connectDesktop}</h2>
         {snapshot.status !== 'ready' || snapshot.error === undefined ? null : <p role="alert">{snapshot.error}</p>}
         <p>{text.connectDetail}</p>
       </div>
       <div className={css.taskActions}>
-        <button type="button" className={`${css.scan} ${css.primaryAction}`} onClick={startCamera}>{text.scanQr}</button>
-        <div className={css.camera} hidden={!cameraActive}>
-          <video ref={video} muted playsInline aria-label={text.cameraLabel} />
-          <p>{text.cameraDetail}</p>
-          <button type="button" className={css.scan} onClick={cancelCamera}>{text.cancelScan}</button>
-        </div>
+        {pairingMethod === 'scan' && !cameraActive && (
+          <button type="button" className={`${css.scan} ${css.primaryAction}`} onClick={startCamera}>{text.scanQr}</button>
+        )}
         <button
           type="button"
           className={css.linkToggle}
-          aria-expanded={linkFallbackOpen}
-          onClick={() => { setLinkFallbackOpen(open => !open) }}
-        >{text.pasteLink}</button>
-        {linkFallbackOpen && (
-          <div className={css.linkFallback}>
-            <label>
-              <span>{text.completeLink}</span>
-              <input type="url" value={link} onChange={(event) => { setLink(event.target.value) }} />
-            </label>
-            <button
-              type="button"
-              className={css.continue}
-              disabled={link === '' || snapshot.status === 'completing'}
-              onClick={() => { void Promise.resolve(actions.completeLink(link)).catch(() => undefined) }}
-            >{text.continuePairing}</button>
-          </div>
-        )}
+          onClick={() => {
+            if (pairingMethod === 'scan') {
+              cancelCamera()
+              setPairingMethod('link')
+            } else {
+              setPairingMethod('scan')
+            }
+          }}
+        >{pairingMethod === 'scan' ? text.pasteLink : text.scanInstead}</button>
         <small>{text.noShortCode}</small>
       </div>
     </section>
@@ -233,6 +261,7 @@ const PAIRING_TEXT = {
     pairAnotherDetail: '扫描另一台桌面端设置中的二维码，或粘贴同一个完整的一次性链接。',
     scanQr: '扫描二维码',
     pasteLink: '改为粘贴完整链接',
+    scanInstead: '改为扫描二维码',
     cameraLabel: '个人配对二维码相机',
     cameraDetail: '将桌面端设置中的二维码对准取景框',
     cancelScan: '取消扫描',
@@ -263,6 +292,7 @@ const PAIRING_TEXT = {
     pairAnotherDetail: 'Scan the QR in another Desktop\'s Settings or paste the same complete one-time link.',
     scanQr: 'Scan QR',
     pasteLink: 'Paste the complete link instead',
+    scanInstead: 'Scan a QR instead',
     cameraLabel: 'Personal Pairing QR camera',
     cameraDetail: 'Point the camera at the QR in Desktop Settings',
     cancelScan: 'Cancel scan',

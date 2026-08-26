@@ -61,8 +61,30 @@
 .taskCard {
   height: 100%;
   align-items: center;
-  padding: clamp(24px, 7dvh, 60px) 2px 0;
+  padding: clamp(20px, 4dvh, 36px) 2px 24px;
   text-align: center;
+}
+
+.methodStage {
+  display: grid;
+  width: 100%;
+  max-width: 360px;
+  min-height: 110px;
+  place-items: center;
+}
+
+.methodStage .heroIcon {
+  margin-bottom: 0;
+}
+
+.methodStage .camera {
+  width: 100%;
+  max-width: 326px;
+}
+
+.methodStage .linkFallback {
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .heroIcon {
@@ -98,9 +120,14 @@
 .taskActions {
   display: grid;
   width: 100%;
+  max-width: 360px;
   gap: 10px;
-  margin-top: auto;
-  padding-top: 26px;
+  margin-top: 8px;
+}
+
+.taskActions > small {
+  max-width: 326px;
+  margin: 0 auto;
 }
 
 .scan,
@@ -151,7 +178,7 @@
 .linkFallback {
   display: grid;
   gap: 10px;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid var(--dsw-alias-border-l3);
   border-radius: 16px;
   background: var(--dsw-alias-bg-layer-1);

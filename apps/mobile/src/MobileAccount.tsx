@@ -22,6 +22,7 @@ const EMPTY_SESSIONS: SessionListState = {
 const EMPTY_WORKSPACES: readonly WorkspaceView[] = []
 const EMPTY_CONVERSATIONS = {}
 const EMPTY_SEARCH = { query: '', status: 'idle', items: [], hasMore: false } as const
+const MOBILE_LOCALE_STORAGE_KEY = 'dsh-mobile-locale'
 
 /** Signed-in Mobile surface after Platform Account login. */
 type SignedInScreen = 'home' | 'account' | 'pairing'
@@ -34,7 +35,7 @@ export interface MobileAccountProps {
   pairing?: MobilePairingActions
   /** Desktop-authoritative Companion presentation supplied by the product entry. */
   companion?: MobileCompanionPresentation | undefined
-  /** Product locale shared by Mobile browse and conversation presentation. */
+  /** Initial product locale used when the Account page has no persisted selection. */
   locale: 'zh' | 'en'
   /** Product theme shared by Mobile browse and conversation presentation. */
   theme: 'light' | 'dark'
@@ -54,6 +55,7 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
   )
   const [accepted, setAccepted] = useState(false)
   const [screen, setScreen] = useState<SignedInScreen>('home')
+  const [activeLocale, setActiveLocale] = useState<'zh' | 'en'>(() => storedLocale(locale))
 
   useEffect(() => { void installation.load() }, [installation])
   useEffect(() => {
@@ -93,11 +95,19 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
     setScreen('home')
     void installation.signOut()
   }
+  const selectLocale = (next: 'zh' | 'en'): void => {
+    setActiveLocale(next)
+    try {
+      localStorage.setItem(MOBILE_LOCALE_STORAGE_KEY, next)
+    } catch {
+      // Browser storage refusal leaves the selected language active for this mounted application.
+    }
+  }
 
   if (!signedIn) {
-    const text = LOGIN_TEXT[locale]
+    const text = LOGIN_TEXT[activeLocale]
     return (
-      <main className={css.page} data-mobile-platform-account={snapshot.status} lang={locale === 'zh' ? 'zh-CN' : 'en'}>
+      <main className={css.page} data-mobile-platform-account={snapshot.status} lang={activeLocale === 'zh' ? 'zh-CN' : 'en'}>
         <header className={css.header}>
           <div className={css.mark} aria-hidden="true">深</div>
           <div>
@@ -160,7 +170,8 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
           githubId={account.githubId}
           avatarUrl={account.avatarUrl}
           pairing={pairingSnapshot}
-          locale={locale}
+          locale={activeLocale}
+          onLocaleChange={selectLocale}
           onBack={() => { setScreen('home') }}
           onSignOut={signOut}
           {...(pairing === undefined ? {} : { onOpenPairing: () => { setScreen('pairing') } })}
@@ -173,9 +184,9 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
   if (screen === 'pairing' && pairing !== undefined) {
     return (
       <main className={css.companion} data-mobile-platform-account={snapshot.status}>
-        <section className={css.pairingPage} aria-label={locale === 'zh' ? '配对' : 'Pairing'}>
-          <ScreenHeader title={locale === 'zh' ? '配对' : 'Pairing'} onBack={() => { setScreen('home') }} locale={locale} />
-          <MobilePairing actions={pairing} locale={locale} manageLifecycle={false} />
+        <section className={css.pairingPage} aria-label={activeLocale === 'zh' ? '配对' : 'Pairing'}>
+          <ScreenHeader title={activeLocale === 'zh' ? '配对' : 'Pairing'} onBack={() => { setScreen('home') }} locale={activeLocale} />
+          <MobilePairing actions={pairing} locale={activeLocale} manageLifecycle={false} />
         </section>
       </main>
     )
@@ -205,7 +216,7 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
         loadImage={companion?.loadImage ?? unavailableImageLoader}
         canMutate={companion?.canMutate ?? false}
         search={companion?.search ?? EMPTY_SEARCH}
-        locale={locale}
+        locale={activeLocale}
         theme={theme}
         clock={clock}
       />
@@ -256,6 +267,7 @@ function AccountView({
   locale,
   onBack,
   onSignOut,
+  onLocaleChange,
   onOpenPairing,
   onClearCache,
 }: {
@@ -266,27 +278,39 @@ function AccountView({
   locale: 'zh' | 'en'
   onBack: () => void
   onSignOut: () => void
+  onLocaleChange: (locale: 'zh' | 'en') => void
   onOpenPairing?: () => void
   onClearCache?: () => void | Promise<void>
 }): ReactNode {
   const text = locale === 'zh'
     ? {
       account: '账号', currentAccount: '当前安装账号', currentInstallation: '当前安装',
-      managePairing: '管理配对', connectDesktop: '连接 Desktop', clearCache: '清除此 Desktop 缓存', signOut: '退出登录',
+      language: '语言', managePairing: '管理配对', connectDesktop: '连接 Desktop',
+      clearCache: '清除此 Desktop 缓存', signOut: '退出登录',
     }
     : {
       account: 'Account', currentAccount: 'Current installation account', currentInstallation: 'Current installation',
-      managePairing: 'Manage pairing', connectDesktop: 'Connect Desktop', clearCache: 'Clear this Desktop cache', signOut: 'Sign out',
+      language: 'Language', managePairing: 'Manage pairing', connectDesktop: 'Connect Desktop',
+      clearCache: 'Clear this Desktop cache', signOut: 'Sign out',
     }
   return (
     <section className={css.accountPage} aria-label={text.currentAccount}>
       <ScreenHeader title={text.account} onBack={onBack} locale={locale} />
-      <img src={avatarUrl} alt="" />
-      <div className={css.identity}>
-        <strong>@{login}</strong>
-        <span>GitHub ID {githubId}</span>
+      <div className={css.accountIdentity} data-account-identity="">
+        <img src={avatarUrl} alt="" />
+        <div className={css.identity}>
+          <strong>@{login}</strong>
+          <span>GitHub ID {githubId}</span>
+        </div>
       </div>
       <span className={css.status}>{text.currentInstallation}</span>
+      <div className={css.languageSetting}>
+        <span>{text.language}</span>
+        <div className={css.languageOptions} role="group" aria-label={text.language}>
+          <button type="button" aria-pressed={locale === 'zh'} onClick={() => { onLocaleChange('zh') }}>中文</button>
+          <button type="button" aria-pressed={locale === 'en'} onClick={() => { onLocaleChange('en') }}>English</button>
+        </div>
+      </div>
       {pairing?.status === 'unavailable' && <p className={css.error} role="alert">{pairing.error}</p>}
       {onOpenPairing !== undefined && (
         <button type="button" className={css.secondary} onClick={onOpenPairing}>
@@ -327,4 +351,13 @@ function unavailableImageLoader(): Promise<string> {
 
 function reportPairingLifecycleError(error: unknown): void {
   console.error('[mobile-personal-pairing] lifecycle failure:', error)
+}
+
+function storedLocale(fallback: 'zh' | 'en'): 'zh' | 'en' {
+  try {
+    const stored = localStorage.getItem(MOBILE_LOCALE_STORAGE_KEY)
+    return stored === 'zh' || stored === 'en' ? stored : fallback
+  } catch {
+    return fallback
+  }
 }

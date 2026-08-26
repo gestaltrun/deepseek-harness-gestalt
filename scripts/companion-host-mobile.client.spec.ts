@@ -73,6 +73,7 @@ describe('Host HTTP failure Companion projection', () => {
 
     const runtime = new CompanionForegroundRuntime()
     const mutations: MobileCompanionMutationChannel = {
+      refreshSurface: vi.fn(() => ({ operationId, completion: Promise.resolve() })),
       create: vi.fn(),
       submit: vi.fn(),
       cancel: vi.fn(() => ({ operationId, completion: Promise.resolve() })),

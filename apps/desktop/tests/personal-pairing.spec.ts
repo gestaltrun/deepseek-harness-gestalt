@@ -168,7 +168,7 @@ describe('DesktopPairingController', () => {
     }])
     const controller = new DesktopPairingController({
       account: accountFixture(), transport,
-      relay: { configure: vi.fn(), start: vi.fn(), stop: vi.fn() },
+      relay: { configure: vi.fn(), start: vi.fn(async () => {}), stop: vi.fn() },
       snowPairingVault: new DesktopSnowPairingVault(),
     })
     await controller.start()
@@ -184,7 +184,7 @@ describe('DesktopPairingController', () => {
       '../../../packages/platform/noise-channel/pkg/dsh_noise_channel_bg.wasm', import.meta.url,
     )))
     const transport = transportFixture()
-    const relay = { configure: vi.fn(), start: vi.fn(), stop: vi.fn() }
+    const relay = { configure: vi.fn(), start: vi.fn(async () => {}), stop: vi.fn() }
     let failNextSave = false
     const save = vi.fn(async () => {
       if (!failNextSave) return
@@ -571,6 +571,39 @@ describe('DesktopPairingController', () => {
     await expect(Promise.all([starting, stopping])).resolves.toEqual([undefined, undefined])
     expect(relay.stop).toHaveBeenCalledWith('quit')
     await controller.dispose()
+  })
+
+  it('keeps the Mobile Access switch actionable while an offline Relay attachment starts', async () => {
+    const startEntered = deferred<undefined>()
+    const startRelease = deferred<undefined>()
+    const relay = {
+      start: vi.fn(async () => {
+        startEntered.resolve(undefined)
+        await startRelease.promise
+      }),
+      stop: vi.fn(async () => {}),
+    }
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset()
+    transport.getMobileAccessState.mockResolvedValue({ enabled: true })
+    const controller = new DesktopPairingController({
+      account: accountFixture(), transport, relay,
+    })
+
+    const starting = controller.start()
+    await startEntered.promise
+    const enabling = controller.setEnabled(true)
+    let observationFailure: unknown
+    try {
+      await vi.waitFor(() => { expect(transport.setMobileAccess).toHaveBeenCalledOnce() }, { timeout: 100 })
+    } catch (error) {
+      observationFailure = error
+    } finally {
+      startRelease.resolve(undefined)
+      await Promise.allSettled([starting, enabling])
+      await controller.dispose()
+    }
+    if (observationFailure !== undefined) throw observationFailure
   })
 
   it('stays locally offline when the remote disable mutation fails and recovers only on explicit enable', async () => {

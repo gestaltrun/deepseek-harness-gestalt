@@ -7,10 +7,16 @@ import { MobilePairing, type MobilePairingActions } from '../src/MobilePairing.t
 afterEach(cleanup)
 
 describe('MobilePairing', () => {
-  it('uses a complete link or QR and shows Desktop-matching authentication words', () => {
+  it('replaces the QR stage with complete-link entry and shows Desktop-matching authentication words', async () => {
     let snapshot: ReturnType<MobilePairingActions['getSnapshot']> = { status: 'ready' }
     const completeLink = vi.fn()
-    const scanQr = vi.fn()
+    let scanSignal: AbortSignal | undefined
+    const scanQr = vi.fn((_preview: HTMLVideoElement, signal: AbortSignal) => {
+      scanSignal = signal
+      return new Promise<void>((_resolve, reject) => {
+        signal.addEventListener('abort', () => { reject(new DOMException('cancelled', 'AbortError')) }, { once: true })
+      })
+    })
     const actions: MobilePairingActions = {
       getSnapshot: () => snapshot,
       subscribe: () => () => {},
@@ -22,17 +28,24 @@ describe('MobilePairing', () => {
       deactivate: vi.fn().mockResolvedValue(undefined),
       unpair: vi.fn().mockResolvedValue(undefined),
     }
-    const { rerender } = render(createElement(MobilePairing, { actions, locale: 'zh' }))
+    const { container, rerender } = render(createElement(MobilePairing, { actions, locale: 'zh' }))
     const link = 'https://platform.example.com/pair?secret=complete-high-entropy-invitation'
+    expect(container.querySelector('[data-pairing-hero="connect"]')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '扫描二维码' }))
     expect(scanQr).toHaveBeenCalledWith(expect.any(HTMLVideoElement), expect.any(AbortSignal))
     expect(screen.getByText('将桌面端设置中的二维码对准取景框')).toBeTruthy()
     expect(screen.queryByRole('textbox', { name: '完整的一次性配对链接' })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '改为粘贴完整链接' }))
+    await waitFor(() => { expect(scanSignal?.aborted).toBe(true) })
+    expect(screen.queryByText('将桌面端设置中的二维码对准取景框')).toBeNull()
+    expect(container.querySelector('[data-pairing-hero="connect"]')).toBeNull()
     fireEvent.change(screen.getByRole('textbox', { name: '完整的一次性配对链接' }), { target: { value: link } })
     fireEvent.click(screen.getByRole('button', { name: '继续配对' }))
     expect(completeLink).toHaveBeenCalledWith(link)
     expect(screen.queryByLabelText(/manual|短码/i)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '改为扫描二维码' }))
+    expect(screen.queryByRole('textbox', { name: '完整的一次性配对链接' })).toBeNull()
+    expect(container.querySelector('[data-pairing-hero="connect"]')).toBeTruthy()
 
     snapshot = {
       status: 'pending', deviceName: 'Alice phone',

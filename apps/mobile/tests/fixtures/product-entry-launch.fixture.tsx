@@ -102,6 +102,7 @@ function connectionChannel(): MobileCompanionConnectionChannel {
   const tracked = () => ({ operationId: crypto.randomUUID() as never, completion: Promise.resolve() })
   return {
     mutations: {
+      refreshSurface: tracked,
       create: tracked,
       submit: tracked,
       cancel: tracked,

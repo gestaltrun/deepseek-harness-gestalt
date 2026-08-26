@@ -708,8 +708,12 @@ async function searchSessions(
   operation: CompanionSearchSessionsOperation,
   host: DesktopHostRpc,
 ): Promise<CompanionSessionSearchResult | CompanionOperationFailedResult> {
-  const response = await host.call('session.search', { query: operation.query })
+  const [response, workspaceResponse] = await Promise.all([
+    host.call('session.search', { query: operation.query }),
+    host.call('workspace.list', {}),
+  ])
   if (!response.ok) return operationFailed(operation, normalizeFailure(response.failure))
+  if (!workspaceResponse.ok) return operationFailed(operation, normalizeFailure(workspaceResponse.failure))
   const parsed = parseSearchValue(response.value)
   if (parsed === undefined) {
     return operationFailed(operation, {
@@ -718,7 +722,20 @@ async function searchSessions(
       message: 'Desktop Host session.search returned an invalid value',
     })
   }
-  return { type: 'session-search', operationId: operation.operationId, ...parsed }
+  const archived = parseArchivedSessionIds(workspaceResponse.value)
+  if (archived === undefined) {
+    return operationFailed(operation, {
+      kind: 'wire',
+      code: 'HOST_WIRE_INVALID',
+      message: 'Desktop Host workspace.list returned an invalid value',
+    })
+  }
+  return {
+    type: 'session-search',
+    operationId: operation.operationId,
+    items: parsed.items.filter(item => !archived.has(item.sessionId)),
+    hasMore: parsed.hasMore,
+  }
 }
 
 function parseSearchValue(value: unknown): Omit<CompanionSessionSearchResult, 'type' | 'operationId'> | undefined {

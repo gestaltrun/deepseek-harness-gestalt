@@ -524,12 +524,16 @@ describe('Desktop Companion product operations', () => {
 
   it('returns authoritative full-text hits and no-hit results without cached substring filtering', async () => {
     const operation = search('needle')
-    const call = vi.fn(async (_method: string, payload: Record<string, unknown>): Promise<DesktopHostRpcResult> => {
-      expect(payload).toEqual({ query: 'needle' })
+    let items = [{ sessionId: 'session-hit', snippet: 'Desktop indexed needle' }]
+    let expectedQuery = 'needle'
+    const call = vi.fn(async (method: string, payload: Record<string, unknown>): Promise<DesktopHostRpcResult> => {
+      if (method === 'workspace.list') return { ok: true, value: { items: [], archivedSessionIds: [] } }
+      expect(method).toBe('session.search')
+      expect(payload).toEqual({ query: expectedQuery })
       return {
         ok: true,
         value: {
-          items: [{ sessionId: 'session-hit', snippet: 'Desktop indexed needle' }],
+          items,
           hasMore: false,
         },
       }
@@ -541,11 +545,29 @@ describe('Desktop Companion product operations', () => {
       items: [{ sessionId: parseCompanionSessionId('session-hit'), snippet: 'Desktop indexed needle' }],
       hasMore: false,
     })
-    call.mockResolvedValueOnce({ ok: true, value: { items: [], hasMore: false } })
+    items = []
+    expectedQuery = 'absent'
     await expect(handleCompanionProductOperation(search('absent'), dependencies)).resolves.toMatchObject({
       type: 'session-search', items: [], hasMore: false,
     })
-    expect(call).toHaveBeenCalledTimes(2)
+    expect(call).toHaveBeenCalledTimes(4)
+  })
+
+  it('excludes Desktop-archived Sessions from authoritative full-text results', async () => {
+    const operation = search('needle')
+    const dependencies = baseDependencies(hostRpc(async method => method === 'session.search'
+      ? { ok: true, value: { items: [
+        { sessionId: 'session-visible', snippet: 'Visible needle' },
+        { sessionId: 'session-archived', snippet: 'Archived needle' },
+      ], hasMore: false } }
+      : { ok: true, value: { items: [], archivedSessionIds: ['session-archived'] } }))
+
+    await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toEqual({
+      type: 'session-search',
+      operationId: operation.operationId,
+      items: [{ sessionId: parseCompanionSessionId('session-visible'), snippet: 'Visible needle' }],
+      hasMore: false,
+    })
   })
 
   it.each([
@@ -569,13 +591,15 @@ describe('Desktop Companion product operations', () => {
       const chunks: Buffer[] = []
       request.on('data', chunk => chunks.push(chunk as Buffer))
       request.on('end', () => {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { rpcId: string }
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { rpcId: string; method: string }
         response.end(JSON.stringify({
           type: 'server-response',
           rpcId: body.rpcId,
           result: {
             ok: true,
-            value: { items: [{ sessionId: 'session-real-entry', snippet: 'real Host result' }], hasMore: false },
+            value: body.method === 'workspace.list'
+              ? { items: [], archivedSessionIds: [] }
+              : { items: [{ sessionId: 'session-real-entry', snippet: 'real Host result' }], hasMore: false },
           },
         }))
       })

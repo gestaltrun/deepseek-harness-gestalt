@@ -47,6 +47,16 @@ describe('startAutoUpdater', () => {
     expect(await readFile(logFile, 'utf8')).toContain('error checksum mismatch')
   })
 
+  it('swallows updater log write failures', async () => {
+    const updater = fakeUpdater()
+    const dir = await mkdtemp(join(tmpdir(), 'gestalt-updater-log-dir-'))
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    configurePackagedAutoUpdater(updater, { logFile: dir })
+    updater.logger?.warn('blocked')
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
   it('does not auto-download and waits for download() after available', () => {
     const updater = fakeUpdater()
     const seen: string[] = []

@@ -276,6 +276,7 @@ export async function repoRoot(cwd: string, selected?: string): Promise<string> 
     const identity = pathIdentity(selected)
     const match = roots.find(root => pathIdentity(root) === identity)
     if (match !== undefined) return match
+    throw new GitCommandError(`selected repository is not available: ${selected}`, 'unknown-repository', 'rev-parse')
   }
   return roots[0]!
 }

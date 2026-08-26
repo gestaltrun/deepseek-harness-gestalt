@@ -1,12 +1,12 @@
 /**
  * The built-in browser tab: an address bar plus a sandboxed iframe.
  *
- * Security model (see browser.ts + the sandbox tokens below): the iframe is
- * ALWAYS sandboxed without `allow-same-origin` (opaque origin — the visited
- * page can never sit on the GUI's origin, read its storage, or reach
- * /sidebar/api) and without `allow-top-navigation` (a page must not hijack
- * the GUI). The address bar only accepts http(s) and refuses loopback /
- * the GUI's own origin. The side card setting "关闭浏览器沙箱" drops the
+ * Security model (see browser.ts + the sandbox tokens below): every iframe
+ * omits `allow-top-navigation`. External pages and the GUI's exact origin
+ * keep an opaque origin. An explicitly allowlisted loopback page receives
+ * `allow-same-origin` so local development servers work; it retains its own
+ * origin privileges but remains cross-origin to the GUI. The side card
+ * setting "关闭浏览器沙箱" drops the
  * sandbox attribute entirely for fully trusted sites — the visited page then
  * runs with the GUI's own origin and full session access, so a persistent
  * warning bar renders while it is off.
@@ -34,9 +34,9 @@ import type { TabComponentProps } from './service.ts'
 import css from './sidebar.module.css'
 
 /**
- * The browser iframe sandbox tokens. NO allow-same-origin (opaque origin —
- * no GUI storage/API access), NO allow-top-navigation (a browsed page must
- * not hijack the GUI). allow-forms/allow-popups/allow-downloads/allow-modals
+ * Baseline browser iframe sandbox tokens. NO allow-same-origin (opaque
+ * origin — no GUI storage/API access), NO allow-top-navigation (a browsed
+ * page must not hijack the GUI). allow-forms/allow-popups/allow-downloads/allow-modals
  * keep login flows working; allow-popups-to-escape-sandbox lets OAuth
  * popups open as normal tabs (they are cross-origin to the GUI either way).
  */

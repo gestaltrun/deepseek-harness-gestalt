@@ -189,8 +189,10 @@ export interface SidebarPrefs {
    * host:port pairs. Empty by default: loopback addresses stay blocked so a
    * browsed page cannot probe local services. Each entry is either a bare
    * hostname (all ports) or host:port; the GUI's own origin is always
-   * allowed regardless. The iframe sandbox still renders allowed local
-   * pages in an opaque origin, exactly like any other site.
+   * allowed regardless. Allowlisted local pages receive `allow-same-origin`
+   * so development servers can use their own storage and fetch behavior,
+   * but remain cross-origin to the GUI. The GUI's exact origin always keeps
+   * an opaque sandbox.
    */
   browserAllowedLoopback: string
   /**

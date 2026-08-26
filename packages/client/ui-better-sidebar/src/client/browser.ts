@@ -3,15 +3,20 @@
  * an http(s) URL, and refuse destinations that would be dangerous to embed
  * in the sidebar iframe. Kept dependency-free so it is unit-testable.
  *
- * The iframe sandbox (opaque origin, no allow-same-origin / top-navigation)
- * is the primary security boundary; this module is the address-bar gate on
- * top of it: only http/https may be navigated, and loopback addresses are
- * refused so a browsed page cannot probe local services by user action.
+ * The iframe sandbox is the primary security boundary; this module is the
+ * address-bar gate on top of it. Only http/https may be navigated. Loopback
+ * addresses are refused unless explicitly allowlisted; allowed loopback
+ * pages retain their own origin privileges but remain cross-origin to the
+ * GUI. The GUI's exact origin always keeps an opaque sandbox.
  * The GUI's OWN origin is explicitly ALLOWED — the user may open the GUI
  * itself in the sidebar (debugging, mirroring); the sandbox still renders
  * it in an opaque origin with no same-origin privileges, exactly like any
  * other site.
  */
+
+import { parseLoopbackAllowlist } from '../loopback-allowlist.ts'
+
+export { parseLoopbackAllowlist } from '../loopback-allowlist.ts'
 
 /** Why a navigation attempt was refused. */
 export type BrowserBlockReason = 'scheme' | 'loopback'
@@ -82,21 +87,6 @@ const FORBIDDEN_SCHEMES = new Set([
   'mailto', 'tel', 'ftp', 'ftps', 'ws', 'wss', 'sftp', 'ssh',
   'chrome', 'chrome-extension', 'moz-extension', 'edge', 'opera', 'resource', 'view-source',
 ])
-
-/** Parse the loopback allowlist into a matcher predicate over host:port. */
-export function parseLoopbackAllowlist(allowlist: string): (host: string, port: string) => boolean {
-  const entries = allowlist.split(',').map(entry => entry.trim().toLowerCase()).filter(entry => entry !== '')
-  const exact = new Set(entries)
-  const hosts = new Set<string>()
-  for (const entry of entries) {
-    if (!entry.includes(':')) hosts.add(entry.replace(/^\[|\]$/g, ''))
-  }
-  return (host, port) => {
-    const key = `${host}:${port}`
-    if (exact.has(key) || exact.has(host)) return true
-    return port !== '' && hosts.has(host)
-  }
-}
 
 /**
  * Whether a loopback URL is explicitly allowlisted by the side card prefs

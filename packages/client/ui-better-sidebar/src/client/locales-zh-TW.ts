@@ -1,14 +1,14 @@
 /**
- * The zh-HK (Traditional Chinese — Hong Kong) dictionary for the betterSidebar
+ * The zh-TW (Traditional Chinese — Taiwan) dictionary for the betterSidebar
  * namespace.
  *
  * Mirrors the key set of `zh` in `locales.ts`. Consumed by better-locale's
- * override store when the active override id is `'zh-HK'` (registered under
+ * override store when the active override id is `'zh-TW'` (registered under
  * the `betterSidebar` namespace). Absent that, the existing zh/en chain
  * runs unchanged.
  *
- * Hong Kong regional conventions:
- * - 软件 → 軟體 (NOT 軟體); 网络 → 網路 (NOT 網路); 鼠标 → 滑鼠
+ * Taiwan regional conventions:
+ * - 软件 → 軟體 (NOT 軟件); 网络 → 網路 (NOT 網絡); 鼠标 → 滑鼠
  * - 檔案 (file), 資料夾 (folder), 程式 (program), 程式碼 (code), 螢幕 (screen)
  * - 預設 (default), 儲存 (save), 設定 (settings/config), 唯讀 (read-only)
  * - 資源管理器 → 檔案總管; refresh → 重新整理; cache → 快取
@@ -29,8 +29,8 @@
  * - English brand names (VS Code, Cursor, Zed, SSH, Git, Chrome) stay as-is.
  */
 
-/** The zh-HK dictionary (key-set-equal to zh, enforced by the type annotation in locales.ts). */
-export const zhTW: Record<string, string> = {
+/** The zh-TW dictionary (key-set-equal to zh, enforced by the type annotation in locales.ts). */
+export const taiwanTraditionalChinese: Record<string, string> = {
   files: '檔案',
   explorer: '檔案總管',
   git: '原始碼管理',

@@ -10,9 +10,9 @@
  *
  * Delivery is a host→browser push over the dedicated `/sidebar/ws/agent-opens`
  * endpoint (the same pattern as `/sidebar/ws/agent-terminals`): the registry
- * keeps a per-session queue; a push is consumed on send (`delivered: true`
- * means a sidebar view was attached at call time), otherwise the request
- * stays queued and is replayed when a view for that session attaches.
+ * keeps a per-session queue; a push is consumed after at least one sender
+ * accepts it (`delivered: true`), otherwise the request stays queued and is
+ * replayed when a view for that session attaches.
  *
  * Conventions (per plugin-development-guide.md §3):
  *   C1 — parameters schema-validated before `execute` runs.
@@ -52,17 +52,48 @@ type Sender = (request: AgentOpenRequest) => void
 /**
  * Per-session queue of open requests plus the connected sidebar views.
  *
- * Lifecycle: `enqueue` adds a request and — when at least one view for the
- * session is attached — pushes it immediately and removes it from the queue
+ * Lifecycle: `enqueue` adds a request and offers it to each attached view.
+ * The request leaves the queue after at least one sender accepts it
  * (consume-on-send: a reconnect must never replay an open the client already
- * applied, and the browser tab type has no per-URL dedupe, so replaying
- * would mint duplicate tabs). With no attached view the request stays queued
- * and `attach` replays it on connect. `drainAll` drops every queued request
- * (the feature was turned off); `dispose` also drops every subscriber.
+ * applied, and the browser tab type has no per-URL dedupe, so replaying would
+ * mint duplicate tabs). Failed senders are reported and detached. With no
+ * successful sender the request stays queued and `attach` retries it on the
+ * next connection. `drainAll` drops every queued request (the feature was
+ * turned off); `dispose` also drops every subscriber.
  */
 export class AgentOpenRegistry {
   private pending = new Map<string, AgentOpenRequest[]>()
   private subscribers = new Map<string, Set<Sender>>()
+
+  /** @param reportSendError - Records a failed transport callback. */
+  constructor(private readonly reportSendError: (error: unknown) => void) {}
+
+  /** Deliver one request to every live view and detach failed transports. */
+  private deliver(sessionId: string, request: AgentOpenRequest): boolean {
+    const views = this.subscribers.get(sessionId)
+    if (views === undefined) return false
+    let delivered = false
+    for (const send of [...views]) {
+      try {
+        send(request)
+        delivered = true
+      } catch (error) {
+        this.reportSendError(error)
+        views.delete(send)
+      }
+    }
+    if (views.size === 0) this.subscribers.delete(sessionId)
+    return delivered
+  }
+
+  /** Deliver queued requests independently, retaining each undelivered item. */
+  private deliverPending(sessionId: string): void {
+    const queued = this.pending.get(sessionId)
+    if (queued === undefined) return
+    const remaining = queued.filter(request => !this.deliver(sessionId, request))
+    if (remaining.length === 0) this.pending.delete(sessionId)
+    else this.pending.set(sessionId, remaining)
+  }
 
   /** Queue one open and deliver it immediately when a view is attached.
    * @returns the request id and whether a connected view received it now. */
@@ -71,13 +102,8 @@ export class AgentOpenRegistry {
     const list = this.pending.get(sessionId) ?? []
     list.push(request)
     this.pending.set(sessionId, list)
-    const views = this.subscribers.get(sessionId)
-    if (views !== undefined && views.size > 0) {
-      for (const send of views) send(request)
-      this.pending.delete(sessionId)
-      return { id: request.id, delivered: true }
-    }
-    return { id: request.id, delivered: false }
+    this.deliverPending(sessionId)
+    return { id: request.id, delivered: !(this.pending.get(sessionId)?.includes(request) ?? false) }
   }
 
   /** Attach one sidebar view (replays queued requests; consume-on-send).
@@ -89,11 +115,7 @@ export class AgentOpenRegistry {
       this.subscribers.set(sessionId, views)
     }
     views.add(send)
-    const queued = this.pending.get(sessionId) ?? []
-    if (queued.length > 0) {
-      for (const request of queued) send(request)
-      this.pending.delete(sessionId)
-    }
+    this.deliverPending(sessionId)
     return () => {
       const current = this.subscribers.get(sessionId)
       current?.delete(send)

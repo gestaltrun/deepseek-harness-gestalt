@@ -50,6 +50,7 @@ import {
 } from './pty-deps.ts'
 import { registerTools } from './tools.ts'
 import { AgentOpenRegistry, registerOpenTool, type AgentOpenRequest } from './agent-opens.ts'
+import { parseLoopbackAllowlist } from './loopback-allowlist.ts'
 import { buildJobsApi, type SidebarJobsRoutes } from './jobs-routes.ts'
 import { buildSubagentLiveApi, type SidebarSubagentLiveRoutes } from './subagent-live-route.ts'
 import { buildSidechatApi, type SidechatRoutes } from './sidechat-routes.ts'
@@ -234,26 +235,6 @@ function shellOverridesOf(getSettings: () => SidebarSettingsFace | undefined): {
   return {
     shell: shell === '' ? undefined : shell,
     shellArgs: args === '' ? undefined : args.split(/\s+/).filter(Boolean),
-  }
-}
-
-/**
- * Parse the browser tab's `browserAllowedLoopback` allowlist into a matcher
- * over host:port (same contract as the client-side helper in
- * src/client/browser.ts — kept in sync). Bare hosts (`localhost`,
- * `127.0.0.1`) match every port; `host:port` entries match exactly.
- */
-function parseLoopbackAllowlist(allowlist: string): (host: string, port: string) => boolean {
-  const entries = allowlist.split(',').map(entry => entry.trim().toLowerCase()).filter(entry => entry !== '')
-  const exact = new Set(entries)
-  const hosts = new Set<string>()
-  for (const entry of entries) {
-    if (!entry.includes(':')) hosts.add(entry.replace(/^\[|\]$/g, ''))
-  }
-  return (host, port) => {
-    const key = `${host}:${port}`
-    if (exact.has(key) || exact.has(host)) return true
-    return port !== '' && hosts.has(host)
   }
 }
 
@@ -645,7 +626,12 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
   // per session and pushes them to connected sidebar views over the
   // `/sidebar/ws/agent-opens` socket. Unlike the pty registry it has no
   // native dependencies — the tool works even in node-pty degraded mode.
-  const agentOpenRegistry = new AgentOpenRegistry()
+  const agentOpenRegistry = new AgentOpenRegistry((error) => {
+    const detail = error instanceof Error ? error.message : String(error)
+    const message = `[dsh-better-sidebar] sidebar_open sender failed: ${detail}`
+    if (ctx.logger !== undefined) ctx.logger.warn(message)
+    else console.error(message)
+  })
 
   // ── User-facing "Side card" preferences ──────────────────────────────────
   // Register the namespace with the settings provider so the Settings page
@@ -1033,9 +1019,8 @@ async function attachAgentOpen(
       return
     }
     const send = (request: AgentOpenRequest): void => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(request))
-      }
+      if (ws.readyState !== WebSocket.OPEN) throw new Error('sidebar_open WebSocket is not open')
+      ws.send(JSON.stringify(request))
     }
     // Attach replays the queued (undelivered) requests for this session; the
     // disposer detaches the view on socket close/error so later opens queue

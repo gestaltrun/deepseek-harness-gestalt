@@ -30,7 +30,7 @@
  */
 
 /** The zh-HK dictionary (key-set-equal to zh, enforced by the type annotation in locales.ts). */
-export const zhHK: Record<string, string> = {
+export const hongKongTraditionalChinese: Record<string, string> = {
   files: '檔案',
   explorer: '檔案總管',
   git: '原始碼管理',

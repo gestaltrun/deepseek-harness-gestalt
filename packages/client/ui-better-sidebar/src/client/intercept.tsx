@@ -130,12 +130,12 @@ export function SidebarProducedFiles(props: {
 export function registerTurnTailInterception(ctx: Context, store: SidebarStore): () => void {
   return ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
     name: 'conversation.chat.turnTail',
-    // Decline the takeover while the editor tab type is disabled in the side
-    // card settings: the produced-files row falls back to the default
-    // deliverables behavior instead of offering chips that cannot open. Also
-    // while the sidebar is externally disabled (aionui-panel chosen).
+    // Decline the takeover while chat file-open interception is disabled, the
+    // editor tab type is disabled, or the sidebar is externally suspended.
+    // The official deliverables row remains the owner in each case.
     select: (owner) => {
       if (store.getSuspended()) return null
+      if (store.getPrefs().interceptOpenPath === false) return null
       if (store.getPrefs().tabsEnabled['editor'] === false) return null
       const matched = selectProducedFiles(owner)
       if (matched !== null) lastProduced = matched

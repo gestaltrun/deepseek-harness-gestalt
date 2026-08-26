@@ -690,9 +690,9 @@ import { it as itDict } from './locales-it.ts'
 import { nl as nlDict } from './locales-nl.ts'
 import { sv as svDict } from './locales-sv.ts'
 import { pl as plDict } from './locales-pl.ts'
-import { zhHK as zhHKDict } from './locales-zh-HK.ts'
-import { zhTW as zhTWDict } from './locales-zh-TW.ts'
-import { zhMO as zhMODict } from './locales-zh-MO.ts'
+import { hongKongTraditionalChinese as zhHKDict } from './locales-zh-HK.ts'
+import { taiwanTraditionalChinese as zhTWDict } from './locales-zh-TW.ts'
+import { macaoTraditionalChinese as zhMODict } from './locales-zh-MO.ts'
 
 /** The ja dictionary (key-set-equal to zh, enforced by the type annotation). */
 export const ja: Record<keyof typeof zh, string> = jaDict as Record<keyof typeof zh, string>

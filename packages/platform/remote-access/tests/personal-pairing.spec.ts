@@ -44,6 +44,21 @@ describe('PersonalPairingProvider', () => {
     })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
   })
 
+  it('authenticates one Mobile Access disable request exactly once', async () => {
+    const currentInstallation = vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken))
+    const provider = new PersonalPairingProvider(new Context(), {
+      account: { currentInstallation },
+      handshake: handshakeProvider(),
+      authority: new MemoryPersonalPairingAuthorityStore(),
+      ownsAuthority: true,
+      pairingLinkOrigin: 'https://platform.example.com/pair',
+    })
+    const desktop = authentication('desktop-installation')
+
+    await expect(provider.setMobileAccess({ desktop, enabled: false })).resolves.toEqual({ enabled: false })
+    expect(currentInstallation).toHaveBeenCalledOnce()
+  })
+
   it('validates endpoint invitation and confirmation stages before publication', async () => {
     let identity = 0
     const provider = configuredProvider({

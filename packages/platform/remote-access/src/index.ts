@@ -1507,14 +1507,15 @@ export class PersonalPairingProvider extends RemoteAccessService {
     enabled: boolean
   }): Promise<MobileAccessState> {
     return this.serialized(async () => {
-      if (!input.enabled) {
+      const owner = input.enabled ? undefined : await this.authenticate(input.desktop, 'desktop')
+      if (owner !== undefined) {
         await this.runTransaction(async () => {
-          const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+          const { account, installation } = owner
           this.stageStoredEndpointRevocations(account.id, installation.id)
         })
       }
       return await this.runTransaction(async () => {
-        const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+        const { account, installation } = owner ?? await this.authenticate(input.desktop, 'desktop')
         this.evictExpiredRecords()
         if (input.enabled) {
           const before = await this.requireTransactionAccess().getDesktop(account.id, installation.id)

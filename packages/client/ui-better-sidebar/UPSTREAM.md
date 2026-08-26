@@ -6,15 +6,15 @@ This package is a pinned source snapshot of [omdsh-dev/DSH-better-sidebar](https
 
 - Repository: `https://github.com/omdsh-dev/DSH-better-sidebar.git`
 - Branch: `main`
-- Commit: `d9b8f15d9eab018742f97d67e54b2398504894cd`
-- Upstream version label: `0.15.2` (`dsh.plugin.json`)
+- Commit: `f9153dfc1ce47cf43445c1b351ee3ae47b4ad9f1`
+- Upstream version label: `0.16.1` (`dsh.plugin.json`)
 - Prefix: `packages/client/ui-better-sidebar/`
 
 Refresh:
 
 ```sh
 git fetch https://github.com/omdsh-dev/DSH-better-sidebar.git main
-git diff --binary d9b8f15d9eab018742f97d67e54b2398504894cd..FETCH_HEAD \
+git diff --binary f9153dfc1ce47cf43445c1b351ee3ae47b4ad9f1..FETCH_HEAD \
   -- dsh.plugin.json src tsdown.config.ts \
   | git apply --3way --index --directory=packages/client/ui-better-sidebar
 ```

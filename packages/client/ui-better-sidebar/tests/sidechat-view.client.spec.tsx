@@ -85,6 +85,7 @@ describe('SideChatView', () => {
       },
       uiRenderer: { mountSession },
       betterSidebar: { updateTab },
+      get: (name: string) => name === 'betterSidebar' ? { updateTab } : undefined,
     } as unknown as Context
 
     const view = render(

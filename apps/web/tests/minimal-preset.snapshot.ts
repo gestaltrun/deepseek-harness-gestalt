@@ -37,9 +37,12 @@ describe('minimal agent preset', () => {
       replayFixture: FIXTURE,
       agentPresets: { roots: [{ path: presetRoot, trust: 'system' }], default: 'minimal' },
     })
+    await scaffold.ctx.settings.replace(settingsNamespace('dsh-better-sidebar'), {
+      agentOpenTools: true,
+    })
     await scaffold.ctx.settings.replace(settingsNamespace('tool-eligibility'), {
       workspaces: {},
-      sessions: { 'minimal-preset-smoke': ['bash'] },
+      sessions: { 'minimal-preset-smoke': ['bash', 'sidebar_open'] },
     })
     disposeInjectedPrompt = scaffold.ctx.systemPrompt.section({
       name: 'test:injected-prompt',
@@ -129,6 +132,7 @@ describe('minimal agent preset', () => {
         "prompt": "You are a helpful software engineer assistant.",
         "tools": [
           "bash",
+          "sidebar_open",
           "tool_search",
         ],
       }

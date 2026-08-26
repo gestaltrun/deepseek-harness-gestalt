@@ -4,8 +4,9 @@
  * button cluster, and the + menu that opens new tabs (explorer / git /
  * terminal). Tabs are draggable; dropping onto another tab inserts before it,
  * dropping on the strip background appends to this pane. Right-clicking a
- * tab opens the tab context menu (close / close others / close to the left /
- * close to the right, all scoped to this pane).
+ * tab opens the tab context menu (float as a free window / close / close
+ * others / close to the left / close to the right, the close ones scoped to
+ * this pane).
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
@@ -111,6 +112,9 @@ export function TabBar(props: {
   newTabOptions: NewTabOption[]
   /** Drop of a tab from any pane: (payload, insertBeforeTabId | null). */
   onDropTab: (payload: TabDragPayload, before: string | null) => void
+  /** Float a tab out as a free window (the tab context menu's entry; the
+   *  drag-to-conversation gesture is handled at the Sidebar shell level). */
+  onFloatTab: (tabId: string) => void
   /** Icon resolver for tab labels (reads from the tab descriptor registry). */
   getTabIcon?: (tab: SidebarTab) => ReactNode
   /** Badge resolver for tab labels (reads the descriptor's `badge`; the
@@ -119,7 +123,7 @@ export function TabBar(props: {
 }) {
   const {
     paneId, tabs, active, windowChrome = false,
-    onActivate, onClose, onNewTab, newTabOptions, onDropTab, getTabIcon, getTabBadge,
+    onActivate, onClose, onNewTab, newTabOptions, onDropTab, onFloatTab, getTabIcon, getTabBadge,
   } = props
   const [menuOpen, setMenuOpen] = useState(false)
   // The tab right-click context menu: the target tab plus the cursor
@@ -373,6 +377,7 @@ export function TabBar(props: {
           open={tabMenu !== null && tabMenuIndex >= 0}
           onClose={() => { setTabMenu(null) }}
           items={[
+            { id: 'float', label: t('moveToFreeWindow') },
             { id: 'close', label: t('close') },
             { id: 'closeOthers', label: t('closeOtherTabs'), ...(tabs.length <= 1 ? { disabled: true } : {}) },
             { id: 'closeLeft', label: t('closeLeftTabs'), ...(tabMenuIndex <= 0 ? { disabled: true } : {}) },
@@ -384,7 +389,9 @@ export function TabBar(props: {
             setTabMenu(null)
             const index = tabs.findIndex(tab => tab.id === target.tabId)
             if (index < 0) return
-            if (id === 'close') {
+            if (id === 'float') {
+              onFloatTab(target.tabId)
+            } else if (id === 'close') {
               onClose(target.tabId)
             } else if (id === 'closeOthers') {
               for (const tab of tabs) {

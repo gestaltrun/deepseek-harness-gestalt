@@ -284,7 +284,8 @@ export class EndpointOwnedPairingMailbox {
    */
   cancelChallenge(challengeId: PairingChallengeId, accountId: PlatformAccountId, desktopInstallationId: InstallationId): void {
     const challenge = this.challenges.get(challengeId)
-    if (challenge === undefined || challenge.accountId !== accountId
+    if (challenge === undefined) return
+    if (challenge.accountId !== accountId
       || challenge.desktopInstallationId !== desktopInstallationId || challenge.pendingPairingId !== undefined) {
       throw mailboxError('Pairing challenge is invalid or unavailable')
     }

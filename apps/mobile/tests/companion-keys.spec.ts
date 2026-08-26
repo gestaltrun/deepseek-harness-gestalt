@@ -251,6 +251,18 @@ describe('PairingCompanionKeyVault', () => {
     expect(restored.attachmentKeyMaterial(work)).toBeUndefined()
   })
 
+  it('identifies older pairings with the same normalized Desktop name', async () => {
+    const vault = new PairingCompanionKeyVault()
+    const home = parsePersonalPairingId('pairing-home-fingerprint')
+    const replacement = parsePersonalPairingId('pairing-home-replacement')
+    vault.retain(home, MATERIAL)
+    vault.retain(replacement, OTHER)
+
+    expect(vault.recordDesktopName(home, 'MacBook-Pro-7.local')).toEqual([])
+    expect(vault.recordDesktopName(replacement, '  macbook-pro-7.LOCAL  ')).toEqual([home])
+    expect(vault.attachmentKeyMaterial(home)).toEqual(MATERIAL)
+  })
+
   it('rejects duplicate Personal Pairing ids in an IndexedDB version-2 document', async () => {
     const store = new IndexedDbMobilePairingStateStore(`mobile-pairing-duplicate-${crypto.randomUUID()}`)
     const accountId = parsePlatformAccountId('account-duplicate')

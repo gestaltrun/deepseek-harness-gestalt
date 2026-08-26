@@ -10,7 +10,7 @@ HTTP 客户端不实现握手，也不存储配对密钥。产品控制器提供
 
 浏览器与 Node adapter 会在物理 socket 上执行 Relay wire 上限，并把消息送入同时限制 item 数与字节数的在线 queue。消费者阻塞或入站 frame 超限时会关闭 socket，而不是累积无 owner 的密文。接收的密文必须指向当前 route 与目标 attachment，endpoint callback 才能观察它。
 
-Desktop 设置所有者只在手机访问开启期间启动该生命周期。关闭窗口会退出 Desktop 进程；sleep、quit、退出账号或关闭手机访问都会停止并排空 socket。不存在 daemon、后台 Host 或 remote wake 路径。
+Desktop 设置所有者只在手机访问开启期间启动该生命周期。它会在 lifecycle authority 串行区内发起物理启动，但释放串行区后才等待网络就绪，因此 WSS attachment 等待期间，设置同步与配对操作仍然可用。关闭窗口会退出 Desktop 进程；sleep、quit、退出账号或关闭手机访问都会停止并排空 socket。不存在 daemon、后台 Host 或 remote wake 路径。
 
 ## 模型体验
 

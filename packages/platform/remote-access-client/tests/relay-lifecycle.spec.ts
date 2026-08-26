@@ -1072,6 +1072,25 @@ describe('DesktopRelayEndpointLifecycle', () => {
     expect(lifecycle.getState()).toEqual({ connected: false, stopReason: 'sleep' })
   })
 
+  it('keeps authority synchronization available while physical start waits for readiness', async () => {
+    const socket = new FakeSocket(false)
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(async () => socket))
+    const grant = desktopGrant('route-pending-start', 'pairing-pending-start', 1)
+    await lifecycle.configure(grant)
+    const starting = lifecycle.start()
+    void starting.catch(() => {})
+    await vi.waitFor(() => { expect(socket.sent).toHaveLength(1) })
+
+    let synchronized = false
+    const synchronization = lifecycle.synchronize([{ ...grant }]).then(() => { synchronized = true })
+    await new Promise((resolve) => { setImmediate(resolve) })
+    expect(synchronized).toBe(true)
+
+    await lifecycle.stop('sleep')
+    await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+    await synchronization
+  })
+
   it.each(['replacement', 'revocation', 'stop'] as const)(
     'settles %s while an inbound callback is pending without a lifecycle lock cycle',
     async (event) => {

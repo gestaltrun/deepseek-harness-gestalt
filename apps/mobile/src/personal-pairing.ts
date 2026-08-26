@@ -89,8 +89,8 @@ export interface MobilePairingKeyRetention {
   selectedPairingId?(): PersonalPairingId | undefined
   /** Select one complete retained Personal Pairing. */
   selectPairing?(pairingId: PersonalPairingId): void
-  /** Persist the authenticated Desktop name carried by its Companion channel. */
-  recordDesktopName?(pairingId: PersonalPairingId, desktopName: string): void
+  /** Persist the authenticated Desktop name and return older pairings with the same normalized fingerprint. */
+  recordDesktopName?(pairingId: PersonalPairingId, desktopName: string): readonly PersonalPairingId[]
   /** Release only one retained Personal Pairing and zero its secret buffers. */
   release?(pairingId: PersonalPairingId): void
   /** Persist one in-flight endpoint pairing before its next external effect. */
@@ -371,13 +371,25 @@ export class MobilePairingController implements MobilePairingActions {
   }
 
   /**
-   * Retain an authenticated Desktop name without deriving identity from Mobile metadata.
+   * Retain an authenticated Desktop name and revoke older pairings with the same normalized name.
    * @param pairingId - Personal Pairing bound into the authenticated channel.
    * @param desktopName - Desktop Installation name carried by foreground synchronization.
+   * @returns settled after every duplicate Platform authority and local secret is removed.
    */
-  recordAuthenticatedDesktopName(pairingId: PersonalPairingId, desktopName: string): void {
-    this.options.attachmentKeys?.recordDesktopName?.(pairingId, desktopName)
-    if (this.pairingId === pairingId) this.publishPaired()
+  async recordAuthenticatedDesktopName(pairingId: PersonalPairingId, desktopName: string): Promise<void> {
+    await this.exclusive(async () => {
+      const retention = this.options.attachmentKeys
+      const duplicates = retention?.recordDesktopName?.(pairingId, desktopName) ?? []
+      for (const duplicate of duplicates) {
+        await this.options.transport.revokeMobilePersonalPairing({
+          authentication: await this.options.installation.authorizeCurrentInstallation(),
+          pairingId: duplicate,
+        })
+        retention?.release?.(duplicate)
+        await retention?.flush?.()
+      }
+      if (this.pairingId === pairingId) this.publishPaired()
+    })
   }
 
   async unpair(): Promise<void> {

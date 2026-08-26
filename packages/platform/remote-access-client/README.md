@@ -10,7 +10,7 @@ The HTTP client does not implement a handshake or store pairing keys. Product co
 
 The browser and Node adapters enforce the Relay wire ceiling on the physical socket and feed an item-and-byte-bounded live queue. A blocked consumer or oversized inbound frame closes the socket instead of accumulating unowned ciphertext. Received ciphertext must name the active route and target attachment before the endpoint callback can observe it.
 
-The Desktop Settings owner starts this lifecycle only while Mobile Access is enabled. Window close quits the Desktop process, and sleep, quit, sign-out, or disabling Mobile Access stops and drains the socket. There is no daemon, background Host, or remote wake path.
+The Desktop Settings owner starts this lifecycle only while Mobile Access is enabled. It initiates physical starts under the lifecycle authority serial but awaits network readiness after releasing that serial, so Settings synchronization and pairing actions remain available while WSS attachment waits. Window close quits the Desktop process, and sleep, quit, sign-out, or disabling Mobile Access stops and drains the socket. There is no daemon, background Host, or remote wake path.
 
 ## Model Experience
 

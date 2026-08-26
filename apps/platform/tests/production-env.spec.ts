@@ -690,6 +690,7 @@ describe('operated Platform composition', () => {
     expect(productComposition).not.toContain('DevelopmentKeylessPairingHandshakeProvider')
     expect(productComposition).not.toContain('MemoryPersonalPairingAuthorityStore')
     expect(productComposition).toContain('RemoteRelayProvider')
+    expect(launchSource).toContain('pairingActivity: remoteAccess.authority')
     expect(productComposition).toContain('OssRemoteAttachmentStore')
     expect(productComposition).toContain('createEcsRamRoleOssClient')
     expect(dockerfileSource).toContain('ali-oss@6.23.0')

@@ -141,6 +141,7 @@ export async function launchOperatedPlatform(
       instanceId: parseRelayInstanceId(config.relay.instanceId),
       routeStore: remoteAccess.routeStore,
       coordinator: remoteAccess.coordinator,
+      pairingActivity: remoteAccess.authority,
       config: {
         capacityRetryAfterMs: config.relay.capacityRetryAfterMs,
         deliveryAckTimeoutMs: config.relay.deliveryAckTimeoutMs,

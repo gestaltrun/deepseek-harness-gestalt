@@ -98,16 +98,32 @@ function PairingPanel({ desktop, snapshot, t }: {
       )}
       {snapshot.pairings.map(pairing => (
         <div className={css.device} key={pairing.id}>
-          <strong>{pairing.deviceName}</strong>
-          <span>{pairing.platform}</span>
-          <span>{pairing.online ? 'online' : 'offline'}</span>
-          <span>Paired <time dateTime={new Date(pairing.pairedAt).toISOString()}>{new Date(pairing.pairedAt).toLocaleString()}</time></span>
-          <span>
-            Last access <time dateTime={new Date(pairing.lastAccessAt).toISOString()}>
-              {new Date(pairing.lastAccessAt).toLocaleString()}
-            </time>
-          </span>
-          <Button variant="outline" onClick={() => { void desktop.pairingRevoke(pairing.id) }}>{t('pairing.revoke')}</Button>
+          <div className={css.deviceIdentity}>
+            <strong>{pairing.deviceName}</strong>
+            <div className={css.deviceBadges}>
+              <span>{pairing.platform}</span>
+              <span className={css.connection} data-online={pairing.online}>
+                {pairing.online ? t('pairing.online') : t('pairing.offline')}
+              </span>
+            </div>
+          </div>
+          <div className={css.deviceAction}>
+            <Button variant="outline" onClick={() => { void desktop.pairingRevoke(pairing.id) }}>{t('pairing.revoke')}</Button>
+          </div>
+          <dl className={css.deviceMetadata}>
+            <div>
+              <dt>{t('pairing.paired')}</dt>
+              <dd><time dateTime={new Date(pairing.pairedAt).toISOString()}>{new Date(pairing.pairedAt).toLocaleString()}</time></dd>
+            </div>
+            <div>
+              <dt>{t('pairing.lastAccess')}</dt>
+              <dd>
+                <time dateTime={new Date(pairing.lastAccessAt).toISOString()}>
+                  {new Date(pairing.lastAccessAt).toLocaleString()}
+                </time>
+              </dd>
+            </div>
+          </dl>
         </div>
       ))}
     </div>

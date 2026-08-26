@@ -138,6 +138,9 @@ export class DesktopPairingController implements DesktopPairingActions {
       }
       const state = stateResult.value
       if (!state.enabled) {
+        this.options.attachmentKeys?.clear()
+        this.options.snowPairingVault?.clear()
+        await this.options.snowPairingVault?.flush()
         this.publish({ status: 'ready', enabled: false, pairings: [] })
         throwSettled([results[0]])
         return this.snapshot

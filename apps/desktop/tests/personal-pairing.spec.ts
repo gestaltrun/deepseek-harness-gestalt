@@ -606,6 +606,28 @@ describe('DesktopPairingController', () => {
     if (observationFailure !== undefined) throw observationFailure
   })
 
+  it('clears revoked local Relay grants before a later Mobile Access re-enable', async () => {
+    const clear = vi.fn()
+    const flush = vi.fn(async () => {})
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset().mockResolvedValue({ enabled: true })
+    transport.listEndpointPending.mockResolvedValue([])
+    const controller = new DesktopPairingController({
+      account: accountFixture(),
+      transport,
+      relay: { start: vi.fn(async () => {}), stop: vi.fn(async () => {}) },
+      snowPairingVault: { clear, flush, desktopRelayGrants: () => [] } as unknown as DesktopSnowPairingVault,
+    })
+    await controller.start()
+    clear.mockClear()
+    flush.mockClear()
+
+    await controller.setEnabled(false)
+
+    expect(clear).toHaveBeenCalledOnce()
+    expect(flush).toHaveBeenCalledOnce()
+  })
+
   it('stays locally offline when the remote disable mutation fails and recovers only on explicit enable', async () => {
     const transport = transportFixture()
     const relay = { configure: vi.fn(async () => {}), start: vi.fn(async () => {}), stop: vi.fn(async () => {}) }

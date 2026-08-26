@@ -43,4 +43,11 @@ describe('AccountControl theme styles', () => {
     expect(enabled).toContain('border-color: var(--dsw-alias-button-info-fill, rgb(65, 118, 230))')
     expect(enabled).toContain('background: var(--dsw-alias-button-info-fill, rgb(65, 118, 230))')
   })
+
+  it('keeps long paired-device content out of the fixed-width action column', () => {
+    expect(block('.device')).toContain('grid-template-columns: minmax(0, 1fr) auto')
+    expect(block('.deviceIdentity')).toContain('min-width: 0')
+    expect(block('.deviceIdentity strong')).toContain('overflow-wrap: anywhere')
+    expect(block('.deviceAction')).toContain('white-space: nowrap')
+  })
 })

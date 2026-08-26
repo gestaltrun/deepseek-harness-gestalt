@@ -254,11 +254,9 @@ async function mountMobileProduct(): Promise<void> {
             })
           },
           (desktopName) => {
-            void Promise.resolve().then(() => {
-              pairingControllerRef.current?.recordAuthenticatedDesktopName(
-                parsePersonalPairingId(pairingSelector), desktopName,
-              )
-            }).catch((error: unknown) => {
+            void pairingControllerRef.current?.recordAuthenticatedDesktopName(
+              parsePersonalPairingId(pairingSelector), desktopName,
+            ).catch((error: unknown) => {
               console.error('[mobile-companion] Paired Desktop name retention failed:', error)
             })
           },

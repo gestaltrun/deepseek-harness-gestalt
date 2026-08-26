@@ -1509,7 +1509,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
     return this.serialized(async () => {
       const owner = input.enabled ? undefined : await this.authenticate(input.desktop, 'desktop')
       if (owner !== undefined) {
-        await this.runTransaction(async () => {
+        await this.runTransaction(() => {
           const { account, installation } = owner
           this.stageStoredEndpointRevocations(account.id, installation.id)
         })
@@ -1799,8 +1799,8 @@ export class PersonalPairingProvider extends RemoteAccessService {
     endpoint: 'desktop' | 'mobile',
   ): Promise<void> {
     await this.serialized(async () => {
-      const endpointOwned = await this.runTransaction(async () => {
-        const { account, installation } = await this.authenticate(authentication, endpoint)
+      const { account, installation } = await this.authenticate(authentication, endpoint)
+      const endpointOwned = await this.runTransaction(() => {
         this.evictExpiredRecords()
         const pairingId = parsePersonalPairingId(inputPairingId)
         const pairing = this.pairings.get(pairingId)
@@ -1826,14 +1826,12 @@ export class PersonalPairingProvider extends RemoteAccessService {
         return false
       })
       if (endpointOwned) {
-        await this.runTransaction(async () => {
-          const { account, installation } = await this.authenticate(authentication, endpoint)
+        await this.runTransaction(() => {
           this.acknowledgeStoredEndpointRevocations(account.id, installation.id, endpoint)
         })
         return
       }
       await this.runTransaction(async () => {
-        const { account, installation } = await this.authenticate(authentication, endpoint)
         this.evictExpiredRecords()
         const pairingId = parsePersonalPairingId(inputPairingId)
         const pairing = this.requireEndpointOwnedPairing(pairingId, account.id, installation.id, endpoint)

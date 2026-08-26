@@ -83,6 +83,8 @@ describe('PersonalPairingProvider', () => {
       expiresAt: NOW + 10_000,
     })
     await provider.cancelEndpointChallenge({ desktop, challengeId: cancelled.challengeId })
+    await expect(provider.cancelEndpointChallenge({ desktop, challengeId: cancelled.challengeId }))
+      .resolves.toBeUndefined()
 
     const incomplete = await prepareEndpointPairing(provider, desktop, mobile, 'incomplete', 'message1')
     await expect(provider.confirmEndpointPairing({
@@ -976,13 +978,19 @@ describe('PersonalPairingProvider', () => {
       desktopCredentialDigest: new Uint8Array(32).fill(21),
       mobileCredentialDigest: new Uint8Array(32).fill(22),
     })
+    const options = Reflect.get(provider, 'options') as PersonalPairingProviderOptions
+    const authenticate = options.account.currentInstallation as ReturnType<typeof vi.fn>
 
     await expect(provider.revokeMobilePersonalPairing({
       mobile: authentication('other-mobile-installation'), pairingId: confirmation.pairing.id,
     })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+    authenticate.mockClear()
     await provider.revokeMobilePersonalPairing({ mobile, pairingId: confirmation.pairing.id })
+    expect(authenticate).toHaveBeenCalledOnce()
+    authenticate.mockClear()
     await expect(provider.revokeMobilePersonalPairing({ mobile, pairingId: confirmation.pairing.id }))
       .resolves.toBeUndefined()
+    expect(authenticate).toHaveBeenCalledOnce()
     expect(relay.revokeCredentialDigest).toHaveBeenNthCalledWith(
       1, expect.any(String), 'desktop', new Uint8Array(32).fill(21),
     )

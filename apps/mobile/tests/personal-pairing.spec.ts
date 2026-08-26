@@ -95,6 +95,50 @@ describe('MobilePairingController', () => {
     })
   })
 
+  it('revokes an older pairing before consolidating the same Desktop fingerprint', async () => {
+    const accountId = parsePlatformAccountId('account-desktop-fingerprint')
+    const previous = parsePersonalPairingId('pairing-previous-desktop')
+    const current = parsePersonalPairingId('pairing-current-desktop')
+    const previousGrant = {
+      routeId: parseRelayRouteId('route-previous-desktop'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(previous),
+    }
+    const currentGrant = {
+      routeId: parseRelayRouteId('route-current-desktop'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(current),
+    }
+    const vault = new PairingCompanionKeyVault()
+    await vault.selectAccount(accountId)
+    vault.retainConfirmedPairing(previous, new Uint8Array(96).fill(1), new Uint8Array(32).fill(2), previousGrant)
+    vault.recordDesktopName(previous, 'MacBook-Pro-7.local')
+    vault.retainConfirmedPairing(current, new Uint8Array(96).fill(3), new Uint8Array(32).fill(4), currentGrant)
+    const installation = installationFixture(() => accountId)
+    const transport = transportFixture()
+    const controller = new MobilePairingController({
+      installation,
+      transport,
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn() },
+      scanner: { scan: vi.fn() },
+      attachmentKeys: vault,
+    })
+    await controller.activate()
+
+    await controller.recordAuthenticatedDesktopName(current, 'macbook-pro-7.LOCAL')
+
+    expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledWith({
+      authentication: await installation.authorizeCurrentInstallation(),
+      pairingId: previous,
+    })
+    expect(vault.attachmentKeyMaterial(previous)).toBeUndefined()
+    expect(controller.getSnapshot()).toEqual({
+      status: 'paired',
+      desktops: [{ pairingId: current, desktopName: 'macbook-pro-7.LOCAL' }],
+      selectedPairingId: current,
+    })
+  })
+
   it.each(['Remote Offline', 'Platform capacity'])('publishes and persists an offline selection while %s retries', async () => {
     const accountId = parsePlatformAccountId('account-offline-selection')
     const home = parsePersonalPairingId('pairing-offline-home')

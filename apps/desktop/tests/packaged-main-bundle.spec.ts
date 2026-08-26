@@ -90,6 +90,7 @@ describe('packaged Desktop main bundle', () => {
     expect(source).not.toMatch(/import\s+['"]@deepseek-ai\//)
     expect(source).toMatch(/from\s+['"]electron['"]/)
     expect(source).toMatch(/import\s*\(\s*['"]electron-updater['"]\s*\)/)
+    expect(source).toMatch(/disableDifferentialDownload/)
     expect(source).toMatch(/from\s+['"]ws['"]/)
     expect(source).not.toContain('node_modules/ws/lib/websocket.js')
     expect(source).toMatch(/from\s+['"]https-proxy-agent['"]/)

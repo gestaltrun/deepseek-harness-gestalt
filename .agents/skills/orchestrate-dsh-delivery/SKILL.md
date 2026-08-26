@@ -5,7 +5,7 @@ description: Orchestrate DeepSeek Harness issue and specification delivery from 
 
 # Orchestrate DSH Delivery
 
-Own the delivery graph from the root task. Treat GitHub Issues, pull requests, checks, and official stacks as durable coordination state. Use Codex tasks and DSH subagents or forks as replaceable executors, not as the source of truth.
+Own the delivery graph from the root task. Treat GitHub Issues, pull requests, checks, and official stacks as durable coordination state. Use Codex tasks and subagents as replaceable executors, not as the source of truth.
 
 ## Establish authority
 
@@ -30,13 +30,12 @@ Complete this phase when the baseline is remotely visible, the planning checkout
 1. Decompose only when the source is not already ticketed. Use the Matt specification and ticket skills for product shaping and blocker-first ticket publication; do not rewrite accepted ticket scope during implementation.
 2. Order tickets by live dependency state. A ready frontier contains only tickets whose blockers are merged into the delivery baseline or represented by an intentional official PR stack.
 3. Keep independent tickets as independent pull requests. Use a stack only for a real code dependency, never merely to gain parallelism.
-4. Run product-shaping prototypes through `subagent_fork` under DSH so the prototype inherits the specification conversation; under Codex, run them in a Codex session. Keep prototype code on its own pushed worktree and branch as durable planning input. Implementation tickets adapt that code into their ticket branches instead of merging it verbatim; retire the prototype branch once its consuming tickets have landed.
 
 Complete this phase when every selected ticket has one base, one acceptance source, and a known dependency position.
 
 ## Dispatch isolated writers
 
-1. Keep the root task as the sole coordinator and merger. Match the writer executor to the runtime: under Codex, prefer one Codex Worktree task per ready ticket when task/worktree tools are available; under DSH, dispatch one `subagent_fork` writer per ready ticket and use plain `subagent` where conversation inheritance adds nothing. Choose each ticket's model at dispatch by the root's judgment; no role pins a model. Every writer commits only inside its own isolated worktree regardless of runtime. Assign the project `ticket_worker` role when custom agents are available.
+1. Keep the root task as the sole coordinator and merger. Prefer one Codex Worktree task per ready ticket when task/worktree tools are available. Assign the project `ticket_worker` role when custom agents are available.
 2. Give each worker exactly one ticket, one `codex/<issue>-<slug>` branch, one worktree, the verified remote baseline branch and SHA, the acceptance criteria, and the required reporting format. Never let two writers mutate the same worktree.
 3. Allow read-heavy exploration, log analysis, and review to run as subagents inside a ticket. Keep one writer for that ticket unless every writer has a disjoint worktree and branch.
 4. Route follow-ups and dependency discoveries through the root task. Sibling agents need no direct communication. Record durable cross-ticket facts in the relevant Issue, pull request, Context document, or Agent Note.
@@ -81,7 +80,7 @@ Complete delivery when every selected ticket is merged or has a concrete reporte
 ## Retire completed work
 
 1. After a ticket pull request lands on the baseline, verify its task is terminal and its exact worktree has no uncommitted files, stash, unpushed commit, or unique commit absent from the remote merged result. Preserve the worktree and report the discrepancy when any check fails.
-2. Under Codex, archive the terminal Codex task. Remove only its validated worktree, delete its merged local and remote ticket branches, and run `git worktree prune`. For an official stack, wait until its descendants no longer depend on the branch.
+2. Archive the terminal Codex task, remove only its validated worktree, delete its merged local and remote ticket branches, and run `git worktree prune`. For an official stack, wait until its descendants no longer depend on the branch.
 3. After the baseline-to-master pull request lands and its tickets close, apply the same checks before removing the baseline worktree and branches. Record an explicit retention reason instead when follow-up work still needs them.
 
 Complete cleanup when every removed path and branch was exact, merged, clean, and replaceable from GitHub, and every retained artifact has a named owner and reason.

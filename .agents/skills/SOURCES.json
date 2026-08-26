@@ -1,0 +1,61 @@
+{
+  "formatVersion": 1,
+  "skills": [
+    {
+      "name": "ego-browser",
+      "path": ".agents/skills/ego-browser",
+      "source": "https://github.com/citrolabs/ego-lite",
+      "sourcePath": "Contents/Resources/ego-skills/ego-browser",
+      "revision": "ego-lite-app-0.4.7.3",
+      "license": "MIT",
+      "localChanges": [
+        "resolve and validate the DSH profile for every Task Space reuse path",
+        "require manual installation through the signed macOS application flow",
+        "align GitHub learning manifests with their tool results"
+      ]
+    },
+    {
+      "name": "retro",
+      "path": ".agents/skills/retro",
+      "source": "https://github.com/mattpocock/skills",
+      "sourcePath": "skills/in-progress/retro",
+      "revision": "6654f6b60cd9d5be8b54c6fafe44346dabeb3b76",
+      "license": "MIT",
+      "localChanges": [
+        "use the Codex skill invocation policy and DeepSeek Harness standards sources"
+      ]
+    },
+    {
+      "name": "show-me",
+      "path": ".agents/skills/show-me",
+      "source": "https://github.com/humanlayer/skills",
+      "sourcePath": "plugins/show-me/skills/show-me",
+      "revision": "3c2629142c5d437428269b1b722b08c0b87f574d",
+      "license": "MIT",
+      "localChanges": []
+    },
+    {
+      "name": "skill-doctor",
+      "path": ".agents/skills/skill-doctor",
+      "source": "https://github.com/warpdotdev/common-skills",
+      "sourcePath": ".agents/skills/skill-doctor",
+      "revision": "59d10d6d0fed69b76c392c7e12f8813a49edd6a2",
+      "license": "MIT",
+      "localChanges": [
+        "render diffs with self-contained HTML instead of a bundled JavaScript dependency",
+        "cover Codex and Warp session parsing"
+      ]
+    },
+    {
+      "name": "unslop",
+      "path": ".agents/skills/unslop",
+      "source": "https://github.com/cursor/plugins",
+      "sourcePath": "pstack/skills/unslop",
+      "revision": "bdf7aa355337897f167153e05069aca505dae17c",
+      "license": "MIT",
+      "localChanges": [
+        "scope voice changes to user-facing prose and defer repository contracts to dsh-prose-standard"
+      ]
+    }
+  ]
+}

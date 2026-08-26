@@ -10,15 +10,15 @@ Repository agents need shared workflows for visual explanations, skill assessmen
 
 ## Decision
 
-The repository stores `show-me`, `skill-doctor`, `retro`, `unslop`, and `ego-browser` under `.agents/skills`. These are repository agent workflows; they do not add DeepSeek Harness runtime packages or change a shipped bundle.
+The repository stores `show-me`, `skill-doctor`, `retro`, `unslop`, and `ego-browser` under `.agents/skills`. These are repository agent workflows; they do not add DeepSeek Harness runtime packages or change a shipped bundle. [`.agents/skills/SOURCES.json`](../../../skills/SOURCES.json) pins each upstream source and records local adaptations, while each Skill directory preserves its upstream MIT notice. The generated [third-party notices](../../../../THIRD_PARTY_NOTICES.md) disclose the same records.
 
-The repository copy of `ego-browser` requires the ego profile named `DSH`. Its task-space helper resolves that profile through `listProfiles()` for each operation, passes the returned id to `globalThis.ego.createTaskSpace(name, profileId)`, and rejects an existing matching task space owned by another profile. The helper fails when the profile name is absent or ambiguous.
+The repository copy of `ego-browser` requires the ego profile named `DSH`. Its helpers resolve that profile through `listProfiles()` before creation, reuse, claim, or takeover; pass the returned id to `globalThis.ego.createTaskSpace(name, profileId)` for creation; and reject an existing matching task space owned by another profile. The helpers fail when the profile name is absent or ambiguous. Installation remains a user-operated download and macOS trust flow; the Skill does not download installers, replace applications, remove quarantine metadata, or invoke an installer as root.
 
-Generated interpreter caches and local skill reports remain outside version control. The bundled `pierre-diffs.js` renderer retains literal whitespace in template strings, so its path disables Git's `blank-at-eol` check without weakening whitespace checks for other files.
+Generated interpreter caches and local skill reports remain outside version control. `skill-doctor` renders proposed diffs with self-contained HTML instead of committing a third-party JavaScript bundle.
 
 ## Verification
 
-Repository skill metadata and documentation checks cover the installed files. A real ego runtime check creates a temporary task space, verifies `profileName` is `DSH`, and removes the space after the assertion.
+Repository skill metadata and documentation checks cover the installed files. A real ego runtime check creates a temporary task space, verifies `profileName` is `DSH`, and removes the space after the assertion. A negative runtime check creates a temporary space under another profile and verifies the DSH resolver rejects it before claim or takeover.
 
 ## Alternatives considered
 
@@ -28,6 +28,8 @@ Repository skill metadata and documentation checks cover the installed files. A 
 
 **Store the current `Profile 2` id.** Ego may assign a different id after profile changes or on another machine. Resolving the unique `DSH` name retains the intended account without treating a local identifier as configuration.
 
+**Keep the bundled diff renderer.** The bundle adds an opaque dependency closure and license burden to a repository workflow. Native escaped HTML retains local, self-contained reports without that copied runtime.
+
 ## Consequences
 
-Agents operating in this repository receive the same five workflows. Browser work stops with a profile configuration error instead of silently using another account. Updates from the upstream ego skill must preserve or deliberately revise the repository-specific `DSH` policy.
+Agents operating in this repository receive the same five workflows. Browser work stops with a profile configuration error instead of silently using another account. Upstream Skill updates must refresh `SOURCES.json`, retain the license, and preserve or deliberately revise repository adaptations.

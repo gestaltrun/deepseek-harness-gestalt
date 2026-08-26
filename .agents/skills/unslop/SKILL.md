@@ -1,22 +1,22 @@
 ---
 name: unslop
-description: Cut AI tells from any writing. Must always apply.
+description: Remove AI tells from conversational and other voice-led user-facing prose. Apply it to prose replies; for repository contracts, comments, diagnostics, Agent Notes, and technical docs, preserve exact terminology and defer to dsh-prose-standard.
 ---
 
 # Unslop
 
-Edit text to remove AI patterns and add human voice.
+Edit conversational and voice-led user-facing text to remove AI patterns and add human voice. For repository prose, use `dsh-prose-standard`; apply only the pattern removals that preserve every contract, technical term, failure mode, and factual claim.
 
 ## Process
 
 1. Scan for the patterns below.
 2. Rewrite. Preserve meaning, match intended tone.
-3. Add soul (see next section).
+3. Add voice when the target is voice-led prose.
 4. Self-audit: "What makes this obviously AI generated?" Fix remaining tells.
 
-## Adding soul
+## Voice-led prose
 
-Removing patterns is half the job. Sterile, voiceless writing is just as obvious.
+Use these choices for conversational, editorial, or marketing prose. Do not add opinions, first person, deliberate mess, or emotional reactions to code comments, Agent Notes, diagnostics, reference docs, or other contract prose.
 
 - **Have opinions.** React to facts instead of neutrally listing pros and cons.
 - **Vary rhythm.** Short sentences. Then longer ones that take their time. Mix it up.
@@ -69,7 +69,7 @@ Removing patterns is half the job. Sterile, voiceless writing is just as obvious
 
 ### Jargon
 
-26. **Abstract metaphor nouns.** Substrate, wedge, vector, locus, vantage, nexus, primitive (as noun), harness (as metaphor), surface (as in "API surface"), bedrock, scaffolding (as metaphor), modality, paradigm, gold-plating, ratchet (as metaphor), evacuate (for moving code), endgame, north star, flywheel. These read as technical but usually have a plainer concrete word. "Substrate" becomes "base". "Wedge in" becomes "add". "Vector" becomes "way" or "method". "Gold-plating" becomes "more than the job needs". "Ratchet" becomes the mechanism's real name or "a limit that only tightens". "Evacuate" becomes "move out". "Endgame" becomes "the last phase". Pick the concrete word.
+26. **Abstract metaphor nouns.** Substrate, wedge, vector, locus, vantage, nexus, primitive (as noun), harness (as metaphor), bedrock, scaffolding (as metaphor), modality, paradigm, gold-plating, ratchet (as metaphor), evacuate (for moving code), endgame, north star, flywheel. These read as technical but usually have a plainer concrete word. Preserve a term when the repository defines it precisely. "Substrate" becomes "base". "Wedge in" becomes "add". "Vector" becomes "way" or "method". "Gold-plating" becomes "more than the job needs". "Ratchet" becomes the mechanism's real name or "a limit that only tightens". "Evacuate" becomes "move out". "Endgame" becomes "the last phase". Pick the concrete word.
 
 ### Plain speech
 

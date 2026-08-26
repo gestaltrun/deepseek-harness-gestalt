@@ -10,15 +10,15 @@ Status: implemented
 
 ## Decision
 
-仓库在 `.agents/skills` 下保存 `show-me`、`skill-doctor`、`retro`、`unslop` 和 `ego-browser`。这些是仓库智能体工作流，不会增加 DeepSeek Harness 运行时包，也不会改变已发布的 Bundle。
+仓库在 `.agents/skills` 下保存 `show-me`、`skill-doctor`、`retro`、`unslop` 和 `ego-browser`。这些是仓库智能体工作流，不会增加 DeepSeek Harness 运行时包，也不会改变已发布的 Bundle。[`.agents/skills/SOURCES.json`](../../../skills/SOURCES.json) 会固定各自的上游来源并记录本地适配，每个 Skill 目录则保留对应上游的 MIT 声明。生成的[第三方声明](../../../../THIRD_PARTY_NOTICES.md)会披露同一组记录。
 
-仓库内的 `ego-browser` 要求使用名为 `DSH` 的 ego Profile。其 Task Space helper 每次操作都通过 `listProfiles()` 解析该 Profile，将返回的 ID 传给 `globalThis.ego.createTaskSpace(name, profileId)`，并拒绝复用属于其他 Profile 的同名 Task Space。如果该名称不存在或不唯一，helper 会失败。
+仓库内的 `ego-browser` 要求使用名为 `DSH` 的 ego Profile。其 helper 会在创建、复用、claim 或 takeover 前通过 `listProfiles()` 解析该 Profile；创建时将返回的 ID 传给 `globalThis.ego.createTaskSpace(name, profileId)`；遇到属于其他 Profile 的同名 Task Space 时则拒绝继续。如果该名称不存在或不唯一，helper 会失败。安装由用户自行下载并经过 macOS 信任流程；Skill 不会下载安装器、替换应用、删除 quarantine 元数据，也不会以 root 身份调用安装器。
 
-解释器生成的缓存和本地技能报告不进入版本控制。`pierre-diffs.js` 渲染器 Bundle 的模板字符串含有字面空白，因此其路径会关闭 Git 的 `blank-at-eol` 检查，不会削弱其他文件的空白检查。
+解释器生成的缓存和本地技能报告不进入版本控制。`skill-doctor` 使用自包含 HTML 渲染建议 diff，不会提交第三方 JavaScript Bundle。
 
 ## Verification
 
-仓库技能元数据和文档检查覆盖已安装文件。真实 ego 运行时检查会创建一个临时 Task Space，验证 `profileName` 为 `DSH`，并在断言后删除该 Space。
+仓库技能元数据和文档检查覆盖已安装文件。真实 ego 运行时检查会创建一个临时 Task Space，验证 `profileName` 为 `DSH`，并在断言后删除该 Space。负向运行时检查会在另一个 Profile 下创建临时 Space，并验证 DSH resolver 在 claim 或 takeover 前拒绝该 Space。
 
 ## Alternatives considered
 
@@ -28,6 +28,8 @@ Status: implemented
 
 **保存当前的 `Profile 2` ID。** Profile 变化后或换一台机器时，ego 可能分配不同 ID。按唯一的 `DSH` 名称解析，可以保留目标账号，而不把本地标识符当成配置。
 
+**保留打包后的 diff 渲染器。** 该 Bundle 会给仓库工作流带来不透明的依赖闭包和许可证负担。原生转义 HTML 同样能让报告保持本地、自包含，而无需复制该运行时。
+
 ## Consequences
 
-在本仓库中运行的智能体会获得相同的五个工作流。浏览器操作会在 Profile 配置错误时停止，不会静默使用其他账号。以后从上游更新 ego Skill 时，必须保留或有意修订仓库专用的 `DSH` 规则。
+在本仓库中运行的智能体会获得相同的五个工作流。浏览器操作会在 Profile 配置错误时停止，不会静默使用其他账号。以后更新上游 Skill 时，必须刷新 `SOURCES.json`、保留许可证，并保留或有意修订仓库适配。

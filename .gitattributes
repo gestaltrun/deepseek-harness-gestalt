@@ -8,9 +8,6 @@
 
 *.pdf binary
 
-# The bundled skill-doctor renderer contains literal whitespace in template strings.
-.agents/skills/skill-doctor/assets/pierre-diffs.js whitespace=-blank-at-eol
-
 # Pairing records are generated from the three confirmed owner-blob pairs.
 # The worktree-local installer registers the fail-closed driver command.
 *.i18n.yaml merge=dsh-translation-pairing

@@ -10,10 +10,8 @@ Python 3.9+, stdlib only. Uses system fonts so the page and the exported PNG
 render the same everywhere.
 """
 
-import base64
 import html
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -23,10 +21,6 @@ GRADES = [
     (0.77, "C+"), (0.73, "C"), (0.70, "C-"),
     (0.60, "D"), (0.0, "F"),
 ]
-
-DIFFS_BUNDLE_PATH = (
-    Path(__file__).resolve().parent.parent / "assets" / "pierre-diffs.js"
-)
 
 # Collapsed height of a diff before the "show more" toggle takes over.
 DIFF_CLAMP_PX = 320
@@ -51,27 +45,14 @@ def esc(v) -> str:
 def render_diff(diff_text: str, proposed_path: str = "") -> str:
     if not diff_text:
         return ""
-    encoded = base64.b64encode(diff_text.encode("utf-8")).decode("ascii")
     filename = Path(proposed_path).name if proposed_path else "SKILL.md"
     return (
         '<div class="diff-wrap" data-collapsed="true">'
-        f'<div class="diff-view" data-pierre-diff data-diff="{encoded}" '
-        f'data-filename="{esc(filename)}">'
-        f'<pre class="diff-fallback">{esc(diff_text)}</pre></div>'
+        f'<div class="diff-filename">{esc(filename)}</div>'
+        f'<pre class="diff-view diff-fallback">{esc(diff_text)}</pre>'
         '<button class="diff-toggle" type="button" hidden>show more</button>'
         "</div>"
     )
-
-
-def embedded_diffs_script() -> str:
-    if not DIFFS_BUNDLE_PATH.exists():
-        raise RuntimeError(
-            f"@pierre/diffs bundle missing: {DIFFS_BUNDLE_PATH}; "
-            "restore it from warpdotdev/skill-doctor, which builds the bundle "
-            "with `pnpm build:diffs`"
-        )
-    bundle = DIFFS_BUNDLE_PATH.read_text()
-    return re.sub(r"</script", r"<\\/script", bundle, flags=re.IGNORECASE)
 
 
 # Warp pixel mark (../assets/warp-pixel-icon.svg), inlined so the page stays
@@ -149,8 +130,9 @@ li { margin-bottom: 10px; }
 .stat .num { font-size: 34px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .stat .lbl { font-size: 12px; color: var(--muted); margin-top: 2px; text-transform: lowercase; }
 .diff-wrap { margin: 10px 0 4px; }
-.diff-view { display: grid; gap: 10px; max-width: 100%; }
-.diff-view > * { min-width: 0; }
+.diff-filename { background: var(--bg-panel); border: 1px solid var(--line); border-bottom: 0;
+  padding: 8px 16px; color: var(--muted); font-size: 11px; }
+.diff-view { display: block; max-width: 100%; }
 .diff-fallback { background: var(--bg-panel); border: 1px solid var(--line); padding: 13px 16px;
   color: var(--muted); font-size: 12px; line-height: 1.7; overflow-x: auto; margin: 0; white-space: pre; }
 .diff-wrap[data-overflowing="true"][data-collapsed="true"] .diff-view {
@@ -244,7 +226,6 @@ def render_page(r) -> str:
   </div></div>
   <a class="cta-button" href="{esc(r.get('cta_url', 'https://warp.dev/factories/request-access'))}">Request access</a>
 </div>
-<script>{embedded_diffs_script()}</script>
 <script>{page_script(card_data)}</script>
 </body></html>"""
 

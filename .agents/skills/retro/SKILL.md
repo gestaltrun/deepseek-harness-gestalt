@@ -8,7 +8,7 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 
 ## Steps
 
-1. Call the Skill tool with `writing-for-agents` for the writing style guide.
+1. Use [`writing-for-agents`](../writing-for-agents/SKILL.md) for the writing standard.
 
 2. Read the primary sources for the session the user specifies. This may mean searching through session logs on this machine. If the user doesn't specify a session, default to the current one.
 
@@ -32,13 +32,13 @@ Remember that all work goes through two stages: implementation and review. The i
 
 The review agent has the least context pressure - it receives a diff, so no exploration needed. It often does not need to write code or debug.
 
-This means that the review agent should be responsible for imposing coding standards, not the implementation agent.
+Implementation and review agents both follow the repository standards. Put independent enforcement in review or an automated check when repeating it during implementation would add context without changing implementation decisions.
 
 ### Files
 
 You have access to several files in the repo:
 
-- `CLAUDE.md`/`AGENTS.md`: these files are pushed to the context window of any agent working in this repo. They should be used incredibly sparingly, usually only for **navigation pointers** to other files.
-- `CODING_STANDARDS.md`: this file is read during review, not implementation. Add **navigation pointers** to docs folders if the standards file gets more than 1,000 lines long.
-- Docs: use docs as references files, pointed to by other files. Look for existing docs before writing new ones.
-- Skills: use skills for docs (since their description goes into the agent's context window), or for user-invoked commands. Follow the advice in the `writing-for-agents` skill.
+- [`AGENTS.md`](../../../AGENTS.md): standing repository instructions loaded for implementation and review. Keep additions short and link to the owning reference.
+- [`dsh-code-review`](../dsh-code-review/SKILL.md): review-only checks that need independent judgment.
+- [`docs/`](../../../docs/): human-facing references and contributor procedures. Reuse the owning document instead of adding a second explanation.
+- [`.agents/skills/`](../): reusable workflows and decision standards. Follow [`writing-for-agents`](../writing-for-agents/SKILL.md) when changing them.

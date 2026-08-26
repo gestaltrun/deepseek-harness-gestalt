@@ -6,6 +6,7 @@ import {
   CLAUDE_AGENT_SDK_PACKAGE,
   claudeDistributionFromManifest,
   collectPythonDependencies,
+  collectRepositorySkillSources,
   isOwnerAuthorizedRuntime,
   isPermissive,
   type Manifest,
@@ -28,6 +29,20 @@ describe('THIRD_PARTY_NOTICES.md', () => {
     const generated = render()
     expect(generated).toContain('It depends on the third-party software listed below.')
     expect(readFileSync(resolve(root, 'THIRD_PARTY_NOTICES.md'), 'utf8'), 'stale notices — run `pnpm run gen-third-party-notices`').toBe(generated)
+  })
+
+  it('discloses every copied repository Skill from its pinned source manifest', () => {
+    const skills = collectRepositorySkillSources()
+
+    expect(skills.map(skill => skill.name)).toEqual([
+      'ego-browser',
+      'retro',
+      'show-me',
+      'skill-doctor',
+      'unslop',
+    ])
+    expect(skills.every(skill => skill.license === 'MIT')).toBe(true)
+    expect(render()).toContain('## Repository agent Skills (`.agents/skills/`)')
   })
 })
 

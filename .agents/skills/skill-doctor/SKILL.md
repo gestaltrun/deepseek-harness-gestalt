@@ -21,7 +21,7 @@ REPORT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/skill-doctor-XXXXXXXX")"
 ## Step 1: Collect
 
 ```bash
-python3 "$SKILL_ROOT/scripts/collect_sessions.py" --out "$REPORT_DIR"
+python3 -B "$SKILL_ROOT/scripts/collect_sessions.py" --out "$REPORT_DIR"
 ```
 
 This scopes to the git repo containing the current directory: skills are discovered from the repo's `.agents/skills`, `.claude/skills`, and `.codex/skills`, and only sessions whose working directory is inside the repo are scored. By default `--harness auto` scans every available local source: Claude Code project-history JSONL, Codex rollout JSONL, and Warp's read-only `warp.sqlite` conversation stores. Duplicate Warp conversations across installed channels are deduplicated by conversation ID.
@@ -105,7 +105,7 @@ Write `$REPORT_DIR/report.json`:
 ```
 
 ```bash
-python3 "$SKILL_ROOT/scripts/render_report.py" "$REPORT_DIR/report.json"
+python3 -B "$SKILL_ROOT/scripts/render_report.py" "$REPORT_DIR/report.json"
 ```
 
 This writes a single self-contained `$REPORT_DIR/report.html`: the scorecard, findings, and suggested skill edits on one page. Long diffs are collapsed behind a "show more" toggle, and a "share as png" button exports a 1200x675 share image locally. There is no separate card file to open or screenshot.

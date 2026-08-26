@@ -1,34 +1,23 @@
 # Install ego lite
 
-Read this file only when ego lite isn't installed yet, or when the user asks to install ego lite. For day-to-day browser work, go back to `SKILL.md`.
+Read this file only when ego lite isn't installed yet, or when the user asks to install ego lite. For day-to-day browser work, return to [the main skill](../SKILL.md).
 
 The ego-browser skill depends on the ego lite browser: the `ego-browser` command is provided by the ego lite app. Once ego lite is installed and you've gone through onboarding once, the environment is ready and there are no further environment issues.
 
 ego lite website: https://lite.ego.app/
 
-## Install steps (macOS only)
+## Install
 
-The install script lives at `scripts/install.sh` in this skill and supports macOS only. It will:
+Installation changes the user's applications and browser account state. Proceed only after the user explicitly asks to install ego lite.
 
-- Download the ego lite installer (a DMG) for your CPU architecture (arm64 / x64).
-- Install `ego lite.app` to `/Applications` (falling back to `~/Applications` when needed).
-- Strip the quarantine attribute to keep Gatekeeper from blocking the first launch.
-- After installing, launch the `ego lite` app.
+Open [lite.ego.app](https://lite.ego.app/) and ask the user to download and install the current macOS release through the normal Finder and Gatekeeper flow. Do not download an unpinned installer from a script, remove quarantine metadata, replace an existing application, run an installer as root, or bypass macOS signature and notarization checks.
 
-Run the script (use the script's actual path under this skill's directory):
-
-```bash
-sh skills/ego-browser/scripts/install.sh
-```
-
-After installing, the script opens the ego lite app directly. If ego lite is already installed, the script skips the download and opens the app directly.
-
-After the script opens the ego lite app, the user completes the first-run onboarding in the app:
+After installation, the user opens ego lite and completes first-run onboarding:
 
 - Choose to import data from Chrome or another browser as needed.
 - Onboarding registers the `ego-browser` command on the PATH (usually under `~/.local/bin`).
 
-Onboarding is a step the user completes in the GUI. After the script opens ego lite, wait for the user to confirm they've finished onboarding before continuing.
+Wait for the user to confirm that installation and onboarding are complete before continuing.
 
 ## After installing: confirm `ego-browser` is available
 
@@ -57,11 +46,11 @@ Printing `ego-browser ready` means the environment is ready.
 
 ## After that, return to the original task
 
-Once the environment is ready, return to the user's original task and continue with the task space flow in `SKILL.md` — start from `useOrCreateTaskSpace(name)` and proceed as usual.
+Once the environment is ready, return to the user's original task. Define the DSH helpers from [Quick start](../SKILL.md#quick-start) and begin with `useDshTaskSpace(name)`.
 
 ## Troubleshooting
 
-- **Not macOS**: the script supports macOS only (`uname -s` is `Darwin`). On other platforms, have the user download and install from the ego lite website at https://lite.ego.app/.
-- **Download failed**: the script retries 3 times automatically; if it still fails, it's usually a network issue — have the user check their network and retry.
-- **Gatekeeper still blocks it**: the script already tries to strip quarantine; if the first launch is still blocked, have the user allow ego lite manually under System Settings → Privacy & Security.
+- **Not macOS**: follow the platform support and installation instructions at [lite.ego.app](https://lite.ego.app/).
+- **Download failed**: have the user check their network and retry the official download.
+- **Gatekeeper blocks it**: stop and let the user review the macOS warning. Do not remove quarantine metadata or bypass the trust check.
 - **Command still unavailable after onboarding**: confirm `~/.local/bin` is on the PATH (see above); or have the user reopen ego lite, finish onboarding, and retry.

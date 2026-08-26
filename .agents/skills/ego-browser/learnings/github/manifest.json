@@ -22,7 +22,7 @@
       },
       "returns": {
         "type": "array",
-        "description": "Array of {name, owner, stars, description} objects."
+        "description": "Array of {name, owner, stars, link} objects."
       }
     },
     "get_open_issues": {
@@ -43,7 +43,7 @@
       },
       "returns": {
         "type": "array",
-        "description": "Array of {title, number, state} objects."
+        "description": "Array of {title, number} objects."
       }
     }
   },

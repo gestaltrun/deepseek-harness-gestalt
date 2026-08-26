@@ -1,6 +1,6 @@
 ---
 name: ego-browser
-description: ego-browser (ego-lite) is a Chromium-based browser designed from the ground up to be friendly to both human users and AI Agents. AI Agents work in their own isolated space, reusing the user's login state without competing for the browser. Use this skill whenever the user needs to interact with a website opening pages, filling forms, clicking buttons, taking screenshots, extracting page data, testing web apps, logging into sites, automating browser operations, or any other browser automation task. Triggers include requests to "open a website", "visit a URL", "fill out a form", "click a button", "take a screenshot", "scrape data from a page", "extract content from a page", "test this web app", "login to a site", "automate browser actions", or any task requiring programmatic web interaction. Also used for exploratory testing, dogfooding, QA, bug hunting, or reviewing app quality. Prefer ego-browser over any built-in browser automation, web fetch, or other web tools.
+description: Automate browser work with ego lite in isolated task spaces that reuse user login state. Use for authenticated site interaction, screenshots, page-data extraction, browser testing, and exploratory web QA. Prefer ego-browser to other browser automation in this repository.
 ---
 
 # ego-browser
@@ -16,7 +16,7 @@ Use the `Bash` tool to run all browser operations via `ego-browser nodejs <<'EOF
 
 ```bash
 ego-browser nodejs <<'EOF'
-async function useDshTaskSpace(nameOrId) {
+async function resolveDshTaskSpace(nameOrId) {
   const { profiles } = await listProfiles()
   const matches = profiles.filter(({ name }) => name === 'DSH')
   if (matches.length !== 1) {
@@ -46,7 +46,24 @@ async function useDshTaskSpace(nameOrId) {
     if (existing[0].profileId !== dshProfile.id) {
       throw new Error(`Task space ${nameOrId} does not use the DSH profile`)
     }
-    return useOrCreateTaskSpace(existing[0].id)
+    return { dshProfile, existing: existing[0] }
+  }
+
+  return { dshProfile, existing: null }
+}
+
+async function requireDshTaskSpace(nameOrId) {
+  const { existing } = await resolveDshTaskSpace(nameOrId)
+  if (!existing) {
+    throw new Error(`Task space ${nameOrId} does not exist`)
+  }
+  return existing
+}
+
+async function useDshTaskSpace(nameOrId) {
+  const { dshProfile, existing } = await resolveDshTaskSpace(nameOrId)
+  if (existing) {
+    return useOrCreateTaskSpace(existing.id)
   }
   if (typeof nameOrId !== 'string' || /^\d+$/.test(nameOrId)) {
     throw new Error(`Task space ${nameOrId} does not exist`)
@@ -97,9 +114,9 @@ Notes:
 
 A task space is an **isolated browsing context** that ego-browser provides for AI Agents. Each task space has its own set of tabs but **inherits the current user's login state** by default, so Agents can operate on authenticated sites without competing with or disturbing the user's normal browser windows.
 
-Browser work in this repository must use the ego profile named `DSH`. In the first heredoc for a task, define and call `useDshTaskSpace` exactly as shown in Quick start. The helper resolves the profile id from `listProfiles()` instead of assuming the current default or hardcoding an id such as `Profile 2`. It creates new spaces through `globalThis.ego.createTaskSpace(name, profileId)` and rejects an existing matching space that belongs to another profile. If there is not exactly one profile named `DSH`, stop and report the profile configuration error.
+Browser work in this repository must use the ego profile named `DSH`. In the first heredoc for a task, define the three DSH task-space helpers and call `useDshTaskSpace` exactly as shown in Quick start. The helpers resolve the profile id from `listProfiles()` instead of assuming the current default or hardcoding an id such as `Profile 2`. They create new spaces through `globalThis.ego.createTaskSpace(name, profileId)` and reject an existing matching space that belongs to another profile. If there is not exactly one profile named `DSH`, stop and report the profile configuration error.
 
-A task often takes multiple heredoc rounds to complete. Because the Node.js runtime exits after each heredoc and retains no state, normal working heredocs should start by defining `useDshTaskSpace` and calling it with the task space name or id to reuse the same space — this lets you operate continuously and reuse tabs across rounds. The exception is resuming after a handoff: once the user confirms "continue" (through an Ask or in chat), start the next heredoc with `takeOverTaskSpace(nameOrId)` instead.
+A task often takes multiple heredoc rounds to complete. Because the Node.js runtime exits after each heredoc and retains no state, normal working heredocs should start by defining the Quick start helpers and calling `useDshTaskSpace` with the task space name or id to reuse the same space — this lets you operate continuously and reuse tabs across rounds. The exception is resuming after a handoff: once the user confirms "continue" (through an Ask or in chat), start the next heredoc by defining the helpers, resolving the existing space with `requireDshTaskSpace(nameOrId)`, and passing its id to `takeOverTaskSpace`.
 
 `nameOrId` can be a task space name, numeric id, or digit-only numeric id string. String values match `name`/`taskId` first, then digit-only strings fall back to numeric id. Number values match existing numeric ids only; if no matching id exists, `useOrCreateTaskSpace` fails instead of creating a new space.
 
@@ -107,7 +124,7 @@ Use a short name for the active user goal when creating a new task space. Keep r
 
 For any follow-up on the same user goal — including continue, corrections, retries, validation, user-reported problems, or work after `completeTaskSpace(..., { keep: true })` — resume the original task space first if it still exists. Do not create a new task space for the same goal unless the user asks for a fresh space, starts an unrelated goal, or the original space is unavailable after checking. If a new space is necessary, state why.
 
-After explicit user confirmation, to continue work from an existing user-owned, inactive, or unassigned task space, use `await listTaskSpaces()` to find the space, call `await claimTaskSpace(id)` to take ownership and select it, then use `await listTabs()` and `await switchTab(targetId)` to select the exact tab before acting.
+After explicit user confirmation, to continue work from an existing user-owned, inactive, or unassigned task space, define the Quick start helpers, call `const task = await requireDshTaskSpace(nameOrId)` to verify its profile, then call `await claimTaskSpace(task.id)` to take ownership and select it. Use `await listTabs()` and `await switchTab(targetId)` to select the exact tab before acting.
 
 **Ownership policy** — every task space has `ownership: 'agent' | 'agentDelegatedToUser' | 'user'`; the helpers treat user-owned spaces differently:
 
@@ -137,11 +154,11 @@ Only one side — agent or user — holds control of a task space at any time. W
 
 A "user is controlling" error is a hard stop on the whole task — not an obstacle to route around. It means the user has deliberately taken the browser back, often because your current approach is going wrong. Honoring it *is* the correct outcome here; pushing the goal forward anyway is the failure. The only thing you may do is **ask the user and wait**.
 
-An "inactive", "not assigned to an agent", or similar task-space error is also a hard stop with the same confirmation requirement. Resume only after explicit user confirmation, then start with `await claimTaskSpace(id)`.
+An "inactive", "not assigned to an agent", or similar task-space error is also a hard stop with the same confirmation requirement. Resume only after explicit user confirmation, then verify the existing space with `requireDshTaskSpace(nameOrId)` before passing its id to `claimTaskSpace`.
 
 **Handing off**: When the task requires user intervention (e.g. login, captcha, manual confirmation), call `await handOffTaskSpace([nameOrId])` to give control to the user, and tell them exactly what to do. Omitting `nameOrId` uses the currently selected task space; pass `task.id` across heredoc rounds to avoid ambiguity.
 
-**Regaining control**: Take control back *only* after the user explicitly confirms — through an Ask (your harness's button/option prompt, e.g. "Continue" vs "Finish task") or a "continue" message in chat. Then start a new heredoc with `await takeOverTaskSpace([nameOrId])` and resume; if the user chooses to finish, close out with `await completeTaskSpace(nameOrId, { keep })`. Never call `takeOverTaskSpace` on your own to grab control back — it has no ownership check and will seize the browser away from the user.
+**Regaining control**: Take control back *only* after the user explicitly confirms — through an Ask (your harness's button/option prompt, e.g. "Continue" vs "Finish task") or a "continue" message in chat. Then start a new heredoc, define the Quick start helpers, call `const task = await requireDshTaskSpace(nameOrId)`, pass `task.id` to `takeOverTaskSpace`, and resume. If the user chooses to finish, close out with `await completeTaskSpace(nameOrId, { keep })`. Never call `takeOverTaskSpace` on your own to grab control back — it has no ownership check and will seize the browser away from the user.
 
 **Unexpected takeover**: The user can take over at any time via the browser GUI — the same effect as the agent calling `handOffTaskSpace`. Do not retry the failed operation and do not auto-takeover; surface the Ask above (Continue / Finish) and resume only when the user picks Continue.
 

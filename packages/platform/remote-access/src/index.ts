@@ -410,14 +410,6 @@ export interface PersonalPairingAuthorityStore extends RelayPairingActivitySink,
     state: PersonalPairingTransactionState,
     access: PersonalPairingAccessTransaction,
   ) => Promise<T>): Promise<T>
-  /** Read current Desktop access without process-local caching. */
-  getDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<DesktopRemoteAccessAuthority>
-  /** Atomically keep an active route or install the supplied fresh route. */
-  enableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, freshRouteId: RelayRouteId): Promise<RelayRouteId>
-  /** Atomically disable access, remove Mobile grants, and return every route still requiring revocation. */
-  disableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<readonly RelayRouteId[]>
-  /** Mark one route's external Relay revocation complete without touching a replacement route. */
-  completeRouteRevocation(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, routeId: RelayRouteId): Promise<void>
   /** Persist the confirmed pairing-to-route result before Mobile observes confirmation. */
   confirmMobilePairing(authority: MobilePairingAuthority): Promise<void>
   /** Read a confirmed Mobile result from any Platform Instance. */

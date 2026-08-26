@@ -356,9 +356,10 @@ type PersistenceFailure =
 
 function classifyUnexpectedFailure(error: unknown):
   PersistenceFailure | 'transport' | 'codec' | 'contract' | 'cleanup' | 'dependency' | 'unexpected' {
-  if (error instanceof AggregateError) return 'cleanup'
-  if (error instanceof SyntaxError) return 'codec'
-  if (error instanceof TypeError) return 'contract'
+  if (error instanceof AggregateError || error instanceof SyntaxError || error instanceof TypeError) {
+    if (error instanceof AggregateError) return 'cleanup'
+    return error instanceof SyntaxError ? 'codec' : 'contract'
+  }
   if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') {
     return 'unexpected'
   }

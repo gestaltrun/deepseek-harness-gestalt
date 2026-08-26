@@ -77,7 +77,8 @@ function setupRemoteEvidence(verdict: 'success' | 'failure', workflow: 'acceptan
   writeFileSync(ghProgram, `
 const { cpSync, mkdirSync } = require('node:fs')
 const { basename, join } = require('node:path')
-const invokedAsWindowsExecutable = process.env.FAKE_GH_PRELOAD === '1' && basename(process.argv0).toLowerCase() === 'gh.exe'
+const executableName = process.platform === 'win32' ? basename(process.execPath) : basename(process.argv0)
+const invokedAsWindowsExecutable = process.env.FAKE_GH_PRELOAD === '1' && executableName.toLowerCase() === 'gh.exe'
 const invokedAsPosixWrapper = basename(module.parent?.filename ?? '') === 'gh'
 if (invokedAsWindowsExecutable || invokedAsPosixWrapper) {
   const args = invokedAsWindowsExecutable

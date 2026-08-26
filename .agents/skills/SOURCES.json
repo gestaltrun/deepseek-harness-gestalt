@@ -9,7 +9,7 @@
       "revision": "ego-lite-app-0.4.7.3",
       "license": "MIT",
       "localChanges": [
-        "resolve and validate the DSH profile for every Task Space reuse path",
+        "resolve and validate the DSH profile for every Task Space operation path",
         "require manual installation through the signed macOS application flow",
         "align GitHub learning manifests with their tool results"
       ]

@@ -30,7 +30,7 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 
 Remember that all work goes through two stages: implementation and review. The implementation agent has the most **context pressure**. They are responsible for exploration, writing code, and debugging failures.
 
-The review agent has the least context pressure - it receives a diff, so no exploration needed. It often does not need to write code or debug.
+The review agent starts from a diff and then reads the surrounding code, contracts, and consumers needed to judge it. It often does not need to write code or debug.
 
 Implementation and review agents both follow the repository standards. Put independent enforcement in review or an automated check when repeating it during implementation would add context without changing implementation decisions.
 

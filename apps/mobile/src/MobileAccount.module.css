@@ -215,6 +215,10 @@
   padding: calc(12px + env(safe-area-inset-top)) 22px calc(24px + env(safe-area-inset-bottom));
 }
 
+.pairingPage {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
 .accountPage > img {
   width: 64px;
   height: 64px;
@@ -253,7 +257,8 @@
 .pairingPage > :last-child {
   box-sizing: border-box;
   width: 100%;
-  margin-top: 8px;
+  min-height: 0;
+  margin-top: 0;
 }
 
 .banner {

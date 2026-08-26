@@ -111,7 +111,7 @@ describe('MobileAccount', () => {
     await waitFor(() => { expect(screen.getByRole('button', { name: '使用 GitHub 继续' }).hasAttribute('disabled')).toBe(false) })
     fireEvent.click(screen.getByRole('button', { name: '使用 GitHub 继续' }))
     expect(await screen.findByText('未连接')).toBeTruthy()
-    expect(screen.getByText('@octocat')).toBeTruthy()
+    expect(screen.queryByText('@octocat')).toBeNull()
     expect(screen.getByText('independent review pending')).toBeTruthy()
     expect(screen.queryByText('当前安装')).toBeNull()
     expect(screen.queryByText('个人配对')).toBeNull()
@@ -120,6 +120,7 @@ describe('MobileAccount', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '查看账号' }))
     expect(await screen.findByText('当前安装')).toBeTruthy()
+    expect(screen.getByText('@octocat')).toBeTruthy()
     expect(screen.queryByText('未连接')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }))

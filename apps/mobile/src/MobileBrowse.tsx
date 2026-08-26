@@ -24,10 +24,6 @@ export interface MobileBrowseProps {
   desktopName?: string | undefined
   /** Live Remote Online / Offline label. */
   connection: 'unpaired' | 'online' | 'offline'
-  /** Signed-in Platform Account login shown in the navigation header. */
-  accountLogin: string
-  /** Signed-in Platform Account avatar shown in the navigation header. */
-  accountAvatarUrl: string
   /** Open the separate current-Installation Account page. */
   onOpenAccount: () => void
   /** Open the separate Personal Pairing page while no Desktop is selected. */
@@ -85,7 +81,7 @@ interface MobileCreateTarget {
 
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
-  desktopName, connection, accountLogin, accountAvatarUrl, onOpenAccount, onOpenPairing,
+  desktopName, connection, onOpenAccount, onOpenPairing,
   connectionFailure, sessions, workspaces, conversations, locale, theme, loadImage,
   canMutate, clock, onCreate, onSessionOpened, onSubmit, onCancel, onAttach, onLoadOlder, onObserveSession,
   search, onSearch, operationFailure,
@@ -290,8 +286,7 @@ export function MobileBrowse({
     <section className={css.page} data-mobile-browse="list" data-theme={theme} lang={locale === 'zh' ? 'zh-CN' : 'en'}>
       <header className={css.remoteHeader}>
         <button type="button" className={css.account} aria-label={locale === 'zh' ? '查看账号' : 'View account'} onClick={onOpenAccount}>
-          <img src={accountAvatarUrl} alt="" />
-          <span>@{accountLogin}</span>
+          {menuIcon}
         </button>
         <div>
           <strong>{locale === 'zh' ? '远程' : 'Remote'}</strong>
@@ -521,6 +516,12 @@ function AuthoritativeSearchResults({
 const scanIcon = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
     <path d="M7 5H5v2M17 5h2v2M7 19H5v-2M17 19h2v-2M8 12h8" />
+  </svg>
+)
+
+const menuIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+    <path d="M5 8h14M5 16h10" />
   </svg>
 )
 

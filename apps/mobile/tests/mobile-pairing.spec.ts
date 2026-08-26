@@ -27,6 +27,8 @@ describe('MobilePairing', () => {
     fireEvent.click(screen.getByRole('button', { name: '扫描二维码' }))
     expect(scanQr).toHaveBeenCalledWith(expect.any(HTMLVideoElement), expect.any(AbortSignal))
     expect(screen.getByText('将桌面端设置中的二维码对准取景框')).toBeTruthy()
+    expect(screen.queryByRole('textbox', { name: '完整的一次性配对链接' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '改为粘贴完整链接' }))
     fireEvent.change(screen.getByRole('textbox', { name: '完整的一次性配对链接' }), { target: { value: link } })
     fireEvent.click(screen.getByRole('button', { name: '继续配对' }))
     expect(completeLink).toHaveBeenCalledWith(link)

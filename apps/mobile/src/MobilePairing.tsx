@@ -28,6 +28,7 @@ export function MobilePairing({
     () => actions.getSnapshot(),
   )
   const [link, setLink] = useState('')
+  const [linkFallbackOpen, setLinkFallbackOpen] = useState(false)
   const [cameraActive, setCameraActive] = useState(false)
   const video = useRef<HTMLVideoElement>(null)
   const cameraAbort = useRef<AbortController>()
@@ -66,35 +67,45 @@ export function MobilePairing({
   }
 
   if (snapshot.status === 'unavailable') {
-    return <section className={css.card}><h2>{text.personalPairing}</h2><p role="alert">{snapshot.error}</p></section>
+    return (
+      <section className={`${css.card} ${css.taskCard}`}>
+        <PairingHero kind="unavailable" />
+        <div className={css.taskCopy}><h2>{text.personalPairing}</h2><p role="alert">{snapshot.error}</p></div>
+      </section>
+    )
   }
   if (snapshot.status === 'retryable') {
     return (
-      <section className={css.card} data-mobile-pairing="retryable">
-        <h2>{text.retryHeading}</h2>
-        <p role="alert">{snapshot.error}</p>
-        <button type="button" className={css.continue} onClick={() => { void actions.retryPairing() }}>{text.retry}</button>
-        <small>{text.retryDetail}</small>
+      <section className={`${css.card} ${css.taskCard}`} data-mobile-pairing="retryable">
+        <PairingHero kind="retry" />
+        <div className={css.taskCopy}><h2>{text.retryHeading}</h2><p role="alert">{snapshot.error}</p></div>
+        <div className={css.taskActions}>
+          <button type="button" className={css.continue} onClick={() => { void actions.retryPairing() }}>{text.retry}</button>
+          <small>{text.retryDetail}</small>
+        </div>
       </section>
     )
   }
   if (snapshot.status === 'pending') {
     return (
-      <section className={css.card} data-mobile-pairing="pending">
-        <h2>{text.verifyWords}</h2>
-        <p>{text.wordsDetail}</p>
+      <section className={`${css.card} ${css.taskCard}`} data-mobile-pairing="pending">
+        <PairingHero kind="verify" />
+        <div className={css.taskCopy}><h2>{text.verifyWords}</h2><p>{text.wordsDetail}</p></div>
         <output>{snapshot.authenticationWords.join(' ')}</output>
-        <strong>{text.confirmOnDesktop}</strong>
+        <strong className={css.pendingStatus}>{text.confirmOnDesktop}</strong>
       </section>
     )
   }
   if (snapshot.status === 'unpair-failed') {
     return (
-      <section className={css.card} data-mobile-pairing="unpair-failed">
-        <h2>{text.unpairFailed}</h2>
-        <p role="alert">{text.unpairFailedDetail}</p>
-        <small>{snapshot.error}</small>
-        <button type="button" className={css.continue} onClick={unpair}>{text.retryUnpair}</button>
+      <section className={`${css.card} ${css.taskCard}`} data-mobile-pairing="unpair-failed">
+        <PairingHero kind="unavailable" />
+        <div className={css.taskCopy}>
+          <h2>{text.unpairFailed}</h2>
+          <p role="alert">{text.unpairFailedDetail}</p>
+          <small>{snapshot.error}</small>
+        </div>
+        <div className={css.taskActions}><button type="button" className={css.continue} onClick={unpair}>{text.retryUnpair}</button></div>
       </section>
     )
   }
@@ -152,29 +163,48 @@ export function MobilePairing({
     )
   }
   return (
-    <section className={css.card} data-mobile-pairing={snapshot.status}>
-      <h2>{text.connectDesktop}</h2>
-      {snapshot.status !== 'ready' || snapshot.error === undefined ? null : <p role="alert">{snapshot.error}</p>}
-      <p>{text.connectDetail}</p>
-      <button type="button" className={css.scan} onClick={startCamera}>{text.scanQr}</button>
-      <div className={css.camera} hidden={!cameraActive}>
-        <video ref={video} muted playsInline aria-label={text.cameraLabel} />
-        <p>{text.cameraDetail}</p>
-        <button type="button" className={css.scan} onClick={cancelCamera}>{text.cancelScan}</button>
+    <section className={`${css.card} ${css.taskCard}`} data-mobile-pairing={snapshot.status}>
+      <PairingHero kind="connect" />
+      <div className={css.taskCopy}>
+        <h2>{text.connectDesktop}</h2>
+        {snapshot.status !== 'ready' || snapshot.error === undefined ? null : <p role="alert">{snapshot.error}</p>}
+        <p>{text.connectDetail}</p>
       </div>
-      <label>
-        <span>{text.completeLink}</span>
-        <input type="url" value={link} onChange={(event) => { setLink(event.target.value) }} />
-      </label>
-      <button
-        type="button"
-        className={css.continue}
-        disabled={link === '' || snapshot.status === 'completing'}
-        onClick={() => { void Promise.resolve(actions.completeLink(link)).catch(() => undefined) }}
-      >{text.continuePairing}</button>
-      <small>{text.noShortCode}</small>
+      <div className={css.taskActions}>
+        <button type="button" className={`${css.scan} ${css.primaryAction}`} onClick={startCamera}>{text.scanQr}</button>
+        <div className={css.camera} hidden={!cameraActive}>
+          <video ref={video} muted playsInline aria-label={text.cameraLabel} />
+          <p>{text.cameraDetail}</p>
+          <button type="button" className={css.scan} onClick={cancelCamera}>{text.cancelScan}</button>
+        </div>
+        <button
+          type="button"
+          className={css.linkToggle}
+          aria-expanded={linkFallbackOpen}
+          onClick={() => { setLinkFallbackOpen(open => !open) }}
+        >{text.pasteLink}</button>
+        {linkFallbackOpen && (
+          <div className={css.linkFallback}>
+            <label>
+              <span>{text.completeLink}</span>
+              <input type="url" value={link} onChange={(event) => { setLink(event.target.value) }} />
+            </label>
+            <button
+              type="button"
+              className={css.continue}
+              disabled={link === '' || snapshot.status === 'completing'}
+              onClick={() => { void Promise.resolve(actions.completeLink(link)).catch(() => undefined) }}
+            >{text.continuePairing}</button>
+          </div>
+        )}
+        <small>{text.noShortCode}</small>
+      </div>
     </section>
   )
+}
+
+function PairingHero({ kind }: { kind: 'connect' | 'verify' | 'retry' | 'unavailable' }): ReactNode {
+  return <span className={css.heroIcon} data-pairing-hero={kind}>{PAIRING_ICONS[kind]}</span>
 }
 
 function defaultLifecycleErrorReporter(error: unknown): void {
@@ -202,6 +232,7 @@ const PAIRING_TEXT = {
     pairAnother: '配对另一台桌面端',
     pairAnotherDetail: '扫描另一台桌面端设置中的二维码，或粘贴同一个完整的一次性链接。',
     scanQr: '扫描二维码',
+    pasteLink: '改为粘贴完整链接',
     cameraLabel: '个人配对二维码相机',
     cameraDetail: '将桌面端设置中的二维码对准取景框',
     cancelScan: '取消扫描',
@@ -231,6 +262,7 @@ const PAIRING_TEXT = {
     pairAnother: 'Pair another Desktop',
     pairAnotherDetail: 'Scan the QR in another Desktop\'s Settings or paste the same complete one-time link.',
     scanQr: 'Scan QR',
+    pasteLink: 'Paste the complete link instead',
     cameraLabel: 'Personal Pairing QR camera',
     cameraDetail: 'Point the camera at the QR in Desktop Settings',
     cancelScan: 'Cancel scan',
@@ -240,4 +272,28 @@ const PAIRING_TEXT = {
     connectDetail: 'Scan the QR in Desktop Settings or paste the same complete one-time link.',
     noShortCode: 'Short codes are unavailable; access starts only after explicit Desktop confirmation.',
   },
+} as const
+
+const PAIRING_ICONS = {
+  connect: (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
+      <path d="M14 14h3v3h-3zm4 4h3v3h-3zm-4 3h2m5-7v2" />
+    </svg>
+  ),
+  verify: (
+    <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3 5 6v5c0 4.6 2.8 7.8 7 10 4.2-2.2 7-5.4 7-10V6l-7-3Z" /><path d="m8.5 12 2.2 2.2 4.8-5" />
+    </svg>
+  ),
+  retry: (
+    <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 11a8 8 0 1 0-2.3 5.7L20 14" /><path d="M20 7v4h-4" />
+    </svg>
+  ),
+  unavailable: (
+    <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" /><path d="M12 7v6m0 4h.01" />
+    </svg>
+  ),
 } as const

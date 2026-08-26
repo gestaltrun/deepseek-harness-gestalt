@@ -93,7 +93,8 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     const login = screen.getByRole('button', { name: 'Continue with GitHub' })
     await waitFor(() => { expect(login.hasAttribute('disabled')).toBe(false) })
     fireEvent.click(login)
-    await screen.findByText('@fixture-account')
+    await screen.findByRole('button', { name: 'View account' })
+    expect(screen.queryByText('@fixture-account')).toBeNull()
 
     runtime.configure({
       routeId: parseRelayRouteId('route-mobile-snapshot'),

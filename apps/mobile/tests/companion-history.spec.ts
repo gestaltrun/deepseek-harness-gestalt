@@ -23,8 +23,6 @@ const workspaceId = wid('work')
 const browsePresentation = {
   locale: 'zh' as const,
   theme: 'light' as const,
-  accountLogin: 'octocat',
-  accountAvatarUrl: 'https://avatars.example/octocat',
   onOpenAccount: vi.fn(),
   loadImage: () => Promise.resolve('data:image/gif;base64,R0lGODlhAQABAAAAACw='),
   canMutate: true,

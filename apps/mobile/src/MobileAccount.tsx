@@ -195,8 +195,6 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
         {...(companion === undefined ? {} : companion)}
         desktopName={companion?.desktopName ?? selectedDesktop?.desktopName}
         connection={connection}
-        accountLogin={account.githubLogin}
-        accountAvatarUrl={account.avatarUrl}
         onOpenAccount={() => { setScreen('account') }}
         {...(pairing === undefined || selectedDesktop !== undefined
           ? {}

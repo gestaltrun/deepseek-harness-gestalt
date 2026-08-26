@@ -14,7 +14,7 @@ const CHECK_INTERVAL_MS = 15 * 60 * 1_000
 const DEFAULT_STAGE_TIMEOUT_MS = 10 * 60 * 1_000
 
 /** electron-updater logger methods the packaged Desktop Host persists. */
-export interface AutoUpdaterLogger {
+interface AutoUpdaterLogger {
   info(message: string): void
   warn(message: string): void
   error(message: string): void

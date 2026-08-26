@@ -76,6 +76,13 @@ export interface MobileBrowseProps {
   onClearCache?: (() => void | Promise<void>) | undefined
 }
 
+type MobileBrowseScreen = 'list' | 'search' | 'creating'
+
+interface MobileCreateTarget {
+  input: { workspace?: string }
+  label: string
+}
+
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
   desktopName, connection, accountLogin, accountAvatarUrl, onOpenAccount, onOpenPairing,
@@ -85,11 +92,17 @@ export function MobileBrowse({
   cacheFailure,
 }: MobileBrowseProps): ReactNode {
   const [openId, setOpenId] = useState<SessionId>()
+  const [screen, setScreen] = useState<MobileBrowseScreen>(() => search.query === '' ? 'list' : 'search')
+  const [returnScreen, setReturnScreen] = useState<'list' | 'search'>('list')
+  const [createTarget, setCreateTarget] = useState<MobileCreateTarget>()
   const [page, setPage] = useState(0)
   const [searchDraft, setSearchDraft] = useState(search.query)
   const adoptedCurrent = useRef<SessionId>()
   const historyRequested = useRef<SessionId>()
-  useEffect(() => { setSearchDraft(search.query) }, [search.query])
+  useEffect(() => {
+    setSearchDraft(search.query)
+    if (search.query !== '') setScreen(current => current === 'list' ? 'search' : current)
+  }, [search.query])
   useEffect(() => {
     const current = sessions.current
     if (current === undefined || sessions.byId[current] === undefined) {
@@ -98,6 +111,9 @@ export function MobileBrowse({
     }
     if (adoptedCurrent.current === current) return
     adoptedCurrent.current = current
+    setCreateTarget(undefined)
+    setReturnScreen('list')
+    setScreen('list')
     setOpenId(current)
   }, [sessions.byId, sessions.current])
   useEffect(() => {
@@ -117,7 +133,6 @@ export function MobileBrowse({
   useEffect(() => {
     if (canMutate) onObserveSession?.(openId)
   }, [canMutate, onObserveSession, openId])
-  const searchActive = search.query !== ''
   const connectionLabel = connection === 'unpaired'
     ? locale === 'zh' ? '未连接' : 'Not paired'
     : connection === 'online' ? 'Remote Online' : 'Remote Offline'
@@ -149,11 +164,23 @@ export function MobileBrowse({
     ? undefined
     : companionConnectionFailureMessage(connectionFailure, locale)
   const openSession = (id: SessionId): void => {
+    setReturnScreen(screen === 'search' ? 'search' : 'list')
     setOpenId(id)
   }
   const closeSearch = (): void => {
+    setScreen('list')
     setSearchDraft('')
     onSearch?.('')
+  }
+  const beginCreate = (target: MobileCreateTarget): void => {
+    if (!canMutate || onCreate === undefined) return
+    setCreateTarget(target)
+    setScreen('creating')
+    onCreate(target.input)
+  }
+  const closeConversation = (): void => {
+    setOpenId(undefined)
+    setScreen(returnScreen)
   }
 
   if (openId !== undefined && openTitle !== undefined) {
@@ -163,7 +190,7 @@ export function MobileBrowse({
           {connectionAlert !== undefined && <p role="alert">{connectionAlert}</p>}
           <MobileConversation
             title={openTitle}
-            onBack={() => { setOpenId(undefined) }}
+            onBack={closeConversation}
             snapshot={conversation}
             locale={locale}
             theme={theme}
@@ -182,12 +209,79 @@ export function MobileBrowse({
     return (
       <section className={css.page} data-mobile-browse="conversation" data-theme={theme} lang={locale === 'zh' ? 'zh-CN' : 'en'}>
         <header className={css.header}>
-          <button type="button" className={css.back} onClick={() => { setOpenId(undefined) }}>{locale === 'zh' ? '返回' : 'Back'}</button>
+          <button type="button" className={css.back} onClick={closeConversation}>{locale === 'zh' ? '返回' : 'Back'}</button>
           <h1>{openTitle}</h1>
         </header>
         {connectionAlert !== undefined && <p role="alert">{connectionAlert}</p>}
         {detailFailure !== undefined && <p role="alert">{detailFailure.message}</p>}
         <p className={css.summary}>{locale === 'zh' ? '尚未加载此 Session 的对话。' : 'This Session conversation is not loaded.'}</p>
+      </section>
+    )
+  }
+
+  if (screen === 'search') {
+    const searchText = locale === 'zh'
+      ? {
+        title: '搜索', back: '返回项目', field: '搜索 Desktop Sessions', submit: '搜索',
+        placeholder: '搜索聊天记录', intro: '输入关键词搜索 Desktop Session 内容。',
+      }
+      : {
+        title: 'Search', back: 'Back to projects', field: 'Search Desktop Sessions', submit: 'Search',
+        placeholder: 'Search chat history', intro: 'Search Desktop Session content.',
+      }
+    return (
+      <section className={css.page} data-mobile-browse="search" data-theme={theme} lang={locale === 'zh' ? 'zh-CN' : 'en'}>
+        <BrowseRouteHeader title={searchText.title} backLabel={searchText.back} onBack={closeSearch} />
+        <main className={css.routeBody}>
+          {connectionAlert !== undefined && <p className={css.error} role="alert">{connectionAlert}</p>}
+          {search.status === 'error' && <p className={css.error} role="alert">{search.error.message}</p>}
+          <form className={css.searchPanel} onSubmit={(event) => { event.preventDefault(); onSearch?.(searchDraft) }}>
+            {searchIcon}
+            <input
+              autoFocus
+              type="search"
+              aria-label={searchText.field}
+              placeholder={searchText.placeholder}
+              value={searchDraft}
+              disabled={!canMutate}
+              onChange={(event) => { setSearchDraft(event.target.value) }}
+            />
+            <button type="submit" disabled={!canMutate || searchDraft.trim() === ''}>{searchText.submit}</button>
+          </form>
+          {search.query === '' && search.status === 'idle'
+            ? <p className={css.routeHint}>{searchText.intro}</p>
+            : <AuthoritativeSearchResults search={search} locale={locale} onOpen={openSession} />}
+        </main>
+      </section>
+    )
+  }
+
+  if (screen === 'creating' && createTarget !== undefined) {
+    const createFailure = operationFailure?.operation === 'create' ? operationFailure.failure : undefined
+    const createText = locale === 'zh'
+      ? {
+        title: '新 Session', back: '返回项目', pending: `正在由 Desktop 在 ${createTarget.label} 中创建 Session…`,
+        offline: 'Remote Offline，重新连接并同步后才能创建 Session。', retry: '重试创建',
+      }
+      : {
+        title: 'New Session', back: 'Back to projects', pending: `Desktop is creating a Session in ${createTarget.label}…`,
+        offline: 'Remote Offline. Reconnect and synchronize before creating a Session.', retry: 'Retry creation',
+      }
+    return (
+      <section className={css.page} data-mobile-browse="creating" data-theme={theme} lang={locale === 'zh' ? 'zh-CN' : 'en'}>
+        <BrowseRouteHeader
+          title={createText.title}
+          backLabel={createText.back}
+          onBack={() => { setCreateTarget(undefined); setScreen('list') }}
+        />
+        <main className={css.creatingBody}>
+          <span className={css.creatingIcon} aria-hidden="true">{composeIcon}</span>
+          <p>{canMutate ? createText.pending : createText.offline}</p>
+          {createFailure !== undefined && <p className={css.error} role="alert">{createFailure.message}</p>}
+          {createFailure !== undefined && (
+            <button type="button" disabled={!canMutate} onClick={() => { beginCreate(createTarget) }}>{createText.retry}</button>
+          )}
+        </main>
       </section>
     )
   }
@@ -236,17 +330,9 @@ export function MobileBrowse({
         ) : (
           <>
             <div className={css.projectTitle}>
-              <h1>{searchActive ? locale === 'zh' ? '搜索' : 'Search' : locale === 'zh' ? '项目' : 'Projects'}</h1>
-              {searchActive && onSearch !== undefined && (
-                <button type="button" className={css.returnProjects} onClick={closeSearch}>
-                  {locale === 'zh' ? '返回项目' : 'Back to projects'}
-                </button>
-              )}
+              <h1>{locale === 'zh' ? '项目' : 'Projects'}</h1>
             </div>
-            {searchActive && (
-              <AuthoritativeSearchResults search={search} locale={locale} onOpen={openSession} />
-            )}
-            {!searchActive && groups.map((group) => {
+            {groups.map((group) => {
               const label = group.workspaceId === undefined ? tw('group.ungrouped') : group.label
               return (
                 <section key={group.key} className={css.group} aria-label={label}>
@@ -259,9 +345,9 @@ export function MobileBrowse({
                         disabled={!canMutate}
                         aria-label={locale === 'zh' ? `在 ${label} 新建 Session` : `New Session in ${label}`}
                         onClick={() => {
-                          if (!canMutate) return
-                          if (group.workspaceId === undefined) onCreate({})
-                          else onCreate({ workspace: group.workspaceId })
+                          beginCreate(group.workspaceId === undefined
+                            ? { input: {}, label }
+                            : { input: { workspace: group.workspaceId }, label })
                         }}
                       >{composeIcon}</button>
                     )}
@@ -277,7 +363,7 @@ export function MobileBrowse({
                 </section>
               )
             })}
-            {!searchActive && paged.spilled > 0 && (
+            {paged.spilled > 0 && (
               <button type="button" className={css.more} onClick={() => { setPage(current => current + 1) }}>
                 {locale === 'zh' ? `加载更多（还有 ${paged.spilled}）` : `Load more (${paged.spilled} remaining)`}
               </button>
@@ -295,28 +381,19 @@ export function MobileBrowse({
                 className={css.compose}
                 disabled={!canMutate}
                 aria-label={locale === 'zh' ? '新建聊天' : 'New chat'}
-                onClick={() => { if (canMutate) onCreate({}) }}
+                onClick={() => { beginCreate({ input: {}, label: tw('group.ungrouped') }) }}
               >{composeIcon}</button>
             )}
           </div>
           <div className={css.dockActions}>
             {onSearch !== undefined && (
-              <form className={css.search} onSubmit={(event) => { event.preventDefault(); onSearch(searchDraft) }}>
-                <button
-                  type="submit"
-                  className={css.searchSubmit}
-                  aria-label={locale === 'zh' ? '搜索' : 'Search'}
-                  disabled={!canMutate}
-                >{searchIcon}</button>
-                <input
-                  type="search"
-                  aria-label={locale === 'zh' ? '搜索 Desktop Sessions' : 'Search Desktop Sessions'}
-                  placeholder={locale === 'zh' ? '搜索聊天记录' : 'Search chat history'}
-                  value={searchDraft}
-                  disabled={!canMutate}
-                  onChange={(event) => { setSearchDraft(event.target.value) }}
-                />
-              </form>
+              <button
+                type="button"
+                className={css.searchPill}
+                aria-label={locale === 'zh' ? '搜索聊天记录' : 'Search chat history'}
+                disabled={!canMutate}
+                onClick={() => { setScreen('search') }}
+              >{searchIcon}<span>{locale === 'zh' ? '搜索聊天记录' : 'Search chat history'}</span></button>
             )}
             {onCreate !== undefined && (
               <button
@@ -324,13 +401,31 @@ export function MobileBrowse({
                 className={css.round}
                 disabled={!canMutate}
                 aria-label={locale === 'zh' ? '新建 Ungrouped Session' : 'New ungrouped Session'}
-                onClick={() => { if (canMutate) onCreate({}) }}
+                onClick={() => { beginCreate({ input: {}, label: tw('group.ungrouped') }) }}
               >{composeIcon}</button>
             )}
           </div>
         </footer>
       )}
     </section>
+  )
+}
+
+function BrowseRouteHeader({
+  title,
+  backLabel,
+  onBack,
+}: {
+  title: string
+  backLabel: string
+  onBack: () => void
+}): ReactNode {
+  return (
+    <header className={css.routeHeader}>
+      <button type="button" className={css.back} aria-label={backLabel} onClick={onBack}>{backIcon}</button>
+      <h1>{title}</h1>
+      <span aria-hidden="true" />
+    </header>
   )
 }
 
@@ -426,6 +521,12 @@ function AuthoritativeSearchResults({
 const scanIcon = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
     <path d="M7 5H5v2M17 5h2v2M7 19H5v-2M17 19h2v-2M8 12h8" />
+  </svg>
+)
+
+const backIcon = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="m15 18-6-6 6-6" />
   </svg>
 )
 

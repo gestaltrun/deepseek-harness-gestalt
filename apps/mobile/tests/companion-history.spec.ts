@@ -272,9 +272,13 @@ describe('Mobile Companion browse projection', () => {
       ...browsePresentation, onCreate,
     }))
     fireEvent.click(screen.getByRole('button', { name: '在 Work 新建 Session' }))
+    expect(screen.getByRole('heading', { name: '新 Session' })).toBeTruthy()
+    expect(screen.queryByText('项目')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
     fireEvent.click(screen.getByRole('button', { name: '新建 Ungrouped Session' }))
     expect(onCreate).toHaveBeenNthCalledWith(1, { workspace: workspaceId })
     expect(onCreate).toHaveBeenNthCalledWith(2, {})
+    fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
 
     view.rerender(createElement(MobileBrowse, {
       desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
@@ -282,6 +286,28 @@ describe('Mobile Companion browse projection', () => {
     }))
     expect(screen.getByRole('button', { name: '在 Work 新建 Session' }).hasAttribute('disabled')).toBe(true)
     expect(screen.getByRole('button', { name: '新建 Ungrouped Session' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('opens search as a separate phone destination and returns to the Session list', () => {
+    const onSearch = vi.fn()
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
+      ...browsePresentation, onSearch,
+    }))
+
+    expect(screen.queryByRole('searchbox')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '搜索聊天记录' }))
+    expect(screen.getByRole('heading', { name: '搜索' })).toBeTruthy()
+    expect(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' })).toBeTruthy()
+    expect(screen.queryByText('项目')).toBeNull()
+    expect(screen.queryByText('聊天')).toBeNull()
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'needle' } })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    expect(onSearch).toHaveBeenCalledWith('needle')
+    fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
+    expect(onSearch).toHaveBeenLastCalledWith('')
+    expect(screen.getByText('项目')).toBeTruthy()
   })
 
   it('renders Desktop-authoritative hits even when the Companion Cache lacks the Session', () => {

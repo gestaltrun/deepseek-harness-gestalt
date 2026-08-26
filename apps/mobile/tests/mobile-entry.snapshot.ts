@@ -183,6 +183,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       ]
     `)
 
+    fireEvent.click(screen.getByRole('button', { name: 'Search chat history' }))
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search Desktop Sessions' }), {
       target: { value: 'authoritative' },
     })

@@ -10,6 +10,7 @@
  * operations are pure functions over the node, unit-tested in tests/state.spec.ts.
  */
 import { SIDEBAR_PREFS_DEFAULTS, type SidebarPrefs } from '../prefs-shared.ts'
+import { sidechatTabRootThreadId, sidechatTabThreadId } from '../sidechat-core.ts'
 import { isNarrowWidth } from './breakpoints.ts'
 
 /**
@@ -112,6 +113,14 @@ export interface SidebarState {
   bottomSplits: SplitNode
   /** Free windows (tabs dragged out onto the conversation area). */
   floats: FloatWindow[]
+  /**
+   * Side Chat threads the user closed: their restart restore
+   * ({@link reconcileSideThreads}) never resurrects a tab for them. The
+   * thread's durable Session survives the close (closing only releases the
+   * live Agent), so without this tombstone set every restart would reopen
+   * deliberately discarded conversations.
+   */
+  closedSideThreads: string[]
 }
 
 export const PANEL_MIN = 280
@@ -212,6 +221,7 @@ export function makeDefaultState(width = PANEL_DEFAULT, panelOpen = true): Sideb
     bottomOpenedOnce: false,
     bottomSplits: bottomLeaf,
     floats: [],
+    closedSideThreads: [],
   }
 }
 
@@ -469,16 +479,30 @@ export function removeLeafAt(node: SplitNode, paneId: string): SplitNode {
   return { ...node, sizes: [...node.sizes], children }
 }
 
-/** Close a tab; an emptied leaf is removed (unless it is the only pane). */
+/** Record a user-closed Side Chat thread so the restart restore never
+ *  resurrects its tab. Only sidechat tabs tombstone; a tab never bound to a
+ *  thread (or an already-tombstoned one) changes nothing. */
+export function tombstoneSideThread(state: SidebarState, tab: SidebarTab): SidebarState {
+  if (tab.type !== 'sidechat') return state
+  const threadId = sidechatTabRootThreadId(tab.meta)
+  if (threadId === undefined || state.closedSideThreads.includes(threadId)) return state
+  return { ...state, closedSideThreads: [...state.closedSideThreads, threadId] }
+}
+
+/** Close a tab; an emptied leaf is removed (unless it is the only pane). A
+ *  closed Side Chat tab also tombstones its thread against restore. */
 export function closeTab(state: SidebarState, paneId: string, tabId: string): SidebarState {
   const key = treeOf(state, paneId)
   let emptied = false
+  let closed: SidebarTab | undefined
   const splits = mapLeaf(state[key], paneId, (leaf) => {
+    closed = leaf.tabs.find(tab => tab.id === tabId)
     leaf.tabs = leaf.tabs.filter(tab => tab.id !== tabId)
     if (leaf.active === tabId) leaf.active = leaf.tabs[leaf.tabs.length - 1]?.id ?? null
     if (leaf.tabs.length === 0) emptied = true
   })
-  return { ...state, [key]: emptied ? removeLeafAt(splits, paneId) : splits }
+  const closedState: SidebarState = { ...state, [key]: emptied ? removeLeafAt(splits, paneId) : splits }
+  return closed === undefined ? closedState : tombstoneSideThread(closedState, closed)
 }
 
 /** Activate a tab in its pane (the pane's own tree). */
@@ -885,10 +909,12 @@ export function dockFloat(state: SidebarState, floatId: string, toPane?: string)
 }
 
 /** Close the free window holding a tab (the tab closes WITH the window —
- *  the caller fires the descriptor's onClose lifecycle). */
+ *  the caller fires the descriptor's onClose lifecycle). A floated Side Chat
+ *  tab tombstones its thread exactly like a docked close. */
 export function closeFloatByTab(state: SidebarState, tabId: string): SidebarState {
-  if (!state.floats.some(f => f.tab.id === tabId)) return state
-  return { ...state, floats: state.floats.filter(f => f.tab.id !== tabId) }
+  const float = state.floats.find(f => f.tab.id === tabId)
+  if (float === undefined) return state
+  return tombstoneSideThread({ ...state, floats: state.floats.filter(f => f.tab.id !== tabId) }, float.tab)
 }
 
 /** Prefix marking a tab id as an agent-owned terminal (suffix is the uuid). */
@@ -959,6 +985,74 @@ export function reconcileAgentTerminals(
     next = openTabInActivePane(next, tab)
   }
   return next
+}
+
+/** One durable Side Chat thread that should have a tab in the strip. */
+export interface SideThreadRef {
+  /** The thread's durable Session id (the child created on first prompt). */
+  threadId: string
+  /** Restored tab title — the durable label with the 'Side: ' prefix stripped. */
+  title: string
+}
+
+/**
+ * Reconcile the tab strip with the session's durable Side Chat threads. The
+ * strip's canonical home is localStorage, which is origin-scoped: a desktop
+ * restart binds a fresh port and orphans it, while the threads' Sessions
+ * survive on the Host. Every listed thread without a live tab and without a
+ * close tombstone gets a restored tab (meta carries no `provisional` flag —
+ * the thread is already published, so the view mounts the conversation
+ * directly). Restored tabs land in the active pane WITHOUT stealing its
+ * active tab; an empty pane activates the first restored thread so the
+ * conversation shows. A restore also reopens a collapsed panel (except in
+ * the narrow full-screen drawer) — restoring invisibly into a closed panel
+ * would look like the thread never came back. Idempotent: returns the same
+ * reference when nothing is missing, and never duplicates a tab on repeated
+ * list refreshes.
+ * @param state - the current per-session sidebar state.
+ * @param threads - durable, non-blank side threads of this session.
+ * @returns the next state (or the same reference if no restore was needed).
+ */
+export function reconcileSideThreads(state: SidebarState, threads: readonly SideThreadRef[]): SidebarState {
+  const openThreadIds = new Set(
+    allLeaves(state.splits).concat(allLeaves(state.bottomSplits)).flatMap(leaf => leaf.tabs)
+      .concat(state.floats.map(float => float.tab))
+      .filter(tab => tab.type === 'sidechat')
+      .map(tab => sidechatTabRootThreadId(tab.meta))
+      .filter((id): id is string => id !== undefined),
+  )
+  const toRestore = threads.filter(thread =>
+    !openThreadIds.has(thread.threadId) && !state.closedSideThreads.includes(thread.threadId))
+  if (toRestore.length === 0) return state
+  const first = toRestore[0]
+  let targetId = state.activePane ?? firstLeaf(state.splits).id
+  // A stale activePane (its pane was closed since) falls back to the first
+  // pane instead of swallowing the restore (mirrors openTabInActivePane).
+  if (!allLeaves(state[treeOf(state, targetId)]).some(leaf => leaf.id === targetId)) {
+    targetId = firstLeaf(state.splits).id
+  }
+  const targetKey = treeOf(state, targetId)
+  // A restore is only reachable when tabs went missing — typically a fresh
+  // origin after restart — so reopen the panel to make it visible. Narrow
+  // viewports stay collapsed: the panel is a full-screen drawer there and
+  // auto-opening it would cover the conversation (mirrors loadState).
+  const narrow = typeof window !== 'undefined' && isNarrowWidth(window.innerWidth)
+  return {
+    ...state,
+    panelOpen: state.panelOpen || narrow ? state.panelOpen : true,
+    activePane: targetId,
+    [targetKey]: mapLeaf(state[targetKey], targetId, (leaf) => {
+      for (const thread of toRestore) {
+        leaf.tabs = [...leaf.tabs, {
+          id: `sidechat:${thread.threadId}`,
+          type: 'sidechat',
+          title: thread.title,
+          meta: { threadId: thread.threadId },
+        }]
+      }
+      if (leaf.active === null && first !== undefined) leaf.active = `sidechat:${first.threadId}`
+    }),
+  }
 }
 
 // ── The per-session store ──────────────────────────────────────────────────
@@ -1161,6 +1255,12 @@ export function sanitizeState(parsed: unknown): SidebarState | undefined {
       floats.push({ id: candidate.id, tab, ...clampFloatGeometry(candidate.x, candidate.y, candidate.w, candidate.h) })
     }
   }
+  // closedSideThreads arrived with the restart restore: an older persisted
+  // state has no tombstones and defaults to none (like nextBrowser), and a
+  // malformed entry drops individually rather than costing the layout.
+  const closedSideThreads = Array.isArray(record.closedSideThreads)
+    ? record.closedSideThreads.filter((item): item is string => typeof item === 'string')
+    : []
   const requestedActivePane = typeof record.activePane === 'string'
     ? (reid.get(record.activePane) ?? record.activePane)
     : null
@@ -1189,6 +1289,7 @@ export function sanitizeState(parsed: unknown): SidebarState | undefined {
     bottomOpenedOnce: record.bottomOpenedOnce === true,
     bottomSplits,
     floats,
+    closedSideThreads,
   }
 }
 
@@ -1507,6 +1608,21 @@ export class SidebarStore {
       }
     }, 200)
     this.persistTimers.set(sessionId, timer)
+  }
+
+  /**
+   * Restore strip tabs for the active session's durable Side Chat threads
+   * (#324): the strip lives in origin-scoped localStorage, but a thread is a
+   * durable Host Session, so a restart under a new origin (the desktop's
+   * ephemeral `--port 0` launch) leaves the threads listed with no tabs.
+   * Skipped under the `?dsh-sidebar-reset` escape hatch: that load must break
+   * a mount-hang loop even when the hanging tab is a side chat. User-closed
+   * threads carry a state tombstone ({@link tombstoneSideThread}) and never
+   * resurrect.
+   */
+  restoreSideThreads(threads: readonly SideThreadRef[]): void {
+    if (resetRequested()) return
+    this.reduce(state => reconcileSideThreads(state, threads))
   }
 
   private notify(): void {

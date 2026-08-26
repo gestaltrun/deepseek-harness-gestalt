@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-27-sidechat-tabs-restore-from-durable-threads.md
+2026-08-27-sidechat-tabs-restore-from-durable-threads.md: 999d2bccc0e79d44d515fb2f1cb8374454099c71
+2026-08-27-sidechat-tabs-restore-from-durable-threads.zh.md: d102e68d73a8c51270e2bb42798930f461db7638

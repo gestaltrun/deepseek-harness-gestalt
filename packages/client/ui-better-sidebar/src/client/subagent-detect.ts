@@ -16,6 +16,7 @@ import type {
   SidebarSubagentCatalog,
 } from '../context-types.ts'
 import { SIDE_LABEL_PREFIX } from '../sidechat-core.ts'
+import type { SideThreadRef } from './state.ts'
 
 /**
  * Side Chat threads ride the subagent origin (main-list hiding + the RPC
@@ -86,6 +87,31 @@ export function collectBranchIds(
   }
   if (rootId !== undefined) visit(rootId)
   return out
+}
+
+/**
+ * Durable Side Chat threads of one session that deserve a strip tab: direct
+ * side children with a published Host Session (blank === false). A
+ * renderer-only provisional identity has no Host Session yet, and a blank
+ * thread (the legacy published-but-never-prompted placeholder) carries no
+ * conversation — neither restores. The title is the durable label minus the
+ * 'Side: ' prefix; the mounted view re-localizes it from the live summary.
+ */
+export function restorableSideThreads(
+  byId: SidebarSessionList['byId'],
+  sessionId: string,
+): SideThreadRef[] {
+  const threads: SideThreadRef[] = []
+  for (const summary of Object.values(byId)) {
+    if (summary.origin !== 'subagent' || summary.parentId !== sessionId) continue
+    if (summary.provisional === true || summary.blank !== false) continue
+    if (!summary.displayTitle.startsWith(SIDE_LABEL_PREFIX)) continue
+    threads.push({
+      threadId: summary.id,
+      title: summary.displayTitle.slice(SIDE_LABEL_PREFIX.length),
+    })
+  }
+  return threads
 }
 
 /**

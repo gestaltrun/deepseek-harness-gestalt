@@ -55,7 +55,7 @@ import { relativeTo } from './paths.ts'
 import { OrphanedTab } from './OrphanedTab.tsx'
 import { RenderBoundary } from './RenderBoundary.tsx'
 import { tabContentCompare, type TabContentMemoKey } from './tab-content-memo.ts'
-import { detectNewDirectSubagent } from './subagent-detect.ts'
+import { detectNewDirectSubagent, restorableSideThreads } from './subagent-detect.ts'
 import { detectNewJob } from './subagent-jobs.ts'
 import { t } from './locales.ts'
 import { api, type SessionScope } from './api.ts'
@@ -300,6 +300,20 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
 
   const state = snapshot.state
   const sessionId = snapshot.sessionId
+
+  /**
+   * Side Chat restart restore (#324): the strip lives in origin-scoped
+   * localStorage, but a side thread is a DURABLE Host Session. A restart
+   * under a new origin (the desktop's ephemeral `--port 0` launch) orphans
+   * the strip while the threads still arrive in the list feed — reconcile
+   * reopens their tabs. User-closed threads carry a state tombstone and
+   * never resurrect; the reducer is a same-reference no-op once tabs and
+   * threads agree, so list churn costs nothing.
+   */
+  useEffect(() => {
+    if (sessionId === undefined || state === undefined) return
+    store.restoreSideThreads(restorableSideThreads(sessionList.byId, sessionId))
+  }, [sessionList, sessionId, state, store])
   const summaryCwd = sessionId === undefined ? undefined : sessionList.byId[sessionId]?.cwd
   const pushedBottomHeight = (bottomOpen: boolean, bottomHeight: number): number => layoutPushSize({
     narrow,

@@ -45,9 +45,40 @@
 .challenge p,
 .pending p { margin: 4px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; }
 
-.toggle { width: 44px; height: 24px; padding: 2px; border: 0; border-radius: 999px; background: var(--dsw-alias-fill-tertiary); }
-.toggle span { display: block; width: 20px; height: 20px; border-radius: 50%; background: white; transition: transform .16s ease; }
-.toggle[aria-checked='true'] { background: var(--dsw-alias-button-info-fill); }
+.toggle {
+  box-sizing: border-box;
+  width: 44px;
+  height: 24px;
+  padding: 1px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 999px;
+  background: var(--dsw-alias-button-primary-dimmed);
+  cursor: pointer;
+}
+
+.toggle span {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--dsw-static-neutral-bluish-00);
+  transition: transform .16s ease;
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--dsw-alias-button-info-fill);
+  outline-offset: 2px;
+}
+
+.toggle:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.toggle[aria-checked='true'] {
+  border-color: var(--dsw-alias-button-info-fill);
+  background: var(--dsw-alias-button-info-fill);
+}
 .toggle[aria-checked='true'] span { transform: translateX(20px); }
 
 .challenge { display: grid; grid-template-columns: 148px 1fr; gap: 16px; align-items: start; }
@@ -57,7 +88,7 @@
 .qr svg { display: block; width: 148px; height: 148px; padding: 8px; border-radius: 12px; background: white; fill: #111; }
 .qr code { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
-.pending { display: grid; gap: 10px; padding: 16px; border-radius: 12px; background: var(--dsw-alias-fill-secondary); }
+.pending { display: grid; gap: 10px; padding: 16px; border-radius: 12px; background: var(--dsw-alias-bg-module-platform); }
 .pending output { font-size: 18px; font-weight: 700; letter-spacing: .04em; }
 .actions { display: flex; gap: 8px; }
 .device { display: flex; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--dsw-alias-border-l2); }

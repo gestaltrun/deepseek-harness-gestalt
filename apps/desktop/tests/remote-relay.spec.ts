@@ -346,6 +346,82 @@ describe('Desktop Remote Relay composition', () => {
     expect(send).toHaveBeenCalledWith(selector, mobileAttachmentId, Uint8Array.of(9))
   })
 
+  it('bounds an oversized history projection before Snow sealing without reconnecting', async () => {
+    const selector = parseRelayPairingSelector('pairing-history-bytes')
+    const desktopAttachmentId = parseRelayAttachmentId('desktop-history-bytes')
+    const mobileAttachmentId = parseRelayAttachmentId('mobile-history-bytes')
+    const channel = fakeSnowChannel()
+    const protocol = negotiateCompanionProtocol(
+      createCompanionNegotiationChannel(),
+      createCompanionVersionOffer('mobile', [4]),
+      createCompanionVersionOffer('desktop', [4]),
+    )
+    channel.seal.mockImplementation((message) => {
+      encodeCompanionMessage(protocol, message)
+      return Uint8Array.of(9)
+    })
+    channel.canEncode.mockImplementation((message) => {
+      try {
+        encodeCompanionMessage(protocol, message)
+        return true
+      } catch {
+        return false
+      }
+    })
+    const operation = {
+      type: 'load-history' as const,
+      operationId: 'history-bytes' as never,
+      sessionId: 'session-history-bytes' as never,
+      maxMessages: REMOTE_PROTOCOL_LIMITS.historyPageMessages,
+    }
+    channel.open.mockReturnValue({ type: 'operation', operation })
+    const result = {
+      type: 'conversation-snapshot' as const,
+      operationId: operation.operationId,
+      generation: 1,
+      desktopRevision: 1,
+      sessionId: operation.sessionId,
+      conversation: liveConversation(operation.sessionId, Array.from({ length: 6 }, (_, index) => ({
+        kind: 'assistant', seq: index + 1, time: index + 1,
+        turn: 1, step: index + 1,
+        blocks: [{ kind: 'text', text: `${String(index)}:${'history'.repeat(1_500)}` }],
+      }))),
+    }
+    const send = vi.fn(async () => {})
+    const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
+      pairingSelector: selector, generation: 1,
+    }) }, send, async () => result, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
+    owner.updatePeers({
+      type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-history-bytes'),
+      attachmentId: desktopAttachmentId,
+      peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+    }, selector)
+    await owner.receive(
+      Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    await owner.receive(
+      Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    channel.seal.mockClear()
+
+    await owner.receive(
+      Uint8Array.of(3), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+
+    const sealed = channel.seal.mock.calls[0]?.[0]
+    if (sealed?.type !== 'projection' || sealed.projection.type !== 'conversation-snapshot'
+      || !isRecord(sealed.projection.conversation)) throw new Error('expected bounded history conversation')
+    expect(encodeCompanionMessage(protocol, sealed).byteLength)
+      .toBeLessThanOrEqual(REMOTE_PROTOCOL_LIMITS.transcriptPageBytes)
+    const nodes = sealed.projection.conversation.nodes
+    expect(Array.isArray(nodes)).toBe(true)
+    expect(nodes).not.toHaveLength(0)
+    expect(sealed.projection.conversation.hasMore).toBe(true)
+    expect((nodes as Array<{ seq: number }>).at(-1)?.seq).toBe(6)
+    owner.invalidate(selector)
+  })
+
   it('coalesces active Host changes behind one ordered Snow sender and advances projection revisions', async () => {
     const selector = parseRelayPairingSelector('pairing-live')
     const desktopAttachmentId = parseRelayAttachmentId('desktop-live')

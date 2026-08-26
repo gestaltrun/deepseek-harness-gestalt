@@ -457,9 +457,16 @@ export class DesktopSnowRelayChannelOwner {
     active: DesktopSnowActiveChannel,
     item: CompanionResult | CompanionProjection,
   ): Promise<void> {
-    await this.enqueueOutbound(active, () => isCompanionProjection(item)
-      ? { type: 'projection', projection: this.currentProjection(item, active.peer.generation) }
-      : { type: 'result', result: item })
+    await this.enqueueOutbound(active, () => {
+      if (!isCompanionProjection(item)) return { type: 'result', result: item }
+      const projection = this.currentProjection(item, active.peer.generation)
+      return {
+        type: 'projection',
+        projection: projection.type === 'conversation-snapshot'
+          ? boundConversationSnapshotProjection(active.channel, projection)
+          : projection,
+      }
+    })
   }
 
   private enqueueOutbound(
@@ -568,38 +575,62 @@ function boundLiveSessionProjection(
     if (!channel.canEncode(message(projection))) throw new Error('Companion live projection summary exceeds its negotiated wire limit')
     return projection
   }
-  const nodes = Array.isArray(projection.conversation.nodes) ? projection.conversation.nodes : []
-  for (let offset = 0; offset < nodes.length; offset += 1) {
-    const candidate = {
-      ...projection,
-      conversation: { ...projection.conversation, nodes: nodes.slice(offset), hasMore: true },
-    }
-    if (channel.canEncode(message(candidate))) return candidate
+  const conversation = fitConversationProjection(
+    projection.conversation,
+    candidate => channel.canEncode(message({ ...projection, conversation: candidate })),
+  )
+  if (conversation !== undefined) return { ...projection, conversation }
+  const { conversation: _conversation, ...summary } = projection
+  if (!channel.canEncode(message(summary))) throw new Error('Companion live projection summary exceeds its negotiated wire limit')
+  return summary
+}
+
+function boundConversationSnapshotProjection(
+  channel: SnowCompanionProtocolChannel,
+  projection: Extract<CompanionProjection, { type: 'conversation-snapshot' }>,
+): Extract<CompanionProjection, { type: 'conversation-snapshot' }> {
+  const message = (candidate: typeof projection): CompanionMessage => ({ type: 'projection', projection: candidate })
+  if (channel.canEncode(message(projection))) return projection
+  if (!isRecord(projection.conversation)) {
+    throw new Error('Companion conversation projection exceeds its negotiated wire limit')
+  }
+  const conversation = fitConversationProjection(
+    projection.conversation,
+    candidate => channel.canEncode(message({ ...projection, conversation: candidate })),
+  )
+  if (conversation === undefined) {
+    throw new Error('Companion conversation projection exceeds its negotiated wire limit')
+  }
+  return { ...projection, conversation }
+}
+
+function fitConversationProjection(
+  conversation: Record<string, unknown>,
+  fits: (candidate: Record<string, unknown>) => boolean,
+): Record<string, unknown> | undefined {
+  const nodes = Array.isArray(conversation.nodes) ? conversation.nodes : []
+  for (let offset = 1; offset < nodes.length; offset += 1) {
+    const candidate = { ...conversation, nodes: nodes.slice(offset), hasMore: true }
+    if (fits(candidate)) return candidate
   }
   let lower = 0
   let upper = REMOTE_PROTOCOL_LIMITS.transcriptPageBytes
-  let fitted: typeof projection | undefined
+  let fitted: Record<string, unknown> | undefined
   while (lower <= upper) {
     const limit = Math.floor((lower + upper) / 2)
-    const candidate = {
-      ...projection,
-      conversation: truncateConversationText({
-        ...projection.conversation,
-        hasMore: true,
-        nodes: nodes.length === 0 ? [] : [nodes.at(-1)],
-      }, limit),
-    }
-    if (channel.canEncode(message(candidate))) {
+    const candidate = truncateConversationText({
+      ...conversation,
+      hasMore: true,
+      nodes: nodes.length === 0 ? [] : [nodes.at(-1)],
+    }, limit) as Record<string, unknown>
+    if (fits(candidate)) {
       fitted = candidate
       lower = limit + 1
     } else {
       upper = limit - 1
     }
   }
-  if (fitted !== undefined) return fitted
-  const { conversation: _conversation, ...summary } = projection
-  if (!channel.canEncode(message(summary))) throw new Error('Companion live projection summary exceeds its negotiated wire limit')
-  return summary
+  return fitted
 }
 
 function truncateConversationText(value: unknown, limit: number, key?: string): unknown {

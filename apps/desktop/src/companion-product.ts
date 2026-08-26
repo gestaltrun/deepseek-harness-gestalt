@@ -474,11 +474,33 @@ export class DesktopCompanionSurfaceDiscovery {
     if (archived === undefined) return invalidHostResult(operation, 'surface baseline')
     const visibleSessionValues = surfaceSessionValues(snapshot.sessionValue, archived)
     if (visibleSessionValues === undefined) return invalidHostResult(operation, 'surface baseline')
-    const sessions = parseSurfaceSessions(visibleSessionValues, operation.offset)
-    if (sessions === undefined) return invalidHostResult(operation, 'surface baseline')
-    const workspaces = parseSurfaceWorkspaces(snapshot.workspaceValue, new Set(sessions.map(session => session.sessionId)))
-    if (workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
-    const hasMore = visibleSessionValues.length > operation.offset + sessions.length
+    const parsedSessions = parseSurfaceSessions(visibleSessionValues, operation.offset)
+    if (parsedSessions === undefined) return invalidHostResult(operation, 'surface baseline')
+    let projection: Extract<CompanionProjection, { type: 'surface-snapshot' }> | undefined
+    for (let sessionCount = parsedSessions.length; sessionCount >= 0; sessionCount -= 1) {
+      if (sessionCount === 0 && parsedSessions.length > 0) break
+      const sessions = parsedSessions.slice(0, sessionCount)
+      const workspaces = parseSurfaceWorkspaces(
+        snapshot.workspaceValue,
+        new Set(sessions.map(session => session.sessionId)),
+      )
+      if (workspaces === undefined) return invalidHostResult(operation, 'surface baseline')
+      const candidate: Extract<CompanionProjection, { type: 'surface-snapshot' }> = {
+        type: 'surface-snapshot', operationId: operation.operationId,
+        generation: dependencies.generation, desktopRevision: dependencies.desktopRevision,
+        desktopName: dependencies.desktopName,
+        offset: operation.offset,
+        sessions,
+        workspaces,
+        hasMore: visibleSessionValues.length > operation.offset + sessions.length,
+      }
+      if (encodedSurfaceProjectionBytes(candidate) <= REMOTE_PROTOCOL_LIMITS.transcriptPageBytes) {
+        projection = candidate
+        break
+      }
+    }
+    if (projection === undefined) return invalidHostResult(operation, 'surface projection byte limit')
+    const { sessions, hasMore } = projection
     if (hasMore) {
       this.states.set(dependencies.pairingId, {
         epoch,
@@ -488,16 +510,18 @@ export class DesktopCompanionSurfaceDiscovery {
     } else {
       this.states.delete(dependencies.pairingId)
     }
-    return {
-      type: 'surface-snapshot', operationId: operation.operationId,
-      generation: dependencies.generation, desktopRevision: dependencies.desktopRevision,
-      desktopName: dependencies.desktopName,
-      offset: operation.offset,
-      sessions,
-      workspaces,
-      hasMore,
-    }
+    return projection
   }
+}
+
+function encodedSurfaceProjectionBytes(
+  projection: Extract<CompanionProjection, { type: 'surface-snapshot' }>,
+): number {
+  return new TextEncoder().encode(JSON.stringify({
+    applicationVersion: 4,
+    type: 'projection',
+    projection: { ...projection, desktopRevision: Number.MAX_SAFE_INTEGER },
+  })).byteLength
 }
 
 async function loadHistory(

@@ -166,6 +166,63 @@ describe('Desktop Companion product operations', () => {
     expect(sessionListCalls).toBe(1)
   })
 
+  it('pages a large surface by its encoded projection byte limit without skipping Sessions', async () => {
+    const items = Array.from({ length: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows }, (_, index) => ({
+      sessionId: `session-large-${String(index)}`,
+      updatedAt: index,
+      running: false,
+      blank: false,
+      projections: { values: { title: `${String(index)}-${'large title '.repeat(300)}` } },
+    }))
+    const dependencies = baseDependencies(hostRpc(async method => method === 'session.list'
+      ? { ok: true, value: { items } }
+      : { ok: true, value: { items: [], archivedSessionIds: [] } }))
+    const discovery = new DesktopCompanionSurfaceDiscovery()
+    const first = await discovery.refresh(op({ type: 'refresh-surface', offset: 0 }), dependencies)
+
+    expect(first.type).toBe('surface-snapshot')
+    if (first.type !== 'surface-snapshot') throw new Error('expected first surface page')
+    expect(first.sessions.length).toBeGreaterThan(0)
+    expect(first.sessions.length).toBeLessThan(items.length)
+    expect(first.hasMore).toBe(true)
+    expect(new TextEncoder().encode(JSON.stringify({
+      applicationVersion: 4,
+      type: 'projection',
+      projection: { ...first, desktopRevision: Number.MAX_SAFE_INTEGER },
+    })).byteLength).toBeLessThanOrEqual(REMOTE_PROTOCOL_LIMITS.transcriptPageBytes)
+
+    const second = await discovery.refresh({
+      ...op({ type: 'refresh-surface', offset: first.sessions.length }),
+      operationId: parseCompanionOperationId('operation-large-surface-page-two'),
+    }, dependencies)
+    expect(second.type).toBe('surface-snapshot')
+    if (second.type !== 'surface-snapshot') throw new Error('expected second surface page')
+    expect([...first.sessions, ...second.sessions].map(session => session.sessionId)).toEqual(
+      items.map(item => item.sessionId),
+    )
+    expect(second.hasMore).toBe(false)
+  })
+
+  it('returns a bounded failure when one surface row exceeds the projection byte limit', async () => {
+    const dependencies = baseDependencies(hostRpc(async method => method === 'session.list'
+      ? { ok: true, value: { items: [{
+        sessionId: 'session-oversized',
+        updatedAt: 1,
+        running: false,
+        blank: false,
+        projections: { values: { title: 'oversized'.repeat(6_000) } },
+      }] } }
+      : { ok: true, value: { items: [], archivedSessionIds: [] } }))
+
+    await expect(new DesktopCompanionSurfaceDiscovery().refresh(
+      op({ type: 'refresh-surface', offset: 0 }),
+      dependencies,
+    )).resolves.toMatchObject({
+      type: 'operation-failed',
+      failure: { code: 'HOST_WIRE_INVALID' },
+    })
+  })
+
   it('rejects an offset-zero snapshot that returns after Host replacement', async () => {
     const oldSessions = deferred<DesktopHostRpcResult>()
     const oldWorkspaces = deferred<DesktopHostRpcResult>()

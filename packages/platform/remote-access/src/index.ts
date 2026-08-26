@@ -1177,6 +1177,10 @@ export class PersonalPairingProvider extends RemoteAccessService {
       const mailbox = this.endpointMailbox()
       const mailboxState = mailbox.exportState()
       const challenge = mailboxState.challenges.find(record => record.challengeId === input.challengeId)
+      const replay = mailboxState.pending.find(record => record.completionId === input.completionId)
+      if (challenge === undefined && replay === undefined) {
+        throw new RemoteAccessError('PAIRING_CHALLENGE_INVALID', 'Endpoint Pairing invitation is invalid or unavailable')
+      }
       if (challenge !== undefined) {
         if (mailboxState.pending.filter(record => !record.confirmed && !record.rejected
           && record.accountId === account.id && record.mobileInstallationId === installation.id).length

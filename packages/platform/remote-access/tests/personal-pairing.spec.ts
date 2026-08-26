@@ -739,6 +739,12 @@ describe('PersonalPairingProvider', () => {
     const desktop = authentication('desktop-installation')
     const mobile = authentication('mobile-installation')
     await provider.setMobileAccess({ desktop, enabled: true })
+    await expect(provider.submitEndpointMessage1({
+      mobile,
+      challengeId: parsePairingChallengeId('missing-endpoint-challenge'),
+      completionId: parsePairingCompletionId('missing-endpoint-completion'),
+      message1: Uint8Array.of(10),
+    })).rejects.toMatchObject({ code: 'PAIRING_CHALLENGE_INVALID' })
     const challenge = await provider.createEndpointChallenge({
       desktop,
       rendezvousId: parsePairingRendezvousId('endpoint-mailbox'),

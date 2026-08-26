@@ -107,6 +107,9 @@ describe('Desktop Host RPC', () => {
   it('accepts the exact response byte limit and rejects overflow and a fast cumulative flood', async () => {
     const padding = 'x'.repeat(1_024)
     const historyPadding = 'h'.repeat(REMOTE_PROTOCOL_LIMITS.companionMessageBytes + 1)
+    const baselinePadding = 'b'.repeat(REMOTE_PROTOCOL_LIMITS.companionMessageBytes + 1)
+    const baselineResponseMaxBytes = REMOTE_PROTOCOL_LIMITS.transcriptPageBytes
+      * REMOTE_PROTOCOL_LIMITS.transcriptPageEntries
     const responseBytes = Buffer.byteLength(successResponse('0'.repeat(36), padding))
     const server = createServer((request, response) => {
       const chunks: Buffer[] = []
@@ -119,6 +122,14 @@ describe('Desktop Host RPC', () => {
         }
         if (body.method === 'session.history') {
           response.end(successResponse(body.rpcId, historyPadding))
+          return
+        }
+        if (body.method === 'session.list' || body.method === 'workspace.list') {
+          if (body.payload.query === 'oversized-baseline') {
+            response.end(Buffer.alloc(baselineResponseMaxBytes + 1, 120))
+            return
+          }
+          response.end(successResponse(body.rpcId, baselinePadding))
           return
         }
         if (body.payload.query === 'fast-flood') {
@@ -162,6 +173,12 @@ describe('Desktop Host RPC', () => {
     await expect(flood.call('session.history', { query: 'history' })).resolves.toMatchObject({
       ok: true, value: { padding: historyPadding },
     })
+    for (const method of ['session.list', 'workspace.list']) {
+      await expect(flood.call(method, { query: 'baseline' })).resolves.toMatchObject({
+        ok: true, value: { padding: baselinePadding },
+      })
+      await expect(flood.call(method, { query: 'oversized-baseline' })).resolves.toEqual(limitFailure)
+    }
     await expect(attachment.call('session.attachment', { query: 'attachment' })).resolves.toMatchObject({
       ok: true, value: { padding },
     })

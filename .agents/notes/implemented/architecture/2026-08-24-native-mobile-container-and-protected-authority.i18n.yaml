@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-24-native-mobile-container-and-protected-authority.md
-2026-08-24-native-mobile-container-and-protected-authority.md: f3a1d5d1ab2c3cb1c41b474b1badf6edc81b83a5
-2026-08-24-native-mobile-container-and-protected-authority.zh.md: da9380f248d49b7eeb6a32fb61c15b657eb04970
+2026-08-24-native-mobile-container-and-protected-authority.md: 9d1ab5bc9fb5c8d03be03d4da6d56eda0c86137d
+2026-08-24-native-mobile-container-and-protected-authority.zh.md: d7c13df18c279530306becc37e4f7aa89170839c

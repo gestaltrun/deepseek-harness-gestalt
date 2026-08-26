@@ -54,6 +54,12 @@ describe('Companion release validation', () => {
     expect(COMPANION_RELEASE_DEVICE_CHECKS).not.toContain('push')
   })
 
+  it('disables Capacitor logging for protected native bridge values', () => {
+    const config = readFileSync(new URL('../capacitor.config.ts', import.meta.url), 'utf8')
+
+    expect(config).toContain("loggingBehavior: 'none'")
+  })
+
   it('returns an object when iOS protected storage has no retained value', () => {
     const plugin = readFileSync(new URL(
       '../ios/App/App/GestaltProtectedStoragePlugin.swift', import.meta.url,

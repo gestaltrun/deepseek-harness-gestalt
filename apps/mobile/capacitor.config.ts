@@ -5,6 +5,7 @@ const config: CapacitorConfig = {
   appName: 'DeepSeek Gestalt',
   webDir: 'dist',
   bundledWebRuntime: false,
+  loggingBehavior: 'none',
   server: {
     androidScheme: 'https',
     iosScheme: 'capacitor',

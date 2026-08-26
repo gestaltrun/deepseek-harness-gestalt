@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   COMPANION_RELEASE_DEVICE_CHECKS,
@@ -100,7 +100,7 @@ function runVerifier(fixture: ReturnType<typeof setupRemoteEvidence>) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      PATH: `${fixture.directory}:${process.env.PATH ?? ''}`,
+      PATH: `${fixture.directory}${delimiter}${process.env.PATH ?? ''}`,
       FAKE_SHA: fixture.candidateSha,
       FAKE_VERDICT: fixture.verdict,
       FAKE_WORKFLOW_ID: fixture.workflow === 'acceptance' ? '9001' : '9002',

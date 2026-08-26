@@ -262,6 +262,9 @@ jobs:
           if (-not $appBin) { throw 'packaged executable not found' }
           & node apps/desktop/scripts/verify-windows-icon.mjs $appBin apps/desktop/build/icon.ico
 
+      - name: Verify Windows update feed
+        run: node apps/desktop/scripts/verify-windows-update-feed.mjs apps/desktop/release ${{ needs.prepare.outputs.version }}
+
       - name: Smoke packaged Desktop Host
         shell: pwsh
         run: |
@@ -269,6 +272,23 @@ jobs:
             Where-Object { $_.FullName -match 'win-unpacked' } |
             Select-Object -First 1 -ExpandProperty FullName
           if (-not $appBin) { throw 'packaged executable not found' }
+          $env:DSH_DESKTOP_SMOKE = '1'
+          $env:DSH_PACKAGED_APP_BIN = $appBin
+          & node_modules/.bin/vitest.cmd run apps/desktop/tests/electron-smoke-packaged.spec.ts
+
+      - name: Smoke NSIS-installed Desktop Host
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem apps/desktop/release -File |
+            Where-Object { $_.Name -like 'DeepSeekGestalt-Setup-*-x64.exe' } |
+            Select-Object -First 1
+          if (-not $setup) { throw 'NSIS installer not found' }
+          $dest = Join-Path $env:RUNNER_TEMP 'gestalt-nsis'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $install = Start-Process -FilePath $setup.FullName -ArgumentList '/S', "/D=$dest" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "NSIS silent install exited $($install.ExitCode)" }
+          $appBin = Join-Path $dest 'DeepSeek Gestalt.exe'
+          if (-not (Test-Path $appBin)) { throw "installed executable not found: $appBin" }
           $env:DSH_DESKTOP_SMOKE = '1'
           $env:DSH_PACKAGED_APP_BIN = $appBin
           & node_modules/.bin/vitest.cmd run apps/desktop/tests/electron-smoke-packaged.spec.ts

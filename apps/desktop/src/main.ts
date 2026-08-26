@@ -43,7 +43,8 @@ import { planHostExit, shouldPreventQuit, startWithOneRetry } from './host-exit.
 import { classifyNavigation } from './navigation-policy.ts'
 import { spawnWebHost, type RunningWebHost } from './spawn-web-host.ts'
 import {
-  autoUpdaterFromModule, startAutoUpdater, type AutoUpdaterLifecycle, type AutoUpdaterModule,
+  autoUpdaterFromModule, configurePackagedAutoUpdater, startAutoUpdater,
+  type AutoUpdaterLifecycle, type AutoUpdaterModule,
 } from './updater.ts'
 import { windowChromeOptions } from './window-options.ts'
 import { desktopIconOptions } from './app-icon.ts'
@@ -247,6 +248,9 @@ async function boot(): Promise<void> {
   try {
     const module = await import('electron-updater')
     const autoUpdater = autoUpdaterFromModule(module as unknown as AutoUpdaterModule)
+    configurePackagedAutoUpdater(autoUpdater, {
+      logFile: join(app.getPath('userData'), 'logs', 'updater.log'),
+    })
     updater = startAutoUpdater({
       updater: autoUpdater,
       onStateChange: pushStatus,

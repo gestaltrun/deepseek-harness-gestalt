@@ -8,6 +8,7 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-desktop/protocol'
 import { parseAccountProofJti } from '@deepseek-ai/dsh-platform-account'
 import {
+  RemoteRelayError,
   parsePairingChallengeId,
   parsePendingPairingId,
   parsePersonalPairingId,
@@ -542,6 +543,33 @@ describe('DesktopPairingController', () => {
     ])).resolves.toBe(true)
     expect(relay.start).toHaveBeenCalledOnce()
     expect(relay.stop).toHaveBeenCalledWith('host-unavailable')
+    await controller.dispose()
+  })
+
+  it('settles an in-flight Relay start cancelled by its owning lifecycle stop', async () => {
+    const startEntered = deferred<undefined>()
+    const startFailure = deferred<undefined>()
+    const relay = {
+      start: vi.fn(async () => {
+        startEntered.resolve(undefined)
+        await startFailure.promise
+        throw new RemoteRelayError('REMOTE_OFFLINE', 'Relay lifecycle stopped before attachment')
+      }),
+      stop: vi.fn(async () => { startFailure.resolve(undefined) }),
+    }
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset()
+    transport.getMobileAccessState.mockResolvedValue({ enabled: true })
+    const controller = new DesktopPairingController({
+      account: accountFixture(), transport, relay,
+    })
+
+    const starting = controller.start()
+    await startEntered.promise
+    const stopping = controller.deactivate('quit')
+
+    await expect(Promise.all([starting, stopping])).resolves.toEqual([undefined, undefined])
+    expect(relay.stop).toHaveBeenCalledWith('quit')
     await controller.dispose()
   })
 

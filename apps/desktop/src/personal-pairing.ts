@@ -4,6 +4,7 @@ import type { DesktopPairingSnapshot } from '@deepseek-ai/dsh-client-ui-desktop/
 import { parsePlatformAccountId, type PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
   PAIRING_CHALLENGE_TTL_MS,
+  RemoteRelayError,
   deriveAuthenticationWords,
   parsePairingChallengeId,
   parsePairingRendezvousId,
@@ -344,7 +345,15 @@ export class DesktopPairingController implements DesktopPairingActions {
       if (generation !== this.lifecycleGeneration || !authorityIsCurrent()) return false
       this.accountId = accountId
       this.active = true
-      await this.exclusive(async () => { await this.refresh() })
+      try {
+        await this.exclusive(async () => { await this.refresh() })
+      } catch (error) {
+        const lifecycleIsStale = generation !== this.lifecycleGeneration || !authorityIsCurrent()
+        if (!lifecycleIsStale || !(error instanceof RemoteRelayError) || error.code !== 'REMOTE_OFFLINE') throw error
+        this.active = false
+        this.suspendProjection()
+        return false
+      }
       if (generation !== this.lifecycleGeneration || !authorityIsCurrent()) {
         this.active = false
         this.suspendProjection()

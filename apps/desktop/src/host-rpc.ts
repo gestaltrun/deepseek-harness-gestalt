@@ -200,7 +200,7 @@ function watchHostWebSocket(
     const message = (event: MessageEvent): void => {
       try {
         if (typeof event.data !== 'string'
-          || new TextEncoder().encode(event.data).byteLength > REMOTE_PROTOCOL_LIMITS.companionMessageBytes) {
+          || new TextEncoder().encode(event.data).byteLength > MAX_HOST_PROJECTED_RESPONSE_BYTES) {
           throw new Error('Desktop Host event stream frame exceeded its byte ceiling')
         }
         const envelope: unknown = JSON.parse(event.data)

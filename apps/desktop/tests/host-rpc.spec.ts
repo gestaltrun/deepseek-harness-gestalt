@@ -1,11 +1,14 @@
 import { createServer } from 'node:http'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import { createDesktopHostRpc } from '../src/host-rpc.ts'
 
 const closeServers: Array<() => Promise<void>> = []
 
-afterEach(async () => { await Promise.all(closeServers.splice(0).map(close => close())) })
+afterEach(async () => {
+  vi.unstubAllGlobals()
+  await Promise.all(closeServers.splice(0).map(close => close()))
+})
 
 describe('Desktop Host RPC', () => {
   it('rejects response bounds outside the Companion application-message ceiling', () => {
@@ -228,6 +231,47 @@ describe('Desktop Host RPC', () => {
       rpc.call('session.search', { query: 'never-ending' }),
     ])).resolves.toEqual([httpFailure, httpFailure])
     await expect.poll(() => closedResponses.size).toBe(2)
+  })
+
+  it('bounds Host event frames before projecting them into Companion messages', async () => {
+    const sockets: TestWebSocket[] = []
+    class TestWebSocket extends EventTarget {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      readyState = TestWebSocket.OPEN
+      readonly close = vi.fn(() => { this.readyState = 3 })
+      constructor(readonly url: URL) {
+        super()
+        sockets.push(this)
+      }
+    }
+    vi.stubGlobal('WebSocket', TestWebSocket)
+    const rpc = createDesktopHostRpc('http://127.0.0.1', {
+      responseMaxBytes: REMOTE_PROTOCOL_LIMITS.companionMessageBytes,
+    })
+    const accepted = vi.fn()
+    const cancellation = new AbortController()
+    const watching = rpc.watchHost?.(cancellation.signal, accepted)
+    const largeFrame = JSON.stringify({
+      type: 'server-request', rpcId: 'large-frame',
+      payload: { type: 'session/event', sessionId: 'session-large', padding: 'x'.repeat(
+        REMOTE_PROTOCOL_LIMITS.companionMessageBytes,
+      ) },
+    })
+
+    sockets[0]?.dispatchEvent(new MessageEvent('message', { data: largeFrame }))
+    expect(accepted).toHaveBeenCalledOnce()
+    expect(sockets[0]?.close).not.toHaveBeenCalled()
+    cancellation.abort()
+    await expect(watching).resolves.toBeUndefined()
+
+    const overflowCancellation = new AbortController()
+    const overflow = rpc.watchHost?.(overflowCancellation.signal, accepted)
+    const maxProjectedBytes = REMOTE_PROTOCOL_LIMITS.transcriptPageBytes
+      * REMOTE_PROTOCOL_LIMITS.transcriptPageEntries
+    sockets[1]?.dispatchEvent(new MessageEvent('message', { data: 'x'.repeat(maxProjectedBytes + 1) }))
+    await expect(overflow).rejects.toThrow('Desktop Host event stream returned an invalid frame')
+    expect(sockets[1]?.close).toHaveBeenCalledOnce()
   })
 })
 

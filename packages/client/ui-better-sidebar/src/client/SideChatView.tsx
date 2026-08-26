@@ -45,10 +45,10 @@ export function SideChatView(props: {
   const published = summary?.blank === false
   const conversationHost = useRef<HTMLDivElement | null>(null)
   const openSession = useCallback((sessionId: SessionId): void => {
-    ctx.betterSidebar?.updateTab(tab.id, {
+    ctx.get('betterSidebar')?.updateTab(tab.id, {
       meta: { threadId: sessionId, ...(rootThreadId === undefined ? {} : { rootThreadId }) },
     })
-  }, [ctx.betterSidebar, rootThreadId, tab.id])
+  }, [ctx, rootThreadId, tab.id])
 
   useEffect(() => {
     if (threadId === undefined || !provisional || published) return
@@ -67,8 +67,8 @@ export function SideChatView(props: {
 
   useEffect(() => {
     if (threadId === undefined || !provisional || !published) return
-    ctx.betterSidebar?.updateTab(tab.id, { meta: { threadId } })
-  }, [ctx.betterSidebar, provisional, published, tab.id, threadId])
+    ctx.get('betterSidebar')?.updateTab(tab.id, { meta: { threadId } })
+  }, [ctx, provisional, published, tab.id, threadId])
 
   useEffect(() => {
     const display = summary?.displayTitle
@@ -76,7 +76,7 @@ export function SideChatView(props: {
     const title = threadDisplayTitle(display)
     if (title === '' || title === tab.title) return
     try {
-      ctx.betterSidebar?.updateTab(tab.id, { title })
+      ctx.get('betterSidebar')?.updateTab(tab.id, { title })
     } catch {
       // A stale tab title does not affect the durable Session or renderer.
     }

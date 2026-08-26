@@ -15,6 +15,7 @@ const FIXTURE = fileURLToPath(new URL('./snapshots/live-interactions/session.jso
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/sidechat-round', import.meta.url))
 const EXPECTED = join(SNAPSHOT_DIR, 'ui.expected.md')
 const PICKER_EXPECTED = join(SNAPSHOT_DIR, 'picker.expected.md')
+const FLOAT_EXPECTED = join(SNAPSHOT_DIR, 'float.expected.md')
 const DESCENDANT_EXPECTED = join(SNAPSHOT_DIR, 'descendant.expected.md')
 const MODE = webSnapshotMode()
 const PROMPT = 'Reply with a one-sentence description of event sourcing, then stop.'
@@ -95,6 +96,21 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     const sideComposer = panel.locator('textarea:enabled')
     await sideComposer.waitFor({ timeout: 15_000 })
     expect(scaffold.ctx.agents.list().map(agent => agent.id)).toEqual(liveIdsBeforeSideChat)
+
+    const sideChatTab = panel.locator('[draggable="true"]').first()
+    await sideChatTab.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Move to Free Window', exact: true }).click()
+    const float = page.locator('[data-dsh-float-window]')
+    await float.waitFor({ timeout: 15_000 })
+    await compareOrRefreshGolden(
+      FLOAT_EXPECTED,
+      await captureStableAria(page, '[data-dsh-float-window]', scaffold.workspaceCwd),
+      MODE,
+    )
+    await float.getByText('New thread', { exact: true }).click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Dock Back to Sidebar', exact: true }).click()
+    await expect.poll(() => float.count()).toBe(0)
+    await sideComposer.waitFor({ timeout: 15_000 })
 
     const launcher = panel.getByRole('button', { name: 'Commands and skills', exact: true })
     await launcher.click()
@@ -203,6 +219,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
   it('keeps the fixture inventory closed', async () => {
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'descendant.expected.md',
+      'float.expected.md',
       'picker.expected.md',
       'ui.expected.md',
     ])

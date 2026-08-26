@@ -150,6 +150,14 @@ describe('open-registration enforcement', () => {
     const provider = composition.provider
     const owner = authentication('desktop-installation', 'account-one')
     await provider.setMobileAccess({ desktop: owner, enabled: true })
+    const privateReservation = await composition.attachmentQuota.admit({
+      accountId: 'account-private' as never,
+      bytes: 1,
+    })
+    await composition.attachmentQuota.release({
+      accountId: 'account-private' as never,
+      reservationId: privateReservation.reservationId,
+    })
     const held: AttachmentBlobReservationId[] = []
     for (let index = 0; index < OPEN_REGISTRATION_QUOTAS.concurrentBlobs; index += 1) {
       held.push((await provider.admitAttachmentBlob({ owner, bytes: 1 })).reservationId)

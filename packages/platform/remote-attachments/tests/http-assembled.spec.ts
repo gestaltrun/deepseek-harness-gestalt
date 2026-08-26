@@ -602,6 +602,21 @@ describe('Remote attachment HTTP assembled transfer', () => {
   })
 
   it.each([
+    ['account-capacity', 429],
+    ['account-invalid', 400],
+  ] as const)('projects %s Account failures without treating them as store faults', async (pairing, status) => {
+    const { origin } = await start()
+    const response = await fetch(`${origin}/v1/remote-attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': pairing },
+      body: Uint8Array.of(1),
+    })
+
+    expect(response.status).toBe(status)
+    if (status === 429) expect(response.headers.get('retry-after')).toBe('7')
+  })
+
+  it.each([
     ['class error', new RemoteAttachmentError('PLATFORM_CAPACITY', 'Attachment capacity is full', 9)],
     ['structural error', { code: 'ATTACHMENT_EMPTY', message: 'Attachment body is empty' }],
   ])('projects a %s from a durable store', async (_label, failure) => {
@@ -935,6 +950,8 @@ async function start(options: {
     if (typeof value !== 'string') throw new Error('pairing header is required')
     if (value === 'explode') throw new Error('authority exploded')
     if (value === 'proof-replayed') throw new AccountError('PROOF_REPLAYED', 'installation proof was already used')
+    if (value === 'account-capacity') throw new AccountError('PLATFORM_CAPACITY', 'Platform is full', 7)
+    if (value === 'account-invalid') throw new AccountError('LOGIN_ATTEMPT_INVALID', 'Account login is invalid')
     return {
       pairingId: parsePersonalPairingId(value),
       admit: options.admit ?? (async () => ({

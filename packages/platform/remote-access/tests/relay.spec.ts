@@ -389,6 +389,57 @@ describe('RemoteRelayProvider', () => {
     await platform.dispose()
   })
 
+  it('keeps the newest directory entry when stale duplicates follow it', async () => {
+    const routeStore = new SharedRouteStore()
+    const coordinator = new SharedCoordinator()
+    const platform = provider('platform-peer-deduplication', routeStore, coordinator, 7)
+    const routeId = parseRelayRouteId('route-peer-deduplication')
+    const desktopGrant = await rotateCredential(platform, routeId, 'desktop')
+    const pairingSelector = parseRelayPairingSelector('pairing-deduplication')
+    const base = {
+      routeId,
+      endpoint: 'mobile' as const,
+      instanceId: parseRelayInstanceId('platform-peer-source'),
+      revision: desktopGrant.revision,
+      pairingSelector,
+      expiresAt: Date.now() + 10_000,
+    }
+    coordinator.put({
+      ...base,
+      attachmentId: parseRelayAttachmentId('mobile-newest'),
+      connectionToken: parseRelayConnectionToken('token-z'),
+      connectedAt: 20,
+    })
+    coordinator.put({
+      ...base,
+      attachmentId: parseRelayAttachmentId('mobile-older-time'),
+      connectionToken: parseRelayConnectionToken('token-y'),
+      connectedAt: 10,
+    })
+    coordinator.put({
+      ...base,
+      attachmentId: parseRelayAttachmentId('mobile-older-token'),
+      connectionToken: parseRelayConnectionToken('token-a'),
+      connectedAt: 20,
+    })
+    let ready: RelayReadyMessage | undefined
+    const desktop = await platform.attach({
+      message: {
+        type: 'attach', transportVersion: 1, routeId,
+        attachmentId: parseRelayAttachmentId('desktop-deduplication'), endpoint: 'desktop',
+        credential: desktopGrant.credential,
+      },
+      deliver: async () => {},
+      announce: async (message) => { ready = message },
+    })
+
+    expect(ready?.peers).toEqual([
+      expect.objectContaining({ attachmentId: 'mobile-newest', pairingSelector }),
+    ])
+    await desktop.close()
+    await platform.dispose()
+  })
+
   it('pushes route-bound peer replacement and close updates across Platform Instances', async () => {
     const routeStore = new SharedRouteStore()
     const coordinator = new SharedCoordinator()

@@ -11,7 +11,7 @@ import {
   parseRelayRouteId,
   RemoteProtocolError,
 } from '@deepseek-ai/dsh-remote-protocol'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MobileCompanionProjectionDto } from '../src/companion-projection.ts'
 
 const browserOpen = vi.hoisted(() => vi.fn<(options: { url: string }) => Promise<void>>())
@@ -140,6 +140,10 @@ vi.mock('@capacitor/core', () => ({
   }),
 }))
 
+beforeEach(() => {
+  vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US'])
+})
+
 afterEach(() => {
   cleanup()
   browserOpen.mockReset()
@@ -164,6 +168,7 @@ afterEach(() => {
   protectedValues.clear()
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   document.body.replaceChildren()
   vi.resetModules()
 })
@@ -199,7 +204,7 @@ describe('Mobile Platform Account entry', () => {
     const { mobileProductStarted } = await import('../src/main.tsx')
     await mobileProductStarted
     fireEvent.click(await screen.findByRole('checkbox'))
-    const button = screen.getByRole('button', { name: '使用 GitHub 继续' })
+    const button = screen.getByRole('button', { name: 'Continue with GitHub' })
     await waitFor(() => { expect(button.hasAttribute('disabled')).toBe(false) })
     fireEvent.click(button)
 

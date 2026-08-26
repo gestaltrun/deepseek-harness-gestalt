@@ -466,6 +466,13 @@ describe('Remote Access HTTP assembled flow', () => {
     expect(replayed.status).toBe(401)
     await expect(replayed.json()).resolves.toMatchObject({ error: { code: 'PROOF_REPLAYED' } })
     expect(reported).not.toHaveBeenCalled()
+    for (const [failure, status] of [
+      [new AccountError('PLATFORM_CAPACITY', 'full', 7), 429],
+      [new AccountError('LOGIN_ATTEMPT_INVALID', 'invalid'), 400],
+    ] as const) {
+      remoteAccess.getMobileAccessState.mockRejectedValueOnce(failure)
+      expect((await request({ operation: 'get-mobile-access' })).status).toBe(status)
+    }
     remoteAccess.getMobileAccessState.mockRejectedValueOnce(
       new RemoteAccessError('PAIRING_CHALLENGE_USED', 'used'),
     )
@@ -489,6 +496,28 @@ describe('Remote Access HTTP assembled flow', () => {
       failureKind: 'unexpected-error',
       cause: 'persistence-untranslatable-character',
     })
+    for (const [failure, cause] of [
+      [new AggregateError([], 'Bearer secret-token'), 'cleanup'],
+      [new SyntaxError('Bearer secret-token'), 'codec'],
+      [new TypeError('Bearer secret-token'), 'contract'],
+      ['Bearer secret-token', 'unexpected'],
+      [null, 'unexpected'],
+      [{ detail: 'Bearer secret-token' }, 'unexpected'],
+      [{ code: 7, detail: 'Bearer secret-token' }, 'unexpected'],
+      [{ code: 'ZZZZZ', detail: 'Bearer secret-token' }, 'persistence-other'],
+      [{ code: 'ECONNREFUSED', detail: 'Bearer secret-token' }, 'transport'],
+      [{ code: 'UND_ERR_CONNECT_TIMEOUT', detail: 'Bearer secret-token' }, 'transport'],
+      [{ code: 'ERR_INVALID_ARG_TYPE', detail: 'Bearer secret-token' }, 'dependency'],
+      [{ code: 'EOTHER', detail: 'Bearer secret-token' }, 'unexpected'],
+    ] as const) {
+      remoteAccess.setMobileAccess.mockRejectedValueOnce(failure)
+      expect((await request({ operation: 'set-mobile-access', enabled: true })).status).toBe(500)
+      expect(reported).toHaveBeenLastCalledWith('[remote-access-http] unexpected request failure:', {
+        operation: 'set-mobile-access',
+        failureKind: 'unexpected-error',
+        cause,
+      })
+    }
     expect(JSON.stringify(reported.mock.calls)).not.toContain('secret-token')
     reported.mockRestore()
   })
@@ -529,6 +558,34 @@ describe('Remote Access HTTP assembled flow', () => {
     if (route === undefined) throw new Error('Remote Access route was not registered')
     await route.handler(request as never, response as never)
     expect(response.writeHead).toHaveBeenCalledWith(200, expect.any(Object))
+  })
+
+  it('logs a bounded request-setup failure when the request stream aborts before dispatch', async () => {
+    let route: RegisteredRoute | undefined
+    const ctx = {
+      remoteAccess: {},
+      webServer: { register(value: RegisteredRoute) { route = value; return () => {} } },
+      effect(register: () => () => void) { register() },
+    } as unknown as Context
+    apply(ctx, { origins: ['https://mobile.example'] })
+    const response = { writeHead: vi.fn(), end: vi.fn(), setHeader: vi.fn() }
+    const request = {
+      method: 'POST',
+      headers: proofHeaders(authentication('account-one:desktop:desktop-one')),
+      async *[Symbol.asyncIterator]() { throw new SyntaxError('Bearer request-secret') },
+    }
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      if (route === undefined) throw new Error('Remote Access route was not registered')
+      await route.handler(request as never, response as never)
+      expect(response.writeHead).toHaveBeenCalledWith(500, expect.any(Object))
+      expect(reported).toHaveBeenCalledWith('[remote-access-http] unexpected request failure:', {
+        operation: 'request-setup', failureKind: 'unexpected-error', cause: 'codec',
+      })
+      expect(JSON.stringify(reported.mock.calls)).not.toContain('request-secret')
+    } finally {
+      reported.mockRestore()
+    }
   })
 
   it('rejects a Pairing Challenge when the TCP socket has no client IP', async () => {

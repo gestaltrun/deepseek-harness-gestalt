@@ -388,11 +388,11 @@ export interface PersonalPairingActivity {
 
 /** Desktop access operations that settle with one pairing-state transaction. */
 export interface PersonalPairingAccessTransaction {
-  /** Read current Desktop access. */
+  /** Read current Desktop access without process-local caching. */
   getDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<DesktopRemoteAccessAuthority>
-  /** Keep an active route or install the supplied fresh route. */
+  /** Atomically keep an active route or install the supplied fresh route. */
   enableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, freshRouteId: RelayRouteId): Promise<RelayRouteId>
-  /** Disable access, remove Mobile grants, and return every route still requiring revocation. */
+  /** Atomically disable access, remove Mobile grants, and return every route still requiring revocation. */
   disableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<readonly RelayRouteId[]>
   /** Mark one route's external Relay revocation complete without touching a replacement route. */
   completeRouteRevocation(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, routeId: RelayRouteId): Promise<void>

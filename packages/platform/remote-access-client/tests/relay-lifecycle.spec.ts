@@ -94,9 +94,20 @@ describe('RemoteRelayEndpointController', () => {
     await expect(clearedStart).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
   })
 
-  it('logs only a bounded cause for secret-bearing unexpected Relay failures', async () => {
+  it.each([
+    ['transport', Object.assign(new Error('Bearer relay-secret'), { code: 'ECONNRESET' })],
+    ['transport', Object.assign(new Error('Bearer relay-secret'), { code: 'UND_ERR_CONNECT_TIMEOUT' })],
+    ['dependency', Object.assign(new Error('Bearer relay-secret'), { code: 'ERR_INVALID_ARG_TYPE' })],
+    ['cleanup', new AggregateError([], 'Bearer relay-secret')],
+    ['codec', new SyntaxError('Bearer relay-secret')],
+    ['contract', new TypeError('Bearer relay-secret')],
+    ['unexpected', 'Bearer relay-secret'],
+    ['unexpected', null],
+    ['unexpected', { detail: 'Bearer relay-secret' }],
+    ['unexpected', { code: 7, detail: 'Bearer relay-secret' }],
+    ['unexpected', { code: 'EOTHER', detail: 'Bearer relay-secret' }],
+  ] as const)('logs only a bounded %s cause for secret-bearing unexpected Relay failures', async (cause, failure) => {
     const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const failure = Object.assign(new Error('Bearer relay-secret'), { code: 'ECONNRESET' })
     const controller = new RemoteRelayEndpointController({
       ...mobileOptions(async () => { throw failure }),
       reconnectDelayMs: MAX_RUNTIME_TIMER_DELAY_MS,
@@ -107,7 +118,7 @@ describe('RemoteRelayEndpointController', () => {
     await vi.waitFor(() => {
       expect(reported).toHaveBeenCalledWith('[remote-relay-client] unexpected connection failure:', {
         failureKind: 'unexpected-error',
-        cause: 'transport',
+        cause,
       })
     })
     expect(JSON.stringify(reported.mock.calls)).not.toContain('relay-secret')

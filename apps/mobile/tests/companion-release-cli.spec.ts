@@ -60,7 +60,8 @@ function setupRemoteEvidence(verdict: 'success' | 'failure', workflow: 'acceptan
   const source = join(directory, 'source-attestation.json')
   writeFileSync(source, `${JSON.stringify(attestation)}\n`)
   const gh = join(directory, 'gh')
-  writeFileSync(gh, `#!/usr/bin/env node
+  const ghProgram = join(directory, 'gh.cjs')
+  writeFileSync(ghProgram, `
 const { cpSync, mkdirSync } = require('node:fs')
 const { join } = require('node:path')
 const args = process.argv.slice(2)
@@ -76,6 +77,10 @@ if (args[0] === 'api') {
   cpSync(process.env.FAKE_ATTESTATION_SOURCE, join(destination, 'companion-release-attestation.json'))
 } else process.exit(2)
 `)
+  writeFileSync(gh, `#!/usr/bin/env node
+require('./gh.cjs')
+`)
+  writeFileSync(join(directory, 'gh.cmd'), `@"${process.execPath}" "%~dp0gh.cjs" %*\r\n`)
   chmodSync(gh, 0o755)
   return { directory, candidateSha, repository, sourceRunId, source, verdict, workflow }
 }

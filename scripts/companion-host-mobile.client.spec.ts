@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { execa } from 'execa'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   parseInstallationId,
   selectPlatformEnvironment,
@@ -41,9 +41,14 @@ const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '..')
 const testCleanups: Array<() => void | Promise<void>> = []
 
+beforeEach(() => {
+  vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US'])
+})
+
 afterEach(async () => {
   for (const dispose of testCleanups.splice(0).reverse()) await dispose()
   cleanup()
+  vi.restoreAllMocks()
 })
 
 describe('Host HTTP failure Companion projection', () => {
@@ -91,7 +96,7 @@ describe('Host HTTP failure Companion projection', () => {
     testCleanups.push(() => { mounted.unmount() })
     const surface = mounted.companionSurface
     fireEvent.click(await screen.findByRole('checkbox'))
-    const login = screen.getByRole('button', { name: '使用 GitHub 继续' })
+    const login = screen.getByRole('button', { name: 'Continue with GitHub' })
     await waitFor(() => { expect(login.hasAttribute('disabled')).toBe(false) })
     fireEvent.click(login)
     await screen.findByText('@octocat')

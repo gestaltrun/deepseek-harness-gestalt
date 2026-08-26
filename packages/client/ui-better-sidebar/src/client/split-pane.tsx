@@ -29,6 +29,8 @@ export interface WorkbenchActions {
   /** Reorder within a pane (drop onto another tab inserts before it). */
   moveTabBefore: (payload: TabDragPayload, toPane: string, beforeTabId: string) => void
   resizeSplit: (splitId: string, index: number, deltaFrac: number) => void
+  /** Float a docked tab out as a free window (tab context menu entry). */
+  floatTab: (tabId: string) => void
 }
 
 /** One divider: pointer-capture drag translating px deltas into fractions.
@@ -168,6 +170,7 @@ function LeafView(props: {
   return (
     <div
       className={clsx(css.pane, dropZone !== null && css.paneDrop)}
+      data-dsh-pane={leaf.id}
       onPointerDown={() => { actions.focusPane(leaf.id) }}
       onDragOver={(event) => {
         event.preventDefault()
@@ -209,6 +212,7 @@ function LeafView(props: {
           if (before === null) actions.moveTabToEdge(payload, leaf.id, 'center')
           else actions.moveTabBefore(payload, leaf.id, before)
         }}
+        onFloatTab={actions.floatTab}
       />
       {leaf.tabs.length > 0 ? (
         /*

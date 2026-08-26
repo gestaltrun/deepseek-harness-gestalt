@@ -26,6 +26,20 @@ Side Chat 标签页以临时子 Session id 挂载本仓已声明的 `conversatio
 
 继承的父会话历史仍是可复用前缀；边界注入与第一次提问从该前缀之后开始分叉。
 
+### 可选侧栏打开工具
+
+#### 模型看到的内容
+
+当 Side Card 设置 `agentOpenTools` 打开时，快照宿主会加入 `sidebar_open` 工具 schema。该工具接受一个本地文件、本地文件夹或 HTTP(S) 页面，并以发起调用的 Session 为目标；该 Session 的侧栏视图未连接时，请求会保持排队。设置关闭时，该工具始终不出现。
+
+#### Token 影响
+
+启用该设置会向后续请求加入 `sidebar_open` 工具 schema。
+
+#### KV Cache 影响
+
+`agentOpenTools` 关闭时无影响。启用它会使未包含该工具 schema 的已缓存请求前缀失效。
+
 ### 可选终端工具
 
 #### 模型看到的内容

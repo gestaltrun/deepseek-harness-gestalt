@@ -26,6 +26,20 @@ The child request includes the inherited parent log, the boundary injection, and
 
 The inherited parent history remains a reusable prefix; the boundary injection and first question diverge after it.
 
+### Optional sidebar open tool
+
+#### What the model sees
+
+When the Side Card setting `agentOpenTools` is on, the snapshot host adds the `sidebar_open` tool schema. The tool accepts one local file, local folder, or HTTP(S) page and targets the calling Session; a request stays queued when that Session's sidebar view is disconnected. The tool remains absent while the setting is off.
+
+#### Token effect
+
+Enabling the setting adds the `sidebar_open` tool schema to later requests.
+
+#### KV Cache effect
+
+There is no effect while `agentOpenTools` is off. Enabling it invalidates a cached request prefix that omitted the tool schema.
+
 ### Optional terminal tools
 
 #### What the model sees

@@ -52,6 +52,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`@codemirror/lang-python`](https://github.com/codemirror/lang-python) | MIT |
 | [`@codemirror/lang-rust`](https://github.com/codemirror/lang-rust) | MIT |
 | [`@codemirror/lang-sql`](https://github.com/codemirror/lang-sql) | MIT |
+| [`@codemirror/lang-vue`](https://github.com/codemirror/lang-vue) | MIT |
 | [`@codemirror/lang-xml`](https://github.com/codemirror/lang-xml) | MIT |
 | [`@codemirror/lang-yaml`](https://github.com/codemirror/lang-yaml) | MIT |
 | [`@codemirror/language`](https://code.haverbeke.berlin/codemirror/language) | MIT |
@@ -86,6 +87,7 @@ External packages that a workspace package resolves at runtime. The tier covers 
 | [`clsx`](https://github.com/lukeed/clsx) | MIT |
 | [`commander`](https://github.com/tj/commander.js) | MIT |
 | [`diff`](https://github.com/kpdecker/jsdiff) | BSD-3-Clause |
+| [`dompurify`](https://github.com/cure53/DOMPurify) | (MPL-2.0 OR Apache-2.0) |
 | [`e2b`](https://github.com/e2b-dev/e2b) | MIT |
 | [`electron-updater`](https://github.com/electron-userland/electron-builder) | MIT |
 | [`eventsource-parser`](https://github.com/rexxars/eventsource-parser) | MIT |

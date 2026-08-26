@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-本仓库仍是唯一 monorepo。上游 `omdsh-dev/DSH-better-sidebar` 的 `d9b8f15d9eab018742f97d67e54b2398504894cd` 作为钉死源码快照放在 [`packages/client/ui-better-sidebar/`](../../../../packages/client/ui-better-sidebar/README.zh.md)，并收成 `@deepseek-ai/dsh-client-ui-better-sidebar`。组合后的 loader 行使用 `id: ui-better-sidebar`。上游 `dsh-external/dsh-better-sidebar` 插件 id、`dsh-better-sidebar` Cordis 名称与设置命名空间保持稳定。它不是 `vendor/` 下的 Cordis 包。[`UPSTREAM.md`](../../../../packages/client/ui-better-sidebar/UPSTREAM.md) 定义源码差异更新流程，[`LOCAL-MODIFICATIONS.md`](../../../../packages/client/ui-better-sidebar/LOCAL-MODIFICATIONS.md) 列出本仓持有的重放项。
+本仓库仍是唯一 monorepo。上游 `omdsh-dev/DSH-better-sidebar` 的 `f9153dfc1ce47cf43445c1b351ee3ae47b4ad9f1` 作为钉死源码快照放在 [`packages/client/ui-better-sidebar/`](../../../../packages/client/ui-better-sidebar/README.zh.md)，并收成 `@deepseek-ai/dsh-client-ui-better-sidebar`。组合后的 loader 行使用 `id: ui-better-sidebar`。上游 `dsh-external/dsh-better-sidebar` 插件 id、`dsh-better-sidebar` Cordis 名称与设置命名空间保持稳定。它不是 `vendor/` 下的 Cordis 包。[`UPSTREAM.md`](../../../../packages/client/ui-better-sidebar/UPSTREAM.md) 定义源码差异更新流程，[`LOCAL-MODIFICATIONS.md`](../../../../packages/client/ui-better-sidebar/LOCAL-MODIFICATIONS.md) 列出本仓持有的重放项。
 
 [`packages/client/ui-workbench/`](../../../../packages/client/ui-workbench/README.zh.md) 是本仓适配层。快照注册设置命名空间 `dsh-better-sidebar` 之后，宿主 apply 写入 `tabsEnabled.browser: true` 与 `browserInterceptLinks: false`，让官方 chrome 占用快照浏览器标签。缺少 `tabsEnabled.browser` 键表示启用；第一期留下的 `false` 必须写成 `true`。快照保留文件、编辑器、终端、Git、子代理、Jobs 与官方 Browser 标签。[`dsh-web-app`](../../../../packages/bundle/web-app/README.zh.md) 先插入 `id: ui-better-sidebar`，再插入适配层，并保留 `id: ui-browser`。官方 chrome 的占用关系由 [工作台官方浏览器 Agent Note](2026-08-21-workbench-official-browser.zh.md) 持有。
 

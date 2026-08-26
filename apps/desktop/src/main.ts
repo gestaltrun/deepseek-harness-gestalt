@@ -225,7 +225,7 @@ async function boot(): Promise<void> {
         () => !hostStartController.signal.aborted,
       )
     host = started.value
-    await installCompanionHost(host)
+    installCompanionHost(host)
     observeHostExit(host)
     smokeLog('host ' + host.url + ' pid ' + String(host.child.pid))
     await window.loadURL(host.url)
@@ -463,7 +463,7 @@ async function onHostExit(exited: RunningWebHost): Promise<void> {
     respawned = true
     try {
       host = await startHost()
-      await installCompanionHost(host)
+      installCompanionHost(host)
       observeHostExit(host)
       await window.loadURL(host.url)
       void ensureChromeOverlay(window, host.url)
@@ -681,11 +681,11 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
   })()
 }
 
-async function installCompanionHost(running: RunningWebHost): Promise<void> {
+function installCompanionHost(running: RunningWebHost): void {
   clearCompanionHost()
   uninstallCompanionHost = companionProduct.installHost(running.url)
   companionHostReady = true
-  await startPairingForCurrentDesktop()
+  void startPairingForCurrentDesktop()
 }
 
 function clearCompanionHost(): void {

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-25-mobile-reconnect-host-readiness.md
-2026-08-25-mobile-reconnect-host-readiness.md: 1662cdd24ed7abc440acf8b55c2b2935c3ae9440
-2026-08-25-mobile-reconnect-host-readiness.zh.md: f487c8fa3c7b3e4d4fdd66572989c452668f7867
+2026-08-25-mobile-reconnect-host-readiness.md: af0c4ee157ba248bd0bfb8ce4b2ebd392889fbd5
+2026-08-25-mobile-reconnect-host-readiness.zh.md: faf3910b449e3bcc62843bbffc391f63f3e7594a

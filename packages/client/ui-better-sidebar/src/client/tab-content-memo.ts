@@ -23,6 +23,8 @@ export interface TabContentMemoKey {
   cwd: string | undefined
   visible: boolean
   expanded: string[]
+  /** Files highlighted in the file tree (the "Show in folder" reveal). */
+  revealed: string[]
   localeRevision: string
   tabsVersion: number
 }
@@ -40,6 +42,7 @@ export function tabContentCompare(prev: TabContentMemoKey, next: TabContentMemoK
     prev.cwd === next.cwd &&
     prev.visible === next.visible &&
     prev.expanded === next.expanded &&
+    prev.revealed === next.revealed &&
     prev.localeRevision === next.localeRevision &&
     prev.tabsVersion === next.tabsVersion
   )

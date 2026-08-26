@@ -587,6 +587,38 @@ describe('MobilePairingController', () => {
     expect(vault.attachmentKeyMaterial(parsePersonalPairingId('pairing-key'))).toBeUndefined()
   })
 
+  it('clears a Desktop-rejected attempt before exposing fresh pairing entry', async () => {
+    const scheduled: Array<() => void> = []
+    const transport = transportFixture()
+    transport.getMobilePairingStatus.mockResolvedValueOnce({ status: 'rejected' })
+    const handshake = {
+      begin: vi.fn(async () => ({
+        completionId: parsePairingCompletionId('rejected-attempt'), mobileHandshake: Uint8Array.of(9),
+      })),
+      acceptDesktopHandshake: vi.fn(),
+    }
+    const controller = new MobilePairingController({
+      installation: installationFixture(), transport, handshake,
+      scanner: { scan: vi.fn() },
+      schedule: (task) => { scheduled.push(task); return { unref: vi.fn() } as never },
+      now: () => Date.parse('2026-08-18T10:01:00.000Z'),
+    })
+
+    await controller.completeLink(pairingLink(Date.parse('2026-08-18T10:02:00.000Z')))
+    scheduled.shift()?.()
+    await vi.waitFor(() => {
+      expect(controller.getSnapshot()).toEqual({
+        status: 'rejected', error: 'Desktop rejected Personal Pairing.',
+      })
+    })
+
+    await controller.completeLink(pairingLink(
+      Date.parse('2026-08-18T10:03:00.000Z'), 'replacement-after-rejection',
+    ))
+    expect(handshake.begin).toHaveBeenCalledTimes(2)
+    expect(controller.getSnapshot()).toMatchObject({ status: 'pending' })
+  })
+
   it('unpairs by wiping local handshake material and stopping Relay', async () => {
     const scheduled: Array<() => void> = []
     const transport = transportFixture()

@@ -645,7 +645,7 @@ export class MobilePairingController implements MobilePairingActions {
           }
           if (status.stage === 'rejected') {
             this.clearAttempt()
-            this.publish({ status: 'unavailable', error: 'Desktop rejected Personal Pairing.' })
+            this.publish({ status: 'rejected', error: 'Desktop rejected Personal Pairing.' })
             return
           }
           if ((this.options.handshake.openRelayAuthority === undefined
@@ -943,7 +943,7 @@ export class MobilePairingController implements MobilePairingActions {
             this.publishPaired()
           } else {
             this.clearAttempt()
-            this.publish({ status: 'unavailable', error: 'Desktop rejected Personal Pairing.' })
+            this.publish({ status: 'rejected', error: 'Desktop rejected Personal Pairing.' })
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)

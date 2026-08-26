@@ -15,3 +15,25 @@ button,
 input {
   font: inherit;
 }
+
+[data-mobile-startup='failed'] {
+  box-sizing: border-box;
+  display: grid;
+  gap: 16px;
+  align-content: center;
+  min-height: 100vh;
+  padding: max(32px, env(safe-area-inset-top)) 24px max(32px, env(safe-area-inset-bottom));
+  color: #17181b;
+  background: #fff;
+}
+
+[data-mobile-startup='failed'] h1,
+[data-mobile-startup='failed'] p {
+  margin: 0;
+}
+
+[data-mobile-startup='failed'] p,
+[data-mobile-startup='failed'] small {
+  overflow-wrap: anywhere;
+  color: #666b75;
+}

@@ -183,7 +183,11 @@ export class CompanionForegroundRuntime {
     if (!this.granted || !this.state.foreground || !this.state.socketOpen) return
     this.connectionGeneration += 1
     this.activeConnectionGeneration = this.connectionGeneration
-    this.state = { ...this.state, synchronized: false }
+    this.state = {
+      foreground: this.state.foreground,
+      socketOpen: this.state.socketOpen,
+      synchronized: false,
+    }
     this.publish()
   }
 
@@ -249,14 +253,16 @@ export class CompanionForegroundRuntime {
   }
 
   /**
-   * Fail closed and retain one stable connection error until a fresh attachment is acknowledged.
+   * Fail closed and retain one stable connection error. A still-connected
+   * physical Relay keeps its socket while the authenticated peer resynchronizes.
    * @param failure - recognizable Relay or Companion protocol failure.
    */
   reportConnectionFailure(failure: CompanionConnectionFailure): void {
     this.activeConnectionGeneration = undefined
+    const socketOpen = this.state.foreground && this.relay?.isConnected() === true
     this.state = {
       ...this.state,
-      socketOpen: false,
+      socketOpen,
       synchronized: false,
       connectionFailure: { ...failure },
     }
@@ -270,6 +276,10 @@ export class CompanionForegroundRuntime {
   }
 
   private async applyForeground(foreground: boolean): Promise<void> {
+    if (foreground === this.state.foreground) {
+      if (foreground && !this.state.socketOpen) await this.startOwned()
+      return
+    }
     if (!foreground) this.activeConnectionGeneration = undefined
     this.state = setCompanionForeground(this.state, foreground)
     this.publish()

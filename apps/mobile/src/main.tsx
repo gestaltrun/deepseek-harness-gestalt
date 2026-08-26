@@ -56,7 +56,6 @@ import { MobileCompanionProjectionCacheRuntime } from './companion-cache-runtime
 import { launchMobileProduct } from './mobile-product-launch.ts'
 import './root.css'
 
-const environment = loadMobilePlatformEnvironment(import.meta.env)
 let companionVisibilityDisposer: (() => Promise<void>) | undefined
 let companionAccountDisposer: (() => void) | undefined
 let companionSurface: MobileCompanionSurface | undefined
@@ -76,6 +75,7 @@ export function disposeCompanionVisibility(): Promise<void> {
 export const mobileProductStarted = launchMobileProduct(mountMobileProduct)
 
 async function mountMobileProduct(): Promise<void> {
+  const environment = loadMobilePlatformEnvironment(import.meta.env)
   const protectedStorage = new CapacitorMobileProtectedStorage()
   const parsedInstallationId = parseInstallationId(await loadProtectedInstallationId(
     protectedStorage,

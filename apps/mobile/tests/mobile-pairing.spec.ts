@@ -77,6 +77,42 @@ describe('MobilePairing', () => {
     expect(retryPairing).toHaveBeenCalledOnce()
   })
 
+  it('admits a fresh invitation after Desktop rejects a terminal attempt', () => {
+    let snapshot: ReturnType<MobilePairingActions['getSnapshot']> = {
+      status: 'rejected', error: 'Desktop rejected Personal Pairing.',
+    }
+    const actions: MobilePairingActions = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      completeLink: vi.fn(),
+      scanQr: vi.fn(),
+      retryPairing: vi.fn(),
+      selectDesktop: vi.fn(),
+      activate: vi.fn().mockResolvedValue(undefined),
+      deactivate: vi.fn().mockResolvedValue(undefined),
+      unpair: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const rendered = render(createElement(MobilePairing, { actions, locale: 'zh' }))
+    expect(screen.getByRole('heading', { name: '配对未获授权' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '继续配对' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '配对另一台桌面端' }))
+    expect(rendered.container.querySelector('[data-mobile-pairing="ready"]')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '扫描二维码' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '改为粘贴完整链接' }))
+    expect(screen.getByRole('textbox', { name: '完整的一次性配对链接' })).toBeTruthy()
+
+    snapshot = {
+      status: 'pending', deviceName: 'Alice phone',
+      authenticationWords: ['amber', 'binary', 'cedar', 'delta', 'ember', 'frost'],
+    }
+    rendered.rerender(createElement(MobilePairing, { actions, locale: 'zh' }))
+    snapshot = { status: 'rejected', error: 'Desktop rejected Personal Pairing again.' }
+    rendered.rerender(createElement(MobilePairing, { actions, locale: 'zh' }))
+    expect(screen.getByRole('heading', { name: '配对未获授权' })).toBeTruthy()
+    expect(screen.getByRole('alert').textContent).toContain('again')
+  })
+
   it('activates on mount and awaits lifecycle deactivation on unmount', async () => {
     const activate = vi.fn().mockResolvedValue(undefined)
     const deactivate = vi.fn().mockResolvedValue(undefined)

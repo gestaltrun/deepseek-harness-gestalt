@@ -199,8 +199,15 @@ describe('bundled Mobile product entry', () => {
     expect(await otherDesktop.getAttribute('aria-pressed')).toBe('false')
     expect(await selectedDesktop.getByText(selected, { exact: true }).count()).toBe(1)
     expect(await otherDesktop.getByText(select, { exact: true }).count()).toBe(1)
+    await page.evaluate(() => { window.__DSH_MOBILE_PRODUCT_EVIDENCE__.showPairing('rejected') })
+    await expect.poll(async () => await page.getByRole('button', {
+      name: /Pair another Desktop|配对另一台桌面端/,
+    }).count()).toBe(1)
+    await page.getByRole('button', { name: /Pair another Desktop|配对另一台桌面端/ }).click()
+    expect(await page.getByRole('button', { name: /Scan QR|扫描二维码/ }).count()).toBe(1)
     await page.getByRole('button', { name: back }).click()
     expect(await page.getByRole('heading', { name: pairingHeading }).count()).toBe(0)
+    await page.evaluate(() => { window.__DSH_MOBILE_PRODUCT_EVIDENCE__.showPairing('paired') })
     await page.getByRole('button', { name: searchTrigger }).click()
     expect(await page.getByRole('heading', { name: searchHeading }).count()).toBe(1)
     expect(await page.getByRole('searchbox', { name: searchField }).count()).toBe(1)

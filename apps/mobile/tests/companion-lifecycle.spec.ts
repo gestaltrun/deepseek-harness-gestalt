@@ -241,6 +241,54 @@ describe('Companion foreground lifecycle', () => {
     expect(companionMayMutate(runtime.getState())).toBe(true)
   })
 
+  it('keeps a synchronized connection stable across duplicate foreground signals', async () => {
+    const relay = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      isConnected: () => true,
+    }
+    const runtime = new CompanionForegroundRuntime({ relay })
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const resync = runtime.bindValidatedDesktopResync()
+    if (resync === undefined) throw new Error('expected Desktop resync receiver')
+    resync.acceptValidatedDesktopResync(validatedResync)
+    const states: string[] = []
+    runtime.subscribe(() => {
+      const state = runtime.getState()
+      states.push(`${String(state.socketOpen)}:${String(state.synchronized)}`)
+    })
+
+    await runtime.setForeground(true)
+
+    expect(states).toEqual([])
+    expect(relay.start).not.toHaveBeenCalled()
+    expect(runtime.getState()).toEqual(ready)
+  })
+
+  it('recovers an authenticated peer after a live Relay reports it offline', () => {
+    const relay = {
+      start: async () => {},
+      stop: async () => {},
+      isConnected: () => true,
+    }
+    const runtime = new CompanionForegroundRuntime({ relay })
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const first = runtime.bindValidatedDesktopResync()
+    if (first === undefined) throw new Error('expected first peer resync receiver')
+    first.acceptValidatedDesktopResync(validatedResync)
+
+    runtime.reportConnectionFailure({ code: 'REMOTE_OFFLINE', message: 'Paired Desktop is Remote Offline' })
+    expect(runtime.getState()).toMatchObject({ socketOpen: true, synchronized: false })
+
+    runtime.markAuthenticatedPeer()
+    const replacement = runtime.bindValidatedDesktopResync()
+    if (replacement === undefined) throw new Error('expected live-socket replacement resync receiver')
+    replacement.acceptValidatedDesktopResync(validatedResync)
+    expect(runtime.getState()).toEqual(ready)
+  })
+
   it('invalidates a mutation permit across backgrounding and physical replacement', async () => {
     const runtime = new CompanionForegroundRuntime()
     runtime.configure(grant)

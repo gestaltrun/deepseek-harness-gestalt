@@ -8,7 +8,7 @@ import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { CompanionForegroundRuntime } from '../../src/companion-lifecycle.ts'
 import { fixedMobilePresentationClock } from '../../src/mobile-clock.ts'
 import { mountMobileEntry } from '../../src/mobile-entry.tsx'
-import type { MobilePairingActions } from '../../src/personal-pairing-model.ts'
+import type { MobilePairingActions, MobilePairingSnapshot } from '../../src/personal-pairing-model.ts'
 import type {
   MobileCompanionConnectionChannel,
   ValidatedDesktopSurfaceResync,
@@ -20,6 +20,7 @@ declare global {
   interface Window {
     __DSH_MOBILE_PRODUCT_EVIDENCE__: {
       show(mode: EvidenceMode): void
+      showPairing(status: 'paired' | 'rejected'): void
     }
   }
 }
@@ -40,9 +41,10 @@ export function launchMobileProduct(_start: () => Promise<void>): Promise<void> 
     revision: 1,
   })
   runtime.markConnectionOpen()
+  const pairing = pairingEvidence()
   const mounted = mountMobileEntry(root, {
     installation: signedInInstallation(),
-    pairing: pairedDesktops(),
+    pairing: pairing.actions,
     companion: runtime,
     clock: fixedMobilePresentationClock(10_000),
   })
@@ -51,14 +53,20 @@ export function launchMobileProduct(_start: () => Promise<void>): Promise<void> 
   const show = (mode: EvidenceMode): void => {
     receiver.acceptValidatedDesktopResync(projection(mode))
   }
-  window.__DSH_MOBILE_PRODUCT_EVIDENCE__ = { show }
+  window.__DSH_MOBILE_PRODUCT_EVIDENCE__ = {
+    show,
+    showPairing: (status) => { pairing.show(status) },
+  }
   show('approval')
   return Promise.resolve()
 }
 
-function pairedDesktops(): MobilePairingActions {
+function pairingEvidence(): {
+  actions: MobilePairingActions
+  show(status: 'paired' | 'rejected'): void
+} {
   const selected = parsePersonalPairingId('pairing-product-entry')
-  const snapshot = {
+  const paired: MobilePairingSnapshot = {
     status: 'paired' as const,
     desktops: [
       { pairingId: selected, desktopName: 'Authenticated Shared Desktop' },
@@ -66,9 +74,11 @@ function pairedDesktops(): MobilePairingActions {
     ],
     selectedPairingId: selected,
   }
-  return {
+  let snapshot: MobilePairingSnapshot = paired
+  const listeners = new Set<() => void>()
+  const actions: MobilePairingActions = {
     getSnapshot: () => snapshot,
-    subscribe: () => () => {},
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
     completeLink: () => {},
     scanQr: () => {},
     retryPairing: () => {},
@@ -76,6 +86,15 @@ function pairedDesktops(): MobilePairingActions {
     activate: async () => {},
     deactivate: async () => {},
     unpair: async () => {},
+  }
+  return {
+    actions,
+    show: (status) => {
+      snapshot = status === 'paired'
+        ? paired
+        : { status: 'rejected', error: 'Desktop rejected Personal Pairing.' }
+      for (const listener of listeners) listener()
+    },
   }
 }
 

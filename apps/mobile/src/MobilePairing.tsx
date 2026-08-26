@@ -30,6 +30,7 @@ export function MobilePairing({
   const [link, setLink] = useState('')
   const [pairingMethod, setPairingMethod] = useState<'scan' | 'link'>('scan')
   const [cameraActive, setCameraActive] = useState(false)
+  const [dismissedRejection, setDismissedRejection] = useState<ReturnType<MobilePairingActions['getSnapshot']>>()
   const video = useRef<HTMLVideoElement>(null)
   const cameraAbort = useRef<AbortController>()
   useEffect(() => {
@@ -80,6 +81,18 @@ export function MobilePairing({
       <section className={`${css.card} ${css.taskCard}`}>
         <PairingHero kind="unavailable" />
         <div className={css.taskCopy}><h2>{text.personalPairing}</h2><p role="alert">{snapshot.error}</p></div>
+      </section>
+    )
+  }
+  if (snapshot.status === 'rejected' && snapshot !== dismissedRejection) {
+    return (
+      <section className={`${css.card} ${css.taskCard}`} data-mobile-pairing="rejected">
+        <PairingHero kind="unavailable" />
+        <div className={css.taskCopy}><h2>{text.rejectedHeading}</h2><p role="alert">{snapshot.error}</p></div>
+        <div className={css.taskActions}>
+          <button type="button" className={css.continue} onClick={() => { setDismissedRejection(snapshot) }}>{text.restartPairing}</button>
+          <small>{text.restartPairingDetail}</small>
+        </div>
       </section>
     )
   }
@@ -172,7 +185,10 @@ export function MobilePairing({
     )
   }
   return (
-    <section className={`${css.card} ${css.taskCard}`} data-mobile-pairing={snapshot.status}>
+    <section
+      className={`${css.card} ${css.taskCard}`}
+      data-mobile-pairing={snapshot.status === 'rejected' ? 'ready' : snapshot.status}
+    >
       <div className={css.methodStage} data-pairing-method={pairingMethod}>
         {pairingMethod === 'link'
           ? (
@@ -243,6 +259,9 @@ const PAIRING_TEXT = {
   zh: {
     personalPairing: '个人配对',
     retryHeading: '配对尚未完成',
+    rejectedHeading: '配对未获授权',
+    restartPairing: '配对另一台桌面端',
+    restartPairingDetail: '请在 Desktop 创建新的完整一次性邀请后重新扫码或粘贴。',
     retry: '重试配对',
     retryDetail: '重试会复用同一个一次性邀请和握手，不会创建新的设备权限。',
     verifyWords: '核对认证词',
@@ -274,6 +293,9 @@ const PAIRING_TEXT = {
   en: {
     personalPairing: 'Personal Pairing',
     retryHeading: 'Pairing is not complete',
+    rejectedHeading: 'Pairing was not authorized',
+    restartPairing: 'Pair another Desktop',
+    restartPairingDetail: 'Create a new complete one-time invitation on Desktop, then scan or paste it.',
     retry: 'Retry pairing',
     retryDetail: 'Retrying reuses the same one-time invitation and handshake without creating new device authority.',
     verifyWords: 'Verify authentication words',

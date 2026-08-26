@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
-  autoUpdaterFromModule, startAutoUpdater, type AutoUpdaterPort,
+  autoUpdaterFromModule, configurePackagedAutoUpdater, startAutoUpdater, type AutoUpdaterPort,
 } from '../src/updater.ts'
 
 function fakeUpdater(): AutoUpdaterPort & { emit: (event: string, info?: unknown) => void } {
@@ -31,6 +34,17 @@ describe('startAutoUpdater', () => {
   it('accepts the CommonJS default export exposed by Node ESM import', () => {
     const updater = fakeUpdater()
     expect(autoUpdaterFromModule({ default: { autoUpdater: updater } })).toBe(updater)
+  })
+
+  it('disables NSIS differential and web installers and writes updater logs', async () => {
+    const updater = fakeUpdater()
+    const dir = await mkdtemp(join(tmpdir(), 'gestalt-updater-log-'))
+    const logFile = join(dir, 'logs', 'updater.log')
+    configurePackagedAutoUpdater(updater, { logFile })
+    expect(updater.disableDifferentialDownload).toBe(true)
+    expect(updater.disableWebInstaller).toBe(true)
+    updater.logger?.error('checksum mismatch')
+    expect(await readFile(logFile, 'utf8')).toContain('error checksum mismatch')
   })
 
   it('does not auto-download and waits for download() after available', () => {

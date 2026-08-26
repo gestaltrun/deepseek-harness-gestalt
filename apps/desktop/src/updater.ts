@@ -2,6 +2,8 @@
  * electron-updater lifecycle: discover, user-confirmed download, quit-and-install.
  * @module @deepseek-ai/dsh-desktop/updater
  */
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type {
   UpdaterPhase, UpdaterStatus,
 } from '@deepseek-ai/dsh-client-ui-desktop/protocol'
@@ -11,10 +13,20 @@ const CHECK_INTERVAL_MS = 15 * 60 * 1_000
 /** How long macOS may stay in `preparing` waiting for native Squirrel. */
 const DEFAULT_STAGE_TIMEOUT_MS = 10 * 60 * 1_000
 
+/** electron-updater logger methods the packaged Desktop Host persists. */
+export interface AutoUpdaterLogger {
+  info(message: string): void
+  warn(message: string): void
+  error(message: string): void
+}
+
 /** Minimal port over electron-updater's AppUpdater. */
 export interface AutoUpdaterPort {
   autoDownload: boolean
   autoInstallOnAppQuit: boolean
+  disableDifferentialDownload?: boolean
+  disableWebInstaller?: boolean
+  logger?: AutoUpdaterLogger | null
   readonly checkForUpdates: () => Promise<unknown>
   readonly downloadUpdate: () => Promise<unknown>
   readonly quitAndInstall: (isSilent?: boolean, isForceRunAfter?: boolean) => void
@@ -46,6 +58,37 @@ export function autoUpdaterFromModule(module: AutoUpdaterModule): AutoUpdaterPor
   const updater = module.autoUpdater ?? module.default?.autoUpdater
   if (updater === undefined) throw new Error('electron-updater did not expose autoUpdater')
   return updater
+}
+
+/**
+ * Configure GitHub NSIS updates: full installer download, no web stub, on-disk log.
+ * @param updater - electron-updater singleton.
+ * @param options.logFile - append-only log under userData.
+ * @returns nothing; mutates `updater` in place.
+ */
+export function configurePackagedAutoUpdater(
+  updater: AutoUpdaterPort,
+  options: { readonly logFile: string },
+): void {
+  updater.disableDifferentialDownload = true
+  updater.disableWebInstaller = true
+  updater.logger = fileLogger(options.logFile)
+}
+
+function fileLogger(logFile: string): AutoUpdaterLogger {
+  mkdirSync(dirname(logFile), { recursive: true })
+  const write = (level: string, message: string): void => {
+    try {
+      appendFileSync(logFile, `${new Date().toISOString()} ${level} ${message}\n`)
+    } catch (error) {
+      console.error('failed to write updater log', error)
+    }
+  }
+  return {
+    info: (message) => { write('info', message) },
+    warn: (message) => { write('warn', message) },
+    error: (message) => { write('error', message) },
+  }
 }
 
 /** Testable updater state machine. */

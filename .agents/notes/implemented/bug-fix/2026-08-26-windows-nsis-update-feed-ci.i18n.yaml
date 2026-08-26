@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-26-windows-nsis-update-feed-ci.md
+2026-08-26-windows-nsis-update-feed-ci.md: cbf3d443df422135ce8c4177eddf16c8a835ea3d
+2026-08-26-windows-nsis-update-feed-ci.zh.md: 95d7d5a8f85144ebe20beda54a7dacb7b5f97491

@@ -14,7 +14,7 @@
         {
           "heading": "Better Sidebar 0.16.1",
           "items": [
-            "内置 Better Sidebar 采用上游 0.16.1，提供自由窗口、模型按需调用的 sidebar_open、Markdown 内联 HTML、目录与本地图片，以及多仓库 Git 与 worktree 支持。",
+            "内置 Better Sidebar 采用上游 0.16.1，提供自由窗口、在 Side Card 设置中按需启用的 sidebar_open、Markdown 内联 HTML、目录与本地图片，以及多仓库 Git 与 worktree 支持。",
             "编辑器、浏览器、搜索、终端字体、响应式布局和多语言体验同步改进；默认组合仍只内置 Better Sidebar，没有加入其他二级插件。"
           ]
         },
@@ -22,7 +22,7 @@
           "heading": "Windows 更新可靠性",
           "items": [
             "Windows NSIS 更新关闭 differential download，并校验 latest.yml 中安装包的路径、大小与 SHA-512 后通过 loopback 重新下载验证。",
-            "发布工作流会静默安装 NSIS 包并启动已安装程序做 smoke；updater 日志写入失败不影响更新流程。"
+            "发布工作流会静默安装 NSIS 包并启动已安装程序做冒烟测试；updater 日志写入失败不影响更新流程。"
           ]
         }
       ]
@@ -33,7 +33,7 @@
         {
           "heading": "Better Sidebar 0.16.1",
           "items": [
-            "The bundled Better Sidebar uses upstream 0.16.1 and provides free windows, model-initiated sidebar_open, inline HTML, a table of contents and local images in Markdown, plus multi-repository Git and worktree support.",
+            "The bundled Better Sidebar uses upstream 0.16.1 and provides free windows, opt-in sidebar_open from the Side Card settings, inline HTML, a table of contents and local images in Markdown, plus multi-repository Git and worktree support.",
             "Editor, browser, search, terminal font, responsive layout, and locale behavior are also improved. The default composition still bundles only Better Sidebar and adds no secondary plugins."
           ]
         },

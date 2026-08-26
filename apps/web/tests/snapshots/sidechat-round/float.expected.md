@@ -1,0 +1,15 @@
+- img
+- text: New thread
+- button "Close":
+  - img
+- banner:
+  - tablist:
+    - tab "Chat" [selected]
+    - tab "Trajectory"
+- textbox "Message the agent"
+- button "Commands and skills":
+  - img
+- button "Select model, current DeepSeek-V4-Flash":
+  - text: DeepSeek-V4-Flash
+  - img
+- button "Send message" [disabled]

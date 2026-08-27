@@ -20,6 +20,14 @@ Desktop 将 `build/icon.icns`、`build/icon.ico` 和 `build/icon.png` 作为自�
 
 Dock / 开始菜单的 cwd 是 Launch Directory（Application Support / `%APPDATA%` 下的 `defaultWorkspace`）。用户数据仍在 `~/.dsh`。
 
+## 可选组件
+
+Sub2API 账号池是 Settings 里 Desktop-only 的 offer 卡（`账号池` 分区，排在手机配对之后）。卡片只负责渲染：Host 把 `missing → downloading → verifying → installed → starting → running / error` 相位机经与 updater、pairing 快照相同的 preload 桥推送过来，卡片渲染当前快照，因此没有 `window.dshDesktop` 时它什么都不画。未启用时卡片说明启用做什么、代价是什么：首次启用会下载组件 bundle 与对应平台的 runtime pack（sub2api 加便携 PostgreSQL/Redis，数百 MB——安装包体积不变），账号数据落在 `~/.dsh/sub2api/data`，卸载时询问是否删除，运行时文件可随时重新下载。运行中卡片提供嵌入控制台入口（`/plugins/dsh-sub2api/ui/`）、停用与两步式卸载；错误态携带 Host 给出的可操作信息，并提供重试与卸载出口。
+
+Desktop Host 主进程就是安装器，且绝不调用用户 PATH 上的 pnpm 或 `dsh` CLI。它把两个归档下载到私有 staging 目录，各自对照自身 SHA256SUMS 校验（runtime pack 解压后再验内部 sums），把 bundle 包放到 `web` profile 的 `node_modules` 下，并恰好追加一行 `dsh.profile.bundles`——即 `dsh plugin add` 的语义，manifest 其余条目原样保留。runtime pack 解压到 `$DSH_HOME/sub2api/runtime`（supervisor 的 `binaryDir` 默认值）。profile patch 之后的任何失败都会回滚该行与本次解压产物；全新安装后首次重启失败同样回滚，并以回滚前缀上报。启用经 Web Host 子进程的常规生命周期重启——窗口保持不动、会话在磁盘保活——随后轮询 sidecar 的 quota-snapshot 路由，直到 2xx 将卡片推至 running。停用把精确的 patch 行 `{ id: 'dsh-sub2api-sidecar', disabled: true }` 写入 profile 自己的 `cordis.patch.yml`，并拒绝触碰该 id 上用户自有的行。
+
+下载源来自 `DSH_DESKTOP_SUB2API_SOURCES`（绝对 JSON 文件路径）或打包主入口旁的 `sub2api-sources.json`；文件内写明 bundle 压缩包、runtime pack 压缩包及各自 SHA256SUMS 的 URL。默认值是有意留出的占位：托管这些产物的 GitHub Release 需用户单独批准、尚未上架，因此没有源文件时启用动词会如实说明，开发时用同一变量指向本地 fixture 服务器。文件存在但非法会作为该分区的可操作错误显示，而不是砸掉 Desktop 启动。
+
 ## Schedule 与能力默认值
 
 每个新 Desktop Session 都会提供 `schedule_create`、`schedule_list` 和 `schedule_delete`。绝对时间 `schedule_create.at` 必须带显式偏移量或 `time_zone`。Desktop 不挂载 `@deepseek-ai/dsh-time-context`；逐 step 时间读数仍由 Schedule Web overlay 注入。

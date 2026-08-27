@@ -1,0 +1,61 @@
+.root {
+  display: grid;
+  gap: 20px;
+  max-width: 640px;
+}
+
+.header p {
+  margin: 4px 0 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+}
+
+.body {
+  padding-top: 18px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.stack p {
+  margin: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.uninstallConfirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+}
+
+.error {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 13px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--dsw-alias-border-l3, rgba(127, 130, 135, 0.72));
+  border-top-color: transparent;
+  border-radius: 999px;
+  animation: sub2api-spin 0.9s linear infinite;
+}
+
+@keyframes sub2api-spin {
+  to { transform: rotate(360deg); }
+}

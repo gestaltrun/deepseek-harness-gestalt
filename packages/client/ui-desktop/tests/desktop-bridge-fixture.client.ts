@@ -8,14 +8,15 @@ import type {
   DesktopAccountSnapshot,
   DesktopBridge,
   DesktopPairingSnapshot,
+  DesktopSub2ApiSnapshot,
   UpdaterStatus,
 } from '../src/protocol.ts'
 
 /**
  * Install a complete inert Desktop Host preload on `globalThis`.
- * Account and Pairing subscriptions deliver the pre-answer `unavailable`
- * snapshot immediately; unsubscribe removes the listener so later inert
- * verbs do not notify it.
+ * Account, Pairing, and Sub2API subscriptions deliver the pre-answer snapshot
+ * immediately; unsubscribe removes the listener so later inert verbs do not
+ * notify it.
  * @param platform - Node `process.platform` projected into Window Chrome.
  * @returns the installed bridge, typed as the current `DesktopBridge`.
  */
@@ -23,9 +24,11 @@ export function installDesktopBridgeFixture(platform: 'darwin' | 'win32'): Deskt
   const updater: UpdaterStatus = { state: 'disabled', lastCheckedAt: null }
   const account: DesktopAccountSnapshot = { status: 'unavailable', privacyAccepted: false }
   const pairing: DesktopPairingSnapshot = { status: 'unavailable', enabled: false, pairings: [] }
+  const sub2api: DesktopSub2ApiSnapshot = { state: 'missing', enabled: true }
   const statusListeners = new Set<(status: UpdaterStatus) => void>()
   const accountListeners = new Set<(snapshot: DesktopAccountSnapshot) => void>()
   const pairingListeners = new Set<(snapshot: DesktopPairingSnapshot) => void>()
+  const sub2apiListeners = new Set<(snapshot: DesktopSub2ApiSnapshot) => void>()
 
   const notifyStatus = (status: UpdaterStatus): void => {
     for (const listener of statusListeners) listener(status)
@@ -35,6 +38,9 @@ export function installDesktopBridgeFixture(platform: 'darwin' | 'win32'): Deskt
   }
   const notifyPairing = (snapshot: DesktopPairingSnapshot): void => {
     for (const listener of pairingListeners) listener(snapshot)
+  }
+  const notifySub2api = (snapshot: DesktopSub2ApiSnapshot): void => {
+    for (const listener of sub2apiListeners) listener(snapshot)
   }
 
   const bridge: DesktopBridge = {
@@ -97,6 +103,25 @@ export function installDesktopBridgeFixture(platform: 'darwin' | 'win32'): Deskt
       pairingListeners.add(listener)
       listener(pairing)
       return () => { pairingListeners.delete(listener) }
+    },
+    sub2ApiGetSnapshot: async () => sub2api,
+    sub2ApiEnable: async () => {
+      notifySub2api(sub2api)
+      return sub2api
+    },
+    sub2ApiDisable: async () => {
+      notifySub2api(sub2api)
+      return sub2api
+    },
+    sub2ApiUninstall: async () => {
+      notifySub2api(sub2api)
+      return sub2api
+    },
+    sub2ApiOpenConsole: () => {},
+    onSub2ApiSnapshot: (listener) => {
+      sub2apiListeners.add(listener)
+      listener(sub2api)
+      return () => { sub2apiListeners.delete(listener) }
     },
     chromeOverlayShow: async () => {},
     chromeOverlayHide: async () => {},

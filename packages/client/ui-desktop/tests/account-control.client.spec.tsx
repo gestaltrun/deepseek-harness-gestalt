@@ -6,7 +6,7 @@ import {
   parsePendingPairingId,
   parsePersonalPairingId,
 } from '@deepseek-ai/dsh-remote-access'
-import type { DesktopAccountSnapshot, DesktopBridge, DesktopPairingSnapshot } from '../src/protocol.ts'
+import type { DesktopAccountSnapshot, DesktopBridge, DesktopPairingSnapshot, DesktopSub2ApiSnapshot } from '../src/protocol.ts'
 import { AccountControl } from '../src/client/AccountControl.tsx'
 import { en } from '../src/client/locales.ts'
 
@@ -211,6 +211,12 @@ function bridge(snapshot: DesktopAccountSnapshot): DesktopBridge {
     pairingReject: vi.fn(),
     pairingRevoke: vi.fn(),
     onPairingSnapshot: () => () => {},
+    sub2ApiGetSnapshot: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+    sub2ApiEnable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+    sub2ApiDisable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+    sub2ApiUninstall: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
+    sub2ApiOpenConsole: vi.fn(),
+    onSub2ApiSnapshot: () => () => {},
     chromeOverlayShow: async () => {},
     chromeOverlayHide: async () => {},
     chromeOverlayGetState: async () => null,

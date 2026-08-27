@@ -1296,6 +1296,38 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'phoneDevices',
+    summary: 'Phone fleet Service over one external mobilecli server child.',
+    description: 'Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing, and mobilecli problems fail loudly instead of degrading.\n\nOperation failure codes:\n\n- `PHONE_DISPOSED` — the owning fiber began teardown.\n- `PHONE_ABORTED` — the caller\'s signal won before completion.\n- `PHONE_TIMEOUT` — the operation\'s configured ceiling elapsed.\n- `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.\n- `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.\n- `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.\n- `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).\n- `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.',
+    methods: [
+      {
+        signature: 'async listDevices(signal?: AbortSignal): Promise<PhoneDeviceList>',
+        description: 'Fetch and publish one fresh grouped device listing.',
+        parameters: [{ name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
+        returns: 'the current grouped listing.',
+        throws: ['{@link PhoneDevicesError} per the class-documented failure modes.'],
+      },
+      {
+        signature: 'async boot(id: DeviceId, signal?: AbortSignal): Promise<void>',
+        description: 'Boot one iOS simulator or Android emulator, then refresh the listing.',
+        parameters: [{ name: 'id', description: 'Branded id of the simulator/emulator to boot.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
+        throws: ['{@link PhoneDevicesError} with `PHONE_REAL_DEVICE` for physical handsets, `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
+      },
+      {
+        signature: 'async shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>',
+        description: 'Shut down one iOS simulator or Android emulator, then refresh the listing. Physical handsets are refused locally before any upstream call because the upstream spec restricts both lifecycle verbs to simulators/emulators.',
+        parameters: [{ name: 'id', description: 'Branded id of the simulator/emulator to shut down.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
+        throws: ['{@link PhoneDevicesError} with `PHONE_REAL_DEVICE` for physical handsets, `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
+      },
+      {
+        signature: 'onChanged(sub: (change: PhoneDeviceChange) => void): () => void',
+        description: 'Subscribe to committed device-set changes. Delivery happens synchronously after each committing poll; a throwing subscriber is contained and logged.',
+        parameters: [{ name: 'sub', description: 'Observer receiving every committed {@link PhoneDeviceChange}.' }],
+        returns: 'disposer removing exactly this subscription; subscriptions never outlive the Service.',
+      },
+    ],
+  },
+  {
     key: 'planMode',
     summary: '`ctx.planMode`: owns logged plan state, applies and narrates selected state at step start, the `plan:policy` section, the `/plan` command, and the stable exit tool.',
     description: '`ctx.planMode`: owns logged plan state, applies and narrates selected state at step start, the `plan:policy` section, the `/plan` command, and the stable exit tool. UIs observe committed flips through `session/event`; there is no live mirror.',
@@ -3967,6 +3999,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface DesktopInstallationPresentation {\n    name: string;\n    platform: \'macos\' | \'windows\' | \'linux\';\n}',
   },
   {
+    name: 'DeviceId',
+    declaration: 'export type DeviceId = Branded<\'DeviceId\'>;',
+  },
+  {
     name: 'DevicePrincipalId',
     declaration: 'export type DevicePrincipalId = Branded<\'DevicePrincipalId\'>;',
   },
@@ -4673,6 +4709,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PersonalPairingView',
     declaration: 'export interface PersonalPairingView {\n    id: PersonalPairingId;\n    devicePrincipal: {\n        id: DevicePrincipalId;\n        accountId: Branded<\'PlatformAccountId\'>;\n        installationId: InstallationId;\n        authority: \'companion-surface\';\n    };\n    device: PairingDeviceDescription;\n    pairedAt: number;\n    lastAccessAt: number;\n    online: boolean;\n}',
+  },
+  {
+    name: 'PhoneDeviceChange',
+    declaration: 'export interface PhoneDeviceChange {\n    readonly list: PhoneDeviceList;\n    readonly added: readonly DeviceId[];\n    readonly removed: readonly DeviceId[];\n}',
+  },
+  {
+    name: 'PhoneDeviceKind',
+    declaration: 'export type PhoneDeviceKind = \'emulator\' | \'simulator\' | \'real\';',
+  },
+  {
+    name: 'PhoneDeviceList',
+    declaration: 'export interface PhoneDeviceList {\n    readonly android: readonly PhoneDeviceRef[];\n    readonly ios: {\n        readonly simulators: readonly PhoneDeviceRef[];\n        readonly reals: readonly PhoneDeviceRef[];\n    };\n}',
+  },
+  {
+    name: 'PhoneDeviceRef',
+    declaration: 'export interface PhoneDeviceRef {\n    readonly id: DeviceId;\n    readonly name: string;\n    readonly kind: PhoneDeviceKind;\n    readonly online: boolean;\n}',
   },
   {
     name: 'PlatformAccountId',

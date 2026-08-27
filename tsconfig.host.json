@@ -282,6 +282,7 @@
     { "path": "./packages/browser/browser-runtime-tandem" },
     { "path": "./packages/browser/browser-workspace" },
     { "path": "./packages/browser/tool-browser" },
+    { "path": "./packages/phone/phone-runtime" },
     { "path": "./packages/spill/spill" },
     { "path": "./packages/spill/spill-local" },
     { "path": "./packages/spill/spill-policy" },

@@ -261,6 +261,9 @@ flowchart TD
   subgraph group_mcp["packages/mcp"]
     pkg_mcp_client["mcp-client"]
   end
+  subgraph group_phone["packages/phone"]
+    pkg_phone_runtime["phone-runtime"]
+  end
   subgraph group_platform["packages/platform"]
     pkg_noise_channel["noise-channel"]
     pkg_platform_account["platform-account"]
@@ -412,6 +415,10 @@ flowchart TD
   pkg_anonymous_user_id --> pkg_brand
   pkg_anonymous_user_id --> pkg_home_paths
   pkg_anonymous_user_id --> pkg_invariants
+  pkg_phone_runtime --> pkg_brand
+  pkg_phone_runtime --> pkg_invariants
+  pkg_phone_runtime --> pkg_subprocess
+  pkg_phone_runtime --> pkg_timeout
   pkg_platform_account --> pkg_brand
   pkg_platform_account --> pkg_invariants
   pkg_remote_protocol --> pkg_brand
@@ -1655,6 +1662,7 @@ flowchart TD
 | [`host-frontend-static`](../packages/host/frontend-static) | `host` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`host-plugin-inventory`](../packages/host/plugin-inventory) | `host` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`typert-protocol`](../packages/typert/protocol) |
 | [`anonymous-user-id`](../packages/identity/anonymous-user-id) | `identity` | [`brand`](../packages/util/brand), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants) |
+| [`phone-runtime`](../packages/phone/phone-runtime) | `phone` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
 | [`platform-account`](../packages/platform/platform-account) | `platform` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`remote-protocol`](../packages/platform/remote-protocol) | `platform` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`settings`](../packages/settings/settings) | `settings` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |

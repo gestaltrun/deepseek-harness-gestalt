@@ -42,6 +42,7 @@ const NO_MODEL_EXPERIENCE_SECTION: Readonly<Record<string, string>> = {
  * blocks. A package moves on or off this list with its context behavior.
  */
 const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
+  'packages/phone/phone-runtime': { kind: 'none', reason: 'The Host-side device fleet service registers no prompt, schema, or model-visible surface.' },
   'packages/browser/browser-runtime': { kind: 'indirect', reason: 'The Service Definition delegates model rendering to dsh-tool-browser.' },
   'packages/browser/browser-runtime-deterministic': { kind: 'indirect', reason: 'The deterministic Provider delegates model rendering to dsh-tool-browser.' },
   'packages/browser/browser-runtime-electron': { kind: 'indirect', reason: 'The in-process Electron Provider delegates model rendering to dsh-tool-browser.' },

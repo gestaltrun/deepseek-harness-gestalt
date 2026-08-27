@@ -1679,6 +1679,38 @@ export interface Config {
 
 来源：[`packages/preset/persona/src/index.ts:34`](../packages/preset/persona/src/index.ts)
 
+<a id="deepseek-aidsh-phone-runtime"></a>
+
+## `@deepseek-ai/dsh-phone-runtime`
+
+```ts config-catalog
+/**
+ * Validated runtime configuration. Defaults carry the upstream facts they can:
+ * `serverPort` mirrors mobilecli's documented default listen port and
+ * `bootTimeoutMs` mirrors the extended upstream deadline granted to
+ * `device.boot`; the polling cadence fields are deployment-varying choices.
+ */
+export interface Config {
+  /**
+   * Absolute path to the `mobilecli` executable. When omitted, each `PATH`
+   * directory is searched for a matching executable file.
+   */
+  executablePath?: string
+  /** Loopback TCP port the spawned server listens on. */
+  serverPort?: number
+  /** Interval between health probes and device-list polls, in milliseconds. */
+  pollIntervalMs?: number
+  /** Total window granted to the first readiness probe, in milliseconds. */
+  readyTimeoutMs?: number
+  /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
+  requestTimeoutMs?: number
+  /** Ceiling on a `device.boot` round trip, in milliseconds. */
+  bootTimeoutMs?: number
+}
+```
+
+来源：[`packages/phone/phone-runtime/src/index.ts:51`](../packages/phone/phone-runtime/src/index.ts)
+
 <a id="deepseek-aidsh-plan-mode"></a>
 
 ## `@deepseek-ai/dsh-plan-mode`

@@ -2,11 +2,12 @@
 
 Status: proposed
 
+English | [中文](2026-08-27-enable-matt-delivery-skills-model-invocation.zh.md)
 ## Problem
 
 Orchestrated ticket writers run as fresh subagents that must execute the delivery workflow themselves, but `implement`, `to-spec`, and `to-tickets` carried `disable-model-invocation: true`, so a writer could neither invoke nor formally enter the workflow it was contracted to follow; instructions degraded to free-form imitation of the skill text.
 
-## Decision
+## Proposal
 
 Remove the flag from exactly `.agents/skills/{implement,to-spec,to-tickets}/SKILL.md`. Writers self-invoke the workflow and its `/tdd` and `/code-review` steps; repository overrides (`dsh-pre-push-checks`, testing policy) keep pruning the generic full-suite advice. `tdd` and `code-review` were already model-invocable and are unchanged.
 
@@ -16,8 +17,10 @@ Remove the flag from exactly `.agents/skills/{implement,to-spec,to-tickets}/SKIL
 
 **Keep the flag and have the root task paste workflow text into every handoff** — this shipped first as an ad-hoc amendment; rejected as durable practice because it forks authority between the tracked skill file and per-handoff prose that drifts silently.
 
-## Consequences
+## Acceptance criteria
 
-Writers gain formal entry points while chat-facing helpers stay user-owned. If an upstream sync re-introduces the flag, the delivery contract fails loudly at dispatch instead of quietly regressing to imitation; restoring the deletion is part of that sync's local-modification log.
+Dispatched writers confirm the workflow entry before implementation on their next ticket, and no behavior change is possible for skills outside the named trio.
 
-Required verification: dispatched writers confirm the workflow entry before implementation on their next ticket, and no behavior change is possible for skills outside the named trio.
+## Risks
+
+If an upstream sync re-introduces the flag, the delivery contract fails loudly at dispatch instead of quietly regressing to imitation; restoring the deletion becomes part of that sync's local-modification log.

@@ -20,6 +20,6 @@ Session 持有的官方 Browser chrome 与收起后的标签页预览。[`dsh-cl
 
 ## 已知限制与延后工作
 
-- **Desktop 展示 Runtime 窗口；`dsh web` 仍是截图加文本**——`window.dshDesktop.browserPresent` 把同一份官方 `webContents` 贴到 chrome 视口上。设置弹层和侧栏 `+` 菜单挂在该页之上的原生 overlay 视图里；该 overlay 文档不 present 或 conceal 页面。observe 或 navigate 进行中时刷新控件旋转。已提交的 Chromium 网络错误把错误文档留在该实况视口里。浏览器 `dsh web` 没有 Host 窗口，仍画 observe/screenshot 事实。
+- **Desktop 展示 Runtime 窗口；`dsh web` 仍是截图加文本**——`window.dshDesktop.browserPresent` 把同一份官方 `webContents` 贴到 chrome 视口上。设置页和侧栏 `+` 菜单挂在该页之上的原生 overlay 视图里；该 overlay 文档不 present 或 conceal 页面。observe 或 navigate 进行中时刷新控件旋转。已提交的 Chromium 网络错误把错误文档留在该实况视口里。浏览器 `dsh web` 没有 Host 窗口，仍画 observe/screenshot 事实。
 - **无密钥 web 与 headless Runtime 仍是确定性的**——浏览器 `dsh web` 与 headless 继续使用 `dsh-browser-runtime-deterministic`。Desktop Host 持有进程内 Electron `webContents`，并把叠加层 HTTP 客户端指向该 loopback origin。
 - **Profile 设置页不会创建标签页**——该分区只写名册与默认身份。

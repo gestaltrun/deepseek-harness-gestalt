@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-27-subagent-prompt-image-blocks.md
-2026-08-27-subagent-prompt-image-blocks.md: a649c479cc0d1f7aef2e12772260cccc0f403538
-2026-08-27-subagent-prompt-image-blocks.zh.md: e80915c6c6c0b6a91104e1fa670889b16834aaa0
+2026-08-27-subagent-prompt-image-blocks.md: 45636b521be2eab022ea712dd7ac61822317db7b
+2026-08-27-subagent-prompt-image-blocks.zh.md: 93b6f5afd88d0025832920bd92bcba980c4a2b04

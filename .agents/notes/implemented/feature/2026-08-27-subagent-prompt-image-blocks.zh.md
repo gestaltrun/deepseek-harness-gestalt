@@ -12,7 +12,7 @@ Status: implemented
 
 `SubagentCapabilities` 新增 `images` 标志，由服务的 `assertCapabilities` 校验：未声明该标志的后端收到含 `ImageBlock` 的提示词以 `UNSUPPORTED_CAPABILITY` 拒绝。工具 schema 新增可选的 `images` 工作区路径数组，仅在所绑定提供方声明该能力时出现；execute 在任何 I/O 之前复查，因为校验器允许未声明键。
 
-每个路径经调用会话的文件系统策略解析，并且必须指向常规的 PNG、JPEG、WebP 或 GIF 文件。工具按单图字节上限读入完整有序批次，再由 `attachments.saveImages` 执行单消息图片数量和总字节上限、验证所有成员，并在委派启动前提交批次。调度预检失败不会提交图片。生成的 `ImageBlock` 跟在文本之后进入 `request.prompt`；进程内驱动器把提示词 block 原样作为子代理首条用户消息交付，因此子代理自身的请求组装会解析这些持久引用。
+每个路径经调用会话的文件系统策略解析，并且必须指向常规的 PNG、JPEG、WebP 或 GIF 文件。工具按单图字节上限读入完整有序批次，再由 `attachments.saveImages` 执行单消息图片数量和总字节上限、验证所有成员，并在委派启动前提交批次。后台 Job 在读取文件或提交附件前完成准入。前台和可继续调用会先提交附件，再启动提供方；后续启动失败可能留下未被任何子提示词引用的不可变内容寻址对象。生成的 `ImageBlock` 跟在文本之后进入 `request.prompt`；进程内驱动器把提示词 block 原样作为子代理首条用户消息交付，因此子代理自身的请求组装会解析这些持久引用。
 
 只有 `spawn` 和 `fork` 声明 `images: true`：两者都在进程内针对同一附件存储运行子代理。进程外后端（`acp`、`codex`、`claude-code`、经 `NO_START_CAPABILITIES` 的 `dsh-sdk`，以及 `subagent-acp` 的内联声明）保持 `false`，直到其传输协议被证明能端到端保留 image block；这些后端的 schema 省略该参数，execute 响亮拒绝。fork 种子子代理本就通过日志复制继承粘贴的图片——不变。
 

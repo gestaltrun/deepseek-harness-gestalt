@@ -8,7 +8,7 @@
 {"type":"assistant/chunk","data":{"turn":1,"step":1,"chunk":{"type":"usage","usage":{"inputTokens":110,"outputTokens":79,"cacheReadTokens":7680,"reasoningTokens":31}}}}
 {"type":"assistant/chunk","data":{"turn":1,"step":1,"chunk":{"type":"finish","reason":{"kind":"stop"}}}}
 {"type":"assistant/chunk","data":{"turn":2,"step":1,"chunk":{"type":"block-start","index":0,"blockType":"text"}}}
-{"type":"text-chunks","data":{"turn":2,"step":1,"index":0,"dt":[],"texts":["After restoration, event sourcing still represents application state as an immutable sequence of recorded changes."]}}
+{"type":"assistant/chunk","data":{"turn":2,"step":1,"chunk":{"type":"text-delta","index":0,"text":"After restoration, event sourcing still represents application state as an immutable sequence of recorded changes."}}}
 {"type":"assistant/chunk","data":{"turn":2,"step":1,"chunk":{"type":"block-end","index":0,"block":{"type":"text","text":"After restoration, event sourcing still represents application state as an immutable sequence of recorded changes."}}}}
 {"type":"assistant/chunk","data":{"turn":2,"step":1,"chunk":{"type":"usage","usage":{"inputTokens":110,"outputTokens":16,"cacheReadTokens":7680}}}}
 {"type":"assistant/chunk","data":{"turn":2,"step":1,"chunk":{"type":"finish","reason":{"kind":"stop"}}}}

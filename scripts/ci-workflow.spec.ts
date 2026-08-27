@@ -66,7 +66,10 @@ describe('CI workflow', () => {
     const workflow = loadWorkflow('.github/workflows/mobile-companion-acceptance.yml')
     const verdict = workflowJob(workflow, 'acceptance-verdict')
     if (!Array.isArray(verdict.steps)) throw new TypeError('Mobile acceptance verdict must define steps')
-    expect(verdict).toMatchObject({ name: 'mobile companion acceptance verdict' })
+    expect(verdict).toMatchObject({
+      name: 'mobile companion acceptance verdict',
+      environment: 'mobile-release',
+    })
     expect(verdict.steps).toContainEqual(expect.objectContaining({
       name: 'Validate and bind operated acceptance',
     }))

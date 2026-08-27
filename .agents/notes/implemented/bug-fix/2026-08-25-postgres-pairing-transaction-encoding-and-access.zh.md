@@ -1,6 +1,6 @@
-# Agent Note：让配对状态与 Desktop 访问共用一个 PostgreSQL 事务
+# Agent Note: 让配对状态与 Desktop 访问共用一个 PostgreSQL 事务
 
-状态：已实现
+Status: implemented
 
 [English](2026-08-25-postgres-pairing-transaction-encoding-and-access.md) | 中文
 

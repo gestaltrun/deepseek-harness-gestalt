@@ -316,6 +316,10 @@ Required for `SurfaceEventType` events — every message-producing event must de
 
 Only `assistant/message` may carry a present empty `sourceEventSeqs`; when the field is absent, the event does not record which earlier events produced the message, and the provider may still have emitted chunks.
 
+### Context source presentation projection
+
+The browser-safe `@deepseek-ai/dsh-session/surface` subpath exports `contextProvenance(source)`, `contextForm(source)`, and `sessionRecallLabels(source)`. These pure functions read only the durable merge-extensible `user/message.source`, so Desktop, Mobile, Web, resumed logs, and foreign logs derive the same role, producer label, and supported presentation form without a producer-name registry. Unknown or malformed source values degrade to an unnamed injection and an opaque presentation; they never remove the logged row.
+
 ### `SessionSurface` — the live readonly surface projection
 
 `Session.surface` returns the session's stable `SessionSurface` view. The same incremental manager validates append candidates before commit and advances this projection from committed events; callers can observe membership and replacement generation but cannot invoke validation.

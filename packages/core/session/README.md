@@ -58,6 +58,8 @@ The shared [storage codec](src/chunk-rows.ts) losslessly converts event sequence
 
 This package owns ordered surface projection, replacement validation, replay, and the type guards that distinguish append-origin from replacement events. The [surface type catalog](../../../docs/subsystems/session.md#surface-types) owns the exact shapes and field semantics. A human transcript must project append-origin events rather than `session.surface`, because landed replacements shadow history the reader already saw; model-facing consumers continue to read `session.surface`.
 
+The browser-safe `@deepseek-ai/dsh-session/surface` subpath also exports `contextProvenance()`, `contextForm()`, and `sessionRecallLabels()`. Desktop, Mobile, and Web use these pure projections to derive the same role, producer label, and supported presentation form from a durable `user/message.source`; no application keeps a separate producer-name table.
+
 ### Request-header reconstruction (`request-header.ts`)
 
 `request/header` records a full canonical snapshot of the non-history request envelope with reason `initial`, `resume`, or `change`. Its optional `adapterDefaults` map marks effective `reasoningEffort` or `maxTokens` values materialized by exact-model resolution, allowing the next request proposal to distinguish them from explicit conversation settings. `foldRequestHeader()` selects the latest snapshot; legacy delta events and the removed `fallback` reason are rejected. See the [reconstructable-requests Agent Note](../../../.agents/notes/implemented/architecture/2026-07-05-reconstructable-requests.md).

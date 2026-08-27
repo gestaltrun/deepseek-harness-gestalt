@@ -1,6 +1,6 @@
-# Agent Note：将 Desktop 状态投影到 Settings Overlay
+# Agent Note: 将 Desktop 状态投影到 Settings Overlay
 
-状态：已实现
+Status: implemented
 
 [English](2026-08-25-desktop-settings-overlay-state-projection.md) | 中文
 
@@ -16,7 +16,7 @@ Desktop 状态 owner 通过同一个 helper，把每次 Account、Personal Pairi
 
 **只在打开 Settings 时刷新状态。** 拒绝，因为登录轮询、配对 mailbox 交付、Relay presence 和更新下载进度都可能在 overlay 保持打开时发生变化。
 
-**由 renderer 轮询每个 controller。** 拒绝，因为 preload 事件通道已经定义了 push 所有权；轮询会在 UI 中增加过期 interval，并重复生命周期策略。
+**由 renderer 轮询每个 controller。** 拒绝，因为 preload 事件通道已经定义了 push 所有权；轮询会在 UI 中增加陈旧 interval，并重复生命周期策略。
 
 **只把这些事件发送给 overlay。** 拒绝，因为 preload bridge 安装在两个 Desktop renderer surface 上；投影策略不应依赖当前由哪个 surface 消费某一类状态。
 

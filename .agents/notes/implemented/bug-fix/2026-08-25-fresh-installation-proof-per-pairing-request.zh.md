@@ -1,6 +1,6 @@
-# Agent Note：为每个 endpoint 配对请求单独授权
+# Agent Note: 为每个 endpoint 配对请求单独授权
 
-状态：已实现
+Status: implemented
 
 [English](2026-08-25-fresh-installation-proof-per-pairing-request.md) | 中文
 

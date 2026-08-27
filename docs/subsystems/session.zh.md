@@ -318,6 +318,10 @@ interface SurfaceIntent {
 
 只有 `assistant/message` 可以携带存在但为空的 `sourceEventSeqs`；字段不存在时，该事件没有记录这条消息由哪些早期事件产生，但提供方仍可能发出过分片。
 
+### 上下文来源呈现投影
+
+浏览器安全的 `@deepseek-ai/dsh-session/surface` 子路径导出 `contextProvenance(source)`、`contextForm(source)` 与 `sessionRecallLabels(source)`。这些纯函数只读取持久且可合并扩展的 `user/message.source`，因此 Desktop、Mobile、Web、恢复的日志和外部日志无需生产方名称注册表，就能推导相同的角色、生产方标签和受支持呈现形式。未知或形态错误的来源值会降级为无名注入和不透明呈现，绝不会移除已记录的行。
+
 ### `SessionSurface`：实时只读 surface 投影
 
 `Session.surface` 返回会话稳定的 `SessionSurface` 视图。同一个增量管理器在提交前校验追加候选事件，并根据已提交事件推进该投影；调用方可以观察成员关系和替换代次，但不能调用校验。

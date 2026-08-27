@@ -1,4 +1,4 @@
-# Agent Note：实际运行的 OSS 附件 authority
+# Agent Note: 实际运行的 OSS 附件 authority
 
 Status: implemented
 

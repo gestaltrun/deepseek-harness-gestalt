@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-25-explicit-companion-transport-risk-acceptance.md
-2026-08-25-explicit-companion-transport-risk-acceptance.md: 852e38b9541d553a70de43eb6562137cd96aea48
-2026-08-25-explicit-companion-transport-risk-acceptance.zh.md: 35740c654eebf5744b97c6b82ceefdccb4b03405
+2026-08-25-explicit-companion-transport-risk-acceptance.md: b1b377a469d964bce0c3f24ed2a0832fc2b01029
+2026-08-25-explicit-companion-transport-risk-acceptance.zh.md: b5eee21b4eaa56f8d256a2379d319cfcbcd3401d

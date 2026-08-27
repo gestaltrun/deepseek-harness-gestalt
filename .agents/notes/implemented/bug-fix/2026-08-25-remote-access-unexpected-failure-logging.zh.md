@@ -1,6 +1,6 @@
-# Agent Note：记录不含请求 authority 的 Remote Access 意外故障
+# Agent Note: 记录不含请求 authority 的 Remote Access 意外故障
 
-状态：已实现
+Status: implemented
 
 [English](2026-08-25-remote-access-unexpected-failure-logging.md) | 中文
 

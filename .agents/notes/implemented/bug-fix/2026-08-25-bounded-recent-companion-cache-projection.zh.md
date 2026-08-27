@@ -1,6 +1,6 @@
-# Agent Note：将 Companion Cache 限定为最近打开的 transcript
+# Agent Note: 将 Companion Cache 限定为最近打开的 transcript
 
-状态：已实现
+Status: implemented
 
 [English](2026-08-25-bounded-recent-companion-cache-projection.md) | 中文
 
@@ -16,14 +16,14 @@ Receiver 会把每个更新后的 conversation 移到末尾，使 conversation m
 
 **提高 projection-snapshot ceiling。** 拒绝，因为 cache retention 会随着 model context 与已打开 Session 增长，而现有 bound 会限制 storage、encryption work 与 startup parsing。
 
-**继续保留 oversized predecessor 之前最后一次成功 snapshot。** 拒绝，因为之后每次 authenticated update 都会让 Remote Offline 静默展示 stale Session metadata。
+**继续保留 oversized predecessor 之前最后一次成功 snapshot。** 拒绝，因为之后每次 authenticated update 都会让 Remote Offline 静默展示陈旧 Session metadata。
 
 **把每个 conversation 保存为独立无界 row。** 拒绝，因为 Mobile 只需要一个最近打开的 read-only transcript，而不是 Desktop Session storage 的 offline replica；每 Session 一 row 的 policy 还需要独立 eviction authority。
 
 ## 后果
 
-真实 provider transcript 很长时，authenticated metadata 仍会持续推进。Remote Offline 会在可以装入时保留最新 active conversation tail，并在 synchronization 恢复后请求更旧 history。Oversized aggregate metadata 会推进为有界的 Session/Workspace 前缀，而不是保留 stale content。Cache encryption、Account 与 Personal Pairing isolation、excluded content kind 和 operation receipt 都不变。
+真实 provider transcript 很长时，authenticated metadata 仍会持续推进。Remote Offline 会在可以装入时保留最新 active conversation tail，并在 synchronization 恢复后请求更旧 history。Oversized aggregate metadata 会推进为有界的 Session/Workspace 前缀，而不是保留陈旧 content。Cache encryption、Account 与 Personal Pairing isolation、excluded content kind 和 operation receipt 都不变。
 
 ## 测试
 
-Cache runtime regression 会在现有 ceiling 下保存两个累计的 35,000-character conversation，恢复完整 metadata，并只保留最近 Session。Exact-limit、one-byte-over 与 multibyte metadata case 会验证完整 versioned UTF-8 bound，并验证 stale content 会被有效的 trimmed projection 替换。Receiver coverage 会在 recency reorder 后继续解析和发布 conversation snapshot 与 live update。
+Cache runtime regression 会在现有 ceiling 下保存两个累计的 35,000-character conversation，恢复完整 metadata，并只保留最近 Session。Exact-limit、one-byte-over 与 multibyte metadata case 会验证完整 versioned UTF-8 bound，并验证陈旧 content 会被有效的 trimmed projection 替换。Receiver coverage 会在 recency reorder 后继续解析和发布 conversation snapshot 与 live update。

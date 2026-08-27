@@ -1,6 +1,6 @@
-# Agent Note：Desktop Platform 流量使用 Electron 系统代理
+# Agent Note: Desktop Platform 流量使用 Electron 系统代理
 
-状态：已实现
+Status: implemented
 
 [English](2026-08-26-desktop-system-proxy-network.md) | 中文
 

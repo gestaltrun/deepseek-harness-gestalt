@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-25-postgres-pairing-transaction-encoding-and-access.md
 2026-08-25-postgres-pairing-transaction-encoding-and-access.md: 613e8a2df86a584e2da94b9b2213c8971ad1bb25
-2026-08-25-postgres-pairing-transaction-encoding-and-access.zh.md: 6107add46b3f604cd001373f470f71a1c8d88ca4
+2026-08-25-postgres-pairing-transaction-encoding-and-access.zh.md: 4fc3b19ae45eb6baa50303945972542c7d131be2

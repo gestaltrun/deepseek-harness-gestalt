@@ -1,6 +1,6 @@
-# Agent Note：让原生 Mobile 发布证据遇错即失败
+# Agent Note: 让原生 Mobile 发布证据遇错即失败
 
-状态：已实现
+Status: implemented
 
 [English](2026-08-25-native-mobile-release-evidence-fails-closed.md) | 中文
 

@@ -1,4 +1,4 @@
-# Agent Note：保持 Mobile Access Authority 可操作
+# Agent Note: 保持 Mobile Access Authority 可操作
 
 Status: implemented
 
@@ -28,4 +28,4 @@ Relay attachment 不可用时，Settings 同步、挑战创建与关闭功能仍
 
 ## 测试
 
-Lifecycle coverage 会让物理启动保持 pending，同时证明 authority 同步可以完成。Desktop controller coverage 证明关闭再开启不会恢复过期 grant。Provider coverage 证明 endpoint cancellation 可重复执行，且 Mobile revocation 只调用一次 Account authentication。实际运行组合 coverage 要求接入 PostgreSQL pairing activity sink。
+Lifecycle coverage 会让物理启动保持 pending，同时证明 authority 同步可以完成。Desktop controller coverage 证明关闭再开启不会恢复陈旧 grant。Provider coverage 证明 endpoint cancellation 可重复执行，且 Mobile revocation 只调用一次 Account authentication。实际运行组合 coverage 要求接入 PostgreSQL pairing activity sink。

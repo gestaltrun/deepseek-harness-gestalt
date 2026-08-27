@@ -26,6 +26,7 @@ jobs:
   acceptance-verdict:
     name: mobile companion acceptance verdict
     runs-on: ubuntu-24.04
+    environment: mobile-release
     steps:
       - uses: actions/checkout@v6
         with:

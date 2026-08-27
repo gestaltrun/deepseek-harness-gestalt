@@ -1,8 +1,8 @@
 // Context source projection: the role and the human-facing producer name
 // of one logged non-user `user/message`, read from its durable `source` alone.
-// The client keeps no table of known plugin ids — a renamed or newly mounted
-// producer must never need a client release to stay identifiable, and a resumed
-// or foreign log must project the same way as a live one.
+// Projection callers keep no table of known plugin ids — a renamed or newly
+// mounted producer must never need an application release to stay identifiable,
+// and a resumed or foreign log must project the same way as a live one.
 
 /**
  * Which model-facing role a logged non-user message plays.
@@ -21,7 +21,7 @@ export interface ContextProvenanceView {
   /**
    * Producer name for the row header, taken from the durable source: the
    * instruction paths, the referenced session titles, the plugin id, or the
-   * bare source kind for a producer this UI version does not know. Null only
+   * bare source kind for a producer the current projection does not know. Null only
    * when the source carries no readable kind at all.
    */
   label: string | null
@@ -76,7 +76,7 @@ export function sessionRecallLabels(source: unknown): string[] {
  *
  * The source arrives over the wire as opaque JSON (`MessageSource` is
  * merge-extensible, so no client-side union can be exhaustive), and a durable
- * log may predate or postdate this UI; every unreadable shape therefore
+ * log may predate or postdate the current projection; every unreadable shape therefore
  * degrades to `inject` with whatever name the record still carries.
  * @param source - the logged `user/message` source, exactly as recorded.
  * @returns the role and producer name to present for this context.
@@ -109,7 +109,7 @@ export function contextProvenance(source: unknown): ContextProvenanceView {
 }
 
 /**
- * Context forms this UI version renders with a dedicated presentation. The
+ * Context forms the shared session projection recognizes for dedicated presentation. The
  * durable vocabulary (`ContextForm` in `dsh-llm`) may already be wider — an
  * unrecognized or absent value degrades to the opaque presentation rather than
  * dropping the row, so a log written by a newer or foreign producer still
@@ -117,13 +117,13 @@ export function contextProvenance(source: unknown): ContextProvenanceView {
  */
 const KNOWN_FORMS = ['instructions', 'catalog', 'snapshot', 'notice', 'relay', 'recall'] as const
 
-/** One durable context form this UI version knows how to present. */
+/** One durable context form the shared projection knows how to present. */
 export type KnownContextForm = typeof KNOWN_FORMS[number]
 
 /**
  * Read the producer-declared form off one durable message source.
  * @param source - the logged `user/message` source, exactly as recorded.
- * @returns the form when this UI version presents it, otherwise null (opaque).
+ * @returns the form when the shared projection recognizes it, otherwise null (opaque).
  */
 export function contextForm(source: unknown): KnownContextForm | null {
   const record = asRecord(source)

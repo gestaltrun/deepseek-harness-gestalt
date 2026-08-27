@@ -1,4 +1,4 @@
-# Agent Note：Mobile Access 禁用只消费一个安装证明
+# Agent Note: Mobile Access 禁用只消费一个安装证明
 
 Status: implemented
 

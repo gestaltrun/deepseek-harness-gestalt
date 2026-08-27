@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-26-mobile-desktop-fingerprint-consolidation.md
 2026-08-26-mobile-desktop-fingerprint-consolidation.md: 7a6901b763b50a69c05e730c6973617802d217f2
-2026-08-26-mobile-desktop-fingerprint-consolidation.zh.md: 377177456f9fbada1212c1ae553f094144274d3c
+2026-08-26-mobile-desktop-fingerprint-consolidation.zh.md: 62ab681dbba5701af270c527bb70faa723eed5c3

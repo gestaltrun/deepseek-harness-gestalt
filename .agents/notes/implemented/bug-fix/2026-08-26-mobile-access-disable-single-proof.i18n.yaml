@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-26-mobile-access-disable-single-proof.md
 2026-08-26-mobile-access-disable-single-proof.md: 9495b51a70464c9fbe090bc0a47e30cc1bd37812
-2026-08-26-mobile-access-disable-single-proof.zh.md: bb03d0cd329695c8a388d559d7e28a0ec90c1235
+2026-08-26-mobile-access-disable-single-proof.zh.md: 49f1333571cb5f222c622172ae4dcc1bd2ddbf07

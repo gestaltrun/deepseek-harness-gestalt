@@ -1,6 +1,6 @@
-# Agent Note：Desktop Host authority 重连时保持 Mobile 可读
+# Agent Note: Desktop Host authority 重连时保持 Mobile 可读
 
-状态：已实现
+Status: implemented
 
 [English](2026-08-25-mobile-reconnect-host-readiness.md) | 中文
 
@@ -14,9 +14,9 @@ Live presentation clock 每次 render 都通过新函数订阅。因此 React �
 
 ## 决策
 
-Packaged Desktop 只有在 Web Host 安装后才启动 signed-in Personal Pairing。它会调度该 lifecycle start，而不延迟 `window.loadURL()`，因此保留的 Mobile Access 状态或缓慢的 Relay attachment 不会在 Host 已可用时让 Desktop window 保持空白。Account sign-in 与 process resume 使用同一个 readiness predicate，因此在初次或 replacement Host startup 尚未完成时唤醒进程，不会重启 Relay access。Pairing controller 会在一个 lifecycle generation owner 内串行 start、deactivate 与 replacement start；它在 refresh 前后复核捕获的 Host predicate，以 `host-unavailable` 停止 stale in-flight start，并只在清理结束后接纳 replacement。
+Packaged Desktop 只有在 Web Host 安装后才启动 signed-in Personal Pairing。它会调度该 lifecycle start，而不延迟 `window.loadURL()`，因此保留的 Mobile Access 状态或缓慢的 Relay attachment 不会在 Host 已可用时让 Desktop window 保持空白。Account sign-in 与 process resume 使用同一个 readiness predicate，因此在初次或 replacement Host startup 尚未完成时唤醒进程，不会重启 Relay access。Pairing controller 会在一个 lifecycle generation owner 内串行 start、deactivate 与 replacement start；它在 refresh 前后复核捕获的 Host predicate，以 `host-unavailable` 停止陈旧 in-flight start，并只在清理结束后接纳 replacement。
 
-同步保留 grant 并发布当前 Platform 状态后，controller 会把物理 Relay attachment 作为一个受跟踪的后台 attempt 启动。Settings 操作不等待首次 attachment，因此已配对 Mobile 离线时，状态变更和邀请管理仍可使用。当前 generation 的 Relay start failure 会成为可见 failed projection 和诊断；stale attempt 不能修改 replacement generation。Lifecycle stop 会抢占并排空底层 Relay attempt。Host exit 仍会保留此前已建立的 Relay 足够长时间，以返回 typed Host failure；generation cancellation 只适用于尚未建立当前 Host authority 的 in-flight startup。
+同步保留 grant 并发布当前 Platform 状态后，controller 会把物理 Relay attachment 作为一个受跟踪的后台 attempt 启动。Settings 操作不等待首次 attachment，因此已配对 Mobile 离线时，状态变更和邀请管理仍可使用。当前 generation 的 Relay start failure 会成为可见 failed projection 和诊断；陈旧 attempt 不能修改 replacement generation。Lifecycle stop 会抢占并排空底层 Relay attempt。Host exit 仍会保留此前已建立的 Relay 足够长时间，以返回 typed Host failure；generation cancellation 只适用于尚未建立当前 Host authority 的 in-flight startup。
 
 `MobileBrowse` 在没有当前 mutation authority 时绝不请求 history。Synchronization 丢失会清除其本地 history-request fence，使后续 synchronized generation 可以请求缺失 conversation。Clock subscription callback 在其 clock owner 生命周期内保持稳定。
 

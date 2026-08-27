@@ -1,4 +1,4 @@
-# Agent Note：合并重新配对的 Desktop Authority
+# Agent Note: 合并重新配对的 Desktop Authority
 
 Status: implemented
 

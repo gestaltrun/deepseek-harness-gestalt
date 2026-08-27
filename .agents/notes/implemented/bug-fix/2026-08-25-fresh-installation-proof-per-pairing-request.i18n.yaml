@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-25-fresh-installation-proof-per-pairing-request.md
 2026-08-25-fresh-installation-proof-per-pairing-request.md: cd58e8ae31fe26d8ed595031f1029c193a19927c
-2026-08-25-fresh-installation-proof-per-pairing-request.zh.md: 23baf843f2add002c8c2b054b185ed56eb089cf2
+2026-08-25-fresh-installation-proof-per-pairing-request.zh.md: 05b48906255052bb18e3f2c4a038b8fbb7e40538

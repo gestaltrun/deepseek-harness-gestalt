@@ -1,6 +1,6 @@
-# Agent Note：实例化 iOS protected-storage bridge controller
+# Agent Note: 实例化 iOS protected-storage bridge controller
 
-状态：已实现
+Status: implemented
 
 [English](2026-08-25-ios-storyboard-registers-protected-storage.md) | 中文
 

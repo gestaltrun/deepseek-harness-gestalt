@@ -58,6 +58,8 @@
 
 此包拥有有序 surface 投影、替换校验、回放，以及区分追加来源事件与替换事件的类型守卫。[surface 类型目录](../../../docs/subsystems/session.zh.md#surface-types)拥有精确形状与字段语义。面向人的 transcript（文本记录）必须投影追加来源事件，而不是 `session.surface`，因为已落地的替换会遮蔽读者已经看到的历史；面向模型的消费方继续读取 `session.surface`。
 
+浏览器安全的 `@deepseek-ai/dsh-session/surface` 子路径还导出 `contextProvenance()`、`contextForm()` 与 `sessionRecallLabels()`。Desktop、Mobile 与 Web 使用这些纯投影，从持久 `user/message.source` 推导相同的角色、生产方标签和受支持呈现形式；任何应用都不维护独立的生产方名称表。
+
 ### 请求头重建（`request-header.ts`）
 
 `request/header` 记录非历史请求封装的完整规范快照，其原因为 `initial`、`resume` 或 `change`。其可选 `adapterDefaults` 映射会标记由精确模型解析填入的生效 `reasoningEffort` 或 `maxTokens` 值，使下一次请求提议能够将它们与显式对话设置区分开。`foldRequestHeader()` 选择最新快照；旧版增量事件和已移除的 `fallback` 原因会被拒绝。详见[可重建请求 Agent Note](../../../.agents/notes/implemented/architecture/2026-07-05-reconstructable-requests.zh.md)。

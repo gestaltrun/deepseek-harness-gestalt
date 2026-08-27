@@ -1,6 +1,7 @@
 /** Foreground Relay lifecycle and Desktop-authoritative synchronization. */
 
 import { App } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
 import type { RelayCredentialGrant } from '@deepseek-ai/dsh-remote-access'
 import type { RelayErrorCode, RemoteProtocolErrorCode } from '@deepseek-ai/dsh-remote-protocol'
 import {
@@ -346,20 +347,52 @@ export function bindCompanionProcessVisibility(
   runtime: CompanionForegroundRuntime,
   hooks: {
     listenAppState?: (listener: (active: boolean) => void) => Promise<{ remove: () => Promise<void> }>
+    readAppState?: () => Promise<boolean>
+    isNativePlatform?: () => boolean
   } = {},
 ): () => Promise<void> {
+  const nativeAuthority = (hooks.isNativePlatform ?? (() => Capacitor.isNativePlatform()))()
+  let appStateObserved = nativeAuthority
+  let nativeStateVersion = 0
+  let disposed = false
+  const onAppState = (active: boolean): void => {
+    if (disposed) return
+    appStateObserved = true
+    nativeStateVersion += 1
+    void runtime.setForeground(active)
+  }
   const onVisibility = (): void => {
+    if (appStateObserved) return
     void runtime.setForeground(document.visibilityState === 'visible')
   }
-  const onPageHide = (): void => { void runtime.setForeground(false) }
+  const onPageHide = (): void => {
+    if (appStateObserved) return
+    void runtime.setForeground(false)
+  }
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('pagehide', onPageHide)
+  if (nativeAuthority) void runtime.setForeground(false)
   const pendingHandle = Promise.resolve()
-    .then(() => (hooks.listenAppState ?? listenCapacitorAppState)((active) => {
-      void runtime.setForeground(active)
-    }))
-    .then(handle => handle, () => undefined)
+    .then(() => (hooks.listenAppState ?? listenCapacitorAppState)(onAppState))
+    .then(async (handle) => {
+      if (!nativeAuthority) return handle
+      const versionBeforeRead = nativeStateVersion
+      try {
+        const active = await (hooks.readAppState ?? readCapacitorAppState)()
+        if (!disposed && nativeStateVersion === versionBeforeRead) onAppState(active)
+      } catch {
+        if (!disposed) console.error('[companion-foreground] native App state read failed')
+      }
+      return handle
+    }, () => {
+      if (!nativeAuthority && !disposed) {
+        appStateObserved = false
+        void runtime.setForeground(document.visibilityState === 'visible')
+      }
+      return undefined
+    })
   return async () => {
+    disposed = true
     document.removeEventListener('visibilitychange', onVisibility)
     window.removeEventListener('pagehide', onPageHide)
     const handle = await pendingHandle
@@ -371,4 +404,8 @@ function listenCapacitorAppState(
   listener: (active: boolean) => void,
 ): Promise<{ remove: () => Promise<void> }> {
   return App.addListener('appStateChange', (state) => { listener(state.isActive) })
+}
+
+async function readCapacitorAppState(): Promise<boolean> {
+  return (await App.getState()).isActive
 }

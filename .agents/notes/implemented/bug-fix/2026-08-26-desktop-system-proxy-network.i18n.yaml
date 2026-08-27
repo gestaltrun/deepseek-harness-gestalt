@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-26-desktop-system-proxy-network.md
 2026-08-26-desktop-system-proxy-network.md: 09a6426aad00879565f59942651a09abfc5b3359
-2026-08-26-desktop-system-proxy-network.zh.md: e1239149cc84b2e52edbac044637ba96a6a1a203
+2026-08-26-desktop-system-proxy-network.zh.md: 4bb57bc05a371902604d16a7cb28ae8dfa9d774c

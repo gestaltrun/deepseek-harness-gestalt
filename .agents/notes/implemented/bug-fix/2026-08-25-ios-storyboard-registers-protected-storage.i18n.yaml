@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-25-ios-storyboard-registers-protected-storage.md
 2026-08-25-ios-storyboard-registers-protected-storage.md: 1092fe23153943fa9ee103c646f360907fcc82ce
-2026-08-25-ios-storyboard-registers-protected-storage.zh.md: ac70b53112de9ee81e4a6f13b9944986142753ad
+2026-08-25-ios-storyboard-registers-protected-storage.zh.md: 65535b9799089a58045d25d2528c938aba5bf7d9

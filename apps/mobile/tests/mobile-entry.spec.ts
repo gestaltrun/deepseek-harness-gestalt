@@ -16,6 +16,10 @@ import type { MobileCompanionProjectionDto } from '../src/companion-projection.t
 
 const browserOpen = vi.hoisted(() => vi.fn<(options: { url: string }) => Promise<void>>())
 const protectedValues = vi.hoisted(() => new Map<string, string>())
+const nativeAppState = vi.hoisted(() => ({
+  active: true,
+  listener: undefined as ((state: { isActive: boolean }) => void) | undefined,
+}))
 const relayLifecycle = vi.hoisted(() => ({
   configure: vi.fn(),
   start: vi.fn(async () => {}),
@@ -64,7 +68,11 @@ vi.mock('@capacitor/browser', () => ({ Browser: { open: browserOpen } }))
 vi.mock('@capacitor/app', () => ({
   App: {
     getLaunchUrl: vi.fn(async () => undefined),
-    addListener: vi.fn(async () => ({ remove: async () => {} })),
+    getState: vi.fn(async () => ({ isActive: nativeAppState.active })),
+    addListener: vi.fn(async (_event: string, listener: (state: { isActive: boolean }) => void) => {
+      nativeAppState.listener = listener
+      return { remove: async () => {} }
+    }),
   },
 }))
 vi.mock('@capacitor/device', () => ({
@@ -141,6 +149,8 @@ vi.mock('@capacitor/core', () => ({
 }))
 
 beforeEach(() => {
+  nativeAppState.active = true
+  nativeAppState.listener = undefined
   vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US'])
 })
 
@@ -227,9 +237,11 @@ describe('Mobile Platform Account entry', () => {
     document.body.innerHTML = '<div id="root"></div>'
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    await expect(import('../src/main.tsx')).rejects.toThrow('production origin is required')
-    expect(document.getElementById('root')?.childElementCount).toBe(0)
+    const { mobileProductStarted } = await import('../src/main.tsx')
+    await expect(mobileProductStarted).rejects.toThrow('production origin is required')
+    expect(screen.getByRole('alert').textContent).toContain('production origin is required')
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -239,11 +251,12 @@ describe('Mobile Platform Account entry', () => {
     document.body.innerHTML = '<div id="root"></div>'
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     const { mobileProductStarted } = await import('../src/main.tsx')
     await expect(mobileProductStarted).rejects.toThrow('must admit one maximum Relay message')
 
-    expect(document.getElementById('root')?.childElementCount).toBe(0)
+    expect(screen.getByRole('alert').textContent).toContain('must admit one maximum Relay message')
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -253,10 +266,12 @@ describe('Mobile Platform Account entry', () => {
     document.body.innerHTML = '<div id="root"></div>'
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    await expect(import('../src/main.tsx')).rejects.toThrow('legacy environment selection is not accepted')
+    const { mobileProductStarted } = await import('../src/main.tsx')
+    await expect(mobileProductStarted).rejects.toThrow('legacy environment selection is not accepted')
 
-    expect(document.getElementById('root')?.childElementCount).toBe(0)
+    expect(screen.getByRole('alert').textContent).toContain('legacy environment selection is not accepted')
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -264,12 +279,6 @@ describe('Mobile Platform Account entry', () => {
     configureEnvironment()
     document.body.innerHTML = '<div id="root"></div>'
     vi.stubGlobal('fetch', vi.fn(async () => json({ status: 'pending' })))
-    let hidden = false
-    Object.defineProperty(document, 'visibilityState', {
-      configurable: true,
-      get: () => hidden ? 'hidden' : 'visible',
-    })
-
     const { mobileProductStarted } = await import('../src/main.tsx')
     await mobileProductStarted
     const { companionMayMutate, companionRuntime } = await import('../src/companion-lifecycle.ts')
@@ -283,16 +292,16 @@ describe('Mobile Platform Account entry', () => {
       credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'),
       revision: 1,
     })
-    hidden = true
-    document.dispatchEvent(new Event('visibilitychange'))
+    nativeAppState.active = false
+    nativeAppState.listener?.({ isActive: false })
     await waitFor(() => { expect(runtime.getState().foreground).toBe(false) })
     expect(runtime.getState()).toMatchObject({ foreground: false, socketOpen: false, synchronized: false })
     expect(settleCompanionInteraction({
       operationId: 'op-approve', kind: 'approval', summary: 'write a.ts', authorized: ['once'],
     }, { accepted: true, decision: 'once' }, runtime.getState()).settled).toBeUndefined()
 
-    hidden = false
-    document.dispatchEvent(new Event('visibilitychange'))
+    nativeAppState.active = true
+    nativeAppState.listener?.({ isActive: true })
     await waitFor(() => { expect(runtime.getState().foreground).toBe(true) })
     expect(runtime.getState()).toMatchObject({ foreground: true, socketOpen: false, synchronized: false })
     expect(companionMayMutate(runtime.getState())).toBe(false)
@@ -334,9 +343,9 @@ describe('Mobile Platform Account entry', () => {
     expect(companionMayMutate(runtime.getState())).toBe(true)
     await expect(relayLifecycle.onPeerAttachments?.({ peers: [{}, {}] })).rejects.toThrow('multiple Desktop')
     expect(companionMayMutate(runtime.getState())).toBe(false)
-    hidden = true
-    document.dispatchEvent(new Event('visibilitychange'))
-    await waitFor(() => { expect(companionMayMutate(runtime.getState())).toBe(false) })
+    nativeAppState.active = false
+    nativeAppState.listener?.({ isActive: false })
+    await waitFor(() => { expect(runtime.getState().foreground).toBe(false) })
     expect(runtime.getState()).toMatchObject({ foreground: false, socketOpen: false, synchronized: false })
   })
 

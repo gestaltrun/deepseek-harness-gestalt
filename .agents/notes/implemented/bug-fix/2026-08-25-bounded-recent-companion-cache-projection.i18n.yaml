@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-25-bounded-recent-companion-cache-projection.md
 2026-08-25-bounded-recent-companion-cache-projection.md: 940a19ae98238d0f35ebf65d46c19f2da324d6a9
-2026-08-25-bounded-recent-companion-cache-projection.zh.md: a910a920c6583248e4ab1ea67b9a3a882e2e27c2
+2026-08-25-bounded-recent-companion-cache-projection.zh.md: 5688b5f82faf7ab36714b1d3694d59a6bd77c747

@@ -86,12 +86,19 @@ export interface AttachmentBlobReservationCleanup {
 
 /** Construction-private Account-authenticated attachment quota closures. */
 export interface PersonalPairingAttachmentQuotaAuthority {
-  /** Reserve quota after the caller has authenticated the current Installation. */
+  /**
+   * Reserve quota after the caller has authenticated the current Installation.
+   * @param input - authenticated Account id and declared ciphertext size.
+   * @returns opaque reservation id plus its durable absolute lease expiry.
+   */
   admit(input: {
     accountId: AuthenticatedInstallationView['account']['id']
     bytes: number
   }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }>
-  /** Release a reservation owned by the authenticated Account. */
+  /**
+   * Release a reservation owned by the authenticated Account.
+   * @param input - authenticated Account id and owned reservation id.
+   */
   release(input: {
     accountId: AuthenticatedInstallationView['account']['id']
     reservationId: AttachmentBlobReservationId
@@ -388,13 +395,34 @@ export interface PersonalPairingActivity {
 
 /** Desktop access operations that settle with one pairing-state transaction. */
 export interface PersonalPairingAccessTransaction {
-  /** Read current Desktop access without process-local caching. */
+  /**
+   * Read current Desktop access without process-local caching.
+   * @param accountId - authenticated Platform Account.
+   * @param desktopInstallationId - Desktop installation whose authority is read.
+   * @returns current durable access after earlier transaction changes.
+   */
   getDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<DesktopRemoteAccessAuthority>
-  /** Atomically keep an active route or install the supplied fresh route. */
+  /**
+   * Atomically keep an active route or install the supplied fresh route.
+   * @param accountId - authenticated Platform Account.
+   * @param desktopInstallationId - Desktop installation receiving access.
+   * @param freshRouteId - replacement route to install only when no active route exists.
+   * @returns the retained or newly installed active route.
+   */
   enableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, freshRouteId: RelayRouteId): Promise<RelayRouteId>
-  /** Atomically disable access, remove Mobile grants, and return every route still requiring revocation. */
+  /**
+   * Atomically disable access and remove Mobile grants before returning.
+   * @param accountId - authenticated Platform Account.
+   * @param desktopInstallationId - Desktop installation losing access.
+   * @returns every route whose external Relay authority still requires revocation.
+   */
   disableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<readonly RelayRouteId[]>
-  /** Mark one route's external Relay revocation complete without touching a replacement route. */
+  /**
+   * Mark one route's external Relay revocation complete without touching a replacement route.
+   * @param accountId - authenticated Platform Account.
+   * @param desktopInstallationId - Desktop installation that owned the route.
+   * @param routeId - externally revoked route to settle.
+   */
   completeRouteRevocation(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, routeId: RelayRouteId): Promise<void>
 }
 
@@ -410,13 +438,29 @@ export interface PersonalPairingAuthorityStore extends RelayPairingActivitySink,
     state: PersonalPairingTransactionState,
     access: PersonalPairingAccessTransaction,
   ) => Promise<T>): Promise<T>
-  /** Persist the confirmed pairing-to-route result before Mobile observes confirmation. */
+  /**
+   * Persist the confirmed pairing-to-route result before Mobile observes confirmation.
+   * @param authority - complete confirmed Mobile authority to commit idempotently.
+   * @throws when the pending pairing id already owns different authority or persistence fails.
+   */
   confirmMobilePairing(authority: MobilePairingAuthority): Promise<void>
-  /** Read a confirmed Mobile result from any Platform Instance. */
+  /**
+   * Read a confirmed Mobile result from any Platform Instance.
+   * @param pendingPairingId - pending result identity returned to Mobile.
+   * @returns detached durable authority, or `undefined` before confirmation or after revocation.
+   */
   getMobilePairing(pendingPairingId: PendingPairingId): Promise<MobilePairingAuthority | undefined>
-  /** Drop one confirmed Mobile pairing result after Desktop revocation. */
+  /**
+   * Durably drop one confirmed Mobile pairing result after Desktop revocation.
+   * @param pairingId - confirmed Personal Pairing whose Mobile result is removed idempotently.
+   */
   revokeMobilePairing(pairingId: PersonalPairingId): Promise<void>
-  /** Read authoritative Relay activity for one confirmed pairing. */
+  /**
+   * Read authoritative Relay activity for one confirmed pairing.
+   * @param pairingId - confirmed Personal Pairing whose activity is read.
+   * @param observedAt - current time used to prune expired presence leases.
+   * @returns durable access time and lease-derived online state, or `undefined` without activity.
+   */
   getPersonalPairingActivity(pairingId: PersonalPairingId, observedAt: number): Promise<PersonalPairingActivity | undefined>
 }
 

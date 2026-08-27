@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-项目成员 Provider。每次变更——创建、邀请、撤回、原子接受并链接、拒绝、升降级、改标签、移除——都在本进程的单一串行写链下运行,在操作内部执行角色门,对输入响亮校验(`INVALID_PROJECT_NAME`、`INVALID_REMOTE_URL`、`INVALID_TAGS`、`INVALID_LINK`),以 `0600` 权限(`0700` 目录)经原子临时文件重命名整体发布环境文档,然后才发出 `project-membership/roster-invalidated`。并发调用者因此观察到全有或全无的提交:向同一账户并发发出八次邀请,只会落定一条待决邀请与七次 `DUPLICATE_INVITEE` 拒绝。
+项目成员 Provider。每次变更——创建、邀请、撤回、原子接受并链接、拒绝、升降级、改标签、移除——都在本进程的单一串行写链下运行,在操作内部执行角色门,对输入响亮校验(`INVALID_PROJECT_NAME`、`INVALID_REMOTE_URL`、`INVALID_TAGS`、`INVALID_LINK`),以 `0600` 权限(`0700` 目录)经原子临时文件重命名整体发布环境文档,然后才发出 `project-membership/roster-invalidated`。被拒绝的持久写入在拒绝返回前,把该操作的确切变更批次对称回滚出内存,后续提交因此永远不会把文档拒绝过的行发布上盘。并发调用者因此观察到全有或全无的提交:向同一账户并发发出八次邀请,只会落定一条待决邀请与七次 `DUPLICATE_INVITEE` 拒绝。
 
 状态按环境命名空间存放于所配置根目录之下——`<storagePath>/<environment>/project-membership.json`——即便共享同一存储根,开发身份也永不与生产冲突。文档只有完全符合记录形态才能解析(`formatVersion 0`;陌生版本直接失败而非降级),文件缺失即为空的首启。读取派生自刚持久化的内存权威状态。
 

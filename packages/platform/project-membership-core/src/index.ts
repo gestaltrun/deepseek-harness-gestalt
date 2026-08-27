@@ -1,8 +1,9 @@
 /**
  * Project Membership provider: durable environment-namespaced JSON state,
  * every mutation executed under one serialized write chain so concurrent
- * callers observe all-or-nothing commits, with each operation enforcing its
- * own role gate before anything persists.
+ * callers observe all-or-nothing commits — a failed durable write commits
+ * nothing, rolling its batch back before the rejection returns — with each
+ * operation enforcing its own role gate before anything persists.
  * @module @deepseek-ai/dsh-project-membership-core
  */
 
@@ -127,7 +128,10 @@ type RosterMutationDetail =
  * File-backed Project Membership provider mounted once per composition.
  * Reads derive from the authoritative in-memory state; writes serialize
  * through one chain, republish the whole document atomically, and only then
- * emit their roster-invalidation record.
+ * emit their roster-invalidation record. Memory publishes state only at its
+ * durable commit point: a rejected write rolls the operation's exact
+ * mutation batch back, so no later commit can publish a row the document
+ * refused.
  */
 export class FileProjectMembership extends ProjectMembershipService {
   static Config: z<Config> = z.object({
@@ -288,6 +292,25 @@ export class FileProjectMembership extends ProjectMembershipService {
     await writeFileAtomic(this.storageFile, serialize(state), { mode: 0o600, dirMode: 0o700 })
   }
 
+  /**
+   * Commit the already-applied mutation batch at its durable point: the
+   * document write must succeed before the batch stays in memory. A failed
+   * write runs `rollback` — the exact inverse of the batch `persist` just
+   * serialized — and rethrows, leaving memory and disk as if the operation
+   * never ran. Serialization through the write chain makes the applied batch
+   * invisible until this point, so the rollback restores the exact pre-call
+   * state.
+   * @param rollback - inverse of the one mutation batch awaiting durability.
+   */
+  private async commit(rollback: () => void): Promise<void> {
+    try {
+      await this.persist()
+    } catch (error) {
+      rollback()
+      throw error
+    }
+  }
+
   private requireProject(projectId: ProjectId): ProjectRow {
     const project = this.projects.get(projectId)
     if (project === undefined) throw new ProjectMembershipError('PROJECT_NOT_FOUND', `project ${projectId} is unknown`)
@@ -379,7 +402,12 @@ export class FileProjectMembership extends ProjectMembershipService {
     this.projectNameIndex.set(name, project.id)
     this.projectMemberships.set(project.id, new Map([[founder.id, founder]]))
     this.membershipAccounts.set(duplicateKey(project.id, actor), founder)
-    await this.persist()
+    await this.commit(() => {
+      this.projects.delete(project.id)
+      this.projectNameIndex.delete(name)
+      this.projectMemberships.delete(project.id)
+      this.membershipAccounts.delete(duplicateKey(project.id, actor))
+    })
     this.publish(project, { reason: 'joined' }, {
       projectId: project.id,
       membershipId: founder.id,
@@ -408,7 +436,10 @@ export class FileProjectMembership extends ProjectMembershipService {
     }
     this.invitations.set(row.id, row)
     this.pendingInvitees.set(duplicateKey(row.projectId, row.inviteeAccountId), row)
-    await this.persist()
+    await this.commit(() => {
+      this.invitations.delete(row.id)
+      this.pendingInvitees.delete(duplicateKey(row.projectId, row.inviteeAccountId))
+    })
     return cloneInvitation(row)
   }
 
@@ -416,6 +447,13 @@ export class FileProjectMembership extends ProjectMembershipService {
     row.state = state
     row.settledAt = Date.now()
     this.pendingInvitees.delete(duplicateKey(row.projectId, row.inviteeAccountId))
+  }
+
+  /** Inverse of {@link settlePending}: restore the row to its pending spelling. */
+  private unsettlePending(row: InvitationRow): void {
+    row.state = 'pending'
+    row.settledAt = undefined
+    this.pendingInvitees.set(duplicateKey(row.projectId, row.inviteeAccountId), row)
   }
 
   /** Resolve one invitation to its row, proving addressee scope along the way. */
@@ -459,7 +497,11 @@ export class FileProjectMembership extends ProjectMembershipService {
     this.membershipAccounts.set(duplicateKey(member.projectId, member.accountId), member)
     this.settlePending(invitation, 'accepted')
     const project = this.requireProject(invitation.projectId)
-    await this.persist()
+    await this.commit(() => {
+      this.projectMemberships.get(member.projectId)?.delete(member.id)
+      this.membershipAccounts.delete(duplicateKey(member.projectId, member.accountId))
+      this.unsettlePending(invitation)
+    })
     this.publish(project, { reason: 'joined' }, {
       projectId: member.projectId,
       membershipId: member.id,
@@ -469,8 +511,9 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   private async declineOp(actor: PlatformAccountId, invitationId: InvitationId): Promise<void> {
-    this.settlePending(this.requireAddressedInvitation(actor, invitationId, true), 'declined')
-    await this.persist()
+    const invitation = this.requireAddressedInvitation(actor, invitationId, true)
+    this.settlePending(invitation, 'declined')
+    await this.commit(() => this.unsettlePending(invitation))
   }
 
   private async retractOp(actor: PlatformAccountId, invitationId: InvitationId): Promise<void> {
@@ -480,7 +523,7 @@ export class FileProjectMembership extends ProjectMembershipService {
       throw new ProjectMembershipError('ROLE_REQUIRED', 'only the issuing account or a project owner can retract')
     }
     this.settlePending(invitation, 'retracted')
-    await this.persist()
+    await this.commit(() => this.unsettlePending(invitation))
   }
 
   /** Locate a membership row among projects where the actor holds a membership. */
@@ -502,9 +545,12 @@ export class FileProjectMembership extends ProjectMembershipService {
     if (target.role === 'owner' && input.role !== 'owner') {
       this.assertNotFinalOwner(target.projectId)
     }
+    const previousRole = target.role
     target.role = input.role
     const project = this.requireProject(target.projectId)
-    await this.persist()
+    await this.commit(() => {
+      target.role = previousRole
+    })
     this.publish(project, { reason: 'role-changed', role: target.role }, {
       projectId: target.projectId,
       membershipId: target.id,
@@ -536,9 +582,12 @@ export class FileProjectMembership extends ProjectMembershipService {
     if (this.requireMembershipIn(actor, target.projectId).role === 'member') {
       throw new ProjectMembershipError('ROLE_REQUIRED', 'editing function tags requires the admin or owner role')
     }
+    const previousTags = target.tags
     target.tags = this.validateFunctionTags(input.tags)
     const project = this.requireProject(target.projectId)
-    await this.persist()
+    await this.commit(() => {
+      target.tags = previousTags
+    })
     this.publish(project, { reason: 'tags-changed', tags: [...target.tags] }, {
       projectId: target.projectId,
       membershipId: target.id,
@@ -558,7 +607,10 @@ export class FileProjectMembership extends ProjectMembershipService {
     this.projectMemberships.get(target.projectId)?.delete(target.id)
     this.membershipAccounts.delete(duplicateKey(target.projectId, removedAccount))
     const project = this.requireProject(target.projectId)
-    await this.persist()
+    await this.commit(() => {
+      this.projectMemberships.get(target.projectId)?.set(target.id, target)
+      this.membershipAccounts.set(duplicateKey(target.projectId, removedAccount), target)
+    })
     this.publish(project, { reason: 'removed' }, {
       projectId: target.projectId,
       membershipId: removedMembershipId,

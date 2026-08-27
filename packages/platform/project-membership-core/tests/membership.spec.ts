@@ -2,10 +2,11 @@
  * Executor-level behavior for the file-backed Project Membership provider:
  * atomic invite/accept under concurrency, role gates enforced inside each
  * operation, tag-edit authority, LAST_OWNER protection, durable
- * environment-namespaced persistence, and roster projection invalidation.
+ * environment-namespaced persistence, failed durable writes committing
+ * nothing, and roster projection invalidation.
  */
 
-import { rm } from 'node:fs/promises'
+import { mkdir, readFile, rm, rmdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -21,6 +22,7 @@ import {
   type RosterInvalidation,
 } from '@deepseek-ai/dsh-project-membership'
 import { FileProjectMembership } from '../src/index.ts'
+import { parse } from '../src/persisted-state.ts'
 
 const alice = 'account-alice' as PlatformAccountId
 const bob = 'account-bob' as PlatformAccountId
@@ -279,5 +281,118 @@ describe('file-backed project membership', () => {
       if (previous !== undefined) expect(change.rosterVersionAfter).toBeGreaterThan(previous)
       lastSeen.set(change.projectId, change.rosterVersionAfter)
     }
+  })
+})
+
+describe('failed durable writes commit nothing', () => {
+  /**
+   * Inject one durable failure: the rename target becomes a directory, so
+   * every `writeFileAtomic` commit rejects with EISDIR until the directory is
+   * removed. The on-disk document from the last successful commit stays
+   * untouched, matching a real durability outage.
+   */
+  async function blockCommits(storageFile: string): Promise<void> {
+    await rm(storageFile)
+    await mkdir(storageFile)
+  }
+
+  it('leaves a refused invite absent from memory and from every later document', async () => {
+    const root = freshRoot()
+    const store = makeStoreAt(root, 'development')
+    const created = await store.createProject(alice, { name: 'Durable', remoteUrl: 'https://org.example/durable' })
+    const storageFile = join(root, 'development', 'project-membership.json')
+
+    await blockCommits(storageFile)
+    await expect(store.invite(alice, { projectId: created.id, inviteeAccountId: bob })).rejects.toThrow()
+    // The caller saw the rejection; reads behave as if the call never happened.
+    expect(await store.pendingInvitationsFor(bob)).toEqual([])
+    expect((await store.roster(alice, created.id)).members.map(row => row.accountId)).toEqual([alice])
+
+    // Recovery: the retry is a fresh invitation, not a DUPLICATE_INVITEE ghost verdict.
+    await rmdir(storageFile)
+    await expect(store.invite(alice, { projectId: created.id, inviteeAccountId: bob }))
+      .resolves.toMatchObject({ inviteeAccountId: bob })
+
+    // A later successful commit publishes exactly its own rows — no ghost invitation.
+    await store.invite(alice, { projectId: created.id, inviteeAccountId: carol })
+    const document = parse(await readFile(storageFile, 'utf8'))
+    expect(document.invitations.map(row => row.inviteeAccountId).sort()).toEqual([bob, carol].sort())
+    expect(document.memberships.map(row => row.accountId)).toEqual([alice])
+  })
+
+  it('keeps a refused project creation out of the name index and off disk', async () => {
+    const root = freshRoot()
+    const store = makeStoreAt(root, 'development')
+    await store.createProject(alice, { name: 'Anchor', remoteUrl: 'https://org.example/anchor' })
+    const storageFile = join(root, 'development', 'project-membership.json')
+    const refusedRemote = normalizeGitRemoteUrl('https://org.example/refused')
+
+    await blockCommits(storageFile)
+    await expect(store.createProject(alice, { name: 'Refused', remoteUrl: 'https://org.example/refused' }))
+      .rejects.toThrow()
+    await expect(store.projectByRemote(alice, refusedRemote)).resolves.toBeUndefined()
+
+    // The name index holds no ghost: the same name is creatable once durability recovers.
+    await rmdir(storageFile)
+    await expect(store.createProject(alice, { name: 'Refused', remoteUrl: 'https://org.example/refused' }))
+      .resolves.toMatchObject({ name: 'Refused' })
+    const document = parse(await readFile(storageFile, 'utf8'))
+    expect(document.projects.map(row => row.name).sort()).toEqual(['Anchor', 'Refused'].sort())
+    const namesById = new Map(document.projects.map(row => [row.id, row.name]))
+    expect(document.memberships.map(row => [namesById.get(row.projectId), row.accountId, row.role]))
+      .toEqual([['Anchor', alice, 'owner'], ['Refused', alice, 'owner']])
+  })
+
+  it('rolls every roster mutation back when its durable write fails', async () => {
+    const root = freshRoot()
+    const store = makeStoreAt(root, 'development')
+    const created = await store.createProject(alice, { name: 'Rollback', remoteUrl: 'https://org.example/rollback' })
+    const projectId = created.id
+    await store.invite(alice, { projectId, inviteeAccountId: bob })
+    const bobInvitation = (await store.pendingInvitationsFor(bob))[0]!.id
+    await store.invite(alice, { projectId, inviteeAccountId: carol })
+    const carolInvitation = (await store.pendingInvitationsFor(carol))[0]!.id
+    const bobMember = await store.acceptInvitation(bob, {
+      invitationId: bobInvitation,
+      link: { workspaceName: 'bob-rollback' },
+    })
+    await ownMembershipOf(store, alice, projectId)
+    const storageFile = join(root, 'development', 'project-membership.json')
+
+    await blockCommits(storageFile)
+    await expect(store.acceptInvitation(carol, {
+      invitationId: carolInvitation,
+      link: { workspaceName: 'carol-rollback' },
+    })).rejects.toThrow()
+    await expect(store.declineInvitation(carol, carolInvitation)).rejects.toThrow()
+    await expect(store.retractInvitation(alice, carolInvitation)).rejects.toThrow()
+    await expect(store.changeRole(alice, { membershipId: bobMember.id, role: 'admin' })).rejects.toThrow()
+    await expect(store.setMemberTags(alice, {
+      membershipId: bobMember.id,
+      tags: ['on-call'] as FunctionTag[],
+    })).rejects.toThrow()
+    await expect(store.removeMember(alice, bobMember.id)).rejects.toThrow()
+
+    // Every refused call reads back exactly as before it ran.
+    expect((await store.pendingInvitationsFor(carol)).map(row => row.state)).toEqual(['pending'])
+    expect(await store.rosterVersion(projectId)).toBe(2)
+    expect(await store.roster(alice, projectId)).toMatchObject({
+      members: [
+        { accountId: alice, role: 'owner', tags: [] },
+        { accountId: bob, role: 'member', tags: [] },
+      ],
+    })
+
+    // The one later successful commit publishes the settled rows and nothing from the refusals.
+    await rmdir(storageFile)
+    await store.changeRole(alice, { membershipId: bobMember.id, role: 'admin' })
+    expect(await store.rosterVersion(projectId)).toBe(3)
+    // Durability precedes publication, so the document carries the version as of commit time.
+    const document = parse(await readFile(storageFile, 'utf8'))
+    expect(document.projects[0]).toMatchObject({ id: projectId, rosterVersion: 2 })
+    expect(document.memberships.map(row => [row.accountId, row.role, row.tags]))
+      .toEqual([[alice, 'owner', []], [bob, 'admin', []]])
+    expect(document.invitations.map(row => [row.inviteeAccountId, row.state]))
+      .toEqual([[bob, 'accepted'], [carol, 'pending']])
   })
 })

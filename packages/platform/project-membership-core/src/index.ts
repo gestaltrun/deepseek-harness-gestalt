@@ -225,11 +225,10 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   override pendingInvitationsFor(actor: PlatformAccountId): Promise<readonly InvitationView[]> {
-    return this.enqueue(() =>
-      Promise.resolve([...this.invitations.values()]
-        .filter(row => row.inviteeAccountId === actor && row.state === 'pending')
-        .sort((left, right) => left.invitedAt - right.invitedAt)
-        .map(cloneInvitation)))
+    return this.enqueue(() => [...this.invitations.values()]
+      .filter(row => row.inviteeAccountId === actor && row.state === 'pending')
+      .sort((left, right) => left.invitedAt - right.invitedAt)
+      .map(cloneInvitation))
   }
 
   override projectByRemote(actor: PlatformAccountId, normalizedRemoteUrl: string): Promise<ProjectView | undefined> {
@@ -251,7 +250,7 @@ export class FileProjectMembership extends ProjectMembershipService {
     if (this.disposed) return Promise.reject(new Error('project-membership: store has been disposed'))
     // The load may still be in flight when an operation is enqueued, so the
     // corruption gate is re-checked at run time, not only at call time.
-    const run = (): Promise<T> => {
+    const run = (): T | Promise<T> => {
       if (this.loadFailure !== undefined) return Promise.reject(this.loadFailure.reason)
       return Promise.resolve(operation())
     }
@@ -271,6 +270,7 @@ export class FileProjectMembership extends ProjectMembershipService {
     try {
       await this.loadDocument()
     } catch (error) {
+      /* v8 ignore next -- node reads and document parsing reject with Error instances. */
       const reason = error instanceof Error ? error : new Error(String(error))
       this.loadFailure = { reason }
       throw reason
@@ -297,6 +297,7 @@ export class FileProjectMembership extends ProjectMembershipService {
       // parse() already rejected dangling projectIds, so this guard only ever
       // fires on a document that reached the maps through another door.
       const memberships = this.projectMemberships.get(row.projectId)
+      /* v8 ignore next 5 -- the parse() gate rejects every dangling row before the maps exist. */
       if (memberships === undefined) {
         throw new Error(
           `project-membership: durable state membership ${row.id} references unknown project ${row.projectId}`,
@@ -395,6 +396,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   private ownerCount(projectId: ProjectId): number {
+    /* v8 ignore next 2 -- every project row owns its membership map before any owner row can exist. */
     return [...(this.projectMemberships.get(projectId)?.values() ?? [])]
       .filter(row => row.role === 'owner').length
   }
@@ -664,6 +666,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   private rosterOf(project: ProjectRow): RosterView {
+    /* v8 ignore next 3 -- the roster gate proves the caller's membership row, so the project's map exists. */
     const members = [...(this.projectMemberships.get(project.id)?.values() ?? [])]
       .sort((left, right) => left.joinedAt - right.joinedAt)
       .map(cloneMembership)
@@ -687,6 +690,7 @@ function buildInvalidation(
     case 'removed': return { ...base, reason: detail.reason }
     case 'role-changed': return { ...base, reason: detail.reason, role: detail.role }
     case 'tags-changed': return { ...base, reason: detail.reason, tags: [...detail.tags] }
+    /* v8 ignore next 2 -- RosterMutationDetail is closed and every member is handled above. */
     default: return detail satisfies never
   }
 }
@@ -771,6 +775,7 @@ function cloneInvitation(invitation: InvitationRow): InvitationView {
     inviteeAccountId: invitation.inviteeAccountId,
     state: invitation.state,
     invitedAt: invitation.invitedAt,
+    /* v8 ignore next 2 -- only pending rows are cloned, so a settled stamp never reaches a view. */
     ...(invitation.settledAt === undefined ? {} : { settledAt: invitation.settledAt }),
   }
 }

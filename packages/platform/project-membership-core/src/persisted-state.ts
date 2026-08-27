@@ -157,12 +157,11 @@ function optionalString(record: Record<string, unknown>, key: string): string | 
   return value
 }
 
-/** Read one safe-integer epoch field, optionally bounded below. */
-function epoch(record: Record<string, unknown>, key: string, bounds?: { min?: number }): number {
+/** Read one safe-integer epoch field, bounded below by zero. */
+function epoch(record: Record<string, unknown>, key: string): number {
   const value = record[key]
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || (bounds?.min !== undefined && value < bounds.min)) {
-    const floor = bounds?.min === undefined ? '' : ` >= ${bounds.min}`
-    throw new Error(`project-membership: durable state ${key} must be a safe integer${floor}`)
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`project-membership: durable state ${key} must be a safe integer >= 0`)
   }
   return value
 }
@@ -172,8 +171,8 @@ function parseProject(record: Record<string, unknown>): PersistedProject {
     id: requiredString(record, 'id'),
     name: requiredString(record, 'name'),
     boundRemoteUrl: requiredString(record, 'boundRemoteUrl'),
-    createdAt: epoch(record, 'createdAt', { min: 0 }),
-    rosterVersion: epoch(record, 'rosterVersion', { min: 0 }),
+    createdAt: epoch(record, 'createdAt'),
+    rosterVersion: epoch(record, 'rosterVersion'),
   }
 }
 
@@ -214,7 +213,7 @@ function parseMembership(record: Record<string, unknown>): PersistedMembership {
     role: parseRole(record.role),
     tags: parseTags(record.tags),
     ...(link === undefined ? {} : { link }),
-    joinedAt: epoch(record, 'joinedAt', { min: 0 }),
+    joinedAt: epoch(record, 'joinedAt'),
   }
 }
 
@@ -236,7 +235,7 @@ function parseInvitation(record: Record<string, unknown>): PersistedInvitation {
     inviterAccountId: requiredString(record, 'inviterAccountId'),
     inviteeAccountId: requiredString(record, 'inviteeAccountId'),
     state: parseInvitationState(record.state),
-    invitedAt: epoch(record, 'invitedAt', { min: 0 }),
+    invitedAt: epoch(record, 'invitedAt'),
     ...(settledAtRaw === undefined ? {} : { settledAt: settledAtRaw }),
   }
 }

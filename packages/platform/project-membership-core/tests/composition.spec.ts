@@ -113,7 +113,11 @@ describe('real Loader composition of project-membership definition + provider', 
     expect(document.memberships.map(row => row.accountId).sort()).toEqual([alice, bob].sort())
     expect(document.memberships.find(row => row.accountId === bob)?.link?.workspaceName).toBe('bob-assembled')
     expect(document.invitations.every(row => row.state !== 'pending')).toBe(true)
-    expect((await stat(first.service.storageFile)).mode & 0o077).toBe(0)
+    // POSIX mode bits are the durable-outcome observable; Windows stat reports
+    // the default 0o666 for every file and carries no permission signal.
+    if (process.platform !== 'win32') {
+      expect((await stat(first.service.storageFile)).mode & 0o077).toBe(0)
+    }
     expect(await first.service.rosterVersion(created.id)).toBeGreaterThan(0)
 
     // Second generation over the same root: no re-registration conflicts, full state recovery.

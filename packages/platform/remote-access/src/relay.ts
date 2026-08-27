@@ -149,7 +149,10 @@ export interface RelayCoordinator {
   locate(routeId: RelayRouteId, attachmentId: RelayAttachmentId): Promise<RelayDirectoryEntry | undefined>
   /** List current route attachments for a bounded server-control projection. */
   list(routeId: RelayRouteId): Promise<readonly RelayDirectoryEntry[]>
-  /** Publish one ephemeral coordination event to a currently subscribed Platform Instance. */
+  /**
+   * Publish one ephemeral coordination event to a currently subscribed Platform Instance.
+   * Peer-update payloads notify the provider to project the current shared directory.
+   */
   publish(instanceId: RelayInstanceId, event: Exclude<RelayCoordinationEvent, { type: 'invalidate' }>): Promise<boolean>
   /** Fan out one content-free route invalidation. */
   invalidate(event: Extract<RelayCoordinationEvent, { type: 'invalidate' }>): Promise<void>

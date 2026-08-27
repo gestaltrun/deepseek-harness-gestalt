@@ -61,7 +61,7 @@ scripts/     repo gates and generators
 website/     VitePress projection of selected bilingual docs/ sources
 ```
 
-Package groups: [packages/README.md](packages/README.md).
+Package groups: [packages/README.md](packages/README.md). External plugins: [plugins/README.md](plugins/README.md).
 
 ## Commands
 

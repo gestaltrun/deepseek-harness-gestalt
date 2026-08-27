@@ -19,6 +19,8 @@ const root = resolve(import.meta.dirname, '..')
 const PATTERNS = [
   'README.md',
   'README.zh.md',
+  'plugins/README.md',
+  'plugins/README.zh.md',
   '.agents/notes/**/*.md',
   'docs/**/*.md',
   'packages/*/*.md',

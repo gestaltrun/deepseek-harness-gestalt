@@ -47,3 +47,11 @@ _Avoid_: workspace window, one workspace per window
 **Launch Directory**:
 The Web Host process cwd when started from the Dock or Start Menu: `~/Library/Application Support/DeepSeek Gestalt/defaultWorkspace` on macOS, `%APPDATA%\\DeepSeek Gestalt\\defaultWorkspace` on Windows. Desktop Host creates the empty directory if needed. It is not a Workspace unless the user later adopts that path.
 _Avoid_: launch-cwd, home, install directory, 未选择项目
+
+**Offer card**:
+A Desktop-only Settings card that can appear while its plugin is not installed. Enablement downloads a built bundle and a platform runtime pack into `$DSH_HOME`; it does not add that plugin to the Desktop Bundle extraResources.
+_Avoid_: plugin marketplace, Docker sidecar (as the Desktop default)
+
+**Sub2API sidecar**:
+The local Sub2API process supervised by the out-of-tree `dsh-sub2api-sidecar` plugin. Account-pool and Composite routing stay in that process. Host UI uses an `admin-` key on `/api/v1/admin/*`; Composite inference uses an `sk-` key on `/v1/*`.
+_Avoid_: embedding Sub2API, one token for admin and inference

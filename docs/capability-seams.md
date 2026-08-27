@@ -72,6 +72,7 @@ flowchart LR
   pkg_platform_account_core["platform-account-core"]
   pkg_platform_account_http["platform-account-http"]
   pkg_platform_account_client["platform-account-client"]
+  pkg_project_membership_http["project-membership-http"]
   pkg_project_membership["project-membership"]
   svc_projectMembership["ctx.projectMembership<br/>Project membership collaboration seam"]
   pkg_project_membership_core["project-membership-core"]
@@ -391,6 +392,8 @@ flowchart LR
   svc_lsp --> pkg_tool_lsp
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
+  svc_platformAccount --> pkg_project_membership_http
+  svc_projectMembership --> pkg_project_membership_http
   svc_remoteAccess --> pkg_remote_access_http
   svc_remoteAttachments --> pkg_remote_attachments
   svc_remoteRelay --> pkg_remote_access_http
@@ -497,8 +500,8 @@ flowchart LR
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | Backends register side by side under names; data forms (domain first) mount on the hub and translate typed operations into opaque KV-unit primitives. |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | Waits for every configured backend, then publishes the domain form as one lifecycle-bound service for typed durable state. |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | Owns local per-assistant-message feedback, lifecycle and target validation, per-item compare-and-set, and the Host unary Remote contract without entering Session history or telemetry. |
-| `ctx.platformAccount` | `seam` | [`platform-account`](../packages/platform/platform-account) | [`platform-account-core`](../packages/platform/platform-account-core) | [`platform-account-http`](../packages/platform/platform-account-http), [`platform-account-client`](../packages/platform/platform-account-client) | - | Owns GitHub public identity and proof-of-possession installation sessions; HTTP and Desktop/Mobile clients complete signed polling without receiving provider credentials. |
-| `ctx.projectMembership` | `seam` | [`project-membership`](../packages/platform/project-membership) | [`project-membership-core`](../packages/platform/project-membership-core) | - | - | Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; no consumer packages are wired yet. |
+| `ctx.platformAccount` | `seam` | [`platform-account`](../packages/platform/platform-account) | [`platform-account-core`](../packages/platform/platform-account-core) | [`platform-account-http`](../packages/platform/platform-account-http), [`platform-account-client`](../packages/platform/platform-account-client), [`project-membership-http`](../packages/platform/project-membership-http) | - | Owns GitHub public identity and proof-of-possession installation sessions; HTTP and Desktop/Mobile clients complete signed polling without receiving provider credentials. |
+| `ctx.projectMembership` | `seam` | [`project-membership`](../packages/platform/project-membership) | [`project-membership-core`](../packages/platform/project-membership-core) | [`project-membership-http`](../packages/platform/project-membership-http) | - | Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; the HTTP consumer resolves the acting account from an Account session and adapts each route onto one service operation. |
 | `ctx.remoteAccess` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | The HTTP consumer exposes endpoint-owned mailbox operations through one validated transport for Desktop Settings and Mobile; Platform receives routing metadata, opaque handshake messages, credential digests, and sealed authority only. |
 | `ctx.remoteRelay` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | Owns credential-authenticated live attachments and ciphertext-only forwarding; an expiring Redis directory and direct Pub/Sub coordinate non-sticky Platform Instances without an offline queue. |
 | `ctx.remoteAttachments` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | - | Retains endpoint-encrypted ciphertext and metadata only, issues single-use expiring capabilities scoped to one Personal Pairing, and removes blob plus capability on consume, expiry, or revocation. |

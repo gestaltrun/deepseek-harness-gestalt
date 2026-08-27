@@ -1907,7 +1907,23 @@ export interface Config {
 }
 ```
 
-Source: [`packages/platform/project-membership-core/src/index.ts:48`](../packages/platform/project-membership-core/src/index.ts)
+来源：[`packages/platform/project-membership-core/src/index.ts:48`](../packages/platform/project-membership-core/src/index.ts)
+
+<a id="deepseek-aidsh-project-membership-http"></a>
+
+## `@deepseek-ai/dsh-project-membership-http`
+
+需要：`platformAccount` · `projectMembership` · `webServer`
+
+```ts config-catalog
+/** HTTP consumer configuration. */
+export interface Config {
+  /** Exact product origins allowed to call Project Membership routes. */
+  origins: string[]
+}
+```
+
+来源：[`packages/platform/project-membership-http/src/index.ts:41`](../packages/platform/project-membership-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 

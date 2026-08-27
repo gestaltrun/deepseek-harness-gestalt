@@ -245,7 +245,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Platform Account identity seam',
     mode: 'seam',
     implementations: ['platform-account-core'],
-    consumers: ['platform-account-http', 'platform-account-client'],
+    consumers: ['platform-account-http', 'platform-account-client', 'project-membership-http'],
     note: 'Owns GitHub public identity and proof-of-possession installation sessions; HTTP and Desktop/Mobile clients complete signed polling without receiving provider credentials.',
   },
   {
@@ -254,7 +254,8 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Project membership collaboration seam',
     mode: 'seam',
     implementations: ['project-membership-core'],
-    note: 'Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; no consumer packages are wired yet.',
+    consumers: ['project-membership-http'],
+    note: 'Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; the HTTP consumer resolves the acting account from an Account session and adapts each route onto one service operation.',
   },
   {
     key: 'remoteAccess',

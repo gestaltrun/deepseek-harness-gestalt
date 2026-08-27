@@ -103,6 +103,8 @@
       "@deepseek-ai/dsh-project-membership/invariant": ["./packages/platform/project-membership/src/invariant.ts"],
       "@deepseek-ai/dsh-project-membership-core": ["./packages/platform/project-membership-core/src/index.ts"],
       "@deepseek-ai/dsh-project-membership-core/invariant": ["./packages/platform/project-membership-core/src/invariant.ts"],
+      "@deepseek-ai/dsh-project-membership-http": ["./packages/platform/project-membership-http/src/index.ts"],
+      "@deepseek-ai/dsh-project-membership-http/invariant": ["./packages/platform/project-membership-http/src/invariant.ts"],
       "@deepseek-ai/dsh-noise-channel": ["./packages/platform/noise-channel/src/index.ts"],
       "@deepseek-ai/dsh-remote-access": ["./packages/platform/remote-access/src/index.ts"],
       "@deepseek-ai/dsh-remote-access/relay-provider": ["./packages/platform/remote-access/src/relay-provider.ts"],

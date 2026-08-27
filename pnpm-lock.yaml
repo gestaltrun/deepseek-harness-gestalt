@@ -7062,6 +7062,31 @@ importers:
         specifier: workspace:^
         version: link:../project-membership
 
+  packages/platform/project-membership-http:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:^
+        version: link:../../host/webserver
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-platform-account':
+        specifier: workspace:^
+        version: link:../platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../project-membership
+      '@deepseek-ai/dsh-project-membership-core':
+        specifier: workspace:^
+        version: link:../project-membership-core
+
   packages/platform/remote-access:
     devDependencies:
       '@deepseek-ai/cordis':

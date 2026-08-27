@@ -194,6 +194,7 @@
     { "path": "./packages/platform/platform-account-http" },
     { "path": "./packages/platform/project-membership" },
     { "path": "./packages/platform/project-membership-core" },
+    { "path": "./packages/platform/project-membership-http" },
     { "path": "./packages/platform/remote-protocol" },
     { "path": "./packages/platform/remote-access" },
     { "path": "./packages/platform/noise-channel" },

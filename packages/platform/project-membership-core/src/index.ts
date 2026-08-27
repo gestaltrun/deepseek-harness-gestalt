@@ -15,6 +15,7 @@ import z from '@deepseek-ai/schemastery'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
+  duplicateInvitee,
   normalizeGitRemoteUrl,
   ProjectMembershipError,
   ProjectMembershipService,
@@ -36,7 +37,7 @@ import {
   type SetMemberTagsInput,
   type WorkspaceLink,
 } from '@deepseek-ai/dsh-project-membership'
-import { parse, serialize, type PersistedMembership, type PersistedState } from './persisted-state.ts'
+import { parse, serialize, type PersistedInvitation, type PersistedMembership, type PersistedState } from './persisted-state.ts'
 
 /** Absolute document path for one environment namespace. */
 function stateFilePath(storagePath: string, environment: string): string {
@@ -403,7 +404,13 @@ export class FileProjectMembership extends ProjectMembershipService {
     throw new ProjectMembershipError('LAST_OWNER', 'the final owner of a project cannot lose the owner role')
   }
 
-  /** Publish one committed membership mutation strictly after durability. */
+  /**
+   * Publish one committed membership mutation strictly after durability.
+   * A synchronous `ctx.emit` inside a running operation delivers to listeners
+   * inline: listener callbacks re-entering this service enqueue behind the
+   * current operation (safe), while a listener awaiting the emit's return
+   * value self-deadlocks on that same write chain.
+   */
   private publish(
     project: ProjectRow,
     detail: RosterMutationDetail,
@@ -418,7 +425,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   private async createProjectOp(actor: PlatformAccountId, input: CreateProjectInput): Promise<ProjectView> {
-    const name = typeof input.name === 'string' ? input.name.trim() : ''
+    const name = input.name.trim()
     if (name === '') throw new ProjectMembershipError('INVALID_PROJECT_NAME', 'project name must contain visible characters')
     if (this.projectNameIndex.has(name)) {
       throw new ProjectMembershipError('PROJECT_NAME_TAKEN', `project name ${name} is already in use`)
@@ -457,10 +464,7 @@ export class FileProjectMembership extends ProjectMembershipService {
     this.requireAdmin(actor, input.projectId)
     if (this.requireMembershipRowOrUndefined(input.inviteeAccountId, input.projectId) !== undefined
       || this.pendingInvitees.has(duplicateKey(input.projectId, input.inviteeAccountId))) {
-      throw new ProjectMembershipError(
-        'DUPLICATE_INVITEE',
-        `account ${input.inviteeAccountId} already holds a membership or a pending invitation here`,
-      )
+      throw duplicateInvitee(input.inviteeAccountId)
     }
     const row: InvitationRow = {
       id: randomUUID() as InvitationId,
@@ -507,6 +511,9 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   private parseLink(link: WorkspaceLink): WorkspaceLink {
+    // Wire/durable entry guard for the `INVALID_LINK` clause of the
+    // acceptInvitation contract: the link crosses the tool-JSON surface, where
+    // workspaceName can arrive blank or not a string at all.
     const workspaceName = typeof link.workspaceName === 'string' ? link.workspaceName.trim() : ''
     if (workspaceName === '') {
       throw new ProjectMembershipError('INVALID_LINK', 'accepting requires naming the linked local workspace')
@@ -518,7 +525,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   private async acceptOp(actor: PlatformAccountId, input: AcceptInvitationInput): Promise<MemberView> {
     const invitation = this.requireAddressedInvitation(actor, input.invitationId, true)
     if (this.requireMembershipRowOrUndefined(invitation.inviteeAccountId, invitation.projectId) !== undefined) {
-      throw new ProjectMembershipError('DUPLICATE_INVITEE', 'account already holds a membership here')
+      throw duplicateInvitee(invitation.inviteeAccountId)
     }
     const link = this.parseLink(input.link)
     const member: MembershipRow = {
@@ -596,7 +603,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   private validateFunctionTags(tags: readonly FunctionTag[]): FunctionTag[] {
-    const values = tags.map(tag => String(tag))
+    const values = [...tags]
     if (values.length > FUNCTION_TAG_LIMITS.count) {
       throw new ProjectMembershipError('INVALID_TAGS', `at most ${FUNCTION_TAG_LIMITS.count} function tags are allowed`)
     }
@@ -611,7 +618,7 @@ export class FileProjectMembership extends ProjectMembershipService {
     if (new Set(values).size !== values.length) {
       throw new ProjectMembershipError('INVALID_TAGS', 'function tags must be distinct')
     }
-    return values as FunctionTag[]
+    return values
   }
 
   private async setMemberTagsOp(actor: PlatformAccountId, input: SetMemberTagsInput): Promise<void> {
@@ -697,7 +704,7 @@ function restoreMembership(persisted: PersistedMembership): MembershipRow {
 }
 
 /** Rehydrate one authoritative invitation row from its durable spelling. */
-function restoreInvitation(persisted: import('./persisted-state.ts').PersistedInvitation): InvitationRow {
+function restoreInvitation(persisted: PersistedInvitation): InvitationRow {
   return {
     id: persisted.id as InvitationId,
     projectId: persisted.projectId as ProjectId,
@@ -723,7 +730,7 @@ function toPersistedMembership(row: MembershipRow): PersistedMembership {
 }
 
 /** Render one invitation row into its exact durable spelling. */
-function toPersistedInvitation(row: InvitationRow): import('./persisted-state.ts').PersistedInvitation {
+function toPersistedInvitation(row: InvitationRow): PersistedInvitation {
   return {
     id: row.id,
     projectId: row.projectId,

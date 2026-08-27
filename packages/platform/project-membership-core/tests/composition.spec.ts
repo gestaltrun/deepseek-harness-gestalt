@@ -5,7 +5,7 @@
  * one storage root. Only nondeterminism (uuids, wall-clock) is external.
  */
 
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -37,8 +37,11 @@ interface Booted {
  * Boot one real Loader generation from cordis.yml text. The modules map plays
  * the package resolution role an installed dsh app provides; every listed
  * plugin still goes through genuine Loader config validation and effects.
+ * @param storagePath - durable storage root handed to the provider config.
+ * @param environment - environment written into the provider config.
+ * @returns the mounted provider service once the boot assertions pass.
  */
-async function boot(storagePath: string): Promise<Booted> {
+async function boot(storagePath: string, environment: string): Promise<Booted> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-project-membership-composition-'))
   roots.push(root)
   const configPath = join(root, 'cordis.yml')
@@ -49,10 +52,9 @@ async function boot(storagePath: string): Promise<Booted> {
     "- name: '@deepseek-ai/dsh-project-membership-core'",
     '  config:',
     `    storagePath: '${storagePath}'`,
-    "    environment: 'development'",
+    `    environment: '${environment}'`,
     '',
   ].join('\n')
-  const { writeFile } = await import('node:fs/promises')
   await writeFile(configPath, yml)
   const context = new Context()
   contexts.push(context)
@@ -75,7 +77,7 @@ async function boot(storagePath: string): Promise<Booted> {
   await context.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
   await context.loader.await()
   const service = context.get('projectMembership') as InstanceType<typeof ProjectMembershipCore>
-  expect(service.storageFile).toBe(join(storagePath, 'development', 'project-membership.json'))
+  expect(service.storageFile).toBe(join(storagePath, environment, 'project-membership.json'))
   // Both companions require the `invariants` service at load; settlement proves registration.
   expect(context.get('invariants')).toBeInstanceOf(InvariantRegistry)
   return { service }
@@ -87,7 +89,7 @@ describe('real Loader composition of project-membership definition + provider', 
     roots.push(storageRoot)
 
     // First generation: create, invite, accept.
-    const first = await boot(storageRoot)
+    const first = await boot(storageRoot, 'development')
     const created = await first.service.createProject(alice, {
       name: 'Assembled',
       remoteUrl: 'git@github.com:Org/assembled.git',
@@ -116,7 +118,7 @@ describe('real Loader composition of project-membership definition + provider', 
     expect(await first.service.rosterVersion(created.id)).toBeGreaterThan(0)
 
     // Second generation over the same root: no re-registration conflicts, full state recovery.
-    const second = await boot(storageRoot)
+    const second = await boot(storageRoot, 'development')
     const recovered = await second.service.roster(alice, created.id as ProjectId)
     expect(recovered.project.name).toBe('Assembled')
     expect(recovered.members.map(row => row.accountId).sort()).toEqual([alice, bob].sort())
@@ -137,42 +139,11 @@ describe('real Loader composition of project-membership definition + provider', 
     roots.push(storageRoot)
     let failure: unknown
     try {
-      await bootWithEnvironment(storageRoot, 'staging')
+      await boot(storageRoot, 'staging')
     } catch (error) {
       failure = error
     }
     expect(String(failure)).toContain('environment')
     expect(String(failure)).toContain('expected "development" | "production"')
   })
-
-  async function bootWithEnvironment(storagePath: string, environment: string): Promise<void> {
-    const root = await mkdtemp(join(tmpdir(), 'dsh-project-membership-bad-config-'))
-    roots.push(root)
-    const configPath = join(root, 'cordis.yml')
-    const { writeFile } = await import('node:fs/promises')
-    await writeFile(configPath, [
-      "- name: '@deepseek-ai/dsh-project-membership-core'",
-      '  config:',
-      `    storagePath: '${storagePath}'`,
-      `    environment: '${environment}'`,
-      '',
-    ].join('\n'))
-    const context = new Context()
-    contexts.push(context)
-    context.baseUrl = pathToFileURL(root).href + '/'
-    await context.plugin(Loader)
-    context.loader.builtins.include = Include
-    const modules = new Map<string, unknown>([
-      ['@deepseek-ai/dsh-project-membership-core', ProjectMembershipCore],
-    ])
-    context.loader.internal = {
-      version: 'v2',
-      async import(specifier: string) {
-        if (!modules.has(specifier)) throw new Error(`unexpected Loader import: ${specifier}`)
-        return modules.get(specifier)
-      },
-    } as unknown as NonNullable<typeof context.loader.internal>
-    await context.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
-    await context.loader.await()
-  }
 })

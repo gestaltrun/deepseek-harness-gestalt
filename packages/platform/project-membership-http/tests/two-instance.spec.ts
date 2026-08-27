@@ -18,6 +18,7 @@ import {
   AccountError,
   type PlatformAccountId,
   type PlatformAccountView,
+  type PublicAccountIdentity,
 } from '@deepseek-ai/dsh-platform-account'
 import { FileProjectMembership } from '@deepseek-ai/dsh-project-membership-core'
 import { apply } from '../src/index.ts'
@@ -189,6 +190,7 @@ function accountStub(): {
     account: PlatformAccountView
     installation: { id: string; kind: 'desktop'; presentation: { name: string; platform: 'macos' } }
   }>
+  publicIdentitiesByIds(accountIds: readonly PlatformAccountId[]): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>>
 } {
   const view = (id: PlatformAccountId): PlatformAccountView => ({
     id, githubId: 13994321, githubLogin: 'octocat', avatarUrl: 'https://avatars.example/octocat',
@@ -209,6 +211,15 @@ function accountStub(): {
         presentation: { name: 'Shared Box', platform: 'macos' as const },
       },
     })),
+    publicIdentitiesByIds: vi.fn(async (
+      accountIds: readonly PlatformAccountId[],
+    ): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>> => {
+      const identities = new Map<PlatformAccountId, PublicAccountIdentity>()
+      for (const id of accountIds) {
+        identities.set(id, { id, githubLogin: 'octocat', avatarUrl: 'https://avatars.example/octocat' })
+      }
+      return identities
+    }),
   }
 }
 

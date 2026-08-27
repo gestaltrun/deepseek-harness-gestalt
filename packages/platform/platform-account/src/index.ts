@@ -14,7 +14,9 @@ import type {
   LoginAttemptId,
   LoginAttemptView,
   LoginPollResult,
+  PlatformAccountId,
   PlatformAccountView,
+  PublicAccountIdentity,
 } from './types.ts'
 
 export * from './environment.ts'
@@ -94,6 +96,15 @@ export abstract class AccountService extends Service {
     accessToken: string
     proof: AccountProof
   }): Promise<AuthenticatedInstallationView>
+
+  /**
+   * Read the public identity of many accounts in one batch.
+   * @param accountIds - accounts to resolve, typically one roster.
+   * @returns the public identity per known account; unknown accounts are absent.
+   */
+  abstract publicIdentitiesByIds(
+    accountIds: readonly PlatformAccountId[],
+  ): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>>
 
   /**
    * Revoke only the current installation Account Session.

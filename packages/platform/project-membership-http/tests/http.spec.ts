@@ -16,6 +16,7 @@ import {
   AccountError,
   type PlatformAccountId,
   type PlatformAccountView,
+  type PublicAccountIdentity,
 } from '@deepseek-ai/dsh-platform-account'
 import { FileProjectMembership } from '@deepseek-ai/dsh-project-membership-core'
 import { apply } from '../src/index.ts'
@@ -30,6 +31,13 @@ const sessions = new Map<string, PlatformAccountId>([
   ['access-octocat-2', OCTOCAT],
   ['access-mona', MONA],
   ['access-neon', NEON],
+])
+
+/** Public GitHub login per Account stub id. */
+const LOGINS = new Map<PlatformAccountId, string>([
+  [OCTOCAT, 'octocat'],
+  [MONA, 'mona'],
+  [NEON, 'neon'],
 ])
 
 interface RegisteredRoute {
@@ -85,11 +93,35 @@ describe('Project Membership HTTP consumer', () => {
     expect(roster.status).toBe(200)
     const view = await roster.json() as {
       project: { id: string; name: string }
-      members: Array<{ accountId: string; role: string }>
+      members: Array<{ accountId: string; role: string; presence: string; displayName: string; avatarRef: string }>
     }
     expect(view.project).toMatchObject({ id: project.id, name: 'Registry' })
     expect(view.members).toHaveLength(1)
-    expect(view.members[0]).toMatchObject({ accountId: OCTOCAT, role: 'owner' })
+    expect(view.members[0]).toMatchObject({
+      accountId: OCTOCAT,
+      role: 'owner',
+      presence: 'offline',
+      displayName: 'octocat',
+      avatarRef: 'https://avatars.example/octocat',
+    })
+  })
+
+  it('reads each member identity in one batch and leaves an unknown account blank without failing', async () => {
+    const server = await start({}, { identityBlindSpot: MONA })
+    const project = await createProjectWithMember(server.origin)
+    const roster = await fetch(`${server.origin}/v1/projects/${project.id}/members`, {
+      headers: { origin: ORIGIN, ...auth('access-octocat') },
+    })
+    expect(roster.status).toBe(200)
+    const view = await roster.json() as {
+      members: Array<{ accountId: string; presence: string; displayName: string; avatarRef: string }>
+    }
+    expect(view.members.map(({ accountId, presence, displayName, avatarRef }) => (
+      { accountId, presence, displayName, avatarRef }
+    ))).toEqual([
+      { accountId: OCTOCAT, presence: 'offline', displayName: 'octocat', avatarRef: 'https://avatars.example/octocat' },
+      { accountId: MONA, presence: 'offline', displayName: '', avatarRef: '' },
+    ])
   })
 
   it('adapts invitations, decisions, role, tags, and removal one-to-one onto the membership service', async () => {
@@ -275,10 +307,13 @@ describe('Project Membership HTTP consumer', () => {
 })
 
 /** Mount the plugin on the effect-wrapped in-memory registry and return its live routes. */
-function bootRoutes(config: { presenceTtlMs?: number; presenceHeartbeatIntervalMs?: number } = {}): Map<string, RegisteredRoute> {
+function bootRoutes(
+  config: { presenceTtlMs?: number; presenceHeartbeatIntervalMs?: number } = {},
+  accountOptions: { identityBlindSpot?: PlatformAccountId } = {},
+): Map<string, RegisteredRoute> {
   const routes = new Map<string, RegisteredRoute>()
   const ctx = {
-    platformAccount: accountStub(),
+    platformAccount: accountStub(accountOptions),
     projectMembership: membership(),
     webServer: {
       register(route: RegisteredRoute) {
@@ -303,16 +338,18 @@ function fakeCtx(): Context {
   } as unknown as Context
 }
 
-function accountStub(): {
+function accountStub(options: { identityBlindSpot?: PlatformAccountId } = {}): {
   environment: { origin: string }
   current(input: { accessToken: string }): Promise<PlatformAccountView>
   currentInstallation(input: { accessToken: string }): Promise<{
     account: PlatformAccountView
     installation: { id: string; kind: 'desktop'; presentation: { name: string; platform: 'macos' } }
   }>
+  publicIdentitiesByIds(accountIds: readonly PlatformAccountId[]): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>>
 } {
+  const login = (id: PlatformAccountId): string => LOGINS.get(id) ?? 'octocat'
   const view = (id: PlatformAccountId): PlatformAccountView => ({
-    id, githubId: 13994321, githubLogin: 'octocat', avatarUrl: 'https://avatars.example/octocat',
+    id, githubId: 13994321, githubLogin: login(id), avatarUrl: `https://avatars.example/${login(id)}`,
   })
   const requireSession = (accessToken: string): PlatformAccountId => {
     const id = sessions.get(accessToken)
@@ -330,6 +367,16 @@ function accountStub(): {
         presentation: { name: 'Smoke Box', platform: 'macos' as const },
       },
     })),
+    publicIdentitiesByIds: vi.fn(async (
+      accountIds: readonly PlatformAccountId[],
+    ): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>> => {
+      const identities = new Map<PlatformAccountId, PublicAccountIdentity>()
+      for (const id of accountIds) {
+        if (id === options.identityBlindSpot) continue
+        identities.set(id, { id, githubLogin: login(id), avatarUrl: `https://avatars.example/${login(id)}` })
+      }
+      return identities
+    }),
   }
 }
 
@@ -341,8 +388,11 @@ function membership(): FileProjectMembership {
   return new FileProjectMembership(context, { storagePath: root, environment: 'development' })
 }
 
-async function start(config: { presenceTtlMs?: number; presenceHeartbeatIntervalMs?: number } = {}): Promise<{ origin: string }> {
-  const routes = bootRoutes(config)
+async function start(
+  config: { presenceTtlMs?: number; presenceHeartbeatIntervalMs?: number } = {},
+  accountOptions: { identityBlindSpot?: PlatformAccountId } = {},
+): Promise<{ origin: string }> {
+  const routes = bootRoutes(config, accountOptions)
   const http = createServer((req, res) => {
     const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
     const route = matchRoute(routes, pathname)

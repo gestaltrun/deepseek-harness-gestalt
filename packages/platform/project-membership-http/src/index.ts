@@ -5,7 +5,8 @@
  * account is resolved from an existing Account session: bearer access token
  * plus the installation proof headers, verified by `ctx.platformAccount`.
  * Roster reads attach per-member presence aggregated from installation
- * heartbeat registrations.
+ * heartbeat registrations and the member's public identity (GitHub login and
+ * avatar URL) read in one batch from the Account service.
  * @module @deepseek-ai/dsh-project-membership-http
  */
 
@@ -15,6 +16,7 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import z from '@deepseek-ai/schemastery'
 import {
   AccountError,
+  AccountService,
   parseAccountProofJti,
   type AccountProof,
   type AuthenticatedInstallationView,
@@ -127,7 +129,7 @@ export function apply(ctx: Context, config: Config): void {
     requireMethod(req, 'GET')
     const actor = await requireActor(ctx, req)
     const view = await ctx.projectMembership.roster(actor, brandedParam<'ProjectId'>(roster, 'projectId'))
-    writeJson(res, 200, await withPresence(presence, view))
+    writeJson(res, 200, await decorateRoster(presence, ctx.platformAccount, view))
   })
 
   route('prefix', '/v1/projects/presence', async (req, res) => {
@@ -233,31 +235,52 @@ async function requireInstallation(ctx: Context, req: IncomingMessage): Promise<
 /** Presence of one member's installations as of a roster read. */
 export type MemberPresence = 'online' | 'offline'
 
-/** One roster member carrying the presence verdict of the aggregation plane. */
-export type PresenceMemberView = MemberView & { readonly presence: MemberPresence }
+/** One roster member carrying its presence verdict and public display identity. */
+export type PresenceMemberView = MemberView & {
+  /** Presence verdict of the aggregation plane. */
+  readonly presence: MemberPresence
+  /** Current public GitHub login; empty when the Account plane does not know the account. */
+  readonly displayName: string
+  /** Current public avatar URL; empty when the Account plane does not know the account. */
+  readonly avatarRef: string
+}
 
-/** Roster read response with per-member presence attached. */
+/** Roster read response with per-member presence and public identity attached. */
 export interface PresenceRosterView {
   /** The queried project. */
   readonly project: ProjectView
-  /** Every membership row ordered by join time, each carrying its presence. */
+  /** Every membership row ordered by join time, each carrying its presence and identity. */
   readonly members: readonly PresenceMemberView[]
 }
 
 /**
- * Attach per-member presence to one roster view.
+ * Attach per-member presence and public identity to one roster view.
  * @param presence - registry of live installation heartbeats.
+ * @param account - Account service resolving the members' public identities.
  * @param view - roster as the membership service stores it.
- * @returns the roster with each member's presence verdict attached.
+ * @returns the roster with each member's presence verdict and identity attached.
  */
-async function withPresence(presence: PresenceRegistry, view: RosterView): Promise<PresenceRosterView> {
-  const online = await presence.onlineAccountIds(view.members.map(member => member.accountId))
+async function decorateRoster(
+  presence: PresenceRegistry,
+  account: AccountService,
+  view: RosterView,
+): Promise<PresenceRosterView> {
+  const accountIds = view.members.map(member => member.accountId)
+  const [online, identities] = await Promise.all([
+    presence.onlineAccountIds(accountIds),
+    account.publicIdentitiesByIds(accountIds),
+  ])
   return {
     project: view.project,
-    members: view.members.map(member => ({
-      ...member,
-      presence: online.has(member.accountId) ? 'online' : 'offline',
-    })),
+    members: view.members.map((member) => {
+      const identity = identities.get(member.accountId)
+      return {
+        ...member,
+        presence: online.has(member.accountId) ? 'online' : 'offline',
+        displayName: identity?.githubLogin ?? '',
+        avatarRef: identity?.avatarUrl ?? '',
+      }
+    }),
   }
 }
 

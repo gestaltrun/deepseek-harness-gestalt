@@ -316,6 +316,32 @@ describe('PlatformAccount', () => {
     })
   })
 
+  it('reads public identities in one batch and omits unknown accounts', async () => {
+    const provider = github()
+    const { first } = accountHarness({ provider })
+    const octocat = await login(first)
+    provider.exchange = async () => ({ providerSubject: 721119, login: 'mona', avatarUrl: 'https://avatars.example/mona' })
+    const mona = await login(first, installationKey(), parseInstallationId('installation-2'))
+
+    const identities = await first.publicIdentitiesByIds([
+      octocat.session.account.id,
+      mona.session.account.id,
+      randomUUID() as PlatformAccountId,
+    ])
+
+    expect(identities.get(octocat.session.account.id)).toEqual({
+      id: octocat.session.account.id,
+      githubLogin: 'octocat',
+      avatarUrl: 'https://avatars.example/octocat',
+    })
+    expect(identities.get(mona.session.account.id)).toEqual({
+      id: mona.session.account.id,
+      githubLogin: 'mona',
+      avatarUrl: 'https://avatars.example/mona',
+    })
+    expect([...identities.keys()]).toHaveLength(2)
+  })
+
   it('revokes a durable Mobile session that predates Installation presentation', async () => {
     const { first, backend } = accountHarness()
     const key = installationKey()

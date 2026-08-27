@@ -161,7 +161,7 @@ export function apply(ctx: Context): void {
           const parentSessionId = draft?.parentSessionId ?? summary?.parentId
           const [catalog, model] = await Promise.all([
             ctx.connection.api.llm.models({}, signal),
-            api.sidechatModel(sessionId, parentSessionId, signal),
+            api.sidechatModel(sessionId, parentSessionId, draft !== undefined, signal),
           ])
           if (!catalog.result.ok) return catalog.result
           return {

@@ -10,11 +10,11 @@ Side Chat 标签条存放在按 origin 隔离的 localStorage 中，而每个已
 
 ## 决策
 
-活动 Session 会将标签条与已发布的直属子 Session 对账；只有持久化标题以 `Side: ` 开头且未归档的子 Session 才符合条件。缺少标签页的子 Session 会以非临时标签页形式回到活动 pane，但不会替换原有活动标签。空白子 Session 和仅存在于渲染器侧的草稿不会恢复。关闭已发布的 Side Chat 时，Workspace service 会归档其 Session，但不删除日志。侧栏本地状态也会记录已关闭的根线程，防止列表刷新在归档投影到达前重新打开标签页。`?dsh-sidebar-reset` 逃逸参数会在本次加载中禁用恢复。
+活动 Session 会将标签条与已发布的直属子 Session 对账；只有持久化标题以 `Side: ` 开头且未归档的子 Session 才符合条件。缺少标签页的子 Session 会以非临时标签页形式回到活动 pane，但不会替换原有活动标签。空白子 Session 和仅存在于渲染器侧的草稿不会恢复。冷线程从最新 `request/header` 恢复模型路由；首次请求尚未产生时回退到创建 descriptor，临时草稿则继续使用在线父会话的路由。关闭已发布的 Side Chat 时，Workspace service 会归档其 Session，但不删除日志。侧栏本地状态也会记录已关闭的根线程，防止列表刷新在归档投影到达前重新打开标签页。`?dsh-sidebar-reset` 逃逸参数会在本次加载中禁用恢复。
 
 ## 验证
 
-Client 测试覆盖候选分类、归档排除、嵌套根线程去重、活动 pane 放置、列表刷新幂等性、停靠与浮动标签页关闭、旧持久化布局、reset 逃逸参数，以及临时标签页关闭行为。浏览器演示会在新端口重启 PR 的真实 Web Host，并验证打开的 Side Chat 会恢复，而已归档的 Side Chat 保持关闭。
+Client 测试覆盖候选分类、归档排除、嵌套根线程去重、活动 pane 放置、列表刷新幂等性、停靠与浮动标签页关闭、旧持久化布局、reset 逃逸参数、临时标签页关闭行为与冷启动模型路由重建。浏览器演示会在新端口重启 PR 的真实 Web Host，通过真实模型请求继续恢复后的 Side Chat，并在再次重启后验证已归档的 Side Chat 保持关闭。
 
 ## 考虑过的替代方案
 

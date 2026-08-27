@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { liveModelSelection, type Agent, type AgentOptions, type AgentSetup } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
+import { Context as CordisContext } from '@deepseek-ai/cordis'
 import { buildSidechatApi } from '../src/sidechat-routes.ts'
 import type { Context } from '../src/context-types.ts'
 
@@ -172,6 +174,108 @@ describe('sidechat route lifecycle', () => {
       routable: true,
     })
     await sidechat.dispose()
+  })
+
+  it('uses the live parent model for a provisional Side Chat', async () => {
+    const inspect = vi.fn(() => Promise.reject(new Error('draft is not persisted')))
+    const parent = {
+      id: 'parent',
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { events: [], header: {} },
+    } as unknown as Agent
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'agents') return { get: (id: string) => id === 'parent' ? parent : undefined }
+        if (name === 'sessionPersistence') return { inspect }
+        return undefined
+      },
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.model']({
+      childId: 'draft-child', parentSessionId: 'parent', provisional: true,
+    })).resolves.toEqual({
+      current: { provider: 'deepseek', model: 'chat' },
+      routable: true,
+    })
+    expect(inspect).not.toHaveBeenCalled()
+    await sidechat.dispose()
+  })
+
+  it('restores the last used model before a persisted Side Chat resumes', async () => {
+    const events = [
+      {
+        type: 'subagent/descriptor',
+        seq: 0,
+        time: 1,
+        data: snapshotSubagentDescriptor({
+          mode: 'continuable',
+          provider: 'sidechat',
+          label: 'Side: persisted',
+          agentProvider: 'initial-provider',
+          agentModel: 'initial-model',
+        }),
+      },
+      {
+        type: 'request/header',
+        seq: 1,
+        time: 2,
+        data: {
+          header: {
+            config: { provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' },
+          },
+          reason: 'change',
+        },
+      },
+      {
+        type: 'user/message',
+        seq: 2,
+        time: 3,
+        data: { content: [{ type: 'text', text: 'Side conversation boundary.' }] },
+      },
+    ]
+    const agentCtx = new CordisContext()
+    let resumedAgent: Agent | undefined
+    const resume = vi.fn(async (options: {
+      agentOptions?: AgentOptions
+      setup?: AgentSetup
+    }) => {
+      await options.setup?.(agentCtx)
+      resumedAgent = {
+        id: 'cold-child',
+        ctx: agentCtx,
+        options: options.agentOptions ?? {},
+        session: { events, header: {} },
+        followup: vi.fn(),
+      } as unknown as Agent
+      return { agent: resumedAgent, dispose: () => Promise.resolve() }
+    })
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'agents') return { get: () => undefined, resume }
+        if (name === 'sessionPersistence') {
+          return { inspect: vi.fn(() => Promise.resolve({ meta: {}, events })) }
+        }
+        if (name === 'llm') return { listProviders: () => [{ id: 'grok' }] }
+        return undefined
+      },
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.model']({ childId: 'cold-child' })).resolves.toEqual({
+      current: { provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' },
+      routable: true,
+    })
+    await sidechat.routes['sidechat.prompt']({ childId: 'cold-child', text: 'continue', mode: 'queue' })
+
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
+      agentOptions: { provider: 'grok', model: 'grok-4.6' },
+    }))
+    expect(liveModelSelection(resumedAgent!)).toEqual({
+      provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high',
+    })
+    await sidechat.dispose()
+    await agentCtx.fiber.dispose()
   })
 
   it('waits for admitted resume work and disposes its handle before teardown completes', async () => {

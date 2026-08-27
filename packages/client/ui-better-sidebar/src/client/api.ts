@@ -344,10 +344,16 @@ export const api = {
     return result
   },
   /** Read Side Chat's current model selection and route availability. */
-  sidechatModel: (childId: SessionId, parentSessionId?: SessionId, signal?: AbortSignal) =>
+  sidechatModel: (
+    childId: SessionId,
+    parentSessionId: SessionId | undefined,
+    provisional: boolean,
+    signal?: AbortSignal,
+  ) =>
     call<{ current: ModelSelection; routable: boolean }>('sidechat.model', {
       childId,
       ...(parentSessionId === undefined ? {} : { parentSessionId }),
+      ...(provisional ? { provisional: true } : {}),
     }, signal),
   /** Validate and apply one Side Chat model selection. */
   sidechatSelectModel: (

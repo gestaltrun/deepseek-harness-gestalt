@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-27-sidechat-tab-restoration.md
-2026-08-27-sidechat-tab-restoration.md: 12c75bbad76c67fae580a6c16071293d0e5f3b27
-2026-08-27-sidechat-tab-restoration.zh.md: 710b5c607ebb2fa888a631a733fe3c5d6327af9e
+2026-08-27-sidechat-tab-restoration.md: d55a4740f49e5572bb47d24bc142e686a4ba6bb3
+2026-08-27-sidechat-tab-restoration.zh.md: baf470d24ec51e9c35e7aad9beccb8ba13ce3554

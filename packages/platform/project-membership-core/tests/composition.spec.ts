@@ -15,7 +15,6 @@ import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
-import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
 import ProjectMembershipCore from '../src/index.ts'
 
 const alice = 'assembled-alice' as PlatformAccountId
@@ -119,7 +118,7 @@ describe('real Loader composition of project-membership definition + provider', 
 
     // Second generation over the same root: no re-registration conflicts, full state recovery.
     const second = await boot(storageRoot, 'development')
-    const recovered = await second.service.roster(alice, created.id as ProjectId)
+    const recovered = await second.service.roster(alice, created.id)
     expect(recovered.project.name).toBe('Assembled')
     expect(recovered.members.map(row => row.accountId).sort()).toEqual([alice, bob].sort())
     expect(await second.service.pendingInvitationsFor(bob)).toEqual([])

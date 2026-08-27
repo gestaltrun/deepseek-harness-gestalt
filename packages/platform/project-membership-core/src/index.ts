@@ -73,9 +73,10 @@ function resolveConfig(config: Config): Config {
   if (typeof config.storagePath !== 'string' || config.storagePath.trim() === '') {
     throw new TypeError('project-membership-core: config.storagePath must be a non-empty directory path')
   }
-  if (config.environment !== 'development' && config.environment !== 'production') {
+  const environment: string = config.environment
+  if (environment !== 'development' && environment !== 'production') {
     throw new TypeError(
-      `project-membership-core: config.environment must be 'development' or 'production', got ${JSON.stringify(config.environment)}`,
+      `project-membership-core: config.environment must be 'development' or 'production', got ${JSON.stringify(environment)}`,
     )
   }
   return config
@@ -216,7 +217,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   override roster(actor: PlatformAccountId, projectId: ProjectId): Promise<RosterView> {
-    return this.enqueue(async () => {
+    return this.enqueue(() => {
       const project = this.requireProject(projectId)
       this.requireMembershipIn(actor, projectId)
       return this.rosterOf(project)
@@ -232,7 +233,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   override projectByRemote(actor: PlatformAccountId, normalizedRemoteUrl: string): Promise<ProjectView | undefined> {
-    return this.enqueue(async () => {
+    return this.enqueue(() => {
       const owned = [...this.projects.values()]
         .filter(project => this.requireMembershipRowOrUndefined(actor, project.id) !== undefined)
         .sort((left, right) => left.createdAt - right.createdAt)
@@ -242,17 +243,17 @@ export class FileProjectMembership extends ProjectMembershipService {
   }
 
   override rosterVersion(projectId: ProjectId): Promise<number> {
-    return this.enqueue(async () => this.requireProject(projectId).rosterVersion)
+    return this.enqueue(() => this.requireProject(projectId).rosterVersion)
   }
 
   /** Run one exclusive operation behind the settled tail of the write chain. */
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  private enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
     if (this.disposed) return Promise.reject(new Error('project-membership: store has been disposed'))
     // The load may still be in flight when an operation is enqueued, so the
     // corruption gate is re-checked at run time, not only at call time.
     const run = (): Promise<T> => {
       if (this.loadFailure !== undefined) return Promise.reject(this.loadFailure.reason)
-      return operation()
+      return Promise.resolve(operation())
     }
     const result = this.chain.then(run, run)
     this.chain = result.then(noop, noop)
@@ -557,7 +558,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   private async declineOp(actor: PlatformAccountId, invitationId: InvitationId): Promise<void> {
     const invitation = this.requireAddressedInvitation(actor, invitationId, true)
     this.settlePending(invitation, 'declined')
-    await this.commit(() => this.unsettlePending(invitation))
+    await this.commit(() => { this.unsettlePending(invitation) })
   }
 
   private async retractOp(actor: PlatformAccountId, invitationId: InvitationId): Promise<void> {
@@ -567,7 +568,7 @@ export class FileProjectMembership extends ProjectMembershipService {
       throw new ProjectMembershipError('ROLE_REQUIRED', 'only the issuing account or a project owner can retract')
     }
     this.settlePending(invitation, 'retracted')
-    await this.commit(() => this.unsettlePending(invitation))
+    await this.commit(() => { this.unsettlePending(invitation) })
   }
 
   /** Locate a membership row among projects where the actor holds a membership. */

@@ -1868,7 +1868,7 @@ export interface AccountRecord extends PlatformAccountView {
 
 Depends on: [`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.md) · [`InstallationId`](subsystems/platform-account.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.md) · [`PlatformAccountId`](subsystems/platform-account.md) · [`PlatformAccountView`](subsystems/platform-account.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
 
-Source: [`packages/platform/platform-account-core/src/index.ts:506`](../packages/platform/platform-account-core/src/index.ts)
+Source: [`packages/platform/platform-account-core/src/index.ts:507`](../packages/platform/platform-account-core/src/index.ts)
 
 <a id="deepseek-aidsh-platform-account-http"></a>
 
@@ -1912,18 +1912,18 @@ Source: [`packages/platform/project-membership-core/src/index.ts:48`](../package
 Requires: `platformAccount` · `projectMembership` · `webServer`
 
 ```ts config-catalog
-/** HTTP consumer configuration. */
+/** HTTP consumer configuration, as resolved by the Config schema's defaults. */
 export interface Config {
   /** Exact product origins allowed to call Project Membership routes. */
   origins: string[]
   /** Desktop heartbeat cadence in milliseconds (default: 60000); the presence TTL must outlast it. */
-  presenceHeartbeatIntervalMs?: number
+  presenceHeartbeatIntervalMs: number
   /** Heartbeat liveness window in milliseconds (default: 90000); expiry is the only route to offline. */
-  presenceTtlMs?: number
+  presenceTtlMs: number
 }
 ```
 
-Source: [`packages/platform/project-membership-http/src/index.ts:52`](../packages/platform/project-membership-http/src/index.ts)
+Source: [`packages/platform/project-membership-http/src/index.ts:54`](../packages/platform/project-membership-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 

@@ -50,14 +50,14 @@ export const PRESENCE_HEARTBEAT_INTERVAL_MS = 60_000
 /** Default milliseconds a heartbeat stays live before its installation counts offline. */
 export const PRESENCE_TTL_MS = 90_000
 
-/** HTTP consumer configuration. */
+/** HTTP consumer configuration, as resolved by the Config schema's defaults. */
 export interface Config {
   /** Exact product origins allowed to call Project Membership routes. */
   origins: string[]
   /** Desktop heartbeat cadence in milliseconds (default: 60000); the presence TTL must outlast it. */
-  presenceHeartbeatIntervalMs?: number
+  presenceHeartbeatIntervalMs: number
   /** Heartbeat liveness window in milliseconds (default: 90000); expiry is the only route to offline. */
-  presenceTtlMs?: number
+  presenceTtlMs: number
 }
 
 /** Validated HTTP consumer configuration. */
@@ -74,26 +74,14 @@ export const inject = ['platformAccount', 'projectMembership', 'webServer']
 
 /** Register the complete Project Membership HTTP route set. */
 export function apply(ctx: Context, config: Config): void {
-  const candidate: unknown = config
-  if (candidate === null || typeof candidate !== 'object' || !Array.isArray((candidate as { origins?: unknown }).origins)) {
-    throw new TypeError('Project Membership HTTP origins configuration is required')
-  }
-  const origins = new CorsOriginPolicy((candidate as Config).origins, 'Project Membership HTTP')
+  const origins = new CorsOriginPolicy(config.origins, 'Project Membership HTTP')
   if (origins.match(ctx.platformAccount.environment.origin) === undefined) {
     throw new TypeError('Project Membership HTTP origins do not include the selected Platform environment')
   }
-  const intervalMs = (candidate as Config).presenceHeartbeatIntervalMs ?? PRESENCE_HEARTBEAT_INTERVAL_MS
-  const ttlMs = (candidate as Config).presenceTtlMs ?? PRESENCE_TTL_MS
-  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) {
-    throw new TypeError('Project Membership HTTP presence heartbeat interval must be a positive integer number of milliseconds')
-  }
-  if (!Number.isSafeInteger(ttlMs) || ttlMs < 1) {
-    throw new TypeError('Project Membership HTTP presence TTL must be a positive integer number of milliseconds')
-  }
-  if (ttlMs <= intervalMs) {
+  if (config.presenceTtlMs <= config.presenceHeartbeatIntervalMs) {
     throw new TypeError('Project Membership HTTP presence TTL must exceed the heartbeat interval')
   }
-  const presence = new PresenceRegistry(new InProcessPresenceStore(), ttlMs)
+  const presence = new PresenceRegistry(new InProcessPresenceStore(), config.presenceTtlMs)
   const route = (
     kind: 'exact' | 'prefix',
     path: string,
@@ -115,8 +103,8 @@ export function apply(ctx: Context, config: Config): void {
 
   route('exact', '/v1/projects', async (req, res) => {
     requireMethod(req, 'POST')
-    const body = await readJson(req)
     const actor = await requireActor(ctx, req)
+    const body = await readJson(req)
     writeJson(res, 201, await ctx.projectMembership.createProject(actor, {
       name: requiredString(body, 'name'),
       remoteUrl: requiredString(body, 'remoteUrl'),
@@ -136,6 +124,9 @@ export function apply(ctx: Context, config: Config): void {
     if (matchPath(requestPath(req), '/v1/projects/presence/heartbeat') === undefined) throw unknownRoute()
     requireMethod(req, 'POST')
     const authenticated = await requireInstallation(ctx, req)
+    if (authenticated.installation.kind !== 'desktop') {
+      throw new HttpError(403, 'INSTALLATION_KIND_UNSUPPORTED', 'presence heartbeats are accepted from Desktop installations only')
+    }
     await presence.beat(authenticated.account.id, authenticated.installation.id)
     answerNoContent(res)
   })
@@ -144,8 +135,8 @@ export function apply(ctx: Context, config: Config): void {
     const pathname = requestPath(req)
     if (matchPath(pathname, '/v1/projects/invitations') !== undefined) {
       requireMethod(req, 'POST')
-      const body = await readJson(req)
       const actor = await requireActor(ctx, req)
+      const body = await readJson(req)
       writeJson(res, 201, await ctx.projectMembership.invite(actor, {
         projectId: requiredBrandedId<'ProjectId'>(body, 'projectId'),
         inviteeAccountId: requiredBrandedId<'PlatformAccountId'>(body, 'inviteeAccountId'),
@@ -155,16 +146,16 @@ export function apply(ctx: Context, config: Config): void {
     const decision = matchPath(pathname, '/v1/projects/invitations/:invitationId/decision')
     if (decision !== undefined) {
       requireMethod(req, 'POST')
-      const body = await readJson(req)
       const actor = await requireActor(ctx, req)
+      const body = await readJson(req)
       await decideInvitation(ctx, res, actor, brandedParam<'InvitationId'>(decision, 'invitationId'), body)
       return
     }
     const retraction = matchPath(pathname, '/v1/projects/invitations/:invitationId/retraction')
     if (retraction !== undefined) {
       requireMethod(req, 'POST')
-      await readJson(req)
       const actor = await requireActor(ctx, req)
+      await readJson(req)
       await ctx.projectMembership.retractInvitation(actor, brandedParam<'InvitationId'>(retraction, 'invitationId'))
       answerNoContent(res)
       return
@@ -177,8 +168,8 @@ export function apply(ctx: Context, config: Config): void {
     const role = matchPath(pathname, '/v1/projects/memberships/:membershipId/role')
     if (role !== undefined) {
       requireMethod(req, 'POST')
-      const body = await readJson(req)
       const actor = await requireActor(ctx, req)
+      const body = await readJson(req)
       await ctx.projectMembership.changeRole(actor, {
         membershipId: brandedParam<'MembershipId'>(role, 'membershipId'),
         role: requiredRole(body.role),
@@ -189,8 +180,8 @@ export function apply(ctx: Context, config: Config): void {
     const tags = matchPath(pathname, '/v1/projects/memberships/:membershipId/tags')
     if (tags !== undefined) {
       requireMethod(req, 'POST')
-      const body = await readJson(req)
       const actor = await requireActor(ctx, req)
+      const body = await readJson(req)
       await ctx.projectMembership.setMemberTags(actor, {
         membershipId: brandedParam<'MembershipId'>(tags, 'membershipId'),
         tags: requiredTags(body.tags),
@@ -383,10 +374,11 @@ function answerError(res: ServerResponse, error: unknown): void {
       error,
       error.code === 'QUOTA' || error.code === 'PLATFORM_CAPACITY'
         ? 429
-        : error.code.startsWith('SESSION_') ? 401 : 400,
+        : error.code.startsWith('SESSION_') || error.code.startsWith('PROOF_') ? 401 : 400,
     )
     return
   }
+  console.error('[project-membership-http] unexpected request failure:', error)
   writeJson(res, 500, { error: { code: 'INTERNAL', message: 'Project Membership request failed' } })
 }
 

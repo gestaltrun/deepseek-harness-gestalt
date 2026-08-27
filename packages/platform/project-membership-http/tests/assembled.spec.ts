@@ -120,11 +120,12 @@ describe('real Project Membership HTTP composition', () => {
       storagePath,
       backend: new MemoryAccountBackend(ENVIRONMENT.databaseIdentity),
       invalidation: new MemoryAccountInvalidationBus(),
-      github: sequentialGithub(),
+      github: sequentialGithub(LIFECYCLE_GITHUB_USERS),
       config: { origins: [ENVIRONMENT.origin] },
     })
     const account = loaded.context.platformAccount
     const octocat = await signIn(account, 'assembled-octocat')
+    const octocatMobile = await signIn(account, 'assembled-octocat-mobile', 'mobile')
     const mona = await signIn(account, 'assembled-mona')
 
     // Create.
@@ -156,7 +157,9 @@ describe('real Project Membership HTTP composition', () => {
     expect(member.role).toBe('member')
 
     // Roster after a desktop heartbeat: per-member presence plus the public
-    // identity joined from the authoritative Account store.
+    // identity joined from the authoritative Account store. Presence is a
+    // Desktop cadence, so the Mobile installation's beat is refused.
+    expect(await errorOf(heartbeat(loaded.origin, octocatMobile))).toEqual([403, 'INSTALLATION_KIND_UNSUPPORTED'])
     expect(await statusOf(heartbeat(loaded.origin, octocat))).toBe(204)
     const roster = await fetch(`${loaded.origin}/v1/projects/${project.id}/members`, {
       headers: { origin: ENVIRONMENT.origin, ...authHeaders(octocat) },
@@ -272,6 +275,22 @@ describe('real Project Membership HTTP composition', () => {
       'x-gestalt-proof-signature': 'signature',
     })
     expect(await errorOf(revoked)).toEqual([401, 'SESSION_REVOKED'])
+    const staleProof = await post(loaded.origin, '/v1/projects', {
+      name: 'x', remoteUrl: 'https://github.com/o/r',
+    }, authHeaders(octocat, Date.now() - 10 * 60_000))
+    expect(await errorOf(staleProof)).toEqual([401, 'PROOF_INVALID'])
+    // Authentication precedes body parsing: a malformed body with no session
+    // still answers the authentication envelope.
+    const unauthenticatedBadBody = await fetch(`${loaded.origin}/v1/projects`, {
+      method: 'POST', body: '{', headers: { 'content-type': 'application/json', origin: ENVIRONMENT.origin },
+    })
+    expect(await errorOf(unauthenticatedBadBody)).toEqual([401, 'AUTH_REQUIRED'])
+    const malformedBody = await fetch(`${loaded.origin}/v1/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ENVIRONMENT.origin, ...authHeaders(octocat) },
+      body: '{',
+    })
+    expect(await errorOf(malformedBody)).toEqual([400, 'INVALID_JSON'])
     const missingProof = await fetch(`${loaded.origin}/v1/projects/${project.id}/members`, {
       headers: { origin: ENVIRONMENT.origin, authorization: `Bearer ${octocat.accessToken}` },
     })
@@ -306,9 +325,6 @@ describe('real Project Membership HTTP composition', () => {
     expect(await errorOf(fetch(`${loaded.origin}/v1/projects`, {
       method: 'GET', headers: { origin: ENVIRONMENT.origin },
     }))).toEqual([405, 'METHOD_NOT_ALLOWED'])
-    expect(await errorOf(fetch(`${loaded.origin}/v1/projects`, {
-      method: 'POST', body: '{', headers: { 'content-type': 'application/json', origin: ENVIRONMENT.origin },
-    }))).toEqual([400, 'INVALID_JSON'])
     expect(await errorOf(post(loaded.origin, '/v1/projects', { value: 'x'.repeat(65_537) }, authHeaders(octocat))))
       .toEqual([413, 'REQUEST_TOO_LARGE'])
     expect(await errorOf(fetch(`${loaded.origin}/v1/projects/%zz/members`, {
@@ -343,9 +359,8 @@ function installationKey() {
   const pair = generateKeyPairSync('ec', { namedCurve: 'P-256' })
   return {
     publicKey: pair.publicKey.export({ format: 'jwk' }),
-    proof(operation: string, binding: string): AccountProof {
+    proof(operation: string, binding: string, issuedAt = Date.now()): AccountProof {
       const jti = parseAccountProofJti(randomUUID())
-      const issuedAt = Date.now()
       return {
         jti,
         issuedAt,
@@ -363,13 +378,22 @@ const GITHUB_USERS = [
   { providerSubject: 721119, login: 'mona', avatarUrl: 'https://avatars.example/mona' },
 ]
 
-function sequentialGithub(): GitHubIdentityProvider {
+/** Lifecycle sign-ins: the second octocat exchange is the same account's second installation. */
+const LIFECYCLE_GITHUB_USERS = [
+  { providerSubject: 13994321, login: 'octocat', avatarUrl: 'https://avatars.example/octocat' },
+  { providerSubject: 13994321, login: 'octocat', avatarUrl: 'https://avatars.example/octocat' },
+  { providerSubject: 721119, login: 'mona', avatarUrl: 'https://avatars.example/mona' },
+]
+
+function sequentialGithub(
+  users: Array<{ providerSubject: number; login: string; avatarUrl: string }> = GITHUB_USERS,
+): GitHubIdentityProvider {
   let served = 0
   return {
     environment: ENVIRONMENT,
     authorizationUrl: () => 'https://github.com/login/oauth/authorize',
     async exchange() {
-      const user = GITHUB_USERS[served]
+      const user = users[served]
       served += 1
       if (user === undefined) throw new Error('assembled provider ran out of GitHub users')
       return user
@@ -378,17 +402,28 @@ function sequentialGithub(): GitHubIdentityProvider {
 }
 
 /**
- * Sign in one desktop installation through the real provider: begin the PKCE
- * attempt, settle the GitHub callback, and poll with a fresh installation proof.
+ * Sign in one installation through the real provider: begin the PKCE attempt,
+ * settle the GitHub callback, and poll with a fresh installation proof.
  */
-async function signIn(service: AccountService, installationId: string): Promise<Session> {
+async function signIn(
+  service: AccountService,
+  installationId: string,
+  installationKind: 'desktop' | 'mobile' = 'desktop',
+): Promise<Session> {
   const key = installationKey()
-  const attempt = await service.beginLogin({
-    installationId: parseInstallationId(installationId),
-    installationKind: 'desktop',
-    presentation: { name: `Assembled ${installationId}`, platform: 'linux' },
-    publicKey: key.publicKey,
-  })
+  const attempt = await service.beginLogin(installationKind === 'desktop'
+    ? {
+      installationId: parseInstallationId(installationId),
+      installationKind,
+      presentation: { name: `Assembled ${installationId}`, platform: 'linux' },
+      publicKey: key.publicKey,
+    }
+    : {
+      installationId: parseInstallationId(installationId),
+      installationKind,
+      presentation: { name: `Assembled ${installationId}`, platform: 'ios' },
+      publicKey: key.publicKey,
+    })
   await service.completeGitHubCallback({ code: 'assembled-code', state: attempt.state })
   const polled = await service.pollLogin({
     attemptId: attempt.id,
@@ -400,8 +435,8 @@ async function signIn(service: AccountService, installationId: string): Promise<
 }
 
 /** One fresh Account session presentation; every request needs a new proof. */
-function authHeaders(session: Session): Record<string, string> {
-  const proof = session.key.proof('current', hashAccountToken(session.accessToken))
+function authHeaders(session: Session, issuedAt = Date.now()): Record<string, string> {
+  const proof = session.key.proof('current', hashAccountToken(session.accessToken), issuedAt)
   return {
     authorization: `Bearer ${session.accessToken}`,
     'x-gestalt-proof-jti': proof.jti,

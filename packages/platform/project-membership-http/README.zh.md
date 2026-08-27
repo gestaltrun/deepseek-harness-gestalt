@@ -6,7 +6,7 @@
 
 每条路由都从既有账号会话解析操作者：持有人访问令牌加 `x-gestalt-proof-*` 安装证明头，经 `ctx.platformAccount.current` 验证，心跳路由另经 `currentInstallation` 解析安装身份。带参数的路由以 `/v1/projects` 前缀路由的形式注册，未匹配的子路径返回 404。
 
-Presence 由心跳注册且只看活性：已认证的安装按 `presenceHeartbeatIntervalMs` 节奏（默认 60 秒）调用 `POST /v1/projects/presence/heartbeat`，每次心跳在 `presenceTtlMs`（默认 90 秒）内保持有效，过期是离线的唯一途径——只要成员任一安装持有有效心跳即为 `online`。花名册读取为每个成员附上该 `presence` 判定，并在同一次批量读取中并入成员的公开身份：`displayName` 为当前公开 GitHub 登录名，`avatarRef` 为当前公开头像 URL；账号平面未知的账户两者留空。没有手动状态，也没有空闲推断。
+Presence 由心跳注册且只看活性：已认证的桌面安装按 `presenceHeartbeatIntervalMs` 节奏（默认 60 秒；其他安装种类返回 `403 INSTALLATION_KIND_UNSUPPORTED`）调用 `POST /v1/projects/presence/heartbeat`，每次心跳在 `presenceTtlMs`（默认 90 秒）内保持有效，过期是离线的唯一途径——只要成员任一安装持有有效心跳即为 `online`。花名册读取为每个成员附上该 `presence` 判定，并在同一次批量读取中并入成员的公开身份：`displayName` 为当前公开 GitHub 登录名，`avatarRef` 为当前公开头像 URL；账号平面未知的账户两者留空。没有手动状态，也没有空闲推断。
 
 心跳条目存于进程内 TTL 映射，背后是预留的 `PresenceStore` 适配接口；跨 Platform 实例保持 presence 一致的共享存储属于延后的部署工作，而非服务变更。
 

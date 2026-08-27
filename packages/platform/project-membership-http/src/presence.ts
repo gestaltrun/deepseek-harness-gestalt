@@ -35,16 +35,17 @@ export interface PresenceStore {
 export class InProcessPresenceStore implements PresenceStore {
   private readonly installations = new Map<PlatformAccountId, Map<InstallationId, number>>()
 
-  async record(entry: PresenceEntry): Promise<void> {
+  record(entry: PresenceEntry): Promise<void> {
     let installations = this.installations.get(entry.accountId)
     if (installations === undefined) {
       installations = new Map()
       this.installations.set(entry.accountId, installations)
     }
     installations.set(entry.installationId, entry.expiresAt)
+    return Promise.resolve()
   }
 
-  async onlineAccountIds(
+  onlineAccountIds(
     accountIds: readonly PlatformAccountId[],
     now: number,
   ): Promise<ReadonlySet<PlatformAccountId>> {
@@ -62,7 +63,7 @@ export class InProcessPresenceStore implements PresenceStore {
       }
       if (installations.size === 0) this.installations.delete(accountId)
     }
-    return online
+    return Promise.resolve(online)
   }
 }
 

@@ -22,6 +22,7 @@ const DESCENDANT_EXPECTED = join(SNAPSHOT_DIR, 'descendant.expected.md')
 const MODE = webSnapshotMode()
 const PROMPT = 'Reply with a one-sentence description of event sourcing, then stop.'
 const RESUME_PROMPT = 'Restate that description in one sentence after restoring this Side Chat.'
+const RESUME_RESPONSE = 'After restoration, event sourcing still represents application state as an immutable sequence of recorded changes.'
 const DESCENDANT_PROMPT = 'Describe event sourcing in one sentence for a nested Side Chat, then stop.'
 const SIDE_BOUNDARY_PREFIX = 'Side conversation boundary'
 const RESPONSE = 'Event sourcing is a pattern where all changes to an application\'s state are stored as an immutable, append-only sequence of events, rather than persisting only the current state, enabling full auditability, temporal queries, and event-driven architectures.'
@@ -218,10 +219,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     await restoredComposer.fill(RESUME_PROMPT)
     await restoredComposer.press('Enter')
     expect(await resumedSettled).toBe(childId)
-    await expect.poll(
-      () => panel.getByText(RESPONSE, { exact: true }).count(),
-      { timeout: 30_000 },
-    ).toBe(2)
+    await panel.getByText(RESUME_RESPONSE, { exact: true }).waitFor({ timeout: 30_000 })
 
     const childAgent = scaffold.ctx.agents.get(childId)
     if (childAgent === undefined) throw new Error('Side Chat child Agent was not live')

@@ -53,6 +53,8 @@ Each published version requires a bilingual manifest under `release-notes/` with
 
 The `0.1.7` manifest uses the `previous-release` baseline `BeiKeJieDeLiuLangMao/deepseek-harness-gestalt@623c5d30460ee699ac1c67f32d0908fcbcdd1d69` (`gestalt-v0.1.6`).
 
+The `0.1.8` manifest uses the `previous-release` baseline `gestaltrun/deepseek-harness-gestalt@a6f8c6e4d1887a403de640027c0aa691bcb1647b` (`gestalt-v0.1.7`).
+
 Local unsigned arm64 rehearsal (no notarization):
 
 ```sh

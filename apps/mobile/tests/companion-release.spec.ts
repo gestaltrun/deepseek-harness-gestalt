@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   COMPANION_RELEASE_DEVICE_CHECKS,
   COMPANION_RELEASE_FLOWS,
@@ -64,13 +69,52 @@ describe('Companion release validation', () => {
     expect(ipadOrientations).toContain('<string>UIInterfaceOrientationLandscapeRight</string>')
   })
 
-  it('parses provisioning-profile expiration from a locale-independent UTC value', () => {
-    const packaging = readFileSync(new URL('../scripts/build-ios-release.sh', import.meta.url), 'utf8')
+  it.runIf(process.platform === 'darwin')(
+    'parses provisioning-profile expiration from a locale-independent UTC value',
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), 'dsh-mobile-profile-expiration-'))
+      const profile = join(directory, 'profile.plist')
+      writeFileSync(profile, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>ExpirationDate</key><date>2030-01-02T03:04:05Z</date></dict></plist>
+`)
+      try {
+        const parser = fileURLToPath(new URL('../scripts/ios-profile-expiration-epoch.sh', import.meta.url))
+        const epoch = execFileSync('bash', [parser, profile], {
+          encoding: 'utf8',
+          env: { ...process.env, LC_ALL: 'zh_CN.UTF-8', TZ: 'Asia/Shanghai' },
+        }).trim()
+        expect(epoch).toBe(String(Date.parse('2030-01-02T03:04:05Z') / 1_000))
+      } finally {
+        rmSync(directory, { force: true, recursive: true })
+      }
+    },
+  )
 
-    expect(packaging).toContain('plutil -extract ExpirationDate raw')
-    expect(packaging).toContain("date -j -u -f '%Y-%m-%dT%H:%M:%SZ'")
-    expect(packaging).not.toContain("PlistBuddy -c 'Print :ExpirationDate'")
-  })
+  it.runIf(process.platform === 'darwin')(
+    'validates the release Info.plist orientation lists through plutil',
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), 'dsh-mobile-release-orientations-'))
+      const invalidPlist = join(directory, 'Info.plist')
+      const validator = fileURLToPath(new URL(
+        '../scripts/verify-ios-release-orientations.sh', import.meta.url,
+      ))
+      const plist = fileURLToPath(new URL('../ios/App/App/Info.plist', import.meta.url))
+      try {
+        expect(() => execFileSync('bash', [validator, plist], { encoding: 'utf8' })).not.toThrow()
+        writeFileSync(invalidPlist, readFileSync(plist, 'utf8').replace(
+          '<string>UIInterfaceOrientationLandscapeRight</string>',
+          '<string>UIInterfaceOrientationPortrait</string>',
+        ))
+        expect(() => execFileSync('bash', [validator, invalidPlist], {
+          encoding: 'utf8',
+          stdio: 'pipe',
+        })).toThrow()
+      } finally {
+        rmSync(directory, { force: true, recursive: true })
+      }
+    },
+  )
 
   it('keeps the Session action dock on the phone viewport and styles per-Workspace paging', () => {
     const styles = readFileSync(new URL('../src/MobileBrowse.module.css', import.meta.url), 'utf8')
@@ -210,4 +254,3 @@ describe('Companion release validation', () => {
     })).toThrow('transport risk')
   })
 })
-import { readFileSync } from 'node:fs'

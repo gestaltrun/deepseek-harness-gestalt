@@ -10,7 +10,7 @@ The universal iOS application declares iPhone and iPad support. A portrait-only 
 
 ## Decision
 
-The iPhone application remains portrait-only. The iPad application declares portrait, portrait upside down, landscape left, and landscape right so the universal bundle supports iPad multitasking. The iOS release script reads `ExpirationDate` through `plutil` as an ISO 8601 UTC value and compares its epoch independently of the runner locale and time zone.
+The iPhone application remains portrait-only. The iPad application declares portrait, portrait upside down, landscape left, and landscape right so the universal bundle supports iPad multitasking. The iOS release script reads `ExpirationDate` through `plutil` as an ISO 8601 UTC value and compares its epoch independently of the runner locale and time zone. Before export, the release script verifies the orientation lists in the archived application rather than trusting only the source plist.
 
 ## Alternatives considered
 
@@ -26,4 +26,4 @@ The iPad interface can rotate and resize across every orientation accepted by Ap
 
 ## Testing
 
-The Companion release test pins the distinct phone and iPad orientation lists and the UTC profile-date parser. The signed release workflow supplies the final App Store bundle validation and TestFlight upload evidence.
+The Companion release test pins the distinct phone and iPad orientation lists, executes the UTC profile-date parser on macOS under a non-UTC Chinese locale, and executes the release-orientation validator. The signed release workflow inspects the archived application and supplies the final App Store bundle validation and TestFlight upload evidence.

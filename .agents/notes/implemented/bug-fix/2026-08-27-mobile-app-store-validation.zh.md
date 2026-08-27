@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-iPhone 应用继续仅支持竖屏。iPad 应用声明竖屏、倒置竖屏、向左横屏和向右横屏，使通用包支持 iPad 多任务。iOS 发布脚本通过 `plutil` 将 `ExpirationDate` 读取为 ISO 8601 UTC 值，并在不依赖 runner 语言区域与时区的情况下比较 epoch。
+iPhone 应用继续仅支持竖屏。iPad 应用声明竖屏、倒置竖屏、向左横屏和向右横屏，使通用包支持 iPad 多任务。iOS 发布脚本通过 `plutil` 将 `ExpirationDate` 读取为 ISO 8601 UTC 值，并在不依赖 runner 语言区域与时区的情况下比较 epoch。导出前，发布脚本验证归档应用中的屏幕方向列表，而不是只信任源 plist。
 
 ## Alternatives considered
 
@@ -26,4 +26,4 @@ iPad 界面可在 App Store 多任务校验接受的全部方向中旋转和调�
 
 ## Testing
 
-Companion 发布测试固定手机与 iPad 各自的方向列表以及 UTC 描述文件日期解析器。签名发布工作流提供最终 App Store bundle 校验与 TestFlight 上传证据。
+Companion 发布测试固定手机与 iPad 各自的方向列表，在 macOS 的非 UTC 中文区域设置下执行 UTC 描述文件日期解析器，并执行发布方向验证器。签名发布工作流检查归档应用，并提供最终 App Store bundle 校验与 TestFlight 上传证据。

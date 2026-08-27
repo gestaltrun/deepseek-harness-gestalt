@@ -22,12 +22,18 @@ The recording itself is part of the evidence: use a real server booted from that
 - Preserve the requested recording conditions. A real-server or real-API demo must not use fixture queries, mock transports, synthetic event injection, or test-only hooks. If credentials or the server are unavailable, report that limitation instead of substituting a fixture.
 - Never read or expose credential values. Use the application's normal configuration path and a benign demonstration prompt.
 
+## Enter only after review freezes the code
+
+Before invoking this skill for pull-request evidence, require the acceptance flow to pass once without recording and require semantic Standards and Spec review to have no code findings. Record the exact reviewed commit as the frozen head. This skill is the last expensive evidence step, not a debugging loop.
+
+If code changes after that freeze, stop. Run the affected checks and semantic review again before recording from the new head. Documentation-only pull-request metadata edits do not move the served commit and do not invalidate the recording.
+
 ## Stage the application
 
 A GIF for a specific pull request demonstrates that pull request's tree, so stage per pull request:
 
-1. Require a clean worktree, record its exact commit with `git rev-parse HEAD`, then build that recorded tree — here, `pnpm run build && pnpm run build:web`. A GIF recorded against another commit's build misattributes the evidence.
-2. Boot one server per port from that tree with fresh scratch `DSH_HOME`, `DSH_AGENTS_HOME`, workspace, and session state. Give the browser a fresh isolated context or profile as well; if the browser workflow cannot create one, clear that origin's cookies and site storage before navigation so persisted client state cannot affect the evidence. Source the root `.env` for the API key through the application's normal path; never echo the key.
+1. Require a clean worktree, record its exact commit with `git rev-parse HEAD`, then use `pnpm run accept:web -- --copy-model-config`. The acceptance supervisor builds when the verified artifact record does not match HEAD, launches the built CLI with isolated state, registers the disposable Workspace through the supported API, and prints the expected visible revision.
+2. Manage every requested port through that supervisor's `restart [port]` command; never boot a second Server beside it. Before the first real-model call or captured frame, verify that the page visibly shows the revision printed by `accept:web`. Give the browser a fresh isolated context or profile as well; if the browser workflow cannot create one, clear that origin's cookies and site storage before navigation so persisted client state cannot affect the evidence. `--copy-model-config` copies only the approved model settings and credential files without displaying their contents.
 3. Treat one storyboard as one evidence run: every published frame comes from that server and those state roots, workspace, session, and model-backed scenario run. If capture automation fails, discard its frames and rerun from fresh roots; never splice frames from separate runs.
 4. When switching between pull requests, stop the old server by PID or an exact match on its command line. A broad `pkill -f` pattern can match and kill the shell that launched it — including your own.
 

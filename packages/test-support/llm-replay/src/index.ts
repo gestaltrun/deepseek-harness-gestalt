@@ -27,6 +27,10 @@ import type {
 import { LlmAdapter, LlmError, ReasoningEffortId, assertNever, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 
 const PACKED_CHUNK_ROW_TYPES = new Set(['text-chunks', 'reasoning-chunks', 'tool-call-chunks'])
+const HANG_PREFIX_CHUNKS: StreamChunk[] = [
+  { type: 'block-start', index: 0, blockType: 'text' },
+  { type: 'text-delta', index: 0, text: 'partial' },
+]
 
 /**
  * One recorded model call. `throw` may replay prefix chunks before failing;
@@ -154,6 +158,18 @@ export interface SessionScript {
    * favor of the parent, which always issues the first model call.
    */
   primary: boolean
+}
+
+/** One expected replay call and the text a streaming UI can observe. */
+export interface ReplayFixtureCallExpectation {
+  /** Exact concatenation of this call's `text-delta` chunks. Omit when only the call count matters. */
+  visibleAssistantText?: string
+}
+
+/** Expected calls for one recorded session script, in first-call bind order. */
+export interface ReplayFixtureScriptExpectation {
+  /** One entry per model call in the recorded session. */
+  calls: readonly ReplayFixtureCallExpectation[]
 }
 
 /**
@@ -580,6 +596,52 @@ export function loadSessionScripts(config: ReplayConfig): SessionScript[] {
   return [primary, ...children]
 }
 
+/**
+ * Validate a replay fixture before an expensive browser run.
+ *
+ * The script and call counts must match exactly. Optional visible text checks
+ * concatenate only `text-delta` chunks because `block-end` content does not
+ * prove that an incremental browser transport rendered a reply.
+ *
+ * @param config - replay fixture paths resolved by {@link loadSessionScripts}.
+ * @param expected - expected scripts and calls in first-call bind order.
+ */
+export function assertReplayFixture(
+  config: ReplayConfig,
+  expected: readonly ReplayFixtureScriptExpectation[],
+): void {
+  const scripts = loadSessionScripts(config)
+  if (scripts.length !== expected.length) {
+    throw new Error(`llm-replay fixture: expected ${expected.length} script(s), found ${scripts.length}`)
+  }
+  for (const [scriptIndex, script] of scripts.entries()) {
+    const expectedScript = expected[scriptIndex] as ReplayFixtureScriptExpectation
+    const label = script.recordedId.length === 0 ? '<unknown>' : script.recordedId
+    if (script.entries.length !== expectedScript.calls.length) {
+      throw new Error(
+        `llm-replay fixture: script ${scriptIndex + 1} (${label}) expected `
+        + `${expectedScript.calls.length} call(s), found ${script.entries.length}`,
+      )
+    }
+    for (const [callIndex, entry] of script.entries.entries()) {
+      const expectedCall = expectedScript.calls[callIndex] as ReplayFixtureCallExpectation
+      const expectedText = expectedCall.visibleAssistantText
+      if (expectedText === undefined) continue
+      const chunks = entry.kind === 'hang' ? HANG_PREFIX_CHUNKS : entry.chunks
+      const actualText = chunks
+        .filter((chunk): chunk is Extract<StreamChunk, { type: 'text-delta' }> => chunk.type === 'text-delta')
+        .map(chunk => chunk.text)
+        .join('')
+      if (actualText !== expectedText) {
+        throw new Error(
+          `llm-replay fixture: script ${scriptIndex + 1} (${label}) call ${callIndex + 1} `
+          + `expected visible assistant text ${JSON.stringify(expectedText)}, found ${JSON.stringify(actualText)}`,
+        )
+      }
+    }
+  }
+}
+
 /** Replay adapter that makes a configured provider catalog discoverable without provider I/O. */
 class ReplayAdapter extends LlmAdapter {
   private readonly providers: ReadonlyMap<string, ReplayProviderConfig>
@@ -701,8 +763,7 @@ async function* replayEntry(entry: ReplayEntry, signal: AbortSignal | undefined,
     case 'hang':
       // Replay a stream that stalls until cancelled (mirrors MockAdapter): one
       // chunk, then wait for abort and surface it as the consumer expects.
-      yield { type: 'block-start', index: 0, blockType: 'text' }
-      yield { type: 'text-delta', index: 0, text: 'partial' }
+      for (const chunk of HANG_PREFIX_CHUNKS) yield chunk
       if (entry.readyFile !== undefined) writeFileSync(entry.readyFile, '')
       await new Promise<void>((_resolve, reject) => {
         if (signal?.aborted) { reject(new Error('aborted')); return }

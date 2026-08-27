@@ -179,16 +179,9 @@
   white-space: nowrap;
 }
 
-.identity span,
-.status {
+.identity span {
   color: var(--dsw-alias-label-tertiary);
   font: var(--dsw-font-xxs-12);
-}
-
-.status {
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: var(--dsw-alias-bg-layer-2);
 }
 
 .secondary {
@@ -278,6 +271,13 @@
 
 .accountPage .secondary {
   width: 100%;
+  border-color: var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-1);
+  font-weight: 650;
+}
+
+.accountPage .secondary:hover {
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .screenHeader {

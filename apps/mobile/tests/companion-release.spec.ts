@@ -166,6 +166,10 @@ printf 'upload invoked\n'
     expect(styles).toMatch(/\.page\s*\{[\s\S]*?height:\s*100dvh;[\s\S]*?overflow:\s*hidden;/u)
     expect(styles).toMatch(/\.dock\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?bottom:\s*0;/u)
     expect(styles).toMatch(/\.groupMore\s*\{[\s\S]*?border-radius:\s*12px;[\s\S]*?background:/u)
+    expect(styles).toMatch(/\.searchPill,[\s\S]*?border:\s*1px solid var\(--dsw-alias-border-l4\);/u)
+    expect(styles).toMatch(/\.searchPill,[\s\S]*?background:\s*var\(--dsw-alias-bg-module-platform\);/u)
+    expect(styles).toMatch(/\.searchPill,[\s\S]*?color:\s*var\(--dsw-alias-label-primary\);/u)
+    expect(styles).toMatch(/\.searchPanel input::placeholder\s*\{[\s\S]*?color:\s*var\(--dsw-alias-label-secondary\);/u)
   })
 
   it('keeps pairing controls beside one replaceable method stage', () => {

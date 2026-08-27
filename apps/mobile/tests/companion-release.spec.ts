@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -134,7 +134,7 @@ printf 'upload invoked\n'
       chmodSync(fakeXcrun, 0o755)
       try {
         const uploader = fileURLToPath(new URL('../scripts/upload-testflight.sh', import.meta.url))
-        const output = execFileSync('bash', [uploader], {
+        const result = spawnSync('bash', [uploader], {
           encoding: 'utf8',
           env: {
             ...process.env,
@@ -145,11 +145,15 @@ printf 'upload invoked\n'
             PATH: `${directory}:${process.env.PATH ?? ''}`,
           },
         })
-        const argumentsList = readFileSync(capturedArguments, 'utf8').trim().split('\n')
+        expect(result.error).toBeUndefined()
+        expect(result.status).toBe(0)
+        const capturedArgumentText = readFileSync(capturedArguments, 'utf8')
+        const argumentsList = capturedArgumentText.trim().split('\n')
         const passwordIndex = argumentsList.indexOf('--password')
         expect(argumentsList[passwordIndex + 1]).toBe('@env:APPLE_APP_SPECIFIC_PASSWORD')
-        expect(argumentsList).not.toContain(password)
-        expect(output).not.toContain(password)
+        expect(capturedArgumentText).not.toContain(password)
+        expect(result.stdout).not.toContain(password)
+        expect(result.stderr).not.toContain(password)
       } finally {
         rmSync(directory, { force: true, recursive: true })
       }

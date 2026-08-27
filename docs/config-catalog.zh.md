@@ -1907,7 +1907,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/platform/project-membership-core/src/index.ts:46`](../packages/platform/project-membership-core/src/index.ts)
+Source: [`packages/platform/project-membership-core/src/index.ts:48`](../packages/platform/project-membership-core/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 

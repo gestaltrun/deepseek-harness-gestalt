@@ -615,8 +615,7 @@ export function assertReplayFixture(
     throw new Error(`llm-replay fixture: expected ${expected.length} script(s), found ${scripts.length}`)
   }
   for (const [scriptIndex, script] of scripts.entries()) {
-    const expectedScript = expected[scriptIndex]
-    if (expectedScript === undefined) throw new Error('llm-replay fixture: missing expected script')
+    const expectedScript = expected[scriptIndex] as ReplayFixtureScriptExpectation
     const label = script.recordedId.length === 0 ? '<unknown>' : script.recordedId
     if (script.entries.length !== expectedScript.calls.length) {
       throw new Error(
@@ -625,8 +624,7 @@ export function assertReplayFixture(
       )
     }
     for (const [callIndex, entry] of script.entries.entries()) {
-      const expectedCall = expectedScript.calls[callIndex]
-      if (expectedCall === undefined) throw new Error('llm-replay fixture: missing expected call')
+      const expectedCall = expectedScript.calls[callIndex] as ReplayFixtureCallExpectation
       const expectedText = expectedCall.visibleAssistantText
       if (expectedText === undefined) continue
       const chunks = entry.kind === 'hang' ? HANG_PREFIX_CHUNKS : entry.chunks

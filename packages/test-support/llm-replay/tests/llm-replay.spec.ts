@@ -1085,6 +1085,13 @@ describe('assertReplayFixture', () => {
     )
   })
 
+  it('labels a fixture without a recorded session id as unknown', () => {
+    const first = writeSession('session.jsonl', { id: '', createdAt: 1 }, [TEXT_CHUNKS])
+    expect(() => { assertReplayFixture({ file: first }, [{ calls: [] }]) }).toThrow(
+      'llm-replay fixture: script 1 (<unknown>) expected 0 call(s), found 1',
+    )
+  })
+
   it('does not treat block-end text as browser-visible streaming text', () => {
     const first = writeSession('session.jsonl', { id: 'parent', createdAt: 1 }, [[
       { type: 'block-end', index: 0, block: { type: 'text', text: 'not streamed' } },

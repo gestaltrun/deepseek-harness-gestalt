@@ -15,6 +15,15 @@ production 不 import 本目录任何文件。
 |---|---|
 | [better-sidebar-integration.html](./better-sidebar-integration.html) | **主稿 A · 骨架还原**：ui-better-sidebar 面板像素级还原——34px Tab 条（内置 editor/git/subagent/sidechat/terminal/browser 各项 + 新增「手机」项）、右端「+」菜单展开态把「手机」列为可选类型（含 terminal 满 3 的禁用行示例）；每个元素标注对应源码符号与行号（TabDescriptor 字段 / buildNewTabOptions 排序 / PANEL 几何）。 |
 | [phone-tab.html](./phone-tab.html) | **主稿 B · 「手机」tab 内容四态纵排**（全部按面板默认宽 400px 排版，尺寸来源在页头注明）：① 未连接空态（Android/iOS 平台选择 + 模拟器/真机分组清单、状态点、启动按钮）② 启动中（AVD/Xcode runtime 命令级指引卡 + 复制按钮 + 拉起进度行）③ 已连接（react-device-view 形态嵌在面板宽度内：占位渐变画面、紧凑工具条 Back/Home/Recents/截图、触控说明一行、MJPEG 10fps / H264 30fps 徽标、「加宽至右侧」虚按钮示意扩展位）④ 错误两例（adb 未找到 / 真机未授权）。 |
+| [decision-matrix.html](./decision-matrix.html) | **决策矩阵 · 三轴并排原型**（沿用 400px 面板副本）：轴1 多设备并存——A 单例模式 vs B 每设备一 tab（激活/非激活、溢出横向滚动、dedupeKey 聚焦演示）；轴2 入口策略三小格——+ 行常亮 / badge 两态 / terminal 式禁用行反例，各附代价一句；轴3 已连接画面行为——flex 贴底 vs 固定比例居中（斜纹标浪费区）。 |
+
+### 决策矩阵状态
+
+| 轴 | 议题 | 状态 |
+|---|---|---|
+| 轴 1 | 多设备并存：单例 vs 每设备一 tab | **倾向 B（每设备一 tab，`createTab → phone:<serial>`）· 待看图确认后锁定**；去重语义按 `dedupeKey: serial` 契约——「+」菜单点已打开设备聚焦既有 tab 而非新建 |
+| 轴 2 | 入口策略 | **已采纳：恒可达 + badge**——+ 菜单行常亮可用；Tab 条 badge 灰点＝无设备、绿色数字＝在线台数；terminal 式禁用行作为反例弃用 |
+| 轴 3 | 已连接画面行为 | **待选定**：格 A flex 贴底（流区 flex 占满、Back/Home 工具条贴底常驻，类推 browserFrame{flex:1;min-height:0}）vs 格 B 固定比例居中（1:2 定比、上下斜纹为浪费区） |
 
 ### 尺寸事实来源（两篇主稿共用）
 
@@ -36,6 +45,6 @@ production 不 import 本目录任何文件。
 
 ## 已知取舍
 
-- 「手机」tab 未创建设备时不在「+」菜单禁用入口（对比 terminal 满 3 的禁用行）——空态引导放 tab 内部，保持入口恒可达。
-- 多设备并存策略二选一待拍板：`createTab` mint `phone:<serial>` 可并存，或 `single:true` 单例聚焦；A 稿对照表列了两种。
+- 入口策略已按决策矩阵采纳「恒可达 + badge」：「手机」tab 无设备时不禁用 + 菜单入口（对比 terminal 满 3 的禁用行反例），空态引导放 tab 内部。
+- 多设备并存与画面行为两轴待评审在 decision-matrix.html 看图后锁定（轴1 倾向每设备一 tab；轴3 flex 贴底 vs 定比居中待选）。
 - 右栏 dock 相关稿件降级为「>640px 加宽」的未来承接位；conversation 胶囊仍是面板关闭时的驻留提示。

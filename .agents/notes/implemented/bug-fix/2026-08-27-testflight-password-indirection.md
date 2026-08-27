@@ -26,4 +26,4 @@ Process arguments contain only the environment-variable selector, so ordinary pr
 
 ## Testing
 
-A keyless test executes the real upload script with a fake `xcrun`, supplies a non-secret test password through the environment, and verifies that captured process arguments contain only the `@env` selector and no password value.
+A keyless test executes the real upload script with a fake `xcrun`, supplies a non-secret test password through the environment, and verifies that the argument after `--password` is the `@env` selector and that captured arguments and output contain no password value.

@@ -156,6 +156,13 @@ export class FileProjectMembership extends ProjectMembershipService {
    */
   private chain: Promise<unknown> = Promise.resolve()
   private disposed = false
+  /**
+   * Corruption error from the one document load. Cordis cannot await a
+   * constructor-era effect, so the store itself must carry the rejection to
+   * every caller; non-Error throw values are normalized so the stored reason
+   * is always an Error.
+   */
+  private loadFailure: { reason: Error } | undefined
 
   /**
    * @param ctx - Cordis context receiving the `projectMembership` service.
@@ -240,13 +247,35 @@ export class FileProjectMembership extends ProjectMembershipService {
   /** Run one exclusive operation behind the settled tail of the write chain. */
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     if (this.disposed) return Promise.reject(new Error('project-membership: store has been disposed'))
-    const result = this.chain.then(operation, operation)
+    // The load may still be in flight when an operation is enqueued, so the
+    // corruption gate is re-checked at run time, not only at call time.
+    const run = (): Promise<T> => {
+      if (this.loadFailure !== undefined) return Promise.reject(this.loadFailure.reason)
+      return operation()
+    }
+    const result = this.chain.then(run, run)
     this.chain = result.then(noop, noop)
     return result
   }
 
-  /** Load the environment document once; absence is the empty first boot. */
+  /**
+   * Load the environment document once; absence is the empty first boot. A
+   * document that fails validation rejects the load before any row reaches
+   * the in-memory maps, and the store records the corruption error so every
+   * later operation rejects instead of serving or republishing an empty
+   * corpus.
+   */
   private async load(): Promise<void> {
+    try {
+      await this.loadDocument()
+    } catch (error) {
+      const reason = error instanceof Error ? error : new Error(String(error))
+      this.loadFailure = { reason }
+      throw reason
+    }
+  }
+
+  private async loadDocument(): Promise<void> {
     let text: string | undefined
     try {
       text = await readFile(this.storageFile, 'utf8')
@@ -263,7 +292,15 @@ export class FileProjectMembership extends ProjectMembershipService {
     }
     for (const membership of state.memberships) {
       const row = restoreMembership(membership)
-      this.projectMemberships.get(row.projectId)?.set(row.id, row)
+      // parse() already rejected dangling projectIds, so this guard only ever
+      // fires on a document that reached the maps through another door.
+      const memberships = this.projectMemberships.get(row.projectId)
+      if (memberships === undefined) {
+        throw new Error(
+          `project-membership: durable state membership ${row.id} references unknown project ${row.projectId}`,
+        )
+      }
+      memberships.set(row.id, row)
       this.membershipAccounts.set(duplicateKey(row.projectId, row.accountId), row)
     }
     for (const invitation of state.invitations) {

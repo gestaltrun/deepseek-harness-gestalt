@@ -2,8 +2,9 @@
  * Durable JSON format for the file-backed Project Membership store. The whole
  * committed corpus lives in one document per environment namespace; every
  * mutation republishes it atomically through a temp-file rename. Parsing
- * accepts exactly the recorded shape — absent fields, extra fields, or wrong
- * types are corruption, not defaults.
+ * accepts exactly the recorded shape — absent fields, extra fields, wrong
+ * types, or rows referencing a project the document does not define are
+ * corruption, not defaults.
  * @module @deepseek-ai/dsh-project-membership-core/persisted-state
  */
 
@@ -68,10 +69,11 @@ export function serialize(state: PersistedState): string {
 
 /**
  * Parse and validate one stored document. Every field is checked explicitly;
- * any deviation throws instead of silently repairing.
+ * any deviation throws instead of silently repairing. Membership and
+ * invitation rows must reference a project the same document defines.
  * @param text - raw file content.
  * @returns the parsed durable state.
- * @throws when the document disagrees with {@link PersistedState}, including a foreign `formatVersion`.
+ * @throws when the document disagrees with {@link PersistedState}, carries a foreign `formatVersion`, or references an unknown project.
  */
 export function parse(text: string): PersistedState {
   const record = expectRecord(parseJson(text), 'document')
@@ -81,13 +83,40 @@ export function parse(text: string): PersistedState {
       + `(this build reads ${PROJECT_MEMBERSHIP_FORMAT_VERSION})`,
     )
   }
-  return {
+  const state: PersistedState = {
     formatVersion: PROJECT_MEMBERSHIP_FORMAT_VERSION,
     projects: expectArray(record.projects, 'projects').map(row => parseProject(expectRecord(row, 'project'))),
     memberships: expectArray(record.memberships, 'memberships').map(row =>
       parseMembership(expectRecord(row, 'membership'))),
     invitations: expectArray(record.invitations, 'invitations').map(row =>
       parseInvitation(expectRecord(row, 'invitation'))),
+  }
+  assertKnownProjects(state)
+  return state
+}
+
+/**
+ * Reject any row whose `projectId` names no project in the same document: a
+ * dangling referent is corruption, and loading it would half-assemble the
+ * store instead of failing loud.
+ * @param state - fully row-validated durable state.
+ * @throws naming the offending membership or invitation row and the unknown project id.
+ */
+function assertKnownProjects(state: PersistedState): void {
+  const known = new Set(state.projects.map(project => project.id))
+  for (const membership of state.memberships) {
+    if (!known.has(membership.projectId)) {
+      throw new Error(
+        `project-membership: durable state membership ${membership.id} references unknown project ${membership.projectId}`,
+      )
+    }
+  }
+  for (const invitation of state.invitations) {
+    if (!known.has(invitation.projectId)) {
+      throw new Error(
+        `project-membership: durable state invitation ${invitation.id} references unknown project ${invitation.projectId}`,
+      )
+    }
   }
 }
 

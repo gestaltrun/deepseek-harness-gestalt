@@ -12,7 +12,7 @@ The delivery workflow named Codex worktree tasks as its preferred ticket writer 
 
 The root coordinator selects writers from the active runtime. Codex uses isolated Codex worktree tasks when they are available. When the Codex task API is unavailable but worktree isolation remains available, the root becomes the sole sequential writer inside one dedicated worktree at a time. DSH uses `subagent_fork` when the writer or prototype benefits from the current conversation and plain `subagent` when inheritance adds nothing. Model selection remains a per-ticket root decision.
 
-Every writer still receives one ticket, branch, and isolated worktree. Only the loss of worktree isolation activates the shared-checkout fallback, where the root remains the sole sequential writer. A product-shaping prototype lives on its own pushed branch and supplies planning input that implementation tickets adapt rather than merge verbatim. Codex task archival runs only under Codex; exact worktree and branch validation remains common cleanup behavior.
+On the normal path, every writer receives one ticket, branch, and isolated worktree. The loss of worktree isolation is the sole exception: it activates the shared-checkout fallback, where the root remains the sole sequential writer and reports the reduced isolation. A product-shaping prototype lives on its own pushed branch and supplies planning input that implementation tickets adapt rather than merge verbatim. Codex task archival runs only under Codex; exact worktree and branch validation remains common cleanup behavior.
 
 ## Alternatives considered
 
@@ -26,5 +26,5 @@ Every writer still receives one ticket, branch, and isolated worktree. Only the 
 
 - Each runtime uses the executor and lifecycle operations it owns.
 - DSH can preserve specification context selectively instead of copying it into every task.
-- Writer isolation and durable branch evidence remain invariant across runtimes.
+- Writer isolation and durable branch evidence remain invariant across runtimes on the normal path; the shared-checkout fallback makes lost isolation explicit.
 - Prototype code requires an explicit adaptation step and its temporary branch remains until all consuming tickets land.

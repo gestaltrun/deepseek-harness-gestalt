@@ -1920,10 +1920,14 @@ export interface Config {
 export interface Config {
   /** Exact product origins allowed to call Project Membership routes. */
   origins: string[]
+  /** Desktop heartbeat cadence in milliseconds (default: 60000); the presence TTL must outlast it. */
+  presenceHeartbeatIntervalMs?: number
+  /** Heartbeat liveness window in milliseconds (default: 90000); expiry is the only route to offline. */
+  presenceTtlMs?: number
 }
 ```
 
-来源：[`packages/platform/project-membership-http/src/index.ts:41`](../packages/platform/project-membership-http/src/index.ts)
+来源：[`packages/platform/project-membership-http/src/index.ts:52`](../packages/platform/project-membership-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 

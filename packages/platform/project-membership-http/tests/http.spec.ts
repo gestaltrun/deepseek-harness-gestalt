@@ -27,6 +27,7 @@ const NEON = 'smoke-neon' as PlatformAccountId
 
 const sessions = new Map<string, PlatformAccountId>([
   ['access-octocat', OCTOCAT],
+  ['access-octocat-2', OCTOCAT],
   ['access-mona', MONA],
   ['access-neon', NEON],
 ])
@@ -48,17 +49,22 @@ afterEach(async () => {
 })
 
 describe('Project Membership HTTP consumer', () => {
-  it('registers the exact project route and three prefix route owners, and fails loud on misconfigured origins', () => {
+  it('registers the presence route beside the exact project route and three prefix route owners, and fails loud on misconfigured origins', () => {
     const routes = bootRoutes()
     expect([...routes.keys()].sort()).toEqual([
       'exact /v1/projects',
       'prefix /v1/projects',
       'prefix /v1/projects/invitations',
       'prefix /v1/projects/memberships',
+      'prefix /v1/projects/presence',
     ])
     expect(() => { apply(fakeCtx(), { origins: [] } as never) }).toThrow('origins configuration is required')
     expect(() => { apply(fakeCtx(), { origins: ['https://other.example'] }) })
       .toThrow('do not include the selected Platform environment')
+    expect(() => { apply(fakeCtx(), { origins: [ORIGIN], presenceTtlMs: 0 }) })
+      .toThrow('presence TTL must be a positive integer')
+    expect(() => { apply(fakeCtx(), { origins: [ORIGIN], presenceHeartbeatIntervalMs: 30, presenceTtlMs: 30 }) })
+      .toThrow('presence TTL must exceed the heartbeat interval')
   })
 
   it('creates a project from an Account session and reads its roster back', async () => {
@@ -143,6 +149,62 @@ describe('Project Membership HTTP consumer', () => {
     expect(await errorOf(removed)).toEqual([403, 'NOT_A_MEMBER'])
   })
 
+  it('registers presence heartbeats and attaches per-member presence to roster reads', async () => {
+    const server = await start()
+    const project = await createProjectWithMember(server.origin)
+    const rosterPresence = async (token: string): Promise<Array<{ accountId: string; presence: string }>> => {
+      const roster = await fetch(`${server.origin}/v1/projects/${project.id}/members`, {
+        headers: { origin: ORIGIN, ...auth(token) },
+      })
+      expect(roster.status).toBe(200)
+      return (await roster.json() as { members: Array<{ accountId: string; presence: string }> })
+        .members.map(({ accountId, presence }) => ({ accountId, presence }))
+    }
+
+    expect(await rosterPresence('access-octocat')).toEqual([
+      { accountId: OCTOCAT, presence: 'offline' },
+      { accountId: MONA, presence: 'offline' },
+    ])
+
+    expect(await statusOf(heartbeat(server.origin, 'access-octocat'))).toBe(204)
+    expect(await rosterPresence('access-mona')).toEqual([
+      { accountId: OCTOCAT, presence: 'online' },
+      { accountId: MONA, presence: 'offline' },
+    ])
+
+    // A second installation of the same account aggregates into one verdict.
+    expect(await statusOf(heartbeat(server.origin, 'access-octocat-2'))).toBe(204)
+    expect(await rosterPresence('access-octocat')).toEqual([
+      { accountId: OCTOCAT, presence: 'online' },
+      { accountId: MONA, presence: 'offline' },
+    ])
+
+    const wrongMethod = await fetch(`${server.origin}/v1/projects/presence/heartbeat`, {
+      method: 'GET', headers: { origin: ORIGIN },
+    })
+    expect(await errorOf(wrongMethod)).toEqual([405, 'METHOD_NOT_ALLOWED'])
+    expect(await errorOf(await heartbeat(server.origin, 'access-revoked'))).toEqual([401, 'SESSION_REVOKED'])
+    const unknownSubpath = await fetch(`${server.origin}/v1/projects/presence/other`, {
+      method: 'POST', headers: { origin: ORIGIN, ...auth('access-octocat') },
+    })
+    expect(await errorOf(unknownSubpath)).toEqual([404, 'NOT_FOUND'])
+  })
+
+  it('expires presence after the configured TTL', async () => {
+    const server = await start({ presenceHeartbeatIntervalMs: 10, presenceTtlMs: 25 })
+    const project = await createProjectWithMember(server.origin)
+    expect(await statusOf(heartbeat(server.origin, 'access-octocat'))).toBe(204)
+    const presenceOf = async (): Promise<string> => {
+      const roster = await fetch(`${server.origin}/v1/projects/${project.id}/members`, {
+        headers: { origin: ORIGIN, ...auth('access-octocat') },
+      })
+      return (await roster.json() as { members: Array<{ presence: string }> }).members[0]?.presence ?? 'missing'
+    }
+    expect(await presenceOf()).toBe('online')
+    await new Promise((resolve) => { setTimeout(resolve, 45) })
+    expect(await presenceOf()).toBe('offline')
+  })
+
   it('answers Account, membership, and protocol failures with stable envelopes', async () => {
     const server = await start()
     const created = await post(server.origin, '/v1/projects', {
@@ -213,7 +275,7 @@ describe('Project Membership HTTP consumer', () => {
 })
 
 /** Mount the plugin on the effect-wrapped in-memory registry and return its live routes. */
-function bootRoutes(): Map<string, RegisteredRoute> {
+function bootRoutes(config: { presenceTtlMs?: number; presenceHeartbeatIntervalMs?: number } = {}): Map<string, RegisteredRoute> {
   const routes = new Map<string, RegisteredRoute>()
   const ctx = {
     platformAccount: accountStub(),
@@ -228,7 +290,7 @@ function bootRoutes(): Map<string, RegisteredRoute> {
     },
     effect(register: () => () => void) { register() },
   } as unknown as Context
-  apply(ctx, { origins: [ORIGIN] })
+  apply(ctx, { origins: [ORIGIN], ...config })
   return routes
 }
 
@@ -244,14 +306,30 @@ function fakeCtx(): Context {
 function accountStub(): {
   environment: { origin: string }
   current(input: { accessToken: string }): Promise<PlatformAccountView>
+  currentInstallation(input: { accessToken: string }): Promise<{
+    account: PlatformAccountView
+    installation: { id: string; kind: 'desktop'; presentation: { name: string; platform: 'macos' } }
+  }>
 } {
+  const view = (id: PlatformAccountId): PlatformAccountView => ({
+    id, githubId: 13994321, githubLogin: 'octocat', avatarUrl: 'https://avatars.example/octocat',
+  })
+  const requireSession = (accessToken: string): PlatformAccountId => {
+    const id = sessions.get(accessToken)
+    if (id === undefined) throw new AccountError('SESSION_REVOKED', 'access token belongs to another identity namespace')
+    return id
+  }
   return {
     environment: { origin: ORIGIN },
-    current: vi.fn(async (input: { accessToken: string }): Promise<PlatformAccountView> => {
-      const id = sessions.get(input.accessToken)
-      if (id === undefined) throw new AccountError('SESSION_REVOKED', 'access token belongs to another identity namespace')
-      return { id, githubId: 13994321, githubLogin: 'octocat', avatarUrl: 'https://avatars.example/octocat' }
-    }),
+    current: vi.fn(async (input: { accessToken: string }): Promise<PlatformAccountView> => view(requireSession(input.accessToken))),
+    currentInstallation: vi.fn(async (input: { accessToken: string }) => ({
+      account: view(requireSession(input.accessToken)),
+      installation: {
+        id: `installation-${input.accessToken}`,
+        kind: 'desktop' as const,
+        presentation: { name: 'Smoke Box', platform: 'macos' as const },
+      },
+    })),
   }
 }
 
@@ -263,8 +341,8 @@ function membership(): FileProjectMembership {
   return new FileProjectMembership(context, { storagePath: root, environment: 'development' })
 }
 
-async function start(): Promise<{ origin: string }> {
-  const routes = bootRoutes()
+async function start(config: { presenceTtlMs?: number; presenceHeartbeatIntervalMs?: number } = {}): Promise<{ origin: string }> {
+  const routes = bootRoutes(config)
   const http = createServer((req, res) => {
     const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
     const route = matchRoute(routes, pathname)
@@ -303,6 +381,33 @@ function auth(accessToken: string): Record<string, string> {
     'x-gestalt-proof-issued-at': '1',
     'x-gestalt-proof-signature': 'signature',
   }
+}
+
+/** POST one presence heartbeat as the token's installation. */
+function heartbeat(origin: string, accessToken: string): Promise<Response> {
+  return fetch(`${origin}/v1/projects/presence/heartbeat`, {
+    method: 'POST', headers: { origin: ORIGIN, ...auth(accessToken) },
+  })
+}
+
+/**
+ * Create one project as Octocat and join Mona through an accepted invitation,
+ * producing a two-member roster.
+ */
+async function createProjectWithMember(origin: string): Promise<{ id: string }> {
+  const created = await post(origin, '/v1/projects', {
+    name: `Presence-${Math.random().toString(36).slice(2)}`, remoteUrl: 'https://github.com/octocat/repo',
+  }, auth('access-octocat'))
+  const project = await created.json() as { id: string }
+  const invited = await post(origin, '/v1/projects/invitations', {
+    projectId: project.id, inviteeAccountId: MONA,
+  }, auth('access-octocat'))
+  const invitation = await invited.json() as { id: string }
+  const accepted = await post(origin, `/v1/projects/invitations/${invitation.id}/decision`, {
+    decision: 'accept-with-link', link: { workspaceName: 'local' },
+  }, auth('access-mona'))
+  expect(accepted.status).toBe(200)
+  return project
 }
 
 async function post(origin: string, path: string, body: unknown, headers: Record<string, string> = {}): Promise<Response> {

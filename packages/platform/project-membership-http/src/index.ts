@@ -1,9 +1,11 @@
 /**
  * HTTP Consumer for Project Membership. It owns the project-registry, roster,
- * invitation, and member-administration routes, while the membership service
- * owns every role gate and roster relation. The acting account is resolved
- * from an existing Account session: bearer access token plus the installation
- * proof headers, verified by `ctx.platformAccount.current`.
+ * invitation, member-administration, and presence-heartbeat routes, while the
+ * membership service owns every role gate and roster relation. The acting
+ * account is resolved from an existing Account session: bearer access token
+ * plus the installation proof headers, verified by `ctx.platformAccount`.
+ * Roster reads attach per-member presence aggregated from installation
+ * heartbeat registrations.
  * @module @deepseek-ai/dsh-project-membership-http
  */
 
@@ -15,6 +17,7 @@ import {
   AccountError,
   parseAccountProofJti,
   type AccountProof,
+  type AuthenticatedInstallationView,
   type PlatformAccountId,
 } from '@deepseek-ai/dsh-platform-account'
 import {
@@ -24,6 +27,8 @@ import {
   type MemberView,
   type ProjectMembershipErrorCode,
   type ProjectRole,
+  type ProjectView,
+  type RosterView,
   type WorkspaceLink,
 } from '@deepseek-ai/dsh-project-membership'
 import {
@@ -34,18 +39,30 @@ import {
   writeJson,
   writeRetryAfterError,
 } from '@deepseek-ai/dsh-host-webserver'
+import { InProcessPresenceStore, PresenceRegistry } from './presence.ts'
 
 const MAX_JSON_BYTES = 64 * 1024
+
+/** Default milliseconds between one installation's presence heartbeats. */
+export const PRESENCE_HEARTBEAT_INTERVAL_MS = 60_000
+/** Default milliseconds a heartbeat stays live before its installation counts offline. */
+export const PRESENCE_TTL_MS = 90_000
 
 /** HTTP consumer configuration. */
 export interface Config {
   /** Exact product origins allowed to call Project Membership routes. */
   origins: string[]
+  /** Desktop heartbeat cadence in milliseconds (default: 60000); the presence TTL must outlast it. */
+  presenceHeartbeatIntervalMs?: number
+  /** Heartbeat liveness window in milliseconds (default: 90000); expiry is the only route to offline. */
+  presenceTtlMs?: number
 }
 
 /** Validated HTTP consumer configuration. */
 export const Config: z<Config> = z.object({
   origins: z.array(z.string()).min(1).required(),
+  presenceHeartbeatIntervalMs: z.natural().min(1).default(PRESENCE_HEARTBEAT_INTERVAL_MS),
+  presenceTtlMs: z.natural().min(1).default(PRESENCE_TTL_MS),
 })
 
 /** Cordis plugin name. */
@@ -63,6 +80,18 @@ export function apply(ctx: Context, config: Config): void {
   if (origins.match(ctx.platformAccount.environment.origin) === undefined) {
     throw new TypeError('Project Membership HTTP origins do not include the selected Platform environment')
   }
+  const intervalMs = (candidate as Config).presenceHeartbeatIntervalMs ?? PRESENCE_HEARTBEAT_INTERVAL_MS
+  const ttlMs = (candidate as Config).presenceTtlMs ?? PRESENCE_TTL_MS
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) {
+    throw new TypeError('Project Membership HTTP presence heartbeat interval must be a positive integer number of milliseconds')
+  }
+  if (!Number.isSafeInteger(ttlMs) || ttlMs < 1) {
+    throw new TypeError('Project Membership HTTP presence TTL must be a positive integer number of milliseconds')
+  }
+  if (ttlMs <= intervalMs) {
+    throw new TypeError('Project Membership HTTP presence TTL must exceed the heartbeat interval')
+  }
+  const presence = new PresenceRegistry(new InProcessPresenceStore(), ttlMs)
   const route = (
     kind: 'exact' | 'prefix',
     path: string,
@@ -97,7 +126,16 @@ export function apply(ctx: Context, config: Config): void {
     if (roster === undefined) throw unknownRoute()
     requireMethod(req, 'GET')
     const actor = await requireActor(ctx, req)
-    writeJson(res, 200, await ctx.projectMembership.roster(actor, brandedParam<'ProjectId'>(roster, 'projectId')))
+    const view = await ctx.projectMembership.roster(actor, brandedParam<'ProjectId'>(roster, 'projectId'))
+    writeJson(res, 200, await withPresence(presence, view))
+  })
+
+  route('prefix', '/v1/projects/presence', async (req, res) => {
+    if (matchPath(requestPath(req), '/v1/projects/presence/heartbeat') === undefined) throw unknownRoute()
+    requireMethod(req, 'POST')
+    const authenticated = await requireInstallation(ctx, req)
+    await presence.beat(authenticated.account.id, authenticated.installation.id)
+    answerNoContent(res)
   })
 
   route('prefix', '/v1/projects/invitations', async (req, res) => {
@@ -179,6 +217,48 @@ export function apply(ctx: Context, config: Config): void {
 async function requireActor(ctx: Context, req: IncomingMessage): Promise<PlatformAccountId> {
   const account = await ctx.platformAccount.current({ accessToken: bearer(req), proof: proofHeaders(req) })
   return account.id
+}
+
+/**
+ * Resolve the authenticated account and installation from one Account session
+ * presentation.
+ * @param ctx - composition context carrying the Account service.
+ * @param req - request carrying the bearer token and installation proof headers.
+ * @returns the authenticated installation with its owning account.
+ */
+async function requireInstallation(ctx: Context, req: IncomingMessage): Promise<AuthenticatedInstallationView> {
+  return ctx.platformAccount.currentInstallation({ accessToken: bearer(req), proof: proofHeaders(req) })
+}
+
+/** Presence of one member's installations as of a roster read. */
+export type MemberPresence = 'online' | 'offline'
+
+/** One roster member carrying the presence verdict of the aggregation plane. */
+export type PresenceMemberView = MemberView & { readonly presence: MemberPresence }
+
+/** Roster read response with per-member presence attached. */
+export interface PresenceRosterView {
+  /** The queried project. */
+  readonly project: ProjectView
+  /** Every membership row ordered by join time, each carrying its presence. */
+  readonly members: readonly PresenceMemberView[]
+}
+
+/**
+ * Attach per-member presence to one roster view.
+ * @param presence - registry of live installation heartbeats.
+ * @param view - roster as the membership service stores it.
+ * @returns the roster with each member's presence verdict attached.
+ */
+async function withPresence(presence: PresenceRegistry, view: RosterView): Promise<PresenceRosterView> {
+  const online = await presence.onlineAccountIds(view.members.map(member => member.accountId))
+  return {
+    project: view.project,
+    members: view.members.map(member => ({
+      ...member,
+      presence: online.has(member.accountId) ? 'online' : 'offline',
+    })),
+  }
 }
 
 /**

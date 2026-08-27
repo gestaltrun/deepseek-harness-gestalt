@@ -53,6 +53,8 @@ ESM 主进程 bundle 会内联工作区代码，但把 Electron、`electron-upda
 
 `0.1.7` manifest 使用 `previous-release` 基线 `BeiKeJieDeLiuLangMao/deepseek-harness-gestalt@623c5d30460ee699ac1c67f32d0908fcbcdd1d69`（`gestalt-v0.1.6`）。
 
+`0.1.8` manifest 使用 `previous-release` 基线 `gestaltrun/deepseek-harness-gestalt@a6f8c6e4d1887a403de640027c0aa691bcb1647b`（`gestalt-v0.1.7`）。
+
 本机未签名 arm64 排练（不做公证）：
 
 ```sh

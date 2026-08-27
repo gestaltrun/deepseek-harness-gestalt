@@ -1,0 +1,52 @@
+{
+  "version": "0.1.8",
+  "tag": "gestalt-v0.1.8",
+  "source": {
+    "baselineKind": "previous-release",
+    "baselineRepository": "gestaltrun/deepseek-harness-gestalt",
+    "releaseRepository": "gestaltrun/deepseek-harness-gestalt",
+    "baselineCommit": "a6f8c6e4d1887a403de640027c0aa691bcb1647b"
+  },
+  "content": {
+    "zh": {
+      "intro": "DeepSeek Gestalt 0.1.8 收录上一版本之后的 {{commitCount}} 个提交。",
+      "sections": [
+        {
+          "heading": "Mobile Companion Host 与远程连接",
+          "items": [
+            "Desktop 恢复由 Platform Account、Personal Pairing 和加密 Relay 组成的 Mobile Companion Host 产品链路，提供远程会话、搜索、历史记录和附件，并对缓存与传输帧设置明确上限。",
+            "Desktop 会使用系统代理，并在窗口、Relay 和移动端生命周期变化后可靠恢复连接；Mobile Access、配对和远程故障状态提供可执行的反馈。",
+            "Mobile Access 开关在远程 Host 尚未就绪时仍然可见，配对与禁用操作使用单次证明并保持明确的账号权限。"
+          ]
+        },
+        {
+          "heading": "Side Chat 与 Agent",
+          "items": [
+            "Host 重启或 Web origin 变化后，未归档的 Side Chat 会从持久会话恢复标签、历史记录和原模型路由；关闭已发布标签时会先归档，避免下次启动再次出现。",
+            "产品分叉会话会清除父会话的目标，支持图片的进程内子 Agent 可以在现有文件读取策略和附件数量限制下接收图片提示。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "intro": "DeepSeek Gestalt 0.1.8 contains the {{commitCount}} commits after the previous Desktop Bundle.",
+      "sections": [
+        {
+          "heading": "Mobile Companion Host and remote connectivity",
+          "items": [
+            "Desktop restores the Mobile Companion Host product path through Platform Account, Personal Pairing, and the encrypted Relay, including remote sessions, search, history, and attachments with explicit cache and frame limits.",
+            "Desktop uses the system proxy and recovers connections across window, Relay, and mobile lifecycle changes. Mobile Access, pairing, and remote failures provide actionable status.",
+            "The Mobile Access switch remains visible before the remote Host is ready, and pairing and disable operations use single-use proofs with explicit account authority."
+          ]
+        },
+        {
+          "heading": "Side Chat and agents",
+          "items": [
+            "After a Host restart or Web origin change, unarchived Side Chats restore their tabs, history, and original model route from durable Sessions. Closing a published tab archives it before local removal so it stays closed after restart.",
+            "Product-forked Sessions clear the parent goal, and capable in-process subagents can receive image prompts under the existing file-read policy and attachment limits."
+          ]
+        }
+      ]
+    }
+  }
+}

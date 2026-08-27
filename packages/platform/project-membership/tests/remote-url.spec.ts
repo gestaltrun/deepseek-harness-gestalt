@@ -31,8 +31,10 @@ describe('normalizeGitRemoteUrl', () => {
     '   ',
     'git@github.com',
     'git@github.com:',
+    'git@github.com:.git',
     '/local/path/only',
     'ssh://git@github.com/Org/Repo',
+    'https://',
     'https://host.example/',
     'file:///srv/repo',
   ])('rejects %j with INVALID_REMOTE_URL', (input) => {

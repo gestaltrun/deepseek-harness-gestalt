@@ -178,6 +178,11 @@ describe('file-backed project membership', () => {
     // A blank workspace name rejects before any state moves.
     await expect(store.acceptInvitation(bob, { invitationId: invitation, link: { workspaceName: '   ' } }))
       .rejects.toMatchObject({ code: 'INVALID_LINK' })
+    // The wire surface can deliver a non-string workspace name; it rejects the same way.
+    await expect(store.acceptInvitation(bob, {
+      invitationId: invitation,
+      link: { workspaceName: 42 as unknown as string },
+    })).rejects.toMatchObject({ code: 'INVALID_LINK' })
     expect((await store.pendingInvitationsFor(bob)).map(row => row.state)).toEqual(['pending'])
 
     const joined = await store.acceptInvitation(bob, {
@@ -394,5 +399,108 @@ describe('failed durable writes commit nothing', () => {
       .toEqual([[alice, 'owner', []], [bob, 'admin', []]])
     expect(document.invitations.map(row => [row.inviteeAccountId, row.state]))
       .toEqual([[bob, 'accepted'], [carol, 'pending']])
+  })
+})
+
+describe('load, construction, and disposal gates', () => {
+  it('rejects programmatic config with no storage directory or an unknown environment', () => {
+    const blankStorage = new Context()
+    contexts.push(blankStorage)
+    expect(() => new FileProjectMembership(blankStorage, { storagePath: '   ', environment: 'development' }))
+      .toThrow(TypeError)
+    const unknownEnvironment = new Context()
+    contexts.push(unknownEnvironment)
+    expect(() => new FileProjectMembership(unknownEnvironment, {
+      storagePath: freshRoot(),
+      environment: 'staging' as never,
+    })).toThrow("config.environment must be 'development' or 'production'")
+  })
+
+  it('rejects blank project names before any state moves', async () => {
+    const store = makeStoreAt(freshRoot(), 'development')
+    await expect(store.createProject(alice, { name: '   ', remoteUrl: 'https://org.example/blank' }))
+      .rejects.toMatchObject({ code: 'INVALID_PROJECT_NAME' })
+  })
+
+  it('fails loud when the durable document is unreadable', async () => {
+    const root = freshRoot()
+    await mkdir(join(root, 'development'), { recursive: true })
+    await mkdir(join(root, 'development', 'project-membership.json'))
+    const store = makeStoreAt(root, 'development')
+    await expect(store.pendingInvitationsFor(alice)).rejects.toThrow('EISDIR')
+  })
+
+  it('rejects every operation once the store is disposed', async () => {
+    const context = new Context()
+    const store = new FileProjectMembership(context, { storagePath: freshRoot(), environment: 'development' })
+    await context.fiber.dispose()
+    await expect(store.createProject(alice, { name: 'Late', remoteUrl: 'https://org.example/late' }))
+      .rejects.toThrow('project-membership: store has been disposed')
+  })
+
+  it('restores tags, workspace links, and settled invitations across boot generations', async () => {
+    const shared = freshRoot()
+    const store = makeStoreAt(shared, 'development')
+    const created = await store.createProject(alice, { name: 'Restore', remoteUrl: 'https://org.example/restore' })
+    const invitation = await store.invite(alice, { projectId: created.id, inviteeAccountId: bob })
+    const bobMember = await store.acceptInvitation(bob, {
+      invitationId: invitation.id,
+      link: { workspaceName: 'bob-restore', normalizedRemoteUrl: 'https://github.com/bob/restore.GIT' },
+    })
+    await store.setMemberTags(alice, { membershipId: bobMember.id, tags: ['on-call', 'db'] as FunctionTag[] })
+    await store.invite(alice, { projectId: created.id, inviteeAccountId: carol })
+    const carolInvitation = (await store.pendingInvitationsFor(carol))[0]!.id
+    await store.retractInvitation(alice, carolInvitation)
+
+    const reopened = makeStoreAt(shared, 'development')
+    const roster = await reopened.roster(alice, created.id)
+    expect(roster.members.find(row => row.accountId === bob)).toMatchObject({
+      tags: ['on-call', 'db'],
+      link: { workspaceName: 'bob-restore', normalizedRemoteUrl: 'https://github.com/bob/restore' },
+    })
+    // The retracted invitation restored as settled: settling it again is rejected as not pending.
+    await expect(reopened.retractInvitation(alice, carolInvitation))
+      .rejects.toMatchObject({ code: 'INVITATION_NOT_PENDING' })
+  })
+})
+
+describe('authority scoping across projects', () => {
+  it('answers member-actor and cross-project refusals inside each executor', async () => {
+    const store = makeStoreAt(freshRoot(), 'development')
+    const alpha = await store.createProject(alice, { name: 'Alpha', remoteUrl: 'https://org.example/alpha' })
+    const beta = await store.createProject(alice, { name: 'Beta', remoteUrl: 'https://org.example/beta' })
+    const bobMember = await joinWith(store, alpha.id, bob, 'bob-alpha')
+    const aliceBeta = await ownMembershipOf(store, alice, beta.id)
+    const denial = async (run: Promise<unknown>, code: string) => {
+      await expect(run).rejects.toMatchObject({ code })
+    }
+
+    // Bob holds no membership in Beta, so its rows are invisible to him.
+    await denial(store.changeRole(bob, { membershipId: aliceBeta.id, role: 'admin' }), 'MEMBERSHIP_NOT_FOUND')
+    // Plain members neither promote nor remove anyone.
+    const aliceAlpha = await ownMembershipOf(store, alice, alpha.id)
+    await denial(store.changeRole(bob, { membershipId: aliceAlpha.id, role: 'admin' }), 'ROLE_REQUIRED')
+    await denial(store.removeMember(bob, aliceAlpha.id), 'ROLE_REQUIRED')
+    // Tag edits above the recorded count limit are invalid before durability.
+    await denial(store.setMemberTags(alice, {
+      membershipId: bobMember.id,
+      tags: ['t1', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9'] as unknown as FunctionTag[],
+    }), 'INVALID_TAGS')
+
+    // Pending invitations order oldest-first across projects; both owned projects answer remote lookups.
+    await store.invite(alice, { projectId: alpha.id, inviteeAccountId: dave })
+    await store.invite(alice, { projectId: beta.id, inviteeAccountId: dave })
+    const pending = await store.pendingInvitationsFor(dave)
+    expect(pending.map(row => row.projectId)).toEqual([alpha.id, beta.id])
+    await expect(store.projectByRemote(alice, 'https://org.example/beta')).resolves.toMatchObject({ id: beta.id })
+  })
+
+  it('keeps retraction authority away from a member who is neither inviter nor owner', async () => {
+    const { store, projectId } = await foundProject(alice, 'Retract')
+    await joinWith(store, projectId, bob, 'bob-retract')
+    await store.invite(alice, { projectId, inviteeAccountId: carol })
+    const carolInvitation = (await store.pendingInvitationsFor(carol))[0]!.id
+    await expect(store.retractInvitation(bob, carolInvitation))
+      .rejects.toMatchObject({ code: 'ROLE_REQUIRED' })
   })
 })

@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
-import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
+import type { InvitationId, ProjectId } from '@deepseek-ai/dsh-project-membership'
 import { FileProjectMembership } from '../src/index.ts'
 import { parse, serialize, type PersistedState } from '../src/persisted-state.ts'
 
@@ -123,6 +123,35 @@ describe('a store booting over a dangling document refuses every operation', () 
     await expect(store.pendingInvitationsFor('dangling-bob' as PlatformAccountId)).rejects.toThrow(
       `project-membership: durable state invitation invitation-ghost-target references unknown project ${DANGLING_PROJECT_ID}`,
     )
+  })
+
+  it('refuses to accept an invitation whose invitee the same document already lists as a member', async () => {
+    const state: PersistedState = {
+      formatVersion: 0,
+      projects: [realProject],
+      memberships: [{
+        id: 'membership-dup',
+        projectId: REAL_PROJECT_ID,
+        accountId: 'dangling-bob',
+        role: 'member',
+        tags: [],
+        joinedAt: 1,
+      }],
+      invitations: [{
+        id: 'invitation-stale-pending',
+        projectId: REAL_PROJECT_ID,
+        inviterAccountId: alice,
+        inviteeAccountId: 'dangling-bob',
+        state: 'pending',
+        invitedAt: 2,
+      }],
+    }
+    const root = await rootedState(state)
+    const store = makeStoreAt(root)
+    await expect(store.acceptInvitation('dangling-bob' as PlatformAccountId, {
+      invitationId: 'invitation-stale-pending' as InvitationId,
+      link: { workspaceName: 'late-checkout' },
+    })).rejects.toMatchObject({ code: 'DUPLICATE_INVITEE' })
   })
 
   /**

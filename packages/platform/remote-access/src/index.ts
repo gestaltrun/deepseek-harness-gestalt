@@ -1552,16 +1552,10 @@ export class PersonalPairingProvider extends RemoteAccessService {
   }): Promise<MobileAccessState> {
     return this.serialized(async () => {
       const owner = input.enabled ? undefined : await this.authenticate(input.desktop, 'desktop')
-      if (owner !== undefined) {
-        await this.runTransaction(() => {
-          const { account, installation } = owner
-          this.stageStoredEndpointRevocations(account.id, installation.id)
-        })
-      }
-      return await this.runTransaction(async () => {
-        const { account, installation } = owner ?? await this.authenticate(input.desktop, 'desktop')
-        this.evictExpiredRecords()
-        if (input.enabled) {
+      if (owner === undefined) {
+        return await this.runTransaction(async () => {
+          const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+          this.evictExpiredRecords()
           const before = await this.requireTransactionAccess().getDesktop(account.id, installation.id)
           const routeId = await this.requireTransactionAccess().enableDesktop(
             account.id,
@@ -1578,53 +1572,62 @@ export class PersonalPairingProvider extends RemoteAccessService {
             })
           }
           return { enabled: true }
-        }
-        this.acknowledgeStoredEndpointRevocations(account.id, installation.id, 'desktop')
-        const routeIds = await this.requireTransactionAccess().disableDesktop(account.id, installation.id)
-        const accessKeyValue = accessKey(account.id, installation.id)
-        const retainedAccess = this.requireTransactions().endpointAccessGenerations.get(accessKeyValue)
-        this.requireTransactions().endpointAccessGenerations.set(accessKeyValue, {
-          generation: (retainedAccess?.generation ?? 0) + 1, phase: 'disabled',
         })
-        for (const publication of this.requireTransactions().endpointPublications.values()) {
-          if (publication.accountId === account.id && publication.desktopInstallationId === installation.id) {
-            this.stageEndpointPublicationRevocation(this.requireTransactions(), publication)
+      } else {
+        await this.runTransaction(() => {
+          const { account, installation } = owner
+          this.stageStoredEndpointRevocations(account.id, installation.id)
+        })
+        return await this.runTransaction(async () => {
+          const { account, installation } = owner
+          this.evictExpiredRecords()
+          this.acknowledgeStoredEndpointRevocations(account.id, installation.id, 'desktop')
+          const routeIds = await this.requireTransactionAccess().disableDesktop(account.id, installation.id)
+          const accessKeyValue = accessKey(account.id, installation.id)
+          const retainedAccess = this.requireTransactions().endpointAccessGenerations.get(accessKeyValue)
+          this.requireTransactions().endpointAccessGenerations.set(accessKeyValue, {
+            generation: (retainedAccess?.generation ?? 0) + 1, phase: 'disabled',
+          })
+          for (const publication of this.requireTransactions().endpointPublications.values()) {
+            if (publication.accountId === account.id && publication.desktopInstallationId === installation.id) {
+              this.stageEndpointPublicationRevocation(this.requireTransactions(), publication)
+            }
           }
-        }
-        if (this.options.relay !== undefined) {
-          await cleanupAll(routeIds.map(routeId => async () => {
-            await this.options.relay?.revokeRoute(routeId)
-            await this.requireTransactionAccess().completeRouteRevocation(account.id, installation.id, routeId)
-          }))
-        } else {
-          await cleanupAll(routeIds.map(routeId => async () => {
-            await this.requireTransactionAccess().completeRouteRevocation(account.id, installation.id, routeId)
-          }))
-        }
-        for (const challenge of [...this.challenges.values()]) {
-          if (challenge.accountId === account.id && challenge.desktopInstallationId === installation.id) {
-            this.settleChallenge(challenge, 'disabled')
+          if (this.options.relay !== undefined) {
+            await cleanupAll(routeIds.map(routeId => async () => {
+              await this.options.relay?.revokeRoute(routeId)
+              await this.requireTransactionAccess().completeRouteRevocation(account.id, installation.id, routeId)
+            }))
+          } else {
+            await cleanupAll(routeIds.map(routeId => async () => {
+              await this.requireTransactionAccess().completeRouteRevocation(account.id, installation.id, routeId)
+            }))
           }
-        }
-        const endpointMailbox = this.endpointMailbox()
-        endpointMailbox.disable(account.id, installation.id, this.clock.now())
-        this.commitEndpointMailbox(endpointMailbox)
-        for (const [id, record] of [...this.pending]) {
-          if (record.accountId === account.id && record.desktopInstallationId === installation.id) {
-            this.settlePending(id, record, 'disabled')
+          for (const challenge of [...this.challenges.values()]) {
+            if (challenge.accountId === account.id && challenge.desktopInstallationId === installation.id) {
+              this.settleChallenge(challenge, 'disabled')
+            }
           }
-        }
-        for (const [pairingId, pairing] of [...this.pairings]) {
-          if (pairing.devicePrincipal.accountId === account.id
-          && pairing.desktopInstallationId === installation.id) {
-            this.pairings.delete(pairingId)
-            this.principalIds.delete(pairing.devicePrincipal.id)
-            if (pairing.cleanup !== undefined) await this.cleanupActive(pairing.cleanup)
+          const endpointMailbox = this.endpointMailbox()
+          endpointMailbox.disable(account.id, installation.id, this.clock.now())
+          this.commitEndpointMailbox(endpointMailbox)
+          for (const [id, record] of [...this.pending]) {
+            if (record.accountId === account.id && record.desktopInstallationId === installation.id) {
+              this.settlePending(id, record, 'disabled')
+            }
           }
-        }
-        await this.cleanupOwner(account.id, installation.id)
-        return { enabled: false }
-      })
+          for (const [pairingId, pairing] of [...this.pairings]) {
+            if (pairing.devicePrincipal.accountId === account.id
+            && pairing.desktopInstallationId === installation.id) {
+              this.pairings.delete(pairingId)
+              this.principalIds.delete(pairing.devicePrincipal.id)
+              if (pairing.cleanup !== undefined) await this.cleanupActive(pairing.cleanup)
+            }
+          }
+          await this.cleanupOwner(account.id, installation.id)
+          return { enabled: false }
+        })
+      }
     })
   }
 

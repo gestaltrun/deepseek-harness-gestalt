@@ -1,0 +1,162 @@
+# Project Membership
+
+English | [中文](project-membership.zh.md)
+
+[`ctx.projectMembership`](../../packages/platform/project-membership/README.md) is the collaboration plane above a workspace: cloud projects bind one normalized git remote as a validated property, memberships carry exactly the roles `owner|admin|member` plus project-defined function tags that never bear permission, and invitations settle `pending → accepted | declined | retracted`. Acceptance is atomic with linking exactly one local workspace; duplicate invitations to an account already holding a membership or pending invitation are rejected atomically under concurrency.
+
+Every mutation executes its role gate inside the operation: admins invite but cannot touch owner rows or remove owners, only owners grant the owner role, and the final owner cannot be demoted or removed (`LAST_OWNER`). Reads are gated too — `roster` requires an active membership, so removed accounts lose enumeration immediately. Each roster-affecting commit publishes a [`project-membership/roster-invalidated`](#cordis-surface) event strictly after durability, advancing a per-project projection version that cache consumers key on.
+
+[`@deepseek-ai/dsh-project-membership-core`](../../packages/platform/project-membership-core/README.md) is the file-backed provider: state lives per environment namespace (`development`/`production`) below the configured storage path, every mutation serializes through one write chain and republishes the whole document through an atomic rename. Roles govern only this collaboration plane and stay disjoint from Git-provider permissions in both directions. Routed member questions remain fail-closed behind the standing encryption review recorded in [the placement Agent Note](../../.agents/notes/implemented/feature/2026-08-27-project-membership-core.md).
+
+<!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
+
+<a id="cordis-surface"></a>
+
+## Cordis API
+
+Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxprojectmembership--projectmembershipservice-abstract-seam"></a>
+
+### `ctx.projectMembership` — `ProjectMembershipService` (abstract seam)
+
+Project-membership capability. Every mutation executes its role gate inside the operation itself: schema omission or listener order never substitutes for the check that decides the outcome.
+
+```ts cordis-catalog
+/**
+ * Create one project; the actor becomes its first owner.
+ * @param actor - authenticated account performing the mutation.
+ * @param input - unique project name and git remote to bind.
+ * @returns the stored project view.
+ * @throws {ProjectMembershipError} `PROJECT_NAME_TAKEN` when the name is in use, or `INVALID_REMOTE_URL` when normalization fails.
+ */
+abstract createProject(actor: PlatformAccountId, input: CreateProjectInput): Promise<ProjectView>
+
+/**
+ * Issue one invitation to a platform account.
+ * @param actor - authenticated account holding admin or owner on the project.
+ * @param input - target project and invitee account.
+ * @returns the invitation in `pending` state.
+ * @throws {ProjectMembershipError} `ROLE_REQUIRED` below admin, `DUPLICATE_INVITEE` when the account already holds
+ *   membership or a pending invitation, or `NOT_A_MEMBER` when the actor holds no membership.
+ */
+abstract invite(actor: PlatformAccountId, input: InviteInput): Promise<InvitationView>
+
+/**
+ * Retract one invitation issued by the caller while it is still pending.
+ * @param actor - authenticated account; must be the invitation's issuer or an owner of the project.
+ * @param invitationId - invitation to retract.
+ * @returns nothing; the stored state moves to `retracted`.
+ * @throws {ProjectMembershipError} `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, or `ROLE_REQUIRED`.
+ */
+abstract retractInvitation(actor: PlatformAccountId, invitationId: InvitationId): Promise<void>
+
+/**
+ * Accept one pending invitation; joining and workspace linking commit atomically, so no joined-but-unlinked state can exist.
+ * @param actor - authenticated account; must be the invitation's addressee.
+ * @param input - invitation id plus the mandatory workspace link.
+ * @returns the created member view.
+ * @throws {ProjectMembershipError} `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, `DUPLICATE_INVITEE`, or
+ *   `INVALID_LINK` when the link omits a workspace name.
+ */
+abstract acceptInvitation(actor: PlatformAccountId, input: AcceptInvitationInput): Promise<MemberView>
+
+/**
+ * Decline one pending invitation addressed to the caller.
+ * @param actor - authenticated account; must be the invitation's addressee.
+ * @param invitationId - invitation to decline.
+ * @returns nothing; the stored state moves to `declined`.
+ * @throws {ProjectMembershipError} `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, or `ROLE_REQUIRED`.
+ */
+abstract declineInvitation(actor: PlatformAccountId, invitationId: InvitationId): Promise<void>
+
+/**
+ * Change one membership's role. Rows whose current or target role is owner answer only to owners; admins may move
+ * members between `member` and `admin`.
+ * @param actor - authenticated account holding admin or owner.
+ * @param input - membership row and new role.
+ * @returns nothing; the stored row carries the new role.
+ * @throws {ProjectMembershipError} `MEMBERSHIP_NOT_FOUND`, `ROLE_REQUIRED`, or `LAST_OWNER` when demoting the final owner.
+ */
+abstract changeRole(actor: PlatformAccountId, input: ChangeRoleInput): Promise<void>
+
+/**
+ * Replace one membership's project-defined function tags; tags are display and routing metadata and never gate permissions.
+ * @param actor - authenticated account holding admin or owner.
+ * @param input - membership row and replacement tags.
+ * @returns nothing; the stored row carries the new tags.
+ * @throws {ProjectMembershipError} `MEMBERSHIP_NOT_FOUND` or `ROLE_REQUIRED`.
+ */
+abstract setMemberTags(actor: PlatformAccountId, input: SetMemberTagsInput): Promise<void>
+
+/**
+ * Remove one membership. Removing an owner answers only to owners; when members remain after removal, every cached
+ * roster projection for the project is invalidated by the same operation.
+ * @param actor - authenticated account holding admin or owner.
+ * @param membershipId - membership row to remove.
+ * @returns nothing.
+ * @throws {ProjectMembershipError} `MEMBERSHIP_NOT_FOUND`, `ROLE_REQUIRED`, or `LAST_OWNER` when removing the final owner.
+ */
+abstract removeMember(actor: PlatformAccountId, membershipId: MembershipId): Promise<void>
+
+/**
+ * Read one project's full roster; both caller and readers require an active membership, so removed accounts lose enumeration immediately.
+ * @param actor - authenticated account whose active membership gates the read.
+ * @param projectId - project to project.
+ * @returns the roster view derived from current authority, not a stale cache.
+ * @throws {ProjectMembershipError} `PROJECT_NOT_FOUND` or `NOT_A_MEMBER`.
+ */
+abstract roster(actor: PlatformAccountId, projectId: ProjectId): Promise<RosterView>
+
+/**
+ * List invitations addressed to the caller that still await a decision.
+ * @param actor - authenticated account.
+ * @returns pending invitations in issuance order.
+ */
+abstract pendingInvitationsFor(actor: PlatformAccountId): Promise<readonly InvitationView[]>
+
+/**
+ * Find the project bound to a normalized git remote, if the actor holds a membership there.
+ * @param actor - authenticated account whose memberships scope the search.
+ * @param normalizedRemoteUrl - normalized remote URL recorded at creation.
+ * @returns the project view, or undefined when no such membership exists.
+ */
+abstract projectByRemote(actor: PlatformAccountId, normalizedRemoteUrl: string): Promise<ProjectView | undefined>
+
+/**
+ * Read one project's current roster projection version. Consumers key caches
+ * on it; every committed membership-set or role-or-tag mutation publishes a
+ * new strictly increasing value for that project.
+ * @param projectId - project to read.
+ * @returns the project's roster projection version.
+ * @throws {ProjectMembershipError} `PROJECT_NOT_FOUND`.
+ */
+abstract rosterVersion(projectId: ProjectId): Promise<number>
+```
+
+Types: [PlatformAccountId](platform-account.md)
+
+Source: [`packages/platform/project-membership/src/index.ts`](../../packages/platform/project-membership/src/index.ts)
+
+<a id="project-membership-events"></a>
+
+### `project-membership/*` events
+
+<a id="project-membershiproster-invalidated--emit"></a>
+
+#### `project-membership/roster-invalidated` — emit
+
+A membership mutation committed durably and its project's roster view must be re-derived. One event per commit in write order.
+
+```ts cordis-catalog
+/**
+ * A membership mutation committed durably and its project's roster view
+ * must be re-derived. One event per commit in write order.
+ * @param change - project, membership, account, both roster versions, and the change discriminant with any post-state payload.
+ * @mode emit
+ */
+'project-membership/roster-invalidated'(change: RosterInvalidation): void
+```
+
+Source: [`packages/platform/project-membership/src/events.ts`](../../packages/platform/project-membership/src/events.ts)
+<!-- END GENERATED cordis-surface -->

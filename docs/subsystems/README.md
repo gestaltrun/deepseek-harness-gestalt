@@ -21,6 +21,7 @@ One page per subsystem of the DeepSeek Harness: what it is, the data structures 
 | [session-query.md](session-query.md) | logical records, bounded exact-event reads, relationship traces, semantic filters/documents, and full-text result pages |
 | [feedback.md](feedback.md) | lifecycle-bound per-message feedback records, optimistic versions, sidecar persistence, and the Host Remote contract |
 | [platform-account.md](platform-account.md) | GitHub public identity, signed Login Attempts, installation proof-of-possession Account Sessions, and cross-instance invalidation |
+| [project-membership.md](project-membership.md) | cloud projects bound to git remotes, owner/admin/member role gates, function tags, atomic invitations with workspace linking, and roster invalidation events |
 | [remote-protocol.md](remote-protocol.md) | independent Relay Transport and encrypted Companion negotiation, codecs, branded ids, stable errors, and wire limits |
 | [personal-pairing.md](personal-pairing.md) | Settings-owned Mobile Access, same-account Pairing Challenges, authentication words, and Companion-only Device Principals |
 | [session-title.md](session-title.md) | durable title snapshots, cited source-message seqs, and the asynchronous provider contract |

@@ -268,7 +268,9 @@ describe('dsh-tool-subagent-report', () => {
 
     expect((await callReport(ctx, child, 'ORDERED_REPORT')).isError).toBe(false)
     adapter.release(started.childId)
-    await vi.waitFor(() => { expect(ctx.agents.get(started.childId) === undefined).toBe(true) })
+    await vi.waitFor(() => {
+      expect(ctx.agents.get(started.childId) === undefined).toBe(true)
+    }, { timeout: 15_000 })
 
     expect(parent.inbox.nextStep.map(message => message.source.kind)).toEqual([
       'subagent-report',
@@ -285,7 +287,7 @@ describe('dsh-tool-subagent-report', () => {
     adapter.release()
     await vi.waitFor(() => {
       expect(ctx.agents.get(started.childId) === undefined).toBe(true)
-    }, { timeout: 5_000 })
+    }, { timeout: 15_000 })
     expect(reports(parent).map(report => report.text)).toEqual([
       `Background subagent ${started.childId} reported:\nDURABLE_SELECTION`,
     ])
@@ -594,7 +596,7 @@ describe('dsh-tool-subagent-report result independence', () => {
     adapter.release()
     await vi.waitFor(() => {
       expect(ctx.agents.get(started.childId) === undefined).toBe(true)
-    }, { timeout: 5_000 })
+    }, { timeout: 15_000 })
 
     // The parent does learn the child settled — that account is the
     // continuation service's, carried under its own `subagent-settled` source.

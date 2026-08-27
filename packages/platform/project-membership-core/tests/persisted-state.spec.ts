@@ -109,4 +109,40 @@ describe('durable document validation', () => {
     const state = withInvitation({ settledAt: 1.5 })
     expect(() => parse(serialize(state))).toThrow('durable state settledAt must be undefined or a safe integer epoch')
   })
+
+  it('rejects a foreign formatVersion', () => {
+    // serialize() always stamps the current version, so the foreign one is written directly.
+    const document = JSON.parse(serialize(validState())) as Record<string, unknown>
+    document.formatVersion = 1
+    expect(() => parse(JSON.stringify(document))).toThrow('formatVersion 1 is not supported')
+  })
+
+  it('rejects a document that is not valid JSON', () => {
+    expect(() => parse('{not json')).toThrow('durable state is not valid JSON')
+  })
+
+  it.each(['42', 'null', '[]'])('rejects a document body %s that is not an object', (body) => {
+    expect(() => parse(body)).toThrow('durable state document must be an object')
+  })
+
+  it('rejects a row collection that is not an array', () => {
+    const document = JSON.parse(serialize(validState())) as Record<string, unknown>
+    document.projects = {}
+    expect(() => parse(JSON.stringify(document))).toThrow('durable state projects must be an array')
+  })
+
+  it('rejects a project row missing a required string field', () => {
+    const document = JSON.parse(serialize(validState())) as { projects: Array<Record<string, unknown>> }
+    delete document.projects[0]!.id
+    expect(() => parse(JSON.stringify(document))).toThrow('durable state row is missing non-empty string id')
+  })
+
+  it('rejects a link normalizedRemoteUrl that is neither undefined nor a non-empty string', () => {
+    const document = JSON.parse(serialize(validState())) as {
+      memberships: Array<{ link?: { workspaceName: string; normalizedRemoteUrl?: unknown } }>
+    }
+    document.memberships[0]!.link = { workspaceName: 'w', normalizedRemoteUrl: 42 }
+    expect(() => parse(JSON.stringify(document)))
+      .toThrow('durable state normalizedRemoteUrl must be undefined or a non-empty string')
+  })
 })

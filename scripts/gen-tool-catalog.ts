@@ -462,8 +462,18 @@ const TOOL_PACKAGES: ToolPackage[] = [
     pkg: '@deepseek-ai/dsh-tool-subagent',
     dir: 'tool-subagent',
     source: 'packages/subagent/tool-subagent/src/index.ts',
-    requires: ['ctx.tools', 'ctx.subagents', 'ctx.systemPrompt'],
-    writes: ['tool/call', 'tool/result', 'child session events through the chosen provider'],
+    requires: [
+      'ctx.tools',
+      'ctx.subagents',
+      'ctx.systemPrompt',
+      'ctx.fs + ctx.attachments when images are supplied',
+    ],
+    writes: [
+      'tool/call',
+      'tool/result',
+      'child session events through the chosen provider',
+      'durable attachments when images are supplied',
+    ],
     shippedNames: ['subagent', 'subagent_fork'],
     async mount(ctx) {
       await ctx.plugin(SubagentRuntime)

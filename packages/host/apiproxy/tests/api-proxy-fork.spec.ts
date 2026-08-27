@@ -295,6 +295,10 @@ describe('sessions.fork', () => {
     const sourceAgent = ctx.agents.get(source.id)
     if (sourceAgent === undefined) throw new Error('source agent missing')
     const goal = ctx.goals.create(sourceAgent, { objective: 'not mine to keep' })
+    const goalsAtPublication: unknown[] = []
+    ctx.on('agent/created', ({ agent }) => {
+      goalsAtPublication.push(ctx.goals.get(agent))
+    })
 
     const response = await api(ctx).sessions.fork(request({ sessionId: source.id }))
 
@@ -303,6 +307,7 @@ describe('sessions.fork', () => {
     const childId = response.result.value.sessionId
     const child = ctx.agents.get(childId)
     if (child === undefined) throw new Error('fork did not publish the child agent')
+    expect(goalsAtPublication).toEqual([undefined])
     expect(ctx.goals.get(child)).toBeUndefined()
     const childSession = ctx.sessions.get(childId)
     if (childSession === undefined) throw new Error('fork did not publish the child session')

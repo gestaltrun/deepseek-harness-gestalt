@@ -79,6 +79,7 @@ function goalClearChange(current: GoalSnapshot, clearedAt: number): {
  * @param seed - Valid contiguous parent event prefix used to create the child Session.
  * @param clearedAt - Timestamp for the child-owned clear mutation.
  * @returns The original seed when it carries no current goal, otherwise a new seed with one trailing clear event.
+ * @throws When the seed contains malformed or illegal goal history.
  */
 export function clearGoalFromForkSeed(
   seed: readonly SessionEvent[],

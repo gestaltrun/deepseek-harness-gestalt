@@ -68,6 +68,7 @@ export function sessionResolveOptions(
  * @param requestedPath - raw path supplied to the tool.
  * @param operation - verb used in filesystem diagnostics.
  * @returns the resolved regular-file target and its single stat result.
+ * @throws When the filesystem is unavailable, resolution or stat fails, or the target is missing or not a regular file.
  */
 export async function resolveRegularReadTarget(
   ctx: Context,

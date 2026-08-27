@@ -73,7 +73,9 @@ describe('copyModelConfiguration', () => {
     expect(readFileSync(join(target, 'settings.yaml'), 'utf8')).toBe('settings')
     expect(readFileSync(join(target, '.credentials.yaml'), 'utf8')).toBe('credentials')
     expect(() => readFileSync(join(target, '.env'))).toThrow()
-    expect(lstatSync(join(target, 'settings.yaml')).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32') {
+      expect(lstatSync(join(target, 'settings.yaml')).mode & 0o777).toBe(0o600)
+    }
   })
 
   it('rejects symlinked configuration', () => {

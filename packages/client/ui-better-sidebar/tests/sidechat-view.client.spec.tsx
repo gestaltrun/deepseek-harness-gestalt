@@ -5,12 +5,15 @@ import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import { SideChatView, sidechatRootThreadIdOf } from '../src/client/SideChatView.tsx'
 import { builtinTabs } from '../src/client/builtins/tabs.tsx'
 import { api } from '../src/client/api.ts'
+import { createBetterSidebarService } from '../src/client/service.ts'
+import { allLeaves, SidebarStore } from '../src/client/state.ts'
 import type { Context, SidebarSessionList } from '../src/context-types.ts'
 import type { SidebarTab } from '../src/client/state.ts'
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 function tab(threadId: string): SidebarTab {
@@ -23,6 +26,78 @@ function tab(threadId: string): SidebarTab {
 }
 
 describe('SideChatView', () => {
+  it('commits an asynchronous tab close to its original Session only after success', async () => {
+    let release!: () => void
+    const closing = new Promise<void>((resolve) => { release = resolve })
+    const store = new SidebarStore()
+    store.setSession('main-thread')
+    const service = createBetterSidebarService(store)
+    service.registerTab({
+      id: 'transactional',
+      title: 'Transactional',
+      onClose: () => closing,
+      component: () => null,
+    })
+    service.openTab({ type: 'transactional' })
+
+    service.closeTab('transactional')
+    expect(allLeaves(store.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)).toHaveLength(1)
+    store.setSession('other-thread')
+    service.openTab({ type: 'transactional' })
+
+    release()
+    await vi.waitFor(() => {
+      expect(store.tabOpen('main-thread', 'transactional')).toBe(false)
+    })
+    expect(allLeaves(store.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)).toHaveLength(1)
+  })
+
+  it('waits for pending closes without committing after service disposal', async () => {
+    let release!: () => void
+    let disposeService!: () => Promise<void>
+    const closing = new Promise<void>((resolve) => { release = resolve })
+    const store = new SidebarStore()
+    store.setSession('main-thread')
+    const service = createBetterSidebarService(store, (dispose) => { disposeService = dispose })
+    service.registerTab({
+      id: 'transactional',
+      title: 'Transactional',
+      onClose: () => closing,
+      component: () => null,
+    })
+    service.openTab({ type: 'transactional' })
+    service.closeTab('transactional')
+
+    const teardown = disposeService()
+    release()
+    await teardown
+
+    expect(store.tabOpen('main-thread', 'transactional')).toBe(true)
+    service.closeTab('transactional')
+    expect(store.tabOpen('main-thread', 'transactional')).toBe(true)
+  })
+
+  it('keeps a tab open when its asynchronous close lifecycle rejects', async () => {
+    const error = new Error('archive failed')
+    const report = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const store = new SidebarStore()
+    store.setSession('main-thread')
+    const service = createBetterSidebarService(store)
+    service.registerTab({
+      id: 'transactional',
+      title: 'Transactional',
+      onClose: () => Promise.reject(error),
+      component: () => null,
+    })
+    service.openTab({ type: 'transactional' })
+
+    service.closeTab('transactional')
+    await vi.waitFor(() => {
+      expect(report).toHaveBeenCalledWith('[dsh-better-sidebar] tab close rejected:', error)
+    })
+    expect(allLeaves(store.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)).toHaveLength(1)
+  })
+
   it('registers an icon and a provisional identity for the new-tab menu entry', () => {
     vi.stubGlobal('crypto', { randomUUID: () => 'draft-id' })
     const descriptor = builtinTabs({} as Context).find(candidate => candidate.id === 'sidechat')!
@@ -42,16 +117,43 @@ describe('SideChatView', () => {
     })).toBe('session-draft-id')
   })
 
-  it('releases the root Side Chat handle after descendant navigation', () => {
-    const descriptor = builtinTabs({} as Context).find(candidate => candidate.id === 'sidechat')!
-    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ ok: true })
+  it('releases the root Side Chat handle after descendant navigation', async () => {
+    const archiveSession = vi.fn(() => Promise.resolve())
+    const descriptor = builtinTabs({ workspaces: { archiveSession } } as unknown as Context)
+      .find(candidate => candidate.id === 'sidechat')!
+    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ accepted: true, published: true })
 
-    descriptor.onClose?.({
+    await descriptor.onClose?.({
       ...tab('nested-child'),
       meta: { threadId: 'nested-child', rootThreadId: 'side-thread' },
     }, { sessionId: 'main-thread' })
 
     expect(dispose).toHaveBeenCalledWith('side-thread')
+    expect(archiveSession).toHaveBeenCalledWith('side-thread')
+  })
+
+  it('archives a provisional tab when the Host reports durable publication', async () => {
+    const archiveSession = vi.fn(() => Promise.resolve())
+    const descriptor = builtinTabs({ workspaces: { archiveSession } } as unknown as Context)
+      .find(candidate => candidate.id === 'sidechat')!
+    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ accepted: true, published: true })
+
+    await descriptor.onClose?.(tab('draft-thread'), { sessionId: 'main-thread' })
+
+    expect(dispose).toHaveBeenCalledWith('draft-thread')
+    expect(archiveSession).toHaveBeenCalledWith('draft-thread')
+  })
+
+  it('closes an unsent provisional tab without archiving a nonexistent Session', async () => {
+    const archiveSession = vi.fn(() => Promise.resolve())
+    const descriptor = builtinTabs({ workspaces: { archiveSession } } as unknown as Context)
+      .find(candidate => candidate.id === 'sidechat')!
+    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ accepted: true, published: false })
+
+    await descriptor.onClose?.(tab('unsent-thread'), { sessionId: 'main-thread' })
+
+    expect(dispose).toHaveBeenCalledWith('unsent-thread')
+    expect(archiveSession).not.toHaveBeenCalled()
   })
 
   it('mounts the canonical conversation slot for the tab thread without changing the selected Session', () => {

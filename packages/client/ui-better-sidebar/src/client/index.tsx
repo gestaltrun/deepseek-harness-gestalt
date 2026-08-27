@@ -22,6 +22,7 @@ import { RenderBoundary } from './RenderBoundary.tsx'
 import { registerOpenPathInterception, registerTurnTailInterception } from './intercept.tsx'
 import { registerLinkInterception } from './link-intercept.ts'
 import { registerImeGuard } from './ime-guard.ts'
+import { subscribeSideThreadRestoration } from './sidechat-restore.ts'
 import { registerSettingsNavIcon } from './settings-nav-icon.ts'
 import { loadExternalDisable, loadPrefs } from './prefs.ts'
 import { SideCardSection } from './SideCardSection.tsx'
@@ -161,7 +162,7 @@ export function apply(ctx: Context): void {
           const parentSessionId = draft?.parentSessionId ?? summary?.parentId
           const [catalog, model] = await Promise.all([
             ctx.connection.api.llm.models({}, signal),
-            api.sidechatModel(sessionId, parentSessionId, signal),
+            api.sidechatModel(sessionId, parentSessionId, draft !== undefined, signal),
           ])
           if (!catalog.result.ok) return catalog.result
           return {
@@ -259,11 +260,17 @@ export function apply(ctx: Context): void {
   // registrations (the official createXXXStore() factory rule — no
   // module-level singleton).
   const sidebarStore = createSidebarStore()
+  ctx.effect(
+    () => subscribeSideThreadRestoration(ctx, sidebarStore),
+    'dsh-better-sidebar: restore durable Side Chat tabs',
+  )
   // The sidebar registry service: external plugins register tab types and
   // file previewers through `ctx.betterSidebar.registerTab/registerFileViewer`.
   // Published before the panel mounts so consumers injecting 'betterSidebar'
   // are ready by the time the sidebar renders.
-  const service = createBetterSidebarService(sidebarStore)
+  const service = createBetterSidebarService(sidebarStore, dispose => {
+    ctx.effect(() => dispose, 'dsh-better-sidebar: settle pending tab closes')
+  })
   ctx.provide('betterSidebar', service)
   // Terminal tab titles use the host's effective shell name (e.g. bash/zsh)
   // instead of "Terminal 1". Start with a safe fallback and replace it as

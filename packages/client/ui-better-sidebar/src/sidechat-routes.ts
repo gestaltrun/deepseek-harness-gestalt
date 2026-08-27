@@ -28,12 +28,13 @@ import {
   type Agent, type AgentSetup, type CreateAgentOptions, type ModelSelection,
   type ModelSelectionRef, type ResumeAgentOptions,
 } from '@deepseek-ai/dsh-agent'
-import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
+import { foldSubagentDescriptor, snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { foldRequestHeader, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {
   Context,
   SidebarAgentPresetsService,
+  SidebarSessionEvent,
   SidebarSessionPersistenceService,
   SidebarSessionTitleService,
 } from './context-types.ts'
@@ -65,8 +66,8 @@ export interface SidechatRoutes {
   'sidechat.updateQueue'(payload: unknown): Promise<{ accepted: true }>
   /** Apply one permission preset to the Side Chat and its direct parent. */
   'sidechat.permission'(payload: unknown): Promise<{ selected: string }>
-  /** Release the thread's live agent (session and history stay persisted). */
-  'sidechat.dispose'(payload: unknown): Promise<{ accepted: true }>
+  /** Wait for creation, report durable publication, and release the live Agent. */
+  'sidechat.dispose'(payload: unknown): Promise<{ accepted: true; published: boolean }>
 }
 
 type SidechatQueueAction =
@@ -229,24 +230,54 @@ async function composeChildSetup(
   }
 }
 
-/** Build the cold-resume setup from the thread's PERSISTED record (the
- *  recorded preset wins, newest selection event first). */
+/** Recover the model route last adopted by a persisted Side Chat. */
+function persistedModelSelection(events: readonly SidebarSessionEvent[]): ModelSelection | undefined {
+  const descriptorIndex = events.findIndex(event => event.type === 'subagent/descriptor')
+  const ownedEvents = descriptorIndex < 0 ? events : events.slice(descriptorIndex + 1)
+  const requestHeader = foldRequestHeader(ownedEvents as unknown as readonly SessionEvent[])
+  if (requestHeader !== undefined) {
+    const { provider, model, reasoningEffort } = requestHeader.config
+    return {
+      provider,
+      model,
+      ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+    }
+  }
+  const descriptor = foldSubagentDescriptor(events as unknown as readonly SessionEvent[])
+  if (descriptor?.mode !== 'continuable'
+    || descriptor.agentProvider === undefined
+    || descriptor.agentModel === undefined) {
+    return undefined
+  }
+  return { provider: descriptor.agentProvider, model: descriptor.agentModel }
+}
+
+interface PersistedSidechatSetup {
+  readonly setup: AgentSetup
+  readonly selection: ModelSelection | undefined
+}
+
+/** Build cold-resume state from the thread's persisted preset and model route. */
 async function composePersistedSetup(
   ctx: Context,
   childId: SessionId,
-): Promise<AgentSetup> {
+): Promise<PersistedSidechatSetup> {
   const persistence = ctx.get('sessionPersistence') as SidebarSessionPersistenceService | undefined
   if (persistence === undefined) {
-    return () => Promise.resolve()
+    return { setup: () => Promise.resolve(), selection: undefined }
   }
   const inspected = await persistence.inspect(childId)
+  const selection = persistedModelSelection(inspected.events)
   const presetId = resolvePresetId(inspected.meta, inspected.events)
   const presets = ctx.get('agentPresets') as SidebarAgentPresetsService | undefined
   if (presets === undefined || presetId === undefined) {
-    return () => Promise.resolve()
+    return { setup: () => Promise.resolve(), selection }
   }
   const resolved = await presets.resolve(presetId)
-  return async (agentCtx: CordisContext) => { await presets.mount(agentCtx, resolved.id) }
+  return {
+    setup: async (agentCtx: CordisContext) => { await presets.mount(agentCtx, resolved.id) },
+    selection,
+  }
 }
 
 /** One text-block prompt (the thread boundary + question, or a follow-up). */
@@ -295,6 +326,8 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
   const threadDisposers = new Map<SessionId, () => Promise<void>>()
   /** Mutable selections installed into live Side Chat Agent scopes. */
   const threadSelections = new Map<SessionId, ModelSelectionRef>()
+  /** First-prompt operations that a concurrent close must observe to completion. */
+  const threadPublications = new Map<SessionId, Promise<void>>()
   const inFlight = new Set<Promise<void>>()
   let stopping = false
   let teardown: Promise<void> | undefined
@@ -413,13 +446,19 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
         if (agents?.resume === undefined) {
           throw new SidebarError('sidechat-error', 'the agents service is unavailable', 503)
         }
-        const baseSetup = await composePersistedSetup(ctx, childId)
+        const persisted = await composePersistedSetup(ctx, childId)
         const selectionRef = threadSelections.get(childId)
-          ?? { current: undefined, assembled: undefined }
+          ?? { current: persisted.selection, assembled: undefined }
         try {
           const handle = await agents.resume({
             resumeSessionId: childId as SessionId,
-            setup: withModelSelection(baseSetup, selectionRef),
+            ...(selectionRef.current === undefined
+              ? {}
+              : { agentOptions: {
+                  provider: selectionRef.current.provider,
+                  model: selectionRef.current.model,
+                } }),
+            setup: withModelSelection(persisted.setup, selectionRef),
           })
           threadDisposers.set(childId, () => handle.dispose())
           threadSelections.set(childId, selectionRef)
@@ -448,13 +487,25 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
 
     'sidechat.model': async (payload: unknown) => {
       const childId = SessionId(requireString(payload, 'childId'))
+      const provisional = (payload as { provisional?: unknown }).provisional === true
       const parentSessionId = typeof (payload as { parentSessionId?: unknown }).parentSessionId === 'string'
         ? SessionId((payload as { parentSessionId: string }).parentSessionId)
         : undefined
       const retained = threadSelections.get(childId)?.current
-      const agent = liveThreadAgent(ctx, childId)
+      const child = liveThreadAgent(ctx, childId)
+      const agent = child
         ?? (parentSessionId === undefined ? undefined : liveThreadAgent(ctx, parentSessionId))
       let current = retained
+      if (current === undefined && child === undefined && !provisional) {
+        const persistence = ctx.get('sessionPersistence') as SidebarSessionPersistenceService | undefined
+        if (persistence !== undefined) {
+          const inspected = await persistence.inspect(childId)
+          current = persistedModelSelection(inspected.events)
+          if (current !== undefined) {
+            threadSelections.set(childId, { current, assembled: undefined })
+          }
+        }
+      }
       if (current === undefined) {
         if (agent === undefined) {
           throw new SidebarError('sidechat-error', `model owner for "${childId}" is unavailable`, 409)
@@ -556,22 +607,36 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
 
     'sidechat.dispose': async (payload: unknown) => {
       const childId = SessionId(requireString(payload, 'childId'))
-      threadSelections.delete(childId)
+      await threadPublications.get(childId)
+      let published = liveThreadAgent(ctx, childId) !== undefined
+      if (!published) {
+        const persistence = ctx.get('sessionPersistence') as SidebarSessionPersistenceService | undefined
+        if (persistence === undefined) {
+          throw new SidebarError('sidechat-error', 'persisted Side Chat lookup is unavailable', 503)
+        }
+        published = (await persistence.list()).some(header => header.id === childId)
+      }
       const dispose = threadDisposers.get(childId)
       if (dispose !== undefined) {
-        threadDisposers.delete(childId)
-        try {
-          await dispose()
-        } catch {
-          // The agent may already be gone (restart); the session persists.
-        }
+        await dispose()
+        if (threadDisposers.get(childId) === dispose) threadDisposers.delete(childId)
       }
-      return { accepted: true as const }
+      threadSelections.delete(childId)
+      return { accepted: true as const, published }
     },
 
   }
   const routes: SidechatRoutes = {
-    'sidechat.start': payload => admit(() => rawRoutes['sidechat.start'](payload)),
+    'sidechat.start': (payload) => {
+      const childId = SessionId(requireString(payload, 'childId'))
+      const result = admit(() => rawRoutes['sidechat.start'](payload))
+      const publication = result.then(() => undefined, () => undefined)
+      threadPublications.set(childId, publication)
+      void publication.finally(() => {
+        if (threadPublications.get(childId) === publication) threadPublications.delete(childId)
+      })
+      return result
+    },
     'sidechat.prompt': payload => admit(() => rawRoutes['sidechat.prompt'](payload)),
     'sidechat.model': payload => admit(() => rawRoutes['sidechat.model'](payload)),
     'sidechat.selectModel': payload => admit(() => rawRoutes['sidechat.selectModel'](payload)),
@@ -585,6 +650,7 @@ export function buildSidechatApi(ctx: Context): SidechatApi {
     stopping = true
     teardown = (async () => {
       await Promise.all([...inFlight])
+      threadPublications.clear()
       threadSelections.clear()
       const disposers = [...threadDisposers.values()]
       threadDisposers.clear()

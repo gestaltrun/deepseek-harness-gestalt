@@ -15,7 +15,15 @@ import type {
   SidebarSessionSummary,
   SidebarSubagentCatalog,
 } from '../context-types.ts'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import { SIDE_LABEL_PREFIX } from '../sidechat-core.ts'
+import type { SideThreadRef } from './state.ts'
+
+/** Workspace archive projection required before Side Chat restoration. */
+export interface SideThreadArchiveSnapshot {
+  phase: 'pending' | 'ready'
+  archivedSessionIds: readonly SessionId[]
+}
 
 /**
  * Side Chat threads ride the subagent origin (main-list hiding + the RPC
@@ -31,7 +39,7 @@ export function isSideThreadSummary(summary: SidebarSessionSummary): boolean {
 /** Count the direct subagent children of one session (durable `origin` rows). */
 export function directSubagentCount(
   byId: SidebarSessionList['byId'],
-  sessionId: string,
+  sessionId: SessionId,
 ): number {
   let count = 0
   for (const summary of Object.values(byId)) {
@@ -86,6 +94,28 @@ export function collectBranchIds(
   }
   if (rootId !== undefined) visit(rootId)
   return out
+}
+
+/** List published, unarchived direct Side Chat children eligible for tab restoration. */
+export function restorableSideThreads(
+  byId: SidebarSessionList['byId'],
+  sessionId: string,
+  archive: SideThreadArchiveSnapshot,
+): SideThreadRef[] {
+  if (archive.phase !== 'ready') return []
+  const archived = new Set(archive.archivedSessionIds)
+  const threads: SideThreadRef[] = []
+  for (const summary of Object.values(byId)) {
+    if (summary.origin !== 'subagent' || summary.parentId !== sessionId) continue
+    if (summary.provisional === true || summary.blank !== false) continue
+    if (!summary.displayTitle.startsWith(SIDE_LABEL_PREFIX)) continue
+    if (archived.has(summary.id)) continue
+    threads.push({
+      threadId: summary.id,
+      title: summary.displayTitle.slice(SIDE_LABEL_PREFIX.length),
+    })
+  }
+  return threads
 }
 
 /**

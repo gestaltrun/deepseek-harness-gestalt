@@ -300,6 +300,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
 
   const state = snapshot.state
   const sessionId = snapshot.sessionId
+
   const summaryCwd = sessionId === undefined ? undefined : sessionList.byId[sessionId]?.cwd
   const pushedBottomHeight = (bottomOpen: boolean, bottomHeight: number): number => layoutPushSize({
     narrow,

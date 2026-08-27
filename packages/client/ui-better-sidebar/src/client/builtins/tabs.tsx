@@ -195,12 +195,13 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
       // One tab per thread: an already-open thread focuses instead of
       // duplicating; unbound fresh tabs never dedupe (each mints its own).
       dedupeKey: (tab) => sidechatThreadIdOf(tab),
-      // Closing the tab releases the thread's live agent while its Session
-      // and history remain persisted.
-      onClose: (tab) => {
+      // Closing the tab archives the Session without deleting its history and
+      // releases its process-local Agent handle.
+      onClose: async (tab) => {
         const threadId = sidechatRootThreadIdOf(tab)
         if (threadId !== undefined) {
-          void api.sidechatDispose(threadId).catch(() => {})
+          const { published } = await api.sidechatDispose(threadId)
+          if (published) await ctx.workspaces.archiveSession(threadId)
         }
       },
       component: ({ ctx, scope, tab, visible }) => (

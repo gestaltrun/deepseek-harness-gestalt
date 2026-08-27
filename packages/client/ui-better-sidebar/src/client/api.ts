@@ -344,10 +344,16 @@ export const api = {
     return result
   },
   /** Read Side Chat's current model selection and route availability. */
-  sidechatModel: (childId: SessionId, parentSessionId?: SessionId, signal?: AbortSignal) =>
+  sidechatModel: (
+    childId: SessionId,
+    parentSessionId: SessionId | undefined,
+    provisional: boolean,
+    signal?: AbortSignal,
+  ) =>
     call<{ current: ModelSelection; routable: boolean }>('sidechat.model', {
       childId,
       ...(parentSessionId === undefined ? {} : { parentSessionId }),
+      ...(provisional ? { provisional: true } : {}),
     }, signal),
   /** Validate and apply one Side Chat model selection. */
   sidechatSelectModel: (
@@ -381,7 +387,7 @@ export const api = {
   }),
   /** Release a Side Chat thread's live agent (history stays persisted). */
   sidechatDispose: (childId: SessionId) =>
-    call<{ accepted: true }>('sidechat.dispose', { childId }),
+    call<{ accepted: true; published: boolean }>('sidechat.dispose', { childId }),
   /** The effective terminal shell and its display name (plugin-global). */
   shellGet: () =>
     call<{ shell: string; name: string }>('shell.get', {}),

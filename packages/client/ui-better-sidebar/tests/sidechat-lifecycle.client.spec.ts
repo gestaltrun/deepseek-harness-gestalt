@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { liveModelSelection, type Agent, type AgentOptions, type AgentSetup } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { snapshotSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
+import { Context as CordisContext } from '@deepseek-ai/cordis'
 import { buildSidechatApi } from '../src/sidechat-routes.ts'
 import type { Context } from '../src/context-types.ts'
 
@@ -42,6 +44,106 @@ describe('sidechat route lifecycle', () => {
     }))
     expect(inject).toHaveBeenCalledOnce()
     expect(followup).toHaveBeenCalledOnce()
+    await sidechat.dispose()
+  })
+
+  it('waits for an in-flight first prompt and reports the Host publication result', async () => {
+    let childLive = false
+    let completeCreate!: (handle: { agent: Agent; dispose(): Promise<void> }) => void
+    const creation = new Promise<{ agent: Agent; dispose(): Promise<void> }>((resolve) => {
+      completeCreate = resolve
+    })
+    const child = {
+      id: 'draft-child',
+      ctx: { effect: vi.fn() },
+      inject: vi.fn(),
+      followup: vi.fn(),
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { events: [], header: {} },
+    } as unknown as Agent
+    const parent = {
+      id: 'parent',
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { id: 'parent', events: [], header: {} },
+    } as unknown as Agent
+    const disposeHandle = vi.fn(async () => { childLive = false })
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'agents') {
+          return {
+            get: (id: string) => id === 'parent' ? parent : id === 'draft-child' && childLive ? child : undefined,
+            create: () => creation,
+          }
+        }
+        if (name === 'sessionPersistence') return { list: () => Promise.resolve([]) }
+        return undefined
+      },
+    } as unknown as Context
+    const sidechat = buildSidechatApi(ctx)
+
+    const starting = sidechat.routes['sidechat.start']({
+      sessionId: 'parent', childId: 'draft-child', text: 'first question',
+    })
+    const closing = sidechat.routes['sidechat.dispose']({ childId: 'draft-child' })
+    expect(disposeHandle).not.toHaveBeenCalled()
+    childLive = true
+    completeCreate({ agent: child, dispose: disposeHandle })
+
+    await expect(starting).resolves.toEqual({ childId: 'draft-child', accepted: true })
+    await expect(closing).resolves.toEqual({ accepted: true, published: true })
+    expect(disposeHandle).toHaveBeenCalledOnce()
+    await sidechat.dispose()
+  })
+
+  it('reports a release failure and retains the handle for a close retry', async () => {
+    let childLive = true
+    const child = {
+      id: 'child',
+      ctx: { effect: vi.fn() },
+      inject: vi.fn(),
+      followup: vi.fn(),
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { events: [], header: {} },
+    } as unknown as Agent
+    const parent = {
+      id: 'parent',
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { id: 'parent', events: [], header: {} },
+    } as unknown as Agent
+    const failure = new Error('release failed')
+    const disposeHandle = vi.fn()
+      .mockRejectedValueOnce(failure)
+      .mockImplementationOnce(async () => { childLive = false })
+    const ctx = {
+      get: (name: string) => name === 'agents'
+        ? {
+            get: (id: string) => id === 'parent' ? parent : id === 'child' && childLive ? child : undefined,
+            create: () => Promise.resolve({ agent: child, dispose: disposeHandle }),
+          }
+        : undefined,
+    } as unknown as Context
+    const sidechat = buildSidechatApi(ctx)
+    await sidechat.routes['sidechat.start']({
+      sessionId: 'parent', childId: 'child', text: 'first question',
+    })
+
+    await expect(sidechat.routes['sidechat.dispose']({ childId: 'child' })).rejects.toBe(failure)
+    await expect(sidechat.routes['sidechat.dispose']({ childId: 'child' }))
+      .resolves.toEqual({ accepted: true, published: true })
+    expect(disposeHandle).toHaveBeenCalledTimes(2)
+    await sidechat.dispose()
+  })
+
+  it('reports an unsent draft as unpublished from the durable Session list', async () => {
+    const list = vi.fn(() => Promise.resolve([]))
+    const ctx = {
+      get: (name: string) => name === 'sessionPersistence' ? { list } : undefined,
+    } as unknown as Context
+    const sidechat = buildSidechatApi(ctx)
+
+    await expect(sidechat.routes['sidechat.dispose']({ childId: 'draft-child' }))
+      .resolves.toEqual({ accepted: true, published: false })
+    expect(list).toHaveBeenCalledOnce()
     await sidechat.dispose()
   })
 
@@ -172,6 +274,150 @@ describe('sidechat route lifecycle', () => {
       routable: true,
     })
     await sidechat.dispose()
+  })
+
+  it('uses the live parent model for a provisional Side Chat', async () => {
+    const inspect = vi.fn(() => Promise.reject(new Error('draft is not persisted')))
+    const parent = {
+      id: 'parent',
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { events: [], header: {} },
+    } as unknown as Agent
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'agents') return { get: (id: string) => id === 'parent' ? parent : undefined }
+        if (name === 'sessionPersistence') return { inspect }
+        return undefined
+      },
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.model']({
+      childId: 'draft-child', parentSessionId: 'parent', provisional: true,
+    })).resolves.toEqual({
+      current: { provider: 'deepseek', model: 'chat' },
+      routable: true,
+    })
+    expect(inspect).not.toHaveBeenCalled()
+    await sidechat.dispose()
+  })
+
+  it('falls back to the descriptor before the child records its own request header', async () => {
+    const events = [
+      {
+        type: 'request/header',
+        seq: 0,
+        time: 1,
+        data: {
+          header: { config: { provider: 'parent-provider', model: 'parent-model' } },
+          reason: 'initial',
+        },
+      },
+      {
+        type: 'subagent/descriptor',
+        seq: 1,
+        time: 2,
+        data: snapshotSubagentDescriptor({
+          mode: 'continuable',
+          provider: 'sidechat',
+          label: 'Side: persisted',
+          agentProvider: 'child-provider',
+          agentModel: 'child-model',
+        }),
+      },
+    ]
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'sessionPersistence') {
+          return { inspect: vi.fn(() => Promise.resolve({ meta: {}, events })) }
+        }
+        if (name === 'llm') return { listProviders: () => [{ id: 'child-provider' }] }
+        return undefined
+      },
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.model']({ childId: 'cold-child' })).resolves.toEqual({
+      current: { provider: 'child-provider', model: 'child-model' },
+      routable: true,
+    })
+    await sidechat.dispose()
+  })
+
+  it('restores the last used model before a persisted Side Chat resumes', async () => {
+    const events = [
+      {
+        type: 'subagent/descriptor',
+        seq: 0,
+        time: 1,
+        data: snapshotSubagentDescriptor({
+          mode: 'continuable',
+          provider: 'sidechat',
+          label: 'Side: persisted',
+          agentProvider: 'initial-provider',
+          agentModel: 'initial-model',
+        }),
+      },
+      {
+        type: 'request/header',
+        seq: 1,
+        time: 2,
+        data: {
+          header: {
+            config: { provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' },
+          },
+          reason: 'change',
+        },
+      },
+      {
+        type: 'user/message',
+        seq: 2,
+        time: 3,
+        data: { content: [{ type: 'text', text: 'Side conversation boundary.' }] },
+      },
+    ]
+    const agentCtx = new CordisContext()
+    let resumedAgent: Agent | undefined
+    const resume = vi.fn(async (options: {
+      agentOptions?: AgentOptions
+      setup?: AgentSetup
+    }) => {
+      await options.setup?.(agentCtx)
+      resumedAgent = {
+        id: 'cold-child',
+        ctx: agentCtx,
+        options: options.agentOptions ?? {},
+        session: { events, header: {} },
+        followup: vi.fn(),
+      } as unknown as Agent
+      return { agent: resumedAgent, dispose: () => Promise.resolve() }
+    })
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'agents') return { get: () => undefined, resume }
+        if (name === 'sessionPersistence') {
+          return { inspect: vi.fn(() => Promise.resolve({ meta: {}, events })) }
+        }
+        if (name === 'llm') return { listProviders: () => [{ id: 'grok' }] }
+        return undefined
+      },
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.model']({ childId: 'cold-child' })).resolves.toEqual({
+      current: { provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high' },
+      routable: true,
+    })
+    await sidechat.routes['sidechat.prompt']({ childId: 'cold-child', text: 'continue', mode: 'queue' })
+
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
+      agentOptions: { provider: 'grok', model: 'grok-4.6' },
+    }))
+    expect(liveModelSelection(resumedAgent!)).toEqual({
+      provider: 'grok', model: 'grok-4.6', reasoningEffort: 'high',
+    })
+    await sidechat.dispose()
+    await agentCtx.fiber.dispose()
   })
 
   it('waits for admitted resume work and disposes its handle before teardown completes', async () => {

@@ -16,6 +16,7 @@
  * the open turn and carrying the partial content as a structured text
  * snapshot inside the boundary prompt.
  */
+import type { SessionId } from '@deepseek-ai/dsh-session'
 /** The durable thread-label prefix used to identify Side Chat Sessions. */
 export const SIDE_LABEL_PREFIX = 'Side: '
 
@@ -311,6 +312,18 @@ export function buildOpenTurnSnapshot(events: readonly SidechatLogEvent[]): stri
   return body.length > SNAPSHOT_TOTAL_CAP
     ? `Parent session in-progress turn (reference only):\n\n${body.slice(0, SNAPSHOT_TOTAL_CAP)}…`
     : `Parent session in-progress turn (reference only):\n\n${body}`
+}
+
+/** The thread a Side Chat tab is bound to, read from its opaque tab meta. */
+export function sidechatTabThreadId(meta: unknown): SessionId | undefined {
+  const record = meta as { threadId?: unknown } | undefined
+  return typeof record?.threadId === 'string' ? record.threadId as SessionId : undefined
+}
+
+/** Return the root thread retained while a Side Chat tab displays a descendant. */
+export function sidechatTabRootThreadId(meta: unknown): SessionId | undefined {
+  const record = meta as { rootThreadId?: unknown } | undefined
+  return typeof record?.rootThreadId === 'string' ? record.rootThreadId as SessionId : sidechatTabThreadId(meta)
 }
 
 /** Truncate + prefix a question into a durable thread label. */

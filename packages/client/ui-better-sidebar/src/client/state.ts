@@ -10,6 +10,8 @@
  * operations are pure functions over the node, unit-tested in tests/state.spec.ts.
  */
 import { SIDEBAR_PREFS_DEFAULTS, type SidebarPrefs } from '../prefs-shared.ts'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import { sidechatTabRootThreadId } from '../sidechat-core.ts'
 import { isNarrowWidth } from './breakpoints.ts'
 
 /**
@@ -112,6 +114,8 @@ export interface SidebarState {
   bottomSplits: SplitNode
   /** Free windows (tabs dragged out onto the conversation area). */
   floats: FloatWindow[]
+  /** Locally closed Side Chat thread ids, including archive projection delay. */
+  closedSideThreads: SessionId[]
 }
 
 export const PANEL_MIN = 280
@@ -212,6 +216,7 @@ export function makeDefaultState(width = PANEL_DEFAULT, panelOpen = true): Sideb
     bottomOpenedOnce: false,
     bottomSplits: bottomLeaf,
     floats: [],
+    closedSideThreads: [],
   }
 }
 
@@ -469,16 +474,27 @@ export function removeLeafAt(node: SplitNode, paneId: string): SplitNode {
   return { ...node, sizes: [...node.sizes], children }
 }
 
-/** Close a tab; an emptied leaf is removed (unless it is the only pane). */
+/** Record a closed Side Chat thread against local list reconciliation. */
+export function tombstoneSideThread(state: SidebarState, tab: SidebarTab): SidebarState {
+  if (tab.type !== 'sidechat') return state
+  const threadId = sidechatTabRootThreadId(tab.meta)
+  if (threadId === undefined || state.closedSideThreads.includes(threadId)) return state
+  return { ...state, closedSideThreads: [...state.closedSideThreads, threadId] }
+}
+
+/** Close a tab; an emptied leaf is removed unless it is the only pane. */
 export function closeTab(state: SidebarState, paneId: string, tabId: string): SidebarState {
   const key = treeOf(state, paneId)
   let emptied = false
+  let closed: SidebarTab | undefined
   const splits = mapLeaf(state[key], paneId, (leaf) => {
+    closed = leaf.tabs.find(tab => tab.id === tabId)
     leaf.tabs = leaf.tabs.filter(tab => tab.id !== tabId)
     if (leaf.active === tabId) leaf.active = leaf.tabs[leaf.tabs.length - 1]?.id ?? null
     if (leaf.tabs.length === 0) emptied = true
   })
-  return { ...state, [key]: emptied ? removeLeafAt(splits, paneId) : splits }
+  const closedState: SidebarState = { ...state, [key]: emptied ? removeLeafAt(splits, paneId) : splits }
+  return closed === undefined ? closedState : tombstoneSideThread(closedState, closed)
 }
 
 /** Activate a tab in its pane (the pane's own tree). */
@@ -884,11 +900,11 @@ export function dockFloat(state: SidebarState, floatId: string, toPane?: string)
   }
 }
 
-/** Close the free window holding a tab (the tab closes WITH the window —
- *  the caller fires the descriptor's onClose lifecycle). */
+/** Close the free window holding a tab; the caller fires the tab lifecycle. */
 export function closeFloatByTab(state: SidebarState, tabId: string): SidebarState {
-  if (!state.floats.some(f => f.tab.id === tabId)) return state
-  return { ...state, floats: state.floats.filter(f => f.tab.id !== tabId) }
+  const float = state.floats.find(f => f.tab.id === tabId)
+  if (float === undefined) return state
+  return tombstoneSideThread({ ...state, floats: state.floats.filter(f => f.tab.id !== tabId) }, float.tab)
 }
 
 /** Prefix marking a tab id as an agent-owned terminal (suffix is the uuid). */
@@ -959,6 +975,55 @@ export function reconcileAgentTerminals(
     next = openTabInActivePane(next, tab)
   }
   return next
+}
+
+/** One durable Side Chat thread eligible for tab restoration. */
+export interface SideThreadRef {
+  /** Durable child Session id. */
+  threadId: SessionId
+  /** Durable label with the `Side: ` prefix removed. */
+  title: string
+}
+
+/**
+ * Add missing durable Side Chat threads to the active pane without changing an existing active tab.
+ * @param state - Current per-session sidebar state.
+ * @param threads - Published, unarchived Side Chat threads owned by the Session.
+ * @returns Updated state, or the same reference when every thread already has a tab.
+ */
+export function reconcileSideThreads(state: SidebarState, threads: readonly SideThreadRef[]): SidebarState {
+  const openThreadIds = new Set(
+    allLeaves(state.splits).concat(allLeaves(state.bottomSplits)).flatMap(leaf => leaf.tabs)
+      .concat(state.floats.map(float => float.tab))
+      .filter(tab => tab.type === 'sidechat')
+      .map(tab => sidechatTabRootThreadId(tab.meta))
+      .filter((id): id is string => id !== undefined),
+  )
+  const toRestore = threads.filter(thread =>
+    !openThreadIds.has(thread.threadId) && !state.closedSideThreads.includes(thread.threadId))
+  if (toRestore.length === 0) return state
+  const first = toRestore[0]
+  let targetId = state.activePane ?? firstLeaf(state.splits).id
+  // The active pane can refer to a pane removed by a prior layout update.
+  if (!allLeaves(state[treeOf(state, targetId)]).some(leaf => leaf.id === targetId)) {
+    targetId = firstLeaf(state.splits).id
+  }
+  const targetKey = treeOf(state, targetId)
+  return {
+    ...state,
+    activePane: targetId,
+    [targetKey]: mapLeaf(state[targetKey], targetId, (leaf) => {
+      for (const thread of toRestore) {
+        leaf.tabs = [...leaf.tabs, {
+          id: `sidechat:${thread.threadId}`,
+          type: 'sidechat',
+          title: thread.title,
+          meta: { threadId: thread.threadId },
+        }]
+      }
+      if (leaf.active === null && first !== undefined) leaf.active = `sidechat:${first.threadId}`
+    }),
+  }
 }
 
 // ── The per-session store ──────────────────────────────────────────────────
@@ -1161,6 +1226,12 @@ export function sanitizeState(parsed: unknown): SidebarState | undefined {
       floats.push({ id: candidate.id, tab, ...clampFloatGeometry(candidate.x, candidate.y, candidate.w, candidate.h) })
     }
   }
+  // Layouts written before this field default to no local tombstones.
+  const closedSideThreads = Array.isArray(record.closedSideThreads)
+    ? record.closedSideThreads
+        .filter((item): item is string => typeof item === 'string')
+        .map(item => item as SessionId)
+    : []
   const requestedActivePane = typeof record.activePane === 'string'
     ? (reid.get(record.activePane) ?? record.activePane)
     : null
@@ -1189,6 +1260,7 @@ export function sanitizeState(parsed: unknown): SidebarState | undefined {
     bottomOpenedOnce: record.bottomOpenedOnce === true,
     bottomSplits,
     floats,
+    closedSideThreads,
   }
 }
 
@@ -1507,6 +1579,14 @@ export class SidebarStore {
       }
     }, 200)
     this.persistTimers.set(sessionId, timer)
+  }
+
+  /** Restore missing tabs for one Session without changing the active Session. */
+  restoreSideThreadsFor(sessionId: SessionId, threads: readonly SideThreadRef[]): void {
+    if (resetRequested()) return
+    const reconcile = (state: SidebarState): SidebarState => reconcileSideThreads(state, threads)
+    if (this.snapshot.sessionId === sessionId) this.reduce(reconcile)
+    else this.reduceFor(sessionId, reconcile)
   }
 
   private notify(): void {

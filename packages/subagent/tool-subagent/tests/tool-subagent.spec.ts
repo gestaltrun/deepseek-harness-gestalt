@@ -1717,6 +1717,29 @@ describe('subagent image attachments', () => {
     expect(starts).toBe(0)
   })
 
+  it('checks job-controller admission before saving image attachments', async () => {
+    let starts = 0
+    const { ctx, fs, store } = await setupWithImages({
+      onStart: () => { starts += 1 },
+    })
+    await ctx.plugin(LocalJobRegistry)
+    fs.files.set('key:shot.png', new TextEncoder().encode('fake-png-bytes'))
+    const parent = agentWithSession()
+    Object.assign(parent, { ctx: ctx.plugin(() => {}).ctx })
+
+    const result = await callSubagent(ctx, {
+      description: 'inspect image',
+      prompt: 'describe it',
+      images: ['shot.png'],
+      run_in_background: true,
+    }, { agent: parent })
+
+    expect(result.isError).toBe(true)
+    expect(text(result)).toContain('no job controller serves this agent')
+    expect(store.saved).toEqual([])
+    expect(starts).toBe(0)
+  })
+
   it('omits images from the schema on an incapable backend', async () => {
     const ctx = await setup({ provider: 'mock' }, { capabilities: { images: false } })
     const schema = ctx.tools.schemas().find(s => s.name === 'subagent')

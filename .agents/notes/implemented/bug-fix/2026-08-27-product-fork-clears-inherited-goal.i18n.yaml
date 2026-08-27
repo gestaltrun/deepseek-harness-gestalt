@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-27-product-fork-clears-inherited-goal.md
-2026-08-27-product-fork-clears-inherited-goal.md: 2571302e042de12f46448775ca48c51577764428
-2026-08-27-product-fork-clears-inherited-goal.zh.md: 41bf266807c4c62200a47ee13141c6b3c0692608
+2026-08-27-product-fork-clears-inherited-goal.md: 9676315690840ff00528679f9bc9ae644d9e80b7
+2026-08-27-product-fork-clears-inherited-goal.zh.md: e99614824704b48ea3db167a00db3045244e11aa

@@ -42,6 +42,9 @@
       "path": "../../fs/fs"
     },
     {
+      "path": "../../fs/tool-fs"
+    },
+    {
       "path": "../../sandbox/sandbox"
     },
     {

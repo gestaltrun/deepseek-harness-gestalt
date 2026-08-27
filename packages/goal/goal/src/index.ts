@@ -56,6 +56,46 @@ export type * from './domain.ts'
 export { GOAL_CHANGE_VERSION, GoalError, GoalId } from './runtime.ts'
 export { decodeGoalChange, foldGoal, goalChangeRef } from './fold.ts'
 
+/** Build one durable clear change for a current goal. */
+function goalClearChange(current: GoalSnapshot, clearedAt: number): {
+  tombstone: GoalRef
+  change: GoalClearChangeMeta
+} {
+  const tombstone: GoalRef = { id: current.id, revision: current.revision + 1 }
+  return {
+    tombstone,
+    change: {
+      kind: 'goal/change',
+      version: GOAL_CHANGE_VERSION,
+      operation: 'clear',
+      cleared: tombstone,
+      clearedAt,
+    },
+  }
+}
+
+/**
+ * Append a child-owned clear tombstone when a fork seed ends with a current goal.
+ * @param seed - Valid contiguous parent event prefix used to create the child Session.
+ * @param clearedAt - Timestamp for the child-owned clear mutation.
+ * @returns The original seed when it carries no current goal, otherwise a new seed with one trailing clear event.
+ */
+export function clearGoalFromForkSeed(
+  seed: readonly SessionEvent[],
+  clearedAt = Date.now(),
+): readonly SessionEvent[] {
+  const state = emptyGoalFoldState()
+  for (const event of seed) applyGoalEvent(state, event)
+  const current = state.goal
+  if (current === undefined) return seed
+  const updatedAt = state.updatedAt
+  /* v8 ignore next -- a folded current goal always carries its mutation time. */
+  if (updatedAt === undefined) throw new Error('current fork-seed goal has no mutation time')
+  const time = Math.max(clearedAt, updatedAt)
+  const { change } = goalClearChange(current, time)
+  return [...seed, { seq: seed.length, time, type: 'goal/change', data: change }]
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     goals: GoalService
@@ -377,52 +417,12 @@ export class GoalService extends TypertRemoteService {
   clear(agent: Agent, ref: GoalRef): GoalRef {
     const cache = this.prepareMutation(agent)
     const current = this.expectCurrent(cache, ref)
-    const tombstone: GoalRef = { id: current.id, revision: current.revision + 1 }
-    const change: GoalClearChangeMeta = {
-      kind: 'goal/change',
-      version: GOAL_CHANGE_VERSION,
-      operation: 'clear',
-      cleared: tombstone,
-      clearedAt: this.nextMutationTime(cache),
-    }
-    this.commit(agent, cache, change, 'disarmed')
-    return { ...tombstone }
+    return this.commitClear(agent, cache, current)
   }
 
-  /**
-   * Clear a goal that arrived only through a fork's seed prefix, so a forked
-   * thread starts goalless instead of owning a copy of its parent's objective.
-   *
-   * A product fork seeds the child with a prefix of the parent's log, and any
-   * `goal/change` inside that prefix would otherwise fold into the child's
-   * current goal. This method appends one clear tombstone when — and only
-   * when — the child's current goal came entirely from the seed and the child
-   * has appended no goal mutation of its own beyond it. Callers invoke it once
-   * at fork creation; the durable tombstone keeps replay and later resumes
-   * stable without re-running the sweep.
-   *
-   * @param agent - owning live agent of the freshly created forked session.
-   * @returns the tombstone ref when a goal was cleared, otherwise `undefined`.
-   */
-  clearInherited(agent: Agent): GoalRef | undefined {
-    const cache = this.prepareMutation(agent)
-    const seedLength = agent.session.header.seedLength
-    if (seedLength === undefined || seedLength <= 0) return undefined
-    // A goal mutation beyond the seed prefix means the thread already took
-    // goal ownership (including an earlier sweep's tombstone): leave it be.
-    for (const event of agent.session.events.slice(seedLength)) {
-      if (event.type === 'goal/change') return undefined
-    }
-    const current = cache.state.goal
-    if (current === undefined) return undefined
-    const tombstone: GoalRef = { id: current.id, revision: current.revision + 1 }
-    const change: GoalClearChangeMeta = {
-      kind: 'goal/change',
-      version: GOAL_CHANGE_VERSION,
-      operation: 'clear',
-      cleared: tombstone,
-      clearedAt: this.nextMutationTime(cache),
-    }
+  /** Commit one clear tombstone for a validated current goal. */
+  private commitClear(agent: Agent, cache: GoalCache, current: GoalSnapshot): GoalRef {
+    const { tombstone, change } = goalClearChange(current, this.nextMutationTime(cache))
     this.commit(agent, cache, change, 'disarmed')
     return { ...tombstone }
   }

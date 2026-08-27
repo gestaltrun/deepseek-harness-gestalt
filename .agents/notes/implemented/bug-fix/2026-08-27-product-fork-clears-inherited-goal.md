@@ -10,9 +10,7 @@ A side conversation is created by `session.fork`: the child session is seeded wi
 
 ## Decision
 
-`GoalService.clearInherited(agent)` is the fork-boundary verb. The host `session.fork` facade calls it once, right after the child agent is created. The method reads the child's durable `header.seedLength` boundary: when the current goal came entirely from the seed prefix and the child has appended no `goal/change` of its own, it commits one clear tombstone into the child's own log. The tombstone makes the sweep idempotent — replay, later resumes, and a repeated call read it and never re-run the sweep. A child that already mutated its goal (resumed, replaced, or cleared it) keeps its own state.
-
-A sweep failure after the child is published degrades to the inherited-goal view and is logged, rather than failing the fork: the RPC has already committed the child, and reporting fork failure for a published session would misreport durable state.
+`clearGoalFromForkSeed(seed)` is a pure pre-publication transform owned by the goal package. It folds the contiguous parent prefix and, when a current goal exists, returns a new seed with one trailing clear tombstone. The host keeps `header.seedLength` equal to the parent-prefix length, so the tombstone is in the child's owned suffix while `AgentRegistry.create` admits the complete seed and publishes the child atomically. A malformed prefix or clear change fails before the child exists.
 
 Automation seeding is unchanged: subagent fork providers seed child logs directly and keep the inherit-then-disarm posture, because an automation child never owns the parent's objective as a human thread does.
 
@@ -22,6 +20,8 @@ The persistence decision this narrows stays active. The session log remains the 
 
 **Filter `goal/change` out of the fork seed.** The seed must stay contiguous from seq 0; interior removal breaks the replay contract. Cutting before the first goal event is impractical and would hide conversation history.
 
+**Clear through `GoalService` after child creation.** Creation publishes session and agent lifecycle events before returning. Listeners could observe the inherited goal, and a clear failure would leave a published child that violates product fork isolation.
+
 **Disarm on fork only.** Already the shipped behavior; it stops continuation but leaves the goal visible and mutable in the child, which is the reported defect.
 
 **Mask the goal in views by lineage metadata.** Diverges the log from every projection and tool read; a second authoritative source for "has this thread a goal".
@@ -30,4 +30,4 @@ The persistence decision this narrows stays active. The session log remains the 
 
 ## Consequences
 
-Newly forked side threads start goalless and may create their own goal; the source thread's goal is untouched. `tool-goal`'s model-visible description is unchanged — its fork sentence describes arming, which remains true for seeded automation children. Existing forked sessions keep showing the inherited goal until cleared by hand. Package tests pin the tombstone, idempotence, ownership, and no-lineage arms; the api-proxy fork suite pins the facade sweep and the untouched source.
+Newly forked side threads start goalless and may create their own goal; the source thread's goal is untouched. `tool-goal`'s model-visible description is unchanged because its fork sentence describes arming, which remains true for seeded automation children. Existing forked sessions keep showing the inherited goal until cleared by hand. Package tests pin the pure seed transform, no-goal identity case, completed-goal case, and automation inheritance; the api-proxy fork suite pins pre-publication isolation and the untouched source.

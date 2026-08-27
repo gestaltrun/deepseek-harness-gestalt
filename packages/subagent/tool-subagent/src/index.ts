@@ -9,7 +9,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { basename, extname } from 'node:path'
+import { basename } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
@@ -19,8 +19,7 @@ import { AttachmentError } from '@deepseek-ai/dsh-attachment'
 import type { ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-fs'
-import { FsError } from '@deepseek-ai/dsh-fs'
-import { canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import { imageMediaTypeForPath, resolveRegularReadTarget } from '@deepseek-ai/dsh-tool-fs/read-policy'
 import type { JobRegistry } from '@deepseek-ai/dsh-jobs'
 import { assertSubagentMaxDepth, settleRun } from '@deepseek-ai/dsh-subagent'
 import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
@@ -264,33 +263,6 @@ interface DelegationRouteSpec {
   readonly agentOptions?: AgentOptions
 }
 
-/** Extensions accepted as image prompt inputs; the attachment store validates bytes. */
-const IMAGE_EXTENSIONS: Readonly<Record<string, ImageMediaType>> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-}
-
-const PARENT_PATH_SEGMENT = /(?:^|[\\/])\.\.(?:[\\/]|$)/
-
-/** Resolve a file path against the calling session without bypassing symlink identity checks. */
-function imageResolveOptions(
-  exec: ToolExecution,
-  requestedPath: string,
-): { cwd?: string; signal?: AbortSignal } {
-  const rawCwd = exec.agent?.session.header.cwd
-  const cwd = rawCwd !== undefined
-    && (PARENT_PATH_SEGMENT.test(rawCwd) || PARENT_PATH_SEGMENT.test(requestedPath))
-    ? canonicalPath(rawCwd)
-    : rawCwd
-  return {
-    ...cwd === undefined ? {} : { cwd },
-    signal: exec.signal,
-  }
-}
-
 /**
  * Resolve the model's optional LLM route onto deployment `agentOptions`.
  * Call values override config; omitted fields keep config or leave inheritance
@@ -351,7 +323,7 @@ async function readAttachedImage(
   acceptedTypes: readonly ImageMediaType[],
   byteCap: number,
 ): Promise<SaveImageAttachment> {
-  const mediaType = IMAGE_EXTENSIONS[extname(requestedPath).toLowerCase()]
+  const mediaType = imageMediaTypeForPath(requestedPath)
   if (mediaType === undefined) {
     throw new Error(`cannot attach "${requestedPath}": images only accepts PNG/JPEG/WebP/GIF paths`)
   }
@@ -362,15 +334,7 @@ async function readAttachedImage(
   if (fs === undefined) {
     throw new Error(`cannot attach "${requestedPath}": no filesystem service is mounted`)
   }
-  const target = await fs.resolve(requestedPath, imageResolveOptions(exec, requestedPath))
-  const info = await fs.stat(target, exec.signal)
-  if (info === undefined) {
-    ctx.emit('fs/observed', target, { kind: 'absent' }, exec)
-    throw new FsError(`cannot read "${target.displayPath}": not found`, 'FS_NOT_FOUND')
-  }
-  if (info.type !== 'file') {
-    throw new FsError(`cannot read "${target.displayPath}": not a regular file`, 'FS_NOT_REGULAR_FILE')
-  }
+  const { target } = await resolveRegularReadTarget(ctx, exec, requestedPath, 'attach')
   const data = await fs.readBytes(target, exec.signal, byteCap)
   return { data, mediaType, name: basename(target.displayPath) }
 }
@@ -572,10 +536,8 @@ export function apply(ctx: Context, config: Config): void {
           throw new Error('images are disabled for this tool instance (backend cannot carry prompt image blocks)')
         }
         const runSpec = resolveDelegationRun(ctx, args, { backgroundEnabled, continuable })
-        const imageBlocks = await resolveAttachedImages(ctx, exec, args.images ?? [])
-        const request = {
+        const requestBase = {
           label: args.description,
-          prompt: [{ type: 'text', text: args.prompt }, ...imageBlocks] as ContentBlock[],
           parent,
           ...route,
           ...config.persona !== undefined ? { persona: config.persona } : {},
@@ -583,27 +545,23 @@ export function apply(ctx: Context, config: Config): void {
           ...maxDepth !== undefined ? { maxDepth } : {},
         }
 
-        if (runSpec.kind === 'continuable') {
-          // Resolves at inbox acceptance: the child owns its own turns from
-          // there, so this call neither waits for nor collects a result.
-          const started = await ctx.subagents.startContinuable({
-            provider: config.provider,
-            label: args.description,
-            request,
-            signal: exec.signal,
-          })
-          return { kind: 'continuable' as const, subagentId: started.childId }
-        }
         if (runSpec.kind === 'job') {
           // One-shot background child: job preflight finishes before the
-          // starter can spawn, and the task-owned signal covers startup.
+          // starter reads attachments or spawns, and the task-owned signal
+          // covers both operations.
           const id = runSpec.jobs.start({
             kind: 'subagent',
             label: args.description,
             owner: parent,
             run: () => {
               const controller = new AbortController()
-              const start = ctx.subagents.start(config.provider, { ...request, signal: controller.signal })
+              const jobExec: ToolExecution = { ...exec, signal: controller.signal }
+              const start = resolveAttachedImages(ctx, jobExec, args.images ?? [])
+                .then(imageBlocks => ctx.subagents.start(config.provider, {
+                  ...requestBase,
+                  prompt: [{ type: 'text', text: args.prompt }, ...imageBlocks],
+                  signal: controller.signal,
+                }))
               return {
                 cancel: (reason?: string) => {
                   controller.abort(reason ?? 'background subagent task killed')
@@ -614,6 +572,23 @@ export function apply(ctx: Context, config: Config): void {
             },
           })
           return { kind: 'background' as const, jobId: id }
+        }
+
+        const imageBlocks = await resolveAttachedImages(ctx, exec, args.images ?? [])
+        const request = {
+          ...requestBase,
+          prompt: [{ type: 'text', text: args.prompt }, ...imageBlocks] as ContentBlock[],
+        }
+        if (runSpec.kind === 'continuable') {
+          // Resolves at inbox acceptance: the child owns its own turns from
+          // there, so this call neither waits for nor collects a result.
+          const started = await ctx.subagents.startContinuable({
+            provider: config.provider,
+            label: args.description,
+            request,
+            signal: exec.signal,
+          })
+          return { kind: 'continuable' as const, subagentId: started.childId }
         }
 
         const run: SubagentRun = await ctx.subagents.start(config.provider, {

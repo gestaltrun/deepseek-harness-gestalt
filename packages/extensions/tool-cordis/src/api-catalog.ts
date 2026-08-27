@@ -1048,12 +1048,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the tombstone ref whose revision is one past the cleared snapshot.',
       },
       {
-        signature: 'clearInherited(agent: Agent): GoalRef | undefined',
-        description: 'Clear a goal that arrived only through a fork\'s seed prefix, so a forked thread starts goalless instead of owning a copy of its parent\'s objective.\n\nA product fork seeds the child with a prefix of the parent\'s log, and any `goal/change` inside that prefix would otherwise fold into the child\'s current goal. This method appends one clear tombstone when — and only when — the child\'s current goal came entirely from the seed and the child has appended no goal mutation of its own beyond it. Callers invoke it once at fork creation; the durable tombstone keeps replay and later resumes stable without re-running the sweep.',
-        parameters: [{ name: 'agent', description: 'owning live agent of the freshly created forked session.' }],
-        returns: 'the tombstone ref when a goal was cleared, otherwise `undefined`.',
-      },
-      {
         signature: '@Remote(\'create\') remoteExportCreate(agent: Agent, request: CreateGoalRequest): CreateGoalResult',
         description: 'Create one Goal through the remote boundary.',
         parameters: [{ name: 'agent', description: 'exact live Agent resolved from the wire identity.' }, { name: 'request', description: 'objective and optional round cap.' }],

@@ -863,7 +863,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/goal/goal/src/index.ts:116`](../packages/goal/goal/src/index.ts)
+Source: [`packages/goal/goal/src/index.ts:156`](../packages/goal/goal/src/index.ts)
 
 <a id="deepseek-aidsh-headless"></a>
 
@@ -3251,7 +3251,7 @@ export interface Config {
 
 Depends on: [`AgentOptions`](subsystems/core.md)
 
-Source: [`packages/subagent/tool-subagent/src/index.ts:37`](../packages/subagent/tool-subagent/src/index.ts)
+Source: [`packages/subagent/tool-subagent/src/index.ts:36`](../packages/subagent/tool-subagent/src/index.ts)
 
 <a id="deepseek-aidsh-tool-subagent-report"></a>
 

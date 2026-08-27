@@ -1553,6 +1553,13 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
       "type": "string",
       "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
     },
+    "images": {
+      "type": "array",
+      "description": "Optional workspace image file paths attached to the child's task prompt. The child sees each image as part of its initial instruction — hand over screenshots, diagrams, or figures instead of describing them. The child's model route must accept image input.",
+      "items": {
+        "type": "string"
+      }
+    },
     "provider": {
       "type": "string",
       "description": "LLM adapter route for the child (for example deepseek-official). This is not the subagent backend (spawn/fork/acp). Omit to inherit the parent session route; may be set without model."

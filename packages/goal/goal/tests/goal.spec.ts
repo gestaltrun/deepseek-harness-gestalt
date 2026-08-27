@@ -7,6 +7,7 @@ import SessionStore, { Session, SessionId, type UserMessage } from '@deepseek-ai
 import GoalService, {
   GoalError,
   GoalId,
+  clearGoalFromForkSeed,
   decodeGoalChange,
   foldGoal,
 } from '@deepseek-ai/dsh-goal'
@@ -187,88 +188,64 @@ describe('GoalService creation and replay', () => {
     expect(child.session.header.seedLength).toBe(parent.session.seq)
   })
 
-  it('clears an inherited seed-prefix goal on demand and leaves the parent untouched', async () => {
-    const ctx = new Context()
-    await ctx.plugin(SessionStore)
-    await ctx.plugin(AgentRegistry)
-    await ctx.plugin(GoalService)
-    const parent = stubAgentForSession(ctx.sessions.create(SessionId('goal-sweep-parent')))
-    ctx.agents.register(parent.agent)
-    const goal = ctx.goals.create(parent.agent, { objective: 'inherit then clear', maxGoalRounds: 5 })
-    appendRound(parent.session, goal, 1)
+  it('appends a child-owned clear tombstone to a fork seed without changing the parent prefix', async () => {
+    const { ctx, agent, session } = await harness()
+    const goal = ctx.goals.create(agent, { objective: 'inherit then clear', maxGoalRounds: 5 })
+    appendRound(session, goal, 1)
+    const parentPrefix = [...session.events]
 
-    const child = stubAgentForSession(ctx.sessions.fork(parent.session))
-    ctx.agents.register(child.agent)
-    expect(ctx.goals.get(child.agent)).toMatchObject({ id: goal.id, activation: 'disarmed' })
+    const childSeed = clearGoalFromForkSeed(parentPrefix, 2_000)
 
-    const tombstone = ctx.goals.clearInherited(child.agent)
-
-    expect(tombstone).toEqual({ id: goal.id, revision: goal.revision + 1 })
-    expect(ctx.goals.get(child.agent)).toBeUndefined()
-    const last = child.session.events.at(-1)
+    expect(childSeed).not.toBe(parentPrefix)
+    expect(session.events).toEqual(parentPrefix)
+    expect(foldGoal(parentPrefix).goal).toMatchObject({ id: goal.id, phase: 'active' })
+    expect(foldGoal(childSeed).goal).toBeUndefined()
+    const last = childSeed.at(-1)
     expect(last?.type).toBe('goal/change')
     if (last?.type !== 'goal/change') throw new Error('expected a durable clear tombstone')
-    expect(decodeGoalChange(last.data)).toMatchObject({ operation: 'clear', cleared: tombstone })
-    expect(foldGoal(child.session.events).goal).toBeUndefined()
-    expect(ctx.goals.get(parent.agent)).toMatchObject({
-      id: goal.id, phase: 'active', roundsStarted: 1,
+    expect(last.seq).toBe(parentPrefix.length)
+    expect(decodeGoalChange(last.data)).toMatchObject({
+      operation: 'clear',
+      cleared: { id: goal.id, revision: goal.revision + 1 },
     })
   })
 
-  it('writes no second tombstone when the sweep repeats', async () => {
-    const ctx = new Context()
-    await ctx.plugin(SessionStore)
-    await ctx.plugin(AgentRegistry)
-    await ctx.plugin(GoalService)
-    const parent = stubAgentForSession(ctx.sessions.create(SessionId('goal-sweep-once')))
-    ctx.agents.register(parent.agent)
-    ctx.goals.create(parent.agent, { objective: 'sweep once' })
-    const child = stubAgentForSession(ctx.sessions.fork(parent.session))
-    ctx.agents.register(child.agent)
+  it('returns an already-cleared fork seed unchanged', async () => {
+    const { ctx, agent, session } = await harness()
+    ctx.goals.create(agent, { objective: 'clear once' })
+    const cleared = clearGoalFromForkSeed(session.events, 2_000)
 
-    expect(ctx.goals.clearInherited(child.agent)).toBeDefined()
-    const afterFirst = child.session.events.length
-    expect(ctx.goals.clearInherited(child.agent)).toBeUndefined()
-    expect(child.session.events).toHaveLength(afterFirst)
+    expect(clearGoalFromForkSeed(cleared, 3_000)).toBe(cleared)
   })
 
-  it('keeps a goal on a session with no seed lineage', async () => {
-    const { ctx, agent } = await harness()
-    const goal = ctx.goals.create(agent, { objective: 'born here' })
-    expect(ctx.goals.clearInherited(agent)).toBeUndefined()
-    expect(ctx.goals.get(agent)).toMatchObject({ id: goal.id, phase: 'active' })
-  })
-
-  it('keeps an inherited goal the child already mutated itself', async () => {
+  it('returns a non-empty fork seed without a goal unchanged', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionStore)
-    await ctx.plugin(AgentRegistry)
-    await ctx.plugin(GoalService)
-    const parent = stubAgentForSession(ctx.sessions.create(SessionId('goal-sweep-owned')))
-    ctx.agents.register(parent.agent)
-    const goal = ctx.goals.create(parent.agent, { objective: 'child owns this' })
-    const child = stubAgentForSession(ctx.sessions.fork(parent.session))
-    ctx.agents.register(child.agent)
-    ctx.goals.resume(child.agent, goal)
+    const session = ctx.sessions.create(SessionId('goal-seed-empty'))
+    appendInjection(session, createUserMessage({
+      content: [{ type: 'text', text: 'context only' }],
+      source: { kind: 'user' },
+    }))
+    const seed = session.events
 
-    expect(ctx.goals.clearInherited(child.agent)).toBeUndefined()
-    expect(ctx.goals.get(child.agent)).toMatchObject({ id: goal.id, revision: 2, phase: 'active' })
+    expect(clearGoalFromForkSeed(seed, 2_000)).toBe(seed)
   })
 
-  it('clears an inherited goal that already completed in the parent', async () => {
-    const ctx = new Context()
-    await ctx.plugin(SessionStore)
-    await ctx.plugin(AgentRegistry)
-    await ctx.plugin(GoalService)
-    const parent = stubAgentForSession(ctx.sessions.create(SessionId('goal-sweep-complete')))
-    ctx.agents.register(parent.agent)
-    const goal = ctx.goals.create(parent.agent, { objective: 'done before fork' })
-    const done = ctx.goals.complete(parent.agent, goal)
-    const child = stubAgentForSession(ctx.sessions.fork(parent.session))
-    ctx.agents.register(child.agent)
+  it('clears a completed goal from a fork seed', async () => {
+    const { ctx, agent, session } = await harness()
+    const goal = ctx.goals.create(agent, { objective: 'done before fork' })
+    const done = ctx.goals.complete(agent, goal)
 
-    expect(ctx.goals.clearInherited(child.agent)).toEqual({ id: goal.id, revision: done.revision + 1 })
-    expect(ctx.goals.get(child.agent)).toBeUndefined()
+    const childSeed = clearGoalFromForkSeed(session.events, 2_000)
+
+    expect(foldGoal(childSeed).goal).toBeUndefined()
+    const last = childSeed.at(-1)
+    expect(last?.type).toBe('goal/change')
+    if (last?.type !== 'goal/change') throw new Error('expected a durable clear tombstone')
+    expect(decodeGoalChange(last.data)).toMatchObject({
+      operation: 'clear',
+      cleared: { id: goal.id, revision: done.revision + 1 },
+    })
   })
 
   it('disarms live activation on every session-start edge', async () => {

@@ -305,35 +305,16 @@ describe('sessions.fork', () => {
     if (child === undefined) throw new Error('fork did not publish the child agent')
     expect(ctx.goals.get(child)).toBeUndefined()
     const childSession = ctx.sessions.get(childId)
-    const last = childSession?.events.at(-1)
-    expect(last?.type).toBe('goal/change')
-    if (last?.type === 'goal/change') {
-      expect(last.data).toMatchObject({ operation: 'clear', cleared: { id: goal.id } })
+    if (childSession === undefined) throw new Error('fork did not publish the child session')
+    expect(childSession.header.seedLength).toBe(source.events.length)
+    const seedLength = childSession.header.seedLength
+    const tombstone = seedLength === undefined ? undefined : childSession.events.at(seedLength)
+    expect(tombstone?.type).toBe('goal/change')
+    if (tombstone?.type === 'goal/change') {
+      expect(tombstone.seq).toBe(childSession.header.seedLength)
+      expect(tombstone.data).toMatchObject({ operation: 'clear', cleared: { id: goal.id } })
     }
     expect(ctx.goals.get(sourceAgent)).toMatchObject({ id: goal.id, phase: 'active' })
-    await ctx.fiber.dispose()
-  })
-
-  it('keeps a published fork usable when the inherited-goal sweep fails', async () => {
-    const ctx = await composed()
-    await ctx.plugin(GoalService)
-    const source = liveAgent(ctx, 'session-goal-sweep-failure', 1)
-    const sourceAgent = ctx.agents.get(source.id)
-    if (sourceAgent === undefined) throw new Error('source agent missing')
-    const goal = ctx.goals.create(sourceAgent, { objective: 'remain visible on sweep failure' })
-    vi.spyOn(ctx.goals, 'clearInherited').mockImplementation(() => {
-      throw new Error('injected sweep failure')
-    })
-    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
-
-    const response = await api(ctx).sessions.fork(request({ sessionId: source.id }))
-
-    expect(response.result.ok).toBe(true)
-    if (!response.result.ok) return
-    const child = ctx.agents.get(response.result.value.sessionId)
-    if (child === undefined) throw new Error('fork did not publish the child agent')
-    expect(ctx.goals.get(child)).toMatchObject({ id: goal.id, phase: 'active' })
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('injected sweep failure'))
     await ctx.fiber.dispose()
   })
 })

@@ -171,6 +171,7 @@ describe('SubagentRuntime', () => {
     ['toolFilter', { toolFilter: { deny: ['bash'] } }],
     ['persona', { persona: 'reviewer' }],
     ['agentOptions', { agentOptions: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } }],
+    ['images', { prompt: [{ type: 'image', attachment: {} as never }] as SubagentStartRequest['prompt'] }],
   ] as const)('rejects unsupported %s before provider startup', async (_capability, override) => {
     const { subagents } = await service()
     const provider = new StubProvider('weak', NO_CAPS)

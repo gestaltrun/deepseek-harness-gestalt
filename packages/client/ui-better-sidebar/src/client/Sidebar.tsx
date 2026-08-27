@@ -55,7 +55,7 @@ import { relativeTo } from './paths.ts'
 import { OrphanedTab } from './OrphanedTab.tsx'
 import { RenderBoundary } from './RenderBoundary.tsx'
 import { tabContentCompare, type TabContentMemoKey } from './tab-content-memo.ts'
-import { detectNewDirectSubagent, restorableSideThreads } from './subagent-detect.ts'
+import { detectNewDirectSubagent } from './subagent-detect.ts'
 import { detectNewJob } from './subagent-jobs.ts'
 import { t } from './locales.ts'
 import { api, type SessionScope } from './api.ts'
@@ -289,10 +289,6 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
     useMemo(() => (callback: () => void) => ctx.sessions.list.subscribe(callback), [ctx]),
     useCallback(() => ctx.sessions.list.getSnapshot(), [ctx]),
   )
-  const workspaceList = useSyncExternalStore(
-    useMemo(() => (callback: () => void) => ctx.workspaces.list.subscribe(callback), [ctx]),
-    useCallback(() => ctx.workspaces.list.getSnapshot(), [ctx]),
-  )
   const current = sessionList.current
 
   // Per-session sidebar state.
@@ -305,16 +301,6 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
   const state = snapshot.state
   const sessionId = snapshot.sessionId
 
-  // Durable Side Chat Sessions can outlive origin-scoped tab state. The
-  // archive set and local tombstones exclude deliberately closed threads.
-  useEffect(() => {
-    if (sessionId === undefined || state === undefined) return
-    store.restoreSideThreads(restorableSideThreads(
-      sessionList.byId,
-      sessionId,
-      workspaceList,
-    ))
-  }, [sessionList, sessionId, state, store, workspaceList])
   const summaryCwd = sessionId === undefined ? undefined : sessionList.byId[sessionId]?.cwd
   const pushedBottomHeight = (bottomOpen: boolean, bottomHeight: number): number => layoutPushSize({
     narrow,

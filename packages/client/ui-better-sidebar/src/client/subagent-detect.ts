@@ -15,13 +15,14 @@ import type {
   SidebarSessionSummary,
   SidebarSubagentCatalog,
 } from '../context-types.ts'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import { SIDE_LABEL_PREFIX } from '../sidechat-core.ts'
 import type { SideThreadRef } from './state.ts'
 
 /** Workspace archive projection required before Side Chat restoration. */
 export interface SideThreadArchiveSnapshot {
   phase: 'pending' | 'ready'
-  archivedSessionIds: readonly string[]
+  archivedSessionIds: readonly SessionId[]
 }
 
 /**
@@ -38,7 +39,7 @@ export function isSideThreadSummary(summary: SidebarSessionSummary): boolean {
 /** Count the direct subagent children of one session (durable `origin` rows). */
 export function directSubagentCount(
   byId: SidebarSessionList['byId'],
-  sessionId: string,
+  sessionId: SessionId,
 ): number {
   let count = 0
   for (const summary of Object.values(byId)) {

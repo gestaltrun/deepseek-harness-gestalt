@@ -232,8 +232,9 @@ async function composeChildSetup(
 
 /** Recover the model route last adopted by a persisted Side Chat. */
 function persistedModelSelection(events: readonly SidebarSessionEvent[]): ModelSelection | undefined {
-  const sessionEvents = events as unknown as readonly SessionEvent[]
-  const requestHeader = foldRequestHeader(sessionEvents)
+  const descriptorIndex = events.findIndex(event => event.type === 'subagent/descriptor')
+  const ownedEvents = descriptorIndex < 0 ? events : events.slice(descriptorIndex + 1)
+  const requestHeader = foldRequestHeader(ownedEvents as unknown as readonly SessionEvent[])
   if (requestHeader !== undefined) {
     const { provider, model, reasoningEffort } = requestHeader.config
     return {
@@ -242,7 +243,7 @@ function persistedModelSelection(events: readonly SidebarSessionEvent[]): ModelS
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     }
   }
-  const descriptor = foldSubagentDescriptor(sessionEvents)
+  const descriptor = foldSubagentDescriptor(events as unknown as readonly SessionEvent[])
   if (descriptor?.mode !== 'continuable'
     || descriptor.agentProvider === undefined
     || descriptor.agentModel === undefined) {

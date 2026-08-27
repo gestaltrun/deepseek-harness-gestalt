@@ -202,6 +202,48 @@ describe('sidechat route lifecycle', () => {
     await sidechat.dispose()
   })
 
+  it('falls back to the descriptor before the child records its own request header', async () => {
+    const events = [
+      {
+        type: 'request/header',
+        seq: 0,
+        time: 1,
+        data: {
+          header: { config: { provider: 'parent-provider', model: 'parent-model' } },
+          reason: 'initial',
+        },
+      },
+      {
+        type: 'subagent/descriptor',
+        seq: 1,
+        time: 2,
+        data: snapshotSubagentDescriptor({
+          mode: 'continuable',
+          provider: 'sidechat',
+          label: 'Side: persisted',
+          agentProvider: 'child-provider',
+          agentModel: 'child-model',
+        }),
+      },
+    ]
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'sessionPersistence') {
+          return { inspect: vi.fn(() => Promise.resolve({ meta: {}, events })) }
+        }
+        if (name === 'llm') return { listProviders: () => [{ id: 'child-provider' }] }
+        return undefined
+      },
+    } as unknown as Context
+
+    const sidechat = buildSidechatApi(ctx)
+    await expect(sidechat.routes['sidechat.model']({ childId: 'cold-child' })).resolves.toEqual({
+      current: { provider: 'child-provider', model: 'child-model' },
+      routable: true,
+    })
+    await sidechat.dispose()
+  })
+
   it('restores the last used model before a persisted Side Chat resumes', async () => {
     const events = [
       {

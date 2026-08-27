@@ -10,6 +10,7 @@
  * operations are pure functions over the node, unit-tested in tests/state.spec.ts.
  */
 import { SIDEBAR_PREFS_DEFAULTS, type SidebarPrefs } from '../prefs-shared.ts'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import { sidechatTabRootThreadId } from '../sidechat-core.ts'
 import { isNarrowWidth } from './breakpoints.ts'
 
@@ -114,7 +115,7 @@ export interface SidebarState {
   /** Free windows (tabs dragged out onto the conversation area). */
   floats: FloatWindow[]
   /** Locally closed Side Chat thread ids, including archive projection delay. */
-  closedSideThreads: string[]
+  closedSideThreads: SessionId[]
 }
 
 export const PANEL_MIN = 280
@@ -979,7 +980,7 @@ export function reconcileAgentTerminals(
 /** One durable Side Chat thread eligible for tab restoration. */
 export interface SideThreadRef {
   /** Durable child Session id. */
-  threadId: string
+  threadId: SessionId
   /** Durable label with the `Side: ` prefix removed. */
   title: string
 }
@@ -1227,7 +1228,9 @@ export function sanitizeState(parsed: unknown): SidebarState | undefined {
   }
   // Layouts written before this field default to no local tombstones.
   const closedSideThreads = Array.isArray(record.closedSideThreads)
-    ? record.closedSideThreads.filter((item): item is string => typeof item === 'string')
+    ? record.closedSideThreads
+        .filter((item): item is string => typeof item === 'string')
+        .map(item => item as SessionId)
     : []
   const requestedActivePane = typeof record.activePane === 'string'
     ? (reid.get(record.activePane) ?? record.activePane)
@@ -1578,10 +1581,12 @@ export class SidebarStore {
     this.persistTimers.set(sessionId, timer)
   }
 
-  /** Restore missing tabs for eligible durable Side Chat threads. */
-  restoreSideThreads(threads: readonly SideThreadRef[]): void {
+  /** Restore missing tabs for one Session without changing the active Session. */
+  restoreSideThreadsFor(sessionId: SessionId, threads: readonly SideThreadRef[]): void {
     if (resetRequested()) return
-    this.reduce(state => reconcileSideThreads(state, threads))
+    const reconcile = (state: SidebarState): SidebarState => reconcileSideThreads(state, threads)
+    if (this.snapshot.sessionId === sessionId) this.reduce(reconcile)
+    else this.reduceFor(sessionId, reconcile)
   }
 
   private notify(): void {

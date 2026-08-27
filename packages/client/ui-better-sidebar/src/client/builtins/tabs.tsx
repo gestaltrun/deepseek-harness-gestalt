@@ -20,7 +20,7 @@ import { GitView } from '../GitView.tsx'
 import { DiffTab } from '../DiffTab.tsx'
 import { SubagentView } from '../SubagentView.tsx'
 import { SideChatView, sidechatRootThreadIdOf, sidechatThreadIdOf } from '../SideChatView.tsx'
-import { api } from '../api.ts'
+import { api, forgetSidechatPublication, waitForSidechatPublication } from '../api.ts'
 import { BrowserView } from '../BrowserView.tsx'
 import { IconTerminalOutline16, IconDiffOutline16, IconGlobeOutline16 } from '../icons.tsx'
 import { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN } from '../../prefs-shared.ts'
@@ -197,12 +197,14 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
       dedupeKey: (tab) => sidechatThreadIdOf(tab),
       // Closing the tab archives the Session without deleting its history and
       // releases its process-local Agent handle.
-      onClose: (tab) => {
+      onClose: async (tab) => {
         const threadId = sidechatRootThreadIdOf(tab)
         if (threadId !== undefined) {
-          void api.sidechatDispose(threadId).catch(() => {})
           const provisional = (tab.meta as { provisional?: unknown } | undefined)?.provisional === true
-          if (!provisional) void ctx.workspaces.archiveSession(threadId).catch(() => {})
+          const published = !provisional || await waitForSidechatPublication(threadId)
+          await api.sidechatDispose(threadId)
+          if (published) await ctx.workspaces.archiveSession(threadId)
+          forgetSidechatPublication(threadId)
         }
       },
       component: ({ ctx, scope, tab, visible }) => (

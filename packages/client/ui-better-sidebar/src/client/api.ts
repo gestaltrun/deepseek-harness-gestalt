@@ -13,6 +13,10 @@ import type { BrowserProbeResult } from './browser.ts'
 
 /** Side Chat ids learned before their list summary reaches the browser. */
 const sidechatSessionIds = new Set<SessionId>()
+/** Side Chat ids whose creation route published a durable Session. */
+const publishedSidechatSessionIds = new Set<SessionId>()
+/** Creation results awaited when close races the first submitted prompt. */
+const sidechatPublications = new Map<SessionId, Promise<boolean>>()
 
 /** Client-only Side Chat identity before its first prompt publishes a Host Session. */
 export interface SidechatDraft {
@@ -51,6 +55,18 @@ export function noteSidechatDraftSelection(sessionId: SessionId, selection: Mode
 /** Mark the provisional identity as published without forgetting Side Chat ownership. */
 export function settleSidechatDraft(sessionId: SessionId): void {
   sidechatDrafts.delete(sessionId)
+}
+
+/** Wait for an admitted first prompt to publish its durable Side Chat Session. */
+export async function waitForSidechatPublication(sessionId: SessionId): Promise<boolean> {
+  if (publishedSidechatSessionIds.has(sessionId)) return true
+  return await (sidechatPublications.get(sessionId) ?? Promise.resolve(false))
+}
+
+/** Forget process-local publication state after a Side Chat closes. */
+export function forgetSidechatPublication(sessionId: SessionId): void {
+  publishedSidechatSessionIds.delete(sessionId)
+  sidechatPublications.delete(sessionId)
 }
 
 /** One wire failure. */
@@ -334,14 +350,26 @@ export const api = {
     selection: ModelSelection | undefined,
     signal?: AbortSignal,
   ) => {
-    const result = await call<{ childId: SessionId; accepted: true }>('sidechat.start', {
+    const operation = call<{ childId: SessionId; accepted: true }>('sidechat.start', {
       sessionId,
       childId,
       text,
       ...(selection === undefined ? {} : { selection }),
     }, signal)
-    sidechatSessionIds.add(result.childId)
-    return result
+    const publication = operation.then(
+      (result) => {
+        sidechatSessionIds.add(result.childId)
+        publishedSidechatSessionIds.add(result.childId)
+        return true
+      },
+      () => false,
+    )
+    sidechatPublications.set(childId, publication)
+    try {
+      return await operation
+    } finally {
+      if (sidechatPublications.get(childId) === publication) sidechatPublications.delete(childId)
+    }
   },
   /** Read Side Chat's current model selection and route availability. */
   sidechatModel: (

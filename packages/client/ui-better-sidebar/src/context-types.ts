@@ -31,6 +31,7 @@
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
 import type { SessionAdmissionAdapter } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { BetterSidebarService } from './client/service.ts'
 
 /** The request face route handlers see (structural subset of node's
@@ -137,13 +138,13 @@ export interface SidebarSlotsService {
 
 /** The client session list row the sidebar reads (cwd for the explorer). */
 export interface SidebarSessionSummary {
-  id: string
+  id: SessionId
   cwd?: string
   displayTitle: string
   /** Coarse durable origin for navigation filtering (subagent children). */
   origin?: 'subagent'
   /** Durable direct parent session id (present on subagent children). */
-  parentId?: string
+  parentId?: SessionId
   /** Whether the session's agent is currently running. */
   running?: boolean
   /** Whether the durable Session has no accepted user turn yet. */
@@ -345,7 +346,7 @@ export interface SidebarConnectionHandle {
 
 /** The client session list snapshot the sidebar subscribes to. */
 export interface SidebarSessionList {
-  current: string | undefined
+  current: SessionId | undefined
   byId: Record<string, SidebarSessionSummary>
   /** Direct durable catalogs keyed by their selected parent address. */
   subagentsByParent?: Readonly<Record<string, SidebarSubagentCatalog>>
@@ -465,10 +466,10 @@ export interface SidebarWorkspacesService {
   /** Open a filesystem path with the Host operating system's default application. */
   openPath(path: string): Promise<void>
   /** Durably hide a closed Side Chat Session without deleting its log. */
-  archiveSession(sessionId: string): Promise<void>
+  archiveSession(sessionId: SessionId): Promise<void>
   /** Workspace projection carrying the durable global Session archive set. */
   list: {
-    getSnapshot(): { phase: 'pending' | 'ready'; archivedSessionIds: readonly string[] }
+    getSnapshot(): { phase: 'pending' | 'ready'; archivedSessionIds: readonly SessionId[] }
     subscribe(listener: () => void): () => void
   }
 }

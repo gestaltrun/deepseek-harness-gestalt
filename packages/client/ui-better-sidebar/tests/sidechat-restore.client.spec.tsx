@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SidebarSessionSummary } from '../src/context-types.ts'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import type { Context, SidebarSessionSummary } from '../src/context-types.ts'
 import {
   allLeaves, closeFloatByTab, closeTab, makeDefaultState, reconcileSideThreads, sanitizeState,
   SidebarStore, tombstoneSideThread, type SidebarState, type SidebarTab,
 } from '../src/client/state.ts'
 import { restorableSideThreads } from '../src/client/subagent-detect.ts'
+import { subscribeSideThreadRestoration } from '../src/client/sidechat-restore.ts'
 
 afterEach(() => {
   localStorage.clear()
@@ -14,12 +16,14 @@ afterEach(() => {
 })
 
 function summary(id: string, overrides: Partial<SidebarSessionSummary> = {}): SidebarSessionSummary {
-  return { id, displayTitle: id, running: false, blank: false, ...overrides }
+  return { id: SessionId(id), displayTitle: id, running: false, blank: false, ...overrides }
 }
 
 function sideThread(id: string, parentId = 'parent', title = `Side: ${id}`): SidebarSessionSummary {
-  return summary(id, { origin: 'subagent', parentId, displayTitle: title })
+  return summary(id, { origin: 'subagent', parentId: SessionId(parentId), displayTitle: title })
 }
+
+const threadRef = (threadId: string, title = '问题一') => ({ threadId: SessionId(threadId), title })
 
 function sidechatTab(threadId: string, meta?: Record<string, unknown>): SidebarTab {
   return { id: `sidechat:${threadId}`, type: 'sidechat', title: threadId, meta: meta ?? { threadId } }
@@ -42,25 +46,25 @@ describe('restorableSideThreads', () => {
   it('collects a published direct side child with the label prefix stripped', () => {
     const threads = restorableSideThreads(
       { parent: summary('parent'), child: sideThread('child', 'parent', 'Side: 要不要拆分支？') },
-      'parent',
+      SessionId('parent'),
       { phase: 'ready', archivedSessionIds: [] },
     )
-    expect(threads).toEqual([{ threadId: 'child', title: '要不要拆分支？' }])
+    expect(threads).toEqual([threadRef('child', '要不要拆分支？')])
   })
 
   it('excludes ordinary subagents, other sessions, blank placeholders, and provisional rows', () => {
     const byId = {
       parent: summary('parent'),
-      plain: summary('plain', { origin: 'subagent', parentId: 'parent', displayTitle: '调研报告' }),
+      plain: summary('plain', { origin: 'subagent', parentId: SessionId('parent'), displayTitle: '调研报告' }),
       foreign: sideThread('foreign', 'other-session'),
       blank: sideThread('blank', 'parent', 'Side: New thread', ),
       provisional: summary('provisional', {
-        origin: 'subagent', parentId: 'parent', provisional: true, displayTitle: 'Side: New thread',
+        origin: 'subagent', parentId: SessionId('parent'), provisional: true, displayTitle: 'Side: New thread',
       }),
     }
     byId.blank.blank = true
 
-    expect(restorableSideThreads(byId, 'parent', {
+    expect(restorableSideThreads(byId, SessionId('parent'), {
       phase: 'ready', archivedSessionIds: [],
     })).toEqual([])
   })
@@ -68,15 +72,15 @@ describe('restorableSideThreads', () => {
   it('excludes archived side threads after browser-local state is lost', () => {
     const byId = { child: sideThread('child') }
 
-    expect(restorableSideThreads(byId, 'parent', {
-      phase: 'ready', archivedSessionIds: ['child'],
+    expect(restorableSideThreads(byId, SessionId('parent'), {
+      phase: 'ready', archivedSessionIds: [SessionId('child')],
     })).toEqual([])
   })
 
   it('waits for the durable archive baseline before restoring any thread', () => {
     const byId = { child: sideThread('child') }
 
-    expect(restorableSideThreads(byId, 'parent', {
+    expect(restorableSideThreads(byId, SessionId('parent'), {
       phase: 'pending', archivedSessionIds: [],
     })).toEqual([])
   })
@@ -84,7 +88,7 @@ describe('restorableSideThreads', () => {
 
 describe('reconcileSideThreads', () => {
   it('restores a missing thread as a non-provisional sidechat tab and activates an empty pane', () => {
-    const next = reconcileSideThreads(makeDefaultState(), [{ threadId: 't1', title: '问题一' }])
+    const next = reconcileSideThreads(makeDefaultState(), [threadRef('t1')])
 
     expect(dockedTabs(next)).toEqual([{
       id: 'sidechat:t1', type: 'sidechat', title: '问题一', meta: { threadId: 't1' },
@@ -96,7 +100,7 @@ describe('reconcileSideThreads', () => {
   it('appends without stealing the active tab when the pane already has one', () => {
     const state = stateWithTabs({ id: 'editor', type: 'editor', title: '文件' })
 
-    const next = reconcileSideThreads(state, [{ threadId: 't1', title: '问题一' }])
+    const next = reconcileSideThreads(state, [threadRef('t1')])
 
     expect(dockedTabs(next).map(tab => tab.id)).toEqual(['editor', 'sidechat:t1'])
     if (next.splits.kind !== 'leaf') throw new Error('expected one default pane')
@@ -106,7 +110,7 @@ describe('reconcileSideThreads', () => {
   it('is a same-reference no-op once every thread has a tab', () => {
     const state = stateWithTabs(sidechatTab('t1'))
 
-    expect(reconcileSideThreads(state, [{ threadId: 't1', title: '问题一' }])).toBe(state)
+    expect(reconcileSideThreads(state, [threadRef('t1')])).toBe(state)
   })
 
   it('treats a tab navigated into a nested thread as covering its root thread', () => {
@@ -116,26 +120,26 @@ describe('reconcileSideThreads', () => {
       x: 0, y: 0, w: 320, h: 240,
     }]
 
-    expect(reconcileSideThreads(state, [{ threadId: 't1', title: '问题一' }])).toBe(state)
+    expect(reconcileSideThreads(state, [threadRef('t1')])).toBe(state)
   })
 
   it('never resurrects a tombstoned thread', () => {
-    const state = { ...makeDefaultState(), closedSideThreads: ['t1'] }
+    const state = { ...makeDefaultState(), closedSideThreads: [SessionId('t1')] }
 
-    expect(reconcileSideThreads(state, [{ threadId: 't1', title: '问题一' }])).toBe(state)
+    expect(reconcileSideThreads(state, [threadRef('t1')])).toBe(state)
   })
 
   it('restores into the first pane when the recorded active pane is gone', () => {
     const state = { ...makeDefaultState(), activePane: 'pane:stale' }
 
-    const next = reconcileSideThreads(state, [{ threadId: 't1', title: '问题一' }])
+    const next = reconcileSideThreads(state, [threadRef('t1')])
 
     expect(dockedTabs(next).map(tab => tab.id)).toEqual(['sidechat:t1'])
   })
 
   it('restores several threads in list order', () => {
     const next = reconcileSideThreads(makeDefaultState(), [
-      { threadId: 't1', title: '一' }, { threadId: 't2', title: '二' },
+      threadRef('t1', '一'), threadRef('t2', '二'),
     ])
 
     expect(dockedTabs(next).map(tab => tab.id)).toEqual(['sidechat:t1', 'sidechat:t2'])
@@ -150,7 +154,7 @@ describe('Side Chat close tombstones', () => {
     const closed = closeTab(state, state.splits.id, 'sidechat:t1')
 
     expect(closed.closedSideThreads).toEqual(['t1'])
-    expect(reconcileSideThreads(closed, [{ threadId: 't1', title: '问题一' }])).toBe(closed)
+    expect(reconcileSideThreads(closed, [threadRef('t1')])).toBe(closed)
   })
 
   it('closeTab leaves other tab types and meta-less sidechat tabs untombstoned', () => {
@@ -184,7 +188,7 @@ describe('Side Chat close tombstones', () => {
   })
 
   it('tombstoneSideThread is idempotent and ignores non-sidechat tabs', () => {
-    const state = { ...makeDefaultState(), closedSideThreads: ['t1'] }
+    const state = { ...makeDefaultState(), closedSideThreads: [SessionId('t1')] }
 
     expect(tombstoneSideThread(state, sidechatTab('t1'))).toBe(state)
     expect(tombstoneSideThread(state, { id: 'editor', type: 'editor', title: '文件' })).toBe(state)
@@ -212,13 +216,13 @@ describe('sanitizeState closedSideThreads', () => {
   })
 })
 
-describe('SidebarStore.restoreSideThreads', () => {
+describe('SidebarStore.restoreSideThreadsFor', () => {
   it('restores tabs for a fresh session and persists them for the next load', () => {
     vi.useFakeTimers()
     const store = new SidebarStore()
     store.setSession('session-a')
 
-    store.restoreSideThreads([{ threadId: 't1', title: '问题一' }])
+    store.restoreSideThreadsFor(SessionId('session-a'), [threadRef('t1')])
 
     const tabs = dockedTabs(store.getSnapshot().state!)
     expect(tabs.map(tab => tab.id)).toEqual(['sidechat:t1'])
@@ -234,7 +238,7 @@ describe('SidebarStore.restoreSideThreads', () => {
     const store = new SidebarStore()
     store.setSession('session-a')
 
-    store.restoreSideThreads([{ threadId: 't1', title: '问题一' }])
+    store.restoreSideThreadsFor(SessionId('session-a'), [threadRef('t1')])
 
     expect(dockedTabs(store.getSnapshot().state!)).toEqual([])
   })
@@ -242,15 +246,56 @@ describe('SidebarStore.restoreSideThreads', () => {
   it('keeps a user-closed thread closed across a later reconcile', () => {
     const store = new SidebarStore()
     store.setSession('session-a')
-    store.restoreSideThreads([{ threadId: 't1', title: '问题一' }])
+    store.restoreSideThreadsFor(SessionId('session-a'), [threadRef('t1')])
 
     store.reduce((state) => {
       if (state.splits.kind !== 'leaf') throw new Error('expected one default pane')
       return closeTab(state, state.splits.id, 'sidechat:t1')
     })
-    store.restoreSideThreads([{ threadId: 't1', title: '问题一' }])
+    store.restoreSideThreadsFor(SessionId('session-a'), [threadRef('t1')])
 
     expect(dockedTabs(store.getSnapshot().state!)).toEqual([])
     expect(store.getSnapshot().state!.closedSideThreads).toEqual(['t1'])
+  })
+})
+
+describe('subscribeSideThreadRestoration', () => {
+  it('reconciles only after both projections are ready and removes both subscriptions', () => {
+    const sessionListeners = new Set<() => void>()
+    const workspaceListeners = new Set<() => void>()
+    const sessions = {
+      current: SessionId('session-a'),
+      byId: { child: sideThread('child', 'session-a') },
+    }
+    let workspaces = { phase: 'pending' as const, archivedSessionIds: [] }
+    const ctx = {
+      sessions: { list: {
+        getSnapshot: () => sessions,
+        subscribe: (listener: () => void) => {
+          sessionListeners.add(listener)
+          return () => { sessionListeners.delete(listener) }
+        },
+      } },
+      workspaces: { list: {
+        getSnapshot: () => workspaces,
+        subscribe: (listener: () => void) => {
+          workspaceListeners.add(listener)
+          return () => { workspaceListeners.delete(listener) }
+        },
+      } },
+    } as unknown as Context
+    const store = new SidebarStore()
+    store.setSession('session-a')
+
+    const dispose = subscribeSideThreadRestoration(ctx, store)
+    expect(dockedTabs(store.getSnapshot().state!)).toEqual([])
+
+    workspaces = { phase: 'ready', archivedSessionIds: [] }
+    for (const listener of workspaceListeners) listener()
+    expect(dockedTabs(store.getSnapshot().state!).map(tab => tab.id)).toEqual(['sidechat:child'])
+
+    dispose()
+    expect(sessionListeners.size).toBe(0)
+    expect(workspaceListeners.size).toBe(0)
   })
 })

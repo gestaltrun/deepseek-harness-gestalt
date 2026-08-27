@@ -10,17 +10,17 @@ The Side Chat tab strip is stored in origin-scoped localStorage while each promp
 
 ## Decision
 
-The active Session reconciles its strip against published, direct child Sessions whose durable title starts with `Side: `. Missing unarchived children return as non-provisional tabs in the active pane without replacing an existing active tab. Blank children and renderer-only drafts do not restore. A cold thread restores the model route from its latest `request/header`, falling back to its creation descriptor before the first request; provisional drafts continue to use the live parent's route. Closing a published Side Chat archives its Session through the Workspace service without deleting its log. The local sidebar state also records the closed root thread so list refreshes cannot reopen it before the archive projection arrives. The `?dsh-sidebar-reset` escape hatch disables restoration for that load.
+The active Session reconciles its strip against published, direct child Sessions whose durable title starts with `Side: `. Missing unarchived children return as non-provisional tabs in the active pane without replacing an existing active tab. Blank children and renderer-only drafts do not restore. A cold thread restores the model route from its latest child-owned `request/header`, falling back to its creation descriptor before the first request; provisional drafts continue to use the live parent's route. Closing a published Side Chat waits for any admitted first prompt, disposes its live handle, and archives its Session through the Workspace service without deleting its log. An unsent draft has no Session to archive. The tab is removed only after these operations succeed; a failure is reported and leaves it open. The local sidebar state then records the closed root thread so list refreshes cannot reopen it before the archive projection arrives. The `?dsh-sidebar-reset` escape hatch disables restoration for that load.
 
 ## Verification
 
-Client tests cover candidate classification, archive exclusion, nested-root deduplication, active-pane placement, idempotent list refreshes, docked and floated close paths, older persisted layouts, the reset escape hatch, provisional close behavior, and cold model-route reconstruction. The browser demonstration restarts the pull request's real Web Host on a new port, continues the restored Side Chat through a real model request, and verifies that an archived Side Chat stays closed after another restart.
+Client tests cover candidate classification, archive exclusion, nested-root deduplication, active-pane placement, idempotent list refreshes, apply-lifetime subscription cleanup, branded Session ids, older persisted layouts, the reset escape hatch, transactional close behavior, the first-prompt close race, and cold model-route reconstruction. The keyless assembled Web scenario drops the origin-scoped strip, reloads the Host-backed Session, and continues the restored thread. The browser demonstration restarts the pull request's real Web Host on a new port, continues the restored Side Chat through a real model request, and verifies that an archived Side Chat stays closed after another restart.
 
 ## Alternatives considered
 
 **Trust only the local close tombstone.** Rejected because the tombstone is lost with the rest of localStorage when the origin changes.
 
-**Persist the complete sidebar layout on the Host.** Rejected because tab restoration needs only durable Side Chat identity; moving every plugin-owned tab payload into a new Host format would broaden the storage contract.
+**Persist the complete sidebar layout on the Host.** Rejected because tab restoration needs only durable Side Chat identity; moving every plugin-owned tab payload into a new Host format would broaden the storage agreement.
 
 **Restore every titled Side Chat child.** Rejected because closing a tab would become temporary and every restart would reopen it.
 

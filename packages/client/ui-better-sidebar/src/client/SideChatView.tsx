@@ -13,12 +13,12 @@ import css from './SideChatView.module.css'
 
 /** The thread a tab is bound to (durable in tab.meta across refreshes). */
 export function sidechatThreadIdOf(tab: SidebarTab): SessionId | undefined {
-  return sidechatTabThreadId(tab.meta) as SessionId | undefined
+  return sidechatTabThreadId(tab.meta)
 }
 
 /** Root Side Chat identity whose live handle belongs to this navigable tab. */
 export function sidechatRootThreadIdOf(tab: SidebarTab): SessionId | undefined {
-  return sidechatTabRootThreadId(tab.meta) as SessionId | undefined
+  return sidechatTabRootThreadId(tab.meta)
 }
 
 function threadDisplayTitle(title: string): string {

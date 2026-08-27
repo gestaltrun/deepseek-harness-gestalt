@@ -6,7 +6,8 @@ import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import {
-  assertFixtureInventory, captureStableAria, compareOrRefreshGolden, launchWebScaffold, watchConsole,
+  acknowledgeReloadConnectionLoss, assertFixtureInventory, captureStableAria, compareOrRefreshGolden,
+  launchWebScaffold, watchConsole,
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
 import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
@@ -19,6 +20,7 @@ const FLOAT_EXPECTED = join(SNAPSHOT_DIR, 'float.expected.md')
 const DESCENDANT_EXPECTED = join(SNAPSHOT_DIR, 'descendant.expected.md')
 const MODE = webSnapshotMode()
 const PROMPT = 'Reply with a one-sentence description of event sourcing, then stop.'
+const RESUME_PROMPT = 'Restate that description in one sentence after restoring this Side Chat.'
 const DESCENDANT_PROMPT = 'Describe event sourcing in one sentence for a nested Side Chat, then stop.'
 const SIDE_BOUNDARY_PREFIX = 'Side conversation boundary'
 const RESPONSE = 'Event sourcing is a pattern where all changes to an application\'s state are stored as an immutable, append-only sequence of events, rather than persisting only the current state, enabling full auditability, temporal queries, and event-driven architectures.'
@@ -52,7 +54,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
   beforeAll(async () => {
     scaffold = await launchWebScaffold({
       replayFixture: FIXTURE,
-      replayChildFixtures: [FIXTURE, FIXTURE],
+      replayChildFixtures: [FIXTURE, FIXTURE, FIXTURE],
       paceMs: 25,
     })
     await seedSideChatSkill(scaffold.workspaceCwd)
@@ -183,6 +185,43 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
       MODE,
     )
 
+    const disposed = await page.request.post(`${scaffold.baseUrl}/sidebar/api/sidechat.dispose`, {
+      data: { childId },
+    })
+    expect(disposed.ok()).toBe(true)
+    await expect.poll(() => scaffold.ctx.agents.get(childId)).toBeUndefined()
+    await page.evaluate(() => {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('dsh-sidebar:v1:')) localStorage.removeItem(key)
+      }
+    })
+    const warningStart = tripwire.warnings.length
+    await page.reload({ waitUntil: 'load' })
+    await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+    acknowledgeReloadConnectionLoss(tripwire, warningStart)
+    const expandSidebar = page.getByRole('button', { name: 'Expand sidebar', exact: true })
+    if (await expandSidebar.count() > 0) await expandSidebar.click()
+    await panel.getByText(PROMPT, { exact: true }).waitFor({ timeout: 15_000 })
+    await compareOrRefreshGolden(
+      EXPECTED,
+      await captureStableAria(page, '[data-dsh-panel]', scaffold.workspaceCwd),
+      MODE,
+    )
+    await panel.getByRole('button', {
+      name: 'Select model, current DeepSeek-V4-Flash',
+      exact: true,
+    }).waitFor({ timeout: 15_000 })
+
+    const resumedSettled = scaffold.whenTurnSettled()
+    const restoredComposer = panel.locator('textarea:enabled')
+    await restoredComposer.fill(RESUME_PROMPT)
+    await restoredComposer.press('Enter')
+    expect(await resumedSettled).toBe(childId)
+    await expect.poll(
+      () => panel.getByText(RESPONSE, { exact: true }).count(),
+      { timeout: 30_000 },
+    ).toBe(2)
+
     const childAgent = scaffold.ctx.agents.get(childId)
     if (childAgent === undefined) throw new Error('Side Chat child Agent was not live')
     const descendantSettled = scaffold.whenTurnSettled()
@@ -212,6 +251,8 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     )
     await panel.getByRole('button', { name: 'Close', exact: true }).click()
     await expect.poll(() => scaffold.ctx.agents.get(childId)).toBeUndefined()
+    await expect.poll(() => [...scaffold.ctx.workspaceRegistry.archivedSessionIds])
+      .toContain(childId)
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
   }, 90_000)

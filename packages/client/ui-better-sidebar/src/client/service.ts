@@ -230,14 +230,16 @@ export interface TabDescriptor {
    * focus is NOT an open — it fires `onActivate` instead), `onActivate`
    * when a tab is focused (dedupe focus, id-safety-net focus, or the
    * tab-bar activation), `onClose` when a tab is closed through
-   * `closeTab`. Builtin-only flows that mutate state directly (the diff
+   * `closeTab`. An asynchronous `onClose` runs before the state commit:
+   * fulfillment permits the close, while rejection is reported and keeps
+   * the tab open. Builtin-only flows that mutate state directly (the diff
    * split placement, agent-terminal reconcile) never touch external tabs
-   * and fire no callbacks. A throwing callback is logged and never breaks
-   * the open/close/activate flow.
+   * and fire no callbacks. A throwing open or activate callback is logged
+   * without breaking its flow; a throwing close callback rejects the close.
    */
   onOpen?: (tab: SidebarTab, scope: SessionScope) => void
   onActivate?: (tab: SidebarTab, scope: SessionScope) => void
-  onClose?: (tab: SidebarTab, scope: SessionScope) => void
+  onClose?: (tab: SidebarTab, scope: SessionScope) => void | Promise<void>
   component: (props: TabComponentProps) => ReactNode
 }
 
@@ -390,10 +392,11 @@ export interface BetterSidebarService {
    */
   openTab(seed: OpenTabSeed, scope?: SessionScope): void
   /**
-   * Close a tab by id (fires descriptor.onClose). An unknown tab id is a
-   * strict no-op (no state churn, no callbacks). `scope` (v0.12.0+) rides
-   * to the callback (its optional cwd included); absent, the callback gets
-   * `{ sessionId }` of the active session.
+   * Close a tab by id. An unknown tab id is a strict no-op. An asynchronous
+   * descriptor.onClose must fulfill before the state is removed; rejection
+   * keeps the tab open. `scope` (v0.12.0+) rides to the callback (its optional
+   * cwd included); absent, the callback gets `{ sessionId }` of the active
+   * session.
    */
   closeTab(tabId: string, scope?: SessionScope): void
   /** Subscribe to registry changes (register/dispose). */
@@ -529,6 +532,7 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
   const tabs = new Map<string, TabDescriptor>()
   const viewers = new Map<string, FileViewerDescriptor>()
   const listeners = new Set<() => void>()
+  const pendingCloses = new Set<string>()
 
   const notify = (): void => {
     for (const fn of [...listeners]) fn()
@@ -748,30 +752,58 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
   }
 
   const closeTab = (tabId: string, scope?: SessionScope): void => {
-    let closed: SidebarTab | undefined
-    store.reduce((state) => {
-      // Unknown tab ids are a strict no-op: no state churn, no notify, no
-      // pointless localStorage rewrite (mirrors updateTab's short-circuit).
-      if (!tabOpenIn(state, tabId)) return state
-      // A floating tab closes WITH its window — the float is the tab's pane.
-      const float = floatWithTab(state, tabId)
-      if (float !== undefined) {
-        closed = float.tab
-        return closeFloatByTab(state, tabId)
+    const state = store.getSnapshot().state
+    if (state === undefined || !tabOpenIn(state, tabId)) return
+    const float = floatWithTab(state, tabId)
+    const paneId = float === undefined ? findPaneIdOf(state, tabId) : undefined
+    const closed = float?.tab
+      ?? (paneId === undefined
+        ? undefined
+        : leafWithTab(state[treeOf(state, paneId)], tabId)?.tabs.find(tab => tab.id === tabId))
+    if (closed === undefined) return
+    const sessionId = scope?.sessionId ?? store.getSnapshot().sessionId
+    const callbackScope = sessionId === undefined ? undefined : scope ?? { sessionId }
+    const pendingKey = `${sessionId ?? ''}\u0000${tabId}`
+    if (pendingCloses.has(pendingKey)) return
+
+    const commit = (): void => {
+      const reducer = (current: SidebarState): SidebarState => {
+        // Unknown tab ids are a strict no-op: no state churn, no notify, no
+        // pointless localStorage rewrite (mirrors updateTab's short-circuit).
+        if (!tabOpenIn(current, tabId)) return current
+        // A floating tab closes WITH its window — the float is the tab's pane.
+        if (floatWithTab(current, tabId) !== undefined) return closeFloatByTab(current, tabId)
+        const currentPaneId = findPaneIdOf(current, tabId)
+        return closeTabReducer(current, currentPaneId, tabId)
       }
-      const paneId = findPaneIdOf(state, tabId)
-      const leaf = leafWithTab(state[treeOf(state, paneId)], tabId)
-      closed = leaf?.tabs.find(tab => tab.id === tabId)
-      return closeTabReducer(state, paneId, tabId)
-    })
-    if (closed !== undefined) {
-      const sessionId = scope?.sessionId ?? store.getSnapshot().sessionId
-      if (sessionId !== undefined) {
-        const descriptor = tabs.get(closed.type)
-        // An explicit scope (with its optional cwd) rides to the callback.
-        safeCall(() => descriptor?.onClose?.(closed!, scope ?? { sessionId }))
+      if (sessionId !== undefined && store.getSnapshot().sessionId !== sessionId) {
+        store.reduceFor(sessionId, reducer)
+      } else {
+        store.reduce(reducer)
       }
     }
+
+    const descriptor = tabs.get(closed.type)
+    if (descriptor?.onClose === undefined || callbackScope === undefined) {
+      commit()
+      return
+    }
+    let lifecycle: void | Promise<void>
+    try {
+      lifecycle = descriptor.onClose(closed, callbackScope)
+    } catch (error) {
+      console.error('[dsh-better-sidebar] tab close rejected:', error)
+      return
+    }
+    if (lifecycle === undefined) {
+      commit()
+      return
+    }
+    pendingCloses.add(pendingKey)
+    void lifecycle.then(
+      commit,
+      (error: unknown) => { console.error('[dsh-better-sidebar] tab close rejected:', error) },
+    ).finally(() => { pendingCloses.delete(pendingKey) })
   }
 
   /** The snapshot the store publishes (state/prefs carry the active session). */

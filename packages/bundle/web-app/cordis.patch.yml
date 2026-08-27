@@ -276,6 +276,11 @@
     - id: ui-browser
       name: '@deepseek-ai/dsh-client-ui-browser'
 
+    # Phone tab skeleton: the always-reachable 「手机」 entry with the enable
+    # gate; disabled by default (Config.enabled), zero detection/spawn.
+    - id: ui-phone
+      name: '@deepseek-ai/dsh-client-ui-phone'
+
     # Goal surface: GoalBar in the input dock over the goal session projection.
     - id: ui-goal
       name: '@deepseek-ai/dsh-client-ui-goal'

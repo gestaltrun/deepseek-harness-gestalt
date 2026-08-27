@@ -252,6 +252,7 @@
       "@deepseek-ai/dsh-client-ui-settings-plugins": ["./packages/client/ui-settings-plugins/src"],
       "@deepseek-ai/dsh-client-ui-jobs": ["./packages/client/ui-jobs/src"],
       "@deepseek-ai/dsh-client-ui-plan": ["./packages/client/ui-plan/src"],
+      "@deepseek-ai/dsh-client-ui-phone": ["./packages/client/ui-phone/src"],
       "@deepseek-ai/dsh-client-ui-schedule": ["./packages/client/ui-schedule/src"],
       "@deepseek-ai/dsh-client-ui-browser": ["./packages/client/ui-browser/src"],
       "@deepseek-ai/dsh-client-ui-better-sidebar": ["./packages/client/ui-better-sidebar/src"],

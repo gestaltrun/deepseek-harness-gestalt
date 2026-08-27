@@ -375,8 +375,11 @@ export class RemoteAttachmentStoreProvider extends RemoteAttachmentStoreService 
   private async releaseExpiredQuota(entry: StoredEntry): Promise<void> {
     try {
       await entry.quota?.release()
-    } catch (error) {
-      console.error('[remote-attachments] quota release failed:', error)
+    } catch {
+      console.error('[remote-attachments] quota release failed:', {
+        phase: 'reservation-release',
+        failureKind: 'unexpected-error',
+      })
     }
   }
 }

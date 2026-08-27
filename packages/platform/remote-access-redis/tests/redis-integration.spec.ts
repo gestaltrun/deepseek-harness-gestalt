@@ -77,6 +77,7 @@ function entry(connectionToken: string, expiresAt: number): RelayDirectoryEntry 
     instanceId: parseRelayInstanceId('platform-integration'),
     connectionToken: parseRelayConnectionToken(connectionToken),
     revision: 1,
+    connectedAt: 1,
     expiresAt,
   }
 }

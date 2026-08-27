@@ -3,6 +3,7 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import { CorsOriginPolicy, writeRetryAfterError } from '@deepseek-ai/dsh-host-webserver'
+import { AccountError } from '@deepseek-ai/dsh-platform-account'
 import { RemoteAccessError, type PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { parseAttachmentCapability, type AttachmentCapability } from '@deepseek-ai/dsh-remote-protocol'
 import z from '@deepseek-ai/schemastery'
@@ -23,30 +24,18 @@ export interface Config {
 export const Config: z<Config> = z.object({ origins: z.array(z.string()).min(1).required() })
 /** Cordis plugin name. */
 export const name = 'remote-attachments-http'
-/** Required blob store, pairing authority, and HTTP route registry. */
-export const inject = ['webServer', 'remoteAttachments', 'remoteAttachmentAuthority']
+/** Required blob store and HTTP route registry. */
+export const inject = ['webServer', 'remoteAttachments']
 
 /**
- * Pairing scope seam: the Personal Pairing layer authenticates one HTTPS request
- * to exactly one Personal Pairing. Implementations never see attachment bytes.
+ * Construction-private authenticator for one HTTPS request and exact Personal Pairing.
+ * @param input - complete untrusted request headers.
+ * @returns pairing authority plus Account-complete blob admission.
  */
-export interface RemoteAttachmentAuthority {
-  /**
-   * Authenticate one attachment request to its owning Personal Pairing.
-   * @param input - complete untrusted request headers.
-   * @returns pairing authority plus Account-complete blob admission.
-   */
-  authenticate(input: { headers: IncomingHttpHeaders }): Promise<{
-    pairingId: PersonalPairingId
-    admit(bytes: number): Promise<RemoteAttachmentQuotaReservation>
-  }>
-}
-
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    remoteAttachmentAuthority: RemoteAttachmentAuthority
-  }
-}
+export type RemoteAttachmentAuthenticator = (input: { headers: IncomingHttpHeaders }) => Promise<{
+  pairingId: PersonalPairingId
+  admit(bytes: number): Promise<RemoteAttachmentQuotaReservation>
+}>
 
 const STORE_FAILURE_STATUS: Record<RemoteAttachmentErrorCode, number> = {
   ATTACHMENT_CAPABILITY_INVALID: 404,
@@ -61,28 +50,47 @@ const STORE_FAILURE_STATUS: Record<RemoteAttachmentErrorCode, number> = {
 type AttachmentRouteHandler = (
   req: IncomingMessage,
   res: ServerResponse,
-  authorization: Awaited<ReturnType<RemoteAttachmentAuthority['authenticate']>>,
+  authorization: Awaited<ReturnType<RemoteAttachmentAuthenticator>>,
 ) => Promise<void>
+type AttachmentOperation = 'upload' | 'consume' | 'revoke'
 
-/** Register the bounded attachment blob routes over the mounted blob store. */
-export function apply(ctx: Context, config: Config): void {
+/**
+ * Capture operated request authentication without publishing it as a Cordis service.
+ * @param authenticate - same-composition Installation and Personal Pairing authenticator.
+ * @returns standard function-plugin namespace for the bounded attachment routes.
+ */
+export function createRemoteAttachmentsHttpPlugin(authenticate: RemoteAttachmentAuthenticator): {
+  name: typeof name
+  inject: typeof inject
+  Config: typeof Config
+  apply(ctx: Context, config: Config): void
+} {
+  return {
+    name,
+    inject,
+    Config,
+    apply(ctx, config) { apply(ctx, config, authenticate) },
+  }
+}
+
+function apply(ctx: Context, config: Config, authenticate: RemoteAttachmentAuthenticator): void {
   const origins = new CorsOriginPolicy(config.origins, 'Remote Attachments HTTP')
   const store = ctx.remoteAttachments
   /** Wrap one route with the shared CORS, method, pairing-authentication, and failure preludes. */
-  const route = (handle: AttachmentRouteHandler) =>
+  const route = (operation: AttachmentOperation, handle: AttachmentRouteHandler) =>
     async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
       try {
         if (handleCors(req, res, origins)) return
         if (req.method !== 'POST') throw new RemoteAttachmentHttpError(405, 'METHOD_NOT_ALLOWED', 'Remote Attachments route requires POST')
-        await handle(req, res, await ctx.remoteAttachmentAuthority.authenticate({ headers: req.headers }))
+        await handle(req, res, await authenticate({ headers: req.headers }))
       } catch (error) {
-        answerError(res, error)
+        answerError(res, error, operation)
       }
     }
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/v1/remote-attachments',
-    handler: route(async (req, res, authorization) => {
+    handler: route('upload', async (req, res, authorization) => {
       const byteLength = parseUploadLength(req.headers['content-length'], store.maxBlobBytes)
       const quota = await authorization.admit(byteLength)
       let ciphertext: Buffer
@@ -91,8 +99,12 @@ export function apply(ctx: Context, config: Config): void {
       } catch (error) {
         try {
           await quota.release()
-        } catch (cleanupError) {
-          console.error('[remote-attachments-http] quota release after rejected upload failed:', cleanupError)
+        } catch {
+          console.error('[remote-attachments-http] quota release after rejected upload failed:', {
+            operation: 'upload',
+            phase: 'quota-release',
+            failureKind: 'unexpected-error',
+          })
         }
         throw error
       }
@@ -112,7 +124,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/v1/remote-attachments/consume',
-    handler: route(async (req, res, authorization) => {
+    handler: route('consume', async (req, res, authorization) => {
       const body = await readJson(req)
       const capability = parseCapability(body.capability)
       const consumption = await store.consume({ pairingId: authorization.pairingId, capability, now: Date.now() })
@@ -130,7 +142,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/v1/remote-attachments/revoke',
-    handler: route(async (req, res, authorization) => {
+    handler: route('revoke', async (req, res, authorization) => {
       const body = await readJson(req)
       await store.revoke({ pairingId: authorization.pairingId, capability: parseCapability(body.capability) })
       res.writeHead(204).end()
@@ -243,10 +255,20 @@ function answerJson(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, JSON_HEADERS).end(JSON.stringify(value))
 }
 
-function answerError(res: ServerResponse, error: unknown): void {
+function answerError(res: ServerResponse, error: unknown, operation: AttachmentOperation): void {
   if (res.headersSent) return
   if (error instanceof RemoteAccessError) {
     writeRetryAfterError(res, error, error.code === 'QUOTA' || error.code === 'PLATFORM_CAPACITY' ? 429 : 409)
+    return
+  }
+  if (error instanceof AccountError) {
+    writeRetryAfterError(
+      res,
+      error,
+      error.code === 'QUOTA' || error.code === 'PLATFORM_CAPACITY'
+        ? 429
+        : error.code.startsWith('SESSION_') || error.code.startsWith('PROOF_') ? 401 : 400,
+    )
     return
   }
   const storeError = remoteAttachmentFailure(error)
@@ -255,6 +277,12 @@ function answerError(res: ServerResponse, error: unknown): void {
     return
   }
   const { status, body } = toFailureView(error)
+  if (status === 500) {
+    console.error('[remote-attachments-http] unexpected request failure:', {
+      operation,
+      failureKind: 'unexpected-error',
+    })
+  }
   answerJson(res, status, body)
 }
 

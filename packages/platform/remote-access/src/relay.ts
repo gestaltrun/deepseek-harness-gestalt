@@ -106,6 +106,8 @@ export interface RelayDirectoryEntry {
   instanceId: RelayInstanceId
   connectionToken: RelayConnectionToken
   revision: number
+  /** Stable physical-attachment creation time used to select one current endpoint per pairing. */
+  connectedAt: number
   expiresAt: number
 }
 

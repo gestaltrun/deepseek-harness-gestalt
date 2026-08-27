@@ -8,7 +8,7 @@ import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import { CompanionForegroundRuntime } from '../../src/companion-lifecycle.ts'
 import { fixedMobilePresentationClock } from '../../src/mobile-clock.ts'
 import { mountMobileEntry } from '../../src/mobile-entry.tsx'
-import type { MobilePairingActions } from '../../src/personal-pairing-model.ts'
+import type { MobilePairingActions, MobilePairingSnapshot } from '../../src/personal-pairing-model.ts'
 import type {
   MobileCompanionConnectionChannel,
   ValidatedDesktopSurfaceResync,
@@ -20,6 +20,7 @@ declare global {
   interface Window {
     __DSH_MOBILE_PRODUCT_EVIDENCE__: {
       show(mode: EvidenceMode): void
+      showPairing(status: 'paired' | 'rejected'): void
     }
   }
 }
@@ -40,9 +41,10 @@ export function launchMobileProduct(_start: () => Promise<void>): Promise<void> 
     revision: 1,
   })
   runtime.markConnectionOpen()
+  const pairing = pairingEvidence()
   const mounted = mountMobileEntry(root, {
     installation: signedInInstallation(),
-    pairing: pairedDesktops(),
+    pairing: pairing.actions,
     companion: runtime,
     clock: fixedMobilePresentationClock(10_000),
   })
@@ -51,14 +53,20 @@ export function launchMobileProduct(_start: () => Promise<void>): Promise<void> 
   const show = (mode: EvidenceMode): void => {
     receiver.acceptValidatedDesktopResync(projection(mode))
   }
-  window.__DSH_MOBILE_PRODUCT_EVIDENCE__ = { show }
+  window.__DSH_MOBILE_PRODUCT_EVIDENCE__ = {
+    show,
+    showPairing: (status) => { pairing.show(status) },
+  }
   show('approval')
   return Promise.resolve()
 }
 
-function pairedDesktops(): MobilePairingActions {
+function pairingEvidence(): {
+  actions: MobilePairingActions
+  show(status: 'paired' | 'rejected'): void
+} {
   const selected = parsePersonalPairingId('pairing-product-entry')
-  const snapshot = {
+  const paired: MobilePairingSnapshot = {
     status: 'paired' as const,
     desktops: [
       { pairingId: selected, desktopName: 'Authenticated Shared Desktop' },
@@ -66,9 +74,11 @@ function pairedDesktops(): MobilePairingActions {
     ],
     selectedPairingId: selected,
   }
-  return {
+  let snapshot: MobilePairingSnapshot = paired
+  const listeners = new Set<() => void>()
+  const actions: MobilePairingActions = {
     getSnapshot: () => snapshot,
-    subscribe: () => () => {},
+    subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
     completeLink: () => {},
     scanQr: () => {},
     retryPairing: () => {},
@@ -76,6 +86,15 @@ function pairedDesktops(): MobilePairingActions {
     activate: async () => {},
     deactivate: async () => {},
     unpair: async () => {},
+  }
+  return {
+    actions,
+    show: (status) => {
+      snapshot = status === 'paired'
+        ? paired
+        : { status: 'rejected', error: 'Desktop rejected Personal Pairing.' }
+      for (const listener of listeners) listener()
+    },
   }
 }
 
@@ -87,7 +106,7 @@ function signedInInstallation(): PlatformAccountInstallation {
       id: 'account-product-entry' as never,
       githubId: 583_231,
       githubLogin: 'shared-product',
-      avatarUrl: 'https://avatars.example/shared-product',
+      avatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2232%22 fill=%22%231c1d21%22/%3E%3Ctext x=%2232%22 y=%2241%22 text-anchor=%22middle%22 font-size=%2228%22 fill=%22white%22%3ES%3C/text%3E%3C/svg%3E',
     },
   }
   return {
@@ -102,6 +121,7 @@ function connectionChannel(): MobileCompanionConnectionChannel {
   const tracked = () => ({ operationId: crypto.randomUUID() as never, completion: Promise.resolve() })
   return {
     mutations: {
+      refreshSurface: tracked,
       create: tracked,
       submit: tracked,
       cancel: tracked,

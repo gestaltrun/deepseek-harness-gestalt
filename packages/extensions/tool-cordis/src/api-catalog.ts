@@ -1534,19 +1534,6 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
-    key: 'remoteAttachmentAuthority',
-    summary: 'Pairing scope seam: the Personal Pairing layer authenticates one HTTPS request to exactly one Personal Pairing.',
-    description: 'Pairing scope seam: the Personal Pairing layer authenticates one HTTPS request to exactly one Personal Pairing. Implementations never see attachment bytes.',
-    methods: [
-      {
-        signature: 'authenticate(input: { headers: IncomingHttpHeaders }): Promise<{ pairingId: PersonalPairingId admit(bytes: number): Promise<RemoteAttachmentQuotaReservation> }>',
-        description: 'Authenticate one attachment request to its owning Personal Pairing.',
-        parameters: [{ name: 'input', description: 'complete untrusted request headers.' }],
-        returns: 'pairing authority plus Account-complete blob admission.',
-      },
-    ],
-  },
-  {
     key: 'remoteAttachments',
     summary: 'Platform attachment blob store: retains ciphertext and metadata only, bounded per blob and in total, scoped to exactly one Personal Pairing, single-use, and expiring.',
     description: 'Platform attachment blob store: retains ciphertext and metadata only, bounded per blob and in total, scoped to exactly one Personal Pairing, single-use, and expiring.',

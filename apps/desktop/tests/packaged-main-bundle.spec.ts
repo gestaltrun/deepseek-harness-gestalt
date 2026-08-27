@@ -93,10 +93,13 @@ describe('packaged Desktop main bundle', () => {
     expect(source).toMatch(/disableDifferentialDownload/)
     expect(source).toMatch(/from\s+['"]ws['"]/)
     expect(source).not.toContain('node_modules/ws/lib/websocket.js')
+    expect(source).toMatch(/from\s+['"]https-proxy-agent['"]/)
+    expect(source).not.toContain('node_modules/https-proxy-agent')
     const desktopPackage = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>
     }
     expect(desktopPackage.dependencies?.ws).toBe('^8.21.0')
+    expect(desktopPackage.dependencies?.['https-proxy-agent']).toBe('^7.0.6')
     expect(source).toContain('companion entry search')
     expect(source).not.toContain('DSH_PLATFORM_ORIGIN')
     expect(JSON.parse(readFileSync(join(desktop, 'out', 'operated-platform.json'), 'utf8'))).toEqual({

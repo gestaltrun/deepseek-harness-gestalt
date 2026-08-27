@@ -101,6 +101,18 @@ describe('public conversation presentation seam', () => {
     expect(onCancel).toHaveBeenCalledOnce()
   })
 
+  it('places owner-supplied controls in the narrow InputBar tool row', () => {
+    render(createElement(ConversationComposer, {
+      snapshot: snapshot(),
+      onSubmit: vi.fn(),
+      tools: createElement('button', { type: 'button' }, 'Attach'),
+      t: conversationPresentationTranslate('en'),
+    }))
+
+    const tool = screen.getByRole('button', { name: 'Attach' })
+    expect(tool.closest('[data-composer-card]')).not.toBeNull()
+  })
+
   it('preserves draft rules across keyboard, composition, paste, and unavailable states', async () => {
     let resolveSubmit: (() => void) | undefined
     const onSubmit = vi.fn(() => new Promise<void>((resolve) => { resolveSubmit = resolve }))

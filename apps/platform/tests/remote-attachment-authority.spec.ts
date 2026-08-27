@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import { parseAttachmentBlobReservationId, parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
-import { OperatedRemoteAttachmentAuthority } from '../src/remote-attachment-authority.ts'
+import { createOperatedRemoteAttachmentAuthenticator } from '../src/remote-attachment-authority.ts'
 
 const pairingId = parsePersonalPairingId('pairing-authorized')
 const authenticationHeaders = {
@@ -23,28 +23,32 @@ describe('operated remote attachment authority', () => {
         presentation: { name: 'Real phone', platform: 'ios' as const } },
     }))
     const ownsConfirmedPairing = vi.fn(async () => true)
-    const admitAttachmentBlob = vi.fn(async () => ({
+    const admit = vi.fn(async () => ({
       reservationId: parseAttachmentBlobReservationId('quota-authorized'),
       expiresAt: 999_999,
     }))
     let finishRelease: (() => void) | undefined
-    const releaseAttachmentBlob = vi.fn(() => new Promise<void>((resolve) => {
+    const release = vi.fn(() => new Promise<void>((resolve) => {
       finishRelease = resolve
     }))
-    const authority = new OperatedRemoteAttachmentAuthority(
+    const authenticate = createOperatedRemoteAttachmentAuthenticator(
       { currentInstallation },
       { ownsConfirmedPairing },
-      { admitAttachmentBlob, releaseAttachmentBlob },
+      {
+        admit,
+        release,
+        cleanup: { release: vi.fn() },
+      },
     )
 
-    const authenticated = await authority.authenticate({ headers: authenticationHeaders })
+    const authenticated = await authenticate({ headers: authenticationHeaders })
     expect(authenticated.pairingId).toBe(pairingId)
     const quota = await authenticated.admit(17)
     expect(quota.id).toBe('quota-authorized')
     expect(quota.expiresAt).toBe(999_999)
     const firstRelease = quota.release()
     const concurrentRelease = quota.release()
-    expect(releaseAttachmentBlob).toHaveBeenCalledTimes(1)
+    expect(release).toHaveBeenCalledTimes(1)
     finishRelease?.()
     await Promise.all([firstRelease, concurrentRelease])
     await quota.release()
@@ -55,12 +59,15 @@ describe('operated remote attachment authority', () => {
     expect(ownsConfirmedPairing).toHaveBeenCalledWith(
       'account-authorized', 'mobile-authorized', pairingId,
     )
-    expect(admitAttachmentBlob).toHaveBeenCalledWith(expect.objectContaining({ bytes: 17 }))
-    expect(releaseAttachmentBlob).toHaveBeenCalledTimes(1)
+    expect(admit).toHaveBeenCalledWith({ accountId: 'account-authorized', bytes: 17 })
+    expect(release).toHaveBeenCalledWith({
+      accountId: 'account-authorized', reservationId: 'quota-authorized',
+    })
+    expect(release).toHaveBeenCalledTimes(1)
   })
 
   it('rejects a selector missing durable Installation membership', async () => {
-    const authority = new OperatedRemoteAttachmentAuthority({
+    const authenticate = createOperatedRemoteAttachmentAuthenticator({
       currentInstallation: async () => ({
         account: {
           id: parsePlatformAccountId('account-hostile'), githubId: 2,
@@ -70,19 +77,19 @@ describe('operated remote attachment authority', () => {
       }),
     } as never, { ownsConfirmedPairing: async () => false }, {} as never)
 
-    await expect(authority.authenticate({ headers: authenticationHeaders }))
+    await expect(authenticate({ headers: authenticationHeaders }))
       .rejects.toMatchObject({ status: 403, code: 'ATTACHMENT_PAIRING_DENIED' })
   })
 
   it('rejects a missing selector before Account verification', async () => {
     const currentInstallation = vi.fn()
-    const authority = new OperatedRemoteAttachmentAuthority(
+    const authenticate = createOperatedRemoteAttachmentAuthenticator(
       { currentInstallation },
       { ownsConfirmedPairing: vi.fn() },
       {} as never,
     )
     const { 'x-gestalt-pairing-selector': _selector, ...headers } = authenticationHeaders
-    await expect(authority.authenticate({ headers }))
+    await expect(authenticate({ headers }))
       .rejects.toMatchObject({ status: 400, code: 'ATTACHMENT_PAIRING_REQUIRED' })
     expect(currentInstallation).not.toHaveBeenCalled()
   })

@@ -11,6 +11,9 @@
 import type { Message } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SurfaceEvent, SurfaceEventType, SurfaceOp } from './types.ts'
 
+export { contextForm, contextProvenance, sessionRecallLabels } from './context-provenance.ts'
+export type { ContextProvenanceView, ContextRole, KnownContextForm } from './context-provenance.ts'
+
 /** Runtime counterpart of the message-producing event union. */
 const SURFACE_EVENT_TYPES = new Set<string>([
   'user/message',

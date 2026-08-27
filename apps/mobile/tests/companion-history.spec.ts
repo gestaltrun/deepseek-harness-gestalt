@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   EMPTY_CHAT_SNAPSHOT, EMPTY_CONVERSATION_VIEWS,
@@ -23,6 +23,7 @@ const workspaceId = wid('work')
 const browsePresentation = {
   locale: 'zh' as const,
   theme: 'light' as const,
+  onOpenAccount: vi.fn(),
   loadImage: () => Promise.resolve('data:image/gif;base64,R0lGODlhAQABAAAAACw='),
   canMutate: true,
   clock: fixedClock(10_000),
@@ -81,17 +82,46 @@ describe('Mobile Companion browse projection', () => {
     expect(screen.getAllByText('10分钟')).toHaveLength(2)
   })
 
-  it('pages the exact Desktop SessionListState without introducing another row model', () => {
-    const ids = Array.from({ length: COMPANION_HISTORY_PAGE_SIZE + 3 }, (_, index) => sid(`id-${String(index)}`))
-    const many = { ...sessions, ids }
-    expect(pageCompanionHistory(many, workspaces, 0).sessions.ids).toHaveLength(COMPANION_HISTORY_PAGE_SIZE)
-    expect(pageCompanionHistory(many, workspaces, 0).spilled).toBe(3)
-    expect(pageCompanionHistory(many, workspaces, 1).sessions.ids).toHaveLength(COMPANION_HISTORY_PAGE_SIZE + 3)
-    expect(pageCompanionHistory(many, workspaces, 1).spilled).toBe(0)
+  it('keeps the clock subscription stable across presentation renders', () => {
+    let subscriptions = 0
+    const clock: MobilePresentationClock = {
+      getSnapshot: () => 10_000,
+      subscribe: () => {
+        subscriptions += 1
+        return () => {}
+      },
+    }
+    const view = render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces,
+      conversations: {}, ...browsePresentation, clock,
+    }))
+
+    view.rerender(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces,
+      conversations: {}, ...browsePresentation, clock,
+    }))
+
+    expect(subscriptions).toBe(1)
   })
 
-  it('limits Workspace-owned rows until the user loads the next page', () => {
-    const ids = Array.from({ length: COMPANION_HISTORY_PAGE_SIZE + 3 }, (_, index) => sid(`workspace-${String(index)}`))
+  it('pages one derived Workspace group without introducing another row model', () => {
+    const ids = Array.from({ length: COMPANION_HISTORY_PAGE_SIZE + 3 }, (_, index) => sid(`id-${String(index)}`))
+    expect(pageCompanionHistory(ids, 0).items).toHaveLength(COMPANION_HISTORY_PAGE_SIZE)
+    expect(pageCompanionHistory(ids, 0).spilled).toBe(3)
+    expect(pageCompanionHistory(ids, 1).items).toHaveLength(COMPANION_HISTORY_PAGE_SIZE + 3)
+    expect(pageCompanionHistory(ids, 1).spilled).toBe(0)
+  })
+
+  it('loads more rows independently inside each Workspace', () => {
+    const firstIds = Array.from(
+      { length: COMPANION_HISTORY_PAGE_SIZE + 3 },
+      (_, index) => sid(`workspace-first-${String(index)}`),
+    )
+    const secondIds = Array.from(
+      { length: COMPANION_HISTORY_PAGE_SIZE + 2 },
+      (_, index) => sid(`workspace-second-${String(index)}`),
+    )
+    const ids = [...firstIds, ...secondIds]
     const byId = Object.fromEntries(ids.map((id, index) => [id, {
       id,
       title: `Session ${String(index)}`,
@@ -102,16 +132,38 @@ describe('Mobile Companion browse projection', () => {
       updatedAt: ids.length - index,
     }]))
     const many: SessionListState = { ...sessions, ids, byId }
-    const manyWorkspaces: readonly WorkspaceView[] = [{ ...workspaces[0]!, sessionIds: ids }]
+    const manyWorkspaces: readonly WorkspaceView[] = [
+      { ...workspaces[0]!, title: 'First', sessionIds: firstIds },
+      { ...workspaces[0]!, workspaceId: wid('second'), title: 'Second', sessionIds: secondIds },
+    ]
 
     render(createElement(MobileBrowse, {
       desktopName: 'Studio Mac', connection: 'online', sessions: many, workspaces: manyWorkspaces,
       conversations: {}, ...browsePresentation,
     }))
 
-    expect(screen.getAllByRole('treeitem')).toHaveLength(COMPANION_HISTORY_PAGE_SIZE)
-    fireEvent.click(screen.getByRole('button', { name: '加载更多（还有 3）' }))
-    expect(screen.getAllByRole('treeitem')).toHaveLength(COMPANION_HISTORY_PAGE_SIZE + 3)
+    expect(screen.getAllByRole('treeitem')).toHaveLength(COMPANION_HISTORY_PAGE_SIZE * 2)
+    fireEvent.click(screen.getByRole('button', { name: '在 First 加载更多（还有 3）' }))
+    expect(within(screen.getByRole('region', { name: 'First' })).getAllByRole('treeitem'))
+      .toHaveLength(COMPANION_HISTORY_PAGE_SIZE + 3)
+    expect(within(screen.getByRole('region', { name: 'Second' })).getAllByRole('treeitem'))
+      .toHaveLength(COMPANION_HISTORY_PAGE_SIZE)
+    expect(screen.getByRole('button', { name: '在 Second 加载更多（还有 2）' })).toBeTruthy()
+  })
+
+  it('collapses and expands one Workspace without affecting its siblings', () => {
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces,
+      conversations: {}, ...browsePresentation,
+    }))
+
+    fireEvent.click(screen.getByRole('button', { name: '收起 Work' }))
+    expect(within(screen.getByRole('region', { name: 'Work' })).queryByRole('treeitem')).toBeNull()
+    expect(within(screen.getByRole('region', { name: '未分组' })).getByRole('treeitem', { name: /Gamma/ }))
+      .toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '展开 Work' }))
+    expect(within(screen.getByRole('region', { name: 'Work' })).getByRole('treeitem', { name: /Alpha/ }))
+      .toBeTruthy()
   })
 
   it('uses shared Desktop Session rows and opens authoritative conversations full-screen', () => {
@@ -166,6 +218,18 @@ describe('Mobile Companion browse projection', () => {
     expect(onLoadOlder).toHaveBeenCalledWith(createdId)
   })
 
+  it('does not request missing history after foreground synchronization is lost', async () => {
+    const onLoadOlder = vi.fn()
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'offline',
+      sessions: { ...sessions, current: alphaId }, workspaces, conversations: {},
+      ...browsePresentation, canMutate: false, onLoadOlder,
+    }))
+
+    await screen.findByRole('heading', { name: 'Alpha' })
+    expect(onLoadOlder).not.toHaveBeenCalled()
+  })
+
   it('keeps a correlated operation failure visible in the opened conversation', () => {
     render(createElement(MobileBrowse, {
       desktopName: 'Studio Mac', connection: 'online', sessions, workspaces,
@@ -179,10 +243,28 @@ describe('Mobile Companion browse projection', () => {
     }))
 
     fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }))
-    expect(screen.getByRole('alert').textContent).toContain('Desktop rejected history')
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('Desktop rejected history')
+    expect(alert.closest('[data-conversation-scroll]')).not.toBeNull()
+    expect(document.querySelector('[data-mobile-conversation="detail"]')?.children).toHaveLength(3)
     fireEvent.click(screen.getByRole('button', { name: '返回' }))
     fireEvent.click(screen.getByRole('treeitem', { name: /Gamma/ }))
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('keeps a connection failure inside the opened conversation scroll region', () => {
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces,
+      conversations: { [alphaId]: conversation() }, ...browsePresentation,
+      connectionFailure: {
+        code: 'PLATFORM_CAPACITY', message: 'Remote Relay returned PLATFORM_CAPACITY', retryAfterMs: 5_000,
+      },
+    }))
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }))
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toBe('Platform 当前容量已满，将在 5 秒后重试。')
+    expect(alert.closest('[data-conversation-scroll]')).not.toBeNull()
   })
 
   it.each([
@@ -228,23 +310,56 @@ describe('Mobile Companion browse projection', () => {
     expect(screen.getByRole('alert').textContent).toBe(expected)
   })
 
-  it('targets real Workspace ids and disables creation before foreground synchronization', () => {
+  it('targets real Workspace ids and keeps navigation usable before foreground synchronization', () => {
     const onCreate = vi.fn()
+    const onSearch = vi.fn()
     const view = render(createElement(MobileBrowse, {
       desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
-      ...browsePresentation, onCreate,
+      ...browsePresentation, onCreate, onSearch,
     }))
     fireEvent.click(screen.getByRole('button', { name: '在 Work 新建 Session' }))
+    expect(screen.getByRole('heading', { name: '新 Session' })).toBeTruthy()
+    expect(screen.queryByText('项目')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
     fireEvent.click(screen.getByRole('button', { name: '新建 Ungrouped Session' }))
     expect(onCreate).toHaveBeenNthCalledWith(1, { workspace: workspaceId })
     expect(onCreate).toHaveBeenNthCalledWith(2, {})
+    fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
 
     view.rerender(createElement(MobileBrowse, {
-      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
-      ...browsePresentation, canMutate: false, onCreate,
+      desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces, conversations: {},
+      ...browsePresentation, canMutate: false, onCreate, onSearch,
     }))
-    expect(screen.getByRole('button', { name: '在 Work 新建 Session' }).hasAttribute('disabled')).toBe(true)
-    expect(screen.getByRole('button', { name: '新建 Ungrouped Session' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '在 Work 新建 Session' }))
+    expect(screen.getByText('Remote Offline，重新连接并同步后才能创建 Session。')).toBeTruthy()
+    expect(onCreate).toHaveBeenCalledTimes(2)
+    fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
+    fireEvent.click(screen.getByRole('button', { name: '搜索聊天记录' }))
+    expect(screen.getByRole('heading', { name: '搜索' })).toBeTruthy()
+    expect(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' }).hasAttribute('disabled')).toBe(true)
+    expect(onSearch).not.toHaveBeenCalled()
+  })
+
+  it('opens search as a separate phone destination and returns to the Session list', () => {
+    const onSearch = vi.fn()
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
+      ...browsePresentation, onSearch,
+    }))
+
+    expect(screen.queryByRole('searchbox')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '搜索聊天记录' }))
+    expect(screen.getByRole('heading', { name: '搜索' })).toBeTruthy()
+    expect(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' })).toBeTruthy()
+    expect(screen.queryByText('项目')).toBeNull()
+    expect(screen.queryByText('聊天')).toBeNull()
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'needle' } })
+    fireEvent.click(screen.getByRole('button', { name: '搜索' }))
+    expect(onSearch).toHaveBeenCalledWith('needle')
+    fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
+    expect(onSearch).toHaveBeenLastCalledWith('')
+    expect(screen.getByText('项目')).toBeTruthy()
   })
 
   it('renders Desktop-authoritative hits even when the Companion Cache lacks the Session', () => {
@@ -296,6 +411,8 @@ describe('Mobile Companion browse projection', () => {
       onLoadOlder,
     }))
     expect(screen.getByRole('alert').textContent).toContain('HTTP 400')
+    fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
+    expect(onSearch).toHaveBeenLastCalledWith('')
   })
 
   it('renders authoritative search controls and status entirely in English', () => {

@@ -3,7 +3,7 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { parseAccountProofJti, type AccountProof } from '@deepseek-ai/dsh-platform-account'
+import { AccountError, parseAccountProofJti, type AccountProof } from '@deepseek-ai/dsh-platform-account'
 import {
   RemoteAccessError,
   parseAttachmentBlobReservationId,
@@ -45,6 +45,7 @@ export function apply(ctx: Context, config: Config): void {
     kind: 'exact',
     path: '/v1/remote-access/personal-pairing',
     handler: async (req, res) => {
+      let operation: string | undefined
       try {
         if (handleCors(req, res, origins)) return
         if (req.method !== 'POST') throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Remote Access route requires POST')
@@ -55,10 +56,16 @@ export function apply(ctx: Context, config: Config): void {
           invalidJson: { status: 400, code: 'BODY_INVALID', message: 'Remote Access body must be JSON' },
           notObject: { status: 400, code: 'BODY_INVALID', message: 'Remote Access body must be an object' },
         })
-        const result = await dispatch(ctx, authentication, body, () => requestClientIp(req))
+        const result = await dispatch(
+          ctx,
+          authentication,
+          body,
+          () => requestClientIp(req),
+          (value) => { operation = value },
+        )
         writeJson(res, 200, result)
       } catch (error) {
-        answerError(res, error)
+        answerError(res, error, operation)
       }
     },
   }))
@@ -69,8 +76,11 @@ async function dispatch(
   authentication: PairingAccountAuthentication,
   body: Record<string, unknown>,
   clientIp: () => string,
+  observeOperation: (operation: string) => void,
 ): Promise<unknown> {
-  switch (requiredString(body.operation, 'operation')) {
+  const operation = requiredString(body.operation, 'operation')
+  observeOperation(operation)
+  switch (operation) {
     case 'get-mobile-access': return ctx.remoteAccess.getMobileAccessState(authentication)
     case 'set-mobile-access':
       return ctx.remoteAccess.setMobileAccess({ desktop: authentication, enabled: requiredBoolean(body.enabled, 'enabled') })
@@ -306,7 +316,7 @@ function handleCors(req: IncomingMessage, res: ServerResponse, allowedOrigins: C
   return true
 }
 
-function answerError(res: ServerResponse, error: unknown): void {
+function answerError(res: ServerResponse, error: unknown, operation?: string): void {
   if (error instanceof HttpError) {
     writeHttpError(res, error)
     return
@@ -319,7 +329,69 @@ function answerError(res: ServerResponse, error: unknown): void {
     )
     return
   }
+  if (error instanceof AccountError) {
+    writeRetryAfterError(
+      res,
+      error,
+      error.code === 'QUOTA' || error.code === 'PLATFORM_CAPACITY'
+        ? 429
+        : error.code.startsWith('SESSION_') || error.code.startsWith('PROOF_') ? 401 : 400,
+    )
+    return
+  }
+  console.error('[remote-access-http] unexpected request failure:', {
+    operation: operation ?? 'request-setup',
+    failureKind: 'unexpected-error',
+    cause: classifyUnexpectedFailure(error),
+  })
   writeJson(res, 500, { error: { code: 'INTERNAL_ERROR', message: 'Remote Access request failed' } })
+}
+
+type PersistenceFailure =
+  'persistence-unique-violation' | 'persistence-foreign-key-violation' | 'persistence-not-null-violation'
+  | 'persistence-check-violation' | 'persistence-missing-relation' | 'persistence-missing-column'
+  | 'persistence-invalid-text' | 'persistence-untranslatable-character'
+  | 'persistence-serialization-failure' | 'persistence-deadlock'
+  | 'persistence-connection' | 'persistence-other'
+
+function classifyUnexpectedFailure(error: unknown):
+  PersistenceFailure | 'transport' | 'codec' | 'contract' | 'cleanup' | 'dependency' | 'unexpected' {
+  if (error instanceof AggregateError || error instanceof SyntaxError || error instanceof TypeError) {
+    if (error instanceof AggregateError) return 'cleanup'
+    return error instanceof SyntaxError ? 'codec' : 'contract'
+  }
+  if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') {
+    return 'unexpected'
+  }
+  const persistenceCause = PERSISTENCE_FAILURES[error.code]
+  if (persistenceCause !== undefined) return persistenceCause
+  if (/^(?:[0-9A-Z]{5})$/u.test(error.code)) return 'persistence-other'
+  if (['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'EPIPE', 'ETIMEDOUT'].includes(error.code)) {
+    return 'transport'
+  }
+  if (error.code.startsWith('UND_ERR_')) return 'transport'
+  if (error.code.startsWith('ERR_')) return 'dependency'
+  return 'unexpected'
+}
+
+const PERSISTENCE_FAILURES: Readonly<Record<string, PersistenceFailure>> = {
+  '23505': 'persistence-unique-violation',
+  '23503': 'persistence-foreign-key-violation',
+  '23502': 'persistence-not-null-violation',
+  '23514': 'persistence-check-violation',
+  '42P01': 'persistence-missing-relation',
+  '42703': 'persistence-missing-column',
+  '22P02': 'persistence-invalid-text',
+  '22P05': 'persistence-untranslatable-character',
+  '40001': 'persistence-serialization-failure',
+  '40P01': 'persistence-deadlock',
+  '08000': 'persistence-connection',
+  '08001': 'persistence-connection',
+  '08003': 'persistence-connection',
+  '08004': 'persistence-connection',
+  '08006': 'persistence-connection',
+  '08007': 'persistence-connection',
+  '08P01': 'persistence-connection',
 }
 
 function requiredString(value: unknown, name: string): string {

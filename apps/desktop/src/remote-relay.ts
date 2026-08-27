@@ -2,6 +2,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
 import type { SelectedPlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
 import {
   parseRelayAttachmentId,
@@ -30,6 +31,7 @@ import {
   type SnowCompanionProtocolChannel,
 } from '@deepseek-ai/dsh-noise-channel'
 import { sealDesktopForegroundSynchronization } from './noise-companion.ts'
+import { desktopRelayProxyCandidates } from './system-network.ts'
 import type { DesktopSnowPairingVault } from './snow-pairing-vault.ts'
 import type {
   DesktopCompanionLiveProjectionChange,
@@ -54,6 +56,8 @@ export interface DesktopRemoteRelayOptions {
   environment: SelectedPlatformEnvironment
   config: DesktopRemoteRelayConfig
   connect?: (signal: AbortSignal, config: DesktopRemoteRelayConfig) => Promise<RelayEndpointSocket>
+  /** Resolve the current native system proxy for every fresh WSS acquisition. */
+  resolveProxy?: (url: string) => Promise<string>
   snowPairingVault: DesktopSnowPairingVault
   initializeWasm?: () => void
   /** Read the Platform-authenticated Desktop Installation name for each fresh synchronization. */
@@ -62,6 +66,48 @@ export interface DesktopRemoteRelayOptions {
   handleOperation: DesktopCompanionOperationHandler
   /** Bind authenticated Snow connections to current Host projection. */
   liveProjection?: Omit<DesktopCompanionLiveProjectionAdapter, 'reconnect'>
+}
+
+type NodeRelayConnector = typeof NodeRelayEndpointSocket.connect
+
+/**
+ * Resolve the bounded Electron proxy list and acquire WSS using qualified fallback only.
+ * @param input - operated URL, lifecycle cancellation, proxy resolver, and Node socket seam.
+ * @returns connected Relay socket.
+ */
+export async function connectDesktopRelayThroughSystemProxy(input: {
+  url: string
+  signal: AbortSignal
+  limits: Parameters<NodeRelayConnector>[2]
+  resolveProxy(url: string): Promise<string>
+  resolveTimeoutMs: number
+  connect?: NodeRelayConnector
+}): Promise<RelayEndpointSocket> {
+  const deadline = Date.now() + input.resolveTimeoutMs
+  const rules = await resolveSystemProxy(input.resolveProxy(input.url), input.signal, input.resolveTimeoutMs)
+  const candidates = desktopRelayProxyCandidates(rules)
+  const connect: NodeRelayConnector = async (...args) => input.connect === undefined
+    ? await NodeRelayEndpointSocket.connect(...args)
+    : await input.connect(...args)
+  let lastFailure: unknown
+  for (const [index, candidate] of candidates.entries()) {
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) throw new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy acquisition timed out')
+    const candidateTimeoutMs = Math.max(1, Math.floor(remainingMs / (candidates.length - index)))
+    const candidateController = new AbortController()
+    const candidateSignal = AbortSignal.any([input.signal, candidateController.signal])
+    try {
+      const acquisition = candidate.agent === undefined
+        ? connect(input.url, candidateSignal, input.limits)
+        : connect(input.url, candidateSignal, input.limits, { agent: candidate.agent })
+      return await withCandidateDeadline(acquisition, input.signal, candidateController, candidateTimeoutMs)
+    } catch (error) {
+      lastFailure = error
+      if (input.signal.aborted || index === candidates.length - 1
+        || (!(error instanceof ProxyCandidateTimeoutError) && !isProxyFallbackFailure(error))) throw error
+    }
+  }
+  throw new Error('Desktop Relay proxy list had no connection candidate', { cause: lastFailure })
 }
 
 interface DesktopSnowAcceptOwner {
@@ -261,7 +307,8 @@ export class DesktopSnowRelayChannelOwner {
       await this.publishActive(channel, current, projected, pairingSelector, sourceAttachmentId)
       return
     }
-    if (projected === undefined) throw new Error('Desktop Relay rejected an unprojected Snow peer')
+    // A superseded Relay attachment can remain briefly live, but an unprojected source has no Snow authority.
+    if (projected === undefined) return
     const acceptedPromise = this.owner.accept(ciphertext, sourceAttachmentId, current.routeId, current.attachmentId)
     const accepted = await abortableAccept(acceptedPromise, [current.cancellation.signal, lifecycleSignal])
     let retained = false
@@ -410,9 +457,16 @@ export class DesktopSnowRelayChannelOwner {
     active: DesktopSnowActiveChannel,
     item: CompanionResult | CompanionProjection,
   ): Promise<void> {
-    await this.enqueueOutbound(active, () => isCompanionProjection(item)
-      ? { type: 'projection', projection: this.currentProjection(item, active.peer.generation) }
-      : { type: 'result', result: item })
+    await this.enqueueOutbound(active, () => {
+      if (!isCompanionProjection(item)) return { type: 'result', result: item }
+      const projection = this.currentProjection(item, active.peer.generation)
+      return {
+        type: 'projection',
+        projection: projection.type === 'conversation-snapshot'
+          ? boundConversationSnapshotProjection(active.channel, projection)
+          : projection,
+      }
+    })
   }
 
   private enqueueOutbound(
@@ -521,38 +575,62 @@ function boundLiveSessionProjection(
     if (!channel.canEncode(message(projection))) throw new Error('Companion live projection summary exceeds its negotiated wire limit')
     return projection
   }
-  const nodes = Array.isArray(projection.conversation.nodes) ? projection.conversation.nodes : []
-  for (let offset = 0; offset < nodes.length; offset += 1) {
-    const candidate = {
-      ...projection,
-      conversation: { ...projection.conversation, nodes: nodes.slice(offset), hasMore: true },
-    }
-    if (channel.canEncode(message(candidate))) return candidate
+  const conversation = fitConversationProjection(
+    projection.conversation,
+    candidate => channel.canEncode(message({ ...projection, conversation: candidate })),
+  )
+  if (conversation !== undefined) return { ...projection, conversation }
+  const { conversation: _conversation, ...summary } = projection
+  if (!channel.canEncode(message(summary))) throw new Error('Companion live projection summary exceeds its negotiated wire limit')
+  return summary
+}
+
+function boundConversationSnapshotProjection(
+  channel: SnowCompanionProtocolChannel,
+  projection: Extract<CompanionProjection, { type: 'conversation-snapshot' }>,
+): Extract<CompanionProjection, { type: 'conversation-snapshot' }> {
+  const message = (candidate: typeof projection): CompanionMessage => ({ type: 'projection', projection: candidate })
+  if (channel.canEncode(message(projection))) return projection
+  if (!isRecord(projection.conversation)) {
+    throw new Error('Companion conversation projection exceeds its negotiated wire limit')
+  }
+  const conversation = fitConversationProjection(
+    projection.conversation,
+    candidate => channel.canEncode(message({ ...projection, conversation: candidate })),
+  )
+  if (conversation === undefined) {
+    throw new Error('Companion conversation projection exceeds its negotiated wire limit')
+  }
+  return { ...projection, conversation }
+}
+
+function fitConversationProjection(
+  conversation: Record<string, unknown>,
+  fits: (candidate: Record<string, unknown>) => boolean,
+): Record<string, unknown> | undefined {
+  const nodes = Array.isArray(conversation.nodes) ? conversation.nodes : []
+  for (let offset = 1; offset < nodes.length; offset += 1) {
+    const candidate = { ...conversation, nodes: nodes.slice(offset), hasMore: true }
+    if (fits(candidate)) return candidate
   }
   let lower = 0
   let upper = REMOTE_PROTOCOL_LIMITS.transcriptPageBytes
-  let fitted: typeof projection | undefined
+  let fitted: Record<string, unknown> | undefined
   while (lower <= upper) {
     const limit = Math.floor((lower + upper) / 2)
-    const candidate = {
-      ...projection,
-      conversation: truncateConversationText({
-        ...projection.conversation,
-        hasMore: true,
-        nodes: nodes.length === 0 ? [] : [nodes.at(-1)],
-      }, limit),
-    }
-    if (channel.canEncode(message(candidate))) {
+    const candidate = truncateConversationText({
+      ...conversation,
+      hasMore: true,
+      nodes: nodes.length === 0 ? [] : [nodes.at(-1)],
+    }, limit) as Record<string, unknown>
+    if (fits(candidate)) {
       fitted = candidate
       lower = limit + 1
     } else {
       upper = limit - 1
     }
   }
-  if (fitted !== undefined) return fitted
-  const { conversation: _conversation, ...summary } = projection
-  if (!channel.canEncode(message(summary))) throw new Error('Companion live projection summary exceeds its negotiated wire limit')
-  return summary
+  return fitted
 }
 
 function truncateConversationText(value: unknown, limit: number, key?: string): unknown {
@@ -679,11 +757,18 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
   }, options.handleOperation, () => options.desktopName(), config.negotiationTimeoutMs, liveProjection)
   const lifecycle = new DesktopRelayEndpointLifecycle({
     attachmentId: () => parseRelayAttachmentId(crypto.randomUUID()),
-    connect: async signal => options.connect === undefined
-      ? await NodeRelayEndpointSocket.connect(config.url, signal, {
-        maxBytes: config.inboundMaxBytes, maxMessages: config.inboundMaxMessages,
+    connect: async (signal) => {
+      if (options.connect !== undefined) return await options.connect(signal, config)
+      const limits = { maxBytes: config.inboundMaxBytes, maxMessages: config.inboundMaxMessages }
+      if (options.resolveProxy === undefined) return await NodeRelayEndpointSocket.connect(config.url, signal, limits)
+      return await connectDesktopRelayThroughSystemProxy({
+        url: config.url,
+        signal,
+        limits,
+        resolveProxy: options.resolveProxy,
+        resolveTimeoutMs: config.attachTimeoutMs,
       })
-      : await options.connect(signal, config),
+    },
     attachTimeoutMs: config.attachTimeoutMs,
     heartbeatIntervalMs: config.heartbeatIntervalMs,
     reconnectDelayMs: config.reconnectDelayMs,
@@ -705,6 +790,75 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
     },
     getState: () => lifecycle.getState(),
   }
+}
+
+function resolveSystemProxy(source: Promise<string>, signal: AbortSignal, timeoutMs: number): Promise<string> {
+  return withRelayDeadline(source, signal, timeoutMs, {
+    cancelled: () => new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy resolution was cancelled'),
+    timedOut: () => new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay proxy resolution timed out'),
+    failed: error => error instanceof Error ? error : new Error('Desktop Relay system proxy resolution failed'),
+  })
+}
+
+function isProxyFallbackFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') return false
+  return [
+    'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EPIPE', 'ETIMEDOUT',
+  ].includes(error.code)
+}
+
+class ProxyCandidateTimeoutError extends Error {
+  constructor() {
+    super('Desktop Relay proxy candidate timed out')
+    this.name = 'ProxyCandidateTimeoutError'
+  }
+}
+
+function withCandidateDeadline<T>(
+  source: Promise<T>,
+  signal: AbortSignal,
+  controller: AbortController,
+  timeoutMs: number,
+): Promise<T> {
+  return withRelayDeadline(source, signal, timeoutMs, {
+    cancelled: () => new RemoteRelayError('REMOTE_OFFLINE', 'Desktop Relay acquisition was cancelled'),
+    timedOut: () => new ProxyCandidateTimeoutError(),
+    failed: error => error instanceof Error ? error : new Error('Desktop Relay acquisition failed'),
+  }, () => { controller.abort() })
+}
+
+function withRelayDeadline<T>(
+  source: Promise<T>,
+  signal: AbortSignal,
+  timeoutMs: number,
+  errors: { cancelled(): Error; timedOut(): Error; failed(error: unknown): Error },
+  cancel: () => void = () => {},
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (operation: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal.removeEventListener('abort', abort)
+      operation()
+    }
+    const abort = (): void => {
+      cancel()
+      finish(() => { reject(errors.cancelled()) })
+    }
+    const timer = setTimeout(() => {
+      cancel()
+      finish(() => { reject(errors.timedOut()) })
+    }, timeoutMs)
+    timer.unref()
+    if (signal.aborted) abort()
+    else signal.addEventListener('abort', abort, { once: true })
+    void source.then(
+      (value) => { finish(() => { resolve(value) }) },
+      (error: unknown) => { finish(() => { reject(errors.failed(error)) }) },
+    )
+  })
 }
 
 async function abortableAccept<T extends { negotiation: { cancel(): void } }>(

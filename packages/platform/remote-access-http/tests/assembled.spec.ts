@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { parseAccountProofJti, parseInstallationId } from '@deepseek-ai/dsh-platform-account'
+import { AccountError, parseAccountProofJti, parseInstallationId } from '@deepseek-ai/dsh-platform-account'
 import {
   MemoryPersonalPairingAuthorityStore,
   PersonalPairingProvider,
@@ -458,6 +458,21 @@ describe('Remote Access HTTP assembled flow', () => {
       raw: JSON.stringify({ operation: 'get-mobile-access', padding: 'x'.repeat(65 * 1024) }),
     })).status).toBe(413)
 
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    remoteAccess.getMobileAccessState.mockRejectedValueOnce(
+      new AccountError('PROOF_REPLAYED', 'installation proof was already used'),
+    )
+    const replayed = await request({ operation: 'get-mobile-access' })
+    expect(replayed.status).toBe(401)
+    await expect(replayed.json()).resolves.toMatchObject({ error: { code: 'PROOF_REPLAYED' } })
+    expect(reported).not.toHaveBeenCalled()
+    for (const [failure, status] of [
+      [new AccountError('PLATFORM_CAPACITY', 'full', 7), 429],
+      [new AccountError('LOGIN_ATTEMPT_INVALID', 'invalid'), 400],
+    ] as const) {
+      remoteAccess.getMobileAccessState.mockRejectedValueOnce(failure)
+      expect((await request({ operation: 'get-mobile-access' })).status).toBe(status)
+    }
     remoteAccess.getMobileAccessState.mockRejectedValueOnce(
       new RemoteAccessError('PAIRING_CHALLENGE_USED', 'used'),
     )
@@ -469,10 +484,42 @@ describe('Remote Access HTTP assembled flow', () => {
     expect(quota.status).toBe(429)
     expect(quota.headers.get('retry-after')).toBe('60')
     await expect(quota.json()).resolves.toMatchObject({ error: { code: 'QUOTA', retryAfter: 60 } })
-    remoteAccess.getMobileAccessState.mockRejectedValueOnce(new Error('boom'))
-    const internal = await request({ operation: 'get-mobile-access' })
+    expect(reported).not.toHaveBeenCalled()
+    remoteAccess.setMobileAccess.mockRejectedValueOnce(
+      Object.assign(new Error('Bearer secret-token with invalid jsonb character'), { code: '22P05' }),
+    )
+    const internal = await request({ operation: 'set-mobile-access', enabled: true })
     expect(internal.status).toBe(500)
     await expect(internal.json()).resolves.toMatchObject({ error: { code: 'INTERNAL_ERROR' } })
+    expect(reported).toHaveBeenCalledWith('[remote-access-http] unexpected request failure:', {
+      operation: 'set-mobile-access',
+      failureKind: 'unexpected-error',
+      cause: 'persistence-untranslatable-character',
+    })
+    for (const [failure, cause] of [
+      [new AggregateError([], 'Bearer secret-token'), 'cleanup'],
+      [new SyntaxError('Bearer secret-token'), 'codec'],
+      [new TypeError('Bearer secret-token'), 'contract'],
+      ['Bearer secret-token', 'unexpected'],
+      [null, 'unexpected'],
+      [{ detail: 'Bearer secret-token' }, 'unexpected'],
+      [{ code: 7, detail: 'Bearer secret-token' }, 'unexpected'],
+      [{ code: 'ZZZZZ', detail: 'Bearer secret-token' }, 'persistence-other'],
+      [{ code: 'ECONNREFUSED', detail: 'Bearer secret-token' }, 'transport'],
+      [{ code: 'UND_ERR_CONNECT_TIMEOUT', detail: 'Bearer secret-token' }, 'transport'],
+      [{ code: 'ERR_INVALID_ARG_TYPE', detail: 'Bearer secret-token' }, 'dependency'],
+      [{ code: 'EOTHER', detail: 'Bearer secret-token' }, 'unexpected'],
+    ] as const) {
+      remoteAccess.setMobileAccess.mockRejectedValueOnce(failure)
+      expect((await request({ operation: 'set-mobile-access', enabled: true })).status).toBe(500)
+      expect(reported).toHaveBeenLastCalledWith('[remote-access-http] unexpected request failure:', {
+        operation: 'set-mobile-access',
+        failureKind: 'unexpected-error',
+        cause,
+      })
+    }
+    expect(JSON.stringify(reported.mock.calls)).not.toContain('secret-token')
+    reported.mockRestore()
   })
 
   it('fails loud when the configured browser origin is not a URL', () => {
@@ -511,6 +558,34 @@ describe('Remote Access HTTP assembled flow', () => {
     if (route === undefined) throw new Error('Remote Access route was not registered')
     await route.handler(request as never, response as never)
     expect(response.writeHead).toHaveBeenCalledWith(200, expect.any(Object))
+  })
+
+  it('logs a bounded request-setup failure when the request stream aborts before dispatch', async () => {
+    let route: RegisteredRoute | undefined
+    const ctx = {
+      remoteAccess: {},
+      webServer: { register(value: RegisteredRoute) { route = value; return () => {} } },
+      effect(register: () => () => void) { register() },
+    } as unknown as Context
+    apply(ctx, { origins: ['https://mobile.example'] })
+    const response = { writeHead: vi.fn(), end: vi.fn(), setHeader: vi.fn() }
+    const request = {
+      method: 'POST',
+      headers: proofHeaders(authentication('account-one:desktop:desktop-one')),
+      async *[Symbol.asyncIterator]() { throw new SyntaxError('Bearer request-secret') },
+    }
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      if (route === undefined) throw new Error('Remote Access route was not registered')
+      await route.handler(request as never, response as never)
+      expect(response.writeHead).toHaveBeenCalledWith(500, expect.any(Object))
+      expect(reported).toHaveBeenCalledWith('[remote-access-http] unexpected request failure:', {
+        operation: 'request-setup', failureKind: 'unexpected-error', cause: 'codec',
+      })
+      expect(JSON.stringify(reported.mock.calls)).not.toContain('request-secret')
+    } finally {
+      reported.mockRestore()
+    }
   })
 
   it('rejects a Pairing Challenge when the TCP socket has no client IP', async () => {

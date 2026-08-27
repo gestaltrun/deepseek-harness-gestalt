@@ -94,6 +94,39 @@ describe('RemoteRelayEndpointController', () => {
     await expect(clearedStart).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
   })
 
+  it.each([
+    ['transport', Object.assign(new Error('Bearer relay-secret'), { code: 'ECONNRESET' })],
+    ['transport', Object.assign(new Error('Bearer relay-secret'), { code: 'UND_ERR_CONNECT_TIMEOUT' })],
+    ['dependency', Object.assign(new Error('Bearer relay-secret'), { code: 'ERR_INVALID_ARG_TYPE' })],
+    ['cleanup', new AggregateError([], 'Bearer relay-secret')],
+    ['codec', new SyntaxError('Bearer relay-secret')],
+    ['contract', new TypeError('Bearer relay-secret')],
+    ['unexpected', 'Bearer relay-secret'],
+    ['unexpected', null],
+    ['unexpected', { detail: 'Bearer relay-secret' }],
+    ['unexpected', { code: 7, detail: 'Bearer relay-secret' }],
+    ['unexpected', { code: 'EOTHER', detail: 'Bearer relay-secret' }],
+  ] as const)('logs only a bounded %s cause for secret-bearing unexpected Relay failures', async (cause, failure) => {
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const controller = new RemoteRelayEndpointController({
+      ...mobileOptions(async () => { throw failure }),
+      reconnectDelayMs: MAX_RUNTIME_TIMER_DELAY_MS,
+    })
+    const starting = controller.start()
+    void starting.catch(() => {})
+
+    await vi.waitFor(() => {
+      expect(reported).toHaveBeenCalledWith('[remote-relay-client] unexpected connection failure:', {
+        failureKind: 'unexpected-error',
+        cause,
+      })
+    })
+    expect(JSON.stringify(reported.mock.calls)).not.toContain('relay-secret')
+    await controller.stop()
+    await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+    reported.mockRestore()
+  })
+
   it('rejects invalid lifecycle configuration and Desktop without authoritative resync', () => {
     const base = {
       endpoint: 'mobile' as const,
@@ -163,7 +196,7 @@ describe('RemoteRelayEndpointController', () => {
   })
 
   it('stops immediately for window close, sleep, quit, or Mobile Access disablement', async () => {
-    for (const reason of ['window-close', 'sleep', 'quit', 'mobile-access-disabled'] as const) {
+    for (const reason of ['window-close', 'sleep', 'quit', 'mobile-access-disabled', 'host-unavailable'] as const) {
       const socket = new FakeSocket()
       const controller = new RemoteRelayEndpointController({
         endpoint: 'desktop',
@@ -1037,6 +1070,25 @@ describe('DesktopRelayEndpointLifecycle', () => {
     await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
     expect(socket.closed).toBe(true)
     expect(lifecycle.getState()).toEqual({ connected: false, stopReason: 'sleep' })
+  })
+
+  it('keeps authority synchronization available while physical start waits for readiness', async () => {
+    const socket = new FakeSocket(false)
+    const lifecycle = new DesktopRelayEndpointLifecycle(desktopOptions(async () => socket))
+    const grant = desktopGrant('route-pending-start', 'pairing-pending-start', 1)
+    await lifecycle.configure(grant)
+    const starting = lifecycle.start()
+    void starting.catch(() => {})
+    await vi.waitFor(() => { expect(socket.sent).toHaveLength(1) })
+
+    let synchronized = false
+    const synchronization = lifecycle.synchronize([{ ...grant }]).then(() => { synchronized = true })
+    await new Promise((resolve) => { setImmediate(resolve) })
+    expect(synchronized).toBe(true)
+
+    await lifecycle.stop('sleep')
+    await expect(starting).rejects.toMatchObject({ code: 'REMOTE_OFFLINE' })
+    await synchronization
   })
 
   it.each(['replacement', 'revocation', 'stop'] as const)(

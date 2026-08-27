@@ -192,6 +192,8 @@ export interface ConversationComposerProps {
   t: TranslateNS<'conversation'>
   /** Disable edits and mutations while the composition lacks current authority. */
   disabled?: boolean | undefined
+  /** Owner-supplied controls placed in the shared InputBar's leading tool row. */
+  tools?: ReactNode | undefined
 }
 
 /** Execute InputMachine effects for the standalone composer. */
@@ -234,7 +236,9 @@ function settleEffects(
  * @param props - authoritative projection, transport actions, translator, and mutation state.
  * @returns shared InputBar presentation with owner-defined draft mechanics.
  */
-export function ConversationComposer({ snapshot, onSubmit, onCancel, t, disabled = false }: ConversationComposerProps): ReactNode {
+export function ConversationComposer({
+  snapshot, onSubmit, onCancel, t, disabled = false, tools,
+}: ConversationComposerProps): ReactNode {
   const machineRef = useRef<InputMachine>()
   const machine = machineRef.current ?? new InputMachine()
   machineRef.current = machine
@@ -294,6 +298,7 @@ export function ConversationComposer({ snapshot, onSubmit, onCancel, t, disabled
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         notice={notice}
+        tools={tools}
         t={t}
       />
     </div>

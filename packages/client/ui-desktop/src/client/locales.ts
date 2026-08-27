@@ -38,6 +38,10 @@ export const zh = {
   'pairing.confirm': '确认配对',
   'pairing.reject': '拒绝',
   'pairing.revoke': '撤销配对',
+  'pairing.online': '在线',
+  'pairing.offline': '离线',
+  'pairing.paired': '配对时间',
+  'pairing.lastAccess': '最近访问',
 } as const
 
 /** English fallback for Desktop chrome copy. */
@@ -79,6 +83,10 @@ export const en = {
   'pairing.confirm': 'Confirm pairing',
   'pairing.reject': 'Reject',
   'pairing.revoke': 'Revoke pairing',
+  'pairing.online': 'online',
+  'pairing.offline': 'offline',
+  'pairing.paired': 'Paired',
+  'pairing.lastAccess': 'Last access',
 } as const
 
 /** Locale keys owned by Desktop chrome. */

@@ -96,13 +96,15 @@ export class RedisRelayCoordinator implements RelayCoordinator {
     const invalidationChannel = this.invalidationChannel()
     const inFlight = new Set<Promise<void>>()
     const listenerErrors: unknown[] = []
+    let serial = Promise.resolve()
     let stopping = false
     const dispatch = (message: string): void => {
       if (stopping) return
-      const operation = this.dispatch(message, listener).catch((error: unknown) => {
+      const operation = serial.then(async () => { await this.dispatch(message, listener) }).catch((error: unknown) => {
         listenerErrors.push(error)
         console.error('[remote-access-redis] coordination listener failed:', error)
       })
+      serial = operation
       inFlight.add(operation)
       void operation.finally(() => { inFlight.delete(operation) })
     }
@@ -277,8 +279,8 @@ function decodeDirectory(value: string): RelayDirectoryEntry {
   if (Buffer.byteLength(value) > DIRECTORY_VALUE_BYTES) throw new TypeError('Relay directory entry exceeds its byte limit')
   const record = object(JSON.parse(value) as unknown, 'Relay directory entry')
   const keys = record.pairingSelector === undefined
-    ? ['routeId', 'attachmentId', 'endpoint', 'instanceId', 'connectionToken', 'revision', 'expiresAt']
-    : ['routeId', 'attachmentId', 'endpoint', 'pairingSelector', 'instanceId', 'connectionToken', 'revision', 'expiresAt']
+    ? ['routeId', 'attachmentId', 'endpoint', 'instanceId', 'connectionToken', 'revision', 'connectedAt', 'expiresAt']
+    : ['routeId', 'attachmentId', 'endpoint', 'pairingSelector', 'instanceId', 'connectionToken', 'revision', 'connectedAt', 'expiresAt']
   exactKeys(record, keys)
   if (record.endpoint !== 'mobile' && record.endpoint !== 'desktop') throw new TypeError('Relay directory endpoint is invalid')
   return {
@@ -291,6 +293,7 @@ function decodeDirectory(value: string): RelayDirectoryEntry {
     instanceId: parseRelayInstanceId(record.instanceId),
     connectionToken: parseRelayConnectionToken(record.connectionToken),
     revision: positiveInteger(record.revision, 'revision'),
+    connectedAt: positiveInteger(record.connectedAt, 'connectedAt'),
     expiresAt: positiveInteger(record.expiresAt, 'expiresAt'),
   }
 }

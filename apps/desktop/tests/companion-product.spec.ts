@@ -67,6 +67,28 @@ describe('Desktop Companion product operations', () => {
     await Promise.resolve()
   })
 
+  it('requests a complete Mobile resync when the Web Host arrives after Relay authentication', () => {
+    class TestHostWebSocket extends EventTarget {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      readyState = TestHostWebSocket.CONNECTING
+      close(): void { this.readyState = 3 }
+    }
+    vi.stubGlobal('WebSocket', TestHostWebSocket)
+    const owner = new DesktopCompanionProductOwner({
+      timeoutMs: 100, responseMaxBytes: REMOTE_PROTOCOL_LIMITS.companionMessageBytes,
+    })
+    const changed = vi.fn()
+    const disconnect = owner.connectLiveProjection(pairingId, changed, () => {})
+
+    const uninstall = owner.installHost('http://127.0.0.1:43123')
+
+    expect(changed).toHaveBeenCalledOnce()
+    expect(changed).toHaveBeenCalledWith({ type: 'surface' })
+    disconnect()
+    uninstall()
+  })
+
   it('projects a bounded real Host Session and Workspace surface', async () => {
     const calls: string[] = []
     const dependencies = baseDependencies(hostRpc(async (method) => {
@@ -142,6 +164,63 @@ describe('Desktop Companion product operations', () => {
       }],
     })
     expect(sessionListCalls).toBe(1)
+  })
+
+  it('pages a large surface by its encoded projection byte limit without skipping Sessions', async () => {
+    const items = Array.from({ length: REMOTE_PROTOCOL_LIMITS.surfaceSessionRows }, (_, index) => ({
+      sessionId: `session-large-${String(index)}`,
+      updatedAt: index,
+      running: false,
+      blank: false,
+      projections: { values: { title: `${String(index)}-${'large title '.repeat(300)}` } },
+    }))
+    const dependencies = baseDependencies(hostRpc(async method => method === 'session.list'
+      ? { ok: true, value: { items } }
+      : { ok: true, value: { items: [], archivedSessionIds: [] } }))
+    const discovery = new DesktopCompanionSurfaceDiscovery()
+    const first = await discovery.refresh(op({ type: 'refresh-surface', offset: 0 }), dependencies)
+
+    expect(first.type).toBe('surface-snapshot')
+    if (first.type !== 'surface-snapshot') throw new Error('expected first surface page')
+    expect(first.sessions.length).toBeGreaterThan(0)
+    expect(first.sessions.length).toBeLessThan(items.length)
+    expect(first.hasMore).toBe(true)
+    expect(new TextEncoder().encode(JSON.stringify({
+      applicationVersion: 4,
+      type: 'projection',
+      projection: { ...first, desktopRevision: Number.MAX_SAFE_INTEGER },
+    })).byteLength).toBeLessThanOrEqual(REMOTE_PROTOCOL_LIMITS.transcriptPageBytes)
+
+    const second = await discovery.refresh({
+      ...op({ type: 'refresh-surface', offset: first.sessions.length }),
+      operationId: parseCompanionOperationId('operation-large-surface-page-two'),
+    }, dependencies)
+    expect(second.type).toBe('surface-snapshot')
+    if (second.type !== 'surface-snapshot') throw new Error('expected second surface page')
+    expect([...first.sessions, ...second.sessions].map(session => session.sessionId)).toEqual(
+      items.map(item => item.sessionId),
+    )
+    expect(second.hasMore).toBe(false)
+  })
+
+  it('returns a bounded failure when one surface row exceeds the projection byte limit', async () => {
+    const dependencies = baseDependencies(hostRpc(async method => method === 'session.list'
+      ? { ok: true, value: { items: [{
+        sessionId: 'session-oversized',
+        updatedAt: 1,
+        running: false,
+        blank: false,
+        projections: { values: { title: 'oversized'.repeat(6_000) } },
+      }] } }
+      : { ok: true, value: { items: [], archivedSessionIds: [] } }))
+
+    await expect(new DesktopCompanionSurfaceDiscovery().refresh(
+      op({ type: 'refresh-surface', offset: 0 }),
+      dependencies,
+    )).resolves.toMatchObject({
+      type: 'operation-failed',
+      failure: { code: 'HOST_WIRE_INVALID' },
+    })
   })
 
   it('rejects an offset-zero snapshot that returns after Host replacement', async () => {
@@ -224,6 +303,80 @@ describe('Desktop Companion product operations', () => {
         running: true,
         hasMore: false,
       },
+    })
+  })
+
+  it('projects non-user messages with the shared context presentation metadata', async () => {
+    const dependencies = baseDependencies(hostRpc(async (method) => {
+      if (method === 'session.list') return { ok: true, value: { items: [{
+        sessionId: 'session-product', updatedAt: 30, running: false, blank: false,
+      }] } }
+      expect(method).toBe('session.history')
+      return { ok: true, value: {
+        events: [{ event: { type: 'user/message', seq: 1, time: 10, data: {
+          id: 'message-context', content: [{ type: 'text', text: 'Current runtime context.' }],
+          source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'snapshot' },
+        } } }],
+        hasMore: false,
+      } }
+    }))
+    const operation = op({ type: 'load-history', sessionId, maxMessages: 20 })
+
+    await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toMatchObject({
+      type: 'conversation-snapshot',
+      conversation: { nodes: [{
+        kind: 'context', seq: 1, content: [{ type: 'text', text: 'Current runtime context.' }],
+        source: { kind: 'plugin', plugin: '@deepseek-ai/dsh-system-prompt', form: 'snapshot' },
+        provenance: { role: 'inject', label: '@deepseek-ai/dsh-system-prompt' },
+        form: 'snapshot',
+      }] },
+    })
+  })
+
+  it('unwraps Host tool presentation envelopes for the shared Mobile cards', async () => {
+    const dependencies = baseDependencies(hostRpc(async (method) => {
+      if (method === 'session.list') return { ok: true, value: { items: [{
+        sessionId: 'session-product', updatedAt: 30, running: false, blank: false,
+      }] } }
+      expect(method).toBe('session.history')
+      return { ok: true, value: {
+        events: [
+          { event: { type: 'tool/call', seq: 1, time: 10, data: {
+            turn: 1, step: 1, callId: 'call-1', name: 'bash', arguments: '{"command":"pwd"}',
+          } }, view: { for: 'call', view: { card: 'terminal', title: 'Run command', cwd: '/tmp' } } },
+          { event: { type: 'tool/result', seq: 2, time: 20, data: {
+            turn: 1, step: 1,
+            message: { source: { kind: 'tool', callId: 'call-1' }, content: [{ type: 'text', text: '/tmp' }] },
+          } }, view: { for: 'result', view: { card: 'terminal', title: 'Command result', output: '/tmp', exitCode: 0 } } },
+        ],
+        hasMore: false,
+      } }
+    }))
+    const operation = op({ type: 'load-history', sessionId, maxMessages: 20 })
+
+    await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toMatchObject({
+      type: 'conversation-snapshot',
+      conversation: { nodes: [{
+        kind: 'tool-result', callId: 'call-1',
+        callView: { card: 'terminal', title: 'Run command', cwd: '/tmp' },
+        resultView: { card: 'terminal', title: 'Command result', output: '/tmp', exitCode: 0 },
+      }] },
+    })
+  })
+
+  it('projects an empty Session with the shared blank composer phase', async () => {
+    const dependencies = baseDependencies(hostRpc(async (method) => {
+      if (method === 'session.list') return { ok: true, value: { items: [{
+        sessionId: 'session-product', updatedAt: 30, running: false, blank: true,
+      }] } }
+      expect(method).toBe('session.history')
+      return { ok: true, value: { events: [], hasMore: false } }
+    }))
+    const operation = op({ type: 'load-history', sessionId, maxMessages: 20 })
+
+    await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toMatchObject({
+      type: 'conversation-snapshot',
+      conversation: { composerPhase: 'blank', blank: true },
     })
   })
 
@@ -428,12 +581,16 @@ describe('Desktop Companion product operations', () => {
 
   it('returns authoritative full-text hits and no-hit results without cached substring filtering', async () => {
     const operation = search('needle')
-    const call = vi.fn(async (_method: string, payload: Record<string, unknown>): Promise<DesktopHostRpcResult> => {
-      expect(payload).toEqual({ query: 'needle' })
+    let items = [{ sessionId: 'session-hit', snippet: 'Desktop indexed needle' }]
+    let expectedQuery = 'needle'
+    const call = vi.fn(async (method: string, payload: Record<string, unknown>): Promise<DesktopHostRpcResult> => {
+      if (method === 'workspace.list') return { ok: true, value: { items: [], archivedSessionIds: [] } }
+      expect(method).toBe('session.search')
+      expect(payload).toEqual({ query: expectedQuery })
       return {
         ok: true,
         value: {
-          items: [{ sessionId: 'session-hit', snippet: 'Desktop indexed needle' }],
+          items,
           hasMore: false,
         },
       }
@@ -445,11 +602,29 @@ describe('Desktop Companion product operations', () => {
       items: [{ sessionId: parseCompanionSessionId('session-hit'), snippet: 'Desktop indexed needle' }],
       hasMore: false,
     })
-    call.mockResolvedValueOnce({ ok: true, value: { items: [], hasMore: false } })
+    items = []
+    expectedQuery = 'absent'
     await expect(handleCompanionProductOperation(search('absent'), dependencies)).resolves.toMatchObject({
       type: 'session-search', items: [], hasMore: false,
     })
-    expect(call).toHaveBeenCalledTimes(2)
+    expect(call).toHaveBeenCalledTimes(4)
+  })
+
+  it('excludes Desktop-archived Sessions from authoritative full-text results', async () => {
+    const operation = search('needle')
+    const dependencies = baseDependencies(hostRpc(async method => method === 'session.search'
+      ? { ok: true, value: { items: [
+        { sessionId: 'session-visible', snippet: 'Visible needle' },
+        { sessionId: 'session-archived', snippet: 'Archived needle' },
+      ], hasMore: false } }
+      : { ok: true, value: { items: [], archivedSessionIds: ['session-archived'] } }))
+
+    await expect(handleCompanionProductOperation(operation, dependencies)).resolves.toEqual({
+      type: 'session-search',
+      operationId: operation.operationId,
+      items: [{ sessionId: parseCompanionSessionId('session-visible'), snippet: 'Visible needle' }],
+      hasMore: false,
+    })
   })
 
   it.each([
@@ -473,13 +648,15 @@ describe('Desktop Companion product operations', () => {
       const chunks: Buffer[] = []
       request.on('data', chunk => chunks.push(chunk as Buffer))
       request.on('end', () => {
-        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { rpcId: string }
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { rpcId: string; method: string }
         response.end(JSON.stringify({
           type: 'server-response',
           rpcId: body.rpcId,
           result: {
             ok: true,
-            value: { items: [{ sessionId: 'session-real-entry', snippet: 'real Host result' }], hasMore: false },
+            value: body.method === 'workspace.list'
+              ? { items: [], archivedSessionIds: [] }
+              : { items: [{ sessionId: 'session-real-entry', snippet: 'real Host result' }], hasMore: false },
           },
         }))
       })
@@ -525,7 +702,6 @@ async function offer(fileName: string, plaintext: Uint8Array, id: string): Promi
   operation: CompanionOfferAttachmentOperation
   ciphertext: Uint8Array
 }> {
-  // oxlint-disable-next-line typescript/no-unsafe-assignment -- the host test face cannot resolve the DOM CryptoKey return type
   const key = await deriveCompanionAttachmentKey(attachmentKey)
   const sealed = await sealCompanionAttachment(key, plaintext)
   return {

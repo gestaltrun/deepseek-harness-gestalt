@@ -86,6 +86,31 @@ describe('Android proof runner cleanup', () => {
       'emulator waitForExit',
     )
   })
+
+  it('allows an existing Emulator thirty seconds to cold-start its WebView report', async () => {
+    let time = 0
+    const report = JSON.stringify({ runtime: 'Android WebView', allPass: true })
+    const commands = {
+      execFileSync(_command, args) {
+        if (args[0] === 'devices') return 'List of devices attached\nemulator-5554\tdevice\n'
+        if (args.join(' ') === 'shell getprop ro.build.version.sdk') return '34\n'
+        if (args.join(' ') === 'shell dumpsys package com.android.webview') return 'versionName=1.2.3\n'
+        return ''
+      },
+      spawnSync(_command, args) {
+        if (args.join(' ') === 'shell getprop sys.boot_completed') return { status: 0, stdout: '1\n' }
+        if (args.join(' ') === 'shell run-as dev.deepseek.noiseproof cat files/noise-proof.json') {
+          return time >= 20_000 ? { status: 0, stdout: report } : { status: 1, stdout: '' }
+        }
+        return { status: 0, stdout: '' }
+      },
+    }
+
+    await assert.doesNotReject(runAndroidProof('/fake/noise-proof.apk', {
+      clock: { now: () => time, sleep: async delay => { time += delay } },
+      commands,
+    }))
+  })
 })
 
 /**

@@ -4,35 +4,37 @@ import type { IncomingHttpHeaders } from 'node:http'
 import type { PlatformAccount } from '@deepseek-ai/dsh-platform-account-core'
 import {
   parsePersonalPairingId,
-  type PersonalPairingProvider,
+  type PersonalPairingAttachmentQuotaAuthority,
 } from '@deepseek-ai/dsh-remote-access'
 import type { RemoteAttachmentQuotaReservation } from '@deepseek-ai/dsh-remote-attachments'
 import { pairingAuthenticationFromHeaders } from '@deepseek-ai/dsh-remote-access-http'
-import { RemoteAttachmentHttpError, type RemoteAttachmentAuthority } from '@deepseek-ai/dsh-remote-attachments/http'
+import {
+  RemoteAttachmentHttpError,
+  type RemoteAttachmentAuthenticator,
+} from '@deepseek-ai/dsh-remote-attachments/http'
 import type { PostgresPersonalPairingAuthorityStore } from './postgres-pairing-store.ts'
 
-/** Installation proof plus durable pairing membership; a selector alone grants no attachment access. */
-export class OperatedRemoteAttachmentAuthority implements RemoteAttachmentAuthority {
-  /**
-   * @param account - operated Platform Account verifier.
-   * @param pairings - shared confirmed pairing authority.
-   * @param remoteAccess - Account-complete blob quota owner.
-   */
-  constructor(
-    private readonly account: Pick<PlatformAccount, 'currentInstallation'>,
-    private readonly pairings: Pick<PostgresPersonalPairingAuthorityStore, 'ownsConfirmedPairing'>,
-    private readonly remoteAccess: Pick<PersonalPairingProvider, 'admitAttachmentBlob' | 'releaseAttachmentBlob'>,
-  ) {}
-
-  async authenticate(input: { headers: IncomingHttpHeaders }): Promise<{
+/**
+ * Bind Installation proof and durable pairing membership to private attachment quota closures.
+ * @param account - operated Platform Account verifier.
+ * @param pairings - shared confirmed pairing authority.
+ * @param quota - Account-authenticated quota authority from the Personal Pairing composition.
+ * @returns request authenticator captured only by the attachment HTTP plugin.
+ */
+export function createOperatedRemoteAttachmentAuthenticator(
+  account: Pick<PlatformAccount, 'currentInstallation'>,
+  pairings: Pick<PostgresPersonalPairingAuthorityStore, 'ownsConfirmedPairing'>,
+  quota: PersonalPairingAttachmentQuotaAuthority,
+): RemoteAttachmentAuthenticator {
+  return async (input: { headers: IncomingHttpHeaders }): Promise<{
     pairingId: ReturnType<typeof parsePersonalPairingId>
     admit(bytes: number): Promise<RemoteAttachmentQuotaReservation>
-  }> {
+  }> => {
     const selector = singleHeader(input.headers, 'x-gestalt-pairing-selector')
     const pairingId = parsePersonalPairingId(selector)
     const owner = pairingAuthenticationFromHeaders(input)
-    const authenticated = await this.account.currentInstallation(owner)
-    if (!await this.pairings.ownsConfirmedPairing(
+    const authenticated = await account.currentInstallation(owner)
+    if (!await pairings.ownsConfirmedPairing(
       authenticated.account.id,
       authenticated.installation.id,
       pairingId,
@@ -42,7 +44,10 @@ export class OperatedRemoteAttachmentAuthority implements RemoteAttachmentAuthor
     return {
       pairingId,
       admit: async (bytes) => {
-        const { reservationId, expiresAt } = await this.remoteAccess.admitAttachmentBlob({ owner, bytes })
+        const accountId = authenticated.account.id
+        const { reservationId, expiresAt } = await quota.admit({
+          accountId, bytes,
+        })
         let released = false
         let releaseInFlight: Promise<void> | undefined
         return {
@@ -54,7 +59,7 @@ export class OperatedRemoteAttachmentAuthority implements RemoteAttachmentAuthor
               await releaseInFlight
               return
             }
-            releaseInFlight = this.remoteAccess.releaseAttachmentBlob({ owner, reservationId })
+            releaseInFlight = quota.release({ accountId, reservationId })
             try {
               await releaseInFlight
               released = true

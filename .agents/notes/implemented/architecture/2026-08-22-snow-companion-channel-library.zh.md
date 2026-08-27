@@ -34,4 +34,4 @@ Relay 在 attachment 登记、替换和关闭后，向已连接的对端发送 c
 
 ## 后果
 
-发布的 Desktop、Mobile 与 Platform 入口现在选择端点自有的配对与 attachment channel。仓库证据覆盖不透明 mailbox 的响应丢失与重放、只登记 digest 的 Relay authority、两个 Mobile selector、跨实例 late attachment 与 replacement、端点状态持久化、真实 XKpsk3 grant 打开、fresh IK、陈旧 transcript 拒绝和认证 Foreground Synchronization。发布验收仍需要针对确切实现的独立审查，以及物理 WKWebView 与 Android WebView 证据；package tests、本地 Vite 和 proof 可执行程序不能替代这些外部记录。
+发布的 Desktop、Mobile 与 Platform 入口现在选择端点自有的配对与 attachment channel。仓库证据覆盖不透明 mailbox 的响应丢失与重放、只登记 digest 的 Relay authority、两个 Mobile selector、跨实例 late attachment 与 replacement、端点状态持久化、真实 XKpsk3 grant 打开、fresh IK、陈旧 transcript 拒绝和认证 Foreground Synchronization。发布验收要求物理 WKWebView 与 Android WebView evidence，以及 candidate-scoped [transport risk acceptance](../process/2026-08-25-explicit-companion-transport-risk-acceptance.zh.md)；package test、本地 Vite 与 proof executable 不能替代 device 或 operated-path record。

@@ -23,6 +23,26 @@ describe('CI workflow', () => {
     if (!isRecord(android) || !Array.isArray(android.steps) || !isRecord(ios) || !Array.isArray(ios.steps)) {
       throw new TypeError('mobile-release workflow must define Android and iOS steps')
     }
+    const dispatch = workflowEvent(workflow, 'workflow_dispatch')
+    expect(dispatch).toMatchObject({ inputs: {
+      acceptance_run_id: { required: true, type: 'string' },
+      accept_transport_risk: { required: true, type: 'boolean', default: false },
+    } })
+    const authorization = workflow.jobs['release-authorization']
+    if (!isRecord(authorization) || !Array.isArray(authorization.steps)) {
+      throw new TypeError('mobile-release workflow must define release authorization steps')
+    }
+    expect(authorization.steps).toContainEqual(expect.objectContaining({
+      name: 'Verify immutable Companion acceptance evidence',
+    }))
+    expect(android).toMatchObject({
+      needs: 'release-authorization',
+      if: "github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'",
+    })
+    expect(ios).toMatchObject({
+      needs: 'release-authorization',
+      if: "github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'",
+    })
     const androidBuild = (android.steps as unknown[])
       .find(step => isRecord(step) && step.name === 'Build and verify signed APK')
     const iosBuild = (ios.steps as unknown[])
@@ -40,6 +60,26 @@ describe('CI workflow', () => {
       APPLE_ID: '${{ secrets.APPLE_ID }}',
       APPLE_APP_SPECIFIC_PASSWORD: '${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}',
     } })
+  })
+
+  it('publishes candidate-bound Mobile Companion acceptance only after the verifier succeeds', () => {
+    const workflow = loadWorkflow('.github/workflows/mobile-companion-acceptance.yml')
+    const verdict = workflowJob(workflow, 'acceptance-verdict')
+    if (!Array.isArray(verdict.steps)) throw new TypeError('Mobile acceptance verdict must define steps')
+    expect(verdict).toMatchObject({
+      name: 'mobile companion acceptance verdict',
+      environment: 'mobile-release',
+    })
+    expect(verdict.steps).toContainEqual(expect.objectContaining({
+      name: 'Validate and bind operated acceptance',
+    }))
+    const upload = (verdict.steps as unknown[])
+      .find(step => isRecord(step) && step.uses === 'actions/upload-artifact@v4')
+    if (!isRecord(upload) || !isRecord(upload.with)) throw new TypeError('Mobile acceptance must upload an artifact')
+    expect(upload.with).toMatchObject({
+      name: 'mobile-companion-acceptance-${{ inputs.candidate_sha }}',
+      'if-no-files-found': 'error',
+    })
   })
 
   it('rejects runner-only contexts before job construction', () => {

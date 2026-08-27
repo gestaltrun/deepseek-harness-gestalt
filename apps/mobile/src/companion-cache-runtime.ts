@@ -2,6 +2,7 @@
 
 import type { PlatformAccountId, PlatformEnvironment } from '@deepseek-ai/dsh-platform-account'
 import type { PersonalPairingId } from '@deepseek-ai/dsh-remote-access'
+import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import {
   CompanionCache,
   CompanionUncertainOperationSettlement,
@@ -40,10 +41,11 @@ export class MobileCompanionProjectionCacheRuntime implements MobileCompanionPro
 
   async save(projection: MobileCompanionProjectionDto): Promise<void> {
     await this.enqueue(async () => {
-      await this.#cache.saveOpenedContent(this.#desktopId, 'projection-snapshot', JSON.stringify({
-        version: 1,
-        projection,
-      }))
+      await this.#cache.saveOpenedContent(
+        this.#desktopId,
+        'projection-snapshot',
+        encodeBoundedProjectionSnapshot(projection),
+      )
     })
   }
 
@@ -78,6 +80,71 @@ export class MobileCompanionProjectionCacheRuntime implements MobileCompanionPro
     this.#operations = result.then(() => undefined, () => undefined)
     return result
   }
+}
+
+function encodeBoundedProjectionSnapshot(projection: MobileCompanionProjectionDto): string {
+  const recent = projection.conversations.at(-1)
+  if (recent !== undefined) {
+    for (let offset = 0; offset <= recent.nodes.length; offset += 1) {
+      const candidate: MobileCompanionProjectionDto = {
+        ...projection,
+        conversations: [{
+          ...recent,
+          nodes: recent.nodes.slice(offset),
+          hasMore: recent.hasMore || offset > 0,
+        }],
+      }
+      const encoded = encodeProjectionSnapshot(candidate)
+      if (new TextEncoder().encode(encoded).byteLength <= REMOTE_PROTOCOL_LIMITS.companionMessageBytes) {
+        return encoded
+      }
+    }
+  }
+  const metadataOnly = encodeProjectionSnapshot({ ...projection, conversations: [] })
+  if (projectionSnapshotBytes(metadataOnly) <= REMOTE_PROTOCOL_LIMITS.companionMessageBytes) return metadataOnly
+  for (let count = projection.sessions.ids.length - 1; count >= 0; count -= 1) {
+    const retainedIds = projection.sessions.ids.slice(0, count)
+      .filter(id => projection.sessions.byId[id] !== undefined)
+    const retained = new Set(retainedIds)
+    const candidate = encodeProjectionSnapshot({
+      ...projection,
+      sessions: {
+        ...projection.sessions,
+        ids: retainedIds,
+        byId: filterProjectionRecord(projection.sessions.byId, retained),
+        current: projection.sessions.current !== null && retained.has(projection.sessions.current)
+          ? projection.sessions.current
+          : null,
+        subagentsByParent: filterProjectionRecord(projection.sessions.subagentsByParent, retained),
+        jobsBySession: filterProjectionRecord(projection.sessions.jobsBySession, retained),
+        currentAddress: null,
+      },
+      workspaces: projection.workspaces.flatMap((workspace) => {
+        const sessionIds = workspace.sessionIds.filter(id => retained.has(id))
+        return sessionIds.length === 0 ? [] : [{ ...workspace, sessionIds }]
+      }),
+      conversations: [],
+    })
+    if (projectionSnapshotBytes(candidate) <= REMOTE_PROTOCOL_LIMITS.companionMessageBytes) return candidate
+  }
+  throw new TypeError(
+    `Companion Cache projection metadata exceeds the ${String(REMOTE_PROTOCOL_LIMITS.companionMessageBytes)}-byte ceiling`,
+  )
+}
+
+function encodeProjectionSnapshot(projection: MobileCompanionProjectionDto): string {
+  return JSON.stringify({ version: 1, projection })
+}
+
+function projectionSnapshotBytes(snapshot: string): number {
+  return new TextEncoder().encode(snapshot).byteLength
+}
+
+function filterProjectionRecord<Value>(
+  record: Readonly<Record<string, Value>>,
+  retained: ReadonlySet<string>,
+): Readonly<Record<string, Value>> {
+  return Object.fromEntries(Object.entries(record).filter(([sessionId]) => retained.has(sessionId)))
 }
 
 function unknownJson(value: string): unknown {

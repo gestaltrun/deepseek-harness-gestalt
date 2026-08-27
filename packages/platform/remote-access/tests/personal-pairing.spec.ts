@@ -17,6 +17,7 @@ import {
   RemoteAccessService,
   RemoteAccessError,
   type PersonalPairingProviderOptions,
+  type PersonalPairingAccessTransaction,
   deriveAuthenticationWords,
   parseDevicePrincipalId,
   parsePairingChallengeId,
@@ -43,6 +44,21 @@ describe('PersonalPairingProvider', () => {
     })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
   })
 
+  it('authenticates one Mobile Access disable request exactly once', async () => {
+    const currentInstallation = vi.fn(async ({ accessToken }: { accessToken: string }) => authenticated(accessToken))
+    const provider = new PersonalPairingProvider(new Context(), {
+      account: { currentInstallation },
+      handshake: handshakeProvider(),
+      authority: new MemoryPersonalPairingAuthorityStore(),
+      ownsAuthority: true,
+      pairingLinkOrigin: 'https://platform.example.com/pair',
+    })
+    const desktop = authentication('desktop-installation')
+
+    await expect(provider.setMobileAccess({ desktop, enabled: false })).resolves.toEqual({ enabled: false })
+    expect(currentInstallation).toHaveBeenCalledOnce()
+  })
+
   it('validates endpoint invitation and confirmation stages before publication', async () => {
     let identity = 0
     const provider = configuredProvider({
@@ -67,6 +83,8 @@ describe('PersonalPairingProvider', () => {
       expiresAt: NOW + 10_000,
     })
     await provider.cancelEndpointChallenge({ desktop, challengeId: cancelled.challengeId })
+    await expect(provider.cancelEndpointChallenge({ desktop, challengeId: cancelled.challengeId }))
+      .resolves.toBeUndefined()
 
     const incomplete = await prepareEndpointPairing(provider, desktop, mobile, 'incomplete', 'message1')
     await expect(provider.confirmEndpointPairing({
@@ -591,12 +609,12 @@ describe('PersonalPairingProvider', () => {
     const originalTransaction = settledAuthority.runPairingTransaction.bind(settledAuthority)
     let removeBeforeNextTransaction = false
     vi.spyOn(settledAuthority, 'runPairingTransaction').mockImplementation(async (operation) => {
-      return await originalTransaction(async (state) => {
+      return await originalTransaction(async (state, access) => {
         if (removeBeforeNextTransaction) {
           state.endpointPublicationRevocations.delete(pendingPairingId)
           removeBeforeNextTransaction = false
         }
-        const result = await operation(state)
+        const result = await operation(state, access)
         if (typeof result === 'object' && result !== null
           && 'pendingPairingId' in result && result.pendingPairingId === pendingPairingId) {
           removeBeforeNextTransaction = true
@@ -738,6 +756,12 @@ describe('PersonalPairingProvider', () => {
     const desktop = authentication('desktop-installation')
     const mobile = authentication('mobile-installation')
     await provider.setMobileAccess({ desktop, enabled: true })
+    await expect(provider.submitEndpointMessage1({
+      mobile,
+      challengeId: parsePairingChallengeId('missing-endpoint-challenge'),
+      completionId: parsePairingCompletionId('missing-endpoint-completion'),
+      message1: Uint8Array.of(10),
+    })).rejects.toMatchObject({ code: 'PAIRING_CHALLENGE_INVALID' })
     const challenge = await provider.createEndpointChallenge({
       desktop,
       rendezvousId: parsePairingRendezvousId('endpoint-mailbox'),
@@ -954,13 +978,19 @@ describe('PersonalPairingProvider', () => {
       desktopCredentialDigest: new Uint8Array(32).fill(21),
       mobileCredentialDigest: new Uint8Array(32).fill(22),
     })
+    const options = Reflect.get(provider, 'options') as PersonalPairingProviderOptions
+    const authenticate = options.account.currentInstallation as ReturnType<typeof vi.fn>
 
     await expect(provider.revokeMobilePersonalPairing({
       mobile: authentication('other-mobile-installation'), pairingId: confirmation.pairing.id,
     })).rejects.toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+    authenticate.mockClear()
     await provider.revokeMobilePersonalPairing({ mobile, pairingId: confirmation.pairing.id })
+    expect(authenticate).toHaveBeenCalledOnce()
+    authenticate.mockClear()
     await expect(provider.revokeMobilePersonalPairing({ mobile, pairingId: confirmation.pairing.id }))
       .resolves.toBeUndefined()
+    expect(authenticate).toHaveBeenCalledOnce()
     expect(relay.revokeCredentialDigest).toHaveBeenNthCalledWith(
       1, expect.any(String), 'desktop', new Uint8Array(32).fill(21),
     )
@@ -1097,14 +1127,14 @@ describe('PersonalPairingProvider', () => {
       })
       const transaction = authority.runPairingTransaction.bind(authority)
       let interfere = false
-      vi.spyOn(authority, 'runPairingTransaction').mockImplementation(async operation => await transaction(async (state) => {
+      vi.spyOn(authority, 'runPairingTransaction').mockImplementation(async operation => await transaction(async (state, access) => {
         if (interfere) {
           const retained = state.endpointPublicationRevocations.get(pairing.endpointPendingPairingId)
           if (race === 'deleted') state.endpointPublicationRevocations.delete(pairing.endpointPendingPairingId)
           else if (retained !== undefined) retained.pairingRemoved = true
           interfere = false
         }
-        const result = await operation(state)
+        const result = await operation(state, access)
         if (typeof result === 'object' && result !== null && 'pendingPairingId' in result) interfere = true
         return result
       }))
@@ -1719,6 +1749,38 @@ describe('PersonalPairingProvider', () => {
     expect(relay.revokeRoute).toHaveBeenCalledOnce()
     expect(await provider.getMobileAccessState(desktop)).toEqual({ enabled: false })
     await provider.dispose()
+  })
+
+  it('settles Desktop access through the pairing transaction access face', async () => {
+    const authority = new MemoryPersonalPairingAuthorityStore()
+    const runPairingTransaction = authority.runPairingTransaction.bind(authority)
+    const routeId = parseRelayRouteId('transaction-route')
+    const transactionGetDesktop = vi.fn(async () => ({ enabled: false }))
+    const transactionEnableDesktop = vi.fn(async () => routeId)
+    const access: PersonalPairingAccessTransaction = {
+      getDesktop: transactionGetDesktop,
+      enableDesktop: transactionEnableDesktop,
+      disableDesktop: vi.fn(async () => []),
+      completeRouteRevocation: vi.fn(async () => {}),
+    }
+    vi.spyOn(authority, 'runPairingTransaction').mockImplementation(async operation =>
+      await runPairingTransaction(async state => await operation(state, access)))
+    const getDesktop = vi.spyOn(authority, 'getDesktop')
+    const enableDesktop = vi.spyOn(authority, 'enableDesktop')
+    const provider = configuredProvider({
+      authority,
+      randomId: kind => kind === 'relay-route' ? routeId : `${kind}-transaction-access`,
+    })
+
+    await expect(provider.setMobileAccess({
+      desktop: authentication('desktop-installation'),
+      enabled: true,
+    })).resolves.toEqual({ enabled: true })
+
+    expect(transactionGetDesktop).toHaveBeenCalledOnce()
+    expect(transactionEnableDesktop).toHaveBeenCalledOnce()
+    expect(getDesktop).not.toHaveBeenCalled()
+    expect(enableDesktop).not.toHaveBeenCalled()
   })
 
   it('does not consult Relay credential generation while enabling a new route', async () => {

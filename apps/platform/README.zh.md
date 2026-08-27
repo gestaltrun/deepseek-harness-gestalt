@@ -10,6 +10,8 @@ Account、Personal Pairing 与加密附件 HTTP 路由只准入生产 Platform o
 
 `GET /` 提供 DeepSeek Gestalt 产品首页。在所需部署密钥齐备后，`GET /healthz` 与 `GET /readyz` 返回 `{ ok: true, attachmentStorage, instanceId }`；生产部署为每个 backend 分配不含网络地址的部署序号 `instanceId`。身份、Relay、OSS、TLS、`PORT` 或 `PLATFORM_LISTEN_HOST` 配置缺失或不一致时，会在获取任何持久资源前失败；监听 host 只能是 `0.0.0.0` 或 `127.0.0.1`。可执行入口调用 `launchOperatedPlatform`，由它拥有校验、事务式 PostgreSQL 与 Redis 资源获取、按 storage mode 选择的附件设置、迁移、GitHub OAuth、Account HTTP、健康路由和排空式关闭。`postgres` mode 不会创建 OSS client；`oss` mode 使用 ECS RAM-role client。每个 Redis owner 在活动期间保留 error listener，连接失败时销毁 client，并在失败或关闭后移除 listener。并发的 `SIGINT` 与 `SIGTERM` 请求会共享一次关闭；进程只在 HTTP 与持久 store owner 都关闭后退出，关闭失败则会报告错误并产生非零退出码。`OperatedRemoteAccessResources` 会在监听前用 Redis Relay coordinator 构造 PostgreSQL Personal Pairing authority 与 Relay route store。Account HTTP 挂在 `/v1/account/*`，配对 HTTP 与 Relay WSS 分别挂在 `/v1/remote-access/personal-pairing` 和 `/v1/remote-access/relay`。PostgreSQL 持有持久配对与 credential digest authority；Redis 只持有会过期的 attachment directory，以及 content-free 或 ciphertext coordination。Platform 不提供产品配对 cipher，也不会收到端点私钥或 Mobile Relay bearer。
 
+实际运行的 Relay provider 会把同一个 PostgreSQL Personal Pairing authority 作为 Mobile presence sink。因此 attach、heartbeat、ciphertext access 与 close 会跨任一 ECS 实例投影由 lease 推导的在线状态。
+
 ```sh
 docker build -f apps/platform/Dockerfile -t dsh-platform .
 ```

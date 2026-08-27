@@ -88,7 +88,6 @@ export const SERVICE_PAGE: Record<string, string> = {
   remoteAccess: 'personal-pairing.md',
   remoteRelay: 'personal-pairing.md',
   remoteAttachments: 'personal-pairing.md',
-  remoteAttachmentAuthority: 'personal-pairing.md',
   planMode: 'plan.md',
   terminals: 'terminal.md',
   sandbox: 'sandbox.md',

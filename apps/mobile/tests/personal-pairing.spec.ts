@@ -95,6 +95,50 @@ describe('MobilePairingController', () => {
     })
   })
 
+  it('revokes an older pairing before consolidating the same Desktop fingerprint', async () => {
+    const accountId = parsePlatformAccountId('account-desktop-fingerprint')
+    const previous = parsePersonalPairingId('pairing-previous-desktop')
+    const current = parsePersonalPairingId('pairing-current-desktop')
+    const previousGrant = {
+      routeId: parseRelayRouteId('route-previous-desktop'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(previous),
+    }
+    const currentGrant = {
+      routeId: parseRelayRouteId('route-current-desktop'), endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI'), revision: 1,
+      pairingSelector: parseRelayPairingSelector(current),
+    }
+    const vault = new PairingCompanionKeyVault()
+    await vault.selectAccount(accountId)
+    vault.retainConfirmedPairing(previous, new Uint8Array(96).fill(1), new Uint8Array(32).fill(2), previousGrant)
+    vault.recordDesktopName(previous, 'MacBook-Pro-7.local')
+    vault.retainConfirmedPairing(current, new Uint8Array(96).fill(3), new Uint8Array(32).fill(4), currentGrant)
+    const installation = installationFixture(() => accountId)
+    const transport = transportFixture()
+    const controller = new MobilePairingController({
+      installation,
+      transport,
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn() },
+      scanner: { scan: vi.fn() },
+      attachmentKeys: vault,
+    })
+    await controller.activate()
+
+    await controller.recordAuthenticatedDesktopName(current, 'macbook-pro-7.LOCAL')
+
+    expect(transport.revokeMobilePersonalPairing).toHaveBeenCalledWith({
+      authentication: await installation.authorizeCurrentInstallation(),
+      pairingId: previous,
+    })
+    expect(vault.attachmentKeyMaterial(previous)).toBeUndefined()
+    expect(controller.getSnapshot()).toEqual({
+      status: 'paired',
+      desktops: [{ pairingId: current, desktopName: 'macbook-pro-7.LOCAL' }],
+      selectedPairingId: current,
+    })
+  })
+
   it.each(['Remote Offline', 'Platform capacity'])('publishes and persists an offline selection while %s retries', async () => {
     const accountId = parsePlatformAccountId('account-offline-selection')
     const home = parsePersonalPairingId('pairing-offline-home')
@@ -374,10 +418,23 @@ describe('MobilePairingController', () => {
       start: vi.fn().mockRejectedValueOnce(new Error('Relay start failed')),
       stop: vi.fn(),
     }
+    const installation = installationFixture()
+    let proofSequence = 0
+    vi.mocked(installation.authorizeCurrentInstallation).mockImplementation(async () => {
+      proofSequence += 1
+      return {
+        accessToken: 'mobile-access',
+        proof: {
+          jti: parseAccountProofJti(`proof-${String(proofSequence)}`),
+          issuedAt: proofSequence,
+          signature: `signature-${String(proofSequence)}`,
+        },
+      }
+    })
     const controller = new MobilePairingController({
-      installation: installationFixture(), transport, handshake, relay, attachmentKeys: vault,
+      installation, transport, handshake, relay, attachmentKeys: vault,
       scanner: { scan: vi.fn() },
-      schedule: (task) => { scheduled.push(task); return { unref: vi.fn() } as never },
+      schedule: (task) => { scheduled.push(task); return 1 as never },
       now: () => Date.parse('2026-08-18T10:01:00.000Z'),
     })
     const payload = btoa(String.fromCharCode(7, 8)).replaceAll('=', '')
@@ -391,6 +448,8 @@ describe('MobilePairingController', () => {
 
     scheduled.shift()?.()
     await vi.waitFor(() => { expect(transport.submitEndpointMessage3).toHaveBeenCalled() })
+    expect(transport.getEndpointPairingStatus.mock.calls[0]?.[0].authentication.proof.jti).toBe('proof-2')
+    expect(transport.submitEndpointMessage3.mock.calls[0]?.[0].authentication.proof.jti).toBe('proof-3')
     expect(controller.getSnapshot()).toMatchObject({ status: 'pending' })
     scheduled.shift()?.()
     await vi.waitFor(() => { expect(transport.getEndpointPairingStatus).toHaveBeenCalledTimes(2) })
@@ -526,6 +585,38 @@ describe('MobilePairingController', () => {
     expect(vault.attachmentKeyMaterial(parsePersonalPairingId('pairing-key'))).toEqual(material)
     await controller.unpair()
     expect(vault.attachmentKeyMaterial(parsePersonalPairingId('pairing-key'))).toBeUndefined()
+  })
+
+  it('clears a Desktop-rejected attempt before exposing fresh pairing entry', async () => {
+    const scheduled: Array<() => void> = []
+    const transport = transportFixture()
+    transport.getMobilePairingStatus.mockResolvedValueOnce({ status: 'rejected' })
+    const handshake = {
+      begin: vi.fn(async () => ({
+        completionId: parsePairingCompletionId('rejected-attempt'), mobileHandshake: Uint8Array.of(9),
+      })),
+      acceptDesktopHandshake: vi.fn(),
+    }
+    const controller = new MobilePairingController({
+      installation: installationFixture(), transport, handshake,
+      scanner: { scan: vi.fn() },
+      schedule: (task) => { scheduled.push(task); return { unref: vi.fn() } as never },
+      now: () => Date.parse('2026-08-18T10:01:00.000Z'),
+    })
+
+    await controller.completeLink(pairingLink(Date.parse('2026-08-18T10:02:00.000Z')))
+    scheduled.shift()?.()
+    await vi.waitFor(() => {
+      expect(controller.getSnapshot()).toEqual({
+        status: 'rejected', error: 'Desktop rejected Personal Pairing.',
+      })
+    })
+
+    await controller.completeLink(pairingLink(
+      Date.parse('2026-08-18T10:03:00.000Z'), 'replacement-after-rejection',
+    ))
+    expect(handshake.begin).toHaveBeenCalledTimes(2)
+    expect(controller.getSnapshot()).toMatchObject({ status: 'pending' })
   })
 
   it('unpairs by wiping local handshake material and stopping Relay', async () => {
@@ -1079,6 +1170,49 @@ describe('MobilePairingController', () => {
     expect(controller.getSnapshot()).toEqual({ status: 'retryable', error: 'account B refresh failed' })
   })
 
+  it('serializes slow activation, sign-out, and the next signed-in generation', async () => {
+    const firstSelection = deferred<undefined>()
+    const pairingId = parsePersonalPairingId('pairing-lifecycle-generation')
+    const grant = {
+      routeId: parseRelayRouteId('route-lifecycle-generation'),
+      endpoint: 'mobile' as const,
+      credential: parseRelayCredential('AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE'),
+      revision: 1,
+    }
+    const selectAccount = vi.fn()
+      .mockReturnValueOnce(firstSelection.promise)
+      .mockResolvedValueOnce(undefined)
+    const relay = { configure: vi.fn(), start: vi.fn(), stop: vi.fn() }
+    const controller = new MobilePairingController({
+      installation: installationFixture(),
+      transport: transportFixture(),
+      handshake: { begin: vi.fn(), acceptDesktopHandshake: vi.fn() },
+      attachmentKeys: {
+        retain: vi.fn(),
+        wipe: vi.fn(),
+        selectAccount,
+        retainedPairingId: () => pairingId,
+        relayAuthority: () => grant,
+        pairedDesktops: () => [{ pairingId }],
+        selectedPairingId: () => pairingId,
+      },
+      relay,
+      scanner: { scan: vi.fn() },
+    })
+
+    const firstActivation = controller.activate()
+    await vi.waitFor(() => { expect(selectAccount).toHaveBeenCalledOnce() })
+    const deactivation = controller.deactivate()
+    const nextActivation = controller.activate()
+    firstSelection.resolve(undefined)
+    await Promise.all([firstActivation, deactivation, nextActivation])
+    await vi.waitFor(() => { expect(relay.start).toHaveBeenCalledOnce() })
+
+    expect(selectAccount).toHaveBeenCalledTimes(2)
+    expect(relay.stop).toHaveBeenCalledOnce()
+    expect(controller.getSnapshot()).toMatchObject({ status: 'paired', selectedPairingId: pairingId })
+  })
+
   it('serializes browser-camera scanning so deactivation drains the scanner and post-close scan is rejected', async () => {
     const scan = deferred<string>()
     const scanner = { scan: vi.fn().mockReturnValue(scan.promise) }
@@ -1197,8 +1331,8 @@ function transportFixture() {
       device: { name: 'Fixture installation', platform: 'ios' },
     }),
     submitEndpointMessage1: vi.fn(),
-    getEndpointPairingStatus: vi.fn(),
-    submitEndpointMessage3: vi.fn(),
+    getEndpointPairingStatus: vi.fn<RemoteAccessTransport['getEndpointPairingStatus']>(),
+    submitEndpointMessage3: vi.fn<RemoteAccessTransport['submitEndpointMessage3']>(),
     finishChallenge: vi.fn<RemoteAccessTransport['finishChallenge']>().mockResolvedValue({
       pendingPairingId: parsePendingPairingId('pending-one'),
       authenticationWords: ['amber', 'binary', 'cedar', 'delta', 'ember', 'frost'],

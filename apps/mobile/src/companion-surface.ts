@@ -153,6 +153,7 @@ export interface MobileCompanionTrackedSubmission {
 
 /** Encrypted mutations owned by one authenticated physical connection. */
 export interface MobileCompanionMutationChannel {
+  refreshSurface(offset?: number): MobileCompanionTrackedSubmission
   create(input: { workspace?: string }): MobileCompanionTrackedSubmission
   submit(sessionId: SessionId, text: string): MobileCompanionMutationSubmission
   cancel(sessionId: SessionId): MobileCompanionTrackedSubmission
@@ -295,6 +296,15 @@ export class MobileCompanionSurface {
       }
       this.publish()
     })
+  }
+
+  /** Request the current Desktop Session and Workspace baseline on the authenticated channel. */
+  readonly refresh = (): void => {
+    const submission = this.transmit(
+      'other-mutation',
+      channel => channel.mutations.refreshSurface(0),
+    )
+    this.trackSurfaceRefresh(submission)
   }
 
   /**

@@ -59,28 +59,29 @@ export interface MobileCompanionPresentation {
   onAttach?: ((sessionId: SessionId, file: File) => void) | undefined
   /** Request one full-text Session search from Desktop. */
   onSearch?: ((query: string) => void) | undefined
+  /** Request the current Desktop Session and Workspace baseline. */
+  onRefresh?: (() => void) | undefined
   /** Clear cached content for this Paired Desktop without deleting pairing keys. */
   onClearCache?: (() => void | Promise<void>) | undefined
 }
 
-/** Page exact Desktop Session ids and their Workspace memberships without projecting another row model. */
-export function pageCompanionHistory(
-  sessions: SessionListState,
-  workspaces: readonly WorkspaceView[],
+/**
+ * Page one derived Workspace group's shared Session rows without creating another row model.
+ * @param items - shared Session row nodes for one Workspace group.
+ * @param page - zero-based visible page index for that group.
+ * @param ceiling - rows revealed by each page.
+ * @returns the visible prefix and remaining row count for that group.
+ */
+export function pageCompanionHistory<Item>(
+  items: readonly Item[],
   page: number,
   ceiling: number = COMPANION_HISTORY_PAGE_SIZE,
-): { sessions: SessionListState; workspaces: readonly WorkspaceView[]; spilled: number } {
+): { items: readonly Item[]; spilled: number } {
   if (!Number.isSafeInteger(page) || page < 0) throw new TypeError('Companion history page must be a non-negative integer')
   if (!Number.isSafeInteger(ceiling) || ceiling <= 0) throw new TypeError('Companion history ceiling must be a positive integer')
   const end = (page + 1) * ceiling
-  const ids = sessions.ids.slice(0, end)
-  const visibleIds = new Set(ids)
   return {
-    sessions: { ...sessions, ids },
-    workspaces: workspaces.map((workspace) => {
-      const sessionIds = workspace.sessionIds.filter(id => visibleIds.has(id))
-      return sessionIds.length === workspace.sessionIds.length ? workspace : { ...workspace, sessionIds }
-    }),
-    spilled: Math.max(0, sessions.ids.length - end),
+    items: items.slice(0, end),
+    spilled: Math.max(0, items.length - end),
   }
 }

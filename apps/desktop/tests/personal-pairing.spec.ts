@@ -8,6 +8,7 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-desktop/protocol'
 import { parseAccountProofJti } from '@deepseek-ai/dsh-platform-account'
 import {
+  RemoteRelayError,
   parsePairingChallengeId,
   parsePendingPairingId,
   parsePersonalPairingId,
@@ -167,7 +168,7 @@ describe('DesktopPairingController', () => {
     }])
     const controller = new DesktopPairingController({
       account: accountFixture(), transport,
-      relay: { configure: vi.fn(), start: vi.fn(), stop: vi.fn() },
+      relay: { configure: vi.fn(), start: vi.fn(async () => {}), stop: vi.fn() },
       snowPairingVault: new DesktopSnowPairingVault(),
     })
     await controller.start()
@@ -183,7 +184,7 @@ describe('DesktopPairingController', () => {
       '../../../packages/platform/noise-channel/pkg/dsh_noise_channel_bg.wasm', import.meta.url,
     )))
     const transport = transportFixture()
-    const relay = { configure: vi.fn(), start: vi.fn(), stop: vi.fn() }
+    const relay = { configure: vi.fn(), start: vi.fn(async () => {}), stop: vi.fn() }
     let failNextSave = false
     const save = vi.fn(async () => {
       if (!failNextSave) return
@@ -506,6 +507,125 @@ describe('DesktopPairingController', () => {
     await resuming
     expect(relay.start).toHaveBeenCalledTimes(startsBeforeSuspend + 1)
     await controller.dispose()
+  })
+
+  it('serializes a slow stale Host start before stopping and starting its replacement', async () => {
+    const firstRefresh = deferred<{ enabled: boolean }>()
+    const refreshEntered = deferred<undefined>()
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset()
+    transport.getMobileAccessState
+      .mockImplementationOnce(async () => {
+        refreshEntered.resolve(undefined)
+        return await firstRefresh.promise
+      })
+      .mockResolvedValue({ enabled: true })
+    transport.listEndpointPending.mockResolvedValue([])
+    const relay = {
+      synchronize: vi.fn(async () => {}),
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+    }
+    const controller = new DesktopPairingController({
+      account: accountFixture(), transport, relay, snowPairingVault: new DesktopSnowPairingVault(),
+    })
+
+    const staleStart = controller.start()
+    await refreshEntered.promise
+    const stoppingStaleHost = controller.deactivate('host-unavailable')
+    const replacementStart = controller.start()
+    firstRefresh.resolve({ enabled: true })
+
+    await staleStart
+    await expect(Promise.race([
+      Promise.all([stoppingStaleHost, replacementStart]).then(() => true),
+      new Promise<false>(resolve => setTimeout(() => { resolve(false) }, 100)),
+    ])).resolves.toBe(true)
+    expect(relay.start).toHaveBeenCalledOnce()
+    expect(relay.stop).toHaveBeenCalledWith('host-unavailable')
+    await controller.dispose()
+  })
+
+  it('settles an in-flight Relay start cancelled by its owning lifecycle stop', async () => {
+    const startEntered = deferred<undefined>()
+    const startFailure = deferred<undefined>()
+    const relay = {
+      start: vi.fn(async () => {
+        startEntered.resolve(undefined)
+        await startFailure.promise
+        throw new RemoteRelayError('REMOTE_OFFLINE', 'Relay lifecycle stopped before attachment')
+      }),
+      stop: vi.fn(async () => { startFailure.resolve(undefined) }),
+    }
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset()
+    transport.getMobileAccessState.mockResolvedValue({ enabled: true })
+    const controller = new DesktopPairingController({
+      account: accountFixture(), transport, relay,
+    })
+
+    const starting = controller.start()
+    await startEntered.promise
+    const stopping = controller.deactivate('quit')
+
+    await expect(Promise.all([starting, stopping])).resolves.toEqual([undefined, undefined])
+    expect(relay.stop).toHaveBeenCalledWith('quit')
+    await controller.dispose()
+  })
+
+  it('keeps the Mobile Access switch actionable while an offline Relay attachment starts', async () => {
+    const startEntered = deferred<undefined>()
+    const startRelease = deferred<undefined>()
+    const relay = {
+      start: vi.fn(async () => {
+        startEntered.resolve(undefined)
+        await startRelease.promise
+      }),
+      stop: vi.fn(async () => {}),
+    }
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset()
+    transport.getMobileAccessState.mockResolvedValue({ enabled: true })
+    const controller = new DesktopPairingController({
+      account: accountFixture(), transport, relay,
+    })
+
+    const starting = controller.start()
+    await startEntered.promise
+    const enabling = controller.setEnabled(true)
+    let observationFailure: unknown
+    try {
+      await vi.waitFor(() => { expect(transport.setMobileAccess).toHaveBeenCalledOnce() }, { timeout: 100 })
+    } catch (error) {
+      observationFailure = error
+    } finally {
+      startRelease.resolve(undefined)
+      await Promise.allSettled([starting, enabling])
+      await controller.dispose()
+    }
+    if (observationFailure !== undefined) throw observationFailure
+  })
+
+  it('clears revoked local Relay grants before a later Mobile Access re-enable', async () => {
+    const clear = vi.fn()
+    const flush = vi.fn(async () => {})
+    const transport = transportFixture()
+    transport.getMobileAccessState.mockReset().mockResolvedValue({ enabled: true })
+    transport.listEndpointPending.mockResolvedValue([])
+    const controller = new DesktopPairingController({
+      account: accountFixture(),
+      transport,
+      relay: { start: vi.fn(async () => {}), stop: vi.fn(async () => {}) },
+      snowPairingVault: { clear, flush, desktopRelayGrants: () => [] } as unknown as DesktopSnowPairingVault,
+    })
+    await controller.start()
+    clear.mockClear()
+    flush.mockClear()
+
+    await controller.setEnabled(false)
+
+    expect(clear).toHaveBeenCalledOnce()
+    expect(flush).toHaveBeenCalledOnce()
   })
 
   it('stays locally offline when the remote disable mutation fails and recovers only on explicit enable', async () => {

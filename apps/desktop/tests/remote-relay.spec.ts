@@ -8,6 +8,7 @@ import {
   REMOTE_PROTOCOL_LIMITS,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
+  connectDesktopRelayThroughSystemProxy,
   createDesktopRemoteRelay,
   DesktopSnowRelayChannelOwner,
   loadDesktopRemoteRelayConfig,
@@ -200,10 +201,13 @@ describe('Desktop Remote Relay composition', () => {
     const routeId = parseRelayRouteId('route-guards')
     const signal = new AbortController().signal
     const channel = fakeSnowChannel()
-    const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+    const accept = vi.fn(async () => ({
       targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
       pairingSelector: otherSelector, generation: 2,
-    }) }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
+    }))
+    const owner = new DesktopSnowRelayChannelOwner(
+      { accept }, async () => {}, undefined, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS,
+    )
     await expect(owner.receive(Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, signal))
       .rejects.toThrow('no peer projection')
     owner.updatePeers({
@@ -215,9 +219,11 @@ describe('Desktop Remote Relay composition', () => {
     )).rejects.toThrow('stale local attachment')
     await expect(owner.receive(
       Uint8Array.of(1), parseRelayAttachmentId('mobile-unprojected'), desktopAttachmentId, selector, signal,
-    )).rejects.toThrow('unprojected')
+    )).resolves.toBeUndefined()
+    expect(accept).not.toHaveBeenCalled()
     await expect(owner.receive(Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, signal))
       .rejects.toThrow('stale Snow IK transcript')
+    expect(accept).toHaveBeenCalledOnce()
     expect(channel.dispose).toHaveBeenCalledOnce()
   })
 
@@ -338,6 +344,82 @@ describe('Desktop Remote Relay composition', () => {
     })
     expect(channel.seal).toHaveBeenCalledWith({ type: 'result', result })
     expect(send).toHaveBeenCalledWith(selector, mobileAttachmentId, Uint8Array.of(9))
+  })
+
+  it('bounds an oversized history projection before Snow sealing without reconnecting', async () => {
+    const selector = parseRelayPairingSelector('pairing-history-bytes')
+    const desktopAttachmentId = parseRelayAttachmentId('desktop-history-bytes')
+    const mobileAttachmentId = parseRelayAttachmentId('mobile-history-bytes')
+    const channel = fakeSnowChannel()
+    const protocol = negotiateCompanionProtocol(
+      createCompanionNegotiationChannel(),
+      createCompanionVersionOffer('mobile', [4]),
+      createCompanionVersionOffer('desktop', [4]),
+    )
+    channel.seal.mockImplementation((message) => {
+      encodeCompanionMessage(protocol, message)
+      return Uint8Array.of(9)
+    })
+    channel.canEncode.mockImplementation((message) => {
+      try {
+        encodeCompanionMessage(protocol, message)
+        return true
+      } catch {
+        return false
+      }
+    })
+    const operation = {
+      type: 'load-history' as const,
+      operationId: 'history-bytes' as never,
+      sessionId: 'session-history-bytes' as never,
+      maxMessages: REMOTE_PROTOCOL_LIMITS.historyPageMessages,
+    }
+    channel.open.mockReturnValue({ type: 'operation', operation })
+    const result = {
+      type: 'conversation-snapshot' as const,
+      operationId: operation.operationId,
+      generation: 1,
+      desktopRevision: 1,
+      sessionId: operation.sessionId,
+      conversation: liveConversation(operation.sessionId, Array.from({ length: 6 }, (_, index) => ({
+        kind: 'assistant', seq: index + 1, time: index + 1,
+        turn: 1, step: index + 1,
+        blocks: [{ kind: 'text', text: `${String(index)}:${'history'.repeat(1_500)}` }],
+      }))),
+    }
+    const send = vi.fn(async () => {})
+    const owner = new DesktopSnowRelayChannelOwner({ accept: async () => ({
+      targetAttachmentId: mobileAttachmentId, payload: Uint8Array.of(2), negotiation: fakeNegotiation(channel.channel),
+      pairingSelector: selector, generation: 1,
+    }) }, send, async () => result, AUTHENTICATED_DESKTOP_NAME, NEGOTIATION_TIMEOUT_MS)
+    owner.updatePeers({
+      type: 'ready', transportVersion: 1, routeId: parseRelayRouteId('route-history-bytes'),
+      attachmentId: desktopAttachmentId,
+      peers: [{ attachmentId: mobileAttachmentId, pairingSelector: selector, generation: 1 }],
+    }, selector)
+    await owner.receive(
+      Uint8Array.of(1), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    await owner.receive(
+      Uint8Array.of(2), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+    channel.seal.mockClear()
+
+    await owner.receive(
+      Uint8Array.of(3), mobileAttachmentId, desktopAttachmentId, selector, new AbortController().signal,
+    )
+
+    const sealed = channel.seal.mock.calls[0]?.[0]
+    if (sealed?.type !== 'projection' || sealed.projection.type !== 'conversation-snapshot'
+      || !isRecord(sealed.projection.conversation)) throw new Error('expected bounded history conversation')
+    expect(encodeCompanionMessage(protocol, sealed).byteLength)
+      .toBeLessThanOrEqual(REMOTE_PROTOCOL_LIMITS.transcriptPageBytes)
+    const nodes = sealed.projection.conversation.nodes
+    expect(Array.isArray(nodes)).toBe(true)
+    expect(nodes).not.toHaveLength(0)
+    expect(sealed.projection.conversation.hasMore).toBe(true)
+    expect((nodes as Array<{ seq: number }>).at(-1)?.seq).toBe(6)
+    owner.invalidate(selector)
   })
 
   it('coalesces active Host changes behind one ordered Snow sender and advances projection revisions', async () => {
@@ -993,6 +1075,113 @@ describe('Desktop Remote Relay composition', () => {
       maxBytes: REMOTE_PROTOCOL_LIMITS.relayMessageBytes, maxMessages: 16,
     })
     await relay.stop()
+    connect.mockRestore()
+  })
+
+  it('applies the Electron system proxy to the product Node WSS adapter', async () => {
+    const socket = new TestRelaySocket()
+    const connect = vi.spyOn(NodeRelayEndpointSocket, 'connect').mockResolvedValue(socket)
+    const resolveProxy = vi.fn(async () => 'PROXY 127.0.0.1:6152; DIRECT')
+    const relay = createDesktopRemoteRelay({
+      environment: { ...DEVELOPMENT, environment: 'production' }, config: RELAY_CONFIG,
+      snowPairingVault: new DesktopSnowPairingVault(), initializeWasm: () => {}, resolveProxy,
+      desktopName: AUTHENTICATED_DESKTOP_NAME, handleOperation: UNUSED_OPERATION_HANDLER,
+    })
+    await relay.configure?.({
+      routeId: parseRelayRouteId('route-system-proxy'), endpoint: 'desktop',
+      credential: await generateRelayCredential(), revision: 1,
+      pairingSelector: parseRelayPairingSelector('pairing-system-proxy'),
+    })
+
+    const starting = relay.start()
+    await vi.waitFor(() => { expect(resolveProxy).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => { expect(connect).toHaveBeenCalledOnce() })
+    expect(resolveProxy).toHaveBeenCalledWith(SOURCE.DSH_REMOTE_RELAY_WSS_URL)
+    const connectionOptions = connect.mock.calls[0]?.[3]
+    expect(connectionOptions?.agent).toBeDefined()
+    await relay.stop('quit')
+    await expect(starting).rejects.toThrow()
+    connect.mockRestore()
+  })
+
+  it('falls through the ordered system proxy list for DNS and connection failures only', async () => {
+    const socket = new TestRelaySocket()
+    for (const code of ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'] as const) {
+      let attempt = 0
+      const connect = vi.fn(async (..._input: Parameters<typeof NodeRelayEndpointSocket.connect>) => {
+        attempt += 1
+        if (attempt === 1) throw Object.assign(new Error('proxy unavailable'), { code })
+        return socket
+      })
+      await expect(connectDesktopRelayThroughSystemProxy({
+        url: RELAY_CONFIG.url,
+        signal: new AbortController().signal,
+        limits: { maxBytes: RELAY_CONFIG.inboundMaxBytes, maxMessages: RELAY_CONFIG.inboundMaxMessages },
+        resolveProxy: async () => 'PROXY first.example:6152; DIRECT',
+        resolveTimeoutMs: RELAY_CONFIG.attachTimeoutMs,
+        connect,
+      })).resolves.toBe(socket)
+      expect(connect).toHaveBeenCalledTimes(2)
+      expect(connect.mock.calls[0]?.[3]?.agent).toBeDefined()
+      expect(connect.mock.calls[1]?.[3]).toBeUndefined()
+    }
+
+    const certificateFailure = vi.fn(async (..._input: Parameters<typeof NodeRelayEndpointSocket.connect>) => {
+      throw Object.assign(new Error('certificate expired'), { code: 'CERT_HAS_EXPIRED' })
+    })
+    await expect(connectDesktopRelayThroughSystemProxy({
+      url: RELAY_CONFIG.url,
+      signal: new AbortController().signal,
+      limits: { maxBytes: RELAY_CONFIG.inboundMaxBytes, maxMessages: RELAY_CONFIG.inboundMaxMessages },
+      resolveProxy: async () => 'PROXY first.example:6152; DIRECT',
+      resolveTimeoutMs: RELAY_CONFIG.attachTimeoutMs,
+      connect: certificateFailure,
+    })).rejects.toThrow('certificate expired')
+    expect(certificateFailure).toHaveBeenCalledOnce()
+  })
+
+  it('bounds a blackholed first proxy and reaches the authorized DIRECT fallback', async () => {
+    const socket = new TestRelaySocket()
+    let attempt = 0
+    const connect = vi.fn(async (..._input: Parameters<typeof NodeRelayEndpointSocket.connect>) => {
+      attempt += 1
+      if (attempt === 1) return await new Promise<RelayEndpointSocket>(() => {})
+      return socket
+    })
+
+    await expect(connectDesktopRelayThroughSystemProxy({
+      url: RELAY_CONFIG.url,
+      signal: new AbortController().signal,
+      limits: { maxBytes: RELAY_CONFIG.inboundMaxBytes, maxMessages: RELAY_CONFIG.inboundMaxMessages },
+      resolveProxy: async () => 'PROXY blackhole.example:6152; DIRECT',
+      resolveTimeoutMs: 100,
+      connect,
+    })).resolves.toBe(socket)
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(connect.mock.calls[0]?.[1].aborted).toBe(true)
+    expect(connect.mock.calls[1]?.[3]).toBeUndefined()
+  })
+
+  it('cancels a pending system proxy resolution during Relay stop', async () => {
+    const resolveProxy = vi.fn(async () => await new Promise<string>(() => {}))
+    const relay = createDesktopRemoteRelay({
+      environment: { ...DEVELOPMENT, environment: 'production' }, config: RELAY_CONFIG,
+      snowPairingVault: new DesktopSnowPairingVault(), initializeWasm: () => {}, resolveProxy,
+      desktopName: AUTHENTICATED_DESKTOP_NAME, handleOperation: UNUSED_OPERATION_HANDLER,
+    })
+    await relay.configure?.({
+      routeId: parseRelayRouteId('route-pending-proxy'), endpoint: 'desktop',
+      credential: await generateRelayCredential(), revision: 1,
+      pairingSelector: parseRelayPairingSelector('pairing-pending-proxy'),
+    })
+
+    const starting = relay.start()
+    await vi.waitFor(() => { expect(resolveProxy).toHaveBeenCalledOnce() })
+    await expect(Promise.race([
+      relay.stop('quit').then(() => true),
+      new Promise<false>(resolve => setTimeout(() => { resolve(false) }, 100)),
+    ])).resolves.toBe(true)
+    await expect(starting).rejects.toThrow('stopped before attachment')
   })
 
   it('validates Relay configuration independently from disabled composition', () => {

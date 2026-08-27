@@ -241,6 +241,54 @@ describe('Companion foreground lifecycle', () => {
     expect(companionMayMutate(runtime.getState())).toBe(true)
   })
 
+  it('keeps a synchronized connection stable across duplicate foreground signals', async () => {
+    const relay = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      isConnected: () => true,
+    }
+    const runtime = new CompanionForegroundRuntime({ relay })
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const resync = runtime.bindValidatedDesktopResync()
+    if (resync === undefined) throw new Error('expected Desktop resync receiver')
+    resync.acceptValidatedDesktopResync(validatedResync)
+    const states: string[] = []
+    runtime.subscribe(() => {
+      const state = runtime.getState()
+      states.push(`${String(state.socketOpen)}:${String(state.synchronized)}`)
+    })
+
+    await runtime.setForeground(true)
+
+    expect(states).toEqual([])
+    expect(relay.start).not.toHaveBeenCalled()
+    expect(runtime.getState()).toEqual(ready)
+  })
+
+  it('recovers an authenticated peer after a live Relay reports it offline', () => {
+    const relay = {
+      start: async () => {},
+      stop: async () => {},
+      isConnected: () => true,
+    }
+    const runtime = new CompanionForegroundRuntime({ relay })
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const first = runtime.bindValidatedDesktopResync()
+    if (first === undefined) throw new Error('expected first peer resync receiver')
+    first.acceptValidatedDesktopResync(validatedResync)
+
+    runtime.reportConnectionFailure({ code: 'REMOTE_OFFLINE', message: 'Paired Desktop is Remote Offline' })
+    expect(runtime.getState()).toMatchObject({ socketOpen: true, synchronized: false })
+
+    runtime.markAuthenticatedPeer()
+    const replacement = runtime.bindValidatedDesktopResync()
+    if (replacement === undefined) throw new Error('expected live-socket replacement resync receiver')
+    replacement.acceptValidatedDesktopResync(validatedResync)
+    expect(runtime.getState()).toEqual(ready)
+  })
+
   it('invalidates a mutation permit across backgrounding and physical replacement', async () => {
     const runtime = new CompanionForegroundRuntime()
     runtime.configure(grant)
@@ -281,11 +329,148 @@ describe('Companion foreground lifecycle', () => {
     const runtime = new CompanionForegroundRuntime()
     const dispose = bindCompanionProcessVisibility(runtime, {
       listenAppState: async () => pending,
+      readAppState: async () => true,
+      isNativePlatform: () => true,
     })
     const disposing = dispose()
     if (resolveHandle === undefined) throw new Error('expected listener factory to run')
     resolveHandle({ remove })
     await disposing
     expect(remove).toHaveBeenCalledOnce()
+  })
+
+  it('initializes native App state before ignoring conflicting document visibility', async () => {
+    const relay = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      isConnected: () => true,
+    }
+    const runtime = new CompanionForegroundRuntime({ relay })
+    runtime.configure(grant)
+    await runtime.setForeground(false)
+    relay.stop.mockClear()
+    const readAppState = vi.fn(async () => true)
+    const dispose = bindCompanionProcessVisibility(runtime, {
+      listenAppState: async () => ({ remove: async () => {} }),
+      readAppState,
+      isNativePlatform: () => true,
+    })
+    await vi.waitFor(() => {
+      expect(readAppState).toHaveBeenCalledOnce()
+      expect(runtime.getState()).toMatchObject({ foreground: true, socketOpen: true })
+    })
+    const resync = runtime.bindValidatedDesktopResync()
+    if (resync === undefined) throw new Error('expected Desktop resync receiver')
+    resync.acceptValidatedDesktopResync(validatedResync)
+    relay.start.mockClear()
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    })
+    document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new Event('pagehide'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(relay.start).not.toHaveBeenCalled()
+    expect(relay.stop).not.toHaveBeenCalled()
+    expect(runtime.getState()).toEqual(ready)
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    })
+    await dispose()
+  })
+
+  it('fails closed when the initial native App state cannot be read', async () => {
+    let reportAppState: ((active: boolean) => void) | undefined
+    const relay = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      isConnected: () => true,
+    }
+    const runtime = new CompanionForegroundRuntime({ relay })
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const resync = runtime.bindValidatedDesktopResync()
+    if (resync === undefined) throw new Error('expected Desktop resync receiver')
+    resync.acceptValidatedDesktopResync(validatedResync)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const dispose = bindCompanionProcessVisibility(runtime, {
+      listenAppState: async (listener) => {
+        reportAppState = listener
+        return { remove: async () => {} }
+      },
+      readAppState: async () => { throw new Error('unavailable') },
+      isNativePlatform: () => true,
+    })
+    await vi.waitFor(() => {
+      expect(runtime.getState().foreground).toBe(false)
+      expect(consoleError).toHaveBeenCalledWith('[companion-foreground] native App state read failed')
+    })
+
+    document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new Event('pagehide'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(runtime.getState().foreground).toBe(false)
+
+    if (reportAppState === undefined) throw new Error('expected App-state listener')
+    reportAppState(true)
+    await vi.waitFor(() => {
+      expect(runtime.getState()).toMatchObject({ foreground: true, socketOpen: true, synchronized: false })
+    })
+    await dispose()
+    consoleError.mockRestore()
+  })
+
+  it('fails closed when the native App-state listener cannot be registered', async () => {
+    const relay = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      isConnected: () => true,
+    }
+    const runtime = new CompanionForegroundRuntime({ relay })
+    runtime.configure(grant)
+    runtime.markConnectionOpen()
+    const dispose = bindCompanionProcessVisibility(runtime, {
+      listenAppState: async () => { throw new Error('unavailable') },
+      readAppState: vi.fn(async () => true),
+      isNativePlatform: () => true,
+    })
+    await vi.waitFor(() => { expect(runtime.getState().foreground).toBe(false) })
+
+    document.dispatchEvent(new Event('visibilitychange'))
+    window.dispatchEvent(new Event('pagehide'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(runtime.getState().foreground).toBe(false)
+    await dispose()
+  })
+
+  it('does not reconcile browser visibility after disposal starts', async () => {
+    let rejectListener: ((reason: Error) => void) | undefined
+    const relay = {
+      start: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      isConnected: () => true,
+    }
+    const runtime = new CompanionForegroundRuntime({ relay })
+    runtime.configure(grant)
+    await runtime.setForeground(false)
+    relay.start.mockClear()
+    const pending = new Promise<{ remove: () => Promise<void> }>((_resolve, reject) => {
+      rejectListener = reject
+    })
+    const dispose = bindCompanionProcessVisibility(runtime, {
+      listenAppState: async () => pending,
+      isNativePlatform: () => false,
+    })
+    const disposing = dispose()
+    if (rejectListener === undefined) throw new Error('expected listener registration to start')
+    rejectListener(new Error('unavailable'))
+    await disposing
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(relay.start).not.toHaveBeenCalled()
+    expect(runtime.getState().foreground).toBe(false)
   })
 })

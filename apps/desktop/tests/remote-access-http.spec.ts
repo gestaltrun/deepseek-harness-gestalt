@@ -55,7 +55,12 @@ describe('Desktop Settings Remote Access composition', () => {
       const transport = new RemoteAccessHttpTransport({
         environment: { environment: 'development', origin: server.origin } as never,
       })
-      const relay = { configure: vi.fn(), start: vi.fn(), stop: vi.fn(), getState: () => ({ connected: false }) }
+      const relay = {
+        configure: vi.fn(),
+        start: vi.fn(async () => {}),
+        stop: vi.fn(async () => {}),
+        getState: () => ({ connected: false }),
+      }
       const controller = new DesktopPairingController({
         account: {
           authorizeCurrentInstallation: vi.fn(async () => authentication('account-one:desktop:desktop-one')),

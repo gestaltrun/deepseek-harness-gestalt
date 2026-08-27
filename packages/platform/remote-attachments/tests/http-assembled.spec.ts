@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AccountError } from '@deepseek-ai/dsh-platform-account'
 import { parseAttachmentBlobReservationId, parsePersonalPairingId, RemoteAccessError } from '@deepseek-ai/dsh-remote-access'
 import {
   deriveCompanionAttachmentKey,
@@ -17,7 +18,7 @@ import {
   type RemoteAttachmentQuotaReservation,
   type RemoteAttachmentStoreOptions,
 } from '../src/index.ts'
-import { apply } from '../src/http.ts'
+import { createRemoteAttachmentsHttpPlugin } from '../src/http.ts'
 import {
   downloadCompanionAttachment,
   receiveCompanionAttachment,
@@ -530,13 +531,23 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(overCapacity.status).toBe(503)
     expect(await errorBody(overCapacity)).toMatchObject({ code: 'ATTACHMENT_CAPACITY' })
 
-    const exploded = await fetch(`${crowded.origin}/v1/remote-attachments`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'explode' },
-      body: second.ciphertext,
-    })
-    expect(exploded.status).toBe(500)
-    expect(await errorBody(exploded)).toMatchObject({ code: 'INTERNAL_ERROR' })
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const exploded = await fetch(`${crowded.origin}/v1/remote-attachments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'explode' },
+        body: second.ciphertext,
+      })
+      expect(exploded.status).toBe(500)
+      expect(await errorBody(exploded)).toMatchObject({ code: 'INTERNAL_ERROR' })
+      expect(reported).toHaveBeenCalledWith(
+        '[remote-attachments-http] unexpected request failure:',
+        { operation: 'upload', failureKind: 'unexpected-error' },
+      )
+      expect(JSON.stringify(reported.mock.calls)).not.toContain('authority exploded')
+    } finally {
+      reported.mockRestore()
+    }
   })
 
   it('admits the product upload through Remote Access quota and preserves capacity retry guidance', async () => {
@@ -570,6 +581,39 @@ describe('Remote attachment HTTP assembled transfer', () => {
 
     expect(response.status).toBe(409)
     expect(await errorBody(response)).toMatchObject({ code: 'PAIRING_PENDING_INVALID' })
+  })
+
+  it('projects consumed Installation proofs as authentication failures', async () => {
+    const { origin } = await start()
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const response = await fetch(`${origin}/v1/remote-attachments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': 'proof-replayed' },
+        body: Uint8Array.of(1),
+      })
+
+      expect(response.status).toBe(401)
+      expect(await errorBody(response)).toMatchObject({ code: 'PROOF_REPLAYED' })
+      expect(reported).not.toHaveBeenCalled()
+    } finally {
+      reported.mockRestore()
+    }
+  })
+
+  it.each([
+    ['account-capacity', 429],
+    ['account-invalid', 400],
+  ] as const)('projects %s Account failures without treating them as store faults', async (pairing, status) => {
+    const { origin } = await start()
+    const response = await fetch(`${origin}/v1/remote-attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'x-test-pairing': pairing },
+      body: Uint8Array.of(1),
+    })
+
+    expect(response.status).toBe(status)
+    if (status === 429) expect(response.headers.get('retry-after')).toBe('7')
   })
 
   it.each([
@@ -705,7 +749,7 @@ describe('Remote attachment HTTP assembled transfer', () => {
       admit: async () => ({
         id: parseAttachmentBlobReservationId('quota-read-failure'),
         expiresAt: Number.MAX_SAFE_INTEGER,
-        release: async () => { throw new Error('quota cleanup failed') },
+        release: async () => { throw new Error('Bearer quota-cleanup-secret') },
       }),
     })
     const uploadRoute = routes.get('/v1/remote-attachments')
@@ -719,13 +763,15 @@ describe('Remote attachment HTTP assembled transfer', () => {
     expect(response.status).toBe(400)
     expect(reported).toHaveBeenCalledWith(
       '[remote-attachments-http] quota release after rejected upload failed:',
-      expect.objectContaining({ message: 'quota cleanup failed' }),
+      { operation: 'upload', phase: 'quota-release', failureKind: 'unexpected-error' },
     )
+    expect(JSON.stringify(reported.mock.calls)).not.toContain('quota-cleanup-secret')
     reported.mockRestore()
   })
 
   it('fails loud when the configured browser origin is not a URL', () => {
-    expect(() => { apply({} as Context, { origins: ['not a URL'] }) }).toThrow()
+    const plugin = createRemoteAttachmentsHttpPlugin(async () => { throw new Error('unused authenticator') })
+    expect(() => { plugin.apply({} as Context, { origins: ['not a URL'] }) }).toThrow()
   })
 })
 
@@ -899,23 +945,24 @@ async function start(options: {
     schedule: () => ({ unref: vi.fn(), cancel: vi.fn() }),
     ...options.store,
   })
+  const authenticate = async ({ headers }: { headers: IncomingMessage['headers'] }) => {
+    const value = headers['x-test-pairing'] ?? headers['x-gestalt-pairing-id']
+    if (typeof value !== 'string') throw new Error('pairing header is required')
+    if (value === 'explode') throw new Error('authority exploded')
+    if (value === 'proof-replayed') throw new AccountError('PROOF_REPLAYED', 'installation proof was already used')
+    if (value === 'account-capacity') throw new AccountError('PLATFORM_CAPACITY', 'Platform is full', 7)
+    if (value === 'account-invalid') throw new AccountError('LOGIN_ATTEMPT_INVALID', 'Account login is invalid')
+    return {
+      pairingId: parsePersonalPairingId(value),
+      admit: options.admit ?? (async () => ({
+        id: parseAttachmentBlobReservationId(crypto.randomUUID()),
+        expiresAt: Number.MAX_SAFE_INTEGER,
+        release: async () => {},
+      })),
+    }
+  }
   const fake = {
     remoteAttachments: store,
-    remoteAttachmentAuthority: {
-      authenticate: async ({ headers }: { headers: IncomingMessage['headers'] }) => {
-        const value = headers['x-test-pairing'] ?? headers['x-gestalt-pairing-id']
-        if (typeof value !== 'string') throw new Error('pairing header is required')
-        if (value === 'explode') throw new Error('authority exploded')
-        return {
-          pairingId: parsePersonalPairingId(value),
-          admit: options.admit ?? (async () => ({
-            id: parseAttachmentBlobReservationId(crypto.randomUUID()),
-            expiresAt: Number.MAX_SAFE_INTEGER,
-            release: async () => {},
-          })),
-        }
-      },
-    },
     webServer: {
       register(route: RegisteredRoute) {
         routes.set(route.path, route)
@@ -924,7 +971,10 @@ async function start(options: {
     },
     effect(register: () => () => void) { register() },
   } as unknown as Context
-  apply(fake, { origins: options.origins ?? ['https://mobile.example'] })
+  createRemoteAttachmentsHttpPlugin(authenticate).apply(
+    fake,
+    { origins: options.origins ?? ['https://mobile.example'] },
+  )
   const http = createServer((req, res) => {
     const route = routes.get(new URL(req.url ?? '/', 'http://localhost').pathname)
     if (route === undefined) { res.writeHead(404).end(); return }

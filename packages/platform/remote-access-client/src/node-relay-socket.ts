@@ -1,9 +1,18 @@
 import { once } from 'node:events'
+import type { Agent } from 'node:http'
 import { RemoteRelayError } from '@deepseek-ai/dsh-remote-access'
 import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import WebSocket, { type RawData } from 'ws'
 import type { RelayEndpointSocket } from './relay.ts'
 import { RelayInboundQueue, type RelayInboundQueueLimits } from './relay-queue.ts'
+
+/** Node WSS connection policy supplied by the endpoint-owned native adapter. */
+export interface NodeRelayConnectionOptions {
+  /** Optional HTTP CONNECT agent selected by the native system proxy owner. */
+  agent?: Agent
+  /** Test-only TLS trust override; production omits it. */
+  rejectUnauthorized?: boolean
+}
 
 /** Node WebSocket adapter with wire-level maxPayload and a bounded live inbound queue. */
 export class NodeRelayEndpointSocket implements RelayEndpointSocket {
@@ -31,21 +40,22 @@ export class NodeRelayEndpointSocket implements RelayEndpointSocket {
    * @param url - deployment WSS endpoint.
    * @param signal - lifecycle cancellation.
    * @param limits - bounded live inbound queue.
-   * @param trust - optional test-only TLS trust override; production defaults to certificate verification.
+   * @param options - optional native proxy agent and test-only TLS trust override.
    * @returns connected Relay socket.
    */
   static async connect(
     url: string,
     signal: AbortSignal,
     limits: RelayInboundQueueLimits,
-    trust?: { rejectUnauthorized: boolean },
+    options?: NodeRelayConnectionOptions,
   ): Promise<NodeRelayEndpointSocket> {
     const parsed = new URL(url)
     if (parsed.protocol !== 'wss:') throw new TypeError('Node Relay endpoint must use WSS')
     const socket = new WebSocket(parsed, {
       perMessageDeflate: false,
       maxPayload: REMOTE_PROTOCOL_LIMITS.relayMessageBytes,
-      ...(trust === undefined ? {} : { rejectUnauthorized: trust.rejectUnauthorized }),
+      ...(options?.agent === undefined ? {} : { agent: options.agent }),
+      ...(options?.rejectUnauthorized === undefined ? {} : { rejectUnauthorized: options.rejectUnauthorized }),
     })
     try {
       await once(socket, 'open', { signal })

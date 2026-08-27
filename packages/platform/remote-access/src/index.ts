@@ -83,6 +83,37 @@ export interface AttachmentBlobReservationCleanup {
   /** @param reservationId - branded id retained only beside attachment metadata. */
   release(reservationId: AttachmentBlobReservationId): Promise<void>
 }
+
+/** Construction-private Account-authenticated attachment quota closures. */
+export interface PersonalPairingAttachmentQuotaAuthority {
+  /**
+   * Reserve quota after the caller has authenticated the current Installation.
+   * @param input - authenticated Account id and declared ciphertext size.
+   * @returns opaque reservation id plus its durable absolute lease expiry.
+   */
+  admit(input: {
+    accountId: AuthenticatedInstallationView['account']['id']
+    bytes: number
+  }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }>
+  /**
+   * Release a reservation owned by the authenticated Account.
+   * @param input - authenticated Account id and owned reservation id.
+   */
+  release(input: {
+    accountId: AuthenticatedInstallationView['account']['id']
+    reservationId: AttachmentBlobReservationId
+  }): Promise<void>
+  /** Cleanup authority retained only beside durable attachment metadata. */
+  cleanup: AttachmentBlobReservationCleanup
+}
+
+/** Personal Pairing provider plus construction-private attachment quota authority. */
+export interface PersonalPairingComposition {
+  /** Public Remote Access provider mounted into the Cordis context. */
+  provider: PersonalPairingProvider
+  /** Private quota closures passed directly to the operated attachment composition. */
+  attachmentQuota: PersonalPairingAttachmentQuotaAuthority
+}
 /** Opaque provider reference for one active Personal Pairing key. */
 export type PersonalPairingKeyReference = Branded<'PersonalPairingKeyReference'>
 /** Opaque reference to crypto-provider state for one challenge. */
@@ -362,30 +393,74 @@ export interface PersonalPairingActivity {
   online: boolean
 }
 
+/** Desktop access operations that settle with one pairing-state transaction. */
+export interface PersonalPairingAccessTransaction {
+  /**
+   * Read current Desktop access without process-local caching.
+   * @param accountId - authenticated Platform Account.
+   * @param desktopInstallationId - Desktop installation whose authority is read.
+   * @returns current durable access after earlier transaction changes.
+   */
+  getDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<DesktopRemoteAccessAuthority>
+  /**
+   * Atomically keep an active route or install the supplied fresh route.
+   * @param accountId - authenticated Platform Account.
+   * @param desktopInstallationId - Desktop installation receiving access.
+   * @param freshRouteId - replacement route to install only when no active route exists.
+   * @returns the retained or newly installed active route.
+   */
+  enableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, freshRouteId: RelayRouteId): Promise<RelayRouteId>
+  /**
+   * Atomically disable access and remove Mobile grants before returning.
+   * @param accountId - authenticated Platform Account.
+   * @param desktopInstallationId - Desktop installation losing access.
+   * @returns every route whose external Relay authority still requires revocation.
+   */
+  disableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<readonly RelayRouteId[]>
+  /**
+   * Mark one route's external Relay revocation complete without touching a replacement route.
+   * @param accountId - authenticated Platform Account.
+   * @param desktopInstallationId - Desktop installation that owned the route.
+   * @param routeId - externally revoked route to settle.
+   */
+  completeRouteRevocation(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, routeId: RelayRouteId): Promise<void>
+}
+
 /** Deployment-owned atomic authority store shared by non-sticky Platform Instances. */
-export interface PersonalPairingAuthorityStore extends RelayPairingActivitySink {
+export interface PersonalPairingAuthorityStore extends RelayPairingActivitySink, PersonalPairingAccessTransaction {
   /**
    * Exclusively own the durable short-lived pairing transaction state.
    * Mutations, including cleanup tombstones retained by a rejected operation, must be persisted before settlement.
-   * @param operation - bounded state transition serialized across every Platform Instance.
+   * @param operation - bounded state and Desktop-access transition serialized across every Platform Instance.
    * @returns the operation result after its state changes are durable.
    */
-  runPairingTransaction<T>(operation: (state: PersonalPairingTransactionState) => Promise<T>): Promise<T>
-  /** Read current Desktop access without process-local caching. */
-  getDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<DesktopRemoteAccessAuthority>
-  /** Atomically keep an active route or install the supplied fresh route. */
-  enableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, freshRouteId: RelayRouteId): Promise<RelayRouteId>
-  /** Atomically disable access, remove Mobile grants, and return every route still requiring revocation. */
-  disableDesktop(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId): Promise<readonly RelayRouteId[]>
-  /** Mark one route's external Relay revocation complete without touching a replacement route. */
-  completeRouteRevocation(accountId: Branded<'PlatformAccountId'>, desktopInstallationId: InstallationId, routeId: RelayRouteId): Promise<void>
-  /** Persist the confirmed pairing-to-route result before Mobile observes confirmation. */
+  runPairingTransaction<T>(operation: (
+    state: PersonalPairingTransactionState,
+    access: PersonalPairingAccessTransaction,
+  ) => Promise<T>): Promise<T>
+  /**
+   * Persist the confirmed pairing-to-route result before Mobile observes confirmation.
+   * @param authority - complete confirmed Mobile authority to commit idempotently.
+   * @throws when the pending pairing id already owns different authority or persistence fails.
+   */
   confirmMobilePairing(authority: MobilePairingAuthority): Promise<void>
-  /** Read a confirmed Mobile result from any Platform Instance. */
+  /**
+   * Read a confirmed Mobile result from any Platform Instance.
+   * @param pendingPairingId - pending result identity returned to Mobile.
+   * @returns detached durable authority, or `undefined` before confirmation or after revocation.
+   */
   getMobilePairing(pendingPairingId: PendingPairingId): Promise<MobilePairingAuthority | undefined>
-  /** Drop one confirmed Mobile pairing result after Desktop revocation. */
+  /**
+   * Durably drop one confirmed Mobile pairing result after Desktop revocation.
+   * @param pairingId - confirmed Personal Pairing whose Mobile result is removed idempotently.
+   */
   revokeMobilePairing(pairingId: PersonalPairingId): Promise<void>
-  /** Read authoritative Relay activity for one confirmed pairing. */
+  /**
+   * Read authoritative Relay activity for one confirmed pairing.
+   * @param pairingId - confirmed Personal Pairing whose activity is read.
+   * @param observedAt - current time used to prune expired presence leases.
+   * @returns durable access time and lease-derived online state, or `undefined` without activity.
+   */
   getPersonalPairingActivity(pairingId: PersonalPairingId, observedAt: number): Promise<PersonalPairingActivity | undefined>
 }
 
@@ -460,11 +535,14 @@ export class MemoryPersonalPairingAuthorityStore implements PersonalPairingAutho
   private readonly pairingLeases = new Map<RelayCredentialFingerprint, Map<RelayConnectionToken, number>>()
   private pairingSerial: Promise<void> = Promise.resolve()
 
-  runPairingTransaction<T>(operation: (state: PersonalPairingTransactionState) => Promise<T>): Promise<T> {
+  runPairingTransaction<T>(operation: (
+    state: PersonalPairingTransactionState,
+    access: PersonalPairingAccessTransaction,
+  ) => Promise<T>): Promise<T> {
     const result = this.pairingSerial.then(
-      () => operation(this.pairingTransactions),
+      () => operation(this.pairingTransactions, this),
       /* v8 ignore next -- pairingSerial is always reassigned to a rejection-swallowing then() */
-      () => operation(this.pairingTransactions),
+      () => operation(this.pairingTransactions, this),
     )
     this.pairingSerial = result.then(() => undefined, () => undefined)
     return result
@@ -940,6 +1018,7 @@ function isEndpointStoredPairing(pairing: StoredPersonalPairing): pairing is End
 /** Provider combining instance-local handshake work with deployment-owned confirmed authority. */
 export class PersonalPairingProvider extends RemoteAccessService {
   private transactionState: PersonalPairingTransactionState | undefined
+  private transactionAccess: PersonalPairingAccessTransaction | undefined
   private serial: Promise<void> = Promise.resolve()
   private readonly clock: { now(): number }
   private readonly randomBytes: (size: number) => Uint8Array
@@ -950,6 +1029,24 @@ export class PersonalPairingProvider extends RemoteAccessService {
   private readonly authority: PersonalPairingAuthorityStore
   private readonly ownsAuthority: boolean
   private readonly localChallengeIds = new Set<PairingChallengeId>()
+
+  /**
+   * Construct the provider together with private attachment quota closures.
+   * @param ctx - Platform context receiving the public Remote Access provider.
+   * @param options - Account, crypto, time, random, and link adapters.
+   * @returns provider and same-composition attachment quota authority.
+   */
+  static compose(ctx: Context, options: PersonalPairingProviderOptions): PersonalPairingComposition {
+    const provider = new PersonalPairingProvider(ctx, options)
+    return {
+      provider,
+      attachmentQuota: {
+        admit: async input => await provider.admitAuthenticatedAttachmentBlob(input),
+        release: async (input) => { await provider.releaseAuthenticatedAttachmentBlob(input) },
+        cleanup: provider.attachmentReservationCleanup(),
+      },
+    }
+  }
 
   /** @param ctx - Platform context. @param options - Account, crypto, time, random, and link adapters. */
   constructor(ctx: Context, private readonly options: PersonalPairingProviderOptions) {
@@ -1124,6 +1221,10 @@ export class PersonalPairingProvider extends RemoteAccessService {
       const mailbox = this.endpointMailbox()
       const mailboxState = mailbox.exportState()
       const challenge = mailboxState.challenges.find(record => record.challengeId === input.challengeId)
+      const replay = mailboxState.pending.find(record => record.completionId === input.completionId)
+      if (challenge === undefined && replay === undefined) {
+        throw new RemoteAccessError('PAIRING_CHALLENGE_INVALID', 'Endpoint Pairing invitation is invalid or unavailable')
+      }
       if (challenge !== undefined) {
         if (mailboxState.pending.filter(record => !record.confirmed && !record.rejected
           && record.accountId === account.id && record.mobileInstallationId === installation.id).length
@@ -1450,18 +1551,13 @@ export class PersonalPairingProvider extends RemoteAccessService {
     enabled: boolean
   }): Promise<MobileAccessState> {
     return this.serialized(async () => {
-      if (!input.enabled) {
-        await this.runTransaction(async () => {
+      const owner = input.enabled ? undefined : await this.authenticate(input.desktop, 'desktop')
+      if (owner === undefined) {
+        return await this.runTransaction(async () => {
           const { account, installation } = await this.authenticate(input.desktop, 'desktop')
-          this.stageStoredEndpointRevocations(account.id, installation.id)
-        })
-      }
-      return await this.runTransaction(async () => {
-        const { account, installation } = await this.authenticate(input.desktop, 'desktop')
-        this.evictExpiredRecords()
-        if (input.enabled) {
-          const before = await this.authority.getDesktop(account.id, installation.id)
-          const routeId = await this.authority.enableDesktop(
+          this.evictExpiredRecords()
+          const before = await this.requireTransactionAccess().getDesktop(account.id, installation.id)
+          const routeId = await this.requireTransactionAccess().enableDesktop(
             account.id,
             installation.id,
             this.options.relay === undefined
@@ -1476,53 +1572,62 @@ export class PersonalPairingProvider extends RemoteAccessService {
             })
           }
           return { enabled: true }
-        }
-        this.acknowledgeStoredEndpointRevocations(account.id, installation.id, 'desktop')
-        const routeIds = await this.authority.disableDesktop(account.id, installation.id)
-        const accessKeyValue = accessKey(account.id, installation.id)
-        const retainedAccess = this.requireTransactions().endpointAccessGenerations.get(accessKeyValue)
-        this.requireTransactions().endpointAccessGenerations.set(accessKeyValue, {
-          generation: (retainedAccess?.generation ?? 0) + 1, phase: 'disabled',
         })
-        for (const publication of this.requireTransactions().endpointPublications.values()) {
-          if (publication.accountId === account.id && publication.desktopInstallationId === installation.id) {
-            this.stageEndpointPublicationRevocation(this.requireTransactions(), publication)
+      } else {
+        await this.runTransaction(() => {
+          const { account, installation } = owner
+          this.stageStoredEndpointRevocations(account.id, installation.id)
+        })
+        return await this.runTransaction(async () => {
+          const { account, installation } = owner
+          this.evictExpiredRecords()
+          this.acknowledgeStoredEndpointRevocations(account.id, installation.id, 'desktop')
+          const routeIds = await this.requireTransactionAccess().disableDesktop(account.id, installation.id)
+          const accessKeyValue = accessKey(account.id, installation.id)
+          const retainedAccess = this.requireTransactions().endpointAccessGenerations.get(accessKeyValue)
+          this.requireTransactions().endpointAccessGenerations.set(accessKeyValue, {
+            generation: (retainedAccess?.generation ?? 0) + 1, phase: 'disabled',
+          })
+          for (const publication of this.requireTransactions().endpointPublications.values()) {
+            if (publication.accountId === account.id && publication.desktopInstallationId === installation.id) {
+              this.stageEndpointPublicationRevocation(this.requireTransactions(), publication)
+            }
           }
-        }
-        if (this.options.relay !== undefined) {
-          await cleanupAll(routeIds.map(routeId => async () => {
-            await this.options.relay?.revokeRoute(routeId)
-            await this.authority.completeRouteRevocation(account.id, installation.id, routeId)
-          }))
-        } else {
-          await cleanupAll(routeIds.map(routeId => async () => {
-            await this.authority.completeRouteRevocation(account.id, installation.id, routeId)
-          }))
-        }
-        for (const challenge of [...this.challenges.values()]) {
-          if (challenge.accountId === account.id && challenge.desktopInstallationId === installation.id) {
-            this.settleChallenge(challenge, 'disabled')
+          if (this.options.relay !== undefined) {
+            await cleanupAll(routeIds.map(routeId => async () => {
+              await this.options.relay?.revokeRoute(routeId)
+              await this.requireTransactionAccess().completeRouteRevocation(account.id, installation.id, routeId)
+            }))
+          } else {
+            await cleanupAll(routeIds.map(routeId => async () => {
+              await this.requireTransactionAccess().completeRouteRevocation(account.id, installation.id, routeId)
+            }))
           }
-        }
-        const endpointMailbox = this.endpointMailbox()
-        endpointMailbox.disable(account.id, installation.id, this.clock.now())
-        this.commitEndpointMailbox(endpointMailbox)
-        for (const [id, record] of [...this.pending]) {
-          if (record.accountId === account.id && record.desktopInstallationId === installation.id) {
-            this.settlePending(id, record, 'disabled')
+          for (const challenge of [...this.challenges.values()]) {
+            if (challenge.accountId === account.id && challenge.desktopInstallationId === installation.id) {
+              this.settleChallenge(challenge, 'disabled')
+            }
           }
-        }
-        for (const [pairingId, pairing] of [...this.pairings]) {
-          if (pairing.devicePrincipal.accountId === account.id
-          && pairing.desktopInstallationId === installation.id) {
-            this.pairings.delete(pairingId)
-            this.principalIds.delete(pairing.devicePrincipal.id)
-            if (pairing.cleanup !== undefined) await this.cleanupActive(pairing.cleanup)
+          const endpointMailbox = this.endpointMailbox()
+          endpointMailbox.disable(account.id, installation.id, this.clock.now())
+          this.commitEndpointMailbox(endpointMailbox)
+          for (const [id, record] of [...this.pending]) {
+            if (record.accountId === account.id && record.desktopInstallationId === installation.id) {
+              this.settlePending(id, record, 'disabled')
+            }
           }
-        }
-        await this.cleanupOwner(account.id, installation.id)
-        return { enabled: false }
-      })
+          for (const [pairingId, pairing] of [...this.pairings]) {
+            if (pairing.devicePrincipal.accountId === account.id
+            && pairing.desktopInstallationId === installation.id) {
+              this.pairings.delete(pairingId)
+              this.principalIds.delete(pairing.devicePrincipal.id)
+              if (pairing.cleanup !== undefined) await this.cleanupActive(pairing.cleanup)
+            }
+          }
+          await this.cleanupOwner(account.id, installation.id)
+          return { enabled: false }
+        })
+      }
     })
   }
 
@@ -1741,8 +1846,8 @@ export class PersonalPairingProvider extends RemoteAccessService {
     endpoint: 'desktop' | 'mobile',
   ): Promise<void> {
     await this.serialized(async () => {
-      const endpointOwned = await this.runTransaction(async () => {
-        const { account, installation } = await this.authenticate(authentication, endpoint)
+      const { account, installation } = await this.authenticate(authentication, endpoint)
+      const endpointOwned = await this.runTransaction(() => {
         this.evictExpiredRecords()
         const pairingId = parsePersonalPairingId(inputPairingId)
         const pairing = this.pairings.get(pairingId)
@@ -1768,14 +1873,12 @@ export class PersonalPairingProvider extends RemoteAccessService {
         return false
       })
       if (endpointOwned) {
-        await this.runTransaction(async () => {
-          const { account, installation } = await this.authenticate(authentication, endpoint)
+        await this.runTransaction(() => {
           this.acknowledgeStoredEndpointRevocations(account.id, installation.id, endpoint)
         })
         return
       }
       await this.runTransaction(async () => {
-        const { account, installation } = await this.authenticate(authentication, endpoint)
         this.evictExpiredRecords()
         const pairingId = parsePersonalPairingId(inputPairingId)
         const pairing = this.requireEndpointOwnedPairing(pairingId, account.id, installation.id, endpoint)
@@ -1999,46 +2102,20 @@ export class PersonalPairingProvider extends RemoteAccessService {
   }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }> {
     return this.exclusive(async () => {
       const { account } = await this.authenticateOwner(input.owner)
-      this.evictExpiredBlobReservations()
-      this.assertCapacity()
-      if (!Number.isSafeInteger(input.bytes) || input.bytes < 0) {
-        throw new TypeError('Attachment blob size must be a non-negative integer')
-      }
-      const now = this.clock.now()
-      const uploads = this.pruneUploads(this.blobUploads.get(account.id) ?? [], now)
-      const concurrent = [...this.blobs.values()].filter(blob => blob.accountId === account.id).length
-      const bytesToday = uploads.reduce((total, upload) => total + upload.bytes, 0)
-      if (input.bytes > OPEN_REGISTRATION_QUOTAS.blobBytes || concurrent >= OPEN_REGISTRATION_QUOTAS.concurrentBlobs) {
-        throw new RemoteAccessError(
-          'QUOTA',
-          'Platform Account has reached its attachment blob limit',
-          OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
-        )
-      }
-      if (bytesToday + input.bytes > OPEN_REGISTRATION_QUOTAS.blobBytesPerAccountPerDay) {
-        const oldest = uploads[0]
-        /* v8 ignore next 6 -- the 100 MiB per-blob cap means a daily overflow always has a prior upload */
-        if (oldest === undefined) {
-          throw new RemoteAccessError(
-            'QUOTA',
-            'Platform Account has reached its attachment blob limit',
-            OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
-          )
-        }
-        throw new RemoteAccessError(
-          'QUOTA',
-          'Platform Account has reached its attachment blob limit',
-          retryAfterSecondsUntil(oldest.at, ACCOUNT_DAILY_QUOTA_WINDOW_MS, now),
-        )
-      }
-      this.blobSequence.next += 1
-      const reservationId = parseAttachmentBlobReservationId(`blob-${String(this.blobSequence.next)}`)
-      const expiresAt = now + this.attachmentReservationLifetimeMs
-      this.blobs.set(reservationId, { accountId: account.id, bytes: input.bytes, expiresAt })
-      uploads.push({ at: now, bytes: input.bytes })
-      this.blobUploads.set(account.id, uploads)
-      return { reservationId, expiresAt }
+      return this.admitAttachmentBlobForAccount(account.id, input.bytes)
     })
+  }
+
+  /**
+   * Reserve attachment quota after a same-process caller has verified the current Installation proof.
+   * @param input - authenticated Account id and declared ciphertext size.
+   * @returns opaque reservation id plus its durable absolute lease expiry.
+   */
+  private async admitAuthenticatedAttachmentBlob(input: {
+    accountId: AuthenticatedInstallationView['account']['id']
+    bytes: number
+  }): Promise<{ reservationId: AttachmentBlobReservationId; expiresAt: number }> {
+    return this.exclusive(() => this.admitAttachmentBlobForAccount(input.accountId, input.bytes))
   }
 
   async releaseAttachmentBlob(input: {
@@ -2047,19 +2124,26 @@ export class PersonalPairingProvider extends RemoteAccessService {
   }): Promise<void> {
     await this.exclusive(async () => {
       const { account } = await this.authenticateOwner(input.owner)
-      const blob = this.blobs.get(input.reservationId)
-      if (blob === undefined || blob.accountId !== account.id) {
-        throw new TypeError('Attachment blob reservation is invalid')
-      }
-      this.blobs.delete(input.reservationId)
+      this.releaseAttachmentBlobForAccount(account.id, input.reservationId)
     })
+  }
+
+  /**
+   * Release attachment quota after a same-process caller has verified the current Installation proof.
+   * @param input - authenticated Account id and owned reservation id.
+   */
+  private async releaseAuthenticatedAttachmentBlob(input: {
+    accountId: AuthenticatedInstallationView['account']['id']
+    reservationId: AttachmentBlobReservationId
+  }): Promise<void> {
+    await this.exclusive(() => { this.releaseAttachmentBlobForAccount(input.accountId, input.reservationId) })
   }
 
   /**
    * Create the provider-private cleanup authority for durable attachment metadata.
    * @returns cleanup capability owned by the durable attachment store.
    */
-  attachmentReservationCleanup(): AttachmentBlobReservationCleanup {
+  private attachmentReservationCleanup(): AttachmentBlobReservationCleanup {
     return { release: async (reservationId) => { await this.releaseAttachmentReservation(reservationId) } }
   }
 
@@ -2067,6 +2151,62 @@ export class PersonalPairingProvider extends RemoteAccessService {
     await this.exclusive(() => {
       this.blobs.delete(reservationId)
     })
+  }
+
+  private admitAttachmentBlobForAccount(
+    accountId: AuthenticatedInstallationView['account']['id'],
+    bytes: number,
+  ): { reservationId: AttachmentBlobReservationId; expiresAt: number } {
+    this.evictExpiredBlobReservations()
+    this.assertCapacity()
+    if (!Number.isSafeInteger(bytes) || bytes < 0) {
+      throw new TypeError('Attachment blob size must be a non-negative integer')
+    }
+    const now = this.clock.now()
+    const uploads = this.pruneUploads(this.blobUploads.get(accountId) ?? [], now)
+    const concurrent = [...this.blobs.values()].filter(blob => blob.accountId === accountId).length
+    const bytesToday = uploads.reduce((total, upload) => total + upload.bytes, 0)
+    if (bytes > OPEN_REGISTRATION_QUOTAS.blobBytes || concurrent >= OPEN_REGISTRATION_QUOTAS.concurrentBlobs) {
+      throw new RemoteAccessError(
+        'QUOTA',
+        'Platform Account has reached its attachment blob limit',
+        OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
+      )
+    }
+    if (bytesToday + bytes > OPEN_REGISTRATION_QUOTAS.blobBytesPerAccountPerDay) {
+      const oldest = uploads[0]
+      /* v8 ignore next 6 -- the 100 MiB per-blob cap means a daily overflow always has a prior upload */
+      if (oldest === undefined) {
+        throw new RemoteAccessError(
+          'QUOTA',
+          'Platform Account has reached its attachment blob limit',
+          OPEN_REGISTRATION_HARD_CAP_RETRY_AFTER_SECONDS,
+        )
+      }
+      throw new RemoteAccessError(
+        'QUOTA',
+        'Platform Account has reached its attachment blob limit',
+        retryAfterSecondsUntil(oldest.at, ACCOUNT_DAILY_QUOTA_WINDOW_MS, now),
+      )
+    }
+    this.blobSequence.next += 1
+    const reservationId = parseAttachmentBlobReservationId(`blob-${String(this.blobSequence.next)}`)
+    const expiresAt = now + this.attachmentReservationLifetimeMs
+    this.blobs.set(reservationId, { accountId, bytes, expiresAt })
+    uploads.push({ at: now, bytes })
+    this.blobUploads.set(accountId, uploads)
+    return { reservationId, expiresAt }
+  }
+
+  private releaseAttachmentBlobForAccount(
+    accountId: AuthenticatedInstallationView['account']['id'],
+    reservationId: AttachmentBlobReservationId,
+  ): void {
+    const blob = this.blobs.get(reservationId)
+    if (blob === undefined || blob.accountId !== accountId) {
+      throw new TypeError('Attachment blob reservation is invalid')
+    }
+    this.blobs.delete(reservationId)
   }
 
   /** Drain instance-local incomplete crypto work while preserving durable confirmed authority. */
@@ -2423,13 +2563,15 @@ export class PersonalPairingProvider extends RemoteAccessService {
     const owned = async (): Promise<T> => {
       await this.reconcileEndpointPublicationRevocations()
       try {
-        return await this.authority.runPairingTransaction(async (state) => {
+        return await this.authority.runPairingTransaction(async (state, access) => {
           this.transactionState = state
+          this.transactionAccess = access
           try {
             this.evictExpiredBlobReservations()
             return await operation()
           } finally {
             this.transactionState = undefined
+            this.transactionAccess = undefined
           }
         })
       } finally {
@@ -2709,6 +2851,12 @@ export class PersonalPairingProvider extends RemoteAccessService {
     /* v8 ignore next -- exclusive() assigns transactionState before operation() and clears it in finally */
     if (this.transactionState === undefined) throw new Error('Personal Pairing transaction state is not owned')
     return this.transactionState
+  }
+
+  private requireTransactionAccess(): PersonalPairingAccessTransaction {
+    /* v8 ignore next -- runTransaction() assigns transactionAccess before operation() and clears it in finally */
+    if (this.transactionAccess === undefined) throw new Error('Personal Pairing access transaction is not owned')
+    return this.transactionAccess
   }
 }
 

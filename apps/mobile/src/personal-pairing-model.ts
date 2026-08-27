@@ -25,6 +25,7 @@ export type MobilePairingSnapshot =
     error?: string
   }
   | { status: 'unpair-failed'; error: string }
+  | { status: 'rejected'; error: string }
   | { status: 'unavailable'; error: string }
 
 /** Mobile adapter for full-link/QR completion and handshake state. */

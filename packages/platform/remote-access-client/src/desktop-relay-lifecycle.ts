@@ -119,11 +119,14 @@ export class DesktopRelayEndpointLifecycle implements DesktopRelayLifecycle {
   }
 
   async start(): Promise<void> {
-    await this.exclusive(async () => {
+    let starts: readonly Promise<void>[] = []
+    await this.exclusive(() => {
       this.running = true
-      await Promise.all([...this.endpoints.values()].map(async ({ controller }) => { await controller.start() }))
+      starts = [...this.endpoints.values()].map(({ controller }) => controller.start())
       this.stopReason = undefined
+      return Promise.resolve()
     })
+    await Promise.all(starts)
   }
   async stop(reason: DesktopRelayStopReason = 'quit'): Promise<void> {
     this.running = false

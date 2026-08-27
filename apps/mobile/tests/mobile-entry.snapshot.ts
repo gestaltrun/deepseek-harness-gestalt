@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   parseInstallationId,
   parseMobileInstallationPresentation,
@@ -19,6 +19,7 @@ import {
   parseRelayCredential,
   parseRelayRouteId,
 } from '@deepseek-ai/dsh-remote-protocol'
+import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import { CompanionForegroundRuntime, installCompanionRuntime } from '../src/companion-lifecycle.ts'
 import { CompanionAttachmentDeliveryUncertainError } from '../src/companion-attachment.ts'
 import { mountMobileEntry } from '../src/mobile-entry.tsx'
@@ -61,7 +62,14 @@ const accountSession: AccountSessionView = {
   refreshExpiresAt: Date.now() + 2_592_000_000,
 }
 
-afterEach(cleanup)
+beforeEach(() => {
+  vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US'])
+})
+
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 describe('Mobile shipped entry foreground mutation gate', () => {
   it('binds receipts and history pages to the current-generation bundled entry', async () => {
@@ -75,16 +83,18 @@ describe('Mobile shipped entry foreground mutation gate', () => {
 
     const mounted = mountMobileEntry(root, {
       installation,
+      pairing: selectedPairing(),
       companion: runtime,
       clock: fixedMobilePresentationClock(10_000),
     })
     const surface = mounted.companionSurface
 
     fireEvent.click(await screen.findByRole('checkbox'))
-    const login = screen.getByRole('button', { name: '使用 GitHub 继续' })
+    const login = screen.getByRole('button', { name: 'Continue with GitHub' })
     await waitFor(() => { expect(login.hasAttribute('disabled')).toBe(false) })
     fireEvent.click(login)
-    await screen.findByText('@fixture-account')
+    await screen.findByRole('button', { name: 'View account' })
+    expect(screen.queryByText('@fixture-account')).toBeNull()
 
     runtime.configure({
       routeId: parseRelayRouteId('route-mobile-snapshot'),
@@ -110,6 +120,13 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       conversations: [guardedConversation()],
     })
     await screen.findByRole('treeitem', { name: /Guarded Session/ })
+
+    const sessionList = document.querySelector('[data-mobile-browse="list"] > main')
+    if (!(sessionList instanceof HTMLElement)) throw new Error('expected shipped Session list')
+    fireEvent.touchStart(sessionList, { touches: [{ clientY: 20 }] })
+    fireEvent.touchMove(sessionList, { touches: [{ clientY: 108 }] })
+    fireEvent.touchEnd(sessionList, { changedTouches: [{ clientY: 108 }] })
+    expect(firstChannel.mutations.refreshSurface).toHaveBeenCalledWith(0)
 
     expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(false)
     fireEvent.click(screen.getByRole('treeitem', { name: /Guarded Session/ }))
@@ -148,7 +165,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       committedAt: 1,
     })
     firstResync.acceptValidatedDesktopResync(createdSessionsProjection('workspace'))
-    await screen.findByRole('heading', { name: 'Workspace created' })
+    await screen.findByRole('heading', { name: 'New Session' })
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect(within(screen.getByRole('region', { name: 'Work' })).getByRole('treeitem', { name: /New Session/ }))
       .toBeTruthy()
@@ -162,18 +179,19 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       committedAt: 2,
     })
     firstResync.acceptValidatedDesktopResync(createdSessionsProjection('ungrouped'))
-    await screen.findByRole('heading', { name: 'Ungrouped created' })
+    await screen.findByRole('heading', { name: 'New Session' })
     fireEvent.click(screen.getByRole('button', { name: 'Back' }))
     expect([
       screen.getByRole('region', { name: 'Work' }).textContent,
       screen.getByRole('region', { name: 'Ungrouped' }).textContent,
     ]).toMatchInlineSnapshot(`
       [
-        "WorkNew Session in WorkWorkspace creatednowWaiting for approvalGuarded Sessionnow",
+        "WorkWorkspace creatednowWaiting for approvalGuarded Sessionnow",
         "UngroupedNew Session",
       ]
     `)
 
+    fireEvent.click(screen.getByRole('button', { name: 'Search chat history' }))
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search Desktop Sessions' }), {
       target: { value: 'authoritative' },
     })
@@ -191,7 +209,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     expect(screen.getByRole('region', { name: 'Desktop search results' }).textContent).toMatchInlineSnapshot(
       '"Desktop search resultsuncached-authoritative-sessionDesktop-only authoritative hit"',
     )
-    surface.search('')
+    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }))
     surface.attach(sid('guarded-session'), selectedFile())
     results.acceptValidatedCompanionResult({
       type: 'attachment-rejected',
@@ -217,15 +235,22 @@ describe('Mobile shipped entry foreground mutation gate', () => {
       sessions: guardedSessions(), workspaces: [], conversations: [],
     })
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(true)
-    })
+    await screen.findByText('Remote Offline')
+    expect(screen.getByRole('button', { name: 'New ungrouped Session' }).hasAttribute('disabled')).toBe(false)
     expect(visibleMutationControls()).toMatchInlineSnapshot(`
       [
-        "button:New ungrouped Session:disabled",
-        "button:New Session in Work:disabled",
+        "button:New Session in Work:enabled",
+        "button:New ungrouped Session:enabled",
       ]
     `)
+    const createCallCount = firstChannel.mutations.create.mock.calls.length
+    fireEvent.click(screen.getByRole('button', { name: 'New ungrouped Session' }))
+    expect(await screen.findByText('Remote Offline. Reconnect and synchronize before creating a Session.')).toBeTruthy()
+    expect(firstChannel.mutations.create).toHaveBeenCalledTimes(createCallCount)
+    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Search chat history' }))
+    expect(screen.getByRole('searchbox', { name: 'Search Desktop Sessions' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }))
 
     runtime.reportConnectionFailure({
       code: 'COMPANION_SECURITY_CAPABILITY_MISSING',
@@ -336,6 +361,26 @@ function installationWithCompletedLogin(): PlatformAccountInstallation {
   })
 }
 
+function selectedPairing() {
+  const pairingId = parsePersonalPairingId('pairing-mobile-snapshot')
+  const snapshot = {
+    status: 'paired' as const,
+    desktops: [{ pairingId, desktopName: 'Guarded Desktop' }],
+    selectedPairingId: pairingId,
+  }
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: () => () => {},
+    completeLink: () => {},
+    scanQr: () => {},
+    retryPairing: () => {},
+    selectDesktop: () => {},
+    activate: async () => {},
+    deactivate: async () => {},
+    unpair: async () => {},
+  }
+}
+
 function guardedConversation(complete = false): ValidatedDesktopSurfaceResync['conversations'][number] {
   return {
     sessionId: 'guarded-session',
@@ -378,6 +423,9 @@ function connectionChannel(attachmentCompletion: Promise<void>) {
   const createOperationIds = ['create-workspace-snapshot', 'create-ungrouped-snapshot'] as const
   let createIndex = 0
   const mutations = {
+    refreshSurface: vi.fn<MobileCompanionConnectionChannel['mutations']['refreshSurface']>(() => ({
+      operationId: parseCompanionOperationId('refresh-snapshot'), completion: Promise.resolve(),
+    })),
     create: vi.fn<MobileCompanionConnectionChannel['mutations']['create']>(() => {
       const operationId = createOperationIds[createIndex]
       if (operationId === undefined) throw new Error('unexpected extra Session creation')

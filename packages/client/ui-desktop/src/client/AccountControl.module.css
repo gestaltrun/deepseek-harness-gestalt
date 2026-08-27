@@ -45,9 +45,40 @@
 .challenge p,
 .pending p { margin: 4px 0 0; color: var(--dsw-alias-label-secondary); font-size: 13px; }
 
-.toggle { width: 44px; height: 24px; padding: 2px; border: 0; border-radius: 999px; background: var(--dsw-alias-fill-tertiary); }
-.toggle span { display: block; width: 20px; height: 20px; border-radius: 50%; background: white; transition: transform .16s ease; }
-.toggle[aria-checked='true'] { background: var(--dsw-alias-button-info-fill); }
+.toggle {
+  box-sizing: border-box;
+  width: 44px;
+  height: 24px;
+  padding: 1px;
+  border: 1px solid var(--dsw-alias-border-l3, rgba(127, 130, 135, 0.72));
+  border-radius: 999px;
+  background: var(--dsw-alias-button-primary-dimmed, rgba(127, 130, 135, 0.42));
+  cursor: pointer;
+}
+
+.toggle span {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--dsw-static-neutral-bluish-00, rgb(255, 255, 255));
+  transition: transform .16s ease;
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--dsw-alias-button-info-fill, rgb(65, 118, 230));
+  outline-offset: 2px;
+}
+
+.toggle:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.toggle[aria-checked='true'] {
+  border-color: var(--dsw-alias-button-info-fill, rgb(65, 118, 230));
+  background: var(--dsw-alias-button-info-fill, rgb(65, 118, 230));
+}
 .toggle[aria-checked='true'] span { transform: translateX(20px); }
 
 .challenge { display: grid; grid-template-columns: 148px 1fr; gap: 16px; align-items: start; }
@@ -57,10 +88,97 @@
 .qr svg { display: block; width: 148px; height: 148px; padding: 8px; border-radius: 12px; background: white; fill: #111; }
 .qr code { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
-.pending { display: grid; gap: 10px; padding: 16px; border-radius: 12px; background: var(--dsw-alias-fill-secondary); }
+.pending {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-module-platform);
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
 .pending output { font-size: 18px; font-weight: 700; letter-spacing: .04em; }
 .actions { display: flex; gap: 8px; }
-.device { display: flex; justify-content: space-between; padding: 12px 0; border-top: 1px solid var(--dsw-alias-border-l2); }
+.device {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px 20px;
+  padding: 16px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-module-platform);
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.deviceIdentity {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.deviceIdentity strong {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.deviceBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deviceBadges span {
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-base);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.connection::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+}
+
+.connection[data-online='true'] {
+  color: var(--dsw-alias-state-success-primary);
+  background: var(--dsw-alias-state-success-secondary);
+}
+
+.deviceAction {
+  align-self: center;
+  white-space: nowrap;
+}
+
+.deviceMetadata {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.deviceMetadata div { min-width: 0; }
+.deviceMetadata dt { color: var(--dsw-alias-label-secondary); font-size: 11px; }
+.deviceMetadata dd { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 12px; line-height: 1.45; }
+
+@media (max-width: 480px) {
+  .device { grid-template-columns: 1fr; }
+  .deviceAction { justify-self: start; }
+  .deviceMetadata { grid-column: 1; grid-template-columns: 1fr; }
+}
 
 .header h2,
 .header p {

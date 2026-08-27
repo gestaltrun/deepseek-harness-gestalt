@@ -12,6 +12,8 @@ const DEFAULT_HOST_RPC_TIMEOUT_MS = 15_000
 const MAX_HOST_ATTACHMENT_RESPONSE_BYTES = Math.ceil(
   REMOTE_PROTOCOL_LIMITS.imageChunkBytes * REMOTE_PROTOCOL_LIMITS.imageChunks / 3,
 ) * 4 + REMOTE_PROTOCOL_LIMITS.companionMessageBytes
+const MAX_HOST_PROJECTED_RESPONSE_BYTES = REMOTE_PROTOCOL_LIMITS.transcriptPageBytes
+  * REMOTE_PROTOCOL_LIMITS.transcriptPageEntries
 
 /** Unary Host call result after HTTP, JSON, envelope, and business validation. */
 export type DesktopHostRpcResult =
@@ -57,7 +59,7 @@ export interface DesktopHostRpc {
 export interface DesktopHostRpcOptions {
   /** Wall-clock deadline for one unary Host request. */
   timeoutMs?: number
-  /** Maximum accumulated response bytes; cannot exceed the Companion application-message ceiling. */
+  /** Maximum accumulated response bytes for ordinary unary calls; cannot exceed the Companion message ceiling. */
   responseMaxBytes: number
   /** Wall-clock deadline for one maximum-size local attachment admission. */
   attachmentTimeoutMs?: number
@@ -87,6 +89,9 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
   return {
     async call(method, payload, callOptions) {
       const attachmentRead = method === 'session.attachment'
+      const projectedRead = method === 'session.history'
+        || method === 'session.list'
+        || method === 'workspace.list'
       const callTimeoutMs = callOptions?.timeoutMs
         ?? (attachmentRead ? options.attachmentTimeoutMs : undefined)
         ?? timeoutMs
@@ -98,7 +103,9 @@ export function createDesktopHostRpc(baseUrl: string, options: DesktopHostRpcOpt
         new URL(`/api/${method}`, origin),
         { type: 'client-request', rpcId, method, payload },
         callTimeoutMs,
-        attachmentRead ? MAX_HOST_ATTACHMENT_RESPONSE_BYTES : responseMaxBytes,
+        attachmentRead
+          ? MAX_HOST_ATTACHMENT_RESPONSE_BYTES
+          : projectedRead ? MAX_HOST_PROJECTED_RESPONSE_BYTES : responseMaxBytes,
         callOptions?.signal,
       )
       if (response.kind === 'timeout') {
@@ -193,7 +200,7 @@ function watchHostWebSocket(
     const message = (event: MessageEvent): void => {
       try {
         if (typeof event.data !== 'string'
-          || new TextEncoder().encode(event.data).byteLength > REMOTE_PROTOCOL_LIMITS.companionMessageBytes) {
+          || new TextEncoder().encode(event.data).byteLength > MAX_HOST_PROJECTED_RESPONSE_BYTES) {
           throw new Error('Desktop Host event stream frame exceeded its byte ceiling')
         }
         const envelope: unknown = JSON.parse(event.data)

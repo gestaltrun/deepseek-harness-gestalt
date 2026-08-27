@@ -267,21 +267,28 @@ export class PairingCompanionKeyVault implements MobilePairingKeyRetention {
   }
 
   /**
-   * Persist the authenticated Desktop name carried by its Companion channel.
+   * Persist the authenticated Desktop name carried by its Companion channel and find older matching pairings.
    * @param pairingId - Personal Pairing authenticated by the current channel.
    * @param desktopName - Desktop Installation name from the encrypted foreground projection.
+   * @returns older retained pairings with the same normalized Desktop name.
    */
-  recordDesktopName(pairingId: PersonalPairingId, desktopName: string): void {
+  recordDesktopName(pairingId: PersonalPairingId, desktopName: string): readonly PersonalPairingId[] {
     if (!this.attachmentKeys.has(pairingId)) throw new Error('Mobile Desktop name has no retained Personal Pairing')
     if (desktopName.trim() === '' || desktopName.length > 128) {
       throw new TypeError('Paired Desktop name must contain 1-128 characters')
     }
+    const fingerprint = desktopNameFingerprint(desktopName)
+    const duplicates = [...this.desktopNames]
+      .filter(([retainedPairingId, retainedName]) => retainedPairingId !== pairingId
+        && desktopNameFingerprint(retainedName) === fingerprint)
+      .map(([retainedPairingId]) => parsePersonalPairingId(retainedPairingId))
     if (this.desktopNames.get(pairingId) === desktopName) {
       this.persist()
-      return
+      return duplicates
     }
     this.desktopNames.set(pairingId, desktopName)
     this.persist()
+    return duplicates
   }
 
   /**
@@ -610,4 +617,8 @@ function parseDesktopName(value: unknown): string {
     throw new TypeError('Paired Desktop name must contain 1-128 characters')
   }
   return value
+}
+
+function desktopNameFingerprint(value: string): string {
+  return value.normalize('NFKC').trim().toLowerCase()
 }

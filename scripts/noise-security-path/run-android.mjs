@@ -18,6 +18,7 @@ const emulator = join(sdkRoot, 'emulator/emulator')
 const buildTools = join(sdkRoot, `build-tools/${process.env.DSH_NOISE_ANDROID_BUILD_TOOLS ?? '35.0.0'}`)
 const androidJar = join(sdkRoot, `platforms/android-${process.env.DSH_NOISE_ANDROID_API ?? '34'}/android.jar`)
 const bundleId = 'dev.deepseek.noiseproof'
+const reportTimeoutMs = 30_000
 const environment = {
   ...process.env,
   ANDROID_HOME: sdkRoot,
@@ -158,7 +159,7 @@ export async function runAndroidProof(apk, overrides = {}) {
       'shell', 'am', 'start', '-n', `${bundleId}/.MainActivity`,
     ], { stdio: 'inherit' })
 
-    const reportDeadline = clock.now() + 10_000
+    const reportDeadline = clock.now() + reportTimeoutMs
     let reportText
     while (clock.now() < reportDeadline) {
       const report = commands.spawnSync(
@@ -177,7 +178,7 @@ export async function runAndroidProof(apk, overrides = {}) {
         'shell', 'run-as', bundleId, 'cat', 'files/noise-proof-progress.txt',
       ], { encoding: 'utf8' })
       throw new Error(
-        `Android WebView did not produce a proof report within 10 seconds; ${progress.stdout?.trim() || 'no progress reported'}`,
+        `Android WebView did not produce a proof report within 30 seconds; ${progress.stdout?.trim() || 'no progress reported'}`,
       )
     }
     const androidApi = commands.execFileSync(

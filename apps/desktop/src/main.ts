@@ -7,7 +7,8 @@ import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, powerMonitor, safeStorage, shell,
+  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, net, powerMonitor, safeStorage,
+  session, shell,
   type IpcMainEvent, type IpcMainInvokeEvent,
 } from 'electron'
 import {
@@ -73,6 +74,7 @@ import {
 } from './chrome-overlay.ts'
 import { createDesktopRemoteRelay } from './remote-relay.ts'
 import { DesktopCompanionProductOwner } from './companion-product.ts'
+import { startDesktopPairingWhenHostReady } from './companion-host-readiness.ts'
 import type { DesktopCompanionOperationOutput } from './companion-product.ts'
 import {
   DesktopCompanionOperationLedger, FileDesktopCompanionOperationStore,
@@ -80,8 +82,11 @@ import {
 import { createDesktopHostRpc } from './host-rpc.ts'
 import { desktopInstallationPresentation } from './desktop-installation.ts'
 import { downloadCompanionAttachment } from './companion-attachments.ts'
+import { projectDesktopRendererEvent } from './renderer-projection.ts'
+import { desktopSystemFetch } from './system-network.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
+const systemFetch = desktopSystemFetch(async (input, init) => await net.fetch(input, init))
 const PRELOAD = join(here, 'preload.cjs')
 const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
 
@@ -117,6 +122,8 @@ const companionProduct = new DesktopCompanionProductOwner({
   attachmentTimeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
 })
 let uninstallCompanionHost: (() => void) | undefined
+let companionHostReady = false
+let companionHostGeneration = 0
 
 smokeLog('main loaded')
 const gotLock = app.requestSingleInstanceLock()
@@ -165,6 +172,7 @@ async function boot(): Promise<void> {
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
     config: accountEnvironment.remoteRelay,
+    resolveProxy: async url => await session.defaultSession.resolveProxy(url),
     snowPairingVault,
     desktopName: () => account.installationPresentation()?.name,
     handleOperation: async (operation, selector, context) => await handleDesktopCompanionOperation(
@@ -205,11 +213,6 @@ async function boot(): Promise<void> {
   if (accountReady) smokeLog('account ready')
   pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
   accountSignedIn = account.getSnapshot().status === 'signed-in'
-  if (accountSignedIn) {
-    await pairing.start().catch((error: unknown) => {
-      console.error('[desktop-personal-pairing] initial Remote Access load failed:', error)
-    })
-  }
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)
   installIntegrationsOnce()
@@ -304,7 +307,7 @@ async function handleDesktopCompanionOperation(
       attachmentKey,
       now: Date.now,
       downloadAttachment: async offer => await downloadCompanionAttachment(offer, {
-        pairingId, origin: accountEnvironment.origin, headers,
+        pairingId, origin: accountEnvironment.origin, headers, fetch: systemFetch,
       }),
       submitAttachment: async input => await companionProduct.submitAttachment(input),
       generation: context.generation,
@@ -483,10 +486,7 @@ function installIntegrationsOnce(): void {
     })
   })
   powerMonitor.on('resume', () => {
-    if (!accountSignedIn) return
-    void pairing.start().catch((error: unknown) => {
-      console.error('[desktop-personal-pairing] resume startup failed:', error)
-    })
+    void startPairingForCurrentDesktop()
   })
 }
 
@@ -684,11 +684,29 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
 function installCompanionHost(running: RunningWebHost): void {
   clearCompanionHost()
   uninstallCompanionHost = companionProduct.installHost(running.url)
+  companionHostReady = true
+  void startPairingForCurrentDesktop()
 }
 
 function clearCompanionHost(): void {
+  companionHostGeneration += 1
+  companionHostReady = false
   uninstallCompanionHost?.()
   uninstallCompanionHost = undefined
+}
+
+async function startPairingForCurrentDesktop(): Promise<void> {
+  const hostGeneration = companionHostGeneration
+  await startDesktopPairingWhenHostReady({
+    accountSignedIn,
+    hostReady: companionHostReady,
+    start: async authorityIsCurrent => await pairing.startForAuthority(authorityIsCurrent),
+    authorityIsCurrent: () => accountSignedIn
+      && companionHostReady
+      && companionHostGeneration === hostGeneration,
+  }).catch((error: unknown) => {
+    console.error('[desktop-personal-pairing] signed-in Remote Access load failed:', error)
+  })
 }
 
 function installIpc(): void {
@@ -825,20 +843,27 @@ function installMenu(): void {
 }
 
 function pushStatus(status: UpdaterStatus): void {
-  window?.webContents.send(UPDATER_STATUS_CHANGED, status)
+  projectDesktopRendererEvent(
+    [window?.webContents, overlayView?.webContents],
+    UPDATER_STATUS_CHANGED,
+    status,
+  )
 }
 
 function pushAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnapshot']>): void {
-  window?.webContents.send(ACCOUNT_SNAPSHOT_CHANGED, snapshot)
+  projectDesktopRendererEvent(
+    [window?.webContents, overlayView?.webContents],
+    ACCOUNT_SNAPSHOT_CHANGED,
+    snapshot,
+  )
 }
 
 function handleAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnapshot']>): void {
   pushAccountSnapshot(snapshot)
   const signedIn = snapshot.status === 'signed-in'
   if (signedIn && !accountSignedIn) {
-    void pairing.start().catch((error: unknown) => {
-      console.error('[desktop-personal-pairing] signed-in Remote Access load failed:', error)
-    })
+    accountSignedIn = true
+    void startPairingForCurrentDesktop()
   }
   if (!signedIn && accountSignedIn) {
     void pairing.deactivate('mobile-access-disabled').catch((error: unknown) => {
@@ -849,11 +874,15 @@ function handleAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSn
 }
 
 function pushPairingSnapshot(snapshot: ReturnType<DesktopPairingActions['getSnapshot']>): void {
-  window?.webContents.send(PAIRING_SNAPSHOT_CHANGED, snapshot)
+  projectDesktopRendererEvent(
+    [window?.webContents, overlayView?.webContents],
+    PAIRING_SNAPSHOT_CHANGED,
+    snapshot,
+  )
 }
 
 function createDesktopAccount(environment: SelectedPlatformEnvironment): DesktopAccountActions {
-  const transport = new PlatformAccountHttpTransport({ environment })
+  const transport = new PlatformAccountHttpTransport({ environment, fetch: systemFetch })
   const store = new EncryptedDesktopAccountStore(
     join(app.getPath('userData'), `platform-account-${environment.databaseIdentity}.bin`),
     {
@@ -882,7 +911,7 @@ function createDesktopPairing(
   }
   return new DesktopPairingController({
     account: currentAccount,
-    transport: new RemoteAccessHttpTransport({ environment }),
+    transport: new RemoteAccessHttpTransport({ environment, fetch: systemFetch }),
     relay,
     snowPairingVault,
   })

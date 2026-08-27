@@ -160,14 +160,21 @@ describe('bundled Mobile product entry', () => {
   it.each([
     {
       locale: 'en-US', colorScheme: 'dark' as const, back: 'Back', placeholder: 'Message the agent',
+      account: 'View account', managePairing: 'Manage pairing',
       pairingHeading: 'Paired Desktops', selected: 'Selected', select: 'Select this Desktop',
+      searchTrigger: 'Search chat history', searchHeading: 'Search', searchField: 'Search Desktop Sessions',
+      newUngrouped: 'New ungrouped Session', newHeading: 'New Session', backProjects: 'Back to projects',
     },
     {
       locale: 'zh-CN', colorScheme: 'light' as const, back: '返回', placeholder: '给智能体发消息',
+      account: '查看账号', managePairing: '管理配对',
       pairingHeading: '已配对的桌面端', selected: '当前选择', select: '选择此桌面端',
+      searchTrigger: '搜索聊天记录', searchHeading: '搜索', searchField: '搜索 Desktop Sessions',
+      newUngrouped: '新建 Ungrouped Session', newHeading: '新 Session', backProjects: '返回项目',
     },
   ])('renders authenticated shared conversation behavior in $locale/$colorScheme', async ({
-    locale, colorScheme, back, placeholder, pairingHeading, selected, select,
+    locale, colorScheme, back, placeholder, account, managePairing, pairingHeading, selected, select,
+    searchTrigger, searchHeading, searchField, newUngrouped, newHeading, backProjects,
   }) => {
     const activeBrowser = browser
     if (activeBrowser === undefined) throw new Error('Mobile snapshot browser unavailable')
@@ -181,6 +188,10 @@ describe('bundled Mobile product entry', () => {
     await page.goto(origin)
     const main = page.locator('[data-mobile-platform-account]')
     await expect.poll(async () => await main.getAttribute('data-mobile-platform-account')).toBe('signed-in')
+    expect(await page.getByRole('heading', { name: pairingHeading }).count()).toBe(0)
+    expect(await page.getByRole('treeitem', { name: /Shared Session/ }).count()).toBe(1)
+    await page.getByRole('button', { name: account }).click()
+    await page.getByRole('button', { name: managePairing }).click()
     expect(await page.getByRole('heading', { name: pairingHeading }).count()).toBe(1)
     const selectedDesktop = page.getByRole('button', { name: /Authenticated Shared Desktop/ })
     const otherDesktop = page.getByRole('button', { name: /Secondary Desktop/ })
@@ -188,6 +199,24 @@ describe('bundled Mobile product entry', () => {
     expect(await otherDesktop.getAttribute('aria-pressed')).toBe('false')
     expect(await selectedDesktop.getByText(selected, { exact: true }).count()).toBe(1)
     expect(await otherDesktop.getByText(select, { exact: true }).count()).toBe(1)
+    await page.evaluate(() => { window.__DSH_MOBILE_PRODUCT_EVIDENCE__.showPairing('rejected') })
+    await expect.poll(async () => await page.getByRole('button', {
+      name: /Pair another Desktop|配对另一台桌面端/,
+    }).count()).toBe(1)
+    await page.getByRole('button', { name: /Pair another Desktop|配对另一台桌面端/ }).click()
+    expect(await page.getByRole('button', { name: /Scan QR|扫描二维码/ }).count()).toBe(1)
+    await page.getByRole('button', { name: back }).click()
+    expect(await page.getByRole('heading', { name: pairingHeading }).count()).toBe(0)
+    await page.evaluate(() => { window.__DSH_MOBILE_PRODUCT_EVIDENCE__.showPairing('paired') })
+    await page.getByRole('button', { name: searchTrigger }).click()
+    expect(await page.getByRole('heading', { name: searchHeading }).count()).toBe(1)
+    expect(await page.getByRole('searchbox', { name: searchField }).count()).toBe(1)
+    expect(await page.getByRole('treeitem').count()).toBe(0)
+    await page.getByRole('button', { name: backProjects }).click()
+    await page.getByRole('button', { name: newUngrouped }).click()
+    expect(await page.getByRole('heading', { name: newHeading }).count()).toBe(1)
+    expect(await page.getByRole('treeitem').count()).toBe(0)
+    await page.getByRole('button', { name: backProjects }).click()
     await page.getByRole('treeitem', { name: /Shared Session/ }).click()
     await expect.poll(async () => await page.locator('[data-mobile-conversation="detail"]').count()).toBe(1)
     expect(await page.getByText('Shared Markdown').evaluate(node => node.tagName)).toBe('STRONG')

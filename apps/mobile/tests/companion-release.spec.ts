@@ -50,13 +50,26 @@ describe('Companion release validation', () => {
     expect(COMPANION_RELEASE_DEVICE_CHECKS).not.toContain('deep-link')
   })
 
-  it('locks both native applications to portrait presentation', () => {
+  it('keeps phone presentation portrait and declares every iPad multitasking orientation', () => {
     const android = readFileSync(new URL('../android/app/src/main/AndroidManifest.xml', import.meta.url), 'utf8')
     const ios = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8')
 
     expect(android).toContain('android:screenOrientation="portrait"')
-    expect(ios).not.toContain('<string>UIInterfaceOrientationLandscapeLeft</string>')
-    expect(ios).not.toContain('<string>UIInterfaceOrientationLandscapeRight</string>')
+    expect(ios.match(/<key>UISupportedInterfaceOrientations<\/key>[\s\S]*?<\/array>/u)?.[0])
+      .not.toContain('UIInterfaceOrientationLandscape')
+    const ipadOrientations = ios.match(/<key>UISupportedInterfaceOrientations~ipad<\/key>[\s\S]*?<\/array>/u)?.[0]
+    expect(ipadOrientations).toContain('<string>UIInterfaceOrientationPortrait</string>')
+    expect(ipadOrientations).toContain('<string>UIInterfaceOrientationPortraitUpsideDown</string>')
+    expect(ipadOrientations).toContain('<string>UIInterfaceOrientationLandscapeLeft</string>')
+    expect(ipadOrientations).toContain('<string>UIInterfaceOrientationLandscapeRight</string>')
+  })
+
+  it('parses provisioning-profile expiration from a locale-independent UTC value', () => {
+    const packaging = readFileSync(new URL('../scripts/build-ios-release.sh', import.meta.url), 'utf8')
+
+    expect(packaging).toContain('plutil -extract ExpirationDate raw')
+    expect(packaging).toContain("date -j -u -f '%Y-%m-%dT%H:%M:%SZ'")
+    expect(packaging).not.toContain("PlistBuddy -c 'Print :ExpirationDate'")
   })
 
   it('keeps the Session action dock on the phone viewport and styles per-Workspace paging', () => {

@@ -45,12 +45,12 @@ if [[ -z "${profile_path}" || ! -f "${profile_path}" ]]; then
 fi
 security cms -D -i "${profile_path}" > "${profile_plist}"
 profile_application_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "${profile_plist}")"
-profile_expiration="$(/usr/libexec/PlistBuddy -c 'Print :ExpirationDate' "${profile_plist}")"
+profile_expiration="$(plutil -extract ExpirationDate raw -o - "${profile_plist}")"
 if [[ "${profile_application_id}" != "${APPLE_TEAM_ID}.${bundle_id}" ]]; then
   echo "Provisioning profile does not authorize ${APPLE_TEAM_ID}.${bundle_id}" >&2
   exit 1
 fi
-if [[ "$(date -j -f '%a %b %d %T %Z %Y' "${profile_expiration}" '+%s')" -le "$(date '+%s')" ]]; then
+if [[ "$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "${profile_expiration}" '+%s')" -le "$(date '+%s')" ]]; then
   echo "Provisioning profile '${profile_name}' is expired" >&2
   exit 1
 fi

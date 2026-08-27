@@ -14,6 +14,7 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const FIXTURE = fileURLToPath(new URL('./snapshots/live-interactions/session.jsonl', import.meta.url))
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/sidechat-round', import.meta.url))
+const RESTORED_CHILD_FIXTURE = join(SNAPSHOT_DIR, 'restored-child.jsonl')
 const EXPECTED = join(SNAPSHOT_DIR, 'ui.expected.md')
 const PICKER_EXPECTED = join(SNAPSHOT_DIR, 'picker.expected.md')
 const FLOAT_EXPECTED = join(SNAPSHOT_DIR, 'float.expected.md')
@@ -54,7 +55,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
   beforeAll(async () => {
     scaffold = await launchWebScaffold({
       replayFixture: FIXTURE,
-      replayChildFixtures: [FIXTURE, FIXTURE, FIXTURE],
+      replayChildFixtures: [RESTORED_CHILD_FIXTURE, FIXTURE],
       paceMs: 25,
     })
     await seedSideChatSkill(scaffold.workspaceCwd)
@@ -262,6 +263,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
       'descendant.expected.md',
       'float.expected.md',
       'picker.expected.md',
+      'restored-child.jsonl',
       'ui.expected.md',
     ])
   })

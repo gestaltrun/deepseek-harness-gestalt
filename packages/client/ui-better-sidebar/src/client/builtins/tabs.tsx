@@ -20,7 +20,7 @@ import { GitView } from '../GitView.tsx'
 import { DiffTab } from '../DiffTab.tsx'
 import { SubagentView } from '../SubagentView.tsx'
 import { SideChatView, sidechatRootThreadIdOf, sidechatThreadIdOf } from '../SideChatView.tsx'
-import { api, forgetSidechatPublication, waitForSidechatPublication } from '../api.ts'
+import { api } from '../api.ts'
 import { BrowserView } from '../BrowserView.tsx'
 import { IconTerminalOutline16, IconDiffOutline16, IconGlobeOutline16 } from '../icons.tsx'
 import { TERMINAL_FONT_SIZE_MAX, TERMINAL_FONT_SIZE_MIN } from '../../prefs-shared.ts'
@@ -200,11 +200,8 @@ export function builtinTabs(ctx: Context, options: BuiltinTabOptions = {}): read
       onClose: async (tab) => {
         const threadId = sidechatRootThreadIdOf(tab)
         if (threadId !== undefined) {
-          const provisional = (tab.meta as { provisional?: unknown } | undefined)?.provisional === true
-          const published = !provisional || await waitForSidechatPublication(threadId)
-          await api.sidechatDispose(threadId)
+          const { published } = await api.sidechatDispose(threadId)
           if (published) await ctx.workspaces.archiveSession(threadId)
-          forgetSidechatPublication(threadId)
         }
       },
       component: ({ ctx, scope, tab, visible }) => (

@@ -527,12 +527,20 @@ function safeCall(fn: () => void): void {
  * Create one BetterSidebar service bound to a store. The service owns the
  * tab/viewer registries (Map + listener set) and proxies openTab/closeTab
  * to the store's reducer. One instance per client plugin activation.
+ * @param store - Per-Session sidebar state owner.
+ * @param ownDispose - Optional activation hook that owns asynchronous close quiescence.
+ * @returns the activation-bound sidebar service.
  */
-export function createBetterSidebarService(store: SidebarStore): BetterSidebarService {
+export function createBetterSidebarService(
+  store: SidebarStore,
+  ownDispose?: (dispose: () => Promise<void>) => void,
+): BetterSidebarService {
   const tabs = new Map<string, TabDescriptor>()
   const viewers = new Map<string, FileViewerDescriptor>()
   const listeners = new Set<() => void>()
-  const pendingCloses = new Set<string>()
+  const pendingCloses = new Map<string, Promise<void>>()
+  let stopping = false
+  let teardown: Promise<void> | undefined
 
   const notify = (): void => {
     for (const fn of [...listeners]) fn()
@@ -752,6 +760,7 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
   }
 
   const closeTab = (tabId: string, scope?: SessionScope): void => {
+    if (stopping) return
     const state = store.getSnapshot().state
     if (state === undefined || !tabOpenIn(state, tabId)) return
     const float = floatWithTab(state, tabId)
@@ -799,12 +808,25 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
       commit()
       return
     }
-    pendingCloses.add(pendingKey)
-    void lifecycle.then(
-      commit,
+    const closing = lifecycle.then(
+      () => {
+        if (!stopping) commit()
+      },
       (error: unknown) => { console.error('[dsh-better-sidebar] tab close rejected:', error) },
-    ).finally(() => { pendingCloses.delete(pendingKey) })
+    ).finally(() => {
+      if (pendingCloses.get(pendingKey) === closing) pendingCloses.delete(pendingKey)
+    })
+    pendingCloses.set(pendingKey, closing)
+    void closing
   }
+
+  const dispose = (): Promise<void> => {
+    if (teardown !== undefined) return teardown
+    stopping = true
+    teardown = Promise.all([...pendingCloses.values()]).then(() => undefined)
+    return teardown
+  }
+  ownDispose?.(dispose)
 
   /** The snapshot the store publishes (state/prefs carry the active session). */
   const getSnapshot = (): SidebarSnapshot => store.getSnapshot()

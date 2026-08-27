@@ -305,6 +305,8 @@ export interface SidebarSessionTitleService {
  *  service): detached inspection of a persisted session, used to compose the
  *  recorded preset when a Side Chat thread cold-resumes. */
 export interface SidebarSessionPersistenceService {
+  /** List every durable Session header from the authoritative backend. */
+  list(): Promise<readonly { id: SessionId }[]>
   inspect(sessionId: string): Promise<{
     meta: { cwd?: string; agentPreset?: string }
     events: readonly SidebarSessionEvent[]

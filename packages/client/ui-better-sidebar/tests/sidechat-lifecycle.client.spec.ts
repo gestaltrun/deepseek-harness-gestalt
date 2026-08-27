@@ -47,6 +47,106 @@ describe('sidechat route lifecycle', () => {
     await sidechat.dispose()
   })
 
+  it('waits for an in-flight first prompt and reports the Host publication result', async () => {
+    let childLive = false
+    let completeCreate!: (handle: { agent: Agent; dispose(): Promise<void> }) => void
+    const creation = new Promise<{ agent: Agent; dispose(): Promise<void> }>((resolve) => {
+      completeCreate = resolve
+    })
+    const child = {
+      id: 'draft-child',
+      ctx: { effect: vi.fn() },
+      inject: vi.fn(),
+      followup: vi.fn(),
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { events: [], header: {} },
+    } as unknown as Agent
+    const parent = {
+      id: 'parent',
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { id: 'parent', events: [], header: {} },
+    } as unknown as Agent
+    const disposeHandle = vi.fn(async () => { childLive = false })
+    const ctx = {
+      get: (name: string) => {
+        if (name === 'agents') {
+          return {
+            get: (id: string) => id === 'parent' ? parent : id === 'draft-child' && childLive ? child : undefined,
+            create: () => creation,
+          }
+        }
+        if (name === 'sessionPersistence') return { list: () => Promise.resolve([]) }
+        return undefined
+      },
+    } as unknown as Context
+    const sidechat = buildSidechatApi(ctx)
+
+    const starting = sidechat.routes['sidechat.start']({
+      sessionId: 'parent', childId: 'draft-child', text: 'first question',
+    })
+    const closing = sidechat.routes['sidechat.dispose']({ childId: 'draft-child' })
+    expect(disposeHandle).not.toHaveBeenCalled()
+    childLive = true
+    completeCreate({ agent: child, dispose: disposeHandle })
+
+    await expect(starting).resolves.toEqual({ childId: 'draft-child', accepted: true })
+    await expect(closing).resolves.toEqual({ accepted: true, published: true })
+    expect(disposeHandle).toHaveBeenCalledOnce()
+    await sidechat.dispose()
+  })
+
+  it('reports a release failure and retains the handle for a close retry', async () => {
+    let childLive = true
+    const child = {
+      id: 'child',
+      ctx: { effect: vi.fn() },
+      inject: vi.fn(),
+      followup: vi.fn(),
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { events: [], header: {} },
+    } as unknown as Agent
+    const parent = {
+      id: 'parent',
+      options: { provider: 'deepseek', model: 'chat' },
+      session: { id: 'parent', events: [], header: {} },
+    } as unknown as Agent
+    const failure = new Error('release failed')
+    const disposeHandle = vi.fn()
+      .mockRejectedValueOnce(failure)
+      .mockImplementationOnce(async () => { childLive = false })
+    const ctx = {
+      get: (name: string) => name === 'agents'
+        ? {
+            get: (id: string) => id === 'parent' ? parent : id === 'child' && childLive ? child : undefined,
+            create: () => Promise.resolve({ agent: child, dispose: disposeHandle }),
+          }
+        : undefined,
+    } as unknown as Context
+    const sidechat = buildSidechatApi(ctx)
+    await sidechat.routes['sidechat.start']({
+      sessionId: 'parent', childId: 'child', text: 'first question',
+    })
+
+    await expect(sidechat.routes['sidechat.dispose']({ childId: 'child' })).rejects.toBe(failure)
+    await expect(sidechat.routes['sidechat.dispose']({ childId: 'child' }))
+      .resolves.toEqual({ accepted: true, published: true })
+    expect(disposeHandle).toHaveBeenCalledTimes(2)
+    await sidechat.dispose()
+  })
+
+  it('reports an unsent draft as unpublished from the durable Session list', async () => {
+    const list = vi.fn(() => Promise.resolve([]))
+    const ctx = {
+      get: (name: string) => name === 'sessionPersistence' ? { list } : undefined,
+    } as unknown as Context
+    const sidechat = buildSidechatApi(ctx)
+
+    await expect(sidechat.routes['sidechat.dispose']({ childId: 'draft-child' }))
+      .resolves.toEqual({ accepted: true, published: false })
+    expect(list).toHaveBeenCalledOnce()
+    await sidechat.dispose()
+  })
+
   it('preserves the canonical composer queue posture', async () => {
     const followup = vi.fn()
     const steer = vi.fn()

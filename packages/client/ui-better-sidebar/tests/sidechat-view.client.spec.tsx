@@ -47,11 +47,34 @@ describe('SideChatView', () => {
 
     release()
     await vi.waitFor(() => {
-      store.setSession('main-thread')
-      expect(allLeaves(store.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)).toEqual([])
+      expect(store.tabOpen('main-thread', 'transactional')).toBe(false)
     })
-    store.setSession('other-thread')
     expect(allLeaves(store.getSnapshot().state!.splits).flatMap(leaf => leaf.tabs)).toHaveLength(1)
+  })
+
+  it('waits for pending closes without committing after service disposal', async () => {
+    let release!: () => void
+    let disposeService!: () => Promise<void>
+    const closing = new Promise<void>((resolve) => { release = resolve })
+    const store = new SidebarStore()
+    store.setSession('main-thread')
+    const service = createBetterSidebarService(store, (dispose) => { disposeService = dispose })
+    service.registerTab({
+      id: 'transactional',
+      title: 'Transactional',
+      onClose: () => closing,
+      component: () => null,
+    })
+    service.openTab({ type: 'transactional' })
+    service.closeTab('transactional')
+
+    const teardown = disposeService()
+    release()
+    await teardown
+
+    expect(store.tabOpen('main-thread', 'transactional')).toBe(true)
+    service.closeTab('transactional')
+    expect(store.tabOpen('main-thread', 'transactional')).toBe(true)
   })
 
   it('keeps a tab open when its asynchronous close lifecycle rejects', async () => {
@@ -98,7 +121,7 @@ describe('SideChatView', () => {
     const archiveSession = vi.fn(() => Promise.resolve())
     const descriptor = builtinTabs({ workspaces: { archiveSession } } as unknown as Context)
       .find(candidate => candidate.id === 'sidechat')!
-    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ ok: true })
+    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ accepted: true, published: true })
 
     await descriptor.onClose?.({
       ...tab('nested-child'),
@@ -109,28 +132,13 @@ describe('SideChatView', () => {
     expect(archiveSession).toHaveBeenCalledWith('side-thread')
   })
 
-  it('waits for an in-flight first prompt before archiving a stale provisional tab', async () => {
-    let publish!: (response: Response) => void
-    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { publish = resolve })))
+  it('archives a provisional tab when the Host reports durable publication', async () => {
     const archiveSession = vi.fn(() => Promise.resolve())
     const descriptor = builtinTabs({ workspaces: { archiveSession } } as unknown as Context)
       .find(candidate => candidate.id === 'sidechat')!
-    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ ok: true })
-    const starting = api.sidechatStart(
-      'main-thread' as SessionId,
-      'draft-thread' as SessionId,
-      'first prompt',
-      undefined,
-    )
+    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ accepted: true, published: true })
 
-    const closing = descriptor.onClose?.(tab('draft-thread'), { sessionId: 'main-thread' })
-    expect(archiveSession).not.toHaveBeenCalled()
-    publish(new Response(JSON.stringify({
-      ok: true,
-      value: { childId: 'draft-thread', accepted: true },
-    }), { status: 200, headers: { 'content-type': 'application/json' } }))
-    await starting
-    await closing
+    await descriptor.onClose?.(tab('draft-thread'), { sessionId: 'main-thread' })
 
     expect(dispose).toHaveBeenCalledWith('draft-thread')
     expect(archiveSession).toHaveBeenCalledWith('draft-thread')
@@ -140,7 +148,7 @@ describe('SideChatView', () => {
     const archiveSession = vi.fn(() => Promise.resolve())
     const descriptor = builtinTabs({ workspaces: { archiveSession } } as unknown as Context)
       .find(candidate => candidate.id === 'sidechat')!
-    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ ok: true })
+    const dispose = vi.spyOn(api, 'sidechatDispose').mockResolvedValue({ accepted: true, published: false })
 
     await descriptor.onClose?.(tab('unsent-thread'), { sessionId: 'main-thread' })
 

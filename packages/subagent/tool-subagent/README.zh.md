@@ -6,7 +6,7 @@
 
 ## 提供方选择与生命周期
 
-每个插件实例把一个 `provider` 绑定到一个 `toolName`；模型不会收到传输选择器。如需公开另一种后端，请加载另一个名称不同的实例。可选的按次 LLM `provider`/`model` 是另一条轴，仅在该后端声明 `agentOptions` 时出现。工具只在其提供方存在时注册，从而避免对同级加载顺序和提供方重新加载的依赖。工具描述遵循 `provider.inheritsParentContext`：新建子 agent（智能体）需要独立提示词，而 fork 子 agent 已能看到父级已完成轮次。
+每个插件实例把一个 `provider` 绑定到一个 `toolName`；模型不会收到传输选择器。如需公开另一种后端，请加载另一个名称不同的实例。可选的按次 LLM `provider`/`model` 是另一条轴，仅在该后端声明 `agentOptions` 时出现；可选的 `images` 数组仅在后端声明 `images` 能力时出现。工具只在其提供方存在时注册，从而避免对同级加载顺序和提供方重新加载的依赖。工具描述遵循 `provider.inheritsParentContext`：新建子 agent（智能体）需要独立提示词，而 fork 子 agent 已能看到父级已完成轮次。
 
 前台调用会让执行信号贯穿启动和执行，等待 `run.result`，并且在返回前总会等待 `run.dispose()`。只有 `completed` 会返回规范值 `{ kind: 'foreground', runId, output: JsonValue[] }`，并渲染为相同的最终文本。中止、拒绝、token 上限和其他失败都会变成出错的工具结果，其消息依次包含终止原因标题、可选的提供方 `SubagentResult.diagnostic`，以及子 agent 保留下来的部分 assistant 文本。诊断与 `SubagentResult.output` 保持分离，因此被截断的回答不会被报告为成功，也不会与基础设施说明混淆。如果结果收集与 dispose（资源释放）都 reject，出错结果会保留两项失败。
 
@@ -37,7 +37,7 @@
 
 #### 模型看到的内容
 
-当提供方存在时，以当前实例配置的名称公开已生成的默认 [`subagent` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent)。提供方是否继承上下文会改变工具描述和提示词描述。具备 `agentOptions` 能力的后端会增加可选的 `provider` 和 `model` LLM 路由字段（不是 spawn/fork/ACP 选择器）；两者都可单独传入，空值会在启动前失败。启用后台模式会添加 `run_in_background`：可继续模式会记录其默认值为 `true`、运行时结算通知与显式前台覆盖；一次性模式会记录其默认值为 `false`，以及用 `job_output` 收集或用 `job_kill` 停止的 job id。当工具在本次组装的作用域中可见时，一个 `tool:<toolName>` 系统提示词 section 会指示模型同时启动相互独立的可继续委派、在它们运行时继续工作，并且仅当下一步动作依赖结果时选择前台；工具限制会同时移除其 schema 和这段指引。
+当提供方存在时，以当前实例配置的名称公开已生成的默认 [`subagent` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-subagent)。提供方是否继承上下文会改变工具描述和提示词描述。具备 `agentOptions` 能力的后端会增加可选的 `provider` 和 `model` LLM 路由字段（不是 spawn/fork/ACP 选择器）；两者都可单独传入，空值会在启动前失败。具备 `images` 能力的后端会增加可选的 `images` 工作区图片路径数组：每个路径经调用会话的文件系统策略解析，附件存储会按图片数量、单图字节、总字节、媒体类型与像素限制验证完整有序批次，再提交任何成员。持久 image block 会进入子任务提示词，因此子模型看到的是每张图片本身而非文字描述。子模型路由是否接受图片输入，由子代理自身的请求阶段决定。启用后台模式会添加 `run_in_background`：可继续模式会记录其默认值为 `true`、运行时结算通知与显式前台覆盖；一次性模式会记录其默认值为 `false`，以及用 `job_output` 收集或用 `job_kill` 停止的 job id。当工具在本次组装的作用域中可见时，一个 `tool:<toolName>` 系统提示词 section 会指示模型同时启动相互独立的可继续委派、在它们运行时继续工作，并且仅当下一步动作依赖结果时选择前台；工具限制会同时移除其 schema 和这段指引。
 
 #### Token 影响
 
@@ -77,6 +77,7 @@
 
 ## 已知限制与暂缓事项
 
+- **图片 block 仅限进程内**：只有 `spawn` 和 `fork` 声明 `images` 能力。进程外后端（`acp`、`codex`、`claude-code`、`dsh-sdk`）会拒绝携带图片的提示词，直到其传输协议被证明能端到端保留 image block。
 - **后台运行不通过本工具公开结果**：一次性任务的最终输出通过通用 Task 接口收集，可继续子 agent 的输出留在其自身会话中，按其 subagent id 读取。结算通知会说明该子 agent 如何结束，并携带可能存在的最终 assistant 消息，但它不是本次调用的返回值，也无法在此等待。
 - **等待中的一次性实例较晚才发现重复名称**（`TODO(subagent-dup-toolname)`）：可继续实例会在插件应用期间预留提示词 section 名称，但若要阻止等待中的一次性实例回滚提供方注册，仍需要一份预期名称注册表。
 - **persona、工具过滤器和深度上限仍按实例固定**：更换 persona、工具过滤器或深度上限仍需要另一个名称不同的工具。子 agent 的 LLM `provider`/`model` 在声明了 `agentOptions` 的后端上按次调用选择。

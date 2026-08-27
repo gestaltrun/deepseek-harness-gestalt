@@ -36,6 +36,18 @@
       "path": "../../jobs/jobs"
     },
     {
+      "path": "../../attachment/attachment"
+    },
+    {
+      "path": "../../fs/fs"
+    },
+    {
+      "path": "../../fs/tool-fs"
+    },
+    {
+      "path": "../../sandbox/sandbox"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

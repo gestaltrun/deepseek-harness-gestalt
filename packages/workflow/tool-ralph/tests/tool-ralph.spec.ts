@@ -61,6 +61,7 @@ class StubProvider implements SubagentProvider {
       toolFilter: true,
       persona: true,
       agentOptions: true,
+      images: true,
     }
     this.inheritsParentContext = options?.inheritsParentContext ?? false
   }

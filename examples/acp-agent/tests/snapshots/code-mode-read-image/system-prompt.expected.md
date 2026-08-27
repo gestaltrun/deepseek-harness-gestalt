@@ -148,6 +148,8 @@ interface ToolArgsMap {
     description: string;
     /** The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs. */
     prompt: string;
+    /** Optional workspace image file paths attached to the child's task prompt. The child sees each image as part of its initial instruction — hand over screenshots, diagrams, or figures instead of describing them. The child's model route must accept image input. */
+    images?: string[];
     /** LLM adapter route for the child (for example deepseek-official). This is not the subagent backend (spawn/fork/acp). Omit to inherit the parent session route; may be set without model. */
     provider?: string;
     /** LLM model id for the child (for example deepseek-v4-pro). Omit to inherit the parent session model; may be set without provider. */
@@ -161,6 +163,8 @@ interface ToolArgsMap {
     description: string;
     /** The task for the subagent. It already sees this conversation's completed turns, so build on them freely and state only what is new. */
     prompt: string;
+    /** Optional workspace image file paths attached to the child's task prompt. The child sees each image as part of its initial instruction — hand over screenshots, diagrams, or figures instead of describing them. The child's model route must accept image input. */
+    images?: string[];
     /** LLM adapter route for the child (for example deepseek-official). This is not the subagent backend (spawn/fork/acp). Omit to inherit the parent session route; may be set without model. */
     provider?: string;
     /** LLM model id for the child (for example deepseek-v4-pro). Omit to inherit the parent session model; may be set without provider. */

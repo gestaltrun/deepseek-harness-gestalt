@@ -190,12 +190,13 @@ describe('spawn construction (pure, every platform)', () => {
 })
 
 describe.skipIf(!hasPwsh)('PwshLocalExecutor.run', () => {
-  it('resolves with output and the effective timeout', { timeout: 15_000 }, async () => {
-    const { bash } = await setup({ timeoutMs: 10_000 })
+  it('resolves with output and the effective timeout', { timeout: 75_000 }, async () => {
+    // The first pwsh process can cold-start slowly under partitioned coverage load.
+    const { bash } = await setup({ timeoutMs: 60_000 })
     const result = await bash.run(bash.resolve({ command: 'Write-Output hi' }))
     expect(result.exitCode).toBe(0)
     expect(lf(result.stdout.text)).toBe('hi\n')
-    expect(result.timeoutMs).toBe(10_000)
+    expect(result.timeoutMs).toBe(60_000)
   })
 
   it('uses config cwd, overridable per call', async () => {

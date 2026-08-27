@@ -239,7 +239,7 @@ const LOGIN_TEXT = {
     preparing: '准备安全授权…',
     polling: '等待 GitHub 授权…',
     continue: '使用 GitHub 继续',
-    footer: '此账号仅识别你的安装；它不会授予任何 Desktop 访问权限。',
+    footer: '这个账号只用于确认你的身份，不会自动允许手机访问桌面端。',
   },
   en: {
     title: 'Connect your Platform Account',
@@ -284,17 +284,17 @@ function AccountView({
 }): ReactNode {
   const text = locale === 'zh'
     ? {
-      account: '账号', currentAccount: '当前安装账号', currentInstallation: '当前安装',
-      language: '语言', managePairing: '管理配对', connectDesktop: '连接 Desktop',
-      clearCache: '清除此 Desktop 缓存', signOut: '退出登录',
+      account: '账号', signedInAccount: '已登录账号',
+      language: '语言', managePairing: '管理配对', connectDesktop: '连接桌面端',
+      clearCache: '清除此桌面端缓存', signOut: '退出登录',
     }
     : {
-      account: 'Account', currentAccount: 'Current installation account', currentInstallation: 'Current installation',
+      account: 'Account', signedInAccount: 'Signed-in account',
       language: 'Language', managePairing: 'Manage pairing', connectDesktop: 'Connect Desktop',
       clearCache: 'Clear this Desktop cache', signOut: 'Sign out',
     }
   return (
-    <section className={css.accountPage} aria-label={text.currentAccount}>
+    <section className={css.accountPage} aria-label={text.signedInAccount}>
       <ScreenHeader title={text.account} onBack={onBack} locale={locale} />
       <div className={css.accountIdentity} data-account-identity="">
         <img src={avatarUrl} alt="" />
@@ -303,7 +303,6 @@ function AccountView({
           <span>GitHub ID {githubId}</span>
         </div>
       </div>
-      <span className={css.status}>{text.currentInstallation}</span>
       <div className={css.languageSetting}>
         <span>{text.language}</span>
         <div className={css.languageOptions} role="group" aria-label={text.language}>

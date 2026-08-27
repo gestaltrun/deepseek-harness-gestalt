@@ -122,7 +122,8 @@ describe('MobileAccount', () => {
     expect(screen.queryByText('Remote Offline')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '查看账号' }))
-    expect(await screen.findByText('当前安装')).toBeTruthy()
+    expect(await screen.findByText('@octocat')).toBeTruthy()
+    expect(screen.queryByText('当前安装')).toBeNull()
     expect(screen.getByText('@octocat')).toBeTruthy()
     expect(screen.queryByText('未连接')).toBeNull()
 
@@ -173,7 +174,7 @@ describe('MobileAccount', () => {
     fireEvent.click(screen.getByRole('button', { name: '使用 GitHub 继续' }))
 
     expect(await screen.findByText('未连接')).toBeTruthy()
-    expect(screen.getByText('扫码连接 Desktop 后即可查看 Session')).toBeTruthy()
+    expect(screen.getByText('扫码连接桌面端后即可查看会话')).toBeTruthy()
     expect(screen.queryByText('连接已配对的桌面端')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '扫描配对' }))

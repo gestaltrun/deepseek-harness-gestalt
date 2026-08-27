@@ -295,6 +295,13 @@
             "type": "string",
             "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
           },
+          "images": {
+            "type": "array",
+            "description": "Optional workspace image file paths attached to the child's task prompt. The child sees each image as part of its initial instruction — hand over screenshots, diagrams, or figures instead of describing them. The child's model route must accept image input.",
+            "items": {
+              "type": "string"
+            }
+          },
           "provider": {
             "type": "string",
             "description": "LLM adapter route for the child (for example deepseek-official). This is not the subagent backend (spawn/fork/acp). Omit to inherit the parent session route; may be set without model."
@@ -352,6 +359,13 @@
           "prompt": {
             "type": "string",
             "description": "The task for the subagent. It already sees this conversation's completed turns, so build on them freely and state only what is new."
+          },
+          "images": {
+            "type": "array",
+            "description": "Optional workspace image file paths attached to the child's task prompt. The child sees each image as part of its initial instruction — hand over screenshots, diagrams, or figures instead of describing them. The child's model route must accept image input.",
+            "items": {
+              "type": "string"
+            }
           },
           "provider": {
             "type": "string",

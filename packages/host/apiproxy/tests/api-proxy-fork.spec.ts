@@ -1,4 +1,4 @@
-/** Session-fork boundaries, lineage, and inherited model routing. */
+/** Session-fork boundaries, lineage, inherited model routing, and goal isolation. */
 
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -9,6 +9,7 @@ import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import SessionStore from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import GoalService from '@deepseek-ai/dsh-goal'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import type { RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
@@ -284,6 +285,41 @@ describe('sessions.fork', () => {
       model: 'inherited-model',
       reasoningEffort: 'high',
     })
+    await ctx.fiber.dispose()
+  })
+
+  it('clears a goal inherited through the seed so the forked thread starts goalless', async () => {
+    const ctx = await composed()
+    await ctx.plugin(GoalService)
+    const source = liveAgent(ctx, 'session-goal-source', 1)
+    const sourceAgent = ctx.agents.get(source.id)
+    if (sourceAgent === undefined) throw new Error('source agent missing')
+    const goal = ctx.goals.create(sourceAgent, { objective: 'not mine to keep' })
+    const goalsAtPublication: unknown[] = []
+    ctx.on('agent/created', ({ agent }) => {
+      goalsAtPublication.push(ctx.goals.get(agent))
+    })
+
+    const response = await api(ctx).sessions.fork(request({ sessionId: source.id }))
+
+    expect(response.result.ok).toBe(true)
+    if (!response.result.ok) return
+    const childId = response.result.value.sessionId
+    const child = ctx.agents.get(childId)
+    if (child === undefined) throw new Error('fork did not publish the child agent')
+    expect(goalsAtPublication).toEqual([undefined])
+    expect(ctx.goals.get(child)).toBeUndefined()
+    const childSession = ctx.sessions.get(childId)
+    if (childSession === undefined) throw new Error('fork did not publish the child session')
+    expect(childSession.header.seedLength).toBe(source.events.length)
+    const seedLength = childSession.header.seedLength
+    const tombstone = seedLength === undefined ? undefined : childSession.events.at(seedLength)
+    expect(tombstone?.type).toBe('goal/change')
+    if (tombstone?.type === 'goal/change') {
+      expect(tombstone.seq).toBe(childSession.header.seedLength)
+      expect(tombstone.data).toMatchObject({ operation: 'clear', cleared: { id: goal.id } })
+    }
+    expect(ctx.goals.get(sourceAgent)).toMatchObject({ id: goal.id, phase: 'active' })
     await ctx.fiber.dispose()
   })
 })

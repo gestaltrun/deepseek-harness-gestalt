@@ -18,6 +18,7 @@ const DEFAULT_CAPABILITIES: SubagentCapabilities = {
   toolFilter: true,
   persona: true,
   agentOptions: true,
+  images: true,
 }
 
 /** Options for one scripted provider fixture. */

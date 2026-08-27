@@ -44,8 +44,10 @@ function limitSubagentDiagnostic(diagnostic: string): string {
 /**
  * The capability advertisement of an out-of-process backend: NONE. A child in
  * another process cannot honor parent-enforced start features
- * (`outputSchema`/`maxDepth`/`toolFilter`/`persona`/`agentOptions`), so the service rejects a
- * request needing any of them before `start` runs — never accepted-then-ignored.
+ * (`outputSchema`/`maxDepth`/`toolFilter`/`persona`/`agentOptions`), and its
+ * wire is not yet proven to preserve prompt image blocks, so the service
+ * rejects a request needing any of them before `start` runs — never
+ * accepted-then-ignored.
  */
 export const NO_START_CAPABILITIES: SubagentCapabilities = Object.freeze({
   outputSchema: false,
@@ -53,6 +55,7 @@ export const NO_START_CAPABILITIES: SubagentCapabilities = Object.freeze({
   toolFilter: false,
   persona: false,
   agentOptions: false,
+  images: false,
 })
 
 /**

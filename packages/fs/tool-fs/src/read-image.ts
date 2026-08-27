@@ -16,16 +16,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, ToolExecution } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-fs'
-import { resolveRegularReadTarget } from './read-target.ts'
-
-/** Extensions `read_image` accepts; magic-byte validation at the attachment service stays authoritative. */
-const IMAGE_EXTENSIONS: Readonly<Record<string, ImageMediaType>> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-}
+import { imageMediaTypeForPath, resolveRegularReadTarget } from './read-policy.ts'
 
 const IMAGE_VALUE_SCHEMA = {
   type: 'object',
@@ -65,15 +56,6 @@ export interface ImageReadValue {
       height: number
     }
   }
-}
-
-/**
- * Map a model-supplied path to its declared image media type by extension.
- * @param filePath - the raw `file_path` argument (not yet resolved).
- * @returns the declared media type, or undefined when the path does not claim an image.
- */
-export function imageMediaTypeForPath(filePath: string): ImageMediaType | undefined {
-  return IMAGE_EXTENSIONS[extname(filePath).toLowerCase()]
 }
 
 /**

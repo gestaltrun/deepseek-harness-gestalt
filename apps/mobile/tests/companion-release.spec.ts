@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -110,6 +110,50 @@ describe('Companion release validation', () => {
           encoding: 'utf8',
           stdio: 'pipe',
         })).toThrow()
+      } finally {
+        rmSync(directory, { force: true, recursive: true })
+      }
+    },
+  )
+
+  it.runIf(process.platform !== 'win32')(
+    'keeps the TestFlight password out of the altool process arguments',
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), 'dsh-mobile-testflight-upload-'))
+      const ipa = join(directory, 'candidate.ipa')
+      const capturedArguments = join(directory, 'arguments.txt')
+      const fakeXcrun = join(directory, 'xcrun')
+      const password = 'test-app-specific-password'
+      writeFileSync(ipa, 'fixture')
+      writeFileSync(fakeXcrun, `#!/usr/bin/env bash
+set -euo pipefail
+[[ -n "\${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]
+printf '%s\n' "$@" > "\${DSH_CAPTURE_ARGUMENTS:?}"
+printf 'upload invoked\n'
+`)
+      chmodSync(fakeXcrun, 0o755)
+      try {
+        const uploader = fileURLToPath(new URL('../scripts/upload-testflight.sh', import.meta.url))
+        const result = spawnSync('bash', [uploader], {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            APPLE_APP_SPECIFIC_PASSWORD: password,
+            APPLE_ID: 'release@example.test',
+            DSH_CAPTURE_ARGUMENTS: capturedArguments,
+            IPA_PATH: ipa,
+            PATH: `${directory}:${process.env.PATH ?? ''}`,
+          },
+        })
+        expect(result.error).toBeUndefined()
+        expect(result.status).toBe(0)
+        const capturedArgumentText = readFileSync(capturedArguments, 'utf8')
+        const argumentsList = capturedArgumentText.trim().split('\n')
+        const passwordIndex = argumentsList.indexOf('--password')
+        expect(argumentsList[passwordIndex + 1]).toBe('@env:APPLE_APP_SPECIFIC_PASSWORD')
+        expect(capturedArgumentText).not.toContain(password)
+        expect(result.stdout).not.toContain(password)
+        expect(result.stderr).not.toContain(password)
       } finally {
         rmSync(directory, { force: true, recursive: true })
       }

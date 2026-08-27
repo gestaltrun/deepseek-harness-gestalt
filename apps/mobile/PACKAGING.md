@@ -26,7 +26,7 @@ MOBILE_VERSION=0.1.0 MOBILE_BUILD_NUMBER=3 APPLE_TEAM_ID=MUX3KT56Q6 \
   bash apps/mobile/scripts/build-ios-release.sh
 ```
 
-Upload is a separate mutation. `scripts/upload-testflight.sh` requires `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and the exact `IPA_PATH`. `.github/workflows/mobile-release.yml` runs only from `master`, checks out the required `candidate_sha`, rejects it unless it is the exact current remote `master`, and uses the protected `mobile-release` Environment. iOS additionally requires the dedicated `mobile-release` self-hosted macOS ARM64 runner label and uploads only when `upload_testflight` is true.
+Upload is a separate mutation. `scripts/upload-testflight.sh` requires `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and the exact `IPA_PATH`. The workflow keeps the app-specific password in the upload step environment, and the script gives `altool` the `@env:APPLE_APP_SPECIFIC_PASSWORD` reference so the credential value is absent from process arguments. A credential observed in a process listing or diagnostic output must be revoked and replaced before another upload. `.github/workflows/mobile-release.yml` runs only from `master`, checks out the required `candidate_sha`, rejects it unless it is the exact current remote `master`, and uses the protected `mobile-release` Environment. iOS additionally requires the dedicated `mobile-release` self-hosted macOS ARM64 runner label and uploads only when `upload_testflight` is true.
 
 ## Candidate acceptance and signing
 

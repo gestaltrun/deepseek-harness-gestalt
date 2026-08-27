@@ -80,8 +80,8 @@ Complete delivery when every selected ticket is merged or has a concrete reporte
 
 ## Retire completed work
 
-1. After a ticket pull request lands on the baseline, verify its task is terminal and its exact worktree has no uncommitted files, stash, unpushed commit, or unique commit absent from the remote merged result. Preserve the worktree and report the discrepancy when any check fails.
-2. Under Codex, archive the terminal Codex task. Remove only its validated worktree, delete its merged local and remote ticket branches, and run `git worktree prune`. For an official stack, wait until its descendants no longer depend on the branch.
+1. After a ticket pull request lands on the baseline, verify the writer is terminal through the owning runtime's task, subagent, or session state; a root-writer fallback is terminal when its sequential ticket execution has completed. Verify that its exact worktree has no uncommitted files, stash, unpushed commit, or unique commit absent from the remote merged result. Preserve the worktree and report the discrepancy when any check fails.
+2. Archive a terminal Codex task only when that writer created one. Remove only a validated dedicated worktree, retain any shared checkout, delete merged local and remote ticket branches, and run `git worktree prune`. For an official stack, wait until its descendants no longer depend on the branch.
 3. After the baseline-to-master pull request lands and its tickets close, apply the same checks before removing the baseline worktree and branches. Record an explicit retention reason instead when follow-up work still needs them.
 
 Complete cleanup when every removed path and branch was exact, merged, clean, and replaceable from GitHub, and every retained artifact has a named owner and reason.

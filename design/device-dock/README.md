@@ -21,9 +21,9 @@ production 不 import 本目录任何文件。
 
 | 轴 | 议题 | 状态 |
 |---|---|---|
-| 轴 1 | 多设备并存：单例 vs 每设备一 tab | **倾向 B（每设备一 tab，`createTab → phone:<serial>`）· 待看图确认后锁定**；去重语义按 `dedupeKey: serial` 契约——「+」菜单点已打开设备聚焦既有 tab 而非新建 |
+| 轴 1 | 多设备并存：单例 vs 每设备一 tab | **已锁定：每设备一 tab**——`createTab → phone:<serial>` 并行可见；去重按 `dedupeKey: serial`，「+」菜单点已打开设备聚焦既有 tab 而非新建；Tab 条溢出横向滚动 + sticky「+」 |
 | 轴 2 | 入口策略 | **已采纳：恒可达 + badge**——+ 菜单行常亮可用；Tab 条 badge 灰点＝无设备、绿色数字＝在线台数；terminal 式禁用行作为反例弃用 |
-| 轴 3 | 已连接画面行为 | **待选定**：格 A flex 贴底（流区 flex 占满、Back/Home 工具条贴底常驻，类推 browserFrame{flex:1;min-height:0}）vs 格 B 固定比例居中（1:2 定比、上下斜纹为浪费区） |
+| 轴 3 | 已连接画面行为 | **已锁定：固定比例居中（格 B）**——画面 1:2 定比居中，上下留白；flex 贴底（格 A）弃用，留作未来面板高度充裕时的可选优化 |
 
 ### 尺寸事实来源（两篇主稿共用）
 

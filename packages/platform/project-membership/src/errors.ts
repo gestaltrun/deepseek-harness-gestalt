@@ -37,6 +37,10 @@ export class ProjectMembershipError extends Error {
   }
 }
 
-/** Build the atomic duplicate-invitee rejection: one account may hold at most one membership or pending invitation per project. */
+/**
+ * Build the atomic duplicate-invitee rejection: one account may hold at most one membership or pending invitation per project.
+ * @param accountId - rejected platform account.
+ * @returns the `DUPLICATE_INVITEE` error carrying no signed values.
+ */
 export const duplicateInvitee = (accountId: PlatformAccountId): ProjectMembershipError =>
   new ProjectMembershipError('DUPLICATE_INVITEE', `account ${accountId} already holds a membership or a pending invitation in this project`)

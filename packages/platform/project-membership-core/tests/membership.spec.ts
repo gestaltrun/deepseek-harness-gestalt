@@ -115,10 +115,9 @@ describe('file-backed project membership', () => {
     const { store, projectId } = await foundProject(alice, 'Race')
     const attempts = await Promise.allSettled(Array.from({ length: 8 }, () =>
       store.invite(alice, { projectId, inviteeAccountId: bob })))
-    const rejected = attempts.filter((result): result is PromiseRejectedResult<ProjectMembershipError> =>
-      result.status === 'rejected')
+    const rejected = attempts.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
     expect(attempts.filter(result => result.status === 'fulfilled')).toHaveLength(1)
-    expect(rejected.every(result => result.reason.code === 'DUPLICATE_INVITEE')).toBe(true)
+    expect(rejected.every(result => (result.reason as ProjectMembershipError).code === 'DUPLICATE_INVITEE')).toBe(true)
     expect(await store.pendingInvitationsFor(bob)).toHaveLength(1)
   })
 

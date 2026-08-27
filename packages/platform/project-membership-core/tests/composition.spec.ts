@@ -125,7 +125,10 @@ describe('real Loader composition of project-membership definition + provider', 
     // The invariant companions stayed mounted through both boots: removing nobody keeps versions monotonic.
     const versionBeforeTagEdit = await second.service.rosterVersion(created.id)
     const bobRow = recovered.members.find(row => row.accountId === bob)!
-    await second.service.setMemberTags(alice, { membershipId: bobRow.id, tags: ['on-call'] })
+    await second.service.setMemberTags(alice, {
+      membershipId: bobRow.id,
+      tags: ['on-call' as import('@deepseek-ai/dsh-project-membership').FunctionTag],
+    })
     expect(await second.service.rosterVersion(created.id)).toBe(versionBeforeTagEdit + 1)
   })
 
@@ -142,7 +145,7 @@ describe('real Loader composition of project-membership definition + provider', 
     expect(String(failure)).toContain('expected "development" | "production"')
   })
 
-  async function bootWithEnvironment(storagePath: string, environment: string): Promise<unknown> {
+  async function bootWithEnvironment(storagePath: string, environment: string): Promise<void> {
     const root = await mkdtemp(join(tmpdir(), 'dsh-project-membership-bad-config-'))
     roots.push(root)
     const configPath = join(root, 'cordis.yml')

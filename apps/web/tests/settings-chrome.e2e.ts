@@ -1,15 +1,15 @@
-// Web e2e scenarios: the settings surface — the modal shell (trigger, nav,
-// section switching, both close paths), the Appearance preference row (the
-// real theme gesture — click 深色 and the whole cascade runs: ThemeRuntime preference -> Host settings
-// -> theme/change -> ui-layout's presenter -> body attribute -> alias token +
-// browser theme-color metadata)
+// Web e2e scenarios: the settings surface — the fullscreen page shell
+// (trigger, nav, section switching, close paths), the Appearance preference
+// row (the real theme gesture — click 深色 and the whole cascade runs:
+// ThemeRuntime preference -> Host settings -> theme/change -> ui-layout's
+// presenter -> body attribute -> alias token + browser theme-color metadata)
 // the Language row and busy-state Enter preference (both Host-backed), plus
 // Permission as the persisted default for subsequently created sessions.
 // Zero model calls: everything is pure client + persistence state on a blank
 // frame, so there is no fixture and a stray stream would fail loud on the
 // open llm seam.
 import { readFile } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
@@ -26,10 +26,16 @@ const DIALOG_EXPECTED = join(SNAPSHOT_DIR, 'dialog.expected.md')
 const PLUGINS_EXPECTED = join(SNAPSHOT_DIR, 'plugins.expected.md')
 // The English fallback surface: a browser naming no shipped language.
 const DIALOG_EN_EXPECTED = join(SNAPSHOT_DIR, 'dialog-en.expected.md')
+// The Desktop composition's overlay-document surface: the same page the Host
+// overlay view paints above official pages.
+const DESKTOP_SETTINGS_EXPECTED = join(SNAPSHOT_DIR, 'desktop-settings.expected.md')
 const PLUGIN_ROW_SELECTOR = '[data-plugin-entry$="ui-settings"]'
+const DESKTOP_BRIDGE_FIXTURE = fileURLToPath(
+  new URL('../../../packages/client/ui-desktop/tests/desktop-bridge-fixture.client.ts', import.meta.url),
+)
 const MODE = webSnapshotMode()
 
-describe('web e2e: settings modal and General preferences', () => {
+describe('web e2e: the settings page and General preferences', () => {
   let scaffold: WebScaffold
   let browser: Browser
   let page: Page
@@ -51,7 +57,7 @@ describe('web e2e: settings modal and General preferences', () => {
     await scaffold?.close()
   })
 
-  it('opens the settings dialog, switches sections, and closes by every path', async () => {
+  it('opens the settings page, switches sections, and closes by every path', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-settings-shell'))
     const trigger = page.getByRole('button', { name: '设置', exact: true })
     expect(await trigger.getAttribute('aria-haspopup')).toBe('dialog')
@@ -89,7 +95,14 @@ describe('web e2e: settings modal and General preferences', () => {
     await expect.poll(() => openRequests, { timeout: 5_000 }).toBe(1)
     await expect.poll(() => openDocument.isEnabled(), { timeout: 5_000 }).toBe(true)
     await page.unroute('**/api/settings.openDocument')
-    // Golden of the freshly opened dialog (default zh, General active).
+    // Golden of the freshly opened page (default zh, General active). The
+    // page fills the viewport — the fullscreen shell this change delivers.
+    const surface = await dialog.evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      return { width: box.width, height: box.height }
+    })
+    expect(surface.width).toBeGreaterThanOrEqual(page.viewportSize()!.width - 1)
+    expect(surface.height).toBeGreaterThanOrEqual(page.viewportSize()!.height - 1)
     const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(DIALOG_EXPECTED, snapshot, MODE)
     // Section switch: aria-current moves (the Models page itself has its own scenario file).
@@ -526,8 +539,102 @@ describe('web e2e: settings modal and General preferences', () => {
     }
   }, 90_000)
 
+  it('keeps the web surface console clean across its scenarios', async () => {
+    expect(tripwire.warnings).toEqual([])
+  }, 60_000)
+})
+
+describe('web e2e: the Desktop composition settings overlay document', () => {
+  let scaffold: WebScaffold
+  let browser: Browser
+  let page: Page
+  let tripwire: ReturnType<typeof watchConsole>
+
+  beforeAll(async () => {
+    // The Desktop composition: the web profile plus the Host's patch overlay
+    // (ui-desktop and friends). The Host overlay view loads this same origin
+    // stamped as the overlay document, and the preload delivers the chrome
+    // state; the fixture bridge stands in for both.
+    scaffold = await launchWebScaffold({
+      extraOverlayPath: fileURLToPath(new URL('../../desktop/cordis.patch.yml', import.meta.url)),
+    })
+    browser = await chromium.launch()
+    page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
+    tripwire = watchConsole(page)
+    const { installDesktopBridgeFixture } = await import(pathToFileURL(DESKTOP_BRIDGE_FIXTURE).href) as {
+      installDesktopBridgeFixture: (platform: 'darwin' | 'win32') => void
+    }
+    const platform: 'darwin' | 'win32' = 'darwin'
+    await page.addInitScript(installDesktopBridgeFixture, platform)
+    // Point the overlay verbs at a live settings request and record the page's
+    // replies, the way the real preload round-trips them with the Host. The
+    // page keeps painting until the Host answers a close by pushing the null
+    // state (it hides the view), so the scenario drives that half too.
+    await page.addInitScript(() => {
+      const bridge = (globalThis as { dshDesktop?: Record<string, unknown> }).dshDesktop
+      if (bridge === undefined) throw new Error('bridge fixture must install first')
+      const state = { kind: 'settings', requestId: 'overlay-e2e', sectionId: 'general' }
+      const results: unknown[] = []
+      const stateListeners = new Set<(value: unknown) => void>()
+      bridge.chromeOverlayGetState = async () => state
+      bridge.chromeOverlayResult = (result: unknown) => { results.push(result) }
+      bridge.onChromeOverlayState = (listener: (value: unknown) => void) => {
+        stateListeners.add(listener)
+        return () => { stateListeners.delete(listener) }
+      }
+      bridge.onChromeOverlayResult = () => () => {}
+      Object.defineProperty(globalThis, '__overlayResults', { configurable: true, value: results })
+      // The real preload broadcasts state to every subscriber (the settings
+      // seat and the chrome menu); the hide helper replays that broadcast.
+      Object.defineProperty(globalThis, '__overlayHide', {
+        configurable: true,
+        value: () => {
+          for (const listener of [...stateListeners]) listener(null)
+        },
+      })
+    })
+    await page.goto(`${scaffold.baseUrl}?dsh-desktop-overlay=1`, { waitUntil: 'load' })
+    await page.waitForSelector('[role="dialog"]', { timeout: 30_000 })
+  }, 120_000)
+
+  afterAll(async () => {
+    await browser?.close()
+    await scaffold?.close()
+  })
+
+  it('paints the fullscreen page with the Desktop-only section and reports close', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-settings-desktop-overlay'))
+    const dialog = page.getByRole('dialog', { name: '设置' })
+    // Fullscreen: the page fills the overlay view (the Host window), the same
+    // geometry the browser page renders.
+    const surface = await dialog.evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      return { width: box.width, height: box.height }
+    })
+    expect(surface.width).toBeGreaterThanOrEqual(page.viewportSize()!.width - 1)
+    expect(surface.height).toBeGreaterThanOrEqual(page.viewportSize()!.height - 1)
+    // The 手机配对 nav row exists only in the Desktop composition: its presence
+    // pins that the patch overlay's section registration reaches this page.
+    expect(await dialog.getByRole('button', { name: '手机配对' }).count()).toBe(1)
+    expect(await dialog.getByRole('button', { name: '通用设置' }).getAttribute('aria-current')).toBe('true')
+    const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
+    await compareOrRefreshGolden(DESKTOP_SETTINGS_EXPECTED, snapshot, MODE)
+    // Closing reports through the overlay result channel with the Host's
+    // request id — the page has no local close state in this mode. The Host
+    // then hides the view and pushes the null state; the page unmounts.
+    await dialog.getByRole('button', { name: '关闭' }).click()
+    await expect.poll(() => page.evaluate(() =>
+      (globalThis as { __overlayResults?: unknown[] }).__overlayResults ?? [],
+    ), { timeout: 5_000 }).toContainEqual({ type: 'close', requestId: 'overlay-e2e' })
+    await page.evaluate(() => { (globalThis as { __overlayHide?: () => void }).__overlayHide?.() })
+    await expect.poll(() => page.getByRole('dialog', { name: '设置' }).count(), { timeout: 5_000 }).toBe(0)
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
   it.skipIf(MODE === 'record')('keeps the fixture inventory closed', async () => {
     expect(tripwire.warnings).toEqual([])
-    await assertFixtureInventory(SNAPSHOT_DIR, ['dialog-en.expected.md', 'dialog.expected.md', 'plugins.expected.md'])
-  })
+    await assertFixtureInventory(SNAPSHOT_DIR, [
+      'desktop-settings.expected.md', 'dialog-en.expected.md', 'dialog.expected.md', 'plugins.expected.md',
+    ])
+  }, 60_000)
 })

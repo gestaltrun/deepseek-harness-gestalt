@@ -56,6 +56,8 @@ export interface DesktopRemoteRelayOptions {
   environment: SelectedPlatformEnvironment
   config: DesktopRemoteRelayConfig
   connect?: (signal: AbortSignal, config: DesktopRemoteRelayConfig) => Promise<RelayEndpointSocket>
+  /** Open one proxy-qualified candidate through the bundled system-Node helper. */
+  connectWithProxy?: DesktopRelayProxyConnector
   /** Resolve the current native system proxy for every fresh WSS acquisition. */
   resolveProxy?: (url: string) => Promise<string>
   snowPairingVault: DesktopSnowPairingVault
@@ -70,6 +72,14 @@ export interface DesktopRemoteRelayOptions {
 
 type NodeRelayConnector = typeof NodeRelayEndpointSocket.connect
 
+/** Desktop proxy candidate connector; an absent proxy URL means DIRECT. */
+export type DesktopRelayProxyConnector = (
+  url: string,
+  signal: AbortSignal,
+  limits: Parameters<NodeRelayConnector>[2],
+  proxyUrl: string | undefined,
+) => Promise<RelayEndpointSocket>
+
 /**
  * Resolve the bounded Electron proxy list and acquire WSS using qualified fallback only.
  * @param input - operated URL, lifecycle cancellation, proxy resolver, and Node socket seam.
@@ -82,6 +92,7 @@ export async function connectDesktopRelayThroughSystemProxy(input: {
   resolveProxy(url: string): Promise<string>
   resolveTimeoutMs: number
   connect?: NodeRelayConnector
+  connectWithProxy?: DesktopRelayProxyConnector
 }): Promise<RelayEndpointSocket> {
   const deadline = Date.now() + input.resolveTimeoutMs
   const rules = await resolveSystemProxy(input.resolveProxy(input.url), input.signal, input.resolveTimeoutMs)
@@ -97,9 +108,11 @@ export async function connectDesktopRelayThroughSystemProxy(input: {
     const candidateController = new AbortController()
     const candidateSignal = AbortSignal.any([input.signal, candidateController.signal])
     try {
-      const acquisition = candidate.agent === undefined
-        ? connect(input.url, candidateSignal, input.limits)
-        : connect(input.url, candidateSignal, input.limits, { agent: candidate.agent })
+      const acquisition = input.connectWithProxy === undefined
+        ? candidate.agent === undefined
+          ? connect(input.url, candidateSignal, input.limits)
+          : connect(input.url, candidateSignal, input.limits, { agent: candidate.agent })
+        : input.connectWithProxy(input.url, candidateSignal, input.limits, candidate.proxyUrl)
       return await withCandidateDeadline(acquisition, input.signal, candidateController, candidateTimeoutMs)
     } catch (error) {
       lastFailure = error
@@ -767,6 +780,7 @@ export function createDesktopRemoteRelay(options: DesktopRemoteRelayOptions): De
         limits,
         resolveProxy: options.resolveProxy,
         resolveTimeoutMs: config.attachTimeoutMs,
+        connectWithProxy: options.connectWithProxy,
       })
     },
     attachTimeoutMs: config.attachTimeoutMs,

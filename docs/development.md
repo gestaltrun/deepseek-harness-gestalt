@@ -89,6 +89,14 @@ pnpm run build
 
 `pnpm run hygiene` includes `publint`, which validates package entrypoints against the built `lib/*.js` files, and `verify-node-next-types`, which validates built declarations against a temporary NodeNext consumer. A fresh worktree has no bundled JS or declarations until `pnpm run build` runs; ordinary commits and pushes do not require that build unless their selected checks consume it.
 
+### Built Web acceptance
+
+Run `pnpm run accept:web` from a clean committed worktree to stage a disposable built-Web acceptance environment. The supervisor reuses only a local client build record whose revision and artifact digest match HEAD, otherwise runs the complete build; it starts the built CLI with isolated Home, Agents, bundled-skill, and Workspace directories, registers that Workspace through `workspace.create`, verifies the served Sidebar bundle contains the expected revision, and prints the URL, PID, full commit, visible revision, and Workspace id. Its stdin commands are `status`, `restart [port]`, and `stop`; `stop` removes only its owned temporary root.
+
+After `test:web:setup`, run `pnpm run test:web:acceptance` on a clean committed head for the automated built lifecycle: start, visible revision, Workspace registration, specified-port restart with a new PID, old-URL refusal, and scratch-root removal.
+
+The environment is keyless by default. Use `pnpm run accept:web -- --copy-model-config` only with explicit authorization for a real-model smoke or GIF: it blindly copies only `settings.yaml` and `.credentials.yaml` from the normal DSH Home, rejects symlinks, uses owner-only file permissions, and never copies `.env`, profiles, sessions, Browser state, or Ego profiles. Browser interaction and selection of the Ego `DSH` profile remain outside the supervisor.
+
 ### Environment variables
 
 The real DeepSeek adapter and key-backed agent demos read credentials from the environment or from a gitignored `.env` at the repo root:

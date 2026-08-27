@@ -11,6 +11,7 @@ import {
   type ReplayEntry,
   type SessionScript,
   apply,
+  assertReplayFixture,
   deriveReplayScript,
   inject,
   installLlmReplay,
@@ -1049,6 +1050,62 @@ describe('loadSessionScripts', () => {
     const scripts = loadSessionScripts({ file: f, childFiles: [earlier] })
     // Equal createdAt → primary first.
     expect(scripts.map(s => s.recordedId)).toEqual(['parent', 'early'])
+  })
+})
+
+describe('assertReplayFixture', () => {
+  it('checks exact script call counts and concatenated visible text deltas', () => {
+    const first = writeSession('session.jsonl', { id: 'parent', createdAt: 1 }, [[
+      { type: 'text-delta', index: 0, text: 'visible ' },
+      { type: 'text-delta', index: 0, text: 'reply' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'ignored duplicate' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ]])
+    const child = writeSession('session.1.jsonl', { id: 'child', createdAt: 2 }, [TEXT_CHUNKS, TEXT_CHUNKS])
+
+    expect(() => {
+      assertReplayFixture({ file: first, childFiles: [child] }, [
+        { calls: [{ visibleAssistantText: 'visible reply' }] },
+        { calls: [{ visibleAssistantText: 'hi' }, {}] },
+      ])
+    }).not.toThrow()
+  })
+
+  it('rejects an unexpected script count', () => {
+    const first = writeSession('session.jsonl', { id: 'parent', createdAt: 1 }, [TEXT_CHUNKS])
+    expect(() => { assertReplayFixture({ file: first }, []) }).toThrow(
+      'llm-replay fixture: expected 0 script(s), found 1',
+    )
+  })
+
+  it('rejects an unexpected call count with the recorded session id', () => {
+    const first = writeSession('session.jsonl', { id: 'parent', createdAt: 1 }, [TEXT_CHUNKS])
+    expect(() => { assertReplayFixture({ file: first }, [{ calls: [{}, {}] }]) }).toThrow(
+      'llm-replay fixture: script 1 (parent) expected 2 call(s), found 1',
+    )
+  })
+
+  it('does not treat block-end text as browser-visible streaming text', () => {
+    const first = writeSession('session.jsonl', { id: 'parent', createdAt: 1 }, [[
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'not streamed' } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ]])
+    expect(() => {
+      assertReplayFixture({ file: first }, [
+        { calls: [{ visibleAssistantText: 'not streamed' }] },
+      ])
+    }).toThrow('expected visible assistant text "not streamed", found ""')
+  })
+
+  it('checks the visible prefix emitted by a hanging replay call', () => {
+    writeFileSync(file, sessionJsonl([], { id: 'parent', createdAt: 1 }), 'utf8')
+    const overrideFile = join(dir, 'replay.override.json')
+    writeFileSync(overrideFile, JSON.stringify([{ kind: 'hang' }]), 'utf8')
+    expect(() => {
+      assertReplayFixture({ file, overrideFile }, [
+        { calls: [{ visibleAssistantText: 'partial' }] },
+      ])
+    }).not.toThrow()
   })
 })
 

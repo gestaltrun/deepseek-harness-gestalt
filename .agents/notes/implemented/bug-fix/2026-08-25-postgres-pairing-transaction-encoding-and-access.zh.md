@@ -10,7 +10,7 @@ Endpoint access-generation map 使用进程内 `accountId\0desktopInstallationId
 
 ## 决策
 
-配对事务格式版本 2 把每个 endpoint access-generation key 编码成两元素 `[accountId, desktopInstallationId]` tuple，并且只在两个 branded value 都解析后重建私有的 NUL 分隔进程内 key。Decoder 接受版本 1 用于迁移，并拒绝其他所有显式版本。
+配对事务格式版本 2 把每个 endpoint access-generation key 编码成两元素 `[accountId, desktopInstallationId]` tuple，并且只在两个 branded value 都解析后重建私有的 NUL 分隔进程内 key。Decoder 只接受版本 2；[旧配对事务格式会立即失败](../simplification/2026-08-27-reject-legacy-pairing-transaction-formats.zh.md)。
 
 `runPairingTransaction` 在可变配对状态之外提供 transaction-bound `PersonalPairingAccessTransaction`。PostgreSQL 实现通过同一个已 checkout client 执行 Desktop access 读写，memory 实现则提供其串行化 store。修改 endpoint access 的 provider transition 只使用这个 transaction-bound face。
 
@@ -24,8 +24,8 @@ Endpoint access-generation map 使用进程内 `accountId\0desktopInstallationId
 
 ## 后果
 
-Operated PostgreSQL 可以接收 endpoint access generation，不再触发 NUL 错误；最终 commit 失败会同时回滚配对文档和 Desktop route 状态。现有版本 1 row 会在下一次成功写入时迁移。需要在配对 transition 之外读取 Desktop access 的 caller 仍可使用 public store method，但 provider transition 无法绕过 transaction-bound face。
+Operated PostgreSQL 可以接收 endpoint access generation，不再触发 NUL 错误；最终 commit 失败会同时回滚配对文档和 Desktop route 状态。需要在配对 transition 之外读取 Desktop access 的 caller 仍可使用 public store method，但 provider transition 无法绕过 transaction-bound face。
 
 ## 测试
 
-Codec coverage 会拒绝带 NUL 的持久化输出、round-trip 版本 2，并迁移版本 1。PostgreSQL coverage 注入最终 `COMMIT` failure，并观察配对状态与 Desktop access 同时回滚。迁移后，operated 双实例 Platform 已接受真实 Desktop Mobile Access enable。
+Codec coverage 会拒绝带 NUL 的持久化输出并 round-trip 版本 2。PostgreSQL coverage 注入最终 `COMMIT` failure，并观察配对状态与 Desktop access 同时回滚。Operated 双实例 Platform 在写入版本 2 后已接受真实 Desktop Mobile Access enable。

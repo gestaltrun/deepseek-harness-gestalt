@@ -243,10 +243,28 @@ describe('Mobile Companion browse projection', () => {
     }))
 
     fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }))
-    expect(screen.getByRole('alert').textContent).toContain('Desktop rejected history')
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toContain('Desktop rejected history')
+    expect(alert.closest('[data-conversation-scroll]')).not.toBeNull()
+    expect(document.querySelector('[data-mobile-conversation="detail"]')?.children).toHaveLength(3)
     fireEvent.click(screen.getByRole('button', { name: '返回' }))
     fireEvent.click(screen.getByRole('treeitem', { name: /Gamma/ }))
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('keeps a connection failure inside the opened conversation scroll region', () => {
+    render(createElement(MobileBrowse, {
+      desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces,
+      conversations: { [alphaId]: conversation() }, ...browsePresentation,
+      connectionFailure: {
+        code: 'PLATFORM_CAPACITY', message: 'Remote Relay returned PLATFORM_CAPACITY', retryAfterMs: 5_000,
+      },
+    }))
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /Alpha/ }))
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toBe('Platform 当前容量已满，将在 5 秒后重试。')
+    expect(alert.closest('[data-conversation-scroll]')).not.toBeNull()
   })
 
   it.each([

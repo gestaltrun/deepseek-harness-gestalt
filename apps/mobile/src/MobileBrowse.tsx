@@ -251,24 +251,22 @@ export function MobileBrowse({
   if (openId !== undefined && openTitle !== undefined) {
     if (conversation !== undefined) {
       return (
-        <>
-          {connectionAlert !== undefined && <p role="alert">{connectionAlert}</p>}
-          <MobileConversation
-            title={openTitle}
-            onBack={closeConversation}
-            snapshot={conversation}
-            locale={locale}
-            theme={theme}
-            loadImage={attachment => loadImage(openId, attachment)}
-            cwd={open?.cwd}
-            mutationEnabled={canMutate}
-            operationFailure={detailFailure}
-            {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(openId, text) })}
-            {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(openId) } })}
-            {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(openId, file) } })}
-            {...(onLoadOlder === undefined ? {} : { onLoadOlder: () => { onLoadOlder(openId) } })}
-          />
-        </>
+        <MobileConversation
+          title={openTitle}
+          onBack={closeConversation}
+          snapshot={conversation}
+          locale={locale}
+          theme={theme}
+          loadImage={attachment => loadImage(openId, attachment)}
+          cwd={open?.cwd}
+          mutationEnabled={canMutate}
+          connectionAlert={connectionAlert}
+          operationFailure={detailFailure}
+          {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(openId, text) })}
+          {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(openId) } })}
+          {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(openId, file) } })}
+          {...(onLoadOlder === undefined ? {} : { onLoadOlder: () => { onLoadOlder(openId) } })}
+        />
       )
     }
     return (

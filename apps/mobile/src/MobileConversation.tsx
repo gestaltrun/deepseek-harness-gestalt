@@ -48,6 +48,8 @@ export interface MobileConversationProps {
   onLoadOlder?: (() => void) | undefined
   /** Whether current foreground synchronization admits mutations. */
   mutationEnabled?: boolean | undefined
+  /** Stable Relay or Companion failure retained while the foreground lifecycle retries. */
+  connectionAlert?: string | undefined
   /** Latest correlated Companion operation failure. */
   operationFailure?: CompanionHostFailure | undefined
 }
@@ -67,6 +69,7 @@ export function MobileConversation({
   onAttach,
   onLoadOlder,
   mutationEnabled = false,
+  connectionAlert,
   operationFailure,
 }: MobileConversationProps): ReactNode {
   const attachmentInput = useRef<HTMLInputElement>(null)
@@ -124,8 +127,9 @@ export function MobileConversation({
         </button>
         <h1>{displayTitle}</h1>
       </header>
-      {operationFailure !== undefined && <p role="alert">{operationFailure.message}</p>}
       <div className={css.blocks} data-conversation-scroll="">
+        {connectionAlert !== undefined && <p role="alert">{connectionAlert}</p>}
+        {operationFailure !== undefined && <p role="alert">{operationFailure.message}</p>}
         {snapshot.openState === 'loading' && <p role="status">{t('chat.loadingHistory')}</p>}
         {snapshot.openState === 'error' && snapshot.openError !== null && (
           <p role="status">{t('chat.loadError', { message: snapshot.openError.message, code: snapshot.openError.code })}</p>

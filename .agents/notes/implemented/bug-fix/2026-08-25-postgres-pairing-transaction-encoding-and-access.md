@@ -10,7 +10,7 @@ The endpoint access-generation map used an in-memory `accountId\0desktopInstalla
 
 ## Decision
 
-Pairing transaction format version 2 encodes each endpoint access-generation key as a two-element `[accountId, desktopInstallationId]` tuple and reconstructs the private NUL-delimited in-memory key only after parsing both branded values. The decoder accepts version 1 for migration and rejects every other explicit version.
+Pairing transaction format version 2 encodes each endpoint access-generation key as a two-element `[accountId, desktopInstallationId]` tuple and reconstructs the private NUL-delimited in-memory key only after parsing both branded values. The decoder accepts only version 2; [legacy pairing transaction formats fail loud](../simplification/2026-08-27-reject-legacy-pairing-transaction-formats.md).
 
 `runPairingTransaction` supplies a transaction-bound `PersonalPairingAccessTransaction` beside the mutable pairing state. The PostgreSQL implementation routes Desktop access reads and writes through the same checked-out client, while the memory implementation supplies its serialized store. Provider transitions that change endpoint access use only this transaction-bound face.
 
@@ -24,8 +24,8 @@ Pairing transaction format version 2 encodes each endpoint access-generation key
 
 ## Consequences
 
-Operated PostgreSQL accepts endpoint access generations without NUL errors, and a failed final commit rolls back both the pairing document and Desktop route state. Existing version-1 rows migrate on their next successful write. Callers that need Desktop access outside a pairing transition retain the public store methods, but provider transitions cannot escape the transaction-bound face.
+Operated PostgreSQL accepts endpoint access generations without NUL errors, and a failed final commit rolls back both the pairing document and Desktop route state. Callers that need Desktop access outside a pairing transition retain the public store methods, but provider transitions cannot escape the transaction-bound face.
 
 ## Testing
 
-Codec coverage rejects NUL-bearing persistence output, round-trips version 2, and migrates version 1. PostgreSQL coverage injects a final `COMMIT` failure and observes both pairing state and Desktop access rolled back. The operated two-instance Platform accepted a real Desktop Mobile Access enable after the migration.
+Codec coverage rejects NUL-bearing persistence output and round-trips version 2. PostgreSQL coverage injects a final `COMMIT` failure and observes both pairing state and Desktop access rolled back. The operated two-instance Platform accepted a real Desktop Mobile Access enable after writing version 2.

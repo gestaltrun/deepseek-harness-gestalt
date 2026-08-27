@@ -30,11 +30,11 @@ Upload is a separate mutation. `scripts/upload-testflight.sh` requires `APPLE_ID
 
 ## Candidate acceptance and signing
 
-Operated acceptance is recorded only after the bundled product entry passes GitHub login, Account, Personal Pairing, Session navigation, search, creation, interaction, attachment, cache, upgrade, failure, and phone-size UI checks. Approved native Android Emulators and iOS Simulators satisfy device evidence; `prototype-companion` and ports 5173/5174 do not. Dispatch `Mobile Companion Acceptance` against the exact tested `master` SHA with evidence JSON containing each value from `COMPANION_RELEASE_FLOWS`, every platform/check pair derived from `COMPANION_RELEASE_PLATFORMS` and `COMPANION_RELEASE_DEVICE_CHECKS`, and all four booleans below set to `true`:
+Operated acceptance is recorded only after the bundled product entry passes GitHub login, Account, complete-link Personal Pairing, Session navigation, search, creation, interaction, attachment, cache, upgrade, failure, and phone-size UI checks. Camera scanning remains a supported product flow but is outside the controlled release evidence. Approved native Android Emulators and iOS Simulators satisfy device evidence; `prototype-companion` and ports 5173/5174 do not. Dispatch `Mobile Companion Acceptance` against the exact tested `master` SHA with evidence JSON containing each value from `COMPANION_RELEASE_FLOWS`, every platform/check pair derived from `COMPANION_RELEASE_PLATFORMS` and `COMPANION_RELEASE_DEVICE_CHECKS`, and all four booleans below set to `true`:
 
 ```json
 {
-  "flows": ["github-login", "account", "camera-pairing", "link-pairing", "desktop-navigation", "search", "workspace-create", "ungrouped-create", "prompt", "cancel", "approval", "question", "attachment", "cache"],
+  "flows": ["github-login", "account", "link-pairing", "desktop-navigation", "search", "workspace-create", "ungrouped-create", "prompt", "cancel", "approval", "question", "attachment", "cache"],
   "devices": ["ios:protected-key-storage", "ios:encrypted-cache", "ios:file-selection", "ios:foreground-lifecycle", "android:protected-key-storage", "android:encrypted-cache", "android:file-selection", "android:foreground-lifecycle"],
   "upgradePreservedKeys": true,
   "uiAcceptance": true,

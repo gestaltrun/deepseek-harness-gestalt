@@ -47,6 +47,11 @@ function operatorEvidence() {
 }
 
 describe('Companion release validation', () => {
+  it('uses complete-link pairing without requiring camera acceptance', () => {
+    expect(COMPANION_RELEASE_FLOWS).toContain('link-pairing')
+    expect(COMPANION_RELEASE_FLOWS).not.toContain('camera-pairing')
+  })
+
   it('does not register an interceptable custom scheme for the pairing invitation', () => {
     const android = readFileSync(new URL('../android/app/src/main/AndroidManifest.xml', import.meta.url), 'utf8')
     const ios = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8')

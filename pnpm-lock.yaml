@@ -7043,7 +7043,7 @@ importers:
   packages/platform/project-membership-core:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: workspace:^
+        specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
     devDependencies:
       '@deepseek-ai/cordis':

@@ -454,6 +454,13 @@ const SCENARIOS: Scenario[] = [
   // Windows bash process-tree kill is deferred with the Bash execution domain.
   { name: 'cancel-tool-calls', hasModelTurn: true, recorded: false, overridden: true, posixOnly: true },
   { name: 'subagent-spawn-in-process', hasModelTurn: true, recorded: true },
+  {
+    name: 'subagent-image-prompt',
+    hasModelTurn: true,
+    recorded: false,
+    headerClass: 'image',
+    configPath: IMAGE_CONFIG,
+  },
   // Keyless authored scenario: the child ends at max-tokens with an empty
   // usage-only assistant/message after earlier text and a tool call. The
   // parent's tool result must retain that assistant output and stop reason.

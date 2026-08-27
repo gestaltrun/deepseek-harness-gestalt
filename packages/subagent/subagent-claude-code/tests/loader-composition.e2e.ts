@@ -45,6 +45,7 @@ describe('product-provider public Loader composition', () => {
         {
           name: 'codex',
           capabilities: {
+            images: false,
             outputSchema: false,
             depthLimit: false,
             toolFilter: false,
@@ -56,6 +57,7 @@ describe('product-provider public Loader composition', () => {
         {
           name: 'claude-code',
           capabilities: {
+            images: false,
             outputSchema: false,
             depthLimit: false,
             toolFilter: false,
@@ -67,6 +69,7 @@ describe('product-provider public Loader composition', () => {
         {
           name: 'claude-primary',
           capabilities: {
+            images: false,
             outputSchema: false,
             depthLimit: false,
             toolFilter: false,
@@ -78,6 +81,7 @@ describe('product-provider public Loader composition', () => {
         {
           name: 'claude-secondary',
           capabilities: {
+            images: false,
             outputSchema: false,
             depthLimit: false,
             toolFilter: false,

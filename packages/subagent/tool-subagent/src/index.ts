@@ -9,11 +9,18 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { basename } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type { AgentOptions } from '@deepseek-ai/dsh-agent'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { AttachmentError } from '@deepseek-ai/dsh-attachment'
+import type { ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
 import type { JsonValue } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-fs'
+import { imageMediaTypeForPath, resolveRegularReadTarget } from '@deepseek-ai/dsh-tool-fs/read-policy'
+import type { JobRegistry } from '@deepseek-ai/dsh-jobs'
 import { assertSubagentMaxDepth, settleRun } from '@deepseek-ai/dsh-subagent'
 import type { SubagentProvider, SubagentResult, SubagentRun } from '@deepseek-ai/dsh-subagent'
 import type { JobOutcome } from '@deepseek-ai/dsh-jobs'
@@ -292,12 +299,73 @@ function requireRouteField(value: unknown, field: 'provider' | 'model'): string 
   return value.trim()
 }
 
-interface DelegationRunSpec {
-  readonly runInBackground: boolean
+type DelegationRunSpec =
+  | { readonly kind: 'foreground' }
+  | { readonly kind: 'continuable' }
+  | { readonly kind: 'job'; readonly jobs: JobRegistry }
+
+/**
+ * Read one model-supplied image path through the calling session's filesystem
+ * policy. The caller submits the complete returned batch to the attachment
+ * store, which validates every image and the message-wide limits before it
+ * commits any member.
+ * @param ctx - the plugin context providing the optional filesystem service.
+ * @param exec - the current tool execution, including session cwd and cancellation.
+ * @param requestedPath - the raw path supplied to the tool.
+ * @param acceptedTypes - deployment-approved image media types.
+ * @param byteCap - maximum input bytes read for one image.
+ * @returns one pending attachment input.
+ */
+async function readAttachedImage(
+  ctx: Context,
+  exec: ToolExecution,
+  requestedPath: string,
+  acceptedTypes: readonly ImageMediaType[],
+  byteCap: number,
+): Promise<SaveImageAttachment> {
+  const mediaType = imageMediaTypeForPath(requestedPath)
+  if (mediaType === undefined) {
+    throw new Error(`cannot attach "${requestedPath}": images only accepts PNG/JPEG/WebP/GIF paths`)
+  }
+  if (!acceptedTypes.includes(mediaType)) {
+    throw new Error(`cannot attach "${requestedPath}": ${mediaType} images are not accepted by this deployment`)
+  }
+  const fs = ctx.get('fs')
+  if (fs === undefined) {
+    throw new Error(`cannot attach "${requestedPath}": no filesystem service is mounted`)
+  }
+  const { target } = await resolveRegularReadTarget(ctx, exec, requestedPath, 'attach')
+  const data = await fs.readBytes(target, exec.signal, byteCap)
+  return { data, mediaType, name: basename(target.displayPath) }
+}
+
+/** Read, validate, and commit one ordered image batch for a child prompt. */
+async function resolveAttachedImages(
+  ctx: Context,
+  exec: ToolExecution,
+  requestedPaths: readonly string[],
+): Promise<Extract<ContentBlock, { type: 'image' }>[]> {
+  const firstPath = requestedPaths[0]
+  if (firstPath === undefined) return []
+  const attachments = ctx.get('attachments')
+  if (attachments === undefined) {
+    throw new Error(`cannot attach "${firstPath}": no attachment service is mounted`)
+  }
+  const { maxImagesPerMessage, maxImageBytes, maxMessageImageBytes, mediaTypes } = attachments.imageLimits
+  if (requestedPaths.length > maxImagesPerMessage) {
+    throw new AttachmentError('Image batch exceeds the configured image-count limit.', 'TOO_MANY_IMAGES')
+  }
+  const byteCap = Math.min(maxImageBytes, maxMessageImageBytes)
+  const inputs = await Promise.all(
+    requestedPaths.map(path => readAttachedImage(ctx, exec, path, mediaTypes, byteCap)),
+  )
+  const refs = await attachments.saveImages(inputs)
+  return refs.map(attachment => ({ type: 'image', attachment }))
 }
 
 /** Resolve the model's optional scheduling request into one execution route. */
 function resolveDelegationRun(
+  ctx: Context,
   request: DelegationRunRequest,
   options: { readonly backgroundEnabled: boolean; readonly continuable: boolean },
 ): DelegationRunSpec {
@@ -307,14 +375,19 @@ function resolveDelegationRun(
     if (request.run_in_background === true) {
       throw new Error('run_in_background is disabled for this tool instance (enableRunInBackground: false)')
     }
-    return { runInBackground: false }
+    return { kind: 'foreground' }
   }
-  return {
-    // Continuable work is independently scheduled unless the caller explicitly
-    // needs the result before its next action. One-shot policy keeps its existing
-    // foreground default because its background result requires Task collection.
-    runInBackground: request.run_in_background ?? options.continuable,
+  // Continuable work is independently scheduled unless the caller explicitly
+  // needs the result before its next action. One-shot policy keeps its existing
+  // foreground default because its background result requires Task collection.
+  const runInBackground = request.run_in_background ?? options.continuable
+  if (!runInBackground) return { kind: 'foreground' }
+  if (options.continuable) return { kind: 'continuable' }
+  const jobs = ctx.get('jobs')
+  if (jobs === undefined) {
+    throw new Error('background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs')
   }
+  return { kind: 'job', jobs }
 }
 
 export function apply(ctx: Context, config: Config): void {
@@ -374,6 +447,15 @@ export function apply(ctx: Context, config: Config): void {
           required: true,
           description: wording.promptDescription,
         },
+        ...provider.capabilities.images ? {
+          images: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional workspace image file paths attached to the child\'s task prompt. '
+              + 'The child sees each image as part of its initial instruction — hand over screenshots, diagrams, '
+              + 'or figures instead of describing them. The child\'s model route must accept image input.',
+          },
+        } : {},
         ...provider.capabilities.agentOptions ? {
           provider: {
             type: 'string' as const,
@@ -448,9 +530,14 @@ export function apply(ctx: Context, config: Config): void {
 
         const maxDepth = typeof config.maxDepth === 'number' ? config.maxDepth : undefined
         const route = resolveDelegationRoute(args, config.agentOptions, provider.capabilities.agentOptions)
-        const request = {
+        // The schema omits `images` on an incapable backend; the validator
+        // permits undeclared keys, so execution re-checks before any I/O.
+        if (args.images !== undefined && !provider.capabilities.images) {
+          throw new Error('images are disabled for this tool instance (backend cannot carry prompt image blocks)')
+        }
+        const runSpec = resolveDelegationRun(ctx, args, { backgroundEnabled, continuable })
+        const requestBase = {
           label: args.description,
-          prompt: [{ type: 'text', text: args.prompt }] as ContentBlock[],
           parent,
           ...route,
           ...config.persona !== undefined ? { persona: config.persona } : {},
@@ -458,32 +545,23 @@ export function apply(ctx: Context, config: Config): void {
           ...maxDepth !== undefined ? { maxDepth } : {},
         }
 
-        const runSpec = resolveDelegationRun(args, { backgroundEnabled, continuable })
-        if (runSpec.runInBackground) {
-          if (continuable) {
-            // Resolves at inbox acceptance: the child owns its own turns from
-            // there, so this call neither waits for nor collects a result.
-            const started = await ctx.subagents.startContinuable({
-              provider: config.provider,
-              label: args.description,
-              request,
-              signal: exec.signal,
-            })
-            return { kind: 'continuable' as const, subagentId: started.childId }
-          }
-          const jobs = ctx.get('jobs')
-          if (jobs === undefined) {
-            throw new Error('background jobs unavailable: load @deepseek-ai/dsh-jobs and @deepseek-ai/dsh-tool-jobs')
-          }
+        if (runSpec.kind === 'job') {
           // One-shot background child: job preflight finishes before the
-          // starter can spawn, and the task-owned signal covers startup.
-          const id = jobs.start({
+          // starter reads attachments or spawns, and the task-owned signal
+          // covers both operations.
+          const id = runSpec.jobs.start({
             kind: 'subagent',
             label: args.description,
             owner: parent,
             run: () => {
               const controller = new AbortController()
-              const start = ctx.subagents.start(config.provider, { ...request, signal: controller.signal })
+              const jobExec: ToolExecution = { ...exec, signal: controller.signal }
+              const start = resolveAttachedImages(ctx, jobExec, args.images ?? [])
+                .then(imageBlocks => ctx.subagents.start(config.provider, {
+                  ...requestBase,
+                  prompt: [{ type: 'text', text: args.prompt }, ...imageBlocks],
+                  signal: controller.signal,
+                }))
               return {
                 cancel: (reason?: string) => {
                   controller.abort(reason ?? 'background subagent task killed')
@@ -494,6 +572,23 @@ export function apply(ctx: Context, config: Config): void {
             },
           })
           return { kind: 'background' as const, jobId: id }
+        }
+
+        const imageBlocks = await resolveAttachedImages(ctx, exec, args.images ?? [])
+        const request = {
+          ...requestBase,
+          prompt: [{ type: 'text', text: args.prompt }, ...imageBlocks] as ContentBlock[],
+        }
+        if (runSpec.kind === 'continuable') {
+          // Resolves at inbox acceptance: the child owns its own turns from
+          // there, so this call neither waits for nor collects a result.
+          const started = await ctx.subagents.startContinuable({
+            provider: config.provider,
+            label: args.description,
+            request,
+            signal: exec.signal,
+          })
+          return { kind: 'continuable' as const, subagentId: started.childId }
         }
 
         const run: SubagentRun = await ctx.subagents.start(config.provider, {

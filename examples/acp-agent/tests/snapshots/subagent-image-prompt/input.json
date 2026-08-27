@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "op": "initialize" },
+    { "op": "newSession" },
+    { "op": "prompt", "text": "Use the subagent tool exactly once with red.png in its images argument. Ask the child to reply with exactly CHILD_OK after inspecting the image. Wait for it, then reply with exactly PARENT_DONE." }
+  ]
+}

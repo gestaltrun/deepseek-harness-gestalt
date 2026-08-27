@@ -7,6 +7,7 @@ import SessionStore, { Session, SessionId, type UserMessage } from '@deepseek-ai
 import GoalService, {
   GoalError,
   GoalId,
+  clearGoalFromForkSeed,
   decodeGoalChange,
   foldGoal,
 } from '@deepseek-ai/dsh-goal'
@@ -185,6 +186,66 @@ describe('GoalService creation and replay', () => {
     })
     expect(child.session.header.parentSession).toBe(parent.session.id)
     expect(child.session.header.seedLength).toBe(parent.session.seq)
+  })
+
+  it('appends a child-owned clear tombstone to a fork seed without changing the parent prefix', async () => {
+    const { ctx, agent, session } = await harness()
+    const goal = ctx.goals.create(agent, { objective: 'inherit then clear', maxGoalRounds: 5 })
+    appendRound(session, goal, 1)
+    const parentPrefix = [...session.events]
+
+    const childSeed = clearGoalFromForkSeed(parentPrefix, 2_000)
+
+    expect(childSeed).not.toBe(parentPrefix)
+    expect(session.events).toEqual(parentPrefix)
+    expect(foldGoal(parentPrefix).goal).toMatchObject({ id: goal.id, phase: 'active' })
+    expect(foldGoal(childSeed).goal).toBeUndefined()
+    const last = childSeed.at(-1)
+    expect(last?.type).toBe('goal/change')
+    if (last?.type !== 'goal/change') throw new Error('expected a durable clear tombstone')
+    expect(last.seq).toBe(parentPrefix.length)
+    expect(decodeGoalChange(last.data)).toMatchObject({
+      operation: 'clear',
+      cleared: { id: goal.id, revision: goal.revision + 1 },
+    })
+  })
+
+  it('returns an already-cleared fork seed unchanged', async () => {
+    const { ctx, agent, session } = await harness()
+    ctx.goals.create(agent, { objective: 'clear once' })
+    const cleared = clearGoalFromForkSeed(session.events, 2_000)
+
+    expect(clearGoalFromForkSeed(cleared, 3_000)).toBe(cleared)
+  })
+
+  it('returns a non-empty fork seed without a goal unchanged', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const session = ctx.sessions.create(SessionId('goal-seed-empty'))
+    appendInjection(session, createUserMessage({
+      content: [{ type: 'text', text: 'context only' }],
+      source: { kind: 'user' },
+    }))
+    const seed = session.events
+
+    expect(clearGoalFromForkSeed(seed, 2_000)).toBe(seed)
+  })
+
+  it('clears a completed goal from a fork seed', async () => {
+    const { ctx, agent, session } = await harness()
+    const goal = ctx.goals.create(agent, { objective: 'done before fork' })
+    const done = ctx.goals.complete(agent, goal)
+
+    const childSeed = clearGoalFromForkSeed(session.events, 2_000)
+
+    expect(foldGoal(childSeed).goal).toBeUndefined()
+    const last = childSeed.at(-1)
+    expect(last?.type).toBe('goal/change')
+    if (last?.type !== 'goal/change') throw new Error('expected a durable clear tombstone')
+    expect(decodeGoalChange(last.data)).toMatchObject({
+      operation: 'clear',
+      cleared: { id: goal.id, revision: done.revision + 1 },
+    })
   })
 
   it('disarms live activation on every session-start edge', async () => {

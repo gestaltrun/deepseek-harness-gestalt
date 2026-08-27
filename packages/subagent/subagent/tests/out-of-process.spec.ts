@@ -27,6 +27,7 @@ describe('NO_START_CAPABILITIES', () => {
       toolFilter: false,
       persona: false,
       agentOptions: false,
+      images: false,
     })
     expect(Object.isFrozen(NO_START_CAPABILITIES)).toBe(true)
   })

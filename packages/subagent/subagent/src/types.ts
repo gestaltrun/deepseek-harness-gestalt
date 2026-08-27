@@ -90,6 +90,13 @@ export interface SubagentCapabilities {
   readonly persona: boolean
   /** Whether the backend applies `request.agentOptions` to the child LLM route. */
   readonly agentOptions: boolean
+  /**
+   * Whether the child's model request can carry `ImageBlock`s submitted inside
+   * `request.prompt`. In-process backends hand the blocks to the child's own
+   * request assembly unchanged; out-of-process backends opt in only after their
+   * wire provably preserves image blocks end to end.
+   */
+  readonly images: boolean
 }
 
 /**

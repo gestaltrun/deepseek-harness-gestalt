@@ -26,9 +26,9 @@ import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import {
   applyReadImageTool,
   formatImageReadOutput,
-  imageMediaTypeForPath,
   imageRefFromValue,
 } from '../src/read-image.ts'
+import { imageMediaTypeForPath } from '../src/read-policy.ts'
 
 /** 1x1 red PNG (valid signature, IHDR, IDAT). */
 const PNG_1X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64')

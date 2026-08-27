@@ -1,14 +1,15 @@
 /**
- * Settings shell root: the sidebar-foot trigger row plus the centered modal
- * panel (figma 501:29947, 1080x700) with the section nav rail. The shell is
- * a pure composition face — every piece of text (trigger label, panel title,
+ * Settings shell root: the sidebar-foot trigger row plus the full-viewport
+ * settings page it opens (left section nav column + content area). The shell
+ * is a pure composition face — every piece of text (trigger label, page title,
  * close label, sections) arrives from registrants through slots; accessible
- * names resolve to that content (trigger: its own text; dialog:
- * aria-labelledby the title node; close: visually-hidden slot text). Modal
+ * names resolve to that content (trigger: its own text; page:
+ * aria-labelledby the title node; close: visually-hidden slot text). Page
  * open state and the active section id are component-local viewing state;
  * the onboarding coordinator mounts exactly one ordered registrant while the
- * sessions-derived empty-Hero fact is active. Visible dialog chrome belongs
- * to the step, so a mounted-but-deciding step paints nothing here.
+ * sessions-derived empty-Hero fact is active. The page paints in every chrome
+ * mode — web, Desktop Host overlay view, and the overlay document — so the
+ * browser and Desktop surfaces are the same page, not two shells.
  */
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import clsx from 'clsx'
@@ -74,7 +75,7 @@ function settingsDesktopBridge(): SettingsDesktopBridge | undefined {
   return bridge as SettingsDesktopBridge
 }
 
-type PanelProps = {
+type PageProps = {
   rows: readonly SettingsSectionRow[]
   renderSlot: SettingsRootComponentProps['renderSlot']
   activeId: string | undefined
@@ -83,11 +84,11 @@ type PanelProps = {
 }
 
 /**
- * The modal layer: full-viewport mask + centered panel. Close paths: the
- * header button, a mask click, and document-level Escape (mounted only while
- * open, so the listener lifetime is the panel's).
+ * The settings page: full-viewport, nav column left + content area right.
+ * Close paths: the header button and document-level Escape (mounted only
+ * while open, so the listener lifetime is the page's).
  */
-function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelProps) {
+function SettingsPage({ rows, renderSlot, activeId, onSelect, onClose }: PageProps) {
   // Entries can unmount underneath the requested id, so the render-time
   // projection falls back to the first row when the id is gone.
   const active = rows.find(r => r.id === activeId)?.id ?? rows[0]?.id
@@ -101,42 +102,39 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
     return () => { document.removeEventListener('keydown', onKeyDown) }
   }, [onClose])
 
-  // Baseline focus management: entering the dialog lands on the close button.
+  // Baseline focus management: entering the page lands on the close button.
   const closeButton = useRef<HTMLButtonElement | null>(null)
   useEffect(() => { closeButton.current?.focus() }, [])
 
   return (
-    <div className={css.overlay} role="presentation">
-      <div className={css.mask} aria-hidden="true" onClick={onClose} />
-      <div className={css.panel} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <nav className={css.nav}>
-          <div className={css.navTitle} id={titleId}>{renderSlot('settings.header', {})}</div>
-          <div className={css.navList}>
-            {rows.map(row => (
-              <button
-                key={row.id}
-                type="button"
-                className={clsx(css.navCell, row.id === active && css.active)}
-                aria-current={row.id === active ? 'true' : undefined}
-                onClick={() => { onSelect(row.id) }}
-              >
-                {navIcon(row.id)}
-                <span className={css.navLabel}>{row.label}</span>
-              </button>
-            ))}
-          </div>
-        </nav>
-        <div className={css.content}>
-          <div className={css.header}>
-            <div className={css.actions}>{renderSlot('settings.action', {})}</div>
-            <button ref={closeButton} type="button" className={css.close} onClick={onClose}>
-              <IconCloseOutline16 size={14} />
-              <span className={css.hiddenLabel}>{renderSlot('settings.close', {})}</span>
+    <div className={css.page} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <nav className={css.nav}>
+        <div className={css.navTitle} id={titleId}>{renderSlot('settings.header', {})}</div>
+        <div className={css.navList}>
+          {rows.map(row => (
+            <button
+              key={row.id}
+              type="button"
+              className={clsx(css.navCell, row.id === active && css.active)}
+              aria-current={row.id === active ? 'true' : undefined}
+              onClick={() => { onSelect(row.id) }}
+            >
+              {navIcon(row.id)}
+              <span className={css.navLabel}>{row.label}</span>
             </button>
-          </div>
-          <div className={css.options}>
-            {active !== undefined && renderSlot('settings.section', { close: onClose }, { only: active })}
-          </div>
+          ))}
+        </div>
+      </nav>
+      <div className={css.content}>
+        <div className={css.header}>
+          <div className={css.actions}>{renderSlot('settings.action', {})}</div>
+          <button ref={closeButton} type="button" className={css.close} onClick={onClose}>
+            <IconCloseOutline16 size={14} />
+            <span className={css.hiddenLabel}>{renderSlot('settings.close', {})}</span>
+          </button>
+        </div>
+        <div className={css.options}>
+          {active !== undefined && renderSlot('settings.section', { close: onClose }, { only: active })}
         </div>
       </div>
     </div>
@@ -245,7 +243,7 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
 
   if (mode === 'overlay') {
     return open ? (
-      <SettingsPanel
+      <SettingsPage
         rows={rows}
         renderSlot={renderSlot}
         activeId={activeId}
@@ -270,7 +268,7 @@ export function SettingsRoot(props: SettingsRootComponentProps) {
         {renderSlot('settings.trigger', { wide })}
       </button>
       {open && mode === 'web' && (
-        <SettingsPanel
+        <SettingsPage
           rows={rows}
           renderSlot={renderSlot}
           activeId={activeId}

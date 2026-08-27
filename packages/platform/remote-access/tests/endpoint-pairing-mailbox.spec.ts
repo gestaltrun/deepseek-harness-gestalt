@@ -303,10 +303,10 @@ describe('EndpointOwnedPairingMailbox', () => {
     }) }).toThrow('authority replay is stale')
   })
 
-  it('rejects unavailable cancellation and unbounded opaque messages', () => {
+  it('keeps absent cancellation idempotent and rejects unavailable or unbounded messages', () => {
     const mailbox = completedMessage1()
     expect(() => { mailbox.cancelChallenge(CHALLENGE, ACCOUNT, DESKTOP) }).toThrow('unavailable')
-    expect(() => { mailbox.cancelChallenge(parsePairingChallengeId('missing'), ACCOUNT, DESKTOP) }).toThrow('unavailable')
+    expect(() => { mailbox.cancelChallenge(parsePairingChallengeId('missing'), ACCOUNT, DESKTOP) }).not.toThrow()
     for (const message1 of [new Uint8Array(), new Uint8Array(4_097)]) {
       expect(() => mailbox.submitMessage1({
         challengeId: CHALLENGE, completionId: parsePairingCompletionId('opaque'), accountId: ACCOUNT,

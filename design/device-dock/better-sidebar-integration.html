@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<!-- Throwaway hi-fi mockup — never import into production. -->
+<!-- 主稿 A：ui-better-sidebar 骨架还原 + 「手机」tab 接入（VSCode 风格 Tab 条 / + 菜单）。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主稿 A · better-sidebar「手机」Tab 接入</title>
+<style>
+/* ================= dsh token sheet =================
+   Extracted from packages/client/ui-theme/src/styles/
+   (design-platform.css + gradient-shadow-text.css + base.css).
+   Dark values mirror the [data-ds-dark-theme] remaps; this prototype
+   scopes them on the same attribute name so pages stay consistent. */
+body {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration: 0.2s;
+  --ds-transition-duration-fast: 0.1s;
+
+  /* static scale */
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-deepseek-50: rgb(237, 243, 254);
+  --dsw-static-deepseek-100: rgb(228, 237, 254);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-300: rgb(183, 200, 254);
+  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-450: rgb(86, 134, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-amber-100: rgb(254, 245, 231);
+  --dsw-static-amber-400: rgb(247, 173, 49);
+  --dsw-static-amber-500: rgb(245, 158, 11);
+  --dsw-static-amber-600: rgb(221, 134, 41);
+
+  /* semantic aliases — light */
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-alias-interactive-bg-active: rgba(38, 49, 72, 0.1);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-warn-label: var(--dsw-static-amber-600);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-50);
+
+  /* typography roles */
+  --dsw-font-s-strong-14: 500 14px/22px var(--dsw-font-family);
+  --dsw-font-s-14: 400 14px/22px var(--dsw-font-family);
+  --dsw-font-xs-13: 400 13px/20px var(--dsw-font-family);
+  --dsw-font-xs-strong-13: 500 13px/20px var(--dsw-font-family);
+  --dsw-font-xxs-12: 400 12px/18px var(--dsw-font-family);
+  --dsw-font-xxs-strong-12: 500 12px/18px var(--dsw-font-family);
+  --dsw-font-code-block-small: 400 12px/18px var(--ds-font-family-code);
+
+  --dsw-shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+  --dsw-shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+
+  /* better-sidebar geometry — values copied from the package source:
+     PANEL_MIN/PANEL_DEFAULT/PANEL_MAX/TAB_MAX_WIDTH = state.ts L121-L124;
+     tab strip 34px, tab min/max width, plus-button 22x22 = sidebar.module.css L759/L811/L880;
+     WIDTH_PERCENT_* (20/60/35) = src/prefs-shared.ts L227-L229. */
+  --bs-panel-min: 280px;
+  --bs-panel-default: 400px;
+  --bs-panel-max: 640px;
+  --bs-tabbar-h: 34px;
+  --bs-tab-min: 64px;
+  --bs-tab-max: 160px;
+}
+[data-dsw-dark-theme] {
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-brand-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.14);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-900);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: var(--dsw-font-s-14); }
+
+/* prototype annotation bar — meta chrome, not part of the evaluated design */
+.proto-note {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 20px;
+  border-bottom: 1px dashed var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+.proto-note .tag {
+  flex: none; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-state-warn-label);
+  color: var(--dsw-alias-state-warn-label);
+  font: var(--dsw-font-code-block-small); letter-spacing: 0.04em;
+}
+.proto-note b { color: var(--dsw-alias-label-primary); font-weight: 500; }
+.proto-note code {
+  font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2); padding: 1px 7px; border-radius: 6px;
+}
+.proto-note .spacer { flex: 1; }
+
+.page-head { max-width: 1180px; margin: 30px auto 18px; padding: 0 24px; }
+.page-head h1 { font-size: 16px; line-height: 24px; font-weight: 500; margin: 0 0 6px; }
+.page-head p { margin: 0 0 4px; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+.page-head code { font: var(--dsw-font-code-block-small); background: var(--dsw-alias-bg-layer-2); padding: 0 6px; border-radius: 5px; }
+
+/* ================= scene：conversation + better-sidebar panel ================= */
+.scene {
+  max-width: 1180px; margin: 0 auto 26px; padding: 0 24px;
+  display: flex; gap: 14px; align-items: stretch;
+}
+
+.convo {
+  flex: 1; min-width: 420px;
+  border-radius: 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-base);
+  box-shadow: var(--dsw-shadow-lv1);
+  display: flex; flex-direction: column;
+  overflow: hidden; opacity: 0.94;
+}
+.convo-bar {
+  flex: none; height: 44px; padding: 0 16px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.convo-bar b { font-weight: 500; font-size: 14px; }
+.flow { flex: 1; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.msg-user { align-self: flex-end; max-width: 80%; width: fit-content; border-radius: 13px 13px 4px 13px; padding: 8px 12px; background: var(--dsw-static-deepseek-50); font-size: 13px; line-height: 21px; }
+[data-dsw-dark-theme] .msg-user { background: var(--dsw-static-neutral-bluish-850); }
+.msg-agent { max-width: 88%; font-size: 13px; line-height: 22px; color: var(--dsw-alias-label-primary); }
+.composer-stub {
+  flex: none; margin: 10px 14px 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 12px; box-shadow: var(--dsw-shadow-lv1);
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 10px 12px 8px;
+}
+.composer-stub .ph { color: var(--dsw-alias-label-caption); font-size: 12px; padding-bottom: 12px; }
+.composer-stub .row { display: flex; gap: 7px; align-items: center; }
+.composer-stub .chipw { width: 20px; height: 20px; border-radius: 6px; background: var(--dsw-alias-bg-layer-2); }
+
+/* ---------- the sidebar panel itself ---------- */
+.bspanel {
+  flex: none; position: relative;
+  width: var(--bs-panel-default);          /* PANEL_DEFAULT = 400 (state.ts L123) */
+  border-radius: 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-specific-sidebar-fill);
+  box-shadow: var(--dsw-shadow-lv3);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  min-height: 720px;
+}
+/* left resize strip hint (PANEL_MIN..PANEL_MAX, panel-side drag) */
+.panel-resize {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+  cursor: col-resize;
+  background:
+    linear-gradient(to right, transparent 40%, var(--dsw-alias-border-l2) 40%, var(--dsw-alias-border-l2) calc(40% + 1px), transparent 0) center / 100% 18px repeat-y;
+  opacity: .7;
+}
+
+.tabstrip {
+  flex: none; height: var(--bs-tabbar-h);   /* tabBar height = 34 (sidebar.module.css L764) */
+  display: flex; align-items: stretch;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  padding-right: 6px;
+}
+.tablist { flex: 1; min-width: 0; display: flex; overflow-x: auto; scrollbar-width: none; }
+.tablist::-webkit-scrollbar { display: none; }
+.tabitem {
+  flex: none;
+  max-width: var(--bs-tab-max);             /* TAB_MAX_WIDTH = 160 (state.ts L124) */
+  min-width: var(--bs-tab-min);             /* tab min-width 64 (sidebar.module.css L814) */
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 4px 0 10px;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-label-secondary);
+  border-right: 1px solid var(--dsw-alias-border-l1);
+  cursor: pointer; user-select: none; white-space: nowrap;
+}
+.tabitem:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.tabitem.active {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-active);
+}
+.tabitem svg { flex: none; }
+.tabtitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabclose {
+  flex: none; width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 4px; background: transparent;
+  color: var(--dsw-alias-label-tertiary); cursor: pointer;
+}
+.tabclose:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.plusbtn {
+  flex: none; align-self: center;
+  width: 22px; height: 22px; margin: 0 6px; /* tabBarPlus metrics (sidebar.module.css L888-892) */
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 5px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary); cursor: pointer;
+}
+.plusbtn:hover, .plusbtn.open { background: var(--dsw-alias-interactive-bg-active); color: var(--dsw-alias-label-primary); }
+
+.pane-body {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  padding: 22px 20px;
+  overflow: hidden; position: relative;
+}
+.pane-hint { text-align: center; color: var(--dsw-alias-label-tertiary); font-size: 13px; line-height: 20px; margin-top: 90px; }
+.pane-hint b { display:block; color: var(--dsw-alias-label-secondary); font-weight: 500; margin-bottom: 6px; }
+.pane-teaser {
+  margin: 46px auto 0; max-width: 300px;
+  border: 1px dashed var(--dsw-alias-border-l3);
+  border-radius: 12px; padding: 14px 16px;
+  font-size: 12px; line-height: 19px; color: var(--dsw-alias-label-caption);
+}
+.pane-teaser code { font: var(--dsw-font-code-block-small); }
+
+/* + 菜单展开态（Portal Menu，右对齐于 + 按钮） */
+.newtab-menu {
+  position: absolute; top: calc(var(--bs-tabbar-h) + 4px); right: 8px; z-index: 30;
+  width: 236px; padding: 5px;
+  border-radius: 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-3);
+  box-shadow: var(--dsw-shadow-lv3);
+}
+.menu-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 9px; border-radius: 6px;
+  font-size: 13px; color: var(--dsw-alias-label-primary);
+  cursor: pointer; white-space: nowrap;
+}
+.menu-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.menu-row.disabled { color: var(--dsw-alias-label-caption); cursor: default; }
+.menu-row.disabled:hover { background: transparent; }
+.menu-row .ordmeta {
+  margin-left: auto;
+  font: var(--dsw-font-code-block-small);
+  color: var(--dsw-alias-label-caption);
+}
+.menu-sep { height: 1px; margin: 5px 8px; background: var(--dsw-alias-border-l1); }
+
+.marker {
+  display: inline-grid; place-items: center;
+  width: 15px; height: 15px; flex: none;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-base);
+  font: 500 10px/1 var(--ds-font-family-code);
+}
+
+/* 「本次新增」高亮标签（评审用，非产品像素） */
+.newtag {
+  display: inline-flex; align-items: center;
+  margin-left: 8px; padding: 0 7px; height: 15px; border-radius: 999px;
+  background: var(--dsw-static-green-100);
+  color: var(--dsw-alias-state-success-primary);
+  font-size: 10px; font-weight: 600; letter-spacing: .02em;
+}
+[data-dsw-dark-theme] .newtag { background: var(--dsw-static-green-100); }
+
+/* ================= 源码符号对照表 ================= */
+.specwrap { max-width: 1180px; margin: 0 auto 90px; padding: 0 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 1080px) { .specwrap { grid-template-columns: 1fr; } }
+.spec-card {
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 16px 18px;
+}
+.spec-card h3 { margin: 0 0 10px; font-size: 13px; font-weight: 500; color: var(--dsw-alias-label-secondary); }
+.spec-row { display: flex; gap: 9px; padding: 5px 0; font-size: 12.5px; line-height: 19px; border-top: 1px solid var(--dsw-alias-border-l1); align-items: baseline; }
+.spec-row:first-of-type { border-top: none; }
+.spec-row .sym { font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2); padding: 0 6px; border-radius: 5px; white-space: nowrap; }
+.spec-row .ref { margin-left: auto; font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-caption); white-space: nowrap; }
+.spec-row p { margin: 0; color: var(--dsw-alias-label-secondary); }
+.spec-row p em { font-style: normal; color: var(--dsw-alias-state-business-primary); }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="proto-note">
+  <span class="tag">PROTOTYPE · 主稿 A</span>
+  <b>屏幕：better-sidebar 整体骨架 +「手机」tab 接入</b>
+  <code>承载假设：外部包 ctx.get('betterSidebar').registerTab(descriptor)，不占 settings 卡与右栏 dock</code>
+  <span>几何全部取自包源码：面板 280/400/640、Tab 条 34px、tab 宽 64–160 —— 对应符号见页底对照表。</span>
+  <span class="spacer"></span>
+  <a href="./README.md" style="color:inherit;">索引</a><span>·</span><a href="./phone-tab.html" style="color:inherit;">主稿 B「手机」tab 内容 →</a>
+</div>
+
+<div class="page-head">
+  <h1>better-sidebar「手机」tab · 骨架还原</h1>
+  <p>右侧面板为 <code>packages/client/ui-better-sidebar</code> 的像素还原：VSCode 风格 Tab 条 + 右端「+」菜单。本次新增一项 tab 类型「手机」——以外部插件身份通过 <code>service.registerTab()</code> 注册（同款路径见 builtins/index.ts 的自注册聚合与 ui-workbench 的 workbenchBrowser 委派）。</p>
+  <p>尺寸来源：<code>state.ts L121–124</code>（PANEL_MIN 280 / PANEL_DEFAULT 400 / PANEL_MAX 640 / TAB_MAX_WIDTH 160）、<code>sidebar.module.css L759/L811–817/L880–892</code>（条高 34、tab 64–160、+ 按钮 22×22）、<code>prefs-shared.ts L227–229</code>（默认宽 35%，1440 视口 ≈ 504，钳制进 [280, 640]）。</p>
+</div>
+
+<div class="scene">
+
+  <!-- 会话列（压缩后的中心列，仅作环境参照） -->
+  <section class="convo" aria-hidden="true">
+    <div class="convo-bar"><b>设备面板原型评审</b></div>
+    <div class="flow">
+      <div class="msg-agent">我把会话列压到最小可用宽度——better-sidebar 打开时会挤占中心列，最窄仍保持可读。</div>
+      <div class="msg-user">嗯，注意手机 tab 在窄面板下也要能操作。</div>
+      <div class="msg-agent">B 稿里所有状态都按 400px 面板宽度排的。</div>
+    </div>
+    <div class="composer-stub">
+      <div class="ph">回复 DeepSeek…</div>
+      <div class="row"><span class="chipw"></span><span class="chipw"></span></div>
+    </div>
+  </section>
+
+  <!-- better-sidebar 面板 -->
+  <aside class="bspanel" aria-label="better-sidebar 面板骨架">
+    <div class="panel-resize" title="拖拽调宽 · PANEL_MIN 280 ↔ PANEL_MAX 640"></div>
+
+    <!-- ── Tab 条（css.tabBar）────────────────────────── -->
+    <div class="tabstrip">
+      <div class="tablist">
+        <div class="tabitem" title="editor · 文件窗口">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4.6c0-.9.7-1.6 1.6-1.6h2.6l1.6 1.7h4.6c.9 0 1.6.7 1.6 1.6v5.1c0 .9-.7 1.6-1.6 1.6H3.6c-.9 0-1.6-.7-1.6-1.6V4.6Z" stroke="currentColor" stroke-width="1.3"/></svg>
+          <span class="tabtitle">文件</span>
+          <button class="tabclose" tabindex="-1" aria-label="关闭"><svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="m3 3 8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="tabitem" title="git · 单例 single:true">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="4.5" cy="4" r="1.9" stroke="currentColor" stroke-width="1.3"/><circle cx="4.5" cy="12" r="1.9" stroke="currentColor" stroke-width="1.3"/><circle cx="11.5" cy="6.5" r="1.9" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 6v4M11 8.4C10 10 7.5 9.8 5.6 11" stroke="currentColor" stroke-width="1.3"/></svg>
+          <span class="tabtitle">Git 变更</span>
+          <button class="tabclose" tabindex="-1" aria-label="关闭"><svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="m3 3 8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        </div>
+        <div class="tabitem active" title="phone · 本次新增类型">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+          <span class="tabtitle">手机</span>
+          <span class="newtag">NEW</span>
+          <button class="tabclose" tabindex="-1" aria-label="关闭"><svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="m3 3 8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+        </div>
+      </div>
+      <button class="plusbtn open" title="新建 Tab" aria-expanded="true">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <!-- ── 面板内容区：本稿只交代骨架，「手机」内容见 B 稿 ── -->
+    <div class="pane-body">
+      <div class="pane-hint"><b>手机</b>tab 已激活 —— 四态内容排版见主稿 B（phone-tab.html）。</div>
+      <div class="pane-teaser">
+        本稿对焦<b style="color:var(--dsw-alias-label-secondary);">骨架与注册语义</b>：Tab 条元素 ↔ <code>TabDescriptor</code> 字段、
+        「+」菜单行 ↔ <code>buildNewTabOptions()</code> 输出、
+        面板左右缘 ↔ <code>PANEL_MIN/MAX</code>。
+      </div>
+
+      <!-- ── 「+」菜单展开态 ── -->
+      <nav class="newtab-menu" aria-label="新建 Tab 菜单">
+        <div class="menu-row"><span class="marker">②</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4.6c0-.9.7-1.6 1.6-1.6h2.6l1.6 1.7h4.6c.9 0 1.6.7 1.6 1.6v5.1c0 .9-.7 1.6-1.6 1.6H3.6c-.9 0-1.6-.7-1.6-1.6V4.6Z" stroke="currentColor" stroke-width="1.3"/></svg>
+          文件<span class="ordmeta">order 10</span>
+        </div>
+        <div class="menu-row"><span class="marker">②</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="4.5" cy="4" r="1.9" stroke="currentColor" stroke-width="1.3"/><circle cx="4.5" cy="12" r="1.9" stroke="currentColor" stroke-width="1.3"/><circle cx="11.5" cy="6.5" r="1.9" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 6v4M11 8.4C10 10 7.5 9.8 5.6 11" stroke="currentColor" stroke-width="1.3"/></svg>
+          Git 变更<span class="ordmeta">20</span>
+        </div>
+        <div class="menu-row"><span class="marker">②</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="2.6" width="9" height="7" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="m5.5 9.6v3l3.4-3" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M13 6h1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" opacity=".55"/></svg>
+          子智能体<span class="ordmeta">30</span>
+        </div>
+        <div class="menu-row"><span class="marker">②</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 4.8A1.8 1.8 0 0 1 4.8 3h6.4A1.8 1.8 0 0 1 13 4.8v4a1.8 1.8 0 0 1-1.8 1.8H8.2L5.4 13V10.6h-.6A1.8 1.8 0 0 1 3 8.8v-4Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+          Side Chat<span class="ordmeta">35</span>
+        </div>
+        <div class="menu-row"><span class="marker">②</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2" y="2.6" width="12" height="10.8" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="m4.6 6 2.2 2-2.2 2M8.2 10.4H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          终端<span class="ordmeta">40</span>
+        </div>
+        <div class="menu-row disabled" title="TERMINAL_LIMIT=3 时 available() 返回 false → 行置灰而非隐藏">
+          <span class="marker">③</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="opacity:.55;"><rect x="2" y="2.6" width="12" height="10.8" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="m4.6 6 2.2 2-2.2 2M8.2 10.4H11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          终端 · 已达上限<span class="ordmeta" style="text-decoration:line-through;">available()=false</span>
+        </div>
+        <div class="menu-sep"></div>
+        <div class="menu-row"><span class="marker">②</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.8" stroke="currentColor" stroke-width="1.3"/><ellipse cx="8" cy="8" rx="2.6" ry="5.8" stroke="currentColor" stroke-width="1.1"/><path d="M2.4 8h11.2" stroke="currentColor" stroke-width="1.1"/></svg>
+          浏览器<span class="ordmeta">50</span>
+        </div>
+        <div class="menu-row" style="background:var(--dsw-alias-interactive-bg-hover);outline:1px dashed var(--dsw-alias-state-business-primary);outline-offset:-1px;" >
+          <span class="marker">①</span>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+          手机<span class="newtag">NEW</span><span class="ordmeta">55 ← 新增 order</span>
+        </div>
+      </nav>
+      <div style="position:absolute;top:42px;left:20px;font:var(--dsw-font-code-block-small);color:var(--dsw-alias-label-caption);">
+        ⓘ diff 描述符 order −1 且 hidden:true —— 从不出现在此菜单（tabs.tsx L319-330）
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- ================= 源码符号对照 ================= -->
+<div class="specwrap">
+  <div class="spec-card">
+    <h3>Tab 条元素 ↔ TabDescriptor（builtins/tabs.tsx · service.ts L161–244）</h3>
+    <div class="spec-row">
+      <span class="marker">①</span>
+      <p>新增「手机」tab 与菜单项 —— 外部包注册：
+        <code class="sym">ctx.get('betterSidebar').registerTab({ id:'phone', … })</code>，返回 disposer（builtins/index.ts 同款聚合；上线后不再需要 mockups 里那颗 NEW 标）。</p>
+    </div>
+    <div class="spec-row">
+      <span class="sym">icon(size)</span>
+      <span class="ref">descriptor.icon</span>
+      <p>tab 上 14px、+ 菜单里 <em>icon(16)</em>（Sidebar.tsx L177）；中性手机 SVG 由本包自带 primitives 图标族补充。</p>
+    </div>
+    <div class="spec-row">
+      <span class="sym">id</span>
+      <span class="ref">'phone'</span>
+      <p>同时是 <code class="sym">SidebarTab.type</code> 值；实例 id 建议 <code class="sym">phone:&lt;serial&gt;</code>（仿 terminal:<code>uuid</code> 的 createTab 模式，多设备并存时按 serial 去重）。</p>
+    </div>
+    <div class="spec-row">
+      <span class="sym">badge</span>
+      <span class="ref">descriptor.badge</span>
+      <p>tab-strip 徽标（sidebar.module.css .tabBadge）：连接中显示设备数或运行状态点 —— 评审确认是否要在 v1 就带徽标。</p>
+    </div>
+    <div class="spec-row">
+      <span class="sym">visible</span>
+      <span class="ref">TabComponentProps</span>
+      <p>组件仅在「激活且面板打开」时收到 <code class="sym">visible:true</code>；手机流应在 false 时暂停拉流。</p>
+    </div>
+  </div>
+
+  <div class="spec-card">
+    <h3>「+」菜单 ↔ buildNewTabOptions()（Sidebar.tsx L162–179）</h3>
+    <div class="spec-row">
+      <span class="marker">②</span>
+      <p>菜单行 = <code class="sym">{ id, label, icon }</code>：过滤 <code class="sym">hidden</code> 与设置页停用项后按 <em>(order ?? 100)</em> 升序；「手机」填 <code class="sym">order: 55</code> 排在浏览器之后、不挤动内置序号。</p>
+    </div>
+    <div class="spec-row">
+      <span class="marker">③</span>
+      <p>禁用而非隐藏：<code class="sym">available(ctx, scope, state) → false</code> 渲染灰行（终 terminal 满 3 个的现状演示）；「手机」无设备时不禁用菜单项 —— 空态引导放进 tab 内容（见 B 稿状态 1），保持入口恒可达。</p>
+    </div>
+    <div class="spec-row">
+      <span class="sym">createTab(state)</span>
+      <span class="ref"> descriptor.createTab</span>
+      <p>多设备并存：mint <code class="sym">phone:&lt;serial&gt;</code>；单窗口策略则用 <code class="sym">single:true</code>（＝ dedupeKey 常等 id），二选一需拍板。</p>
+    </div>
+    <div class="spec-row">
+      <span class="sym">Menu portal</span>
+      <span class="ref">TabBar.tsx L309–367</span>
+      <p>web 走内联 Menu（本稿样子）；Desktop 窗口走 <code class="sym">chromeOverlayShow</code> 原生覆盖菜单，视觉随平台。</p>
+    </div>
+    <div class="spec-row">
+      <span class="sym">width chain</span>
+      <span class="ref">prefs-shared.ts L227–229</span>
+      <p>默认宽度 = 视口 × defaultWidthPercent(35%) 再钳制 [PANEL_MIN 280, PANEL_MAX 640]；侧缘拖拽双向越界即回弹。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+// Prototype affordance: toggle the "+" menu and tab activation states.
+(function () {
+  var menu = document.querySelector('.newtab-menu');
+  var plus = document.querySelector('.plusbtn');
+  plus.addEventListener('click', function () {
+    var open = menu.style.display !== 'none';
+    menu.style.display = open ? 'none' : '';
+    plus.classList.toggle('open', !open);
+    plus.setAttribute('aria-expanded', String(!open));
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { menu.style.display = 'none'; plus.classList.remove('open'); }
+  });
+})();
+</script>
+</body>
+</html>

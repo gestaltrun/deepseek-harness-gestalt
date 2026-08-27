@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<!-- Throwaway hi-fi mockup — never import into production. -->
+<!-- 主稿 B：「手机」tab 激活态四态纵排，全部按 better-sidebar 实际面板宽度排版。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主稿 B · 「手机」tab 四态</title>
+<style>
+/* ================= dsh token sheet =================
+   Extracted from packages/client/ui-theme/src/styles/
+   (design-platform.css + gradient-shadow-text.css + base.css). */
+body {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration: 0.2s;
+  --ds-transition-duration-fast: 0.1s;
+
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-deepseek-50: rgb(237, 243, 254);
+  --dsw-static-deepseek-100: rgb(228, 237, 254);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-red-100: rgb(254, 226, 226);
+  --dsw-static-red-500: rgb(239, 68, 68);
+  --dsw-static-red-600: rgb(236, 19, 19);
+  --dsw-static-amber-100: rgb(254, 245, 231);
+  --dsw-static-amber-500: rgb(245, 158, 11);
+  --dsw-static-amber-600: rgb(221, 134, 41);
+
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-alias-interactive-bg-active: rgba(38, 49, 72, 0.1);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-secondary: var(--dsw-static-green-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-100);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-600);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-warn-label: var(--dsw-static-amber-600);
+  --dsw-alias-state-warn-tertiary: var(--dsw-static-amber-100);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-50);
+
+  --dsw-font-s-strong-14: 500 14px/22px var(--dsw-font-family);
+  --dsw-font-s-14: 400 14px/22px var(--dsw-font-family);
+  --dsw-font-xs-13: 400 13px/20px var(--dsw-font-family);
+  --dsw-font-xs-strong-13: 500 13px/20px var(--dsw-font-family);
+  --dsw-font-xxs-12: 400 12px/18px var(--dsw-font-family);
+  --dsw-font-xxs-strong-12: 500 12px/18px var(--dsw-font-family);
+  --dsw-font-code-block-small: 400 12px/18px var(--ds-font-family-code);
+
+  --dsw-shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+  --dsw-shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
+
+  /* geometry copied from package sources (cited in the page head):
+     panel contract = state.ts L121-L124; tab strip/tab widths = sidebar.module.css;
+     width percent bounds = src/prefs-shared.ts L227-L229;
+     free-window phone ratio precedent = state.ts L133-L138. */
+  --bs-panel-default: 400px;   /* PANEL_DEFAULT */
+  --bs-panel-min: 280px;       /* PANEL_MIN */
+  --bs-panel-max: 640px;       /* PANEL_MAX */
+  --bs-tabbar-h: 34px;
+}
+[data-dsw-dark-theme] {
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.14);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-900);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-900);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: var(--dsw-font-s-14); }
+
+.proto-note {
+  position: sticky; top: 0; z-index: 40;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 20px;
+  border-bottom: 1px dashed var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+.proto-note .tag {
+  flex: none; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-state-warn-label);
+  color: var(--dsw-alias-state-warn-label);
+  font: var(--dsw-font-code-block-small); letter-spacing: 0.04em;
+}
+.proto-note b { color: var(--dsw-alias-label-primary); font-weight: 500; }
+.proto-note code {
+  font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2); padding: 1px 7px; border-radius: 6px;
+}
+.proto-note .spacer { flex: 1; }
+
+.page-head { max-width: 900px; margin: 30px auto 6px; padding: 0 24px; }
+.page-head h1 { font-size: 16px; line-height: 24px; font-weight: 500; margin: 0 0 6px; }
+.page-head p { margin: 0 0 4px; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+.page-head code { font: var(--dsw-font-code-block-small); background: var(--dsw-alias-bg-layer-2); padding: 0 6px; border-radius: 5px; }
+
+.stack { display: flex; flex-direction: column; align-items: center; gap: 40px; padding: 26px 20px 90px; }
+.state-block { display: flex; flex-direction: column; align-items: center; }
+.state-head { display: flex; align-items: baseline; gap: 10px; margin: 0 2px 10px; align-self: stretch; padding-left: 8px; }
+.state-head .idx {
+  width: 20px; height: 20px; border-radius: 999px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font-size: 12px; font-weight: 500; transform: translateY(3px);
+}
+.state-head h2 { margin: 0; font-size: 13px; font-weight: 500; color: var(--dsw-alias-label-secondary); letter-spacing: .02em; }
+.state-head span { font: var(--dsw-font-xxs-12); color: var(--dsw-alias-label-caption); }
+
+/* ---------- panel replica（骨架同主稿 A）---------- */
+.bspanel {
+  width: var(--bs-panel-default);
+  border-radius: 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-specific-sidebar-fill);
+  box-shadow: var(--dsw-shadow-lv2);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.tabstrip {
+  flex: none; height: var(--bs-tabbar-h);
+  display: flex; align-items: stretch;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  padding-right: 6px;
+}
+.tabitem {
+  display: flex; align-items: center; gap: 4px;
+  min-width: 64px; max-width: 160px;
+  padding: 0 4px 0 10px;
+  font: var(--dsw-font-xxs-12);
+  color: var(--dsw-alias-label-secondary);
+  border-right: 1px solid var(--dsw-alias-border-l1);
+  white-space: nowrap; cursor: default;
+}
+.tabitem.active { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-interactive-bg-active); }
+.tabtitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.plusbtn {
+  flex: none; align-self: center; width: 22px; height: 22px; margin: 0 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 5px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+}
+.pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* ---------- shared widgets ---------- */
+.seg { display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--dsw-specific-selector, var(--dsw-alias-bg-layer-2)); align-self: center; }
+.segbtn {
+  border: none; border-radius: 999px; padding: 3px 14px; cursor: pointer;
+  background: transparent; color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xs-13);
+}
+.segbtn.active { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font-weight: 500; box-shadow: var(--dsw-shadow-lv1); }
+
+.dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--dsw-alias-label-dimmed); }
+.dot.on { background: var(--dsw-alias-state-success-primary); animation: dd-pulse 2.2s infinite; }
+@keyframes dd-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--dsw-alias-state-success-tertiary); }
+  50% { box-shadow: 0 0 0 4px var(--dsw-alias-state-success-tertiary); }
+}
+
+.dev-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-radius: 8px;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.dev-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dev-name { font: var(--dsw-font-xs-strong-13); }
+.dev-meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xxs-12); }
+.gname { display: flex; align-items: center; gap: 8px; margin: 16px 0 2px; color: var(--dsw-alias-label-caption); font: var(--dsw-font-xxs-strong-12); letter-spacing: .05em; }
+.gname::after { content: ''; flex: 1; height: 1px; background: var(--dsw-alias-border-l1); }
+
+.minibtn {
+  flex: none; border: 1px solid var(--dsw-alias-border-l2); border-radius: 7px;
+  background: transparent; color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxs-12); padding: 4px 11px; cursor: pointer;
+}
+.minibtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.minibtn.primary { background: var(--dsw-alias-label-primary); color: var(--dsw-alias-label-primary-foreground); border-color: transparent; }
+
+.emptyrow {
+  border: 1px dashed var(--dsw-alias-border-l3); border-radius: 8px;
+  padding: 12px; text-align: center;
+  color: var(--dsw-alias-label-caption); font: var(--dsw-font-xxs-12);
+}
+
+.cmd { display: flex; align-items: center; gap: 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); padding: 7px 7px 7px 11px; margin-top: 8px; }
+.cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-primary); }
+.copybtn {
+  flex: none; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxs-12); padding: 3px 9px; cursor: pointer;
+}
+.copybtn.copied { color: var(--dsw-alias-state-success-primary); border-color: currentColor; }
+
+.alertcard { border-radius: 10px; padding: 11px 13px; font: var(--dsw-font-s-14); }
+.alertcard p { margin: 0; font-size: 13px; }
+.alertcard p small { display: block; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xxs-12); margin-top: 2px; }
+.alertcard.warn { background: var(--dsw-alias-state-warn-tertiary); color: var(--dsw-alias-state-warn-label); }
+.alertcard.err { background: var(--dsw-static-red-100); color: var(--dsw-alias-state-error-primary); }
+[data-dsw-dark-theme] .alertcard.err { background: rgba(242, 90, 90, 0.12); } /* alpha-derived from --dsw-static-red-400 */
+
+.errdot { flex: none; width: 18px; height: 18px; border-radius: 999px; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+.errdot.r { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-state-error-primary); }
+.errdot.w { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-state-warn-label); }
+.alert-actions { display: flex; gap: 7px; margin-top: 9px; justify-content: flex-end; }
+
+.spinner {
+  width: 13px; height: 13px; border-radius: 999px; flex: none;
+  border: 2px solid var(--dsw-alias-border-l3);
+  border-top-color: var(--dsw-alias-button-info-fill);
+  animation: dd-spin .8s linear infinite;
+}
+@keyframes dd-spin { to { transform: rotate(360deg); } }
+
+/* ---------- connected state: BrowserView-chrome-mirroring device view ----------
+   行距/输入高/圆图标按钮取自 browserBar(browserInput/iconButton 规则)，
+   画面按面板宽度裁切（react-device-view 形态）。 */
+.devbar {
+  flex: none; display: flex; align-items: center; gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+.iconbtn {
+  width: 28px; height: 28px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.iconbtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.iconbtn:focus-visible, .segbtn:focus-visible, .tierchip:focus-visible, .copybtn:focus-visible, .minibtn:focus-visible { outline: 2px solid var(--dsw-alias-button-info-fill); outline-offset: 2px; }
+[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute; left: 50%; top: calc(100% + 7px); transform: translateX(-50%);
+  background: var(--dsw-static-neutral-bluish-850);
+  color: var(--dsw-static-neutral-bluish-00);
+  font: var(--dsw-font-xxs-12);
+  padding: 4px 9px; border-radius: 7px;
+  white-space: nowrap; z-index: 45; pointer-events: none;
+  box-shadow: var(--dsw-shadow-lv2);
+}
+.devpick {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l1); border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+  font: var(--dsw-font-xxs-strong-12);
+  cursor: pointer; position: relative;
+}
+.devpick:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.tierchip {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px;
+  padding: 2px 8px; cursor: pointer;
+  background: transparent; color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-strong-12); white-space: nowrap;
+}
+.tierchip .reslv { color: var(--dsw-alias-label-caption); font-weight: 400; }
+.tierchip.active { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); }
+.tierchip .live { width: 5px; height: 5px; border-radius: 999px; background: var(--dsw-alias-state-success-primary); animation: dd-pulse 2.2s infinite; }
+.tierchip .biz { width: 5px; height: 5px; border-radius: 999px; background: var(--dsw-alias-state-business-primary); }
+
+.screenwrap { flex: none; display: grid; place-items: center; background: var(--dsw-alias-bg-layer-2); padding: 10px 0; }
+.phone-screen {
+  width: calc(var(--bs-panel-default) - 36px);   /* 400 − 2×面板边距 ≈ react-device-view 可用宽 */
+  aspect-ratio: 360 / 560;
+  border-radius: 12px; overflow: hidden;
+  outline: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  position: relative;
+}
+svg.scr { display: block; width: 100%; height: 100%; }
+
+.toolstrip { flex: none; display: flex; justify-content: center; gap: 4px; padding: 7px 8px; border-top: 1px solid var(--dsw-alias-border-l1); }
+.toolsep { width: 1px; background: var(--dsw-alias-border-l1); margin: 5px 6px; }
+.hintline { flex: none; text-align: center; color: var(--dsw-alias-label-caption); font: var(--dsw-font-xxs-12); padding: 1px 12px 8px; }
+.liveflag {
+  position: absolute; top: 8px; left: 8px; z-index: 5;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(84, 85, 87, 0.55);            /* --dsw-alias-button-tool-bar-fill 同值 */
+  color: var(--dsw-static-neutral-bluish-00);
+  font: var(--dsw-font-xxs-strong-12);
+}
+
+/* 扩展位示意：非主要交互 */
+.extendzone { border-top: 1px dashed var(--dsw-alias-border-l3); padding: 10px 14px 12px; display: flex; align-items: center; gap: 9px; }
+.extendbtn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px dashed var(--dsw-alias-state-business-primary); border-radius: 999px;
+  background: transparent; color: var(--dsw-alias-state-business-primary);
+  font: var(--dsw-font-xxs-strong-12); padding: 4px 12px; cursor: pointer;
+  opacity: .85;
+}
+.extendnote { font: var(--dsw-font-xxs-12); color: var(--dsw-alias-label-caption); line-height: 17px; }
+
+.statelabel-inline { font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-caption); }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="proto-note">
+  <span class="tag">PROTOTYPE · 主稿 B</span>
+  <b>屏幕：「手机」tab 内容四态</b>
+  <code>组件假设：descriptor.component = (TabComponentProps) => ReactNode，visible=false 时暂停拉流</code>
+  <span class="spacer"></span>
+  <a href="./README.md" style="color:inherit;">索引</a><span>·</span><a href="./better-sidebar-integration.html" style="color:inherit;">← 主稿 A 骨架</a>
+</div>
+
+<div class="page-head">
+  <h1>「手机」tab · 未连接 / 启动中 / 已连接 / 错误</h1>
+  <p>四个状态各占一个 <b>400px 宽</b>面板副本（= <code>PANEL_DEFAULT</code>）。尺寸来源：<code>src/client/state.ts L121–124</code>
+    （PANEL_MIN <b>280</b> / PANEL_DEFAULT <b>400</b> / PANEL_MAX <b>640</b> / TAB_MAX_WIDTH <b>160</b>）；
+    Tab 条高 34、tab 宽 64–160、圆形 icon 按钮 28 —— <code>sidebar.module.css L759/L811/L887/L527</code>；
+    默认宽度百分比 20–60 默认 <b>35%</b> —— <code>src/prefs-shared.ts L227–229</code>；
+    包内已有 390×780「手机比例」自由窗口先例 —— <code>state.ts L133–138</code>。</p>
+</div>
+
+<main class="stack">
+
+  <!-- ================= STATE 1 · 未连接空态 ================= -->
+  <section class="state-block">
+    <div class="state-head"><span class="idx">1</span><h2>未连接空态</h2><span>平台选择 + 分组设备清单；无设备不禁用菜单入口</span></div>
+    <aside class="bspanel">
+      <div class="tabstrip">
+        <div class="tabitem active">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+          <span class="tabtitle">手机</span>
+        </div>
+        <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="pane-body">
+        <div style="padding:16px 16px 14px;">
+          <div class="seg" role="tablist" aria-label="平台选择">
+            <button class="segbtn active" type="button">Android</button>
+            <button class="segbtn" type="button">iOS</button>
+          </div>
+          <p style="margin:10px 0 0;text-align:center;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-caption);">切换到 iOS 将列出 Xcode 模拟器与 WDA 真机</p>
+
+          <div class="gname">模拟器</div>
+          <div class="dev-row">
+            <span class="dot on"></span>
+            <span class="dev-name">Pixel_6_API_35</span>
+            <span class="dev-meta">Android 15 · 运行中</span>
+            <button class="minibtn primary" type="button">打开</button>
+          </div>
+          <div class="dev-row">
+            <span class="dot"></span>
+            <span class="dev-name">Galaxy_A54_API_34</span>
+            <span class="dev-meta">Android 14 · 已停止</span>
+            <button class="minibtn" type="button">启动</button>
+          </div>
+
+          <div class="gname">USB 真机</div>
+          <div class="emptyrow">用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。</div>
+          <div style="display:flex;justify-content:center;margin-top:12px;">
+            <button class="minibtn" type="button">重新检测环境</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ================= STATE 2 · 启动中 / 引导 ================= -->
+  <section class="state-block">
+    <div class="state-head"><span class="idx">2</span><h2>启动中 · 环境引导</h2><span>缺什么补什么：命令级指引 + 复制按钮</span></div>
+    <aside class="bspanel">
+      <div class="tabstrip">
+        <div class="tabitem active">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+          <span class="tabtitle">手机</span>
+        </div>
+        <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="pane-body">
+        <div style="padding:14px 16px;">
+          <div class="alertcard warn">
+            <p>尚未创建 AVD<small>需要 Android SDK 命令行工具；插件不会替你下载 SDK 二进制。</small></p>
+          </div>
+          <div class="cmd">
+            <code>sdkmanager --install "emulator" "system-images;android-35;google_apis;arm64-v8a"</code>
+            <button class="copybtn" data-copy type="button">复制</button>
+          </div>
+          <div class="cmd">
+            <code>avdmanager create avd -n Pixel_6_API_35 -k "system-images;android-35;google_apis;arm64-v8a" -d pixel_6</code>
+            <button class="copybtn" data-copy type="button">复制</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:9px;margin-top:14px;border-top:1px solid var(--dsw-alias-border-l1);padding-top:12px;">
+            <span class="spinner"></span>
+            <code style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:var(--dsw-font-code-block-small);color:var(--dsw-alias-label-primary);">emulator -avd Pixel_6_API_35</code>
+            <span class="statelabel-inline">拉起中…</span>
+            <button class="minibtn" type="button">取消</button>
+          </div>
+          <p style="margin:12px 0 0;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-caption);">
+            iOS 平台同布局：<code style="font:var(--dsw-font-code-block-small);">xcodebuild -downloadPlatform iOS</code> 之后创建模拟器即可。
+          </p>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ================= STATE 3 · 已连接 ================= -->
+  <section class="state-block">
+    <div class="state-head"><span class="idx">3</span><h2>已连接 · 实时画面</h2><span>react-device-view 形态嵌进面板宽度；chrome 对齐 BrowserView 的条带节奏</span></div>
+    <aside class="bspanel">
+      <div class="tabstrip">
+        <div class="tabitem active">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+          <span class="tabtitle">Pixel_6_API_35</span>
+          <span aria-hidden="true" style="width:6px;height:6px;border-radius:999px;background:var(--dsw-alias-state-success-primary);display:inline-block;"></span>
+        </div>
+        <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="pane-body">
+        <!-- device bar：同 .browserBar 节奏（6×8 边距 / 28 高控件） -->
+        <div class="devbar">
+          <button class="devpick" type="button" data-tip="切换设备">
+            <span class="dot on"></span>Pixel_6_API_35
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+          </button>
+          <span style="flex:1;"></span>
+          <button class="tierchip" data-tier type="button"><span class="live"></span>MJPEG<span class="reslv">10 fps</span></button>
+          <button class="tierchip active" data-tier type="button"><span class="biz"></span>H264<span class="reslv">30 fps</span></button>
+        </div>
+
+        <!-- 手机画面：按面板宽度裁切的竖屏流 -->
+        <div class="screenwrap">
+          <div class="phone-screen">
+            <span class="liveflag"><span style="width:6px;height:6px;border-radius:999px;background:var(--dsw-static-green-400);display:inline-block;"></span>代理中</span>
+            <svg class="scr" viewBox="0 0 360 560" preserveAspectRatio="xMidYMid slice" role="img" aria-label="设备实时画面占位">
+              <defs>
+                <linearGradient id="scrwall" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="var(--dsw-static-deepseek-200)"/>
+                  <stop offset="1" stop-color="var(--dsw-static-deepseek-50)"/>
+                </linearGradient>
+              </defs>
+              <rect width="360" height="560" fill="url(#scrwall)"/>
+              <text x="24" y="30" font-size="14" font-weight="600" fill="var(--dsw-static-neutral-bluish-1000)">9:41</text>
+              <rect x="292" y="19" width="3" height="5" rx="1" fill="var(--dsw-static-neutral-bluish-1000)"/>
+              <rect x="297" y="16" width="3" height="8" rx="1" fill="var(--dsw-static-neutral-bluish-1000)"/>
+              <rect x="302" y="13" width="3" height="11" rx="1" fill="var(--dsw-static-neutral-bluish-1000)"/>
+              <rect x="307" y="10" width="3" height="14" rx="1" fill="var(--dsw-static-neutral-bluish-1000)"/>
+              <text x="180" y="96" font-size="19" font-weight="600" text-anchor="middle" fill="var(--dsw-static-neutral-bluish-1000)" font-family="-apple-system,'PingFang SC',sans-serif">林小满</text>
+              <g font-family="-apple-system,'PingFang SC',sans-serif">
+                <g><rect x="46" y="128" width="204" height="62" rx="16" fill="var(--dsw-static-neutral-bluish-00)" opacity=".92"/><text x="62" y="153" font-size="13" fill="var(--dsw-static-neutral-bluish-1000)">模拟器装好了吗？</text><text x="62" y="173" font-size="13" fill="var(--dsw-static-neutral-bluish-1000)">想看新版本跑起来</text></g>
+                <g><rect x="110" y="210" width="204" height="44" rx="16" fill="var(--dsw-static-deepseek-500)"/><text x="126" y="228" font-size="13" fill="var(--dsw-static-neutral-bluish-00)">好了，APK 已经装上，</text><text x="126" y="246" font-size="13" fill="var(--dsw-static-neutral-bluish-00)">正在启动登录页</text></g>
+                <g><rect x="46" y="274" width="164" height="44" rx="16" fill="var(--dsw-static-neutral-bluish-00)" opacity=".92"/><text x="62" y="292" font-size="13" fill="var(--dsw-static-neutral-bluish-1000)">注意验证码那步</text><text x="62" y="310" font-size="13" fill="var(--dsw-static-neutral-bluish-1000)">等我来填</text></g>
+                <g><rect x="110" y="338" width="204" height="44" rx="16" fill="var(--dsw-static-deepseek-500)"/><text x="126" y="356" font-size="13" fill="var(--dsw-static-neutral-bluish-00)">收到，到验证码我会停</text><text x="126" y="374" font-size="13" fill="var(--dsw-static-neutral-bluish-00)">下来等你接管</text></g>
+              </g>
+              <rect x="52" y="486" width="240" height="38" rx="19" fill="var(--dsw-static-neutral-bluish-00)" opacity=".95"/>
+              <text x="72" y="510" font-size="13" fill="var(--dsw-static-neutral-bluish-400)" font-family="-apple-system,'PingFang SC',sans-serif">输入消息…</text>
+              <circle cx="312" cy="505" r="17" fill="var(--dsw-static-deepseek-500)"/>
+              <path d="M305 505h12M312 498l7 7-7 7" stroke="var(--dsw-static-neutral-bluish-00)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- 设备工具条：Back / Home / Recents / 截图 -->
+        <div class="toolstrip">
+          <button class="iconbtn" data-tip="返回" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <button class="iconbtn" data-tip="主屏幕" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.4" stroke="currentColor" stroke-width="2"/></svg></button>
+          <button class="iconbtn" data-tip="最近任务" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="11" width="4.6" height="7" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="9.9" y="6" width="4.6" height="12" rx="1.4" stroke="currentColor" stroke-width="1.9"/><rect x="15.8" y="9" width="4.6" height="9" rx="1.4" stroke="currentColor" stroke-width="1.9"/></svg></button>
+          <span class="toolsep"></span>
+          <button class="iconbtn" data-tip="截图（存入会话附件）" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 8.5h3l1.6-2.4h6.8L17 8.5h3v10H4v-10Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13.4" r="3" stroke="currentColor" stroke-width="2"/></svg></button>
+          <button class="iconbtn" data-tip="刷新流" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 13.66-5.66L20 8.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20 4v4.5h-4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 12a8 8 0 0 1-13.66 5.66L4 15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 20v-4.5h4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        </div>
+        <div class="hintline">点击画面即向设备发送触控；按住拖动为滑动。画面左上角会显示当前操作方（你 / Agent）。</div>
+
+        <!-- 加宽扩展位（示意，不作为主要交互） -->
+        <div class="extendzone">
+          <button class="extendbtn" type="button">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            加宽至右侧
+          </button>
+          <p class="extendnote" style="margin:0;">面板内最大 <b>PANEL_MAX 640</b>；更宽的体验由右栏 dock 承担（见旧稿），此按钮仅为后续扩展示意位。</p>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ================= STATE 4 · 错误两例 ================= -->
+  <section class="state-block">
+    <div class="state-head"><span class="idx">4</span><h2>错误态两例</h2><span>可恢复错误内联在 tab 里，处理完自动消失</span></div>
+    <aside class="bspanel">
+      <div class="tabstrip">
+        <div class="tabitem active">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="4.6" y="1.6" width="6.8" height="12.8" rx="1.8" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="12" r=".95" fill="currentColor"/></svg>
+          <span class="tabtitle">手机</span>
+        </div>
+        <button class="plusbtn" aria-label="新建 Tab"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="pane-body">
+        <div style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+          <div class="alertcard err">
+            <div style="display:flex;align-items:center;gap:9px;">
+              <span class="errdot r">✕</span>
+              <p>无法定位 adb<small>PATH 与 ANDROID_HOME 下均未找到平台工具，无法发现任何 Android 设备。</small></p>
+            </div>
+            <div class="alert-actions">
+              <button class="minibtn" data-copy-cmd='sdkmanager --install "platform-tools"' type="button">复制安装命令</button>
+              <button class="minibtn primary" type="button">打开指引</button>
+            </div>
+          </div>
+          <div class="alertcard warn">
+            <div style="display:flex;align-items:center;gap:9px;">
+              <span class="errdot w">!</span>
+              <p>真机未授权调试<small>SM-S9310 已通过 USB 连接；请在手机上允许「USB 调试」后重新检测。</small></p>
+            </div>
+            <div class="alert-actions">
+              <button class="minibtn primary" type="button">重新检测</button>
+            </div>
+          </div>
+          <p style="margin:4px 0 0;text-align:center;font:var(--dsw-font-xxs-12);color:var(--dsw-alias-label-caption);">错误行只遮挡设备清单，不妨碍切换平台或查看其他分组。</p>
+        </div>
+      </div>
+    </aside>
+  </section>
+</main>
+
+<script>
+// Prototype-only affordances: copy buttons and stream-tier toggle.
+document.querySelectorAll('[data-copy]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var code = btn.closest('.cmd').querySelector('code').textContent;
+    btn.classList.add('copied'); btn.textContent = '已复制';
+    setTimeout(function () { btn.classList.remove('copied'); btn.textContent = '复制'; }, 1300);
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).catch(function () {});
+  });
+});
+document.querySelectorAll('[data-copy-cmd]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(btn.dataset.copyCmd).catch(function () {});
+    var old = btn.textContent; btn.textContent = '已复制';
+    setTimeout(function () { btn.textContent = old; }, 1300);
+  });
+});
+document.querySelectorAll('[data-tier]').forEach(function (chip) {
+  chip.addEventListener('click', function () {
+    chip.parentElement.querySelectorAll('.tierchip').forEach(function (c) { c.classList.remove('active'); });
+    chip.classList.add('active');
+  });
+});
+</script>
+</body>
+</html>

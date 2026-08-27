@@ -22,6 +22,7 @@
     "@deepseek-ai/dsh-atomic-write": "workspace:^",
     "@deepseek-ai/dsh-browser-runtime-electron": "workspace:^",
     "@deepseek-ai/dsh-client-ui-desktop": "workspace:^",
+    "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-noise-channel": "workspace:^",
     "@deepseek-ai/dsh-platform-account": "workspace:^",
     "@deepseek-ai/dsh-platform-account-client": "workspace:^",
@@ -31,11 +32,12 @@
     "@deepseek-ai/dsh-session": "workspace:^",
     "electron-updater": "^6.8.3",
     "https-proxy-agent": "^7.0.6",
+    "js-yaml": "^4.2.0",
+    "tar": "^7.4.3",
     "ws": "^8.21.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:^",
-    "@deepseek-ai/cordis-plugin-include": "workspace:^",
     "@deepseek-ai/cordis-plugin-loader": "workspace:^",
     "@deepseek-ai/dsh-agent": "workspace:^",
     "@deepseek-ai/dsh-agent-loop": "workspace:^",
@@ -68,7 +70,8 @@
     "esbuild": "^0.24.0",
     "jsdom": "29.1.1",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "@types/js-yaml": "^4.0.9"
   },
   "build": {
     "appId": "com.gestalt.deepseek",

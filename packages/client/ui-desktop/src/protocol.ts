@@ -52,6 +52,18 @@ export const PAIRING_REJECT = 'pairing:reject'
 export const PAIRING_REVOKE = 'pairing:revoke'
 /** IPC event pushed for every Mobile Access or pairing transition. */
 export const PAIRING_SNAPSHOT_CHANGED = 'pairing:snapshot-changed'
+/** IPC / preload channel for the optional Sub2API component state. */
+export const SUB2API_GET_SNAPSHOT = 'sub2api:getSnapshot'
+/** IPC / preload channel enabling (download, install, restart) the component. */
+export const SUB2API_ENABLE = 'sub2api:enable'
+/** IPC / preload channel disabling the component for future boots. */
+export const SUB2API_DISABLE = 'sub2api:disable'
+/** IPC / preload channel uninstalling the component; payload deletes data when true. */
+export const SUB2API_UNINSTALL = 'sub2api:uninstall'
+/** IPC / preload channel pointing the main window at the embedded console. */
+export const SUB2API_OPEN_CONSOLE = 'sub2api:openConsole'
+/** IPC event pushed for every Sub2API component transition. */
+export const SUB2API_SNAPSHOT_CHANGED = 'sub2api:snapshot-changed'
 /** IPC / preload channel: place one official page over the sidebar viewport. */
 export const BROWSER_PRESENT = 'browser:present'
 /** IPC / preload channel: hide one official page when its tab is not visible. */
@@ -205,6 +217,30 @@ export interface DesktopPairingSnapshot {
   readonly error?: string
 }
 
+/** Lifecycle the Desktop-only Sub2API offer card renders. */
+export type Sub2ApiPhase =
+  | 'missing'
+  | 'downloading'
+  | 'verifying'
+  | 'installed'
+  | 'starting'
+  | 'running'
+  | 'error'
+
+/** Immutable Sub2API component snapshot pushed to the page. */
+export interface DesktopSub2ApiSnapshot {
+  /** Current phase. */
+  readonly state: Sub2ApiPhase
+  /** false while the installer-owned disable row sits in the profile patch layer. */
+  readonly enabled: boolean
+  /** Installed bundle package version, when present on disk. */
+  readonly version?: string
+  /** 0–100 while downloading the runtime pack (Content-Length permitting). */
+  readonly downloadPercent?: number
+  /** Human-readable actionable failure when state is error. */
+  readonly error?: string
+}
+
 /** Preload API exposed as `window.dshDesktop`. Absent in browser `dsh web`. */
 export interface DesktopBridge {
   /** Node `process.platform` of the Desktop Host. */
@@ -255,6 +291,21 @@ export interface DesktopBridge {
   readonly pairingRevoke: (pairingId: PersonalPairingId) => Promise<DesktopPairingSnapshot>
   /** Subscribe to Mobile Access and Personal Pairing transitions. */
   readonly onPairingSnapshot: (listener: (snapshot: DesktopPairingSnapshot) => void) => () => void
+  /** Read the optional Sub2API component state. */
+  readonly sub2ApiGetSnapshot: () => Promise<DesktopSub2ApiSnapshot>
+  /** Download, verify, install, restart the Web Host, and wait for health. */
+  readonly sub2ApiEnable: () => Promise<DesktopSub2ApiSnapshot>
+  /** Disable the component for future Web Host boots and restart now. */
+  readonly sub2ApiDisable: () => Promise<DesktopSub2ApiSnapshot>
+  /**
+   * Uninstall the component and delete the extracted files.
+   * @param deleteData - also delete `$DSH_HOME/sub2api/data` (accounts, keys).
+   */
+  readonly sub2ApiUninstall: (deleteData: boolean) => Promise<DesktopSub2ApiSnapshot>
+  /** Point the main window at the embedded console route. */
+  readonly sub2ApiOpenConsole: () => void
+  /** Subscribe to Sub2API component transitions. */
+  readonly onSub2ApiSnapshot: (listener: (snapshot: DesktopSub2ApiSnapshot) => void) => () => void
   /** Place one official Runtime page over the sidebar viewport. */
   readonly browserPresent?: (request: DesktopBrowserPresentRequest) => Promise<void>
   /** Hide one official Runtime page when its tab is not visible. */

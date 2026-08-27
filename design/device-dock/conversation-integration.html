@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<!-- Throwaway hi-fi mockup — never import into production. -->
+<!-- Screen: 会话内的设备工具卡（一线高）与 composer 上方状态胶囊。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计稿 · 会话内设备集成</title>
+<style>
+/* ================= dsh token sheet =================
+   Extracted from packages/client/ui-theme/src/styles/
+   (design-platform.css + gradient-shadow-text.css + base.css). */
+body {
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration: 0.2s;
+  --ds-transition-duration-fast: 0.1s;
+  --ds-transition-duration-slow: 0.3s;
+
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-deepseek-50: rgb(237, 243, 254);
+  --dsw-static-deepseek-100: rgb(228, 237, 254);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-300: rgb(183, 200, 254);
+  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-450: rgb(86, 134, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-green-900: rgb(35, 60, 44);
+  --dsw-static-amber-100: rgb(254, 245, 231);
+  --dsw-static-amber-400: rgb(247, 173, 49);
+  --dsw-static-amber-500: rgb(245, 158, 11);
+  --dsw-static-amber-600: rgb(221, 134, 41);
+
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-border-l4: rgba(0, 0, 0, 0.16);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-500);
+  --dsw-alias-button-info-hover: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-secondary: var(--dsw-static-green-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-100);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-warn-tertiary: var(--dsw-static-amber-100);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-60);
+
+  --dsw-font-l-20: 500 20px/28px var(--dsw-font-family);
+  --dsw-font-base-16: 400 16px/24px var(--dsw-font-family);
+  --dsw-font-s-strong-14: 500 14px/22px var(--dsw-font-family);
+  --dsw-font-s-14: 400 14px/22px var(--dsw-font-family);
+  --dsw-font-xs-13: 400 13px/20px var(--dsw-font-family);
+  --dsw-font-xs-strong-13: 500 13px/20px var(--dsw-font-family);
+  --dsw-font-xxs-12: 400 12px/18px var(--dsw-font-family);
+  --dsw-font-xxs-strong-12: 500 12px/18px var(--dsw-font-family);
+  --dsw-font-code-block-small: 400 12px/18px var(--ds-font-family-code);
+
+  --dsw-shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+  --dsw-shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+
+  --dd-r-lg: 16px;
+  --dd-r-md: 10px;
+  --dd-r-sm: 8px;
+}
+[data-dsw-dark-theme] {
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-border-l4: rgba(255, 255, 255, 0.2);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-400);
+  --dsw-alias-button-info-hover: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-900);
+  --dsw-alias-state-warn-tertiary: var(--dsw-static-green-900);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-primary); font: var(--dsw-font-s-14); }
+
+.proto-note {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 7px 20px;
+  border-bottom: 1px dashed var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+.proto-note .tag {
+  flex: none; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  color: var(--dsw-alias-state-warn-primary);
+  font: var(--dsw-font-code-block-small); letter-spacing: 0.04em;
+}
+.proto-note b { color: var(--dsw-alias-label-primary); font-weight: 500; }
+.proto-note code {
+  font: var(--dsw-font-code-block-small); color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-specific-tip); padding: 1px 7px; border-radius: 6px;
+}
+.proto-note .spacer { flex: 1; }
+.legend { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.legend input { accent-color: var(--dsw-alias-button-info-fill); margin: 0; }
+
+/* ============ transcript ============ */
+.chatwrap {
+  max-width: 800px; margin: 34px auto 110px;
+  padding: 0 22px;
+}
+.datechip { text-align: center; color: var(--dsw-alias-label-caption); font: var(--dsw-font-xxs-12); margin-bottom: 18px; }
+.msg-user {
+  align-self: flex-end; max-width: 76%;
+  margin-left: auto;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--dsw-static-deepseek-50);
+  padding: 9px 13px; font: var(--dsw-font-s-14); line-height: 1.65;
+  width: fit-content;
+}
+[data-dsw-dark-theme] .msg-user { background: var(--dsw-static-neutral-bluish-850); }
+.msg-agent { max-width: 86%; font: var(--dsw-font-s-14); line-height: 1.7; margin: 16px 0; }
+.senderrow { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.avatar {
+  width: 20px; height: 20px; border-radius: 999px;
+  background: linear-gradient(135deg, var(--dsw-static-deepseek-300), var(--dsw-static-deepseek-450));
+}
+.sendername { color: var(--dsw-alias-label-caption); font: var(--dsw-font-xxs-strong-12); }
+
+/* ---- compact tool rows：one line each ---- */
+.toolcard {
+  display: flex; align-items: center; gap: 9px;
+  height: 40px;
+  margin: 8px 0;
+  padding: 0 12px 0 10px;
+  border-radius: var(--dd-r-md);
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out), border-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.toolcard:hover { background: var(--dsw-alias-interactive-bg-hover); }
+[data-dsw-dark-theme] .toolcard:hover { background: var(--dsw-alias-interactive-bg-hover); border-color: var(--dsw-alias-border-l2); }
+.toolcard:focus-visible { outline: 2px solid var(--dsw-alias-button-info-fill); outline-offset: 2px; }
+
+.tstatus { flex: none; width: 20px; height: 20px; border-radius: 999px; display: grid; place-items: center; }
+.tstatus.ok { background: var(--dsw-alias-state-success-tertiary); color: var(--dsw-alias-state-success-primary); }
+.tstatus.run {
+  background: transparent;
+  animation: none;
+}
+.spinner {
+  width: 13px; height: 13px; border-radius: 999px;
+  border: 2px solid var(--dsw-alias-border-l3);
+  border-top-color: var(--dsw-alias-button-info-fill);
+  animation: dd-spin 0.8s linear infinite;
+}
+@keyframes dd-spin { to { transform: rotate(360deg); } }
+
+.ttitle { font-weight: 500; font-size: 13px; white-space: nowrap; }
+.ttoolname {
+  font: var(--dsw-font-code-block-small);
+  color: var(--dsw-alias-label-caption);
+  background: var(--dsw-specific-tip);
+  padding: 1px 7px; border-radius: 5px;
+  white-space: nowrap;
+}
+.targs {
+  font: var(--dsw-font-code-block-small);
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tdev {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  max-width: 150px;
+  font-size: 12px; font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+  padding: 1px 8px; border-radius: 999px;
+  white-space: nowrap;
+}
+.tdev::before { content: ''; width: 5px; height: 5px; border-radius: 999px; background: var(--dsw-alias-state-success-primary); }
+
+.autopill {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  font-size: 12px; font-weight: 500;
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-static-deepseek-50);
+  padding: 1px 8px; border-radius: 999px;
+  white-space: nowrap;
+}
+[data-dsw-dark-theme] .autopill { background: rgba(103, 158, 254, 0.12); }
+/* ^ Alpha-derived from --dsw-static-deepseek-400; no alias exists at this tint. */
+
+.badge-run {
+  flex: none;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--dsw-alias-state-business-primary);
+}
+.ts-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex: none; }
+.openpanel {
+  flex: none;
+  display: inline-flex; align-items: center; gap: 4px;
+  color: var(--dsw-alias-button-info-fill);
+  font-size: 12px; font-weight: 500;
+  white-space: nowrap;
+}
+.toolcard:hover .openpanel { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ---- status capsule above the composer（conversation.input.dock）---- */
+.dockzone { position: relative; margin: 26px 0 10px; }
+.capsule {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  box-shadow: var(--dsw-shadow-lv1);
+  transition: transform var(--ds-transition-duration-fast) var(--ds-ease-in-out), background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.capsule:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.capsule:active { transform: scale(0.97); }
+.capsule:focus-visible { outline: 2px solid var(--dsw-alias-button-info-fill); outline-offset: 2px; }
+.capsule .dot {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--dsw-alias-state-success-primary);
+  animation: dd-pulse 2.2s var(--ds-ease-in-out) infinite;
+}
+@keyframes dd-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--dsw-alias-state-success-tertiary); }
+  50% { box-shadow: 0 0 0 4px var(--dsw-alias-state-success-tertiary); }
+}
+.capsule .sub { color: var(--dsw-alias-label-caption); font-weight: 400; font-size: 12px; }
+.capsule svg { color: var(--dsw-alias-label-caption); }
+
+/* ---- composer mockup ---- */
+.composer {
+  border-radius: 15px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-shadow-lv2);
+  padding: 13px 15px 9px;
+}
+.composer .ph { color: var(--dsw-alias-label-caption); font: var(--dsw-font-base-16); padding-bottom: 26px; }
+.composer .crow { display: flex; align-items: center; gap: 10px; }
+.cbtn { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: var(--dsw-alias-label-tertiary); cursor: default; }
+.cbtn:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.modeltag {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--dsw-alias-label-secondary);
+  padding: 3px 9px; border-radius: 8px; cursor: default;
+}
+.modeltag:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.send {
+  margin-left: auto;
+  width: 28px; height: 28px; border-radius: 999px;
+  background: var(--dsw-alias-label-primary);
+  display: grid; place-items: center;
+}
+.send svg { stroke: var(--dsw-alias-label-primary-foreground); }
+
+/* ============ slot annotation overlay (review-only) ============ */
+.slottag {
+  position: absolute;
+  font: var(--dsw-font-code-block-small);
+  color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-base);
+  border: 1px dashed currentColor;
+  border-radius: 6px;
+  padding: 1px 8px;
+  opacity: 0;
+  transition: opacity var(--ds-transition-duration) var(--ds-ease-in-out);
+  pointer-events: none;
+  white-space: nowrap;
+}
+body.show-anno .slottag { opacity: 1; }
+body.show-anno .toolcard { outline: 1px dashed var(--dsw-alias-state-business-primary); outline-offset: 2px; }
+body.show-anno .dockzone { outline: 1px dashed var(--dsw-alias-state-business-primary); outline-offset: 8px; border-radius: 10px; }
+#slotTagTools { right: -10px; top: -24px; }
+#slotTagDock { left: 12px; top: -22px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body class="show-anno">
+
+<div class="proto-note">
+  <span class="tag">PROTOTYPE</span>
+  <b>屏幕：会话内集成 · 设备工具卡 + 实时胶囊</b>
+  <code>槽位假设：工具行走通用 tool 卡（无内嵌图）· 胶囊占 conversation.input.dock（composer 上方独占一行）</code>
+  <span>卡片只有标题 / 设备名 / 状态徽标 / 「打开侧栏」线索；画面一律在右侧 dock，不在卡片内嵌图。</span>
+  <span class="spacer"></span>
+  <label class="legend"><input type="checkbox" id="annoToggle" checked>显示槽位标注</label>
+</div>
+
+<main class="chatwrap">
+
+  <div class="datechip">今天 · 09:41</div>
+
+  <!-- incoming ask -->
+  <div class="msg-user">
+    用模拟器把登录流程跑一遍，先进入设置页确认版本号是 3.8，然后停在验证码输入框等我。
+  </div>
+
+  <div class="msg-agent">
+    好的。我先打开 Pixel_6_API_35 并确认当前界面。
+  </div>
+
+  <!-- device_open —— success + auto-open hint -->
+  <div class="toolcard" tabindex="0" role="button">
+    <span class="tstatus ok"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 8" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <span class="ttitle">打开设备面板</span>
+    <span class="ttoolname">device_open</span>
+    <span class="tdev">Pixel_6_API_35</span>
+    <span class="autopill">⚡ 已自动打开右侧面板</span>
+    <span class="ts-right">
+      <span class="badge-run" style="color:var(--dsw-alias-label-caption);font-size:12px;">成功 · 1.2s</span>
+      <span class="openpanel">打开侧栏
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7M9 7h8v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+    </span>
+    <span class="slottag" id="slotTagTools">tool call 行 · generic 意图，无内嵌图</span>
+  </div>
+
+  <!-- device_observe —— running -->
+  <div class="toolcard" tabindex="0" role="button">
+    <span class="tstatus run"><span class="spinner"></span></span>
+    <span class="ttitle">观察设备画面</span>
+    <span class="ttoolname">device_observe</span>
+    <span class="tdev">Pixel_6_API_35</span>
+    <span class="ts-right">
+      <span class="badge-run"><span style="display:inline-block;width:6px;height:6px;border-radius:999px;background:var(--dsw-alias-state-business-primary);"></span>进行中 · 截取画面与 UI 树</span>
+      <span class="openpanel">打开侧栏
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7M9 7h8v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+    </span>
+  </div>
+
+  <div class="msg-agent">
+    当前在系统桌面。我现在点开「设置」，查看系统版本。
+  </div>
+
+  <!-- device_act tap —— success -->
+  <div class="toolcard" tabindex="0" role="button">
+    <span class="tstatus ok"><svg width="11" height="11" viewBox="0 0 24 24" fill="none"><path d="m5 13 4.5 4.5L19 8" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <span class="ttitle">执行触控</span>
+    <span class="ttoolname">device_act</span>
+    <span class="targs">tap(0.5, 0.32)</span>
+    <span class="tdev">Pixel_6_API_35</span>
+    <span class="ts-right">
+      <span class="badge-run" style="color:var(--dsw-alias-label-caption);font-size:12px;">成功 · 320ms</span>
+      <span class="openpanel">打开侧栏
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M7 17 17 7M9 7h8v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+    </span>
+  </div>
+
+  <div class="msg-agent">
+    已确认版本为 3.8。接下来我打开登录页并在验证码输入框前暂停——你可以随时在右栏直接接管画面。
+  </div>
+
+  <!-- ============ conversation.input.dock capsule + composer ============ -->
+  <div class="dockzone">
+    <button class="capsule" type="button" title="点击打开右侧设备面板">
+      <span class="dot"></span>
+      Pixel_6_API_35 · 实时
+      <span class="sub">点击打开面板</span>
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none"><rect x="3" y="5" width="14" height="14" rx="2.5" stroke="currentColor" stroke-width="2"/><path d="M21 5v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <span class="slottag" id="slotTagDock">conversation.input.dock · list 条目（面板关闭时驻留）</span>
+  </div>
+
+  <div class="composer" aria-hidden="true">
+    <div class="ph">回复 DeepSeek…</div>
+    <div class="crow">
+      <span class="cbtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 5v9M12 5l-3.2 3.2M12 5l3.2 3.2M5 15v2.5A1.5 1.5 0 0 0 6.5 19h11a1.5 1.5 0 0 0 1.5-1.5V15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+      <span class="cbtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="3" stroke="currentColor" stroke-width="1.8"/><path d="M8 9h8M8 13h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></span>
+      <span class="modeltag">DeepSeek Chat<svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></span>
+      <span class="send"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M5 12h13M13 6.5 18.5 12 13 17.5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    </div>
+  </div>
+</main>
+
+<script>
+// Review-only slot annotation toggle.
+document.getElementById('annoToggle').addEventListener('change', function () {
+  document.body.classList.toggle('show-anno', this.checked);
+});
+// Capsule press feedback only — panel geometry lives in the real layout owner.
+document.querySelector('.capsule').addEventListener('click', function () {});
+</script>
+</body>
+</html>

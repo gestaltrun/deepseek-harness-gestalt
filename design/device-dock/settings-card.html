@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<!-- Throwaway hi-fi mockup — never import into production. -->
+<!-- Screen: Plugins 设置分区「手机设备」卡片状态机（六态纵排，供逐一对焦）。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设计稿 · 手机设备设置卡片（六态）</title>
+<style>
+/* ================= dsh token sheet =================
+   Extracted from packages/client/ui-theme/src/styles/
+   (design-platform.css + gradient-shadow-text.css + base.css).
+   Dark values mirror the [data-ds-dark-theme] remaps; this prototype
+   scopes them on the same attribute name so pages stay consistent. */
+body {
+  /* fonts & motion (base.css) */
+  --dsw-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --ds-font-family-code: 'SF Mono', 'JetBrains Mono', 'Fira Code', Consolas, 'Liberation Mono', Menlo, Courier, 'PingFang SC', 'Microsoft YaHei';
+  --ds-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-transition-duration: 0.2s;
+  --ds-transition-duration-fast: 0.1s;
+  --ds-transition-duration-slow: 0.3s;
+
+  /* static scale — light defaults */
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(249, 250, 251);
+  --dsw-static-neutral-bluish-60: rgb(245, 246, 247);
+  --dsw-static-neutral-bluish-75: rgb(241, 243, 245);
+  --dsw-static-neutral-bluish-100: rgb(235, 238, 242);
+  --dsw-static-neutral-bluish-150: rgb(233, 236, 242);
+  --dsw-static-neutral-bluish-200: rgb(225, 229, 238);
+  --dsw-static-neutral-bluish-300: rgb(207, 211, 214);
+  --dsw-static-neutral-bluish-400: rgb(173, 178, 184);
+  --dsw-static-neutral-bluish-500: rgb(151, 157, 166);
+  --dsw-static-neutral-bluish-600: rgb(129, 133, 140);
+  --dsw-static-neutral-bluish-700: rgb(97, 102, 107);
+  --dsw-static-neutral-bluish-750: rgb(67, 69, 74);
+  --dsw-static-neutral-bluish-800: rgb(53, 54, 56);
+  --dsw-static-neutral-bluish-850: rgb(44, 44, 46);
+  --dsw-static-neutral-bluish-875: rgb(35, 35, 36);
+  --dsw-static-neutral-bluish-900: rgb(27, 27, 28);
+  --dsw-static-neutral-bluish-950: rgb(21, 21, 23);
+  --dsw-static-neutral-bluish-1000: rgb(15, 17, 21);
+  --dsw-static-deepseek-50: rgb(237, 243, 254);
+  --dsw-static-deepseek-100: rgb(228, 237, 253);
+  --dsw-static-deepseek-200: rgb(211, 226, 255);
+  --dsw-static-deepseek-300: rgb(183, 200, 254);
+  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-450: rgb(86, 134, 254);
+  --dsw-static-deepseek-500: rgb(65, 118, 230);
+  --dsw-static-deepseek-600: rgb(72, 104, 178);
+  --dsw-static-green-100: rgb(230, 250, 237);
+  --dsw-static-green-400: rgb(78, 209, 126);
+  --dsw-static-green-500: rgb(34, 197, 94);
+  --dsw-static-green-900: rgb(35, 60, 44);
+  --dsw-static-red-50: rgb(254, 242, 242);
+  --dsw-static-red-100: rgb(254, 226, 226);
+  --dsw-static-red-400: rgb(242, 90, 90);
+  --dsw-static-red-500: rgb(239, 68, 68);
+  --dsw-static-red-600: rgb(236, 19, 19);
+  --dsw-static-amber-100: rgb(254, 245, 231);
+  --dsw-static-amber-400: rgb(247, 173, 49);
+  --dsw-static-amber-500: rgb(245, 158, 11);
+  --dsw-static-amber-600: rgb(221, 134, 41);
+
+  /* semantic aliases — light */
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-60);
+  --dsw-alias-border-l1: rgba(0, 0, 0, 0.04);
+  --dsw-alias-border-l2: rgba(0, 0, 0, 0.1);
+  --dsw-alias-border-l3: rgba(0, 0, 0, 0.12);
+  --dsw-alias-border-l4: rgba(0, 0, 0, 0.16);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-00);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-700);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-interactive-bg-hover: rgba(38, 49, 72, 0.06);
+  --dsw-alias-interactive-bg-active: rgba(38, 49, 72, 0.1);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-500);
+  --dsw-alias-button-info-hover: var(--dsw-static-deepseek-400);
+  --dsw-alias-state-success-primary: var(--dsw-static-green-500);
+  --dsw-alias-state-success-secondary: var(--dsw-static-green-400);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-100);
+  --dsw-alias-state-error-primary: var(--dsw-static-red-600);
+  --dsw-alias-state-warn-primary: var(--dsw-static-amber-500);
+  --dsw-alias-state-warn-secondary: var(--dsw-static-amber-400);
+  --dsw-alias-state-warn-label: var(--dsw-static-amber-600);
+  --dsw-alias-state-warn-tertiary: var(--dsw-static-amber-100);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
+  --dsw-alias-tooltip-bg: var(--dsw-static-neutral-bluish-850);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-60);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-60);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-50);
+
+  /* typography roles */
+  --dsw-font-l-20: 500 20px/28px var(--dsw-font-family);
+  --dsw-font-base-16: 400 16px/24px var(--dsw-font-family);
+  --dsw-font-s-14: 400 14px/22px var(--dsw-font-family);
+  --dsw-font-s-strong-14: 500 14px/22px var(--dsw-font-family);
+  --dsw-font-xs-13: 400 13px/20px var(--dsw-font-family);
+  --dsw-font-xs-strong-13: 500 13px/20px var(--dsw-font-family);
+  --dsw-font-xxs-12: 400 12px/18px var(--dsw-font-family);
+  --dsw-font-xxs-strong-12: 500 12px/18px var(--dsw-font-family);
+  --dsw-font-code-block-small: 400 12px/18px var(--ds-font-family-code);
+
+  /* elevation */
+  --dsw-shadow-lv1: 0 2px 4px 0 rgba(0, 0, 0, 0.05);
+  --dsw-shadow-lv2: 0 4px 12px 0 rgba(0, 0, 0, 0.02), 0 2px 8px 0 rgba(0, 0, 0, 0.04);
+  --dsw-shadow-lv3: 0 0 1px 0 rgba(0, 0, 0, 0.2), 0 0 4px 0 rgba(0, 0, 0, 0.02), 0 12px 32px 0 rgba(0, 0, 0, 0.08);
+
+  /* component-local layout contract (radius only lives here) */
+  --dd-r-lg: 16px;
+  --dd-r-md: 10px;
+  --dd-r-sm: 8px;
+}
+[data-dsw-dark-theme] {
+  --dsw-static-neutral-bluish-60: rgb(249, 250, 251);
+  --dsw-alias-bg-base: var(--dsw-static-neutral-bluish-950);
+  --dsw-alias-bg-layer-1: var(--dsw-static-neutral-bluish-875);
+  --dsw-alias-bg-layer-2: var(--dsw-static-neutral-bluish-850);
+  --dsw-alias-bg-layer-3: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-bg-module-platform: var(--dsw-static-neutral-bluish-800);
+  --dsw-alias-border-l1: rgba(255, 255, 255, 0.06);
+  --dsw-alias-border-l2: rgba(255, 255, 255, 0.12);
+  --dsw-alias-border-l3: rgba(255, 255, 255, 0.16);
+  --dsw-alias-border-l4: rgba(255, 255, 255, 0.2);
+  --dsw-alias-label-primary: var(--dsw-static-neutral-bluish-50);
+  --dsw-alias-label-primary-foreground: var(--dsw-static-neutral-bluish-1000);
+  --dsw-alias-label-secondary: var(--dsw-static-neutral-bluish-300);
+  --dsw-alias-label-tertiary: var(--dsw-static-neutral-bluish-400);
+  --dsw-alias-label-caption: var(--dsw-static-neutral-bluish-600);
+  --dsw-alias-label-dimmed: var(--dsw-static-neutral-bluish-750);
+  --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, 0.08);
+  --dsw-alias-interactive-bg-active: rgba(255, 255, 255, 0.14);
+  --dsw-alias-button-info-fill: var(--dsw-static-deepseek-400);
+  --dsw-alias-button-info-hover: var(--dsw-static-deepseek-500);
+  --dsw-alias-state-success-tertiary: var(--dsw-static-green-900);
+  --dsw-alias-state-warn-tertiary: var(--dsw-static-amber-900);
+  --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
+  --dsw-alias-tooltip-bg: var(--dsw-static-neutral-bluish-750);
+  --dsw-specific-tip: var(--dsw-static-neutral-bluish-800);
+  --dsw-specific-selector: var(--dsw-static-neutral-bluish-800);
+  --dsw-specific-sidebar-fill: var(--dsw-static-neutral-bluish-900);
+}
+
+/* ================= page scaffold ================= */
+* { box-sizing: border-box; }
+html { color-scheme: light dark; }
+body {
+  margin: 0;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-s-14);
+}
+::selection { background: var(--dsw-static-deepseek-200); }
+
+/* prototype annotation bar — meta chrome, not part of the evaluated design */
+.proto-note {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 20px;
+  border-bottom: 1px dashed var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+.proto-note .tag {
+  flex: none;
+  padding: 1px 8px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-state-warn-secondary);
+  color: var(--dsw-alias-state-warn-label);
+  font: var(--dsw-font-code-block-small);
+  letter-spacing: 0.04em;
+}
+.proto-note b { color: var(--dsw-alias-label-primary); font-weight: 500; }
+.proto-note code {
+  font: var(--dsw-font-code-block-small);
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-specific-tip);
+  padding: 1px 7px; border-radius: 6px;
+}
+.proto-note .spacer { flex: 1; }
+
+.page { max-width: 780px; margin: 0 auto; padding: 36px 24px 96px; }
+.page-head { margin-bottom: 26px; }
+.page-head h1 { font: var(--dsw-font-l-20); margin: 0 0 6px; }
+.page-head p { margin: 0; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-s-14); max-width: 56ch; }
+
+.state-gap { height: 34px; }
+.state-head {
+  display: flex; align-items: baseline; gap: 10px;
+  margin: 0 2px 10px;
+}
+.state-head .idx {
+  width: 20px; height: 20px; border-radius: 999px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font: var(--dsw-font-xxs-strong-12);
+  transform: translateY(3px);
+}
+.state-head h2 { font: var(--dsw-font-xs-strong-13); margin: 0; color: var(--dsw-alias-label-secondary); letter-spacing: 0.02em; }
+.state-head span { font: var(--dsw-font-xxs-12); color: var(--dsw-alias-label-caption); }
+
+/* ================= the settings card itself ================= */
+.card {
+  position: relative;
+  border-radius: var(--dd-r-lg);
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-shadow-lv1);
+  overflow: hidden;
+}
+.card-head {
+  display: flex; align-items: center; gap: 14px;
+  padding: 18px 20px;
+}
+.card-icon {
+  flex: none; width: 40px; height: 40px; border-radius: 12px;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--dsw-static-deepseek-100), var(--dsw-static-deepseek-200));
+  color: var(--dsw-static-deepseek-600);
+}
+[data-dsw-dark-theme] .card-icon { background: var(--dsw-static-deepseek-800); color: var(--dsw-static-deepseek-300); }
+.card-title h3 { font: var(--dsw-font-base-16); font-weight: 500; margin: 0 0 2px; }
+.card-title p { margin: 0; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); max-width: 46ch; }
+.card-spacer { flex: 1; }
+
+/* toggle switch */
+.switch { position: relative; flex: none; width: 40px; height: 24px; cursor: pointer; }
+.switch input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.switch .track {
+  position: absolute; inset: 0; border-radius: 999px;
+  background: var(--dsw-alias-label-dimmed);
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.switch .knob {
+  position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: var(--dsw-shadow-lv1);
+  transition: transform var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.switch input:checked ~ .track { background: var(--dsw-alias-state-success-primary); }
+.switch input:checked ~ .knob { transform: translateX(16px); }
+.switch input:focus-visible ~ .track { outline: 2px solid var(--dsw-alias-button-info-fill); outline-offset: 2px; }
+
+.card-body { padding: 0 20px 18px; }
+.card-foot {
+  padding: 10px 20px 12px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  color: var(--dsw-alias-label-caption);
+  font: var(--dsw-font-xxs-12);
+}
+
+/* checklist (probing state) */
+.probe-line {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-s-14);
+  padding-bottom: 12px;
+}
+.checklist { border-top: 1px solid var(--dsw-alias-border-l1); }
+.check-row {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 42px; padding: 5px 2px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+  font: var(--dsw-font-s-14);
+}
+.check-row:last-child { border-bottom: none; }
+.check-name { width: 172px; flex: none; }
+.check-name small { display: block; color: var(--dsw-alias-label-caption); font: var(--dsw-font-xxs-12); }
+.check-detail { flex: 1; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xs-13); }
+.check-detail code { font: var(--dsw-font-code-block-small); background: var(--dsw-specific-tip); padding: 0 6px; border-radius: 5px; }
+
+.icon-dot { flex: none; width: 18px; height: 18px; border-radius: 999px; display: grid; place-items: center; }
+.ok { background: var(--dsw-alias-state-success-tertiary); color: var(--dsw-alias-state-success-primary); }
+.bad { background: var(--dsw-static-red-50); color: var(--dsw-alias-state-error-primary); }
+.warnbg { background: var(--dsw-alias-state-warn-tertiary); color: var(--dsw-alias-state-warn-label); }
+.idle { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-caption); }
+
+.spinner {
+  width: 14px; height: 14px; border-radius: 999px; flex: none;
+  border: 2px solid var(--dsw-alias-border-l3);
+  border-top-color: var(--dsw-alias-button-info-fill);
+  animation: dd-spin 0.8s linear infinite;
+}
+@keyframes dd-spin { to { transform: rotate(360deg); } }
+
+/* command rows for the wizards */
+.cmdlist { display: flex; flex-direction: column; gap: 8px; }
+.cmd {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dd-r-md);
+  background: var(--dsw-alias-bg-layer-2);
+  padding: 8px 8px 8px 14px;
+}
+.cmd .txt { flex: 1; min-width: 0; overflow-x: auto; }
+.cmd .cmt {
+  color: var(--dsw-alias-label-caption);
+  font: var(--dsw-font-code-block-small);
+  white-space: nowrap;
+}
+.cmd code {
+  display: block; font: var(--dsw-font-code-block-small);
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+}
+.copybtn {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dd-r-sm);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xxs-12);
+  padding: 4px 10px; cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.copybtn:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.copybtn:focus-visible { outline: 2px solid var(--dsw-alias-button-info-fill); outline-offset: 2px; }
+.copybtn.copied { color: var(--dsw-alias-state-success-primary); border-color: currentColor; }
+
+.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.stepchip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-tertiary);
+  font: var(--dsw-font-xxs-12);
+}
+.stepchip i {
+  font-style: normal; width: 15px; height: 15px; border-radius: 999px;
+  display: inline-grid; place-items: center;
+  background: var(--dsw-alias-bg-layer-2);
+  font: var(--dsw-font-xxxs);
+}
+.stepchip.done { border-color: transparent; background: var(--dsw-alias-state-success-tertiary); color: var(--dsw-alias-state-success-primary); }
+
+.alert-row {
+  display: flex; align-items: center; gap: 12px;
+  border-radius: var(--dd-r-md);
+  border: 1px solid var(--dsw-alias-border-l2);
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  font: var(--dsw-font-s-14);
+}
+.alert-row p { margin: 0; }
+.alert-row p small { display: block; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xs-13); margin-top: 1px; }
+.alert-row.warncase { background: var(--dsw-alias-state-warn-tertiary); border-color: transparent; }
+.alert-row.errcase { background: var(--dsw-static-red-50); border-color: transparent; }
+/* Alpha-derived from --dsw-static-red-400; no alias exists at this tint. */
+[data-dsw-dark-theme] .alert-row.errcase { background: rgba(242, 90, 90, 0.12); }
+.alert-row.infocase { background: var(--dsw-static-deepseek-50); border-color: transparent; }
+/* Alpha-derived from --dsw-static-deepseek-400; no alias exists at this tint. */
+[data-dsw-dark-theme] .alert-row.infocase { background: rgba(103, 158, 254, 0.12); }
+
+/* device list (ready state) */
+.dev-group { margin-bottom: 4px; }
+.dev-group > .gname {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 0 4px;
+  color: var(--dsw-alias-label-caption);
+  font: var(--dsw-font-xxs-strong-12);
+  letter-spacing: 0.05em;
+}
+.dev-group > .gname::after { content: ''; flex: 1; height: 1px; background: var(--dsw-alias-border-l1); }
+.dev-row {
+  display: flex; align-items: center; gap: 12px;
+  border-radius: var(--dd-r-md);
+  padding: 9px 10px;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.dev-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dot { flex: none; width: 9px; height: 9px; border-radius: 999px; margin: 0 4px; }
+.dot.on { background: var(--dsw-alias-state-success-primary); animation: dd-pulse 2.2s var(--ds-ease-in-out) infinite; }
+.dot.off { background: var(--dsw-alias-label-dimmed); }
+@keyframes dd-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--dsw-alias-state-success-tertiary); }
+  50% { box-shadow: 0 0 0 5px var(--dsw-alias-state-success-tertiary); }
+}
+.dev-name { font: var(--dsw-font-s-strong-14); }
+.dev-meta { flex: 1; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xs-13); }
+.ghostbtn {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dd-r-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xs-13);
+  padding: 5px 12px; cursor: pointer;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+.ghostbtn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.ghostbtn.primary { background: var(--dsw-alias-label-primary); color: var(--dsw-alias-label-primary-foreground); border-color: transparent; }
+.ghostbtn.primary:hover { opacity: 0.88; background: var(--dsw-alias-label-primary); }
+.textlink { color: var(--dsw-alias-button-info-fill); cursor: pointer; font: inherit; }
+
+.summary-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 3px 10px; border-radius: 999px;
+  background: var(--dsw-alias-state-success-tertiary);
+  color: var(--dsw-alias-state-success-primary);
+  font: var(--dsw-font-xxs-strong-12);
+}
+.summary-chip .dot { width: 7px; height: 7px; margin: 0; animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="proto-note">
+  <span class="tag">PROTOTYPE</span>
+  <b>屏幕：设置 › 插件 › 手机设备卡片</b>
+  <code>slot 假设：settings.plugin.item（keyed namespace，随插件启停）</code>
+  <span>卡片六个状态自上而下排列，仅供逐一对焦；开关关闭时 Host 不注册设备工具。</span>
+  <span class="spacer"></span>
+  <span>throwaway · 不进 production</span>
+</div>
+
+<main class="page">
+  <div class="page-head">
+    <h1>插件</h1>
+    <p>下面六张卡是同一张「手机设备」卡片的不同状态，纵向铺开便于评审对照。就绪后的画面入口在右侧设备 dock（另稿）。</p>
+  </div>
+
+  <!-- ============ STATE 1 · off by default ============ -->
+  <section>
+    <div class="state-head"><span class="idx">1</span><h2>默认关闭</h2><span>未启用 · 不产生任何工具与会话影响</span></div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg>
+        </div>
+        <div class="card-title">
+          <h3>手机设备</h3>
+          <p>把 Android / iOS 模拟器与 USB 真机接入会话。启用后 Agent 获得设备工具，你可以在右侧面板实时观看画面并随时接管。</p>
+        </div>
+        <div class="card-spacer"></div>
+        <label class="switch" aria-label="启用手机设备">
+          <input type="checkbox">
+          <span class="track"></span>
+          <span class="knob"></span>
+        </label>
+      </div>
+      <div class="card-foot">关闭时不注册任何 device_* 工具，也不监听 adb / mobilecli 进程；本机环境不受影响。</div>
+    </div>
+  </section>
+
+  <div class="state-gap"></div>
+
+  <!-- ============ STATE 2 · probing ============ -->
+  <section>
+    <div class="state-head"><span class="idx">2</span><h2>启用中 · 正在检测本机环境</h2><span>spinner + 四项检查</span></div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg>
+        </div>
+        <div class="card-title">
+          <h3>手机设备</h3>
+          <p>正在检测本机的调试工具与模拟器运行时，检测完成后按缺失项给出指引。</p>
+        </div>
+        <div class="card-spacer"></div>
+        <label class="switch" aria-label="启用手机设备">
+          <input type="checkbox" checked>
+          <span class="track"></span>
+          <span class="knob"></span>
+        </label>
+      </div>
+      <div class="card-body">
+        <div class="probe-line"><span class="spinner"></span>正在探测 PATH、ANDROID_HOME 与 Xcode 组件…</div>
+        <div class="checklist">
+          <div class="check-row">
+            <span class="icon-dot ok">✓</span>
+            <span class="check-name">adb<small>Android 平台工具</small></span>
+            <span class="check-detail">已检测到 <code>v35.0.1</code>（ANDROID_HOME/platform-tools）</span>
+          </div>
+          <div class="check-row">
+            <span class="spinner" style="width:18px;height:18px;"></span>
+            <span class="check-name">mobilecli<small>统一设备引擎（可选）</small></span>
+            <span class="check-detail">正在确认 H264 流支持…</span>
+          </div>
+          <div class="check-row">
+            <span class="icon-dot bad">✕</span>
+            <span class="check-name">Android 模拟器<small>AVD / 系统镜像</small></span>
+            <span class="check-detail">未找到任何 AVD —— 完成下方向导后重新检测</span>
+          </div>
+          <div class="check-row">
+            <span class="icon-dot ok">✓</span>
+            <span class="check-name">Xcode iOS 运行时<small>iOS 模拟器依赖</small></span>
+            <span class="check-detail">iOS 18.4 已就绪</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="state-gap"></div>
+
+  <!-- ============ STATE 3 · Android wizard ============ -->
+  <section>
+    <div class="state-head"><span class="idx">3</span><h2>Android 引导向导</h2><span>未装 SDK / AVD 时给出命令级指引，逐行可复制</span></div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7.2 8.6A5 5 0 0 1 12 5.5a5 5 0 0 1 4.8 3.1H7.2Zm-.9 1.5h11.4c.3.7.4 1.4.4 2.2v5.4c0 .7-.6 1.3-1.3 1.3h-.7v2.6a1.1 1.1 0 1 1-2.2 0v-2.6h-3.6v2.6a1.1 1.1 0 1 1-2.2 0v-2.6H7.4c-.7 0-1.3-.6-1.3-1.3v-5.4c0-.8.1-1.5.4-2.2Zm-2.6 2a1.1 1.1 0 0 1 1.1 1.1v4.4a1.1 1.1 0 1 1-2.2 0v-4.4A1.1 1.1 0 0 1 3.7 12Zm16.6 0a1.1 1.1 0 0 1 1.1 1.1v4.4a1.1 1.1 0 1 1-2.2 0v-4.4a1.1 1.1 0 0 1 1.1-1.1ZM8.6 2.2l1 1.8M15.4 2.2l-1 1.8" stroke="currentColor" stroke-width="1.4" fill="none"/><circle cx="9.4" cy="7" r=".9"/><circle cx="14.6" cy="7" r=".9"/></svg>
+        </div>
+        <div class="card-title">
+          <h3>创建第一台 Android 模拟器</h3>
+          <p>需要 Android SDK 命令行工具；插件不会替你下载 SDK 二进制。依次执行以下命令（macOS / Linux）：</p>
+        </div>
+        <div class="card-spacer"></div>
+        <label class="switch" aria-label="启用手机设备">
+          <input type="checkbox" checked>
+          <span class="track"></span>
+          <span class="knob"></span>
+        </label>
+      </div>
+      <div class="card-body">
+        <div class="steps">
+          <span class="stepchip done"><i>✓</i>platform-tools 已安装</span>
+          <span class="stepchip"><i>2</i>下载系统镜像</span>
+          <span class="stepchip"><i>3</i>创建 AVD</span>
+          <span class="stepchip"><i>4</i>启动模拟器</span>
+        </div>
+        <div class="cmdlist">
+          <div class="cmd">
+            <span class="txt">
+              <span class="cmt"># 下载 Android 系统镜像（API 35，Google APIs ARM64）</span>
+              <code>sdkmanager --install "emulator" "system-images;android-35;google_apis;arm64-v8a"</code>
+            </span>
+            <button class="copybtn" data-copy type="button"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke="currentColor" stroke-width="2"/></svg><span>复制</span></button>
+          </div>
+          <div class="cmd">
+            <span class="txt">
+              <span class="cmt"># 创建名为 Pixel_6_API_35 的 AVD（机型 pixel_6）</span>
+              <code>avdmanager create avd -n Pixel_6_API_35 -k "system-images;android-35;google_apis;arm64-v8a" -d pixel_6</code>
+            </span>
+            <button class="copybtn" data-copy type="button"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke="currentColor" stroke-width="2"/></svg><span>复制</span></button>
+          </div>
+          <div class="cmd">
+            <span class="txt">
+              <span class="cmt"># 启动模拟器（也可以留到会话里让 Agent 启动）</span>
+              <code>emulator -avd Pixel_6_API_35</code>
+            </span>
+            <button class="copybtn" data-copy type="button"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke="currentColor" stroke-width="2"/></svg><span>复制</span></button>
+          </div>
+        </div>
+      </div>
+      <div class="card-foot">完成后点右上角「重新检测」，AVD 出现在清单即可打开面板。USB 真机无需此步，打开 USB 调试并授权即可。</div>
+    </div>
+  </section>
+
+  <div class="state-gap"></div>
+
+  <!-- ============ STATE 4 · iOS wizard ============ -->
+  <section>
+    <div class="state-head"><span class="idx">4</span><h2>iOS 引导向导</h2><span>runtime 缺失提示 + 模拟器创建 + 真机 WDA 前置说明</span></div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M10.8 4.9h2.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg>
+        </div>
+        <div class="card-title">
+          <h3>iOS 环境差两步</h3>
+          <p>仅 macOS 可用；需要完整 Xcode。先补齐模拟器运行时，再创建一台 iPhone 模拟器。</p>
+        </div>
+        <div class="card-spacer"></div>
+        <label class="switch" aria-label="启用手机设备">
+          <input type="checkbox" checked>
+          <span class="track"></span>
+          <span class="knob"></span>
+        </label>
+      </div>
+      <div class="card-body">
+        <div class="alert-row warncase">
+          <span class="icon-dot warnbg">!</span>
+          <p>未找到 iOS 模拟器运行时<small>Xcode → Settings → Components 中下载 iOS 平台，或执行以下命令（约数 GB）：</small></p>
+        </div>
+        <div class="cmdlist" style="margin-bottom:14px;">
+          <div class="cmd">
+            <span class="txt">
+              <span class="cmt"># 下载 iOS 模拟器运行时</span>
+              <code>xcodebuild -downloadPlatform iOS</code>
+            </span>
+            <button class="copybtn" data-copy type="button"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke="currentColor" stroke-width="2"/></svg><span>复制</span></button>
+          </div>
+          <div class="cmd">
+            <span class="txt">
+              <span class="cmt"># 创建一台 iPhone 16 Pro 模拟器</span>
+              <code>xcrun simctl create "iPhone 16 Pro" "iPhone 16 Pro" iOS18.4</code>
+            </span>
+            <button class="copybtn" data-copy type="button"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke="currentColor" stroke-width="2"/></svg><span>复制</span></button>
+          </div>
+        </div>
+        <div class="alert-row infocase" style="margin-bottom:0;">
+          <span class="icon-dot" style="background:var(--dsw-static-deepseek-100);color:var(--dsw-static-deepseek-600);">W</span>
+          <p>USB 真机的前置条件：WebDriverAgent<small>控制真机需自备 WDA checkout 并完成签名与设备信任；免费开发者证书 7 天过期，过期后需重新构建。就绪后面板内会出现「构建 WDA」入口。</small></p>
+        </div>
+      </div>
+      <div class="card-foot">模拟器不需要 WDA；真机上的每次点击都有真实后果，涉及登录与支付的步骤请人工接管。</div>
+    </div>
+  </section>
+
+  <div class="state-gap"></div>
+
+  <!-- ============ STATE 5 · ready with device list ============ -->
+  <section>
+    <div class="state-head"><span class="idx">5</span><h2>就绪态 · 设备清单</h2><span>分组：模拟器(Android) / 模拟器(iOS) / USB 真机</span></div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg>
+        </div>
+        <div class="card-title">
+          <h3>手机设备</h3>
+          <p>环境就绪。点击任一设备的「打开面板」在右侧查看实时画面，Agent 的 device_* 工具同时生效。</p>
+        </div>
+        <div class="card-spacer"></div>
+        <span class="summary-chip"><span class="dot on"></span>环境正常 · 3 台可用</span>
+        <button class="ghostbtn" type="button" style="margin-left:10px;">重新检测</button>
+        <label class="switch" aria-label="启用手机设备" style="margin-left:10px;">
+          <input type="checkbox" checked>
+          <span class="track"></span>
+          <span class="knob"></span>
+        </label>
+      </div>
+      <div class="card-body">
+        <div class="dev-group">
+          <div class="gname">模拟器 · ANDROID</div>
+          <div class="dev-row">
+            <span class="dot on"></span>
+            <span class="dev-name">Pixel_6_API_35</span>
+            <span class="dev-meta">Android 15 · 运行中 · serial <code style="font:var(--dsw-font-code-block-small);background:var(--dsw-specific-tip);padding:0 5px;border-radius:4px;">emulator-5554</code></span>
+            <button class="ghostbtn primary" type="button">打开面板</button>
+          </div>
+          <div class="dev-row">
+            <span class="dot off"></span>
+            <span class="dev-name">Galaxy_A54_API_34</span>
+            <span class="dev-meta">Android 14 · 已停止</span>
+            <button class="ghostbtn" type="button">启动</button>
+            <button class="ghostbtn" type="button" disabled style="opacity:.45;cursor:default;">打开面板</button>
+          </div>
+        </div>
+        <div class="dev-group">
+          <div class="gname">模拟器 · IOS</div>
+          <div class="dev-row">
+            <span class="dot on"></span>
+            <span class="dev-name">iPhone 16 Pro</span>
+            <span class="dev-meta">iOS 18.4 · 运行中</span>
+            <button class="ghostbtn primary" type="button">打开面板</button>
+          </div>
+        </div>
+        <div class="dev-group">
+          <div class="gname">USB 真机</div>
+          <div class="dev-row">
+            <span class="dot on"></span>
+            <span class="dev-name">SM-S9310（Galaxy S24）</span>
+            <span class="dev-meta">已授权 USB 调试 · WDA 未构建前仅 Android 动作可用</span>
+            <button class="ghostbtn primary" type="button">打开面板</button>
+          </div>
+        </div>
+      </div>
+      <div class="card-foot">停止的设备先用「启动」拉起再打开面板；清单变化会实时刷新，无需重启会话。</div>
+    </div>
+  </section>
+
+  <div class="state-gap"></div>
+
+  <!-- ============ STATE 6 · error samples ============ -->
+  <section>
+    <div class="state-head"><span class="idx">6</span><h2>错误态样例</h2><span>三种可恢复错误的行内呈现</span></div>
+    <div class="card">
+      <div class="card-head">
+        <div class="card-icon" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="7" y="2.5" width="10" height="19" rx="2.5" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="1.1" fill="currentColor"/></svg>
+        </div>
+        <div class="card-title">
+          <h3>手机设备</h3>
+          <p>启用后发现的问题列在这里，每条都带下一步动作；处理完条目自动消失。</p>
+        </div>
+        <div class="card-spacer"></div>
+        <label class="switch" aria-label="启用手机设备">
+          <input type="checkbox" checked>
+          <span class="track"></span>
+          <span class="knob"></span>
+        </label>
+      </div>
+      <div class="card-body">
+        <div class="alert-row errcase">
+          <span class="icon-dot" style="background:var(--dsw-static-red-100);color:var(--dsw-alias-state-error-primary);">✕</span>
+          <p>未找到 adb<small>PATH 与 ANDROID_HOME 下均无平台工具，无法发现任何 Android 设备。</small></p>
+          <div class="card-spacer" style="flex:1;"></div>
+          <code style="font:var(--dsw-font-code-block-small);color:var(--dsw-alias-label-tertiary);white-space:nowrap;">sdkmanager "platform-tools"</code>
+          <button class="ghostbtn" type="button">安装指引</button>
+        </div>
+        <div class="alert-row warncase">
+          <span class="icon-dot warnbg">!</span>
+          <p>当前没有可用设备<small>模拟器未启动、也没有连接真机；连接手机后需在设备上允许 USB 调试。</small></p>
+          <div class="card-spacer" style="flex:1;"></div>
+          <button class="ghostbtn" type="button">打开 Android 向导</button>
+          <button class="ghostbtn" type="button">重新检测</button>
+        </div>
+        <div class="alert-row errcase">
+          <span class="icon-dot" style="background:var(--dsw-static-red-100);color:var(--dsw-alias-state-error-primary);">✕</span>
+          <p>WebDriverAgent 尚未构建<small>iPhone 通过 USB 已识别，但真机控制需要先构建并信任 WDA（免费证书 7 天有效）。</small></p>
+          <div class="card-spacer" style="flex:1;"></div>
+          <button class="ghostbtn" type="button">查看前置条件</button>
+          <button class="ghostbtn primary" type="button">构建 WDA…</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// Prototype-only copy affordance: clipboard first, silent fallback otherwise.
+document.querySelectorAll('[data-copy]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var text = btn.closest('.cmd').querySelector('code').textContent;
+    var mark = function () {
+      btn.classList.add('copied');
+      btn.querySelector('span').textContent = '已复制';
+      setTimeout(function () {
+        btn.classList.remove('copied');
+        btn.querySelector('span').textContent = '复制';
+      }, 1400);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(mark, mark);
+    } else { mark(); }
+  });
+});
+</script>
+</body>
+</html>

@@ -12,7 +12,7 @@ The delivery workflow named Codex worktree tasks as its preferred ticket writer 
 
 The root coordinator selects writers from the active runtime. Codex uses isolated Codex worktree tasks when they are available. DSH uses `subagent_fork` when the writer or prototype benefits from the current conversation and plain `subagent` when inheritance adds nothing. Model selection remains a per-ticket root decision.
 
-Every writer still receives one ticket, branch, and isolated worktree. A product-shaping prototype lives on its own pushed branch and supplies planning input that implementation tickets adapt rather than merge verbatim. Codex task archival runs only under Codex; exact worktree and branch validation remains common cleanup behavior.
+Every writer still receives one ticket, branch, and isolated worktree. Missing Codex task APIs do not activate the shared-checkout fallback when the runtime can still create an isolated worktree; only the loss of worktree isolation does. A product-shaping prototype lives on its own pushed branch and supplies planning input that implementation tickets adapt rather than merge verbatim. Codex task archival runs only under Codex; exact worktree and branch validation remains common cleanup behavior.
 
 ## Alternatives considered
 

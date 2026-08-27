@@ -12,7 +12,7 @@ Status: implemented
 
 根协调器根据当前运行时选择执行器。Codex 在可用时使用隔离的 Codex worktree 任务。DSH 在执行器或原型受益于当前对话时使用 `subagent_fork`，在继承上下文没有帮助时使用普通 `subagent`。模型选择仍由根协调器按 ticket 决定。
 
-每个执行器仍只接收一个 ticket、分支和隔离 worktree。产品塑形原型保存在独立的已推送分支中，作为规划输入；实现 ticket 会改造这些代码，而不是直接合并原型分支。只有 Codex 运行时会归档 Codex 任务；精确验证 worktree 和分支仍是所有运行时共用的清理行为。
+每个执行器仍只接收一个 ticket、分支和隔离 worktree。只要运行时仍能创建隔离 worktree，缺少 Codex 任务 API 就不会触发共享 checkout 兜底；只有失去 worktree 隔离能力时才会触发。产品塑形原型保存在独立的已推送分支中，作为规划输入；实现 ticket 会改造这些代码，而不是直接合并原型分支。只有 Codex 运行时会归档 Codex 任务；精确验证 worktree 和分支仍是所有运行时共用的清理行为。
 
 ## 曾考虑的替代方案
 

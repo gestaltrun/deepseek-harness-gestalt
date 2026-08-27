@@ -7071,6 +7071,12 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: workspace:^
+        version: link:../../../vendor/include
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: workspace:^
+        version: link:../../../vendor/loader
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:^
         version: link:../../host/webserver
@@ -7080,6 +7086,9 @@ importers:
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../platform-account
+      '@deepseek-ai/dsh-platform-account-core':
+        specifier: workspace:^
+        version: link:../platform-account-core
       '@deepseek-ai/dsh-project-membership':
         specifier: workspace:^
         version: link:../project-membership

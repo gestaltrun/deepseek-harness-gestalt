@@ -30,7 +30,7 @@ Complete this phase when the baseline is remotely visible, the planning checkout
 1. Decompose only when the source is not already ticketed. Use the Matt specification and ticket skills for product shaping and blocker-first ticket publication; do not rewrite accepted ticket scope during implementation.
 2. Order tickets by live dependency state. A ready frontier contains only tickets whose blockers are merged into the delivery baseline or represented by an intentional official PR stack.
 3. Keep independent tickets as independent pull requests. Use a stack only for a real code dependency, never merely to gain parallelism.
-4. Follow the [runtime-specific executor decision](../../notes/implemented/process/2026-08-27-runtime-specific-delivery-executors.md) for product-shaping prototypes. Under DSH, use `subagent_fork` so the prototype inherits the specification conversation. Under Codex, create an independent Codex Worktree task when available; otherwise use the sequential fallback in step 5 below. Keep prototype code on its own pushed worktree and branch as durable planning input. Implementation tickets adapt that code into their ticket branches instead of merging it verbatim; retire the prototype branch once its consuming tickets have landed.
+4. Follow the [runtime-specific executor decision](../../notes/implemented/process/2026-08-27-runtime-specific-delivery-executors.md) for product-shaping prototypes. Under DSH, use `subagent_fork` so the prototype inherits the specification conversation. Under Codex, create an independent Codex Worktree task when available; otherwise use the applicable sequential path in step 5 below. Keep prototype code on its own pushed worktree and branch as durable planning input. Implementation tickets adapt that code into their ticket branches instead of merging it verbatim; retire the prototype branch once its consuming tickets have landed.
 
 Complete this phase when every selected ticket has one base, one acceptance source, and a known dependency position.
 
@@ -40,7 +40,7 @@ Complete this phase when every selected ticket has one base, one acceptance sour
 2. Give each worker exactly one ticket, one `codex/<issue>-<slug>` branch, one worktree, the verified remote baseline branch and SHA, the acceptance criteria, and the required reporting format. Never let two writers mutate the same worktree.
 3. Allow read-heavy exploration, log analysis, and review to run as subagents inside a ticket. Keep one writer for that ticket unless every writer has a disjoint worktree and branch.
 4. Route follow-ups and dependency discoveries through the root task. Sibling agents need no direct communication. Record durable cross-ticket facts in the relevant Issue, pull request, Context document, or Agent Note.
-5. If the active runtime cannot create an isolated worktree, execute tickets sequentially with one writer in the current checkout. Use subagents only for read-only work and report the reduced isolation.
+5. Under Codex, when task creation is unavailable but an isolated worktree can still be created, the root executes tickets sequentially as the sole writer in one dedicated worktree at a time. If the active runtime cannot create an isolated worktree, the root executes tickets sequentially as the sole writer in the current checkout. Use subagents only for read-only work and report the reduced isolation.
 
 Complete this phase when every ready ticket has one accountable writer and no mutable checkout has multiple owners.
 

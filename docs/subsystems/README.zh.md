@@ -21,6 +21,7 @@
 | [session-query.md](session-query.zh.md) | 逻辑记录、有界精确事件读取、关系追踪、语义筛选器/文档与全文检索结果页 |
 | [feedback.md](feedback.zh.md) | 绑定生命周期的逐消息反馈记录、乐观版本、伴随记录持久化与 Host Remote 契约 |
 | [platform-account.md](platform-account.zh.md) | GitHub 公开身份、签名登录尝试、安装持有证明账号会话与跨实例失效 |
+| [project-membership.md](project-membership.zh.md) | 绑定 git remote 的云端项目、owner/admin/member 角色门、功能标签、原子邀请与工作区链接、roster 失效事件 |
 | [remote-protocol.md](remote-protocol.zh.md) | 独立 Relay Transport 与加密 Companion 协商、codec、品牌化 id、稳定错误和 wire 限制 |
 | [personal-pairing.md](personal-pairing.zh.md) | Settings-owned Mobile Access、同账号 Pairing Challenge、authentication words 与 Companion-only Device Principal |
 | [session-title.md](session-title.zh.md) | 持久标题快照、被引用的来源消息 seq 与异步提供方约定 |

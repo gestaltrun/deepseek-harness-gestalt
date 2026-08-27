@@ -6,7 +6,7 @@ Status: implemented
 
 ## 问题
 
-协作规格（#338）引入了云端项目的 owner/admin/member 角色、项目自定义功能标签，以及接受即原子链接工作区的邀请体系。在写任何代码之前有两个放置问题需要裁决：鉴于[无状态双实例 Relay](../../architecture/2026-08-18-stateless-two-instance-remote-relay.md) 决策刻意让每个 Platform Instance 不接触 DSH 业务值，权威的项目与成员存储到底该不该放在运营侧 Platform 上；以及在线状态如何推导才不必另造一套状态模型。生产故事也必须在不越过既有密码学评审门的前提下推进。
+协作规格（#338）引入了云端项目的 owner/admin/member 角色、项目自定义功能标签，以及接受即原子链接工作区的邀请体系。在写任何代码之前有两个放置问题需要裁决：鉴于[无状态双实例 Relay](../architecture/2026-08-18-stateless-two-instance-remote-relay.zh.md) 决策刻意让每个 Platform Instance 不接触 DSH 业务值，权威的项目与成员存储到底该不该放在运营侧 Platform 上；以及在线状态如何推导才不必另造一套状态模型。生产故事也必须在不越过既有密码学评审门的前提下推进。
 
 ## 决策
 
@@ -18,7 +18,7 @@ Status: implemented
 
 功能标签始终是项目词汇表拥有的展示与路由元数据:随每个 roster 视图携带,仅 owner/admin 可编辑,永不承载权限语义。角色只治理这一层面,并与 Git 平台权限双向无关。
 
-生产环境继续处于[版本化远端协议](../../architecture/2026-08-18-versioned-remote-protocol.md)所记录的独立信道加密评审之后,fail-closed:开发环境通过本地存储上的 keyless 组装场景完成验证,而任何被产出的部署中的提问路由激活都要等该评审通过。本次变更没有任何内容把传输、凭据或明文推过这条线。
+生产环境继续处于[版本化远端协议](../architecture/2026-08-18-versioned-remote-protocol.zh.md)所记录的独立信道加密评审之后,fail-closed:开发环境通过本地存储上的 keyless 组装场景完成验证,而任何被产出的部署中的提问路由激活都要等该评审通过。本次变更没有任何内容把传输、凭据或明文推过这条线。
 
 ## Supersession 检查
 

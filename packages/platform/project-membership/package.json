@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-project-membership",
   "description": "Project Membership Service Definition for cloud projects, member roles, function tags, and invitations",
-  "version": "0.1.0",
+  "version": "0.1.1-rc.2",
   "publishConfig": { "access": "public" },
   "repository": {
     "type": "git",
@@ -17,7 +17,7 @@
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
-  "files": ["lib/index.js", "lib/invariant.js", "lib/types/**/*.js", "lib/types/**/*.d.ts"],
+  "files": ["lib/index.js", "lib/invariant.js", "lib/types/**/*.d.ts"],
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",

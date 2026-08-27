@@ -1377,6 +1377,95 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'projectMembership',
+    summary: 'Project-membership capability.',
+    description: 'Project-membership capability. Every mutation executes its role gate inside the operation itself: schema omission or listener order never substitutes for the check that decides the outcome.',
+    methods: [
+      {
+        signature: 'abstract createProject(actor: PlatformAccountId, input: CreateProjectInput): Promise<ProjectView>',
+        description: 'Create one project; the actor becomes its first owner.',
+        parameters: [{ name: 'actor', description: 'authenticated account performing the mutation.' }, { name: 'input', description: 'unique project name and git remote to bind.' }],
+        returns: 'the stored project view.',
+        throws: ['{ProjectMembershipError} `PROJECT_NAME_TAKEN` when the name is in use, or `INVALID_REMOTE_URL` when normalization fails.'],
+      },
+      {
+        signature: 'abstract invite(actor: PlatformAccountId, input: InviteInput): Promise<InvitationView>',
+        description: 'Issue one invitation to a platform account.',
+        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner on the project.' }, { name: 'input', description: 'target project and invitee account.' }],
+        returns: 'the invitation in `pending` state.',
+        throws: ['{ProjectMembershipError} `ROLE_REQUIRED` below admin, `DUPLICATE_INVITEE` when the account already holds membership or a pending invitation, or `NOT_A_MEMBER` when the actor holds no membership.'],
+      },
+      {
+        signature: 'abstract retractInvitation(actor: PlatformAccountId, invitationId: InvitationId): Promise<void>',
+        description: 'Retract one invitation issued by the caller while it is still pending.',
+        parameters: [{ name: 'actor', description: 'authenticated account; must be the invitation\'s issuer or an owner of the project.' }, { name: 'invitationId', description: 'invitation to retract.' }],
+        returns: 'nothing; the stored state moves to `retracted`.',
+        throws: ['{ProjectMembershipError} `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, or `ROLE_REQUIRED`.'],
+      },
+      {
+        signature: 'abstract acceptInvitation(actor: PlatformAccountId, input: AcceptInvitationInput): Promise<MemberView>',
+        description: 'Accept one pending invitation; joining and workspace linking commit atomically, so no joined-but-unlinked state can exist.',
+        parameters: [{ name: 'actor', description: 'authenticated account; must be the invitation\'s addressee.' }, { name: 'input', description: 'invitation id plus the mandatory workspace link.' }],
+        returns: 'the created member view.',
+        throws: ['{ProjectMembershipError} `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, `DUPLICATE_INVITEE`, or `INVALID_LINK` when the link omits a workspace name.'],
+      },
+      {
+        signature: 'abstract declineInvitation(actor: PlatformAccountId, invitationId: InvitationId): Promise<void>',
+        description: 'Decline one pending invitation addressed to the caller.',
+        parameters: [{ name: 'actor', description: 'authenticated account; must be the invitation\'s addressee.' }, { name: 'invitationId', description: 'invitation to decline.' }],
+        returns: 'nothing; the stored state moves to `declined`.',
+        throws: ['{ProjectMembershipError} `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, or `ROLE_REQUIRED`.'],
+      },
+      {
+        signature: 'abstract changeRole(actor: PlatformAccountId, input: ChangeRoleInput): Promise<void>',
+        description: 'Change one membership\'s role. Rows whose current or target role is owner answer only to owners; admins may move members between `member` and `admin`.',
+        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner.' }, { name: 'input', description: 'membership row and new role.' }],
+        returns: 'nothing; the stored row carries the new role.',
+        throws: ['{ProjectMembershipError} `MEMBERSHIP_NOT_FOUND`, `ROLE_REQUIRED`, or `LAST_OWNER` when demoting the final owner.'],
+      },
+      {
+        signature: 'abstract setMemberTags(actor: PlatformAccountId, input: SetMemberTagsInput): Promise<void>',
+        description: 'Replace one membership\'s project-defined function tags; tags are display and routing metadata and never gate permissions.',
+        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner.' }, { name: 'input', description: 'membership row and replacement tags.' }],
+        returns: 'nothing; the stored row carries the new tags.',
+        throws: ['{ProjectMembershipError} `MEMBERSHIP_NOT_FOUND` or `ROLE_REQUIRED`.'],
+      },
+      {
+        signature: 'abstract removeMember(actor: PlatformAccountId, membershipId: MembershipId): Promise<void>',
+        description: 'Remove one membership. Removing an owner answers only to owners; when members remain after removal, every cached roster projection for the project is invalidated by the same operation.',
+        parameters: [{ name: 'actor', description: 'authenticated account holding admin or owner.' }, { name: 'membershipId', description: 'membership row to remove.' }],
+        returns: 'nothing.',
+        throws: ['{ProjectMembershipError} `MEMBERSHIP_NOT_FOUND`, `ROLE_REQUIRED`, or `LAST_OWNER` when removing the final owner.'],
+      },
+      {
+        signature: 'abstract roster(actor: PlatformAccountId, projectId: ProjectId): Promise<RosterView>',
+        description: 'Read one project\'s full roster; both caller and readers require an active membership, so removed accounts lose enumeration immediately.',
+        parameters: [{ name: 'actor', description: 'authenticated account whose active membership gates the read.' }, { name: 'projectId', description: 'project to project.' }],
+        returns: 'the roster view derived from current authority, not a stale cache.',
+        throws: ['{ProjectMembershipError} `PROJECT_NOT_FOUND` or `NOT_A_MEMBER`.'],
+      },
+      {
+        signature: 'abstract pendingInvitationsFor(actor: PlatformAccountId): Promise<readonly InvitationView[]>',
+        description: 'List invitations addressed to the caller that still await a decision.',
+        parameters: [{ name: 'actor', description: 'authenticated account.' }],
+        returns: 'pending invitations in issuance order.',
+      },
+      {
+        signature: 'abstract projectByRemote(actor: PlatformAccountId, normalizedRemoteUrl: string): Promise<ProjectView | undefined>',
+        description: 'Find the project bound to a normalized git remote, if the actor holds a membership there.',
+        parameters: [{ name: 'actor', description: 'authenticated account whose memberships scope the search.' }, { name: 'normalizedRemoteUrl', description: 'normalized remote URL recorded at creation.' }],
+        returns: 'the project view, or undefined when no such membership exists.',
+      },
+      {
+        signature: 'abstract rosterVersion(projectId: ProjectId): Promise<number>',
+        description: 'Read one project\'s current roster projection version. Consumers key caches on it; every committed membership-set or role-or-tag mutation publishes a new strictly increasing value for that project.',
+        parameters: [{ name: 'projectId', description: 'project to read.' }],
+        returns: 'the project\'s roster projection version.',
+        throws: ['{ProjectMembershipError} `PROJECT_NOT_FOUND`.'],
+      },
+    ],
+  },
+  {
     key: 'remoteAccess',
     summary: 'Remote Access capability owning the complete Personal Pairing lifecycle.',
     description: 'Remote Access capability owning the complete Personal Pairing lifecycle.',
@@ -3159,6 +3248,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'options', description: 'the full request. A LOOP-built request carries the process-local {@link markAgentLoopRequest} identity and arrives deep-frozen (mutation throws): its content is a pure function of the session log (the reconstructability Agent Note), so listeners read it, never rewrite it. Hand-built calls do not carry that marker; their messages already obey the immutable creation contract.' }],
   },
   {
+    name: 'project-membership/roster-invalidated',
+    mode: 'emit',
+    signature: '\'project-membership/roster-invalidated\'(change: RosterInvalidation): void',
+    summary: 'A membership mutation committed durably and its project\'s roster view must be re-derived.',
+    description: 'A membership mutation committed durably and its project\'s roster view must be re-derived. One event per commit in write order.',
+    parameters: [{ name: 'change', description: 'project, membership, account, both roster versions, and the change discriminant with any post-state payload.' }],
+  },
+  {
     name: 'session-telemetry/record',
     mode: 'waterfall',
     signature: '\'session-telemetry/record\'(record: SessionTelemetryRecord, next: () => SessionTelemetryRecord): SessionTelemetryRecord',
@@ -3402,6 +3499,10 @@ export const EVENT_API: readonly EventApiEntry[] = [
 
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
+  {
+    name: 'AcceptInvitationInput',
+    declaration: 'export interface AcceptInvitationInput {\n    readonly invitationId: InvitationId;\n    readonly link: WorkspaceLink;\n}',
+  },
   {
     name: 'AccountProof',
     declaration: 'export interface AccountProof {\n    jti: AccountProofJti;\n    issuedAt: number;\n    signature: string;\n}',
@@ -3759,6 +3860,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CancelOptions {\n    keepInbox?: boolean | undefined;\n}',
   },
   {
+    name: 'ChangeRoleInput',
+    declaration: 'export interface ChangeRoleInput {\n    readonly membershipId: MembershipId;\n    readonly role: ProjectRole;\n}',
+  },
+  {
     name: 'ClientResponse',
     declaration: 'export interface ClientResponse {\n    type: \'client-response\';\n    rpcId: RpcId;\n    result: RpcResult<unknown>;\n}',
   },
@@ -3929,6 +4034,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CreateGoalResult',
     declaration: 'export interface CreateGoalResult {\n    readonly ref: GoalRef;\n}',
+  },
+  {
+    name: 'CreateProjectInput',
+    declaration: 'export interface CreateProjectInput {\n    readonly name: string;\n    readonly remoteUrl: string;\n}',
   },
   {
     name: 'CreateSessionOptions',
@@ -4187,6 +4296,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface FsWriteOutcome {\n    operation: \'create\' | \'update\';\n    version: FsVersion;\n    before: string | null;\n    after: string;\n}',
   },
   {
+    name: 'FunctionTag',
+    declaration: 'export type FunctionTag = Branded<\'FunctionTag\'>;',
+  },
+  {
     name: 'GenerateOptions',
     declaration: 'export interface GenerateOptions {\n    provider: string;\n    model: string;\n    reasoningEffort?: ReasoningEffortId;\n    messages: Message[];\n    system?: string;\n    tools?: ToolSchema[];\n    temperature?: number;\n    maxTokens?: number;\n    stop?: string[];\n    signal?: AbortSignal;\n    sessionId?: Branded<\'SessionId\'>;\n    purpose?: \'compaction\' | \'session-title\';\n}',
   },
@@ -4289,6 +4402,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'InvariantInstaller',
     declaration: 'export interface InvariantInstaller {\n    (ctx: Context, fail: InvariantFailure): void | Promise<void>;\n    readonly inject?: Inject;\n}',
+  },
+  {
+    name: 'InvitationId',
+    declaration: 'export type InvitationId = Branded<\'InvitationId\'>;',
+  },
+  {
+    name: 'InvitationState',
+    declaration: 'export type InvitationState = \'pending\' | \'accepted\' | \'declined\' | \'retracted\';',
+  },
+  {
+    name: 'InvitationView',
+    declaration: 'export interface InvitationView {\n    readonly id: InvitationId;\n    readonly projectId: ProjectId;\n    readonly inviterAccountId: PlatformAccountId;\n    readonly inviteeAccountId: PlatformAccountId;\n    readonly state: InvitationState;\n    readonly invitedAt: number;\n    readonly settledAt?: number;\n}',
+  },
+  {
+    name: 'InviteInput',
+    declaration: 'export interface InviteInput {\n    readonly projectId: ProjectId;\n    readonly inviteeAccountId: PlatformAccountId;\n}',
   },
   {
     name: 'InvocationDescriptor',
@@ -4497,6 +4626,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ManualCompactAgentContext',
     declaration: 'export interface ManualCompactAgentContext extends CompactionAgentContext {\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n}',
+  },
+  {
+    name: 'MembershipId',
+    declaration: 'export type MembershipId = Branded<\'MembershipId\'>;',
+  },
+  {
+    name: 'MemberView',
+    declaration: 'export interface MemberView {\n    readonly id: MembershipId;\n    readonly accountId: PlatformAccountId;\n    readonly role: ProjectRole;\n    readonly tags: readonly FunctionTag[];\n    readonly link?: WorkspaceLink;\n    readonly joinedAt: number;\n}',
   },
   {
     name: 'Message',
@@ -4727,6 +4864,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PreToolDecision = {\n    kind: \'allow\';\n} | {\n    kind: \'deny\';\n    reason: string;\n} | {\n    kind: \'ask\';\n    reason?: string;\n};',
   },
   {
+    name: 'ProjectId',
+    declaration: 'export type ProjectId = Branded<\'ProjectId\'>;',
+  },
+  {
     name: 'ProjectionChangeListener',
     declaration: 'export type ProjectionChangeListener = (session: Session, key: Extract<keyof SessionProjectionMap, string>, value: unknown, seq: number) => void;',
   },
@@ -4745,6 +4886,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ProjectionSnapshot',
     declaration: 'export interface ProjectionSnapshot {\n    asOfSeq: number;\n    values: Partial<SessionProjectionMap>;\n}',
+  },
+  {
+    name: 'ProjectRole',
+    declaration: 'export type ProjectRole = \'owner\' | \'admin\' | \'member\';',
+  },
+  {
+    name: 'ProjectView',
+    declaration: 'export interface ProjectView {\n    readonly id: ProjectId;\n    readonly name: string;\n    readonly boundRemoteUrl: string;\n    readonly createdAt: number;\n}',
   },
   {
     name: 'PromptAssembly',
@@ -4917,6 +5066,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ResumeAgentOptions',
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
+  },
+  {
+    name: 'RosterInvalidation',
+    declaration: 'export type RosterInvalidation = RosterInvalidationBase & (RosterTagsChanged | RosterRoleChanged | {\n    readonly reason: \'joined\';\n} | {\n    readonly reason: \'removed\';\n});',
+  },
+  {
+    name: 'RosterInvalidationBase',
+    declaration: 'export interface RosterInvalidationBase {\n    readonly projectId: ProjectId;\n    readonly membershipId: MembershipId;\n    readonly accountId: PlatformAccountId;\n    readonly rosterVersionBefore: number;\n    readonly rosterVersionAfter: number;\n}',
+  },
+  {
+    name: 'RosterRoleChanged',
+    declaration: 'export interface RosterRoleChanged {\n    readonly reason: \'role-changed\';\n    readonly role: ProjectRole;\n}',
+  },
+  {
+    name: 'RosterTagsChanged',
+    declaration: 'export interface RosterTagsChanged {\n    readonly reason: \'tags-changed\';\n    readonly tags: readonly FunctionTag[];\n}',
+  },
+  {
+    name: 'RosterView',
+    declaration: 'export interface RosterView {\n    readonly project: ProjectView;\n    readonly members: readonly MemberView[];\n}',
   },
   {
     name: 'RpcError',
@@ -5289,6 +5458,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionTitleUserMessage',
     declaration: 'export interface SessionTitleUserMessage {\n    readonly seq: number;\n    readonly text: string;\n}',
+  },
+  {
+    name: 'SetMemberTagsInput',
+    declaration: 'export interface SetMemberTagsInput {\n    readonly membershipId: MembershipId;\n    readonly tags: readonly FunctionTag[];\n}',
   },
   {
     name: 'SettingsApplies',
@@ -6045,6 +6218,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkflowStopReason',
     declaration: 'export type WorkflowStopReason = \'completed\' | \'cancelled\' | \'error\';',
+  },
+  {
+    name: 'WorkspaceLink',
+    declaration: 'export interface WorkspaceLink {\n    readonly workspaceName: string;\n    readonly normalizedRemoteUrl?: string;\n}',
   },
 ]
 

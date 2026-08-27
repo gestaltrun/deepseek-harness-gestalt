@@ -1868,11 +1868,13 @@ export interface AccountRecord extends PlatformAccountView {
 }
 ```
 
-依赖：[`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.zh.md) · [`InstallationId`](subsystems/platform-account.zh.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.zh.md) · [`PlatformAccountId`](../packages/platform/platform-account/src/index.ts) · [`PlatformAccountView`](subsystems/platform-account.zh.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
+依赖：[`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.zh.md) · [`InstallationId`](subsystems/platform-account.zh.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.zh.md) · [`PlatformAccountId`](subsystems/platform-account.zh.md) · [`PlatformAccountView`](subsystems/platform-account.zh.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
 
 来源：[`packages/platform/platform-account-core/src/index.ts:506`](../packages/platform/platform-account-core/src/index.ts)
 
 <a id="deepseek-aidsh-platform-account-http"></a>
+
+
 
 ## `@deepseek-ai/dsh-platform-account-http`
 
@@ -1887,6 +1889,25 @@ export interface Config {
 ```
 
 来源：[`packages/platform/platform-account-http/src/index.ts:31`](../packages/platform/platform-account-http/src/index.ts)
+
+<a id="deepseek-aidsh-project-membership-core"></a>
+
+## `@deepseek-ai/dsh-project-membership-core`
+
+```ts config-catalog
+/** Plugin config: where committed state lives and which environment owns it. */
+export interface Config {
+  /**
+   * Directory holding this deployment's durable membership corpus. Each
+   * validated environment keeps its own subdirectory below it.
+   */
+  storagePath: string
+  /** Deployment identity isolating project and account namespaces. */
+  environment: 'development' | 'production'
+}
+```
+
+Source: [`packages/platform/project-membership-core/src/index.ts:46`](../packages/platform/project-membership-core/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 
@@ -3759,6 +3780,7 @@ export interface Config {
 - `@deepseek-ai/dsh-host-directory-picker` — 抽象 `DirectoryPicker`（[`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts)）
 - `@deepseek-ai/dsh-jobs` — 抽象 `JobRegistry`（[`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts)）
 - `@deepseek-ai/dsh-platform-account` — 抽象 `AccountService`（[`packages/platform/platform-account/src/index.ts`](../packages/platform/platform-account/src/index.ts)）
+- `@deepseek-ai/dsh-project-membership` — 抽象 `ProjectMembershipService`（[`packages/platform/project-membership/src/index.ts`](../packages/platform/project-membership/src/index.ts)）
 - `@deepseek-ai/dsh-remote-access` — 抽象 `RemoteAccessService`（[`packages/platform/remote-access/src/index.ts`](../packages/platform/remote-access/src/index.ts)）
 - `@deepseek-ai/dsh-sandbox` — 抽象 `SandboxProvider`（[`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts)）
 - `@deepseek-ai/dsh-session-persistence` — 抽象 `SessionPersistence`（[`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts)）

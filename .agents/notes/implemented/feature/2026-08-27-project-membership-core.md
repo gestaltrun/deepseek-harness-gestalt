@@ -6,7 +6,7 @@ English | [中文](2026-08-27-project-membership-core.zh.md)
 
 ## Problem
 
-The collaboration spec (#338) introduces cloud projects with owner/admin/member roles, project-defined function tags, and invitations whose acceptance links a workspace atomically. Two placement questions preceded any code: whether the authoritative project/membership store belongs on the operated Platform at all — given that the [stateless two-instance Relay](../../architecture/2026-08-18-stateless-two-instance-remote-relay.md) decision deliberately keeps every Platform Instance free of DSH business values — and how presence may be derived without inventing a state model. The production story also had to avoid widening trust beyond the standing cryptographic review gate.
+The collaboration spec (#338) introduces cloud projects with owner/admin/member roles, project-defined function tags, and invitations whose acceptance links a workspace atomically. Two placement questions preceded any code: whether the authoritative project/membership store belongs on the operated Platform at all — given that the [stateless two-instance Relay](../architecture/2026-08-18-stateless-two-instance-remote-relay.md) decision deliberately keeps every Platform Instance free of DSH business values — and how presence may be derived without inventing a state model. The production story also had to avoid widening trust beyond the standing cryptographic review gate.
 
 ## Decision
 
@@ -18,7 +18,7 @@ Presence derives solely from connection liveness: a member is online when at lea
 
 Function tags stay display-and-routing metadata owned by the project vocabulary: they ride every roster view, they are editable only by owner/admin, and they never gate a permission. Roles govern only this plane and stay disjoint from Git-provider permissions in both directions.
 
-Production remains fail-closed behind the independent channel-encryption review recorded alongside the [versioned Remote Protocol](../../architecture/2026-08-18-versioned-remote-protocol.md): development composes and verifies through keyless assembled scenarios over local storage, while any routed-question activation in a produced deployment waits for that review to clear. Nothing in this change moves transport, credentials, or plaintext across that line.
+Production remains fail-closed behind the independent channel-encryption review recorded alongside the [versioned Remote Protocol](../architecture/2026-08-18-versioned-remote-protocol.md): development composes and verifies through keyless assembled scenarios over local storage, while any routed-question activation in a produced deployment waits for that review to clear. Nothing in this change moves transport, credentials, or plaintext across that line.
 
 ## Supersession check
 

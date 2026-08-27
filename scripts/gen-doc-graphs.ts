@@ -249,6 +249,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns GitHub public identity and proof-of-possession installation sessions; HTTP and Desktop/Mobile clients complete signed polling without receiving provider credentials.',
   },
   {
+    key: 'projectMembership',
+    pkg: 'project-membership',
+    title: 'Project membership collaboration seam',
+    mode: 'seam',
+    implementations: ['project-membership-core'],
+    note: 'Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; no consumer packages are wired yet.',
+  },
+  {
     key: 'remoteAccess',
     pkg: 'remote-access',
     title: 'Personal Pairing lifecycle seam',

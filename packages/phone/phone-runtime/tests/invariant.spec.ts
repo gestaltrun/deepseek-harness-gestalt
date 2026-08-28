@@ -139,6 +139,9 @@ describe('phone runtime invariant companion', () => {
     }).await()
     const owner = (context.phoneDevices as unknown as Record<PropertyKey, unknown>)[PHONE_RUNTIME_STATE_OWNER]
     expect(owner).toBeDefined()
+    if (typeof owner !== 'object' || owner === null) {
+      throw new Error('phone runtime state owner must be an object')
+    }
     expect(phoneRuntimeStateValidator(owner)).toBeUndefined()
 
     registerPhoneRuntimeStateValidator(owner, () => {

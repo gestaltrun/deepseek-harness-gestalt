@@ -13,7 +13,13 @@ const ANDROID_EMU = deviceId('emulator-5554')
 const IOS_SIM = deviceId('SIM-UDID-1')
 const IOS_REAL = deviceId('REAL-UDID-1')
 
-function wire(id: string, platform: 'ios' | 'android', type: string, state = 'online', name = `${id}-n`): unknown {
+function wire(
+  id: string,
+  platform: 'ios' | 'android',
+  type: string,
+  state = 'online',
+  name = `${id}-n`,
+): { id: string; name: string; platform: string; type: string; state: string; model: string; provider: { type: string } } {
   return { id, name, platform, type, state, model: 'm', provider: { type: 'local' } }
 }
 

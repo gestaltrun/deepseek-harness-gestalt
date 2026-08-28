@@ -276,8 +276,8 @@
     - id: ui-browser
       name: '@deepseek-ai/dsh-client-ui-browser'
 
-    # Phone tab skeleton: the always-reachable 「手机」 entry with the enable
-    # gate; disabled by default (Config.enabled), zero detection/spawn.
+    # Phone tab plus Plugins-tab settings wizard: the always-reachable 「手机」
+    # entry with the enable gate; disabled by default (ui-phone.enabled).
     - id: ui-phone
       name: '@deepseek-ai/dsh-client-ui-phone'
 

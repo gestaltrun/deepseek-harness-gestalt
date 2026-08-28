@@ -132,7 +132,11 @@ function signaturesOf(list: PhoneDeviceList | undefined): Map<DeviceId, string> 
   return signatures
 }
 
-/** Every entry of one grouped listing, android first then iOS simulators then reals. */
+/**
+ * Flatten one grouped listing in android, then iOS simulator, then iOS real order.
+ * @param list - Grouped listing to flatten.
+ * @returns every entry of the listing in that order.
+ */
 export function allRefs(list: PhoneDeviceList): readonly PhoneDeviceRef[] {
   return [...list.android, ...list.ios.simulators, ...list.ios.reals]
 }

@@ -4,7 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { HarnessError, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
-import type { DeviceId, PhoneDeviceList, PhoneDeviceRef } from '@deepseek-ai/dsh-phone-runtime'
+import type { DeviceId, PhoneDeviceList, PhoneDeviceRef, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 
@@ -181,7 +181,7 @@ interface PhoneFleet {
   listDevices(signal?: AbortSignal): Promise<PhoneDeviceList>
   boot(id: DeviceId, signal?: AbortSignal): Promise<void>
   shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
-  act?(id: DeviceId, action: DeviceAction, signal?: AbortSignal): Promise<unknown>
+  io?(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
   screenshot?(id: DeviceId, signal?: AbortSignal): Promise<{ readonly mediaType: 'image/png'; readonly data: string }>
 }
 
@@ -262,6 +262,38 @@ function parseAction(raw: DeviceAction): DeviceAction {
     return { kind: 'type', text }
   }
   return { kind: 'button', name: raw.name }
+}
+
+const IO_BUTTONS: Record<(typeof BUTTON_NAMES)[number], string> = {
+  home: 'HOME',
+  back: 'BACK',
+  recents: 'APP_SWITCH',
+  power: 'POWER',
+  volume_up: 'VOLUME_UP',
+  volume_down: 'VOLUME_DOWN',
+}
+
+/**
+ * Map one closed model action onto a branded `device.io.*` request.
+ * @param id - Branded device id.
+ * @param action - Closed tap, swipe, type, or button action.
+ * @returns the Service IO request.
+ */
+function ioRequestFrom(id: DeviceId, action: DeviceAction): PhoneIoRequest {
+  if (action.kind === 'tap') return { deviceId: id, method: 'tap', x: action.x, y: action.y }
+  if (action.kind === 'swipe') {
+    return {
+      deviceId: id,
+      method: 'gesture',
+      actions: [
+        { type: 'pointerDown', x: action.x1, y: action.y1 },
+        { type: 'pointerMove', x: action.x2, y: action.y2 },
+        { type: 'pointerUp' },
+      ],
+    }
+  }
+  if (action.kind === 'type') return { deviceId: id, method: 'text', text: action.text }
+  return { deviceId: id, method: 'button', button: IO_BUTTONS[action.name] }
 }
 
 /**
@@ -386,11 +418,11 @@ export function apply(ctx: Context, config: Config): void {
       execute: async (args, exec) => {
         const id = requireDeviceId(args.deviceId)
         const action = parseAction(args.action)
-        if (fleet.act === undefined) {
+        if (fleet.io === undefined) {
           throw new HarnessError('the phone fleet does not expose device actions', 'PHONE_UNSUPPORTED')
         }
         try {
-          await fleet.act(id, action, exec.signal)
+          await fleet.io(ioRequestFrom(id, action), exec.signal)
           return { deviceId: id, action, status: 'ok' as const }
         } catch (error) {
           wrapFleetError(error)

@@ -12,9 +12,9 @@ Status: implemented
 
 `packages/phone/tool-phone`（`@deepseek-ai/dsh-tool-phone`）是 `ctx.phoneDevices` 的延迟 Consumer。它注入 `phoneDevices` 与 `tools`，注册六个 `deferLoading` 工具（`device_list`、`device_open`、`device_close`、`device_observe`、`device_act`、`device_screenshot`），并在禁用 `toolSearch` 时拒绝加载。初始请求不含这些 schema；`tool_search` 返回匹配 schema 但不激活工具，后续请求从持久 `loadedTools` 重建。
 
-`device_act` 只接受封闭的 `tap` / `swipe` / `type` / `button` 动作。没有 shell、`adb` 或自由命令参数。`device_act`、`device_open` 与 `device_close` 监听 `tools/pre-execute`，在先前监听器返回 `allow` 后替换为 `ask`。先前的 deny 或 ask 保持不变。审批 `allowed-once` 会执行一次设备群调用；拒绝则永远到不了 `boot` / `shutdown` / `act`。
+`device_act` 只接受封闭的 `tap` / `swipe` / `type` / `button` 动作，并转发到 `phoneDevices.io`（`tap`、`gesture`、`text`、`button`）。没有 shell、`adb` 或自由命令参数。`device_act`、`device_open` 与 `device_close` 监听 `tools/pre-execute`，在先前监听器返回 `allow` 后替换为 `ask`。先前的 deny 或 ask 保持不变。审批 `allowed-once` 会执行一次设备群调用；拒绝则永远到不了 `boot` / `shutdown` / `io`。
 
-已携带 `PhoneDevicesError` 代码的设备群失败会以同一代码重抛为 `HarnessError`。注入设备群缺少 `act`/`screenshot` 方法，或 type 文本为空，使用 `PHONE_UNSUPPORTED`。当前 mobilecli Service 只拥有 list/boot/shutdown；screenshot 与 act 因此在后续设备群票补齐前以该代码失败。本票不把 Consumer 编入已交付的 Desktop/headless preset；发现重建由包测试通过 `systemPrompt.assemble` 证明。
+已携带 `PhoneDevicesError` 代码的设备群失败会以同一代码重抛为 `HarnessError`。空 type 文本，或注入设备群缺少 `io` / `screenshot`，使用 `PHONE_UNSUPPORTED`。`device_screenshot` 仍要求注入 PNG 方法；实况 MJPEG/H264 采集仍由 `dsh-phone-stream` 负责。本票不把 Consumer 编入已交付的 Desktop/headless preset；发现重建由包测试通过 `systemPrompt.assemble` 证明。
 
 ## Alternatives considered
 
@@ -28,4 +28,4 @@ Status: implemented
 
 ## Consequences
 
-模型可以在首次请求不支付 schema 成本的情况下发现六工具手机词表，有后果的变更默认走一次性审批。运维继承设备群的安装前置，以及当前 Service 缺失的 screenshot/act 方法。GUI chrome、签名流路由与 preset 组合仍是后续票。
+模型可以在首次请求不支付 schema 成本的情况下发现六工具手机词表，有后果的变更默认走一次性审批。运维继承设备群的安装前置。`device_screenshot` 在当前 Service 上仍无 PNG 方法，因此实况采集仍由签名流 Consumer 负责。GUI chrome 与 preset 组合仍是后续票。

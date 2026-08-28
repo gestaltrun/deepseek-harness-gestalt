@@ -13,6 +13,7 @@ import net from 'node:net'
 export interface FakeKnobs {
   devices?: Array<Record<string, unknown>>
   listDelayMs?: number
+  screencaptureDelayMs?: number
   hang?: boolean
   exitAfter?: number
   /** Exit before binding anything; simulates a binary that cannot start. */
@@ -29,7 +30,7 @@ export interface StagedFake {
   /** Release the placeholder port reservation right before the child spawns. */
   claim(): void
   setDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
-  counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number }>
+  counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }>
   /** Resolves when the RPC endpoint answers or rejects when the fake is gone. */
   awaitOnline(timeoutMs?: number): Promise<void>
   dispose(): Promise<void>
@@ -99,11 +100,12 @@ export async function stageFake(knobs: FakeKnobs = {}): Promise<StagedFake> {
       })
       if (!response.ok) throw new Error(`set-devices failed: HTTP ${String(response.status)}`)
     },
-    async counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number }> {
+    async counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }> {
       return await (await fetch(`${baseUrl}/__test/counters`)).json() as {
         requests: number
         bootCount: number
         shutdownCount: number
+        io: unknown[]
       }
     },
     async awaitOnline(timeoutMs = 5_000): Promise<void> {

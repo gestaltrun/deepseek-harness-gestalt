@@ -1707,7 +1707,27 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/phone-runtime/src/index.ts:51`](../packages/phone/phone-runtime/src/index.ts)
+Source: [`packages/phone/phone-runtime/src/index.ts:75`](../packages/phone/phone-runtime/src/index.ts)
+
+<a id="deepseek-aidsh-phone-stream"></a>
+
+## `@deepseek-ai/dsh-phone-stream`
+
+Requires: `phoneDevices` · `webServer`
+
+```ts config-catalog
+/**
+ * Validated runtime configuration. Token lifetime is a deployment-varying
+ * choice; path prefixes, HMAC algorithm, and the loopback capture fence are
+ * security invariants.
+ */
+export interface Config {
+  /** Milliseconds a minted capture URL remains valid. */
+  tokenTtlMs?: number
+}
+```
+
+Source: [`packages/phone/phone-stream/src/index.ts:54`](../packages/phone/phone-stream/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 

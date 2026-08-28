@@ -6,6 +6,8 @@
 
 - `listDevices(signal?)` — 返回分组清单 `{ android, ios: { simulators, reals } }`；每项为冻结的 `PhoneDeviceRef`（`id` 为 branded `DeviceId`、`name`、`kind: 'emulator' | 'simulator' | 'real'`、`online`）。关机的模拟器/仿真器同样是合法 boot 目标，因此始终随查询发送 `includeOffline: true`；仅上游 `online` 状态映射为 `online: true`（`offline`、`unauthorized` 等一律 false）。
 - `boot(id, signal?)` / `shutdown(id, signal?)` — 对应上游 `device.boot` / `device.shutdown`，以 branded id 寻址。真机在本包内先于 RPC 以 `PHONE_REAL_DEVICE` 拒绝（上游仅允许模拟器/仿真器），最新清单中不存在的 id 以 `PHONE_DEVICE_NOT_FOUND` 失败。变更成功后立即调度一次刷新轮询。
+- `io(request, signal?)` — 对应上游 `device.io.tap` / `gesture` / `text` / `button`。真机是合法目标；仅最新清单中不存在的 id 在本包内以 `PHONE_DEVICE_NOT_FOUND` 失败。
+- `startCapture(request)` — 对应上游 `device.screencapture`。`h264` 映射为上游 `avc`；返回的 `PhoneCaptureStream` 是尚未读取的 body，`contentType` 为上游响应头。`requestTimeoutMs` 只约束等待响应头的时间；body 取消由调用方持有。最新清单中不存在的 id 以 `PHONE_DEVICE_NOT_FOUND` 失败。
 - `onChanged(sub)` — 返回 disposer 的订阅；每条已提交的 `PhoneDeviceChange` 携带完整新清单以及相对上一条已发布清单的 `added`/`removed` id 数组。通知在提交轮询后同步投递，抛错的订阅者被拦截并记日志，订阅绝不比 Service 更长寿。
 
 所有操作接受可选 `AbortSignal` 并执行经校验的时间上限；一切失败归一为 `PhoneDevicesError`（`PHONE_DISPOSED`、`PHONE_ABORTED`、`PHONE_TIMEOUT`、`PHONE_UNAVAILABLE`、`PHONE_UNRESOLVED`、`PHONE_PROTOCOL`、`PHONE_UPSTREAM`、`PHONE_DEVICE_NOT_FOUND`、`PHONE_REAL_DEVICE`）。

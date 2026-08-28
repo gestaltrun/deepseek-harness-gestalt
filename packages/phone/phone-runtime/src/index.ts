@@ -23,12 +23,27 @@ import {
 import { MobilecliServerProcess } from './server-process.ts'
 import type {
   DeviceId,
+  PhoneCaptureRequest,
+  PhoneCaptureStream,
   PhoneDeviceChange,
   PhoneDeviceList,
   PhoneDeviceRef,
+  PhoneIoRequest,
 } from './types.ts'
 
-export type { DeviceId, PhoneDeviceChange, PhoneDeviceKind, PhoneDeviceList, PhoneDeviceRef, PhoneErrorCode } from './types.ts'
+export type {
+  DeviceId,
+  PhoneCaptureFormat,
+  PhoneCaptureRequest,
+  PhoneCaptureStream,
+  PhoneDeviceChange,
+  PhoneDeviceKind,
+  PhoneDeviceList,
+  PhoneDeviceRef,
+  PhoneErrorCode,
+  PhoneIoMethod,
+  PhoneIoRequest,
+} from './types.ts'
 export { PhoneDevicesError } from './errors.ts'
 export { deviceId } from './ids.ts'
 export type { ServerExit } from './server-process.ts'
@@ -39,8 +54,17 @@ const METHOD_DEVICES_LIST = 'devices.list'
 const METHOD_DEVICE_BOOT = 'device.boot'
 /** OpenRPC method shutting down one simulator or emulator. */
 const METHOD_DEVICE_SHUTDOWN = 'device.shutdown'
+/** OpenRPC method opening an MJPEG or AVC screen-capture stream. */
+const METHOD_DEVICE_SCREENCAPTURE = 'device.screencapture'
 /** OpenRPC method probed until the spawned server answers its first request. */
 const METHOD_SERVER_INFO = 'server.info'
+
+const IO_METHODS = {
+  tap: 'device.io.tap',
+  gesture: 'device.io.gesture',
+  text: 'device.io.text',
+  button: 'device.io.button',
+} as const
 
 /**
  * Validated runtime configuration. Defaults carry the upstream facts they can:
@@ -125,6 +149,9 @@ declare module '@deepseek-ai/cordis' {
  * - `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.
  * - `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).
  * - `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.
+ *
+ * `io` and `startCapture` accept physical handsets; they only refuse ids
+ * absent from the latest published listing.
  */
 export class PhoneDevices extends Service {
   /** Validated configuration schema applied by composition. */
@@ -355,6 +382,64 @@ export class PhoneDevices extends Service {
     this.enqueuePoll({ refreshOnly: true })
   }
 
+  /**
+   * Forward one `device.io.tap` / `gesture` / `text` / `button` round trip.
+   * Physical handsets are valid targets; only ids absent from the latest
+   * published listing fail locally before any RPC.
+   * @param request - Branded device id plus the OpenRPC params for that verb.
+   * @param signal - Caller's optional cancellation signal.
+   * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
+   *   absent from the latest published listing, and otherwise per the
+   *   class-documented failure modes.
+   */
+  async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void> {
+    this.requireKnown(request.deviceId, 'io')
+    await this.whenReady(signal)
+    await this.roundTrip(IO_METHODS[request.method], ioParams(request), signal, this.resolved.requestTimeoutMs)
+  }
+
+  /**
+   * Open one upstream `device.screencapture` stream. `h264` maps onto the
+   * upstream `avc` format; the returned body is unread so the Host can proxy
+   * frames without buffering a capture.
+   * @param request - Branded device id, encoding, and optional cancellation.
+   * @returns the live capture content type and body; the caller owns cancellation.
+   * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
+   *   absent from the latest published listing, and otherwise per the
+   *   class-documented failure modes.
+   */
+  async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream> {
+    this.requireKnown(request.deviceId, 'capture')
+    await this.whenReady(request.signal)
+    this.assertUsable()
+    if (request.signal?.aborted === true) {
+      throw new PhoneDevicesError('PHONE_ABORTED', 'cancelled before the request was sent')
+    }
+    const fused = fuseCallerAndLifetime(request.signal, this.lifetime.signal)
+    const budget = deadline(fused, this.resolved.requestTimeoutMs, METHOD_DEVICE_SCREENCAPTURE)
+    try {
+      const capture = await (this.rpcClient as MobilecliRpc).stream(
+        METHOD_DEVICE_SCREENCAPTURE,
+        {
+          deviceId: request.deviceId,
+          format: request.format === 'h264' ? 'avc' : 'mjpeg',
+        },
+        budget.signal,
+      )
+      return Object.freeze({ contentType: capture.contentType, body: capture.body })
+    } catch (error) {
+      const normalized = normalizeOperationError(error)
+      if (normalized.code !== 'PHONE_TIMEOUT') throw normalized
+      throw new PhoneDevicesError(
+        'PHONE_TIMEOUT',
+        `${JSON.stringify(METHOD_DEVICE_SCREENCAPTURE)} exceeded its ${String(this.resolved.requestTimeoutMs)}ms ceiling`,
+        { cause: normalized },
+      )
+    } finally {
+      budget[Symbol.dispose]()
+    }
+  }
+
   private requireVirtual(id: DeviceId, operation: 'boot' | 'shutdown'): void {
     this.assertAccepting()
     const known = this.findKnown(id)
@@ -368,6 +453,16 @@ export class PhoneDevices extends Service {
       throw new PhoneDevicesError(
         'PHONE_REAL_DEVICE',
         `cannot ${operation} ${JSON.stringify(id)}: physical handsets support neither operation; address a simulator or emulator`,
+      )
+    }
+  }
+
+  private requireKnown(id: DeviceId, operation: 'io' | 'capture'): void {
+    this.assertAccepting()
+    if (this.findKnown(id) === undefined) {
+      throw new PhoneDevicesError(
+        'PHONE_DEVICE_NOT_FOUND',
+        `cannot ${operation}: ${JSON.stringify(id)} is absent from the latest device listing (online or offline)`,
       )
     }
   }
@@ -522,6 +617,25 @@ function exitedBeforeReady(child: MobilecliServerProcess, exit: { readonly code:
 
 function allRefsOf(list: PhoneDeviceList): readonly PhoneDeviceRef[] {
   return [...list.android, ...list.ios.simulators, ...list.ios.reals]
+}
+
+function ioParams(request: PhoneIoRequest): Record<string, unknown> {
+  switch (request.method) {
+    case 'tap':
+      return { deviceId: request.deviceId, x: request.x, y: request.y }
+    case 'gesture':
+      return { deviceId: request.deviceId, actions: request.actions }
+    case 'text':
+      return { deviceId: request.deviceId, text: request.text }
+    case 'button':
+      return { deviceId: request.deviceId, button: request.button }
+    /* v8 ignore start -- PhoneIoRequest is a closed union */
+    default: {
+      const exhaustive: never = request
+      throw new PhoneDevicesError('PHONE_PROTOCOL', `unhandled phone io method: ${String(exhaustive)}`)
+    }
+    /* v8 ignore stop */
+  }
 }
 
 function tailOf(text: string): string {

@@ -1298,7 +1298,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
     key: 'phoneDevices',
     summary: 'Phone fleet Service over one external mobilecli server child.',
-    description: 'Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing, and mobilecli problems fail loudly instead of degrading.\n\nOperation failure codes:\n\n- `PHONE_DISPOSED` — the owning fiber began teardown.\n- `PHONE_ABORTED` — the caller\'s signal won before completion.\n- `PHONE_TIMEOUT` — the operation\'s configured ceiling elapsed.\n- `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.\n- `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.\n- `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.\n- `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).\n- `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.',
+    description: 'Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing, and mobilecli problems fail loudly instead of degrading.\n\nOperation failure codes:\n\n- `PHONE_DISPOSED` — the owning fiber began teardown.\n- `PHONE_ABORTED` — the caller\'s signal won before completion.\n- `PHONE_TIMEOUT` — the operation\'s configured ceiling elapsed.\n- `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.\n- `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.\n- `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.\n- `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).\n- `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.\n\n`io` and `startCapture` accept physical handsets; they only refuse ids absent from the latest published listing.',
     methods: [
       {
         signature: 'async listDevices(signal?: AbortSignal): Promise<PhoneDeviceList>',
@@ -1320,10 +1320,36 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['{@link PhoneDevicesError} with `PHONE_REAL_DEVICE` for physical handsets, `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
       },
       {
+        signature: 'async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>',
+        description: 'Forward one `device.io.tap` / `gesture` / `text` / `button` round trip. Physical handsets are valid targets; only ids absent from the latest published listing fail locally before any RPC.',
+        parameters: [{ name: 'request', description: 'Branded device id plus the OpenRPC params for that verb.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
+        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
+      },
+      {
+        signature: 'async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream>',
+        description: 'Open one upstream `device.screencapture` stream. `h264` maps onto the upstream `avc` format; the returned body is unread so the Host can proxy frames without buffering a capture.',
+        parameters: [{ name: 'request', description: 'Branded device id, encoding, and optional cancellation.' }],
+        returns: 'the live capture content type and body; the caller owns cancellation.',
+        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
+      },
+      {
         signature: 'onChanged(sub: (change: PhoneDeviceChange) => void): () => void',
         description: 'Subscribe to committed device-set changes. Delivery happens synchronously after each committing poll; a throwing subscriber is contained and logged.',
         parameters: [{ name: 'sub', description: 'Observer receiving every committed {@link PhoneDeviceChange}.' }],
         returns: 'disposer removing exactly this subscription; subscriptions never outlive the Service.',
+      },
+    ],
+  },
+  {
+    key: 'phoneStream',
+    summary: 'Same-origin phone stream Consumer.',
+    description: 'Same-origin phone stream Consumer. It injects `phoneDevices` and `webServer`, registers the IO upgrade and signed capture routes, and publishes `ctx.phoneStream` so later GUI consumers can mint URLs without talking to `:12000`.',
+    methods: [
+      {
+        signature: 'sessionFor(id: DeviceId): PhoneStreamSession',
+        description: 'Mint signed same-origin MJPEG and H264 URLs for one known device.',
+        parameters: [{ name: 'id', description: 'Branded device id present in the latest published listing.' }],
+        returns: 'the IO upgrade path plus both capture URLs and their expiry.',
       },
     ],
   },
@@ -4711,6 +4737,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PersonalPairingView {\n    id: PersonalPairingId;\n    devicePrincipal: {\n        id: DevicePrincipalId;\n        accountId: Branded<\'PlatformAccountId\'>;\n        installationId: InstallationId;\n        authority: \'companion-surface\';\n    };\n    device: PairingDeviceDescription;\n    pairedAt: number;\n    lastAccessAt: number;\n    online: boolean;\n}',
   },
   {
+    name: 'PhoneCaptureFormat',
+    declaration: 'export type PhoneCaptureFormat = \'mjpeg\' | \'h264\';',
+  },
+  {
+    name: 'PhoneCaptureRequest',
+    declaration: 'export interface PhoneCaptureRequest {\n    readonly deviceId: DeviceId;\n    readonly format: PhoneCaptureFormat;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'PhoneCaptureStream',
+    declaration: 'export interface PhoneCaptureStream {\n    readonly contentType: string;\n    readonly body: ReadableStream<Uint8Array>;\n}',
+  },
+  {
     name: 'PhoneDeviceChange',
     declaration: 'export interface PhoneDeviceChange {\n    readonly list: PhoneDeviceList;\n    readonly added: readonly DeviceId[];\n    readonly removed: readonly DeviceId[];\n}',
   },
@@ -4725,6 +4763,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PhoneDeviceRef',
     declaration: 'export interface PhoneDeviceRef {\n    readonly id: DeviceId;\n    readonly name: string;\n    readonly kind: PhoneDeviceKind;\n    readonly online: boolean;\n}',
+  },
+  {
+    name: 'PhoneIoRequest',
+    declaration: 'export type PhoneIoRequest = {\n    readonly deviceId: DeviceId;\n    readonly method: \'tap\';\n    readonly x: number;\n    readonly y: number;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'gesture\';\n    readonly actions: readonly Record<string, unknown>[];\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'text\';\n    readonly text: string;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'button\';\n    readonly button: string;\n};',
+  },
+  {
+    name: 'PhoneStreamSession',
+    declaration: 'export interface PhoneStreamSession {\n    readonly deviceId: DeviceId;\n    readonly ioPath: string;\n    readonly mjpeg: PhoneStreamUrl;\n    readonly h264: PhoneStreamUrl;\n}',
+  },
+  {
+    name: 'PhoneStreamUrl',
+    declaration: 'export interface PhoneStreamUrl {\n    readonly url: string;\n    readonly expiresAt: number;\n}',
   },
   {
     name: 'PlatformAccountId',

@@ -8,7 +8,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
 import ApprovalService, { type ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
-import type { DeviceId, PhoneDeviceList } from '@deepseek-ai/dsh-phone-runtime'
+import type { DeviceId, PhoneDeviceList, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import * as ToolPhone from '@deepseek-ai/dsh-tool-phone'
 import * as ToolPhoneInvariant from '../src/invariant.ts'
@@ -51,21 +51,16 @@ const LISTING: PhoneDeviceList = Object.freeze({
   }),
 })
 
-interface FakeAct {
-  readonly id: DeviceId
-  readonly action: unknown
-}
-
 interface FakeFleet {
   boots: DeviceId[]
   shutdowns: DeviceId[]
-  acts: FakeAct[]
+  ioCalls: PhoneIoRequest[]
   screenshots: DeviceId[]
   listCalls: number
   listDevices(signal?: AbortSignal): Promise<PhoneDeviceList>
   boot(id: DeviceId, signal?: AbortSignal): Promise<void>
   shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
-  act(id: DeviceId, action: unknown, signal?: AbortSignal): Promise<{ status: 'ok' }>
+  io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
   screenshot(id: DeviceId, signal?: AbortSignal): Promise<{ mediaType: 'image/png'; data: string }>
 }
 
@@ -79,7 +74,7 @@ function fakeFleet(listing: PhoneDeviceList = LISTING): FakeFleet {
   return {
     boots: [],
     shutdowns: [],
-    acts: [],
+    ioCalls: [],
     screenshots: [],
     listCalls: 0,
     async listDevices() {
@@ -92,9 +87,8 @@ function fakeFleet(listing: PhoneDeviceList = LISTING): FakeFleet {
     async shutdown(id) {
       this.shutdowns.push(id)
     },
-    async act(id, action) {
-      this.acts.push({ id, action })
-      return { status: 'ok' }
+    async io(request) {
+      this.ioCalls.push(request)
     },
     async screenshot(id) {
       this.screenshots.push(id)
@@ -213,7 +207,7 @@ describe('deferred phone device Consumer', () => {
     })
     expect(fleet.boots).toEqual([])
     expect(fleet.shutdowns).toEqual([])
-    expect(fleet.acts).toEqual([])
+    expect(fleet.ioCalls).toEqual([])
   })
 
   it('asks before a consequential act, runs once when allowed, and leaves the device untouched when rejected', async () => {
@@ -248,7 +242,7 @@ describe('deferred phone device Consumer', () => {
       isError: false,
       value: { deviceId: 'emulator-5554', action: { kind: 'tap', x: 12, y: 40 }, status: 'ok' },
     })
-    expect(fleet.acts).toEqual([{ id: ANDROID_ID, action: { kind: 'tap', x: 12, y: 40 } }])
+    expect(fleet.ioCalls).toEqual([{ deviceId: ANDROID_ID, method: 'tap', x: 12, y: 40 }])
 
     await expect(ctx.tools.execute({
       callId: CallId('act-swipe'),
@@ -271,7 +265,20 @@ describe('deferred phone device Consumer', () => {
       agent,
       signal,
     })).resolves.toMatchObject({ isError: false, value: { action: { kind: 'button', name: 'home' } } })
-    expect(fleet.acts).toHaveLength(4)
+    expect(fleet.ioCalls).toEqual([
+      { deviceId: ANDROID_ID, method: 'tap', x: 12, y: 40 },
+      {
+        deviceId: ANDROID_ID,
+        method: 'gesture',
+        actions: [
+          { type: 'pointerDown', x: 1, y: 2 },
+          { type: 'pointerMove', x: 3, y: 4 },
+          { type: 'pointerUp' },
+        ],
+      },
+      { deviceId: ANDROID_ID, method: 'text', text: 'hello' },
+      { deviceId: ANDROID_ID, method: 'button', button: 'HOME' },
+    ])
 
     ctx.on('approval/request', () => Promise.resolve<ApprovalOutcome>('rejected'), { prepend: true })
     const denied = await ctx.tools.execute({
@@ -283,7 +290,7 @@ describe('deferred phone device Consumer', () => {
     })
     expect(denied.isError).toBe(true)
     expect(denied.content[0]).toMatchObject({ text: 'Error: the user rejected tool "device_act"' })
-    expect(fleet.acts).toHaveLength(4)
+    expect(fleet.ioCalls).toHaveLength(4)
 
     const closed = await ctx.tools.execute({
       callId: CallId('close-deny'),
@@ -421,7 +428,7 @@ describe('deferred phone device Consumer', () => {
       isError: true,
       error: { info: { name: 'HarnessError', code: 'PHONE_UNSUPPORTED' } },
     })
-    expect(fleet.acts).toEqual([])
+    expect(fleet.ioCalls).toEqual([])
     expect(fleet.listCalls).toBe(0)
   })
 
@@ -430,7 +437,7 @@ describe('deferred phone device Consumer', () => {
       async listDevices() { return LISTING },
       async boot() {},
       async shutdown() {},
-      async act() {
+      async io() {
         throw new PhoneDevicesError('PHONE_TIMEOUT', 'the tap exceeded its ceiling')
       },
       async screenshot() {

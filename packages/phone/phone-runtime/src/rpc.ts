@@ -2,8 +2,8 @@
  * JSON-RPC 2.0 client over HTTP for one loopback mobilecli `/rpc` endpoint,
  * plus normalization of transport failures onto the public error vocabulary.
  * Method names follow the upstream OpenRPC specification (`devices.list`,
- * `device.boot`, `device.shutdown`, `server.info`); this module owns no other
- * mobilecli behavior.
+ * `device.boot`, `device.shutdown`, `server.info`, `device.io.*`,
+ * `device.screencapture`); this module owns no other mobilecli behavior.
  * @module @deepseek-ai/dsh-phone-runtime/rpc
  */
 
@@ -66,6 +66,75 @@ export class MobilecliRpc {
     return body.result
   }
 
+  /**
+   * POST one JSON-RPC request whose successful answer is a byte stream
+   * (`device.screencapture`). JSON-RPC errors still arrive as a JSON body and
+   * map onto the same public vocabulary as {@link call}.
+   * @param method - Upstream OpenRPC method name.
+   * @param params - Params object exactly as the method documents them.
+   * @param signal - Fused caller-and-deadline signal that stops header wait.
+   * @returns the upstream content type and unread body; the caller owns cancellation.
+   */
+  async stream(
+    method: string,
+    params: unknown,
+    signal: AbortSignal,
+  ): Promise<{ readonly contentType: string; readonly body: ReadableStream<Uint8Array> }> {
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}/rpc`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: '*/*', connection: 'close' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: this.nextId++, method, params }),
+        signal,
+      })
+    } catch (error) {
+      throw normalizeOperationError(error)
+    }
+    const headerType = response.headers.get('content-type')
+    const contentType = headerType === null ? '' : headerType
+    if (contentType.includes('application/json')) {
+      const body = await this.readBody(response)
+      if ('error' in body && body.error !== null && typeof body.error === 'object') {
+        const record = body.error as { code?: unknown; message?: unknown }
+        const code = typeof record.code === 'number' ? record.code : undefined
+        const message = typeof record.message === 'string' ? record.message : 'upstream error'
+        if (code === DEVICE_NOT_FOUND_CODE) {
+          throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `no device answers that id upstream: ${message}`)
+        }
+        throw new PhoneDevicesError(
+          'PHONE_UPSTREAM',
+          `mobilecli rejected ${JSON.stringify(method)}${code === undefined ? '' : ` (${String(code)})`}: ${message}`,
+        )
+      }
+      throw new PhoneDevicesError(
+        'PHONE_PROTOCOL',
+        `mobilecli ${JSON.stringify(method)} answered JSON instead of a capture stream`,
+      )
+    }
+    if (!response.ok) {
+      try {
+        await response.body?.cancel()
+      } catch {
+        // The unread capture body is already gone; the HTTP status is the failure.
+      }
+      throw new PhoneDevicesError(
+        'PHONE_PROTOCOL',
+        `mobilecli answered HTTP ${String(response.status)} instead of a capture stream`,
+      )
+    }
+    /* v8 ignore next 4 -- node:fetch always attaches a body on a completed HTTP response */
+    if (response.body === null) {
+      throw new PhoneDevicesError('PHONE_PROTOCOL', `mobilecli ${JSON.stringify(method)} answered no capture body`)
+    }
+    return { contentType, body: response.body }
+  }
+
+  /**
+   * Parse one JSON-RPC HTTP body into `result` or `error`.
+   * @param response - Completed fetch response whose body is JSON.
+   * @returns the parsed JSON-RPC envelope.
+   */
   async readBody(response: Response): Promise<{ result?: unknown; error?: unknown }> {
     let text: string
     try {

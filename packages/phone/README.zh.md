@@ -7,6 +7,7 @@
 | 包 | 角色 | ctx 键 |
 |---|---|---|
 | [`phone-runtime/`](phone-runtime/README.zh.md) | mobilecli Provider 与 Service Definition（折叠） | `ctx.phoneDevices` |
+| [`phone-stream/`](phone-stream/README.zh.md) | 同源 IO WebSocket 与签名 MJPEG/H264 反代 | `ctx.phoneStream` |
 | [`tool-phone/`](tool-phone/README.zh.md) | 面向模型的延迟 Consumer | 注册到 `ctx.tools` |
 
 子系统参考：[docs/subsystems/phone-runtime.zh.md](../../docs/subsystems/phone-runtime.zh.md)。

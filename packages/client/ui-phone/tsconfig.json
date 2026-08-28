@@ -16,6 +16,21 @@
     },
     {
       "path": "../../runtime-diagnostics/invariants"
+    },
+    {
+      "path": "../../settings/settings"
+    },
+    {
+      "path": "../runtime"
+    },
+    {
+      "path": "../ui-slots"
+    },
+    {
+      "path": "../ui-settings"
+    },
+    {
+      "path": "../ui-settings-plugins"
     }
   ]
 }

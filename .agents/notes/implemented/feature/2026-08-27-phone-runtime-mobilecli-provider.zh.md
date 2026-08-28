@@ -12,7 +12,7 @@
 
 `packages/phone/phone-runtime`（@deepseek-ai/dsh-phone-runtime）是承载于 `ctx.phoneDevices` 的手机设备群 Service；由于 mobilecli 是当下唯一可想象的 backend，Service Definition 与 Service Provider 折叠进同一个包（[capability seams](../../../../docs/glossary.zh.md#capability-seam) 允许折叠；Consumer 仍另置他处）。Service：
 
-- 以 `server start --listen 127.0.0.1:<serverPort>` 启动用户安装的 `mobilecli`，环境为去除凭据的父环境——绝不 vendor、拷贝或 shell 出 adb；一切设备事实都经过上游 OpenRPC JSON-RPC 契约（`devices.list`、`device.boot`、`device.shutdown`、`server.info`）；
+- 以 `server start --listen 127.0.0.1:<serverPort>` 启动用户安装的 `mobilecli`，环境为去除凭据的父环境——绝不 vendor、拷贝或 shell 出 adb；一切设备事实都经过上游 OpenRPC JSON-RPC 契约（`devices.list`、`device.boot`、`device.shutdown`、`server.info`，以及面向 Consumer 的 `device.io.*` 与 `device.screencapture`）；
 - 探测就绪（`server.info`），随后以 `includeOffline: true` 轮询 `devices.list`，让已关机的模拟器保持可见的 boot 目标；`online` 映射自上游 `state` 字段，`kind` 映射自上游 `type` 字段（`emulator`/`simulator`/`real`，其余一律响亮的 `PHONE_PROTOCOL`）；
 - 仅在真实差异时发布分组清单 `{ android, ios: { simulators, reals } }`，并以精确的 added/removed id 差值通知 `onChanged` 订阅者；该关系由本包的 invariant 伴生插件在运行时强制（发布前对照已发布清单重推差异）；
 - 在任何 RPC 之前于本包内拒绝真机的 `boot`/`shutdown`，镜像上游仅限模拟器的限制；
@@ -30,4 +30,4 @@
 
 ## Consequences
 
-延迟 Consumer [`dsh-tool-phone`](2026-08-28-tool-phone-deferred-device-tools.zh.md) 获得面向双平台、以 branded id 寻址的单一表面，可以带变更通知地 boot/shutdown 模拟器；但也继承硬性的用户前置：必须安装 mobilecli（npm/源码）且其平台前置（adb、Xcode CLT）在场。外部依赖保持 FSL-1.1-Apache-2.0 的安全距离——只执行、绝不 vendor——行为随安装版本走；本包只锚定其校验的 OpenRPC 方法名与线上形状。套件以脚本化的 `fakemobilecli` JSON-RPC 替身无密钥运行；Windows 覆盖待该平台的垫片方案出现后再补。
+延迟 Consumer [`dsh-tool-phone`](2026-08-28-tool-phone-deferred-device-tools.zh.md) 获得面向双平台、以 branded id 寻址的单一表面，可以带变更通知地 boot/shutdown 模拟器；但也继承硬性的用户前置：必须安装 mobilecli（npm/源码）且其平台前置（adb、Xcode CLT）在场。`io` 与 `startCapture` 是给 Host Consumer（例如[同源流通道](../architecture/2026-08-28-phone-same-origin-stream-channel.zh.md)）追加的 Service 方法；它们不改变清单或生命周期语义。外部依赖保持 FSL-1.1-Apache-2.0 的安全距离——只执行、绝不 vendor——行为随安装版本走；本包只锚定其校验的 OpenRPC 方法名与线上形状。套件以脚本化的 `fakemobilecli` JSON-RPC 替身无密钥运行；Windows 覆盖待该平台的垫片方案出现后再补。

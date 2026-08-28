@@ -570,8 +570,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'phone-runtime',
     title: 'Phone device fleet capability',
     mode: 'seam',
-    consumers: ['tool-phone'],
-    note: 'Opaque DeviceId identities stay behind ctx.phoneDevices; the deferred Consumer uses ordinary discovery, results, and tools/pre-execute ask for mutations.',
+    consumers: ['tool-phone', 'phone-stream'],
+    note: 'Opaque DeviceId identities stay behind ctx.phoneDevices; the deferred Consumer uses ordinary discovery, results, and tools/pre-execute ask for mutations; the same-origin stream Consumer reverse-proxies io and capture.',
+  },
+  {
+    key: 'phoneStream',
+    pkg: 'phone-stream',
+    title: 'Same-origin phone IO and capture reverse-proxy',
+    mode: 'core',
+    note: 'Registers Host WebSocket and signed HTTP capture routes so the browser never dials mobilecli :12000.',
   },
   {
     key: 'web',

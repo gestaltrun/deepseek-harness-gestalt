@@ -12,9 +12,9 @@ The mobile device dock (#355) needs a model-facing Consumer over `ctx.phoneDevic
 
 `packages/phone/tool-phone` (`@deepseek-ai/dsh-tool-phone`) is the deferred Consumer of `ctx.phoneDevices`. It injects `phoneDevices` and `tools`, registers six `deferLoading` tools (`device_list`, `device_open`, `device_close`, `device_observe`, `device_act`, `device_screenshot`), and fails plugin load when `toolSearch` is disabled. The initial request carries none of those schemas; `tool_search` returns matching schemas without activating tools, and later requests reconstruct them from durable `loadedTools`.
 
-`device_act` accepts exactly one closed `tap` / `swipe` / `type` / `button` action. There is no shell, `adb`, or free-form command parameter. `device_act`, `device_open`, and `device_close` listen on `tools/pre-execute` and, after earlier listeners return `allow`, replace that with `ask`. A prior deny or ask is left unchanged. Approval `allowed-once` runs the fleet call once; rejection never reaches `boot` / `shutdown` / `act`.
+`device_act` accepts exactly one closed `tap` / `swipe` / `type` / `button` action and forwards it onto `phoneDevices.io` (`tap`, `gesture`, `text`, `button`). There is no shell, `adb`, or free-form command parameter. `device_act`, `device_open`, and `device_close` listen on `tools/pre-execute` and, after earlier listeners return `allow`, replace that with `ask`. A prior deny or ask is left unchanged. Approval `allowed-once` runs the fleet call once; rejection never reaches `boot` / `shutdown` / `io`.
 
-Fleet failures that already carry a `PhoneDevicesError` code are rethrown as `HarnessError` with that same code. A missing `act`/`screenshot` method on the injected fleet, or empty type text, uses `PHONE_UNSUPPORTED`. The current mobilecli Service owns list/boot/shutdown only; screenshot and act therefore fail with that code until a later fleet ticket adds them. The Consumer is not composed into shipped Desktop/headless presets in this ticket; discovery reconstruction is proven through `systemPrompt.assemble` in package tests.
+Fleet failures that already carry a `PhoneDevicesError` code are rethrown as `HarnessError` with that same code. Empty type text, or an injected fleet missing `io` / `screenshot`, uses `PHONE_UNSUPPORTED`. `device_screenshot` still requires an injected PNG method; live MJPEG/H264 capture stays on `dsh-phone-stream`. The Consumer is not composed into shipped Desktop/headless presets in this ticket; discovery reconstruction is proven through `systemPrompt.assemble` in package tests.
 
 ## Alternatives considered
 
@@ -28,4 +28,4 @@ Fleet failures that already carry a `PhoneDevicesError` code are rethrown as `Ha
 
 ## Consequences
 
-The model can discover a six-tool phone vocabulary without paying its schema cost on the first request, and consequential mutations default to one-shot approval. Operators inherit the fleet's install prerequisite and the current Service's missing screenshot/act methods. GUI chrome, signed stream routes, and preset composition remain later tickets.
+The model can discover a six-tool phone vocabulary without paying its schema cost on the first request, and consequential mutations default to one-shot approval. Operators inherit the fleet's install prerequisite. `device_screenshot` still has no PNG method on the current Service, so live capture stays on the signed stream Consumer. GUI chrome and preset composition remain later tickets.

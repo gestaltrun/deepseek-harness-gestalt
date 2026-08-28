@@ -140,6 +140,129 @@ describe('MobilecliRpc.call', () => {
       .rejects.toThrow(expect.objectContaining({ code: 'PHONE_UNAVAILABLE' }))
   })
 
+  it('treats a capture with no content-type as a byte stream', async () => {
+    const url = await listen((_req, res) => {
+      res.writeHead(200)
+      res.write(Buffer.from([0x00, 0x00, 0x00, 0x01]))
+      res.end()
+    })
+    const capture = await new MobilecliRpc(url).stream('device.screencapture', {
+      deviceId: 'emulator-5554',
+      format: 'avc',
+    }, new AbortController().signal)
+    expect(capture.contentType).toBe('')
+    const reader = capture.body.getReader()
+    const first = await reader.read()
+    expect(Buffer.from(first.value ?? new Uint8Array()).subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x00, 0x01]))).toBe(true)
+    await reader.cancel()
+  })
+
+  it('returns a streaming capture body without buffering the whole response', async () => {
+    const url = await listen((_req, res) => {
+      res.writeHead(200, { 'content-type': 'multipart/x-mixed-replace; boundary=frame' })
+      res.write('--frame\r\nContent-Type: image/jpeg\r\n\r\n')
+      res.write(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
+    })
+    const capture = await new MobilecliRpc(url).stream('device.screencapture', {
+      deviceId: 'emulator-5554',
+      format: 'mjpeg',
+    }, new AbortController().signal)
+    expect(capture.contentType).toBe('multipart/x-mixed-replace; boundary=frame')
+    const reader = capture.body.getReader()
+    const first = await reader.read()
+    expect(Buffer.from(first.value ?? new Uint8Array()).includes(Buffer.from([0xff, 0xd8]))).toBe(true)
+    await reader.cancel()
+  })
+
+  it('rejects a capture whose HTTP status is not 2xx', async () => {
+    const url = await listen((_req, res) => {
+      res.writeHead(502, { 'content-type': 'video/h264' })
+      res.end(Buffer.from([0x00, 0x00, 0x00, 0x01]))
+    })
+    const error = await rejectionOf(() => new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554', format: 'avc' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_PROTOCOL')
+    expect(error.message).toContain('HTTP 502')
+  })
+
+  it('rejects a capture that answers a JSON result instead of a byte stream', async () => {
+    const url = await listen((req, res) => {
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { status: 'ok' } }))
+      })
+    })
+    const error = await rejectionOf(() => new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_PROTOCOL')
+    expect(error.message).toContain('JSON instead of a capture stream')
+  })
+
+  it('maps a JSON-RPC error on a capture request onto PHONE_DEVICE_NOT_FOUND', async () => {
+    const url = await listen((req, res) => {
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32010, message: 'gone' } }))
+      })
+    })
+    const error = await rejectionOf(() => new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'missing' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_DEVICE_NOT_FOUND')
+  })
+
+  it('wraps a capture JSON-RPC error with an upstream code as PHONE_UPSTREAM', async () => {
+    const url = await listen((req, res) => {
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32050, message: 'busy' } }))
+      })
+    })
+    const error = await rejectionOf(() => new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_UPSTREAM')
+    expect(error.message).toContain('-32050')
+  })
+
+  it('maps a refused capture socket onto PHONE_UNAVAILABLE', async () => {
+    await expect(new MobilecliRpc('http://127.0.0.1:1').stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554' },
+      new AbortController().signal,
+    )).rejects.toThrow(expect.objectContaining({ code: 'PHONE_UNAVAILABLE' }))
+  })
+
+  it('wraps a capture JSON-RPC error without a code as PHONE_UPSTREAM', async () => {
+    const url = await listen((req, res) => {
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: {} }))
+      })
+    })
+    const error = await rejectionOf(() => new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_UPSTREAM')
+    expect(error.message).toContain('upstream error')
+  })
+
   it('surfaces caller cancellation as PHONE_ABORTED', async () => {
     const url = await listen(() => {
       // The handler never answers; the abort must end the round trip.

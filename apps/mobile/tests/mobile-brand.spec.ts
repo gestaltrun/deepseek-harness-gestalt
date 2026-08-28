@@ -24,19 +24,72 @@ describe('Mobile brand validation', () => {
     }
   })
 
-  it('validates branding before both signed builds and names their artifacts consistently', () => {
+  it('keeps the Gestalt build identity separate from the 獭子哥 display name', () => {
     const android = source('../scripts/build-android-release.sh')
     const ios = source('../scripts/build-ios-release.sh')
+    const gradle = source('../android/app/build.gradle')
     const workflow = source('../../../.github/workflows/mobile-release.yml')
 
     for (const release of [android, ios]) {
       expect(release).toContain('pnpm --filter @deepseek-ai/dsh-mobile run verify:brand')
-      expect(release).not.toContain('DeepSeek-Gestalt')
     }
-    expect(android).toContain('Tazige-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.apk')
-    expect(ios).toContain('Tazige-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.ipa')
-    expect(workflow).toContain('name: tazige-android-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}')
-    expect(workflow).toContain('name: tazige-ios-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}')
+    expect(android).toContain('Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.apk')
+    expect(android).toContain('-PdshMobileVersionCode="${MOBILE_BUILD_NUMBER}"')
+    expect(android).toContain('-PdshMobileVersionName="${MOBILE_VERSION}"')
+    expect(android).toContain('versionCode=\'${MOBILE_BUILD_NUMBER}\'')
+    expect(android).toContain('package: name=\'${bundle_id}\'')
+    expect(android).toContain('application-label:\'獭子哥\'')
+    expect(android).not.toContain('android.injected.version')
+    expect(gradle).toContain("project.findProperty('dshMobileVersionCode')")
+    expect(gradle).toContain("project.findProperty('dshMobileVersionName')")
+    expect(ios).toContain('PRODUCT_NAME=Gestalt')
+    expect(ios).toContain('Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.ipa')
+    expect(ios).toContain('Print :CFBundleDisplayName')
+    expect(ios).toContain('Print :CFBundleIdentifier')
+    expect(workflow).toContain('name: gestalt-android-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}')
+    expect(workflow).toContain('name: gestalt-ios-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}')
+  })
+
+  it('uses com.gestalt.mobile as the sole native application identity', () => {
+    const capacitor = source('../capacitor.config.ts')
+    const gradle = source('../android/app/build.gradle')
+    const androidStrings = source('../android/app/src/main/res/values/strings.xml')
+    const androidActivity = source('../android/app/src/main/java/com/gestalt/mobile/MainActivity.java')
+    const androidStorage = source('../android/app/src/main/java/com/gestalt/mobile/GestaltProtectedStoragePlugin.java')
+    const iosProject = source('../ios/App/App.xcodeproj/project.pbxproj')
+    const iosStorage = source('../ios/App/App/GestaltProtectedStoragePlugin.swift')
+    const iosExport = source('../ios/AppStoreExportOptions.plist')
+    const androidRelease = source('../scripts/build-android-release.sh')
+    const iosRelease = source('../scripts/build-ios-release.sh')
+
+    expect(capacitor).toContain("appId: 'com.gestalt.mobile'")
+    expect(gradle).toContain('namespace = "com.gestalt.mobile"')
+    expect(gradle).toContain('applicationId "com.gestalt.mobile"')
+    expect(androidStrings).toContain('<string name="package_name">com.gestalt.mobile</string>')
+    expect(androidStrings).toContain('<string name="custom_url_scheme">com.gestalt.mobile</string>')
+    expect(androidActivity).toContain('package com.gestalt.mobile;')
+    expect(androidStorage).toContain('"com.gestalt.mobile.protected-storage.v1"')
+    expect(iosProject.match(/PRODUCT_BUNDLE_IDENTIFIER = com\.gestalt\.mobile;/gu)).toHaveLength(2)
+    expect(iosProject.match(/PRODUCT_NAME = Gestalt;/gu)).toHaveLength(2)
+    expect(iosStorage).toContain('"com.gestalt.mobile.protected-storage.v1"')
+    expect(iosExport).toContain('<key>com.gestalt.mobile</key>')
+    expect(androidRelease).toContain('MOBILE_BUNDLE_ID:-com.gestalt.mobile')
+    expect(iosRelease).toContain('MOBILE_BUNDLE_ID:-com.gestalt.mobile')
+
+    for (const owner of [
+      capacitor,
+      gradle,
+      androidStrings,
+      androidActivity,
+      androidStorage,
+      iosProject,
+      iosStorage,
+      iosExport,
+      androidRelease,
+      iosRelease,
+    ]) {
+      expect(owner).not.toContain('com.alibaba.gestalt.mobile')
+    }
   })
 
   it('uses one opaque iOS master and complete Android launcher families', () => {

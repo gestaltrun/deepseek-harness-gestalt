@@ -130,7 +130,7 @@ Relay 持久保留公钥、配对状态和 revision 以及撤销记录。它在�
 
 Mobile Companion 仅在修改已发送但结果未知时持久保存 operation receipt。重连会按 operation id 查询已配对 Desktop：已提交操作返回原始结果，明确不存在的操作标记为未提交，并等待用户决定是否重试。应用永远不会自动重放陈旧 receipt，receipt 也不是离线修改队列。
 
-系统与商店名称为 **DeepSeek Gestalt**，Mobile Companion 仍是其移动端角色的领域术语。移动应用使用 bundle identifier `com.gestalt.deepseek.mobile`。它继承 DSH 设计 token、共享渲染器、中英文术语以及明暗主题，而不保留之前移动应用的米色和橙色身份。初始主题和语言跟随操作系统，之后由与 DSH 相同的显式用户选择优先。
+消费者与商店名称为**獭子哥**，Mobile Companion 仍是其移动端角色的领域术语，DeepSeek Gestalt 仍是 Paired Desktop 产品家族。移动应用使用 bundle identifier `com.gestalt.mobile`。它继承 DSH 设计 token、共享渲染器、中英文术语以及明暗主题，而不保留之前移动应用的米色和橙色身份。初始主题和语言跟随操作系统，之后由与 DSH 相同的显式用户选择优先。
 
 交付按依赖顺序推进：有界密码原型和安全评审入口；Remote Protocol 与跨运行时向量；Platform Remote Access plugin 和双实例路由；Desktop 适配器、Mobile Access 设置和审计；Mobile Client Runtime 加 Capacitor 密钥与缓存适配器；最后才是组装页面、blob、真实设备验收和故障测试。后续层不能用 mock 替代尚未完成的下层验收路径。
 
@@ -282,7 +282,7 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 
 **使用自动数据库 down migration，或将配对密钥放入可丢弃缓存。** 不采用，因为滚动 Relay 版本需要兼容的扩展 schema，且 Mobile 缓存恢复不得销毁有效 Personal Pairing。
 
-**保留之前的移动端名称、bundle id 或视觉身份。** 不采用，因为该应用是 DeepSeek Gestalt 的移动界面，而不是迁移后的千机产品。后续的[獭子哥 Mobile 品牌决策](../../implemented/feature/2026-08-28-tazige-mobile-brand.zh.md)仅取代共用的消费者名称与视觉身份；它既不恢复千机身份，也不改变 bundle id。
+**保留之前的移动端名称、bundle id 或视觉身份。** 不采用，因为该应用是 DeepSeek Gestalt 的移动界面，而不是迁移后的千机产品。后续的[獭子哥 Mobile 品牌决策](../../implemented/feature/2026-08-28-tazige-mobile-brand.zh.md)拥有消费者名称、视觉身份与 `com.gestalt.mobile` 原生 application identifier。
 
 **增加单独生物特征应用锁。** 从产品范围中拒绝；操作系统访问控制和加密存储拥有本地保护。
 
@@ -347,7 +347,7 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 - 共享 Markdown、代码、图片、工具、diff、审批和 Ask User 渲染器保持可用；终端内容有界且只读，未知工具使用可见通用卡片。
 - Mobile 支持查看和继续 Ungrouped Session；新建时省略 Workspace 会与 Desktop 一致创建 Ungrouped Session。
 - 结果未知的已发送修改只保留 operation receipt；重连会先解析其 operation id，再允许用户决定重试，不存在自动重放或离线 outbox。
-- 应用名称为 DeepSeek Gestalt，使用 `com.gestalt.deepseek.mobile`，并继承 DSH 术语、token、渲染器、语言和主题选择。
+- 应用名称为獭子哥，使用 `com.gestalt.mobile`，并继承 DSH 术语、token、渲染器、语言和主题选择。
 - Mobile Companion 没有独立应用锁功能。
 - Companion Cache 静态加密上次确认的元数据和已打开 transcript，不自动缓存附件、终端、spill 和凭证字节，并支持按 Desktop 清除。
 - Mobile Companion 不暴露任何由 agent 操作的移动设备自动化。

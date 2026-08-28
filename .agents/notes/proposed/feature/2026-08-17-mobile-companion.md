@@ -130,7 +130,7 @@ The Paired Desktop orders concurrent local and mobile operations by authoritativ
 
 Mobile Companion durably keeps an operation receipt only after sending a mutation whose result is not yet known. Reconnection queries the Paired Desktop by operation id: a committed operation returns its original result, while an explicitly absent operation becomes not submitted and waits for the user to choose whether to retry. The application never automatically replays a stale receipt, and the receipt is not an offline mutation queue.
 
-The system and store name is **DeepSeek Gestalt**, while Mobile Companion remains the domain term for its mobile role. The mobile application uses bundle identifier `com.gestalt.deepseek.mobile`. It inherits DSH design tokens, shared renderers, Chinese and English terminology, and light and dark themes rather than the prior mobile application's beige and orange identity. The initial theme and language follow the operating system, after which the same explicit user choices as DSH take precedence.
+The consumer and store name is **獭子哥**, while Mobile Companion remains the domain term for its mobile role and DeepSeek Gestalt remains the Paired Desktop product family. The mobile application uses bundle identifier `com.gestalt.mobile`. It inherits DSH design tokens, shared renderers, Chinese and English terminology, and light and dark themes rather than the prior mobile application's beige and orange identity. The initial theme and language follow the operating system, after which the same explicit user choices as DSH take precedence.
 
 Delivery proceeds in dependency order: bounded cryptographic prototypes and the security-review entry point; Remote Protocol and cross-runtime vectors; the Platform Remote Access plugin and two-instance routing; the Desktop adapter, Mobile Access settings, and audit trail; Mobile Client Runtime plus Capacitor key and cache adapters; then assembled pages, blobs, real-device acceptance, and failure testing. A later layer does not substitute mocks for an unfinished lower-layer acceptance path.
 
@@ -282,7 +282,7 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 
 **Use automatic database down migrations or place pairing keys inside disposable cache.** Rejected because rolling Relay versions need one compatible expanded schema, while mobile cache recovery must not destroy a valid Personal Pairing.
 
-**Retain the prior mobile name, bundle id, or visual identity.** Rejected because this application is the DeepSeek Gestalt mobile surface rather than a migrated 千机 product. The later [獭子哥 Mobile brand decision](../../implemented/feature/2026-08-28-tazige-mobile-brand.md) supersedes only the shared consumer name and visual identity; it neither revives the 千机 identity nor changes the bundle id.
+**Retain the prior mobile name, bundle id, or visual identity.** Rejected because this application is the DeepSeek Gestalt mobile surface rather than a migrated 千机 product. The later [獭子哥 Mobile brand decision](../../implemented/feature/2026-08-28-tazige-mobile-brand.md) owns the consumer name, visual identity, and `com.gestalt.mobile` native application identifier.
 
 **Add a separate biometric application lock.** Rejected from the product scope; operating-system access control and encrypted storage own local protection.
 
@@ -347,7 +347,7 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 - Shared Markdown, code, image, tool, diff, approval, and Ask User renderers remain available; terminal content is bounded and read-only, while unknown tools use a visible generic card.
 - Mobile supports viewing and continuing Ungrouped Sessions, and omitting Workspace during creation creates an Ungrouped Session consistently with Desktop.
 - An uncertain sent mutation retains only an operation receipt; reconnect resolves its operation id before any user-directed retry, with no automatic replay or offline outbox.
-- The application is named DeepSeek Gestalt, uses `com.gestalt.deepseek.mobile`, and inherits DSH terminology, tokens, renderers, language, and theme choices.
+- The application is named 獭子哥, uses `com.gestalt.mobile`, and inherits DSH terminology, tokens, renderers, language, and theme choices.
 - Mobile Companion has no independent application-lock feature.
 - Companion Cache encrypts last-confirmed metadata and opened transcripts at rest, excludes automatically cached attachment, terminal, spill, and credential bytes, and supports per-Desktop clearing.
 - Mobile Companion exposes no agent-operated mobile-device automation.

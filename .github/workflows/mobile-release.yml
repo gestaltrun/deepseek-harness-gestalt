@@ -124,7 +124,7 @@ jobs:
         run: bash apps/mobile/scripts/build-android-release.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: tazige-android-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
+          name: gestalt-android-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
           path: apps/mobile/release/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -139,7 +139,7 @@ jobs:
       MOBILE_BUNDLE_ID: ${{ vars.MOBILE_BUNDLE_ID }}
       MOBILE_VERSION: ${{ vars.MOBILE_VERSION }}
       MOBILE_BUILD_NUMBER: ${{ vars.MOBILE_BUILD_NUMBER }}
-      MOBILE_PROVISIONING_PROFILE: Gestalt Mobile App Store
+      MOBILE_PROVISIONING_PROFILE: Gestalt Mobile App Store com.gestalt.mobile
       VITE_PLATFORM_ORIGIN: ${{ vars.VITE_PLATFORM_ORIGIN }}
       VITE_PLATFORM_CALLBACK_URL: ${{ vars.VITE_PLATFORM_CALLBACK_URL }}
       VITE_PLATFORM_GITHUB_CLIENT_ID: ${{ vars.VITE_PLATFORM_GITHUB_CLIENT_ID }}
@@ -185,7 +185,7 @@ jobs:
             bash apps/mobile/scripts/upload-testflight.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: tazige-ios-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
+          name: gestalt-ios-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
           path: apps/mobile/release/*.ipa
           if-no-files-found: error
           retention-days: 30

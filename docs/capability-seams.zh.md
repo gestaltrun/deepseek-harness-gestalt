@@ -74,6 +74,7 @@ flowchart LR
   pkg_platform_account_core["platform-account-core"]
   pkg_platform_account_http["platform-account-http"]
   pkg_platform_account_client["platform-account-client"]
+  pkg_project_membership_http["project-membership-http"]
   pkg_project_membership["project-membership"]
   svc_projectMembership["ctx.projectMembership<br/>Project membership collaboration seam"]
   pkg_project_membership_core["project-membership-core"]
@@ -393,6 +394,8 @@ flowchart LR
   svc_lsp --> pkg_tool_lsp
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
+  svc_platformAccount --> pkg_project_membership_http
+  svc_projectMembership --> pkg_project_membership_http
   svc_remoteAccess --> pkg_remote_access_http
   svc_remoteAttachments --> pkg_remote_attachments
   svc_remoteRelay --> pkg_remote_access_http
@@ -499,8 +502,8 @@ flowchart LR
 | `ctx.storage` | `seam` | [`storage`](../packages/storage/storage) | [`storage-json`](../packages/storage/storage-json), [`storage-sqlite`](../packages/storage/storage-sqlite) | [`storage-domain`](../packages/storage/storage-domain) | - | 各后端以不同名称并列注册；数据形态（领域优先）挂载到枢纽上，并将类型化操作转换为不透明的 KV 单元原语。 |
 | `ctx.storageDomain` | `core` | [`storage-domain`](../packages/storage/storage-domain) | - | [`workspace`](../packages/workspace/workspace), [`message-feedback`](../packages/feedback/message-feedback) | - | 等待所有已配置后端就绪，然后将领域形态发布为一个受生命周期约束的服务，用于类型化持久状态。 |
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | 拥有本地逐 assistant 消息反馈、生命周期与目标校验、逐条目 compare-and-set 及 Host 一元 Remote 契约，且不进入 Session 历史或遥测。 |
-| `ctx.platformAccount` | `seam` | [`platform-account`](../packages/platform/platform-account) | [`platform-account-core`](../packages/platform/platform-account-core) | [`platform-account-http`](../packages/platform/platform-account-http), [`platform-account-client`](../packages/platform/platform-account-client) | - | 拥有 GitHub 公开身份与持有证明安装会话；HTTP 和 Desktop/Mobile 客户端通过签名轮询完成登录，不接收提供方凭证。 |
-| `ctx.projectMembership` | `seam` | [`project-membership`](../packages/platform/project-membership) | [`project-membership-core`](../packages/platform/project-membership-core) | - | - | 拥有云端项目权威——角色门邀请、伴随 roster 投影失效的成员移除、环境命名空间持久状态；尚未接入消费方包。 |
+| `ctx.platformAccount` | `seam` | [`platform-account`](../packages/platform/platform-account) | [`platform-account-core`](../packages/platform/platform-account-core) | [`platform-account-http`](../packages/platform/platform-account-http), [`platform-account-client`](../packages/platform/platform-account-client), [`project-membership-http`](../packages/platform/project-membership-http) | - | 拥有 GitHub 公开身份与持有证明安装会话；HTTP 和 Desktop/Mobile 客户端通过签名轮询完成登录，不接收提供方凭证。 |
+| `ctx.projectMembership` | `seam` | [`project-membership`](../packages/platform/project-membership) | [`project-membership-core`](../packages/platform/project-membership-core) | [`project-membership-http`](../packages/platform/project-membership-http) | - | 拥有云端项目权威——角色门邀请、伴随 roster 投影失效的成员移除、环境命名空间持久状态；HTTP 消费方从账号会话解析操作者，并把每条路由适配到唯一一次服务操作上。 |
 | `ctx.remoteAccess` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | HTTP 消费方通过一个共用校验传输向 Desktop 设置与 Mobile 暴露 endpoint-owned mailbox 操作；Platform 只接收路由元数据、不透明握手消息、credential digest 与密封 authority。 |
 | `ctx.remoteRelay` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | 拥有由凭据鉴权的在线 attachment 和只含密文的转发；会过期的 Redis 目录与直达 Pub/Sub 协调非 sticky Platform Instance，且不建立离线 queue。 |
 | `ctx.remoteAttachments` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | - | 只保留 endpoint 加密的密文与元数据，签发限定于单个 Personal Pairing 的一次性会过期 capability，并在 consume、过期或撤销时移除 blob 及其 capability。 |

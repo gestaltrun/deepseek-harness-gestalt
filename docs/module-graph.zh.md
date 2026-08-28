@@ -269,6 +269,7 @@ flowchart TD
     pkg_platform_account_http["platform-account-http"]
     pkg_project_membership["project-membership"]
     pkg_project_membership_core["project-membership-core"]
+    pkg_project_membership_http["project-membership-http"]
     pkg_remote_access["remote-access"]
     pkg_remote_access_client["remote-access-client"]
     pkg_remote_access_http["remote-access-http"]
@@ -508,6 +509,11 @@ flowchart TD
   pkg_project_membership_core --> pkg_invariants
   pkg_project_membership_core --> pkg_platform_account
   pkg_project_membership_core --> pkg_project_membership
+  pkg_project_membership_http --> pkg_host_webserver
+  pkg_project_membership_http --> pkg_invariants
+  pkg_project_membership_http --> pkg_platform_account
+  pkg_project_membership_http --> pkg_platform_account_http
+  pkg_project_membership_http --> pkg_project_membership
   pkg_remote_access_client --> pkg_invariants
   pkg_remote_access_client --> pkg_platform_account
   pkg_remote_access_client --> pkg_remote_access
@@ -1694,6 +1700,7 @@ flowchart TD
 | [`lsp`](../packages/lsp/lsp) | `lsp` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`llm`](../packages/llm/llm) |
 | [`noise-channel`](../packages/platform/noise-channel) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`project-membership-core`](../packages/platform/project-membership-core) | `platform` | [`atomic-write`](../packages/util/atomic-write), [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`project-membership`](../packages/platform/project-membership) |
+| [`project-membership-http`](../packages/platform/project-membership-http) | `platform` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`platform-account-http`](../packages/platform/platform-account-http), [`project-membership`](../packages/platform/project-membership) |
 | [`remote-access-client`](../packages/platform/remote-access-client) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`remote-access-http`](../packages/platform/remote-access-http) | `platform` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |
 | [`remote-access-redis`](../packages/platform/remote-access-redis) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`remote-access`](../packages/platform/remote-access), [`remote-protocol`](../packages/platform/remote-protocol) |

@@ -17,5 +17,6 @@ Platform 包拥有 DeepSeek Gestalt Desktop 与 Mobile 共用、且独立于具�
 | [`remote-access-redis/`](remote-access-redis/README.zh.md) | `@deepseek-ai/dsh-remote-access-redis` | 会过期的 Relay 目录、失效通知与直达密文 Pub/Sub | 协调 adapter |
 | [`remote-protocol/`](remote-protocol/README.zh.md) | `@deepseek-ai/dsh-remote-protocol` | Relay 与加密 Companion codec、协商、错误和限制 | 纯协议模块 |
 | [`remote-attachments/`](remote-attachments/README.zh.md) | `@deepseek-ai/dsh-remote-attachments` | 配对范围的加密 attachment blob store 与 HTTPS 消费方 | `ctx.remoteAttachments` |
+| [`project-membership-http/`](project-membership-http/README.zh.md) | `@deepseek-ai/dsh-project-membership-http` | 项目注册表、花名册、邀请与成员管理 HTTP 路由 | 消费方 |
 
 部署持久化、共享失效传输、密钥与可观测性适配器归 Platform composition root 所有。本组定义并验证这些适配器必须满足的接口，不嵌入部署凭证。

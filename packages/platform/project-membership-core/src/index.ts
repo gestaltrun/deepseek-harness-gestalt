@@ -73,9 +73,10 @@ function resolveConfig(config: Config): Config {
   if (typeof config.storagePath !== 'string' || config.storagePath.trim() === '') {
     throw new TypeError('project-membership-core: config.storagePath must be a non-empty directory path')
   }
-  if (!['development', 'production'].includes(config.environment)) {
+  const environment: string = config.environment
+  if (environment !== 'development' && environment !== 'production') {
     throw new TypeError(
-      `project-membership-core: config.environment must be 'development' or 'production', got ${JSON.stringify(config.environment)}`,
+      `project-membership-core: config.environment must be 'development' or 'production', got ${JSON.stringify(environment)}`,
     )
   }
   return config
@@ -251,7 +252,7 @@ export class FileProjectMembership extends ProjectMembershipService {
     // corruption gate is re-checked at run time, not only at call time.
     const run = (): T | Promise<T> => {
       if (this.loadFailure !== undefined) return Promise.reject(this.loadFailure.reason)
-      return operation()
+      return Promise.resolve(operation())
     }
     const result = this.chain.then(run, run)
     this.chain = result.then(noop, noop)
@@ -559,9 +560,7 @@ export class FileProjectMembership extends ProjectMembershipService {
   private async declineOp(actor: PlatformAccountId, invitationId: InvitationId): Promise<void> {
     const invitation = this.requireAddressedInvitation(actor, invitationId, true)
     this.settlePending(invitation, 'declined')
-    await this.commit(() => {
-      this.unsettlePending(invitation)
-    })
+    await this.commit(() => { this.unsettlePending(invitation) })
   }
 
   private async retractOp(actor: PlatformAccountId, invitationId: InvitationId): Promise<void> {
@@ -571,9 +570,7 @@ export class FileProjectMembership extends ProjectMembershipService {
       throw new ProjectMembershipError('ROLE_REQUIRED', 'only the issuing account or a project owner can retract')
     }
     this.settlePending(invitation, 'retracted')
-    await this.commit(() => {
-      this.unsettlePending(invitation)
-    })
+    await this.commit(() => { this.unsettlePending(invitation) })
   }
 
   /** Locate a membership row among projects where the actor holds a membership. */

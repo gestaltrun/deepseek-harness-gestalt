@@ -1363,6 +1363,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'provider-owned Account and Installation identity, including authenticated Mobile presentation.',
       },
       {
+        signature: 'abstract publicIdentitiesByIds( accountIds: readonly PlatformAccountId[], ): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>>',
+        description: 'Read the public identity of many accounts in one batch.',
+        parameters: [{ name: 'accountIds', description: 'accounts to resolve, typically one roster.' }],
+        returns: 'the public identity per known account; unknown accounts are absent.',
+      },
+      {
         signature: 'abstract signOut(input: { accessToken: string; proof: AccountProof }): Promise<void>',
         description: 'Revoke only the current installation Account Session.',
         parameters: [{ name: 'input', description: 'access token and installation proof.' }],
@@ -4918,6 +4924,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PruneResult',
     declaration: 'export interface PruneResult {\n    readonly pruned: readonly PrunedEntry[];\n    readonly charsRemoved: number;\n}',
+  },
+  {
+    name: 'PublicAccountIdentity',
+    declaration: 'export interface PublicAccountIdentity {\n    readonly id: PlatformAccountId;\n    readonly githubLogin: string;\n    readonly avatarUrl: string;\n}',
   },
   {
     name: 'ReadFileLine',

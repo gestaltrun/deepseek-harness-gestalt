@@ -36,6 +36,7 @@ import AccountService, {
   type PlatformAccountView,
   type PlatformCapacityState,
   type PlatformEnvironment,
+  type PublicAccountIdentity,
   type SelectedPlatformEnvironment,
 } from '@deepseek-ai/dsh-platform-account'
 
@@ -729,6 +730,23 @@ export class PlatformAccount extends AccountService {
       account: accountView(await this.requireAccount(payload.accountId)),
       installation,
     }
+  }
+
+  async publicIdentitiesByIds(
+    accountIds: readonly PlatformAccountId[],
+  ): Promise<ReadonlyMap<PlatformAccountId, PublicAccountIdentity>> {
+    const identities = new Map<PlatformAccountId, PublicAccountIdentity>()
+    for (const accountId of accountIds) {
+      const account = await this.backend.getAccount(accountId)
+      if (account !== undefined) {
+        identities.set(accountId, {
+          id: account.id,
+          githubLogin: account.githubLogin,
+          avatarUrl: account.avatarUrl,
+        })
+      }
+    }
+    return identities
   }
 
   async signOut(input: { accessToken: string; proof: AccountProof }): Promise<void> {

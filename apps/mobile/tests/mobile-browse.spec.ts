@@ -191,4 +191,34 @@ describe('Mobile Session browser', () => {
     view.rerender(createElement(MobileBrowse, { ...props, canMutate: true }))
     expect(onAttach).not.toHaveBeenCalled()
   })
+
+  it('drops a pending native picker file when Desktop removes the Session', async () => {
+    const onAttach = vi.fn()
+    const file = new File([Uint8Array.of(2)], 'removed.png', { type: 'image/png' })
+    const props = {
+      desktopName: 'Paired Desktop',
+      connection: 'online' as const,
+      onOpenAccount: () => {},
+      sessions: attachmentSessions,
+      workspaces: [],
+      conversations: { [attachmentSessionId]: attachmentConversation },
+      locale: 'zh' as const,
+      theme: 'light' as const,
+      loadImage: async () => '',
+      canMutate: false,
+      clock: fixedMobilePresentationClock(0),
+      search,
+      onSubmit: () => {},
+      onAttach,
+    }
+    const view = render(createElement(MobileBrowse, props))
+    await waitFor(() => { expect(screen.queryByRole('button', { name: '返回' })).not.toBeNull() })
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
+    if (input === null) throw new Error('expected attachment file input')
+    fireEvent.change(input, { target: { files: [file] } })
+
+    view.rerender(createElement(MobileBrowse, { ...props, sessions, conversations: {} }))
+    view.rerender(createElement(MobileBrowse, { ...props, canMutate: true }))
+    expect(onAttach).not.toHaveBeenCalled()
+  })
 })

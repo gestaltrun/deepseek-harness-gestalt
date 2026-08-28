@@ -150,17 +150,6 @@ export function MobileBrowse({
     if (canMutate) onObserveSession?.(openId)
   }, [canMutate, onObserveSession, openId])
   useEffect(() => {
-    const pending = pendingAttachment.current
-    if (pending === undefined) return
-    if (pending.sessionId !== openId) {
-      pendingAttachment.current = undefined
-      return
-    }
-    if (!canMutate || onAttach === undefined) return
-    pendingAttachment.current = undefined
-    onAttach(pending.sessionId, pending.file)
-  }, [canMutate, onAttach, openId])
-  useEffect(() => {
     if (refreshState === 'refreshing' && sessions !== refreshSessions.current) setRefreshState('idle')
   }, [refreshState, sessions])
   useEffect(() => {
@@ -191,6 +180,17 @@ export function MobileBrowse({
   const openTitle = open?.displayTitle
     ?? (openSearchHit === undefined ? undefined : locale === 'zh' ? '未命名会话' : 'Untitled Session')
   const conversation = openId === undefined ? undefined : conversations[openId]
+  useEffect(() => {
+    const pending = pendingAttachment.current
+    if (pending === undefined) return
+    if (pending.sessionId !== openId || openTitle === undefined) {
+      pendingAttachment.current = undefined
+      return
+    }
+    if (!canMutate || onAttach === undefined) return
+    pendingAttachment.current = undefined
+    onAttach(pending.sessionId, pending.file)
+  }, [canMutate, onAttach, openId, openTitle])
   const detailFailure = operationFailure !== undefined
     && (operationFailure.operation === 'refresh' || operationFailure.sessionId === openId)
     ? operationFailure.failure

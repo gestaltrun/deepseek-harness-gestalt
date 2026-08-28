@@ -10,7 +10,7 @@ Android DocumentsUI 会在用户选择文件时把 Capacitor 应用切到后台�
 
 ## 决策
 
-打开原生选择器仍然要求当前前台 mutation authority。mutation authority 暂时关闭时，Session browse owner 可以在组件内存中保留一个由浏览器返回的 `File`；前台同步恢复 authority 后，再通过普通 attachment callback 提交。这个 owner 可以跨原生前台恢复期间的 conversation detail 重挂载存活，会在提交前清除待处理引用，并在用户离开 conversation 时释放该引用且不持久化。
+打开原生选择器仍然要求当前前台 mutation authority。mutation authority 暂时关闭时，Session browse owner 可以在组件内存中保留一个由浏览器返回的 `File`；前台同步恢复 authority 后，再通过普通 attachment callback 提交。这个 owner 可以跨原生前台恢复期间的 conversation detail 重挂载存活，会在提交前清除待处理引用，并在用户离开 conversation 或 Desktop 移除权威 Session 时释放该引用且不持久化。
 
 attachment surface、当前 generation permit、加密上传和 Desktop 确认保持不变。Mobile 离线时，待处理选择不能开始上传、创建 operation id，也不能绕过前台 generation 检查。
 

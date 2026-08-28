@@ -14,12 +14,15 @@ Model-facing `ask_user_question` tool over `ctx.userQuestions`. It lets the mode
 - `header` — optional short heading.
 - `options` — optional choices with `label` and `description`. If recommending a choice, put it first and append `(Recommended)` to that label.
 - `multi_select` — whether that question may return more than one selected option.
+- `to_project_member` — optional single addressee. When present, the call is routed through `ctx.memberQuestionSender` and never reaches the local user-questions provider. Runtime eligibility filtering of this parameter is deferred.
+- `background` — agent-authored Decision Brief text. Required with `to_project_member`; 1 to 600 Unicode code points, rejected at construction with `BACKGROUND_REQUIRED` or `BACKGROUND_TOO_LONG`.
+- `references` — optional `{ path, reason? }[]` available for local and routed asks. Each `path` must resolve to an existing file inside the asking session workspace; each `reason` is at most 100 code points. Failures throw `REFERENCES_INVALID` naming the failing items. Local asks accept references without changing routing; focusing the details panel on a referenced file is deferred.
 
-The tool calls `ctx.userQuestions.ask()` and returns canonical `{ answers: [{ id, selected, custom? }] }`. `selected` contains option labels; `custom` carries a free-form answer, supplementing `selected` for a multi-select question and overriding it for a single-select question. The Native renderer preserves the compact JSON text shape `{ "answers": [{ "id": "...", "selected": ["..."], "custom": "..." }] }`.
+Without `to_project_member` the tool calls `ctx.userQuestions.ask()` and returns canonical `{ answers: [{ id, selected, custom? }] }`. `selected` contains option labels; `custom` carries a free-form answer, supplementing `selected` for a multi-select question and overriding it for a single-select question. The Native renderer preserves the compact JSON text shape `{ "answers": [{ "id": "...", "selected": ["..."], "custom": "..." }] }`. A routed ask that cannot reach a composed sender fails with `SENDER_UNAVAILABLE`.
 
 ## Role
 
-This is the Consumer package for the user-questions seam. It does not render UI and does not know how input is collected; it only translates model arguments into `AskUserQuestionRequest` and returns the human answer to the agent loop.
+This is the Consumer package for the user-questions seam and the member-question sender seam. It does not render UI and does not know how input is collected; local asks translate model arguments into `AskUserQuestionRequest`, and routed asks forward a validated payload to `ctx.memberQuestionSender.send()`.
 
 ## Model Experience
 
@@ -27,7 +30,7 @@ This is the Consumer package for the user-questions seam. It does not render UI 
 
 #### What the model sees
 
-The model sees the generated [`ask_user_question` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ask-user), including question ids, prompts, headings, options, and multi-select flags.
+The model sees the generated [`ask_user_question` schema](../../../docs/tool-catalog.md#deepseek-aidsh-tool-ask-user), including question ids, prompts, headings, options, multi-select flags, `to_project_member`, `background`, and `references`.
 
 #### Token effect
 
@@ -56,3 +59,5 @@ Append-only; newly visible content follows the reusable request prefix and does 
 - **A pending question blocks the tool call until the human answers** — the tool declares no `timeout-policy` budget; cancellation rides the turn's `exec.signal` only.
 - **Runtime-owned subagents cannot ask the user** — `ask_user_question` rejects a live child owned by another agent with `DELEGATED_CALLER`; the child must include the unresolved question or decision in its final result. Durable lineage does not decide this boundary, so a lineage-bearing session resumed as a runtime root may ask normally.
 - **Native answers render as JSON text** — the canonical value remains structured, but the model-facing result uses compact JSON rather than a richer content-block vocabulary.
+- **`to_project_member` stays in the static schema** — runtime eligibility filtering that hides it from unbound workspaces is deferred; the tool routes only when the argument is present.
+- **Local reference focusing is deferred** — `references` is accepted and validated for local asks, but opening the details panel on a referenced file lands with a later ticket.

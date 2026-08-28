@@ -2,7 +2,7 @@
 
 English | [中文](user-questions.zh.md)
 
-The user-questions seam of [dsh-user-questions](../../packages/interaction/user-questions). It is the provider-neutral vocabulary a tool or permission plugin uses when it needs the human to answer before the agent can continue. UI surfaces provide the active `UserQuestionProvider`; the host runtime relays requests to its connected client.
+The user-questions seam of [dsh-user-questions](../../packages/interaction/user-questions). It is the provider-neutral vocabulary a tool or permission plugin uses when it needs the human to answer before the agent can continue. UI surfaces provide the active `UserQuestionProvider`; the host runtime relays requests to its connected client. Routed asks with `to_project_member` leave this provider and travel through [`ctx.memberQuestionSender`](#ctxmemberquestionsender--memberquestionsenderservice-abstract-seam) instead.
 
 Source: [`packages/interaction/user-questions/src/index.ts`](../../packages/interaction/user-questions/src/index.ts)
 
@@ -133,6 +133,44 @@ class UserQuestionError extends HarnessError {
 }
 ```
 
+## Member-directed routing
+
+`MemberQuestionSendPayload` is the application payload `ctx.memberQuestionSender.send()` encodes as a Companion `member-question` operation. Origin, questions, and references reuse the T4 Companion vocabulary; this seam does not invent a second protocol.
+
+```ts type-equiv
+/**
+ * Application payload of one member-directed question. The sender encodes it
+ * as a Companion `member-question` operation; origin, background, questions,
+ * and references reuse the T4 codec vocabulary without a second protocol.
+ */
+interface MemberQuestionSendPayload {
+  /** Account reference of the single addressee. */
+  readonly toProjectMember: string
+  /** Cloud project whose peer grant addresses that member. */
+  readonly projectId: string
+  /** Agent-authored background; already bounded by the asking tool. */
+  readonly background: string
+  /** Question batch mirrored from `ask_user_question`. */
+  readonly questions: readonly MemberQuestionItem[]
+  /** Workspace-validated references; an empty list is admitted. */
+  readonly references: readonly MemberQuestionReference[]
+  /** Public identity fields rendered on the receiver's Decision Brief. */
+  readonly origin: MemberQuestionOrigin
+}
+```
+
+`MemberQuestionSendResult` returns the branded question id and the encoded Companion application bytes after delivery accepts them.
+
+```ts type-equiv
+/** Result of one successful send: the encoded operation plus its question id. */
+interface MemberQuestionSendResult {
+  /** Branded question identity the caller correlates with later settlement. */
+  readonly questionId: MemberQuestionId
+  /** Companion application bytes encoded by the T4 codec. */
+  readonly encoded: Uint8Array
+}
+```
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -140,6 +178,26 @@ class UserQuestionError extends HarnessError {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxmemberquestionsender--memberquestionsenderservice-abstract-seam"></a>
+
+### `ctx.memberQuestionSender` — `MemberQuestionSenderService` (abstract seam)
+
+Member-question sender capability. `send(payload)` encodes one Companion `member-question` operation and hands the bytes to the composed delivery adapter.
+
+```ts cordis-catalog
+/**
+ * Encode one member-directed question and deliver it to the addressed member.
+ * @param payload - Decision Brief origin, background, question batch, and references.
+ * @returns the branded question id and the encoded Companion application bytes.
+ * @throws {MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no adapter is composed,
+ *   `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant,
+ *   or `ENCODE_FAILED` when the T4 codec rejects the payload.
+ */
+abstract send(payload: MemberQuestionSendPayload): Promise<MemberQuestionSendResult>
+```
+
+Source: [`packages/interaction/member-question-sender/src/index.ts`](../../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="ctxuserquestions--userquestionservice"></a>
 

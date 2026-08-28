@@ -1228,6 +1228,20 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'memberQuestionSender',
+    summary: 'Member-question sender capability.',
+    description: 'Member-question sender capability. `send(payload)` encodes one Companion `member-question` operation and hands the bytes to the composed delivery adapter.',
+    methods: [
+      {
+        signature: 'abstract send(payload: MemberQuestionSendPayload): Promise<MemberQuestionSendResult>',
+        description: 'Encode one member-directed question and deliver it to the addressed member.',
+        parameters: [{ name: 'payload', description: 'Decision Brief origin, background, question batch, and references.' }],
+        returns: 'the branded question id and the encoded Companion application bytes.',
+        throws: ['{MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no adapter is composed, `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant, or `ENCODE_FAILED` when the T4 codec rejects the payload.'],
+      },
+    ],
+  },
+  {
     key: 'messageFeedback',
     summary: 'Storage-domain sidecar service.',
     description: 'Storage-domain sidecar service. It inspects persisted Session history and never creates or resumes an Agent or Session.',
@@ -3981,6 +3995,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type CompactionTrigger = \'pressure\' | \'context-overflow\';',
   },
   {
+    name: 'CompanionMemberQuestionItem',
+    declaration: 'export interface CompanionMemberQuestionItem {\n    id: string;\n    question: string;\n    header?: string;\n    options?: readonly CompanionMemberQuestionOption[];\n    multiSelect?: boolean;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionOption',
+    declaration: 'export interface CompanionMemberQuestionOption {\n    label: string;\n    description?: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionOrigin',
+    declaration: 'export interface CompanionMemberQuestionOrigin {\n    projectName: string;\n    originSessionTitle: string;\n    askerAccountId: string;\n    askerRole: MemberQuestionRole;\n    askerDisplayName: string;\n    askerAvatarUrl: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionReference',
+    declaration: 'export interface CompanionMemberQuestionReference {\n    path: string;\n    reason: string;\n}',
+  },
+  {
     name: 'ConfinedArgv',
     declaration: 'export interface ConfinedArgv {\n    argv: string[];\n    enforcement: SandboxEnforcement;\n    denialSignatures: readonly string[];\n    runnerFailureRules: readonly RunnerFailureRule[];\n}',
   },
@@ -4659,6 +4689,34 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ManualCompactAgentContext',
     declaration: 'export interface ManualCompactAgentContext extends CompactionAgentContext {\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n}',
+  },
+  {
+    name: 'MemberQuestionId',
+    declaration: 'export type MemberQuestionId = Branded<\'MemberQuestionId\'>;',
+  },
+  {
+    name: 'MemberQuestionItem',
+    declaration: 'export type MemberQuestionItem = CompanionMemberQuestionItem;',
+  },
+  {
+    name: 'MemberQuestionOrigin',
+    declaration: 'export type MemberQuestionOrigin = CompanionMemberQuestionOrigin;',
+  },
+  {
+    name: 'MemberQuestionReference',
+    declaration: 'export type MemberQuestionReference = CompanionMemberQuestionReference;',
+  },
+  {
+    name: 'MemberQuestionRole',
+    declaration: 'export type MemberQuestionRole = \'owner\' | \'admin\' | \'member\';',
+  },
+  {
+    name: 'MemberQuestionSendPayload',
+    declaration: 'export interface MemberQuestionSendPayload {\n    readonly toProjectMember: string;\n    readonly projectId: string;\n    readonly background: string;\n    readonly questions: readonly MemberQuestionItem[];\n    readonly references: readonly MemberQuestionReference[];\n    readonly origin: MemberQuestionOrigin;\n}',
+  },
+  {
+    name: 'MemberQuestionSendResult',
+    declaration: 'export interface MemberQuestionSendResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n}',
   },
   {
     name: 'MembershipId',

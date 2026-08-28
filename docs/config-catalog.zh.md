@@ -1600,6 +1600,75 @@ export interface ReconnectConfig {
 
 来源：[`packages/mcp/mcp-client/src/index.ts:103`](../packages/mcp/mcp-client/src/index.ts)
 
+<a id="deepseek-aidsh-member-question-sender"></a>
+
+## `@deepseek-ai/dsh-member-question-sender`
+
+```ts config-catalog
+/** Construction-owned faces injected into the sender Provider. */
+export interface Config {
+  /**
+   * Delivers encoded Companion bytes to the addressed member's route. Absent,
+   * `send()` answers the stable `DELIVERY_UNAVAILABLE` error — the same
+   * fail-closed stance as the deferred registry transport.
+   */
+  delivery?: MemberQuestionDelivery
+  /**
+   * Retrieves the sealed project-peer grant addressed to the member. Absent,
+   * encoding still proceeds so a keyless assembly can round-trip the codec
+   * without a Platform Instance.
+   */
+  lookupGrant?: ProjectPeerGrantLookup
+}
+
+/**
+ * Injected delivery adapter. Cross-machine registry transport is deferred
+ * (the T4 Known Limitation); tests and keyless assemblies inject an in-memory
+ * stub. Production delivery stays behind that same gap.
+ */
+export interface MemberQuestionDelivery {
+  /**
+   * Deliver one encoded member-question operation to the addressed member.
+   * @param encoded - codec output plus the addressee and project identity.
+   * @returns fulfillment after the adapter accepts the encoded bytes.
+   */
+  deliver(encoded: EncodedMemberQuestion & {
+    toProjectMember: string
+    projectId: string
+  }): Promise<void>
+}
+
+/**
+ * B-side retrieval of one sealed project-peer grant. Compositions wire this
+ * to `ctx.remoteAccess.getProjectPeerGrant`; tests inject a stub.
+ * @param input - project and peer account identity.
+ * @returns the sealed grant addressed to that peer.
+ */
+export type ProjectPeerGrantLookup = (input: ProjectPeerGrantLookupInput) => Promise<SealedProjectPeerGrant>
+
+/** Encoded Companion operation ready for the injected delivery adapter. */
+export interface EncodedMemberQuestion {
+  /** Branded question identity correlated with later settlement. */
+  readonly questionId: MemberQuestionId
+  /** Companion `member-question` operation message. */
+  readonly message: CompanionMessage
+  /** Bounded Companion application bytes produced by the T4 codec. */
+  readonly encoded: Uint8Array
+}
+
+/** Inputs for retrieving one sealed project-peer grant on the B side. */
+export interface ProjectPeerGrantLookupInput {
+  /** Cloud project whose grant records are searched. */
+  projectId: string
+  /** Account the sealed grant must address. */
+  peerAccountId: string
+}
+```
+
+依赖：[`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.zh.md)
+
+来源：[`packages/interaction/member-question-sender/src/index.ts:71`](../packages/interaction/member-question-sender/src/index.ts)
+
 <a id="deepseek-aidsh-message-feedback"></a>
 
 ## `@deepseek-ai/dsh-message-feedback`
@@ -2936,6 +3005,56 @@ export type TokenMeterConfig = Record<string, never>
 
 来源：[`packages/llm/token-meter/src/types.ts:12`](../packages/llm/token-meter/src/types.ts)
 
+<a id="deepseek-aidsh-tool-ask-user"></a>
+
+## `@deepseek-ai/dsh-tool-ask-user`
+
+需要：`tools` · `userQuestions`
+
+```ts config-catalog
+/** Injected faces for routed asks. Local asks ignore every field. */
+export interface Config {
+  /**
+   * Resolves Decision Brief origin fields for a routed ask. Absent, the tool
+   * answers `SENDER_UNAVAILABLE` rather than inventing identity.
+   */
+  originResolver?: OriginResolver
+  /**
+   * Resolves the workspace-bound cloud project for a routed ask. Absent, the
+   * addressee string is forwarded as the project id.
+   */
+  boundProjectResolver?: BoundProjectResolver
+}
+
+/**
+ * Resolves the Decision Brief origin of one routed ask. The composition
+ * supplies project name and asker identity; the tool forwards the resolved
+ * origin to the sender.
+ * @param input - addressee and optional calling agent.
+ * @returns the origin fields the sender encodes onto the Companion operation.
+ */
+export type OriginResolver = (input: OriginResolverInput) => Promise<MemberQuestionOrigin>
+
+/**
+ * Resolves the cloud project whose peer grant addresses the member. Absent,
+ * the tool forwards `to_project_member` as the project id so schema-level
+ * routing can be tested without a membership face.
+ */
+export type BoundProjectResolver = () => Promise<string | undefined>
+
+/** Inputs for resolving the Decision Brief origin of one routed ask. */
+export interface OriginResolverInput {
+  /** Single project-member addressee from `to_project_member`. */
+  toProjectMember: string
+  /** Calling agent, when the tool ran from a live session. */
+  agent?: Agent
+}
+```
+
+依赖：[`Agent`](subsystems/core.zh.md) · [`MemberQuestionOrigin`](../packages/interaction/member-question-sender/src/index.ts)
+
+来源：[`packages/interaction/tool-ask-user/src/index.ts:68`](../packages/interaction/tool-ask-user/src/index.ts)
+
 <a id="deepseek-aidsh-tool-bash"></a>
 
 ## `@deepseek-ai/dsh-tool-bash`
@@ -3853,7 +3972,6 @@ export interface Config {
 - `@deepseek-ai/dsh-subagent`（[`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts)）
 - `@deepseek-ai/dsh-subprocess-local`（[`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts)）
 - `@deepseek-ai/dsh-terminal`（[`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts)）
-- `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userQuestions`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
 - `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect`（[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
 - `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents`（[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）

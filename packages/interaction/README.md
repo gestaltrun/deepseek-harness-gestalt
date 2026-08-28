@@ -10,7 +10,8 @@ The services and plugins through which a human collaborates with a running agent
 | [`user-approval/`](user-approval/README.md) | Coordinates one-shot approval decisions. | `ctx.approval` |
 | [`permission/`](permission-presets/README.md) | Presents and persists user-facing permission presets. | `ctx.permissionPresets` |
 | [`user-questions/`](user-questions/README.md) | Defines the provider-neutral human question/answer seam. | `ctx.userQuestions` |
-| [`tool-ask-user/`](tool-ask-user/README.md) | Exposes human questions to the model. | (registers on `ctx.tools`) |
+| [`tool-ask-user/`](tool-ask-user/README.md) | Exposes human questions to the model, including optional member-directed routing. | (registers on `ctx.tools`) |
+| [`member-question-sender/`](member-question-sender/README.md) | Encodes and delivers member-directed questions over the T4 Companion codec. | `ctx.memberQuestionSender` |
 | [`tool-project-members/`](tool-project-members/README.md) | Exposes the cloud-project roster — roles, function tags, presence — to the model. | (registers on `ctx.tools`) |
 
 These packages integrate through existing agent and session contracts rather than changing the loop. Interactive applications provide the concrete command, approval, and question adapters; automation uses [`acp/`](../acp/README.md), and runnable demo bundles live under [`examples/`](../examples/README.md). The product [`dsh`](../../apps/cli/README.md) CLI composes these packages directly.

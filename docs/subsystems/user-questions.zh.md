@@ -2,7 +2,7 @@
 
 [English](user-questions.md) | 中文
 
-[dsh-user-questions](../../packages/interaction/user-questions) 的用户交互 seam。它是工具或权限插件需要人类回答后 agent（智能体）才能继续时所使用的、提供方无关的词汇。UI 界面提供活跃的 `UserQuestionProvider`；host 运行时把请求转发给其连接的客户端。
+[dsh-user-questions](../../packages/interaction/user-questions) 的用户交互 seam。它是工具或权限插件需要人类回答后 agent（智能体）才能继续时所使用的、提供方无关的词汇。UI 界面提供活跃的 `UserQuestionProvider`；host 运行时把请求转发给其连接的客户端。带 `to_project_member` 的路由提问离开该提供方，改走 [`ctx.memberQuestionSender`](#ctxmemberquestionsender--memberquestionsenderservice-abstract-seam)。
 
 源码：[`packages/interaction/user-questions/src/index.ts`](../../packages/interaction/user-questions/src/index.ts)
 
@@ -133,6 +133,44 @@ class UserQuestionError extends HarnessError {
 }
 ```
 
+## 成员定向路由
+
+`MemberQuestionSendPayload` 是 `ctx.memberQuestionSender.send()` 编码为 Companion `member-question` 操作的应用 payload。origin、questions 与 references 复用 T4 Companion 词汇；本 seam 不发明第二种协议。
+
+```ts type-equiv
+/**
+ * Application payload of one member-directed question. The sender encodes it
+ * as a Companion `member-question` operation; origin, background, questions,
+ * and references reuse the T4 codec vocabulary without a second protocol.
+ */
+interface MemberQuestionSendPayload {
+  /** Account reference of the single addressee. */
+  readonly toProjectMember: string
+  /** Cloud project whose peer grant addresses that member. */
+  readonly projectId: string
+  /** Agent-authored background; already bounded by the asking tool. */
+  readonly background: string
+  /** Question batch mirrored from `ask_user_question`. */
+  readonly questions: readonly MemberQuestionItem[]
+  /** Workspace-validated references; an empty list is admitted. */
+  readonly references: readonly MemberQuestionReference[]
+  /** Public identity fields rendered on the receiver's Decision Brief. */
+  readonly origin: MemberQuestionOrigin
+}
+```
+
+`MemberQuestionSendResult` 在投递接受后返回品牌化 question id 与编码后的 Companion 应用字节。
+
+```ts type-equiv
+/** Result of one successful send: the encoded operation plus its question id. */
+interface MemberQuestionSendResult {
+  /** Branded question identity the caller correlates with later settlement. */
+  readonly questionId: MemberQuestionId
+  /** Companion application bytes encoded by the T4 codec. */
+  readonly encoded: Uint8Array
+}
+```
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -140,6 +178,26 @@ class UserQuestionError extends HarnessError {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxmemberquestionsender--memberquestionsenderservice-abstract-seam"></a>
+
+### `ctx.memberQuestionSender` — `MemberQuestionSenderService` (abstract seam)
+
+Member-question sender capability. `send(payload)` encodes one Companion `member-question` operation and hands the bytes to the composed delivery adapter.
+
+```ts cordis-catalog
+/**
+ * Encode one member-directed question and deliver it to the addressed member.
+ * @param payload - Decision Brief origin, background, question batch, and references.
+ * @returns the branded question id and the encoded Companion application bytes.
+ * @throws {MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no adapter is composed,
+ *   `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant,
+ *   or `ENCODE_FAILED` when the T4 codec rejects the payload.
+ */
+abstract send(payload: MemberQuestionSendPayload): Promise<MemberQuestionSendResult>
+```
+
+Source: [`packages/interaction/member-question-sender/src/index.ts`](../../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="ctxuserquestions--userquestionservice"></a>
 

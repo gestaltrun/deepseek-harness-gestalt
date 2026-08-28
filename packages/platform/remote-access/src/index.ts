@@ -11,6 +11,7 @@ import type {
   AuthenticatedInstallationView,
   InstallationId,
   MobileInstallationPresentation,
+  PlatformAccountId,
   PlatformCapacityState,
 } from '@deepseek-ai/dsh-platform-account'
 import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
@@ -968,7 +969,7 @@ export abstract class RemoteAccessService extends Service {
   abstract grantProjectPeer(input: {
     desktop: PairingAccountAuthentication
     projectId: ProjectPeerProjectId
-    peerAccountId: Branded<'PlatformAccountId'>
+    peerAccountId: PlatformAccountId
     peerInstallationId: InstallationId
   }): Promise<ProjectPeerGrantView>
 
@@ -994,7 +995,7 @@ export abstract class RemoteAccessService extends Service {
   abstract revokeProjectPeerGrant(input: {
     desktop: PairingAccountAuthentication
     projectId: ProjectPeerProjectId
-    peerAccountId: Branded<'PlatformAccountId'>
+    peerAccountId: PlatformAccountId
     peerInstallationId: InstallationId
   }): Promise<void>
 
@@ -2241,7 +2242,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
   async grantProjectPeer(input: {
     desktop: PairingAccountAuthentication
     projectId: ProjectPeerProjectId
-    peerAccountId: Branded<'PlatformAccountId'>
+    peerAccountId: PlatformAccountId
     peerInstallationId: InstallationId
   }): Promise<ProjectPeerGrantView> {
     return this.exclusive(async () => {
@@ -2341,7 +2342,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
   async revokeProjectPeerGrant(input: {
     desktop: PairingAccountAuthentication
     projectId: ProjectPeerProjectId
-    peerAccountId: Branded<'PlatformAccountId'>
+    peerAccountId: PlatformAccountId
     peerInstallationId: InstallationId
   }): Promise<void> {
     return this.exclusive(async () => {

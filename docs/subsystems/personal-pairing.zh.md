@@ -205,7 +205,54 @@ abstract admitAttachmentBlob(input: { owner: PairingAccountAuthentication bytes:
  * @throws TypeError when the reservation is missing or owned by another Account.
  */
 abstract releaseAttachmentBlob(input: { owner: PairingAccountAuthentication reservationId: AttachmentBlobReservationId }): Promise<void>
+
+/**
+ * Issue one sealed Relay credential for a peer member's installation on this
+ * Desktop's route. Re-granting the same project and peer installation
+ * rotates the grant: the replacement digest is issued at the carried route
+ * revision first, then the superseded digest is revoked through the same
+ * compensation a removal tombstone uses.
+ * @param input - granting Desktop authorization, project, and peer identity.
+ * @returns content-free grant projection including the carried route revision.
+ * @throws RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.
+ * @throws RemoteAccessError `PROJECT_PEER_MEMBERSHIP_REQUIRED` when the grantor or peer holds no active membership.
+ * @throws RemoteAccessError `MOBILE_ACCESS_DISABLED` when the granting Desktop has no active route.
+ */
+abstract grantProjectPeer(input: { desktop: PairingAccountAuthentication projectId: ProjectPeerProjectId peerAccountId: PlatformAccountId peerInstallationId: InstallationId }): Promise<ProjectPeerGrantView>
+
+/**
+ * List the live project peer grants this Desktop Installation carries on its route.
+ * @param input - granting Desktop authorization and optional project scope.
+ * @returns live grants ordered by issuance; revocation tombstones are excluded.
+ * @throws RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.
+ */
+abstract listProjectPeerGrants(input: { desktop: PairingAccountAuthentication projectId?: ProjectPeerProjectId }): Promise<readonly ProjectPeerGrantView[]>
+
+/**
+ * Revoke one grant this Desktop issued: the Relay digest and any superseded
+ * digest enter compensating revocation and the record keeps a tombstone.
+ * Revoking an absent or already-revoked grant is a no-op.
+ * @param input - granting Desktop authorization and the addressed peer identity.
+ * @throws RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.
+ * @throws RemoteAccessError `PROJECT_PEER_GRANT_INVALID` when the grant is carried by another Desktop.
+ */
+abstract revokeProjectPeerGrant(input: { desktop: PairingAccountAuthentication projectId: ProjectPeerProjectId peerAccountId: PlatformAccountId peerInstallationId: InstallationId }): Promise<void>
+
+/**
+ * Retrieve the sealed grant addressed to the authenticated installation.
+ * Membership is re-proven at read time and every live grant of the project
+ * is reconciled first, so a member removed from the project loses both the
+ * sealed envelope and the Relay authority.
+ * @param input - peer installation authorization and project.
+ * @returns the sealed envelope with its content-free fingerprint.
+ * @throws RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.
+ * @throws RemoteAccessError `PROJECT_PEER_MEMBERSHIP_REQUIRED` when the reading account holds no active membership.
+ * @throws RemoteAccessError `PROJECT_PEER_GRANT_INVALID` when no live grant addresses this installation.
+ */
+abstract getProjectPeerGrant(input: { peer: PairingAccountAuthentication projectId: ProjectPeerProjectId }): Promise<SealedProjectPeerGrant>
 ```
+
+Types: [InstallationId](platform-account.zh.md) · [PlatformAccountId](platform-account.zh.md)
 
 Source: [`packages/platform/remote-access/src/index.ts`](../../packages/platform/remote-access/src/index.ts)
 

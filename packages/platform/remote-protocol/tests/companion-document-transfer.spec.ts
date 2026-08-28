@@ -77,7 +77,7 @@ describe('Encrypted Companion Protocol document transfer frames', () => {
       { wire: wireState((state) => { state.received = 4 }), code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' },
       { wire: wireChunk((chunk) => { chunk.bytes = oversizeChunk }), code: 'REMOTE_PROTOCOL_LIMIT_EXCEEDED' },
       {
-        wire: wireChunk((chunk) => { chunk.bytes = `${canonicalBytes as string}=` }),
+        wire: wireChunk((chunk) => { chunk.bytes = `${canonicalBytes}=` }),
         code: 'REMOTE_PROTOCOL_INVALID_MESSAGE',
       },
       { wire: wireChunk((chunk) => { chunk.bytes = 7 }), code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' },

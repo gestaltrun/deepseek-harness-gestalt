@@ -240,7 +240,7 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
       wireOperation((operation) => { operation.questions = [] }),
       wireOperation((operation) => {
         operation.references = Array.from({ length: REMOTE_PROTOCOL_LIMITS.memberQuestionReferences + 1 }, () => ({
-          path: 'docs/rollout.md',
+          path: 'plans/rollout.md',
           reason: 'Rollout plan',
         }))
       }),
@@ -341,13 +341,22 @@ function memberQuestionMessage(): { type: 'operation'; operation: CompanionMembe
           multiSelect: false,
         },
       ],
-      references: [{ path: 'docs/rollout.md', reason: 'Current rollout plan' }],
+      references: [{ path: 'plans/rollout.md', reason: 'Current rollout plan' }],
     },
   }
 }
 
 function rawMemberQuestionOperation(): Record<string, unknown> {
-  return JSON.parse(JSON.stringify(memberQuestionMessage())).operation
+  const operation = structuredClone(memberQuestionMessage().operation)
+  return {
+    type: operation.type,
+    operationId: operation.operationId,
+    questionId: operation.questionId,
+    origin: operation.origin,
+    background: operation.background,
+    questions: operation.questions,
+    references: operation.references,
+  }
 }
 
 function rawSettledResult(): Record<string, unknown> {

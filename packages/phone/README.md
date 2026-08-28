@@ -7,5 +7,6 @@ The phone device fleet over the external mobilecli binary: one Host-half Service
 | Package | Role | ctx key |
 |---|---|---|
 | [`phone-runtime/`](phone-runtime/README.md) | mobilecli Provider and Service Definition, folded | `ctx.phoneDevices` |
+| [`phone-stream/`](phone-stream/README.md) | same-origin IO WebSocket and signed MJPEG/H264 reverse-proxy | `ctx.phoneStream` |
 
 The subsystem reference is [docs/subsystems/phone-runtime.md](../../docs/subsystems/phone-runtime.md).

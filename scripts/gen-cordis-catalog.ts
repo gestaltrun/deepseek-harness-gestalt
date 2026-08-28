@@ -238,6 +238,10 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
   DeviceId: 'phone-runtime.md',
+  PhoneAgentInfo: 'phone-runtime.md',
+  PhoneAgentInstallOptions: 'phone-runtime.md',
+  PhoneAgentInstallResult: 'phone-runtime.md',
+  PhoneAgentStatus: 'phone-runtime.md',
   PhoneCaptureFormat: 'phone-runtime.md',
   PhoneCaptureRequest: 'phone-runtime.md',
   PhoneCaptureStream: 'phone-runtime.md',
@@ -249,6 +253,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   PhoneErrorCode: 'phone-runtime.md',
   PhoneIoMethod: 'phone-runtime.md',
   PhoneIoRequest: 'phone-runtime.md',
+  PhoneRealDeviceIssue: 'phone-runtime.md',
   PhoneStreamSession: 'phone-stream.md',
   PhoneStreamUrl: 'phone-stream.md',
   BrowserClosedState: 'browser-runtime.md',

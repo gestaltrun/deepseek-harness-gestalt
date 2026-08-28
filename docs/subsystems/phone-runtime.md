@@ -4,7 +4,9 @@ English | [中文](phone-runtime.zh.md)
 
 The phone device fleet seam: `packages/phone/phone-runtime` folds the Service Definition and its mobilecli Service Provider into one package while mobilecli is the only backend, and `packages/phone/tool-phone` is the deferred model Consumer. The Service owns the external `mobilecli server start` child process (loopback-only, spawned with the credential-scrubbed parent environment), probes its HTTP JSON-RPC endpoint until the first successful `server.info` reply, then polls `devices.list` on the configured cadence. Device ids are branded `DeviceId` values (an Android serial or an iOS UDID); the grouped listing `{ android, ios: { simulators, reals } }` carries frozen `PhoneDeviceRef` entries whose `kind` translates the upstream `type` field and whose `online` is true only for the upstream `online` state.
 
-Failure semantics are total: a missing or unusable mobilecli binary fails composition loudly with install guidance; a child that dies before readiness rejects plugin initialization; an unexpected post-ready exit (or a refused socket, or a protocol breach) marks the Service lost, and every later operation rejects with the recorded reason instead of degrading. All operations fuse the caller's `AbortSignal` with validated Config ceilings (`requestTimeoutMs`, `bootTimeoutMs`); boot and shutdown refuse physical handsets locally before any RPC. `io` and `startCapture` accept physical handsets and only refuse ids absent from the latest published listing. `startCapture` maps `h264` onto upstream `avc` and bounds only the wait for response headers; the caller owns the unread capture body.
+Failure semantics are total: a missing or unusable mobilecli binary fails composition loudly with install guidance; a child that dies before readiness rejects plugin initialization; an unexpected post-ready exit (or a refused socket, or a protocol breach) marks the Service lost, and every later operation rejects with the recorded reason instead of degrading. All operations fuse the caller's `AbortSignal` with validated Config ceilings (`requestTimeoutMs`, `bootTimeoutMs`, `agentTimeoutMs`); boot and shutdown refuse physical handsets locally before any RPC. `io` and `startCapture` accept physical handsets and only refuse ids absent from the latest published listing. `startCapture` maps `h264` onto upstream `avc` and bounds only the wait for response headers; the caller owns the unread capture body.
+
+The iOS real-device link lives behind the listing's real group: `agentStatus` and `installAgent` run the upstream `agent status` / `agent install` commands as one-shot children of the same executable, keeping the on-device agent installed idempotently and re-signing real handsets through the configured `provisioningProfilePath` (the upstream command requires it for real iOS installs). Every answer about an installed, re-signed real handset carries `FREE_SIGNING_PROFILE_REMINDER` — free-team profiles expire after 7 days, and `installAgent(id, { force: true })` is the re-run entry. Failures whose output names a structured arm surface as `PHONE_REAL_DEVICE_ISSUE` with the arm on `PhoneDevicesError.issue`, classified identically from agent-command output and upstream JSON-RPC error messages; upstream `-32010` stays `PHONE_DEVICE_NOT_FOUND`.
 
 Publication is monotonic and change-driven: a poll publishes only when the freshly grouped listing differs from the published one (id set, name, kind, or online fact), and each `PhoneDeviceChange` names exactly the added/removed ids of that difference. The `./invariant` companion re-derives every candidate difference from the published listing and halts polling loudly on a mismatch.
 
@@ -52,6 +54,54 @@ interface PhoneCaptureStream {
 }
 ```
 
+```ts type-equiv
+/**
+ * Closed union of structured real-device failure arms. {@link classifyRealDeviceIssue}
+ * names one arm from free-form mobilecli output; the matching
+ * `PHONE_REAL_DEVICE_ISSUE` failure carries it on {@link PhoneDevicesError.issue}.
+ */
+type PhoneRealDeviceIssue =
+  | 'device-locked'
+  | 'cert-untrusted'
+  | 'profile-expired'
+  | 'tunnel-failed'
+  | 'device-unplugged'
+```
+
+```ts type-equiv
+/** Options for one on-device agent install. */
+interface PhoneAgentInstallOptions {
+  /** Reinstall and re-sign even when the agent already answers as installed. */
+  readonly force?: boolean
+  /** Optional caller cancellation bounding the whole install. */
+  readonly signal?: AbortSignal
+}
+```
+
+```ts type-equiv
+/** One on-device agent status answer. */
+interface PhoneAgentStatus {
+  /** Device the answer is about. */
+  readonly deviceId: DeviceId
+  /** True only when the upstream agent command answered `status: ok`. */
+  readonly installed: boolean
+  /** Installed agent version; absent while `installed` is false. */
+  readonly version?: string
+  /** Installed agent bundle id; absent while `installed` is false. */
+  readonly bundleId?: string
+  /** Free-signing expiry reminder for a re-signed real handset; see the Service's `FREE_SIGNING_PROFILE_REMINDER`. */
+  readonly profileReminder?: string
+}
+```
+
+```ts type-equiv
+/** One on-device agent install answer; `reinstalled` names a forced run this call performed. */
+interface PhoneAgentInstallResult extends PhoneAgentStatus {
+  /** True when this call ran a forced reinstall; false for a first install or an already-installed answer. */
+  readonly reinstalled: boolean
+}
+```
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -76,8 +126,9 @@ Operation failure codes:
 - `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.
 - `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).
 - `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.
+- `PHONE_REAL_DEVICE_ISSUE` — the upstream output named a structured real-device failure arm; PhoneDevicesError.issue carries which one (`device-locked`, `cert-untrusted`, `profile-expired`, `tunnel-failed`, `device-unplugged`).
 
-`io` and `startCapture` accept physical handsets; they only refuse ids absent from the latest published listing.
+`io` and `startCapture` accept physical handsets; they only refuse ids absent from the latest published listing. `agentStatus` and `installAgent` drive the upstream `agent status` / `agent install` commands as one-shot child runs of the same executable, keep the on-device agent installed idempotently, re-sign real handsets through the configured provisioning profile, and attach the free-signing expiry reminder to every answer about a re-signed real handset.
 
 ```ts cordis-catalog
 /**
@@ -133,6 +184,38 @@ async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
  *   class-documented failure modes.
  */
 async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream>
+
+/**
+ * Report the on-device agent installation state for one listed device by
+ * running the upstream `agent status` command as a one-shot child of the
+ * same executable the loopback server was spawned from. Answers about a
+ * re-signed real handset carry the free-signing expiry reminder.
+ * @param id - Branded id of the device to inspect.
+ * @param signal - Caller's optional cancellation signal.
+ * @returns the parsed installation state.
+ * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
+ *   absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when
+ *   the command output names a structured real-device arm, and otherwise per
+ *   the class-documented failure modes.
+ */
+async agentStatus(id: DeviceId, signal?: AbortSignal): Promise<PhoneAgentStatus>
+
+/**
+ * Keep the on-device agent installed for one listed device. Without `force`
+ * the upstream `agent status` command runs first and an already-installed
+ * agent answers without any install spawn, so repeated calls are idempotent;
+ * `force` reinstalls and re-signs through the configured provisioning
+ * profile, which real iOS installs require upstream.
+ * @param id - Branded id of the device to install on.
+ * @param options - Force reinstall switch and optional cancellation.
+ * @returns the resulting installation state; `reinstalled` is true only when
+ *   this call spawned an install.
+ * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
+ *   absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when
+ *   the command output names a structured real-device arm, and otherwise per
+ *   the class-documented failure modes.
+ */
+async installAgent(id: DeviceId, options: PhoneAgentInstallOptions = {}): Promise<PhoneAgentInstallResult>
 
 /**
  * Subscribe to committed device-set changes. Delivery happens synchronously

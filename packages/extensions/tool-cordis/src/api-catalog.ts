@@ -1298,7 +1298,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
     key: 'phoneDevices',
     summary: 'Phone fleet Service over one external mobilecli server child.',
-    description: 'Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing, and mobilecli problems fail loudly instead of degrading.\n\nOperation failure codes:\n\n- `PHONE_DISPOSED` — the owning fiber began teardown.\n- `PHONE_ABORTED` — the caller\'s signal won before completion.\n- `PHONE_TIMEOUT` — the operation\'s configured ceiling elapsed.\n- `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.\n- `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.\n- `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.\n- `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).\n- `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.\n\n`io` and `startCapture` accept physical handsets; they only refuse ids absent from the latest published listing.',
+    description: 'Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing, and mobilecli problems fail loudly instead of degrading.\n\nOperation failure codes:\n\n- `PHONE_DISPOSED` — the owning fiber began teardown.\n- `PHONE_ABORTED` — the caller\'s signal won before completion.\n- `PHONE_TIMEOUT` — the operation\'s configured ceiling elapsed.\n- `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.\n- `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.\n- `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.\n- `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).\n- `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.\n- `PHONE_REAL_DEVICE_ISSUE` — the upstream output named a structured real-device failure arm; PhoneDevicesError.issue carries which one (`device-locked`, `cert-untrusted`, `profile-expired`, `tunnel-failed`, `device-unplugged`).\n\n`io` and `startCapture` accept physical handsets; they only refuse ids absent from the latest published listing. `agentStatus` and `installAgent` drive the upstream `agent status` / `agent install` commands as one-shot child runs of the same executable, keep the on-device agent installed idempotently, re-sign real handsets through the configured provisioning profile, and attach the free-signing expiry reminder to every answer about a re-signed real handset.',
     methods: [
       {
         signature: 'async listDevices(signal?: AbortSignal): Promise<PhoneDeviceList>',
@@ -1331,6 +1331,20 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'request', description: 'Branded device id, encoding, and optional cancellation.' }],
         returns: 'the live capture content type and body; the caller owns cancellation.',
         throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],
+      },
+      {
+        signature: 'async agentStatus(id: DeviceId, signal?: AbortSignal): Promise<PhoneAgentStatus>',
+        description: 'Report the on-device agent installation state for one listed device by running the upstream `agent status` command as a one-shot child of the same executable the loopback server was spawned from. Answers about a re-signed real handset carry the free-signing expiry reminder.',
+        parameters: [{ name: 'id', description: 'Branded id of the device to inspect.' }, { name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
+        returns: 'the parsed installation state.',
+        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when the command output names a structured real-device arm, and otherwise per the class-documented failure modes.'],
+      },
+      {
+        signature: 'async installAgent(id: DeviceId, options: PhoneAgentInstallOptions = {}): Promise<PhoneAgentInstallResult>',
+        description: 'Keep the on-device agent installed for one listed device. Without `force` the upstream `agent status` command runs first and an already-installed agent answers without any install spawn, so repeated calls are idempotent; `force` reinstalls and re-signs through the configured provisioning profile, which real iOS installs require upstream.',
+        parameters: [{ name: 'id', description: 'Branded id of the device to install on.' }, { name: 'options', description: 'Force reinstall switch and optional cancellation.' }],
+        returns: 'the resulting installation state; `reinstalled` is true only when this call spawned an install.',
+        throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when the command output names a structured real-device arm, and otherwise per the class-documented failure modes.'],
       },
       {
         signature: 'onChanged(sub: (change: PhoneDeviceChange) => void): () => void',
@@ -4737,8 +4751,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PersonalPairingView {\n    id: PersonalPairingId;\n    devicePrincipal: {\n        id: DevicePrincipalId;\n        accountId: Branded<\'PlatformAccountId\'>;\n        installationId: InstallationId;\n        authority: \'companion-surface\';\n    };\n    device: PairingDeviceDescription;\n    pairedAt: number;\n    lastAccessAt: number;\n    online: boolean;\n}',
   },
   {
-    name: 'PhoneCaptureFormat',
-    declaration: 'export type PhoneCaptureFormat = \'mjpeg\' | \'h264\';',
+    name: 'PhoneAgentInstallOptions',
+    declaration: 'export interface PhoneAgentInstallOptions {\n    readonly force?: boolean;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'PhoneAgentInstallResult',
+    declaration: 'export interface PhoneAgentInstallResult extends PhoneAgentStatus {\n    readonly reinstalled: boolean;\n}',
+  },
+  {
+    name: 'PhoneAgentStatus',
+    declaration: 'export interface PhoneAgentStatus {\n    readonly deviceId: DeviceId;\n    readonly installed: boolean;\n    readonly version?: string;\n    readonly bundleId?: string;\n    readonly profileReminder?: string;\n}',
   },
   {
     name: 'PhoneCaptureRequest',

@@ -2021,6 +2021,26 @@
       "source": "packages/phone/phone-runtime/src/types.ts"
     },
     {
+      "doc": "docs/subsystems/phone-runtime.md",
+      "symbol": "PhoneRealDeviceIssue",
+      "source": "packages/phone/phone-runtime/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/phone-runtime.md",
+      "symbol": "PhoneAgentInstallOptions",
+      "source": "packages/phone/phone-runtime/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/phone-runtime.md",
+      "symbol": "PhoneAgentStatus",
+      "source": "packages/phone/phone-runtime/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/phone-runtime.md",
+      "symbol": "PhoneAgentInstallResult",
+      "source": "packages/phone/phone-runtime/src/types.ts"
+    },
+    {
       "doc": "docs/subsystems/phone-stream.md",
       "symbol": "PhoneStreamUrl",
       "source": "packages/phone/phone-stream/src/types.ts"

@@ -254,13 +254,13 @@ const TOOL_PACKAGES: ToolPackage[] = [
     dir: 'tool-ask-user',
     source: 'packages/interaction/tool-ask-user/src/index.ts',
     requires: ['ctx.tools', 'ctx.userQuestions'],
-    writes: ['tool/call', 'tool/result after a UI/provider answers the question'],
+    writes: ['tool/call', 'tool/result after a UI/provider answers the question, or after member-question sender delivery'],
     async mount(ctx) {
       await ctx.plugin(UserQuestionService)
       await ctx.plugin(ToolAskUser)
     },
     note:
-      'ask_user_question pauses the tool call until the active UI provider returns a human answer.',
+      'ask_user_question pauses a local call until the active UI provider returns a human answer. `to_project_member` routes through `ctx.memberQuestionSender` instead. Runtime eligibility hides that parameter from assembled prompts unless the workspace is bound to a cloud project; the catalog records the static schema including the routing parameters because the sender is optional at harvest.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-project-members',

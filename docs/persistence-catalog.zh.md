@@ -518,6 +518,39 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src/types.ts)
 
+### `member-question/*`
+
+<a id="member-questionasked--log-only"></a>
+
+#### `member-question/asked` — log-only
+
+```ts persistence-catalog
+/**
+ * A routed member-question ask was delivered — log-only record of the
+ * already model-visible tool-call summary (not a surface event).
+ * `questionId` pairs it with the `member-question/outcome` that always
+ * follows.
+ */
+'member-question/asked': MemberQuestionAskedRecord
+```
+
+来源：[`packages/interaction/member-question-sender/src/index.ts:72`](../packages/interaction/member-question-sender/src/index.ts)
+
+<a id="member-questionoutcome--log-only"></a>
+
+#### `member-question/outcome` — log-only
+
+```ts persistence-catalog
+/**
+ * The terminal outcome of a prior `member-question/asked` (same
+ * `questionId`) — log-only record of the already model-visible tool
+ * result. Exactly one per ask.
+ */
+'member-question/outcome': MemberQuestionOutcomeRecord
+```
+
+来源：[`packages/interaction/member-question-sender/src/index.ts:78`](../packages/interaction/member-question-sender/src/index.ts)
+
 ### `permission/*`
 
 <a id="permissionpreset--log-only"></a>

@@ -6360,6 +6360,31 @@ importers:
         specifier: workspace:^
         version: link:../../typert/protocol
 
+  packages/interaction/member-question-sender:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@deepseek-ai/dsh-remote-access':
+        specifier: workspace:^
+        version: link:../../platform/remote-access
+      '@deepseek-ai/dsh-remote-protocol':
+        specifier: workspace:^
+        version: link:../../platform/remote-protocol
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+
   packages/interaction/permission-presets:
     dependencies:
       '@deepseek-ai/schemastery':
@@ -6404,6 +6429,10 @@ importers:
         version: link:../user-approval
 
   packages/interaction/tool-ask-user:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
@@ -6417,6 +6446,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-member-question-sender':
+        specifier: workspace:^
+        version: link:../member-question-sender
       '@deepseek-ai/dsh-system-prompt':
         specifier: workspace:^
         version: link:../../core/system-prompt

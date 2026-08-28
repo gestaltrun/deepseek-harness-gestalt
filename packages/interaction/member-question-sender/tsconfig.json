@@ -21,19 +21,13 @@
       "path": "../../llm/llm"
     },
     {
-      "path": "../../core/agent"
+      "path": "../../platform/remote-access"
     },
     {
-      "path": "../../core/system-prompt"
+      "path": "../../platform/remote-protocol"
     },
     {
-      "path": "../../core/tools"
-    },
-    {
-      "path": "../user-questions"
-    },
-    {
-      "path": "../member-question-sender"
+      "path": "../../core/session"
     },
     {
       "path": "../../runtime-diagnostics/invariants"

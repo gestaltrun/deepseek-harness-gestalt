@@ -349,6 +349,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'UI front ends provide the active human-answer provider; tool-ask-user pauses a tool call on the provider-neutral ask() promise.',
   },
   {
+    key: 'memberQuestionSender',
+    pkg: 'member-question-sender',
+    title: 'Member-question sender seam',
+    mode: 'seam',
+    implementations: ['member-question-sender'],
+    consumers: ['tool-ask-user'],
+    note: 'Encodes a Companion member-question operation through the T4 codec and delivers the bytes through an injected adapter; peer credentials are retrieved through a B-side project-peer grant lookup.',
+  },
+  {
     key: 'planMode',
     pkg: 'plan-mode',
     title: 'Plan collaboration state',

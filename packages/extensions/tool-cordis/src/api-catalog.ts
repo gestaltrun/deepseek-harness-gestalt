@@ -1228,6 +1228,32 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'memberQuestionSender',
+    summary: 'Member-question sender capability.',
+    description: 'Member-question sender capability. `send(payload)` encodes one Companion `member-question` operation, delivers it, and waits for a terminal settlement or a stable lifetime error.',
+    methods: [
+      {
+        signature: 'abstract send( payload: MemberQuestionSendPayload, options?: MemberQuestionSendOptions, ): Promise<MemberQuestionSendResult>',
+        description: 'Encode one member-directed question, deliver it, and wait for settlement.',
+        parameters: [{ name: 'payload', description: 'Decision Brief origin, background, question batch, and references.' }, { name: 'options', description: 'optional asking session and withdrawal signal.' }],
+        returns: 'the answered or declined settlement plus the encoded Companion bytes.',
+        throws: ['{MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no adapter is composed, `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant, `ENCODE_FAILED` when the T4 codec rejects the payload, `MEMBER_OFFLINE` when presence is offline at send time, `QUESTION_EXPIRED` when the configured TTL elapses unanswered, `QUESTION_WITHDRAWN` when the initiator cancels the turn, `QUESTION_SUPERSEDED` when a newer same-route ask replaces this one, or `REVOKED_DURING_FLIGHT` when membership is withdrawn while waiting.'],
+      },
+      {
+        signature: 'abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>',
+        description: 'Apply one answered or declined settlement to a pending question. Unknown or already-settled question ids are ignored (idempotent).',
+        parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }, { name: 'settlement', description: 'answered answers or a declined verdict.' }],
+        returns: 'fulfillment after the matching `send()` promise settles, or immediately when none is pending.',
+      },
+      {
+        signature: 'abstract withdraw(questionId: MemberQuestionId): Promise<void>',
+        description: 'Withdraw one pending question as initiator cancellation. Unknown or already-settled question ids are ignored.',
+        parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }],
+        returns: 'fulfillment after the matching `send()` promise rejects `QUESTION_WITHDRAWN`, or immediately when none is pending.',
+      },
+    ],
+  },
+  {
     key: 'messageFeedback',
     summary: 'Storage-domain sidecar service.',
     description: 'Storage-domain sidecar service. It inspects persisted Session history and never creates or resumes an Agent or Session.',
@@ -3981,6 +4007,26 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type CompactionTrigger = \'pressure\' | \'context-overflow\';',
   },
   {
+    name: 'CompanionMemberQuestionAnswer',
+    declaration: 'export interface CompanionMemberQuestionAnswer {\n    id: string;\n    selected: readonly string[];\n    custom?: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionItem',
+    declaration: 'export interface CompanionMemberQuestionItem {\n    id: string;\n    question: string;\n    header?: string;\n    options?: readonly CompanionMemberQuestionOption[];\n    multiSelect?: boolean;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionOption',
+    declaration: 'export interface CompanionMemberQuestionOption {\n    label: string;\n    description?: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionOrigin',
+    declaration: 'export interface CompanionMemberQuestionOrigin {\n    projectName: string;\n    originSessionTitle: string;\n    askerAccountId: string;\n    askerRole: MemberQuestionRole;\n    askerDisplayName: string;\n    askerAvatarUrl: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionReference',
+    declaration: 'export interface CompanionMemberQuestionReference {\n    path: string;\n    reason: string;\n}',
+  },
+  {
     name: 'ConfinedArgv',
     declaration: 'export interface ConfinedArgv {\n    argv: string[];\n    enforcement: SandboxEnforcement;\n    denialSignatures: readonly string[];\n    runnerFailureRules: readonly RunnerFailureRule[];\n}',
   },
@@ -4659,6 +4705,54 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ManualCompactAgentContext',
     declaration: 'export interface ManualCompactAgentContext extends CompactionAgentContext {\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n}',
+  },
+  {
+    name: 'MemberQuestionAnswer',
+    declaration: 'export type MemberQuestionAnswer = CompanionMemberQuestionAnswer;',
+  },
+  {
+    name: 'MemberQuestionAnsweredResult',
+    declaration: 'export interface MemberQuestionAnsweredResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'answered\';\n    readonly answers: readonly MemberQuestionAnswer[];\n}',
+  },
+  {
+    name: 'MemberQuestionDeclinedResult',
+    declaration: 'export interface MemberQuestionDeclinedResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'declined\';\n}',
+  },
+  {
+    name: 'MemberQuestionId',
+    declaration: 'export type MemberQuestionId = Branded<\'MemberQuestionId\'>;',
+  },
+  {
+    name: 'MemberQuestionItem',
+    declaration: 'export type MemberQuestionItem = CompanionMemberQuestionItem;',
+  },
+  {
+    name: 'MemberQuestionOrigin',
+    declaration: 'export type MemberQuestionOrigin = CompanionMemberQuestionOrigin;',
+  },
+  {
+    name: 'MemberQuestionReference',
+    declaration: 'export type MemberQuestionReference = CompanionMemberQuestionReference;',
+  },
+  {
+    name: 'MemberQuestionRole',
+    declaration: 'export type MemberQuestionRole = \'owner\' | \'admin\' | \'member\';',
+  },
+  {
+    name: 'MemberQuestionSendOptions',
+    declaration: 'export interface MemberQuestionSendOptions {\n    session?: Session;\n    signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'MemberQuestionSendPayload',
+    declaration: 'export interface MemberQuestionSendPayload {\n    readonly toProjectMember: string;\n    readonly projectId: string;\n    readonly background: string;\n    readonly questions: readonly MemberQuestionItem[];\n    readonly references: readonly MemberQuestionReference[];\n    readonly origin: MemberQuestionOrigin;\n    readonly originSessionId: string;\n}',
+  },
+  {
+    name: 'MemberQuestionSendResult',
+    declaration: 'export type MemberQuestionSendResult = MemberQuestionAnsweredResult | MemberQuestionDeclinedResult;',
+  },
+  {
+    name: 'MemberQuestionSettlement',
+    declaration: 'export type MemberQuestionSettlement = {\n    outcome: \'answered\';\n    answers: readonly MemberQuestionAnswer[];\n} | {\n    outcome: \'declined\';\n};',
   },
   {
     name: 'MembershipId',

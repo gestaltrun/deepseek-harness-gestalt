@@ -1598,6 +1598,126 @@ export interface ReconnectConfig {
 
 Source: [`packages/mcp/mcp-client/src/index.ts:103`](../packages/mcp/mcp-client/src/index.ts)
 
+<a id="deepseek-aidsh-member-question-sender"></a>
+
+## `@deepseek-ai/dsh-member-question-sender`
+
+```ts config-catalog
+/** Construction-owned faces injected into the sender Provider. */
+export interface Config {
+  /**
+   * Delivers encoded Companion bytes to the addressed member's route. Absent,
+   * `send()` answers the stable `DELIVERY_UNAVAILABLE` error — the same
+   * fail-closed stance as the deferred registry transport.
+   */
+  delivery?: MemberQuestionDelivery
+  /**
+   * Retrieves the sealed project-peer grant addressed to the member. Absent,
+   * encoding still proceeds so a keyless assembly can round-trip the codec
+   * without a Platform Instance.
+   */
+  lookupGrant?: ProjectPeerGrantLookup
+  /**
+   * Reads live presence for the addressed member. Absent, send skips the
+   * offline fail-fast so a keyless assembly can round-trip without a presence
+   * registry. Present, an `offline` verdict answers `MEMBER_OFFLINE` before
+   * encoding.
+   */
+  presenceLookup?: MemberPresenceLookup
+  /**
+   * Resolves when the addressed member's membership is revoked while an ask
+   * is in flight. Absent, in-flight revocation is not observed.
+   */
+  watchMembership?: MemberMembershipWatch
+  /**
+   * Routed-question lifetime in milliseconds. Default 1_800_000 (30 minutes).
+   * Expiry answers `QUESTION_EXPIRED` and records the expired outcome.
+   */
+  ttlMs?: number
+}
+
+/**
+ * Injected delivery adapter. Cross-machine registry transport is deferred
+ * (the T4 Known Limitation); tests and keyless assemblies inject an in-memory
+ * stub. Production delivery stays behind that same gap.
+ */
+export interface MemberQuestionDelivery {
+  /**
+   * Deliver one encoded member-question operation to the addressed member.
+   * @param encoded - codec output plus the addressee and project identity.
+   * @returns fulfillment after the adapter accepts the encoded bytes.
+   */
+  deliver(encoded: EncodedMemberQuestion & {
+    toProjectMember: string
+    projectId: string
+  }): Promise<void>
+}
+
+/**
+ * B-side retrieval of one sealed project-peer grant. Compositions wire this
+ * to `ctx.remoteAccess.getProjectPeerGrant`; tests inject a stub.
+ * @param input - project and peer account identity.
+ * @returns the sealed grant addressed to that peer.
+ */
+export type ProjectPeerGrantLookup = (input: ProjectPeerGrantLookupInput) => Promise<SealedProjectPeerGrant>
+
+/**
+ * Live presence of one project member. Compositions wire this to the
+ * membership HTTP presence registry; tests inject a stub.
+ * @param input - project and peer account identity.
+ * @returns `online` when any installation holds a live heartbeat, else `offline`.
+ */
+export type MemberPresenceLookup = (input: MemberPresenceLookupInput) => Promise<'online' | 'offline'>
+
+/**
+ * Resolves when the addressed member's membership is revoked during flight.
+ * Aborting `signal` cancels the watch without treating that as a revocation.
+ * @param input - project, peer account, and settlement cancellation.
+ * @returns fulfillment when membership is revoked while the ask is pending.
+ */
+export type MemberMembershipWatch = (input: MemberMembershipWatchInput) => Promise<void>
+
+/** Encoded Companion operation ready for the injected delivery adapter. */
+export interface EncodedMemberQuestion {
+  /** Branded question identity correlated with later settlement. */
+  readonly questionId: MemberQuestionId
+  /** Companion `member-question` operation message. */
+  readonly message: CompanionMessage
+  /** Bounded Companion application bytes produced by the T4 codec. */
+  readonly encoded: Uint8Array
+}
+
+/** Inputs for retrieving one sealed project-peer grant on the B side. */
+export interface ProjectPeerGrantLookupInput {
+  /** Cloud project whose grant records are searched. */
+  projectId: string
+  /** Account the sealed grant must address. */
+  peerAccountId: string
+}
+
+/** Inputs for a live presence verdict of one project member. */
+export interface MemberPresenceLookupInput {
+  /** Cloud project whose roster presence is queried. */
+  projectId: string
+  /** Account whose installations are aggregated. */
+  peerAccountId: string
+}
+
+/** Inputs for watching one membership row until it is revoked or the ask settles. */
+export interface MemberMembershipWatchInput {
+  /** Cloud project whose roster is watched. */
+  projectId: string
+  /** Account whose membership is watched. */
+  peerAccountId: string
+  /** Aborts the watch when the ask settles for any other reason. */
+  signal: AbortSignal
+}
+```
+
+Depends on: [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.md)
+
+Source: [`packages/interaction/member-question-sender/src/index.ts:149`](../packages/interaction/member-question-sender/src/index.ts)
+
 <a id="deepseek-aidsh-message-feedback"></a>
 
 ## `@deepseek-ai/dsh-message-feedback`
@@ -2932,6 +3052,62 @@ export type TokenMeterConfig = Record<string, never>
 
 Source: [`packages/llm/token-meter/src/types.ts:12`](../packages/llm/token-meter/src/types.ts)
 
+<a id="deepseek-aidsh-tool-ask-user"></a>
+
+## `@deepseek-ai/dsh-tool-ask-user`
+
+Requires: `tools` · `userQuestions`
+
+```ts config-catalog
+/** Injected faces for routed asks. Local asks ignore every field. */
+export interface Config {
+  /**
+   * Resolves Decision Brief origin fields for a routed ask. Absent, the tool
+   * answers `SENDER_UNAVAILABLE` rather than inventing identity.
+   */
+  originResolver?: OriginResolver
+  /**
+   * Resolves the workspace-bound cloud project for a routed ask and for
+   * runtime eligibility of `to_project_member`. Absent or resolving to
+   * undefined hides the parameter from assembled prompts; a present id
+   * surfaces it. Execute still forwards the addressee as the project id
+   * when this resolver is absent so schema-level routing can be tested
+   * without a membership face.
+   */
+  boundProjectResolver?: BoundProjectResolver
+}
+
+/**
+ * Resolves the Decision Brief origin of one routed ask. The composition
+ * supplies project name and asker identity; the tool forwards the resolved
+ * origin to the sender.
+ * @param input - addressee and optional calling agent.
+ * @returns the origin fields the sender encodes onto the Companion operation.
+ */
+export type OriginResolver = (input: OriginResolverInput) => Promise<MemberQuestionOrigin>
+
+/**
+ * Resolves the cloud project whose peer grant addresses the member. Absent,
+ * the tool forwards `to_project_member` as the project id so schema-level
+ * routing can be tested without a membership face. The same resolver drives
+ * runtime eligibility: an unbound (undefined) result hides `to_project_member`
+ * from assembled prompts.
+ */
+export type BoundProjectResolver = () => Promise<string | undefined>
+
+/** Inputs for resolving the Decision Brief origin of one routed ask. */
+export interface OriginResolverInput {
+  /** Single project-member addressee from `to_project_member`. */
+  toProjectMember: string
+  /** Calling agent, when the tool ran from a live session. */
+  agent?: Agent
+}
+```
+
+Depends on: [`Agent`](subsystems/core.md) · [`MemberQuestionOrigin`](../packages/interaction/member-question-sender/src/index.ts)
+
+Source: [`packages/interaction/tool-ask-user/src/index.ts:72`](../packages/interaction/tool-ask-user/src/index.ts)
+
 <a id="deepseek-aidsh-tool-bash"></a>
 
 ## `@deepseek-ai/dsh-tool-bash`
@@ -3849,7 +4025,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-subagent` ([`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts))
 - `@deepseek-ai/dsh-subprocess-local` ([`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts))
 - `@deepseek-ai/dsh-terminal` ([`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts))
-- `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))

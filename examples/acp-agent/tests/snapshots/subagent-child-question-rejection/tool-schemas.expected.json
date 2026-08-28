@@ -2,7 +2,7 @@
   "initial": [
     {
       "name": "ask_user_question",
-      "description": "Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer.",
+      "description": "Ask the user a concise question when you need confirmation, a choice, or missing information before proceeding. Send one or more questions, each with a stable id that will be echoed in the answer. Pass to_project_member to route the question to one project member instead of the local user; routed asks require background (1 to 600 characters). references attaches workspace files that support the decision, locally or routed.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -54,6 +54,31 @@
               "required": [
                 "id",
                 "question"
+              ]
+            }
+          },
+          "background": {
+            "type": "string",
+            "description": "Agent-authored Decision Brief background. Required with to_project_member; 1 to 600 characters, enforced at construction."
+          },
+          "references": {
+            "type": "array",
+            "description": "Workspace files that support the decision. Available for local and routed asks; each path must exist inside the asking session workspace.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Path resolved inside the asking session workspace; the file must exist."
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Optional one-liner (at most 100 characters) explaining why this file matters."
+                }
+              },
+              "required": [
+                "path"
               ]
             }
           }

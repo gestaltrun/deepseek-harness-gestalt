@@ -2,7 +2,7 @@
 
 English | [中文](user-questions.zh.md)
 
-The user-questions seam of [dsh-user-questions](../../packages/interaction/user-questions). It is the provider-neutral vocabulary a tool or permission plugin uses when it needs the human to answer before the agent can continue. UI surfaces provide the active `UserQuestionProvider`; the host runtime relays requests to its connected client.
+The user-questions seam of [dsh-user-questions](../../packages/interaction/user-questions). It is the provider-neutral vocabulary a tool or permission plugin uses when it needs the human to answer before the agent can continue. UI surfaces provide the active `UserQuestionProvider`; the host runtime relays requests to its connected client. Routed asks with `to_project_member` leave this provider and travel through [`ctx.memberQuestionSender`](#ctxmemberquestionsender--memberquestionsenderservice-abstract-seam) instead.
 
 Source: [`packages/interaction/user-questions/src/index.ts`](../../packages/interaction/user-questions/src/index.ts)
 
@@ -133,6 +133,84 @@ class UserQuestionError extends HarnessError {
 }
 ```
 
+## Member-directed routing
+
+`MemberQuestionSendPayload` is the application payload `ctx.memberQuestionSender.send()` encodes as a Companion `member-question` operation. Origin, questions, and references reuse the T4 Companion vocabulary; this seam does not invent a second protocol.
+
+```ts type-equiv
+/**
+ * Application payload of one member-directed question. The sender encodes it
+ * as a Companion `member-question` operation; origin, background, questions,
+ * and references reuse the T4 codec vocabulary without a second protocol.
+ */
+interface MemberQuestionSendPayload {
+  /** Account reference of the single addressee. */
+  readonly toProjectMember: string
+  /** Cloud project whose peer grant addresses that member. */
+  readonly projectId: string
+  /** Agent-authored background; already bounded by the asking tool. */
+  readonly background: string
+  /** Question batch mirrored from `ask_user_question`. */
+  readonly questions: readonly MemberQuestionItem[]
+  /** Workspace-validated references; an empty list is admitted. */
+  readonly references: readonly MemberQuestionReference[]
+  /** Public identity fields rendered on the receiver's Decision Brief. */
+  readonly origin: MemberQuestionOrigin
+  /** Originating session identity used as one half of the supersede route key. */
+  readonly originSessionId: string
+}
+```
+
+`MemberQuestionSendResult` is the answered or declined settlement after the hanging `send()` promise resolves. Lifetime failures (`MEMBER_OFFLINE`, `QUESTION_EXPIRED`, `QUESTION_WITHDRAWN`, `QUESTION_SUPERSEDED`, `REVOKED_DURING_FLIGHT`) reject as `MemberQuestionSenderError` and remain ordinary tool results.
+
+```ts type-equiv
+/** Successful routed-ask settlement: the member answered the batch. */
+interface MemberQuestionAnsweredResult {
+  /** Branded question identity the caller correlates with later settlement. */
+  readonly questionId: MemberQuestionId
+  /** Companion application bytes encoded by the T4 codec. */
+  readonly encoded: Uint8Array
+  /** Terminal answered outcome. */
+  readonly outcome: 'answered'
+  /** Settling answers echoed by question id. */
+  readonly answers: readonly MemberQuestionAnswer[]
+}
+```
+
+```ts type-equiv
+/** Successful routed-ask settlement: the member declined without answering. */
+interface MemberQuestionDeclinedResult {
+  /** Branded question identity the caller correlates with later settlement. */
+  readonly questionId: MemberQuestionId
+  /** Companion application bytes encoded by the T4 codec. */
+  readonly encoded: Uint8Array
+  /** Terminal declined outcome. */
+  readonly outcome: 'declined'
+}
+```
+
+```ts type-equiv
+/** Result of one successful send: an answered or declined settlement. */
+type MemberQuestionSendResult = MemberQuestionAnsweredResult | MemberQuestionDeclinedResult
+```
+
+```ts type-equiv
+/** Optional session and cancellation attached to one `send()` call. */
+interface MemberQuestionSendOptions {
+  /** Asking session that records the durable ask/outcome pair. */
+  session?: Session
+  /** Aborting this signal withdraws the in-flight question. */
+  signal?: AbortSignal
+}
+```
+
+```ts type-equiv
+/** Successful or declined settlement applied to one in-flight question. */
+type MemberQuestionSettlement =
+  | { outcome: 'answered'; answers: readonly MemberQuestionAnswer[] }
+  | { outcome: 'declined' }
+```
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -140,6 +218,49 @@ class UserQuestionError extends HarnessError {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxmemberquestionsender--memberquestionsenderservice-abstract-seam"></a>
+
+### `ctx.memberQuestionSender` — `MemberQuestionSenderService` (abstract seam)
+
+Member-question sender capability. `send(payload)` encodes one Companion `member-question` operation, delivers it, and waits for a terminal settlement or a stable lifetime error.
+
+```ts cordis-catalog
+/**
+ * Encode one member-directed question, deliver it, and wait for settlement.
+ * @param payload - Decision Brief origin, background, question batch, and references.
+ * @param options - optional asking session and withdrawal signal.
+ * @returns the answered or declined settlement plus the encoded Companion bytes.
+ * @throws {MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no adapter is composed,
+ *   `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant,
+ *   `ENCODE_FAILED` when the T4 codec rejects the payload,
+ *   `MEMBER_OFFLINE` when presence is offline at send time,
+ *   `QUESTION_EXPIRED` when the configured TTL elapses unanswered,
+ *   `QUESTION_WITHDRAWN` when the initiator cancels the turn,
+ *   `QUESTION_SUPERSEDED` when a newer same-route ask replaces this one,
+ *   or `REVOKED_DURING_FLIGHT` when membership is withdrawn while waiting.
+ */
+abstract send( payload: MemberQuestionSendPayload, options?: MemberQuestionSendOptions, ): Promise<MemberQuestionSendResult>
+
+/**
+ * Apply one answered or declined settlement to a pending question.
+ * Unknown or already-settled question ids are ignored (idempotent).
+ * @param questionId - branded question identity returned by `send()`.
+ * @param settlement - answered answers or a declined verdict.
+ * @returns fulfillment after the matching `send()` promise settles, or immediately when none is pending.
+ */
+abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>
+
+/**
+ * Withdraw one pending question as initiator cancellation.
+ * Unknown or already-settled question ids are ignored.
+ * @param questionId - branded question identity returned by `send()`.
+ * @returns fulfillment after the matching `send()` promise rejects `QUESTION_WITHDRAWN`, or immediately when none is pending.
+ */
+abstract withdraw(questionId: MemberQuestionId): Promise<void>
+```
+
+Source: [`packages/interaction/member-question-sender/src/index.ts`](../../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="ctxuserquestions--userquestionservice"></a>
 

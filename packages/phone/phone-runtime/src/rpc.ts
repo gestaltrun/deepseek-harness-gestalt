@@ -4,9 +4,14 @@
  * Method names follow the upstream OpenRPC specification (`devices.list`,
  * `device.boot`, `device.shutdown`, `server.info`, `device.io.*`,
  * `device.screencapture`); this module owns no other mobilecli behavior.
+ * The capture answer follows both upstream shapes: the bare byte stream and
+ * mobilecli 1.0.5's `{ format, sessionUrl }` envelope, whose session URL is
+ * resolved against the server origin and forced back onto the loopback fence
+ * before the stream is opened.
  * @module @deepseek-ai/dsh-phone-runtime/rpc
  */
 
+import { isLoopbackHostname } from '@deepseek-ai/dsh-request-trust'
 import { TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import { realDeviceIssueError } from './classify.ts'
 import { PhoneDevicesError } from './errors.ts'
@@ -98,8 +103,12 @@ export class MobilecliRpc {
 
   /**
    * POST one JSON-RPC request whose successful answer is a byte stream
-   * (`device.screencapture`). JSON-RPC errors still arrive as a JSON body and
-   * map onto the same public vocabulary as {@link call}.
+   * (`device.screencapture`). Both upstream answer shapes are accepted: the
+   * bare byte stream, and mobilecli 1.0.5's `{ format, sessionUrl }` JSON
+   * envelope whose session URL is resolved against the server origin, forced
+   * back onto the loopback fence, and dialed for the actual stream. JSON-RPC
+   * errors still arrive as a JSON body and map onto the same public vocabulary
+   * as {@link call}.
    * @param method - Upstream OpenRPC method name.
    * @param params - Params object exactly as the method documents them.
    * @param signal - Fused caller-and-deadline signal that stops header wait.
@@ -128,6 +137,10 @@ export class MobilecliRpc {
       if ('error' in body && body.error !== null && typeof body.error === 'object') {
         throw jsonRpcError(method, body.error)
       }
+      const sessionUrl = (body.result as { sessionUrl?: unknown } | null | undefined)?.sessionUrl
+      if (typeof sessionUrl === 'string' && sessionUrl.length > 0) {
+        return await this.streamSession(sessionUrl, signal)
+      }
       throw new PhoneDevicesError(
         'PHONE_PROTOCOL',
         `mobilecli ${JSON.stringify(method)} answered JSON instead of a capture stream`,
@@ -149,6 +162,59 @@ export class MobilecliRpc {
       throw new PhoneDevicesError('PHONE_PROTOCOL', `mobilecli ${JSON.stringify(method)} answered no capture body`)
     }
     return { contentType, body: response.body }
+  }
+
+  /**
+   * Dial the capture session endpoint a 1.0.5 envelope named. Relative URLs
+   * resolve against the server origin; an absolute URL must stay on the
+   * loopback fence, so a compromised server cannot redirect the Host proxy at
+   * an internal endpoint.
+   * @param sessionUrl - Session URL exactly as the envelope carried it.
+   * @param signal - Fused caller-and-deadline signal that stops header wait.
+   * @returns the session content type and unread body; the caller owns cancellation.
+   */
+  private async streamSession(
+    sessionUrl: string,
+    signal: AbortSignal,
+  ): Promise<{ readonly contentType: string; readonly body: ReadableStream<Uint8Array> }> {
+    let resolved: URL
+    try {
+      resolved = new URL(sessionUrl, this.baseUrl)
+    } catch {
+      throw new PhoneDevicesError(
+        'PHONE_PROTOCOL',
+        `mobilecli answered an unparseable capture session URL: ${JSON.stringify(sessionUrl)}`,
+      )
+    }
+    if (resolved.protocol !== 'http:' || !isLoopbackHostname(resolved.hostname)) {
+      throw new PhoneDevicesError(
+        'PHONE_PROTOCOL',
+        `mobilecli capture session URL ${JSON.stringify(sessionUrl)} leaves the loopback fence`,
+      )
+    }
+    let session: Response
+    try {
+      session = await fetch(resolved, { headers: { accept: '*/*', connection: 'close' }, signal })
+    } catch (error) {
+      throw normalizeOperationError(error)
+    }
+    if (!session.ok) {
+      try {
+        await session.body?.cancel()
+      } catch {
+        // The unread session body is already gone; the HTTP status is the failure.
+      }
+      throw new PhoneDevicesError(
+        'PHONE_PROTOCOL',
+        `the mobilecli capture session answered HTTP ${String(session.status)}`,
+      )
+    }
+    const sessionType = session.headers.get('content-type')
+    /* v8 ignore next 4 -- node:fetch always attaches a body on a completed HTTP response */
+    if (session.body === null) {
+      throw new PhoneDevicesError('PHONE_PROTOCOL', 'the mobilecli capture session answered no body')
+    }
+    return { contentType: sessionType === null ? '' : sessionType, body: session.body }
   }
 
   /**

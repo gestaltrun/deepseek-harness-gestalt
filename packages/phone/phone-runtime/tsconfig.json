@@ -16,6 +16,9 @@
       "path": "../../util/brand"
     },
     {
+      "path": "../../util/request-trust"
+    },
+    {
       "path": "../../util/timeout"
     },
     {

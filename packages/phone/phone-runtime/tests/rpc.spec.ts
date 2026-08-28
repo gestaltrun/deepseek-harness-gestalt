@@ -205,6 +205,152 @@ describe('MobilecliRpc.call', () => {
     expect(error.message).toContain('JSON instead of a capture stream')
   })
 
+  it('follows the 1.0.5 capture envelope: relative sessionUrl resolved against the server origin', async () => {
+    let sessionPath: string | undefined
+    const url = await listen((req, res) => {
+      if (req.method === 'GET') {
+        sessionPath = req.url
+        res.writeHead(200, { 'content-type': 'multipart/x-mixed-replace; boundary=frame' })
+        res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))
+        return
+      }
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { format: 'mjpeg', sessionUrl: '/stream?s=mjpeg' } }))
+      })
+    })
+    const capture = await new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554', format: 'mjpeg' },
+      new AbortController().signal,
+    )
+    expect(capture.contentType).toContain('multipart/x-mixed-replace')
+    const first = Buffer.from((await capture.body.getReader().read()).value ?? new Uint8Array())
+    expect(first.includes(Buffer.from([0xff, 0xd8]))).toBe(true)
+    expect(sessionPath).toBe('/stream?s=mjpeg')
+  })
+
+  it('follows an absolute loopback sessionUrl verbatim', async () => {
+    let sessionHost: string | undefined
+    const url = await listen((req, res) => {
+      if (req.method === 'GET') {
+        sessionHost = req.headers.host
+        res.writeHead(200, { 'content-type': 'video/h264' })
+        res.end(Buffer.from([0x00, 0x00, 0x00, 0x01]))
+        return
+      }
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { format: 'avc', sessionUrl: `${url}/stream?s=avc` } }))
+      })
+    })
+    const capture = await new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554', format: 'avc' },
+      new AbortController().signal,
+    )
+    expect(capture.contentType).toBe('video/h264')
+    expect(sessionHost).toContain('127.0.0.1')
+  })
+
+  it('rejects a capture envelope whose sessionUrl leaves the loopback fence', async () => {
+    for (const sessionUrl of ['http://10.0.0.5:9/stream?s=x', 'http://evil.example/stream?s=x']) {
+      const url = await listen((req, res) => {
+        void body(req).then((value) => {
+          const request = value as { id: number }
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { format: 'mjpeg', sessionUrl } }))
+        })
+      })
+      const error = await rejectionOf(() => new MobilecliRpc(url).stream(
+        'device.screencapture',
+        { deviceId: 'emulator-5554', format: 'mjpeg' },
+        new AbortController().signal,
+      ))
+      expect(error.code).toBe('PHONE_PROTOCOL')
+      expect(error.message).toContain('loopback')
+    }
+  })
+
+  it('rejects an unparseable capture sessionUrl', async () => {
+    const url = await listen((req, res) => {
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { format: 'mjpeg', sessionUrl: 'http://[::1' } }))
+      })
+    })
+    const error = await rejectionOf(() => new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554', format: 'mjpeg' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_PROTOCOL')
+    expect(error.message).toContain('session URL')
+  })
+
+  it('rejects a capture session endpoint that answers non-2xx', async () => {
+    const url = await listen((req, res) => {
+      if (req.method === 'GET') {
+        res.writeHead(503, { 'content-type': 'text/plain' })
+        res.end('session gone')
+        return
+      }
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { format: 'mjpeg', sessionUrl: '/stream?s=mjpeg' } }))
+      })
+    })
+    const error = await rejectionOf(() => new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554', format: 'mjpeg' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_PROTOCOL')
+    expect(error.message).toContain('HTTP 503')
+  })
+
+  it('passes a session answer without a content-type header through with an empty type', async () => {
+    const url = await listen((req, res) => {
+      if (req.method === 'GET') {
+        res.writeHead(200)
+        res.end(Buffer.from([0x00]))
+        return
+      }
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { format: 'mjpeg', sessionUrl: '/stream?s=x' } }))
+      })
+    })
+    const capture = await new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554', format: 'mjpeg' },
+      new AbortController().signal,
+    )
+    expect(capture.contentType).toBe('')
+  })
+
+  it('reports a refused capture session endpoint as PHONE_UNAVAILABLE', async () => {
+    // A closed loopback port keeps the fence satisfied while the socket refuses.
+    const url = await listen((req, res) => {
+      void body(req).then((value) => {
+        const request = value as { id: number }
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { format: 'mjpeg', sessionUrl: 'http://127.0.0.1:1/stream?s=mjpeg' } }))
+      })
+    })
+    const error = await rejectionOf(() => new MobilecliRpc(url).stream(
+      'device.screencapture',
+      { deviceId: 'emulator-5554', format: 'mjpeg' },
+      new AbortController().signal,
+    ))
+    expect(error.code).toBe('PHONE_UNAVAILABLE')
+  })
+
   it('maps a JSON-RPC error on a capture request onto PHONE_DEVICE_NOT_FOUND', async () => {
     const url = await listen((req, res) => {
       void body(req).then((value) => {

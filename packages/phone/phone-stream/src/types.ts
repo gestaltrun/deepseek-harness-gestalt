@@ -33,6 +33,8 @@ export interface PhoneDeviceRefWire {
   readonly name: string
   /** Emulator, iOS simulator, or physical handset class. */
   readonly kind: PhoneDeviceKind
+  /** Upstream state verbatim (`online`, `offline`, `unauthorized`, ...). */
+  readonly state: string
   /** True only while the upstream reports the device online. */
   readonly online: boolean
 }

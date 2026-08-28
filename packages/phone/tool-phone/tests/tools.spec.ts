@@ -33,6 +33,7 @@ const LISTING: PhoneDeviceList = Object.freeze({
     id: ANDROID_ID,
     name: 'Pixel_6',
     kind: 'emulator' as const,
+    state: 'online',
     online: true,
   }]),
   ios: Object.freeze({
@@ -40,12 +41,14 @@ const LISTING: PhoneDeviceList = Object.freeze({
       id: IOS_SIM_ID,
       name: 'iPhone 16',
       kind: 'simulator' as const,
+      state: 'shutdown',
       online: false,
     }]),
     reals: Object.freeze([{
       id: IOS_REAL_ID,
       name: 'iPhone',
       kind: 'real' as const,
+      state: 'online',
       online: true,
     }]),
   }),

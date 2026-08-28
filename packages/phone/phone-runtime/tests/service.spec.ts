@@ -5,7 +5,7 @@ import type { Config } from '@deepseek-ai/dsh-phone-runtime'
 import type { PhoneDeviceChange } from '@deepseek-ai/dsh-phone-runtime'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliServerProcess } from '../src/server-process.ts'
-import { stageFake, wireDevice } from './helpers.ts'
+import { firstMjpegFrame, stageFake, wireDevice } from './helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -322,10 +322,11 @@ describe('phone runtime service lifecycle', () => {
       format: 'mjpeg',
     })
     expect(mjpeg.contentType).toMatch(/multipart\/x-mixed-replace/)
-    const mjpegReader = mjpeg.body.getReader()
-    const mjpegBytes = Buffer.from((await mjpegReader.read()).value ?? new Uint8Array())
-    expect(mjpegBytes.includes(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))).toBe(true)
-    await mjpegReader.cancel()
+    const { payload } = await firstMjpegFrame(mjpeg.body)
+    // Frame-level decodability is pinned structurally by acceptance.spec;
+    // this opening-mechanics check only requires a complete SOI…EOI JPEG.
+    expect(payload.subarray(0, 2).equals(Buffer.from([0xff, 0xd8]))).toBe(true)
+    expect(payload.subarray(-2).equals(Buffer.from([0xff, 0xd9]))).toBe(true)
     const h264 = await context.phoneDevices.startCapture({
       deviceId: ANDROID_EMULATOR,
       format: 'h264',

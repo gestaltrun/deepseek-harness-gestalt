@@ -64,7 +64,7 @@ export function parseDeviceInfos(result: unknown): readonly MobilecliDevice[] {
     const name = stringField(record, 'name', index)
     const state = stringField(record, 'state', index)
     const kind = phoneDeviceKind(stringField(record, 'type', index))
-    const device: MobilecliDevice = Object.freeze({ id, name, kind, online: state === 'online', platform })
+    const device: MobilecliDevice = Object.freeze({ id, name, kind, state, online: state === 'online', platform })
     return device
   })
 }
@@ -128,7 +128,9 @@ export function changeSets(
 function signaturesOf(list: PhoneDeviceList | undefined): Map<DeviceId, string> {
   const signatures = new Map<DeviceId, string>()
   if (list === undefined) return signatures
-  for (const ref of allRefs(list)) signatures.set(ref.id, `${ref.kind}\u0000${ref.online ? 1 : 0}\u0000${ref.name}`)
+  for (const ref of allRefs(list)) {
+    signatures.set(ref.id, `${ref.kind}\u0000${ref.state}\u0000${ref.online ? 1 : 0}\u0000${ref.name}`)
+  }
   return signatures
 }
 

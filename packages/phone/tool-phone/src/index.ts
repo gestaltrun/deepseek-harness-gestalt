@@ -43,6 +43,7 @@ const DEVICE_REF_SCHEMA = {
     id: { type: 'string' as const, required: true as const },
     name: { type: 'string' as const, required: true as const },
     kind: { type: 'string' as const, required: true as const, enum: ['emulator', 'simulator', 'real'] },
+    state: { type: 'string' as const, required: true as const },
     online: { type: 'boolean' as const, required: true as const },
   },
 } as const

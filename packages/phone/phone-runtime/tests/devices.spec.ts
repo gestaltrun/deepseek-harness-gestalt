@@ -37,6 +37,25 @@ describe('devices.list result validation', () => {
     ])
   })
 
+  it('keeps every upstream state verbatim instead of folding non-online states together', () => {
+    const refs = parseDeviceInfos([
+      wire('u', 'ios', 'real', 'unauthorized'),
+      wire('o', 'android', 'emulator'),
+      wire('x', 'android', 'emulator', 'recovery'),
+    ])
+    expect(refs.map(ref => [ref.id, ref.state, ref.online])).toEqual([
+      [deviceId('u'), 'unauthorized', false],
+      [deviceId('o'), 'online', true],
+      [deviceId('x'), 'recovery', false],
+    ])
+  })
+
+  it('reports a change when only the upstream state flips between two non-online values', () => {
+    const before = groupEntries(parseDeviceInfos([wire('u', 'ios', 'real', 'unauthorized')]))
+    const after = groupEntries(parseDeviceInfos([wire('u', 'ios', 'real', 'offline')]))
+    expect(changeSets(before, after)).toMatchObject({ changed: true, added: [], removed: [] })
+  })
+
   it.each([
     ['non-array', 42, 'result must be a device array'],
     ['element not object', [null], 'must be an object'],

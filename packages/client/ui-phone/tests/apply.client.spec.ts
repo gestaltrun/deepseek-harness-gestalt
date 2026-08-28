@@ -5,9 +5,12 @@
  * it — mirrors what the invariant companion proves at runtime).
  */
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply, Config, inject } from '../src/client/index.tsx'
 import { RecordingSidebar } from '../src/invariant.ts'
+import { PHONE_SETTINGS_NAMESPACE, type PhoneSettings } from '../src/phone-settings.ts'
 import {
   buildPhoneTabDescriptor, installPhoneTab, NULL_PHONE_BADGE_SOURCE,
   type PhoneBadgeSource, type PhoneTabView,
@@ -40,21 +43,39 @@ function sourceWith(onlineCount: number): PhoneBadgeSource {
   return { getBadge: () => ({ onlineCount }), listDevices: () => [] }
 }
 
-async function mount(sidebar: SidebarUnderTest) {
+async function mount(sidebar: SidebarUnderTest, settings?: ReturnType<typeof stubSettingsScope<PhoneSettings>>) {
   const ctx = new Context()
   ctx.provide('betterSidebar', sidebar)
+  await ctx.plugin(SlotRegistry).await()
+  ctx.slots.register({
+    name: 'root',
+    children: { 'settings.plugin.item': { kind: 'keyed', scope: 'root' } },
+  } as never, () => null)
+  const host = settings ?? stubSettingsScope<PhoneSettings>()
+  ctx.provide('settingsScope', { bind: () => host.scope })
   // The loader hands apply the schema-validated config; mimic its default here.
   const fiber = ctx.plugin({
     inject: [...inject],
-    apply: (pluginCtx: Context) => { apply(pluginCtx, Config({})) },
+    apply: (pluginCtx: Context) => { apply(pluginCtx as never, Config({})) },
   })
   await fiber.await()
-  return { ctx, fiber }
+  return { ctx, fiber, host }
 }
 
 describe('ui-phone client apply', () => {
-  it('declares only the Side card service edge', () => {
-    expect([...inject]).toEqual(['betterSidebar'])
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('declares the Side card and settings-card service edges', () => {
+    expect([...inject]).toEqual(['betterSidebar', 'slots', 'settingsScope'])
+  })
+
+  it('keys the Plugins-tab card on the Host settings namespace', async () => {
+    const sidebar = new SidebarUnderTest()
+    const { ctx, fiber } = await mount(sidebar)
+    expect(ctx.slots.entries('settings.plugin.item').map(entry => entry.options.key))
+      .toEqual([PHONE_SETTINGS_NAMESPACE])
+    await fiber.dispose()
+    expect(ctx.slots.entries('settings.plugin.item')).toHaveLength(0)
   })
 
   it('fails loud when betterSidebar has not been published', () => {
@@ -76,6 +97,34 @@ describe('ui-phone client apply', () => {
     expect(descriptor!.available(undefined, undefined, undefined)).toBe(true)
     // The monochrome inline SVG resolves the icon(size) contract.
     expect(descriptor!.icon(14)).toBeTruthy()
+    // The body reads the settings scope when ready, else the composition Config.
+    expect(descriptor!.component()).toBeTruthy()
+  })
+
+  it('wires the browser clipboard into the settings card when one exists', async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    const sidebar = new SidebarUnderTest()
+    const { ctx } = await mount(sidebar)
+    const entry = ctx.slots.entries('settings.plugin.item')[0]!
+    const face = (entry.inject as () => { copyCommand: (command: string) => void })()
+    face.copyCommand('sdkmanager "platform-tools"')
+    expect(writeText).toHaveBeenCalledWith('sdkmanager "platform-tools"')
+  })
+
+  it('reads the durable enable flag once the Host scope is ready', async () => {
+    const sidebar = new SidebarUnderTest()
+    const host = stubSettingsScope<PhoneSettings>()
+    host.publish({
+      status: 'ready',
+      writable: true,
+      value: { enabled: true },
+      base: { enabled: false },
+      user: { enabled: true },
+      revision: 1,
+    })
+    await mount(sidebar, host)
+    expect(sidebar.getTab('phone')!.component()).toBeTruthy()
   })
 
   it('drives both badge arms from the injected snapshot values', async () => {

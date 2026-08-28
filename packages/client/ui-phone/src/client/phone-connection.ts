@@ -192,7 +192,10 @@ export class PhoneConnectionController {
     this.retryBaseDelayMs = options.retryBaseDelayMs ?? RETRY_BASE_DELAY_MS
   }
 
-  /** Current phase snapshot; identity changes on every transition. */
+  /**
+   * Current phase snapshot; identity changes on every transition.
+   * @returns the latest phase the connected view should render.
+   */
   snapshot(): PhoneConnectionPhase {
     return this.phase
   }
@@ -200,6 +203,7 @@ export class PhoneConnectionController {
   /**
    * Follow phase changes until the returned disposer runs.
    * @param listener - called after every phase transition.
+   * @returns disposer that stops following this controller.
    */
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener)
@@ -264,6 +268,8 @@ export class PhoneConnectionController {
 
   /**
    * Tap one normalized screen point.
+   * @param u - Horizontal position in 0..1 of the streamed frame.
+   * @param v - Vertical position in 0..1 of the streamed frame.
    * @returns false when the surface is unknown or the phase is not live.
    */
   tap(u: number, v: number): boolean {
@@ -292,6 +298,7 @@ export class PhoneConnectionController {
   /**
    * Type text on the device.
    * @param value - the text to input; empty text is dropped.
+   * @returns false when the text is empty or the phase is not live.
    */
   text(value: string): boolean {
     if (value.length === 0) return false
@@ -301,6 +308,7 @@ export class PhoneConnectionController {
   /**
    * Press one device toolbar button.
    * @param name - the closed button vocabulary.
+   * @returns false when the phase is not live.
    */
   button(name: PhoneButtonName): boolean {
     return this.send({ method: 'button', button: name })

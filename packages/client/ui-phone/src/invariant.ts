@@ -31,7 +31,11 @@ export class RecordingSidebar {
   private readonly registered = Promise.withResolvers<void>()
   private readonly unregistered = Promise.withResolvers<void>()
 
-  /** Register one tab descriptor keyed by id; duplicates throw loud. */
+  /**
+   * Register one tab descriptor keyed by id; duplicates throw loud.
+   * @param descriptor - Tab descriptor whose `id` is the registry key.
+   * @returns disposer that removes this exact descriptor.
+   */
   registerTab(descriptor: { readonly id: string }): () => void {
     if (this.tabs.has(descriptor.id)) {
       throw new Error(`tab type "${descriptor.id}" already registered`)
@@ -46,6 +50,11 @@ export class RecordingSidebar {
     }
   }
 
+  /**
+   * Look up one registered tab descriptor.
+   * @param id - Tab type id.
+   * @returns the descriptor, or `undefined` when none is registered.
+   */
   getTab(id: string): unknown {
     return this.tabs.get(id)
   }

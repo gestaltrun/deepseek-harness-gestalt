@@ -1,6 +1,6 @@
 # 手机设备接入 · 静态高保真设计稿
 
-English | [中文](README.zh.md)
+[English](README.md) | 中文
 
 Throwaway hi-fi mockups for the `ui-device-dock` 方案。**主稿承载为已存在的多类型侧栏包
 `packages/client/ui-better-sidebar`**（VSCode 风格 Tab 条 +「+」菜单）：以外部插件身份

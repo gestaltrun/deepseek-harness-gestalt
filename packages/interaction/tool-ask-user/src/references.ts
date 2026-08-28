@@ -105,13 +105,18 @@ async function validatePath(path: string, workspaceRoot: string | undefined): Pr
     return `path ${JSON.stringify(path)} is unreadable or does not exist inside the session workspace`
   }
   const relativePath = relative(canonicalWorkspace, canonicalTarget)
-  if (relativePath.startsWith(`..${sep}`) || relativePath === '..' || isAbsolute(relativePath)) {
+  if (relativePath.startsWith(`..${sep}`) || relativePath === '..') {
+    return `path ${JSON.stringify(path)} is outside the session workspace`
+  }
+  /* v8 ignore next 3 -- relative() yields an absolute path only for a Windows cross-drive target */
+  if (isAbsolute(relativePath)) {
     return `path ${JSON.stringify(path)} is outside the session workspace`
   }
   try {
     const info = await lstat(canonicalTarget)
     if (!info.isFile()) return `path ${JSON.stringify(path)} is not a file`
   } catch {
+    /* v8 ignore next -- realpath already proved the target exists; lstat failure is a TOCTOU/IO race */
     return `path ${JSON.stringify(path)} is unreadable or does not exist inside the session workspace`
   }
   return undefined

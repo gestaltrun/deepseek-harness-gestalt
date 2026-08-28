@@ -71,6 +71,7 @@ jobs:
       - name: Verify and build documentation
         env:
           DOCS_BASE: ${{ steps.pages.outputs.base_path }}/
+          DOCS_SITE_URL: ${{ steps.pages.outputs.base_url }}/
         run: pnpm run doc-sync
 
       - name: Upload Pages artifact

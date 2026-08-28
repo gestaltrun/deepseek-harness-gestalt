@@ -739,6 +739,7 @@
     "apps/platform": {
       "entry": [
         "tests/**/*.spec.ts",
+        "tests/**/*.snapshot.ts",
         "tests/fixtures/oss-metadata-fetch.ts"
       ],
       "project": [

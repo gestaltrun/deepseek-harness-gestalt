@@ -92,6 +92,9 @@
         "two-instance-relay/start.ts",
         "personal-pairing/start.ts",
         "personal-pairing/src/provider.ts",
+        "project-members/start.ts",
+        "project-members/memory-membership.ts",
+        "project-members/mock-llm.ts",
         "*/tests/**/*.e2e.ts",
         "*/tests/**/*.snapshot.ts"
       ],

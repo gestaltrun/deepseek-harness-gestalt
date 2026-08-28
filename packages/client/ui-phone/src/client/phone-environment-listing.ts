@@ -73,6 +73,7 @@ function readyDevicesOf(listing: PhoneListingSnapshot): readonly PhoneReadyDevic
 }
 
 function metaOf(device: PhoneDeviceSummary): string {
+  if (device.state === 'unauthorized') return `未授权 · ${device.id}`
   const run = device.online ? '运行中' : '已停止'
   return `${run} · ${device.id}`
 }

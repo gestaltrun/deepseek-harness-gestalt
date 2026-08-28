@@ -12,12 +12,12 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 const WIRE_LISTING = {
   android: [
-    { id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', online: true },
-    { id: 'R3CN30', name: 'SM-S9310', kind: 'real', online: false },
+    { id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', state: 'online', online: true },
+    { id: 'R3CN30', name: 'SM-S9310', kind: 'real', state: 'offline', online: false },
   ],
   ios: {
-    simulators: [{ id: 'iPhone-16', name: 'iPhone 16', kind: 'simulator', online: true }],
-    reals: [{ id: 'UDID-9', name: 'iPhone', kind: 'real', online: false }],
+    simulators: [{ id: 'iPhone-16', name: 'iPhone 16', kind: 'simulator', state: 'online', online: true }],
+    reals: [{ id: 'UDID-9', name: 'iPhone', kind: 'real', state: 'unauthorized', online: false }],
   },
 }
 
@@ -46,12 +46,12 @@ describe('phone listing source', () => {
     expect(seen.init.method).toBe('GET')
     expect(source.snapshot()).toEqual({
       android: [
-        { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: true },
-        { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: false },
+        { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
+        { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'offline', online: false },
       ],
       ios: [
-        { id: 'iPhone-16', name: 'iPhone 16', channel: 'emulator', online: true },
-        { id: 'UDID-9', name: 'iPhone', channel: 'usb', online: false },
+        { id: 'iPhone-16', name: 'iPhone 16', channel: 'emulator', state: 'online', online: true },
+        { id: 'UDID-9', name: 'iPhone', channel: 'usb', state: 'unauthorized', online: false },
       ],
     })
     expect(source.getBadge()).toEqual({ onlineCount: 2 })
@@ -96,7 +96,8 @@ describe('phone listing source', () => {
     ['an android entry is not an object', { android: [42], ios: { simulators: [], reals: [] } }],
     ['a ref id is missing', { android: [{ name: 'x', kind: 'real', online: true }], ios: { simulators: [], reals: [] } }],
     ['a ref name is missing', { android: [{ id: 'x', kind: 'real', online: true }], ios: { simulators: [], reals: [] } }],
-    ['a ref online flag is missing', { android: [{ id: 'x', name: 'x', kind: 'real' }], ios: { simulators: [], reals: [] } }],
+    ['a ref online flag is missing', { android: [{ id: 'x', name: 'x', kind: 'real', state: 'online' }], ios: { simulators: [], reals: [] } }],
+    ['a ref verbatim state is missing', { android: [{ id: 'x', name: 'x', kind: 'real', online: true }], ios: { simulators: [], reals: [] } }],
     ['an ios group is missing', { android: [], ios: { reals: [] } }],
     ['an ios ref is broken', { android: [], ios: { simulators: [], reals: [{ id: 'x' }] } }],
   ])('classifies a listing where %s as a wire error', async (_label, body) => {
@@ -116,38 +117,29 @@ describe('phone listing source', () => {
     expect(source.snapshot()).toEqual({ android: [], ios: [] })
   })
 
-  it('carries the unauthorized flag and OS version through the wire contract', async () => {
+  it('carries the upstream state verbatim through the wire contract', async () => {
     stubFetch(200, {
       android: [
-        { id: 'R3CN30', name: 'SM-S9310', kind: 'real', online: true, unauthorized: true },
-        { id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', online: true, osVersion: 'Android 15' },
+        { id: 'R3CN30', name: 'SM-S9310', kind: 'real', state: 'unauthorized', online: false },
+        { id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', state: 'device', online: true },
       ],
       ios: { simulators: [], reals: [] },
     })
     const source = createHttpPhoneListingSource()
     await source.refresh()
+    // The state rides verbatim (#421 wire): unknown upstream values survive.
     expect(source.snapshot().android).toEqual([
-      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true, unauthorized: true },
-      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: true, osVersion: 'Android 15' },
+      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'unauthorized', online: false },
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'device', online: true },
     ])
-    // Absent optional fields stay absent rather than materializing defaults.
-    stubFetch(200, WIRE_LISTING)
-    await source.refresh()
-    expect(source.snapshot().android[0]).not.toHaveProperty('unauthorized')
-    expect(source.snapshot().android[0]).not.toHaveProperty('osVersion')
   })
 
-  it('rejects a non-boolean unauthorized flag or blank OS version as a wire error', async () => {
+  it('rejects a listing entry whose verbatim state is missing as a wire error', async () => {
     stubFetch(200, {
-      android: [{ id: 'x', name: 'x', kind: 'real', online: true, unauthorized: 'yes' }],
+      android: [{ id: 'x', name: 'x', kind: 'real', online: true }],
       ios: { simulators: [], reals: [] },
     })
     const source = createHttpPhoneListingSource()
-    await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
-    stubFetch(200, {
-      android: [{ id: 'x', name: 'x', kind: 'real', online: true, osVersion: '' }],
-      ios: { simulators: [], reals: [] },
-    })
     await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
   })
 

@@ -11,6 +11,21 @@ import { PhoneStreamHttpError } from './phone-stream-client.ts'
 /** Fleet-listing endpoint on the same Host origin. */
 export const PHONE_DEVICES_PATH = '/phone/devices'
 
+/**
+ * One device entry of the `GET /phone/devices` body — a local mirror of
+ * `PhoneDeviceRefWire` from `@deepseek-ai/dsh-phone-stream` types.ts
+ * (#421 wire): the upstream `state` rides verbatim and `online` is the
+ * derived value. Mirrored (not imported) because this package consumes
+ * the route over HTTP without a dependency on the Host package.
+ */
+interface PhoneDeviceRefWireMirror {
+  readonly id: string
+  readonly name: string
+  readonly kind: string
+  readonly state: string
+  readonly online: boolean
+}
+
 /** Wire kinds the Host listing reports; maps onto the picker group headers. */
 const WIRE_KINDS = ['emulator', 'simulator', 'real'] as const
 
@@ -31,25 +46,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function summaryOf(value: unknown, group: string, index: number): PhoneDeviceSummary {
   if (!isRecord(value)) throw wireError(200, `phone device listing ${group}[${String(index)}] is not an object`)
-  const { id, name, kind, online, unauthorized, osVersion } = value
+  const { id, name, kind, online, state } = value as Partial<PhoneDeviceRefWireMirror>
   if (typeof id !== 'string' || id.length === 0) throw wireError(200, `phone device listing ${group}[${String(index)}] id is missing`)
   if (typeof name !== 'string' || name.length === 0) throw wireError(200, `phone device listing ${group}[${String(index)}] name is missing`)
   if (!WIRE_KINDS.includes(kind as WireKind)) throw wireError(200, `phone device listing ${group}[${String(index)}] kind is unknown`)
   if (typeof online !== 'boolean') throw wireError(200, `phone device listing ${group}[${String(index)}] online is missing`)
-  if (unauthorized !== undefined && typeof unauthorized !== 'boolean') {
-    throw wireError(200, `phone device listing ${group}[${String(index)}] unauthorized is not a boolean`)
-  }
-  if (osVersion !== undefined && (typeof osVersion !== 'string' || osVersion.length === 0)) {
-    throw wireError(200, `phone device listing ${group}[${String(index)}] osVersion is not a non-empty string`)
-  }
-  return {
-    id,
-    name,
-    channel: channelOf(kind as WireKind),
-    online,
-    ...(unauthorized === undefined ? {} : { unauthorized }),
-    ...(osVersion === undefined ? {} : { osVersion }),
-  }
+  if (typeof state !== 'string' || state.length === 0) throw wireError(200, `phone device listing ${group}[${String(index)}] state is missing`)
+  return { id, name, channel: channelOf(kind as WireKind), online, state }
 }
 
 function summariesOf(value: unknown, group: string): readonly PhoneDeviceSummary[] {

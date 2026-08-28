@@ -44,7 +44,8 @@ export class PhoneSettingsCardController {
     writable: false,
     view: { kind: 'off' },
   })
-  private readonly unsubscribe: () => void
+  private readonly unsubscribeScope: () => void
+  private unsubscribeSource: () => void
   private source: PhoneEnvironmentSource
 
   /**
@@ -58,8 +59,10 @@ export class PhoneSettingsCardController {
     private readonly clipboard?: { writeText(text: string): Promise<void> },
   ) {
     this.source = source
-    this.unsubscribe = scope.subscribe(() => { this.publish() })
+    this.unsubscribeScope = scope.subscribe(() => { this.publish() })
+    this.unsubscribeSource = source.subscribe(() => { this.publish() })
     this.publish()
+    if (this.isEnabled()) void this.source.redetect()
   }
 
   /**
@@ -67,13 +70,17 @@ export class PhoneSettingsCardController {
    * @param source - Environment snapshot the card should now follow.
    */
   setSource(source: PhoneEnvironmentSource): void {
+    this.unsubscribeSource()
     this.source = source
+    this.unsubscribeSource = source.subscribe(() => { this.publish() })
     this.publish()
+    if (this.isEnabled()) void this.source.redetect()
   }
 
-  /** Stop following the settings scope. */
+  /** Stop following the settings scope and the environment source. */
   dispose(): void {
-    this.unsubscribe()
+    this.unsubscribeScope()
+    this.unsubscribeSource()
   }
 
   /**
@@ -84,18 +91,18 @@ export class PhoneSettingsCardController {
     return {
       hooks: { phoneSettingsCard: this.store },
       setEnabled: (enabled) => { void this.scope.set('enabled', enabled) },
-      redetect: () => {
-        this.source.redetect()
-        this.publish()
-      },
+      redetect: () => { void this.source.redetect() },
       copyCommand: (command) => { void this.clipboard?.writeText(command) },
       nextAction: (kind) => {
         if (kind === 'no-devices' || kind === 'adb-missing' || kind === 'probe-failed') {
-          this.source.redetect()
-          this.publish()
+          void this.source.redetect()
         }
       },
     }
+  }
+
+  private isEnabled(): boolean {
+    return this.scope.getSnapshot().value?.enabled === true
   }
 
   private publish(): void {

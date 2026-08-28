@@ -1,4 +1,4 @@
-package com.alibaba.gestalt.mobile;
+package com.gestalt.mobile;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

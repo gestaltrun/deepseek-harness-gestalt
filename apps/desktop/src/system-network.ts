@@ -14,17 +14,6 @@ export interface DesktopRelayProxyCandidate {
 }
 
 /**
- * Adapt Electron `net.fetch` to the shared Fetch interface.
- * @param fetch - Electron session-aware fetch implementation.
- * @returns Fetch implementation that follows Chromium system proxy policy.
- */
-export function desktopSystemFetch(
-  fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
-): typeof globalThis.fetch {
-  return async (input, init) => await fetch(input, init)
-}
-
-/**
  * Preserve the ordered connection candidates from Electron proxy resolution rules.
  * @param rules - Semicolon-delimited result from `Session.resolveProxy`.
  * @returns ordered CONNECT and direct candidates.

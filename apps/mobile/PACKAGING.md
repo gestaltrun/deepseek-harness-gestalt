@@ -4,7 +4,7 @@ This reference covers the checked-in Capacitor projects. It produces artifacts f
 
 ## Configuration
 
-Both scripts require the production `VITE_PLATFORM_*` and `VITE_REMOTE_RELAY_*` variables listed in [README.md](README.md). Release identity comes from the `mobile-release` GitHub Environment: application id `com.alibaba.gestalt.mobile`, Apple team `MUX3KT56Q6`, version/build variables, Android keystore secrets, and Apple upload credentials. Profiles, certificates, keystores, passwords, and `.ipa`/`.apk` artifacts stay outside git.
+Both scripts require the production `VITE_PLATFORM_*` and `VITE_REMOTE_RELAY_*` variables listed in [README.md](README.md). Release identity comes from the `mobile-release` GitHub Environment: application id `com.gestalt.mobile`, Apple team `MUX3KT56Q6`, version/build variables, Android keystore secrets, and Apple upload credentials. The scripts reject another application id before signing. Profiles, certificates, keystores, passwords, and `.ipa`/`.apk` artifacts stay outside git.
 
 ## Android
 
@@ -19,7 +19,7 @@ The artifact is written under the ignored `apps/mobile/release/` directory.
 
 ## iOS and TestFlight
 
-`scripts/build-ios-release.sh` fails before building unless the selected macOS runner has a valid Distribution identity for team `MUX3KT56Q6` and a non-expired `Gestalt Mobile App Store` profile authorizing `MUX3KT56Q6.com.alibaba.gestalt.mobile`. Profile expiration uses the profile's UTC raw date, independent of the runner locale and time zone. It archives version/build from the Environment, verifies the archived application's iPhone and iPad orientation lists, and exports with `ios/AppStoreExportOptions.plist`. The universal bundle remains portrait on iPhone and declares all four iPad orientations required for multitasking validation.
+`scripts/build-ios-release.sh` fails before building unless the selected macOS runner has a valid Distribution identity for team `MUX3KT56Q6` and a non-expired `Gestalt Mobile App Store com.gestalt.mobile` profile authorizing `MUX3KT56Q6.com.gestalt.mobile`. Profile expiration uses the profile's UTC raw date, independent of the runner locale and time zone. It archives version/build from the Environment, verifies the archived application's iPhone and iPad orientation lists, and exports with `ios/AppStoreExportOptions.plist`. The universal bundle remains portrait on iPhone and declares all four iPad orientations required for multitasking validation.
 
 ```sh
 MOBILE_VERSION=0.1.0 MOBILE_BUILD_NUMBER=3 APPLE_TEAM_ID=MUX3KT56Q6 \

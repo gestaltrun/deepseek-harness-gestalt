@@ -1158,10 +1158,7 @@ export class PersonalPairingProvider extends RemoteAccessService {
         !== (typeof options.relay.revokeCredentialDigest === 'function')) {
       throw new TypeError('Remote Relay composition requires pairing registration and revocation')
     }
-    if (options.projectPeerGrants !== undefined
-      && (options.relay === undefined
-        || typeof options.relay.registerCredentialDigest !== 'function'
-        || typeof options.relay.revokeCredentialDigest !== 'function')) {
+    if (options.projectPeerGrants !== undefined && !hasProjectPeerRelay(options.relay)) {
       throw new TypeError('Project peer grants require a Remote Relay composition with digest registration and revocation')
     }
     this.pairingLinkOrigin = origin.toString()
@@ -3016,12 +3013,10 @@ export class PersonalPairingProvider extends RemoteAccessService {
     return this.options.projectPeerGrants
   }
 
-  private requireProjectPeerRelay(): Pick<RemoteRelayService,
-    'registerCredentialDigest' | 'revokeCredentialDigest'> {
+  private requireProjectPeerRelay(): ProjectPeerRelay {
     const relay = this.options.relay
     /* v8 ignore start -- the constructor rejects projectPeerGrants unless Relay supplies both digest operations */
-    if (relay === undefined || typeof relay.registerCredentialDigest !== 'function'
-      || typeof relay.revokeCredentialDigest !== 'function') {
+    if (!hasProjectPeerRelay(relay)) {
       throw new TypeError('Project peer grants require a Remote Relay composition with digest registration and revocation')
     }
     /* v8 ignore stop */
@@ -3609,6 +3604,16 @@ function decodeBase64Url(value: string): Uint8Array {
 function nonEmpty(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${name} must be non-empty`)
   return value
+}
+
+type ProjectPeerRelay = Pick<RemoteRelayService, 'registerCredentialDigest' | 'revokeCredentialDigest'>
+
+function hasProjectPeerRelay(
+  relay: PersonalPairingProviderOptions['relay'],
+): relay is NonNullable<PersonalPairingProviderOptions['relay']> & ProjectPeerRelay {
+  return relay !== undefined
+    && typeof relay.registerCredentialDigest === 'function'
+    && typeof relay.revokeCredentialDigest === 'function'
 }
 
 export default RemoteAccessService

@@ -54,8 +54,26 @@ describe('PersonalPairingProvider project peer grants', () => {
       .rejects.toMatchObject({ code: 'PROJECT_PEER_UNAVAILABLE' })
     await expect(provider.revokeProjectPeerGrant(grantInput('desktop-installation')))
       .rejects.toMatchObject({ code: 'PROJECT_PEER_UNAVAILABLE' })
+    const grants = {
+      membership: membership(), sealer: sealing(), store: new MemoryProjectPeerGrantStore(),
+    }
     expect(() => new PersonalPairingProvider(new Context(), {
-      ...providerOptions({ membership: membership(), sealer: sealing(), store: new MemoryProjectPeerGrantStore() }),
+      ...providerOptions(grants),
+    })).toThrow('Project peer grants require a Remote Relay composition')
+    expect(() => new PersonalPairingProvider(new Context(), {
+      ...providerOptions(grants),
+      relay: {
+        revokeRoute: vi.fn(async () => {}),
+        registerPairingCredentialDigests: vi.fn(async () => 1),
+        revokeCredentialDigest: vi.fn(async () => {}),
+      },
+    })).toThrow('Project peer grants require a Remote Relay composition')
+    expect(() => new PersonalPairingProvider(new Context(), {
+      ...providerOptions(grants),
+      relay: {
+        revokeRoute: vi.fn(async () => {}),
+        registerCredentialDigest: vi.fn(async () => 1),
+      },
     })).toThrow('Project peer grants require a Remote Relay composition')
   })
 

@@ -85,6 +85,7 @@ describe('product release workflows', () => {
     const imageSource = text('.github/workflows/platform-image.yml')
     const deploySource = text('.github/workflows/platform-deploy.yml')
     expect(imageSource).not.toContain('type=raw,value=latest')
+    expect(imageSource).toContain('if [[ "$PUSH_IMAGE" == true ]]')
     expect(imageSource).toContain('value: ${{ jobs.provenance.outputs.digest || jobs.evidence.outputs.digest }}')
     expect(deploySource).not.toContain('default: latest')
     expect(deploySource).not.toContain('sha-... or latest')

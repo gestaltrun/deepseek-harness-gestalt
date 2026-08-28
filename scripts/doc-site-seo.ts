@@ -31,7 +31,7 @@ export const docsLocaleIdentity = {
   root: {
     title: '獭子哥',
     titleTemplate: ':title | 獭子哥 Gestalt',
-    description: '獭子哥（Gestalt）是基于 DeepSeek Harness 的开源桌面、Web 与移动 agent 产品，兼容 DSH Profile、插件、CLI 模式和 SDK 入口。',
+    description: '獭子哥（Gestalt）是基于 DeepSeek Harness 的开源桌面、Web 与移动 agent（智能体）产品，兼容 DSH Profile、插件、CLI 模式和 SDK 入口。',
   },
   en: {
     title: 'Gestalt',

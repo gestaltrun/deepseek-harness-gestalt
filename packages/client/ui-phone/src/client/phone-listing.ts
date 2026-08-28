@@ -31,12 +31,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function summaryOf(value: unknown, group: string, index: number): PhoneDeviceSummary {
   if (!isRecord(value)) throw wireError(200, `phone device listing ${group}[${String(index)}] is not an object`)
-  const { id, name, kind, online } = value
+  const { id, name, kind, online, unauthorized, osVersion } = value
   if (typeof id !== 'string' || id.length === 0) throw wireError(200, `phone device listing ${group}[${String(index)}] id is missing`)
   if (typeof name !== 'string' || name.length === 0) throw wireError(200, `phone device listing ${group}[${String(index)}] name is missing`)
   if (!WIRE_KINDS.includes(kind as WireKind)) throw wireError(200, `phone device listing ${group}[${String(index)}] kind is unknown`)
   if (typeof online !== 'boolean') throw wireError(200, `phone device listing ${group}[${String(index)}] online is missing`)
-  return { id, name, channel: channelOf(kind as WireKind), online }
+  if (unauthorized !== undefined && typeof unauthorized !== 'boolean') {
+    throw wireError(200, `phone device listing ${group}[${String(index)}] unauthorized is not a boolean`)
+  }
+  if (osVersion !== undefined && (typeof osVersion !== 'string' || osVersion.length === 0)) {
+    throw wireError(200, `phone device listing ${group}[${String(index)}] osVersion is not a non-empty string`)
+  }
+  return {
+    id,
+    name,
+    channel: channelOf(kind as WireKind),
+    online,
+    ...(unauthorized === undefined ? {} : { unauthorized }),
+    ...(osVersion === undefined ? {} : { osVersion }),
+  }
 }
 
 function summariesOf(value: unknown, group: string): readonly PhoneDeviceSummary[] {

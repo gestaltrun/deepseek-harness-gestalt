@@ -58,6 +58,7 @@ import { tabContentCompare, type TabContentMemoKey } from './tab-content-memo.ts
 import { detectNewDirectSubagent } from './subagent-detect.ts'
 import { detectNewJob } from './subagent-jobs.ts'
 import { t } from './locales.ts'
+import { tabBadgeNode } from './tab-badge.tsx'
 import { api, type SessionScope } from './api.ts'
 import css from './sidebar.module.css'
 
@@ -1293,9 +1294,7 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
       console.error('[dsh-better-sidebar] tab badge error:', error)
       return null
     }
-    if (value === null || value === undefined || value === '') return null
-    const text = typeof value === 'number' ? (value > 99 ? '99+' : String(value)) : String(value)
-    return <span className={css.tabBadge}>{text}</span>
+    return tabBadgeNode(value)
   }
 
   /**

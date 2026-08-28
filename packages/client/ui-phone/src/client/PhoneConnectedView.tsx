@@ -6,6 +6,7 @@
  * action. Everything reactive arrives through one per-tab
  * `PhoneConnectionController`; the component only mirrors its snapshot.
  */
+import clsx from 'clsx'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { PhoneConnectionController, PhoneStreamFailureKind } from './phone-connection.ts'
@@ -163,9 +164,27 @@ export function PhoneConnectedView({
     }
   }
 
-  const online = devices.find(device => device.id === serial)?.online === true
+  const current = devices.find(device => device.id === serial)
+  const online = current?.online === true
+  const unauthorized = current?.unauthorized === true
 
   const screenContent = (): ReactNode => {
+    // A listed-unauthorized handset cannot stream: the design's warn arm
+    // replaces the stream area (a live stream wins — the device may have
+    // been authorized since the listing committed).
+    if (unauthorized && phase.kind !== 'live') {
+      return (
+        <div role="alert" className={`${css.alertCard} ${css.alertWarn}`}>
+          <p className={css.alertTitle}>真机未授权调试</p>
+          <p className={css.alertDetail}>{`${name} 已通过 USB 连接；请在手机上允许「USB 调试」后重新连接。`}</p>
+          <div className={css.alertActions}>
+            <button type="button" className={shared.minibtnPrimary} onClick={() => { controller.connect() }}>
+              重新连接
+            </button>
+          </div>
+        </div>
+      )
+    }
     if (phase.kind === 'live') {
       return (
         <div
@@ -244,18 +263,25 @@ export function PhoneConnectedView({
             if (event.key === 'Escape') setMenuOpen(false)
           }}
         >
-          <span aria-hidden="true" className={online ? css.dot : `${css.dot} ${css.dotOffline}`} />
+          <span
+            aria-hidden="true"
+            className={clsx(css.dot, unauthorized && css.dotUnauthorized, !online && !unauthorized && css.dotOffline)}
+          />
           {name}
           <ChevronDown />
         </button>
         <span className={css.devbarSpacer} />
-        <span className={`${css.tierChip} ${css.tierChipActive}`} aria-label="当前画面编码 MJPEG">
+        {/* The capture cadences are the locked mockup's captions; the stream
+            contract carries no fps field, so no live value exists to bind. */}
+        <span className={`${css.tierChip} ${css.tierChipActive}`} aria-label="当前画面编码 MJPEG · 10 fps">
           <span aria-hidden="true" className={css.liveDot} />
           MJPEG
+          <span className={css.reslv}>10 fps</span>
         </span>
         <button type="button" className={css.tierChip} disabled title="H264 解码将在后续票据接入，当前使用 MJPEG">
           <span aria-hidden="true" className={css.bizDot} />
           H264
+          <span className={css.reslv}>30 fps</span>
         </button>
         {menuOpen && (
           <div role="menu" aria-label="切换设备" className={css.pickMenu}>

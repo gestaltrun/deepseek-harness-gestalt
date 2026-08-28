@@ -106,6 +106,10 @@
   background: var(--dsw-alias-label-dimmed);
 }
 
+.dotUnauthorized {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
 .tierChip {
   display: inline-flex;
   align-items: center;
@@ -128,6 +132,11 @@
 .tierChipActive {
   background: var(--dsw-alias-bg-layer-1);
   color: var(--dsw-alias-label-primary);
+}
+
+.reslv {
+  color: var(--dsw-alias-label-caption);
+  font-weight: 400;
 }
 
 .liveDot {

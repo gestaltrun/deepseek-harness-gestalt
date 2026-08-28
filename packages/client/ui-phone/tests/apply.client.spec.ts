@@ -91,6 +91,7 @@ describe('ui-phone client apply', () => {
       source: createHttpPhoneListingSource(),
       view: stubView(),
       isEnabled: () => false,
+      gate: { snapshot: () => false, subscribe: () => () => undefined },
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -198,6 +199,7 @@ describe('ui-phone client apply', () => {
         source,
         view: stubView(),
         isEnabled: () => false,
+        gate: { snapshot: () => false, subscribe: () => () => undefined },
         openDevice: () => {},
         createController: () => {
           throw new Error('not expected in this spec')

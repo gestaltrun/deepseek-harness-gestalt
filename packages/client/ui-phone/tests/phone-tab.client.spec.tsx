@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PhoneTab } from '../src/client/PhoneTab.tsx'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
-import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
+import { FakeGate, FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 
 afterEach(cleanup)
 
@@ -19,9 +19,11 @@ const EMULATOR: readonly PhoneDeviceSummary[] = [
 
 const openDevice = vi.fn()
 
-async function renderTab(enabled: boolean, source: FakeListingSource): Promise<void> {
-  render(<PhoneTab enabled={enabled} source={source} onOpenDevice={openDevice} />)
+async function renderTab(enabled: boolean, source: FakeListingSource): Promise<{ gate: FakeGate }> {
+  const gate = new FakeGate(enabled)
+  render(<PhoneTab gate={gate} source={source} onOpenDevice={openDevice} />)
   await act(async () => { await flush() })
+  return { gate }
 }
 
 function redetect(): HTMLButtonElement {
@@ -48,6 +50,23 @@ describe('PhoneTab empty state', () => {
     expect(screen.queryByRole('note', { name: '手机连接未启用' })).toBeNull()
   })
 
+  it('refreshes the gate strip the moment the enable switch flips', async () => {
+    const source = new FakeListingSource()
+    const { gate } = await renderTab(false, source)
+    expect(screen.getByRole('note', { name: '手机连接未启用' })).toBeTruthy()
+    expect(source.refreshCount).toBe(0)
+    // The mounted body follows the gate source: enabling the deployment in
+    // the settings card refreshes this tab without remounting it.
+    source.scriptNext(listingOf(EMULATOR))
+    await act(async () => {
+      gate.set(true)
+      await flush()
+    })
+    expect(screen.queryByRole('note', { name: '手机连接未启用' })).toBeNull()
+    expect(source.refreshCount).toBe(1)
+    expect(screen.getByRole('button', { name: '打开' })).toBeTruthy()
+  })
+
   it('switches the active segment, its guidance copy, and its rows', async () => {
     const source = new FakeListingSource().seed(listingOf(EMULATOR, [
       { id: 'iPhone-16', name: 'iPhone 16', channel: 'emulator', online: true },
@@ -71,7 +90,7 @@ describe('PhoneTab empty state', () => {
     ]))
     await renderTab(true, source)
     expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
-    expect(screen.getByText('在线')).toBeTruthy()
+    expect(screen.getByText('运行中')).toBeTruthy()
     expect(screen.getByText('SM-S9310')).toBeTruthy()
     expect(screen.getByText('离线')).toBeTruthy()
     // Rows replace the USB placeholder once a device answers.
@@ -87,6 +106,50 @@ describe('PhoneTab empty state', () => {
     expect(screen.getAllByRole('button', { name: '打开' })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '打开' }))
     expect(openDevice).toHaveBeenCalledWith('emulator-5554', 'Pixel_6_API_35')
+  })
+
+  it('renders the design error arm for an unauthorized handset instead of 离线', async () => {
+    const source = new FakeListingSource().seed(listingOf([
+      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true, unauthorized: true },
+    ]))
+    await renderTab(true, source)
+    expect(screen.getByRole('alert')).toBeTruthy()
+    expect(screen.getByText('真机未授权调试')).toBeTruthy()
+    expect(screen.getByText(/已通过 USB 连接；请在手机上允许「USB 调试」后重新检测/)).toBeTruthy()
+    // The offline copy and the open action never coexist with the arm.
+    expect(screen.queryByText('离线')).toBeNull()
+    expect(screen.queryByRole('button', { name: '打开' })).toBeNull()
+  })
+
+  it('re-pulls the listing from the 重新检测 action of the unauthorized arm', async () => {
+    const source = new FakeListingSource().seed(listingOf([
+      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true, unauthorized: true },
+    ]))
+    await renderTab(true, source)
+    const pulls = source.refreshCount
+    source.scriptNext(listingOf([
+      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true },
+    ]))
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '重新检测' }))
+      await flush()
+    })
+    expect(source.refreshCount).toBe(pulls + 1)
+    expect(screen.getByRole('button', { name: '打开' })).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('shows the OS version and the per-channel running state in the row meta', async () => {
+    const source = new FakeListingSource().seed(listingOf([
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: true, osVersion: 'Android 15' },
+      { id: 'emulator-9999', name: 'Galaxy_A54_API_34', channel: 'emulator', online: false, osVersion: 'Android 14' },
+      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true },
+    ]))
+    await renderTab(true, source)
+    expect(screen.getByText('Android 15 · 运行中')).toBeTruthy()
+    expect(screen.getByText('Android 14 · 已停止')).toBeTruthy()
+    // A handset without an OS caption keeps the bare channel state.
+    expect(screen.getByText('在线')).toBeTruthy()
   })
 
   it('keeps the USB placeholder while only simulators answer', async () => {

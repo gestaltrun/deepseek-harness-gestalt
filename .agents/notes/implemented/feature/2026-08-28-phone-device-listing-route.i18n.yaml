@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-28-phone-device-listing-route.md
-2026-08-28-phone-device-listing-route.md: 3cd49f2b6acf035303a417d7b401f9d1f7aea19f
-2026-08-28-phone-device-listing-route.zh.md: 82cc49607c53b7c7ac9ae13e2d78771c76d87773
+2026-08-28-phone-device-listing-route.md: 2489fddcfb1d8b317d5a4cd4feeada5e6579af73
+2026-08-28-phone-device-listing-route.zh.md: 0d469a321755f9ff4a04ce81e265bd915eb0191d

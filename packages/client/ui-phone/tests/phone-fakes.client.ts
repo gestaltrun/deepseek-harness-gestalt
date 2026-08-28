@@ -8,7 +8,7 @@
 import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from '../src/client/phone-connection.ts'
 import type { PhoneIoTarget, PhoneStreamSessionView } from '../src/client/phone-stream-client.ts'
 import type {
-  PhoneBadgeSnapshot, PhoneDeviceSummary, PhoneListingSnapshot, PhoneListingSource,
+  PhoneBadgeSnapshot, PhoneDeviceSummary, PhoneGateSource, PhoneListingSnapshot, PhoneListingSource,
 } from '../src/client/registry.ts'
 
 export const SESSION_A: PhoneStreamSessionView = {
@@ -106,6 +106,30 @@ export class ManualScheduler {
     if (task === undefined) throw new Error('no pending retry')
     task.cancelled = true
     task.fn()
+  }
+}
+
+/**
+ * Enable-gate fake: a settable snapshot whose writes notify subscribers —
+ * the picker body must re-render the gate strip on the same tick.
+ */
+export class FakeGate implements PhoneGateSource {
+  private readonly listeners = new Set<() => void>()
+
+  constructor(private value: boolean) {}
+
+  snapshot(): boolean {
+    return this.value
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+
+  set(next: boolean): void {
+    this.value = next
+    for (const listener of [...this.listeners]) listener()
   }
 }
 

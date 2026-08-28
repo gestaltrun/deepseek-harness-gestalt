@@ -51,6 +51,14 @@ export interface PhoneDeviceSummary {
   readonly channel: 'emulator' | 'usb'
   /** Whether the device currently reports an open connection. */
   readonly online: boolean
+  /**
+   * The handset is USB-connected but debugging is not authorized; the rows
+   * and the connected view render the design's error arm instead of the
+   * offline state. Absent when the listing reports no authorization gate.
+   */
+  readonly unauthorized?: boolean
+  /** OS version caption (Android 15, iOS 18…); absent when unreported. */
+  readonly osVersion?: string
 }
 
 /** One committed listing: summaries grouped per platform segment. */
@@ -59,6 +67,14 @@ export interface PhoneListingSnapshot {
   readonly android: readonly PhoneDeviceSummary[]
   /** Devices the iOS segment lists (simulators and physical handsets). */
   readonly ios: readonly PhoneDeviceSummary[]
+}
+
+/** Reactive read of the durable enable gate, seating useSyncExternalStore. */
+export interface PhoneGateSource {
+  /** Current gate value; the same boolean until the scope invalidates. */
+  snapshot(): boolean
+  /** Follow gate invalidations; returns the disposer. */
+  subscribe(listener: () => void): () => void
 }
 
 /**
@@ -229,8 +245,10 @@ export function createPhoneTabOpener(
 
 /** Environment the descriptor hands each tab body at render time. */
 export interface PhoneTabEnvironment {
-  /** Current enable gate (the picker pins its strip from this). */
+  /** Current enable gate, read at open time. */
   readonly isEnabled: () => boolean
+  /** Reactive gate the picker body follows (the banner refreshes live). */
+  readonly gate: PhoneGateSource
   /** Listing source backing the picker list and the device dropdown. */
   readonly source: PhoneListingSource
   /** Open (or focus) the per-device tab of one device. */
@@ -297,8 +315,10 @@ export interface PhoneTabOptions {
   readonly source: PhoneListingSource
   /** Browser-only chrome (icon SVG + styled bodies). */
   readonly view: PhoneTabView
-  /** Current enable gate, read at open and render time. */
+  /** Current enable gate, read at open time. */
   readonly isEnabled: () => boolean
+  /** Reactive gate the picker body follows. */
+  readonly gate: PhoneGateSource
   /** Live connection controller factory for one device tab. */
   readonly createController: (serial: string) => PhoneConnectionController
 }
@@ -316,6 +336,7 @@ export interface PhoneTabOptions {
 export function buildPhoneTabDescriptor(options: PhoneTabDescriptorOptions): PhoneTabDescriptor {
   const env: PhoneTabEnvironment = {
     isEnabled: options.isEnabled,
+    gate: options.gate,
     source: options.source,
     openDevice: options.openDevice,
     createController: options.createController,

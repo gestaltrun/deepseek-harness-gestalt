@@ -959,6 +959,9 @@ importers:
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:*
         version: link:../packages/interaction/permission-presets
+      '@deepseek-ai/dsh-phone-runtime':
+        specifier: workspace:*
+        version: link:../packages/phone/phone-runtime
       '@deepseek-ai/dsh-plan-mode':
         specifier: workspace:*
         version: link:../packages/plan/plan-mode
@@ -1130,6 +1133,9 @@ importers:
       '@deepseek-ai/dsh-tool-lsp':
         specifier: workspace:*
         version: link:../packages/lsp/tool-lsp
+      '@deepseek-ai/dsh-tool-phone':
+        specifier: workspace:*
+        version: link:../packages/phone/tool-phone
       '@deepseek-ai/dsh-tool-pwsh':
         specifier: workspace:*
         version: link:../packages/shell/tool-pwsh

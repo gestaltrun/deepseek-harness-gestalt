@@ -254,8 +254,8 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Project membership collaboration seam',
     mode: 'seam',
     implementations: ['project-membership-core'],
-    consumers: ['project-membership-http'],
-    note: 'Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; the HTTP consumer resolves the acting account from an Account session and adapts each route onto one service operation.',
+    consumers: ['project-membership-http', 'tool-project-members'],
+    note: 'Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; the HTTP consumer resolves the acting account from an Account session and adapts each route onto one service operation, and the model-facing roster tool reads one project\'s full roster through the same service.',
   },
   {
     key: 'remoteAccess',

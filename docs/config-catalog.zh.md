@@ -3117,6 +3117,80 @@ export interface Config {
 
 来源：[`packages/lsp/tool-lsp/src/index.ts:58`](../packages/lsp/tool-lsp/src/index.ts)
 
+<a id="deepseek-aidsh-tool-project-members"></a>
+
+## `@deepseek-ai/dsh-tool-project-members`
+
+需要：`tools` · `projectMembership`
+
+```ts config-catalog
+/**
+ * Model-facing tool configuration: the injected provider faces. A call
+ * resolves the account first and the workspace binding second, so a
+ * composition with neither face answers `ACCOUNT_UNAVAILABLE`.
+ */
+export interface Config {
+  /**
+   * Resolves the current session-bound account; the platform provider face
+   * wires it to the Account Service Definition. Absent, rejecting, or
+   * resolving to undefined answers the stable `ACCOUNT_UNAVAILABLE` error.
+   */
+  currentAccountResolver?: CurrentAccountResolver
+  /**
+   * Resolves the workspace-bound cloud project for calls that omit
+   * `projectId`; a workspace-face resolver derives it from the workspace
+   * remote. Absent, rejecting, or resolving to undefined answers the stable
+   * `PROJECT_UNBOUND` error.
+   */
+  boundProjectResolver?: BoundProjectResolver
+  /**
+   * Attaches presence and public display identity to one read; the platform
+   * provider face wires it to the presence registry and public identities.
+   * Absent, every member reads `offline` with no identity fields — the same
+   * verdict a composed presence registry with no live heartbeats produces.
+   */
+  rosterPresenter?: RosterPresenter
+}
+
+/** Resolves the session-bound platform account that reads the roster. */
+export type CurrentAccountResolver = () => Promise<AccountRef | undefined>
+
+/** Resolves the workspace-bound cloud project for calls that omit `projectId`. */
+export type BoundProjectResolver = () => Promise<Branded<'ProjectId'> | undefined>
+
+/**
+ * Attaches presence and public display identity to one stored roster read.
+ * Implementations return exactly one presentation per input member, in the
+ * same order; the tool owns every stored roster field.
+ */
+export type RosterPresenter = (view: RosterView) => Promise<readonly MemberPresentation[]>
+
+/**
+ * Durable platform account reference, resolvable only by the provider face.
+ * Spelled through the shared brand key so a resolver typed against the
+ * Account Service Definition's id is directly assignable here without this
+ * package importing any platform package.
+ */
+export type AccountRef = Branded<'PlatformAccountId'>
+
+/** Presence and public display identity attached to one stored member. */
+export interface MemberPresentation {
+  /** Presence verdict of the composition's aggregation plane. */
+  readonly presence: MemberPresence
+  /** Current public display name; omitted when the composition does not resolve identities. */
+  readonly displayName?: string
+  /** Current public avatar reference; omitted when the composition does not resolve identities. */
+  readonly avatarRef?: string
+}
+
+/** Whether any of a member's installations held a live heartbeat at the read. */
+export type MemberPresence = 'online' | 'offline'
+```
+
+依赖：[`Branded`](../packages/util/brand/src/index.ts) · [`RosterView`](subsystems/project-membership.zh.md)
+
+来源：[`packages/interaction/tool-project-members/src/index.ts:99`](../packages/interaction/tool-project-members/src/index.ts)
+
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
 ## `@deepseek-ai/dsh-tool-pwsh`

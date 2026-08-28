@@ -20,6 +20,7 @@
 | 工具包 | 模型可见名称 | 依赖 | 写入／影响 | 随产品发布的别名 | 部署说明 |
 | --- | --- | --- | --- | --- | --- |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`、`ctx.userQuestions` | `tool/call`、`tool/result after a UI/provider answers the question` | - | ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。 |
+| `@deepseek-ai/dsh-tool-project-members` | `project_members` | `ctx.tools`、`ctx.projectMembership` | `tool/call`、`tool/result` | - | 该工具只读取成员关系 seam，不持有任何权限判定。组合通过 Config 注入会话绑定账号、工作区→项目绑定以及在线状态／身份呈现；缺少这些接口时工具照常注册，并在调用时返回稳定的 `ACCOUNT_UNAVAILABLE` ／ `PROJECT_UNBOUND` 错误。 |
 | `@deepseek-ai/dsh-tools` | `run_code`、`tool_search` | `ctx.tools`、`ctx.codeRuntime (execution time)`、`ctx.systemPrompt` | `tool/call`、`one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`、`tool/result` | - | 在 `mode: code`／`mode: both` 下，它由工具注册表所有，作为可过滤能力层之外的保留传输机制（参见 Code Mode Agent Note）。在 `code` 下，它是注册表对协议格式（wire format）的唯一贡献；其他可见能力在使用已加载运行时语言生成的 SDK 章节中声明。程序通过 binding 调用这些能力，调用按照原生并发约定调度：启动顺序和策略遵循提交顺序，并发安全的函数体最多重叠执行 `maxParallelSubCalls` 个。调用会重新进入完整且受守卫保护的工具流水线，并将每个嵌套执行关联到此外层结果。 |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`、`ctx.systemPrompt`、`ctx.userQuestions (execution time, opportunistic)` | `tool/call`、`plan/mode inactive on an approved review`、`tool/result` | - | 规划未激活时，exit_plan_mode 仍保留在面向模型的 schema 中，这样状态转换不会在规划策略变更之外额外造成工具目录变动。其执行路径会拒绝规划模式之外的调用；在规划模式下，它通过用户交互 seam 提交计划（批准／根据反馈继续规划），批准后会在步骤边界记录规划模式已停用。 |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`、`ctx.shell`、`ctx.systemPrompt`、`ctx.shellEnv`、`ctx.jobs at call time for run_in_background` | `tool/call`、`tool/result` | - | bash 工具是 bash 执行器 seam 面向模型的消费方。使用 `run_in_background` 的运行会注册到通用 `ctx.jobs` 运行时，并通过 `job_*` 工具（来自 `@deepseek-ai/dsh-tool-jobs`）收集／停止；禁用 `enableRunInBackground` 配置（默认为 true）后，该参数会被完全移除。 |
@@ -120,6 +121,30 @@
 来源：[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)
 
 ask_user_question 会暂停工具调用，直到当前 UI 提供方返回人类答案。
+
+<a id="deepseek-aidsh-tool-project-members"></a>
+
+## `@deepseek-ai/dsh-tool-project-members`
+
+### `project_members`
+
+查询云项目的成员名册：每位成员的账号引用、显示名称、头像、权限角色、职能标签与在线状态。省略 projectId 即查询当前工作区绑定的项目。当协作、评审或任务分派需要知道项目上有谁、各自覆盖什么以及谁在线时使用它。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "Cloud project to query; omit to read the project bound to the current workspace."
+    }
+  }
+}
+```
+
+来源：[`packages/interaction/tool-project-members/src/index.ts`](../packages/interaction/tool-project-members/src/index.ts)
+
+该工具只读取成员关系 seam，不持有任何权限判定。组合通过 Config 注入会话绑定账号、工作区→项目绑定以及在线状态／身份呈现；缺少这些接口时工具照常注册，并在调用时返回稳定的 `ACCOUNT_UNAVAILABLE` ／ `PROJECT_UNBOUND` 错误。
 
 <a id="deepseek-aidsh-tools"></a>
 

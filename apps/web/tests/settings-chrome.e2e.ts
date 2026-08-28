@@ -602,7 +602,7 @@ describe('web e2e: the Desktop composition settings overlay document', () => {
     await scaffold?.close()
   })
 
-  it('paints the fullscreen page with the Desktop-only section and reports close', async () => {
+  it('paints the fullscreen page with the Desktop-only sections and reports close', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-settings-desktop-overlay'))
     const dialog = page.getByRole('dialog', { name: '设置' })
     // Fullscreen: the page fills the overlay view (the Host window), the same
@@ -613,12 +613,23 @@ describe('web e2e: the Desktop composition settings overlay document', () => {
     })
     expect(surface.width).toBeGreaterThanOrEqual(page.viewportSize()!.width - 1)
     expect(surface.height).toBeGreaterThanOrEqual(page.viewportSize()!.height - 1)
-    // The 手机配对 nav row exists only in the Desktop composition: its presence
-    // pins that the patch overlay's section registration reaches this page.
+    // The 手机配对 and 账号池 nav rows exist only in the Desktop composition:
+    // their presence pins that the patch overlay's section registrations reach
+    // this page.
     expect(await dialog.getByRole('button', { name: '手机配对' }).count()).toBe(1)
+    expect(await dialog.getByRole('button', { name: '账号池' }).count()).toBe(1)
     expect(await dialog.getByRole('button', { name: '通用设置' }).getAttribute('aria-current')).toBe('true')
     const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(DESKTOP_SETTINGS_EXPECTED, snapshot, MODE)
+    // The Sub2API offer card is a render-only projection of the fixture
+    // bridge's missing snapshot: the offer copy plus the enable affordance,
+    // with the data-directory and uninstall semantics spelled out.
+    await dialog.getByRole('button', { name: '账号池' }).click()
+    const offer = dialog.locator('[data-desktop-sub2api-state="missing"]')
+    await expect.poll(() => offer.count(), { timeout: 10_000 }).toBe(1)
+    await expect.poll(() => offer.getByRole('heading', { name: 'Sub2API 账号池' }).count()).toBe(1)
+    await expect.poll(() => offer.getByText(/~\/\.dsh\/sub2api\/data/).count()).toBe(1)
+    await expect.poll(() => offer.getByRole('button', { name: '下载并启用' }).count()).toBe(1)
     // Closing reports through the overlay result channel with the Host's
     // request id — the page has no local close state in this mode. The Host
     // then hides the view and pushes the null state; the page unmounts.

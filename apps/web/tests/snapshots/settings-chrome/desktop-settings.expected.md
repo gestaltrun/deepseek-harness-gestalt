@@ -19,6 +19,9 @@
     - button "手机配对":
       - img
       - text: 手机配对
+    - button "账号池":
+      - img
+      - text: 账号池
     - button "侧边卡片"
   - button "打开配置文件"
   - button "关闭":

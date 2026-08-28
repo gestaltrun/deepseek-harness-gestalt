@@ -2172,6 +2172,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-request-trust':
+        specifier: workspace:^
+        version: link:../../util/request-trust
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
@@ -6998,6 +7001,9 @@ importers:
       '@deepseek-ai/dsh-phone-runtime':
         specifier: workspace:^
         version: link:../phone-runtime
+      '@deepseek-ai/dsh-request-trust':
+        specifier: workspace:^
+        version: link:../../util/request-trust
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
@@ -9807,6 +9813,15 @@ importers:
         version: link:../../runtime-diagnostics/invariants
 
   packages/util/output-retention:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+
+  packages/util/request-trust:
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^

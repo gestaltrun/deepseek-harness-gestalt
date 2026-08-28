@@ -12,3 +12,4 @@
 | [`retention/`](output-retention/README.zh.md) | 限制保留文本和项集合的大小 |
 | [`atomic-write/`](atomic-write/README.zh.md) | 以原子方式替换文件 |
 | [`native-command/`](native-command/README.zh.md) | 不经 shell 运行宿主原生命令 |
+| [`request-trust/`](request-trust/README.zh.md) | 判定哪些 HTTP 请求可通过共享的浏览器信任栅栏 |

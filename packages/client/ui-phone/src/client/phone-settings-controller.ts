@@ -103,16 +103,28 @@ export class PhoneSettingsCardController {
     return this.scope.getSnapshot().value?.enabled === true
   }
 
+  private publishing = false
+
   private publish(): void {
-    const snapshot = this.scope.getSnapshot()
-    // An enabled card must not settle on the probe-failed arm while its
-    // first detection is still in flight: kick it when it has not run.
-    if (this.isEnabled()) this.source.ensureDetected?.()
-    const enabled = snapshot.value?.enabled === true
-    this.store.set({
-      enabled,
-      writable: snapshot.writable,
-      view: resolvePhoneCardView(enabled, this.source),
-    })
+    // Subscribe callbacks (a detection completing mid-kick) re-enter here
+    // synchronously; the re-entrant call must not kick the source again or
+    // the publish → ensureDetected → notify → publish wave never ends (P17).
+    // The outer wave's store.set below already reads the updated view.
+    if (this.publishing) return
+    this.publishing = true
+    try {
+      const snapshot = this.scope.getSnapshot()
+      // An enabled card must not settle on the probe-failed arm while its
+      // first detection is still in flight: kick it when it has not run.
+      if (this.isEnabled()) this.source.ensureDetected?.()
+      const enabled = snapshot.value?.enabled === true
+      this.store.set({
+        enabled,
+        writable: snapshot.writable,
+        view: resolvePhoneCardView(enabled, this.source),
+      })
+    } finally {
+      this.publishing = false
+    }
   }
 }

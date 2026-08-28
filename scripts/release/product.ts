@@ -104,6 +104,8 @@ interface PackageManifest {
 
 interface PriorReleaseRunExpectation {
   repository: string
+  candidateCommit: string
+  trustedWorkflowHeadCommits: readonly string[]
   allowedWorkflows: readonly string[]
   artifactProducers: ReadonlyArray<{ artifactName: string; producerJob: string }>
 }
@@ -641,12 +643,19 @@ export function validatePriorReleaseRun(
   jobsValue: unknown,
   artifactsValue: unknown,
   expected: PriorReleaseRunExpectation,
-): { workflowRun: string; workflow: string; artifactName: string } {
+): { workflowRun: string; workflow: string; workflowHead: string; artifactName: string } {
   const run = requireRecord(runValue, 'prior release run')
   const repository = requireRecord(run.repository, 'prior release run repository')
   if (repository.full_name !== expected.repository) throw new Error('prior release run belongs to a different repository')
   if (run.status !== 'completed') throw new Error('prior release run must be completed')
   const runId = requirePositiveInteger(run.id, 'prior release run id')
+  const workflowHead = requireFullCommit(run.head_sha, 'prior release workflow head')
+  const candidate = requireFullCommit(expected.candidateCommit, 'candidate commit')
+  const trustedWorkflowHeads = new Set(expected.trustedWorkflowHeadCommits.map(commit =>
+    requireFullCommit(commit, 'trusted workflow head')))
+  if (workflowHead !== candidate && !trustedWorkflowHeads.has(workflowHead)) {
+    throw new Error('prior release workflow head is neither the candidate nor reachable from trusted master history')
+  }
   const workflow = requireNonEmptyString(run.path, 'prior release run workflow')
   if (!expected.allowedWorkflows.includes(workflow)) throw new Error(`prior release run workflow is not allowed: ${workflow}`)
   const workflowRun = requireActionsRunUrl(run.html_url, 'prior release run URL')
@@ -673,7 +682,7 @@ export function validatePriorReleaseRun(
         && job.conclusion === 'success'
     })
     if (matchingArtifacts.length === 1 && matchingJobs.length === 1) {
-      return { workflowRun, workflow, artifactName }
+      return { workflowRun, workflow, workflowHead, artifactName }
     }
   }
   throw new Error('prior release run has no named successful artifact and producing job')

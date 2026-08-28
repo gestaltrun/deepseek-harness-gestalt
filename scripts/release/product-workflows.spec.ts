@@ -43,6 +43,10 @@ describe('product release workflows', () => {
     expect(input(deploy, 'workflow_call', 'recover')).toMatchObject({ required: true, type: 'boolean' })
     expect(input(deploy, 'workflow_call', 'publish_only')).toMatchObject({ required: true, type: 'boolean' })
     expect(input(deploy, 'workflow_call', 'deployment_run_id')).toMatchObject({ required: false, type: 'string' })
+    for (const source of [desktopSource, text('.github/workflows/mobile-release.yml'), text('.github/workflows/platform-image.yml'), text('.github/workflows/platform-deploy.yml')]) {
+      expect(source).toContain('git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master')
+      expect(source).toContain('trustedWorkflowHeadCommits')
+    }
   })
 
   it('projects the tracked Mobile marketing/build versions and publishes a durable prerelease', () => {
@@ -51,7 +55,7 @@ describe('product release workflows', () => {
     expect(source).not.toContain('vars.MOBILE_VERSION')
     expect(source).not.toContain('vars.MOBILE_BUILD_NUMBER')
     expect(source).toContain('apps/mobile/release.json')
-    expect(source).not.toContain('refs/remotes/origin/master')
+    expect(source).toContain('git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master')
     expect(source).not.toContain('github.ref == \'refs/heads/master\'')
     expect(source).toContain('inputs.version')
     expect(source).toContain('inputs.build_number')

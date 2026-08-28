@@ -439,6 +439,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
@@ -459,11 +460,19 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DESKTOP_ARTIFACT_RUN_ID" > run.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DESKTOP_ARTIFACT_RUN_ID/jobs?filter=latest&per_page=100" > jobs.json
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DESKTOP_ARTIFACT_RUN_ID/artifacts?per_page=100" > artifacts.json
-          ARTIFACT_NAME="$artifact_name" node --import tsx/esm -e '
+          workflow_head=$(jq -r .head_sha run.json)
+          [[ "$workflow_head" =~ ^[0-9a-f]{40}$ ]]
+          trusted_workflow_head=
+          if [[ "$workflow_head" != "$CANDIDATE_SHA" ]]; then
+            git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+            git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master
+            trusted_workflow_head=$workflow_head
+          fi
+          ARTIFACT_NAME="$artifact_name" TRUSTED_WORKFLOW_HEAD="$trusted_workflow_head" node --import tsx/esm -e '
             import { readFileSync } from "node:fs";
             import { validatePriorReleaseRun } from "./scripts/release/product.ts";
             const json = path => JSON.parse(readFileSync(path, "utf8"));
-            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, allowedWorkflows: [".github/workflows/desktop-release.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Record signed Desktop candidate" }] });'
+            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, candidateCommit: process.env.CANDIDATE_SHA, trustedWorkflowHeadCommits: [process.env.TRUSTED_WORKFLOW_HEAD].filter(Boolean), allowedWorkflows: [".github/workflows/desktop-release.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Record signed Desktop candidate" }] });'
           gh run download "$DESKTOP_ARTIFACT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name "$artifact_name" --dir candidate
           digests=$(for asset in candidate/*; do

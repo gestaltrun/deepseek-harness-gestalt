@@ -28,7 +28,7 @@ const fakePhoneDevices = {
     ctx.provide('phoneDevices', {
       async listDevices() {
         return {
-          android: [{ id: deviceId('emulator-5554'), name: 'Pixel_6', kind: 'emulator', online: true }],
+          android: [{ id: deviceId('emulator-5554'), name: 'Pixel_6', kind: 'emulator', state: 'online', online: true }],
           ios: { simulators: [], reals: [] },
         }
       },

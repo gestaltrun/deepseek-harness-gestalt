@@ -10,7 +10,6 @@ import { stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
 const ANDROID = deviceId('emulator-5554')
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9])
 const H264 = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x67, 0x42])
 
 const contexts: Context[] = []
@@ -96,13 +95,18 @@ async function rawRequest(options: {
   })
 }
 
-async function readPrefix(origin: string, path: string, host: string): Promise<{
+/**
+ * Read the capture stream until the first complete MJPEG frame arrived (up to
+ * its boundary terminator) or the stream ended, so assertions never depend on
+ * how the proxy chunked the writes.
+ */
+function readFrame(origin: string, path: string, host: string): Promise<{
   status: number
   contentType: string
   body: Buffer
 }> {
   const url = new URL(origin)
-  return await new Promise((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const req = httpRequest({
       hostname: url.hostname,
       port: url.port,
@@ -110,20 +114,23 @@ async function readPrefix(origin: string, path: string, host: string): Promise<{
       path,
       headers: { host },
     }, (res) => {
-      res.once('data', (chunk: Buffer) => {
+      const chunks: Buffer[] = []
+      let acc = Buffer.alloc(0)
+      const settle = (body: Buffer) => {
         req.destroy()
         resolve({
           status: res.statusCode ?? 0,
           contentType: String(res.headers['content-type'] ?? ''),
-          body: chunk,
+          body,
         })
+      }
+      res.on('data', (chunk: Buffer) => {
+        chunks.push(chunk)
+        acc = Buffer.concat(chunks)
+        if (acc.includes('\r\n--frame')) settle(acc)
       })
       res.once('end', () => {
-        resolve({
-          status: res.statusCode ?? 0,
-          contentType: String(res.headers['content-type'] ?? ''),
-          body: Buffer.alloc(0),
-        })
+        settle(Buffer.concat(chunks))
       })
       res.once('error', (error) => {
         if ((error as NodeJS.ErrnoException).code === 'ECONNRESET') return
@@ -152,12 +159,12 @@ describe('phone stream Host routes', () => {
     expect(response.contentType).toContain('application/json')
     expect(JSON.parse(response.body.toString('utf8'))).toEqual({
       android: [
-        { id: 'emulator-5554', name: 'emulator-5554-name', kind: 'emulator', online: true },
-        { id: 'R3CN30', name: 'R3CN30-name', kind: 'real', online: false },
+        { id: 'emulator-5554', name: 'emulator-5554-name', kind: 'emulator', state: 'online', online: true },
+        { id: 'R3CN30', name: 'R3CN30-name', kind: 'real', state: 'offline', online: false },
       ],
       ios: {
-        simulators: [{ id: 'iPhone-16', name: 'iPhone-16-name', kind: 'simulator', online: true }],
-        reals: [{ id: 'UDID-9', name: 'UDID-9-name', kind: 'real', online: false }],
+        simulators: [{ id: 'iPhone-16', name: 'iPhone-16-name', kind: 'simulator', state: 'online', online: true }],
+        reals: [{ id: 'UDID-9', name: 'UDID-9-name', kind: 'real', state: 'offline', online: false }],
       },
     })
   })
@@ -195,11 +202,17 @@ describe('phone stream Host routes', () => {
     const { origin } = await mount()
     const host = new URL(origin).host
     const session = await mint(origin)
-    const mjpeg = await readPrefix(origin, session.mjpeg.url, host)
+    const mjpeg = await readFrame(origin, session.mjpeg.url, host)
     expect(mjpeg.status).toBe(200)
     expect(mjpeg.contentType).toMatch(/multipart\/x-mixed-replace/)
-    expect(mjpeg.body.includes(JPEG)).toBe(true)
-    const h264 = await readPrefix(origin, session.h264.url, host)
+    // The proxy passes the upstream bytes through; assert the delivered frame
+    // is a complete JPEG (SOI…EOI) rather than assuming marker adjacency.
+    const headerEnd = mjpeg.body.indexOf('\r\n\r\n')
+    expect(headerEnd).toBeGreaterThanOrEqual(0)
+    const frame = mjpeg.body.subarray(headerEnd + 4, mjpeg.body.indexOf('\r\n--frame'))
+    expect(frame.subarray(0, 2).equals(Buffer.from([0xff, 0xd8]))).toBe(true)
+    expect(frame.subarray(-2).equals(Buffer.from([0xff, 0xd9]))).toBe(true)
+    const h264 = await readFrame(origin, session.h264.url, host)
     expect(h264.status).toBe(200)
     expect(h264.contentType).toMatch(/video\/h264/)
     expect(h264.body.subarray(0, 4).equals(H264.subarray(0, 4))).toBe(true)
@@ -209,7 +222,7 @@ describe('phone stream Host routes', () => {
     const { origin } = await mount()
     const host = new URL(origin).host
     const session = await mint(origin)
-    await readPrefix(origin, session.mjpeg.url, host)
+    await readFrame(origin, session.mjpeg.url, host)
   })
 
   it('forwards tap JSON-RPC over the trusted WebSocket upgrade', async () => {

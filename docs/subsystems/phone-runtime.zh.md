@@ -2,7 +2,7 @@
 
 [English](phone-runtime.md) | 中文
 
-手机设备群缝：`packages/phone/phone-runtime` 在 mobilecli 仍是唯一后端期间，将 Service Definition 与其 mobilecli Service Provider 折叠于一个包；`packages/phone/tool-phone` 是延迟模型 Consumer。Service 持有外部 `mobilecli server start` 子进程（仅回环，使用去除凭据后的父环境启动），探测其 HTTP JSON-RPC 端点直至首个 `server.info` 成功应答，随后按配置节奏轮询 `devices.list`。设备 id 是 branded `DeviceId`（Android 序列号或 iOS UDID）；分组清单 `{ android, ios: { simulators, reals } }` 携带冻结的 `PhoneDeviceRef`，其 `kind` 翻译自上游 `type` 字段，`online` 仅在上游 `online` 状态时为真。
+手机设备群缝：`packages/phone/phone-runtime` 在 mobilecli 仍是唯一后端期间，将 Service Definition 与其 mobilecli Service Provider 折叠于一个包；`packages/phone/tool-phone` 是延迟模型 Consumer。Service 持有外部 `mobilecli server start` 子进程（仅回环，使用去除凭据后的父环境启动），探测其 HTTP JSON-RPC 端点直至首个 `server.info` 成功应答，随后按配置节奏轮询 `devices.list`。设备 id 是 branded `DeviceId`（Android 序列号或 iOS UDID）；分组清单 `{ android, ios: { simulators, reals } }` 携带冻结的 `PhoneDeviceRef`，其 `kind` 翻译自上游 `type` 字段，其 `state` 原样保留上游状态——`unauthorized` 真机保留自身状态、在其接受信任提示前上游拒绝其 io，而非折叠进 offline——且 `online` 仅在上游 `online` 状态时为真。
 
 失败语义是全量的：缺失或不可用的 mobilecli 二进制让组合响亮失败并附带安装指引；就绪前退出的子进程令插件初始化拒绝；就绪后的异常退出（或拒连、协议违背）将 Service 置为 lost，此后一切操作以记录的原因拒绝而非降级。所有操作将调用方 `AbortSignal` 与经校验的 Config 上限（`requestTimeoutMs`、`bootTimeoutMs`、`agentTimeoutMs`）融合；boot 与 shutdown 在任何 RPC 之前就在本包内拒绝真机。`io` 与 `startCapture` 接受真机，仅拒绝最新清单中不存在的 id。`startCapture` 将 `h264` 映射为上游 `avc`，并且只约束等待响应头的时间；未读的采集 body 由调用方持有。
 

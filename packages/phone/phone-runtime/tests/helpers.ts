@@ -195,3 +195,88 @@ export function wireDevice(
 ): Record<string, unknown> {
   return { id, name, platform, type: kind, state, model: `${name}-model`, provider: { type: 'local' } }
 }
+
+/** One extracted MJPEG frame: its part headers and the raw JPEG payload. */
+export interface MjpegFrame {
+  readonly headers: Map<string, string>
+  readonly payload: Buffer
+}
+
+/**
+ * Drain one MJPEG capture body until the first complete frame (up to its
+ * boundary terminator) arrived, so assertions never depend on how the HTTP
+ * layer chunked the writes.
+ */
+export async function firstMjpegFrame(
+  body: ReadableStream<Uint8Array>,
+  boundary = 'frame',
+): Promise<MjpegFrame> {
+  const reader = body.getReader()
+  let acc = Buffer.alloc(0)
+  const terminator = `\r\n--${boundary}`
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) throw new Error('capture ended before one complete frame arrived')
+    acc = Buffer.concat([acc, Buffer.from(value)])
+    const end = acc.indexOf(terminator)
+    if (end < 0) continue
+    await reader.cancel()
+    const headerEnd = acc.indexOf('\r\n\r\n')
+    if (headerEnd < 0 || headerEnd + 4 > end) throw new Error('frame carries no headers before its payload')
+    const headers = new Map<string, string>()
+    for (const line of acc.subarray(0, headerEnd).toString('utf8').split('\r\n')) {
+      const separator = line.indexOf(':')
+      if (separator > 0) headers.set(line.slice(0, separator).trim().toLowerCase(), line.slice(separator + 1).trim())
+    }
+    return { headers, payload: acc.subarray(headerEnd + 4, end) }
+  }
+}
+
+/**
+ * Dependency-free structural decode: walk every JPEG marker from SOI to the
+ * closing EOI, requiring a baseline SOF0 (real dimensions) and a SOS scan, so
+ * a bare SOI+EOI marker pair cannot pass for a decodable frame.
+ * @param payload - One complete JPEG payload, boundaries already stripped.
+ */
+export function assertStructurallyDecodableJpeg(payload: Buffer): void {
+  if (payload[0] !== 0xff || payload[1] !== 0xd8) throw new Error('payload does not start with the JPEG SOI marker')
+  let cursor = 2
+  let sawSof0 = false
+  let sawSos = false
+  while (cursor < payload.length - 1) {
+    if (payload[cursor] !== 0xff) throw new Error(`marker desync at byte ${String(cursor)}`)
+    const marker = payload[cursor + 1] ?? -1
+    if (marker === 0xd9) {
+      cursor += 2
+      break
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      cursor += 2
+      continue
+    }
+    if (marker === 0xc0) {
+      sawSof0 = true
+      if (payload.readUInt16BE(cursor + 5) < 1 || payload.readUInt16BE(cursor + 7) < 1) {
+        throw new Error('SOF0 names no real pixel dimensions')
+      }
+    }
+    if (marker === 0xda) sawSos = true
+    const segmentLength = payload.readUInt16BE(cursor + 2)
+    if (marker === 0xda) {
+      // Entropy-coded data is byte-stuffed; scan to the next real marker.
+      cursor += 2 + segmentLength
+      for (;;) {
+        if (cursor >= payload.length - 1) break
+        const next = payload[cursor + 1] ?? -1
+        const stuffedOrRestart = next === 0x00 || (next >= 0xd0 && next <= 0xd7)
+        if (payload[cursor] === 0xff && !stuffedOrRestart) break
+        cursor += 1
+      }
+      continue
+    }
+    cursor += 2 + segmentLength
+  }
+  if (!sawSof0) throw new Error('payload carries no SOF0 frame header')
+  if (!sawSos) throw new Error('payload carries no SOS scan header')
+  if (cursor !== payload.length) throw new Error(`payload carries ${String(payload.length - cursor)} trailing bytes after EOI`)
+}

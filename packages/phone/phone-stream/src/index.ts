@@ -201,8 +201,8 @@ export class PhoneStream extends Service {
     }
     try {
       const list = await this.ctx.phoneDevices.listDevices()
-      const refOf = ({ id, name, kind, online }: PhoneDeviceRef): PhoneDeviceRefWire =>
-        Object.freeze({ id, name, kind, online })
+      const refOf = ({ id, name, kind, state, online }: PhoneDeviceRef): PhoneDeviceRefWire =>
+        Object.freeze({ id, name, kind, state, online })
       writeJson(res, 200, Object.freeze({
         android: list.android.map(refOf),
         ios: Object.freeze({

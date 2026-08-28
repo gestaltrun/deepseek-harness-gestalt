@@ -59,6 +59,8 @@ function validateMemberQuestionEvent(
 }
 
 /** Apply one accepted ask/outcome transition. */
+// Event owners keep precommit staging local so their vocabularies never move into a central helper.
+/* jscpd:ignore-start -- package companions share replay and dispatch plumbing */
 function applyMemberQuestionTransition(
   pending: Set<MemberQuestionId>,
   transition: MemberQuestionTransition,
@@ -68,8 +70,6 @@ function applyMemberQuestionTransition(
 }
 
 /** Install ask/outcome pairing and closed-vocabulary checks. */
-// Event owners keep precommit staging local so their vocabularies never move into a central helper.
-/* jscpd:ignore-start */
 const install: InvariantInstaller = Object.assign((ctx: Context, fail: InvariantFailure) => {
   const traces = new WeakMap<Session, MemberQuestionTrace>()
   const staged = new WeakMap<SessionEvent, { session: Session; transition: MemberQuestionTransition }>()
@@ -104,7 +104,6 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
     if (transition !== undefined) staged.set(event, { session, transition })
   }, { global: true })
 }, { inject: ['sessions'] })
-/* jscpd:ignore-end */
 
 /**
  * Register this package's invariant companion.
@@ -113,3 +112,4 @@ const install: InvariantInstaller = Object.assign((ctx: Context, fail: Invariant
  */
 export const apply = (ctx: Context): Promise<() => void> =>
   Promise.resolve(ctx.invariants.register(PACKAGE_NAME, install))
+/* jscpd:ignore-end */

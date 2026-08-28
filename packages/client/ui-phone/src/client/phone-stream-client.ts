@@ -63,9 +63,9 @@ export interface PhoneIoReply {
   /** Whether the Host reported success. */
   readonly ok: boolean
   /** Wire error code when {@link PhoneIoReply.ok} is false. */
-  readonly code?: number
+  readonly code?: number | undefined
   /** Wire error message when {@link PhoneIoReply.ok} is false. */
-  readonly message?: string
+  readonly message?: string | undefined
 }
 
 /**

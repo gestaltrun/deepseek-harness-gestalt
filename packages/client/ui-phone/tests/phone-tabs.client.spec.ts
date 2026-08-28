@@ -71,6 +71,9 @@ describe('per-device phone tabs', () => {
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: NULL_PHONE_BADGE_SOURCE, view: stubView(), isEnabled: () => true,
       openDevice: createPhoneTabOpener(sidebar, () => true),
+      createController: () => {
+        throw new Error('not expected in this spec')
+      },
     }))
     const openDevice = createPhoneTabOpener(sidebar, () => true)
     openDevice('emulator-5554', 'Pixel_6_API_35')
@@ -87,6 +90,9 @@ describe('per-device phone tabs', () => {
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: NULL_PHONE_BADGE_SOURCE, view: stubView(), isEnabled: () => true,
       openDevice: createPhoneTabOpener(sidebar, () => true),
+      createController: () => {
+        throw new Error('not expected in this spec')
+      },
     }))
     const openDevice = createPhoneTabOpener(sidebar, () => true)
     openDevice('emulator-5554', 'Pixel_6_API_35')
@@ -102,6 +108,9 @@ describe('per-device phone tabs', () => {
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: NULL_PHONE_BADGE_SOURCE, view: stubView(), isEnabled: () => true,
       openDevice: createPhoneTabOpener(sidebar, () => true),
+      createController: () => {
+        throw new Error('not expected in this spec')
+      },
     }))
     sidebar.openTab({ type: PHONE_TAB_ID })
     sidebar.openTab({ type: PHONE_TAB_ID })
@@ -126,6 +135,9 @@ describe('per-device phone tabs', () => {
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: NULL_PHONE_BADGE_SOURCE, view: stubView(), isEnabled: () => false,
       openDevice: createPhoneTabOpener(sidebar, () => false),
+      createController: () => {
+        throw new Error('not expected in this spec')
+      },
     }))
     const openDevice = createPhoneTabOpener(sidebar, () => false)
     openDevice('emulator-5554', 'Pixel_6_API_35')

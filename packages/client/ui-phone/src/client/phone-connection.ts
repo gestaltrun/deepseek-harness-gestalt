@@ -210,7 +210,6 @@ export class PhoneConnectionController {
   connect(): void {
     if (this.isBusy()) return
     this.retryAttempt = 0
-    this.visible = true
     void this.startConnect()
   }
 
@@ -226,8 +225,6 @@ export class PhoneConnectionController {
     this.connect()
   }
 
-  private visible = true
-
   /**
    * Pause pulling while the tab hides and resume on re-show. Suspending
    * never forgets the device; resuming mints a fresh session because the
@@ -235,7 +232,6 @@ export class PhoneConnectionController {
    * @param visible - whether the tab is active and the panel open.
    */
   setVisible(visible: boolean): void {
-    this.visible = visible
     if (visible) {
       this.connect()
       return
@@ -282,8 +278,9 @@ export class PhoneConnectionController {
    * @returns false when the path is empty, the surface unknown, or not live.
    */
   swipe(points: readonly PhoneScreenPoint[]): boolean {
-    if (this.surface === undefined || points.length === 0) return false
-    const mapped = points.map(point => devicePointOf(point, this.surface))
+    const surface = this.surface
+    if (surface === undefined || points.length === 0) return false
+    const mapped = points.map(point => devicePointOf(point, surface))
     const actions = mapped.map((point, index) => ({
       type: index === 0 ? 'pointerDown' : index === mapped.length - 1 ? 'pointerUp' : 'pointerMove',
       x: point.x,

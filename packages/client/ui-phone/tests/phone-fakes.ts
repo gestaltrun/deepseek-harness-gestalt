@@ -4,9 +4,8 @@
  * from the tests tree only — production code receives its own gateway via
  * `createHttpPhoneGateway`.
  */
-import type {
-  PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway, PhoneStreamSessionView,
-} from '../src/client/phone-connection.ts'
+import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from '../src/client/phone-connection.ts'
+import type { PhoneStreamSessionView } from '../src/client/phone-stream-client.ts'
 
 export const SESSION_A: PhoneStreamSessionView = {
   deviceId: 'emulator-5554',

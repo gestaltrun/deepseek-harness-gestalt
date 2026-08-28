@@ -46,8 +46,10 @@ describe('Mobile brand validation', () => {
     expect(ios).toContain('Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.ipa')
     expect(ios).toContain('Print :CFBundleDisplayName')
     expect(ios).toContain('Print :CFBundleIdentifier')
-    expect(workflow).toContain('name: gestalt-android-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}')
-    expect(workflow).toContain('name: gestalt-ios-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}')
+    expect(workflow).toContain("require('./apps/mobile/package.json').version")
+    expect(workflow).toContain("require('./apps/mobile/release.json').buildNumber")
+    expect(workflow).toContain('name: gestalt-android-${{ needs.release-version.outputs.version }}-${{ needs.release-version.outputs.build_number }}')
+    expect(workflow).toContain('name: gestalt-ios-${{ needs.release-version.outputs.version }}-${{ needs.release-version.outputs.build_number }}')
   })
 
   it('uses com.gestalt.mobile as the sole native application identity', () => {

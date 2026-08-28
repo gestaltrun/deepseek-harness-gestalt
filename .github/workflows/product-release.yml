@@ -1,0 +1,298 @@
+# Promote only the release units selected by one merged Product Release Plan.
+name: Product Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact commit containing the merged Product Release Plan.
+        required: true
+        type: string
+      plan_path:
+        description: Source-owned Product Release Plan path.
+        required: true
+        type: string
+      desktop_artifact_run_id:
+        description: Prior run containing signed Desktop artifacts for publish-only recovery.
+        required: false
+        type: string
+      mobile_artifact_run_id:
+        description: Prior run containing signed Mobile artifacts for publish-only recovery.
+        required: false
+        type: string
+      mobile_acceptance_run_id:
+        description: Candidate-bound Mobile Acceptance run; required only when Mobile is selected.
+        required: false
+        type: string
+      mobile_upload_testflight:
+        description: Upload the selected Mobile build to TestFlight.
+        required: true
+        type: boolean
+        default: false
+      mobile_accept_transport_risk:
+        description: Accept the candidate-bound Mobile transport evidence.
+        required: true
+        type: boolean
+        default: false
+      platform_attachment_storage:
+        description: Production attachment authority.
+        required: true
+        type: choice
+        options: [postgres, oss]
+        default: postgres
+      platform_image_run_id:
+        description: Successful prior Platform Image run; skips image rebuild when provided.
+        required: false
+        type: string
+      platform_deployment_run_id:
+        description: Successful prior Platform Deploy run; publishes without deploying again when provided.
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: product-release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Read exact Product Release Plan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      sequence: ${{ steps.plan.outputs.sequence }}
+      desktop: ${{ steps.plan.outputs.desktop }}
+      desktop_version: ${{ steps.plan.outputs.desktop_version }}
+      mobile: ${{ steps.plan.outputs.mobile }}
+      mobile_version: ${{ steps.plan.outputs.mobile_version }}
+      mobile_build: ${{ steps.plan.outputs.mobile_build }}
+      platform: ${{ steps.plan.outputs.platform }}
+      platform_version: ${{ steps.plan.outputs.platform_version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install candidate validator
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Validate and project selected release units
+        id: plan
+        env:
+          PLAN_PATH: ${{ inputs.plan_path }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          case "$PLAN_PATH" in product-releases/[0-9][0-9][0-9][0-9].json) ;; *) echo 'invalid Product Release Plan path' >&2; exit 1 ;; esac
+          test -f "$PLAN_PATH"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
+          pnpm product-release:validate-candidate --plan "$PLAN_PATH" --candidate "$CANDIDATE_SHA" --master refs/remotes/origin/master
+          actual=$(git rev-parse HEAD)
+          if [[ "$actual" != "$CANDIDATE_SHA" ]]; then echo "candidate checkout does not match $CANDIDATE_SHA" >&2; exit 1; fi
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          jq -e '.version == 1 and (.sequence | numbers) and (.releaseUnits | type == "object")' "$PLAN_PATH" >/dev/null
+          for unit in desktop mobile platform; do
+            plan_version=$(jq -r ".releaseUnits.$unit.version" "$PLAN_PATH")
+            source_version=$(jq -r .version "apps/$unit/package.json")
+            if [[ "$plan_version" != "$source_version" ]]; then echo "$unit version does not match candidate" >&2; exit 1; fi
+          done
+          mobile_build=$(jq -r '.releaseUnits.mobile.buildNumber // empty' "$PLAN_PATH")
+          if [[ "$(jq -r '.releaseUnits.mobile.selected' "$PLAN_PATH")" == true ]]; then
+            source_build=$(jq -r .buildNumber apps/mobile/release.json)
+            if [[ "$mobile_build" != "$source_build" ]]; then echo 'Mobile build does not match candidate' >&2; exit 1; fi
+          fi
+          {
+            echo "sequence=$(jq -r '.sequence' "$PLAN_PATH")"
+            for unit in desktop mobile platform; do
+              echo "$unit=$(jq -r ".releaseUnits.$unit.selected" "$PLAN_PATH")"
+              echo "${unit}_version=$(jq -r ".releaseUnits.$unit.version" "$PLAN_PATH")"
+            done
+            echo "mobile_build=$mobile_build"
+          } >> "$GITHUB_OUTPUT"
+
+  desktop:
+    needs: plan
+    if: needs.plan.outputs.desktop == 'true'
+    uses: ./.github/workflows/desktop-release.yml
+    permissions:
+      contents: write
+      actions: read
+    with:
+      candidate_sha: ${{ inputs.candidate_sha }}
+      plan_path: ${{ inputs.plan_path }}
+      version: ${{ needs.plan.outputs.desktop_version }}
+      publish: true
+      artifact_run_id: ${{ inputs.desktop_artifact_run_id }}
+      recover_artifacts: ${{ inputs.desktop_artifact_run_id != '' }}
+      sign_artifacts: true
+    secrets: inherit
+
+  mobile:
+    needs: plan
+    if: needs.plan.outputs.mobile == 'true' && inputs.mobile_acceptance_run_id != ''
+    uses: ./.github/workflows/mobile-release.yml
+    permissions:
+      contents: write
+      actions: read
+    with:
+      candidate_sha: ${{ inputs.candidate_sha }}
+      plan_path: ${{ inputs.plan_path }}
+      version: ${{ needs.plan.outputs.mobile_version }}
+      build_number: ${{ fromJSON(needs.plan.outputs.mobile_build) }}
+      acceptance_run_id: ${{ inputs.mobile_acceptance_run_id }}
+      upload_testflight: ${{ inputs.mobile_upload_testflight }}
+      accept_transport_risk: ${{ inputs.mobile_accept_transport_risk }}
+      publish_github: true
+      artifact_run_id: ${{ inputs.mobile_artifact_run_id }}
+      recover_artifacts: ${{ inputs.mobile_artifact_run_id != '' }}
+    secrets: inherit
+
+  platform-image:
+    needs: plan
+    if: needs.plan.outputs.platform == 'true'
+    uses: ./.github/workflows/platform-image.yml
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+    with:
+      candidate_sha: ${{ inputs.candidate_sha }}
+      push: true
+      recover_image: ${{ inputs.platform_image_run_id != '' }}
+      prior_run_id: ${{ inputs.platform_image_run_id }}
+    secrets: inherit
+
+  platform-deploy:
+    needs: [plan, platform-image]
+    if: ${{ always() && needs.plan.outputs.platform == 'true' && needs.platform-image.result == 'success' }}
+    uses: ./.github/workflows/platform-deploy.yml
+    permissions:
+      contents: write
+      packages: read
+      id-token: write
+      actions: read
+    with:
+      candidate_sha: ${{ inputs.candidate_sha }}
+      plan_path: ${{ inputs.plan_path }}
+      image_identity: ${{ needs.platform-image.outputs.image_identity }}
+      image_candidate_sha: ${{ needs.platform-image.outputs.candidate_sha }}
+      version: ${{ needs.plan.outputs.platform_version }}
+      deploy: ${{ inputs.platform_deployment_run_id == '' }}
+      recover: false
+      publish_only: ${{ inputs.platform_deployment_run_id != '' }}
+      deployment_run_id: ${{ inputs.platform_deployment_run_id }}
+      attachment_storage: ${{ inputs.platform_attachment_storage }}
+    secrets: inherit
+
+  manifest:
+    name: Product Release manifest
+    needs: [plan, desktop, mobile, platform-image, platform-deploy]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Render selected, skipped, and blocked release evidence
+        env:
+          PLAN_SEQUENCE: ${{ needs.plan.outputs.sequence }}
+          DESKTOP_SELECTED: ${{ needs.plan.outputs.desktop }}
+          DESKTOP_VERSION: ${{ needs.plan.outputs.desktop_version }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
+          DESKTOP_TAG: ${{ needs.desktop.outputs.tag }}
+          DESKTOP_RELEASE_URL: ${{ needs.desktop.outputs.release_url }}
+          DESKTOP_DIGESTS: ${{ needs.desktop.outputs.artifact_digests }}
+          MOBILE_SELECTED: ${{ needs.plan.outputs.mobile }}
+          MOBILE_VERSION: ${{ needs.plan.outputs.mobile_version }}
+          MOBILE_TESTFLIGHT_BUILD: ${{ needs.mobile.outputs.testflight_build }}
+          MOBILE_RESULT: ${{ needs.mobile.result }}
+          MOBILE_TAG: ${{ needs.mobile.outputs.tag }}
+          MOBILE_RELEASE_URL: ${{ needs.mobile.outputs.release_url }}
+          MOBILE_DIGESTS: ${{ needs.mobile.outputs.artifact_digests }}
+          PLATFORM_SELECTED: ${{ needs.plan.outputs.platform }}
+          PLATFORM_VERSION: ${{ needs.plan.outputs.platform_version }}
+          PLATFORM_IMAGE_RESULT: ${{ needs.platform-image.result }}
+          PLATFORM_DEPLOY_RESULT: ${{ needs.platform-deploy.result }}
+          PLATFORM_DIGEST: ${{ needs.platform-image.outputs.digest }}
+          PLATFORM_IMAGE_IDENTITY: ${{ needs.platform-image.outputs.image_identity }}
+          PLATFORM_DEPLOYMENT: ${{ needs.platform-deploy.outputs.deployment }}
+          PLATFORM_TAG: ${{ needs.platform-deploy.outputs.tag }}
+          PLATFORM_RELEASE_URL: ${{ needs.platform-deploy.outputs.release_url }}
+          MOBILE_ACCEPTANCE_RUN_ID: ${{ inputs.mobile_acceptance_run_id }}
+          MOBILE_TESTFLIGHT_REQUESTED: ${{ inputs.mobile_upload_testflight }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -Eeuo pipefail
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          state() {
+            if [[ "$1" != true ]]; then echo skipped
+            elif [[ "$2" == success ]]; then echo released
+            else echo blocked
+            fi
+          }
+          desktop_state=$(state "$DESKTOP_SELECTED" "$DESKTOP_RESULT")
+          mobile_state=$(state "$MOBILE_SELECTED" "$MOBILE_RESULT")
+          platform_state=$(state "$PLATFORM_SELECTED" "$PLATFORM_DEPLOY_RESULT")
+          if [[ "$desktop_state" == released && -z "$DESKTOP_RELEASE_URL" ]]; then desktop_state=blocked; fi
+          if [[ "$mobile_state" == released && -z "$MOBILE_RELEASE_URL" ]]; then mobile_state=blocked; fi
+          if [[ "$mobile_state" == released && "$MOBILE_TESTFLIGHT_REQUESTED" == true && -z "$MOBILE_TESTFLIGHT_BUILD" ]]; then mobile_state=blocked; fi
+          if [[ "$platform_state" == released && -z "$PLATFORM_RELEASE_URL" ]]; then platform_state=blocked; fi
+          if [[ "$desktop_state" == skipped ]]; then
+            desktop=$(jq -nc --arg version "$DESKTOP_VERSION" --arg tag "gestalt-v$DESKTOP_VERSION" '{state:"skipped",version:$version,tag:$tag}')
+          elif [[ "$desktop_state" == released ]]; then
+            desktop=$(jq -nc --arg version "$DESKTOP_VERSION" --arg tag "$DESKTOP_TAG" --arg run "$run_url" --arg release "$DESKTOP_RELEASE_URL" --argjson digests "${DESKTOP_DIGESTS:-[]}" \
+              '{state:"released",version:$version,tag:$tag,workflowRun:$run,releaseUrl:$release,artifactDigests:$digests}')
+          else
+            desktop_reason="Desktop release workflow result: ${DESKTOP_RESULT:-not run}"
+            if [[ -z "$DESKTOP_RELEASE_URL" ]]; then desktop_reason='Desktop GitHub Release publication did not complete'; fi
+            desktop=$(jq -nc --arg version "$DESKTOP_VERSION" --arg tag "gestalt-v$DESKTOP_VERSION" --arg run "$run_url" --arg reason "$desktop_reason" \
+              '{state:"blocked",version:$version,tag:$tag,workflowRun:$run,reason:$reason}')
+          fi
+          if [[ "$mobile_state" == skipped ]]; then
+            mobile=$(jq -nc --arg version "$MOBILE_VERSION" --arg tag "mobile-v$MOBILE_VERSION" '{state:"skipped",version:$version,tag:$tag}')
+          elif [[ "$mobile_state" == released ]]; then
+            mobile=$(jq -nc --arg version "$MOBILE_VERSION" --arg tag "$MOBILE_TAG" --arg run "$run_url" --arg release "$MOBILE_RELEASE_URL" --argjson digests "${MOBILE_DIGESTS:-[]}" --arg build "$MOBILE_TESTFLIGHT_BUILD" \
+              '{state:"released",version:$version,tag:$tag,workflowRun:$run,releaseUrl:$release,artifactDigests:$digests} + (if $build == "" then {} else {testFlightBuild:($build|tonumber)} end)')
+          else
+            mobile_reason="Mobile release workflow result: ${MOBILE_RESULT:-not run}"
+            if [[ -z "$MOBILE_ACCEPTANCE_RUN_ID" ]]; then mobile_reason='Candidate-bound Mobile Acceptance run is required'; fi
+            if [[ "$MOBILE_TESTFLIGHT_REQUESTED" == true && -z "$MOBILE_TESTFLIGHT_BUILD" ]]; then mobile_reason='TestFlight upload did not complete'; fi
+            if [[ -z "$MOBILE_RELEASE_URL" ]]; then mobile_reason='Mobile GitHub prerelease publication did not complete'; fi
+            mobile=$(jq -nc --arg version "$MOBILE_VERSION" --arg tag "mobile-v$MOBILE_VERSION" --arg run "$run_url" --arg reason "$mobile_reason" --arg build "$MOBILE_TESTFLIGHT_BUILD" \
+              '{state:"blocked",version:$version,tag:$tag,workflowRun:$run,reason:$reason} + (if $build == "" then {} else {testFlightBuild:($build|tonumber)} end)')
+          fi
+          if [[ -z "$PLATFORM_DIGEST" && -n "$PLATFORM_IMAGE_IDENTITY" ]]; then PLATFORM_DIGEST="${PLATFORM_IMAGE_IDENTITY##*@}"; fi
+          if [[ "$platform_state" == skipped ]]; then
+            platform=$(jq -nc --arg version "$PLATFORM_VERSION" --arg tag "platform-v$PLATFORM_VERSION" '{state:"skipped",version:$version,tag:$tag}')
+          elif [[ "$platform_state" == released ]]; then
+            platform=$(jq -nc --arg version "$PLATFORM_VERSION" --arg tag "$PLATFORM_TAG" --arg run "$run_url" --arg release "$PLATFORM_RELEASE_URL" --arg digest "$PLATFORM_DIGEST" --arg deployment "$PLATFORM_DEPLOYMENT" \
+              '{state:"released",version:$version,tag:$tag,workflowRun:$run,releaseUrl:$release,imageDigest:$digest,deployment:$deployment}')
+          else
+            platform_reason="Platform release workflow result: ${PLATFORM_DEPLOY_RESULT:-not run}; image workflow: ${PLATFORM_IMAGE_RESULT:-not run}"
+            if [[ -z "$PLATFORM_RELEASE_URL" ]]; then platform_reason='Platform GitHub Release publication did not complete'; fi
+            platform=$(jq -nc --arg version "$PLATFORM_VERSION" --arg tag "platform-v$PLATFORM_VERSION" --arg run "$run_url" --arg reason "$platform_reason" \
+              '{state:"blocked",version:$version,tag:$tag,workflowRun:$run,reason:$reason}')
+          fi
+          jq -n --argjson sequence "$PLAN_SEQUENCE" --arg candidate "$CANDIDATE_SHA" \
+            --argjson desktop "$desktop" --argjson mobile "$mobile" --argjson platform "$platform" \
+            '{version:1,planSequence:$sequence,candidateCommit:$candidate,releaseUnits:{desktop:$desktop,mobile:$mobile,platform:$platform}}' \
+            > product-release-manifest.json
+          jq -e '
+            all(.releaseUnits[]; .state != "blocked" or ((.reason | type) == "string" and (.reason | length) > 0)) and
+            all(.releaseUnits[]; (has("workflowRun") | not) or (.workflowRun | test("/actions/runs/[0-9]+"))) and
+            all(.releaseUnits[]; (has("releaseUrl") | not) or (.releaseUrl | test("/releases/tag/")))
+          ' product-release-manifest.json >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: product-release-manifest-${{ needs.plan.outputs.sequence }}
+          path: product-release-manifest.json
+          if-no-files-found: error
+          retention-days: 90

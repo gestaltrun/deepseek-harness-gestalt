@@ -2,6 +2,35 @@
 name: Platform Image
 
 on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Exact Product Release Plan commit to build.
+        required: true
+        type: string
+      push:
+        description: Push the candidate image to GHCR.
+        required: true
+        type: boolean
+      recover_image:
+        description: Reuse a validated prior image run instead of building again.
+        required: true
+        type: boolean
+      prior_run_id:
+        description: Successful prior run containing candidate-bound image metadata.
+        required: false
+        type: string
+        default: ''
+    outputs:
+      digest:
+        description: Immutable OCI digest produced by buildx.
+        value: ${{ jobs.provenance.outputs.digest || jobs.evidence.outputs.digest }}
+      image_identity:
+        description: Candidate-matched immutable GHCR identity.
+        value: ${{ jobs.provenance.outputs.image_identity || jobs.evidence.outputs.image_identity }}
+      candidate_sha:
+        description: Exact source commit recorded in the image metadata.
+        value: ${{ jobs.provenance.outputs.candidate_sha || jobs.evidence.outputs.candidate_sha }}
   pull_request:
     paths:
       - 'apps/platform/**'
@@ -19,11 +48,24 @@ on:
       - 'packages/host/frontend-static/**'
   workflow_dispatch:
     inputs:
+      candidate_sha:
+        description: Exact master commit to build.
+        required: true
+        type: string
       push:
         description: Push the image to GHCR
         required: true
         type: boolean
         default: false
+      recover_image:
+        description: Reuse a validated prior image run instead of building again
+        required: true
+        type: boolean
+        default: false
+      prior_run_id:
+        description: Successful prior run containing candidate-bound image metadata
+        required: false
+        type: string
 
 concurrency:
   group: platform-image-${{ github.ref }}
@@ -39,13 +81,39 @@ jobs:
   build:
     name: Build Platform image
     runs-on: ubuntu-24.04
+    if: ${{ !inputs.recover_image }}
     permissions:
       contents: read
       packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image_identity: ghcr.io/${{ github.repository }}/platform@${{ steps.build.outputs.digest }}
+      candidate_sha: ${{ steps.candidate.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Record exact image candidate
+        id: candidate
+        env:
+          EXPECTED_CANDIDATE: ${{ inputs.candidate_sha || github.sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
+          PRIOR_RUN_ID: ${{ inputs.prior_run_id }}
+          PUSH_IMAGE: ${{ inputs.push }}
+        run: |
+          if [[ -n "$PRIOR_RUN_ID" ]]; then echo 'prior_run_id requires recover_image' >&2; exit 1; fi
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "$EXPECTED_CANDIDATE"
+          if [[ "$PUSH_IMAGE" == true ]]; then
+            git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+            [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+            git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
+            git merge-base --is-ancestor "$EXPECTED_CANDIDATE" refs/remotes/origin/master
+          fi
+          echo "sha=$actual" >> "$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@v4
 
@@ -63,7 +131,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
-        if: github.event_name == 'workflow_dispatch' && inputs.push
+        if: github.event_name != 'pull_request' && github.event_name != 'push' && inputs.push
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -75,14 +143,118 @@ jobs:
           images: ghcr.io/${{ github.repository }}/platform
           tags: |
             type=sha,format=long
-            type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && inputs.push }}
 
       - uses: docker/build-push-action@v6
+        id: build
         with:
           context: apps/platform
           file: apps/platform/Dockerfile
-          push: ${{ github.event_name == 'workflow_dispatch' && inputs.push }}
+          push: ${{ github.event_name != 'pull_request' && github.event_name != 'push' && inputs.push }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  evidence:
+    name: Record Platform image candidate
+    needs: build
+    if: needs.build.result == 'success' && inputs.push
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.evidence.outputs.digest }}
+      image_identity: ${{ steps.evidence.outputs.image_identity }}
+      candidate_sha: ${{ steps.evidence.outputs.candidate_sha }}
+    steps:
+      - name: Record immutable image metadata
+        id: evidence
+        env:
+          CANDIDATE_SHA: ${{ needs.build.outputs.candidate_sha }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          IMAGE_IDENTITY: ${{ needs.build.outputs.image_identity }}
+        run: |
+          mkdir candidate
+          jq -n --arg candidate "$CANDIDATE_SHA" --arg digest "$DIGEST" --arg identity "$IMAGE_IDENTITY" \
+            '{version:1,candidateCommit:$candidate,digest:$digest,imageIdentity:$identity}' > candidate/platform-image.json
+          {
+            echo "digest=$DIGEST"
+            echo "image_identity=$IMAGE_IDENTITY"
+            echo "candidate_sha=$CANDIDATE_SHA"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-image-candidate-${{ needs.build.outputs.candidate_sha }}
+          path: candidate/platform-image.json
+          if-no-files-found: error
+          retention-days: 30
+
+  provenance:
+    name: Validate prior Platform image
+    if: inputs.recover_image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      digest: ${{ steps.provenance.outputs.digest }}
+      image_identity: ${{ steps.provenance.outputs.image_identity }}
+      candidate_sha: ${{ steps.provenance.outputs.candidate_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify merged release candidate
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
+          git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/master
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Validate successful candidate-bound image run
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM_IMAGE_RUN_ID: ${{ inputs.prior_run_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$PLATFORM_IMAGE_RUN_ID"
+          artifact_name="platform-image-candidate-$CANDIDATE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_IMAGE_RUN_ID" > run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_IMAGE_RUN_ID/jobs?filter=latest&per_page=100" > jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_IMAGE_RUN_ID/artifacts?per_page=100" > artifacts.json
+          workflow_head=$(jq -r .head_sha run.json)
+          [[ "$workflow_head" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master
+          ARTIFACT_NAME="$artifact_name" TRUSTED_WORKFLOW_HEAD="$workflow_head" node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { validatePriorReleaseRun } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, trustedWorkflowHeadCommits: [process.env.TRUSTED_WORKFLOW_HEAD], allowedWorkflows: [".github/workflows/platform-image.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Record Platform image candidate" }] });'
+          gh run download "$PLATFORM_IMAGE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$artifact_name" --dir candidate
+          node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { assertImmutablePlatformCandidate } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            const image = json("candidate/platform-image.json");
+            if (image.version !== 1 || image.candidateCommit !== process.env.CANDIDATE_SHA || image.digest !== image.imageIdentity.split("@").at(-1)) throw new Error("Platform image metadata does not match candidate");
+            assertImmutablePlatformCandidate(image.imageIdentity, process.env.CANDIDATE_SHA, image.candidateCommit);'
+          {
+            echo "digest=$(jq -r .digest candidate/platform-image.json)"
+            echo "image_identity=$(jq -r .imageIdentity candidate/platform-image.json)"
+            echo "candidate_sha=$(jq -r .candidateCommit candidate/platform-image.json)"
+          } >> "$GITHUB_OUTPUT"

@@ -32,7 +32,7 @@ describe('Desktop release workflow', () => {
   it('plans an explicit Desktop Bundle version before packaging', () => {
     expect(workflow).toContain('version:')
     expect(workflow).toContain('node apps/desktop/scripts/prepare-release.mjs')
-    expect(workflow.match(/needs: prepare/g)).toHaveLength(2)
+    expect(workflow.match(/needs: prepare/g)).toHaveLength(3)
 
     const dispatch = record(record(record(parsed).on).workflow_dispatch)
     const inputs = record(dispatch.inputs)
@@ -43,7 +43,7 @@ describe('Desktop release workflow', () => {
     expect(JSON.stringify(job('prepare'))).not.toContain('secrets.')
     const mac = job('pack-mac')
     expect(record(mac.environment).name).toBe(
-      "${{ inputs.publish && 'desktop-release' || 'desktop-dry-run' }}",
+      "${{ inputs.sign_artifacts && 'desktop-release' || 'desktop-dry-run' }}",
     )
     const dry = steps('pack-mac').find(step => step.name === 'Package unsigned')
     expect(JSON.stringify(dry)).not.toContain('secrets.')
@@ -215,7 +215,7 @@ describe('Desktop release workflow', () => {
     expect(workflow).toContain('tag=${{ needs.prepare.outputs.tag }}')
     expect(workflow).toContain('gh release create "$tag"')
     expect(workflow).toContain('gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs"')
-    expect(workflow).toContain('--target "$GITHUB_SHA"')
+    expect(workflow).toContain('--target "$DESKTOP_CANDIDATE_SHA"')
     expect(workflow).toContain('--verify-tag')
     expect(workflow).toContain('--draft')
     expect(workflow).toContain('gh release upload "$tag"')
@@ -249,7 +249,7 @@ describe('Desktop release workflow', () => {
     const publish = String(publishSteps[publishIndex]?.run)
 
     expect(render).toContain('apps/desktop/scripts/render-release-notes.mjs')
-    expect(render).toContain('"$RELEASE_VERSION" "$GITHUB_SHA" "$RELEASE_NOTES_FILE"')
+    expect(render).toContain('"$RELEASE_VERSION" "${{ inputs.candidate_sha }}" "$RELEASE_NOTES_FILE"')
     expect(publish).toContain('--notes-file "$RELEASE_NOTES_FILE"')
     expect(workflow).not.toContain('--generate-notes')
     expect(renderIndex).toBeGreaterThan(-1)

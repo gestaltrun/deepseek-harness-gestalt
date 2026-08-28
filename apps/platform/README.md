@@ -2,7 +2,9 @@
 
 English | [中文](README.zh.md)
 
-Platform listen process packaged as a container. GitHub Actions builds the image for pull requests that touch the Platform tree and for matching master pushes. Publishing to GHCR requires an explicit Platform Image dispatch with **push**. ECS pulls a published tag. Secrets come from GitHub Environment `production` at deploy time and are never stored in image layers.
+[Product releases](../../docs/product-releases.md) defines Platform version selection, immutable image identity, coordinated promotion evidence, and recovery; this page owns the production deployment transaction.
+
+Platform listen process packaged as a container. GitHub Actions builds the image for pull requests that touch the Platform tree and for matching master pushes. Publishing to GHCR requires an explicit Platform Image call with **push**. Production accepts only the recorded full OCI digest bound to the image build's full candidate commit; tags, short digests, `latest`, and candidate-mismatched metadata are rejected. Secrets come from GitHub Environment `production` at deploy time and are never stored in image layers.
 
 The operated listen process and product clients accept one production identity. `PLATFORM_ORIGIN`, the fixed callback, GitHub client id and credential reference, PostgreSQL database identity, identity namespace, Redis ACL identity, Relay Redis key prefix, a Base64-encoded ApsaraDB CA chain, explicit `PLATFORM_REMOTE_ATTACHMENT_STORAGE`, and the OSS endpoint, bucket, ECS RAM role, object prefix, and timeout are mandatory; there is no development, staging, or default identity. Deployment validation requires an Alibaba Cloud region, OIDC provider and deploy role ARNs, ALB server group id, upload endpoint and object prefix, and exactly two distinct ECS instance ids before a candidate starts.
 

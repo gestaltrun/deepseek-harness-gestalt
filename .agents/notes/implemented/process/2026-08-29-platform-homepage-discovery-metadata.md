@@ -18,7 +18,7 @@ The homepage has one canonical URL with a client-side Chinese and English switch
 
 The Platform public directory contains `robots.txt`, `sitemap.xml`, and `llms.txt`. The sitemap lists the only product page. The agent guide gives a short product description and links to the product origin, source, releases, bilingual documentation, and official DeepSeek Harness. The static file server sends `.txt` as UTF-8 plain text and `.xml` as UTF-8 XML.
 
-The Platform tests read the tracked metadata, boot the assembled product entry, and request the discovery files. A keyless real-Chromium snapshot boots the homepage through a Loader composition and pins its title, product links, discovery responses, and Chinese and English states. The Platform Dockerfile continues to copy the complete public directory, so the tested files and the deployed files share one source.
+The Platform tests read the tracked metadata, boot the assembled product entry, and request the discovery files. A keyless real-Chromium snapshot boots the homepage through a Loader composition and pins its title, product links, social preview image, discovery responses, and Chinese and English states. The Platform Dockerfile continues to copy the complete public directory, so the tested files and the deployed files share one source.
 
 ## Alternatives considered
 

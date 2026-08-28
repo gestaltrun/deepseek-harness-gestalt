@@ -16,6 +16,16 @@
 }
 ```
 
+## Social preview image
+
+```json
+{
+  "status": 200,
+  "type": "image/png",
+  "bytes": 1456333
+}
+```
+
 ## Discovery responses
 
 ```json

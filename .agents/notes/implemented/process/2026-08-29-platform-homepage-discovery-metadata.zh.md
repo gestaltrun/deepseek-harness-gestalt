@@ -18,7 +18,7 @@ Status: implemented
 
 Platform public 目录包含 `robots.txt`、`sitemap.xml` 与 `llms.txt`。sitemap 只列出唯一的产品页。agent 指南提供简短产品说明，并链接产品域名、源码、发布页、双语文档与 DSH 官方仓库。静态文件服务器以 UTF-8 纯文本提供 `.txt`，以 UTF-8 XML 提供 `.xml`。
 
-Platform 测试读取受版本控制的元数据，启动组装后的产品入口，并请求发现文件。一个无密钥的真实 Chromium 快照会通过 Loader 组合启动首页，并固定标题、产品链接、发现响应及中英文状态。Platform Dockerfile 继续复制完整 public 目录，因此测试与部署使用同一份文件来源。
+Platform 测试读取受版本控制的元数据，启动组装后的产品入口，并请求发现文件。一个无密钥的真实 Chromium 快照会通过 Loader 组合启动首页，并固定标题、产品链接、社交预览图、发现响应及中英文状态。Platform Dockerfile 继续复制完整 public 目录，因此测试与部署使用同一份文件来源。
 
 ## Alternatives considered
 

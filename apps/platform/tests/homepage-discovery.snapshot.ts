@@ -95,6 +95,14 @@ describe('Platform homepage browser snapshot', () => {
       }
       return results
     })
+    const socialImage = await page.evaluate(async () => {
+      const response = await fetch('/images/hero-bg.png')
+      return {
+        status: response.status,
+        type: response.headers.get('content-type'),
+        bytes: (await response.arrayBuffer()).byteLength,
+      }
+    })
     const chineseHero = await page.locator('main > section').first().ariaSnapshot()
     await page.locator('#en').click()
     await expect.poll(() => page?.locator('html').getAttribute('lang')).toBe('en')
@@ -107,6 +115,12 @@ describe('Platform homepage browser snapshot', () => {
       '',
       '```json',
       JSON.stringify(head, null, 2),
+      '```',
+      '',
+      '## Social preview image',
+      '',
+      '```json',
+      JSON.stringify(socialImage, null, 2),
       '```',
       '',
       '## Discovery responses',

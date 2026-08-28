@@ -86,6 +86,11 @@ export interface PhoneListingSource {
  * string/number pill contract, so the quiet arm stays invisible until the
  * contract extends (see the README's known limitation).
  */
+/**
+ * Strip-badge pill value from one listing source.
+ * @param source - Device listing the strip badge reads.
+ * @returns the online count, or `null` when none are connected.
+ */
 export function phoneBadgeValue(source: PhoneListingSource): number | null {
   const { onlineCount } = source.getBadge()
   return onlineCount > 0 ? onlineCount : null
@@ -114,12 +119,20 @@ export function assertPhoneTabSymmetry(
   if (probe.survivedDispose) fail(`the "${PHONE_TAB_ID}" tab leaked past plugin-fiber disposal`)
 }
 
-/** Tab instance id of the per-device tab for one serial (`phone:<serial>`). */
+/**
+ * Tab instance id of the per-device tab for one serial (`phone:<serial>`).
+ * @param serial - Android serial or iOS UDID.
+ * @returns the sidebar tab id for that device.
+ */
 export function phoneTabIdOf(serial: string): string {
   return `${PHONE_TAB_ID}:${serial}`
 }
 
-/** Tab title of a per-device tab (`手机·<name>`, locked mockup cell B). */
+/**
+ * Tab title of a per-device tab (`手机·<name>`, locked mockup cell B).
+ * @param name - Display name of the device.
+ * @returns the sidebar tab title.
+ */
 export function phoneTabTitleOf(name: string): string {
   return `手机·${name}`
 }

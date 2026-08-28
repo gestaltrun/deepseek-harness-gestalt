@@ -18,7 +18,7 @@ import { PhoneTabIcon } from './phone-icon.tsx'
 import { PhoneTab } from './PhoneTab.tsx'
 import { PhoneSettingsItem } from './PhoneSettingsItem.tsx'
 import { PhoneSettingsCardController } from './phone-settings-controller.ts'
-import { MISSING_PHONE_ENVIRONMENT_SOURCE } from './phone-environment.ts'
+import { createListingPhoneEnvironmentSource } from './phone-environment-listing.ts'
 import { PhoneConnectionController } from './phone-connection.ts'
 import { createHttpPhoneGateway } from './phone-stream-client.ts'
 import { createHttpPhoneListingSource } from './phone-listing.ts'
@@ -79,9 +79,10 @@ function renderPhoneTabBody(props: PhoneTabBodyProps, env: PhoneTabEnvironment):
 export function apply(ctx: ClientContext, config: Config): void {
   const compositionEnabled = config.enabled === true
   const scope = ctx.settingsScope.bind<PhoneSettings>({ namespace: PHONE_SETTINGS_NAMESPACE })
+  const listing = createHttpPhoneListingSource()
   const card = new PhoneSettingsCardController(
     scope,
-    MISSING_PHONE_ENVIRONMENT_SOURCE,
+    createListingPhoneEnvironmentSource(listing),
     globalThis.navigator?.clipboard,
   )
   ctx.effect(() => () => { card.dispose() }, 'ui-phone: settings card')
@@ -96,7 +97,7 @@ export function apply(ctx: ClientContext, config: Config): void {
     component: renderPhoneTabBody,
   }
   installPhoneTab(ctx, {
-    source: createHttpPhoneListingSource(),
+    source: listing,
     view,
     isEnabled: tabEnabled,
     createController: serial => new PhoneConnectionController({

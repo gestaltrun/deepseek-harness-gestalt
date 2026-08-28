@@ -24,4 +24,4 @@ The Node half registers the durable `ui-phone` section (`enabled: boolean`, defa
 
 ## Consequences
 
-A later ticket that actually talks to `phoneDevices` replaces `MISSING_PHONE_ENVIRONMENT_SOURCE` without changing the card's view union or the copy-button commands. Device-tool registration stays off while `enabled` is false; this package still does not spawn mobilecli. The tab strip reads `PhoneListingSource` as [the skeleton note](2026-08-27-ui-phone-tab-skeleton.md) records.
+The Plugins-tab card now wraps the same Host `GET /phone/devices` listing the picker uses: a successful pull reaches probing, both wizards, and ready, and a missing fleet route stays on the probe-failed row. Device-tool registration stays off while `enabled` is false; this package still does not spawn mobilecli. The tab strip reads `PhoneListingSource` as [the skeleton note](2026-08-27-ui-phone-tab-skeleton.md) records.

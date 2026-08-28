@@ -52,20 +52,36 @@ describe('PhoneSettingsCardController', () => {
     controller.dispose()
   })
 
-  it('republishes when the Host scope or the environment source moves', () => {
+  it('republishes when the Host scope or the environment source moves', async () => {
     const host = readyScope(true)
     const views: PhoneEnvironmentView[] = [{ kind: 'probing', checks: [] }]
+    const listeners = new Set<() => void>()
     const source: PhoneEnvironmentSource = {
       getView: () => views[0]!,
-      redetect: () => { views[0] = { kind: 'android-wizard', platformToolsInstalled: false } },
+      redetect: async () => {
+        views[0] = { kind: 'android-wizard', platformToolsInstalled: false }
+        for (const listener of [...listeners]) listener()
+      },
+      subscribe: (listener) => {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
     }
     const controller = new PhoneSettingsCardController(host.scope, source)
     const face = controller.inject()
-    expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('probing')
+    await vi.waitFor(() => {
+      expect(face.hooks.phoneSettingsCard.getSnapshot().view).toEqual({
+        kind: 'android-wizard',
+        platformToolsInstalled: false,
+      })
+    })
+    views[0] = { kind: 'probing', checks: [] }
     face.redetect()
-    expect(face.hooks.phoneSettingsCard.getSnapshot().view).toEqual({
-      kind: 'android-wizard',
-      platformToolsInstalled: false,
+    await vi.waitFor(() => {
+      expect(face.hooks.phoneSettingsCard.getSnapshot().view).toEqual({
+        kind: 'android-wizard',
+        platformToolsInstalled: false,
+      })
     })
     controller.setSource(MISSING_PHONE_ENVIRONMENT_SOURCE)
     expect(face.hooks.phoneSettingsCard.getSnapshot().view).toEqual({
@@ -74,15 +90,33 @@ describe('PhoneSettingsCardController', () => {
     })
     host.publish({ value: { enabled: false } })
     expect(face.hooks.phoneSettingsCard.getSnapshot().view).toEqual({ kind: 'off' })
+    const replacementListeners = new Set<() => void>()
+    let replacement: PhoneEnvironmentView = { kind: 'errors', errors: [PROBE_FAILED_ERROR] }
+    const replacementSource: PhoneEnvironmentSource = {
+      getView: () => replacement,
+      redetect: async () => {},
+      subscribe: (listener) => {
+        replacementListeners.add(listener)
+        return () => { replacementListeners.delete(listener) }
+      },
+    }
+    controller.setSource(replacementSource)
+    replacement = { kind: 'ios-wizard' }
+    for (const listener of [...replacementListeners]) listener()
+    expect(face.hooks.phoneSettingsCard.getSnapshot().view).toEqual({ kind: 'off' })
+    host.publish({ value: { enabled: true } })
+    expect(face.hooks.phoneSettingsCard.getSnapshot().view).toEqual({ kind: 'ios-wizard' })
     controller.dispose()
+    expect(replacementListeners.size).toBe(0)
   })
 
   it('copies a command and redetects on the recoverable next-action kinds', async () => {
-    const host = readyScope(true)
+    const host = readyScope(false)
     const redetect = vi.fn()
     const source: PhoneEnvironmentSource = {
       getView: () => ({ kind: 'errors', errors: [PROBE_FAILED_ERROR] }),
-      redetect,
+      redetect: async () => { redetect() },
+      subscribe: () => () => {},
     }
     const writeText = vi.fn(() => Promise.resolve())
     const controller = new PhoneSettingsCardController(host.scope, source, { writeText })

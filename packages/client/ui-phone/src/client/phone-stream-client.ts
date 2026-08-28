@@ -10,7 +10,11 @@ import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from './phone
 /** Minting endpoint for signed same-origin capture URLs. */
 export const PHONE_SESSION_PATH = '/phone/session'
 
-/** Whether an upstream io/capture message reports the handset debugging gate. */
+/**
+ * Whether an upstream io/capture message reports the handset debugging gate.
+ * @param message - Wire or upstream error text.
+ * @returns true when the text names an unauthorized USB/WDA gate.
+ */
 export function isUnauthorizedMessage(message: string): boolean {
   return /unauthor/i.test(message)
 }

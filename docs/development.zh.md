@@ -93,6 +93,14 @@ pnpm run build
 
 `pnpm run hygiene` 包含 `publint`（用构建出的 `lib/*.js` 文件校验包入口点）和 `verify-node-next-types`（用一个临时的 NodeNext 消费方校验构建出的声明文件）。新 worktree 在 `pnpm run build` 运行之前没有打包的 JS 和声明文件；普通提交和推送无需构建，除非所选检查会使用这些产物。
 
+### Built Web 验收
+
+在干净且已提交的 worktree 中运行 `pnpm run accept:web`，可建立一次性的 built-Web 验收环境。Supervisor 只复用 revision 和 artifact digest 都与 HEAD 匹配的本地 Client 构建记录，否则执行完整构建；随后使用隔离的 Home、Agents、bundled-skill 和 Workspace 目录启动构建后的 CLI，通过 `workspace.create` 注册 Workspace，验证实际提供的 Sidebar bundle 包含预期 revision，并打印 URL、PID、完整 commit、可见 revision 和 Workspace id。stdin 命令为 `status`、`restart [port]` 和 `stop`；`stop` 只删除该进程自己创建的临时根目录。
+
+执行 `test:web:setup` 后，在干净且已提交的 head 上运行 `pnpm run test:web:acceptance`，可自动验证 built lifecycle：启动、可见 revision、Workspace 注册、指定端口并更换 PID 的 restart、旧 URL 拒绝连接，以及 scratch 根目录删除。
+
+验收环境默认无密钥。只有在真实模型 smoke 或 GIF 已获得明确授权时，才使用 `pnpm run accept:web -- --copy-model-config`：它只盲复制正常 DSH Home 中的 `settings.yaml` 和 `.credentials.yaml`，拒绝符号链接，目标文件仅所有者可读写，绝不复制 `.env`、profile、Session、Browser 状态或 Ego profile。浏览器交互以及选择 Ego 的 `DSH` profile 仍由 Supervisor 之外的流程负责。
+
 ### 环境变量
 
 真实的 DeepSeek 适配器和需要密钥的 agent 演示从环境变量或仓库根目录一个被 gitignore 的 `.env` 文件读取凭证：

@@ -173,7 +173,7 @@ describe('Mobile Companion browse projection', () => {
       conversations: { [alphaId]: conversation() }, ...browsePresentation, onObserveSession,
     }))
     expect(screen.getByText('Studio Mac')).toBeTruthy()
-    expect(screen.getByText('Remote Online')).toBeTruthy()
+    expect(screen.getByText('远程在线')).toBeTruthy()
     expect(screen.getByText('Work')).toBeTruthy()
     expect(screen.getByText('未分组')).toBeTruthy()
     const alpha = screen.getByRole('treeitem', { name: /Alpha/ })
@@ -185,7 +185,7 @@ describe('Mobile Companion browse projection', () => {
     expect(onObserveSession).toHaveBeenLastCalledWith(undefined)
     fireEvent.click(screen.getByRole('treeitem', { name: /Gamma/ }))
     expect(onObserveSession).toHaveBeenLastCalledWith(gammaId)
-    expect(screen.getByText('尚未加载此 Session 的对话。')).toBeTruthy()
+    expect(screen.getByText('尚未加载此会话的对话内容。')).toBeTruthy()
   })
 
   it('opens the authoritative current Session before acknowledging its pending creation selection', async () => {
@@ -268,12 +268,12 @@ describe('Mobile Companion browse projection', () => {
   })
 
   it.each([
-    ['COMPANION_UPDATE_REQUIRED', 'zh', 'mobile', '请升级 Mobile 后再连接此 Desktop。'],
-    ['COMPANION_UPDATE_REQUIRED', 'zh', 'desktop', '请升级 Desktop 后再从 Mobile 连接。'],
+    ['COMPANION_UPDATE_REQUIRED', 'zh', 'mobile', '请升级手机端后再连接这台电脑。'],
+    ['COMPANION_UPDATE_REQUIRED', 'zh', 'desktop', '请升级桌面端后再用手机连接。'],
     ['COMPANION_UPDATE_REQUIRED', 'en', 'mobile', 'Update Mobile to connect to this Desktop.'],
     ['COMPANION_UPDATE_REQUIRED', 'en', 'desktop', 'Update Desktop to connect from this Mobile.'],
-    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'zh', 'mobile', '请升级 Mobile 后再连接此 Desktop。'],
-    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'zh', 'desktop', '请升级 Desktop 后再从 Mobile 连接。'],
+    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'zh', 'mobile', '请升级手机端后再连接这台电脑。'],
+    ['COMPANION_SECURITY_CAPABILITY_MISSING', 'zh', 'desktop', '请升级桌面端后再用手机连接。'],
     ['COMPANION_SECURITY_CAPABILITY_MISSING', 'en', 'mobile', 'Update Mobile to connect to this Desktop.'],
     ['COMPANION_SECURITY_CAPABILITY_MISSING', 'en', 'desktop', 'Update Desktop to connect from this Mobile.'],
   ] as const)('renders an explicit %s %s %s requirement', (code, locale, updateEndpoint, expected) => {
@@ -317,11 +317,12 @@ describe('Mobile Companion browse projection', () => {
       desktopName: 'Studio Mac', connection: 'online', sessions, workspaces, conversations: {},
       ...browsePresentation, onCreate, onSearch,
     }))
-    fireEvent.click(screen.getByRole('button', { name: '在 Work 新建 Session' }))
-    expect(screen.getByRole('heading', { name: '新 Session' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '在 Work 中新建会话' }))
+    expect(screen.getByRole('heading', { name: '新会话' })).toBeTruthy()
     expect(screen.queryByText('项目')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
-    fireEvent.click(screen.getByRole('button', { name: '新建 Ungrouped Session' }))
+    expect(screen.queryByRole('button', { name: '新建聊天' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '新建未分组会话' }))
     expect(onCreate).toHaveBeenNthCalledWith(1, { workspace: workspaceId })
     expect(onCreate).toHaveBeenNthCalledWith(2, {})
     fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
@@ -330,13 +331,13 @@ describe('Mobile Companion browse projection', () => {
       desktopName: 'Studio Mac', connection: 'offline', sessions, workspaces, conversations: {},
       ...browsePresentation, canMutate: false, onCreate, onSearch,
     }))
-    fireEvent.click(screen.getByRole('button', { name: '在 Work 新建 Session' }))
-    expect(screen.getByText('Remote Offline，重新连接并同步后才能创建 Session。')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '在 Work 中新建会话' }))
+    expect(screen.getByText('桌面端离线，重新连接并同步后才能创建会话。')).toBeTruthy()
     expect(onCreate).toHaveBeenCalledTimes(2)
     fireEvent.click(screen.getByRole('button', { name: '返回项目' }))
     fireEvent.click(screen.getByRole('button', { name: '搜索聊天记录' }))
     expect(screen.getByRole('heading', { name: '搜索' })).toBeTruthy()
-    expect(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('searchbox', { name: '搜索桌面端会话' }).hasAttribute('disabled')).toBe(true)
     expect(onSearch).not.toHaveBeenCalled()
   })
 
@@ -350,7 +351,7 @@ describe('Mobile Companion browse projection', () => {
     expect(screen.queryByRole('searchbox')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '搜索聊天记录' }))
     expect(screen.getByRole('heading', { name: '搜索' })).toBeTruthy()
-    expect(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' })).toBeTruthy()
+    expect(screen.getByRole('searchbox', { name: '搜索桌面端会话' })).toBeTruthy()
     expect(screen.queryByText('项目')).toBeNull()
     expect(screen.queryByText('聊天')).toBeNull()
 
@@ -380,16 +381,17 @@ describe('Mobile Companion browse projection', () => {
       onSearch,
       onLoadOlder,
     }))
-    expect(screen.queryByText('Alpha')).toBeNull()
+    expect(screen.getByText('Alpha')).toBeTruthy()
     expect(screen.getByText('Desktop indexed needle')).toBeTruthy()
     expect(screen.getByText('Authoritative uncached needle')).toBeTruthy()
-    expect(screen.getByText('s-uncached')).toBeTruthy()
+    expect(screen.queryByText('s-uncached')).toBeNull()
+    expect(screen.getByText('未命名会话')).toBeTruthy()
     expect(screen.queryByText('needle in local title')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: /s-uncached/u }))
+    fireEvent.click(screen.getByRole('button', { name: /未命名会话Authoritative uncached needle/u }))
     expect(onLoadOlder).toHaveBeenCalledWith('s-uncached')
-    expect(screen.getByRole('heading', { name: 's-uncached' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '未命名会话' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '返回' }))
-    fireEvent.change(screen.getByRole('searchbox', { name: '搜索 Desktop Sessions' }), {
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索桌面端会话' }), {
       target: { value: 'next query' },
     })
     fireEvent.click(screen.getByRole('button', { name: '搜索' }))

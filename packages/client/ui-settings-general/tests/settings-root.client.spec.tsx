@@ -274,7 +274,7 @@ describe('SettingsRoot trigger', () => {
   })
 })
 
-describe('SettingsPanel chrome seats', () => {
+describe('SettingsPage chrome seats', () => {
   it('names the dialog via aria-labelledby pointing at the header seat node', () => {
     mount()
     openPanel()
@@ -302,7 +302,7 @@ describe('SettingsPanel chrome seats', () => {
   })
 })
 
-describe('SettingsPanel close paths', () => {
+describe('SettingsPage close paths', () => {
   it('closes via the header button', () => {
     mount()
     openPanel()
@@ -310,15 +310,7 @@ describe('SettingsPanel close paths', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('closes via a mask click', () => {
-    mount()
-    openPanel()
-    const dialog = screen.getByRole('dialog')
-    fireEvent.click(dialog.parentElement!.firstElementChild!)
-    expect(screen.queryByRole('dialog')).toBeNull()
-  })
-
-  it('closes via document-level Escape and unhooks the listener with the panel', () => {
+  it('closes via document-level Escape and unhooks the listener with the page', () => {
     mount()
     openPanel()
     fireEvent.keyDown(document, { key: 'Escape' })
@@ -338,7 +330,7 @@ describe('SettingsPanel close paths', () => {
   })
 })
 
-describe('SettingsPanel navigation', () => {
+describe('SettingsPage navigation', () => {
   it('projects rows, marks the first active, and renders only that section', () => {
     mount()
     openPanel()

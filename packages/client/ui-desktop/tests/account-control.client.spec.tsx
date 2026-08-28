@@ -52,9 +52,10 @@ describe('AccountControl', () => {
       },
     }
     renderControl(signedIn)
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out this installation' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
     expect(desktop.accountSignOut).toHaveBeenCalledOnce()
-    expect(screen.getByText(/preserves Personal Pairings/)).toBeTruthy()
+    expect(screen.getByText(/keeps existing phone pairings/)).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Platform Account' })).toBeNull()
   })
 
   it('configures Personal Pairing only inside the signed-in Settings section', () => {
@@ -146,7 +147,7 @@ describe('AccountControl', () => {
     window.dshDesktop = desktop
     cleanup()
     renderControl({ status: 'unavailable', privacyAccepted: false })
-    expect(screen.getByText('Platform Account is not configured for this installation.')).toBeTruthy()
+    expect(screen.getByText('Platform Account is not configured on this computer.')).toBeTruthy()
 
     cleanup()
     renderControl({ status: 'unavailable', privacyAccepted: false, error: 'secure storage unavailable' })
@@ -167,7 +168,7 @@ describe('AccountControl', () => {
       status: 'signing-out', privacyAccepted: true,
       account: { id: 'account-1', githubId: 1, githubLogin: 'octocat', avatarUrl: 'https://avatars.example/octocat' },
     })
-    expect(screen.getByRole('button', { name: 'Sign out this installation' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Sign out' }).hasAttribute('disabled')).toBe(true)
   })
 })
 

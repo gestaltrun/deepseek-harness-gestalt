@@ -1,5 +1,7 @@
 # 手机设备接入 · 静态高保真设计稿
 
+English | [中文](README.zh.md)
+
 Throwaway hi-fi mockups for the `ui-device-dock` 方案。**主稿承载为已存在的多类型侧栏包
 `packages/client/ui-better-sidebar`**（VSCode 风格 Tab 条 +「+」菜单）：以外部插件身份
 `ctx.get('betterSidebar').registerTab(descriptor)` 新增一类「手机」tab；此前按右栏 page-owned
@@ -46,5 +48,5 @@ production 不 import 本目录任何文件。
 ## 已知取舍
 
 - 入口策略已按决策矩阵采纳「恒可达 + badge」：「手机」tab 无设备时不禁用 + 菜单入口（对比 terminal 满 3 的禁用行反例），空态引导放 tab 内部。
-- 多设备并存与画面行为两轴待评审在 decision-matrix.html 看图后锁定（轴1 倾向每设备一 tab；轴3 flex 贴底 vs 定比居中待选）。
+- 三轴已锁定：每设备一 tab、恒可达 + badge、已连接画面 1:2 定比居中。
 - 右栏 dock 相关稿件降级为「>640px 加宽」的未来承接位；conversation 胶囊仍是面板关闭时的驻留提示。

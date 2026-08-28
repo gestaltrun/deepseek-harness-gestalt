@@ -84,6 +84,7 @@ import { desktopInstallationPresentation } from './desktop-installation.ts'
 import { downloadCompanionAttachment } from './companion-attachments.ts'
 import { projectDesktopRendererEvent } from './renderer-projection.ts'
 import { desktopSystemFetch } from './system-network.ts'
+import { connectDesktopRelayNodeHelper } from './relay-node-helper.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const systemFetch = desktopSystemFetch(async (input, init) => await net.fetch(input, init))
@@ -169,10 +170,26 @@ async function boot(): Promise<void> {
     )),
   ))
   account = createDesktopAccount(accountEnvironment)
+  const relayRuntime = resolveDesktopRuntime({
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    moduleUrl: import.meta.url,
+  })
+  if (!app.isPackaged && isElectronExecutable(relayRuntime.node)) {
+    throw new Error('Desktop Relay needs a real Node executable; set DSH_NODE or run via pnpm gestalt:dev')
+  }
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
     config: accountEnvironment.remoteRelay,
     resolveProxy: async url => await session.defaultSession.resolveProxy(url),
+    connectWithProxy: async (url, signal, limits, proxyUrl) => await connectDesktopRelayNodeHelper({
+      nodePath: relayRuntime.node,
+      helperPath: relayRuntime.relayHelper,
+      url,
+      proxyUrl,
+      signal,
+      limits,
+    }),
     snowPairingVault,
     desktopName: () => account.installationPresentation()?.name,
     handleOperation: async (operation, selector, context) => await handleDesktopCompanionOperation(

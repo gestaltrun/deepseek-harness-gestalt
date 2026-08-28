@@ -12,6 +12,7 @@ import {
   PHONE_PLATFORMS, type PhoneBadgeSource, type PhoneDeviceSummary, type PhonePlatform,
 } from './registry.ts'
 import css from './PhoneTab.module.css'
+import shared from './PhoneShared.module.css'
 
 /** Props of the phone tab body, threaded from the descriptor closure. */
 export interface PhoneTabProps {
@@ -90,7 +91,7 @@ export function PhoneTab({ enabled, source, onOpenDevice }: PhoneTabProps): Reac
                 {device.online && (
                   <button
                     type="button"
-                    className={css.openButton}
+                    className={shared.minibtnPrimary}
                     onClick={() => { onOpenDevice(device.id, device.name) }}
                   >
                     打开

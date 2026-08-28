@@ -81,8 +81,7 @@ describe('PhoneConnectedView chrome', () => {
   it('renders the devbar rhythm: device dropdown, format chips, and the 1:2 frame', async () => {
     await renderLive()
     expect(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' })).toBeTruthy()
-    const mjpeg = screen.getByRole('button', { name: /MJPEG/ })
-    expect(mjpeg.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByLabelText('当前画面编码 MJPEG')).toBeTruthy()
     const h264 = screen.getByRole('button', { name: /H264/ }) as HTMLButtonElement
     expect(h264.disabled).toBe(true)
     expect(h264.title).toContain('MJPEG')
@@ -96,6 +95,11 @@ describe('PhoneConnectedView chrome', () => {
     await flush()
     expect(screen.queryByRole('img')).toBeNull()
     expect(screen.getByText(/已暂停/)).toBeTruthy()
+  })
+
+  it('dials the minted io path from the session', async () => {
+    const harness = await renderLive()
+    expect(harness.gateway.dialedPaths).toEqual(['/phone/ws/io'])
   })
 
   it('opens the device dropdown and asks the opener to focus another device', async () => {

@@ -9,8 +9,8 @@
  * @module @deepseek-ai/dsh-client-ui-phone/client/phone-connection
  */
 import {
-  encodePhoneIoFrame, PhoneStreamHttpError,
-  type PhoneClientIoRequest, type PhoneStreamSessionView,
+  encodePhoneIoFrame, isUnauthorizedMessage, parsePhoneIoReply, PhoneStreamHttpError,
+  type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
 } from './phone-stream-client.ts'
 
 /** Capture encodings the Host signs (the `phoneStream` URL vocabulary). */
@@ -81,8 +81,8 @@ export interface PhoneIoSocket {
 export interface PhoneStreamGateway {
   /** Mint one signed same-origin session for the device. */
   mintSession(deviceId: string): Promise<PhoneStreamSessionView>
-  /** Open the io WebSocket; events fire asynchronously. */
-  connectIo(handlers: PhoneIoHandlers): PhoneIoSocket
+  /** Open the io WebSocket on the session's minted path; events fire asynchronously. */
+  connectIo(target: PhoneIoTarget, handlers: PhoneIoHandlers): PhoneIoSocket
 }
 
 /** Toolbar button vocabulary forwarded as `device.io.button` names. */
@@ -138,7 +138,7 @@ export function classifyPhoneStreamFailure(error: unknown): PhoneStreamFailureKi
   if (error instanceof PhoneStreamHttpError) {
     if (error.status === 404) return 'device-offline'
     if (error.status === 403) return 'refused'
-    if (/unauthor/i.test(error.message)) return 'unauthorized'
+    if (isUnauthorizedMessage(error.message)) return 'unauthorized'
     return 'unavailable'
   }
   return 'unavailable'
@@ -336,7 +336,7 @@ export class PhoneConnectionController {
     // after connectIo has returned, so the entry is populated by then.
     const entry: { socket?: PhoneIoSocket } = {}
     const isCurrent = (): boolean => entry.socket !== undefined && this.socket === entry.socket && this.epoch === epoch
-    entry.socket = this.gateway.connectIo({
+    entry.socket = this.gateway.connectIo(session, {
       onOpen: () => {
         if (!isCurrent()) return
         this.setPhase({
@@ -377,23 +377,16 @@ export class PhoneConnectionController {
   }
 
   private handleFrame(data: string): void {
-    let reply: { id?: unknown; error?: { code?: unknown; message?: unknown } }
-    try {
-      reply = JSON.parse(data)
-    } catch {
-      // Only error replies carry actionable state; junk frames change nothing.
-      return
-    }
-    if (typeof reply !== 'object' || reply === null || reply.error === undefined) return
-    const error = reply.error
-    const code = typeof error.code === 'number' ? error.code : undefined
-    const message = typeof error.message === 'string' ? error.message : ''
-    if (code === -32010) {
+    // Only error replies carry actionable state; junk frames and ok results
+    // change nothing — the connection lifecycle owns the rest.
+    const reply = parsePhoneIoReply(data)
+    if (reply === undefined || reply.ok) return
+    if (reply.code === -32010) {
       this.teardown()
       this.setPhase({ kind: 'error', failure: { kind: 'device-offline' } })
       return
     }
-    if (/unauthor/i.test(message)) {
+    if (reply.message !== undefined && isUnauthorizedMessage(reply.message)) {
       this.teardown()
       this.setPhase({ kind: 'error', failure: { kind: 'unauthorized' } })
     }

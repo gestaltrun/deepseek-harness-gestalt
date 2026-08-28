@@ -5,7 +5,7 @@
  * `createHttpPhoneGateway`.
  */
 import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from '../src/client/phone-connection.ts'
-import type { PhoneStreamSessionView } from '../src/client/phone-stream-client.ts'
+import type { PhoneIoTarget, PhoneStreamSessionView } from '../src/client/phone-stream-client.ts'
 
 export const SESSION_A: PhoneStreamSessionView = {
   deviceId: 'emulator-5554',
@@ -56,6 +56,7 @@ export class FakeSocket implements PhoneIoSocket {
 export class FakeGateway implements PhoneStreamGateway {
   readonly sockets: FakeSocket[] = []
   readonly mintedDevices: string[] = []
+  readonly dialedPaths: string[] = []
   private readonly mintScript: Array<{ readonly session?: PhoneStreamSessionView; readonly error?: unknown }> = []
 
   /** Queue one mint outcome; unqueued mints succeed with SESSION_A. */
@@ -70,7 +71,8 @@ export class FakeGateway implements PhoneStreamGateway {
     return next?.session ?? SESSION_A
   }
 
-  connectIo(handlers: PhoneIoHandlers): PhoneIoSocket {
+  connectIo(target: PhoneIoTarget, handlers: PhoneIoHandlers): PhoneIoSocket {
+    this.dialedPaths.push(target.ioPath)
     const socket = new FakeSocket(handlers)
     this.sockets.push(socket)
     return socket

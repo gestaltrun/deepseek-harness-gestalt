@@ -6,8 +6,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createHttpPhoneGateway, encodePhoneIoFrame, mintPhoneSession, openPhoneIoSocket,
-  parsePhoneIoReply, PHONE_IO_PATH, PHONE_SESSION_PATH, PhoneStreamHttpError,
+  parsePhoneIoReply, PHONE_SESSION_PATH, PhoneStreamHttpError,
 } from '../src/client/phone-stream-client.ts'
+
+/** The io upgrade path the Host mints into every session. */
+const MINTED_IO_PATH = '/phone/ws/io'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -127,13 +130,13 @@ describe('io socket wiring', () => {
   it('dials the same-origin io path and forwards events, frames, and closes', () => {
     stubSocket({ protocol: 'http:', host: '127.0.0.1:57641' })
     const events: string[] = []
-    const socket = openPhoneIoSocket({
+    const socket = openPhoneIoSocket({ ioPath: MINTED_IO_PATH }, {
       onOpen: () => { events.push('open') },
       onClose: () => { events.push('close') },
       onError: () => { events.push('error') },
       onMessage: (data) => { events.push(data) },
     })
-    expect(urls).toEqual([`ws://127.0.0.1:57641${PHONE_IO_PATH}`])
+    expect(urls).toEqual([`ws://127.0.0.1:57641${MINTED_IO_PATH}`])
     const ws = instances[0]!
     ws.onopen?.()
     ws.onmessage?.({ data: 'reply' })
@@ -150,8 +153,11 @@ describe('io socket wiring', () => {
   it('wires the production gateway onto the wss upgrade arm', () => {
     stubSocket({ protocol: 'https:', host: 'phone.example.net' })
     const gateway = createHttpPhoneGateway()
-    const socket = gateway.connectIo({ onOpen: () => {}, onClose: () => {}, onError: () => {}, onMessage: () => {} })
-    expect(urls[0]).toBe(`wss://phone.example.net${PHONE_IO_PATH}`)
+    const socket = gateway.connectIo(
+      { ioPath: MINTED_IO_PATH },
+      { onOpen: () => {}, onClose: () => {}, onError: () => {}, onMessage: () => {} },
+    )
+    expect(urls[0]).toBe(`wss://phone.example.net${MINTED_IO_PATH}`)
     socket.send('tap')
     socket.close()
     expect(sent).toEqual(['tap'])

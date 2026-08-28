@@ -6,11 +6,12 @@
  * action. Everything reactive arrives through one per-tab
  * `PhoneConnectionController`; the component only mirrors its snapshot.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { PhoneConnectionController, PhoneStreamFailureKind } from './phone-connection.ts'
 import type { PhoneDeviceSummary } from './registry.ts'
 import css from './PhoneConnectedView.module.css'
+import shared from './PhoneShared.module.css'
 
 /** Props of one connected device tab body. */
 export interface PhoneConnectedViewProps {
@@ -37,7 +38,7 @@ const FAILURE_COPY: Record<PhoneStreamFailureKind, {
   unauthorized: {
     tone: 'warn',
     title: '真机未授权调试',
-    detail: name => `${name} 已连接，请在手机上允许「USB 调试」后重新连接。`,
+    detail: name => `${name} 已通过 USB 连接；请在手机上允许「USB 调试」后重新连接。`,
   },
   'device-offline': {
     tone: 'err',
@@ -84,7 +85,11 @@ export function PhoneConnectedView({
   const controllerRef = useRef<PhoneConnectionController | undefined>(undefined)
   controllerRef.current ??= createController(serial)
   const controller = controllerRef.current
-  const [phase, setPhase] = useState(controller.snapshot())
+  // The controller is the owning observable source; uSES is the render-side
+  // adapter for it (the better-sidebar tab hosts have no slot hook channel).
+  const subscribe = useCallback((listener: () => void) => controller.subscribe(listener), [controller])
+  const snapshot = useCallback(() => controller.snapshot(), [controller])
+  const phase = useSyncExternalStore(subscribe, snapshot, snapshot)
   const [menuOpen, setMenuOpen] = useState(false)
   /** The press being tracked: its fixed origin, the move trail, the drag flag. */
   const drag = useRef<{
@@ -93,7 +98,6 @@ export function PhoneConnectedView({
     dragging: boolean
   } | undefined>(undefined)
 
-  useEffect(() => controller.subscribe(() => { setPhase(controller.snapshot()) }), [controller])
   useEffect(() => { controller.setVisible(visible) }, [controller, visible])
   useEffect(() => () => { controller.dispose() }, [controller])
 
@@ -201,7 +205,7 @@ export function PhoneConnectedView({
           <p className={css.alertTitle}>{copy.title}</p>
           <p className={css.alertDetail}>{copy.detail(name)}</p>
           <div className={css.alertActions}>
-            <button type="button" className={css.retryButton} onClick={() => { controller.connect() }}>
+            <button type="button" className={shared.minibtnPrimary} onClick={() => { controller.connect() }}>
               重新连接
             </button>
           </div>
@@ -234,10 +238,10 @@ export function PhoneConnectedView({
           <ChevronDown />
         </button>
         <span className={css.devbarSpacer} />
-        <button type="button" className={`${css.tierChip} ${css.tierChipActive}`} aria-pressed="true">
+        <span className={`${css.tierChip} ${css.tierChipActive}`} aria-label="当前画面编码 MJPEG">
           <span aria-hidden="true" className={css.liveDot} />
           MJPEG
-        </button>
+        </span>
         <button type="button" className={css.tierChip} disabled title="H264 解码将在后续票据接入，当前使用 MJPEG">
           <span aria-hidden="true" className={css.bizDot} />
           H264

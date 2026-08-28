@@ -7,11 +7,13 @@
  */
 import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from './phone-connection.ts'
 
-/** Exact-path WebSocket upgrade that forwards `device.io.*` JSON-RPC. */
-export const PHONE_IO_PATH = '/phone/ws/io'
-
 /** Minting endpoint for signed same-origin capture URLs. */
 export const PHONE_SESSION_PATH = '/phone/session'
+
+/** Whether an upstream io/capture message reports the handset debugging gate. */
+export function isUnauthorizedMessage(message: string): boolean {
+  return /unauthor/i.test(message)
+}
 
 /** One signed same-origin capture URL plus its expiry (Host wire shape). */
 export interface PhoneStreamUrlView {
@@ -158,16 +160,21 @@ export async function mintPhoneSession(deviceId: string): Promise<PhoneStreamSes
   }
 }
 
+/** Socket target the minted session names. */
+export type PhoneIoTarget = Pick<PhoneStreamSessionView, 'ioPath'>
+
 /**
- * Open the io WebSocket against the current Host origin. The browser fires
- * `open` asynchronously, so handlers never run during this call.
+ * Open the io WebSocket against the current Host origin on the io path the
+ * Host minted. The browser fires `open` asynchronously, so handlers never
+ * run during this call.
+ * @param target - the minted session carrying the io upgrade path.
  * @param handlers - the events the connection controller reacts to.
  * @returns the socket handle the controller owns.
  */
-export function openPhoneIoSocket(handlers: PhoneIoHandlers): PhoneIoSocket {
+export function openPhoneIoSocket(target: PhoneIoTarget, handlers: PhoneIoHandlers): PhoneIoSocket {
   const protocol = globalThis.location?.protocol === 'https:' ? 'wss' : 'ws'
   const host = globalThis.location?.host ?? ''
-  const socket = new WebSocket(`${protocol}://${host}${PHONE_IO_PATH}`)
+  const socket = new WebSocket(`${protocol}://${host}${target.ioPath}`)
   socket.onopen = () => { handlers.onOpen() }
   socket.onclose = () => { handlers.onClose() }
   socket.onerror = () => { handlers.onError() }
@@ -186,6 +193,6 @@ export function openPhoneIoSocket(handlers: PhoneIoHandlers): PhoneIoSocket {
 export function createHttpPhoneGateway(): PhoneStreamGateway {
   return {
     mintSession: deviceId => mintPhoneSession(deviceId),
-    connectIo: handlers => openPhoneIoSocket(handlers),
+    connectIo: (target, handlers) => openPhoneIoSocket(target, handlers),
   }
 }

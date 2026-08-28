@@ -46,8 +46,9 @@ Indirectly, through `dsh-tool-ask-user`, which routes `to_project_member` onto `
 
 #### KV Cache effect
 
-No direct invalidation; the named consumer owns any request-prefix changes.
+No direct token cost or invalidation. `dsh-tool-ask-user` owns schema growth for `to_project_member`, `background`, and `references`, plus retained tool-result tokens for answered batches and sender lifetime errors.
 
 ## Known Limitations and Deferred Work
 
-- **Cross-machine delivery rides the deferred project-registry transport** — encoding and the delivery interface are defined; the default composition injects an in-memory stub. Opening a sealed peer grant on the addressee's installation and carrying it across machines remain the [Remote Access Known Limitation](../../platform/remote-access/README.md#known-limitations-and-deferred-work). This package does not invent a new protocol.
+- **Cross-machine delivery rides the deferred project-registry transport** — encoding and the delivery interface are defined; the default composition injects an in-memory stub. Opening a sealed peer grant on the addressee's installation and carrying it across machines remain the [Remote Access Known Limitation](../../platform/remote-access/README.md#known-limitations-and-deferred-work). Production sealing stays behind the independent encryption review recorded there. This package does not invent a new protocol.
+- **Referenced documents stay path metadata on `member-question`** — the T4 codec owns `document-chunk` frames and treats reassembly as a consumer duty; this sender encodes only the `member-question` operation and does not transfer file bytes.

@@ -46,8 +46,9 @@ Indirectly, through `dsh-tool-ask-user`, which routes `to_project_member` onto `
 
 #### KV Cache effect
 
-不会直接使 KV Cache 失效；请求前缀的任何变更均由上述消费方负责。
+不会直接产生 token 开销，也不会使 KV Cache 失效。`dsh-tool-ask-user` 拥有 `to_project_member`、`background` 与 `references` 的 schema 增长，以及已回答批次与发送器生命周期错误作为工具结果保留的 token。
 
 ## Known Limitations and Deferred Work
 
-- **跨机投递依赖被推迟的项目注册表传输**：编码与投递接口已经定义；默认组合注入内存 stub。在收件人安装上打开密封对等授权，以及跨机携带该授权，仍是 [Remote Access 已知限制](../../platform/remote-access/README.zh.md#known-limitations-and-deferred-work)。本包不发明新协议。
+- **跨机投递依赖被推迟的项目注册表传输**：编码与投递接口已经定义；默认组合注入内存 stub。在收件人安装上打开密封对等授权，以及跨机携带该授权，仍是 [Remote Access 已知限制](../../platform/remote-access/README.zh.md#known-limitations-and-deferred-work)。生产密封仍受那里记录的独立加密评审约束。本包不发明新协议。
+- **被引用文档停留在 `member-question` 的 path 元数据上**：T4 codec 拥有 `document-chunk` 帧，并将重组视为消费方职责；本发送器只编码 `member-question` 操作，不传输文件字节。

@@ -34,21 +34,21 @@ The model sees the generated [`ask_user_question` schema](../../../docs/tool-cat
 
 #### Token effect
 
-Fixed schema cost on every request where the tool is visible.
+Standing schema cost on every request where the tool is visible: `background` and `references` remain in the assembled schema. `to_project_member` adds a further schema cost only when `boundProjectResolver` returns a cloud-project id; unbound assemblies omit that property and keep the previous schema width.
 
 #### KV Cache effect
 
-Prefix-stable while the definition and visibility are unchanged. Plugin lifecycle or scoped restrictions may invalidate reuse from this schema.
+Prefix-stable while the definition and the bound-project visibility of `to_project_member` are unchanged. Binding or unbinding the workspace, plugin lifecycle, or scoped restrictions change the assembled schema and invalidate reuse from this prefix.
 
 ### Tool-call history and result
 
 #### What the model sees
 
-The model's full questions remain in the assistant tool-call arguments. After the human answers, the next step sees compact JSON in the exact shape `{"answers":[{"id":"<id>","selected":["<label>"],"custom":"<text>"}]}`; `custom` is omitted when unused and `selected` can contain zero, one, or several labels. UI interaction while the call is pending is not model context.
+The model's full questions remain in the assistant tool-call arguments. A routed ask also retains `to_project_member`, `background`, and `references` there. After the human or member answers, the next step sees compact JSON in the exact shape `{"answers":[{"id":"<id>","selected":["<label>"],"custom":"<text>"}]}`; `custom` is omitted when unused and `selected` can contain zero, one, or several labels. Sender lifetime errors return as ordinary tool-result text. UI interaction while the call is pending is not model context.
 
 #### Token effect
 
-Arguments and answer JSON are data-dependent retained tokens; there is no token cost while waiting for the human.
+Arguments, `background`, `references`, answer JSON, and lifetime-error text are data-dependent retained tokens; there is no token cost while waiting for the human or the member.
 
 #### KV Cache effect
 
@@ -61,3 +61,5 @@ Append-only; newly visible content follows the reusable request prefix and does 
 - **Native answers render as JSON text** — the canonical value remains structured, but the model-facing result uses compact JSON rather than a richer content-block vocabulary.
 - **`to_project_member` stays in the static schema** — prompt assembly omits it for unbound workspaces by filtering the assembled tool list; `ctx.tools.schemas()` and the generated catalog still record the static parameter.
 - **Local reference focusing is deferred** — `references` is accepted and validated for local asks, but opening the details panel on a referenced file lands with a later ticket.
+- **Routed delivery rides the T4 registry-transport gap** — encoding and the sender interface exist; opening a sealed peer grant on the addressee's installation and carrying it across machines remain the [Remote Access Known Limitation](../../platform/remote-access/README.md#known-limitations-and-deferred-work). Until that transport lands, a composition without a delivery adapter fails closed with `SENDER_UNAVAILABLE` or `DELIVERY_UNAVAILABLE` rather than queuing.
+- **Referenced files are path metadata, not `document-chunk` frames** — the T4 codec owns document-chunk transfer and treats reassembly as a consumer duty; this tool validates workspace paths and forwards `{ path, reason }` on the `member-question` operation, and does not encode or reassemble document bytes.

@@ -34,21 +34,21 @@
 
 #### Token 影响
 
-工具可见时，每个请求都会产生固定的 schema token 开销。
+工具可见时，每个请求都会产生常态 schema token 开销：`background` 与 `references` 保留在组装后的 schema 中。`to_project_member` 仅在 `boundProjectResolver` 返回云端项目 id 时额外增加 schema 开销；非绑定组装会省略该属性，从而保持原先的 schema 宽度。
 
 #### KV Cache 影响
 
-只要定义和可见性保持不变，前缀即可稳定复用。插件生命周期变化或作用域限制可能会使从此 schema 起的缓存复用失效。
+只要定义以及 `to_project_member` 的绑定项目可见性保持不变，前缀即可稳定复用。绑定或解除绑定工作区、插件生命周期变化或作用域限制会改变组装后的 schema，并使从此前缀起的缓存复用失效。
 
 ### 工具调用历史与结果
 
 #### 模型看到的内容
 
-模型提出的完整问题保留在 assistant 工具调用参数中。用户回答后，下一步会看到精确采用 `{"answers":[{"id":"<id>","selected":["<label>"],"custom":"<text>"}]}` 形式的紧凑 JSON；不使用 `custom` 时会省略该字段，`selected` 可以包含零个、一个或多个标签。调用等待期间的 UI 交互不属于模型上下文。
+模型提出的完整问题保留在 assistant 工具调用参数中。路由提问还会在那里保留 `to_project_member`、`background` 和 `references`。用户或成员回答后，下一步会看到精确采用 `{"answers":[{"id":"<id>","selected":["<label>"],"custom":"<text>"}]}` 形式的紧凑 JSON；不使用 `custom` 时会省略该字段，`selected` 可以包含零个、一个或多个标签。发送器生命周期失败作为普通工具结果文本返回。调用等待期间的 UI 交互不属于模型上下文。
 
 #### Token 影响
 
-参数和回答 JSON 是依数据而定的保留 token；等待用户时不会产生 token 开销。
+参数、`background`、`references`、回答 JSON 以及生命周期错误文本是依数据而定的保留 token；等待用户或成员时不会产生 token 开销。
 
 #### KV Cache 影响
 
@@ -61,3 +61,5 @@
 - **Native 回答渲染为 JSON 文本**：规范值仍为结构化数据，但模型侧结果使用紧凑 JSON，而非更丰富的内容块词汇。
 - **`to_project_member` 保留在静态 schema 中**：提示组装会从组装后的工具列表中为非绑定工作区省略该参数；`ctx.tools.schemas()` 与生成的目录仍记录静态参数。
 - **本地参考材料聚焦被推迟**：本地提问会接受并校验 `references`，但将 details 面板打开到被引用文件由后续工单落地。
+- **路由投递依赖 T4 注册表传输缺环**：编码与发送器接口已经存在；在收件人安装上打开密封对等授权，以及跨机携带该授权，仍是 [Remote Access 已知限制](../../platform/remote-access/README.zh.md#known-limitations-and-deferred-work)。在该传输落地之前，没有投递适配器的组合以 `SENDER_UNAVAILABLE` 或 `DELIVERY_UNAVAILABLE` 失败关闭，而不是排队。
+- **被引用文件是 path 元数据，不是 `document-chunk` 帧**：T4 codec 拥有 document-chunk 传输，并将重组视为消费方职责；本工具校验工作区 path，并在 `member-question` 操作上转发 `{ path, reason }`，不编码或重组文档字节。

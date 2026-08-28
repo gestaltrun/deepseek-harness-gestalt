@@ -87,6 +87,11 @@ interface MobileCreateTarget {
   label: string
 }
 
+interface PendingAttachmentSelection {
+  sessionId: SessionId
+  file: File
+}
+
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
   desktopName, connection, onOpenAccount, onOpenPairing,
@@ -106,6 +111,7 @@ export function MobileBrowse({
   const [refreshState, setRefreshState] = useState<PullRefreshState>('idle')
   const adoptedCurrent = useRef<SessionId>()
   const historyRequested = useRef<SessionId>()
+  const pendingAttachment = useRef<PendingAttachmentSelection>()
   const pullStart = useRef<number>()
   const pullDistanceRef = useRef(0)
   const refreshSessions = useRef(sessions)
@@ -174,6 +180,17 @@ export function MobileBrowse({
   const openTitle = open?.displayTitle
     ?? (openSearchHit === undefined ? undefined : locale === 'zh' ? '未命名会话' : 'Untitled Session')
   const conversation = openId === undefined ? undefined : conversations[openId]
+  useEffect(() => {
+    const pending = pendingAttachment.current
+    if (pending === undefined) return
+    if (pending.sessionId !== openId) {
+      pendingAttachment.current = undefined
+      return
+    }
+    if (openTitle === undefined || !canMutate || onAttach === undefined) return
+    pendingAttachment.current = undefined
+    onAttach(pending.sessionId, pending.file)
+  }, [canMutate, onAttach, openId, openTitle])
   const detailFailure = operationFailure !== undefined
     && (operationFailure.operation === 'refresh' || operationFailure.sessionId === openId)
     ? operationFailure.failure
@@ -197,6 +214,7 @@ export function MobileBrowse({
     if (canMutate) onCreate(target.input)
   }
   const closeConversation = (): void => {
+    pendingAttachment.current = undefined
     setOpenId(undefined)
     setScreen(returnScreen)
   }
@@ -267,7 +285,12 @@ export function MobileBrowse({
           operationFailure={detailFailure}
           {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(openId, text) })}
           {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(openId) } })}
-          {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(openId, file) } })}
+          {...(onAttach === undefined ? {} : {
+            onAttach: (file: File) => {
+              if (canMutate) onAttach(openId, file)
+              else pendingAttachment.current = { sessionId: openId, file }
+            },
+          })}
           {...(onLoadOlder === undefined ? {} : { onLoadOlder: () => { onLoadOlder(openId) } })}
         />
       )

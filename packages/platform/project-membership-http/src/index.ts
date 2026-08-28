@@ -17,11 +17,10 @@ import z from '@deepseek-ai/schemastery'
 import {
   AccountError,
   AccountService,
-  parseAccountProofJti,
-  type AccountProof,
   type AuthenticatedInstallationView,
   type PlatformAccountId,
 } from '@deepseek-ai/dsh-platform-account'
+import { accountSessionPresentation } from '@deepseek-ai/dsh-platform-account-http'
 import {
   ProjectMembershipError,
   type FunctionTag,
@@ -208,7 +207,7 @@ export function apply(ctx: Context, config: Config): void {
  * @returns the authenticated account id.
  */
 async function requireActor(ctx: Context, req: IncomingMessage): Promise<PlatformAccountId> {
-  const account = await ctx.platformAccount.current({ accessToken: bearer(req), proof: proofHeaders(req) })
+  const account = await ctx.platformAccount.current(accountSessionPresentation(req))
   return account.id
 }
 
@@ -220,7 +219,7 @@ async function requireActor(ctx: Context, req: IncomingMessage): Promise<Platfor
  * @returns the authenticated installation with its owning account.
  */
 async function requireInstallation(ctx: Context, req: IncomingMessage): Promise<AuthenticatedInstallationView> {
-  return ctx.platformAccount.currentInstallation({ accessToken: bearer(req), proof: proofHeaders(req) })
+  return ctx.platformAccount.currentInstallation(accountSessionPresentation(req))
 }
 
 /** Presence of one member's installations as of a roster read. */
@@ -415,13 +414,14 @@ function requestPath(req: IncomingMessage): string {
 }
 
 /**
- * Bind one required branded path parameter.
+ * Bind one branded path parameter captured by `matchPath`; every `:key` of a
+ * matched pattern is captured with a non-empty decoded segment.
  * @param params - captured path parameters.
  * @param key - parameter name in the route pattern.
  * @returns the validated branded identifier.
  */
 function brandedParam<B extends string>(params: Record<string, string>, key: string): Branded<B> {
-  return requiredParam(params, key) as Branded<B>
+  return params[key] as Branded<B>
 }
 
 /**
@@ -432,12 +432,6 @@ function brandedParam<B extends string>(params: Record<string, string>, key: str
  */
 function requiredBrandedId<B extends string>(record: Record<string, unknown>, key: string): Branded<B> {
   return requiredString(record, key) as Branded<B>
-}
-
-function requiredParam(params: Record<string, string>, key: string): string {
-  const value = params[key]
-  if (value === undefined || value === '') throw new HttpError(400, 'INVALID_REQUEST', `${key} path parameter is required`)
-  return value
 }
 
 function requiredString(record: Record<string, unknown>, key: string): string {
@@ -480,27 +474,6 @@ function requireExactKeys(record: Record<string, unknown>, keys: readonly string
   if (Object.keys(record).length !== expected.size || Object.keys(record).some(key => !expected.has(key))) {
     throw new HttpError(400, 'INVALID_REQUEST', `${name} contains unsupported fields`)
   }
-}
-
-function bearer(req: IncomingMessage): string {
-  const authorization = req.headers.authorization
-  if (authorization === undefined || !authorization.startsWith('Bearer ') || authorization.length === 7) {
-    throw new HttpError(401, 'AUTH_REQUIRED', 'Bearer Account access token is required')
-  }
-  return authorization.slice(7)
-}
-
-function proofHeaders(req: IncomingMessage): AccountProof {
-  const jti = req.headers['x-gestalt-proof-jti']
-  const issuedAt = req.headers['x-gestalt-proof-issued-at']
-  const signature = req.headers['x-gestalt-proof-signature']
-  if (typeof jti !== 'string' || typeof issuedAt !== 'string' || typeof signature !== 'string') {
-    throw new HttpError(400, 'INVALID_REQUEST', 'installation proof headers are required')
-  }
-  if (jti === '') throw new HttpError(400, 'INVALID_REQUEST', 'proof jti header is invalid')
-  const parsed = Number(issuedAt)
-  if (!Number.isSafeInteger(parsed)) throw new HttpError(400, 'INVALID_REQUEST', 'proof issued-at header is invalid')
-  return { jti: parseAccountProofJti(jti), issuedAt: parsed, signature }
 }
 
 function requireMethod(req: IncomingMessage, method: string): void {

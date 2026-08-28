@@ -7,6 +7,7 @@
     { "path": "../../../vendor/schemastery" },
     { "path": "../../util/brand" },
     { "path": "../platform-account" },
+    { "path": "../platform-account-http" },
     { "path": "../project-membership" },
     { "path": "../../host/webserver" },
     { "path": "../../runtime-diagnostics/invariants" }

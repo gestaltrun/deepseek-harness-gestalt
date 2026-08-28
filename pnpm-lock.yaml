@@ -7089,6 +7089,9 @@ importers:
       '@deepseek-ai/dsh-platform-account-core':
         specifier: workspace:^
         version: link:../platform-account-core
+      '@deepseek-ai/dsh-platform-account-http':
+        specifier: workspace:^
+        version: link:../platform-account-http
       '@deepseek-ai/dsh-project-membership':
         specifier: workspace:^
         version: link:../project-membership

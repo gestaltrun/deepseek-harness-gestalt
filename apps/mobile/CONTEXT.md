@@ -8,6 +8,10 @@ Human-operated mobile access to a person's DeepSeek Gestalt work while its Paire
 The human-facing mobile product that provides remote access to a Paired Desktop from any network.
 _Avoid_: mobile connector, device automation, mobile client
 
+**獭子哥**:
+The consumer-facing application name and otter visual identity for Mobile Companion. DeepSeek Gestalt remains the Paired Desktop and technical product family.
+_Avoid_: 千机-Gestalt, DeepSeek Gestalt Mobile as the installed application name
+
 **Personal Pairing**:
 An independently revocable authorization relationship between a person-controlled mobile device and a person-controlled DeepSeek Gestalt installation. Desktop and Mobile must authenticate the same GitHub-backed Platform Account before pairing, but each pairing still grants one Device Principal rather than account-wide Desktop authority. One person may keep multiple Personal Pairings, but each Companion operation selects one Paired Desktop.
 _Avoid_: organization membership, team sharing, account-wide Desktop access

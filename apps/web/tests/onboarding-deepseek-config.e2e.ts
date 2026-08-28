@@ -206,6 +206,9 @@ describe.skipIf(MODE === 'record')('web e2e: first-run configure-models onboardi
 
     const deepSeek = settings.getByText('deepseek', { exact: true }).first()
     await deepSeek.locator('xpath=ancestor::li').getByRole('button', { name: '编辑' }).click()
+    await expect.poll(async () =>
+      settings.getByRole('textbox', { name: 'API 密钥', exact: true }).getAttribute('placeholder'),
+    { timeout: 10_000 }).toBe('已配置——输入新值可替换')
     await settings.getByText('自定义设置').click()
     await settings.getByRole('button', { name: /删除模型/ }).first().click()
     await settings.getByRole('button', { name: '添加模型' }).click()

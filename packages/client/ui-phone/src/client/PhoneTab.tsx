@@ -1,10 +1,10 @@
 /**
  * Phone tab body: the not-connected empty state of the locked design —
  * state with the platform selector, the grouped device list, and the inert
- * re-detect placeholder. Startup, connected, and error states belong to the
- * later device-dock tickets; every fact this component reads arrives through
- * its two plain props (the enable gate and the device source), never through
- * a service or context.
+ * re-detect placeholder. Connected instances of the same tab type render
+ * the live view instead; every fact this component reads arrives through
+ * plain props (the enable gate, the device source, the device-tab opener),
+ * never through a service or context.
  */
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -19,6 +19,8 @@ export interface PhoneTabProps {
   readonly enabled: boolean
   /** Device abstraction backing the list rows (default reports none). */
   readonly source: PhoneBadgeSource
+  /** Open (or focus) the per-device tab of one listed device. */
+  readonly onOpenDevice: (serial: string, name: string) => void
 }
 
 /** Copy under each platform segment (the mockup fixes the Android→iOS one). */
@@ -40,10 +42,10 @@ const GROUP_TITLES: Record<PhoneDeviceSummary['channel'], string> = {
 
 /**
  * Render the empty-state body for one tab.
- * @param props - enable-gate value and the injected device source.
+ * @param props - enable-gate value, the injected device source, and the opener.
  * @returns the not-connected empty state.
  */
-export function PhoneTab({ enabled, source }: PhoneTabProps): ReactNode {
+export function PhoneTab({ enabled, source, onOpenDevice }: PhoneTabProps): ReactNode {
   const [platform, setPlatform] = useState<PhonePlatform>('android')
   const devices = useMemo(() => source.listDevices(platform), [source, platform])
   return (
@@ -85,6 +87,15 @@ export function PhoneTab({ enabled, source }: PhoneTabProps): ReactNode {
                 />
                 <span className={css.deviceName}>{device.name}</span>
                 <span className={css.deviceMeta}>{device.online ? '在线' : '离线'}</span>
+                {device.online && (
+                  <button
+                    type="button"
+                    className={css.openButton}
+                    onClick={() => { onOpenDevice(device.id, device.name) }}
+                  >
+                    打开
+                  </button>
+                )}
               </div>
             ))}
             {channel === 'usb' && group.length === 0 && (

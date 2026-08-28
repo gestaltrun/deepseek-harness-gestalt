@@ -90,7 +90,14 @@ const install: InvariantInstaller = async (ctx: Context, fail: InvariantFailure)
   const dependent = ctx.plugin({
     inject: ['betterSidebar'],
     apply: (pluginCtx: Context): void => {
-      installPhoneTab(pluginCtx, { source: NULL_PHONE_BADGE_SOURCE, view: stubView })
+      installPhoneTab(pluginCtx, {
+        source: NULL_PHONE_BADGE_SOURCE,
+        view: stubView,
+        isEnabled: () => false,
+        createController: () => {
+          throw new Error('the symmetry probe never renders a tab body')
+        },
+      })
     },
   })
   await dependent.await()

@@ -139,6 +139,27 @@
   font: var(--dsw-font-xxs-12);
 }
 
+/* The 打开 action on an online device row: the mockup's primary minibtn. */
+.openButton {
+  flex: none;
+  border: none;
+  border-radius: 7px;
+  background: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font: var(--dsw-font-xxs-12);
+  padding: 4px 11px;
+  cursor: pointer;
+}
+
+.openButton:hover {
+  opacity: 0.88;
+}
+
+.openButton:focus-visible {
+  outline: 2px solid var(--dsw-alias-button-info-fill);
+  outline-offset: 2px;
+}
+
 /* The dashed placeholder row under USB 真机 when no device answers. */
 .emptyRow {
   border: 1px dashed var(--dsw-alias-border-l3);

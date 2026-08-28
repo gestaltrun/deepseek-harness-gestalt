@@ -1,20 +1,30 @@
 /**
- * Phone plugin, browser half: registers the always-reachable 「手机」
- * tab through the `ctx.betterSidebar` service and the Plugins-tab card
- * keyed on the `ui-phone` settings namespace. With `enabled: false`
- * (the default) the tab still mounts and the card stays in the off chrome;
- * no device discovery, no mobilecli spawn, no stream routing exists here.
+ * Phone plugin, browser half: registers the 「手机」 tab type through the
+ * `ctx.betterSidebar` service and the Plugins-tab card keyed on the
+ * `ui-phone` settings namespace. The tab type hosts the always-reachable
+ * picker instance (the locked not-connected empty state) plus one connected
+ * instance per opened device (`phone:<serial>` ids, serial dedupeKey) whose
+ * body consumes the Host `phoneStream` same-origin channel. With
+ * `enabled: false` (the default) opens of device tabs are refused and no
+ * stream session is ever minted.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import z from '@deepseek-ai/schemastery'
+import type { ReactNode } from 'react'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+import { PhoneConnectedView } from './PhoneConnectedView.tsx'
 import { PhoneTabIcon } from './phone-icon.tsx'
 import { PhoneTab } from './PhoneTab.tsx'
 import { PhoneSettingsItem } from './PhoneSettingsItem.tsx'
 import { PhoneSettingsCardController } from './phone-settings-controller.ts'
 import { MISSING_PHONE_ENVIRONMENT_SOURCE } from './phone-environment.ts'
-import { installPhoneTab, NULL_PHONE_BADGE_SOURCE, type PhoneTabView } from './registry.ts'
+import { PhoneConnectionController } from './phone-connection.ts'
+import { createHttpPhoneGateway } from './phone-stream-client.ts'
+import {
+  installPhoneTab, NULL_PHONE_BADGE_SOURCE, phoneDeviceTabMetaOf,
+  type PhoneTabBodyProps, type PhoneTabEnvironment, type PhoneTabView,
+} from './registry.ts'
 import { PHONE_SETTINGS_NAMESPACE } from '../phone-settings.ts'
 import type { PhoneSettings } from '../phone-settings.ts'
 
@@ -35,6 +45,31 @@ export interface Config {
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(false),
 })
+
+/**
+ * Split one tab instance onto its body: an instance without device meta is
+ * the picker (empty state), one with it is the connected view of that device.
+ * @param props - the tab instance props from the better-sidebar render.
+ * @param env - the registration environment the descriptor assembled.
+ * @returns the body of this tab instance.
+ */
+function renderPhoneTabBody(props: PhoneTabBodyProps, env: PhoneTabEnvironment): ReactNode {
+  const device = phoneDeviceTabMetaOf(props.tab.meta)
+  if (device === undefined) {
+    return <PhoneTab enabled={env.isEnabled()} source={env.source} onOpenDevice={env.openDevice} />
+  }
+  const devices = [...env.source.listDevices('android'), ...env.source.listDevices('ios')]
+  return (
+    <PhoneConnectedView
+      serial={device.serial}
+      name={device.name}
+      visible={props.visible}
+      devices={devices}
+      onOpenDevice={env.openDevice}
+      createController={env.createController}
+    />
+  )
+}
 
 /**
  * Client plugin body.
@@ -58,9 +93,17 @@ export function apply(ctx: ClientContext, config: Config): void {
   }
   const view: PhoneTabView = {
     icon: size => <PhoneTabIcon size={size} />,
-    component: () => <PhoneTab enabled={tabEnabled()} source={NULL_PHONE_BADGE_SOURCE} />,
+    component: renderPhoneTabBody,
   }
-  installPhoneTab(ctx, { source: NULL_PHONE_BADGE_SOURCE, view })
+  installPhoneTab(ctx, {
+    source: NULL_PHONE_BADGE_SOURCE,
+    view,
+    isEnabled: tabEnabled,
+    createController: serial => new PhoneConnectionController({
+      gateway: createHttpPhoneGateway(),
+      deviceId: serial,
+    }),
+  })
 
   ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
     name: 'settings.plugin.item',

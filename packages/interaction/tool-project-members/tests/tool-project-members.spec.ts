@@ -275,6 +275,24 @@ describe('project_members tool', () => {
     ])
   })
 
+  it('fills missing presenter rows as offline so a short presentation still yields the full roster', async () => {
+    const ctx = await setup({
+      currentAccountResolver: resolveActorAccount,
+      rosterPresenter: async view => view.members.slice(0, 1).map(() => ({
+        presence: 'online' as const,
+        displayName: 'alice',
+      })),
+    })
+
+    const result = await execute(ctx, 'pm-short-presenter', { projectId: 'proj-alpha' })
+
+    expect(result.isError).toBe(false)
+    expect(resultValue(result)).toEqual([
+      { accountId: 'acc-owner', displayName: 'alice', role: 'owner', tags: ['founding'], presence: 'online' },
+      { accountId: 'acc-member', role: 'member', tags: ['docs', 'review'], presence: 'offline' },
+    ])
+  })
+
   it('answers the stable PROJECT_UNBOUND error when no workspace binding resolves', async () => {
     const ctx = await setup(ACTOR_CONFIG)
 

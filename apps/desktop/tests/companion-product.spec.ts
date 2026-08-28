@@ -3,9 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
   deriveCompanionAttachmentKey,
+  encodeProtocolBase64Url,
   parseCompanionOperationId,
   parseCompanionInteractionId,
   parseCompanionSessionId,
+  parseDocumentTransferId,
+  parseMemberQuestionId,
   REMOTE_PROTOCOL_LIMITS,
   sealCompanionAttachment,
   type CompanionOfferAttachmentOperation,
@@ -503,6 +506,50 @@ describe('Desktop Companion product operations', () => {
     expect(respond).toHaveBeenCalledWith('host-request-private', {
       ok: true,
       value: { sessionId, approvalId: 'approval-product', outcome: 'allowed-once' },
+    })
+  })
+
+  it('refuses routed member questions with a stable typed business failure', async () => {
+    const host = hostRpc(async () => { throw new Error('member questions must not reach the Host yet') })
+    const question = op({
+      type: 'member-question',
+      questionId: parseMemberQuestionId('member-question-product'),
+      origin: {
+        projectName: 'Atlas', originSessionTitle: 'Refactor the ingest pipeline',
+        askerAccountId: 'account-asker', askerRole: 'admin',
+        askerDisplayName: 'Ada', askerAvatarUrl: 'https://example.test/ada.png',
+      },
+      background: 'Pick a rollback window before the freeze.',
+      questions: [{ id: 'q-1', question: 'Which rollback window do we pick?' }],
+      references: [],
+    })
+    await expect(handleCompanionProductOperation(question, baseDependencies(host))).resolves.toEqual({
+      type: 'operation-failed',
+      operationId: question.operationId,
+      failure: {
+        kind: 'business', code: 'member-question-not-accepted',
+        message: 'This Desktop does not accept routed member questions yet',
+      },
+    })
+  })
+
+  it('refuses routed document transfers with a stable typed business failure', async () => {
+    const host = hostRpc(async () => { throw new Error('document transfers must not reach the Host yet') })
+    const chunk = op({
+      type: 'document-chunk',
+      transferId: parseDocumentTransferId('document-transfer-product'),
+      questionId: parseMemberQuestionId('member-question-product'),
+      index: 0,
+      total: 3,
+      bytes: encodeProtocolBase64Url(Uint8Array.of(1, 2, 3)),
+    })
+    await expect(handleCompanionProductOperation(chunk, baseDependencies(host))).resolves.toEqual({
+      type: 'operation-failed',
+      operationId: chunk.operationId,
+      failure: {
+        kind: 'business', code: 'document-transfer-not-accepted',
+        message: 'This Desktop does not accept document transfers yet',
+      },
     })
   })
 

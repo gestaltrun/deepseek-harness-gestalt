@@ -1626,6 +1626,33 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'input', description: 'current-installation authorization and reservation id.' }],
         throws: ['TypeError when the reservation is missing or owned by another Account.'],
       },
+      {
+        signature: 'abstract grantProjectPeer(input: { desktop: PairingAccountAuthentication projectId: ProjectPeerProjectId peerAccountId: PlatformAccountId peerInstallationId: InstallationId }): Promise<ProjectPeerGrantView>',
+        description: 'Issue one sealed Relay credential for a peer member\'s installation on this Desktop\'s route. Re-granting the same project and peer installation rotates the grant: the replacement digest is issued at the carried route revision first, then the superseded digest is revoked through the same compensation a removal tombstone uses.',
+        parameters: [{ name: 'input', description: 'granting Desktop authorization, project, and peer identity.' }],
+        returns: 'content-free grant projection including the carried route revision.',
+        throws: ['RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.', 'RemoteAccessError `PROJECT_PEER_MEMBERSHIP_REQUIRED` when the grantor or peer holds no active membership.', 'RemoteAccessError `MOBILE_ACCESS_DISABLED` when the granting Desktop has no active route.'],
+      },
+      {
+        signature: 'abstract listProjectPeerGrants(input: { desktop: PairingAccountAuthentication projectId?: ProjectPeerProjectId }): Promise<readonly ProjectPeerGrantView[]>',
+        description: 'List the live project peer grants this Desktop Installation carries on its route.',
+        parameters: [{ name: 'input', description: 'granting Desktop authorization and optional project scope.' }],
+        returns: 'live grants ordered by issuance; revocation tombstones are excluded.',
+        throws: ['RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.'],
+      },
+      {
+        signature: 'abstract revokeProjectPeerGrant(input: { desktop: PairingAccountAuthentication projectId: ProjectPeerProjectId peerAccountId: PlatformAccountId peerInstallationId: InstallationId }): Promise<void>',
+        description: 'Revoke one grant this Desktop issued: the Relay digest and any superseded digest enter compensating revocation and the record keeps a tombstone. Revoking an absent or already-revoked grant is a no-op.',
+        parameters: [{ name: 'input', description: 'granting Desktop authorization and the addressed peer identity.' }],
+        throws: ['RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.', 'RemoteAccessError `PROJECT_PEER_GRANT_INVALID` when the grant is carried by another Desktop.'],
+      },
+      {
+        signature: 'abstract getProjectPeerGrant(input: { peer: PairingAccountAuthentication projectId: ProjectPeerProjectId }): Promise<SealedProjectPeerGrant>',
+        description: 'Retrieve the sealed grant addressed to the authenticated installation. Membership is re-proven at read time and every live grant of the project is reconciled first, so a member removed from the project loses both the sealed envelope and the Relay authority.',
+        parameters: [{ name: 'input', description: 'peer installation authorization and project.' }],
+        returns: 'the sealed envelope with its content-free fingerprint.',
+        throws: ['RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.', 'RemoteAccessError `PROJECT_PEER_MEMBERSHIP_REQUIRED` when the reading account holds no active membership.', 'RemoteAccessError `PROJECT_PEER_GRANT_INVALID` when no live grant addresses this installation.'],
+      },
     ],
   },
   {
@@ -4894,6 +4921,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ProjectionSnapshot {\n    asOfSeq: number;\n    values: Partial<SessionProjectionMap>;\n}',
   },
   {
+    name: 'ProjectPeerGrantId',
+    declaration: 'export type ProjectPeerGrantId = Branded<\'ProjectPeerGrantId\'>;',
+  },
+  {
+    name: 'ProjectPeerGrantView',
+    declaration: 'export interface ProjectPeerGrantView {\n    grantId: ProjectPeerGrantId;\n    projectId: ProjectPeerProjectId;\n    routeId: RelayRouteId;\n    peerAccountId: PlatformAccountId;\n    peerInstallationId: InstallationId;\n    credentialFingerprint: RelayCredentialFingerprint;\n    revision: number;\n    grantedAt: number;\n}',
+  },
+  {
+    name: 'ProjectPeerProjectId',
+    declaration: 'export type ProjectPeerProjectId = Branded<\'ProjectId\'>;',
+  },
+  {
     name: 'ProjectRole',
     declaration: 'export type ProjectRole = \'owner\' | \'admin\' | \'member\';',
   },
@@ -4968,6 +5007,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RelayCredential',
     declaration: 'export type RelayCredential = Branded<\'RelayCredential\'>;',
+  },
+  {
+    name: 'RelayCredentialFingerprint',
+    declaration: 'export type RelayCredentialFingerprint = Branded<\'RelayCredentialFingerprint\'>;',
   },
   {
     name: 'RelayCredentialGrant',
@@ -5196,6 +5239,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ScopeKey',
     declaration: 'export type ScopeKey = object;',
+  },
+  {
+    name: 'SealedProjectPeerGrant',
+    declaration: 'export interface SealedProjectPeerGrant {\n    projectId: ProjectPeerProjectId;\n    grantId: ProjectPeerGrantId;\n    credentialFingerprint: RelayCredentialFingerprint;\n    sealedCredential: Uint8Array;\n}',
   },
   {
     name: 'SearchFileMatches',

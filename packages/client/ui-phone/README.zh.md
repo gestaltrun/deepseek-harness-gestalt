@@ -4,9 +4,9 @@
 
 「手机」tab 插件：向 `ctx.betterSidebar` 注册表登记 `phone` tab 类型（id `phone`、标题 手机、单色内联 SVG 图标、`order: 55`）。入口恒可达——`available` 永不拒绝，零设备的部署同样能打开选择器实例，落到已锁稿的未连接空态：Android/iOS 平台分段选择、分组设备清单（模拟器 / USB 真机）、USB 占位行与「重新检测环境」控件。
 
-tab 实例按 `meta` 分流。选择器实例（id `phone`，无 serial）渲染空态；每台被打开的设备单独铸造一个实例，id 为 `phone:<serial>`、meta 为 `{ kind: 'device', serial, name }`、标题为 `手机·<name>`；`dedupeKey` 返回 serial，重复打开已连接设备会聚焦既有 tab 而非重建（决策矩阵轴 1 格 B/C），选择器则经宿主的 id 安全网保持单例。打开动作走携带 seed 的默认铸造（editor 按路径去重的既有模式）——`TabDescriptor.createTab` 只收得到 `SidebarState`，基于 createTab 的铸造拿不到发起方的 serial。关闭部署会拒绝设备 tab 的打开：检测关闭时无法铸造任何流会话。空态在线行带「打开」按钮，已连接视图的设备下拉列出设备清单，两者共用同一个 opener。
+tab 实例按 `meta` 分流。选择器实例（id `phone`，无 serial）渲染空态；每台被打开的设备单独铸造一个实例，id 为 `phone:<serial>`、meta 为 `{ kind: 'device', serial, name }`、标题为 `手机·<name>`；`dedupeKey` 返回 serial，重复打开已连接设备会聚焦既有 tab 而非重建（决策矩阵轴 1 格 B/C），选择器则经宿主的 id 安全网保持单例。打开动作走携带 seed 的默认铸造（editor 按路径去重的既有模式）——`TabDescriptor.createTab` 只收得到 `SidebarState`，基于 createTab 的铸造拿不到发起方的 serial。关闭部署会拒绝设备 tab 的打开：检测关闭时无法铸造任何流会话。清单行读取 listing wire（`online`、可选 `unauthorized`、可选 `osVersion`）：meta 行显示 `OS · 运行态`（模拟器为 运行中/已停止，真机为 在线/离线），未授权真机渲染设计稿的警示臂——「真机未授权调试」+ 下一步动作「重新检测」——替代离线文案并去掉「打开」；在线行带「打开」按钮。选择器内容经 gate source 响应式跟随持久化开关：在设置卡拨动开关，已挂载的「手机连接未启用」说明条同 tick 刷新（并武装首次清单拉取）。
 
-已连接实例消费 Host `phone-stream` 的同源通道但不 import 它：`POST /phone/session` 铸造签名采集地址，`/phone/ws/io` WebSocket 承载 JSON-RPC `tap` / `gesture` / `text` / `button`，MJPEG 用原生 `<img>` 播放并以图片自然尺寸作为触控坐标面。内容按已锁稿状态 ③ 渲染：devbar 对齐 BrowserView 节奏（6×8 边距、28 高控件），承载设备下拉与 MJPEG/H264 徽标；1:2 固定比例画面在面板剩余空间居中（轴 3 格 B）；底部为圆形 返回/主屏幕/最近任务/截图/刷新流 工具条与触控提示行。点击画面发送 tap，拖动超过 6px 发送 `pointerDown`/`pointerMove`…/`pointerUp` gesture，可打印字符（Enter 为 `\n`）发送 text；「截图」保持禁用，直到会话附件存储就绪。
+清单把设备标为未授权时，已连接实例渲染同一条警示臂（实时流优先于过期清单），并消费 Host `phone-stream` 的同源通道但不 import 它：`POST /phone/session` 铸造签名采集地址，`/phone/ws/io` WebSocket 承载 JSON-RPC `tap` / `gesture` / `text` / `button`，MJPEG 用原生 `<img>` 播放并以图片自然尺寸作为触控坐标面。内容按已锁稿状态 ③ 渲染：devbar 对齐 BrowserView 节奏（6×8 边距、28 高控件），承载设备下拉与 MJPEG/H264 徽标；1:2 固定比例画面在面板剩余空间居中（轴 3 格 B）；底部为圆形 返回/主屏幕/最近任务/截图/刷新流 工具条（带已锁稿的帧率说明：MJPEG 10 fps / H264 30 fps；流契约无 fps 字段，现为设计稿文案）与触控提示行。点击画面发送 tap，拖动超过 6px 发送 `pointerDown`/`pointerMove`…/`pointerUp` gesture，可打印字符（Enter 为 `\n`）发送 text；「截图」保持禁用，直到会话附件存储就绪。
 
 连接生命周期收敛在 `PhoneConnectionController`（无 React，每 tab 一实例）：铸造 → io 打开 → live；`visible: false` 暂停拉流，恢复时重新铸造——签名地址短时效。中断（`onClose`、`onError`、采集元素错误）进入有界自动重连（3 次线性退避），预算耗尽落到错误卡。终态分支——设备离线（铸造 404 或 io `-32010`）、真机调试未授权（上游报文）、被拒绝（403）——跳过重试循环，按已锁稿状态 ④ 渲染带唯一「重新连接」下一步动作的错误卡。渲染层只镜像阶段快照；全部决策留在控制器内，fake gateway 的 spec 逐一证明迁移。
 
@@ -28,7 +28,7 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 
 ## Known Limitations and Deferred Work
 
-- **徽标保真缺口**——已锁稿的 灰点（无设备）/ 绿色数字（在线台数）需要点形与配色渲染路径，而钉死的 better-sidebar 徽标契约只提供包裹字符串或数字的中性 pill，且 `null` 会整体隐藏 pill。本包因此先交付值层面的两态（静默 / 计数）；点样式待契约扩展后落地。徽标回调也看不到渲染它的 tab 实例，因此每个手机 tab 显示的是全队在线台数，而非激活设备的绿点。
+- **徽标保真缺口**——pill 节点已 aria-hidden（可访问性 P3：计数不再进入 tab 可访问名），但已锁稿的 灰点（无设备）/ 绿色数字（在线台数）仍需点形与配色渲染路径，而钉死的 better-sidebar 徽标契约只提供包裹字符串或数字的中性 pill，且 `null` 会整体隐藏 pill。本包因此先交付值层面的两态（静默 / 计数）；点样式待契约扩展后落地。徽标回调也看不到渲染它的 tab 实例，因此每个手机 tab 显示的是全队在线台数，而非激活设备的绿点。
 - **H264 徽标在位但禁用**——Host 会签名 H264 采集地址，但裸 `avc` 需要 Media Source Extensions 或 WebCodecs 才能播放；该徽标现以 tooltip 禁用渲染，流格式保持 MJPEG，待解码子票落地。`PhoneConnectionController` 已按会话钉住格式。
 - **「截图」禁用**——设计稿把截图存入会话附件；客户端侧暂无可用的附件通道，按钮以 tooltip 禁用渲染，不做假动作。
 - **设置卡的「重新检测」仍读取 `MISSING_PHONE_ENVIRONMENT_SOURCE`**——选择器内容里的「重新检测环境」现已通过 `PhoneListingSource` 拉取设备清单，但插件标签页的环境向导在 Host 环境 publisher 组装完成前仍以探针失败行渲染；`PhoneEnvironmentSource` 缝隙保持不变。

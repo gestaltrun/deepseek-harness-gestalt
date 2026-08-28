@@ -1,0 +1,26 @@
+# Keyless assembled overlay: the shipped headless profile drives tool-phone's
+# deferred device tools against a recorded fake fleet. The `phone-mock`
+# adapter scripts the model turns, so the snapshot pins the whole assembled
+# arc: zero device schemas in the initial request, `tool_search`
+# reconstruction, and the unattended rejection of the consequential act
+# (`DSH_PERMISSION_MODE=danger-full-access` maps the approval policy to
+# `never`, whose fixed outcome is `rejected`).
+- id: agent-default-model
+  config:
+    provider: phone-mock
+    model: phone-mock
+
+# The one scripted stream belongs to the agent turn; the session title keeps
+# the shipped fallback path.
+- id: session-title-llm
+  disabled: true
+
+- insert:
+    - id: phone-mock-llm
+      name: './snapshot-fixtures/phone-mock-llm.ts'
+
+    - id: fake-phone-fleet
+      name: './snapshot-fixtures/fake-phone-fleet.ts'
+
+    - id: tool-phone
+      name: '@deepseek-ai/dsh-tool-phone'

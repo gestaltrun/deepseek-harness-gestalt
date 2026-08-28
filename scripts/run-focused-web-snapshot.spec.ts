@@ -12,9 +12,11 @@ function fixtureRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'focused-web-'))
   mkdirSync(join(root, 'apps', 'web', 'tests'), { recursive: true })
   mkdirSync(join(root, 'apps', 'mobile', 'tests'), { recursive: true })
+  mkdirSync(join(root, 'apps', 'platform', 'tests'), { recursive: true })
   writeFileSync(join(root, 'apps', 'web', 'tests', 'flow.e2e.ts'), '')
   writeFileSync(join(root, 'apps', 'web', 'tests', 'state.snapshot.ts'), '')
   writeFileSync(join(root, 'apps', 'mobile', 'tests', 'shell.snapshot.ts'), '')
+  writeFileSync(join(root, 'apps', 'platform', 'tests', 'homepage.snapshot.ts'), '')
   return root
 }
 
@@ -23,6 +25,7 @@ describe('resolveFocusedWebSnapshotFile', () => {
     'apps/web/tests/flow.e2e.ts',
     'apps/web/tests/state.snapshot.ts',
     'apps/mobile/tests/shell.snapshot.ts',
+    'apps/platform/tests/homepage.snapshot.ts',
   ])('accepts one existing Web inventory file: %s', (file) => {
     expect(resolveFocusedWebSnapshotFile([file], fixtureRoot())).toBe(file)
   })

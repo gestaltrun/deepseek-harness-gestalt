@@ -8,7 +8,7 @@ English | [中文](2026-08-28-documentation-discovery-metadata.zh.md)
 
 The root README identifies Gestalt as the product layer built on DeepSeek Harness, but the documentation build still names the site and source repository as official DSH. Search engines receive no canonical URL, language relationship, social metadata, sitemap, or structured product identity. Agents can read raw Markdown and `llms.txt`, but that index also presents the wrong site identity.
 
-The marketing site at `www.gestaltrun.com` is deployed from a source outside this repository. This repository must not claim it can repair files or metadata that it does not own.
+The product site at `www.gestaltrun.com` is served from `apps/platform/public` in this repository and deployed with the Platform container. The documentation build and the product origin own different routes, so each deployment must publish metadata for the URLs it serves.
 
 ## Decision
 
@@ -21,6 +21,8 @@ Every manifest page emits a self-referential clean canonical URL and reciprocal 
 VitePress generates `sitemap.xml` from the deployed site URL. The build writes `robots.txt` beside it and names the sitemap explicitly. The post-build verifier requires both files, `llms.txt`, and every raw-Markdown twin.
 
 `llms.txt` identifies Gestalt and 獭子哥, explains the raw-Markdown convention, links the product website, current source repository, and official DSH, then lists both locale trees from the publication manifest. It remains concise; the per-page twins carry full documentation, so this site does not duplicate them into `llms-full.txt`.
+
+The [Platform homepage discovery decision](2026-08-29-platform-homepage-discovery-metadata.md) owns metadata and origin-root discovery files for `www.gestaltrun.com`.
 
 The root README uses the concrete phrase "open-source AI coding agent product" once in each language. Metadata does not include a keywords tag or unsupported capability claims.
 
@@ -38,4 +40,4 @@ The root README uses the concrete phrase "open-source AI coding agent product" o
 
 Search engines receive one canonical route per rendered page, reciprocal language signals, a generated sitemap, and explicit site and software identities. Agents receive the same product identity plus direct Markdown routes. Tests fail when routes, identities, source links, or discovery files drift.
 
-Deployments must pass the destination's complete base URL. Google assigns site names at a domain or subdomain, and a `robots.txt` under a project Pages subpath cannot control the host root. The hosting owner must provide an origin-root deployment and host-level policy for those two signals. The external marketing site still needs its own description, canonical, social metadata, structured data, sitemap, robots file, and `llms.txt` in the repository that owns that deployment.
+Deployments must pass the destination's complete base URL. Google assigns site names at a domain or subdomain, and a `robots.txt` under a project Pages subpath cannot control the host root. The Platform homepage owns the origin-root product signals; the Pages build owns documentation routes and their language pairs.

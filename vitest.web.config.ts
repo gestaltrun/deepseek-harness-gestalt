@@ -29,6 +29,7 @@ export default defineConfig({
       'apps/web/tests/**/*.e2e.ts',
       'apps/web/tests/**/*.snapshot.ts',
       'apps/mobile/tests/**/*.snapshot.ts',
+      'apps/platform/tests/**/*.snapshot.ts',
     ],
     // Local and record runs stay serial. CI runs workspace-mutating HMR and
     // dynamic Cordis lifecycle coverage before parallelizing the remaining files.

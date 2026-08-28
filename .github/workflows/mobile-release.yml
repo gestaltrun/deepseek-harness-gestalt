@@ -124,7 +124,7 @@ jobs:
         run: bash apps/mobile/scripts/build-android-release.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: deepseek-gestalt-android-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
+          name: tazige-android-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
           path: apps/mobile/release/*.apk
           if-no-files-found: error
           retention-days: 30
@@ -185,7 +185,7 @@ jobs:
             bash apps/mobile/scripts/upload-testflight.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: deepseek-gestalt-ios-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
+          name: tazige-ios-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
           path: apps/mobile/release/*.ipa
           if-no-files-found: error
           retention-days: 30

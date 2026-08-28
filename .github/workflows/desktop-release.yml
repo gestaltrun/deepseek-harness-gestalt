@@ -114,6 +114,7 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           PUBLISH: ${{ inputs.publish }}
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
           PLAN_PATH: ${{ inputs.plan_path }}
           ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
           RECOVER_ARTIFACTS: ${{ inputs.recover_artifacts }}
@@ -121,6 +122,8 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
           git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/master
           jq -e --arg version "$INPUT_VERSION" \
             '.releaseUnits.desktop.selected == true and .releaseUnits.desktop.version == $version' "$PLAN_PATH" >/dev/null

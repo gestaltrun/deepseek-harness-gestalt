@@ -138,12 +138,15 @@ jobs:
           INPUT_VERSION: ${{ inputs.version }}
           INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
           MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
           ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
           RECOVER_ARTIFACTS: ${{ inputs.recover_artifacts }}
           PUBLISH_GITHUB: ${{ inputs.publish_github }}
         run: |
           test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
           git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
           git merge-base --is-ancestor "$MOBILE_CANDIDATE_SHA" refs/remotes/origin/master
           version=$(node -p "require('./apps/mobile/package.json').version")
           build_number=$(node -p "require('./apps/mobile/release.json').buildNumber")

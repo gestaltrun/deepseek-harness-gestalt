@@ -137,9 +137,12 @@ jobs:
       - name: Verify merged release candidate
         env:
           PLATFORM_CANDIDATE_SHA: ${{ inputs.candidate_sha || github.sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$PLATFORM_CANDIDATE_SHA"
           git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
           git merge-base --is-ancestor "$PLATFORM_CANDIDATE_SHA" refs/remotes/origin/master
 
       - uses: pnpm/action-setup@v4

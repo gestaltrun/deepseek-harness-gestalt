@@ -115,6 +115,25 @@ describe('product release workflows', () => {
     expect(text('.github/workflows/product-release.yml')).toContain('if: ${{ always() }}')
   })
 
+  it('rejects promotion logic executed from an unmerged workflow head', () => {
+    for (const path of [
+      '.github/workflows/desktop-release.yml',
+      '.github/workflows/mobile-release.yml',
+      '.github/workflows/platform-deploy.yml',
+      '.github/workflows/product-release.yml',
+    ]) {
+      const source = text(path)
+      expect(source).toContain('CURRENT_WORKFLOW_SHA: ${{ github.sha }}')
+      expect(source).toContain('[[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]')
+      expect(source).toContain('git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master')
+    }
+    const image = text('.github/workflows/platform-image.yml')
+    expect(image.match(/CURRENT_WORKFLOW_SHA: \$\{\{ github\.sha \}\}/g)?.length).toBeGreaterThanOrEqual(2)
+    expect(image.match(/git merge-base --is-ancestor "\$CURRENT_WORKFLOW_SHA" refs\/remotes\/origin\/master/g)?.length)
+      .toBeGreaterThanOrEqual(2)
+    expect(image).toContain('if [[ "$PUSH_IMAGE" == true ]]')
+  })
+
   it('updates a Product Release PR without publishing and coordinates only selected lanes', () => {
     const planner = text('.github/workflows/product-release-plan.yml')
     const coordinatorSource = text('.github/workflows/product-release.yml')

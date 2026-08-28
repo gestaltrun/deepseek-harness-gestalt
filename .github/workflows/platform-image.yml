@@ -100,6 +100,7 @@ jobs:
         id: candidate
         env:
           EXPECTED_CANDIDATE: ${{ inputs.candidate_sha || github.sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
           PRIOR_RUN_ID: ${{ inputs.prior_run_id }}
           PUSH_IMAGE: ${{ inputs.push }}
         run: |
@@ -108,6 +109,8 @@ jobs:
           test "$actual" = "$EXPECTED_CANDIDATE"
           if [[ "$PUSH_IMAGE" == true ]]; then
             git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+            [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+            git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
             git merge-base --is-ancestor "$EXPECTED_CANDIDATE" refs/remotes/origin/master
           fi
           echo "sha=$actual" >> "$GITHUB_OUTPUT"
@@ -206,9 +209,12 @@ jobs:
       - name: Verify merged release candidate
         env:
           CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
           git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/master
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6

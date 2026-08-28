@@ -138,8 +138,14 @@ describe('normalizeMultipartImageStream', () => {
         }
         return new Promise<void>((resolve) => {
           releasePendingPull = () => {
-            c.close()
             resolve()
+            // TryClose: the product cancel path already closed this
+            // controller; a second close is a silent no-op.
+            try {
+              c.close()
+            } catch (error) {
+              if (!(error instanceof TypeError)) throw error
+            }
           }
         })
       },
@@ -157,6 +163,11 @@ describe('normalizeMultipartImageStream', () => {
     const secondResult = await second
     await cancelPromise
     expect(secondResult.done).toBe(true)
+    expect(upstreamCancelled).toBe(true)
+    // A repeated release after the controller closed stays silently harmless.
+    expect(() => {
+      releasePendingPull()
+    }).not.toThrow()
     expect(upstreamCancelled).toBe(true)
   })
 

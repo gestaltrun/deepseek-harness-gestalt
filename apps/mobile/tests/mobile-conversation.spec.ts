@@ -381,4 +381,28 @@ describe('Mobile shared Session presentation', () => {
     fireEvent.change(input, { target: { files: [file] } })
     expect(onAttach).toHaveBeenCalledWith(file)
   })
+
+  it('delivers a native picker selection that returns during foreground synchronization', () => {
+    const onAttach = vi.fn()
+    const file = new File([Uint8Array.of(3, 2, 1)], 'foreground.png', { type: 'image/png' })
+    const props = {
+      title: 'Attachment',
+      onBack: () => {},
+      locale: 'zh' as const,
+      snapshot: snapshot([]),
+      loadImage: imageLoader,
+      onSubmit: () => {},
+      onAttach,
+    }
+    const view = render(createElement(MobileConversation, { ...props, mutationEnabled: true }))
+    const input = view.container.querySelector<HTMLInputElement>('input[type="file"]')
+    if (input === null) throw new Error('expected attachment file input')
+    const openPicker = vi.spyOn(input, 'click')
+
+    fireEvent.click(screen.getByRole('button', { name: '添加附件' }))
+    expect(openPicker).toHaveBeenCalledOnce()
+    view.rerender(createElement(MobileConversation, { ...props, mutationEnabled: false }))
+    fireEvent.change(input, { target: { files: [file] } })
+    expect(onAttach).toHaveBeenCalledWith(file)
+  })
 })

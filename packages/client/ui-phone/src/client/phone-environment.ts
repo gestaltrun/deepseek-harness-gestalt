@@ -67,8 +67,13 @@ export type PhoneEnvironmentView =
 export interface PhoneEnvironmentSource {
   /** Current view the card should render. */
   getView(): PhoneEnvironmentView
-  /** Re-run detection; a no-op source may leave the view unchanged. */
-  redetect(): void
+  /**
+   * Re-run detection. A listing-backed source starts a fleet pull; the
+   * missing-service source resolves immediately and stays on probe-failed.
+   */
+  redetect(): Promise<void>
+  /** Subscribe to view replacements; returns the disposer. */
+  subscribe(listener: () => void): () => void
 }
 
 /** Error row shown when the Host has not published a phoneDevices face. */
@@ -82,7 +87,8 @@ export const PROBE_FAILED_ERROR: PhoneEnvironmentError = {
 /** Shipped source while `phoneDevices` is not composed: probe-failed. */
 export const MISSING_PHONE_ENVIRONMENT_SOURCE: PhoneEnvironmentSource = {
   getView: () => ({ kind: 'errors', errors: [PROBE_FAILED_ERROR] }),
-  redetect: () => {},
+  redetect: () => Promise.resolve(),
+  subscribe: () => () => {},
 }
 
 /**

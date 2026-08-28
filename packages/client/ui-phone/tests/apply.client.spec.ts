@@ -118,6 +118,55 @@ describe('ui-phone client apply', () => {
     expect(descriptor.component({ tab: { id: 'phone', title: '手机' }, visible: false })).toBeTruthy()
   })
 
+  it('reaches the ready inventory from a successful fleet listing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      android: [{ id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', online: true }],
+      ios: { simulators: [], reals: [] },
+    }), { status: 200 })))
+    const sidebar = new SidebarUnderTest()
+    const host = stubSettingsScope<PhoneSettings>()
+    host.publish({
+      status: 'ready',
+      writable: true,
+      value: { enabled: true },
+      base: { enabled: false },
+      user: { enabled: true },
+      revision: 1,
+    })
+    const { ctx } = await mount(sidebar, host)
+    const entry = ctx.slots.entries('settings.plugin.item')[0]!
+    const face = (entry.inject as () => {
+      hooks: { phoneSettingsCard: { getSnapshot: () => { view: { kind: string } } } }
+    })()
+    await vi.waitFor(() => {
+      expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('ready')
+    })
+  })
+
+  it('falls back to probe-failed when the fleet listing is missing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('Failed to fetch')
+    }))
+    const sidebar = new SidebarUnderTest()
+    const host = stubSettingsScope<PhoneSettings>()
+    host.publish({
+      status: 'ready',
+      writable: true,
+      value: { enabled: true },
+      base: { enabled: false },
+      user: { enabled: true },
+      revision: 1,
+    })
+    const { ctx } = await mount(sidebar, host)
+    const entry = ctx.slots.entries('settings.plugin.item')[0]!
+    const face = (entry.inject as () => {
+      hooks: { phoneSettingsCard: { getSnapshot: () => { view: { kind: string } } } }
+    })()
+    await vi.waitFor(() => {
+      expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('errors')
+    })
+  })
+
   it('wires the browser clipboard into the settings card when one exists', async () => {
     const writeText = vi.fn(() => Promise.resolve())
     vi.stubGlobal('navigator', { clipboard: { writeText } })

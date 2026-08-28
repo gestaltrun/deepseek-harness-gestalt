@@ -10,7 +10,7 @@ tab 实例按 `meta` 分流。选择器实例（id `phone`，无 serial）渲染
 
 连接生命周期收敛在 `PhoneConnectionController`（无 React，每 tab 一实例）：铸造 → io 打开 → live；`visible: false` 暂停拉流，恢复时重新铸造——签名地址短时效。中断（`onClose`、`onError`、采集元素错误）进入有界自动重连（3 次线性退避），预算耗尽落到错误卡。终态分支——设备离线（铸造 404 或 io `-32010`）、真机调试未授权（上游报文）、被拒绝（403）——跳过重试循环，按已锁稿状态 ④ 渲染带唯一「重新连接」下一步动作的错误卡。渲染层只镜像阶段快照；全部决策留在控制器内，fake gateway 的 spec 逐一证明迁移。
 
-Host 半边在 settings 提供方组装时注册持久化 `ui-phone` 命名空间（`enabled`，boolean，默认 `false`）。浏览器半边把插件配置卡片注册进 `settings.plugin.item`，键就是同一命名空间。卡片拥有已锁稿的六态（关闭 / 探测中 / Android 向导 / iOS 向导 / 就绪清单 / 可恢复错误行）。命令级安装指引带「复制」按钮，剪贴板内容就是稿中的 `sdkmanager` / `avdmanager` / `emulator` / `xcodebuild` / `xcrun simctl` 命令。每条错误行共用动词「下一步动作」。检测数据经窄接口 `PhoneEnvironmentSource` 进入；随包的 `MISSING_PHONE_ENVIRONMENT_SOURCE` 是 Host 未组装 `phoneDevices` 时的探测失败行。本包不 import `phone-runtime` 与 `phone-stream`。
+Host 半边在 settings 提供方组装时注册持久化 `ui-phone` 命名空间（`enabled`，boolean，默认 `false`）。浏览器半边把插件配置卡片注册进 `settings.plugin.item`，键就是同一命名空间。卡片拥有已锁稿的六态（关闭 / 探测中 / Android 向导 / iOS 向导 / 就绪清单 / 可恢复错误行）。命令级安装指引带「复制」按钮，剪贴板内容就是稿中的 `sdkmanager` / `avdmanager` / `emulator` / `xcodebuild` / `xcrun simctl` 命令。每条错误行共用动词「下一步动作」。检测数据经窄接口 `PhoneEnvironmentSource` 进入。随包实现包装选择器已在用的 Host `GET /phone/devices` 清单：成功拉取可到达探测中、两端向导与就绪清单；缺失或拒绝的设备路由回落到探测失败行。本包不 import `phone-runtime` 与 `phone-stream`。
 
 Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是组装默认值。注册不依赖它——关闭时选择器入口仍然可达，选择器内容会在空态上方固定渲染「手机连接未启用」说明条。持久化开关关闭时不发现设备、不拉起 `mobilecli`、不路由任何流。
 
@@ -31,7 +31,7 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 - **徽标保真缺口**——pill 节点已 aria-hidden（可访问性 P3：计数不再进入 tab 可访问名），但已锁稿的 灰点（无设备）/ 绿色数字（在线台数）仍需点形与配色渲染路径，而钉死的 better-sidebar 徽标契约只提供包裹字符串或数字的中性 pill，且 `null` 会整体隐藏 pill。本包因此先交付值层面的两态（静默 / 计数）；点样式待契约扩展后落地。徽标回调也看不到渲染它的 tab 实例，因此每个手机 tab 显示的是全队在线台数，而非激活设备的绿点。
 - **H264 徽标在位但禁用**——Host 会签名 H264 采集地址，但裸 `avc` 需要 Media Source Extensions 或 WebCodecs 才能播放；该徽标现以 tooltip 禁用渲染，流格式保持 MJPEG，待解码子票落地。`PhoneConnectionController` 已按会话钉住格式。
 - **「截图」禁用**——设计稿把截图存入会话附件；客户端侧暂无可用的附件通道，按钮以 tooltip 禁用渲染，不做假动作。
-- **设置卡的「重新检测」仍读取 `MISSING_PHONE_ENVIRONMENT_SOURCE`**——选择器内容里的「重新检测环境」现已通过 `PhoneListingSource` 拉取设备清单，但插件标签页的环境向导在 Host 环境 publisher 组装完成前仍以探针失败行渲染；`PhoneEnvironmentSource` 缝隙保持不变。
+- **设置卡从设备清单推断环境**——Host `phoneDevices` 不在线上发布 adb/SDK/Xcode 探测事实，因此一份成功的空清单仍会打开平台向导（macOS 上为 iOS，否则为 Android），而不是按二进制逐项列出检查表。
 - **「最近设备」与行内「启动」是后续界面**——票面点名了最近设备与模拟器启动，但设备历史与浏览器可达的启动路由都不存在；选择器现阶段只交付「打开」。
 - **IME 组合与控制键不上送设备**——可打印字符与 Enter 映射到 `device.io.text`；删除、快捷键与 IME 预编辑需要更完整的文本通道。
 - **中文文案固定**——包内只带 zh 文案、未接 locale 命名空间；本地化与 device-dock 剩余状态一并推进。

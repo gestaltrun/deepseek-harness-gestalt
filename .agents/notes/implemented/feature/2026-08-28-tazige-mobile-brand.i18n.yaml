@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-28-tazige-mobile-brand.md
-2026-08-28-tazige-mobile-brand.md: 8a5a6b5a246d598b568fc9a41855f3220e7a1b36
-2026-08-28-tazige-mobile-brand.zh.md: 8a398ef1a499f5401ab2f037a568e403c4feb021
+2026-08-28-tazige-mobile-brand.md: 801bb5df0ee68dc5aa59abce7e254764fff76df9
+2026-08-28-tazige-mobile-brand.zh.md: 096b61947f85a5e37485ac86d182637044aa2f8a

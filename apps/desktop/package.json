@@ -102,6 +102,10 @@
       {
         "from": "out/relay-node-helper.cjs",
         "to": "relay-node-helper.cjs"
+      },
+      {
+        "from": "out/system-node-fetch-helper.cjs",
+        "to": "system-node-fetch-helper.cjs"
       }
     ],
     "asar": true,

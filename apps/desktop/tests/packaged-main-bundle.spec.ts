@@ -87,6 +87,7 @@ describe('packaged Desktop main bundle', () => {
     })
     const source = readFileSync(join(desktop, 'out', 'main.mjs'), 'utf8')
     const relayHelper = readFileSync(join(desktop, 'out', 'relay-node-helper.cjs'), 'utf8')
+    const fetchHelper = readFileSync(join(desktop, 'out', 'system-node-fetch-helper.cjs'), 'utf8')
     expect(source).not.toMatch(/from\s+['"]@deepseek-ai\//)
     expect(source).not.toMatch(/import\s+['"]@deepseek-ai\//)
     expect(source).toMatch(/from\s+['"]electron['"]/)
@@ -98,6 +99,8 @@ describe('packaged Desktop main bundle', () => {
     expect(source).not.toContain('node_modules/https-proxy-agent')
     expect(relayHelper).not.toMatch(/from\s+['"](?:ws|https-proxy-agent)['"]/)
     expect(relayHelper).toContain('Relay helper target must be credential-free WSS')
+    expect(fetchHelper).not.toMatch(/from\s+['"]https-proxy-agent['"]/)
+    expect(fetchHelper).toContain('Desktop Platform HTTP target must be credential-free HTTPS')
     const desktopPackage = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>
     }

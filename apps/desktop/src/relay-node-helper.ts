@@ -8,6 +8,7 @@ import {
   type RelayInboundQueueLimits,
 } from '@deepseek-ai/dsh-remote-access-client'
 import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
+import { desktopNodeHelperEnvironment } from './node-helper-environment.ts'
 
 type HelperMessage =
   | { type: 'open' }
@@ -46,7 +47,7 @@ export async function connectDesktopRelayNodeHelper(
   const child = fork(options.helperPath, [], {
     execPath: options.nodePath,
     execArgv: [...options.execArgv ?? []],
-    env: helperEnvironment(process.env, options.environment),
+    env: desktopNodeHelperEnvironment(process.env, options.environment),
     serialization: 'advanced',
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   })
@@ -203,22 +204,6 @@ function parseHelperMessage(value: unknown): HelperMessage {
     throw new TypeError('Relay helper data is invalid')
   }
   return { type: 'data', value: new Uint8Array(value.value) }
-}
-
-function helperEnvironment(
-  ambient: Readonly<NodeJS.ProcessEnv>,
-  additions: Readonly<NodeJS.ProcessEnv> | undefined,
-): NodeJS.ProcessEnv {
-  const allowed = [
-    'NODE_EXTRA_CA_CERTS', 'SSL_CERT_DIR', 'SSL_CERT_FILE',
-    'SystemRoot', 'WINDIR', 'TMPDIR', 'TMP', 'TEMP',
-  ] as const
-  const result: NodeJS.ProcessEnv = {}
-  for (const name of allowed) {
-    const value = additions?.[name] ?? ambient[name]
-    if (value !== undefined) result[name] = value
-  }
-  return result
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

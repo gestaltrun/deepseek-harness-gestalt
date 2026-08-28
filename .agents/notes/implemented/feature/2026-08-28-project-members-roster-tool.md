@@ -32,4 +32,4 @@ The tool is complete and testable today against stub faces, while the provider f
 
 ## Testing
 
-`tests/tool-project-members.spec.ts` pins the canonical JSON shape, the presenter contract, both stable error paths (including chained causes and the account-before-binding order), config misconfiguration failing at load, and registration disposal. `tests/loader-composition.spec.ts` boots the tool through the real Loader from `cordis.yml` whose `!!js` config carries function-valued faces, proving the injection path and the no-faces error end to end.
+`tests/tool-project-members.spec.ts` pins the canonical JSON shape, the presenter contract, both stable error paths (including chained causes and the account-before-binding order), config misconfiguration failing at load, and registration disposal. `tests/loader-composition.spec.ts` boots the tool through the real Loader from `cordis.yml` whose `!!js` config carries function-valued faces, proving the injection path and the no-faces error end to end. `examples/project-members` keyless snapshot replay pins the assembled stream-json transcript of one roster read through the real agent loop.

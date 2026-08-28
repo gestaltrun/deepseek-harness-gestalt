@@ -32,4 +32,4 @@ Status: implemented
 
 ## Testing
 
-`tests/tool-project-members.spec.ts` 固定规范 JSON 形态、presenter 契约、两条稳定错误路径（含链式原因与先账号后绑定的顺序）、配置错误在加载时失败，以及注册后的释放。`tests/loader-composition.spec.ts` 让工具经真实 Loader 从 `cordis.yml` 启动，其 `!!js` 配置携带函数值接口，端到端证明注入路径与无接口时的错误。
+`tests/tool-project-members.spec.ts` 固定规范 JSON 形态、presenter 契约、两条稳定错误路径（含链式原因与先账号后绑定的顺序）、配置错误在加载时失败，以及注册后的释放。`tests/loader-composition.spec.ts` 让工具经真实 Loader 从 `cordis.yml` 启动，其 `!!js` 配置携带函数值接口，端到端证明注入路径与无接口时的错误。`examples/project-members` 的 keyless snapshot 回放钉住真实 agent 循环上一次名册读取的组装 stream-json transcript。

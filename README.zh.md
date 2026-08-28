@@ -14,7 +14,7 @@
   </p>
 </div>
 
-獭子哥正在 [DeepSeek Harness](https://www.deepseek.com/harness/)（`dsh`）之上构建完整的桌面端、Web 端与移动端产品，英文产品名为 **Gestalt**。它以官方 DSH 的插件与运行时模型为基础，补齐产品工作流和发行能力，并通过经过测试的产品接口集成优秀社区插件。项目目标是稳定可用的产品发行，而不是补丁集合。
+獭子哥（Gestalt）是基于 [DeepSeek Harness](https://www.deepseek.com/harness/)（`dsh`）构建的开源桌面、Web 与移动 AI 编码 agent 产品。它以官方 DSH 的插件与运行时模型为基础，补齐产品工作流和发行能力，并通过经过测试的产品接口集成优秀社区插件。项目目标是稳定可用的产品发行，而不是补丁集合。
 
 本项目持续合并 [DSH 官方仓库](https://github.com/deepseek-ai/deepseek-harness)的改动，并尽可能把产品增量放在应用、Bundle、插件和有文档说明的能力 seam 上。DSH Profile、插件、CLI（命令行界面）模式和 SDK 入口是兼容性基线。獭子哥目前仍处于开发者预览阶段，产品收敛过程中仍可能出现破坏兼容性的变更。
 

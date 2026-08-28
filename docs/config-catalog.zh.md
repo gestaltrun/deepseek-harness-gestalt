@@ -1927,7 +1927,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/project-membership-http/src/index.ts:54`](../packages/platform/project-membership-http/src/index.ts)
+来源：[`packages/platform/project-membership-http/src/index.ts:53`](../packages/platform/project-membership-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 

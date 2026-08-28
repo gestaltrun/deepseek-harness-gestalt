@@ -98,6 +98,62 @@ describe('PhoneConnectedView chrome', () => {
     expect(screen.getByText(/已暂停/)).toBeTruthy()
   })
 
+  it('renders the design unauthorized arm from the listing instead of a dead stream', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    render(
+      <PhoneConnectedView
+        serial="R3CN30"
+        name="SM-S9310"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([
+          { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true, unauthorized: true },
+        ]))}
+        onOpenDevice={() => {}}
+        createController={() => new PhoneConnectionController({
+          gateway,
+          deviceId: 'R3CN30',
+          schedule: scheduler.schedule,
+        })}
+      />,
+    )
+    await act(async () => { await flush() })
+    // The arm replaces the stream area until the device is authorized; the
+    // copy is the design's, and the next action reconnects after authorizing.
+    expect(screen.getByRole('alert')).toBeTruthy()
+    expect(screen.getByText('真机未授权调试')).toBeTruthy()
+    expect(screen.getByText(/已通过 USB 连接；请在手机上允许「USB 调试」后重新连接/)).toBeTruthy()
+    expect(screen.queryByRole('img')).toBeNull()
+    // The devpick dot reads the warn state, not offline.
+    expect(document.querySelector('._dotOffline_')).toBeNull()
+  })
+
+  it('keeps the live stream up when the stale listing still flags unauthorized', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    render(
+      <PhoneConnectedView
+        serial="R3CN30"
+        name="SM-S9310"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([
+          { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true, unauthorized: true },
+        ]))}
+        onOpenDevice={() => {}}
+        createController={() => new PhoneConnectionController({
+          gateway,
+          deviceId: 'R3CN30',
+          schedule: scheduler.schedule,
+        })}
+      />,
+    )
+    await act(async () => { await flush() })
+    gateway.lastSocket!.accept()
+    await act(async () => {})
+    expect(screen.getByRole('img', { name: 'SM-S9310 实时画面' })).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('dials the minted io path from the session', async () => {
     const harness = await renderLive()
     expect(harness.gateway.dialedPaths).toEqual(['/phone/ws/io'])

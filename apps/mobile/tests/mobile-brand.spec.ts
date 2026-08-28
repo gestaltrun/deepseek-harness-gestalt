@@ -74,8 +74,10 @@ describe('Mobile brand validation', () => {
     expect(iosProject.match(/PRODUCT_NAME = Gestalt;/gu)).toHaveLength(2)
     expect(iosStorage).toContain('"com.gestalt.mobile.protected-storage.v1"')
     expect(iosExport).toContain('<key>com.gestalt.mobile</key>')
-    expect(androidRelease).toContain('MOBILE_BUNDLE_ID:-com.gestalt.mobile')
-    expect(iosRelease).toContain('MOBILE_BUNDLE_ID:-com.gestalt.mobile')
+    expect(androidRelease).toContain('MOBILE_BUNDLE_ID:?MOBILE_BUNDLE_ID is required')
+    expect(iosRelease).toContain('MOBILE_BUNDLE_ID:?MOBILE_BUNDLE_ID is required')
+    expect(androidRelease).not.toContain('MOBILE_BUNDLE_ID:-')
+    expect(iosRelease).not.toContain('MOBILE_BUNDLE_ID:-')
     expect(workflow.match(/MOBILE_BUNDLE_ID: \$\{\{ vars\.MOBILE_BUNDLE_ID \}\}/gu)).toHaveLength(2)
 
     for (const owner of [

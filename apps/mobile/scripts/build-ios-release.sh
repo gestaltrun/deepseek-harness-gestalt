@@ -9,7 +9,8 @@ repo_root="$(cd "${mobile_root}/../.." && pwd)"
 : "${MOBILE_BUILD_NUMBER:?MOBILE_BUILD_NUMBER is required}"
 : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required}"
 
-bundle_id="${MOBILE_BUNDLE_ID:-com.gestalt.mobile}"
+: "${MOBILE_BUNDLE_ID:?MOBILE_BUNDLE_ID is required}"
+bundle_id="${MOBILE_BUNDLE_ID}"
 if [[ "${bundle_id}" != 'com.gestalt.mobile' ]]; then
   echo 'MOBILE_BUNDLE_ID must be com.gestalt.mobile' >&2
   exit 1

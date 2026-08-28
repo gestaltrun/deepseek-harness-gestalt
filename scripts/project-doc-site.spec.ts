@@ -119,7 +119,7 @@ describe('rewriteMarkdown', () => {
       repositoryRef: 'abc123',
     })).toBe(
       '[B](./reference/b.md#part) '
-      + '[source](https://github.com/deepseek-ai/deepseek-harness/blob/abc123/packages/tool.ts#L2) '
+      + '[source](https://github.com/gestaltrun/deepseek-harness-gestalt/blob/abc123/packages/tool.ts#L2) '
       + '[web](https://example.com)\n',
     )
   })
@@ -145,7 +145,7 @@ describe('rewriteMarkdown', () => {
       pages,
       repoRoot: root,
       repositoryRef: 'abc123',
-    })).toBe('![logo](https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/abc123/packages/logo.svg)\n')
+    })).toBe('![logo](https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/abc123/packages/logo.svg)\n')
   })
 
   it('hands an image to the placer and uses the URL it returns', () => {
@@ -224,7 +224,7 @@ describe('rewriteMarkdown', () => {
       repositoryRef: 'abc123',
     })).toBe(
       '[title](./reference/b.md "b.md") '
-      + '[escaped](https://github.com/deepseek-ai/deepseek-harness/blob/abc123/docs/x(y).md)\n',
+      + '[escaped](https://github.com/gestaltrun/deepseek-harness-gestalt/blob/abc123/docs/x(y).md)\n',
     )
   })
 
@@ -288,7 +288,7 @@ describe('docsPages locale routes', () => {
       expect(projected).toContain('layout: false')
       expect(projected).toContain('http-equiv: refresh')
       expect(projected).toContain('content: 0; url=./guide/quickstart')
-      expect(projected).not.toContain('# DeepSeek Harness')
+      expect(projected).not.toMatch(/^# (?:Gestalt|獭子哥)/m)
     }
   })
 
@@ -691,7 +691,7 @@ describe('raw Markdown projection of the published manifest', () => {
     for (const route of ['index.md', 'en/index.md']) {
       const home = readFileSync(join(mirror, route), 'utf8')
       expect(home.startsWith('---'), route).toBe(false)
-      expect(home, route).toContain('# DeepSeek Harness')
+      expect(home, route).toMatch(/^# (?:Gestalt|獭子哥)/m)
     }
   })
 
@@ -728,7 +728,11 @@ function relativeTargets(markdown: string): string[] {
 }
 
 describe('llmsTxt', () => {
-  const site = { base: '/x/', title: 'DeepSeek Harness', description: '插件化 SDK' }
+  const site = {
+    base: '/x/',
+    title: 'Gestalt / 獭子哥',
+    description: 'Gestalt is built on DeepSeek Harness.',
+  }
 
   it('lists every sidebar page as a base-prefixed raw-Markdown link', () => {
     const text = llmsTxt(site)
@@ -746,9 +750,15 @@ describe('llmsTxt', () => {
 
   it('carries the site identity and the raw-Markdown convention', () => {
     const text = llmsTxt(site)
-    expect(text.startsWith('# DeepSeek Harness\n')).toBe(true)
-    expect(text).toContain('> 插件化 SDK')
+    expect(text.startsWith('# Gestalt / 獭子哥\n')).toBe(true)
+    expect(text).toContain('> Gestalt is built on DeepSeek Harness.')
     expect(text).toMatch(/`\.md`/)
+    expect(text).toContain(
+      '[Gestalt source repository](https://github.com/gestaltrun/deepseek-harness-gestalt)',
+    )
+    expect(text).toContain(
+      '[Official DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)',
+    )
   })
 })
 

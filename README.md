@@ -67,7 +67,7 @@ Gestalt does not create another agent runtime. Official DSH supplies the plugin 
     <tr>
       <td>Context and review</td>
       <td><code>DONE</code></td>
-      <td>Text and image Annotation selects assistant text or pins images, attaches notes, restores drafts, and submits the result as an ordinary user message</td>
+      <td><a href="packages/client/ui-conversation/README.md">Text and image Annotation</a> selects assistant text or pins images, attaches notes, restores drafts, and submits the result as an ordinary user message</td>
       <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/7edaf7daa3d69b97382ef4b47ce35d37dce863b7/pr-70-text-annotation-517ad8.gif" alt="Selecting assistant text, adding a note, and submitting the Annotation draft" width="520"></td>
     </tr>
     <tr>
@@ -92,7 +92,7 @@ Gestalt does not create another agent runtime. Official DSH supplies the plugin 
     <tr>
       <td>Mobile Companion</td>
       <td><code>DONE</code></td>
-      <td>Platform Account, Personal Pairing, encrypted Relay, concurrent phones, TestFlight delivery, and a signed Android APK. Desktop remains the authority for Sessions, Workspaces, attachments, approvals, and questions</td>
+      <td><a href="docs/subsystems/platform-account.md">Platform Account</a>, <a href="docs/subsystems/personal-pairing.md">Personal Pairing</a>, encrypted Relay, concurrent phones, TestFlight delivery, and a signed Android APK. Desktop remains the authority for Sessions, Workspaces, attachments, approvals, and questions</td>
       <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/0af70c971b999cc54d18884233d7c59e595aba68/companion-ui-pr-371.gif" alt="Desktop Settings showing two paired Mobile devices online at the same time" width="520"></td>
     </tr>
     <tr>

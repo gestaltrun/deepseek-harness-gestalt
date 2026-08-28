@@ -375,6 +375,14 @@ export async function handleCompanionProductOperation(
       return await settleInteraction(operation, dependencies)
     case 'read-image':
       return await readImage(operation, dependencies)
+    case 'member-question':
+      return {
+        type: 'operation-failed', operationId: operation.operationId,
+        failure: {
+          kind: 'business', code: 'member-question-not-accepted',
+          message: 'This Desktop does not accept routed member questions yet',
+        },
+      }
     default: {
       const never: never = operation
       return never

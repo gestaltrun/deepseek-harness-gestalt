@@ -20,6 +20,8 @@ Major 4 新增 `observe-session` 与主动发送的 `session-live` 替换。每�
 
 conversation projection 会回显 history 请求中可选的 exclusive `beforeSeq`。cursor 缺失时替换 tail；cursor 存在时标识由 Mobile 进行连续性校验并 prepend 的旧 page。
 
+Major 4 还承载两个 Platform 账号的配对安装之间交换的成员提问。`member-question` 操作携带品牌化 question id、有界 Decision Brief origin（项目名、发起 Session 标题、提问者账号、角色、显示名、头像 URL）、agent 撰写的 background、复用 user-questions 问题项形态的一个问题批次，以及至多 8 条带 reason 的参考文档 path。`member-question-settled` 结果携带全局幂等的 outcome——`answered`（附带回显的 answers 批次）、`declined`、`expired`、`withdrawn` 或 `superseded`——以及可选的结算设备 id 与时刻，并可作为 terminal mutation result 通过 `query-operation-status` 重放。`member-question-state` 投影为 endpoint 状态栏携带派生的接收端状态（`pending` 或一种终态）。每个 member-question 载体都要求应用 major 4，拒绝未知字段，并将每条字符串限制在其文档化的 code-point 上限内。
+
 ## Endpoint attachment cipher
 
 `deriveCompanionAttachmentKey`、`sealCompanionAttachment`、`openCompanionAttachment` 与 `hashCompanionCiphertext` 以 HKDF-SHA-256 密钥派生和 AES-256-GCM 实现加密 attachment 传输的 endpoint 侧。密封载荷是 `iv(12) ‖ ciphertext ‖ tag(16)`（`COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES` = 28）。两个 endpoint 链接这些函数；Platform blob store 只接收 `sealCompanionAttachment` 的输出及其 SHA-256，永不派生密钥。密钥材料由 Personal Pairing 层提供。100 MiB blob 上限是密文限制；Mobile 会拒绝加上该开销后无法放入上限的明文。
@@ -45,6 +47,16 @@ conversation projection 会回显 history 请求中可选的 exclusive `beforeSe
 | Session 搜索查询 | 500 个 UTF-16 code unit |
 | Session 搜索结果 | 20 个唯一 Session |
 | Session 搜索 snippet | 240 个 Unicode code point |
+| 成员提问发起 Session 标题 | 200 个 Unicode code point |
+| 成员提问者显示名 | 80 个 Unicode code point |
+| 成员提问者头像 URL | 300 个 Unicode code point |
+| 成员提问 background | 600 个 Unicode code point |
+| 成员提问参考 path | 512 个 Unicode code point |
+| 成员提问参考 reason | 100 个 Unicode code point |
+| 成员提问结算设备 id | 80 个 Unicode code point |
+| 成员提问结算时刻 | 40 个 Unicode code point |
+| 成员提问参考文档 | 8 个 |
+| 成员提问选项 | 8 个 |
 | Host 失败消息 | 4,096 个 UTF-8 字节 |
 | 保留的 attachment blob | 104,857,600 密文字节（100 MiB） |
 | Attachment capability 生命周期 | 900,000 毫秒（15 分钟） |

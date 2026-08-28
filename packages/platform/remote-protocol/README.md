@@ -20,6 +20,8 @@ Major 4 adds `observe-session` and unsolicited `session-live` replacements. One 
 
 A conversation projection echoes the optional exclusive `beforeSeq` from its history request. An absent cursor replaces the tail; a present cursor identifies an older page that Mobile continuity-checks and prepends.
 
+Major 4 also carries member-directed questions exchanged between the paired installations of two Platform accounts. The `member-question` operation carries the branded question id, the bounded Decision Brief origin (project name, originating Session title, asker account, role, display name, avatar URL), the agent-authored background, one question batch reusing the user-questions item shape, and up to eight referenced document paths with reasons. The `member-question-settled` result carries the globally idempotent outcome — `answered` with the echoing answer batch, `declined`, `expired`, `withdrawn`, or `superseded` — plus the optional settling device id and moment, and replays through `query-operation-status` as a terminal mutation result. The `member-question-state` projection carries the derived receiver state (`pending` or one terminal outcome) for endpoint status bars. Every member-question carrier requires application major 4, rejects unknown fields, and bounds each string by its documented code-point ceiling.
+
 ## Endpoint attachment cipher
 
 `deriveCompanionAttachmentKey`, `sealCompanionAttachment`, `openCompanionAttachment`, and `hashCompanionCiphertext` implement the endpoint side of encrypted attachment transfer with HKDF-SHA-256 key derivation and AES-256-GCM. The sealed payload is `iv(12) ‖ ciphertext ‖ tag(16)` (`COMPANION_ATTACHMENT_SEAL_OVERHEAD_BYTES` = 28). Both endpoints link these functions; the Platform blob store receives only `sealCompanionAttachment` output and its SHA-256 and never derives the key. Key material is supplied by the Personal Pairing layer. The 100 MiB blob ceiling is a ciphertext limit; Mobile rejects plaintext that cannot fit after this overhead.
@@ -45,6 +47,16 @@ A conversation projection echoes the optional exclusive `beforeSeq` from its his
 | Session search query | 500 UTF-16 code units |
 | Session search result | 20 unique Sessions |
 | Session search snippet | 240 Unicode code points |
+| Member question origin Session title | 200 Unicode code points |
+| Member question asker display name | 80 Unicode code points |
+| Member question asker avatar URL | 300 Unicode code points |
+| Member question background | 600 Unicode code points |
+| Member question reference path | 512 Unicode code points |
+| Member question reference reason | 100 Unicode code points |
+| Member question settling device id | 80 Unicode code points |
+| Member question settled moment | 40 Unicode code points |
+| Member question references | 8 |
+| Member question options | 8 |
 | Host failure message | 4,096 UTF-8 bytes |
 | Retained attachment blob | 104,857,600 ciphertext bytes (100 MiB) |
 | Attachment capability lifetime | 900,000 ms (15 minutes) |

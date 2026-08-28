@@ -25,6 +25,9 @@ export type CompanionOperationId = Branded<'CompanionOperationId'>
 /** Pairing-private identity of one pending Approval or Ask User request. */
 export type CompanionInteractionId = Branded<'CompanionInteractionId'>
 
+/** Protocol-native identity of one member-directed question carrier. */
+export type MemberQuestionId = Branded<'MemberQuestionId'>
+
 /** Protocol-native identifier for an approved Session projection or operation target. */
 export type CompanionSessionId = Branded<'CompanionSessionId'>
 
@@ -152,6 +155,74 @@ export interface CompanionSettleInteractionOperation {
   settlement: CompanionInteractionSettlement
 }
 
+/** Collaboration-plane role of one project member; disjoint from Git-platform permissions. */
+export type MemberQuestionRole = 'owner' | 'admin' | 'member'
+
+/**
+ * Remote origin of one member-directed question, bounded to the public identity
+ * fields the receiver renders on its Decision Brief banner.
+ */
+export interface CompanionMemberQuestionOrigin {
+  /** Display name of the cloud project the asking workspace is bound to. */
+  projectName: string
+  /** One-line title of the originating Session; never carries conversation content. */
+  originSessionTitle: string
+  /** Platform account reference of the asking member. */
+  askerAccountId: string
+  askerRole: MemberQuestionRole
+  /** Public display name shown beside the asker avatar. */
+  askerDisplayName: string
+  /** Avatar image URL rendered by the receiver's brief banner. */
+  askerAvatarUrl: string
+}
+
+/** One selectable option inside a member question, mirroring the user-questions option shape. */
+export interface CompanionMemberQuestionOption {
+  /** User-facing label. */
+  label: string
+  /** Optional extra context rendered by capable UIs. */
+  description?: string
+}
+
+/** One question in a routed member-question batch, mirroring the user-questions item shape. */
+export interface CompanionMemberQuestionItem {
+  /** Stable caller-provided question id, echoed by the settlement answers. */
+  id: string
+  /** The question to display. */
+  question: string
+  /** Optional short heading or group label. */
+  header?: string
+  /** Optional choices the receiver renders as a menu. */
+  options?: readonly CompanionMemberQuestionOption[]
+  /** Whether more than one option may be selected. */
+  multiSelect?: boolean
+}
+
+/** One referenced document attached to a member question. */
+export interface CompanionMemberQuestionReference {
+  /** Path the receiving Desktop resolves inside the receiving workspace. */
+  path: string
+  /** Why this document matters, rendered as the receiver's reference chip subtitle. */
+  reason: string
+}
+
+/**
+ * Member-directed question routed between paired installations with its bounded
+ * Decision Brief: origin identity, agent-authored background, one question batch,
+ * and referenced documents.
+ */
+export interface CompanionMemberQuestionOperation {
+  type: 'member-question'
+  operationId: CompanionOperationId
+  /** Identity whose settlement results and state projections correlate across endpoints. */
+  questionId: MemberQuestionId
+  origin: CompanionMemberQuestionOrigin
+  /** Agent-authored decision background; bounded at request construction. */
+  background: string
+  questions: readonly CompanionMemberQuestionItem[]
+  references: readonly CompanionMemberQuestionReference[]
+}
+
 /**
  * Stable explicit Companion attachment rejection reasons; never carry application data.
  *
@@ -185,6 +256,7 @@ export type CompanionOperation =
   | CompanionCancelSessionOperation
   | CompanionReadImageOperation
   | CompanionSettleInteractionOperation
+  | CompanionMemberQuestionOperation
 
 /** Desktop-authoritative acceptance of a correlated operation. */
 export interface CompanionConfirmedResult {
@@ -262,6 +334,41 @@ export interface CompanionInteractionReceiptResult {
   reason?: 'not-pending' | 'bad-response'
 }
 
+/** Terminal outcome of one routed member question. */
+export type MemberQuestionOutcome =
+  | 'answered'
+  | 'declined'
+  | 'expired'
+  | 'withdrawn'
+  | 'superseded'
+
+/** Answer to one question of a settled member-question batch, mirroring the user-questions answer shape. */
+export interface CompanionMemberQuestionAnswer {
+  /** The answered question id, echoing the operation's question batch. */
+  id: string
+  /** Selected option labels. May accompany custom text for a multi-select question. */
+  selected: readonly string[]
+  /** Optional free-text "Other" answer. */
+  custom?: string
+}
+
+/**
+ * Global settlement of one routed member question, idempotent by question id.
+ * The answer batch is admitted only for the `answered` outcome.
+ */
+export interface CompanionMemberQuestionSettledResult {
+  type: 'member-question-settled'
+  operationId: CompanionOperationId
+  questionId: MemberQuestionId
+  outcome: MemberQuestionOutcome
+  /** Settling answers echoed by question id; present only when the outcome is `answered`. */
+  answers?: readonly CompanionMemberQuestionAnswer[]
+  /** Identifier of the device that settled the question, named on the receiver's record band. */
+  settledByDeviceId?: string
+  /** Settling moment rendered on the receiver's record band. */
+  settledAtMoment?: string
+}
+
 /** Terminal Desktop result retained for one idempotent Companion mutation. */
 export type CompanionMutationResult =
   | CompanionConfirmedResult
@@ -269,6 +376,7 @@ export type CompanionMutationResult =
   | CompanionAttachmentRejectedResult
   | CompanionOperationFailedResult
   | CompanionInteractionReceiptResult
+  | CompanionMemberQuestionSettledResult
 
 /** Reconnect answer returning the original committed result for one operation id. */
 export interface CompanionCommittedStatusResult {
@@ -293,6 +401,7 @@ export type CompanionResult =
   | CompanionOperationFailedResult
   | CompanionImageChunkResult
   | CompanionInteractionReceiptResult
+  | CompanionMemberQuestionSettledResult
   | CompanionCommittedStatusResult
   | CompanionAbsentStatusResult
 
@@ -392,6 +501,19 @@ export type CompanionLiveSessionProjection = {
   }
 )
 
+/**
+ * Derived receiver-side lifecycle state of one routed member question, projected
+ * to every endpoint status bar showing the question.
+ */
+export type MemberQuestionState = 'pending' | MemberQuestionOutcome
+
+/** Derived state projection for one routed member question. */
+export interface CompanionMemberQuestionStateProjection {
+  type: 'member-question-state'
+  questionId: MemberQuestionId
+  state: MemberQuestionState
+}
+
 /** Projections in the first implemented Companion codec slice. */
 export type CompanionProjection =
   | CompanionTranscriptPageProjection
@@ -399,6 +521,7 @@ export type CompanionProjection =
   | CompanionSurfaceSnapshotProjection
   | CompanionConversationSnapshotProjection
   | CompanionLiveSessionProjection
+  | CompanionMemberQuestionStateProjection
 
 /** Version-tagged encrypted application plaintext before endpoint encryption. */
 export type CompanionMessage =

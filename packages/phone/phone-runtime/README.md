@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The phone device fleet Service over one external [mobilecli](https://github.com/mobile-next/mobilecli) server: the package spawns `mobilecli server start --listen 127.0.0.1:<serverPort>` as a child process, polls its HTTP JSON-RPC endpoint (methods per the upstream [OpenRPC specification](https://github.com/mobile-next/mobile-openrpc/blob/main/mobilecli/openrpc.md)), and publishes the unified Android/iOS device listing on `ctx.phoneDevices`. Service Definition and Provider are folded into one package while mobilecli is the only backend; a future Consumer (tool or GUI) lives in its own package and imports only this one.
+The phone device fleet Service over one external [mobilecli](https://github.com/mobile-next/mobilecli) server: the package spawns `mobilecli server start --listen 127.0.0.1:<serverPort>` as a child process, polls its HTTP JSON-RPC endpoint (methods per the upstream [OpenRPC specification](https://github.com/mobile-next/mobile-openrpc/blob/main/mobilecli/openrpc.md)), and publishes the unified Android/iOS device listing on `ctx.phoneDevices`. Service Definition and Provider are folded into one package while mobilecli is the only backend; the deferred model Consumer lives in [`dsh-tool-phone`](../tool-phone/README.md) and imports only this package.
 
 - `listDevices(signal?)` — fresh grouped listing `{ android, ios: { simulators, reals } }`; every entry is a frozen `PhoneDeviceRef` (`id` branded `DeviceId`, `name`, `kind: 'emulator' | 'simulator' | 'real'`, `online`). Offline emulators and simulators are included because they are valid boot targets; the query always sends `includeOffline: true`, and `online` is true only for the upstream `online` state (`offline`, `unauthorized`, and other states read false).
 - `boot(id, signal?)` / `shutdown(id, signal?)` — upstream `device.boot` / `device.shutdown`, addressed by the branded id. Physical handsets are refused locally with `PHONE_REAL_DEVICE` before any RPC (upstream restricts both verbs to simulators/emulators), and ids absent from the latest published listing fail with `PHONE_DEVICE_NOT_FOUND`. A successful mutation schedules an immediate refresh poll.
@@ -29,7 +29,7 @@ A missing or unusable mobilecli fails composition loudly with install guidance (
 
 ## Model Experience
 
-None, as this package is a pure Host-side device fleet service that registers no prompt, tool schema, or other model-visible surface.
+Indirectly, through dsh-tool-phone, which renders every listing, observation, mutation, action, and screenshot fact.
 
 #### KV Cache effect
 

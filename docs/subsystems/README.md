@@ -43,8 +43,8 @@ One page per subsystem of the DeepSeek Harness: what it is, the data structures 
 | [subagent.md](subagent.md) | the subagent seam: the named-provider registry, `SubagentStartRequest`/`Result`/`Run`, the start-time-vs-runtime capability split |
 | [agent-team.md](agent-team.md) | Agent Teams: implicit Lead identity, named continuable teammates, durable peer mailbox, and shared task DAG |
 | [web.md](web.md) | the web access seam: `WebSearchRequest`/`Result`, `WebFetchRequest`/`Result`, `WebFetchBody`, provider availability, `WebError` |
-| [browser-runtime.md](browser-runtime.md) | the Browser Runtime seam
-| [phone-runtime.md](phone-runtime.md) | the phone device fleet seam: the folded mobilecli Service, loopback server lifecycle, health polling, IO/capture verbs, and the grouped Android/iOS listing on `ctx.phoneDevices` |
+| [browser-runtime.md](browser-runtime.md) | the Browser Runtime seam: opaque Profile/Workspace/browser/tab identities, revision-guarded operations, Session-owned Workspace binder, deterministic Provider, and deferred tool Consumer |
+| [phone-runtime.md](phone-runtime.md) | the phone device fleet seam: the folded mobilecli Service, loopback server lifecycle, health polling, IO/capture verbs, the grouped Android/iOS listing on `ctx.phoneDevices`, and the deferred tool Consumer |
 | [phone-stream.md](phone-stream.md) | same-origin phone IO WebSocket and signed MJPEG/H264 reverse-proxy on `ctx.phoneStream` |
 | [spill.md](spill.md) | the spill storage seam: `SaveTextSpill`, `SpillOwner`/`SpillSource`, `SpillRef`, the branded `SpillLocator` |
 | [workflow.md](workflow.md) | the workflow seam: `WorkflowStartRequest`, `WorkflowMeta`, `WorkflowRun`/`Result`, the `workflow/*` event payloads, `WorkflowError` fatality |

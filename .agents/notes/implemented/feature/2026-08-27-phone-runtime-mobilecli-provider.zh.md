@@ -30,4 +30,4 @@
 
 ## Consequences
 
-Consumer 获得面向双平台、以 branded id 寻址的单一表面，可以带变更通知地 boot/shutdown 模拟器；但也继承硬性的用户前置：必须安装 mobilecli（npm/源码）且其平台前置（adb、Xcode CLT）在场。`io` 与 `startCapture` 是给 Host Consumer（例如[同源流通道](../architecture/2026-08-28-phone-same-origin-stream-channel.zh.md)）追加的 Service 方法；它们不改变清单或生命周期语义。外部依赖保持 FSL-1.1-Apache-2.0 的安全距离——只执行、绝不 vendor——行为随安装版本走；本包只锚定其校验的 OpenRPC 方法名与线上形状。套件以脚本化的 `fakemobilecli` JSON-RPC 替身无密钥运行；Windows 覆盖待该平台的垫片方案出现后再补。
+延迟 Consumer [`dsh-tool-phone`](2026-08-28-tool-phone-deferred-device-tools.zh.md) 获得面向双平台、以 branded id 寻址的单一表面，可以带变更通知地 boot/shutdown 模拟器；但也继承硬性的用户前置：必须安装 mobilecli（npm/源码）且其平台前置（adb、Xcode CLT）在场。`io` 与 `startCapture` 是给 Host Consumer（例如[同源流通道](../architecture/2026-08-28-phone-same-origin-stream-channel.zh.md)）追加的 Service 方法；它们不改变清单或生命周期语义。外部依赖保持 FSL-1.1-Apache-2.0 的安全距离——只执行、绝不 vendor——行为随安装版本走；本包只锚定其校验的 OpenRPC 方法名与线上形状。套件以脚本化的 `fakemobilecli` JSON-RPC 替身无密钥运行；Windows 覆盖待该平台的垫片方案出现后再补。

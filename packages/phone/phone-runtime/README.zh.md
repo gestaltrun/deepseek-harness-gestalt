@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-基于外部 [mobilecli](https://github.com/mobile-next/mobilecli) 服务进程的手机设备群 Service：本包以子进程方式启动 `mobilecli server start --listen 127.0.0.1:<serverPort>`，轮询其 HTTP JSON-RPC 端点（方法名遵循上游 [OpenRPC 规范](https://github.com/mobile-next/mobile-openrpc/blob/main/mobilecli/openrpc.md)），并在 `ctx.phoneDevices` 上发布合并后的 Android/iOS 设备清单。mobilecli 仍是唯一后端，Service Definition 与 Provider 折叠于同一包；未来的 Consumer（工具或 GUI）另立包，只 import 本包。
+基于外部 [mobilecli](https://github.com/mobile-next/mobilecli) 服务进程的手机设备群 Service：本包以子进程方式启动 `mobilecli server start --listen 127.0.0.1:<serverPort>`，轮询其 HTTP JSON-RPC 端点（方法名遵循上游 [OpenRPC 规范](https://github.com/mobile-next/mobile-openrpc/blob/main/mobilecli/openrpc.md)），并在 `ctx.phoneDevices` 上发布合并后的 Android/iOS 设备清单。mobilecli 仍是唯一后端，Service Definition 与 Provider 折叠于同一包；面向模型的延迟 Consumer 见 [`dsh-tool-phone`](../tool-phone/README.zh.md)，只 import 本包。
 
 - `listDevices(signal?)` — 返回分组清单 `{ android, ios: { simulators, reals } }`；每项为冻结的 `PhoneDeviceRef`（`id` 为 branded `DeviceId`、`name`、`kind: 'emulator' | 'simulator' | 'real'`、`online`）。关机的模拟器/仿真器同样是合法 boot 目标，因此始终随查询发送 `includeOffline: true`；仅上游 `online` 状态映射为 `online: true`（`offline`、`unauthorized` 等一律 false）。
 - `boot(id, signal?)` / `shutdown(id, signal?)` — 对应上游 `device.boot` / `device.shutdown`，以 branded id 寻址。真机在本包内先于 RPC 以 `PHONE_REAL_DEVICE` 拒绝（上游仅允许模拟器/仿真器），最新清单中不存在的 id 以 `PHONE_DEVICE_NOT_FOUND` 失败。变更成功后立即调度一次刷新轮询。
@@ -29,7 +29,7 @@
 
 ## 模型体验
 
-无模型体验：本包是纯 Host 侧的设备群服务，不注册任何提示词、工具模式或其他模型可见面。
+通过 dsh-tool-phone 间接影响模型；该 Consumer 会渲染全部清单、观察、变更、动作与截图事实。
 
 #### KV 缓存影响
 

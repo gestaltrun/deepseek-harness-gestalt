@@ -66,6 +66,7 @@ import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import DeterministicBrowserRuntime from '@deepseek-ai/dsh-browser-runtime-deterministic'
 import * as ToolBrowser from '@deepseek-ai/dsh-tool-browser'
+import * as ToolPhone from '@deepseek-ai/dsh-tool-phone'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
@@ -625,6 +626,26 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'All Browser tools are deferred: tool_search returns their schemas without activating them, and current eligibility remains authoritative.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-phone',
+    dir: 'tool-phone',
+    source: 'packages/phone/tool-phone/src/index.ts',
+    requires: ['ctx.tools', 'ctx.phoneDevices'],
+    writes: ['tool/call', 'tool/result'],
+    toolsConfig: { toolSearch: { maxResultBytes: 65_536 } },
+    async mount(ctx) {
+      ctx.provide('phoneDevices', {
+        async listDevices() {
+          return { android: [], ios: { simulators: [], reals: [] } }
+        },
+        async boot() {},
+        async shutdown() {},
+      } as never)
+      await ctx.plugin(ToolPhone)
+    },
+    note:
+      'All phone device tools are deferred: tool_search returns their schemas without activating them, and current eligibility remains authoritative. device_act, device_open, and device_close default to tools/pre-execute ask.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-web',

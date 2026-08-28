@@ -3128,6 +3128,22 @@ export interface Config {
 
 来源：[`packages/lsp/tool-lsp/src/index.ts:58`](../packages/lsp/tool-lsp/src/index.ts)
 
+<a id="deepseek-aidsh-tool-phone"></a>
+
+## `@deepseek-ai/dsh-tool-phone`
+
+需要：`phoneDevices` · `tools`
+
+```ts config-catalog
+/** Model-facing Consumer configuration. */
+export interface Config {
+  /** Cooperative timeout budget in milliseconds for each fleet call. */
+  readonly timeoutMs?: number
+}
+```
+
+来源：[`packages/phone/tool-phone/src/index.ts:23`](../packages/phone/tool-phone/src/index.ts)
+
 <a id="deepseek-aidsh-tool-pwsh"></a>
 
 ## `@deepseek-ai/dsh-tool-pwsh`

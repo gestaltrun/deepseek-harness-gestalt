@@ -286,6 +286,7 @@
     { "path": "./packages/browser/tool-browser" },
     { "path": "./packages/phone/phone-runtime" },
     { "path": "./packages/phone/phone-stream" },
+    { "path": "./packages/phone/tool-phone" },
     { "path": "./packages/spill/spill" },
     { "path": "./packages/spill/spill-local" },
     { "path": "./packages/spill/spill-policy" },

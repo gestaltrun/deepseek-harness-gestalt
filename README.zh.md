@@ -23,7 +23,7 @@
 獭子哥不另起一套 agent runtime。官方 DSH 提供插件树、agent loop、持久会话日志、能力 seam、Profile、CLI 和 SDK；Gestalt 在这套基础上增加统一的产品设置、工作空间与会话归属、审批、生命周期、共享 UI 和发行能力，再组成面向用户的产品域。
 
 <p align="center">
-  <img src="docs/assets/product/gestalt-product-architecture.zh.png" alt="从 DSH 基础层经过 Gestalt 共享产品层到三个产品域组及其具体产品功能的架构图" width="1100">
+  <img src="docs/assets/product/gestalt-product-architecture.zh.png" alt="以 DSH 为底部基础、共享产品层居中、三个产品域组位于上方的产品架构图" width="1100">
 </p>
 
 `DONE` 表示功能已进入 `master`，但可能比最新安装包更新。`DOING` 表示产品域已有交付中的改动。`TODO` 表示已进入产品计划。下表使用与架构图一致的一级产品域和二级产品域列，也是 README 唯一的产品状态清单。每个功能行只放一张产品画面，便于纵向浏览。

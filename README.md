@@ -23,7 +23,7 @@ The project continuously merges the [official DSH repository](https://github.com
 Gestalt does not create another agent runtime. Official DSH supplies the plugin tree, agent loop, durable Session log, capability seams, Profiles, CLI, and SDK. Gestalt adds shared product settings, Workspace and Session ownership, approvals, lifecycle, UI components, and distribution, then assembles them into user-facing product areas.
 
 <p align="center">
-  <img src="docs/assets/product/gestalt-product-architecture.en.png" alt="Gestalt product architecture from the DSH foundation through the shared product layer to three grouped product domains and their product functions" width="1100">
+  <img src="docs/assets/product/gestalt-product-architecture.en.png" alt="Product architecture with DSH as the bottom foundation, a shared product layer, and three grouped product domains" width="1100">
 </p>
 
 `DONE` means a function is on `master`, though it may be newer than the latest installer. `DOING` means the product area has an active delivery. `TODO` means the work is on the product plan. The table exposes first-level and second-level product-domain columns that match the architecture image, and it is the README's only product-status inventory. Each feature row contains at most one product recording so the walkthrough reads vertically.

@@ -18,7 +18,7 @@ export const DSH_REPOSITORY_URL = 'https://github.com/deepseek-ai/deepseek-harne
 export const GESTALT_PRODUCT_URL = 'https://www.gestaltrun.com/'
 
 /** Product artwork used by search and social previews. */
-export const GESTALT_SOCIAL_IMAGE_URL = 'https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/master/docs/assets/brand/tazige-ip.png'
+const GESTALT_SOCIAL_IMAGE_URL = 'https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/master/docs/assets/brand/tazige-ip.png'
 
 /** Bilingual identity used by the agent-facing documentation index. */
 export const docsSiteIdentity = {

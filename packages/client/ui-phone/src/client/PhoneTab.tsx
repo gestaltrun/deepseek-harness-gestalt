@@ -42,17 +42,23 @@ const GROUP_TITLES: Record<PhoneDeviceSummary['channel'], string> = {
   usb: 'USB 真机',
 }
 
-/** Row meta state caption per channel (the mockup fixes the emulator pair). */
+/**
+ * Row meta state caption per channel (the mockup fixes the emulator pair).
+ * The upstream `state === 'unauthorized'` overrides with the design's
+ * 未授权 caption; other verbatim states fall back to the derived value.
+ */
 function runningStateOf(device: PhoneDeviceSummary): string {
-  if (device.unauthorized === true) return '未授权'
+  if (device.state === 'unauthorized') return '未授权'
   if (device.channel === 'emulator') return device.online ? '运行中' : '已停止'
   return device.online ? '在线' : '离线'
 }
 
-/** The meta line: OS version when reported, then the running state. */
+/**
+ * The meta line. The upstream wire carries no OS version field, so the
+ * caption degrades to the running state alone (P5 leftover note).
+ */
 function rowMetaOf(device: PhoneDeviceSummary): string {
-  const state = runningStateOf(device)
-  return device.osVersion === undefined ? state : `${device.osVersion} · ${state}`
+  return runningStateOf(device)
 }
 
 /**
@@ -111,7 +117,7 @@ export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNo
           <section key={channel} aria-label={GROUP_TITLES[channel]}>
             <div className={css.groupName}>{GROUP_TITLES[channel]}</div>
             {group.map(device => (
-              device.unauthorized === true ? (
+              device.state === 'unauthorized' ? (
                 <div key={device.id} role="alert" className={css.unauthorizedArm}>
                   <p className={css.unauthorizedTitle}>真机未授权调试</p>
                   <p className={css.unauthorizedDetail}>

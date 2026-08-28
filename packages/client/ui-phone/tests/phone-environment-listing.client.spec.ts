@@ -12,16 +12,16 @@ import type { PhoneDeviceSummary } from '../src/client/registry.ts'
 afterEach(() => { vi.unstubAllGlobals() })
 
 const ANDROID_EMULATOR: PhoneDeviceSummary = {
-  id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: true,
+  id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true,
 }
 const ANDROID_USB: PhoneDeviceSummary = {
-  id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true,
+  id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'online', online: true,
 }
 const IOS_SIMULATOR: PhoneDeviceSummary = {
-  id: 'iPhone-16', name: 'iPhone 16 Pro', channel: 'emulator', online: false,
+  id: 'iPhone-16', name: 'iPhone 16 Pro', channel: 'emulator', state: 'offline', online: false,
 }
 const IOS_USB: PhoneDeviceSummary = {
-  id: 'UDID-9', name: 'iPhone', channel: 'usb', online: false,
+  id: 'UDID-9', name: 'iPhone', channel: 'usb', state: 'offline', online: false,
 }
 
 function deferred() {

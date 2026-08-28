@@ -120,7 +120,7 @@ describe('ui-phone client apply', () => {
 
   it('reaches the ready inventory from a successful fleet listing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-      android: [{ id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', online: true }],
+      android: [{ id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', state: 'online', online: true }],
       ios: { simulators: [], reals: [] },
     }), { status: 200 })))
     const sidebar = new SidebarUnderTest()

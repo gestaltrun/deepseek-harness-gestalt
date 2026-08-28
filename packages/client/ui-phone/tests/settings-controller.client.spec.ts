@@ -9,6 +9,8 @@ import {
   type PhoneEnvironmentSource, type PhoneEnvironmentView,
 } from '../src/client/phone-environment.ts'
 import { PhoneSettingsCardController } from '../src/client/phone-settings-controller.ts'
+import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
+import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 import type { PhoneSettings } from '../src/phone-settings.ts'
 
 function readyScope(enabled: boolean) {
@@ -37,6 +39,70 @@ describe('resolvePhoneCardView', () => {
   })
 })
 
+describe('PhoneSettingsCardController first-open auto-detect', () => {
+  it('auto-probes when enable arrives after construction: probing paints, ready lands', async () => {
+    const listing = new FakeListingSource().seed(listingOf([
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
+    ]))
+    // The real card constructs at apply time, before the scope hydrates —
+    // the enable flip arrives later and must kick the one auto-detect.
+    const host = stubSettingsScope<PhoneSettings>()
+    const controller = new PhoneSettingsCardController(host.scope, createListingPhoneEnvironmentSource(listing))
+    const face = controller.inject()
+    host.publish({
+      status: 'ready',
+      writable: true,
+      value: { enabled: true },
+      base: { enabled: false },
+      user: { enabled: true },
+      revision: 1,
+    })
+    // The first enabled paint is the probing view — never the probe-failed
+    // arm the stale phase used to settle on while the pull was in flight.
+    expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('probing')
+    await vi.waitFor(() => {
+      expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('ready')
+    })
+    expect(listing.refreshCount).toBe(1)
+    controller.dispose()
+  })
+
+  it('auto-probes on construction when the deployment is already enabled', async () => {
+    const listing = new FakeListingSource().seed(listingOf([
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
+    ]))
+    const host = readyScope(true)
+    const controller = new PhoneSettingsCardController(host.scope, createListingPhoneEnvironmentSource(listing))
+    const face = controller.inject()
+    expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('probing')
+    await vi.waitFor(() => {
+      expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('ready')
+    })
+    expect(listing.refreshCount).toBe(1)
+    controller.dispose()
+  })
+
+  it('falls to the probe-failed arm only when the auto-probe itself fails', async () => {
+    const listing = new FakeListingSource()
+    listing.scriptNext(Promise.reject(new Error('host down')))
+    const host = readyScope(true)
+    const controller = new PhoneSettingsCardController(host.scope, createListingPhoneEnvironmentSource(listing))
+    const face = controller.inject()
+    expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('probing')
+    await vi.waitFor(() => {
+      expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('errors')
+    })
+    // A disabled deployment never pulls.
+    const idle = new FakeListingSource()
+    const off = new PhoneSettingsCardController(readyScope(false).scope, createListingPhoneEnvironmentSource(idle))
+    await flush()
+    expect(off.inject().hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('off')
+    expect(idle.refreshCount).toBe(0)
+    controller.dispose()
+    off.dispose()
+  })
+})
+
 describe('PhoneSettingsCardController', () => {
   it('projects the durable enable flag onto the off / probe-failed views', () => {
     const host = readyScope(false)
@@ -56,12 +122,14 @@ describe('PhoneSettingsCardController', () => {
     const host = readyScope(true)
     const views: PhoneEnvironmentView[] = [{ kind: 'probing', checks: [] }]
     const listeners = new Set<() => void>()
+    const detect = async (): Promise<void> => {
+      views[0] = { kind: 'android-wizard', platformToolsInstalled: false }
+      for (const listener of [...listeners]) listener()
+    }
     const source: PhoneEnvironmentSource = {
       getView: () => views[0]!,
-      redetect: async () => {
-        views[0] = { kind: 'android-wizard', platformToolsInstalled: false }
-        for (const listener of [...listeners]) listener()
-      },
+      redetect: detect,
+      ensureDetected: () => { void detect() },
       subscribe: (listener) => {
         listeners.add(listener)
         return () => { listeners.delete(listener) }

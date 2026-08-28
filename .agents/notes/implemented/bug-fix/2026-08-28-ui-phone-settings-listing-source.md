@@ -23,3 +23,5 @@ The card and the picker share one `PhoneListingSource`. `createListingPhoneEnvir
 ## Consequences
 
 An empty but successful listing still opens a platform wizard because the listing body carries no adb/SDK/Xcode probe facts. The card's view union and copy-button commands stay those of [the settings-wizard note](../architecture/2026-08-28-ui-phone-settings-wizard-card.md).
+
+The card controller kicks the source's one-shot `ensureDetected` on every enabled publish instead of redetecting eagerly at construction, so the probing view is the first enabled paint (the scope is usually still unhydrated when the card constructs) and only a failed probe settles on the probe-failed arm.

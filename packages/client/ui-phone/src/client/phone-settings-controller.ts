@@ -62,7 +62,6 @@ export class PhoneSettingsCardController {
     this.unsubscribeScope = scope.subscribe(() => { this.publish() })
     this.unsubscribeSource = source.subscribe(() => { this.publish() })
     this.publish()
-    if (this.isEnabled()) void this.source.redetect()
   }
 
   /**
@@ -74,7 +73,6 @@ export class PhoneSettingsCardController {
     this.source = source
     this.unsubscribeSource = source.subscribe(() => { this.publish() })
     this.publish()
-    if (this.isEnabled()) void this.source.redetect()
   }
 
   /** Stop following the settings scope and the environment source. */
@@ -107,6 +105,9 @@ export class PhoneSettingsCardController {
 
   private publish(): void {
     const snapshot = this.scope.getSnapshot()
+    // An enabled card must not settle on the probe-failed arm while its
+    // first detection is still in flight: kick it when it has not run.
+    if (this.isEnabled()) this.source.ensureDetected?.()
     const enabled = snapshot.value?.enabled === true
     this.store.set({
       enabled,

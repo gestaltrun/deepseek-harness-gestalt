@@ -166,7 +166,7 @@ export function PhoneConnectedView({
 
   const current = devices.find(device => device.id === serial)
   const online = current?.online === true
-  const unauthorized = current?.unauthorized === true
+  const unauthorized = current?.state === 'unauthorized'
 
   const screenContent = (): ReactNode => {
     // A listed-unauthorized handset cannot stream: the design's warn arm

@@ -73,6 +73,7 @@ function readyDevicesOf(listing: PhoneListingSnapshot): readonly PhoneReadyDevic
 }
 
 function metaOf(device: PhoneDeviceSummary): string {
+  if (device.state === 'unauthorized') return `未授权 · ${device.id}`
   const run = device.online ? '运行中' : '已停止'
   return `${run} · ${device.id}`
 }
@@ -123,6 +124,12 @@ export function createListingPhoneEnvironmentSource(
         phase = 'failed'
       }
       notify()
+    },
+    ensureDetected: () => {
+      if (phase !== 'idle') return
+      phase = 'probing'
+      notify()
+      void source.redetect()
     },
     subscribe: (listener) => {
       listeners.add(listener)

@@ -17,8 +17,8 @@ import { FakeGateway, FakeListingSource, flush, listingOf, ManualScheduler, SESS
 afterEach(cleanup)
 
 const DEVICES: readonly PhoneDeviceSummary[] = [
-  { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: true },
-  { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true },
+  { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
+  { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'online', online: true },
 ]
 
 interface Harness {
@@ -109,7 +109,7 @@ describe('PhoneConnectedView chrome', () => {
         name="SM-S9310"
         visible={true}
         source={new FakeListingSource().seed(listingOf([
-          { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true, unauthorized: true },
+          { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'unauthorized', online: false },
         ]))}
         onOpenDevice={() => {}}
         createController={() => new PhoneConnectionController({
@@ -139,7 +139,7 @@ describe('PhoneConnectedView chrome', () => {
         name="SM-S9310"
         visible={true}
         source={new FakeListingSource().seed(listingOf([
-          { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true, unauthorized: true },
+          { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'unauthorized', online: false },
         ]))}
         onOpenDevice={() => {}}
         createController={() => new PhoneConnectionController({

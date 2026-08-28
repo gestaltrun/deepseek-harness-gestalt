@@ -49,16 +49,15 @@ export interface PhoneDeviceSummary {
   readonly name: string
   /** Which group header the row belongs under. */
   readonly channel: 'emulator' | 'usb'
-  /** Whether the device currently reports an open connection. */
+  /** Whether the device currently reports an open connection (derived). */
   readonly online: boolean
   /**
-   * The handset is USB-connected but debugging is not authorized; the rows
-   * and the connected view render the design's error arm instead of the
-   * offline state. Absent when the listing reports no authorization gate.
+   * Upstream device state verbatim (`online`, `offline`, `unauthorized`,
+   * …) — the #421 `PhoneDeviceRefWire.state` contract. The rows and the
+   * connected view read `state === 'unauthorized'` for the design's error
+   * arm instead of keying on a dedicated flag.
    */
-  readonly unauthorized?: boolean
-  /** OS version caption (Android 15, iOS 18…); absent when unreported. */
-  readonly osVersion?: string
+  readonly state: string
 }
 
 /** One committed listing: summaries grouped per platform segment. */

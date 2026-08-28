@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-28-ui-phone-settings-listing-source.md
-2026-08-28-ui-phone-settings-listing-source.md: 2c4cb25ccd7e264f39ff7a82f8ad480566ae4fc1
-2026-08-28-ui-phone-settings-listing-source.zh.md: b7a1e7be9d9cb6d96fecbe3f5145f5fbc3583d45
+2026-08-28-ui-phone-settings-listing-source.md: 34d446f63e9189739fd5fb72e65be56168b310e5
+2026-08-28-ui-phone-settings-listing-source.zh.md: d20a46ed22164a65790e458566b4ef50b66c4f4c

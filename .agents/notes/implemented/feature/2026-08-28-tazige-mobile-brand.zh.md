@@ -16,6 +16,8 @@ Mobile Companion 仍是技术产品术语，DeepSeek Gestalt 仍是 Paired Deskt
 
 源图标是不透明的方形主图，不包含文字、水印、内置圆角遮罩或设定稿排版。iOS 消费 1024 像素主图，Android 消费每个仓内密度的经评审 legacy、round 与 adaptive launcher 派生图。Release build 在原生编译前执行聚焦品牌校验。
 
+后续的[原生应用身份决策](../bug-fix/2026-08-28-mobile-application-identity.zh.md)只取代上文保持 bundle id 稳定的条款。本记录继续拥有消费者名称与视觉身份。
+
 ## Alternatives considered
 
 **把 DeepSeek Gestalt 保留为已安装应用名。**不采用，因为已批准的产品方向为手机应用提供独立且可识别的消费者身份，同时在文档与架构中保留技术关系。

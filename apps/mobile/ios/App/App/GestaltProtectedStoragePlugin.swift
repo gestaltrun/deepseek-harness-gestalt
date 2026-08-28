@@ -12,7 +12,7 @@ public final class GestaltProtectedStoragePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "remove", returnType: CAPPluginReturnPromise),
     ]
 
-    private let service = "com.alibaba.gestalt.mobile.protected-storage.v1"
+    private let service = "com.gestalt.mobile.protected-storage.v1"
 
     @objc func get(_ call: CAPPluginCall) {
         guard let key = validKey(call) else { return }

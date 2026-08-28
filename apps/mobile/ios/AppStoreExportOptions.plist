@@ -12,8 +12,8 @@
   <string>MUX3KT56Q6</string>
   <key>provisioningProfiles</key>
   <dict>
-    <key>com.alibaba.gestalt.mobile</key>
-    <string>Gestalt Mobile App Store</string>
+    <key>com.gestalt.mobile</key>
+    <string>Gestalt Mobile App Store com.gestalt.mobile</string>
   </dict>
   <key>stripSwiftSymbols</key>
   <true/>

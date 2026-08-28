@@ -16,6 +16,8 @@ Mobile Companion remains the technical product term, DeepSeek Gestalt remains th
 
 The source icon is an opaque square master without text, a watermark, a baked corner mask, or reference-sheet layout. iOS consumes the 1024-pixel master, while Android consumes reviewed legacy, round, and adaptive launcher derivatives at every checked-in density. Release builds execute focused brand validation before native compilation.
 
+The later [native application identity decision](../bug-fix/2026-08-28-mobile-application-identity.md) supersedes only the bundle-id stability clause above. This note continues to own the consumer name and visual identity.
+
 ## Alternatives considered
 
 **Keep DeepSeek Gestalt as the installed application name.** Rejected because the approved product direction gives the phone application its own recognizable consumer identity while retaining the technical relationship in documentation and architecture.

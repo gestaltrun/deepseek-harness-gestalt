@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import PhoneDevices, { deviceId } from '@deepseek-ai/dsh-phone-runtime'
@@ -20,6 +21,7 @@ afterEach(async () => {
 
 const IOS_REAL = deviceId('REAL-UDID')
 const ANDROID_EMULATOR = deviceId('emulator-5554')
+const ENVELOPE_REAL_HANDSET = deviceId('00008101-000A2B3C4D5E6F70')
 
 const BASE_DEVICES = [
   wireDevice('emulator-5554', 'android', 'emulator', 'online'),
@@ -32,6 +34,12 @@ const FAST_CONFIG: Partial<Config> = {
   requestTimeoutMs: 1_500,
   bootTimeoutMs: 2_000,
 }
+
+/** Real mobilecli 1.0.5 devices.list result envelope captured during acceptance R2-C. */
+const REAL_1_0_5_ENVELOPE = JSON.parse(readFileSync(
+  new URL('./fixtures/mobilecli-1.0.5-devices-envelope.json', import.meta.url),
+  'utf8',
+)) as { result: { devices: Array<Record<string, unknown>> } }
 
 async function mountWith(fake: Awaited<ReturnType<typeof stageFake>>, overrides: Partial<Config> = {}): Promise<CordisContext> {
   fake.claim()
@@ -112,5 +120,30 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
       await new Promise(resolveWait => setTimeout(resolveWait, 5))
     }
     expect(changes).toEqual([{ state: 'offline', online: false }])
+  })
+
+  it('serves the real 1.0.5 envelope end to end: grouped listing, observe leg, io round trip', async () => {
+    const fake = await stageFake({ devices: REAL_1_0_5_ENVELOPE.result.devices, listEnvelope: true })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+
+    // list: the enveloped result maps onto the grouped listing, duplicates included.
+    const list = await context.phoneDevices.listDevices()
+    expect(list.ios.reals.map(device => [device.id, device.state, device.online])).toEqual([
+      [ENVELOPE_REAL_HANDSET, 'online', true],
+      [ENVELOPE_REAL_HANDSET, 'online', true],
+    ])
+    expect(list.ios.simulators.map(device => [device.name, device.online])).toEqual([
+      ['DSH Companion iOS Acceptance', true],
+      ['DSH Tazige Brand Proof', true],
+      ['iPhone 15 Pro', false],
+    ])
+
+    // observe leg: the captured handset answers io (the Consumer observe path
+    // reads the same listing for its device facts).
+    await context.phoneDevices.io({ deviceId: ENVELOPE_REAL_HANDSET, method: 'tap', x: 1, y: 1 })
+    expect((await fake.counters()).io).toEqual([
+      { method: 'device.io.tap', params: { deviceId: '00008101-000A2B3C4D5E6F70', x: 1, y: 1 } },
+    ])
   })
 })

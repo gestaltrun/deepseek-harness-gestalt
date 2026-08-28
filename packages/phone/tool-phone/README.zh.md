@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这是 `ctx.phoneDevices` 的模型 Consumer。它把 `device_list`、`device_open`、`device_close`、`device_observe`、`device_act` 与 `device_screenshot` 注册为普通延迟工具。`device_act` 只接受封闭的 tap、swipe、type 或硬件按钮动作；没有任意 `adb` 或 shell 路径。
+这是 `ctx.phoneDevices` 的模型 Consumer。它把 `device_list`、`device_open`、`device_close`、`device_observe`、`device_act` 与 `device_screenshot` 注册为普通延迟工具。`device_act` 只接受封闭的 tap、swipe、type 或硬件按钮动作；没有任意 `adb` 或 shell 路径。`device_list` 与 `device_observe` 的应答每项携带 `id`/`name`/`kind`/`state`/`online`/`platform`。
 
 ## 配置
 

@@ -45,6 +45,9 @@ const DEVICE_REF_SCHEMA = {
     kind: { type: 'string' as const, required: true as const, enum: ['emulator', 'simulator', 'real'] },
     state: { type: 'string' as const, required: true as const },
     online: { type: 'boolean' as const, required: true as const },
+    // Runtime listing refs carry the upstream platform even though the public
+    // PhoneDeviceRef type omits it, so the declared output must accept it.
+    platform: { type: 'string' as const, required: true as const, enum: ['ios', 'android'] },
   },
 } as const
 

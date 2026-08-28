@@ -1,0 +1,57 @@
+{
+  "comment": "devices.list JSON-RPC result as captured from real mobilecli 1.0.5 (acceptance round R2-C, real iPhone iOS 26.5.1 plus two booted simulators): the result is an envelope object carrying a devices array, the online real handset appears twice, and an offline simulator rides along. Field names follow mobilecli 1.0.5 devices/common.go DeviceInfo (id, name, platform, type, version, state, model, provider). Device ids are sanitized.",
+  "result": {
+    "devices": [
+      {
+        "id": "00008101-000A2B3C4D5E6F70",
+        "name": "iPhone",
+        "platform": "ios",
+        "type": "real",
+        "version": "26.5.1",
+        "state": "online",
+        "model": "iPhone18,2",
+        "provider": { "type": "local" }
+      },
+      {
+        "id": "00008101-000A2B3C4D5E6F70",
+        "name": "iPhone",
+        "platform": "ios",
+        "type": "real",
+        "version": "26.5.1",
+        "state": "online",
+        "model": "iPhone18,2",
+        "provider": { "type": "local" }
+      },
+      {
+        "id": "D5AB1F8E-11D2-4E0A-9C7E-1A2B3C4D5E6F",
+        "name": "DSH Companion iOS Acceptance",
+        "platform": "ios",
+        "type": "simulator",
+        "version": "26.5.1",
+        "state": "online",
+        "model": "iPhone16,2",
+        "provider": { "type": "local" }
+      },
+      {
+        "id": "9F0E1D2C-3B4A-5968-7788-99AABBCCDDEE",
+        "name": "DSH Tazige Brand Proof",
+        "platform": "ios",
+        "type": "simulator",
+        "version": "26.5.1",
+        "state": "online",
+        "model": "iPhone16,2",
+        "provider": { "type": "local" }
+      },
+      {
+        "id": "C7D8E9F0-1122-3344-5566-778899AABBCC",
+        "name": "iPhone 15 Pro",
+        "platform": "ios",
+        "type": "simulator",
+        "version": "26.5.1",
+        "state": "offline",
+        "model": "iPhone15,4",
+        "provider": { "type": "local" }
+      }
+    ]
+  }
+}

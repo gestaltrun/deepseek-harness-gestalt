@@ -35,6 +35,9 @@ const LISTING: PhoneDeviceList = Object.freeze({
     kind: 'emulator' as const,
     state: 'online',
     online: true,
+    // Runtime listing refs carry the upstream platform (the public type omits
+    // it), so the declared output schema must accept it.
+    platform: 'android' as const,
   }]),
   ios: Object.freeze({
     simulators: Object.freeze([{
@@ -43,6 +46,7 @@ const LISTING: PhoneDeviceList = Object.freeze({
       kind: 'simulator' as const,
       state: 'shutdown',
       online: false,
+      platform: 'ios' as const,
     }]),
     reals: Object.freeze([{
       id: IOS_REAL_ID,
@@ -50,6 +54,7 @@ const LISTING: PhoneDeviceList = Object.freeze({
       kind: 'real' as const,
       state: 'online',
       online: true,
+      platform: 'ios' as const,
     }]),
   }),
 })

@@ -41,6 +41,8 @@ export interface FakeKnobs {
   agent?: FakeAgentKnobs
   /** Makes the named RPC method answer this JSON-RPC error verbatim. */
   failArm?: { method: string; code?: number; message: string }
+  /** Wraps the devices.list result in the real mobilecli 1.0.5 `{ devices: [...] }` envelope. */
+  listEnvelope?: boolean
 }
 
 /** Persistent agent state the fake CLI mode records across invocations. */

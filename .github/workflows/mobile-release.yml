@@ -78,6 +78,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment: mobile-release
     env:
+      MOBILE_BUNDLE_ID: ${{ vars.MOBILE_BUNDLE_ID }}
       MOBILE_VERSION: ${{ vars.MOBILE_VERSION }}
       MOBILE_BUILD_NUMBER: ${{ vars.MOBILE_BUILD_NUMBER }}
       VITE_PLATFORM_ORIGIN: ${{ vars.VITE_PLATFORM_ORIGIN }}

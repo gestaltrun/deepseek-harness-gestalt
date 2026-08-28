@@ -61,6 +61,7 @@ describe('Mobile brand validation', () => {
     const iosExport = source('../ios/AppStoreExportOptions.plist')
     const androidRelease = source('../scripts/build-android-release.sh')
     const iosRelease = source('../scripts/build-ios-release.sh')
+    const workflow = source('../../../.github/workflows/mobile-release.yml')
 
     expect(capacitor).toContain("appId: 'com.gestalt.mobile'")
     expect(gradle).toContain('namespace = "com.gestalt.mobile"')
@@ -75,6 +76,7 @@ describe('Mobile brand validation', () => {
     expect(iosExport).toContain('<key>com.gestalt.mobile</key>')
     expect(androidRelease).toContain('MOBILE_BUNDLE_ID:-com.gestalt.mobile')
     expect(iosRelease).toContain('MOBILE_BUNDLE_ID:-com.gestalt.mobile')
+    expect(workflow.match(/MOBILE_BUNDLE_ID: \$\{\{ vars\.MOBILE_BUNDLE_ID \}\}/gu)).toHaveLength(2)
 
     for (const owner of [
       capacitor,
@@ -87,6 +89,7 @@ describe('Mobile brand validation', () => {
       iosExport,
       androidRelease,
       iosRelease,
+      workflow,
     ]) {
       expect(owner).not.toContain('com.alibaba.gestalt.mobile')
     }

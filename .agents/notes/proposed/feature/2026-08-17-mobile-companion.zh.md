@@ -282,7 +282,7 @@ Keyless 组装应用 snapshot 覆盖未登录时拒绝 Pairing Challenge、跨�
 
 **使用自动数据库 down migration，或将配对密钥放入可丢弃缓存。** 不采用，因为滚动 Relay 版本需要兼容的扩展 schema，且 Mobile 缓存恢复不得销毁有效 Personal Pairing。
 
-**保留之前的移动端名称、bundle id 或视觉身份。** 不采用，因为该应用是 DeepSeek Gestalt 的移动界面，而不是迁移后的千机产品。后续的[獭子哥 Mobile 品牌决策](../../implemented/feature/2026-08-28-tazige-mobile-brand.zh.md)拥有消费者名称、视觉身份与 `com.gestalt.mobile` 原生 application identifier。
+**保留之前的移动端名称、bundle id 或视觉身份。** 不采用，因为该应用是 DeepSeek Gestalt 的移动界面，而不是迁移后的千机产品。后续的[獭子哥 Mobile 品牌决策](../../implemented/feature/2026-08-28-tazige-mobile-brand.zh.md)拥有消费者名称与视觉身份，[原生应用身份决策](../../implemented/bug-fix/2026-08-28-mobile-application-identity.zh.md)拥有 `com.gestalt.mobile`。
 
 **增加单独生物特征应用锁。** 从产品范围中拒绝；操作系统访问控制和加密存储拥有本地保护。
 

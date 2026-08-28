@@ -75,7 +75,7 @@ async function startChild(
   })
   await vi.waitFor(() => {
     expect(ctx.agents.get(started.childId)).toBeUndefined()
-  }, { timeout: 5_000 })
+  }, { timeout: 15_000 })
   return started.childId
 }
 

@@ -6,4 +6,4 @@ set -euo pipefail
 : "${IPA_PATH:?IPA_PATH is required}"
 test -f "${IPA_PATH}"
 xcrun altool --upload-app --type ios --file "${IPA_PATH}" \
-  --username "${APPLE_ID}" --password "${APPLE_APP_SPECIFIC_PASSWORD}"
+  --username "${APPLE_ID}" --password '@env:APPLE_APP_SPECIFIC_PASSWORD'

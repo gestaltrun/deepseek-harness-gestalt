@@ -95,6 +95,7 @@ describe('gate graph validation', () => {
 
     expect(ids).toEqual([
       'constraints',
+      'session-fixture-layout',
       'translation-pairing',
       'client-catalog',
       'tool-catalog',

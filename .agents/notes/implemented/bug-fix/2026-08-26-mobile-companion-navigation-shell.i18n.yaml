@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-26-mobile-companion-navigation-shell.md
-2026-08-26-mobile-companion-navigation-shell.md: b7554ab5dc9f90c30d37114dba34082c01c8683b
-2026-08-26-mobile-companion-navigation-shell.zh.md: 0c20497b7e01b035e5f84536f211a38947f2bb9a
+2026-08-26-mobile-companion-navigation-shell.md: 63744b54d67dfa8d11689e7cacddea7d577578f9
+2026-08-26-mobile-companion-navigation-shell.zh.md: c54450f889a8c9dccbf9246921e93b7a796f8e3b

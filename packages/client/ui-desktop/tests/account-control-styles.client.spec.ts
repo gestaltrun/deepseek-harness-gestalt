@@ -50,4 +50,13 @@ describe('AccountControl theme styles', () => {
     expect(block('.deviceIdentity strong')).toContain('overflow-wrap: anywhere')
     expect(block('.deviceAction')).toContain('white-space: nowrap')
   })
+
+  it('separates the online status text, surface, and indicator', () => {
+    const online = block(".connection\\[data-online='true'\\]")
+    expect(online).toContain('border: 1px solid var(--dsw-alias-state-success-primary)')
+    expect(online).toContain('color: var(--dsw-alias-label-primary)')
+    expect(online).toContain('background: var(--dsw-alias-bg-base)')
+    expect(block(".connection\\[data-online='true'\\]::before"))
+      .toContain('background: var(--dsw-alias-state-success-primary)')
+  })
 })

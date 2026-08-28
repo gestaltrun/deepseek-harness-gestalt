@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-28-root-readme-product-evidence.md
 2026-08-28-root-readme-product-evidence.md: f7634ead35c8cfad68ab744591c7a6263612c62f
-2026-08-28-root-readme-product-evidence.zh.md: 0b13dd3ea74a8e7d66c6e5b6fed31e207f9062b6
+2026-08-28-root-readme-product-evidence.zh.md: 2c3cb16e33559e9d0029aa6541223fb70b0cd112

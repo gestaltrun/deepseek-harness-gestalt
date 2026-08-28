@@ -3,8 +3,9 @@
  * The tool pauses until a UI provider returns a human answer, then feeds that
  * answer back into the agent loop as an ordinary tool result. When
  * `to_project_member` is present the call is routed through
- * `ctx.memberQuestionSender` instead of the local provider; runtime
- * eligibility filtering of that parameter is deferred.
+ * `ctx.memberQuestionSender` instead of the local provider. Runtime
+ * eligibility filtering hides that parameter from unbound workspaces at
+ * prompt assembly; the static schema retains it.
  *
  * @module @deepseek-ai/dsh-tool-ask-user
  */
@@ -13,6 +14,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import '@deepseek-ai/dsh-user-questions'
 import type { MemberQuestionOrigin } from '@deepseek-ai/dsh-member-question-sender'
 import {
@@ -60,7 +62,9 @@ export type OriginResolver = (input: OriginResolverInput) => Promise<MemberQuest
 /**
  * Resolves the cloud project whose peer grant addresses the member. Absent,
  * the tool forwards `to_project_member` as the project id so schema-level
- * routing can be tested without a membership face.
+ * routing can be tested without a membership face. The same resolver drives
+ * runtime eligibility: an unbound (undefined) result hides `to_project_member`
+ * from assembled prompts.
  */
 export type BoundProjectResolver = () => Promise<string | undefined>
 
@@ -72,8 +76,12 @@ export interface Config {
    */
   originResolver?: OriginResolver
   /**
-   * Resolves the workspace-bound cloud project for a routed ask. Absent, the
-   * addressee string is forwarded as the project id.
+   * Resolves the workspace-bound cloud project for a routed ask and for
+   * runtime eligibility of `to_project_member`. Absent or resolving to
+   * undefined hides the parameter from assembled prompts; a present id
+   * surfaces it. Execute still forwards the addressee as the project id
+   * when this resolver is absent so schema-level routing can be tested
+   * without a membership face.
    */
   boundProjectResolver?: BoundProjectResolver
 }
@@ -249,7 +257,7 @@ export function apply(ctx: Context, config: Config = {}): void {
         ...exec.agent !== undefined ? { agent: exec.agent } : {},
       })
       const projectId = (await resolved.boundProjectResolver?.()) ?? addressee
-      await sender.send({
+      const result = await sender.send({
         toProjectMember: addressee,
         projectId,
         background,
@@ -259,8 +267,73 @@ export function apply(ctx: Context, config: Config = {}): void {
           reason: reference.reason ?? reference.path,
         })),
         origin,
+        originSessionId: String(exec.agent?.session.id ?? 'unbound-origin'),
+      }, {
+        ...exec.agent !== undefined ? { session: exec.agent.session } : {},
+        signal: exec.signal,
       })
-      return { answers: [] }
+      if (result.outcome === 'declined') return { answers: [] }
+      return {
+        answers: result.answers.map(answer => ({
+          id: answer.id,
+          selected: [...answer.selected],
+          ...answer.custom !== undefined ? { custom: answer.custom } : {},
+        })),
+      }
     },
   }))
+  ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+    const assembled = await next()
+    return filterAskUserQuestionSchema(assembled, resolved)
+  })
+}
+
+/**
+ * Hide `to_project_member` from the assembled `ask_user_question` schema when
+ * the workspace is not bound to a cloud project. The static registry schema
+ * is unchanged; this filter runs at prompt assembly so a later bind cannot
+ * leak a stale parameter into the next request.
+ * @param assembly - waterfall-authoritative prompt assembly.
+ * @param config - injected project-binding face.
+ * @returns the same assembly, or a clone with the routing parameter omitted.
+ */
+async function filterAskUserQuestionSchema(
+  assembly: PromptAssembly,
+  config: Config,
+): Promise<PromptAssembly> {
+  const bound = await resolveBoundProject(config)
+  if (bound !== undefined) return assembly
+  return {
+    ...assembly,
+    tools: assembly.tools.map((schema) => {
+      if (schema.name !== 'ask_user_question') return schema
+      return { ...schema, parameters: omitRoutingParameter(schema.parameters) }
+    }),
+  }
+}
+
+/**
+ * Resolve the workspace-bound cloud project. A rejecting or absent resolver
+ * is unbound — the routing parameter stays hidden rather than leaking.
+ * @param config - injected project-binding face.
+ * @returns the bound project id, or undefined when the workspace is unbound.
+ */
+async function resolveBoundProject(config: Config): Promise<string | undefined> {
+  if (config.boundProjectResolver === undefined) return undefined
+  try {
+    return await config.boundProjectResolver()
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Clone a JSON-schema object without the `to_project_member` property.
+ * @param parameters - model-facing parameter schema of `ask_user_question`.
+ * @returns the same object when the property is already absent, else a clone.
+ */
+function omitRoutingParameter(parameters: Record<string, unknown>): Record<string, unknown> {
+  const properties = { ...(parameters.properties as Record<string, unknown> | undefined) }
+  delete properties.to_project_member
+  return { ...parameters, properties }
 }

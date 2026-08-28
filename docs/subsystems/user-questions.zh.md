@@ -156,19 +156,59 @@ interface MemberQuestionSendPayload {
   readonly references: readonly MemberQuestionReference[]
   /** Public identity fields rendered on the receiver's Decision Brief. */
   readonly origin: MemberQuestionOrigin
+  /** Originating session identity used as one half of the supersede route key. */
+  readonly originSessionId: string
 }
 ```
 
-`MemberQuestionSendResult` 在投递接受后返回品牌化 question id 与编码后的 Companion 应用字节。
+`MemberQuestionSendResult` 是挂起的 `send()` Promise 兑现后的已回答或已拒绝结算。生命周期失败（`MEMBER_OFFLINE`、`QUESTION_EXPIRED`、`QUESTION_WITHDRAWN`、`QUESTION_SUPERSEDED`、`REVOKED_DURING_FLIGHT`）以 `MemberQuestionSenderError` 拒绝，并仍作为普通工具结果保留。
 
 ```ts type-equiv
-/** Result of one successful send: the encoded operation plus its question id. */
-interface MemberQuestionSendResult {
+/** Successful routed-ask settlement: the member answered the batch. */
+interface MemberQuestionAnsweredResult {
   /** Branded question identity the caller correlates with later settlement. */
   readonly questionId: MemberQuestionId
   /** Companion application bytes encoded by the T4 codec. */
   readonly encoded: Uint8Array
+  /** Terminal answered outcome. */
+  readonly outcome: 'answered'
+  /** Settling answers echoed by question id. */
+  readonly answers: readonly MemberQuestionAnswer[]
 }
+```
+
+```ts type-equiv
+/** Successful routed-ask settlement: the member declined without answering. */
+interface MemberQuestionDeclinedResult {
+  /** Branded question identity the caller correlates with later settlement. */
+  readonly questionId: MemberQuestionId
+  /** Companion application bytes encoded by the T4 codec. */
+  readonly encoded: Uint8Array
+  /** Terminal declined outcome. */
+  readonly outcome: 'declined'
+}
+```
+
+```ts type-equiv
+/** Result of one successful send: an answered or declined settlement. */
+type MemberQuestionSendResult = MemberQuestionAnsweredResult | MemberQuestionDeclinedResult
+```
+
+```ts type-equiv
+/** Optional session and cancellation attached to one `send()` call. */
+interface MemberQuestionSendOptions {
+  /** Asking session that records the durable ask/outcome pair. */
+  session?: Session
+  /** Aborting this signal withdraws the in-flight question. */
+  signal?: AbortSignal
+}
+```
+
+```ts type-equiv
+/** Successful or declined settlement applied to one in-flight question. */
+type MemberQuestionSettlement =
+  | { outcome: 'answered'; answers: readonly MemberQuestionAnswer[] }
+  | { outcome: 'declined' }
 ```
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
@@ -183,18 +223,41 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 ### `ctx.memberQuestionSender` — `MemberQuestionSenderService` (abstract seam)
 
-Member-question sender capability. `send(payload)` encodes one Companion `member-question` operation and hands the bytes to the composed delivery adapter.
+Member-question sender capability. `send(payload)` encodes one Companion `member-question` operation, delivers it, and waits for a terminal settlement or a stable lifetime error.
 
 ```ts cordis-catalog
 /**
- * Encode one member-directed question and deliver it to the addressed member.
+ * Encode one member-directed question, deliver it, and wait for settlement.
  * @param payload - Decision Brief origin, background, question batch, and references.
- * @returns the branded question id and the encoded Companion application bytes.
+ * @param options - optional asking session and withdrawal signal.
+ * @returns the answered or declined settlement plus the encoded Companion bytes.
  * @throws {MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no adapter is composed,
  *   `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant,
- *   or `ENCODE_FAILED` when the T4 codec rejects the payload.
+ *   `ENCODE_FAILED` when the T4 codec rejects the payload,
+ *   `MEMBER_OFFLINE` when presence is offline at send time,
+ *   `QUESTION_EXPIRED` when the configured TTL elapses unanswered,
+ *   `QUESTION_WITHDRAWN` when the initiator cancels the turn,
+ *   `QUESTION_SUPERSEDED` when a newer same-route ask replaces this one,
+ *   or `REVOKED_DURING_FLIGHT` when membership is withdrawn while waiting.
  */
-abstract send(payload: MemberQuestionSendPayload): Promise<MemberQuestionSendResult>
+abstract send( payload: MemberQuestionSendPayload, options?: MemberQuestionSendOptions, ): Promise<MemberQuestionSendResult>
+
+/**
+ * Apply one answered or declined settlement to a pending question.
+ * Unknown or already-settled question ids are ignored (idempotent).
+ * @param questionId - branded question identity returned by `send()`.
+ * @param settlement - answered answers or a declined verdict.
+ * @returns fulfillment after the matching `send()` promise settles, or immediately when none is pending.
+ */
+abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>
+
+/**
+ * Withdraw one pending question as initiator cancellation.
+ * Unknown or already-settled question ids are ignored.
+ * @param questionId - branded question identity returned by `send()`.
+ * @returns fulfillment after the matching `send()` promise rejects `QUESTION_WITHDRAWN`, or immediately when none is pending.
+ */
+abstract withdraw(questionId: MemberQuestionId): Promise<void>
 ```
 
 Source: [`packages/interaction/member-question-sender/src/index.ts`](../../packages/interaction/member-question-sender/src/index.ts)

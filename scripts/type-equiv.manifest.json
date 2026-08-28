@@ -907,8 +907,28 @@
     },
     {
       "doc": "docs/subsystems/user-questions.md",
+      "symbol": "MemberQuestionAnsweredResult",
+      "source": "packages/interaction/member-question-sender/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/user-questions.md",
+      "symbol": "MemberQuestionDeclinedResult",
+      "source": "packages/interaction/member-question-sender/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/user-questions.md",
       "symbol": "MemberQuestionSendResult",
       "source": "packages/interaction/member-question-sender/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/user-questions.md",
+      "symbol": "MemberQuestionSendOptions",
+      "source": "packages/interaction/member-question-sender/src/index.ts"
+    },
+    {
+      "doc": "docs/subsystems/user-questions.md",
+      "symbol": "MemberQuestionSettlement",
+      "source": "packages/interaction/member-question-sender/src/index.ts"
     },
     {
       "doc": "docs/subsystems/approval.md",

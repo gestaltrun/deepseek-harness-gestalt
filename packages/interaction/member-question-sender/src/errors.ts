@@ -10,6 +10,11 @@ export type MemberQuestionSenderErrorCode =
   | 'DELIVERY_UNAVAILABLE'
   | 'GRANT_UNAVAILABLE'
   | 'ENCODE_FAILED'
+  | 'MEMBER_OFFLINE'
+  | 'QUESTION_EXPIRED'
+  | 'QUESTION_WITHDRAWN'
+  | 'QUESTION_SUPERSEDED'
+  | 'REVOKED_DURING_FLIGHT'
 
 /** Sender failure with a stable code safe for model and client branching. */
 export class MemberQuestionSenderError extends HarnessError {

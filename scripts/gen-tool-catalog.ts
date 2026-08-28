@@ -260,7 +260,7 @@ const TOOL_PACKAGES: ToolPackage[] = [
       await ctx.plugin(ToolAskUser)
     },
     note:
-      'ask_user_question pauses a local call until the active UI provider returns a human answer. `to_project_member` routes through `ctx.memberQuestionSender` instead; that sender is optional at harvest, so the catalog records the static schema including the routing parameters.',
+      'ask_user_question pauses a local call until the active UI provider returns a human answer. `to_project_member` routes through `ctx.memberQuestionSender` instead. Runtime eligibility hides that parameter from assembled prompts unless the workspace is bound to a cloud project; the catalog records the static schema including the routing parameters because the sender is optional at harvest.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-project-members',

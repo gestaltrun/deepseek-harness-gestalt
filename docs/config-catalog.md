@@ -1617,6 +1617,23 @@ export interface Config {
    * without a Platform Instance.
    */
   lookupGrant?: ProjectPeerGrantLookup
+  /**
+   * Reads live presence for the addressed member. Absent, send skips the
+   * offline fail-fast so a keyless assembly can round-trip without a presence
+   * registry. Present, an `offline` verdict answers `MEMBER_OFFLINE` before
+   * encoding.
+   */
+  presenceLookup?: MemberPresenceLookup
+  /**
+   * Resolves when the addressed member's membership is revoked while an ask
+   * is in flight. Absent, in-flight revocation is not observed.
+   */
+  watchMembership?: MemberMembershipWatch
+  /**
+   * Routed-question lifetime in milliseconds. Default 1_800_000 (30 minutes).
+   * Expiry answers `QUESTION_EXPIRED` and records the expired outcome.
+   */
+  ttlMs?: number
 }
 
 /**
@@ -1644,6 +1661,22 @@ export interface MemberQuestionDelivery {
  */
 export type ProjectPeerGrantLookup = (input: ProjectPeerGrantLookupInput) => Promise<SealedProjectPeerGrant>
 
+/**
+ * Live presence of one project member. Compositions wire this to the
+ * membership HTTP presence registry; tests inject a stub.
+ * @param input - project and peer account identity.
+ * @returns `online` when any installation holds a live heartbeat, else `offline`.
+ */
+export type MemberPresenceLookup = (input: MemberPresenceLookupInput) => Promise<'online' | 'offline'>
+
+/**
+ * Resolves when the addressed member's membership is revoked during flight.
+ * Aborting `signal` cancels the watch without treating that as a revocation.
+ * @param input - project, peer account, and settlement cancellation.
+ * @returns fulfillment when membership is revoked while the ask is pending.
+ */
+export type MemberMembershipWatch = (input: MemberMembershipWatchInput) => Promise<void>
+
 /** Encoded Companion operation ready for the injected delivery adapter. */
 export interface EncodedMemberQuestion {
   /** Branded question identity correlated with later settlement. */
@@ -1661,11 +1694,29 @@ export interface ProjectPeerGrantLookupInput {
   /** Account the sealed grant must address. */
   peerAccountId: string
 }
+
+/** Inputs for a live presence verdict of one project member. */
+export interface MemberPresenceLookupInput {
+  /** Cloud project whose roster presence is queried. */
+  projectId: string
+  /** Account whose installations are aggregated. */
+  peerAccountId: string
+}
+
+/** Inputs for watching one membership row until it is revoked or the ask settles. */
+export interface MemberMembershipWatchInput {
+  /** Cloud project whose roster is watched. */
+  projectId: string
+  /** Account whose membership is watched. */
+  peerAccountId: string
+  /** Aborts the watch when the ask settles for any other reason. */
+  signal: AbortSignal
+}
 ```
 
 Depends on: [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.md)
 
-Source: [`packages/interaction/member-question-sender/src/index.ts:71`](../packages/interaction/member-question-sender/src/index.ts)
+Source: [`packages/interaction/member-question-sender/src/index.ts:149`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="deepseek-aidsh-message-feedback"></a>
 
@@ -3016,8 +3067,12 @@ export interface Config {
    */
   originResolver?: OriginResolver
   /**
-   * Resolves the workspace-bound cloud project for a routed ask. Absent, the
-   * addressee string is forwarded as the project id.
+   * Resolves the workspace-bound cloud project for a routed ask and for
+   * runtime eligibility of `to_project_member`. Absent or resolving to
+   * undefined hides the parameter from assembled prompts; a present id
+   * surfaces it. Execute still forwards the addressee as the project id
+   * when this resolver is absent so schema-level routing can be tested
+   * without a membership face.
    */
   boundProjectResolver?: BoundProjectResolver
 }
@@ -3034,7 +3089,9 @@ export type OriginResolver = (input: OriginResolverInput) => Promise<MemberQuest
 /**
  * Resolves the cloud project whose peer grant addresses the member. Absent,
  * the tool forwards `to_project_member` as the project id so schema-level
- * routing can be tested without a membership face.
+ * routing can be tested without a membership face. The same resolver drives
+ * runtime eligibility: an unbound (undefined) result hides `to_project_member`
+ * from assembled prompts.
  */
 export type BoundProjectResolver = () => Promise<string | undefined>
 
@@ -3049,7 +3106,7 @@ export interface OriginResolverInput {
 
 Depends on: [`Agent`](subsystems/core.md) · [`MemberQuestionOrigin`](../packages/interaction/member-question-sender/src/index.ts)
 
-Source: [`packages/interaction/tool-ask-user/src/index.ts:68`](../packages/interaction/tool-ask-user/src/index.ts)
+Source: [`packages/interaction/tool-ask-user/src/index.ts:72`](../packages/interaction/tool-ask-user/src/index.ts)
 
 <a id="deepseek-aidsh-tool-bash"></a>
 

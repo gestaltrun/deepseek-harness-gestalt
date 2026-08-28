@@ -21,6 +21,7 @@ printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore}" 2>/de
 chmod 600 "${keystore}"
 
 cd "${repo_root}"
+pnpm --filter @deepseek-ai/dsh-mobile run verify:brand
 pnpm --filter @deepseek-ai/dsh-mobile run build
 pnpm --dir apps/mobile exec cap sync android
 
@@ -32,7 +33,7 @@ ANDROID_KEYSTORE_FILE="${keystore}" ./gradlew --no-daemon :app:assembleRelease \
 source_apk="${mobile_root}/android/app/build/outputs/apk/release/app-release.apk"
 test -f "${source_apk}"
 mkdir -p "${release_dir}"
-target_apk="${release_dir}/DeepSeek-Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.apk"
+target_apk="${release_dir}/Tazige-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.apk"
 cp "${source_apk}" "${target_apk}"
 
 apksigner_path="$(command -v apksigner || true)"

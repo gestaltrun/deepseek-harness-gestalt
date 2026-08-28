@@ -282,7 +282,7 @@ Keyless assembled-application snapshots cover logged-out Pairing Challenge refus
 
 **Use automatic database down migrations or place pairing keys inside disposable cache.** Rejected because rolling Relay versions need one compatible expanded schema, while mobile cache recovery must not destroy a valid Personal Pairing.
 
-**Retain the prior mobile name, bundle id, or visual identity.** Rejected because this application is the DeepSeek Gestalt mobile surface and shares its design and terminology rather than presenting a migrated 千机 product.
+**Retain the prior mobile name, bundle id, or visual identity.** Rejected because this application is the DeepSeek Gestalt mobile surface rather than a migrated 千机 product. The later [獭子哥 Mobile brand decision](../../implemented/feature/2026-08-28-tazige-mobile-brand.md) supersedes only the shared consumer name and visual identity; it neither revives the 千机 identity nor changes the bundle id.
 
 **Add a separate biometric application lock.** Rejected from the product scope; operating-system access control and encrypted storage own local protection.
 

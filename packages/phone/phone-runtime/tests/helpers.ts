@@ -43,6 +43,8 @@ export interface FakeKnobs {
   failArm?: { method: string; code?: number; message: string }
   /** Wraps the devices.list result in the real mobilecli 1.0.5 `{ devices: [...] }` envelope. */
   listEnvelope?: boolean
+  /** Answers device.screencapture with the 1.0.5 `{ format, sessionUrl }` envelope; the stream moves to GET /stream?s=. */
+  captureEnvelope?: boolean
 }
 
 /** Persistent agent state the fake CLI mode records across invocations. */

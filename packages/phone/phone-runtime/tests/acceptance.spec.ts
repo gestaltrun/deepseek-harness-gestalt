@@ -146,4 +146,17 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
       { method: 'device.io.tap', params: { deviceId: '00008101-000A2B3C4D5E6F70', x: 1, y: 1 } },
     ])
   })
+
+  it('serves the real 1.0.5 capture envelope end to end: session stream first frame decodes', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, captureEnvelope: true })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const capture = await context.phoneDevices.startCapture({ deviceId: ANDROID_EMULATOR, format: 'mjpeg' })
+    expect(capture.contentType).toMatch(/multipart\/x-mixed-replace; boundary=frame/)
+
+    const { headers, payload } = await firstMjpegFrame(capture.body)
+    expect(headers.get('content-type')).toBe('image/jpeg')
+    expect(headers.get('content-length')).toBe(String(payload.length))
+    assertStructurallyDecodableJpeg(payload)
+  })
 })

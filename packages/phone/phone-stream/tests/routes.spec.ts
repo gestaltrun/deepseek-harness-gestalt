@@ -5,7 +5,7 @@ import WebServer from '@deepseek-ai/dsh-host-webserver'
 import PhoneDevices, { deviceId } from '@deepseek-ai/dsh-phone-runtime'
 import WebSocket from 'ws'
 import PhoneStream, { PHONE_IO_PATH } from '../src/index.ts'
-import { stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
+import { assertStructurallyDecodableJpeg, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -22,8 +22,9 @@ afterEach(async () => {
 
 async function mount(
   devices: Array<Record<string, unknown>> = [wireDevice('emulator-5554', 'android', 'emulator', 'online')],
+  fakeKnobs: Record<string, unknown> = {},
 ): Promise<{ context: Context; origin: string }> {
-  const fake = await stageFake({ devices })
+  const fake = await stageFake({ devices, ...fakeKnobs })
   fakes.push(fake)
   fake.claim()
   const context = new Context()
@@ -216,6 +217,19 @@ describe('phone stream Host routes', () => {
     expect(h264.status).toBe(200)
     expect(h264.contentType).toMatch(/video\/h264/)
     expect(h264.body.subarray(0, 4).equals(H264.subarray(0, 4))).toBe(true)
+  })
+
+  it('delivers decodable frames when the real backend answers the capture envelope', async () => {
+    const { origin } = await mount([wireDevice('emulator-5554', 'android', 'emulator', 'online')], { captureEnvelope: true })
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    const mjpeg = await readFrame(origin, session.mjpeg.url, host)
+    expect(mjpeg.status).toBe(200)
+    expect(mjpeg.contentType).toMatch(/multipart\/x-mixed-replace/)
+    const headerEnd = mjpeg.body.indexOf('\r\n\r\n')
+    expect(headerEnd).toBeGreaterThanOrEqual(0)
+    const frame = mjpeg.body.subarray(headerEnd + 4, mjpeg.body.indexOf('\r\n--frame'))
+    assertStructurallyDecodableJpeg(frame)
   })
 
   it('cancels the upstream capture when the browser disconnects mid-stream', async () => {

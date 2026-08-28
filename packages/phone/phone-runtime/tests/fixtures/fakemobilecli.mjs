@@ -135,6 +135,21 @@ function reply(res, id, payload) {
   res.end(JSON.stringify({ jsonrpc: '2.0', id, ...payload }))
 }
 
+// One capture payload: an MJPEG multipart stream or a raw H264 Annex-B prefix.
+function serveCapture(res, format) {
+  if (format === 'avc') {
+    res.writeHead(200, { 'content-type': 'video/h264', 'cache-control': 'no-store' })
+    res.write(H264_ANNEX_B)
+    res.end()
+    return
+  }
+  res.writeHead(200, { 'content-type': 'multipart/x-mixed-replace; boundary=frame', 'cache-control': 'no-store' })
+  res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_1X1.length)}\r\n\r\n`)
+  res.write(JPEG_1X1)
+  res.write('\r\n--frame--\r\n')
+  res.end()
+}
+
 async function handleRpc(req, res) {
   let raw = ''
   for await (const chunk of req) raw += chunk
@@ -227,17 +242,13 @@ async function handleRpc(req, res) {
         await new Promise(resolveDelay => setTimeout(resolveDelay, captureDelayMs))
       }
       const format = params?.format === 'avc' ? 'avc' : 'mjpeg'
-      if (format === 'avc') {
-        res.writeHead(200, { 'content-type': 'video/h264', 'cache-control': 'no-store' })
-        res.write(H264_ANNEX_B)
-        res.end()
+      // Real mobilecli 1.0.5 answers with a session envelope; the stream then
+      // lives on the separate /stream?s= endpoint this server also serves.
+      if (knobs.captureEnvelope === true) {
+        reply(res, id, { result: { format, sessionUrl: `/stream?s=${format}` } })
         return
       }
-      res.writeHead(200, { 'content-type': 'multipart/x-mixed-replace; boundary=frame', 'cache-control': 'no-store' })
-      res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_1X1.length)}\r\n\r\n`)
-      res.write(JPEG_1X1)
-      res.write('\r\n--frame--\r\n')
-      res.end()
+      serveCapture(res, format)
       return
     }
     default: {
@@ -249,6 +260,13 @@ async function handleRpc(req, res) {
 const server = http.createServer((req, res) => {
   void (async () => {
     try {
+      // Session endpoint of the 1.0.5 capture contract: the stream lives here,
+      // addressed by the `s` parameter the envelope hands out.
+      if (req.method === 'GET' && (req.url === '/stream' || (req.url ?? '').startsWith('/stream?'))) {
+        const s = new URL(req.url ?? '/stream', 'http://127.0.0.1').searchParams.get('s')
+        serveCapture(res, s === 'avc' ? 'avc' : 'mjpeg')
+        return
+      }
       if (req.method === 'GET' && req.url === '/__test/counters') {
         reply(res, undefined, { requests, bootCount: state.bootCount, shutdownCount: state.shutdownCount, io: state.io })
         return

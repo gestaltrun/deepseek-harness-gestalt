@@ -10,7 +10,7 @@ Issue #356 锁定了「手机」tab 骨架——恒可达入口、第①态空�
 
 ## Decision
 
-`packages/client/ui-phone` 在 `ctx.effect` 内通过 `ctx.betterSidebar` 注册，使 disposer 随插件 fiber 生命周期走（HMR 安全）。descriptor 为 `id: 'phone'`、标题 手机、包内自带单色 SVG 图标、排在内置浏览器之后的 `order: 55`、`single: true`，以及永不拒绝的 `available`（决策轴 2：入口把首次使用引导放进 tab 内容，而不是置灰菜单行）。`Config.enabled`（schemastery，默认 `false`）是契约占位：注册无条件执行，禁用臂在内容里固定渲染「手机连接未启用」说明条，同时发现、拉起与流路由都不进入本包。徽标与内容清单读取同一个注入的 `PhoneBadgeSource`；随包的 `NULL_PHONE_BADGE_SOURCE` 报告零在线设备与空清单，条状取值映射为 `null`（静默）或在线台数。Node 侧 invariant 伴生体在注册自身的 child context 上驱动「先提供者后依赖方」的 fiber 对，以 fake 注册表的注册/注销事实作为同步点；当宿主根已经发布 `betterSidebar` 时（各包套件自己就在练注册）探针让位。探针放在无样式的 `registry.ts` 中，Node 面因此从不引入带样式的组件体或 React 运行时代码。
+`packages/client/ui-phone` 在 `ctx.effect` 内通过 `ctx.betterSidebar` 注册，使 disposer 随插件 fiber 生命周期走（HMR 安全）。descriptor 为 `id: 'phone'`、标题 手机、包内自带单色 SVG 图标、排在内置浏览器之后的 `order: 55`，以及永不拒绝的 `available`（`single: true` 语法糖已让位于[已连接多 tab 笔记](../feature/2026-08-28-ui-phone-connected-device-tabs.zh.md)的每设备实例模型）（决策轴 2：入口把首次使用引导放进 tab 内容，而不是置灰菜单行）。`Config.enabled`（schemastery，默认 `false`）是契约占位：注册无条件执行，禁用臂在内容里固定渲染「手机连接未启用」说明条，同时发现、拉起与流路由都不进入本包。徽标与内容清单读取同一个注入的 `PhoneBadgeSource`；随包的 `NULL_PHONE_BADGE_SOURCE` 报告零在线设备与空清单，条状取值映射为 `null`（静默）或在线台数。Node 侧 invariant 伴生体在注册自身的 child context 上驱动「先提供者后依赖方」的 fiber 对，以 fake 注册表的注册/注销事实作为同步点；当宿主根已经发布 `betterSidebar` 时（各包套件自己就在练注册）探针让位。探针放在无样式的 `registry.ts` 中，Node 面因此从不引入带样式的组件体或 React 运行时代码。
 
 ## Alternatives considered
 
@@ -24,4 +24,4 @@ Issue #356 锁定了「手机」tab 骨架——恒可达入口、第①态空�
 
 ## Consequences
 
-mobilecli 子票用真实 publisher 替换 `NULL_PHONE_BADGE_SOURCE` 并接管 `Config.enabled` 的实际语义；每设备一 tab 通过 `createTab` 与 `dedupeKey: serial` 扩展 descriptor，不触碰本注册路径。徽标点样式只在 better-sidebar 扩展 pill 契约后落地。宿主根让位使共享测试 invariant host 对自带 `betterSidebar` 的套件保持确定性；在其他任何环境里丢失注册的回归都会在伴生体激活时失败（`the "phone" tab is missing after the plugin fiber activated`）。插件配置标签页向导卡与 Host `ui-phone` 命名空间见[设置向导笔记](2026-08-28-ui-phone-settings-wizard-card.zh.md)。
+mobilecli 子票用真实 publisher 替换 `NULL_PHONE_BADGE_SOURCE` 并接管 `Config.enabled` 的实际语义；每设备一 tab 已在[已连接多 tab 笔记](../feature/2026-08-28-ui-phone-connected-device-tabs.zh.md)交付：以 seed 携带的 `phone:<serial>` 打开加 `dedupeKey: serial`，不触碰本注册路径。徽标点样式只在 better-sidebar 扩展 pill 契约后落地。宿主根让位使共享测试 invariant host 对自带 `betterSidebar` 的套件保持确定性；在其他任何环境里丢失注册的回归都会在伴生体激活时失败（`the "phone" tab is missing after the plugin fiber activated`）。插件配置标签页向导卡与 Host `ui-phone` 命名空间见[设置向导笔记](2026-08-28-ui-phone-settings-wizard-card.zh.md)。

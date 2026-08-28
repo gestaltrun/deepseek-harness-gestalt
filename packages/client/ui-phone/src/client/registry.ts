@@ -51,6 +51,14 @@ export interface PhoneDeviceSummary {
   readonly channel: 'emulator' | 'usb'
   /** Whether the device currently reports an open connection. */
   readonly online: boolean
+  /**
+   * The handset is USB-connected but debugging is not authorized; the rows
+   * and the connected view render the design's error arm instead of the
+   * offline state. Absent when the listing reports no authorization gate.
+   */
+  readonly unauthorized?: boolean
+  /** OS version caption (Android 15, iOS 18…); absent when unreported. */
+  readonly osVersion?: string
 }
 
 /** One committed listing: summaries grouped per platform segment. */

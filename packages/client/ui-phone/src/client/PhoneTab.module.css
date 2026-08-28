@@ -126,6 +126,36 @@
   background: var(--dsw-alias-label-dimmed);
 }
 
+.deviceDotUnauthorized {
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+/* The unauthorized error arm (design state 4) replaces the row's meta and
+   open action with the design's warn copy and its 重新检测 next action. */
+.unauthorizedArm {
+  margin: 4px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.unauthorizedTitle {
+  margin: 0;
+  font: var(--dsw-font-xs-strong-13);
+}
+
+.unauthorizedDetail {
+  margin: 2px 0 0;
+  font: var(--dsw-font-xxs-12);
+}
+
+.alertActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 9px;
+}
+
 .deviceName {
   font: var(--dsw-font-xs-strong-13);
   overflow: hidden;

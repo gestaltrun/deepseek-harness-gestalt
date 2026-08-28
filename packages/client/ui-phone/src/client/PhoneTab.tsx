@@ -42,6 +42,19 @@ const GROUP_TITLES: Record<PhoneDeviceSummary['channel'], string> = {
   usb: 'USB 真机',
 }
 
+/** Row meta state caption per channel (the mockup fixes the emulator pair). */
+function runningStateOf(device: PhoneDeviceSummary): string {
+  if (device.unauthorized === true) return '未授权'
+  if (device.channel === 'emulator') return device.online ? '运行中' : '已停止'
+  return device.online ? '在线' : '离线'
+}
+
+/** The meta line: OS version when reported, then the running state. */
+function rowMetaOf(device: PhoneDeviceSummary): string {
+  const state = runningStateOf(device)
+  return device.osVersion === undefined ? state : `${device.osVersion} · ${state}`
+}
+
 /**
  * Render the empty-state body for one tab.
  * @param props - enable-gate value, the injected listing source, and the opener.
@@ -95,25 +108,44 @@ export function PhoneTab({ enabled, source, onOpenDevice }: PhoneTabProps): Reac
           <section key={channel} aria-label={GROUP_TITLES[channel]}>
             <div className={css.groupName}>{GROUP_TITLES[channel]}</div>
             {group.map(device => (
-              <div key={device.id} className={css.deviceRow}>
-                <span
-                  aria-hidden="true"
-                  className={
-                    device.online ? css.deviceDot : `${css.deviceDot} ${css.deviceDotOffline}`
-                  }
-                />
-                <span className={css.deviceName}>{device.name}</span>
-                <span className={css.deviceMeta}>{device.online ? '在线' : '离线'}</span>
-                {device.online && (
-                  <button
-                    type="button"
-                    className={shared.minibtnPrimary}
-                    onClick={() => { onOpenDevice(device.id, device.name) }}
-                  >
-                    打开
-                  </button>
-                )}
-              </div>
+              device.unauthorized === true ? (
+                <div key={device.id} role="alert" className={css.unauthorizedArm}>
+                  <p className={css.unauthorizedTitle}>真机未授权调试</p>
+                  <p className={css.unauthorizedDetail}>
+                    {`${device.name} 已通过 USB 连接；请在手机上允许「USB 调试」后重新检测。`}
+                  </p>
+                  <div className={css.alertActions}>
+                    <button
+                      type="button"
+                      className={css.redetectButton}
+                      disabled={refreshing}
+                      onClick={refresh}
+                    >
+                      重新检测
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div key={device.id} className={css.deviceRow}>
+                  <span
+                    aria-hidden="true"
+                    className={
+                      device.online ? css.deviceDot : `${css.deviceDot} ${css.deviceDotOffline}`
+                    }
+                  />
+                  <span className={css.deviceName}>{device.name}</span>
+                  <span className={css.deviceMeta}>{rowMetaOf(device)}</span>
+                  {device.online && (
+                    <button
+                      type="button"
+                      className={shared.minibtnPrimary}
+                      onClick={() => { onOpenDevice(device.id, device.name) }}
+                    >
+                      打开
+                    </button>
+                  )}
+                </div>
+              )
             ))}
             {channel === 'usb' && group.length === 0 && (
               <div className={css.emptyRow}>用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。</div>

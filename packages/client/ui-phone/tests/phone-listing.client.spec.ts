@@ -116,6 +116,41 @@ describe('phone listing source', () => {
     expect(source.snapshot()).toEqual({ android: [], ios: [] })
   })
 
+  it('carries the unauthorized flag and OS version through the wire contract', async () => {
+    stubFetch(200, {
+      android: [
+        { id: 'R3CN30', name: 'SM-S9310', kind: 'real', online: true, unauthorized: true },
+        { id: 'emulator-5554', name: 'Pixel_6_API_35', kind: 'emulator', online: true, osVersion: 'Android 15' },
+      ],
+      ios: { simulators: [], reals: [] },
+    })
+    const source = createHttpPhoneListingSource()
+    await source.refresh()
+    expect(source.snapshot().android).toEqual([
+      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true, unauthorized: true },
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: true, osVersion: 'Android 15' },
+    ])
+    // Absent optional fields stay absent rather than materializing defaults.
+    stubFetch(200, WIRE_LISTING)
+    await source.refresh()
+    expect(source.snapshot().android[0]).not.toHaveProperty('unauthorized')
+    expect(source.snapshot().android[0]).not.toHaveProperty('osVersion')
+  })
+
+  it('rejects a non-boolean unauthorized flag or blank OS version as a wire error', async () => {
+    stubFetch(200, {
+      android: [{ id: 'x', name: 'x', kind: 'real', online: true, unauthorized: 'yes' }],
+      ios: { simulators: [], reals: [] },
+    })
+    const source = createHttpPhoneListingSource()
+    await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+    stubFetch(200, {
+      android: [{ id: 'x', name: 'x', kind: 'real', online: true, osVersion: '' }],
+      ios: { simulators: [], reals: [] },
+    })
+    await expect(source.refresh()).rejects.toBeInstanceOf(PhoneStreamHttpError)
+  })
+
   it('stops notifying after the subscription is disposed', async () => {
     stubFetch(200, WIRE_LISTING)
     const source = createHttpPhoneListingSource()

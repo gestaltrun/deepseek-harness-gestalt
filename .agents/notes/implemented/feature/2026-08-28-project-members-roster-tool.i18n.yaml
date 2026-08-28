@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-28-project-members-roster-tool.md
-2026-08-28-project-members-roster-tool.md: 83198cc0226094004403d520c49f32c16502c28a
-2026-08-28-project-members-roster-tool.zh.md: a4f8b1c2a80567331aeb37d494c3b476725c7bdb
+2026-08-28-project-members-roster-tool.md: ddb13710d46206b5a04048a1b5d9bfa485dbde44
+2026-08-28-project-members-roster-tool.zh.md: c1a7532523797fc1c3c585d8665be318063f155d

@@ -965,6 +965,9 @@ importers:
       '@deepseek-ai/dsh-platform-account-core':
         specifier: workspace:*
         version: link:../packages/platform/platform-account-core
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:*
+        version: link:../packages/platform/project-membership
       '@deepseek-ai/dsh-pwsh-local':
         specifier: workspace:*
         version: link:../packages/shell/pwsh-local
@@ -1127,6 +1130,9 @@ importers:
       '@deepseek-ai/dsh-tool-lsp':
         specifier: workspace:*
         version: link:../packages/lsp/tool-lsp
+      '@deepseek-ai/dsh-tool-project-members':
+        specifier: workspace:*
+        version: link:../packages/interaction/tool-project-members
       '@deepseek-ai/dsh-tool-pwsh':
         specifier: workspace:*
         version: link:../packages/shell/tool-pwsh

@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { CallId } from '@deepseek-ai/dsh-llm'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -171,6 +172,21 @@ function resultValue(result: { content: { type: string; text?: string }[] }): un
 }
 
 describe('project_members tool', () => {
+  it('has no default export and keeps name/inject/Config through unwrapExports', () => {
+    // A default export would make Loader unwrap only apply and drop `inject`.
+    expect('default' in toolProjectMembers).toBe(false)
+    expect(toolProjectMembers.name).toBe('tool-project-members')
+    expect(toolProjectMembers.inject).toEqual(['tools', 'projectMembership'])
+
+    const loader = Object.create(Loader.prototype) as Loader
+    const unwrapped = loader.unwrapExports(toolProjectMembers) as Record<string, unknown>
+    expect(unwrapped).toBe(toolProjectMembers)
+    expect(unwrapped.name).toBe('tool-project-members')
+    expect(unwrapped.inject).toEqual(['tools', 'projectMembership'])
+    expect(typeof unwrapped.apply).toBe('function')
+    expect(unwrapped.Config).toBeDefined()
+  })
+
   it('registers a model-facing schema with an optional projectId and an array output', async () => {
     const ctx = await setup()
     const schema = ctx.tools.schemas().find(tool => tool.name === 'project_members')

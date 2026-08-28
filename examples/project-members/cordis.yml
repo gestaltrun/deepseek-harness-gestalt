@@ -1,0 +1,51 @@
+# Keyless project_members demo. The in-memory membership provider serves one
+# seeded project; the tool's provider faces are plain `!!js` resolver functions
+# per the seam's Config contract; the scripted adapter drives one roster read
+# through the real agent loop. Boot with examples/project-members/start.ts.
+
+- id: project-members-memory
+  name: './memory-membership.ts'
+
+- id: project-members-mock-llm
+  name: './mock-llm.ts'
+
+# The tool resolves the account first and the workspace binding second; the
+# presenter decorates stored rows by join order, so stored authority stays
+# authoritative and only presence/display identity are presentation choices.
+- id: tool-project-members
+  name: '@deepseek-ai/dsh-tool-project-members'
+  config:
+    currentAccountResolver: !!js "async () => 'acc-demo-owner'"
+    boundProjectResolver: !!js "async () => 'proj-demo'"
+    rosterPresenter: !!js "async view => view.members.map((member, index) => ({ presence: index === 0 ? 'online' : 'offline', displayName: index === 0 ? 'Demo Owner' : 'Demo Member' }))"
+
+- id: agent-spine
+  name: '@deepseek-ai/dsh-agent-spine-demo'
+  config:
+    agents:
+      - id: main
+        provider: project-members-mock
+        model: project-members-mock
+        cwd: !!js process.cwd()
+    workspaceContext: false
+    skills:
+      # Keep skill discovery inside the boot cwd so the assembled transcript
+      # never depends on the launching user's agent home.
+      filesystem:
+        agentsHome: './.agents'
+
+- id: persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: './.sessions'
+
+- id: session-checkpoints
+  name: '@deepseek-ai/dsh-session-checkpoint-policy'
+
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+
+- id: bash
+  name: '@deepseek-ai/dsh-bash-local'
+  config:
+    cwd: '.'

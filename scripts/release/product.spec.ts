@@ -359,43 +359,40 @@ describe('release artifact provenance', () => {
   it('accepts a failed caller run only when its named producer and artifact succeeded', () => {
     expect(validatePriorReleaseRun(run, jobs, artifacts, {
       repository: 'gestaltrun/deepseek-harness-gestalt',
-      candidateCommit: candidate,
       trustedWorkflowHeadCommits: [run.head_sha],
       allowedWorkflows: ['.github/workflows/mobile-release.yml'],
       artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
     })).toMatchObject({ workflowRun: run.html_url, workflowHead: run.head_sha, artifactName })
+    expect(() => validatePriorReleaseRun({ ...run, head_sha: candidate }, jobs, artifacts, {
+      repository: 'gestaltrun/deepseek-harness-gestalt', trustedWorkflowHeadCommits: [], allowedWorkflows: [run.path],
+      artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
+    })).toThrow('trusted master history')
     expect(validatePriorReleaseRun({ ...run, head_sha: candidate }, jobs, artifacts, {
-      repository: 'gestaltrun/deepseek-harness-gestalt', candidateCommit: candidate,
-      trustedWorkflowHeadCommits: [], allowedWorkflows: [run.path],
+      repository: 'gestaltrun/deepseek-harness-gestalt', trustedWorkflowHeadCommits: [candidate], allowedWorkflows: [run.path],
       artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
     })).toMatchObject({ workflowHead: candidate })
     expect(() => validatePriorReleaseRun(run, jobs, artifacts, {
-      repository: 'gestaltrun/deepseek-harness-gestalt', candidateCommit: candidate,
-      trustedWorkflowHeadCommits: [], allowedWorkflows: [run.path],
+      repository: 'gestaltrun/deepseek-harness-gestalt', trustedWorkflowHeadCommits: [], allowedWorkflows: [run.path],
       artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
     })).toThrow('trusted master history')
     expect(() => validatePriorReleaseRun({ ...run, head_sha: 'master' }, jobs, artifacts, {
-      repository: 'gestaltrun/deepseek-harness-gestalt', candidateCommit: candidate,
-      trustedWorkflowHeadCommits: [], allowedWorkflows: [run.path],
+      repository: 'gestaltrun/deepseek-harness-gestalt', trustedWorkflowHeadCommits: [], allowedWorkflows: [run.path],
       artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
     })).toThrow('full commit id')
     expect(() => validatePriorReleaseRun(run, {
       jobs: [{ ...jobs.jobs[0], conclusion: 'failure' }],
     }, artifacts, {
-      repository: 'gestaltrun/deepseek-harness-gestalt', candidateCommit: candidate,
-      trustedWorkflowHeadCommits: [run.head_sha], allowedWorkflows: [run.path],
+      repository: 'gestaltrun/deepseek-harness-gestalt', trustedWorkflowHeadCommits: [run.head_sha], allowedWorkflows: [run.path],
       artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
     })).toThrow('producing job')
     expect(() => validatePriorReleaseRun(run, jobs, {
       artifacts: [{ ...artifacts.artifacts[0], expired: true }],
     }, {
-      repository: 'gestaltrun/deepseek-harness-gestalt', candidateCommit: candidate,
-      trustedWorkflowHeadCommits: [run.head_sha], allowedWorkflows: [run.path],
+      repository: 'gestaltrun/deepseek-harness-gestalt', trustedWorkflowHeadCommits: [run.head_sha], allowedWorkflows: [run.path],
       artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
     })).toThrow('named successful artifact')
     expect(() => validatePriorReleaseRun({ ...run, path: '.github/workflows/other.yml' }, jobs, artifacts, {
-      repository: 'gestaltrun/deepseek-harness-gestalt', candidateCommit: candidate,
-      trustedWorkflowHeadCommits: [run.head_sha], allowedWorkflows: [run.path],
+      repository: 'gestaltrun/deepseek-harness-gestalt', trustedWorkflowHeadCommits: [run.head_sha], allowedWorkflows: [run.path],
       artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
     })).toThrow('workflow')
   })

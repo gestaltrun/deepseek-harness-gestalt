@@ -129,6 +129,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Read source-owned version and build number
         id: version
@@ -142,6 +143,8 @@ jobs:
           PUBLISH_GITHUB: ${{ inputs.publish_github }}
         run: |
           test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$MOBILE_CANDIDATE_SHA" refs/remotes/origin/master
           version=$(node -p "require('./apps/mobile/package.json').version")
           build_number=$(node -p "require('./apps/mobile/release.json').buildNumber")
           node -e "const v=process.argv[1], b=Number(process.argv[2]); if (!/^\\d+\\.\\d+\\.\\d+$/.test(v) || !Number.isSafeInteger(b) || b < 1) process.exit(1)" "$version" "$build_number"
@@ -375,18 +378,14 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MOBILE_ARTIFACT_RUN_ID/artifacts?per_page=100" > artifacts.json
           workflow_head=$(jq -r .head_sha run.json)
           [[ "$workflow_head" =~ ^[0-9a-f]{40}$ ]]
-          trusted_workflow_head=
-          if [[ "$workflow_head" != "$CANDIDATE_SHA" ]]; then
-            git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
-            git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master
-            trusted_workflow_head=$workflow_head
-          fi
-          artifact_name=$(TRUSTED_WORKFLOW_HEAD="$trusted_workflow_head" node --import tsx/esm -e '
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master
+          artifact_name=$(TRUSTED_WORKFLOW_HEAD="$workflow_head" node --import tsx/esm -e '
             import { readFileSync } from "node:fs";
             import { validatePriorReleaseRun } from "./scripts/release/product.ts";
             const json = path => JSON.parse(readFileSync(path, "utf8"));
             const candidate = process.env.CANDIDATE_SHA;
-            const result = validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, candidateCommit: candidate, trustedWorkflowHeadCommits: [process.env.TRUSTED_WORKFLOW_HEAD].filter(Boolean), allowedWorkflows: [".github/workflows/mobile-release.yml", ".github/workflows/product-release.yml"], artifactProducers: [
+            const result = validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, trustedWorkflowHeadCommits: [process.env.TRUSTED_WORKFLOW_HEAD], allowedWorkflows: [".github/workflows/mobile-release.yml", ".github/workflows/product-release.yml"], artifactProducers: [
               { artifactName: "mobile-release-channel-candidate-" + candidate, producerJob: "Record Mobile channel evidence" },
               { artifactName: "mobile-release-candidate-" + candidate, producerJob: "Record signed Mobile candidate" },
             ] });

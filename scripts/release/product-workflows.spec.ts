@@ -46,6 +46,8 @@ describe('product release workflows', () => {
     for (const source of [desktopSource, text('.github/workflows/mobile-release.yml'), text('.github/workflows/platform-image.yml'), text('.github/workflows/platform-deploy.yml')]) {
       expect(source).toContain('git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master')
       expect(source).toContain('trustedWorkflowHeadCommits')
+      expect(source).not.toContain('if [[ "$workflow_head" !=')
+      expect(source.match(/git merge-base --is-ancestor/g)?.length).toBeGreaterThanOrEqual(2)
     }
   })
 

@@ -93,6 +93,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Record exact image candidate
@@ -104,6 +105,8 @@ jobs:
           if [[ -n "$PRIOR_RUN_ID" ]]; then echo 'prior_run_id requires recover_image' >&2; exit 1; fi
           actual=$(git rev-parse HEAD)
           test "$actual" = "$EXPECTED_CANDIDATE"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$EXPECTED_CANDIDATE" refs/remotes/origin/master
           echo "sha=$actual" >> "$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@v4
@@ -197,6 +200,13 @@ jobs:
           ref: ${{ inputs.candidate_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify merged release candidate
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/master
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -218,17 +228,13 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_IMAGE_RUN_ID/artifacts?per_page=100" > artifacts.json
           workflow_head=$(jq -r .head_sha run.json)
           [[ "$workflow_head" =~ ^[0-9a-f]{40}$ ]]
-          trusted_workflow_head=
-          if [[ "$workflow_head" != "$CANDIDATE_SHA" ]]; then
-            git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
-            git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master
-            trusted_workflow_head=$workflow_head
-          fi
-          ARTIFACT_NAME="$artifact_name" TRUSTED_WORKFLOW_HEAD="$trusted_workflow_head" node --import tsx/esm -e '
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master
+          ARTIFACT_NAME="$artifact_name" TRUSTED_WORKFLOW_HEAD="$workflow_head" node --import tsx/esm -e '
             import { readFileSync } from "node:fs";
             import { validatePriorReleaseRun } from "./scripts/release/product.ts";
             const json = path => JSON.parse(readFileSync(path, "utf8"));
-            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, candidateCommit: process.env.CANDIDATE_SHA, trustedWorkflowHeadCommits: [process.env.TRUSTED_WORKFLOW_HEAD].filter(Boolean), allowedWorkflows: [".github/workflows/platform-image.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Record Platform image candidate" }] });'
+            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, trustedWorkflowHeadCommits: [process.env.TRUSTED_WORKFLOW_HEAD], allowedWorkflows: [".github/workflows/platform-image.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Record Platform image candidate" }] });'
           gh run download "$PLATFORM_IMAGE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name "$artifact_name" --dir candidate
           node --import tsx/esm -e '

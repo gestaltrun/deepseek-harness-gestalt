@@ -1173,6 +1173,7 @@ function object(value: unknown, name: string): Record<string, unknown> {
 }
 
 function exactKeys(record: Record<string, unknown>, keys: readonly unknown[], name: string): void {
+  /* v8 ignore next -- callers pass string key lists or optional-key filters over string literals */
   const supported = keys.filter((key): key is string => typeof key === 'string')
   const actual = Object.keys(record)
   if (actual.length !== supported.length || actual.some(key => !supported.includes(key))) {

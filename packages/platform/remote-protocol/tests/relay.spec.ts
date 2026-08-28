@@ -12,6 +12,7 @@ import {
   parseRelayCredentialPublicKey,
   parseRelayPairingSelector,
   parseRelayRouteId,
+  relayAttachmentProofMatches,
   REMOTE_PROTOCOL_LIMITS,
   RemoteProtocolError,
   signRelayAttachmentChallenge,
@@ -70,6 +71,14 @@ describe('Relay Transport Protocol codec', () => {
           attachmentId: parseRelayAttachmentId('desktop-peer'),
           pairingSelector: parseRelayPairingSelector('pairing-one'),
           generation: 7,
+        }],
+      },
+      {
+        type: 'peer-update', transportVersion: 1, routeId, attachmentId,
+        peers: [{
+          attachmentId: parseRelayAttachmentId('desktop-peer-update'),
+          pairingSelector: parseRelayPairingSelector('pairing-two'),
+          generation: 8,
         }],
       },
       { type: 'revoke', transportVersion: 1, routeId, attachmentId, reason: 'device' },
@@ -132,6 +141,53 @@ describe('Relay Transport Protocol codec', () => {
       .resolves.toBe(false)
     await expect(verifyRelayAttachmentProof({ ...proof, expiresAt: proof.expiresAt + 1 }))
       .resolves.toBe(false)
+
+    const request = {
+      type: 'attach-challenge' as const, transportVersion: 1 as const,
+      routeId: challenge.routeId, attachmentId: challenge.attachmentId,
+      endpoint: challenge.endpoint, credentialPublicKey: challenge.credentialPublicKey,
+    }
+    expect(relayAttachmentProofMatches(request, challenge, proof)).toBe(true)
+    expect(relayAttachmentProofMatches(
+      { ...request, routeId: parseRelayRouteId('route-other') }, challenge, proof,
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      request, challenge, { ...proof, routeId: parseRelayRouteId('route-other') },
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      { ...request, attachmentId: parseRelayAttachmentId('mobile-other') }, challenge, proof,
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      request, challenge, { ...proof, attachmentId: parseRelayAttachmentId('mobile-other') },
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      { ...request, endpoint: 'desktop' }, challenge, proof,
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      request, challenge, { ...proof, endpoint: 'desktop' },
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      { ...request, credentialPublicKey: `${challenge.credentialPublicKey.slice(0, -1)}B` as typeof request.credentialPublicKey },
+      challenge, proof,
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      request, challenge,
+      { ...proof, credentialPublicKey: `${proof.credentialPublicKey.slice(0, -1)}B` as typeof proof.credentialPublicKey },
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      request, challenge, { ...proof, challengeId: parseRelayAttachChallengeId('challenge-other') },
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      request, challenge, { ...proof, expiresAt: proof.expiresAt + 1 },
+    )).toBe(false)
+    expect(relayAttachmentProofMatches(
+      request, challenge, { ...proof, nonce: new Uint8Array(31).fill(3) },
+    )).toBe(false)
+    const nonceTampered = new Uint8Array(challenge.nonce)
+    nonceTampered[0] = 9
+    expect(relayAttachmentProofMatches(
+      request, challenge, { ...proof, nonce: nonceTampered },
+    )).toBe(false)
   })
 
   it('enforces message, parser-depth, encoded-value, and ciphertext limits before dispatch', () => {

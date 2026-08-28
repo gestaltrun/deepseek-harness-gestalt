@@ -392,6 +392,7 @@ export async function handleCompanionProductOperation(
         },
       }
     default: {
+      /* v8 ignore next 2 -- CompanionOperation is closed and every member is handled above */
       const never: never = operation
       return never
     }

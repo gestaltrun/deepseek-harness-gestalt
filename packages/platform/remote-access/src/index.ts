@@ -2262,7 +2262,11 @@ export class PersonalPairingProvider extends RemoteAccessService {
         )
       }
       const authority = await this.authority.getDesktop(account.id, installation.id)
-      if (!authority.enabled || authority.routeId === undefined) {
+      if (!authority.enabled) {
+        throw new RemoteAccessError('MOBILE_ACCESS_DISABLED', 'Mobile Access is disabled for this Desktop Installation')
+      }
+      /* v8 ignore next 3 -- getDesktop never returns enabled without a routeId */
+      if (authority.routeId === undefined) {
         throw new RemoteAccessError('MOBILE_ACCESS_DISABLED', 'Mobile Access is disabled for this Desktop Installation')
       }
       const relay = this.requireProjectPeerRelay()
@@ -3014,8 +3018,14 @@ export class PersonalPairingProvider extends RemoteAccessService {
 
   private requireProjectPeerRelay(): Pick<RemoteRelayService,
     'registerCredentialDigest' | 'revokeCredentialDigest'> {
-    /* The constructor fails composition loading unless Relay supplies both operations. */
-    return this.options.relay as Pick<RemoteRelayService, 'registerCredentialDigest' | 'revokeCredentialDigest'>
+    const relay = this.options.relay
+    /* v8 ignore start -- the constructor rejects projectPeerGrants unless Relay supplies both digest operations */
+    if (relay === undefined || typeof relay.registerCredentialDigest !== 'function'
+      || typeof relay.revokeCredentialDigest !== 'function') {
+      throw new TypeError('Project peer grants require a Remote Relay composition with digest registration and revocation')
+    }
+    /* v8 ignore stop */
+    return relay
   }
 
   /**

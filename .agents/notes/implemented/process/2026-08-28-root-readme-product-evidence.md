@@ -16,9 +16,9 @@ The root README presents Gestalt as the product layer on top of official DSH. It
 
 The English product name is **Gestalt**. The Chinese product name and IP character are **獭子哥**. The landing page stores and displays the approved character sheet. Existing package names, application identifiers, release tags, and historical references remain unchanged until a separately coordinated rename requires their migration.
 
-A tracker-backed product map separates Gestalt additions into product domains. `DONE` requires a capability to be merged into `master`; it does not claim inclusion in the latest packaged release. `DOING` requires an active delivery pull request. `TODO` requires an open issue selected for the product roadmap. Each nonempty state links the pull request, issue, owning reference, or plugin catalog that supports it. The map covers product functions added around the DSH base rather than repeating the official DSH package and tool catalogs. It is the sole product-status inventory in the README; feature tours explain completed behavior without repeating delivery state.
+A product architecture diagram separates the official DSH foundation, Gestalt's shared product layer, and the user-facing product areas. `DONE` requires a capability to be merged into `master`; it does not claim inclusion in the latest packaged release. `DOING` requires active delivery. `TODO` requires an open issue selected for the product plan. The map covers product functions added around the DSH base rather than repeating the official DSH package and tool catalogs.
 
-Feature tours expand the map with accepted product recordings for Workbench and Better Sidebar, Side Chat, Schedule, AI Browser, Workspace Reference, Annotation, and Mobile Companion. Every embedded GIF comes from a merged change's real product path and uses an immutable repository object id. Provenance remains in the linked pull requests.
+One vertical table is the README's product-status inventory and feature tour. Each row names a product area, its completion, concrete user functions, and at most one product recording. Completed functions link their owning product documentation instead of a delivery ledger; planned functions link the tracker item that defines their direction. Recordings cover Workbench and Better Sidebar, Side Chat, Schedule, AI Browser, Workspace Reference, Annotation, and Mobile Companion. Every embedded GIF uses an immutable repository object id.
 
 Installation steps stay short. The README links first-run procedures to the user guide, composition and lifecycle semantics to architecture and application references, external integrations to the plugin catalog, and contributor workflows to development documentation.
 
@@ -30,10 +30,10 @@ Installation steps stay short. The README links first-run procedures to the user
 
 **Show only completed work.** Rejected because active product direction would remain invisible. Tracker-backed `DOING` and `TODO` states distinguish committed delivery from plans without presenting open work as shipped.
 
-**Use mock screenshots or conceptual artwork.** Rejected because they cannot demonstrate current product behavior. Accepted product recordings provide concrete evidence without turning the README into a test report.
+**Use mock screenshots or conceptual artwork.** Rejected because they do not show the product a user can run. Product recordings show the current workflows.
 
-**Embed every available recording.** Rejected because repeated animations make the page slow and hide the main product domains. One representative recording or paired comparison per tour is sufficient.
+**Place recordings side by side.** Rejected because wide rows dominate the page and become cramped on narrow screens. The table places one recording on each row and keeps the walkthrough vertical.
 
 ## Consequences
 
-Readers can see the official DSH base, the extra Gestalt product layer, current delivery, and planned work in one pass, then inspect real workflows by domain. The status map can become stale, so every README change that touches product scope verifies its issue and pull-request links against the live tracker. No second roadmap section repeats those states. Detailed runtime behavior, configuration, compatibility limits, and verification remain in their owning documents and pull requests.
+Readers can see the official DSH base, the shared Gestalt product layer, product areas, completion, and concrete functions in one pass. The status table can become stale, so every README change that touches product scope checks active and planned items against the live tracker. No second roadmap or feature gallery repeats the table. Detailed runtime behavior, configuration, compatibility limits, and verification remain in their owning documents and pull requests.

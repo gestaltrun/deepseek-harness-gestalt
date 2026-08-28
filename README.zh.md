@@ -18,120 +18,47 @@
 
 本项目持续合并 [DSH 官方仓库](https://github.com/deepseek-ai/deepseek-harness)的改动，并尽可能把产品增量放在应用、Bundle、插件和有文档说明的能力 seam 上。DSH Profile、插件、CLI（命令行界面）模式和 SDK 入口是兼容性基线。獭子哥目前仍处于开发者预览阶段，产品收敛过程中仍可能出现破坏兼容性的变更。
 
-## 产品方向
+## 产品功能全景
 
-- **补齐完整产品：** 增加 Desktop Host、Workbench、Mobile Companion、产品设置、发行打包、更新流程和验收路径，让 agent harness（智能体框架）成为可以日常安装和使用的软件。
-- **保持 DSH 兼容：** 合并上游改动，保留 DSH 组合约定，不用另一套平台替换官方 agent loop（智能体循环）或插件模型。
-- **集成社区成果：** 采用 [DSH Better Sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) 等有价值的插件，钉住经过审阅的修订，并让它们遵循獭子哥的生命周期、安全和展示规则。
-- **交付一个连贯产品：** 让会话、工具、浏览器、文件、审批、Desktop 和 Mobile 共享同一份持久真源，而不是成为彼此割裂的应用。
+獭子哥不另起一套 agent runtime。官方 DSH 提供插件树、agent loop、持久会话日志、能力 seam、Profile、CLI 和 SDK；Gestalt 在这套基础上增加统一的产品设置、工作空间与会话归属、审批、生命周期、共享 UI 和发行能力，再组成面向用户的产品域。
 
-## 产品功能地图
+```mermaid
+flowchart TB
+  DSH["DSH foundation / DSH 基础能力<br/>Cordis plugin tree · agent loop · durable Session log<br/>capability seams · Profiles · CLI · SDK"]
+  G["Gestalt shared product layer / Gestalt 共享产品层<br/>Workspace and Session ownership · approvals · product settings<br/>lifecycle · distribution · cross-client UI"]
+  DSH --> G
+  G --> W["Work experience / 工作体验域"]
+  G --> C["Clients and delivery / 客户端与交付域"]
+  G --> E["Extensions and collaboration / 扩展与协作域"]
+  W --> WB["Workbench and navigation / Workbench 与导航<br/>DONE"]
+  W --> SW["Session workflows / 会话工作流<br/>DONE"]
+  W --> CR["Context and review / 上下文与审阅<br/>DONE"]
+  W --> BR["AI Browser<br/>DONE"]
+  C --> DT["Desktop product / Desktop 产品<br/>DONE"]
+  C --> MC["Mobile Companion<br/>DONE"]
+  E --> PI["Community plugins / 社区插件<br/>DONE + TODO"]
+  E --> CO["Cross-account collaboration / 跨账号协作<br/>DOING"]
+  E --> DV["Device operation / 设备操作<br/>TODO"]
+```
 
-`DONE` 表示能力已合并进 `master`，但可能比最新打包版本更新。`DOING` 必须对应正在交付的 PR（Pull Request）。`TODO` 链接已确认的开放 Issue。短横线表示本地图在该状态下没有已经承诺的条目。
+`DONE` 表示功能已进入 `master`，但可能比最新安装包更新。`DOING` 表示产品域已有交付中的改动。`TODO` 表示已进入产品计划。下表是 README 唯一的产品状态清单，每行只放一张产品画面，便于纵向浏览。
 
-| 产品域 | DONE | DOING | TODO |
+| 产品域 | 完成度 | 具体产品功能导览 | 产品画面 |
 |---|---|---|---|
-| Desktop 产品 | Electron Host、macOS 与 Windows 安装包、产品窗口框架、全屏 Settings、分阶段自动更新和会话日程（[#1](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/1)、[#26](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/26)、[#367](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/367)） | — | — |
-| Workbench 与导航 | Better Sidebar 0.16.1、文件、多仓库 Git、Markdown/HTML、终端、自由窗口和由 agent 打开的 tab（[#317](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/317)） | — | 简化 Workbench 内 Browser 的所有权（[#226](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/226)） |
-| 会话工作流 | 带重启恢复和统一对话 UI 的持久 Side Chat、獭子哥 Schedule 任务板，以及面向有相应能力的 subagent 提供方的图片提示词（[#26](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/26)、[#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247)、[#325](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/325)、[#329](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/329)） | — | — |
-| 上下文与审阅 | 工作空间 `@file` 引用、目录下钻、上下文 dock、文本与图片 Annotation，以及按工作空间设置的工具准入（[#73](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/73)、[#80](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/80)、[#176](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/176)） | — | — |
-| AI（人工智能）Browser | 会话所有的 Browser Workspace 与 tab、shared/temporary/具名 persistent Profile、Browser Dock、工具审批和重启恢复（[#104](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/104)、[#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247)） | — | — |
-| Mobile Companion | Platform Account、Personal Pairing、加密 Relay、由 Desktop 管理的会话浏览／搜索／历史、提示词、取消、审批、提问、附件、实时投影、多手机并发、TestFlight 交付和签名 Android APK（[#312](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/312)、[#371](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/371)、[#398](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/398)、[#44](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/44)） | — | — |
-| 社区插件 | Better Sidebar 已作为经过审阅的源码快照集成；外部插件使用精确修订目录（[plugins](plugins/README.zh.md)、[#335](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/335)） | — | 可选 Sub2API 提供方、安装器和内嵌管理台（[#346](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/346)、[#348](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/348)、[#349](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/349)） |
-| 跨账号协作 | — | Project Membership 与成员定向提问（[#338](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/338)、[#399](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/399)） | 发送方路由、接收体验和整体验收（[#343](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/343)、[#344](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/344)、[#345](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/345)） |
-| 设备操作 | — | — | 侧栏手机 tab：启动 Android/iOS、显示实时画面、由人接手以及经过审批的 agent 工具（[#355](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/355)） |
+| Desktop 产品 | `DONE` | [Electron Host](apps/desktop/README.zh.md)、macOS 与 Windows 安装包、产品窗口框架、全屏 Settings、分阶段自动更新、退出与重启生命周期 | [Desktop 与发行说明](apps/desktop/README.zh.md) |
+| Workbench 与导航 | `DONE`<br/>`TODO` [简化 Browser 所有权](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/226) | [Better Sidebar](packages/client/ui-better-sidebar/README.zh.md) 提供文件、编辑器、多仓库 Git、Markdown/HTML、终端、自由窗口和由 agent 打开的 tab；[Workbench 适配器](packages/client/ui-workbench/README.zh.md)承载官方 Browser Runtime | <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/5ea5bae18c9083d1c200173ed8bb05e903fc3e1d/better-sidebar-v0.16.1-pr317-16311605.gif" alt="獭子哥 Workbench 展示模型回复、仓库文件、Git 视图和侧边栏工具" width="520"> |
+| 会话工作流 | `DONE` | 持久 [Side Chat](packages/client/ui-better-sidebar/README.zh.md)复用主会话的对话 UI、模型、权限、后台任务和下级导航，并在 Host 重启后恢复；具备相应能力的 subagent 提供方也可接收图片提示词 | <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/3e32d89ee0e28a15cb099e6b90114601dfc537ce/issue-324-sidechat-restore-8469fa6eb8.gif" alt="Side Chat 在重启后恢复、继续，并在归档后保持关闭" width="520"> |
+| 会话工作流 | `DONE` | [Schedule 任务板](packages/client/ui-schedule/README.zh.md)管理 agent 创建的提醒，支持暂停、恢复和删除 | <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/8be40575a41afeb231477bdf22ea0eb8976c7d71/issue-25-session-schedule-board.gif" alt="会话日程创建、暂停、恢复和删除提醒" width="520"> |
+| 上下文与审阅 | `DONE` | [Workspace Reference](packages/client/ui-reference/README.zh.md)支持文件搜索、目录下钻、粘贴控制和 Composer dock，把受限的 `@path` 上下文加入会话；Workspace Settings 控制哪些工具可以进入会话 | <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/a203adc7494cd5d8adae1fa23108afd98f7f022b/pr-164-workspace-reference-parity.gif" alt="Workspace Reference 选择器、目录下钻、Composer dock 和上下文注入" width="520"> |
+| 上下文与审阅 | `DONE` | 文本与图片 Annotation 支持选择 assistant 文本、在图片上放置标记、附加说明、恢复草稿，并作为普通用户消息提交 | <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/7edaf7daa3d69b97382ef4b47ce35d37dce863b7/pr-70-text-annotation-517ad8.gif" alt="选择 assistant 文本、添加说明并提交 Annotation 草稿" width="520"> |
+| AI Browser | `DONE` | 每个会话可拥有零个或多个 [Browser Workspace](packages/browser/browser-workspace/README.zh.md) 与 tab；Workspace 可使用 shared、temporary 或具名 persistent Profile，Browser Dock、审批、重启恢复和会话归属的关闭流程让浏览器工作留在产品生命周期内 | <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/849a04d76ae94c48a4d4b311942bbf1ca0f98888/pr/247/browser-lifecycle.gif" alt="会话所有的 Browser tab 完成导航、恢复并随生命周期关闭" width="520"> |
+| Mobile Companion | `DONE` | [Mobile](apps/mobile/README.zh.md)浏览、搜索和继续由 Desktop 管理的会话，并支持提示词、取消、审批、提问、附件与实时投影 | <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/3c711b7f0bc934d55f10dcdb9ee71e91850278f0/mobile-real-provider-98438f2.gif" alt="Mobile Companion 继续由 Desktop 管理的会话" width="260"> |
+| Mobile Companion | `DONE` | Platform Account、Personal Pairing、加密 Relay、多手机并发、TestFlight 交付和签名 Android APK；Desktop 继续持有会话、工作空间、附件、审批和提问权威 | <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/0af70c971b999cc54d18884233d7c59e595aba68/companion-ui-pr-371.gif" alt="Desktop Settings 同时显示两台已配对 Mobile 设备在线" width="520"> |
+| 社区插件 | `DONE` Better Sidebar<br/>`TODO` Sub2API | [外部插件目录](plugins/README.zh.md)固定经过审阅的精确修订。Better Sidebar 已集成；可选 Sub2API 提供方、安装器和内嵌管理台进入[后续计划](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/346) | [插件目录](plugins/README.zh.md) |
+| 跨账号协作 | `DOING` | Project Membership 与成员定向提问正在建设；后续补齐发送方路由、接收体验和[整体验收](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/345) | [产品计划](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/338) |
+| 设备操作 | `TODO` | 计划提供侧栏手机 tab，用于启动 Android/iOS、显示实时画面、由人接手和运行经过审批的 agent 工具 | [产品计划](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/355) |
 
-## 功能导览
-
-### Workbench 与社区侧边栏
-
-獭子哥用一个 Workbench 取代彼此割裂的面板。集成后的 Better Sidebar 提供文件与多仓库 Git 视图、渲染后的 Markdown 和 HTML、终端、自由窗口，以及可选的 `sidebar_open` 和终端工具。官方 Browser Runtime 使用原生 Workbench tab，而不是源码快照中的 iframe 后备实现。
-
-| 侧边栏能力 | 产品行为 | 证据 |
-|---|---|---|
-| 文件与编辑器 | 浏览仓库文件、打开编辑器，并预览本地 HTML 与媒体 | [Better Sidebar](packages/client/ui-better-sidebar/README.zh.md) |
-| 多仓库 Git | 在一个工作空间中选择并检查多个仓库的 Git 状态 | [#317](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/317) |
-| 文档渲染 | 在侧边栏内渲染 Markdown、HTML、目录和图片 | [#317](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/317) |
-| 终端 | 在对话旁保留终端 tab，并可选择向 agent 暴露终端工具 | [Better Sidebar](packages/client/ui-better-sidebar/README.zh.md) |
-| 自由窗口 | 将支持的侧边栏内容拆进独立窗口 | [#317](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/317) |
-| Browser | 将官方 Browser Runtime 页面放进带生命周期恢复的 Workbench tab | [Workbench 适配器](packages/client/ui-workbench/README.zh.md) |
-| Side Chat | 使用统一对话 UI 运行持久子会话 | [#329](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/329) |
-| 由 agent 打开的内容 | 让经过审批的 `sidebar_open` 调用聚焦本地文件、目录或网页 | [Better Sidebar](packages/client/ui-better-sidebar/README.zh.md) |
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/5ea5bae18c9083d1c200173ed8bb05e903fc3e1d/better-sidebar-v0.16.1-pr317-16311605.gif" alt="獭子哥 Workbench 展示真实模型回复、仓库文件、Git 视图和 Better Sidebar 工具" width="900">
-</p>
-
-### 会话工作流
-
-Side Chat 是持久子会话，使用与主会话相同的对话渲染器、模型选择、权限、日程、后台任务和后代导航。它们会在 Host 重启后恢复，并以事务方式归档。会话本地 Schedule 为 agent 创建的提醒提供持久暂停、恢复和删除操作。
-
-<table>
-  <thead>
-    <tr>
-      <th align="center">持久 Side Chat</th>
-      <th align="center">会话日程</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/3e32d89ee0e28a15cb099e6b90114601dfc537ce/issue-324-sidechat-restore-8469fa6eb8.gif" alt="Side Chat 在重启后恢复、继续，并在归档后保持关闭" width="520"></td>
-      <td align="center"><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/8be40575a41afeb231477bdf22ea0eb8976c7d71/issue-25-session-schedule-board.gif" alt="会话日程创建、暂停、恢复和删除提醒" width="520"></td>
-    </tr>
-  </tbody>
-</table>
-
-### 会话所有的 AI Browser
-
-一个会话可以拥有零个或多个 Browser Workspace 与 tab。每个 Workspace 使用 shared、temporary 或具名 persistent Browser Profile；默认 shared Profile 会在多个会话之间复用存储，不提供隔离保证。Browser tab 位于 Workbench 中，可在 Runtime 重启后恢复最后一个非空 URL，并随所属会话的生命周期关闭。工具操作仍通过普通审批流水线。
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/849a04d76ae94c48a4d4b311942bbf1ca0f98888/pr/247/browser-lifecycle.gif" alt="会话所有的 Browser tab 完成导航、恢复并随生命周期关闭" width="900">
-</p>
-
-### 上下文与人工审阅
-
-Workspace Reference 让人通过文件搜索、目录下钻、粘贴控制和 Composer dock 添加受限的 `@path` 上下文。Annotation 允许人选择 assistant 文本，或在暂存图片与历史图片上放置标记、附加说明、恢复草稿，并把结果作为普通的已记录用户消息提交。
-
-<table>
-  <thead>
-    <tr>
-      <th align="center">Workspace Reference</th>
-      <th align="center">文本与图片 Annotation</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/a203adc7494cd5d8adae1fa23108afd98f7f022b/pr-164-workspace-reference-parity.gif" alt="Workspace Reference 选择器、目录下钻、Composer dock 和注入上下文" width="520"></td>
-      <td align="center"><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/7edaf7daa3d69b97382ef4b47ce35d37dce863b7/pr-70-text-annotation-517ad8.gif" alt="选择 assistant 文本、添加说明并提交 Annotation 草稿" width="520"></td>
-    </tr>
-  </tbody>
-</table>
-
-### Mobile Companion
-
-Mobile Companion 不会创建另一套聊天后端。Desktop 仍是会话、工作空间、搜索、附件、审批和提问的权威；手机通过 Personal Pairing 和加密 Relay 访问这些能力。Desktop 与 Mobile 共用 Web 展示组件，使两端的对话行为保持一致。
-
-<table>
-  <thead>
-    <tr>
-      <th align="center">真实提供方会话续接</th>
-      <th align="center">Desktop 配对与多手机并发</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/3c711b7f0bc934d55f10dcdb9ee71e91850278f0/mobile-real-provider-98438f2.gif" alt="Mobile Companion 通过加密产品路径继续由 Desktop 管理的会话" width="260"></td>
-      <td align="center"><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/0af70c971b999cc54d18884233d7c59e595aba68/companion-ui-pr-371.gif" alt="Desktop Settings 同时显示两台已配对 Mobile 设备在线" width="620"></td>
-    </tr>
-  </tbody>
-</table>
-
-### Desktop 产品化与上游兼容
-
-獭子哥把 DSH Web 产品打包进 Electron Host，并提供官方 Node、仅 loopback 可访问的 Web server、产品窗口框架、原生 Browser Runtime、经过签名和公证的 macOS 构建、Windows 安装器、分阶段更新和退出所有权。仓库定期合并官方 DSH，通过文档、类型、快照、包、Electron 和平台门禁验证组合后的代码树，并通过固定精确修订的插件接入树外集成。
-
-[架构文档](docs/architecture.zh.md)介绍共享插件树和能力 seam，[Desktop Host 参考](apps/desktop/README.zh.md)介绍打包与生命周期，[外部插件目录](plugins/README.zh.md)记录经过审阅的精确修订。
+[架构文档](docs/architecture.zh.md)介绍 DSH 插件树和能力 seam；[Desktop Host](apps/desktop/README.zh.md)、[Mobile](apps/mobile/README.zh.md)与[外部插件目录](plugins/README.zh.md)分别介绍三个产品交付入口。
 
 <a id="run"></a>
 

@@ -12,7 +12,7 @@ import { PhoneConnectedView } from '../src/client/PhoneConnectedView.tsx'
 import { PhoneConnectionController } from '../src/client/phone-connection.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
-import { FakeGateway, flush, ManualScheduler, SESSION_A } from './phone-fakes.ts'
+import { FakeGateway, flush, ManualScheduler, SESSION_A } from './phone-fakes.client.ts'
 
 afterEach(cleanup)
 

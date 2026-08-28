@@ -689,6 +689,7 @@
     },
     "apps/web": {
       "entry": [
+        "tests/**/*.acceptance.ts",
         "tests/**/*.e2e.ts",
         "tests/**/*.perf.ts",
         "tests/**/*.snapshot.ts",
@@ -733,9 +734,6 @@
         "src/**/*.ts",
         "scripts/**/*.mjs",
         "tests/**/*.ts"
-      ],
-      "ignoreDependencies": [
-        "ws"
       ]
     },
     "apps/platform": {

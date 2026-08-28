@@ -22,6 +22,8 @@ A scenario where a parent agent delegates to in-process subagents records more t
 
 Replay keys every call by its calling session id (`GenerateOptions.sessionId`, stamped by the agent loop). Live session ids are freshly random each run and never equal the recorded ones, so a live session binds to a recorded script by **first-call order**: scripts are ordered by header `createdAt` (parent first — it streams before it can delegate), and the first live session to make any call claims the first script, the next new session the next, and so on. Each session then advances its own cursor. A call with no `sessionId` is one anonymous session bound to the primary script. More distinct live sessions than recorded scripts fails loud.
 
+Before an expensive browser journey, `assertReplayFixture(config, expected)` validates the complete bind-order inventory. Each expected script lists one entry per model call; an optional `visibleAssistantText` pins the exact concatenation of `text-delta` chunks for that call. The validator deliberately ignores complete text stored in `block-end`: that durable result does not prove the incremental browser path received renderable text.
+
 ## Config
 
 | Key | Type | Default | Notes |
@@ -58,9 +60,10 @@ Replay keys every call by its calling session id (`GenerateOptions.sessionId`, s
 
 - `installLlmReplay(ctx, config)` — install the configured replay adapter or catch-all `llm/stream` listener; returns a `ReplayHandle` (`dispose()` for HMR safety plus `assertConsumed()`, the teardown check that every recorded script bound to a live session and every bound cursor drained — turning a scenario that silently drove fewer model calls than recorded into a crisp diagnostic). Use this in tests to drive replay without the Loader or env vars.
 - `loadSessionScripts(config)` — resolve the ordered `SessionScript[]` (primary + children) for a scenario, ready to bind to live sessions in first-call order.
+- `assertReplayFixture(config, expected)` — validate exact script and call counts plus optional browser-visible `text-delta` output before launching an expensive consumer.
 - `loadReplayScript(config)` — resolve the `ReplayEntry[]` for the primary session only (validated sidecar replacement/patches if present, else derived from the JSONL; fail-loud if the fixture is missing).
 - `deriveReplayScript(events)` / `parseSessionLog(text)` / `parseSessionHeader(text)` / `resolveScriptedEntry(entry, messages)` — the pure helpers that turn ordinary loop chunks and explicitly marked local compaction outputs in a persisted or projected session log into a script, read its header `id`/`createdAt`, and resolve `{{fromRequest:...}}` placeholders against one live request. A derived assistant group must end in a `finish` chunk; a group without one is the fingerprint of a thrown `stream()` and must instead be expressed via an override sidecar.
-- Types `ReplayEntry` / `ReplayOverrideDoc` / `ReplayOverridePatch` / `SessionScript` / `ReplayConfig` / `ReplayProviderConfig` / `ReplayModelConfig` / `ReplayHandle` / `Config`.
+- Types `ReplayEntry` / `ReplayOverrideDoc` / `ReplayOverridePatch` / `ReplayFixtureCallExpectation` / `ReplayFixtureScriptExpectation` / `SessionScript` / `ReplayConfig` / `ReplayProviderConfig` / `ReplayModelConfig` / `ReplayHandle` / `Config`.
 
 ## Plugin export shape
 

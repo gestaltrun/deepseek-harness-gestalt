@@ -7,6 +7,8 @@ import { HttpsProxyAgent } from 'https-proxy-agent'
 export interface DesktopRelayProxyCandidate {
   /** Native HTTP CONNECT agent; absence means a direct connection. */
   agent?: Agent
+  /** Credential-free proxy URL suitable for the system-Node Relay helper. */
+  proxyUrl?: string
   /** Content-free directive used for diagnostics and tests. */
   directive: 'DIRECT' | 'PROXY' | 'HTTPS'
 }
@@ -45,7 +47,14 @@ export function desktopRelayProxyCandidates(rules: string): readonly DesktopRela
     if (authority === undefined) throw new TypeError('Desktop Relay system proxy has no authority')
     const url = new URL(`${protocol}//${authority}`)
     if (url.hostname === '' || url.port === '') throw new TypeError('Desktop Relay system proxy is invalid')
-    candidates.push({ directive: match[1] as 'PROXY' | 'HTTPS', agent: new HttpsProxyAgent(url) })
+    if (url.username !== '' || url.password !== '') {
+      throw new TypeError('Desktop Relay system proxy must not contain credentials')
+    }
+    candidates.push({
+      directive: match[1] as 'PROXY' | 'HTTPS',
+      agent: new HttpsProxyAgent(url),
+      proxyUrl: url.href,
+    })
   }
   return candidates.length === 0 ? [{ directive: 'DIRECT' }] : candidates
 }

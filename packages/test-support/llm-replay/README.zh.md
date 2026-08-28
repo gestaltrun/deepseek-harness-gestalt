@@ -22,6 +22,8 @@ fixture 是持久化会话日志（`<scenario>/session.jsonl`）的投影：它�
 
 回放根据发起调用的会话 id 为每次调用建立键（`GenerateOptions.sessionId` 由 agent loop 写入）。实时会话 id 每次运行时都会重新随机生成，绝不会等于记录中的 id，因此实时会话按**首次调用顺序**绑定到已记录脚本：脚本按 header 中的 `createdAt` 排序（父会话在前，因为它必须先开始流式输出才能委托）；第一个发起调用的实时会话取得第一个脚本，下一个新会话取得下一个脚本，以此类推。此后每个会话分别推进自己的游标。没有 `sessionId` 的调用视为一个绑定主脚本的匿名会话。不同实时会话的数量超过已记录脚本数时会明确报错。
 
+在昂贵的浏览器旅程之前，`assertReplayFixture(config, expected)` 会验证完整的绑定顺序清单。每个预期脚本按模型调用逐项列出；可选的 `visibleAssistantText` 固定该次调用所有 `text-delta` 分片的准确拼接结果。Validator 有意忽略 `block-end` 中的完整文本：该持久结果不能证明增量浏览器路径收到了可渲染文本。
+
 ## 配置
 
 | 键 | 类型 | 默认值 | 说明 |
@@ -58,9 +60,10 @@ fixture 是持久化会话日志（`<scenario>/session.jsonl`）的投影：它�
 
 - `installLlmReplay(ctx, config)`：安装已配置回放适配器或 catch-all `llm/stream` 监听器；返回 `ReplayHandle`（包含用于保证 HMR（热模块替换）安全的 `dispose()`，以及清理阶段执行的 `assertConsumed()` 检查；后者确保每个已记录脚本都绑定到实时会话，且每个已绑定游标都已耗尽，从而将场景静默驱动的模型调用少于记录数转换为明确诊断）。在测试中使用它，可以不通过 Loader 或 env var 驱动回放。
 - `loadSessionScripts(config)`：解析场景中有序的 `SessionScript[]`（主会话 + 子会话），准备按首次调用顺序绑定到实时会话。
+- `assertReplayFixture(config, expected)`：在启动昂贵 consumer 前，验证准确的脚本和调用次数，以及可选的浏览器可见 `text-delta` 输出。
 - `loadReplayScript(config)`：只解析主会话的 `ReplayEntry[]`（如果伴随文件存在，则使用经校验的替换或补丁；否则从 JSONL 派生；fixture 缺失时明确报错）。
 - `deriveReplayScript(events)` / `parseSessionLog(text)` / `parseSessionHeader(text)` / `resolveScriptedEntry(entry, messages)`：将持久化或投影后会话日志中的普通 loop 分片和显式标记的本地压缩输出转换为脚本、读取其 header `id`/`createdAt`、并针对单次实时请求解析 `{{fromRequest:...}}` 占位符的纯辅助工具。派生的 assistant 分组必须以 `finish` 分片结束；没有该分片的分组是 `stream()` 抛出异常的指纹，必须改用 override 伴随文件表达。
-- 类型 `ReplayEntry` / `ReplayOverrideDoc` / `ReplayOverridePatch` / `SessionScript` / `ReplayConfig` / `ReplayProviderConfig` / `ReplayModelConfig` / `ReplayHandle` / `Config`。
+- 类型 `ReplayEntry` / `ReplayOverrideDoc` / `ReplayOverridePatch` / `ReplayFixtureCallExpectation` / `ReplayFixtureScriptExpectation` / `SessionScript` / `ReplayConfig` / `ReplayProviderConfig` / `ReplayModelConfig` / `ReplayHandle` / `Config`。
 
 ## 插件导出形态
 

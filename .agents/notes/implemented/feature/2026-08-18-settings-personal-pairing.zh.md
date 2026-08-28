@@ -16,7 +16,7 @@ Desktop 与 Mobile 的密码行为通过 `PairingHandshakeProvider` 进入。生
 
 `remote-access-http` 消费 `ctx.remoteAccess`；`remote-access-client` 为 Host 拥有的 Desktop 控制器与 Mobile 控制器校验 JSON 和带品牌的 id。Mobile 区分尚未发送的尝试、可能已经提交的请求和待确认结果，分别将它们保留到邀请过期、服务端重放期限或明确终态，并以相同的完成 id 和握手字节重试。Desktop 账号退出与 Mobile 卸载会停用各自按账号划分的生命周期拥有者：投影与重试状态会清除，计时器停止，包括浏览器相机扫码在内的进行中工作排空，后续操作在重新激活前都会失败。组装后的 loader 场景使用 `DevelopmentKeylessPairingHandshakeProvider`，让提供方、HTTP 消费方和共享传输通过真实环回服务器运行。Desktop 与 Mobile 开发入口可以通过显式环境标志选择各自的真实控制器。生产环境在独立 Snow 评审接纳产品提供方前保持关闭，任何生产路径都不会导入无密钥实现。无密钥组装验收、精确两分钟边界与 Settings 外壳放置证明见[个人配对组装验收说明](../testing/2026-08-19-personal-pairing-assembled-acceptance.zh.md)。
 
-既有 Desktop `手机配对` 设置区拥有手机访问开关、QR／完整链接挑战、认证词、确认、拒绝与已配对设备列表。QR 生成使用维护中的零依赖 `uqr` 编码器。Mobile 通过粘贴或浏览器相机 QR 扫描接受同一个完整链接，并等待 Desktop 确认。不会注册新的 Session 标题栏、侧栏、批准、编辑器或离线界面。
+既有 Desktop `手机配对` 设置区拥有手机访问开关、QR／完整链接挑战、认证词、确认、拒绝与已配对设备列表。登录前，Platform 账号提醒占用设置区标题。登录后，已鉴权的 GitHub 头像与名称会替换该提醒，而不是作为第二份身份并排显示；辅助文案直接说明退出登录与保留手机配对，不使用 Installation 术语。已配对设备状态分别使用文字、底色、边框与指示点颜色。中文界面使用中文任务文案，Platform 与 GitHub 等产品名保持不变。QR 生成使用维护中的零依赖 `uqr` 编码器。Mobile 通过粘贴或浏览器相机 QR 扫描接受同一个完整链接，并等待 Desktop 确认。不会注册新的 Session 标题栏、侧栏、批准、编辑器或离线界面。
 
 ## Alternatives considered
 

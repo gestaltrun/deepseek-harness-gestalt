@@ -24,6 +24,7 @@ import type {
   CompanionVersionDescriptor,
   CompanionVersionOffer,
   CompanionWorkspaceProjection,
+  DocumentTransferId,
   MemberQuestionId,
   MemberQuestionState,
 } from './types.ts'
@@ -216,6 +217,15 @@ export function parseCompanionInteractionId(value: unknown): CompanionInteractio
  */
 export function parseMemberQuestionId(value: unknown): MemberQuestionId {
   return parseIdentifier(value, 'Companion member questionId') as MemberQuestionId
+}
+
+/**
+ * Parse one chunked document transfer identity.
+ * @param value - untrusted protocol-native identifier.
+ * @returns branded document transfer identifier.
+ */
+export function parseDocumentTransferId(value: unknown): DocumentTransferId {
+  return parseIdentifier(value, 'Companion document transferId') as DocumentTransferId
 }
 
 /**
@@ -459,6 +469,30 @@ function parseOperation(value: unknown, major: NegotiatedCompanionProtocol['majo
       ),
       questions,
       references: record.references.map(parseMemberQuestionReference),
+    }
+  }
+  if (record.type === 'document-chunk') {
+    if (major < 4) invalid('Companion document-chunk requires application major 4')
+    exactKeys(
+      record,
+      ['type', 'operationId', 'transferId', 'questionId', 'index', 'total', 'bytes'],
+      'Companion document-chunk operation',
+    )
+    const total = positiveSafeInteger(record.total, 'Companion document-chunk total')
+    if (total > REMOTE_PROTOCOL_LIMITS.documentTransferChunks) {
+      throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion document transfer exceeds its chunk ceiling')
+    }
+    const index = nonNegativeSafeInteger(record.index, 'Companion document-chunk index')
+    if (index >= total) invalid('Companion document-chunk index must be less than total')
+    decodeProtocolBase64Url(record.bytes, REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes, 'Companion document-chunk bytes')
+    return {
+      type: 'document-chunk',
+      operationId: parseCompanionOperationId(record.operationId),
+      transferId: parseDocumentTransferId(record.transferId),
+      questionId: parseMemberQuestionId(record.questionId),
+      index,
+      total,
+      bytes: record.bytes as string,
     }
   }
   if (record.type !== 'submit-prompt') invalid('Companion operation type is unsupported')
@@ -799,6 +833,22 @@ function parseProjection(value: unknown, major: NegotiatedCompanionProtocol['maj
       state: parseMemberQuestionState(record.state),
     }
   }
+  if (record.type === 'document-transfer-state') {
+    if (major < 4) invalid('Companion document-transfer-state requires application major 4')
+    exactKeys(record, ['type', 'transferId', 'received', 'total'], 'Companion document-transfer-state projection')
+    const total = positiveSafeInteger(record.total, 'Companion document-transfer-state total')
+    if (total > REMOTE_PROTOCOL_LIMITS.documentTransferChunks) {
+      throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion document transfer exceeds its chunk ceiling')
+    }
+    const received = nonNegativeSafeInteger(record.received, 'Companion document-transfer-state received')
+    if (received > total) invalid('Companion document-transfer-state received must not exceed total')
+    return {
+      type: 'document-transfer-state',
+      transferId: parseDocumentTransferId(record.transferId),
+      received,
+      total,
+    }
+  }
   if (record.type !== 'transcript-page') invalid('Companion projection type is unsupported')
   exactKeys(record, ['type', 'sessionId', 'entries'], 'Companion transcript-page projection')
   if (!Array.isArray(record.entries)) invalid('Companion transcript entries must be an array')
@@ -1092,9 +1142,11 @@ function parseVersionDescriptor(value: unknown): CompanionVersionDescriptor {
 
 function isCompanionV4Message(message: CompanionMessage): boolean {
   return message.type === 'operation'
-      && (message.operation.type === 'observe-session' || message.operation.type === 'member-question')
+      && (message.operation.type === 'observe-session' || message.operation.type === 'member-question'
+        || message.operation.type === 'document-chunk')
     || message.type === 'projection'
-      && (message.projection.type === 'session-live' || message.projection.type === 'member-question-state')
+      && (message.projection.type === 'session-live' || message.projection.type === 'member-question-state'
+        || message.projection.type === 'document-transfer-state')
     || message.type === 'result' && message.result.type === 'member-question-settled'
 }
 

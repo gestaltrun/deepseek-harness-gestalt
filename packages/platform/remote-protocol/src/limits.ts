@@ -58,6 +58,12 @@ export const REMOTE_PROTOCOL_LIMITS = {
   imageChunkBytes: 32 * 1_024,
   /** Maximum chunks in one historical image result. */
   imageChunks: 512,
+  /** Maximum decoded bytes in one document transfer chunk. */
+  documentTransferChunkBytes: 32 * 1_024,
+  /** Maximum chunks in one document transfer. */
+  documentTransferChunks: 64,
+  /** Maximum cumulative decoded bytes reassembled from one document transfer. */
+  documentTransferTotalBytes: 8 * 1_024 * 1_024,
   /** Maximum UTF-16 code units in one authoritative Session search query. */
   sessionSearchQueryCharacters: 500,
   /** Maximum Session/snippet pairs in one authoritative search result. */

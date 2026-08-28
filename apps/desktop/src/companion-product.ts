@@ -383,6 +383,14 @@ export async function handleCompanionProductOperation(
           message: 'This Desktop does not accept routed member questions yet',
         },
       }
+    case 'document-chunk':
+      return {
+        type: 'operation-failed', operationId: operation.operationId,
+        failure: {
+          kind: 'business', code: 'document-transfer-not-accepted',
+          message: 'This Desktop does not accept document transfers yet',
+        },
+      }
     default: {
       const never: never = operation
       return never

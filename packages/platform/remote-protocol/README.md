@@ -20,7 +20,7 @@ Major 4 adds `observe-session` and unsolicited `session-live` replacements. One 
 
 A conversation projection echoes the optional exclusive `beforeSeq` from its history request. An absent cursor replaces the tail; a present cursor identifies an older page that Mobile continuity-checks and prepends.
 
-Major 4 also carries member-directed questions exchanged between the paired installations of two Platform accounts. The `member-question` operation carries the branded question id, the bounded Decision Brief origin (project name, originating Session title, asker account, role, display name, avatar URL), the agent-authored background, one question batch reusing the user-questions item shape, and up to eight referenced document paths with reasons. The `member-question-settled` result carries the globally idempotent outcome — `answered` with the echoing answer batch, `declined`, `expired`, `withdrawn`, or `superseded` — plus the optional settling device id and moment, and replays through `query-operation-status` as a terminal mutation result. The `member-question-state` projection carries the derived receiver state (`pending` or one terminal outcome) for endpoint status bars. Every member-question carrier requires application major 4, rejects unknown fields, and bounds each string by its documented code-point ceiling.
+Major 4 also carries member-directed questions exchanged between the paired installations of two Platform accounts. The `member-question` operation carries the branded question id, the bounded Decision Brief origin (project name, originating Session title, asker account, role, display name, avatar URL), the agent-authored background, one question batch reusing the user-questions item shape, and up to eight referenced document paths with reasons. The `member-question-settled` result carries the globally idempotent outcome — `answered` with the echoing answer batch, `declined`, `expired`, `withdrawn`, or `superseded` — plus the optional settling device id and moment, and replays through `query-operation-status` as a terminal mutation result. The `member-question-state` projection carries the derived receiver state (`pending` or one terminal outcome) for endpoint status bars. Every member-question carrier requires application major 4, rejects unknown fields, and bounds each string by its documented code-point ceiling. Referenced documents of any file type travel as `document-chunk` operation frames: each frame carries the branded transfer id, the correlated question id, a zero-based index, the declared chunk total of at most 64, and at most 32 KiB of canonical base64url bytes, so one frame fits the application ceiling. The `document-transfer-state` projection reports `{transferId, received, total}` transfer progress. The codec validates each frame independently — exact fields, index below total, chunk byte ceiling, canonical base64url — and reassembly is a consumer duty that validates ordering and the cumulative 8 MiB decoded-byte budget.
 
 ## Endpoint attachment cipher
 
@@ -44,6 +44,9 @@ Major 4 also carries member-directed questions exchanged between the paired inst
 | Pending live Session replacements | 32 distinct Sessions |
 | Historical image chunk | 32,768 decoded bytes |
 | Historical image result | 512 chunks |
+| Document transfer chunk | 32,768 decoded bytes |
+| Document transfer | 64 chunks |
+| Document transfer reassembled bytes | 8,388,608 decoded bytes (8 MiB) |
 | Session search query | 500 UTF-16 code units |
 | Session search result | 20 unique Sessions |
 | Session search snippet | 240 Unicode code points |

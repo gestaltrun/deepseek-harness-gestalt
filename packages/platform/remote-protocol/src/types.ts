@@ -28,6 +28,9 @@ export type CompanionInteractionId = Branded<'CompanionInteractionId'>
 /** Protocol-native identity of one member-directed question carrier. */
 export type MemberQuestionId = Branded<'MemberQuestionId'>
 
+/** Protocol-native identity of one chunked document transfer. */
+export type DocumentTransferId = Branded<'DocumentTransferId'>
+
 /** Protocol-native identifier for an approved Session projection or operation target. */
 export type CompanionSessionId = Branded<'CompanionSessionId'>
 
@@ -257,6 +260,26 @@ export type CompanionOperation =
   | CompanionReadImageOperation
   | CompanionSettleInteractionOperation
   | CompanionMemberQuestionOperation
+  | CompanionDocumentChunkOperation
+
+/**
+ * One bounded chunk of a referenced document transferred beside a member
+ * question. Any file type travels as ordered frames; the receiver reassembles.
+ */
+export interface CompanionDocumentChunkOperation {
+  type: 'document-chunk'
+  operationId: CompanionOperationId
+  /** Transfer identity shared by every chunk of one document. */
+  transferId: DocumentTransferId
+  /** Member question the transferred document is attached to. */
+  questionId: MemberQuestionId
+  /** Zero-based position of this chunk inside the transfer. */
+  index: number
+  /** Declared chunk count of the whole transfer. */
+  total: number
+  /** Canonical unpadded base64url bytes for this chunk. */
+  bytes: string
+}
 
 /** Desktop-authoritative acceptance of a correlated operation. */
 export interface CompanionConfirmedResult {
@@ -514,6 +537,16 @@ export interface CompanionMemberQuestionStateProjection {
   state: MemberQuestionState
 }
 
+/** Receiver-side progress projection for one chunked document transfer. */
+export interface CompanionDocumentTransferStateProjection {
+  type: 'document-transfer-state'
+  transferId: DocumentTransferId
+  /** Chunks of this transfer accepted so far. */
+  received: number
+  /** Declared chunk count of the whole transfer. */
+  total: number
+}
+
 /** Projections in the first implemented Companion codec slice. */
 export type CompanionProjection =
   | CompanionTranscriptPageProjection
@@ -522,6 +555,7 @@ export type CompanionProjection =
   | CompanionConversationSnapshotProjection
   | CompanionLiveSessionProjection
   | CompanionMemberQuestionStateProjection
+  | CompanionDocumentTransferStateProjection
 
 /** Version-tagged encrypted application plaintext before endpoint encryption. */
 export type CompanionMessage =

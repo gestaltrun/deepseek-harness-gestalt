@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { parsePersonalPairingId } from '@deepseek-ai/dsh-remote-access'
 import {
   deriveCompanionAttachmentKey,
+  encodeProtocolBase64Url,
   parseCompanionOperationId,
   parseCompanionInteractionId,
   parseCompanionSessionId,
+  parseDocumentTransferId,
   parseMemberQuestionId,
   REMOTE_PROTOCOL_LIMITS,
   sealCompanionAttachment,
@@ -527,6 +529,26 @@ describe('Desktop Companion product operations', () => {
       failure: {
         kind: 'business', code: 'member-question-not-accepted',
         message: 'This Desktop does not accept routed member questions yet',
+      },
+    })
+  })
+
+  it('refuses routed document transfers with a stable typed business failure', async () => {
+    const host = hostRpc(async () => { throw new Error('document transfers must not reach the Host yet') })
+    const chunk = op({
+      type: 'document-chunk',
+      transferId: parseDocumentTransferId('document-transfer-product'),
+      questionId: parseMemberQuestionId('member-question-product'),
+      index: 0,
+      total: 3,
+      bytes: encodeProtocolBase64Url(Uint8Array.of(1, 2, 3)),
+    })
+    await expect(handleCompanionProductOperation(chunk, baseDependencies(host))).resolves.toEqual({
+      type: 'operation-failed',
+      operationId: chunk.operationId,
+      failure: {
+        kind: 'business', code: 'document-transfer-not-accepted',
+        message: 'This Desktop does not accept document transfers yet',
       },
     })
   })

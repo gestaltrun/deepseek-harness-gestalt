@@ -20,7 +20,7 @@ Major 4 新增 `observe-session` 与主动发送的 `session-live` 替换。每�
 
 conversation projection 会回显 history 请求中可选的 exclusive `beforeSeq`。cursor 缺失时替换 tail；cursor 存在时标识由 Mobile 进行连续性校验并 prepend 的旧 page。
 
-Major 4 还承载两个 Platform 账号的配对安装之间交换的成员提问。`member-question` 操作携带品牌化 question id、有界 Decision Brief origin（项目名、发起 Session 标题、提问者账号、角色、显示名、头像 URL）、agent 撰写的 background、复用 user-questions 问题项形态的一个问题批次，以及至多 8 条带 reason 的参考文档 path。`member-question-settled` 结果携带全局幂等的 outcome——`answered`（附带回显的 answers 批次）、`declined`、`expired`、`withdrawn` 或 `superseded`——以及可选的结算设备 id 与时刻，并可作为 terminal mutation result 通过 `query-operation-status` 重放。`member-question-state` 投影为 endpoint 状态栏携带派生的接收端状态（`pending` 或一种终态）。每个 member-question 载体都要求应用 major 4，拒绝未知字段，并将每条字符串限制在其文档化的 code-point 上限内。
+Major 4 还承载两个 Platform 账号的配对安装之间交换的成员提问。`member-question` 操作携带品牌化 question id、有界 Decision Brief origin（项目名、发起 Session 标题、提问者账号、角色、显示名、头像 URL）、agent 撰写的 background、复用 user-questions 问题项形态的一个问题批次，以及至多 8 条带 reason 的参考文档 path。`member-question-settled` 结果携带全局幂等的 outcome——`answered`（附带回显的 answers 批次）、`declined`、`expired`、`withdrawn` 或 `superseded`——以及可选的结算设备 id 与时刻，并可作为 terminal mutation result 通过 `query-operation-status` 重放。`member-question-state` 投影为 endpoint 状态栏携带派生的接收端状态（`pending` 或一种终态）。每个 member-question 载体都要求应用 major 4，拒绝未知字段，并将每条字符串限制在其文档化的 code-point 上限内。成员提问的参考文档以 `document-chunk` 操作帧传输任意文件类型：每帧携带品牌化 transfer id、关联 question id、零起 index、至多 64 的 total 声明，以及至多 32 KiB 的规范 base64url bytes，因此单帧始终满足应用上限。`document-transfer-state` 投影以 `{transferId, received, total}` 报告传输进度。codec 独立校验每帧——精确字段、index 小于 total、分片字节上限、规范 base64url——重组属于消费方职责，由其校验顺序与累计 8 MiB 解码字节预算。
 
 ## Endpoint attachment cipher
 
@@ -44,6 +44,9 @@ Major 4 还承载两个 Platform 账号的配对安装之间交换的成员提�
 | 待处理实时 Session 替换 | 32 个不同 Session |
 | 历史图片分片 | 32,768 个解码后字节 |
 | 历史图片结果 | 512 个分片 |
+| 文档传输分片 | 32,768 个解码后字节 |
+| 文档传输 | 64 个分片 |
+| 文档传输重组字节 | 8,388,608 个解码后字节（8 MiB） |
 | Session 搜索查询 | 500 个 UTF-16 code unit |
 | Session 搜索结果 | 20 个唯一 Session |
 | Session 搜索 snippet | 240 个 Unicode code point |

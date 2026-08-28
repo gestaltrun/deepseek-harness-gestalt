@@ -12,6 +12,8 @@ Platform 返回不含邀请 PSK 的路由元数据。Desktop 在本地创建完�
 
 一次 pairing revocation 请求只鉴别一次 endpoint proof，然后在各个持久 cleanup transaction 中复用已解析的 Account 与 Installation id。重复撤销已经移除的 Mobile pairing，或取消已经不存在的 endpoint challenge，都会成功且不会重建 authority。
 
+项目对等授权面与 Personal Pairing 并列，让一名成员的 Desktop 在自己携带的 route 上向另一名成员的 installation 签发密封 Relay 凭证。`grantProjectPeer` 通过注入的 Project Membership roster 读取证明双方账号均为活跃成员，在沿用 route revision 的前提下按每个 grant 独立的 selector 登记对端凭据摘要，并提交只持有摘要、密封信封与撤销状态的持久记录；组合提供的 sealing 适配器是 Platform 存储与交付凭据的唯一形态，缺少它时授权面失败关闭。取回操作会重新证明读取账号的成员资格，并先对项目内每份存活 grant 做对账：grantor 失去成员资格、对端失去成员资格或携带 route 消失的 grant，都会经由与显式撤销相同的补偿性摘要撤销进入撤销 tombstone；对同一对端 installation 重新授权即为轮换，在替换摘要登记完成后再撤销被取代的摘要。对等投影把无 selector 的 attachment 视为 route 所有者权限，同 revision 下对带渠道 selector 的 attachment 可见，因此 grantor attachment 与被授权对端互相可见，不同 grant 之间保持隔离。面向对端自身 installation 的生产级密封与跨机交付传输仍被推迟：它们依赖尚未存在的项目注册表传输，并继续处于已记录的独立加密评审之后。
+
 `ctx.remoteRelay` 拥有无状态多实例 Relay 生命周期。Desktop 与 Mobile 分别持有独立 P-256 签名凭据，持久 `RelayRouteStore` 只保留公钥摘要。每条物理连接都证明一份绑定 route、端点、attachment 与过期时间的新鲜挑战，因此观察到的 attach 交换无法授权另一条连接，仅凭不透明 route id 也无法 attach。Personal Pairing authority 会把 Mobile 公钥摘要对应的不含内容 fingerprint 绑定到已确认设备。每个已鉴别 Mobile attachment 会登记连接 token 与过期 lease；attach、heartbeat 和 ciphertext 访问推进 `lastAccessAt`，close 只删除该 token。只要任一当前 lease 存在，presence 就为在线，因此旧连接延迟 close 不会清除替换连接，进程崩溃也会在 lease 到期后转为离线。Desktop Settings 读取该状态，而不是使用确认时写死的值。每个 Platform Instance 先鉴权 attachment 并刷出 ready，再把它注册到会过期的共享目录，并直接发布到目标实例。跨实例事件只包含有界 Relay 密文、带品牌 transport id、连接 token 与 route revision。目标缺失时返回 `REMOTE_OFFLINE`，不存在离线密文或 mutation queue。容量限制只拒绝新 attachment，慢消费者在配置的字节上限处断开，心跳重新验证 route 权限，轮换或撤销会跨实例使旧在线 attachment 失效。仅主机侧的 `relay-provider` 包从本包的公开入口导入 `RemoteRelayError`，使按该类做 `instanceof` 映射的 HTTP Consumer 与 provider 共用同一个构造函数。
 
 部署持久状态仅限 route identity、credential digest、单调 revision 与撤销／关联状态。临时协调仅限会过期的 attachment 位置、失效事件与直达密文 Pub/Sub。实例退出会关闭其 socket；Mobile 与 Desktop 获取新的 non-sticky 连接，Desktop 发送权威加密 resync，而不迁移在线 socket。容量、目录、心跳、缓冲、连接与 attach timeout 都是组合中显式校验的配置值。
@@ -29,3 +31,4 @@ Platform 返回不含邀请 PSK 的路由元数据。Desktop 在本地创建完�
 - 产品组合已组装仅端点 mailbox、持久 authority store、密封 Mobile authority 与 Snow channel。独立安全评审以及 WKWebView／Android WebView 真机证据仍是发布证据，而不是运行时功能开关。
 - 已运营 Platform 通过 PostgreSQL 持久化 mailbox、publication、pairing-to-route 与 Relay 摘要权限，并且只用 Redis 处理会过期的 attachment discovery 与密文投递。本仓库不供应 PostgreSQL、Redis、TLS 或云实例。
 - 产品 Desktop 与 Mobile 使用 endpoint-owned Snow mailbox 和 Companion channel；Platform 不挂载配对密码实现。物理 WebView 证据与针对确切实现的独立评审仍是 release blocker。
+- 项目对等授权的交付止步于密封信封与持久记录：对端 installation 侧打开信封，以及承载它的跨机注册表传输，都要等该传输存在后再做；生产级密封继续处于独立加密评审之后。

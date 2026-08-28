@@ -45,6 +45,8 @@ export interface FakeKnobs {
   listEnvelope?: boolean
   /** Answers device.screencapture with the 1.0.5 `{ format, sessionUrl }` envelope; the stream moves to GET /stream?s=. */
   captureEnvelope?: boolean
+  /** MJPEG frames per capture body (default 1); larger values keep the body open for mid-stream teardown tests. */
+  streamFrameCount?: number
 }
 
 /** Persistent agent state the fake CLI mode records across invocations. */

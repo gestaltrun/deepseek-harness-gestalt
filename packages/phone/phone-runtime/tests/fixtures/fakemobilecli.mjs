@@ -136,6 +136,8 @@ function reply(res, id, payload) {
 }
 
 // One capture payload: an MJPEG multipart stream or a raw H264 Annex-B prefix.
+// With streamFrameCount the MJPEG body stays open, emitting a frame every 40ms
+// until the client disconnects — so a mid-stream teardown reaches the proxy.
 function serveCapture(res, format) {
   if (format === 'avc') {
     res.writeHead(200, { 'content-type': 'video/h264', 'cache-control': 'no-store' })
@@ -144,10 +146,21 @@ function serveCapture(res, format) {
     return
   }
   res.writeHead(200, { 'content-type': 'multipart/x-mixed-replace; boundary=frame', 'cache-control': 'no-store' })
-  res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_1X1.length)}\r\n\r\n`)
-  res.write(JPEG_1X1)
-  res.write('\r\n--frame--\r\n')
-  res.end()
+  const frameCount = knobs.streamFrameCount ?? 1
+  let sent = 0
+  const emitFrame = () => {
+    sent += 1
+    res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_1X1.length)}\r\n\r\n`)
+    res.write(JPEG_1X1)
+    res.write('\r\n')
+    if (sent >= frameCount) {
+      res.write('--frame--\r\n')
+      res.end()
+      return
+    }
+    setTimeout(emitFrame, 40)
+  }
+  emitFrame()
 }
 
 async function handleRpc(req, res) {
@@ -261,9 +274,28 @@ const server = http.createServer((req, res) => {
   void (async () => {
     try {
       // Session endpoint of the 1.0.5 capture contract: the stream lives here,
-      // addressed by the `s` parameter the envelope hands out.
+      // addressed by the `s` parameter the envelope hands out. The
+      // dualBoundaryStream knob reproduces the real R4 body: JSON notifications
+      // under the declared --BoundaryString family, then image frames under an
+      // undeclared --mjpeg-frame-boundary family.
       if (req.method === 'GET' && (req.url === '/stream' || (req.url ?? '').startsWith('/stream?'))) {
         const s = new URL(req.url ?? '/stream', 'http://127.0.0.1').searchParams.get('s')
+        if (knobs.dualBoundaryStream === true) {
+          const json = JSON.stringify({ notification: 'message', message: 'Starting video stream' })
+          const body = Buffer.concat([
+            Buffer.from(`--BoundaryString\r\nContent-Type: application/json\r\n\r\n${json}\r\n`),
+            Buffer.from('--BoundaryString--\r\n'),
+            Buffer.from(`--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_1X1.length)}\r\n\r\n`),
+            JPEG_1X1,
+            Buffer.from(`\r\n--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_1X1.length)}\r\n\r\n`),
+            JPEG_1X1,
+            Buffer.from('\r\n--mjpeg-frame-boundary--\r\n'),
+          ])
+          res.writeHead(200, { 'content-type': 'multipart/x-mixed-replace; boundary=BoundaryString', 'cache-control': 'no-store' })
+          res.write(body)
+          res.end()
+          return
+        }
         serveCapture(res, s === 'avc' ? 'avc' : 'mjpeg')
         return
       }

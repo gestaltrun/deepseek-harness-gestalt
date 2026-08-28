@@ -18,6 +18,7 @@ import { HttpError, readJsonObject, writeHttpError, writeJson } from '@deepseek-
 import { WebSocketServer } from 'ws'
 import { signPhoneStreamToken, verifyPhoneStreamToken } from './token.ts'
 import { isLoopbackApiRequest, isTrustedApiRequest } from './trust.ts'
+import { MJPEG_NORMALIZED_BOUNDARY, normalizeMultipartImageStream } from './multipart-normalize.ts'
 import type { PhoneDeviceRefWire, PhoneStreamSession, PhoneStreamUrl } from './types.ts'
 
 export type { PhoneStreamSession, PhoneStreamUrl } from './types.ts'
@@ -241,12 +242,19 @@ export class PhoneStream extends Service {
         deviceId: deviceId(grant.deviceId),
         format: grant.format,
       })
+      // Real 1.0.5 streams mix a declared JSON-notification boundary with an
+      // undeclared frame boundary; the browser can only parse one, so the
+      // multipart body is re-emitted under a single normalized image-frame
+      // boundary. Non-multipart bodies (H264) stream through untouched.
+      const multipart = capture.contentType.includes('multipart/x-mixed-replace')
       res.writeHead(200, {
-        'content-type': capture.contentType,
+        'content-type': multipart
+          ? `multipart/x-mixed-replace; boundary=${MJPEG_NORMALIZED_BOUNDARY}`
+          : capture.contentType,
         'cache-control': 'no-store',
         'x-content-type-options': 'nosniff',
       })
-      const reader = capture.body.getReader()
+      const reader = (multipart ? normalizeMultipartImageStream(capture.body) : capture.body).getReader()
       /* v8 ignore start -- browser disconnect cancels the unread capture body */
       const abort = (): void => {
         void reader.cancel()

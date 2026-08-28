@@ -232,8 +232,29 @@ describe('phone stream Host routes', () => {
     assertStructurallyDecodableJpeg(frame)
   })
 
+  it('normalizes the real R4 dual-boundary stream to a single image-frame boundary', async () => {
+    const { origin } = await mount([wireDevice('emulator-5554', 'android', 'emulator', 'online')], { dualBoundaryStream: true })
+    const host = new URL(origin).host
+    const session = await mint(origin)
+    const mjpeg = await readFrame(origin, session.mjpeg.url, host)
+    expect(mjpeg.status).toBe(200)
+    expect(mjpeg.contentType).toBe('multipart/x-mixed-replace; boundary=frame')
+    const body = mjpeg.body.toString('utf8')
+    // The upstream notification family and its undeclared frame boundary are gone.
+    expect(body).not.toContain('BoundaryString')
+    expect(body).not.toContain('mjpeg-frame-boundary')
+    expect(body).not.toContain('notification')
+    // readFrame stops at the first frame terminator; a streaming proxy owes
+    // the browser exactly that one frame per read, not the whole upstream.
+    expect(body.split('--frame\r\n').length - 1).toBe(1)
+    const headerEnd = mjpeg.body.indexOf('\r\n\r\n')
+    const frame = mjpeg.body.subarray(headerEnd + 4, mjpeg.body.indexOf('\r\n--frame'))
+    assertStructurallyDecodableJpeg(frame)
+  })
+
   it('cancels the upstream capture when the browser disconnects mid-stream', async () => {
-    const { origin } = await mount()
+    // A multi-frame body keeps the upstream open past the client teardown.
+    const { origin } = await mount([wireDevice('emulator-5554', 'android', 'emulator', 'online')], { streamFrameCount: 50 })
     const host = new URL(origin).host
     const session = await mint(origin)
     await readFrame(origin, session.mjpeg.url, host)

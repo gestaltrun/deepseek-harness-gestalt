@@ -12,7 +12,7 @@ repo_root="$(cd "${mobile_root}/../.." && pwd)"
 bundle_id="${MOBILE_BUNDLE_ID:-com.alibaba.gestalt.mobile}"
 profile_name="${MOBILE_PROVISIONING_PROFILE:-Gestalt Mobile App Store}"
 release_dir="${mobile_root}/release"
-archive="${release_dir}/DeepSeek-Gestalt.xcarchive"
+archive="${release_dir}/Tazige.xcarchive"
 export_dir="${release_dir}/ios-export"
 profile_plist="$(mktemp)"
 trap 'rm -f "${profile_plist}"' EXIT
@@ -56,6 +56,7 @@ if [[ "${profile_expiration_epoch}" -le "$(date '+%s')" ]]; then
 fi
 
 cd "${repo_root}"
+pnpm --filter @deepseek-ai/dsh-mobile run verify:brand
 pnpm --filter @deepseek-ai/dsh-mobile run build
 pnpm --dir apps/mobile exec cap sync ios
 
@@ -86,7 +87,7 @@ xcodebuild -exportArchive \
 
 source_ipa="$(find "${export_dir}" -maxdepth 1 -name '*.ipa' -print -quit)"
 test -n "${source_ipa}"
-target_ipa="${release_dir}/DeepSeek-Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.ipa"
+target_ipa="${release_dir}/Tazige-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.ipa"
 cp "${source_ipa}" "${target_ipa}"
 codesign --verify --deep --strict "${archive}/Products/Applications/App.app"
 printf '%s\n' "${target_ipa}"

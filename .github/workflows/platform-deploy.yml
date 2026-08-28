@@ -194,7 +194,7 @@ jobs:
           tar -xzf "$ARCHIVE" -C "$BIN_DIR"
           echo "$BIN_DIR" >> "$GITHUB_PATH"
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

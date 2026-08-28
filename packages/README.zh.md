@@ -35,7 +35,7 @@ npm scope 为 `@deepseek-ai/dsh-*`；Cordis `Service` 子类和函数插件通�
 | [`workflow/`](workflow/README.zh.md) | 工作流 seam、worker 线程引擎和面向模型的 `workflow`/`ralph` 工具 | 产品：稳定 API |
 | [`web/`](web/README.zh.md) | Web 能力系列：seam、搜索／获取提供方、面向模型的 Web 工具 | 产品：稳定 API |
 | [`browser/`](browser/README.zh.md) | Browser Runtime seam、多个 Provider 与 deferred 工具 | 产品：演进中 API |
-| [`phone/`](phone/README.zh.md) | 基于外部 mobilecli 二进制的手机设备群：回环服务子进程生命周期、健康轮询、统一清单 | 产品：演进中 API |
+| [`phone/`](phone/README.zh.md) | 基于外部 mobilecli 二进制的手机设备群与延迟工具 | 产品：演进中 API |
 | [`attachment/`](attachment/README.zh.md) | 持久附件标识、校验、本地内容寻址存储 | 产品：稳定 API |
 | [`spill/`](spill/README.zh.md) | spill 能力系列：存储 seam、本地实现、工具结果 spill 策略 | 产品：稳定 API |
 | [`todo/`](todo/README.zh.md) | 面向模型的 `todo_write` 工具 | 产品：稳定 API |

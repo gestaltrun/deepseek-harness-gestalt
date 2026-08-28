@@ -35,7 +35,7 @@ Groups hold `packages/<group>/<pkg>/`; names stay `@deepseek-ai/dsh-<pkg>`. **Gr
 | [`workflow/`](workflow/README.md) | Workflow seam, worker-thread engine, and model-facing `workflow`/`ralph` tools | Product — stable API |
 | [`web/`](web/README.md) | Web capability family: seam, search/fetch providers, model-facing web tools | Product — stable API |
 | [`browser/`](browser/README.md) | Browser Runtime seam, Providers, deferred tools | Product — evolving API |
-| [`phone/`](phone/README.md) | mobilecli-backed phone device fleet Service | Product — evolving API |
+| [`phone/`](phone/README.md) | mobilecli-backed phone device fleet Service and deferred tools | Product — evolving API |
 | [`attachment/`](attachment/README.md) | Durable attachment identity, validation, local content-addressed storage | Product — stable API |
 | [`spill/`](spill/README.md) | Spill capability family: storage seam, local impl, tool-result spill policy | Product — stable API |
 | [`todo/`](todo/README.md) | The model-facing `todo_write` tool | Product — stable API |

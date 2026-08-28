@@ -566,6 +566,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Each Session independently owns Dock facts, instances, and tabs over ctx.browserRuntime identities; the deferred Consumer binds created tabs when a calling Agent Session is present; the workbench sidebar reads the same snapshot.',
   },
   {
+    key: 'phoneDevices',
+    pkg: 'phone-runtime',
+    title: 'Phone device fleet capability',
+    mode: 'seam',
+    consumers: ['tool-phone'],
+    note: 'Opaque DeviceId identities stay behind ctx.phoneDevices; the deferred Consumer uses ordinary discovery, results, and tools/pre-execute ask for mutations.',
+  },
+  {
     key: 'web',
     pkg: 'web',
     title: 'Web access provider registry',

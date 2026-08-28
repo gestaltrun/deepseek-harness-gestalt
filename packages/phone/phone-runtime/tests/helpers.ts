@@ -4,10 +4,27 @@
  * excludes this package's suites on Windows.
  */
 
-import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import net from 'node:net'
+
+/** Behavior knobs the fake agent CLI mode reads from its config file per invocation. */
+export interface FakeAgentKnobs {
+  /** Seeds the persistent agent state as already installed. */
+  installed?: boolean
+  statusDelayMs?: number
+  installDelayMs?: number
+  /** When set, the subcommand writes this text to stderr and exits non-zero. */
+  statusText?: string
+  installText?: string
+  statusExitCode?: number
+  installExitCode?: number
+  /** When set, a successful install prints this JSON answer verbatim. */
+  installAnswer?: string
+  /** Makes the agent child ignore SIGTERM so the caller's SIGKILL escape runs. */
+  ignoreTerm?: boolean
+}
 
 /** Knobs fakemobilecli reads from its sibling config file at startup. */
 export interface FakeKnobs {
@@ -20,6 +37,18 @@ export interface FakeKnobs {
   exitFast?: boolean
   /** Ignore SIGTERM to exercise the SIGKILL escape in stop(). */
   ignoreTerm?: boolean
+  /** One-shot `agent` CLI behavior; state lives in a sibling state file. */
+  agent?: FakeAgentKnobs
+  /** Makes the named RPC method answer this JSON-RPC error verbatim. */
+  failArm?: { method: string; code?: number; message: string }
+}
+
+/** Persistent agent state the fake CLI mode records across invocations. */
+export interface FakeAgentState {
+  installed: boolean
+  installCount: number
+  statusCount: number
+  lastInstallArgv: string[] | null
 }
 
 /** One staged fake ready to be handed to PhoneDevices or spawned directly. */
@@ -27,9 +56,15 @@ export interface StagedFake {
   readonly port: number
   readonly executablePath: string
   readonly baseUrl: string
+  /** Staged dummy provisioning profile that satisfies composition validation. */
+  readonly profilePath: string
   /** Release the placeholder port reservation right before the child spawns. */
   claim(): void
   setDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
+  /** Rewrite the `agent` behavior knobs the next CLI invocation reads. */
+  setAgent(agent: FakeAgentKnobs): Promise<void>
+  /** Read the persistent agent state the fake CLI invocations record. */
+  agentState(): Promise<FakeAgentState>
   counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }>
   /** Resolves when the RPC endpoint answers or rejects when the fake is gone. */
   awaitOnline(timeoutMs?: number): Promise<void>
@@ -82,13 +117,24 @@ export async function stageFake(knobs: FakeKnobs = {}): Promise<StagedFake> {
   await copyFile(new URL('./fixtures/fakemobilecli.mjs', import.meta.url), executablePath)
   await chmod(executablePath, 0o755)
   await writeFile(join(fixturesDir, 'fakemobilecli.config.json'), JSON.stringify(knobs))
+  if (knobs.agent !== undefined) {
+    await writeFile(join(fixturesDir, 'fakemobilecli.agent-state.json'), JSON.stringify({
+      installed: knobs.agent.installed === true,
+      installCount: 0,
+      statusCount: 0,
+      lastInstallArgv: null,
+    }))
+  }
   const port = await randomPort()
   const hold = holdPort(port)
   const baseUrl = `http://127.0.0.1:${String(port)}`
+  const profilePath = join(fixturesDir, 'profile.mobileprovision')
+  await writeFile(profilePath, 'fake provisioning profile payload')
   const facade: StagedFake = {
     port,
     executablePath,
     baseUrl,
+    profilePath,
     claim(): void {
       hold.release()
     },
@@ -99,6 +145,18 @@ export async function stageFake(knobs: FakeKnobs = {}): Promise<StagedFake> {
         body: JSON.stringify({ devices }),
       })
       if (!response.ok) throw new Error(`set-devices failed: HTTP ${String(response.status)}`)
+    },
+    async setAgent(agent): Promise<void> {
+      const configPath = join(fixturesDir, 'fakemobilecli.config.json')
+      const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
+      await writeFile(configPath, JSON.stringify({ ...current, agent }))
+    },
+    async agentState(): Promise<FakeAgentState> {
+      try {
+        return JSON.parse(await readFile(join(fixturesDir, 'fakemobilecli.agent-state.json'), 'utf8')) as FakeAgentState
+      } catch {
+        return { installed: false, installCount: 0, statusCount: 0, lastInstallArgv: null }
+      }
     },
     async counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }> {
       return await (await fetch(`${baseUrl}/__test/counters`)).json() as {

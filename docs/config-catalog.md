@@ -1704,10 +1704,19 @@ export interface Config {
   requestTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
+  /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
+  agentTimeoutMs?: number
+  /**
+   * Absolute path to the `.mobileprovision` file passed as
+   * `--provisioning-profile` when installing or re-signing the on-device agent
+   * on a physical handset; the upstream command requires it for real iOS
+   * installs. When set, the path must name an existing file.
+   */
+  provisioningProfilePath?: string
 }
 ```
 
-Source: [`packages/phone/phone-runtime/src/index.ts:75`](../packages/phone/phone-runtime/src/index.ts)
+Source: [`packages/phone/phone-runtime/src/index.ts:97`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 

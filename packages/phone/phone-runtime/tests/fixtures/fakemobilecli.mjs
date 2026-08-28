@@ -7,7 +7,7 @@
 // environment of its own. Never shipped; never imported by src.
 
 import http from 'node:http'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -50,6 +50,79 @@ let requests = 0
 const listDelayMs = knobs.listDelayMs ?? 0
 const hangEveryResponse = knobs.hang === true
 const exitAfter = typeof knobs.exitAfter === 'number' ? knobs.exitAfter : null
+// When set, the named RPC method answers with this JSON-RPC error instead of
+// its normal handler; the suite pins structured real-device error arms on it.
+const failArm = knobs.failArm ?? null
+
+const AGENT_STATE_FILE = join(selfDir, 'fakemobilecli.agent-state.json')
+
+function readAgentState() {
+  try {
+    return JSON.parse(readFileSync(AGENT_STATE_FILE, 'utf8'))
+  } catch {
+    return { installed: knobs.agent?.installed === true, installCount: 0, statusCount: 0, lastInstallArgv: null }
+  }
+}
+
+function writeAgentState(agentState) {
+  writeFileSync(AGENT_STATE_FILE, JSON.stringify(agentState))
+}
+
+function replyAgent(payload) {
+  process.stdout.write(`${JSON.stringify(payload)}\n`)
+  process.exit(0)
+}
+
+// CLI mode: `fakemobilecli agent status|install --device <id> ...` runs as a
+// one-shot command against a persistent state file, mirroring the upstream
+// agent command's JSON answers and exit codes. Server mode never reaches this.
+if (args[0] === 'agent') {
+  const agentKnobs = knobs.agent ?? {}
+  if (agentKnobs.ignoreTerm === true) {
+    process.on('SIGTERM', () => {
+      // Simulate a stuck agent child that forces the caller's SIGKILL escape.
+    })
+  }
+  const subcommand = args[1]
+  const deviceIndex = args.indexOf('--device')
+  const device = deviceIndex >= 0 ? (args[deviceIndex + 1] ?? null) : null
+  const agentState = readAgentState()
+  const failText = subcommand === 'install' ? agentKnobs.installText : agentKnobs.statusText
+  const delayMs = subcommand === 'install' ? (agentKnobs.installDelayMs ?? 0) : (agentKnobs.statusDelayMs ?? 0)
+  setTimeout(() => {
+    if (typeof failText === 'string') {
+      process.stderr.write(`${failText}\n`)
+      process.exit(subcommand === 'install' ? (agentKnobs.installExitCode ?? 1) : (agentKnobs.statusExitCode ?? 1))
+    }
+    if (subcommand === 'status') {
+      agentState.statusCount += 1
+      writeAgentState(agentState)
+      if (agentState.installed) {
+        replyAgent({ status: 'ok', data: { message: 'Agent version 0.0.0-test is installed on device', agent: { version: '0.0.0-test', bundleId: 'com.mobilenext.devicekit-iosUITests.xctrunner' } } })
+      }
+      replyAgent({ status: 'fail', data: { message: 'Agent is not installed on the device' } })
+    }
+    if (subcommand === 'install') {
+      agentState.installCount += 1
+      agentState.lastInstallArgv = [...args]
+      writeAgentState(agentState)
+      const deviceEntry = state.devices.find(candidate => candidate.id === device)
+      if (deviceEntry?.type === 'real' && !args.includes('--provisioning-profile')) {
+        process.stderr.write('--provisioning-profile is required for real iOS devices\n')
+        process.exit(1)
+      }
+      agentState.installed = true
+      writeAgentState(agentState)
+      if (typeof agentKnobs.installAnswer === 'string') {
+        process.stdout.write(`${agentKnobs.installAnswer}\n`)
+        process.exit(0)
+      }
+      replyAgent({ status: 'ok', data: { message: 'Agent installed successfully', agent: { version: '0.0.0-test', bundleId: 'com.mobilenext.devicekit-iosUITests.xctrunner' } } })
+    }
+    process.stderr.write(`unknown agent subcommand: ${String(subcommand)}\n`)
+    process.exit(1)
+  }, delayMs)
+}
 
 function reply(res, id, payload) {
   res.setHeader('content-type', 'application/json')
@@ -63,6 +136,10 @@ async function handleRpc(req, res) {
   const { id, method, params } = request ?? {}
   requests += 1
   if (hangEveryResponse) return
+  if (failArm !== null && failArm.method === method) {
+    reply(res, id, { error: { code: failArm.code ?? -32000, message: failArm.message } })
+    return
+  }
   if (listDelayMs > 0 && method === 'devices.list') {
     await new Promise(resolveDelay => setTimeout(resolveDelay, listDelayMs))
   }
@@ -186,18 +263,21 @@ const server = http.createServer((req, res) => {
   })()
 })
 
-process.stderr.write(`fakemobilecli listening on ${address}\n`)
-let listenAttempts = 0
-server.on('error', (error) => {
-  // The staged port is claimed, but a straggler can still hold it briefly.
-  if (error.code === 'EADDRINUSE' && listenAttempts < 50) {
-    listenAttempts += 1
-    setTimeout(() => {
-      server.listen(port, '127.0.0.1')
-    }, 40)
-    return
-  }
-  process.stderr.write(`fakemobilecli listen failed: ${String(error)}\n`)
-  process.exit(1)
-})
-server.listen(port, '127.0.0.1')
+// Server startup never runs in agent CLI mode, which exits from its own timer.
+if (args[0] !== 'agent') {
+  process.stderr.write(`fakemobilecli listening on ${address}\n`)
+  let listenAttempts = 0
+  server.on('error', (error) => {
+    // The staged port is claimed, but a straggler can still hold it briefly.
+    if (error.code === 'EADDRINUSE' && listenAttempts < 50) {
+      listenAttempts += 1
+      setTimeout(() => {
+        server.listen(port, '127.0.0.1')
+      }, 40)
+      return
+    }
+    process.stderr.write(`fakemobilecli listen failed: ${String(error)}\n`)
+    process.exit(1)
+  })
+  server.listen(port, '127.0.0.1')
+}

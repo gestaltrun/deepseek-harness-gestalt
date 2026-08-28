@@ -16,9 +16,9 @@ The root README presents Gestalt as the product layer on top of official DSH. It
 
 The English product name is **Gestalt**. The Chinese product name and IP character are **獭子哥**. The landing page stores and displays the approved character sheet. Existing package names, application identifiers, release tags, and historical references remain unchanged until a separately coordinated rename requires their migration.
 
-A product architecture diagram separates the official DSH foundation, Gestalt's shared product layer, and the user-facing product areas. `DONE` requires a capability to be merged into `master`; it does not claim inclusion in the latest packaged release. `DOING` requires active delivery. `TODO` requires an open issue selected for the product plan. The map covers product functions added around the DSH base rather than repeating the official DSH package and tool catalogs.
+A committed bilingual PNG uses nested rectangular boxes to separate the official DSH foundation, Gestalt's shared product layer, three product-area groups, and their child product areas. `DONE` requires a capability to be merged into `master`; it does not claim inclusion in the latest packaged release. `DOING` requires active delivery. `TODO` requires an open issue selected for the product plan. The map covers product functions added around the DSH base rather than repeating the official DSH package and tool catalogs.
 
-One vertical table is the README's product-status inventory and feature tour. Each row names a product area, its completion, concrete user functions, and at most one product recording. Completed functions link their owning product documentation instead of a delivery ledger; planned functions link the tracker item that defines their direction. Recordings cover Workbench and Better Sidebar, Side Chat, Schedule, AI Browser, Workspace Reference, Annotation, and Mobile Companion. Every embedded GIF uses an immutable repository object id.
+One vertical table is the README's product-status inventory and feature tour. Group rows repeat the diagram's work-experience, client-delivery, and extension-collaboration hierarchy; child rows name a product function, its completion, concrete user behavior, and at most one product recording. Completed functions link their owning product documentation instead of a delivery ledger; planned functions link the tracker item that defines their direction. Recordings cover Workbench and Better Sidebar, Side Chat, Schedule, AI Browser, Workspace Reference, Annotation, and Mobile Companion. Every embedded GIF uses an immutable repository object id.
 
 Installation steps stay short. The README links first-run procedures to the user guide, composition and lifecycle semantics to architecture and application references, external integrations to the plugin catalog, and contributor workflows to development documentation.
 
@@ -31,6 +31,8 @@ Installation steps stay short. The README links first-run procedures to the user
 **Show only completed work.** Rejected because active product direction would remain invisible. Tracker-backed `DOING` and `TODO` states distinguish committed delivery from plans without presenting open work as shipped.
 
 **Use mock screenshots or conceptual artwork.** Rejected because they do not show the product a user can run. Product recordings show the current workflows.
+
+**Render the architecture as Mermaid.** Rejected because the generated flow layout does not preserve the intended nested box hierarchy at every README width. A committed image keeps the same visual grouping in both languages.
 
 **Place recordings side by side.** Rejected because wide rows dominate the page and become cramped on narrow screens. The table places one recording on each row and keeps the walkthrough vertical.
 

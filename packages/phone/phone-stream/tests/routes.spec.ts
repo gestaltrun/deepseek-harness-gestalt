@@ -21,10 +21,10 @@ afterEach(async () => {
   await Promise.all(fakes.splice(0).map(fake => fake.dispose()))
 })
 
-async function mount(): Promise<{ context: Context; origin: string }> {
-  const fake = await stageFake({
-    devices: [wireDevice('emulator-5554', 'android', 'emulator', 'online')],
-  })
+async function mount(
+  devices: Array<Record<string, unknown>> = [wireDevice('emulator-5554', 'android', 'emulator', 'online')],
+): Promise<{ context: Context; origin: string }> {
+  const fake = await stageFake({ devices })
   fakes.push(fake)
   fake.claim()
   const context = new Context()
@@ -139,6 +139,46 @@ async function readPrefix(origin: string, path: string, host: string): Promise<{
 }
 
 describe('phone stream Host routes', () => {
+  it('answers the grouped device listing with platform groups and online states', async () => {
+    const { origin } = await mount([
+      wireDevice('emulator-5554', 'android', 'emulator', 'online'),
+      wireDevice('R3CN30', 'android', 'real', 'offline'),
+      wireDevice('iPhone-16', 'ios', 'simulator', 'online'),
+      wireDevice('UDID-9', 'ios', 'real', 'offline'),
+    ])
+    const host = new URL(origin).host
+    const response = await rawRequest({ origin, path: '/phone/devices', host })
+    expect(response.status).toBe(200)
+    expect(response.contentType).toContain('application/json')
+    expect(JSON.parse(response.body.toString('utf8'))).toEqual({
+      android: [
+        { id: 'emulator-5554', name: 'emulator-5554-name', kind: 'emulator', online: true },
+        { id: 'R3CN30', name: 'R3CN30-name', kind: 'real', online: false },
+      ],
+      ios: {
+        simulators: [{ id: 'iPhone-16', name: 'iPhone-16-name', kind: 'simulator', online: true }],
+        reals: [{ id: 'UDID-9', name: 'UDID-9-name', kind: 'real', online: false }],
+      },
+    })
+  })
+
+  it('serves the listing only to trusted GET requests on the exact path', async () => {
+    const { origin } = await mount()
+    const host = new URL(origin).host
+    expect((await rawRequest({ origin, method: 'POST', path: '/phone/devices', host })).status).toBe(405)
+    expect((await rawRequest({ origin, path: '/phone/devices/extra', host })).status).toBe(404)
+    expect((await rawRequest({ origin, path: '/phone/devices', host: 'evil.example' })).status).toBe(403)
+  })
+
+  it('answers 502 when the listing fails upstream', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    context.phoneDevices.listDevices = async () => {
+      throw new Error('listing backend down')
+    }
+    expect((await rawRequest({ origin, path: '/phone/devices', host })).status).toBe(502)
+  })
+
   it('refuses a signed capture URL that is expired, forged, or not loopback', async () => {
     const { origin } = await mount()
     const host = new URL(origin).host

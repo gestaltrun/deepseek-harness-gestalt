@@ -26,4 +26,4 @@ The connected body consumes the Host `phone-stream` channel over plain browser p
 
 ## Consequences
 
-Multi-device monitoring works per tab with focus dedupe, and the connected view touches the device through the same-origin channel with no new dependency. The plugin still owns no device discovery: with the shipped `NULL_PHONE_BADGE_SOURCE` the picker lists nothing until the engine ticket publishes a real source, and 截图 plus H264 playback remain visibly disabled with reasons. The badge contract still cannot target one tab instance, so every phone tab shows the fleet online count.
+Multi-device monitoring works per tab with focus dedupe, and the connected view touches the device through the same-origin channel with no new dependency. The plugin owns no device discovery of its own: the picker lists what the Host listing route answers through the shipped `PhoneListingSource` ([the listing-route note](2026-08-28-phone-device-listing-route.md)), and 截图 plus H264 playback remain visibly disabled with reasons. The badge contract still cannot target one tab instance, so every phone tab shows the fleet online count.

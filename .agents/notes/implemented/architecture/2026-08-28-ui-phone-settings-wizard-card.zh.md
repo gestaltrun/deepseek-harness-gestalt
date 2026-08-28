@@ -24,4 +24,4 @@ Node 半边通过 `ctx.inject(['settings'], …)` / `settings.register` 注册�
 
 ## Consequences
 
-后续真正对接 `phoneDevices` 的子票只需替换 `MISSING_PHONE_ENVIRONMENT_SOURCE`，不必改卡片的视图联合或复制按钮命令。`enabled` 为 false 时仍不注册设备工具；本包仍不拉起 mobilecli。Tab 条继续读取 `PhoneBadgeSource`，见[骨架笔记](2026-08-27-ui-phone-tab-skeleton.zh.md)。
+后续真正对接 `phoneDevices` 的子票只需替换 `MISSING_PHONE_ENVIRONMENT_SOURCE`，不必改卡片的视图联合或复制按钮命令。`enabled` 为 false 时仍不注册设备工具；本包仍不拉起 mobilecli。Tab 条读取 `PhoneListingSource`，见[骨架笔记](2026-08-27-ui-phone-tab-skeleton.zh.md)。

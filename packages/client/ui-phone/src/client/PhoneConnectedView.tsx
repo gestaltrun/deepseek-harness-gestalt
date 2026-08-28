@@ -6,10 +6,10 @@
  * action. Everything reactive arrives through one per-tab
  * `PhoneConnectionController`; the component only mirrors its snapshot.
  */
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { PhoneConnectionController, PhoneStreamFailureKind } from './phone-connection.ts'
-import type { PhoneDeviceSummary } from './registry.ts'
+import type { PhoneListingSource } from './registry.ts'
 import css from './PhoneConnectedView.module.css'
 import shared from './PhoneShared.module.css'
 
@@ -21,8 +21,8 @@ export interface PhoneConnectedViewProps {
   readonly name: string
   /** Whether this tab is active and the panel open; false suspends pulling. */
   readonly visible: boolean
-  /** Fleet listing backing the device dropdown. */
-  readonly devices: readonly PhoneDeviceSummary[]
+  /** Listing source backing the device dropdown. */
+  readonly source: PhoneListingSource
   /** Open (or focus) the per-device tab of one dropdown entry. */
   readonly onOpenDevice: (serial: string, name: string) => void
   /** Controller factory; the tab owns the created instance for its lifetime. */
@@ -80,16 +80,21 @@ function ChevronDown(): ReactNode {
  * @returns the live view, its in-flight notes, or the error card.
  */
 export function PhoneConnectedView({
-  serial, name, visible, devices, onOpenDevice, createController,
+  serial, name, visible, source, onOpenDevice, createController,
 }: PhoneConnectedViewProps): ReactNode {
   const controllerRef = useRef<PhoneConnectionController | undefined>(undefined)
   controllerRef.current ??= createController(serial)
   const controller = controllerRef.current
-  // The controller is the owning observable source; uSES is the render-side
-  // adapter for it (the better-sidebar tab hosts have no slot hook channel).
+  // The controller and the listing source are the owning observables; uSES
+  // is the render-side adapter (the better-sidebar tab hosts have no slot
+  // hook channel).
   const subscribe = useCallback((listener: () => void) => controller.subscribe(listener), [controller])
   const snapshot = useCallback(() => controller.snapshot(), [controller])
   const phase = useSyncExternalStore(subscribe, snapshot, snapshot)
+  const listSubscribe = useCallback((listener: () => void) => source.subscribe(listener), [source])
+  const listSnapshot = useCallback(() => source.snapshot(), [source])
+  const listing = useSyncExternalStore(listSubscribe, listSnapshot, listSnapshot)
+  const devices = useMemo(() => [...listing.android, ...listing.ios], [listing])
   const [menuOpen, setMenuOpen] = useState(false)
   /** The press being tracked: its fixed origin, the move trail, the drag flag. */
   const drag = useRef<{
@@ -100,6 +105,12 @@ export function PhoneConnectedView({
 
   useEffect(() => { controller.setVisible(visible) }, [controller, visible])
   useEffect(() => () => { controller.dispose() }, [controller])
+  useEffect(() => {
+    // The dropdown needs the fleet even when this tab restored from layout
+    // without the picker having pulled first; a failed pull keeps the
+    // committed listing.
+    source.refresh().catch(() => undefined)
+  }, [source])
 
   const normalize = (event: ReactPointerEvent<HTMLDivElement>): { u: number; v: number } => {
     const rect = event.currentTarget.getBoundingClientRect()

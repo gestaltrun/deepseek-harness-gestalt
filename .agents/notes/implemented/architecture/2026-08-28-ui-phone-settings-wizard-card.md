@@ -24,4 +24,4 @@ The Node half registers the durable `ui-phone` section (`enabled: boolean`, defa
 
 ## Consequences
 
-A later ticket that actually talks to `phoneDevices` replaces `MISSING_PHONE_ENVIRONMENT_SOURCE` without changing the card's view union or the copy-button commands. Device-tool registration stays off while `enabled` is false; this package still does not spawn mobilecli. The tab strip continues to read `PhoneBadgeSource` as [the skeleton note](2026-08-27-ui-phone-tab-skeleton.md) records.
+A later ticket that actually talks to `phoneDevices` replaces `MISSING_PHONE_ENVIRONMENT_SOURCE` without changing the card's view union or the copy-button commands. Device-tool registration stays off while `enabled` is false; this package still does not spawn mobilecli. The tab strip reads `PhoneListingSource` as [the skeleton note](2026-08-27-ui-phone-tab-skeleton.md) records.

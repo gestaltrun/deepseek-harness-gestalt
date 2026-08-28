@@ -12,9 +12,10 @@ import { apply, Config, inject } from '../src/client/index.tsx'
 import { RecordingSidebar } from '../src/invariant.ts'
 import { PHONE_SETTINGS_NAMESPACE, type PhoneSettings } from '../src/phone-settings.ts'
 import {
-  buildPhoneTabDescriptor, installPhoneTab, NULL_PHONE_BADGE_SOURCE,
-  type PhoneBadgeSource, type PhoneTabView,
+  buildPhoneTabDescriptor, installPhoneTab,
+  type PhoneListingSource, type PhoneTabView,
 } from '../src/client/registry.ts'
+import { createHttpPhoneListingSource } from '../src/client/phone-listing.ts'
 
 /** A registered tab descriptor as this suite observes it. */
 interface RegisteredTab {
@@ -40,8 +41,13 @@ function stubView(): PhoneTabView {
   return { icon: () => null, component: () => null }
 }
 
-function sourceWith(onlineCount: number): PhoneBadgeSource {
-  return { getBadge: () => ({ onlineCount }), listDevices: () => [] }
+function sourceWith(onlineCount: number): PhoneListingSource {
+  return {
+    getBadge: () => ({ onlineCount }),
+    snapshot: () => ({ android: [], ios: [] }),
+    refresh: () => Promise.resolve(),
+    subscribe: () => () => undefined,
+  }
 }
 
 async function mount(sidebar: SidebarUnderTest, settings?: ReturnType<typeof stubSettingsScope<PhoneSettings>>) {
@@ -82,7 +88,7 @@ describe('ui-phone client apply', () => {
   it('fails loud when betterSidebar has not been published', () => {
     const ctx = new Context()
     expect(() => installPhoneTab(ctx, {
-      source: NULL_PHONE_BADGE_SOURCE,
+      source: createHttpPhoneListingSource(),
       view: stubView(),
       isEnabled: () => false,
       createController: () => {
@@ -138,7 +144,7 @@ describe('ui-phone client apply', () => {
   })
 
   it('drives both badge arms from the injected snapshot values', async () => {
-    const badgeOf = (source: PhoneBadgeSource) =>
+    const badgeOf = (source: PhoneListingSource) =>
       buildPhoneTabDescriptor({
         source,
         view: stubView(),

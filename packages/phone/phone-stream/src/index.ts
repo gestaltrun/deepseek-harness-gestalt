@@ -13,14 +13,15 @@ import type { Duplex } from 'node:stream'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
-import type { DeviceId, PhoneCaptureFormat, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
+import type { DeviceId, PhoneCaptureFormat, PhoneDeviceRef, PhoneIoRequest } from '@deepseek-ai/dsh-phone-runtime'
 import { HttpError, readJsonObject, writeHttpError, writeJson } from '@deepseek-ai/dsh-host-webserver'
 import { WebSocketServer } from 'ws'
 import { signPhoneStreamToken, verifyPhoneStreamToken } from './token.ts'
 import { isLoopbackApiRequest, isTrustedApiRequest } from './trust.ts'
-import type { PhoneStreamSession, PhoneStreamUrl } from './types.ts'
+import type { PhoneDeviceRefWire, PhoneStreamSession, PhoneStreamUrl } from './types.ts'
 
 export type { PhoneStreamSession, PhoneStreamUrl } from './types.ts'
+export type { PhoneDeviceListWire, PhoneDeviceRefWire } from './types.ts'
 export { isCaptureFormat, signPhoneStreamToken, verifyPhoneStreamToken } from './token.ts'
 export { isLoopbackApiRequest, isLoopbackHostname, isTrustedApiRequest } from './trust.ts'
 
@@ -30,6 +31,8 @@ export const PHONE_IO_PATH = '/phone/ws/io'
 export const PHONE_STREAM_PATH = '/phone/stream'
 /** Prefix for minting signed same-origin session URLs. */
 export const PHONE_SESSION_PATH = '/phone/session'
+/** Exact-path GET listing of the grouped device fleet behind the `/api` fence. */
+export const PHONE_DEVICES_PATH = '/phone/devices'
 
 const IO_METHODS = new Set(['tap', 'gesture', 'text', 'button'])
 const JSON_BODY_LIMITS = {
@@ -91,6 +94,11 @@ export class PhoneStream extends Service {
       path: PHONE_SESSION_PATH,
       handler: (req, res) => this.handleSession(req, res),
     }), 'phone-stream: /phone/session')
+    ctx.effect(() => ctx.webServer.register({
+      kind: 'prefix',
+      path: PHONE_DEVICES_PATH,
+      handler: (req, res) => this.handleDevices(req, res),
+    }), 'phone-stream: /phone/devices')
     ctx.effect(() => ctx.webServer.register({
       kind: 'prefix',
       path: PHONE_STREAM_PATH,
@@ -165,6 +173,43 @@ export class PhoneStream extends Service {
         )
       }
       writeJson(res, 200, this.sessionFor(id))
+    } catch (error) {
+      this.writeFailure(res, error)
+    }
+  }
+
+  /**
+   * Answer the grouped fleet listing for the browser picker: the latest
+   * `listDevices()` groups verbatim (android, iOS simulators/reals, online
+   * flags). Same-origin browser requests need no minted token — the `/api`
+   * trust fence is the gate.
+   * @param req - Incoming request.
+   * @param res - Response to write the listing JSON onto.
+   */
+  private async handleDevices(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!isTrustedApiRequest(req, this.trustedHosts())) {
+      writeForbidden(res)
+      return
+    }
+    if (req.method !== 'GET') {
+      writeHttpError(res, new HttpError(405, 'method-not-allowed', 'phone device listing is GET-only'))
+      return
+    }
+    if (pathnameOf(req) !== PHONE_DEVICES_PATH) {
+      writeHttpError(res, new HttpError(404, 'not-found', 'unknown phone device listing path'))
+      return
+    }
+    try {
+      const list = await this.ctx.phoneDevices.listDevices()
+      const refOf = ({ id, name, kind, online }: PhoneDeviceRef): PhoneDeviceRefWire =>
+        Object.freeze({ id, name, kind, online })
+      writeJson(res, 200, Object.freeze({
+        android: list.android.map(refOf),
+        ios: Object.freeze({
+          simulators: list.ios.simulators.map(refOf),
+          reals: list.ios.reals.map(refOf),
+        }),
+      }))
     } catch (error) {
       this.writeFailure(res, error)
     }

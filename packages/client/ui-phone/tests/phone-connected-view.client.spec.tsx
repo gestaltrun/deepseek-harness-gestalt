@@ -12,7 +12,7 @@ import { PhoneConnectedView } from '../src/client/PhoneConnectedView.tsx'
 import { PhoneConnectionController } from '../src/client/phone-connection.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
-import { FakeGateway, flush, ManualScheduler, SESSION_A } from './phone-fakes.client.ts'
+import { FakeGateway, FakeListingSource, flush, listingOf, ManualScheduler, SESSION_A } from './phone-fakes.client.ts'
 
 afterEach(cleanup)
 
@@ -24,10 +24,11 @@ const DEVICES: readonly PhoneDeviceSummary[] = [
 interface Harness {
   readonly gateway: FakeGateway
   readonly scheduler: ManualScheduler
+  readonly source: FakeListingSource
   readonly onOpenDevice: ReturnType<typeof vi.fn>
 }
 
-function renderView(visible = true, mintError?: unknown): Harness {
+function renderView(visible = true, mintError?: unknown, source = new FakeListingSource().seed(listingOf(DEVICES))): Harness {
   const gateway = new FakeGateway()
   const scheduler = new ManualScheduler()
   const onOpenDevice = vi.fn()
@@ -39,7 +40,7 @@ function renderView(visible = true, mintError?: unknown): Harness {
       serial="emulator-5554"
       name="Pixel_6_API_35"
       visible={visible}
-      devices={DEVICES}
+      source={source}
       onOpenDevice={onOpenDevice}
       createController={serial => new PhoneConnectionController({
         gateway,
@@ -48,7 +49,7 @@ function renderView(visible = true, mintError?: unknown): Harness {
       })}
     />,
   )
-  return { gateway, scheduler, onOpenDevice }
+  return { gateway, scheduler, source, onOpenDevice }
 }
 
 /** Drive one async step inside act so controller transitions reach the DOM. */
@@ -109,6 +110,24 @@ describe('PhoneConnectedView chrome', () => {
     expect(menu.textContent).toContain('当前')
     fireEvent.click(screen.getByRole('menuitem', { name: /SM-S9310/ }))
     expect(harness.onOpenDevice).toHaveBeenCalledWith('R3CN30', 'SM-S9310')
+  })
+
+  it('lights the dropdown from the mount pull when the tab restores empty', async () => {
+    const source = new FakeListingSource()
+    source.scriptNext(listingOf(DEVICES))
+    renderView(true, undefined, source)
+    await act(async () => { await flush() })
+    expect(source.refreshCount).toBe(1)
+    fireEvent.click(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' }))
+    expect(screen.getByRole('menuitem', { name: /SM-S9310/ })).toBeTruthy()
+  })
+
+  it('keeps the chrome rendered when the mount pull fails', async () => {
+    const source = new FakeListingSource()
+    source.scriptNext(Promise.reject(new Error('host down')))
+    renderView(true, undefined, source)
+    await act(async () => { await flush() })
+    expect(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' })).toBeTruthy()
   })
 })
 

@@ -2,10 +2,14 @@
  * Shared test fakes for the phone connection surfaces: a scripted stream
  * gateway, explicit-event sockets, and a manual retry scheduler. Exported
  * from the tests tree only — production code receives its own gateway via
- * `createHttpPhoneGateway`.
+ * `createHttpPhoneGateway` and its own listing source via
+ * `createHttpPhoneListingSource`.
  */
 import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from '../src/client/phone-connection.ts'
 import type { PhoneIoTarget, PhoneStreamSessionView } from '../src/client/phone-stream-client.ts'
+import type {
+  PhoneBadgeSnapshot, PhoneDeviceSummary, PhoneListingSnapshot, PhoneListingSource,
+} from '../src/client/registry.ts'
 
 export const SESSION_A: PhoneStreamSessionView = {
   deviceId: 'emulator-5554',
@@ -102,5 +106,67 @@ export class ManualScheduler {
     if (task === undefined) throw new Error('no pending retry')
     task.cancelled = true
     task.fn()
+  }
+}
+
+/** One committed listing built from per-platform rows. */
+export function listingOf(
+  android: readonly PhoneDeviceSummary[] = [],
+  ios: readonly PhoneDeviceSummary[] = [],
+): PhoneListingSnapshot {
+  return { android, ios }
+}
+
+/**
+ * Listing-source fake: a seedable committed snapshot plus scripted refresh
+ * outcomes. A scripted snapshot commits and notifies; a scripted promise
+ * holds `refresh()` until the spec resolves it; an empty script is a no-op.
+ */
+export class FakeListingSource implements PhoneListingSource {
+  private committed: PhoneListingSnapshot = listingOf()
+  private readonly listeners = new Set<() => void>()
+  private readonly scripts: Array<PhoneListingSnapshot | Promise<void>> = []
+
+  /** How many times refresh() ran, mount pulls included. */
+  refreshCount = 0
+
+  /** Replace the committed snapshot without notifying (construction seeding). */
+  seed(snapshot: PhoneListingSnapshot): this {
+    this.committed = snapshot
+    return this
+  }
+
+  /** Script one refresh outcome for the next refresh() call. */
+  scriptNext(outcome: PhoneListingSnapshot | Promise<void>): void {
+    this.scripts.push(outcome)
+  }
+
+  getBadge(): PhoneBadgeSnapshot {
+    return {
+      onlineCount: [...this.committed.android, ...this.committed.ios]
+        .filter(device => device.online).length,
+    }
+  }
+
+  snapshot(): PhoneListingSnapshot {
+    return this.committed
+  }
+
+  async refresh(): Promise<void> {
+    this.refreshCount += 1
+    const next = this.scripts.shift()
+    if (next instanceof Promise) {
+      await next
+      return
+    }
+    if (next !== undefined) {
+      this.committed = next
+      for (const listener of [...this.listeners]) listener()
+    }
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
   }
 }

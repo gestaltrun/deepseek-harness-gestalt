@@ -18,6 +18,24 @@ const DEVICE_NOT_FOUND_CODE = -32010
 const CONNECTIVITY_CODES: readonly string[] = ['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ENOTFOUND']
 
 /**
+ * Map one parsed JSON-RPC error envelope onto the public failure. The
+ * `-32010` arm stays `PHONE_DEVICE_NOT_FOUND` so Host 404 semantics survive;
+ * every other message classifies onto the structured real-device arms first.
+ * @param method - Upstream OpenRPC method that was rejected.
+ * @param error - The parsed JSON-RPC `error` envelope value.
+ * @returns the public failure to throw.
+ */
+function jsonRpcError(method: string, error: unknown): PhoneDevicesError {
+  const record = error as { code?: unknown; message?: unknown }
+  const code = typeof record.code === 'number' ? record.code : undefined
+  const message = typeof record.message === 'string' ? record.message : 'upstream error'
+  if (code === DEVICE_NOT_FOUND_CODE) {
+    return new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `no device answers that id upstream: ${message}`)
+  }
+  return upstreamRejection(method, code, message)
+}
+
+/**
  * Build the public failure for one upstream JSON-RPC error message. A message
  * naming a structured real-device arm becomes `PHONE_REAL_DEVICE_ISSUE`; the
  * `-32010` arm stays `PHONE_DEVICE_NOT_FOUND` so Host 404 semantics survive.
@@ -73,13 +91,7 @@ export class MobilecliRpc {
     }
     const body = await this.readBody(response)
     if ('error' in body && body.error !== null && typeof body.error === 'object') {
-      const record = body.error as { code?: unknown; message?: unknown }
-      const code = typeof record.code === 'number' ? record.code : undefined
-      const message = typeof record.message === 'string' ? record.message : 'upstream error'
-      if (code === DEVICE_NOT_FOUND_CODE) {
-        throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `no device answers that id upstream: ${message}`)
-      }
-      throw upstreamRejection(method, code, message)
+      throw jsonRpcError(method, body.error)
     }
     return body.result
   }
@@ -114,13 +126,7 @@ export class MobilecliRpc {
     if (contentType.includes('application/json')) {
       const body = await this.readBody(response)
       if ('error' in body && body.error !== null && typeof body.error === 'object') {
-        const record = body.error as { code?: unknown; message?: unknown }
-        const code = typeof record.code === 'number' ? record.code : undefined
-        const message = typeof record.message === 'string' ? record.message : 'upstream error'
-        if (code === DEVICE_NOT_FOUND_CODE) {
-          throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `no device answers that id upstream: ${message}`)
-        }
-        throw upstreamRejection(method, code, message)
+        throw jsonRpcError(method, body.error)
       }
       throw new PhoneDevicesError(
         'PHONE_PROTOCOL',

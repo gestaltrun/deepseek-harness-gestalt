@@ -82,10 +82,11 @@ export async function runMobilecliAgent(options: MobilecliAgentRunOptions): Prom
     // The pre-abort rejection above guarantees the budget cannot be aborted
     // before this listener attaches: there is no await between the two lines.
     budget.signal.addEventListener('abort', onAbort, { once: true })
-    child.stdout?.on('data', (chunk: Buffer) => {
+    // stdio pipes both output streams, so the readable halves are always present.
+    child.stdout.on('data', (chunk: Buffer) => {
       stdoutTail = retainTailWith(stdoutTail, chunk)
     })
-    child.stderr?.on('data', (chunk: Buffer) => {
+    child.stderr.on('data', (chunk: Buffer) => {
       stderrTail = retainTailWith(stderrTail, chunk)
     })
     child.once('error', (error: NodeJS.ErrnoException) => {
@@ -164,7 +165,10 @@ function parseAgentAnswer(stdoutTail: string): MobilecliAgentAnswer | undefined 
   for (const rawLine of lines) {
     const line = rawLine.trim()
     if (!line.startsWith('{')) continue
-    let parsed: { status?: unknown; data?: { message?: unknown; agent?: { version?: unknown; bundleId?: unknown } } }
+    let parsed: {
+      status?: unknown
+      data?: { message?: unknown; agent?: { version?: unknown; bundleId?: unknown } | null } | null
+    }
     try {
       parsed = JSON.parse(line) as typeof parsed
     } catch {
@@ -176,7 +180,7 @@ function parseAgentAnswer(stdoutTail: string): MobilecliAgentAnswer | undefined 
     const rawAgent = parsed.data?.agent
     const agent = typeof rawAgent === 'object' && rawAgent !== null
       && typeof rawAgent.version === 'string' && typeof rawAgent.bundleId === 'string'
-      ? { version: rawAgent.version, bundleId: rawAgent.bundleId } as PhoneAgentInfo
+      ? { version: rawAgent.version, bundleId: rawAgent.bundleId }
       : undefined
     return { ok: parsed.status === 'ok', message, ...(agent !== undefined ? { agent } : {}) }
   }

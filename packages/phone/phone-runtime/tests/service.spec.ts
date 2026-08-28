@@ -258,6 +258,132 @@ describe('phone runtime service lifecycle', () => {
     expect(unknown.code).toBe('PHONE_DEVICE_NOT_FOUND')
   })
 
+  it('forwards io tap, gesture, text, and button to the loopback JSON-RPC server', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    await context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR,
+      method: 'tap',
+      x: 12,
+      y: 34,
+    })
+    await context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR,
+      method: 'gesture',
+      actions: [{ type: 'pointerDown', x: 1, y: 2 }],
+    })
+    await context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR,
+      method: 'text',
+      text: 'hello',
+    })
+    await context.phoneDevices.io({
+      deviceId: ANDROID_EMULATOR,
+      method: 'button',
+      button: 'HOME',
+    })
+    expect((await fake.counters()).io).toEqual([
+      { method: 'device.io.tap', params: { deviceId: 'emulator-5554', x: 12, y: 34 } },
+      {
+        method: 'device.io.gesture',
+        params: { deviceId: 'emulator-5554', actions: [{ type: 'pointerDown', x: 1, y: 2 }] },
+      },
+      { method: 'device.io.text', params: { deviceId: 'emulator-5554', text: 'hello' } },
+      { method: 'device.io.button', params: { deviceId: 'emulator-5554', button: 'HOME' } },
+    ])
+  })
+
+  it('refuses io and capture for ids absent from the latest listing', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const unknownIo = await errorOf(() => context.phoneDevices.io({
+      deviceId: deviceId('emulator-nope'),
+      method: 'tap',
+      x: 0,
+      y: 0,
+    }))
+    expect(unknownIo.code).toBe('PHONE_DEVICE_NOT_FOUND')
+    const unknownCapture = await errorOf(() => context.phoneDevices.startCapture({
+      deviceId: deviceId('emulator-nope'),
+      format: 'mjpeg',
+    }))
+    expect(unknownCapture.code).toBe('PHONE_DEVICE_NOT_FOUND')
+    expect((await fake.counters()).io).toEqual([])
+  })
+
+  it('opens MJPEG and H264 capture streams from the loopback screencapture RPC', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const mjpeg = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'mjpeg',
+    })
+    expect(mjpeg.contentType).toMatch(/multipart\/x-mixed-replace/)
+    const mjpegReader = mjpeg.body.getReader()
+    const mjpegBytes = Buffer.from((await mjpegReader.read()).value ?? new Uint8Array())
+    expect(mjpegBytes.includes(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))).toBe(true)
+    await mjpegReader.cancel()
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+    expect(h264.contentType).toMatch(/video\/h264/)
+    const h264Reader = h264.body.getReader()
+    const h264Bytes = Buffer.from((await h264Reader.read()).value ?? new Uint8Array())
+    expect(h264Bytes.subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x00, 0x01]))).toBe(true)
+    await h264Reader.cancel()
+  })
+
+  it('reports capture cancellation that arrives before the request is sent as PHONE_ABORTED', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const controller = new AbortController()
+    controller.abort()
+    const cancelled = await errorOf(() => context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'mjpeg',
+      signal: controller.signal,
+    }))
+    expect(cancelled.code).toBe('PHONE_ABORTED')
+  })
+
+  it('maps a refused capture socket onto PHONE_UNAVAILABLE after readiness', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const pid = (await (await fetch(`${fake.baseUrl}/__test/pid`)).json() as { pid: number }).pid
+    process.kill(pid, 'SIGKILL')
+    await waitFor(async () => {
+      try {
+        await fetch(`${fake.baseUrl}/__test/counters`)
+        return false
+      } catch {
+        return true
+      }
+    })
+    const unavailable = await errorOf(() => context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'mjpeg',
+    }))
+    expect(unavailable.code).toBe('PHONE_UNAVAILABLE')
+  })
+
+  it('bounds a hung screencapture with the configured request ceiling', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, screencaptureDelayMs: 1_500 })
+    fakes.push(fake)
+    const context = await mountWith(fake, { requestTimeoutMs: 80, pollIntervalMs: 60_000 })
+    const timedOut = await errorOf(() => context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'mjpeg',
+    }))
+    expect(timedOut.code).toBe('PHONE_TIMEOUT')
+    expect(timedOut.message).toContain('device.screencapture')
+  })
+
   it('boots and shuts simulators down through mobilecli with refreshed listings', async () => {
     const fake = await stageFake({
       devices: [wireDevice('SIM-UDID', 'ios', 'simulator', 'offline')],

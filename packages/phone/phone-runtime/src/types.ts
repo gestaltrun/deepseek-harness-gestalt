@@ -48,6 +48,40 @@ export interface PhoneDeviceChange {
   readonly removed: readonly DeviceId[]
 }
 
+/** Upstream OpenRPC `device.io.*` verbs this Service forwards. */
+export type PhoneIoMethod = 'tap' | 'gesture' | 'text' | 'button'
+
+/** One JSON-RPC `device.io.*` request addressed by branded device id. */
+export type PhoneIoRequest =
+  | { readonly deviceId: DeviceId; readonly method: 'tap'; readonly x: number; readonly y: number }
+  | { readonly deviceId: DeviceId; readonly method: 'gesture'; readonly actions: readonly Record<string, unknown>[] }
+  | { readonly deviceId: DeviceId; readonly method: 'text'; readonly text: string }
+  | { readonly deviceId: DeviceId; readonly method: 'button'; readonly button: string }
+
+/** Screen-capture encoding the Host reverse-proxy may request. */
+export type PhoneCaptureFormat = 'mjpeg' | 'h264'
+
+/** Request that opens one upstream `device.screencapture` stream. */
+export interface PhoneCaptureRequest {
+  /** Branded Android serial or iOS UDID whose screen to stream. */
+  readonly deviceId: DeviceId
+  /** `mjpeg` for both platforms; `h264` maps onto upstream `avc` (Android). */
+  readonly format: PhoneCaptureFormat
+  /** Optional caller cancellation fused with the request ceiling until headers arrive. */
+  readonly signal?: AbortSignal
+}
+
+/**
+ * One live capture body owned by the caller. The Host must cancel `body` when
+ * the browser disconnects so the upstream HTTP stream ends.
+ */
+export interface PhoneCaptureStream {
+  /** Upstream `Content-Type`, including the MJPEG boundary parameter when present. */
+  readonly contentType: string
+  /** Byte stream of the capture; cancel it to abort the upstream request. */
+  readonly body: ReadableStream<Uint8Array>
+}
+
 /** Closed error-code union carried by {@link PhoneDevicesError}. */
 export type PhoneErrorCode =
   | 'PHONE_DISPOSED'

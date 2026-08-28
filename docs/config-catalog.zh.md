@@ -1709,7 +1709,27 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-runtime/src/index.ts:51`](../packages/phone/phone-runtime/src/index.ts)
+来源：[`packages/phone/phone-runtime/src/index.ts:75`](../packages/phone/phone-runtime/src/index.ts)
+
+<a id="deepseek-aidsh-phone-stream"></a>
+
+## `@deepseek-ai/dsh-phone-stream`
+
+需要：`phoneDevices` · `webServer`
+
+```ts config-catalog
+/**
+ * Validated runtime configuration. Token lifetime is a deployment-varying
+ * choice; path prefixes, HMAC algorithm, and the loopback capture fence are
+ * security invariants.
+ */
+export interface Config {
+  /** Milliseconds a minted capture URL remains valid. */
+  tokenTtlMs?: number
+}
+```
+
+来源：[`packages/phone/phone-stream/src/index.ts:54`](../packages/phone/phone-stream/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 
@@ -3727,6 +3747,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-message-feedback`（[`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-model-selection`（[`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-permission-presets`（[`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-phone`（[`packages/client/ui-phone/src/index.ts`](../packages/client/ui-phone/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-plan`（[`packages/client/ui-plan/src/index.ts`](../packages/client/ui-plan/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-reference`（[`packages/client/ui-reference/src/index.ts`](../packages/client/ui-reference/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-renderer`（[`packages/client/ui-renderer/src/index.ts`](../packages/client/ui-renderer/src/index.ts)）

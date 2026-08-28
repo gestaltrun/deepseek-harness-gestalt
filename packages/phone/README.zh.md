@@ -7,5 +7,6 @@
 | 包 | 角色 | ctx 键 |
 |---|---|---|
 | [`phone-runtime/`](phone-runtime/README.zh.md) | mobilecli Provider 与 Service Definition（折叠） | `ctx.phoneDevices` |
+| [`phone-stream/`](phone-stream/README.zh.md) | 同源 IO WebSocket 与签名 MJPEG/H264 反代 | `ctx.phoneStream` |
 
 子系统参考：[docs/subsystems/phone-runtime.zh.md](../../docs/subsystems/phone-runtime.zh.md)。

@@ -44,7 +44,8 @@
 | [agent-team.md](agent-team.zh.md) | Agent Teams：隐式 Lead 身份、具名 continuable teammate、持久 peer mailbox 与共享任务 DAG |
 | [web.md](web.zh.md) | Web 访问 seam：`WebSearchRequest`/`Result`、`WebFetchRequest`/`Result`、`WebFetchBody`、提供方可用性、`WebError` |
 | [browser-runtime.md](browser-runtime.zh.md) | Browser Runtime seam：不透明 Profile/Workspace/浏览器/标签页身份、修订保护操作、Session 持有的 Workspace binder、确定性 Provider 与 deferred 工具 Consumer |
-| [phone-runtime.md](phone-runtime.zh.md) | 手机设备群缝：折叠的 mobilecli Service、回环服务子进程生命周期、健康轮询，以及承载于 `ctx.phoneDevices` 的分组 Android/iOS 清单 |
+| [phone-runtime.md](phone-runtime.zh.md) | 手机设备群缝：折叠的 mobilecli Service、回环服务子进程生命周期、健康轮询、IO/采集动词，以及承载于 `ctx.phoneDevices` 的分组 Android/iOS 清单 |
+| [phone-stream.md](phone-stream.zh.md) | 同源手机 IO WebSocket 与签名 MJPEG/H264 反代，承载于 `ctx.phoneStream` |
 | [spill.md](spill.zh.md) | spill 存储 seam：`SaveTextSpill`、`SpillOwner`/`SpillSource`、`SpillRef`、品牌类型 `SpillLocator` |
 | [workflow.md](workflow.zh.md) | 工作流 seam：`WorkflowStartRequest`、`WorkflowMeta`、`WorkflowRun`/`Result`、`workflow/*` 事件载荷、`WorkflowError` 致命性 |
 | [jobs.md](jobs.zh.md) | 后台任务运行时：品牌化 `JobId`、producer 约定、消费方视图和 `ctx.jobs` 服务行为 |

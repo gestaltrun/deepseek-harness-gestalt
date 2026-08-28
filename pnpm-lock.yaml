@@ -1927,9 +1927,6 @@ importers:
       '@deepseek-ai/dsh-client-ui-better-sidebar':
         specifier: workspace:^
         version: link:../../client/ui-better-sidebar
-      '@deepseek-ai/dsh-client-ui-phone':
-        specifier: workspace:^
-        version: link:../../client/ui-phone
       '@deepseek-ai/dsh-client-ui-brand-official':
         specifier: workspace:^
         version: link:../../client/ui-brand-official
@@ -1978,6 +1975,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-permission-presets':
         specifier: workspace:^
         version: link:../../client/ui-permission-presets
+      '@deepseek-ai/dsh-client-ui-phone':
+        specifier: workspace:^
+        version: link:../../client/ui-phone
       '@deepseek-ai/dsh-client-ui-plan':
         specifier: workspace:^
         version: link:../../client/ui-plan
@@ -6949,6 +6949,31 @@ importers:
       '@deepseek-ai/dsh-timeout':
         specifier: workspace:^
         version: link:../../util/timeout
+
+  packages/phone/phone-stream:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:^
+        version: link:../../host/webserver
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-phone-runtime':
+        specifier: workspace:^
+        version: link:../phone-runtime
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
 
   packages/plan/plan-mode:
     dependencies:

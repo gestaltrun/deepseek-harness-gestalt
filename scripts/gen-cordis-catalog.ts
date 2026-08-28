@@ -56,6 +56,7 @@ export { REGION_BEGIN, REGION_END }
 export const SERVICE_PAGE: Record<string, string> = {
   browserRuntime: 'browser-runtime.md',
   phoneDevices: 'phone-runtime.md',
+  phoneStream: 'phone-stream.md',
   browserWorkspace: 'browser-runtime.md',
   agentLoop: 'core.md',
   agentDefaultModel: 'core.md',
@@ -237,12 +238,19 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
   DeviceId: 'phone-runtime.md',
+  PhoneCaptureFormat: 'phone-runtime.md',
+  PhoneCaptureRequest: 'phone-runtime.md',
+  PhoneCaptureStream: 'phone-runtime.md',
   PhoneDeviceChange: 'phone-runtime.md',
   PhoneDeviceKind: 'phone-runtime.md',
   PhoneDeviceList: 'phone-runtime.md',
   PhoneDeviceRef: 'phone-runtime.md',
   PhoneDevicesError: 'phone-runtime.md',
   PhoneErrorCode: 'phone-runtime.md',
+  PhoneIoMethod: 'phone-runtime.md',
+  PhoneIoRequest: 'phone-runtime.md',
+  PhoneStreamSession: 'phone-stream.md',
+  PhoneStreamUrl: 'phone-stream.md',
   BrowserClosedState: 'browser-runtime.md',
   BrowserCreateRequest: 'browser-runtime.md',
   BrowserInputRequest: 'browser-runtime.md',

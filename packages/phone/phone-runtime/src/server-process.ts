@@ -53,7 +53,11 @@ export class MobilecliServerProcess {
   /** Most recent child stderr/error lines across generations, oldest first. */
   static readonly diagnostics: string[] = []
 
-  /** @internal Test and support triage sink; bounded. */
+  /**
+   * Append one diagnostic line to the bounded cross-generation ring.
+   * @param line - stderr or spawn-error text retained for triage.
+   * @internal Test and support triage sink; bounded.
+   */
   static record(line: string): void {
     MobilecliServerProcess.diagnostics.push(line)
     if (MobilecliServerProcess.diagnostics.length > DIAGNOSTIC_LINES) {

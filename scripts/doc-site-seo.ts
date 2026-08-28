@@ -17,6 +17,9 @@ export const DSH_REPOSITORY_URL = 'https://github.com/deepseek-ai/deepseek-harne
 /** Product website linked from search metadata and structured data. */
 export const GESTALT_PRODUCT_URL = 'https://www.gestaltrun.com/'
 
+/** Product artwork used by search and social previews. */
+export const GESTALT_SOCIAL_IMAGE_URL = 'https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/master/docs/assets/brand/tazige-ip.png'
+
 /** Bilingual identity used by the agent-facing documentation index. */
 export const docsSiteIdentity = {
   title: 'Gestalt / 獭子哥',
@@ -56,6 +59,7 @@ export interface DocsPageHeadOptions {
  *
  * @param environment - Build environment carrying an optional Pages `base_url`.
  * @returns Validated absolute site base URL with a trailing slash.
+ * @throws When `DOCS_SITE_URL` is not an absolute HTTP(S) URL without a query or fragment and with a trailing slash.
  */
 export function resolveDocsSiteBaseUrl(environment: NodeJS.ProcessEnv): URL {
   const value = environment.DOCS_SITE_URL ?? DEFAULT_DOCS_SITE_URL
@@ -83,6 +87,7 @@ export function resolveDocsSiteBaseUrl(environment: NodeJS.ProcessEnv): URL {
  * @param siteBaseUrl - Absolute deployment base URL.
  * @param route - Manifest route ending in `.md`.
  * @returns Absolute clean URL for the rendered page.
+ * @throws When the route is absolute or does not end in `.md`.
  */
 export function docsRouteUrl(siteBaseUrl: URL, route: string): string {
   if (route.startsWith('/') || !route.endsWith('.md')) {
@@ -140,6 +145,7 @@ function siteSchema(siteBaseUrl: URL): string {
  *
  * @param options - Page, manifest, deployment URL, and rendered metadata.
  * @returns VitePress head entries for the page.
+ * @throws When the manifest has no matching Chinese or English route for the page.
  */
 export function docsPageHead(options: DocsPageHeadOptions): HeadConfig[] {
   const rootPage = localePage(options.page, options.pages, 'root')
@@ -162,11 +168,15 @@ export function docsPageHead(options: DocsPageHeadOptions): HeadConfig[] {
     ['meta', { property: 'og:title', content: options.title }],
     ['meta', { property: 'og:description', content: options.description }],
     ['meta', { property: 'og:url', content: canonical }],
+    ['meta', { property: 'og:image', content: GESTALT_SOCIAL_IMAGE_URL }],
+    ['meta', { property: 'og:image:alt', content: 'Gestalt (獭子哥) product identity' }],
     ['meta', { property: 'og:locale', content: locale }],
     ['meta', { property: 'og:locale:alternate', content: alternateLocale }],
     ['meta', { name: 'twitter:card', content: 'summary' }],
     ['meta', { name: 'twitter:title', content: options.title }],
     ['meta', { name: 'twitter:description', content: options.description }],
+    ['meta', { name: 'twitter:image', content: GESTALT_SOCIAL_IMAGE_URL }],
+    ['meta', { name: 'twitter:image:alt', content: 'Gestalt (獭子哥) product identity' }],
   ]
   if (sharedRoute === 'index.md') {
     head.push(['script', { id: 'gestalt-site-schema', type: 'application/ld+json' }, siteSchema(options.siteBaseUrl)])

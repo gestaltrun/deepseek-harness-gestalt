@@ -293,7 +293,7 @@ const scrollbarScript = `
 `
 
 /**
- * Navigation-bar title: the DeepSeek wordmark and the release-stage tag.
+ * Navigation-bar title: the DeepSeek wordmark, localized product name, and release-stage tag.
  * VitePress renders `siteTitle` as HTML.
  *
  * @param productName - Localized product name.

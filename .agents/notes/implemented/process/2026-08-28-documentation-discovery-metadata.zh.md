@@ -16,13 +16,13 @@ Status: implemented
 
 `DOCS_SITE_URL` 携带部署后的绝对基础 URL。Pages 工作流传入 `actions/configure-pages` 的 `base_url`；本地与普通 CI 构建使用可预测的项目 Pages URL `https://gestaltrun.github.io/deepseek-harness-gestalt/`。该值必须使用 HTTP 或 HTTPS，不得包含 query 或 fragment，并以 `/` 结尾。
 
-每个 manifest 页面输出 self-referential clean canonical URL，以及相互对应的 `zh-CN`、`en-US` 与 `x-default` alternate。`website/docs.ts` 继续持有路由与 locale 配对权威，源文件移动不会产生第二份 SEO 路由表。每个页面还会根据最终渲染的标题和描述输出 Open Graph 与 Twitter summary 字段。两个 locale 首页携带同一份 `WebSite` 与 `SoftwareApplication` JSON-LD graph，明确 Gestalt、獭子哥、DeepSeek Gestalt、产品网站、当前源代码仓库，以及作为基础的 DSH 官方仓库。
+每个 manifest 页面输出 self-referential clean canonical URL，以及相互对应的 `zh-CN`、`en-US` 与 `x-default` alternate。`website/docs.ts` 继续持有路由与 locale 配对权威，源文件移动不会产生第二份 SEO 路由表。每个页面还会根据最终渲染的标题和描述输出 Open Graph 与 Twitter summary 字段，并使用仓库内的獭子哥产品图作为社交预览图片。两个 locale 首页携带同一份 `WebSite` 与 `SoftwareApplication` JSON-LD graph，明确 Gestalt、獭子哥、DeepSeek Gestalt、产品网站、当前源代码仓库，以及作为基础的 DSH 官方仓库。
 
 VitePress 根据部署站点 URL 生成 `sitemap.xml`。构建在同级写入 `robots.txt`，并显式引用该 sitemap。构建后校验器要求这两个文件、`llms.txt` 和每个原始 Markdown twin 同时存在。
 
 `llms.txt` 标明 Gestalt 与獭子哥身份，说明原始 Markdown 规则，链接产品网站、当前源代码仓库与 DSH 官方仓库，然后根据发布 manifest 列出两个 locale tree。该文件保持简短；每页 twin 已携带完整文档，因此站点不再复制生成 `llms-full.txt`。
 
-根 README 在两种语言中各使用一次明确的「开源 AI 编码 agent 产品」。元数据不包含 keywords tag，也不声称未支持的能力。
+根 README 在两种语言中各使用一次明确的「开源 AI coding agent（编程智能体）产品」。元数据不包含 keywords tag，也不声称未支持的能力。
 
 ## Alternatives considered
 

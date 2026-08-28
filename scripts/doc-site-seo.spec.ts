@@ -76,6 +76,20 @@ describe('docsPageHead', () => {
       'meta',
       { property: 'og:url', content: 'https://docs.example.com/product/guide/quickstart' },
     ])
+    expect(head).toContainEqual([
+      'meta',
+      {
+        property: 'og:image',
+        content: 'https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/master/docs/assets/brand/tazige-ip.png',
+      },
+    ])
+    expect(head).toContainEqual([
+      'meta',
+      {
+        name: 'twitter:image',
+        content: 'https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/master/docs/assets/brand/tazige-ip.png',
+      },
+    ])
     expect(head).toContainEqual(['meta', { name: 'twitter:card', content: 'summary' }])
     expect(head).toContainEqual([
       'meta',

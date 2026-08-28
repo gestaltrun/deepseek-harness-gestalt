@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "verify:brand": "vitest run tests/mobile-brand.spec.ts",
     "native:sync": "pnpm run build && cap sync",
     "native:open:ios": "cap open ios",
     "native:open:android": "cap open android"

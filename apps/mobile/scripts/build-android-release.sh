@@ -12,6 +12,13 @@ repo_root="$(cd "${mobile_root}/../.." && pwd)"
 : "${MOBILE_VERSION:?MOBILE_VERSION is required}"
 : "${MOBILE_BUILD_NUMBER:?MOBILE_BUILD_NUMBER is required}"
 
+: "${MOBILE_BUNDLE_ID:?MOBILE_BUNDLE_ID is required}"
+bundle_id="${MOBILE_BUNDLE_ID}"
+if [[ "${bundle_id}" != 'com.gestalt.mobile' ]]; then
+  echo 'MOBILE_BUNDLE_ID must be com.gestalt.mobile' >&2
+  exit 1
+fi
+
 release_dir="${mobile_root}/release"
 temporary_dir="$(mktemp -d)"
 trap 'rm -rf "${temporary_dir}"' EXIT
@@ -21,18 +28,19 @@ printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore}" 2>/de
 chmod 600 "${keystore}"
 
 cd "${repo_root}"
+pnpm --filter @deepseek-ai/dsh-mobile run verify:brand
 pnpm --filter @deepseek-ai/dsh-mobile run build
 pnpm --dir apps/mobile exec cap sync android
 
 cd "${mobile_root}/android"
 ANDROID_KEYSTORE_FILE="${keystore}" ./gradlew --no-daemon :app:assembleRelease \
-  -Pandroid.injected.version.code="${MOBILE_BUILD_NUMBER}" \
-  -Pandroid.injected.version.name="${MOBILE_VERSION}"
+  -PdshMobileVersionCode="${MOBILE_BUILD_NUMBER}" \
+  -PdshMobileVersionName="${MOBILE_VERSION}"
 
 source_apk="${mobile_root}/android/app/build/outputs/apk/release/app-release.apk"
 test -f "${source_apk}"
 mkdir -p "${release_dir}"
-target_apk="${release_dir}/DeepSeek-Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.apk"
+target_apk="${release_dir}/Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.apk"
 cp "${source_apk}" "${target_apk}"
 
 apksigner_path="$(command -v apksigner || true)"
@@ -54,4 +62,14 @@ if [[ -z "${apksigner_path}" ]]; then
   exit 1
 fi
 "${apksigner_path}" verify --verbose "${target_apk}"
+aapt2_path="$(dirname "${apksigner_path}")/aapt2"
+if [[ ! -x "${aapt2_path}" ]]; then
+  echo 'Android SDK aapt2 is unavailable next to apksigner' >&2
+  exit 1
+fi
+badging="$("${aapt2_path}" dump badging "${target_apk}")"
+grep -Fq "versionCode='${MOBILE_BUILD_NUMBER}'" <<< "${badging}"
+grep -Fq "versionName='${MOBILE_VERSION}'" <<< "${badging}"
+grep -Fq "package: name='${bundle_id}'" <<< "${badging}"
+grep -Fq "application-label:'獭子哥'" <<< "${badging}"
 printf '%s\n' "${target_apk}"

@@ -1,6 +1,6 @@
 /**
  * Verify fragment links against the HTML emitted by VitePress, and that the
- * build carries the raw-Markdown twin of every route plus llms.txt. Markdown
+ * build carries the raw-Markdown twin of every route plus discovery files. Markdown
  * and VitePress use different heading-slug algorithms, so source-link
  * validation alone cannot prove that a published fragment exists.
  *
@@ -155,11 +155,12 @@ function main(): number {
   const distRoot = resolve(root, 'website/.dist')
   const report = inspectSiteFragments(distRoot)
   const expected = rawMarkdownFiles()
-  const missing = missingSiteFiles(distRoot, [...expected, 'llms.txt'])
+  const discoveryFiles = ['llms.txt', 'robots.txt', 'sitemap.xml']
+  const missing = missingSiteFiles(distRoot, [...expected, ...discoveryFiles])
   if (report.broken.length === 0 && missing.length === 0) {
     console.log(
       `verify-doc-site-fragments: ${report.checked} internal fragment reference(s) resolve;`
-      + ` ${expected.length} raw-Markdown file(s) and llms.txt emitted.`,
+      + ` ${expected.length} raw-Markdown file(s) and ${discoveryFiles.join(', ')} emitted.`,
     )
     return 0
   }
@@ -172,7 +173,7 @@ function main(): number {
     }
   }
   if (missing.length > 0) {
-    console.error(`verify-doc-site-fragments: ${missing.length} expected raw-Markdown file(s) missing from the build:`)
+    console.error(`verify-doc-site-fragments: ${missing.length} expected site file(s) missing from the build:`)
     for (const file of missing) console.error(`  ${file}`)
   }
   return 1

@@ -1,95 +1,186 @@
-# DeepSeek Gestalt
+# Gestalt
 
 English | [中文](README.zh.md)
 
-DeepSeek Gestalt is the desktop and phone product on [DeepSeek Harness](https://www.deepseek.com/harness/) (`dsh`). Start a session on the computer, then continue the same session on a paired phone.
+<div align="center">
+  <img src="docs/assets/brand/tazige-ip.png" alt="Tazige, the otter IP character for Gestalt" width="560">
+  <p><sub>Product name: Gestalt · Chinese name and IP character: 獭子哥</sub></p>
+  <p><strong>Gestalt is the product layer for DeepSeek Harness.</strong></p>
+  <p>
+    <a href="https://www.gestaltrun.com/">Website</a> ·
+    <a href="https://github.com/gestaltrun/deepseek-harness-gestalt/releases/latest">Download</a> ·
+    <a href="docs/user/guide/index.md">Web guide</a> ·
+    <a href="docs/architecture.md">Architecture</a>
+  </p>
+</div>
 
-The site is [www.gestaltrun.com](https://www.gestaltrun.com/).
+Gestalt is an open-source AI coding agent product for desktop, Web, and mobile, built on [DeepSeek Harness](https://www.deepseek.com/harness/) (`dsh`). Its Chinese product name and IP character are **獭子哥**. Gestalt keeps the official DSH plugin and runtime model as its base, fills in product workflows and distribution, and integrates strong community plugins behind tested product interfaces. The goal is a stable, usable product distribution rather than a collection of patches.
 
-DeepSeek Harness is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com). It uses an architecture where **everything is a plugin**, and is powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://github.com/cordiverse/paper).
+The project continuously merges the [official DSH repository](https://github.com/deepseek-ai/deepseek-harness) and keeps product additions on apps, bundles, plugins, and documented capability seams wherever possible. DSH profiles, plugins, CLI modes, and SDK entry points remain the compatibility baseline. Gestalt is still in developer preview, so compatibility-breaking changes remain possible while the product converges.
 
-## Desktop and phone
+## Product panorama
 
-Install the DeepSeek Gestalt desktop app for the full session: write code, use tools, and replay the trail.
+Gestalt does not create another agent runtime. Official DSH supplies the plugin tree, agent loop, durable Session log, capability seams, Profiles, CLI, and SDK. Gestalt adds shared product settings, Workspace and Session ownership, approvals, lifecycle, UI components, and distribution, then assembles them into user-facing product areas.
 
-Pair a phone with that desktop app to continue the same session on the phone. You do not open a second session.
+<p align="center">
+  <img src="docs/assets/product/gestalt-product-architecture.en.png" alt="Product architecture with DSH as the bottom foundation, a shared product layer, and three grouped product domains" width="1100">
+</p>
 
-## Developer preview
+`DONE` means a function is on `master`, though it may be newer than the latest installer. `DOING` means the product area has an active delivery. `TODO` means the work is on the product plan. The table exposes first-level and second-level product-domain columns that match the architecture image, with repeated first-level domains merged into one cell. It is the README's only product-status inventory. Each feature row contains at most one product recording so the walkthrough reads vertically.
 
-DeepSeek Harness is currently in _developer preview_ and is iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+<table>
+  <thead>
+    <tr>
+      <th>Level 1 product domain</th>
+      <th>Level 2 product domain</th>
+      <th>Completion</th>
+      <th>Product walkthrough</th>
+      <th>Product view</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="6" valign="top"><strong>Work experience</strong></td>
+      <td>Workbench and navigation</td>
+      <td><code>DONE</code><br><code>TODO</code> <a href="https://github.com/gestaltrun/deepseek-harness-gestalt/issues/226">simplify Browser ownership</a></td>
+      <td><a href="packages/client/ui-better-sidebar/README.md">Better Sidebar</a> provides files, editors, multi-repository Git, Markdown/HTML, terminals, free windows, and agent-opened tabs; the <a href="packages/client/ui-workbench/README.md">Workbench adapter</a> hosts the official Browser Runtime</td>
+      <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/5ea5bae18c9083d1c200173ed8bb05e903fc3e1d/better-sidebar-v0.16.1-pr317-16311605.gif" alt="Gestalt Workbench showing a model response, repository files, Git views, and sidebar tools" width="520"></td>
+    </tr>
+    <tr>
+      <td>Session workflows</td>
+      <td><code>DONE</code></td>
+      <td>Durable <a href="packages/client/ui-better-sidebar/README.md">Side Chat</a> reuses the main Session conversation UI, model, permissions, jobs, and descendant navigation, and restores after a Host restart. Capable subagent providers also receive image prompts</td>
+      <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/3e32d89ee0e28a15cb099e6b90114601dfc537ce/issue-324-sidechat-restore-8469fa6eb8.gif" alt="Side Chat restoring after restart, continuing, and staying closed after archive" width="520"></td>
+    </tr>
+    <tr>
+      <td>Session workflows</td>
+      <td><code>DONE</code></td>
+      <td>The <a href="packages/client/ui-schedule/README.md">Schedule board</a> manages reminders created by the agent with pause, resume, and delete controls</td>
+      <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/8be40575a41afeb231477bdf22ea0eb8976c7d71/issue-25-session-schedule-board.gif" alt="Session Schedule creating, pausing, resuming, and deleting a reminder" width="520"></td>
+    </tr>
+    <tr>
+      <td>Context and review</td>
+      <td><code>DONE</code></td>
+      <td><a href="packages/client/ui-reference/README.md">Workspace Reference</a> adds confined <code>@path</code> context through file search, folder descent, paste controls, and a Composer dock. Workspace settings control which tools may enter a Session</td>
+      <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/a203adc7494cd5d8adae1fa23108afd98f7f022b/pr-164-workspace-reference-parity.gif" alt="Workspace Reference picker, folder descent, Composer dock, and context injection" width="520"></td>
+    </tr>
+    <tr>
+      <td>Context and review</td>
+      <td><code>DONE</code></td>
+      <td><a href="packages/client/ui-conversation/README.md">Text and image Annotation</a> selects assistant text or pins images, attaches notes, restores drafts, and submits the result as an ordinary user message</td>
+      <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/7edaf7daa3d69b97382ef4b47ce35d37dce863b7/pr-70-text-annotation-517ad8.gif" alt="Selecting assistant text, adding a note, and submitting the Annotation draft" width="520"></td>
+    </tr>
+    <tr>
+      <td>AI Browser</td>
+      <td><code>DONE</code></td>
+      <td>A Session owns zero or more <a href="packages/browser/browser-workspace/README.md">Browser Workspaces</a> and tabs. Each Workspace may use a shared, temporary, or named persistent Profile. Browser Dock, approvals, restart recovery, and Session-owned teardown keep browser work inside the product lifecycle</td>
+      <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/849a04d76ae94c48a4d4b311942bbf1ca0f98888/pr/247/browser-lifecycle.gif" alt="Session-owned Browser tab navigating, recovering, and closing with its lifecycle" width="520"></td>
+    </tr>
+    <tr>
+      <td rowspan="3" valign="top"><strong>Clients and delivery</strong></td>
+      <td>Desktop product</td>
+      <td><code>DONE</code></td>
+      <td><a href="apps/desktop/README.md">Electron Host</a>, macOS and Windows installers, product window chrome, fullscreen Settings, staged auto-update, and owned shutdown and restart lifecycle</td>
+      <td><a href="apps/desktop/README.md">Desktop and distribution</a></td>
+    </tr>
+    <tr>
+      <td>Mobile Companion</td>
+      <td><code>DONE</code></td>
+      <td><a href="apps/mobile/README.md">Mobile</a> browses, searches, and continues Desktop-owned Sessions with prompts, cancellation, approvals, questions, attachments, and live projection</td>
+      <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/3c711b7f0bc934d55f10dcdb9ee71e91850278f0/mobile-real-provider-98438f2.gif" alt="Mobile Companion continuing a Desktop-owned Session" width="260"></td>
+    </tr>
+    <tr>
+      <td>Mobile Companion</td>
+      <td><code>DONE</code></td>
+      <td><a href="docs/subsystems/platform-account.md">Platform Account</a>, <a href="docs/subsystems/personal-pairing.md">Personal Pairing</a>, encrypted Relay, concurrent phones, TestFlight delivery, and a signed Android APK. Desktop remains the authority for Sessions, Workspaces, attachments, approvals, and questions</td>
+      <td><img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/0af70c971b999cc54d18884233d7c59e595aba68/companion-ui-pr-371.gif" alt="Desktop Settings showing two paired Mobile devices online at the same time" width="520"></td>
+    </tr>
+    <tr>
+      <td rowspan="3" valign="top"><strong>Extensions and collaboration</strong></td>
+      <td>Community plugins</td>
+      <td><code>DONE</code> Better Sidebar<br><code>TODO</code> Sub2API</td>
+      <td>The <a href="plugins/README.md">external plugin catalog</a> pins reviewed revisions. Better Sidebar is integrated; the optional Sub2API provider, installer, and embedded console are on the <a href="https://github.com/gestaltrun/deepseek-harness-gestalt/issues/346">product plan</a></td>
+      <td><a href="plugins/README.md">Plugin catalog</a></td>
+    </tr>
+    <tr>
+      <td>Cross-account collaboration</td>
+      <td><code>DOING</code></td>
+      <td>Project membership and member-directed questions are in development. Sender routing, receiver experience, and <a href="https://github.com/gestaltrun/deepseek-harness-gestalt/issues/345">assembled acceptance</a> follow</td>
+      <td><a href="https://github.com/gestaltrun/deepseek-harness-gestalt/issues/338">Product plan</a></td>
+    </tr>
+    <tr>
+      <td>Device operation</td>
+      <td><code>TODO</code></td>
+      <td>Planned sidebar phone tabs launch Android/iOS, show a live view, allow human takeover, and run approved agent tools</td>
+      <td><a href="https://github.com/gestaltrun/deepseek-harness-gestalt/issues/355">Product plan</a></td>
+    </tr>
+  </tbody>
+</table>
 
-## Run
+Read the [architecture](docs/architecture.md) for the DSH plugin tree and capability seams. The [Desktop Host](apps/desktop/README.md), [Mobile](apps/mobile/README.md), and [external plugin catalog](plugins/README.md) document the three product delivery entries.
+
+<a id="run"></a>
+
+## Run Gestalt
 
 ### Desktop
 
-Download a desktop build from [Releases](https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt/releases).
+Download the latest macOS or Windows build from [GitHub Releases](https://github.com/gestaltrun/deepseek-harness-gestalt/releases/latest).
 
-From a repository checkout:
+### Web
 
-```sh
-pnpm install
-pnpm gestalt:dev
-```
-
-### Run from `npm`
-
-Install `Node.js`, then run:
+Install [Node.js](https://nodejs.org/), then run:
 
 ```sh
 npx @deepseek-ai/dsh web
 ```
 
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
+The command starts the Web UI at `http://127.0.0.1:3080` and opens it for a local launch. Open **Settings → Models**, add a provider, choose a workspace, and start a Session. The [Web guide](docs/user/guide/index.md) covers the first run and SSH launches.
 
-### Run from source
+<a id="run-from-source"></a>
 
-To run from a repository checkout:
+### From source
 
 ```sh
-git clone https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt.git
+git clone https://github.com/gestaltrun/deepseek-harness-gestalt.git
 cd deepseek-harness-gestalt
 pnpm install
 pnpm run build
 pnpm dsh web
 ```
 
-`pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+Use the [development guide](docs/development.md) for repository workflows and [AGENTS.md](AGENTS.md) for agent instructions.
 
 ## Community and support
 
-- Feel free to submit feedback or bug reports through [GitHub Issues](https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt/issues).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join the DeepSeek Harness WeCom group: scan the assistant QR, complete the survey, and the assistant invites you.
+- Report bugs and request features through [GitHub Issues](https://github.com/gestaltrun/deepseek-harness-gestalt/issues).
+- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to a plugin repository so others can find it.
+- Join the DeepSeek Harness WeCom group by adding the assistant and completing the survey.
 
-<table>
-  <thead>
-    <tr>
-      <th align="center">WeCom assistant</th>
-      <th align="center">Group survey</th>
-      <th align="center">WeChat official account</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-assistant.png" alt="DeepSeek Harness WeCom assistant QR code" width="180" height="180"></td>
-      <td align="center"><a href="https://trtgsjkv6r.feishu.cn/share/base/form/shrcnIt5twSVdLGD52KJBckGCgg"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-survey.png" alt="DeepSeek Harness group survey QR code" width="180" height="180"></a></td>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wechat-official-account.png" alt="DeepSeek Harness WeChat official account QR code" width="180" height="180"></td>
-    </tr>
-  </tbody>
-</table>
+<details>
+  <summary>Community QR codes</summary>
+  <table>
+    <thead>
+      <tr>
+        <th align="center">WeCom assistant</th>
+        <th align="center">Group survey</th>
+        <th align="center">WeChat official account</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-assistant.png" alt="DeepSeek Harness WeCom assistant QR code" width="180" height="180"></td>
+        <td align="center"><a href="https://trtgsjkv6r.feishu.cn/share/base/form/shrcnIt5twSVdLGD52KJBckGCgg"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-survey.png" alt="DeepSeek Harness group survey QR code" width="180" height="180"></a></td>
+        <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wechat-official-account.png" alt="DeepSeek Harness WeChat official account QR code" width="180" height="180"></td>
+      </tr>
+    </tbody>
+  </table>
+</details>
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Development
-
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
-
-For agents, follow [AGENTS.md](AGENTS.md).
-
 ## License
 
-[MIT](LICENSE)
-
-Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Third-party dependencies and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

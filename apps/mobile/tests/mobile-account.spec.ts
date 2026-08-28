@@ -68,6 +68,7 @@ describe('MobileAccount', () => {
     const { installation, openSystemBrowser } = fixture()
     render(createElement(MobileAccount, { installation, locale: 'zh', theme: 'light', clock }))
 
+    expect(screen.getByText('獭子哥')).toBeTruthy()
     expect(screen.getByText(/Platform 会保存 GitHub 数字 ID/)).toBeTruthy()
     expect(screen.getByText(/Platform stores the numeric GitHub id/)).toBeTruthy()
     const continueButton = screen.getByRole('button', { name: '使用 GitHub 继续' })

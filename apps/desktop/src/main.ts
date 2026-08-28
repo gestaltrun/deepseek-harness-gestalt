@@ -7,7 +7,7 @@ import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, net, powerMonitor, safeStorage,
+  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, powerMonitor, safeStorage,
   session, shell,
   type IpcMainEvent, type IpcMainInvokeEvent,
 } from 'electron'
@@ -90,11 +90,11 @@ import { createDesktopHostRpc } from './host-rpc.ts'
 import { desktopInstallationPresentation } from './desktop-installation.ts'
 import { downloadCompanionAttachment } from './companion-attachments.ts'
 import { projectDesktopRendererEvent } from './renderer-projection.ts'
-import { desktopSystemFetch } from './system-network.ts'
 import { connectDesktopRelayNodeHelper } from './relay-node-helper.ts'
+import { createDesktopSystemNodeFetch } from './system-node-fetch-helper.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const systemFetch = desktopSystemFetch(async (input, init) => await net.fetch(input, init))
+let systemFetch: typeof globalThis.fetch
 const PRELOAD = join(here, 'preload.cjs')
 const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
 
@@ -178,7 +178,6 @@ async function boot(): Promise<void> {
       app.getPath('userData'), `companion-operations-${accountEnvironment.databaseIdentity}.json`,
     )),
   ))
-  account = createDesktopAccount(accountEnvironment)
   const relayRuntime = resolveDesktopRuntime({
     packaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
@@ -187,6 +186,13 @@ async function boot(): Promise<void> {
   if (!app.isPackaged && isElectronExecutable(relayRuntime.node)) {
     throw new Error('Desktop Relay needs a real Node executable; set DSH_NODE or run via pnpm gestalt:dev')
   }
+  systemFetch = createDesktopSystemNodeFetch({
+    nodePath: relayRuntime.node,
+    helperPath: relayRuntime.fetchHelper,
+    resolveProxy: async url => await session.defaultSession.resolveProxy(url),
+    timeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
+  })
+  account = createDesktopAccount(accountEnvironment)
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
     config: accountEnvironment.remoteRelay,
@@ -195,7 +201,7 @@ async function boot(): Promise<void> {
       nodePath: relayRuntime.node,
       helperPath: relayRuntime.relayHelper,
       url,
-      proxyUrl,
+      ...(proxyUrl === undefined ? {} : { proxyUrl }),
       signal,
       limits,
     }),

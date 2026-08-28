@@ -109,9 +109,9 @@ export function MobileAccount({ installation, pairing, companion, locale, theme,
     return (
       <main className={css.page} data-mobile-platform-account={snapshot.status} lang={activeLocale === 'zh' ? 'zh-CN' : 'en'}>
         <header className={css.header}>
-          <div className={css.mark} aria-hidden="true">深</div>
+          <div className={css.mark} aria-hidden="true">獭</div>
           <div>
-            <p className={css.product}>DeepSeek Gestalt</p>
+            <p className={css.product}>獭子哥</p>
             <h1>{text.title}</h1>
           </div>
         </header>

@@ -9,10 +9,16 @@ repo_root="$(cd "${mobile_root}/../.." && pwd)"
 : "${MOBILE_BUILD_NUMBER:?MOBILE_BUILD_NUMBER is required}"
 : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required}"
 
-bundle_id="${MOBILE_BUNDLE_ID:-com.alibaba.gestalt.mobile}"
-profile_name="${MOBILE_PROVISIONING_PROFILE:-Gestalt Mobile App Store}"
+: "${MOBILE_BUNDLE_ID:?MOBILE_BUNDLE_ID is required}"
+bundle_id="${MOBILE_BUNDLE_ID}"
+if [[ "${bundle_id}" != 'com.gestalt.mobile' ]]; then
+  echo 'MOBILE_BUNDLE_ID must be com.gestalt.mobile' >&2
+  exit 1
+fi
+profile_name="${MOBILE_PROVISIONING_PROFILE:-Gestalt Mobile App Store com.gestalt.mobile}"
 release_dir="${mobile_root}/release"
-archive="${release_dir}/DeepSeek-Gestalt.xcarchive"
+archive="${release_dir}/Gestalt.xcarchive"
+archive_app="${archive}/Products/Applications/Gestalt.app"
 export_dir="${release_dir}/ios-export"
 profile_plist="$(mktemp)"
 trap 'rm -f "${profile_plist}"' EXIT
@@ -56,6 +62,7 @@ if [[ "${profile_expiration_epoch}" -le "$(date '+%s')" ]]; then
 fi
 
 cd "${repo_root}"
+pnpm --filter @deepseek-ai/dsh-mobile run verify:brand
 pnpm --filter @deepseek-ai/dsh-mobile run build
 pnpm --dir apps/mobile exec cap sync ios
 
@@ -68,6 +75,7 @@ xcodebuild \
   -destination 'generic/platform=iOS' \
   -archivePath "${archive}" \
   DEVELOPMENT_TEAM="${APPLE_TEAM_ID}" \
+  PRODUCT_NAME=Gestalt \
   PRODUCT_BUNDLE_IDENTIFIER="${bundle_id}" \
   MARKETING_VERSION="${MOBILE_VERSION}" \
   CURRENT_PROJECT_VERSION="${MOBILE_BUILD_NUMBER}" \
@@ -77,7 +85,14 @@ xcodebuild \
   archive
 
 bash "${script_dir}/verify-ios-release-orientations.sh" \
-  "${archive}/Products/Applications/App.app/Info.plist"
+  "${archive_app}/Info.plist"
+
+archive_plist="${archive_app}/Info.plist"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "${archive_plist}")" = Gestalt
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "${archive_plist}")" = 獭子哥
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${archive_plist}")" = "${bundle_id}"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${archive_plist}")" = "${MOBILE_VERSION}"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${archive_plist}")" = "${MOBILE_BUILD_NUMBER}"
 
 xcodebuild -exportArchive \
   -archivePath "${archive}" \
@@ -86,7 +101,7 @@ xcodebuild -exportArchive \
 
 source_ipa="$(find "${export_dir}" -maxdepth 1 -name '*.ipa' -print -quit)"
 test -n "${source_ipa}"
-target_ipa="${release_dir}/DeepSeek-Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.ipa"
+target_ipa="${release_dir}/Gestalt-${MOBILE_VERSION}-${MOBILE_BUILD_NUMBER}.ipa"
 cp "${source_ipa}" "${target_ipa}"
-codesign --verify --deep --strict "${archive}/Products/Applications/App.app"
+codesign --verify --deep --strict "${archive_app}"
 printf '%s\n' "${target_ipa}"

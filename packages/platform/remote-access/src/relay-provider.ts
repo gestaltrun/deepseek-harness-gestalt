@@ -661,11 +661,18 @@ function relayReady(
   entries: readonly RelayDirectoryEntry[],
   now: number,
 ): RelayReadyMessage {
+  // Opposite-endpoint attachments pair by route, optionally narrowed to one
+  // pairing selector. An attachment without a selector carries route-owner
+  // authority, so it is also a candidate peer for every channel-scoped
+  // attachment at the same revision — that visibility is what lets a
+  // selector-less grantor attachment address a project peer's scoped grant.
   const candidates = entries.filter(peer => peer.routeId === local.routeId
     && peer.endpoint !== local.endpoint
     && peer.expiresAt > now
     && peer.revision === local.revision
-    && (local.pairingSelector === undefined || peer.pairingSelector === local.pairingSelector))
+    && (local.pairingSelector === undefined
+      || peer.pairingSelector === local.pairingSelector
+      || peer.pairingSelector === undefined))
   const peersBySelector = new Map<RelayPairingSelector, RelayDirectoryEntry>()
   for (const peer of candidates) {
     const pairingSelector = peer.pairingSelector ?? local.pairingSelector

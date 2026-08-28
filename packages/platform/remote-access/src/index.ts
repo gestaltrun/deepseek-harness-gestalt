@@ -11,9 +11,13 @@ import type {
   AuthenticatedInstallationView,
   InstallationId,
   MobileInstallationPresentation,
+  PlatformAccountId,
   PlatformCapacityState,
 } from '@deepseek-ai/dsh-platform-account'
+import { parseInstallationId, parsePlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
+  deriveRelayCredentialDigest,
+  generateRelayCredential,
   parseRelayPairingSelector,
   parseRelayRouteId,
   REMOTE_PROTOCOL_LIMITS,
@@ -33,12 +37,27 @@ import {
   type EndpointPairingDesktopView,
   type EndpointPairingMobileView,
 } from './endpoint-pairing-mailbox.ts'
+import type {
+  ProjectPeerGrantComposition,
+  ProjectPeerGrantRecord,
+  ProjectPeerGrantView,
+  ProjectPeerProjectId,
+  ProjectPeerRosterProof,
+  SealedProjectPeerGrant,
+} from './project-peer-grant.ts'
+import {
+  cloneProjectPeerGrantRecord,
+  parseProjectPeerGrantId,
+  parseProjectPeerProjectId,
+  toProjectPeerGrantView,
+} from './project-peer-grant.ts'
 
 export * from './relay.ts'
 export * from './open-registration-quotas.ts'
 export * from './platform-operations.ts'
 export * from './endpoint-pairing-mailbox.ts'
 export * from './keyless-handshake.ts'
+export * from './project-peer-grant.ts'
 
 import {
   ACCOUNT_DAILY_QUOTA_WINDOW_MS,
@@ -258,6 +277,8 @@ export interface PersonalPairingProviderOptions {
     })
   /** Deployment-owned Mobile Access and pairing-to-route authority. Product entries provide a durable shared store. */
   authority?: PersonalPairingAuthorityStore
+  /** Project peer grant composition; omitted compositions fail the grant surface closed. */
+  projectPeerGrants?: ProjectPeerGrantComposition
   /** Whether this provider owns the complete authority lifetime and settles every retained record on disposal. */
   ownsAuthority?: boolean
   /** Clock used for fixed challenge expiry and deterministic assembled scenarios. */
@@ -267,7 +288,15 @@ export interface PersonalPairingProviderOptions {
   /** Cryptographic random source; production defaults to Web Crypto. */
   randomBytes?: (size: number) => Uint8Array
   /** Opaque id source for challenge and pairing records. */
-  randomId?: (kind: 'challenge' | 'pending' | 'pairing' | 'principal' | 'completion' | 'relay-route') => string
+  randomId?: (kind:
+    | 'challenge'
+    | 'pending'
+    | 'pairing'
+    | 'principal'
+    | 'completion'
+    | 'relay-route'
+    | 'project-peer-grant',
+  ) => string
   /** Expiry scheduler; production defaults to the process timer. */
   schedule?: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   /** HTTPS origin and path used by both QR and full-link flows. */
@@ -289,6 +318,10 @@ export type RemoteAccessErrorCode =
   | 'PAIRING_RESOURCE_LIMIT'
   | 'QUOTA'
   | 'PLATFORM_CAPACITY'
+  | 'PROJECT_PEER_UNAVAILABLE'
+  | 'PROJECT_PEER_MEMBERSHIP_REQUIRED'
+  | 'PROJECT_PEER_GRANT_INVALID'
+  | 'PROJECT_PEER_ID_COLLISION'
 
 /** Personal Pairing failure with a content-free stable code. */
 export class RemoteAccessError extends Error {
@@ -921,6 +954,67 @@ export abstract class RemoteAccessService extends Service {
     reservationId: AttachmentBlobReservationId
   }): Promise<void>
 
+  /**
+   * Issue one sealed Relay credential for a peer member's installation on this
+   * Desktop's route. Re-granting the same project and peer installation
+   * rotates the grant: the replacement digest is issued at the carried route
+   * revision first, then the superseded digest is revoked through the same
+   * compensation a removal tombstone uses.
+   * @param input - granting Desktop authorization, project, and peer identity.
+   * @returns content-free grant projection including the carried route revision.
+   * @throws RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.
+   * @throws RemoteAccessError `PROJECT_PEER_MEMBERSHIP_REQUIRED` when the grantor or peer holds no active membership.
+   * @throws RemoteAccessError `MOBILE_ACCESS_DISABLED` when the granting Desktop has no active route.
+   */
+  abstract grantProjectPeer(input: {
+    desktop: PairingAccountAuthentication
+    projectId: ProjectPeerProjectId
+    peerAccountId: PlatformAccountId
+    peerInstallationId: InstallationId
+  }): Promise<ProjectPeerGrantView>
+
+  /**
+   * List the live project peer grants this Desktop Installation carries on its route.
+   * @param input - granting Desktop authorization and optional project scope.
+   * @returns live grants ordered by issuance; revocation tombstones are excluded.
+   * @throws RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.
+   */
+  abstract listProjectPeerGrants(input: {
+    desktop: PairingAccountAuthentication
+    projectId?: ProjectPeerProjectId
+  }): Promise<readonly ProjectPeerGrantView[]>
+
+  /**
+   * Revoke one grant this Desktop issued: the Relay digest and any superseded
+   * digest enter compensating revocation and the record keeps a tombstone.
+   * Revoking an absent or already-revoked grant is a no-op.
+   * @param input - granting Desktop authorization and the addressed peer identity.
+   * @throws RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.
+   * @throws RemoteAccessError `PROJECT_PEER_GRANT_INVALID` when the grant is carried by another Desktop.
+   */
+  abstract revokeProjectPeerGrant(input: {
+    desktop: PairingAccountAuthentication
+    projectId: ProjectPeerProjectId
+    peerAccountId: PlatformAccountId
+    peerInstallationId: InstallationId
+  }): Promise<void>
+
+  /**
+   * Retrieve the sealed grant addressed to the authenticated installation.
+   * Membership is re-proven at read time and every live grant of the project
+   * is reconciled first, so a member removed from the project loses both the
+   * sealed envelope and the Relay authority.
+   * @param input - peer installation authorization and project.
+   * @returns the sealed envelope with its content-free fingerprint.
+   * @throws RemoteAccessError `PROJECT_PEER_UNAVAILABLE` when the grant surface is not composed.
+   * @throws RemoteAccessError `PROJECT_PEER_MEMBERSHIP_REQUIRED` when the reading account holds no active membership.
+   * @throws RemoteAccessError `PROJECT_PEER_GRANT_INVALID` when no live grant addresses this installation.
+   */
+  abstract getProjectPeerGrant(input: {
+    peer: PairingAccountAuthentication
+    projectId: ProjectPeerProjectId
+  }): Promise<SealedProjectPeerGrant>
+
 }
 
 /** Durable ownership tombstone for provider-private crypto material. */
@@ -1063,6 +1157,9 @@ export class PersonalPairingProvider extends RemoteAccessService {
       && (typeof options.relay.registerPairingCredentialDigests === 'function')
         !== (typeof options.relay.revokeCredentialDigest === 'function')) {
       throw new TypeError('Remote Relay composition requires pairing registration and revocation')
+    }
+    if (options.projectPeerGrants !== undefined && !hasProjectPeerRelay(options.relay)) {
+      throw new TypeError('Project peer grants require a Remote Relay composition with digest registration and revocation')
     }
     this.pairingLinkOrigin = origin.toString()
     this.authority = options.authority
@@ -2139,6 +2236,164 @@ export class PersonalPairingProvider extends RemoteAccessService {
     await this.exclusive(() => { this.releaseAttachmentBlobForAccount(input.accountId, input.reservationId) })
   }
 
+  async grantProjectPeer(input: {
+    desktop: PairingAccountAuthentication
+    projectId: ProjectPeerProjectId
+    peerAccountId: PlatformAccountId
+    peerInstallationId: InstallationId
+  }): Promise<ProjectPeerGrantView> {
+    return this.exclusive(async () => {
+      const composition = this.requireProjectPeerGrants()
+      const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+      this.evictExpiredRecords()
+      this.assertCapacity()
+      const projectId = parseProjectPeerProjectId(input.projectId)
+      const peerAccountId = parsePlatformAccountId(input.peerAccountId)
+      const peerInstallationId = parseInstallationId(input.peerInstallationId)
+      await this.reconcileProjectPeerGrants(composition, projectId)
+      const roster = await this.requireProjectRoster(composition, account.id, projectId)
+      if (!roster.members.some(member => member.accountId === peerAccountId)) {
+        throw new RemoteAccessError(
+          'PROJECT_PEER_MEMBERSHIP_REQUIRED',
+          'Project peer grants require the addressed account to hold an active membership',
+        )
+      }
+      const authority = await this.authority.getDesktop(account.id, installation.id)
+      if (!authority.enabled) {
+        throw new RemoteAccessError('MOBILE_ACCESS_DISABLED', 'Mobile Access is disabled for this Desktop Installation')
+      }
+      /* v8 ignore next 3 -- getDesktop never returns enabled without a routeId */
+      if (authority.routeId === undefined) {
+        throw new RemoteAccessError('MOBILE_ACCESS_DISABLED', 'Mobile Access is disabled for this Desktop Installation')
+      }
+      const relay = this.requireProjectPeerRelay()
+      const prior = await composition.store.getProjectPeerGrant({
+        projectId, peerAccountId, peerInstallationId,
+      })
+      const grantId = parseProjectPeerGrantId(this.randomId('project-peer-grant'))
+      const retained = await composition.store.listProjectPeerGrantRecords({})
+      if (retained.some(record => record.grantId === grantId)) {
+        throw new RemoteAccessError('PROJECT_PEER_ID_COLLISION', 'Project peer grant identity was already allocated')
+      }
+      const credential = await generateRelayCredential()
+      const credentialDigest = await deriveRelayCredentialDigest(credential)
+      const pairingSelector = parseRelayPairingSelector(grantId)
+      const revision = await relay.registerCredentialDigest(
+        authority.routeId, 'mobile', credentialDigest.slice(), pairingSelector,
+      )
+      let sealedCredential: Uint8Array
+      try {
+        sealedCredential = await composition.sealer.seal({
+          projectId,
+          peerAccountId,
+          peerInstallationId,
+          grant: {
+            routeId: authority.routeId, endpoint: 'mobile', credential, revision, pairingSelector,
+          },
+        })
+      } catch (error) {
+        await relay.revokeCredentialDigest(authority.routeId, 'mobile', credentialDigest.slice())
+        throw error
+      }
+      const record: ProjectPeerGrantRecord = {
+        projectId,
+        grantId,
+        routeId: authority.routeId,
+        grantorAccountId: account.id,
+        grantorInstallationId: installation.id,
+        peerAccountId,
+        peerInstallationId,
+        pairingSelector,
+        credentialDigest,
+        sealedCredential,
+        /* A live prior necessarily rides this route: reconcile tombstoned mismatches above. */
+        ...(prior !== undefined && prior.revokedAt === undefined
+          ? { supersededCredentialDigest: prior.credentialDigest.slice() }
+          : {}),
+        revision,
+        grantedAt: this.clock.now(),
+      }
+      await composition.store.putProjectPeerGrant(cloneProjectPeerGrantRecord(record))
+      await this.revokeProjectPeerSupersededDigest(composition, record)
+      return toProjectPeerGrantView(record)
+    })
+  }
+
+  async listProjectPeerGrants(input: {
+    desktop: PairingAccountAuthentication
+    projectId?: ProjectPeerProjectId
+  }): Promise<readonly ProjectPeerGrantView[]> {
+    return this.exclusive(async () => {
+      const composition = this.requireProjectPeerGrants()
+      const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+      this.evictExpiredRecords()
+      const projectId = input.projectId === undefined ? undefined : parseProjectPeerProjectId(input.projectId)
+      await this.reconcileProjectPeerGrants(composition, projectId)
+      const records = await composition.store.listProjectPeerGrantRecords(
+        projectId === undefined ? {} : { projectId },
+      )
+      return records
+        .filter(record => record.revokedAt === undefined
+          && record.grantorAccountId === account.id
+          && record.grantorInstallationId === installation.id)
+        .map(toProjectPeerGrantView)
+    })
+  }
+
+  async revokeProjectPeerGrant(input: {
+    desktop: PairingAccountAuthentication
+    projectId: ProjectPeerProjectId
+    peerAccountId: PlatformAccountId
+    peerInstallationId: InstallationId
+  }): Promise<void> {
+    return this.exclusive(async () => {
+      const composition = this.requireProjectPeerGrants()
+      const { account, installation } = await this.authenticate(input.desktop, 'desktop')
+      this.evictExpiredRecords()
+      const projectId = parseProjectPeerProjectId(input.projectId)
+      const peerAccountId = parsePlatformAccountId(input.peerAccountId)
+      const peerInstallationId = parseInstallationId(input.peerInstallationId)
+      await this.reconcileProjectPeerGrants(composition, projectId)
+      const record = await composition.store.getProjectPeerGrant({ projectId, peerAccountId, peerInstallationId })
+      if (record === undefined || record.revokedAt !== undefined) return
+      if (record.grantorAccountId !== account.id || record.grantorInstallationId !== installation.id) {
+        throw new RemoteAccessError(
+          'PROJECT_PEER_GRANT_INVALID',
+          'Project peer grants answer only to the Desktop that carries them',
+        )
+      }
+      await this.revokeProjectPeerGrantRecord(composition, record, this.clock.now())
+    })
+  }
+
+  async getProjectPeerGrant(input: {
+    peer: PairingAccountAuthentication
+    projectId: ProjectPeerProjectId
+  }): Promise<SealedProjectPeerGrant> {
+    return this.exclusive(async () => {
+      const composition = this.requireProjectPeerGrants()
+      const { account, installation } = await this.authenticateOwner(input.peer)
+      this.evictExpiredRecords()
+      this.assertCapacity()
+      const projectId = parseProjectPeerProjectId(input.projectId)
+      await this.reconcileProjectPeerGrants(composition, projectId)
+      await this.requireProjectRoster(composition, account.id, projectId)
+      const record = await composition.store.getProjectPeerGrant({
+        projectId, peerAccountId: account.id, peerInstallationId: installation.id,
+      })
+      if (record === undefined || record.revokedAt !== undefined) {
+        throw new RemoteAccessError('PROJECT_PEER_GRANT_INVALID', 'Project peer grant is invalid or unavailable')
+      }
+      const view = toProjectPeerGrantView(record)
+      return {
+        projectId: record.projectId,
+        grantId: record.grantId,
+        credentialFingerprint: view.credentialFingerprint,
+        sealedCredential: record.sealedCredential.slice(),
+      }
+    })
+  }
+
   /**
    * Create the provider-private cleanup authority for durable attachment metadata.
    * @returns cleanup capability owned by the durable attachment store.
@@ -2751,6 +3006,113 @@ export class PersonalPairingProvider extends RemoteAccessService {
     return relay
   }
 
+  private requireProjectPeerGrants(): ProjectPeerGrantComposition {
+    if (this.options.projectPeerGrants === undefined) {
+      throw new RemoteAccessError('PROJECT_PEER_UNAVAILABLE', 'Project peer grants are not composed')
+    }
+    return this.options.projectPeerGrants
+  }
+
+  private requireProjectPeerRelay(): ProjectPeerRelay {
+    const relay = this.options.relay
+    /* v8 ignore start -- the constructor rejects projectPeerGrants unless Relay supplies both digest operations */
+    if (!hasProjectPeerRelay(relay)) {
+      throw new TypeError('Project peer grants require a Remote Relay composition with digest registration and revocation')
+    }
+    /* v8 ignore stop */
+    return relay
+  }
+
+  /**
+   * Prove the reading account's active membership through the injected Project
+   * Membership authority. Membership errors never cross this boundary; they
+   * surface as one content-free stable code.
+   */
+  private async requireProjectRoster(
+    composition: ProjectPeerGrantComposition,
+    accountId: Branded<'PlatformAccountId'>,
+    projectId: ProjectPeerProjectId,
+  ): Promise<ProjectPeerRosterProof> {
+    try {
+      return await composition.membership.roster(accountId, projectId)
+    } catch {
+      throw new RemoteAccessError(
+        'PROJECT_PEER_MEMBERSHIP_REQUIRED',
+        'Project peer grants require an active project membership',
+      )
+    }
+  }
+
+  /**
+   * Reconcile live grants against the membership authority and the carriers'
+   * current routes. A grant whose grantor lost membership, whose peer lost
+   * membership, or whose carrying route is gone enters the revocation
+   * tombstone through the same compensating revocation an explicit revoke
+   * uses; superseded digests left by an interrupted rotation revoke first.
+   */
+  private async reconcileProjectPeerGrants(
+    composition: ProjectPeerGrantComposition,
+    projectId?: ProjectPeerProjectId,
+  ): Promise<void> {
+    const records = await composition.store.listProjectPeerGrantRecords(
+      projectId === undefined ? {} : { projectId },
+    )
+    for (const record of records) {
+      const retained = await this.revokeProjectPeerSupersededDigest(composition, record)
+      if (retained.revokedAt !== undefined) continue
+      const route = await this.authority.getDesktop(retained.grantorAccountId, retained.grantorInstallationId)
+      if (!route.enabled || route.routeId !== retained.routeId) {
+        await this.revokeProjectPeerGrantRecord(composition, retained, this.clock.now())
+        continue
+      }
+      let roster: ProjectPeerRosterProof
+      try {
+        roster = await composition.membership.roster(retained.grantorAccountId, retained.projectId)
+      } catch {
+        await this.revokeProjectPeerGrantRecord(composition, retained, this.clock.now())
+        continue
+      }
+      if (!roster.members.some(member => member.accountId === retained.peerAccountId)) {
+        await this.revokeProjectPeerGrantRecord(composition, retained, this.clock.now())
+      }
+    }
+  }
+
+  /**
+   * Revoke one grant's live digest, then commit the revocation tombstone so
+   * the record stays visible to reconciliation and can never authorize again.
+   * Reconciliation clears a superseded digest before any tombstone path, so
+   * only the live digest remains here.
+   */
+  private async revokeProjectPeerGrantRecord(
+    composition: ProjectPeerGrantComposition,
+    record: ProjectPeerGrantRecord,
+    revokedAt: number,
+  ): Promise<void> {
+    const relay = this.requireProjectPeerRelay()
+    await relay.revokeCredentialDigest(record.routeId, 'mobile', record.credentialDigest.slice())
+    const { supersededCredentialDigest: _superseded, ...revoked } = record
+    await composition.store.putProjectPeerGrant(cloneProjectPeerGrantRecord({ ...revoked, revokedAt }))
+  }
+
+  /**
+   * Complete a rotation by revoking the superseded digest and clearing it from
+   * the record; an interrupted rotation is repaired here on the next grant
+   * operation.
+   */
+  private async revokeProjectPeerSupersededDigest(
+    composition: ProjectPeerGrantComposition,
+    record: ProjectPeerGrantRecord,
+  ): Promise<ProjectPeerGrantRecord> {
+    if (record.supersededCredentialDigest === undefined) return record
+    const relay = this.requireProjectPeerRelay()
+    await relay.revokeCredentialDigest(record.routeId, 'mobile', record.supersededCredentialDigest.slice())
+    const { supersededCredentialDigest: _superseded, ...cleared } = record
+    const retained = cloneProjectPeerGrantRecord(cleared)
+    await composition.store.putProjectPeerGrant(retained)
+    return retained
+  }
+
   private acknowledgeStoredEndpointRevocations(
     accountId: string,
     installationId: InstallationId,
@@ -3242,6 +3604,16 @@ function decodeBase64Url(value: string): Uint8Array {
 function nonEmpty(value: unknown, name: string): string {
   if (typeof value !== 'string' || value.trim() === '') throw new TypeError(`${name} must be non-empty`)
   return value
+}
+
+type ProjectPeerRelay = Pick<RemoteRelayService, 'registerCredentialDigest' | 'revokeCredentialDigest'>
+
+function hasProjectPeerRelay(
+  relay: PersonalPairingProviderOptions['relay'],
+): relay is NonNullable<PersonalPairingProviderOptions['relay']> & ProjectPeerRelay {
+  return relay !== undefined
+    && typeof relay.registerCredentialDigest === 'function'
+    && typeof relay.revokeCredentialDigest === 'function'
 }
 
 export default RemoteAccessService

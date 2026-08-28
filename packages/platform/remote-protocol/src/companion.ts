@@ -6,6 +6,10 @@ import type {
   CompanionHostFailure,
   CompanionInteractionId,
   CompanionInteractionSettlement,
+  CompanionMemberQuestionItem,
+  CompanionMemberQuestionOption,
+  CompanionMemberQuestionOrigin,
+  CompanionMemberQuestionReference,
   CompanionMessage,
   CompanionOperation,
   CompanionOperationId,
@@ -20,6 +24,9 @@ import type {
   CompanionVersionDescriptor,
   CompanionVersionOffer,
   CompanionWorkspaceProjection,
+  DocumentTransferId,
+  MemberQuestionId,
+  MemberQuestionState,
 } from './types.ts'
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]+$/
@@ -204,6 +211,24 @@ export function parseCompanionInteractionId(value: unknown): CompanionInteractio
 }
 
 /**
+ * Parse one member-directed question carrier identity.
+ * @param value - untrusted protocol-native identifier.
+ * @returns branded member-question identifier.
+ */
+export function parseMemberQuestionId(value: unknown): MemberQuestionId {
+  return parseIdentifier(value, 'Companion member questionId') as MemberQuestionId
+}
+
+/**
+ * Parse one chunked document transfer identity.
+ * @param value - untrusted protocol-native identifier.
+ * @returns branded document transfer identifier.
+ */
+export function parseDocumentTransferId(value: unknown): DocumentTransferId {
+  return parseIdentifier(value, 'Companion document transferId') as DocumentTransferId
+}
+
+/**
  * Parse one transcript projection entry id at the encrypted wire boundary.
  * @param value - untrusted protocol-native identifier.
  * @returns branded transcript entry identifier.
@@ -273,7 +298,7 @@ export function decodeCompanionMessage(
       return { type: 'projection', projection: parseProjection(record.projection, protocol.major) }
     case 'result':
       exactKeys(record, ['applicationVersion', 'type', 'result'], 'Companion result message')
-      return { type: 'result', result: parseResult(record.result) }
+      return { type: 'result', result: parseResult(record.result, protocol.major) }
     default:
       invalid('Companion message type is unsupported')
   }
@@ -414,6 +439,62 @@ function parseOperation(value: unknown, major: NegotiatedCompanionProtocol['majo
       settlement: parseInteractionSettlement(record.settlement),
     }
   }
+  if (record.type === 'member-question') {
+    if (major < 4) invalid('Companion member-question requires application major 4')
+    exactKeys(
+      record,
+      ['type', 'operationId', 'questionId', 'origin', 'background', 'questions', 'references'],
+      'Companion member-question operation',
+    )
+    if (!Array.isArray(record.questions) || record.questions.length === 0
+      || record.questions.length > REMOTE_PROTOCOL_LIMITS.interactionQuestions) {
+      invalid('Companion member-question questions must be a non-empty bounded array')
+    }
+    if (!Array.isArray(record.references) || record.references.length > REMOTE_PROTOCOL_LIMITS.memberQuestionReferences) {
+      invalid('Companion member-question references must be an array within its reference ceiling')
+    }
+    const questions = record.questions.map(parseMemberQuestionItem)
+    if (new Set(questions.map(question => question.id)).size !== questions.length) {
+      invalid('Companion member-question question ids must be unique')
+    }
+    return {
+      type: 'member-question',
+      operationId: parseCompanionOperationId(record.operationId),
+      questionId: parseMemberQuestionId(record.questionId),
+      origin: parseMemberQuestionOrigin(record.origin),
+      background: parseBoundedCodePoints(
+        record.background,
+        REMOTE_PROTOCOL_LIMITS.memberQuestionBackgroundCodePoints,
+        'Companion member-question background',
+      ),
+      questions,
+      references: record.references.map(parseMemberQuestionReference),
+    }
+  }
+  if (record.type === 'document-chunk') {
+    if (major < 4) invalid('Companion document-chunk requires application major 4')
+    exactKeys(
+      record,
+      ['type', 'operationId', 'transferId', 'questionId', 'index', 'total', 'bytes'],
+      'Companion document-chunk operation',
+    )
+    const total = positiveSafeInteger(record.total, 'Companion document-chunk total')
+    if (total > REMOTE_PROTOCOL_LIMITS.documentTransferChunks) {
+      throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion document transfer exceeds its chunk ceiling')
+    }
+    const index = nonNegativeSafeInteger(record.index, 'Companion document-chunk index')
+    if (index >= total) invalid('Companion document-chunk index must be less than total')
+    decodeProtocolBase64Url(record.bytes, REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes, 'Companion document-chunk bytes')
+    return {
+      type: 'document-chunk',
+      operationId: parseCompanionOperationId(record.operationId),
+      transferId: parseDocumentTransferId(record.transferId),
+      questionId: parseMemberQuestionId(record.questionId),
+      index,
+      total,
+      bytes: record.bytes as string,
+    }
+  }
   if (record.type !== 'submit-prompt') invalid('Companion operation type is unsupported')
   exactKeys(record, ['type', 'operationId', 'sessionId', 'text'], 'Companion submit-prompt operation')
   if (typeof record.text !== 'string' || record.text.trim() === ''
@@ -428,8 +509,12 @@ function parseOperation(value: unknown, major: NegotiatedCompanionProtocol['majo
   }
 }
 
-function parseResult(value: unknown): CompanionResult {
+function parseResult(value: unknown, major: NegotiatedCompanionProtocol['major']): CompanionResult {
   const record = object(value, 'Companion result')
+  if (record.type === 'member-question-settled') {
+    if (major < 4) invalid('Companion member-question-settled requires application major 4')
+    return parseMemberQuestionSettled(record)
+  }
   if (record.type === 'image-chunk') {
     exactKeys(
       record,
@@ -529,7 +614,7 @@ function parseResult(value: unknown): CompanionResult {
       committedAt: positiveSafeInteger(record.committedAt, 'Companion session-created committedAt'),
     }
   }
-  if (record.type === 'status') return parseStatusResult(record)
+  if (record.type === 'status') return parseStatusResult(record, major)
   if (record.type !== 'confirmed') invalid('Companion result type is unsupported')
   exactKeys(record, ['type', 'operationId', 'committedAt', 'outcome'], 'Companion confirmed result')
   if (record.outcome !== 'accepted') invalid('Companion confirmed outcome is unsupported')
@@ -576,13 +661,109 @@ function parseHostFailure(value: unknown): CompanionHostFailure {
   }
 }
 
+function parseMemberQuestionOrigin(value: unknown): CompanionMemberQuestionOrigin {
+  const origin = object(value, 'Companion member-question origin')
+  exactKeys(
+    origin,
+    ['projectName', 'originSessionTitle', 'askerAccountId', 'askerRole', 'askerDisplayName', 'askerAvatarUrl'],
+    'Companion member-question origin',
+  )
+  if (origin.askerRole !== 'owner' && origin.askerRole !== 'admin' && origin.askerRole !== 'member') {
+    invalid('Companion member-question askerRole is unsupported')
+  }
+  return {
+    projectName: parseInteractionString(origin.projectName, 'Companion member-question projectName'),
+    originSessionTitle: parseBoundedCodePoints(
+      origin.originSessionTitle,
+      REMOTE_PROTOCOL_LIMITS.memberQuestionOriginSessionTitleCodePoints,
+      'Companion member-question originSessionTitle',
+    ),
+    askerAccountId: parseInteractionString(origin.askerAccountId, 'Companion member-question askerAccountId'),
+    askerRole: origin.askerRole,
+    askerDisplayName: parseBoundedCodePoints(
+      origin.askerDisplayName,
+      REMOTE_PROTOCOL_LIMITS.memberQuestionAskerDisplayNameCodePoints,
+      'Companion member-question askerDisplayName',
+    ),
+    askerAvatarUrl: parseBoundedCodePoints(
+      origin.askerAvatarUrl,
+      REMOTE_PROTOCOL_LIMITS.memberQuestionAskerAvatarUrlCodePoints,
+      'Companion member-question askerAvatarUrl',
+    ),
+  }
+}
+
+function parseMemberQuestionItem(value: unknown): CompanionMemberQuestionItem {
+  const item = object(value, 'Companion member-question item')
+  const keys = ['id', 'question', 'header', 'options', 'multiSelect'].filter(key => item[key] !== undefined)
+  exactKeys(item, keys, 'Companion member-question item')
+  if (item.options !== undefined
+    && (!Array.isArray(item.options) || item.options.length === 0
+      || item.options.length > REMOTE_PROTOCOL_LIMITS.memberQuestionOptions)) {
+    invalid('Companion member-question options must be a non-empty bounded array')
+  }
+  if (item.multiSelect !== undefined && typeof item.multiSelect !== 'boolean') {
+    invalid('Companion member-question multiSelect must be boolean')
+  }
+  return {
+    id: parseInteractionString(item.id, 'Companion member-question item id'),
+    question: parseInteractionString(item.question, 'Companion member-question item question'),
+    ...(item.header === undefined ? {} : {
+      header: parseInteractionString(item.header, 'Companion member-question item header'),
+    }),
+    ...(item.options === undefined ? {} : { options: item.options.map(parseMemberQuestionOption) }),
+    ...(item.multiSelect === undefined ? {} : { multiSelect: item.multiSelect }),
+  }
+}
+
+function parseMemberQuestionOption(value: unknown): CompanionMemberQuestionOption {
+  const option = object(value, 'Companion member-question option')
+  exactKeys(option, option.description === undefined ? ['label'] : ['label', 'description'], 'Companion member-question option')
+  return {
+    label: parseInteractionString(option.label, 'Companion member-question option label'),
+    ...(option.description === undefined ? {} : {
+      description: parseInteractionString(option.description, 'Companion member-question option description'),
+    }),
+  }
+}
+
+function parseMemberQuestionReference(value: unknown): CompanionMemberQuestionReference {
+  const reference = object(value, 'Companion member-question reference')
+  exactKeys(reference, ['path', 'reason'], 'Companion member-question reference')
+  return {
+    path: parseBoundedCodePoints(
+      reference.path,
+      REMOTE_PROTOCOL_LIMITS.memberQuestionReferencePathCodePoints,
+      'Companion member-question reference path',
+    ),
+    reason: parseBoundedCodePoints(
+      reference.reason,
+      REMOTE_PROTOCOL_LIMITS.memberQuestionReferenceReasonCodePoints,
+      'Companion member-question reference reason',
+    ),
+  }
+}
+
+function parseMemberQuestionState(value: unknown): MemberQuestionState {
+  if (value === 'pending' || value === 'answered' || value === 'declined' || value === 'expired'
+    || value === 'withdrawn' || value === 'superseded') return value
+  return invalid('Companion member-question state is unsupported')
+}
+
+function parseBoundedCodePoints(value: unknown, codePoints: number, name: string): string {
+  if (typeof value !== 'string' || value.length === 0 || countUnicodeCodePoints(value) > codePoints) {
+    invalid(`${name} must contain 1-${String(codePoints)} code points`)
+  }
+  return value
+}
+
 function countUnicodeCodePoints(value: string): number {
   let count = 0
   for (const _codePoint of value) count++
   return count
 }
 
-function parseStatusResult(record: Record<string, unknown>): CompanionResult {
+function parseStatusResult(record: Record<string, unknown>, major: NegotiatedCompanionProtocol['major']): CompanionResult {
   const operationId = parseCompanionOperationId(record.operationId)
   if (record.committed !== undefined && record.absent !== undefined) {
     invalid('Companion status result cannot be both committed and absent')
@@ -593,10 +774,11 @@ function parseStatusResult(record: Record<string, unknown>): CompanionResult {
     return { type: 'status', operationId, absent: true }
   }
   exactKeys(record, ['type', 'operationId', 'committed'], 'Companion committed status result')
-  const mutationResult = parseResult(record.committed)
+  const mutationResult = parseResult(record.committed, major)
   if ((mutationResult.type !== 'confirmed' && mutationResult.type !== 'session-created'
     && mutationResult.type !== 'attachment-rejected'
-    && mutationResult.type !== 'operation-failed' && mutationResult.type !== 'interaction-receipt')
+    && mutationResult.type !== 'operation-failed' && mutationResult.type !== 'interaction-receipt'
+    && mutationResult.type !== 'member-question-settled')
     || mutationResult.operationId !== operationId) {
     invalid('Companion committed status must embed its own terminal mutation result')
   }
@@ -642,6 +824,31 @@ function parseProjection(value: unknown, major: NegotiatedCompanionProtocol['maj
       conversation: record.conversation,
     }
   }
+  if (record.type === 'member-question-state') {
+    if (major < 4) invalid('Companion member-question-state requires application major 4')
+    exactKeys(record, ['type', 'questionId', 'state'], 'Companion member-question-state projection')
+    return {
+      type: 'member-question-state',
+      questionId: parseMemberQuestionId(record.questionId),
+      state: parseMemberQuestionState(record.state),
+    }
+  }
+  if (record.type === 'document-transfer-state') {
+    if (major < 4) invalid('Companion document-transfer-state requires application major 4')
+    exactKeys(record, ['type', 'transferId', 'received', 'total'], 'Companion document-transfer-state projection')
+    const total = positiveSafeInteger(record.total, 'Companion document-transfer-state total')
+    if (total > REMOTE_PROTOCOL_LIMITS.documentTransferChunks) {
+      throw new RemoteProtocolError('REMOTE_PROTOCOL_LIMIT_EXCEEDED', 'Companion document transfer exceeds its chunk ceiling')
+    }
+    const received = nonNegativeSafeInteger(record.received, 'Companion document-transfer-state received')
+    if (received > total) invalid('Companion document-transfer-state received must not exceed total')
+    return {
+      type: 'document-transfer-state',
+      transferId: parseDocumentTransferId(record.transferId),
+      received,
+      total,
+    }
+  }
   if (record.type !== 'transcript-page') invalid('Companion projection type is unsupported')
   exactKeys(record, ['type', 'sessionId', 'entries'], 'Companion transcript-page projection')
   if (!Array.isArray(record.entries)) invalid('Companion transcript entries must be an array')
@@ -684,30 +891,76 @@ function parseInteractionSettlement(value: unknown): CompanionInteractionSettlem
   }
   if (settlement.kind !== 'question') invalid('Companion interaction settlement kind is unsupported')
   exactKeys(settlement, ['kind', 'answers'], 'Companion Ask User settlement')
-  if (!Array.isArray(settlement.answers) || settlement.answers.length === 0
-    || settlement.answers.length > REMOTE_PROTOCOL_LIMITS.interactionQuestions) {
-    invalid('Companion Ask User answers must be a non-empty bounded array')
+  return { kind: 'question', answers: parseInteractionAnswerItems(settlement.answers, 'Companion Ask User answers') }
+}
+
+/** Shared bounded {id, selected, custom?} answer-batch parser for Ask User and member-question settlements. */
+function parseInteractionAnswerItems(
+  value: unknown,
+  name: string,
+): { id: string; selected: string[]; custom?: string }[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > REMOTE_PROTOCOL_LIMITS.interactionQuestions) {
+    invalid(`${name} must be a non-empty bounded array`)
   }
   const ids = new Set<string>()
-  const answers = settlement.answers.map((valueAnswer) => {
-    const answer = object(valueAnswer, 'Companion Ask User answer')
+  return value.map((valueAnswer) => {
+    const answer = object(valueAnswer, `${name} item`)
     const keys = answer.custom === undefined ? ['id', 'selected'] : ['id', 'selected', 'custom']
-    exactKeys(answer, keys, 'Companion Ask User answer')
-    const id = parseInteractionString(answer.id, 'Companion Ask User answer id')
-    if (ids.has(id)) invalid('Companion Ask User answer ids must be unique')
+    exactKeys(answer, keys, `${name} item`)
+    const id = parseInteractionString(answer.id, `${name} item id`)
+    if (ids.has(id)) invalid(`${name} item ids must be unique`)
     ids.add(id)
     if (!Array.isArray(answer.selected) || answer.selected.length > REMOTE_PROTOCOL_LIMITS.interactionSelections) {
-      invalid('Companion Ask User selections exceed their item ceiling')
+      invalid(`${name} item selections exceed their item ceiling`)
     }
     const selected = answer.selected.map(selection =>
-      parseInteractionString(selection, 'Companion Ask User selected label'))
-    if (new Set(selected).size !== selected.length) invalid('Companion Ask User selected labels must be unique')
+      parseInteractionString(selection, `${name} item selected label`))
+    if (new Set(selected).size !== selected.length) invalid(`${name} item selected labels must be unique`)
     const custom = answer.custom === undefined
       ? undefined
-      : parseInteractionString(answer.custom, 'Companion Ask User custom answer')
+      : parseInteractionString(answer.custom, `${name} item custom answer`)
     return { id, selected, ...custom === undefined ? {} : { custom } }
   })
-  return { kind: 'question', answers }
+}
+
+function parseMemberQuestionSettled(record: Record<string, unknown>): CompanionResult {
+  const keys = ['type', 'operationId', 'questionId', 'outcome', 'answers', 'settledByDeviceId', 'settledAtMoment']
+    .filter(key => record[key] !== undefined)
+  exactKeys(record, keys, 'Companion member-question-settled result')
+  if (record.outcome !== 'answered' && record.outcome !== 'declined' && record.outcome !== 'expired'
+    && record.outcome !== 'withdrawn' && record.outcome !== 'superseded') {
+    invalid('Companion member-question outcome is unsupported')
+  }
+  const outcome = record.outcome
+  if (outcome === 'answered' && record.answers === undefined) {
+    invalid('Companion member-question answers are required for the answered outcome')
+  }
+  if (outcome !== 'answered' && record.answers !== undefined) {
+    invalid('Companion member-question answers are admitted only for the answered outcome')
+  }
+  return {
+    type: 'member-question-settled',
+    operationId: parseCompanionOperationId(record.operationId),
+    questionId: parseMemberQuestionId(record.questionId),
+    outcome,
+    ...(record.answers === undefined
+      ? {}
+      : { answers: parseInteractionAnswerItems(record.answers, 'Companion member-question answers') }),
+    ...(record.settledByDeviceId === undefined ? {} : {
+      settledByDeviceId: parseBoundedCodePoints(
+        record.settledByDeviceId,
+        REMOTE_PROTOCOL_LIMITS.memberQuestionSettledByDeviceIdCodePoints,
+        'Companion member-question settledByDeviceId',
+      ),
+    }),
+    ...(record.settledAtMoment === undefined ? {} : {
+      settledAtMoment: parseBoundedCodePoints(
+        record.settledAtMoment,
+        REMOTE_PROTOCOL_LIMITS.memberQuestionSettledAtMomentCodePoints,
+        'Companion member-question settledAtMoment',
+      ),
+    }),
+  }
 }
 
 function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProjection {
@@ -888,8 +1141,13 @@ function parseVersionDescriptor(value: unknown): CompanionVersionDescriptor {
 }
 
 function isCompanionV4Message(message: CompanionMessage): boolean {
-  return message.type === 'operation' && message.operation.type === 'observe-session'
-    || message.type === 'projection' && message.projection.type === 'session-live'
+  return message.type === 'operation'
+      && (message.operation.type === 'observe-session' || message.operation.type === 'member-question'
+        || message.operation.type === 'document-chunk')
+    || message.type === 'projection'
+      && (message.projection.type === 'session-live' || message.projection.type === 'member-question-state'
+        || message.projection.type === 'document-transfer-state')
+    || message.type === 'result' && message.result.type === 'member-question-settled'
 }
 
 function parseSecurityCapability(value: unknown): CompanionSecurityCapability {
@@ -915,6 +1173,7 @@ function object(value: unknown, name: string): Record<string, unknown> {
 }
 
 function exactKeys(record: Record<string, unknown>, keys: readonly unknown[], name: string): void {
+  /* v8 ignore next -- callers pass string key lists or optional-key filters over string literals */
   const supported = keys.filter((key): key is string => typeof key === 'string')
   const actual = Object.keys(record)
   if (actual.length !== supported.length || actual.some(key => !supported.includes(key))) {

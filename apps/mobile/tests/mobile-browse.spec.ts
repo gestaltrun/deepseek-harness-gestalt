@@ -192,9 +192,9 @@ describe('Mobile Session browser', () => {
     expect(onAttach).not.toHaveBeenCalled()
   })
 
-  it('drops a pending native picker file when Desktop removes the Session', async () => {
+  it('retains a pending native picker file while the foreground projection is unavailable', async () => {
     const onAttach = vi.fn()
-    const file = new File([Uint8Array.of(2)], 'removed.png', { type: 'image/png' })
+    const file = new File([Uint8Array.of(3)], 'foreground.png', { type: 'image/png' })
     const props = {
       desktopName: 'Paired Desktop',
       connection: 'online' as const,
@@ -217,8 +217,14 @@ describe('Mobile Session browser', () => {
     if (input === null) throw new Error('expected attachment file input')
     fireEvent.change(input, { target: { files: [file] } })
 
-    view.rerender(createElement(MobileBrowse, { ...props, sessions, conversations: {} }))
+    view.rerender(createElement(MobileBrowse, {
+      ...props,
+      connection: 'offline',
+      sessions,
+      conversations: {},
+    }))
     view.rerender(createElement(MobileBrowse, { ...props, canMutate: true }))
-    expect(onAttach).not.toHaveBeenCalled()
+    expect(onAttach).toHaveBeenCalledOnce()
+    expect(onAttach).toHaveBeenCalledWith(attachmentSessionId, file)
   })
 })

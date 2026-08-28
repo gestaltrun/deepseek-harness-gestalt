@@ -10,7 +10,7 @@ Android DocumentsUI backgrounds the Capacitor application while a user selects a
 
 ## Decision
 
-Opening the native picker still requires current foreground mutation authority. The Session browse owner may retain one returned browser `File` in component memory while mutation authority is temporarily closed, then submit it through the ordinary attachment callback after foreground synchronization restores authority. This owner survives conversation-detail remounts during native foreground restoration, clears the pending reference before submission, and releases it when the user leaves the conversation or Desktop removes the authoritative Session without persistence.
+Opening the native picker still requires current foreground mutation authority. The Session browse owner may retain one returned browser `File` in component memory while mutation authority is temporarily closed, then submit it through the ordinary attachment callback after foreground synchronization restores authority. This owner survives conversation-detail remounts during native foreground restoration, clears the pending reference before submission, and releases it when the user leaves the conversation without persistence.
 
 The attachment surface, current-generation permit, encrypted upload, and Desktop confirmation remain unchanged. A pending selection cannot start an upload, create an operation id, or bypass the foreground-generation check while Mobile is offline.
 

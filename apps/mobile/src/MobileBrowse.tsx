@@ -183,11 +183,11 @@ export function MobileBrowse({
   useEffect(() => {
     const pending = pendingAttachment.current
     if (pending === undefined) return
-    if (pending.sessionId !== openId || openTitle === undefined) {
+    if (pending.sessionId !== openId) {
       pendingAttachment.current = undefined
       return
     }
-    if (!canMutate || onAttach === undefined) return
+    if (openTitle === undefined || !canMutate || onAttach === undefined) return
     pendingAttachment.current = undefined
     onAttach(pending.sessionId, pending.file)
   }, [canMutate, onAttach, openId, openTitle])

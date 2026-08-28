@@ -103,6 +103,45 @@ describe('PhoneSettingsCardController first-open auto-detect', () => {
   })
 })
 
+describe('PhoneSettingsCardController publish re-entrancy', () => {
+  it('never re-kicks ensureDetected from a subscribe callback (P17 recursion cut)', async () => {
+    // An UNGUARDED source: every ensureDetected runs detect, which notifies.
+    // The controller's re-entrant publish must not kick it again — the
+    // kick happens at most once per publish wave, so the recursion the
+    // acceptance run hit (publish → ensureDetected → notify → publish)
+    // terminates instead of blowing the stack.
+    let kicks = 0
+    const listeners = new Set<() => void>()
+    let view: PhoneEnvironmentView = { kind: 'probing', checks: [] }
+    const detect = async (): Promise<void> => {
+      view = { kind: 'android-wizard', platformToolsInstalled: true }
+      for (const listener of [...listeners]) listener()
+    }
+    const source: PhoneEnvironmentSource = {
+      getView: () => view,
+      redetect: detect,
+      ensureDetected: () => {
+        kicks += 1
+        void detect()
+      },
+      subscribe: (listener) => {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+    }
+    const host = readyScope(true)
+    const controller = new PhoneSettingsCardController(host.scope, source)
+    const face = controller.inject()
+    await vi.waitFor(() => {
+      expect(face.hooks.phoneSettingsCard.getSnapshot().view).toEqual({
+        kind: 'android-wizard', platformToolsInstalled: true,
+      })
+    })
+    expect(kicks).toBe(1)
+    controller.dispose()
+  })
+})
+
 describe('PhoneSettingsCardController', () => {
   it('projects the durable enable flag onto the off / probe-failed views', () => {
     const host = readyScope(false)
@@ -126,10 +165,16 @@ describe('PhoneSettingsCardController', () => {
       views[0] = { kind: 'android-wizard', platformToolsInstalled: false }
       for (const listener of [...listeners]) listener()
     }
+    // A compliant ensureDetected runs the detection once per source.
+    let detected = false
     const source: PhoneEnvironmentSource = {
       getView: () => views[0]!,
       redetect: detect,
-      ensureDetected: () => { void detect() },
+      ensureDetected: () => {
+        if (detected) return
+        detected = true
+        void detect()
+      },
       subscribe: (listener) => {
         listeners.add(listener)
         return () => { listeners.delete(listener) }

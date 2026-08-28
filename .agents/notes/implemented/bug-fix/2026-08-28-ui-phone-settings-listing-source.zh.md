@@ -24,4 +24,4 @@ Issue #417 P1 记录：插件配置标签页的「手机设备」卡片始终注
 
 一份成功但为空的清单仍会打开平台向导，因为清单体不携带 adb/SDK/Xcode 探测事实。卡片的视图联合与复制按钮命令仍遵循[设置向导笔记](../architecture/2026-08-28-ui-phone-settings-wizard-card.zh.md)。
 
-卡片控制器在每次启用态 publish 时触发 source 的一次性 `ensureDetected`，而非在构造时抢跑 redetect——构造时 scope 通常尚未水合，因此首次启用渲染即探测中视图，只有探测本身失败才落到 probe-failed 臂。
+卡片控制器在每次启用态 publish 时经重入护栏触发 source 的一次性 `ensureDetected`——探测在 kick 内完成会同步 notify，重入的 publish 不得再次 kick（P17 递归环）——而非在构造时抢跑 redetect——构造时 scope 通常尚未水合，因此首次启用渲染即探测中视图，只有探测本身失败才落到 probe-failed 臂。

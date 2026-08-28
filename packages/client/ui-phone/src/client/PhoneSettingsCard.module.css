@@ -216,6 +216,10 @@
   flex: 1;
   min-width: 0;
   overflow-x: auto;
+  /* The command row paints the elevated bg-layer-2 surface; the scrolling
+     thumb rebinds to the l2 pair so it stays visible on it. */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
 .cmt {

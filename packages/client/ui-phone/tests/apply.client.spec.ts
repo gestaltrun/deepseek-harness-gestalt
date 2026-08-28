@@ -20,7 +20,8 @@ import {
 interface RegisteredTab {
   available: (ctx: unknown, scope: unknown, state: unknown) => boolean
   badge: (ctx: unknown, scope: unknown, state: unknown) => number | null
-  component: () => unknown
+  component: (props: unknown) => unknown
+  dedupeKey?: (tab: { readonly id: string; readonly meta?: unknown }) => string | undefined
   icon: (size: number) => unknown
   id: string
   order: number
@@ -81,24 +82,33 @@ describe('ui-phone client apply', () => {
   it('fails loud when betterSidebar has not been published', () => {
     const ctx = new Context()
     expect(() => installPhoneTab(ctx, {
-      source: NULL_PHONE_BADGE_SOURCE, view: stubView(),
+      source: NULL_PHONE_BADGE_SOURCE,
+      view: stubView(),
+      isEnabled: () => false,
+      createController: () => {
+        throw new Error('not expected in this spec')
+      },
     })).toThrow(/betterSidebar is not published/)
   })
 
   it('registers the locked 「手机」descriptor shape', async () => {
     const sidebar = new SidebarUnderTest()
     await mount(sidebar)
-    const descriptor = sidebar.getTab('phone')
-    expect(descriptor).toBeDefined()
-    expect(descriptor!.title).toBe('手机')
-    expect(descriptor!.order).toBe(55)
-    expect(descriptor!.single).toBe(true)
+    const descriptor = sidebar.getTab('phone')!
+    expect(descriptor.title).toBe('手机')
+    expect(descriptor.order).toBe(55)
+    // Per-device tabs: the serial dedupeKey replaces the single flag — the
+    // picker dedupes through the service's id safety net instead.
+    expect(descriptor.single).toBeUndefined()
+    expect(descriptor.dedupeKey?.({ id: 'phone:emulator-5554', meta: { kind: 'device', serial: 'emulator-5554', name: 'x' } }))
+      .toBe('emulator-5554')
+    expect(descriptor.dedupeKey?.({ id: 'phone', meta: undefined })).toBeUndefined()
     // 恒可达 decision: zero devices never disables the + menu row.
-    expect(descriptor!.available(undefined, undefined, undefined)).toBe(true)
+    expect(descriptor.available(undefined, undefined, undefined)).toBe(true)
     // The monochrome inline SVG resolves the icon(size) contract.
-    expect(descriptor!.icon(14)).toBeTruthy()
+    expect(descriptor.icon(14)).toBeTruthy()
     // The body reads the settings scope when ready, else the composition Config.
-    expect(descriptor!.component()).toBeTruthy()
+    expect(descriptor.component({ tab: { id: 'phone', title: '手机' }, visible: false })).toBeTruthy()
   })
 
   it('wires the browser clipboard into the settings card when one exists', async () => {
@@ -124,12 +134,20 @@ describe('ui-phone client apply', () => {
       revision: 1,
     })
     await mount(sidebar, host)
-    expect(sidebar.getTab('phone')!.component()).toBeTruthy()
+    expect(sidebar.getTab('phone')!.component({ tab: { id: 'phone', title: '手机' }, visible: false })).toBeTruthy()
   })
 
   it('drives both badge arms from the injected snapshot values', async () => {
     const badgeOf = (source: PhoneBadgeSource) =>
-      buildPhoneTabDescriptor({ source, view: stubView() }).badge!
+      buildPhoneTabDescriptor({
+        source,
+        view: stubView(),
+        isEnabled: () => false,
+        openDevice: () => {},
+        createController: () => {
+          throw new Error('not expected in this spec')
+        },
+      }).badge!
     // Quiet arm: no online devices hides the strip pill.
     expect(badgeOf(sourceWith(0))(undefined, undefined, undefined)).toBeNull()
     // Live arm: the pill shows the online count.

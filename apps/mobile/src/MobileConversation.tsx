@@ -97,7 +97,7 @@ export function MobileConversation({
         disabled={!mutationEnabled}
         onChange={(event) => {
           const file = event.target.files?.[0]
-          if (file !== undefined && mutationEnabled) onAttach(file)
+          if (file !== undefined) onAttach(file)
           event.target.value = ''
         }}
       />

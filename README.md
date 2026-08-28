@@ -1,9 +1,11 @@
-# DeepSeek Gestalt
+# Gestalt
 
 English | [中文](README.zh.md)
 
 <div align="center">
-  <p><strong>The product layer for DeepSeek Harness.</strong></p>
+  <img src="docs/assets/brand/tazige-ip.png" alt="Tazige, the otter IP character for Gestalt" width="560">
+  <p><sub>Product name: Gestalt · Chinese name and IP character: 獭子哥</sub></p>
+  <p><strong>Gestalt is the product layer for DeepSeek Harness.</strong></p>
   <p>
     <a href="https://www.gestaltrun.com/">Website</a> ·
     <a href="https://github.com/gestaltrun/deepseek-harness-gestalt/releases/latest">Download</a> ·
@@ -12,7 +14,7 @@ English | [中文](README.zh.md)
   </p>
 </div>
 
-DeepSeek Gestalt is building a complete desktop, web, and mobile product on top of [DeepSeek Harness](https://www.deepseek.com/harness/) (`dsh`). It keeps the official DSH plugin and runtime model as its base, fills in product workflows and distribution, and integrates strong community plugins behind tested product interfaces. The goal is a stable, usable product distribution rather than a collection of patches.
+Gestalt is building a complete desktop, web, and mobile product on top of [DeepSeek Harness](https://www.deepseek.com/harness/) (`dsh`). Its Chinese product name and IP character are **獭子哥**. Gestalt keeps the official DSH plugin and runtime model as its base, fills in product workflows and distribution, and integrates strong community plugins behind tested product interfaces. The goal is a stable, usable product distribution rather than a collection of patches.
 
 The project continuously merges the [official DSH repository](https://github.com/deepseek-ai/deepseek-harness) and keeps product additions on apps, bundles, plugins, and documented capability seams wherever possible. DSH profiles, plugins, CLI modes, and SDK entry points remain the compatibility baseline. Gestalt is still in developer preview, so compatibility-breaking changes remain possible while the product converges.
 
@@ -31,9 +33,9 @@ The project continuously merges the [official DSH repository](https://github.com
 |---|---|---|---|
 | Desktop product | Electron Host, macOS and Windows packages, product chrome, fullscreen Settings, staged auto-update, and Session Schedule ([#1](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/1), [#26](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/26), [#367](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/367)) | — | — |
 | Workbench and navigation | Better Sidebar 0.16.1, files, multi-repository Git, Markdown/HTML, terminals, free windows, and agent-opened tabs ([#317](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/317)) | — | Simplify Browser ownership inside the Workbench ([#226](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/226)) |
-| Session workflows | Durable Side Chats, restart restoration, canonical conversation UI, goals, forks, schedules, background work, and subagent image prompts ([#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247), [#325](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/325), [#329](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/329)) | — | — |
+| Session workflows | Durable Side Chats with restart restoration and canonical conversation UI, the Gestalt Schedule board, and image prompts for capable subagent providers ([#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247), [#325](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/325), [#329](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/329)) | — | — |
 | Context and review | Workspace `@file` references, folder descent, context dock, text and image annotations, and per-Workspace tool eligibility ([#73](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/73), [#80](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/80), [#176](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/176)) | — | — |
-| AI Browser | Session-owned Browser Profiles, isolated Workspaces, tabs, Browser Dock, tool approvals, and restart recovery ([#104](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/104), [#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247)) | — | — |
+| AI Browser | Session-owned Browser Workspaces and tabs, shared/temporary/named persistent Profiles, Browser Dock, tool approvals, and restart recovery ([#104](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/104), [#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247)) | — | — |
 | Mobile Companion | Platform Account, Personal Pairing, encrypted Relay, Desktop-owned Session browse/search/history, prompts, cancellation, approvals, questions, attachments, live projection, and concurrent phones ([#312](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/312), [#371](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/371)) | — | Controlled iOS and Android distribution ([#44](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/44)) |
 | Community plugins | Better Sidebar is integrated as a reviewed source snapshot; external plugins have an exact-revision catalog ([plugins](plugins/README.md), [#335](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/335)) | — | Optional Sub2API provider, installer, and embedded management console ([#346](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/346), [#348](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/348), [#349](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/349)) |
 | Cross-account collaboration | — | Project membership and member-directed questions ([#338](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/338), [#399](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/399)) | Sender routing, receiver experience, and assembled acceptance ([#343](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/343), [#344](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/344), [#345](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/345)) |
@@ -81,7 +83,7 @@ Side Chats are durable child Sessions with the same conversation renderer, model
 
 ### Session-owned AI Browser
 
-Each Session receives an isolated Browser Workspace backed by persistent Browser Profiles. Browser tabs live in the Workbench, recover their last non-blank URL after Runtime restarts, and close with their owning Session lifecycle. Tool actions pass through the ordinary approval pipeline.
+A Session can own zero or more Browser Workspaces and tabs. Each Workspace uses a shared, temporary, or named persistent Browser Profile; the default shared Profile reuses storage across Sessions and is not an isolation guarantee. Browser tabs live in the Workbench, recover their last non-blank URL after Runtime restarts, and close with their owning Session lifecycle. Tool actions pass through the ordinary approval pipeline.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/849a04d76ae94c48a4d4b311942bbf1ca0f98888/pr/247/browser-lifecycle.gif" alt="Session-owned Browser tab navigating, recovering, and closing with its lifecycle" width="900">
@@ -130,19 +132,6 @@ Mobile Companion does not create a separate chat backend. Desktop remains the au
 Gestalt packages the DSH Web product inside an Electron Host with official Node, a loopback-only Web server, product window chrome, native Browser Runtime, signed and notarized macOS builds, Windows installers, staged updates, and shutdown ownership. The repository periodically merges official DSH, runs the combined tree through documentation, type, snapshot, package, Electron, and platform gates, and keeps out-of-tree integrations behind pinned plugin revisions.
 
 Read the [architecture](docs/architecture.md) for the shared plugin tree and capability seams, the [Desktop Host reference](apps/desktop/README.md) for packaging and lifecycle, and the [external plugin catalog](plugins/README.md) for reviewed revision pins.
-
-## Roadmap
-
-### DOING
-
-- **Projects and member-directed questions:** [the accepted specification](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/338) adds cross-account Project membership, member roster tools, Decision Brief questions, bounded document transfer, and peer Relay credentials. [PR #399](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/399) carries the active protocol and credential work on the feature baseline.
-
-### TODO
-
-- **Complete member questions:** route `ask_user_question` to a Project Member, deliver the receiving experience, and prove the assembled cross-machine flow ([#343](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/343), [#344](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/344), [#345](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/345)).
-- **Productize Sub2API:** make the pinned sidecar an optional Desktop account-pool provider with an Offer card, one-click installer, and embedded upstream management console ([#346](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/346)).
-- **Operate phones from the Workbench:** add Android and iOS phone tabs, live video and touch, setup guidance, and approval-gated device tools ([#355](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/355)).
-- **Finish controlled Mobile distribution:** bind acceptance to release candidates and distribute the approved iOS and Android builds ([#44](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/44)).
 
 <a id="run"></a>
 

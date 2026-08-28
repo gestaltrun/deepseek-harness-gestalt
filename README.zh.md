@@ -1,9 +1,11 @@
-# DeepSeek Gestalt
+# 獭子哥（Gestalt）
 
 [English](README.md) | 中文
 
 <div align="center">
-  <p><strong>DeepSeek Harness 的产品层。</strong></p>
+  <img src="docs/assets/brand/tazige-ip.png" alt="Gestalt 的水獭 IP 角色獭子哥" width="560">
+  <p><sub>英文产品名：Gestalt · 中文名与 IP 角色：獭子哥</sub></p>
+  <p><strong>獭子哥是 DeepSeek Harness 的产品层。</strong></p>
   <p>
     <a href="https://www.gestaltrun.com/">网站</a> ·
     <a href="https://github.com/gestaltrun/deepseek-harness-gestalt/releases/latest">下载</a> ·
@@ -12,7 +14,7 @@
   </p>
 </div>
 
-DeepSeek Gestalt 正在 [DeepSeek Harness](https://www.deepseek.com/harness/)（`dsh`）之上构建完整的桌面端、Web 端与移动端产品。它以官方 DSH 的插件与运行时模型为基础，补齐产品工作流和发行能力，并通过经过测试的产品接口集成优秀社区插件。项目目标是稳定可用的产品发行，而不是补丁集合。
+獭子哥正在 [DeepSeek Harness](https://www.deepseek.com/harness/)（`dsh`）之上构建完整的桌面端、Web 端与移动端产品，英文产品名为 **Gestalt**。它以官方 DSH 的插件与运行时模型为基础，补齐产品工作流和发行能力，并通过经过测试的产品接口集成优秀社区插件。项目目标是稳定可用的产品发行，而不是补丁集合。
 
 本项目持续合并 [DSH 官方仓库](https://github.com/deepseek-ai/deepseek-harness)的改动，并尽可能把产品增量放在应用、Bundle、插件和有文档说明的能力 seam 上。DSH Profile、插件、CLI（命令行界面）模式和 SDK 入口是兼容性基线。Gestalt 目前仍处于开发者预览阶段，产品收敛过程中仍可能出现破坏兼容性的变更。
 
@@ -31,9 +33,9 @@ DeepSeek Gestalt 正在 [DeepSeek Harness](https://www.deepseek.com/harness/)（
 |---|---|---|---|
 | Desktop 产品 | Electron Host、macOS 与 Windows 安装包、产品窗口框架、全屏 Settings、分阶段自动更新和会话日程（[#1](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/1)、[#26](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/26)、[#367](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/367)） | — | — |
 | Workbench 与导航 | Better Sidebar 0.16.1、文件、多仓库 Git、Markdown/HTML、终端、自由窗口和由 agent 打开的 tab（[#317](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/317)） | — | 简化 Workbench 内 Browser 的所有权（[#226](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/226)） |
-| 会话工作流 | 持久 Side Chat、重启恢复、统一对话 UI、目标、fork、日程、后台工作和 subagent 图片提示词（[#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247)、[#325](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/325)、[#329](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/329)） | — | — |
+| 会话工作流 | 带重启恢复和统一对话 UI 的持久 Side Chat、獭子哥 Schedule 任务板，以及面向有相应能力的 subagent 提供方的图片提示词（[#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247)、[#325](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/325)、[#329](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/329)） | — | — |
 | 上下文与审阅 | 工作空间 `@file` 引用、目录下钻、上下文 dock、文本与图片 Annotation，以及按工作空间设置的工具准入（[#73](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/73)、[#80](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/80)、[#176](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/176)） | — | — |
-| AI（人工智能）Browser | 会话所有的 Browser Profile、隔离工作空间、tab、Browser Dock、工具审批和重启恢复（[#104](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/104)、[#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247)） | — | — |
+| AI（人工智能）Browser | 会话所有的 Browser Workspace 与 tab、shared/temporary/具名 persistent Profile、Browser Dock、工具审批和重启恢复（[#104](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/104)、[#247](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/247)） | — | — |
 | Mobile Companion | Platform Account、Personal Pairing、加密 Relay、由 Desktop 管理的会话浏览／搜索／历史、提示词、取消、审批、提问、附件、实时投影和多手机并发（[#312](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/312)、[#371](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/371)） | — | 受控的 iOS 与 Android 发行（[#44](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/44)） |
 | 社区插件 | Better Sidebar 已作为经过审阅的源码快照集成；外部插件使用精确修订目录（[plugins](plugins/README.zh.md)、[#335](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/335)） | — | 可选 Sub2API 提供方、安装器和内嵌管理台（[#346](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/346)、[#348](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/348)、[#349](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/349)） |
 | 跨账号协作 | — | Project Membership 与成员定向提问（[#338](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/338)、[#399](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/399)） | 发送方路由、接收体验和整体验收（[#343](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/343)、[#344](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/344)、[#345](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/345)） |
@@ -81,7 +83,7 @@ Side Chat 是持久子会话，使用与主会话相同的对话渲染器、模�
 
 ### 会话所有的 AI Browser
 
-每个会话都会获得由持久 Browser Profile 支撑的隔离 Browser Workspace。Browser tab 位于 Workbench 中，可在 Runtime 重启后恢复最后一个非空 URL，并随所属会话的生命周期关闭。工具操作仍通过普通审批流水线。
+一个会话可以拥有零个或多个 Browser Workspace 与 tab。每个 Workspace 使用 shared、temporary 或具名 persistent Browser Profile；默认 shared Profile 会在多个会话之间复用存储，不提供隔离保证。Browser tab 位于 Workbench 中，可在 Runtime 重启后恢复最后一个非空 URL，并随所属会话的生命周期关闭。工具操作仍通过普通审批流水线。
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/gestaltrun/deepseek-harness-gestalt/849a04d76ae94c48a4d4b311942bbf1ca0f98888/pr/247/browser-lifecycle.gif" alt="会话所有的 Browser tab 完成导航、恢复并随生命周期关闭" width="900">
@@ -131,22 +133,9 @@ Gestalt 把 DSH Web 产品打包进 Electron Host，并提供官方 Node、仅 l
 
 [架构文档](docs/architecture.zh.md)介绍共享插件树和能力 seam，[Desktop Host 参考](apps/desktop/README.zh.md)介绍打包与生命周期，[外部插件目录](plugins/README.zh.md)记录经过审阅的精确修订。
 
-## 路线图
-
-### DOING
-
-- **Project 与成员定向提问：** [已确认的规格](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/338)增加跨账号 Project Membership、成员 roster 工具、Decision Brief 提问、有界文档传输和 peer Relay 凭据。[PR #399](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/399)正在功能基线上交付协议与凭据工作。
-
-### TODO
-
-- **完成成员提问：** 将 `ask_user_question` 路由到 Project Member，交付接收体验，并证明完整跨机器流程（[#343](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/343)、[#344](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/344)、[#345](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/345)）。
-- **产品化 Sub2API：** 将已钉住的 sidecar 做成可选 Desktop 账号池提供方，并提供 Offer 卡、一键安装器和内嵌上游管理台（[#346](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/346)）。
-- **从 Workbench 操作手机：** 增加 Android 和 iOS 手机 tab、实时画面与触控、设置指引和经过审批的设备工具（[#355](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/355)）。
-- **完成受控 Mobile 发行：** 将验收绑定到候选版本，并发行经过批准的 iOS 与 Android 构建（[#44](https://github.com/gestaltrun/deepseek-harness-gestalt/issues/44)）。
-
 <a id="run"></a>
 
-## 运行 Gestalt
+## 运行獭子哥
 
 ### 桌面端
 

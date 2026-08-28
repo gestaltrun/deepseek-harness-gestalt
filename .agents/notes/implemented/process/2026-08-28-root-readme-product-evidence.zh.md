@@ -14,7 +14,9 @@ Status: implemented
 
 根 README 将 Gestalt 定义为官方 DSH 之上的产品层。产品方向包含四部分：补齐可安装产品、保持 DSH 组合方式与入口兼容、集成经过审阅的社区插件，以及让多个客户端共享一份持久权威。README 把上游兼容视为持续的仓库工作，不会声称开发者预览阶段的每个 commit 都可相互替换。
 
-由 tracker 支撑的产品地图把 Gestalt 增量划分为多个产品域。`DONE` 要求能力已经合并进 `master`，但不表示它已包含在最新打包版本中。`DOING` 要求存在正在交付的 PR（Pull Request）。`TODO` 要求存在已确认的开放 Issue。每个非空状态都会链接支撑它的 PR、Issue、权威参考或插件目录。该地图介绍 DSH 基础周围增加的产品功能，不重复官方 DSH 的包目录和工具目录。
+英文产品名是 **Gestalt**，中文产品名与 IP 角色是 **獭子哥**。产品首页保存并展示已经确认的角色设定图。现有包名、应用标识符、发行 tag 和历史引用保持不变，直到另一项协调重命名明确要求迁移。
+
+由 tracker 支撑的产品地图把 Gestalt 增量划分为多个产品域。`DONE` 要求能力已经合并进 `master`，但不表示它已包含在最新打包版本中。`DOING` 要求存在正在交付的 PR（Pull Request）。`TODO` 要求存在已经选入产品路线图的开放 Issue。每个非空状态都会链接支撑它的 PR、Issue、权威参考或插件目录。该地图介绍 DSH 基础周围增加的产品功能，不重复官方 DSH 的包目录和工具目录。它是 README 中唯一的产品状态清单；功能导览只解释已经完成的行为，不重复交付状态。
 
 功能导览使用经过验收的产品录屏展开地图，覆盖 Workbench 与 Better Sidebar、Side Chat、Schedule、AI Browser、Workspace Reference、Annotation 和 Mobile Companion。每个嵌入的 GIF 都来自已合并改动所验收的真实产品路径，并在 URL 中使用不可变的仓库对象 id。详细来源保留在所链接的 PR 中。
 
@@ -34,4 +36,4 @@ Status: implemented
 
 ## 后果
 
-读者可以一次看清官方 DSH 基础、额外的 Gestalt 产品层、当前交付和计划工作，再按产品域检查真实工作流。状态地图可能产生漂移，因此每次涉及产品范围的 README 改动都要根据实时 tracker 校验 Issue 与 PR 链接。详细运行时行为、配置、兼容限制和验证仍由各自的权威文档与 PR 维护。
+读者可以一次看清官方 DSH 基础、额外的 Gestalt 产品层、当前交付和计划工作，再按产品域检查真实工作流。状态地图可能产生漂移，因此每次涉及产品范围的 README 改动都要根据实时 tracker 校验 Issue 与 PR 链接。README 不再用第二个路线图章节重复这些状态。详细运行时行为、配置、兼容限制和验证仍由各自的权威文档与 PR 维护。

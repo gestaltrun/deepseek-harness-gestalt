@@ -77,7 +77,7 @@ jobs:
             type=sha,format=long
             type=raw,value=latest,enable=${{ github.event_name == 'workflow_dispatch' && inputs.push }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: apps/platform
           file: apps/platform/Dockerfile

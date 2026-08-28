@@ -13,7 +13,7 @@ import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 const STDERR_TAIL_BYTES = 4096
 
 /** Milliseconds granted between `SIGTERM` and the escalating `SIGKILL`. */
-const TERM_ESCAPE_MS = 2_000
+export const TERM_ESCAPE_MS = 2_000
 
 /** Bounded cross-generation diagnostic ring for tests and support triage. */
 const DIAGNOSTIC_LINES = 40

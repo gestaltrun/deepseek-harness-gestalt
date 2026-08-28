@@ -8,6 +8,7 @@
  */
 
 import { TimeoutReason } from '@deepseek-ai/dsh-timeout'
+import { realDeviceIssueError } from './classify.ts'
 import { PhoneDevicesError } from './errors.ts'
 
 /** Upstream JSON-RPC error code naming a missing device (mobilecli `-32010`). */
@@ -15,6 +16,25 @@ const DEVICE_NOT_FOUND_CODE = -32010
 
 /** System error codes whose presence means the server socket is gone. */
 const CONNECTIVITY_CODES: readonly string[] = ['ECONNREFUSED', 'ECONNRESET', 'EPIPE', 'ENOTFOUND']
+
+/**
+ * Build the public failure for one upstream JSON-RPC error message. A message
+ * naming a structured real-device arm becomes `PHONE_REAL_DEVICE_ISSUE`; the
+ * `-32010` arm stays `PHONE_DEVICE_NOT_FOUND` so Host 404 semantics survive.
+ * @param method - Upstream OpenRPC method that was rejected.
+ * @param code - Upstream error code, `undefined` when the envelope omitted it.
+ * @param message - Upstream error text.
+ * @returns the public failure to throw.
+ */
+function upstreamRejection(method: string, code: number | undefined, message: string): PhoneDevicesError {
+  const described = `mobilecli rejected ${JSON.stringify(method)}: ${message}`
+  const issueError = realDeviceIssueError(described)
+  if (issueError !== undefined) return issueError
+  return new PhoneDevicesError(
+    'PHONE_UPSTREAM',
+    `mobilecli rejected ${JSON.stringify(method)}${code === undefined ? '' : ` (${String(code)})`}: ${message}`,
+  )
+}
 
 /** One loopback JSON-RPC client. */
 export class MobilecliRpc {
@@ -33,7 +53,8 @@ export class MobilecliRpc {
    * @returns the parsed `result` field, `undefined` when the notification-style result is nullish.
    * @throws {@link PhoneDevicesError} with `PHONE_PROTOCOL` for non-2xx responses or
    *   unparseable bodies, `PHONE_UPSTREAM` carrying the upstream code and message,
-   *   `PHONE_DEVICE_NOT_FOUND` for upstream `-32010`, or whatever
+   *   `PHONE_REAL_DEVICE_ISSUE` when the upstream message names a structured
+   *   real-device arm, `PHONE_DEVICE_NOT_FOUND` for upstream `-32010`, or whatever
    *   {@link normalizeOperationError} makes of a transport failure.
    */
   async call(method: string, params: unknown, signal: AbortSignal): Promise<unknown> {
@@ -58,10 +79,7 @@ export class MobilecliRpc {
       if (code === DEVICE_NOT_FOUND_CODE) {
         throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `no device answers that id upstream: ${message}`)
       }
-      throw new PhoneDevicesError(
-        'PHONE_UPSTREAM',
-        `mobilecli rejected ${JSON.stringify(method)}${code === undefined ? '' : ` (${String(code)})`}: ${message}`,
-      )
+      throw upstreamRejection(method, code, message)
     }
     return body.result
   }
@@ -102,10 +120,7 @@ export class MobilecliRpc {
         if (code === DEVICE_NOT_FOUND_CODE) {
           throw new PhoneDevicesError('PHONE_DEVICE_NOT_FOUND', `no device answers that id upstream: ${message}`)
         }
-        throw new PhoneDevicesError(
-          'PHONE_UPSTREAM',
-          `mobilecli rejected ${JSON.stringify(method)}${code === undefined ? '' : ` (${String(code)})`}: ${message}`,
-        )
+        throw upstreamRejection(method, code, message)
       }
       throw new PhoneDevicesError(
         'PHONE_PROTOCOL',

@@ -3,17 +3,24 @@
  * folded into one package while mobilecli is its only backend. The Service owns
  * the external `mobilecli server start` child process, its loopback HTTP
  * JSON-RPC endpoint health, health/device polling, and publishes grouped
- * Android/iOS listings through `ctx.phoneDevices`.
+ * Android/iOS listings through `ctx.phoneDevices`. The iOS real-device link is
+ * exposed through the listing's real group plus one-shot `mobilecli agent
+ * status` / `agent install` runs that keep the on-device agent installed and
+ * re-signed, with structured failure arms for locked devices, untrusted
+ * certificates, expired profiles, failed tunnels, and unplugged handsets.
  * @module @deepseek-ai/dsh-phone-runtime
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import { deadline, TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import z from '@deepseek-ai/schemastery'
+import { runMobilecliAgent } from './agent-process.ts'
 import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
 import { PhoneDevicesError } from './errors.ts'
+import type { MobilecliAgentAnswer } from './agent-process.ts'
 import { MobilecliRpc, normalizeOperationError } from './rpc.ts'
 import { resolveMobilecliExecutable } from './resolve-binary.ts'
+import { statSync } from 'node:fs'
 import {
   PHONE_RUNTIME_STATE_OWNER,
   phoneRuntimeStateValidator,
@@ -23,6 +30,9 @@ import {
 import { MobilecliServerProcess } from './server-process.ts'
 import type {
   DeviceId,
+  PhoneAgentInstallOptions,
+  PhoneAgentInstallResult,
+  PhoneAgentStatus,
   PhoneCaptureRequest,
   PhoneCaptureStream,
   PhoneDeviceChange,
@@ -33,6 +43,10 @@ import type {
 
 export type {
   DeviceId,
+  PhoneAgentInfo,
+  PhoneAgentInstallOptions,
+  PhoneAgentInstallResult,
+  PhoneAgentStatus,
   PhoneCaptureFormat,
   PhoneCaptureRequest,
   PhoneCaptureStream,
@@ -43,10 +57,18 @@ export type {
   PhoneErrorCode,
   PhoneIoMethod,
   PhoneIoRequest,
+  PhoneRealDeviceIssue,
 } from './types.ts'
 export { PhoneDevicesError } from './errors.ts'
 export { deviceId } from './ids.ts'
 export type { ServerExit } from './server-process.ts'
+
+/**
+ * Fixed operator guidance attached to every agent answer about a re-signed
+ * real handset: free-team provisioning profiles expire after seven days and
+ * the documented re-run entry is a forced reinstall.
+ */
+export const FREE_SIGNING_PROFILE_REMINDER = 'the agent is re-signed with the configured provisioning profile; free-team profiles expire after 7 days, so re-run installAgent(id, { force: true }) to re-sign when taps, text, buttons, or capture start failing'
 
 /** OpenRPC method listing every Android and iOS device, including offline ones. */
 const METHOD_DEVICES_LIST = 'devices.list'
@@ -88,6 +110,15 @@ export interface Config {
   requestTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
+  /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
+  agentTimeoutMs?: number
+  /**
+   * Absolute path to the `.mobileprovision` file passed as
+   * `--provisioning-profile` when installing or re-signing the on-device agent
+   * on a physical handset; the upstream command requires it for real iOS
+   * installs. When set, the path must name an existing file.
+   */
+  provisioningProfilePath?: string
 }
 
 /** Runtime configuration schema applied by composition. */
@@ -97,9 +128,10 @@ export const Config: z<Config> = z.object({
   readyTimeoutMs: z.number().default(60_000),
   requestTimeoutMs: z.number().default(30_000),
   bootTimeoutMs: z.number().default(180_000),
+  agentTimeoutMs: z.number().default(120_000),
 })
 
-type ResolvedConfig = Omit<Required<Config>, 'executablePath'> & Pick<Config, 'executablePath'>
+type ResolvedConfig = Omit<Required<Config>, 'executablePath' | 'provisioningProfilePath'> & Pick<Config, 'executablePath' | 'provisioningProfilePath'>
 
 function assertDurationField(name: string, value: number): void {
   if (!Number.isSafeInteger(value) || value < 1) {
@@ -120,9 +152,26 @@ function resolveValidatedConfig(config: Config): ResolvedConfig {
   assertDurationField('readyTimeoutMs', values.readyTimeoutMs)
   assertDurationField('requestTimeoutMs', values.requestTimeoutMs)
   assertDurationField('bootTimeoutMs', values.bootTimeoutMs)
+  assertDurationField('agentTimeoutMs', values.agentTimeoutMs)
   const trimmedPath = values.executablePath?.trim()
-  if (trimmedPath === undefined || trimmedPath.length === 0) return values
-  return { ...values, executablePath: trimmedPath }
+  const trimmedProfile = values.provisioningProfilePath?.trim()
+  const resolved: ResolvedConfig = {
+    ...values,
+    ...(trimmedPath !== undefined && trimmedPath.length > 0 ? { executablePath: trimmedPath } : {}),
+    ...(trimmedProfile !== undefined && trimmedProfile.length > 0 ? { provisioningProfilePath: trimmedProfile } : {}),
+  }
+  if (resolved.provisioningProfilePath !== undefined) assertProfileFile(resolved.provisioningProfilePath)
+  return resolved
+}
+
+function assertProfileFile(path: string): void {
+  try {
+    if (statSync(path).isFile()) return
+  } catch {
+    // A missing or unreadable profile path is exactly the misconfiguration
+    // reported below; there is no other readable fact to surface first.
+  }
+  throw new Error(`phone-runtime: provisioningProfilePath ${JSON.stringify(path)} is not an existing file; fix the path or drop the field.`)
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -149,9 +198,18 @@ declare module '@deepseek-ai/cordis' {
  * - `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.
  * - `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).
  * - `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.
+ * - `PHONE_REAL_DEVICE_ISSUE` — the upstream output named a structured real-device
+ *   failure arm; {@link PhoneDevicesError.issue} carries which one
+ *   (`device-locked`, `cert-untrusted`, `profile-expired`, `tunnel-failed`,
+ *   `device-unplugged`).
  *
  * `io` and `startCapture` accept physical handsets; they only refuse ids
- * absent from the latest published listing.
+ * absent from the latest published listing. `agentStatus` and `installAgent`
+ * drive the upstream `agent status` / `agent install` commands as one-shot
+ * child runs of the same executable, keep the on-device agent installed
+ * idempotently, re-sign real handsets through the configured provisioning
+ * profile, and attach the free-signing expiry reminder to every answer about
+ * a re-signed real handset.
  */
 export class PhoneDevices extends Service {
   /** Validated configuration schema applied by composition. */
@@ -161,6 +219,7 @@ export class PhoneDevices extends Service {
   readonly [PHONE_RUNTIME_STATE_OWNER]: PhoneRuntimeStateOwner = Object.freeze({})
 
   private readonly resolved: ResolvedConfig
+  private readonly executablePath: string
   private readonly subscribers = new Set<(change: PhoneDeviceChange) => void>()
   private readonly lifetime = new AbortController()
   private queueTail: Promise<void> = Promise.resolve()
@@ -190,6 +249,7 @@ export class PhoneDevices extends Service {
       ...(override !== undefined ? { executablePath: override } : {}),
       env: process.env,
     })
+    this.executablePath = executablePath
     ctx.effect(() => () => {
       this.subscribers.clear()
     }, 'phone runtime subscriber registry cleanup')
@@ -440,6 +500,95 @@ export class PhoneDevices extends Service {
     }
   }
 
+  /**
+   * Report the on-device agent installation state for one listed device by
+   * running the upstream `agent status` command as a one-shot child of the
+   * same executable the loopback server was spawned from. Answers about a
+   * re-signed real handset carry the free-signing expiry reminder.
+   * @param id - Branded id of the device to inspect.
+   * @param signal - Caller's optional cancellation signal.
+   * @returns the parsed installation state.
+   * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
+   *   absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when
+   *   the command output names a structured real-device arm, and otherwise per
+   *   the class-documented failure modes.
+   */
+  async agentStatus(id: DeviceId, signal?: AbortSignal): Promise<PhoneAgentStatus> {
+    this.assertAccepting()
+    await this.whenReady(signal)
+    this.assertUsable()
+    this.requireKnown(id, 'agent status')
+    const answer = await runMobilecliAgent({
+      executablePath: this.executablePath,
+      args: ['agent', 'status', '--device', id],
+      signal,
+      timeoutMs: this.resolved.agentTimeoutMs,
+    })
+    return this.agentAnswer(id, answer)
+  }
+
+  /**
+   * Keep the on-device agent installed for one listed device. Without `force`
+   * the upstream `agent status` command runs first and an already-installed
+   * agent answers without any install spawn, so repeated calls are idempotent;
+   * `force` reinstalls and re-signs through the configured provisioning
+   * profile, which real iOS installs require upstream.
+   * @param id - Branded id of the device to install on.
+   * @param options - Force reinstall switch and optional cancellation.
+   * @returns the resulting installation state; `reinstalled` is true only when
+   *   this call spawned an install.
+   * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
+   *   absent from the latest published listing, `PHONE_REAL_DEVICE_ISSUE` when
+   *   the command output names a structured real-device arm, and otherwise per
+   *   the class-documented failure modes.
+   */
+  async installAgent(id: DeviceId, options: PhoneAgentInstallOptions = {}): Promise<PhoneAgentInstallResult> {
+    this.assertAccepting()
+    await this.whenReady(options.signal)
+    this.assertUsable()
+    this.requireKnown(id, 'agent install')
+    const reinstall = options.force === true
+    if (!reinstall) {
+      const current = await this.agentStatus(id, options.signal)
+      if (current.installed) return Object.freeze({ ...current, reinstalled: false })
+    }
+    const profile = this.resolved.provisioningProfilePath
+    const answer = await runMobilecliAgent({
+      executablePath: this.executablePath,
+      args: [
+        'agent', 'install', '--device', id,
+        ...(options.force === true ? ['--force'] : []),
+        ...(profile !== undefined ? ['--provisioning-profile', profile] : []),
+      ],
+      signal: options.signal,
+      timeoutMs: this.resolved.agentTimeoutMs,
+    })
+    if (!answer.ok) {
+      throw new PhoneDevicesError('PHONE_UPSTREAM', `mobilecli agent install answered ${JSON.stringify(answer.message)}`)
+    }
+    return Object.freeze({ ...this.agentAnswer(id, answer), installed: true, reinstalled: reinstall })
+  }
+
+  /**
+   * Map one parsed upstream agent answer onto the public status vocabulary,
+   * attaching the free-signing reminder to answers about an installed,
+   * re-signed real handset.
+   * @param id - Branded id the answer is about.
+   * @param answer - Parsed upstream answer.
+   * @returns the frozen public status.
+   */
+  private agentAnswer(id: DeviceId, answer: MobilecliAgentAnswer): PhoneAgentStatus {
+    const reminder = answer.ok && this.findKnown(id)?.kind === 'real' && this.resolved.provisioningProfilePath !== undefined
+      ? FREE_SIGNING_PROFILE_REMINDER
+      : undefined
+    return Object.freeze({
+      deviceId: id,
+      installed: answer.ok,
+      ...(answer.agent !== undefined ? { version: answer.agent.version, bundleId: answer.agent.bundleId } : {}),
+      ...(reminder !== undefined ? { profileReminder: reminder } : {}),
+    })
+  }
+
   private requireVirtual(id: DeviceId, operation: 'boot' | 'shutdown'): void {
     this.assertAccepting()
     const known = this.findKnown(id)
@@ -457,7 +606,7 @@ export class PhoneDevices extends Service {
     }
   }
 
-  private requireKnown(id: DeviceId, operation: 'io' | 'capture'): void {
+  private requireKnown(id: DeviceId, operation: 'io' | 'capture' | 'agent status' | 'agent install'): void {
     this.assertAccepting()
     if (this.findKnown(id) === undefined) {
       throw new PhoneDevicesError(

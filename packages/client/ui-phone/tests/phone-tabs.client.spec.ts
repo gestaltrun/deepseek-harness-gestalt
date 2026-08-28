@@ -71,6 +71,7 @@ describe('per-device phone tabs', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => true,
+      gate: { snapshot: () => false, subscribe: () => () => undefined },
       openDevice: createPhoneTabOpener(sidebar, () => true),
       createController: () => {
         throw new Error('not expected in this spec')
@@ -90,6 +91,7 @@ describe('per-device phone tabs', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => true,
+      gate: { snapshot: () => false, subscribe: () => () => undefined },
       openDevice: createPhoneTabOpener(sidebar, () => true),
       createController: () => {
         throw new Error('not expected in this spec')
@@ -108,6 +110,7 @@ describe('per-device phone tabs', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => true,
+      gate: { snapshot: () => false, subscribe: () => () => undefined },
       openDevice: createPhoneTabOpener(sidebar, () => true),
       createController: () => {
         throw new Error('not expected in this spec')
@@ -135,6 +138,7 @@ describe('per-device phone tabs', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => false,
+      gate: { snapshot: () => false, subscribe: () => () => undefined },
       openDevice: createPhoneTabOpener(sidebar, () => false),
       createController: () => {
         throw new Error('not expected in this spec')
@@ -163,6 +167,7 @@ describe('per-device phone tabs', () => {
         },
       },
       isEnabled: () => gate,
+      gate: { snapshot: () => gate, subscribe: () => () => undefined },
       createController: () => {
         throw new Error('not expected in this spec')
       },

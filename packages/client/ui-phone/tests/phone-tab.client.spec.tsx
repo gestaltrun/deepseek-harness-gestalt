@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PhoneTab } from '../src/client/PhoneTab.tsx'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
-import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
+import { FakeGate, FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 
 afterEach(cleanup)
 
@@ -19,9 +19,11 @@ const EMULATOR: readonly PhoneDeviceSummary[] = [
 
 const openDevice = vi.fn()
 
-async function renderTab(enabled: boolean, source: FakeListingSource): Promise<void> {
-  render(<PhoneTab enabled={enabled} source={source} onOpenDevice={openDevice} />)
+async function renderTab(enabled: boolean, source: FakeListingSource): Promise<{ gate: FakeGate }> {
+  const gate = new FakeGate(enabled)
+  render(<PhoneTab gate={gate} source={source} onOpenDevice={openDevice} />)
   await act(async () => { await flush() })
+  return { gate }
 }
 
 function redetect(): HTMLButtonElement {
@@ -46,6 +48,23 @@ describe('PhoneTab empty state', () => {
   it('omits the gate strip once enabled', async () => {
     await renderTab(true, new FakeListingSource())
     expect(screen.queryByRole('note', { name: '手机连接未启用' })).toBeNull()
+  })
+
+  it('refreshes the gate strip the moment the enable switch flips', async () => {
+    const source = new FakeListingSource()
+    const { gate } = await renderTab(false, source)
+    expect(screen.getByRole('note', { name: '手机连接未启用' })).toBeTruthy()
+    expect(source.refreshCount).toBe(0)
+    // The mounted body follows the gate source: enabling the deployment in
+    // the settings card refreshes this tab without remounting it.
+    source.scriptNext(listingOf(EMULATOR))
+    await act(async () => {
+      gate.set(true)
+      await flush()
+    })
+    expect(screen.queryByRole('note', { name: '手机连接未启用' })).toBeNull()
+    expect(source.refreshCount).toBe(1)
+    expect(screen.getByRole('button', { name: '打开' })).toBeTruthy()
   })
 
   it('switches the active segment, its guidance copy, and its rows', async () => {

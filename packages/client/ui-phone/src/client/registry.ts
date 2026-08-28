@@ -69,6 +69,14 @@ export interface PhoneListingSnapshot {
   readonly ios: readonly PhoneDeviceSummary[]
 }
 
+/** Reactive read of the durable enable gate, seating useSyncExternalStore. */
+export interface PhoneGateSource {
+  /** Current gate value; the same boolean until the scope invalidates. */
+  snapshot(): boolean
+  /** Follow gate invalidations; returns the disposer. */
+  subscribe(listener: () => void): () => void
+}
+
 /**
  * Device abstraction backing the strip badge and both tab bodies' lists.
  * The shipped implementation consumes the Host `GET /phone/devices` route
@@ -224,8 +232,10 @@ export function createPhoneTabOpener(
 
 /** Environment the descriptor hands each tab body at render time. */
 export interface PhoneTabEnvironment {
-  /** Current enable gate (the picker pins its strip from this). */
+  /** Current enable gate, read at open time. */
   readonly isEnabled: () => boolean
+  /** Reactive gate the picker body follows (the banner refreshes live). */
+  readonly gate: PhoneGateSource
   /** Listing source backing the picker list and the device dropdown. */
   readonly source: PhoneListingSource
   /** Open (or focus) the per-device tab of one device. */
@@ -292,8 +302,10 @@ export interface PhoneTabOptions {
   readonly source: PhoneListingSource
   /** Browser-only chrome (icon SVG + styled bodies). */
   readonly view: PhoneTabView
-  /** Current enable gate, read at open and render time. */
+  /** Current enable gate, read at open time. */
   readonly isEnabled: () => boolean
+  /** Reactive gate the picker body follows. */
+  readonly gate: PhoneGateSource
   /** Live connection controller factory for one device tab. */
   readonly createController: (serial: string) => PhoneConnectionController
 }
@@ -311,6 +323,7 @@ export interface PhoneTabOptions {
 export function buildPhoneTabDescriptor(options: PhoneTabDescriptorOptions): PhoneTabDescriptor {
   const env: PhoneTabEnvironment = {
     isEnabled: options.isEnabled,
+    gate: options.gate,
     source: options.source,
     openDevice: options.openDevice,
     createController: options.createController,

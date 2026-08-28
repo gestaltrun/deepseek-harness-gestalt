@@ -10,15 +10,15 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import {
-  PHONE_PLATFORMS, type PhoneDeviceSummary, type PhoneListingSource, type PhonePlatform,
+  PHONE_PLATFORMS, type PhoneDeviceSummary, type PhoneGateSource, type PhoneListingSource, type PhonePlatform,
 } from './registry.ts'
 import css from './PhoneTab.module.css'
 import shared from './PhoneShared.module.css'
 
 /** Props of the phone tab body, threaded from the descriptor closure. */
 export interface PhoneTabProps {
-  /** Validated Config.enabled; false renders the top gate strip. */
-  readonly enabled: boolean
+  /** Reactive enable gate; the strip follows invalidations live. */
+  readonly gate: PhoneGateSource
   /** Listing source backing the rows (starts empty until a pull commits). */
   readonly source: PhoneListingSource
   /** Open (or focus) the per-device tab of one listed device. */
@@ -60,13 +60,16 @@ function rowMetaOf(device: PhoneDeviceSummary): string {
  * @param props - enable-gate value, the injected listing source, and the opener.
  * @returns the not-connected empty state.
  */
-export function PhoneTab({ enabled, source, onOpenDevice }: PhoneTabProps): ReactNode {
+export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNode {
   const [platform, setPlatform] = useState<PhonePlatform>('android')
-  // The listing source is the owning observable; uSES is the render-side
-  // adapter (better-sidebar tab hosts have no slot hook channel).
+  // The gate and the listing source are the owning observables; uSES is the
+  // render-side adapter (better-sidebar tab hosts have no slot hook channel).
   const subscribe = useCallback((listener: () => void) => source.subscribe(listener), [source])
   const getSnapshot = useCallback(() => source.snapshot(), [source])
   const listing = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const gateSubscribe = useCallback((listener: () => void) => gate.subscribe(listener), [gate])
+  const gateSnapshot = useCallback(() => gate.snapshot(), [gate])
+  const enabled = useSyncExternalStore(gateSubscribe, gateSnapshot, gateSnapshot)
   const [refreshing, setRefreshing] = useState(false)
   const refresh = (): void => {
     setRefreshing(true)

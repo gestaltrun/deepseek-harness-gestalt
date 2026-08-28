@@ -57,7 +57,7 @@ export const Config: z<Config> = z.object({
 function renderPhoneTabBody(props: PhoneTabBodyProps, env: PhoneTabEnvironment): ReactNode {
   const device = phoneDeviceTabMetaOf(props.tab.meta)
   if (device === undefined) {
-    return <PhoneTab enabled={env.isEnabled()} source={env.source} onOpenDevice={env.openDevice} />
+    return <PhoneTab gate={env.gate} source={env.source} onOpenDevice={env.openDevice} />
   }
   return (
     <PhoneConnectedView
@@ -91,6 +91,9 @@ export function apply(ctx: ClientContext, config: Config): void {
     if (snapshot.status === 'ready' && snapshot.value !== undefined) return snapshot.value.enabled === true
     return compositionEnabled
   }
+  // The body reads the gate reactively: scope invalidation (the enable
+  // switch toggling) re-renders the gate strip on the same tick.
+  const gate = { snapshot: tabEnabled, subscribe: (listener: () => void) => scope.subscribe(listener) }
   const view: PhoneTabView = {
     icon: size => <PhoneTabIcon size={size} />,
     component: renderPhoneTabBody,
@@ -99,6 +102,7 @@ export function apply(ctx: ClientContext, config: Config): void {
     source: createHttpPhoneListingSource(),
     view,
     isEnabled: tabEnabled,
+    gate,
     createController: serial => new PhoneConnectionController({
       gateway: createHttpPhoneGateway(),
       deviceId: serial,

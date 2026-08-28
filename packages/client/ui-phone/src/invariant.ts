@@ -95,6 +95,7 @@ const install: InvariantInstaller = async (ctx: Context, fail: InvariantFailure)
         source: createHttpPhoneListingSource(),
         view: stubView,
         isEnabled: () => false,
+        gate: { snapshot: () => false, subscribe: () => () => undefined },
         createController: () => {
           throw new Error('the symmetry probe never renders a tab body')
         },

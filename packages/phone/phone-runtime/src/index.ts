@@ -1,0 +1,582 @@
+/**
+ * Host-half Service Definition + Provider for the phone device fleet capability,
+ * folded into one package while mobilecli is its only backend. The Service owns
+ * the external `mobilecli server start` child process, its loopback HTTP
+ * JSON-RPC endpoint health, health/device polling, and publishes grouped
+ * Android/iOS listings through `ctx.phoneDevices`.
+ * @module @deepseek-ai/dsh-phone-runtime
+ */
+
+import { Context, Service } from '@deepseek-ai/cordis'
+import { deadline, TimeoutReason } from '@deepseek-ai/dsh-timeout'
+import z from '@deepseek-ai/schemastery'
+import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
+import { PhoneDevicesError } from './errors.ts'
+import { MobilecliRpc, normalizeOperationError } from './rpc.ts'
+import { resolveMobilecliExecutable } from './resolve-binary.ts'
+import {
+  PHONE_RUNTIME_STATE_OWNER,
+  phoneRuntimeStateValidator,
+  registerPhoneRuntimeStateReader,
+  type PhoneRuntimeStateOwner,
+} from './runtime-state.ts'
+import { MobilecliServerProcess } from './server-process.ts'
+import type {
+  DeviceId,
+  PhoneDeviceChange,
+  PhoneDeviceList,
+  PhoneDeviceRef,
+} from './types.ts'
+
+export type { DeviceId, PhoneDeviceChange, PhoneDeviceKind, PhoneDeviceList, PhoneDeviceRef, PhoneErrorCode } from './types.ts'
+export { PhoneDevicesError } from './errors.ts'
+export { deviceId } from './ids.ts'
+export type { ServerExit } from './server-process.ts'
+
+/** OpenRPC method listing every Android and iOS device, including offline ones. */
+const METHOD_DEVICES_LIST = 'devices.list'
+/** OpenRPC method booting one simulator or emulator. */
+const METHOD_DEVICE_BOOT = 'device.boot'
+/** OpenRPC method shutting down one simulator or emulator. */
+const METHOD_DEVICE_SHUTDOWN = 'device.shutdown'
+/** OpenRPC method probed until the spawned server answers its first request. */
+const METHOD_SERVER_INFO = 'server.info'
+
+/**
+ * Validated runtime configuration. Defaults carry the upstream facts they can:
+ * `serverPort` mirrors mobilecli's documented default listen port and
+ * `bootTimeoutMs` mirrors the extended upstream deadline granted to
+ * `device.boot`; the polling cadence fields are deployment-varying choices.
+ */
+export interface Config {
+  /**
+   * Absolute path to the `mobilecli` executable. When omitted, each `PATH`
+   * directory is searched for a matching executable file.
+   */
+  executablePath?: string
+  /** Loopback TCP port the spawned server listens on. */
+  serverPort?: number
+  /** Interval between health probes and device-list polls, in milliseconds. */
+  pollIntervalMs?: number
+  /** Total window granted to the first readiness probe, in milliseconds. */
+  readyTimeoutMs?: number
+  /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
+  requestTimeoutMs?: number
+  /** Ceiling on a `device.boot` round trip, in milliseconds. */
+  bootTimeoutMs?: number
+}
+
+/** Runtime configuration schema applied by composition. */
+export const Config: z<Config> = z.object({
+  serverPort: z.number().default(12_000),
+  pollIntervalMs: z.number().default(5_000),
+  readyTimeoutMs: z.number().default(60_000),
+  requestTimeoutMs: z.number().default(30_000),
+  bootTimeoutMs: z.number().default(180_000),
+})
+
+type ResolvedConfig = Omit<Required<Config>, 'executablePath'> & Pick<Config, 'executablePath'>
+
+function assertDurationField(name: string, value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`phone-runtime: ${name} must be a positive safe integer`)
+  }
+}
+
+function assertPortField(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 65_535) {
+    throw new Error('phone-runtime: serverPort must be a safe integer between 1 and 65535')
+  }
+}
+
+function resolveValidatedConfig(config: Config): ResolvedConfig {
+  const values = config as ResolvedConfig
+  assertPortField(values.serverPort)
+  assertDurationField('pollIntervalMs', values.pollIntervalMs)
+  assertDurationField('readyTimeoutMs', values.readyTimeoutMs)
+  assertDurationField('requestTimeoutMs', values.requestTimeoutMs)
+  assertDurationField('bootTimeoutMs', values.bootTimeoutMs)
+  const trimmedPath = values.executablePath?.trim()
+  if (trimmedPath === undefined || trimmedPath.length === 0) return values
+  return { ...values, executablePath: trimmedPath }
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** The phone device fleet Service backed by one local mobilecli server. */
+    phoneDevices: PhoneDevices
+  }
+}
+
+/**
+ * Phone fleet Service over one external mobilecli server child. All operations
+ * accept an optional cancellation signal and enforce validated time ceilings;
+ * every failure normalizes onto {@link PhoneDevicesError}. A device-set
+ * notification is published only after a poll observes a real difference from
+ * the previously committed listing, and mobilecli problems fail loudly instead
+ * of degrading.
+ *
+ * Operation failure codes:
+ * - `PHONE_DISPOSED` — the owning fiber began teardown.
+ * - `PHONE_ABORTED` — the caller's signal won before completion.
+ * - `PHONE_TIMEOUT` — the operation's configured ceiling elapsed.
+ * - `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.
+ * - `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.
+ * - `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.
+ * - `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).
+ * - `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.
+ */
+export class PhoneDevices extends Service {
+  /** Validated configuration schema applied by composition. */
+  static readonly Config = Config
+
+  /** Package-private identity of this concrete Service generation. */
+  readonly [PHONE_RUNTIME_STATE_OWNER]: PhoneRuntimeStateOwner = Object.freeze({})
+
+  private readonly resolved: ResolvedConfig
+  private readonly subscribers = new Set<(change: PhoneDeviceChange) => void>()
+  private readonly lifetime = new AbortController()
+  private queueTail: Promise<void> = Promise.resolve()
+  private closing = false
+  private disposed = false
+  private ready = false
+  private lost: PhoneDevicesError | undefined
+  private child: MobilecliServerProcess | undefined
+  private rpcClient: MobilecliRpc | undefined
+  private publishedList: PhoneDeviceList | undefined
+  private startupOutcome: Promise<void> | undefined
+  private pollTimer: ReturnType<typeof setTimeout> | undefined
+
+  /**
+   * Resolve the external binary loudly, spawn the loopback server child, and
+   * register lifecycle effects. A missing or unusable mobilecli throws here
+   * with install guidance; later startup failures reject plugin initialization
+   * so composition still fails visibly.
+   * @param ctx - Owning Cordis context.
+   * @param config - Composition config validated against {@link PhoneDevices.Config}.
+   */
+  constructor(ctx: Context, config: Config) {
+    super(ctx, 'phoneDevices')
+    this.resolved = resolveValidatedConfig(config)
+    const override = this.resolved.executablePath
+    const executablePath = resolveMobilecliExecutable({
+      ...(override !== undefined ? { executablePath: override } : {}),
+      env: process.env,
+    })
+    ctx.effect(() => () => {
+      this.subscribers.clear()
+    }, 'phone runtime subscriber registry cleanup')
+    ctx.effect(() => () => this.teardown(), 'phone runtime teardown')
+    ctx.effect(
+      () => registerPhoneRuntimeStateReader(this[PHONE_RUNTIME_STATE_OWNER], () => this.publishedList),
+      'phone runtime state reader',
+    )
+    this.child = new MobilecliServerProcess({
+      executablePath,
+      port: this.resolved.serverPort,
+    })
+    this.rpcClient = new MobilecliRpc(`http://127.0.0.1:${String(this.resolved.serverPort)}`)
+  }
+
+  /**
+   * Await server readiness as part of plugin initialization; a rejected start
+   * fails the whole plugin loudly.
+   */
+  protected [Service.init](): Promise<void> {
+    this.startupOutcome ??= this.startup()
+    return this.startupOutcome
+  }
+
+  /** Reject work entering after teardown begins. */
+  private assertAccepting(): void {
+    if (this.closing || this.disposed) {
+      throw new PhoneDevicesError('PHONE_DISPOSED', 'the phone runtime service is disposed')
+    }
+  }
+
+  /** Reject operations once the server generation is known to be gone or halt-listed. */
+  private assertUsable(): void {
+    if (this.lost !== undefined) throw this.lost
+  }
+
+  private async startup(): Promise<void> {
+    // The constructor spawned the child before any effect could dispose it;
+    // teardown nulls these fields only after init has settled either way.
+    const child = this.child as MobilecliServerProcess
+    const client = this.rpcClient as MobilecliRpc
+    let settledExit: { readonly code: number | null } | undefined
+    const exitSeen = child.exit.then((exit) => {
+      settledExit = exit
+    })
+    const window = deadline(undefined, this.resolved.readyTimeoutMs, 'READY_WINDOW')
+    try {
+      for (;;) {
+        if (settledExit !== undefined) throw exitedBeforeReady(child, settledExit)
+        if (window.signal.aborted) throw this.readinessWindowElapsed(child)
+        try {
+          // The lifetime signal lets teardown interrupt a hung probe at once.
+          await client.call(METHOD_SERVER_INFO, {}, AbortSignal.any([window.signal, this.lifetime.signal]))
+          break
+        } catch {
+          // Probes fail while the server binary is still starting up; the next
+          // iteration re-checks child exit and window state first.
+        }
+        await pauseBeforeNextProbe(
+          Math.min(this.resolved.pollIntervalMs, this.resolved.requestTimeoutMs),
+          window.signal,
+          this.lifetime.signal,
+          exitSeen,
+        )
+      }
+      void child.exit.then((exit) => { this.onChildExit(child, exit) })
+      this.ready = true
+      // Commit the baseline listing inside initialization so every observer
+      // attaches to a stable starting point and receives only later changes.
+      await this.pollAttempt()
+      this.armPoll()
+    } catch (error) {
+      const failure = new PhoneDevicesError('PHONE_PROTOCOL', `mobilecli startup failed unexpectedly: ${String(error)}`, { cause: error })
+      this.lost = failure
+      await child.stop()
+      throw failure
+    } finally {
+      window[Symbol.dispose]()
+    }
+  }
+
+  private readinessWindowElapsed(child: MobilecliServerProcess): PhoneDevicesError {
+    const tail = tailOf(child.lastStderr)
+    return new PhoneDevicesError(
+      'PHONE_TIMEOUT',
+      `the mobilecli server did not become ready within ${String(this.resolved.readyTimeoutMs)}ms on 127.0.0.1:${String(this.resolved.serverPort)}; stderr tail follows\n${tail}`,
+    )
+  }
+
+  private onChildExit(child: MobilecliServerProcess, exit: { readonly code: number | null }): void {
+    if (child !== this.child || this.closing || !this.ready) return
+    // The poll pipeline owns loss detection; the exit is logged so the next
+    // refused poll confirms and halts with the socket-level reason.
+    this.ctx.logger.error(`the mobilecli server exited unexpectedly (code ${String(exit.code)}); the next poll will confirm the loss`)
+  }
+
+  /**
+   * Wait until the spawned server answers its first readiness probe.
+   * @param signal - Caller's optional cancellation signal.
+   * @throws {@link PhoneDevicesError} per the class-documented failure modes.
+   */
+  private async whenReady(signal: AbortSignal | undefined): Promise<void> {
+    this.startupOutcome ??= this.startup()
+    const budget = deadline(signal, this.resolved.requestTimeoutMs, 'READY_WAIT')
+    try {
+      await Promise.race([
+        this.startupOutcome,
+        haltedOn(budget.signal),
+      ])
+    } finally {
+      budget[Symbol.dispose]()
+    }
+  }
+
+  /**
+   * Run one JSON-RPC round trip under its fused cancellation and ceiling.
+   * @param method - Upstream OpenRPC method name.
+   * @param params - Params object exactly as the method documents them.
+   * @param signal - Caller's optional cancellation signal.
+   * @param ceilingMs - Validated ceiling bounding the round trip.
+   * @returns the parsed upstream result value.
+   */
+  private async roundTrip(method: string, params: unknown, signal: AbortSignal | undefined, ceilingMs: number): Promise<unknown> {
+    this.assertUsable()
+    if (signal?.aborted === true) {
+      throw new PhoneDevicesError('PHONE_ABORTED', 'cancelled before the request was sent')
+    }
+    const budget = deadline(fuseCallerAndLifetime(signal, this.lifetime.signal), ceilingMs, method)
+    try {
+      // this.rpcClient is constructor-guaranteed; teardown nulls it only with
+      // this.disposed, which assertUsable already rejected above.
+      return await (this.rpcClient as MobilecliRpc).call(method, params, budget.signal)
+    } catch (error) {
+      const normalized = normalizeOperationError(error)
+      if (normalized.code === 'PHONE_TIMEOUT') {
+        throw new PhoneDevicesError(
+          'PHONE_TIMEOUT',
+          `${JSON.stringify(method)} exceeded its ${String(ceilingMs)}ms ceiling`,
+          { cause: normalized },
+        )
+      }
+      throw normalized
+    } finally {
+      budget[Symbol.dispose]()
+    }
+  }
+
+  /**
+   * Fetch and publish one fresh grouped device listing.
+   * @param signal - Caller's optional cancellation signal.
+   * @returns the current grouped listing.
+   * @throws {@link PhoneDevicesError} per the class-documented failure modes.
+   */
+  async listDevices(signal?: AbortSignal): Promise<PhoneDeviceList> {
+    this.assertAccepting()
+    await this.whenReady(signal)
+    const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, signal, this.resolved.requestTimeoutMs)
+    return groupEntries(parseDeviceInfos(result))
+  }
+
+  /**
+   * Boot one iOS simulator or Android emulator, then refresh the listing.
+   * @param id - Branded id of the simulator/emulator to boot.
+   * @param signal - Caller's optional cancellation signal.
+   * @throws {@link PhoneDevicesError} with `PHONE_REAL_DEVICE` for physical handsets,
+   *   `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing,
+   *   and otherwise per the class-documented failure modes.
+   */
+  async boot(id: DeviceId, signal?: AbortSignal): Promise<void> {
+    this.requireVirtual(id, 'boot')
+    await this.whenReady(signal)
+    await this.roundTrip(METHOD_DEVICE_BOOT, { deviceId: id }, signal, this.resolved.bootTimeoutMs)
+    this.enqueuePoll({ refreshOnly: true })
+  }
+
+  /**
+   * Shut down one iOS simulator or Android emulator, then refresh the listing.
+   * Physical handsets are refused locally before any upstream call because the
+   * upstream spec restricts both lifecycle verbs to simulators/emulators.
+   * @param id - Branded id of the simulator/emulator to shut down.
+   * @param signal - Caller's optional cancellation signal.
+   * @throws {@link PhoneDevicesError} with `PHONE_REAL_DEVICE` for physical handsets,
+   *   `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing,
+   *   and otherwise per the class-documented failure modes.
+   */
+  async shutdown(id: DeviceId, signal?: AbortSignal): Promise<void> {
+    this.requireVirtual(id, 'shutdown')
+    await this.whenReady(signal)
+    await this.roundTrip(METHOD_DEVICE_SHUTDOWN, { deviceId: id }, signal, this.resolved.requestTimeoutMs)
+    this.enqueuePoll({ refreshOnly: true })
+  }
+
+  private requireVirtual(id: DeviceId, operation: 'boot' | 'shutdown'): void {
+    this.assertAccepting()
+    const known = this.findKnown(id)
+    if (known === undefined) {
+      throw new PhoneDevicesError(
+        'PHONE_DEVICE_NOT_FOUND',
+        `cannot ${operation}: ${JSON.stringify(id)} is absent from the latest device listing (online or offline)`,
+      )
+    }
+    if (known.kind === 'real') {
+      throw new PhoneDevicesError(
+        'PHONE_REAL_DEVICE',
+        `cannot ${operation} ${JSON.stringify(id)}: physical handsets support neither operation; address a simulator or emulator`,
+      )
+    }
+  }
+
+  private findKnown(id: DeviceId): PhoneDeviceRef | undefined {
+    if (this.publishedList === undefined) return undefined
+    for (const ref of allRefsOf(this.publishedList)) {
+      if (ref.id === id) return ref
+    }
+    return undefined
+  }
+
+  /**
+   * Subscribe to committed device-set changes. Delivery happens synchronously
+   * after each committing poll; a throwing subscriber is contained and logged.
+   * @param sub - Observer receiving every committed {@link PhoneDeviceChange}.
+   * @returns disposer removing exactly this subscription; subscriptions never outlive the Service.
+   */
+  onChanged(sub: (change: PhoneDeviceChange) => void): () => void {
+    this.subscribers.add(sub)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      this.subscribers.delete(sub)
+    }
+  }
+
+  /**
+   * Append publication work to the serialized poll queue so listings stay
+   * monotonic no matter who triggers them. Queue steps catch their own
+   * bounded failures and never reject the shared tail.
+   * @param options - Refresh-only attempts skip the automatic interval rearm.
+   */
+  private enqueuePoll(options: { readonly refreshOnly: boolean }): void {
+    this.queueTail = this.queueTail.then(async () => {
+      if (this.closing || this.disposed || this.lost !== undefined) return
+      await this.pollAttempt()
+      if (!options.refreshOnly) this.armPoll()
+    })
+  }
+
+  private armPoll(): void {
+    if (this.closing || this.disposed || this.lost !== undefined) return
+    this.clearPollTimer()
+    this.pollTimer = setTimeout(() => {
+      this.pollTimer = undefined
+      this.enqueuePoll({ refreshOnly: false })
+    }, this.resolved.pollIntervalMs)
+  }
+
+  private clearPollTimer(): void {
+    if (this.pollTimer !== undefined) {
+      clearTimeout(this.pollTimer)
+      this.pollTimer = undefined
+    }
+  }
+
+  /** One bounded devices.list attempt followed by publication, never throwing outward. */
+  private async pollAttempt(): Promise<void> {
+    let next: PhoneDeviceList
+    try {
+      const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, undefined, this.resolved.requestTimeoutMs)
+      next = groupEntries(parseDeviceInfos(result))
+    } catch (error) {
+      const normalized = normalizeOperationError(error)
+      if (normalized.code === 'PHONE_UNAVAILABLE' || normalized.code === 'PHONE_PROTOCOL') {
+        this.markLost(normalized)
+        return
+      }
+      // Bounded misses (a busy server, a slow Android bridge) are retried by
+      // the next poll; state stays at the last committed listing meanwhile.
+      this.ctx.logger.warn(`phone-runtime: device poll missed (${normalized.code}); keeping the last listing`)
+      return
+    }
+    const delta = changeSets(this.publishedList, next)
+    if (!delta.changed) return
+    this.publish(Object.freeze({
+      list: next,
+      added: Object.freeze(delta.added),
+      removed: Object.freeze(delta.removed),
+    }))
+  }
+
+  private publish(change: PhoneDeviceChange): void {
+    const validator = phoneRuntimeStateValidator(this[PHONE_RUNTIME_STATE_OWNER])
+    if (validator !== undefined && !this.guarded(validator, change)) return
+    this.publishedList = change.list
+    for (const sub of [...this.subscribers]) {
+      try {
+        sub(change)
+      } catch (error) {
+        this.ctx.logger.warn('phone-runtime: a devices-changed observer failed')
+        this.ctx.logger.warn(error)
+      }
+    }
+  }
+
+  /**
+   * Run the pre-publication validator; a malformed candidate halts polling
+   * loudly instead of ever reaching subscribers.
+   * @param validator - Installed runtime-invariant validator.
+   * @param change - Candidate awaiting publication.
+   * @returns whether the candidate may be published.
+   */
+  private guarded(validator: (candidate: PhoneDeviceChange) => undefined, change: PhoneDeviceChange): boolean {
+    try {
+      validator(change)
+      return true
+    } catch (error) {
+      this.markLost(new PhoneDevicesError(
+        'PHONE_PROTOCOL',
+        `device publication failed its runtime-invariant check and polling halted\n${String(error)}`,
+        { cause: error },
+      ))
+      return false
+    }
+  }
+
+  private markLost(reason: PhoneDevicesError): void {
+    if (this.lost !== undefined) return
+    this.lost = reason
+    this.clearPollTimer()
+    this.ctx.logger.error(reason.message)
+  }
+
+  /**
+   * Drain the publication queue, silence subscribers before killing the child,
+   * and reach child-exit quiescence before returning.
+   */
+  private teardown(): void | Promise<void> {
+    this.closing = true
+    this.clearPollTimer()
+    this.lifetime.abort(new PhoneDevicesError('PHONE_DISPOSED', 'the phone runtime service is disposed'))
+    this.subscribers.clear()
+    this.disposed = true
+    const child = this.child
+    this.child = undefined
+    this.rpcClient = undefined
+    if (child === undefined) return undefined
+    return child.stop()
+  }
+}
+
+function exitedBeforeReady(child: MobilecliServerProcess, exit: { readonly code: number | null }): PhoneDevicesError {
+  const tail = tailOf(child.lastStderr)
+  return new PhoneDevicesError(
+    'PHONE_UNAVAILABLE',
+    `the mobilecli server exited before becoming ready (code ${String(exit.code)}); stderr tail follows\n${tail}`,
+  )
+}
+
+function allRefsOf(list: PhoneDeviceList): readonly PhoneDeviceRef[] {
+  return [...list.android, ...list.ios.simulators, ...list.ios.reals]
+}
+
+function tailOf(text: string): string {
+  const trimmed = text.trim()
+  return trimmed.length > 0 ? trimmed.slice(-2000) : '(empty)'
+}
+
+function fuseCallerAndLifetime(caller: AbortSignal | undefined, lifetime: AbortSignal): AbortSignal {
+  // The lifetime signal is always present, so the fused signal always exists.
+  return caller === undefined ? lifetime : AbortSignal.any([caller, lifetime])
+}
+
+/**
+ * Reject when the fused signal aborts, translating the winner's reason onto
+ * the public vocabulary.
+ * @param signal - Budget signal whose abort ends the wait.
+ */
+function haltedOn(signal: AbortSignal): Promise<never> {
+  if (signal.aborted) return Promise.reject(haltReason(signal))
+  return new Promise((_, rejectHalt) => {
+    signal.addEventListener('abort', () => {
+      rejectHalt(haltReason(signal))
+    }, { once: true })
+  })
+}
+
+function haltReason(signal: AbortSignal): Error {
+  const reason: unknown = signal.reason
+  if (reason instanceof TimeoutReason) return normalizeOperationError(reason)
+  return new PhoneDevicesError('PHONE_ABORTED', 'cancelled while waiting for the phone runtime')
+}
+
+async function pauseBeforeNextProbe(
+  ms: number,
+  window: AbortSignal,
+  lifetime: AbortSignal,
+  exitSeen: Promise<unknown>,
+): Promise<void> {
+  const slept = new Promise<'slept'>((resolveSleep) => {
+    const timer = setTimeout(() => {
+      resolveSleep('slept')
+    }, ms)
+    timer.unref()
+  })
+  const abortedOrExited = new Promise<'interrupted'>((resolveInterrupted) => {
+    for (const signal of [window, lifetime]) {
+      signal.addEventListener('abort', () => {
+        resolveInterrupted('interrupted')
+      }, { once: true })
+    }
+    void exitSeen.then(() => {
+      resolveInterrupted('interrupted')
+    })
+  })
+  await Promise.race([slept, abortedOrExited])
+}
+
+export default PhoneDevices

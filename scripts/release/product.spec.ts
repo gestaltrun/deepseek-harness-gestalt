@@ -44,6 +44,14 @@ describe('product release intent', () => {
       releases: { desktop: 'none', mobile: 'none', platform: 'none' },
       compatibilityExceptions: [],
     }, 'intent.json')).toThrow('summary')
+    expect(() => parseReleaseIntent({
+      ...intentValue('unknown-field'),
+      internalNote: 'must not persist',
+    }, 'intent.json')).toThrow('unknown field')
+    expect(() => parseReleaseIntent({
+      ...intentValue('unknown-exception'),
+      compatibilityExceptions: [{ releaseUnit: 'desktop', reason: 'Reviewed.', extra: true }],
+    }, 'intent.json')).toThrow('unknown field')
   })
 
   it('fails closed when an intent omits an impacted release unit', () => {
@@ -200,15 +208,17 @@ describe('product release plan', () => {
     await expect(validateProductReleasePlanChange(root, [
       'apps/mobile/package.json',
       'product-releases/0001.json',
+      'product-releases/state.json',
       'tooling/unplanned.ts',
     ])).rejects.toThrow('unexpected path')
+    await expect(validateProductReleasePlanChange(root, ['product-releases/state.json']))
+      .rejects.toThrow('exactly one numbered plan')
   })
 
   it('recomputes a generated plan from the base ledger and rejects forged bumps', async () => {
     const root = await fixtureRepository()
     await mkdir(join(root, '.release-intents'), { recursive: true })
     await writeFile(join(root, '.release-intents/planned-mobile.json'), `${JSON.stringify(intentValue('planned-mobile', { desktop: 'none', mobile: 'patch', platform: 'none' }), null, 2)}\n`)
-    await writeFile(join(root, 'product-releases/state.json'), '{\n  "version": 1,\n  "nextSequence": 1,\n  "consumedIntentIds": []\n}\n')
     git(root, 'init')
     git(root, 'config', 'core.hooksPath', '/dev/null')
     git(root, 'config', 'user.email', 'release-test@example.com')
@@ -216,10 +226,19 @@ describe('product release plan', () => {
     git(root, 'add', '.')
     git(root, 'commit', '-m', 'base')
     git(root, 'tag', 'gestalt-v0.1.0')
+    const base = git(root, 'rev-parse', 'HEAD').trim()
     const { state, plan } = await plannedMobileRelease(root)
     await writeProductRelease(root, plan, state)
     const changed = mobileGeneratedPaths
     await expect(validateProductReleasePlanChange(root, changed, 'HEAD')).resolves.toBe(1)
+    await writeFile(join(root, 'product-releases/0001.json'), `${JSON.stringify({ ...plan, internalNote: true }, null, 2)}\n`)
+    await expect(validateProductReleasePlanChange(root, changed, 'HEAD')).rejects.toThrow('unknown field')
+    await writeFile(join(root, 'product-releases/0001.json'), `${JSON.stringify(plan, null, 2)}\n`)
+    const releaseStatePath = join(root, 'product-releases/state.json')
+    const releaseState = jsonRecord(await readFile(releaseStatePath, 'utf8'))
+    await writeFile(releaseStatePath, `${JSON.stringify({ ...releaseState, internalNote: true }, null, 2)}\n`)
+    await expect(validateProductReleasePlanChange(root, changed, 'HEAD')).rejects.toThrow('unknown field')
+    await writeFile(releaseStatePath, `${JSON.stringify(releaseState, null, 2)}\n`)
     const mobilePackagePath = join(root, 'apps/mobile/package.json')
     const mobilePackage = jsonRecord(await readFile(mobilePackagePath, 'utf8'))
     await writeFile(mobilePackagePath, `${JSON.stringify({ ...mobilePackage, scripts: { hitchhike: 'true' } }, null, 2)}\n`)
@@ -230,6 +249,14 @@ describe('product release plan', () => {
     const candidate = git(root, 'rev-parse', 'HEAD').trim()
     await expect(validateProductReleaseCandidate(root, 'product-releases/0001.json', candidate, candidate, 'HEAD'))
       .resolves.toMatchObject({ sequence: 1 })
+    await writeFile(releaseStatePath, `${JSON.stringify({ ...releaseState, consumedIntentIds: ['forged', 'planned-mobile'] }, null, 2)}\n`)
+    git(root, 'add', '.')
+    git(root, 'commit', '-m', 'forge release state')
+    await expect(validateProductReleaseCandidate(root, 'product-releases/0001.json', candidate, candidate, 'HEAD'))
+      .rejects.toThrow('numbered master release ledger')
+    await writeFile(releaseStatePath, `${JSON.stringify(releaseState, null, 2)}\n`)
+    git(root, 'add', '.')
+    git(root, 'commit', '-m', 'restore release state')
     await writeFile(join(root, '.release-intents/later-mobile.json'), `${JSON.stringify(intentValue('later-mobile', { desktop: 'none', mobile: 'patch', platform: 'none' }), null, 2)}\n`)
     git(root, 'add', '.')
     git(root, 'commit', '-m', 'later intent')
@@ -240,7 +267,7 @@ describe('product release plan', () => {
     if (!mobile.selected) throw new TypeError('Mobile must be selected')
     mobile.bump = 'major'
     await writeFile(join(root, 'product-releases/0001.json'), `${JSON.stringify(forged, null, 2)}\n`)
-    await expect(validateProductReleasePlanChange(root, changed, 'HEAD~2')).rejects.toThrow('base ledger')
+    await expect(validateProductReleasePlanChange(root, changed, base)).rejects.toThrow('base ledger')
   }, 15_000)
 
   it('binds the exact plan, candidate checkout, versions, and Mobile build', async () => {
@@ -308,24 +335,48 @@ describe('release promotion identity and manifest', () => {
 describe('release artifact provenance', () => {
   const candidate = '0123456789abcdef0123456789abcdef01234567'
   const run = {
+    id: 123,
     repository: { full_name: 'gestaltrun/deepseek-harness-gestalt' },
     path: '.github/workflows/mobile-release.yml',
-    conclusion: 'success',
-    head_sha: candidate,
+    status: 'completed',
+    conclusion: 'failure',
+    head_sha: '1123456789abcdef0123456789abcdef01234567',
     html_url: 'https://github.com/gestaltrun/deepseek-harness-gestalt/actions/runs/123',
   }
+  const jobs = {
+    jobs: [{ name: 'mobile / Record Mobile channel evidence', status: 'completed', conclusion: 'success' }],
+  }
+  const artifactName = `mobile-release-channel-candidate-${candidate}`
+  const artifacts = {
+    artifacts: [{
+      id: 456,
+      name: artifactName,
+      expired: false,
+      workflow_run: { id: run.id, head_sha: run.head_sha },
+    }],
+  }
 
-  it('accepts only a successful same-repository allowed workflow at the candidate SHA', () => {
-    expect(validatePriorReleaseRun(run, {
+  it('accepts a failed caller run only when its named producer and artifact succeeded', () => {
+    expect(validatePriorReleaseRun(run, jobs, artifacts, {
       repository: 'gestaltrun/deepseek-harness-gestalt',
-      candidateCommit: candidate,
       allowedWorkflows: ['.github/workflows/mobile-release.yml'],
-    })).toMatchObject({ workflowRun: run.html_url })
-    expect(() => validatePriorReleaseRun({ ...run, conclusion: 'failure' }, {
-      repository: 'gestaltrun/deepseek-harness-gestalt', candidateCommit: candidate, allowedWorkflows: [run.path],
-    })).toThrow('successful')
-    expect(() => validatePriorReleaseRun({ ...run, path: '.github/workflows/other.yml' }, {
-      repository: 'gestaltrun/deepseek-harness-gestalt', candidateCommit: candidate, allowedWorkflows: [run.path],
+      artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
+    })).toMatchObject({ workflowRun: run.html_url, artifactName })
+    expect(() => validatePriorReleaseRun(run, {
+      jobs: [{ ...jobs.jobs[0], conclusion: 'failure' }],
+    }, artifacts, {
+      repository: 'gestaltrun/deepseek-harness-gestalt', allowedWorkflows: [run.path],
+      artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
+    })).toThrow('producing job')
+    expect(() => validatePriorReleaseRun(run, jobs, {
+      artifacts: [{ ...artifacts.artifacts[0], expired: true }],
+    }, {
+      repository: 'gestaltrun/deepseek-harness-gestalt', allowedWorkflows: [run.path],
+      artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
+    })).toThrow('named successful artifact')
+    expect(() => validatePriorReleaseRun({ ...run, path: '.github/workflows/other.yml' }, jobs, artifacts, {
+      repository: 'gestaltrun/deepseek-harness-gestalt', allowedWorkflows: [run.path],
+      artifactProducers: [{ artifactName, producerJob: 'Record Mobile channel evidence' }],
     })).toThrow('workflow')
   })
 

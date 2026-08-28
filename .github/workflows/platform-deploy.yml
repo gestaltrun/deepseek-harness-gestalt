@@ -641,14 +641,20 @@ jobs:
           PLATFORM_VERSION: ${{ inputs.version }}
         run: |
           set -Eeuo pipefail
+          artifact_name="platform-deployment-candidate-$PLATFORM_CANDIDATE_SHA"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_DEPLOYMENT_RUN_ID" > run.json
-          gh run download "$PLATFORM_DEPLOYMENT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "platform-deployment-candidate-$PLATFORM_CANDIDATE_SHA" --dir deployment-evidence
-          node --import tsx/esm -e '
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_DEPLOYMENT_RUN_ID/jobs?filter=latest&per_page=100" > jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_DEPLOYMENT_RUN_ID/artifacts?per_page=100" > artifacts.json
+          ARTIFACT_NAME="$artifact_name" node --import tsx/esm -e '
             import { readFileSync } from "node:fs";
             import { validatePriorReleaseRun } from "./scripts/release/product.ts";
             const json = path => JSON.parse(readFileSync(path, "utf8"));
-            validatePriorReleaseRun(json("run.json"), { repository: process.env.GITHUB_REPOSITORY, candidateCommit: process.env.PLATFORM_CANDIDATE_SHA, allowedWorkflows: [".github/workflows/platform-deploy.yml", ".github/workflows/product-release.yml"] });
+            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, allowedWorkflows: [".github/workflows/platform-deploy.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Deploy to private ECS through Cloud Assistant" }] });'
+          gh run download "$PLATFORM_DEPLOYMENT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$artifact_name" --dir deployment-evidence
+          node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
             const deployment = json("deployment-evidence/platform-deployment.json");
             if (deployment.version !== 1 || deployment.candidateCommit !== process.env.PLATFORM_CANDIDATE_SHA || deployment.imageIdentity !== process.env.PLATFORM_IMAGE_IDENTITY || deployment.productVersion !== process.env.PLATFORM_VERSION || !/^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/\d+/.test(deployment.deployment)) throw new Error("Platform deployment metadata does not match candidate and image");'
           echo "deployment=$(jq -r .deployment deployment-evidence/platform-deployment.json)" >> "$GITHUB_OUTPUT"
@@ -674,7 +680,6 @@ jobs:
           fetch-depth: 0
       - name: Record immutable image and production deployment
         id: publish
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           PLATFORM_VERSION: ${{ inputs.version }}

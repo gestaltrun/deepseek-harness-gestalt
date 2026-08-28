@@ -14,11 +14,11 @@ Desktop 使用 `gestalt-v<version>`，Mobile 使用 `mobile-v<version>`，Platfo
 
 每个影响产品的 pull request 都会新增一条符合 `.release-intents/schema.json` 的 `.release-intents/<issue>-<slug>.json` 记录。每个发布单元分别请求 `major`、`minor`、`patch` 或 `none`；`summary.en` 与 `summary.zh` 提供面向用户的双语发布说明。非发布的产品变更会显式地为三个单元全部选择 `none`；只有文档或测试的变更不需要 intent。
 
-`pnpm product-release:validate --base <base> --head <head>` 会比较全部新增、唯一且未消费的 intent 与变更路径、每个 app 的生产/构建依赖闭包，以及显式的原生、打包、workflow、lockfile、部署与 wire-protocol 输入。Pull request 校验通常只看到一条新增记录；merge-group 校验会确定性汇总组内的全部新增记录。修改、删除、重复身份、复用已消费 intent 或少报都会使 CI 失败；保守多报有效。兼容例外会指定一个发布单元和非空的已评审理由；未知生产输入会保守地选中全部单元。
+`pnpm product-release:validate --base <base> --head <head>` 会比较全部新增、唯一且未消费的 intent 与变更路径、每个 app 的生产/构建依赖闭包，以及显式的原生、打包、工作流、lockfile、部署与 wire-protocol 输入。Pull request 校验通常只看到一条新增记录；merge-group 校验会确定性汇总组内的全部新增记录。修改、删除、重复身份、复用已消费 intent 或少报都会使 CI 失败；保守多报有效。兼容例外会指定一个发布单元和非空的已评审理由；未知生产输入会保守地选中全部单元。
 
 ## Product Release PR
 
-Intent 到达 `master` 后，`Product Release Plan` 会运行 `pnpm product-release:prepare --write`，并创建或更新 Draft `automation/product-release` pull request。仓库变量 `DSH_RELEASE_APP_CLIENT_ID` 与 secret `DSH_RELEASE_APP_PRIVATE_KEY` 标识一个对仓库 Contents 和 Pull requests 具有写权限、对 Issues 具有读权限的 GitHub App 安装；与 workflow `GITHUB_TOKEN` 产生的变更不同，它的 commit 与 PR 事件会触发普通 CI。生成器只消费每条已合并 intent 一次，为各发布单元应用最高请求 bump，在选中 Mobile 时只递增一次构建号，按每条 intent 选中的端过滤双语摘要，并提交带序号的 `product-releases/NNNN.json` 计划与 `product-releases/state.json`。
+Intent 到达 `master` 后，`Product Release Plan` 会运行 `pnpm product-release:prepare --write`，并创建或更新 Draft `automation/product-release` pull request。仓库变量 `DSH_RELEASE_APP_CLIENT_ID` 与 secret `DSH_RELEASE_APP_PRIVATE_KEY` 标识一个对仓库 Contents 和 Pull requests 具有写权限、对 Issues 具有读权限的 GitHub App 安装；与工作流 `GITHUB_TOKEN` 产生的变更不同，它的 commit 与 PR 事件会触发普通 CI。生成器只消费每条已合并 intent 一次，为各发布单元应用最高请求 bump，在选中 Mobile 时只递增一次构建号，按每条 intent 选中的端过滤双语摘要，并提交带序号的 `product-releases/NNNN.json` 计划与 `product-releases/state.json`。
 
 CI 会根据基线 ledger、基线版本、受跟踪的 Mobile build 和全部未消费 intent 重算生成的 Product Release PR。提交的 plan、选中端、bump、版本、tag、摘要、已消费 intent 状态、Mobile build 与 Desktop notes 必须与重算结果一致；手工修改生成事务不能漏掉或伪造发布。
 
@@ -32,4 +32,4 @@ CI 会根据基线 ledger、基线版本、受跟踪的 Mobile build 和全部�
 
 ## 恢复与回滚
 
-手动 `Desktop Release`、`Mobile Release`、`Platform Image` 与 `Platform Deploy` dispatch 继续作为恢复入口。恢复由显式类型化模式选择，绝不根据触发事件推断。Desktop 与 Mobile 会先通过 GitHub API 校验先前 run：仓库相同、工作流受允许、结论成功且 head SHA 等于候选；随后下载签名候选 manifest，并在推广前重算每个产物 digest。Mobile 可以用经过校验的 IPA 重试 TestFlight；不请求新上传时会保留经过校验的先前 TestFlight build。Platform Image 恢复只接收先前 run id，校验其中绑定候选的完整 digest 元数据，绝不把请求提供的 digest 当作证据。Platform 仅发布恢复会在创建 Release 前校验先前成功部署 run 及其精确候选、image、版本和部署元数据。中断的 Platform 部署仍使用已有持久生产阶段与滚动回滚事务。
+手动 `Desktop Release`、`Mobile Release`、`Platform Image` 与 `Platform Deploy` dispatch 继续作为恢复入口。恢复由显式类型化模式选择，绝不根据触发事件推断。每项先前 run 恢复都会通过 GitHub API 校验仓库相同、工作流受允许、run 已完成、命名生产 job 成功且候选命名产物未过期；后续 lane 失败不会否定已经成功生成的字节，run head 也可以是协调器后续提交。下载的候选 manifest 与重新计算的 digest 随后把将被推广的精确字节绑定到请求候选。Mobile 可以用经过校验的 IPA 重试 TestFlight；不请求新上传时会保留经过校验的先前 TestFlight 证据。Platform Image 恢复校验绑定候选的完整 digest 元数据，绝不把请求提供的 digest 当作证据。Platform 仅发布恢复会在创建 Release 前校验命名部署产物及其精确候选、image、版本和部署元数据。请求的 GitHub Release、TestFlight 上传或 Platform 发布在外部渠道失败时会让直接工作流失败；Product Release 协调器仍通过最终 manifest 汇总 lane 失败。中断的 Platform 部署继续使用持久生产阶段与滚动回滚事务。

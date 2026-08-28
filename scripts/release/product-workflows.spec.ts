@@ -21,6 +21,8 @@ describe('product release workflows', () => {
     expect(desktopSource).not.toContain('GITHUB_EVENT_NAME')
     expect(desktopSource).toContain('release-candidate.json')
     expect(desktopSource).toContain('actions/runs/$DESKTOP_ARTIFACT_RUN_ID')
+    expect(desktopSource).toContain('actions/runs/$DESKTOP_ARTIFACT_RUN_ID/jobs')
+    expect(desktopSource).toContain('actions/runs/$DESKTOP_ARTIFACT_RUN_ID/artifacts')
 
     expect(mobile.on).toHaveProperty('workflow_dispatch')
     expect(mobile.on).toHaveProperty('workflow_call')
@@ -60,6 +62,8 @@ describe('product release workflows', () => {
     expect(source).toContain('value: ${{ jobs.channel-evidence.outputs.testflight_build }}')
     expect(source).toContain('release-candidate.json')
     expect(source).toContain('actions/runs/$MOBILE_ARTIFACT_RUN_ID')
+    expect(source).toContain('actions/runs/$MOBILE_ARTIFACT_RUN_ID/jobs')
+    expect(source).toContain('actions/runs/$MOBILE_ARTIFACT_RUN_ID/artifacts')
     expect(source).toContain('TestFlight recovery from signed IPA')
     const publish = job(mobile, 'publish')
     expect(publish.needs).toEqual(['release-authorization', 'release-version', 'channel-evidence'])
@@ -87,6 +91,21 @@ describe('product release workflows', () => {
     expect(deploySource).toContain('inputs.publish_only')
     expect(deploySource).toContain('inputs.deployment_run_id')
     expect(deploySource).toContain('platform-deployment-candidate-')
+    expect(imageSource).toContain('actions/runs/$PLATFORM_IMAGE_RUN_ID/jobs')
+    expect(imageSource).toContain('actions/runs/$PLATFORM_IMAGE_RUN_ID/artifacts')
+    expect(deploySource).toContain('actions/runs/$PLATFORM_DEPLOYMENT_RUN_ID/jobs')
+    expect(deploySource).toContain('actions/runs/$PLATFORM_DEPLOYMENT_RUN_ID/artifacts')
+  })
+
+  it('fails direct release workflows when a requested external channel fails', () => {
+    for (const path of [
+      '.github/workflows/desktop-release.yml',
+      '.github/workflows/mobile-release.yml',
+      '.github/workflows/platform-deploy.yml',
+    ]) {
+      expect(text(path)).not.toContain('continue-on-error: true')
+    }
+    expect(text('.github/workflows/product-release.yml')).toContain('if: ${{ always() }}')
   })
 
   it('updates a Product Release PR without publishing and coordinates only selected lanes', () => {

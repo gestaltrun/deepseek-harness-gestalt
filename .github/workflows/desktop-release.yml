@@ -455,18 +455,25 @@ jobs:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -Eeuo pipefail
+          artifact_name="desktop-release-candidate-$CANDIDATE_SHA"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DESKTOP_ARTIFACT_RUN_ID" > run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DESKTOP_ARTIFACT_RUN_ID/jobs?filter=latest&per_page=100" > jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DESKTOP_ARTIFACT_RUN_ID/artifacts?per_page=100" > artifacts.json
+          ARTIFACT_NAME="$artifact_name" node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { validatePriorReleaseRun } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, allowedWorkflows: [".github/workflows/desktop-release.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Record signed Desktop candidate" }] });'
           gh run download "$DESKTOP_ARTIFACT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "desktop-release-candidate-$CANDIDATE_SHA" --dir candidate
+            --name "$artifact_name" --dir candidate
           digests=$(for asset in candidate/*; do
             if [[ "$(basename "$asset")" != release-candidate.json ]]; then sha256sum "$asset"; fi
           done | jq -Rn '[inputs | capture("^(?<digest>[0-9a-f]{64})  (?<path>.+)$") | {key:(.path | split("/") | last),value:("sha256:" + .digest)}] | from_entries')
           printf '%s\n' "$digests" > digests.json
           node --import tsx/esm -e '
             import { readFileSync } from "node:fs";
-            import { validatePriorReleaseRun, validateReleaseArtifactManifest } from "./scripts/release/product.ts";
+            import { validateReleaseArtifactManifest } from "./scripts/release/product.ts";
             const json = path => JSON.parse(readFileSync(path, "utf8"));
-            validatePriorReleaseRun(json("run.json"), { repository: process.env.GITHUB_REPOSITORY, candidateCommit: process.env.CANDIDATE_SHA, allowedWorkflows: [".github/workflows/desktop-release.yml", ".github/workflows/product-release.yml"] });
             validateReleaseArtifactManifest(json("candidate/release-candidate.json"), { surface: "desktop", candidateCommit: process.env.CANDIDATE_SHA, planPath: process.env.PLAN_PATH, productVersion: process.env.RELEASE_VERSION }, json("digests.json"));'
       - uses: actions/upload-artifact@v4
         with:
@@ -508,7 +515,6 @@ jobs:
 
       - name: Publish release
         id: publish
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}

@@ -370,17 +370,28 @@ jobs:
         run: |
           set -Eeuo pipefail
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MOBILE_ARTIFACT_RUN_ID" > run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MOBILE_ARTIFACT_RUN_ID/jobs?filter=latest&per_page=100" > jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MOBILE_ARTIFACT_RUN_ID/artifacts?per_page=100" > artifacts.json
+          artifact_name=$(node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { validatePriorReleaseRun } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            const candidate = process.env.CANDIDATE_SHA;
+            const result = validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, allowedWorkflows: [".github/workflows/mobile-release.yml", ".github/workflows/product-release.yml"], artifactProducers: [
+              { artifactName: `mobile-release-channel-candidate-${candidate}`, producerJob: "Record Mobile channel evidence" },
+              { artifactName: `mobile-release-candidate-${candidate}`, producerJob: "Record signed Mobile candidate" },
+            ] });
+            process.stdout.write(result.artifactName);')
           gh run download "$MOBILE_ARTIFACT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "mobile-release-channel-candidate-$CANDIDATE_SHA" --dir candidate
+            --name "$artifact_name" --dir candidate
           digests=$(for asset in candidate/*; do
             if [[ "$(basename "$asset")" != release-candidate.json ]]; then sha256sum "$asset"; fi
           done | jq -Rn '[inputs | capture("^(?<digest>[0-9a-f]{64})  (?<path>.+)$") | {key:(.path | split("/") | last),value:("sha256:" + .digest)}] | from_entries')
           printf '%s\n' "$digests" > digests.json
           node --import tsx/esm -e '
             import { readFileSync } from "node:fs";
-            import { validatePriorReleaseRun, validateReleaseArtifactManifest } from "./scripts/release/product.ts";
+            import { validateReleaseArtifactManifest } from "./scripts/release/product.ts";
             const json = path => JSON.parse(readFileSync(path, "utf8"));
-            validatePriorReleaseRun(json("run.json"), { repository: process.env.GITHUB_REPOSITORY, candidateCommit: process.env.CANDIDATE_SHA, allowedWorkflows: [".github/workflows/mobile-release.yml", ".github/workflows/product-release.yml"] });
             validateReleaseArtifactManifest(json("candidate/release-candidate.json"), { surface: "mobile", candidateCommit: process.env.CANDIDATE_SHA, planPath: process.env.PLAN_PATH, productVersion: process.env.MOBILE_VERSION, buildNumber: Number(process.env.MOBILE_BUILD_NUMBER) }, json("digests.json"));'
           {
             echo "testflight_build=$(jq -r '.testFlight.buildNumber // empty' candidate/release-candidate.json)"
@@ -413,7 +424,6 @@ jobs:
           path: candidate
       - name: Upload exact signed IPA to TestFlight
         id: upload
-        continue-on-error: true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -492,7 +502,6 @@ jobs:
           path: dist
       - name: Publish signed APK and checksum
         id: publish
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           MOBILE_VERSION: ${{ needs.release-version.outputs.version }}

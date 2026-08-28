@@ -104,8 +104,8 @@ interface PackageManifest {
 
 interface PriorReleaseRunExpectation {
   repository: string
-  candidateCommit: string
   allowedWorkflows: readonly string[]
+  artifactProducers: ReadonlyArray<{ artifactName: string; producerJob: string }>
 }
 
 interface ReleaseArtifactExpectation {
@@ -124,6 +124,7 @@ interface ValidatedReleaseArtifactManifest extends ReleaseArtifactExpectation {
 
 const BUMPS: readonly ReleaseBump[] = ['none', 'patch', 'minor', 'major']
 const BUMP_RANK: Record<ReleaseBump, number> = { none: 0, patch: 1, minor: 2, major: 3 }
+const INITIAL_PRODUCT_RELEASE_STATE: ProductReleaseState = { version: 1, nextSequence: 1, consumedIntentIds: [] }
 const APP_DIRECTORIES: Record<ProductReleaseUnit, string> = {
   desktop: 'apps/desktop',
   mobile: 'apps/mobile',
@@ -170,6 +171,7 @@ const SHARED_RELEASE_INPUTS = new Set([
 /** Parse one reviewed release-intent record. */
 export function parseReleaseIntent(value: unknown, source: string): ReleaseIntent {
   const record = requireRecord(value, `${source}: intent`)
+  requireOnlyKeys(record, ['$schema', 'version', 'id', 'summary', 'releases', 'compatibilityExceptions'], `${source}: intent`)
   if (record.version !== 1) throw new Error(`${source}: version must be 1`)
   const id = requireNonEmptyString(record.id, `${source}: id`)
   if (!/^[a-z0-9][a-z0-9-]*$/u.test(id)) throw new Error(`${source}: id must use lowercase letters, digits, and hyphens`)
@@ -198,6 +200,7 @@ export function parseReleaseIntent(value: unknown, source: string): ReleaseInten
   const seen = new Set<ProductReleaseUnit>()
   const compatibilityExceptions = record.compatibilityExceptions.map((item, index) => {
     const exception = requireRecord(item, `${source}: compatibilityExceptions[${index}]`)
+    requireOnlyKeys(exception, ['releaseUnit', 'reason'], `${source}: compatibilityExceptions[${index}]`)
     const releaseUnit = exception.releaseUnit
     if (typeof releaseUnit !== 'string' || !PRODUCT_RELEASE_UNITS.includes(releaseUnit as ProductReleaseUnit)) {
       throw new Error(`${source}: compatibilityExceptions[${index}].releaseUnit is invalid`)
@@ -250,7 +253,7 @@ export async function validateReleaseIntentAdditions(
   for (const [id, paths] of ids) {
     if (paths.length > 1) throw new Error(`duplicate product release intent id ${id}: ${paths.sort().join(', ')}`)
   }
-  const state = parseProductReleaseState(await readJson(join(root, 'product-releases/state.json')))
+  const state = await readProductReleaseState(root)
   const added = normalized.map((path) => {
     const record = records.find(candidate => candidate.path === path)
     if (record === undefined) throw new Error(`added release intent is not readable: ${path}`)
@@ -455,6 +458,9 @@ export function renderDesktopReleaseNotes(plan: ProductReleasePlan, baselineComm
 export async function validateProductReleasePlanChange(root: string, changedPaths: readonly string[], baseRef?: string): Promise<number> {
   const planPaths = changedPaths.filter(path => /^product-releases\/\d{4}\.json$/u.test(normalizePath(path)))
   if (planPaths.length !== 1) throw new Error(`generated Product Release PR requires exactly one numbered plan; found ${planPaths.length}`)
+  if (!changedPaths.map(normalizePath).includes('product-releases/state.json')) {
+    throw new Error('generated Product Release PR must update product-releases/state.json with its numbered plan')
+  }
   const planPath = normalizePath(planPaths[0] as string)
   const typedPlan = parseProductReleasePlan(await readJson(join(root, planPath)), planPath)
   const plan = typedPlan as unknown as Record<string, unknown>
@@ -494,7 +500,7 @@ export async function validateProductReleasePlanChange(root: string, changedPath
   }
   if (baseRef !== undefined) {
     const baseCommit = runGit(root, ['merge-base', baseRef, 'HEAD']).trim()
-    const baseState = parseProductReleaseState(gitJsonAt(root, baseCommit, 'product-releases/state.json'))
+    const baseState = productReleaseStateAt(root, baseCommit)
     const versions = {} as Record<ProductReleaseUnit, string>
     for (const unit of PRODUCT_RELEASE_UNITS) {
       const manifest = requireRecord(gitJsonAt(root, baseCommit, `${APP_DIRECTORIES[unit]}/package.json`), `${unit} base package.json`)
@@ -581,10 +587,7 @@ export async function validateProductReleaseCandidate(
   if (masterRef !== undefined) {
     const ancestor = spawnSync('git', ['-C', root, 'merge-base', '--is-ancestor', candidate, masterRef])
     if (ancestor.status !== 0) throw new Error(`candidate ${candidate} is not reachable from master`)
-    const masterState = parseProductReleaseState(gitJsonAt(root, masterRef, 'product-releases/state.json'))
-    if (plan.sequence !== masterState.nextSequence - 1) {
-      throw new Error(`${normalizedPath} is not the latest Product Release Plan in the master ledger`)
-    }
+    const masterState = validateMasterReleaseLedger(root, masterRef, normalizedPath, plan)
     const masterIntents = loadIntentRecordsAtRef(root, masterRef)
     const consumed = new Set(masterState.consumedIntentIds)
     const pending = masterIntents.filter(record => !consumed.has(record.intent.id)).map(record => record.intent.id).sort()
@@ -595,19 +598,85 @@ export async function validateProductReleaseCandidate(
   return plan
 }
 
-/** Validate GitHub Actions provenance for a prior artifact or deployment run. */
-export function validatePriorReleaseRun(value: unknown, expected: PriorReleaseRunExpectation): { workflowRun: string; workflow: string } {
-  const run = requireRecord(value, 'prior release run')
+function validateMasterReleaseLedger(
+  root: string,
+  masterRef: string,
+  candidatePlanPath: string,
+  candidatePlan: ProductReleasePlan,
+): ProductReleaseState {
+  const masterState = parseProductReleaseState(gitJsonAt(root, masterRef, 'product-releases/state.json'))
+  const planPaths = runGit(root, ['ls-tree', '-r', '--name-only', masterRef, '--', 'product-releases'])
+    .trim().split('\n').filter(path => /^product-releases\/\d{4}\.json$/u.test(path)).sort()
+  if (planPaths.length === 0) throw new Error('master release ledger has no numbered plan')
+  const plans = planPaths.map(path => ({ path, plan: parseProductReleasePlan(gitJsonAt(root, masterRef, path), path) }))
+  const consumed = new Set<string>()
+  for (const [index, entry] of plans.entries()) {
+    const sequence = index + 1
+    if (entry.path !== `product-releases/${String(sequence).padStart(4, '0')}.json` || entry.plan.sequence !== sequence) {
+      throw new Error('master release ledger plan sequence is not contiguous')
+    }
+    for (const intentId of entry.plan.intentIds) {
+      if (consumed.has(intentId)) throw new Error(`master release ledger consumes intent more than once: ${intentId}`)
+      consumed.add(intentId)
+    }
+  }
+  const latest = plans.at(-1)
+  if (latest === undefined || latest.path !== candidatePlanPath || stableJson(latest.plan) !== stableJson(candidatePlan)) {
+    throw new Error(`${candidatePlanPath} is not the latest Product Release Plan in the master ledger`)
+  }
+  const expectedState: ProductReleaseState = {
+    version: 1,
+    nextSequence: latest.plan.sequence + 1,
+    consumedIntentIds: [...consumed].sort(),
+  }
+  if (stableJson(masterState) !== stableJson(expectedState)) {
+    throw new Error('product-releases/state.json does not match the numbered master release ledger')
+  }
+  return masterState
+}
+
+/** Validate GitHub Actions provenance for a named artifact and its producing job. */
+export function validatePriorReleaseRun(
+  runValue: unknown,
+  jobsValue: unknown,
+  artifactsValue: unknown,
+  expected: PriorReleaseRunExpectation,
+): { workflowRun: string; workflow: string; artifactName: string } {
+  const run = requireRecord(runValue, 'prior release run')
   const repository = requireRecord(run.repository, 'prior release run repository')
   if (repository.full_name !== expected.repository) throw new Error('prior release run belongs to a different repository')
-  if (run.conclusion !== 'success') throw new Error('prior release run must be successful')
-  if (run.head_sha !== requireFullCommit(expected.candidateCommit, 'candidate commit')) {
-    throw new Error('prior release run head SHA does not match candidate')
-  }
+  if (run.status !== 'completed') throw new Error('prior release run must be completed')
+  const runId = requirePositiveInteger(run.id, 'prior release run id')
   const workflow = requireNonEmptyString(run.path, 'prior release run workflow')
   if (!expected.allowedWorkflows.includes(workflow)) throw new Error(`prior release run workflow is not allowed: ${workflow}`)
   const workflowRun = requireActionsRunUrl(run.html_url, 'prior release run URL')
-  return { workflowRun, workflow }
+  const jobs = requireRecord(jobsValue, 'prior release jobs').jobs
+  if (!Array.isArray(jobs)) throw new Error('prior release jobs must contain a jobs array')
+  const artifacts = requireRecord(artifactsValue, 'prior release artifacts').artifacts
+  if (!Array.isArray(artifacts)) throw new Error('prior release artifacts must contain an artifacts array')
+  for (const producer of expected.artifactProducers) {
+    const artifactName = requireNonEmptyString(producer.artifactName, 'prior release artifact name')
+    const producerJob = requireNonEmptyString(producer.producerJob, 'prior release producing job')
+    const matchingArtifacts = artifacts.filter((value) => {
+      const artifact = requireRecord(value, 'prior release artifact')
+      if (artifact.name !== artifactName || artifact.expired !== false) return false
+      if (!Number.isSafeInteger(artifact.id) || (artifact.id as number) < 1) return false
+      const artifactRun = requireRecord(artifact.workflow_run, 'prior release artifact workflow run')
+      return artifactRun.id === runId
+    })
+    const matchingJobs = jobs.filter((value) => {
+      const job = requireRecord(value, 'prior release job')
+      const name = job.name
+      return typeof name === 'string'
+        && (name === producerJob || name.endsWith(` / ${producerJob}`))
+        && job.status === 'completed'
+        && job.conclusion === 'success'
+    })
+    if (matchingArtifacts.length === 1 && matchingJobs.length === 1) {
+      return { workflowRun, workflow, artifactName }
+    }
+  }
+  throw new Error('prior release run has no named successful artifact and producing job')
 }
 
 /** Validate one signed-candidate manifest and the digests recomputed after download. */
@@ -739,6 +808,7 @@ function validateState(state: ProductReleaseState): void {
 
 function parseProductReleaseState(value: unknown): ProductReleaseState {
   const state = requireRecord(value, 'product-releases/state.json')
+  requireOnlyKeys(state, ['version', 'nextSequence', 'consumedIntentIds'], 'product-releases/state.json')
   if (state.version !== 1) throw new Error('product release state version must be 1')
   const typed: ProductReleaseState = {
     version: 1,
@@ -751,6 +821,7 @@ function parseProductReleaseState(value: unknown): ProductReleaseState {
 
 function parseProductReleasePlan(value: unknown, source: string): ProductReleasePlan {
   const record = requireRecord(value, source)
+  requireOnlyKeys(record, ['version', 'sequence', 'intentIds', 'summaries', 'releaseUnits'], source)
   if (record.version !== 1) throw new Error(`${source}: version must be 1`)
   const sequence = requirePositiveInteger(record.sequence, `${source}: sequence`)
   if (!Array.isArray(record.intentIds) || record.intentIds.some(id => typeof id !== 'string' || id === '')) {
@@ -758,15 +829,21 @@ function parseProductReleasePlan(value: unknown, source: string): ProductRelease
   }
   const summaries = parseLocalizedSummaries(record.summaries, `${source}: summaries`)
   const units = requireRecord(record.releaseUnits, `${source}: releaseUnits`)
+  requireOnlyKeys(units, PRODUCT_RELEASE_UNITS, `${source}: releaseUnits`)
   const releaseUnits = {} as ProductReleasePlan['releaseUnits']
   for (const unit of PRODUCT_RELEASE_UNITS) {
     const release = requireRecord(units[unit], `${source}: releaseUnits.${unit}`)
     const version = requireNonEmptyString(release.version, `${source}: releaseUnits.${unit}.version`)
     if (release.selected === false) {
+      requireOnlyKeys(release, ['selected', 'version'], `${source}: releaseUnits.${unit}`)
       releaseUnits[unit] = { selected: false, version }
       continue
     }
     if (release.selected !== true) throw new Error(`${source}: releaseUnits.${unit}.selected must be boolean`)
+    requireOnlyKeys(release, [
+      'selected', 'previousVersion', 'version', 'tag', 'bump', 'summaries',
+      ...(unit === 'mobile' ? ['buildNumber'] : []),
+    ], `${source}: releaseUnits.${unit}`)
     const unitSummaries = parseLocalizedSummaries(release.summaries, `${source}: releaseUnits.${unit}.summaries`)
     if (unitSummaries.length === 0) throw new Error(`${source}: releaseUnits.${unit}.summaries must not be empty`)
     releaseUnits[unit] = {
@@ -797,11 +874,18 @@ function parseLocalizedSummaries(value: unknown, label: string): LocalizedReleas
   if (!Array.isArray(value)) throw new Error(`${label} must be an array`)
   return value.map((item, index) => {
     const record = requireRecord(item, `${label}[${index}]`)
+    requireOnlyKeys(record, ['en', 'zh'], `${label}[${index}]`)
     return {
       en: requireNonEmptyString(record.en, `${label}[${index}].en`),
       zh: requireNonEmptyString(record.zh, `${label}[${index}].zh`),
     }
   })
+}
+
+function requireOnlyKeys(record: Readonly<Record<string, unknown>>, allowed: readonly string[], label: string): void {
+  const allowedKeys = new Set(allowed)
+  const unknown = Object.keys(record).filter(key => !allowedKeys.has(key)).sort()
+  if (unknown.length > 0) throw new Error(`${label} contains unknown field: ${unknown.join(', ')}`)
 }
 
 function normalizePath(path: string): string {
@@ -966,6 +1050,19 @@ function gitJsonAt(root: string, ref: string, path: string): unknown {
   return JSON.parse(source) as unknown
 }
 
+async function readProductReleaseState(root: string): Promise<ProductReleaseState> {
+  const source = await readOptional(join(root, 'product-releases/state.json'))
+  return source === undefined ? structuredClone(INITIAL_PRODUCT_RELEASE_STATE) : parseProductReleaseState(JSON.parse(source) as unknown)
+}
+
+function productReleaseStateAt(root: string, ref: string): ProductReleaseState {
+  const path = 'product-releases/state.json'
+  const exists = spawnSync('git', ['-C', root, 'cat-file', '-e', `${ref}:${path}`])
+  return exists.status === 0
+    ? parseProductReleaseState(gitJsonAt(root, ref, path))
+    : structuredClone(INITIAL_PRODUCT_RELEASE_STATE)
+}
+
 async function main(args: string[]): Promise<void> {
   const command = args[0]
   const root = resolve(import.meta.dirname, '../..')
@@ -980,7 +1077,10 @@ async function main(args: string[]): Promise<void> {
     const addedPaths = gitAddedPaths(root, values.base, values.head)
     const intentPaths = changedPaths.filter(path => path.startsWith('.release-intents/')
       && path.endsWith('.json') && !path.endsWith('/schema.json'))
-    if (intentPaths.length === 0 && changedPaths.some(path => /^product-releases\/\d{4}\.json$/u.test(path))) {
+    const releaseStateChanged = changedPaths.includes('product-releases/state.json')
+    const numberedPlanChanged = changedPaths.some(path => /^product-releases\/\d{4}\.json$/u.test(path))
+    if (releaseStateChanged || numberedPlanChanged) {
+      if (intentPaths.length > 0) throw new Error('release intents and generated Product Release state cannot change in one transaction')
       const sequence = await validateProductReleasePlanChange(root, changedPaths, values.base)
       process.stdout.write(stableJson({ productReleasePlan: sequence, changedPaths }))
       return
@@ -1001,7 +1101,7 @@ async function main(args: string[]): Promise<void> {
   }
   if (command === 'prepare') {
     const { values } = parseArgs({ args: args.slice(1), options: { write: { type: 'boolean', default: false } }, strict: true })
-    const typedState = parseProductReleaseState(await readJson(join(root, 'product-releases/state.json')))
+    const typedState = await readProductReleaseState(root)
     const intents = await loadIntents(root)
     const pending = intents.filter(intent => !new Set(typedState.consumedIntentIds).has(intent.id))
     if (pending.length === 0) {

@@ -211,14 +211,21 @@ jobs:
         run: |
           set -Eeuo pipefail
           test -n "$PLATFORM_IMAGE_RUN_ID"
+          artifact_name="platform-image-candidate-$CANDIDATE_SHA"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_IMAGE_RUN_ID" > run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_IMAGE_RUN_ID/jobs?filter=latest&per_page=100" > jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_IMAGE_RUN_ID/artifacts?per_page=100" > artifacts.json
+          ARTIFACT_NAME="$artifact_name" node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { validatePriorReleaseRun } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, allowedWorkflows: [".github/workflows/platform-image.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Record Platform image candidate" }] });'
           gh run download "$PLATFORM_IMAGE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "platform-image-candidate-$CANDIDATE_SHA" --dir candidate
+            --name "$artifact_name" --dir candidate
           node --import tsx/esm -e '
             import { readFileSync } from "node:fs";
-            import { assertImmutablePlatformCandidate, validatePriorReleaseRun } from "./scripts/release/product.ts";
+            import { assertImmutablePlatformCandidate } from "./scripts/release/product.ts";
             const json = path => JSON.parse(readFileSync(path, "utf8"));
-            validatePriorReleaseRun(json("run.json"), { repository: process.env.GITHUB_REPOSITORY, candidateCommit: process.env.CANDIDATE_SHA, allowedWorkflows: [".github/workflows/platform-image.yml", ".github/workflows/product-release.yml"] });
             const image = json("candidate/platform-image.json");
             if (image.version !== 1 || image.candidateCommit !== process.env.CANDIDATE_SHA || image.digest !== image.imageIdentity.split("@").at(-1)) throw new Error("Platform image metadata does not match candidate");
             assertImmutablePlatformCandidate(image.imageIdentity, process.env.CANDIDATE_SHA, image.candidateCommit);'

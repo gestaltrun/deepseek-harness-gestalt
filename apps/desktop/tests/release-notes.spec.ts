@@ -257,6 +257,23 @@ describe('Desktop release notes', () => {
     expect(body).toContain('a6f8c6e4d1887a403de640027c0aa691bcb1647b...gestalt-v0.1.8')
   })
 
+  it('renders the 0.1.9 Mobile release-train changelog from its tracked manifest', () => {
+    const body = renderReleaseNotes({
+      manifest: loadReleaseNotesManifest('0.1.9'),
+      requestedVersion: '0.1.9',
+      releaseTarget,
+      isAncestor: () => true,
+      countCommits: () => 43,
+    })
+    expect(body).toContain('DeepSeek Gestalt 0.1.9 收录上一版本之后的 43 个提交。')
+    expect(body).toContain('DeepSeek Gestalt 0.1.9 contains the 43 commits after the previous Desktop Bundle.')
+    expect(body).toContain('实际运行的 Mobile 连接')
+    expect(body).toContain('Operated Mobile connectivity')
+    expect(body).toContain('Mobile Companion 0.1.0')
+    expect(body).toContain('gestalt-v0.1.9')
+    expect(body).toContain('2f12663e340d8d26e19251445d0714ca7972155a...gestalt-v0.1.9')
+  })
+
   it('writes the verified body through the release CLI', () => {
     const directory = mkdtempSync(join(tmpdir(), 'dsh-release-notes-'))
     const output = join(directory, 'notes.md')

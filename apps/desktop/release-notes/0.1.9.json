@@ -22,7 +22,7 @@
           "heading": "Mobile Companion 0.1.0",
           "items": [
             "Mobile 发布使用完整链接配对验收；相机与 iPad 不属于本次实际运行验收。Platform Account、搜索、创建入口和设备状态展示得到完善，Android 原生文件选择在前台重新同步后会保留待发送附件。",
-            "`com.gestalt.mobile` 是 iOS 与 Android 的唯一应用标识。内部构建产物继续使用 Gestalt，用户可见名称与图标使用“獭子哥”，发布脚本会拒绝包名、签名、版本或显示元数据漂移。"
+            "`com.gestalt.mobile` 是 iOS 与 Android 的唯一应用标识。内部构建产物继续使用 Gestalt，用户可见名称与图标使用「獭子哥」，发布脚本会拒绝包名、签名、版本或显示元数据漂移。"
           ]
         }
       ]

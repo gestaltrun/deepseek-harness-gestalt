@@ -24,4 +24,4 @@ Issue #356 锁定了「手机」tab 骨架——恒可达入口、第①态空�
 
 ## Consequences
 
-mobilecli 子票用真实 publisher 替换 `NULL_PHONE_BADGE_SOURCE` 并接管 `Config.enabled` 的实际语义；每设备一 tab 通过 `createTab` 与 `dedupeKey: serial` 扩展 descriptor，不触碰本注册路径。徽标点样式只在 better-sidebar 扩展 pill 契约后落地。宿主根让位使共享测试 invariant host 对自带 `betterSidebar` 的套件保持确定性；在其他任何环境里丢失注册的回归都会在伴生体激活时失败（`the "phone" tab is missing after the plugin fiber activated`）。
+mobilecli 子票用真实 publisher 替换 `NULL_PHONE_BADGE_SOURCE` 并接管 `Config.enabled` 的实际语义；每设备一 tab 通过 `createTab` 与 `dedupeKey: serial` 扩展 descriptor，不触碰本注册路径。徽标点样式只在 better-sidebar 扩展 pill 契约后落地。宿主根让位使共享测试 invariant host 对自带 `betterSidebar` 的套件保持确定性；在其他任何环境里丢失注册的回归都会在伴生体激活时失败（`the "phone" tab is missing after the plugin fiber activated`）。插件配置标签页向导卡与 Host `ui-phone` 命名空间见[设置向导笔记](2026-08-28-ui-phone-settings-wizard-card.zh.md)。

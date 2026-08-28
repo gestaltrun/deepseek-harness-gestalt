@@ -36,10 +36,14 @@ if (knobs.exitFast === true) {
   process.exit(9)
 }
 
+const JPEG_SOI_EOI = Buffer.from([0xff, 0xd8, 0xff, 0xd9])
+const H264_ANNEX_B = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x67, 0x42])
+
 const state = {
   devices: knobs.devices ?? [],
   bootCount: 0,
   shutdownCount: 0,
+  io: [],
 }
 let requests = 0
 
@@ -107,6 +111,45 @@ async function handleRpc(req, res) {
       reply(res, id, { result: { status: 'ok' } })
       return
     }
+    case 'device.io.tap':
+    case 'device.io.gesture':
+    case 'device.io.text':
+    case 'device.io.button': {
+      const deviceId = params?.deviceId
+      const device = state.devices.find(candidate => candidate.id === deviceId)
+      if (device === undefined) {
+        reply(res, id, { error: { code: -32010, message: `no device ${String(deviceId)}` } })
+        return
+      }
+      state.io.push({ method, params })
+      reply(res, id, { result: { status: 'ok' } })
+      return
+    }
+    case 'device.screencapture': {
+      const deviceId = params?.deviceId
+      const device = state.devices.find(candidate => candidate.id === deviceId)
+      if (device === undefined) {
+        reply(res, id, { error: { code: -32010, message: `no device ${String(deviceId)}` } })
+        return
+      }
+      const captureDelayMs = knobs.screencaptureDelayMs ?? 0
+      if (captureDelayMs > 0) {
+        await new Promise(resolveDelay => setTimeout(resolveDelay, captureDelayMs))
+      }
+      const format = params?.format === 'avc' ? 'avc' : 'mjpeg'
+      if (format === 'avc') {
+        res.writeHead(200, { 'content-type': 'video/h264', 'cache-control': 'no-store' })
+        res.write(H264_ANNEX_B)
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'content-type': 'multipart/x-mixed-replace; boundary=frame', 'cache-control': 'no-store' })
+      res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_SOI_EOI.length)}\r\n\r\n`)
+      res.write(JPEG_SOI_EOI)
+      res.write('\r\n--frame--\r\n')
+      res.end()
+      return
+    }
     default: {
       reply(res, id, { error: { code: -32601, message: `method ${String(method)} not found` } })
     }
@@ -117,7 +160,7 @@ const server = http.createServer((req, res) => {
   void (async () => {
     try {
       if (req.method === 'GET' && req.url === '/__test/counters') {
-        reply(res, undefined, { requests, bootCount: state.bootCount, shutdownCount: state.shutdownCount })
+        reply(res, undefined, { requests, bootCount: state.bootCount, shutdownCount: state.shutdownCount, io: state.io })
         return
       }
       if (req.method === 'GET' && req.url === '/__test/pid') {

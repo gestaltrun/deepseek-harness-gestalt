@@ -1018,12 +1018,14 @@ describe('Platform release workflows', () => {
       throw new TypeError('image workflow must define docker/build-push-action')
     }
     expect(buildPush.with.push).not.toBe(true)
-    expect(String(buildPush.with.push)).toContain('workflow_dispatch')
+    expect(String(buildPush.with.push)).toContain("github.event_name != 'pull_request'")
+    expect(String(buildPush.with.push)).toContain("github.event_name != 'push'")
     expect(String(buildPush.with.push)).toContain('inputs.push')
     const login = steps(build).find(step => typeof step.uses === 'string'
       && step.uses.startsWith('docker/login-action@'))
     if (login === undefined) throw new TypeError('image workflow must define docker/login-action')
-    expect(String(login.if)).toContain('workflow_dispatch')
+    expect(String(login.if)).toContain("github.event_name != 'pull_request'")
+    expect(String(login.if)).toContain("github.event_name != 'push'")
     expect(String(login.if)).toContain('inputs.push')
   })
 })

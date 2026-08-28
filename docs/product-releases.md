@@ -1,0 +1,35 @@
+# Product releases
+
+English | [中文](product-releases.zh.md)
+
+This reference defines how Desktop, Mobile, and Platform versions move from an ordinary pull request to durable public or production evidence. It does not govern the independent dsh, vendor, native, or Python release families.
+
+## Release units and version owners
+
+Desktop, Mobile, and Platform are independent product release units. `apps/desktop/package.json`, `apps/mobile/package.json`, and `apps/platform/package.json` own their SemVer versions. `apps/mobile/release.json` separately owns the positive, monotonically increasing build number projected into Android `versionCode` and iOS `CFBundleVersion`.
+
+Desktop uses `gestalt-v<version>`, Mobile uses `mobile-v<version>`, and Platform uses `platform-v<version>`. One Product Release Plan can select any subset; it does not impose a shared version or release date.
+
+## Pull-request intent and impact validation
+
+Every product-affecting pull request adds a new `.release-intents/<issue>-<slug>.json` record conforming to `.release-intents/schema.json`. Each release unit requests `major`, `minor`, `patch`, or `none`, and `summary.en` plus `summary.zh` provide the user-visible release-note text. A non-release product change explicitly selects `none` for all three units; documentation- and test-only changes do not need an intent.
+
+`pnpm product-release:validate --base <base> --head <head>` compares every newly added, unique, unconsumed intent with changed paths, the production/build dependency closure of each app, and explicit native, packaging, workflow, lockfile, deployment, and wire-protocol inputs. Pull-request validation normally sees one addition; merge-group validation deterministically aggregates all additions from the group. Modification, deletion, duplicate identity, reuse of a consumed intent, and under-reporting fail CI. Conservative over-reporting is valid. A compatibility exception names one release unit and a non-empty reviewed reason; unknown production inputs conservatively select all units.
+
+## Product Release PR
+
+After an intent reaches `master`, `Product Release Plan` runs `pnpm product-release:prepare --write` and creates or updates the Draft `automation/product-release` pull request. Repository variable `DSH_RELEASE_APP_CLIENT_ID` and secret `DSH_RELEASE_APP_PRIVATE_KEY` identify a GitHub App installation with repository Contents and Pull requests write permission plus Issues read permission; its commits and PR events trigger ordinary CI, unlike mutations made with the workflow `GITHUB_TOKEN`. The generator consumes every merged intent once, applies the highest requested bump per release unit, increments the Mobile build number once when Mobile is selected, filters bilingual summaries to the surfaces selected by each intent, and commits a numbered `product-releases/NNNN.json` plan plus `product-releases/state.json`.
+
+CI recomputes a generated Product Release PR from the base ledger, base versions, tracked Mobile build, and all unconsumed intents. The committed plan, selected surfaces, bumps, versions, tags, summaries, consumed-intent state, Mobile build, and Desktop notes must match that recomputation; manually editing the generated transaction cannot omit or forge a release.
+
+Merging the Product Release PR approves versions, release notes, and the selected set. It does not authorize signing, TestFlight upload, GitHub Release publication, image publication, or production deployment.
+
+## Promotion and evidence
+
+Dispatch `Product Release` with the full candidate commit and its tracked plan path. Before any release lane starts, the coordinator checks out that commit, verifies that it is reachable from `master`, and rejects a plan whose Desktop, Mobile, or Platform version, Mobile build number, ledger sequence, or consumed-intent state differs from the latest valid master ledger. A later commit without product intent does not invalidate the candidate; any later unconsumed product intent does. Desktop keeps its atomic installer, blockmap, and updater-feed transaction. Mobile consumes the exact plan version and build, produces one signed APK and IPA, optionally uploads the IPA to the rolling [TestFlight beta](https://testflight.apple.com/join/pKCZtn7q), then publishes the APK and `SHA256SUMS` through a draft-then-publish GitHub prerelease. Platform builds one candidate-bound image, passes its full OCI digest and recorded source commit to production deployment, and never promotes a tag or short digest.
+
+`desktop-release`, `mobile-release`, and `production` Environments retain their own credentials and approvals. Reusable-workflow callers grant the least token permissions required by each lane. The coordinator uploads `product-release-manifest-<sequence>` with each release unit's selected, skipped, released, or blocked state; a reason for every blocked state; versions and tags; exact candidate commit; artifact or image digests; GitHub Actions run URLs; separate GitHub Release URLs; and deployment evidence. `testFlightBuild` appears only when a current or validated prior upload actually ran. GitHub Release assets are durable public downloads. Actions artifacts are temporary build and evidence transport.
+
+## Recovery and rollback
+
+Manual `Desktop Release`, `Mobile Release`, `Platform Image`, and `Platform Deploy` dispatches remain recovery entry points. Recovery is an explicit typed mode and never inferred from the triggering event. Desktop and Mobile first verify the prior run through the GitHub API: same repository, allowed workflow, successful conclusion, and candidate head SHA. They then download a signed-candidate manifest and recompute every artifact digest before promotion. Mobile can reuse the validated IPA to retry TestFlight and carries a validated prior TestFlight build when no new upload is requested. Platform Image recovery accepts a prior run id, validates its candidate-bound full digest metadata, and never accepts a requested digest as proof. Platform publish-only recovery validates a successful prior deployment run and its exact candidate, image, version, and deployment metadata before creating the Release. Interrupted Platform deployment recovery continues to use the durable production phase and rolling rollback transaction.

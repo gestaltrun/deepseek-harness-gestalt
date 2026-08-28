@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gestaltrun.dev/schemas/product-release-intent-v1.json",
+  "title": "DeepSeek Gestalt product release intent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "summary", "releases", "compatibilityExceptions"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["en", "zh"],
+      "properties": {
+        "en": { "type": "string", "minLength": 1 },
+        "zh": { "type": "string", "minLength": 1 }
+      }
+    },
+    "releases": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["desktop", "mobile", "platform"],
+      "properties": {
+        "desktop": { "enum": ["major", "minor", "patch", "none"] },
+        "mobile": { "enum": ["major", "minor", "patch", "none"] },
+        "platform": { "enum": ["major", "minor", "patch", "none"] }
+      }
+    },
+    "compatibilityExceptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["releaseUnit", "reason"],
+        "properties": {
+          "releaseUnit": { "enum": ["desktop", "mobile", "platform"] },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

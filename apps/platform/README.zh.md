@@ -2,7 +2,9 @@
 
 [English](README.md) | 中文
 
-Platform 监听进程以容器发布。GitHub Actions 会为触及 Platform 树的拉取请求以及匹配的 master 推送构建镜像。推送到 GHCR 必须显式派发 Platform Image 并勾选 **push**。ECS 拉取已发布的 tag。密钥在部署时从 GitHub Environment `production` 注入，不会写入镜像层。
+[产品发布](../../docs/product-releases.zh.md)定义 Platform 版本选择、不可变 image 身份、协调推广证据与恢复；本页拥有生产部署事务。
+
+Platform 监听进程以容器发布。GitHub Actions 会为触及 Platform 树的拉取请求以及匹配的 master 推送构建镜像。推送到 GHCR 必须显式调用 Platform Image 并勾选 **push**。生产只接受绑定 image build 完整候选 commit 的已记录完整 OCI digest；tag、短 digest、`latest` 与候选不匹配的元数据都会被拒绝。密钥在部署时从 GitHub Environment `production` 注入，不会写入镜像层。
 
 实际运行的监听进程与产品客户端只接受一套生产身份。`PLATFORM_ORIGIN`、固定回调、GitHub client id 与 credential reference、PostgreSQL database identity、identity namespace、Redis ACL identity、Relay Redis key prefix、Base64 编码的 ApsaraDB CA 链、显式 `PLATFORM_REMOTE_ATTACHMENT_STORAGE`，以及 OSS endpoint、bucket、ECS RAM role、object prefix 和 timeout 都是必填项；不存在开发、staging 或默认身份。在启动 candidate 前，部署校验还要求阿里云 region、OIDC provider 与 deploy role ARN、ALB server group id、上传 endpoint 与 object prefix，以及恰好两个不同的 ECS instance id。
 

@@ -55,6 +55,8 @@ The `0.1.7` manifest uses the `previous-release` baseline `BeiKeJieDeLiuLangMao/
 
 The `0.1.8` manifest uses the `previous-release` baseline `gestaltrun/deepseek-harness-gestalt@a6f8c6e4d1887a403de640027c0aa691bcb1647b` (`gestalt-v0.1.7`).
 
+The `0.1.9` manifest uses the `previous-release` baseline `gestaltrun/deepseek-harness-gestalt@2f12663e340d8d26e19251445d0714ca7972155a` (`gestalt-v0.1.8`).
+
 Local unsigned arm64 rehearsal (no notarization):
 
 ```sh

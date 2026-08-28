@@ -1,0 +1,50 @@
+{
+  "version": "0.1.9",
+  "tag": "gestalt-v0.1.9",
+  "source": {
+    "baselineKind": "previous-release",
+    "baselineRepository": "gestaltrun/deepseek-harness-gestalt",
+    "releaseRepository": "gestaltrun/deepseek-harness-gestalt",
+    "baselineCommit": "2f12663e340d8d26e19251445d0714ca7972155a"
+  },
+  "content": {
+    "zh": {
+      "intro": "DeepSeek Gestalt 0.1.9 收录上一版本之后的 {{commitCount}} 个提交。",
+      "sections": [
+        {
+          "heading": "实际运行的 Mobile 连接",
+          "items": [
+            "Desktop 将 Relay WSS 与 Platform HTTPS 通过随 Desktop Bundle 打包的官方 Node helper 传输，避开实际运行环境中的 Electron TLS 连接重置；Electron 继续拥有系统代理选择、Platform Account、配对、Session、附件授权和生命周期。",
+            "Relay 的跨实例目录变化会在投影前读取当前共享 peer 状态，因此两个同时配对的 Mobile 可以各自保持 Remote Online，不会因另一台设备的连接生命周期被错误标记为离线。"
+          ]
+        },
+        {
+          "heading": "Mobile Companion 0.1.0",
+          "items": [
+            "Mobile 发布使用完整链接配对验收；相机与 iPad 不属于本次实际运行验收。Platform Account、搜索、创建入口和设备状态展示得到完善，Android 原生文件选择在前台重新同步后会保留待发送附件。",
+            "`com.gestalt.mobile` 是 iOS 与 Android 的唯一应用标识。内部构建产物继续使用 Gestalt，用户可见名称与图标使用“獭子哥”，发布脚本会拒绝包名、签名、版本或显示元数据漂移。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "intro": "DeepSeek Gestalt 0.1.9 contains the {{commitCount}} commits after the previous Desktop Bundle.",
+      "sections": [
+        {
+          "heading": "Operated Mobile connectivity",
+          "items": [
+            "Desktop carries Relay WSS and Platform HTTPS through official Node helpers packaged in the Desktop Bundle, avoiding Electron TLS connection resets in the operated environment while Electron retains ownership of system proxy selection, Platform Account, pairing, Sessions, attachment authorization, and lifecycle.",
+            "Relay directory changes read current shared peer state before projection, so two concurrently paired Mobile devices can remain independently Remote Online instead of one device's connection lifecycle marking the other offline."
+          ]
+        },
+        {
+          "heading": "Mobile Companion 0.1.0",
+          "items": [
+            "The Mobile release uses complete-link pairing acceptance; camera and iPad are outside this operated acceptance run. Platform Account, search, creation, and device-state presentation are refined, and Android native selections survive foreground resynchronization until submission.",
+            "`com.gestalt.mobile` is the sole iOS and Android application identity. Internal build artifacts remain Gestalt, the user-facing name and icon are 獭子哥, and release scripts reject package, signing, version, or display-metadata drift."
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -2,10 +2,11 @@
 
 English | [中文](README.zh.md)
 
-Same-origin Host Consumer for phone IO and screen capture. The plugin injects `phoneDevices` and `webServer`, registers a WebSocket upgrade plus signed HTTP capture routes, and publishes `ctx.phoneStream`. The browser never dials mobilecli `:12000`: tap/gesture/text/button JSON-RPC rides `/phone/ws/io`, and MJPEG/H264 frames ride Host-origin URLs minted by `sessionFor`. Picture layout (fixed 1:2, axis 3) is a GUI consumer contract; this package only mints stream URLs and forwards frames.
+Same-origin Host Consumer for phone IO and screen capture. The plugin injects `phoneDevices` and `webServer`, registers the fleet-listing route, a WebSocket upgrade plus signed HTTP capture routes, and publishes `ctx.phoneStream`. The browser never dials mobilecli `:12000`: tap/gesture/text/button JSON-RPC rides `/phone/ws/io`, and MJPEG/H264 frames ride Host-origin URLs minted by `sessionFor`. Picture layout (fixed 1:2, axis 3) is a GUI consumer contract; this package only mints stream URLs and forwards frames.
 
 - `sessionFor(id)` — IO upgrade path plus signed `mjpeg` and `h264` URLs whose query token expires after `tokenTtlMs`.
 - `POST /phone/session` — mints those URLs for a device present in the latest listing; the `/api` trust fence runs first.
+- `GET /phone/devices` — answers the grouped fleet listing (`android`, `ios.simulators`, `ios.reals`; each entry `id`/`name`/`kind`/`online`) from the latest `phoneDevices.listDevices()` acquisition; the `/api` trust fence runs first and the body is GET-only on the exact path.
 - `GET /phone/stream/<id>/<mjpeg|h264>?token=` — reverse-proxies `device.screencapture`. The `/api` trust fence runs first, then a loopback Host fence, then HMAC verification; expired, forged, or non-loopback requests return 403.
 - `GET /phone/ws/io` upgrade — forwards `device.io.tap` / `gesture` / `text` / `button` JSON-RPC after the `/api` trust fence; untrusted upgrades are refused before protocol negotiation.
 

@@ -3,7 +3,7 @@
  * @module @deepseek-ai/dsh-phone-stream/types
  */
 
-import type { DeviceId, PhoneCaptureFormat } from '@deepseek-ai/dsh-phone-runtime'
+import type { DeviceId, PhoneCaptureFormat, PhoneDeviceKind } from '@deepseek-ai/dsh-phone-runtime'
 
 /** One signed same-origin capture URL plus its expiry. */
 export interface PhoneStreamUrl {
@@ -23,6 +23,29 @@ export interface PhoneStreamSession {
   readonly mjpeg: PhoneStreamUrl
   /** Signed H264 (`avc`) capture URL. */
   readonly h264: PhoneStreamUrl
+}
+
+/** One device entry of the `GET /phone/devices` listing body. */
+export interface PhoneDeviceRefWire {
+  /** Branded Android serial or iOS UDID as a JSON string. */
+  readonly id: string
+  /** Human-readable device name from the upstream listing. */
+  readonly name: string
+  /** Emulator, iOS simulator, or physical handset class. */
+  readonly kind: PhoneDeviceKind
+  /** True only while the upstream reports the device online. */
+  readonly online: boolean
+}
+
+/** Grouped fleet listing body served by `GET /phone/devices`. */
+export interface PhoneDeviceListWire {
+  /** Every Android device, emulators and handsets alike. */
+  readonly android: readonly PhoneDeviceRefWire[]
+  /** iOS devices split by simulator versus physical handset. */
+  readonly ios: {
+    readonly simulators: readonly PhoneDeviceRefWire[]
+    readonly reals: readonly PhoneDeviceRefWire[]
+  }
 }
 
 export type { PhoneCaptureFormat }

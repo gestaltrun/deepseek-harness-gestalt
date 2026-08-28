@@ -37,6 +37,8 @@ async function loadComposition(): Promise<Context> {
   await writeFile(join(dist, 'app.js'), 'export {}')
   await writeFile(join(dist, 'blob.bin'), 'BLOB')
   await writeFile(join(dist, 'manifest.webmanifest'), '{}')
+  await writeFile(join(dist, 'robots.txt'), 'User-agent: *\nAllow: /\n')
+  await writeFile(join(dist, 'sitemap.xml'), '<?xml version="1.0"?><urlset/>')
   await mkdir(join(dist, 'empty'))
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
@@ -100,6 +102,16 @@ describe('real Loader composition', () => {
       status: 200,
       type: 'application/manifest+json',
       body: '{}',
+    })
+    expect(await request(port, '/robots.txt')).toMatchObject({
+      status: 200,
+      type: 'text/plain; charset=utf-8',
+      body: 'User-agent: *\nAllow: /\n',
+    })
+    expect(await request(port, '/sitemap.xml')).toMatchObject({
+      status: 200,
+      type: 'application/xml; charset=utf-8',
+      body: '<?xml version="1.0"?><urlset/>',
     })
     expect(await request(port, '/app.js', { method: 'HEAD' })).toEqual({
       status: 200,

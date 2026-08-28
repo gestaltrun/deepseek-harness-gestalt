@@ -16,6 +16,7 @@ This table connects model-visible tool names to the plugin package and service s
 | Tool package | Model-visible names | Requires | Writes / affects | Shipped aliases | Deployment note |
 | --- | --- | --- | --- | --- | --- |
 | `@deepseek-ai/dsh-tool-ask-user` | `ask_user_question` | `ctx.tools`, `ctx.userQuestions` | `tool/call`, `tool/result after a UI/provider answers the question` | - | ask_user_question pauses the tool call until the active UI provider returns a human answer. |
+| `@deepseek-ai/dsh-tool-project-members` | `project_members` | `ctx.tools`, `ctx.projectMembership` | `tool/call`, `tool/result` | - | The tool reads the membership seam only and owns no permission decision. The composition injects the session-bound account, the workspace→project binding, and the presence/identity presentation through Config; without those faces the tool still registers and answers the stable `ACCOUNT_UNAVAILABLE` / `PROJECT_UNBOUND` errors at call time. |
 | `@deepseek-ai/dsh-tools` | `run_code`, `tool_search` | `ctx.tools`, `ctx.codeRuntime (execution time)`, `ctx.systemPrompt` | `tool/call`, `one tool/code-dispatch-start + tool/code-dispatch pair per bridged sub-call`, `tool/result` | - | Owned by the tool registry as a reserved transport outside filterable capability layers under `mode: code` / `mode: both` (see the Code Mode Agent Note). Under `code` it is the registry's only wire contribution; the other visible capabilities are declared in a generated SDK section in the loaded runtime's language, and a program calls them through bindings scheduled under the native concurrency contract (submission-ordered starts and policy; concurrency-safe bodies overlap up to `maxParallelSubCalls`) that re-enter the complete guarded tool pipeline and link each nested execution to this outer result. |
 | `@deepseek-ai/dsh-plan-mode` | `exit_plan_mode` | `ctx.tools`, `ctx.systemPrompt`, `ctx.userQuestions (execution time, opportunistic)` | `tool/call`, `plan/mode inactive on an approved review`, `tool/result` | - | exit_plan_mode stays in the model-facing schema while planning is inactive so transitions add no tool-catalog churn on top of the plan-policy change. Its execute path rejects calls outside plan mode; in plan mode it presents the plan over the user-questions seam (approve / keep planning with feedback), and approval logs plan mode inactive at the step boundary. |
 | `@deepseek-ai/dsh-tool-bash` | `bash` | `ctx.tools`, `ctx.shell`, `ctx.systemPrompt`, `ctx.shellEnv`, `ctx.jobs at call time for run_in_background` | `tool/call`, `tool/result` | - | The bash tool is the model-facing consumer of the bash executor seam. A `run_in_background` run registers with the generic `ctx.jobs` runtime and is collected/stopped through the `job_*` tools from `@deepseek-ai/dsh-tool-jobs`; the `enableRunInBackground` config (default true) removes the parameter entirely when disabled. |
@@ -116,6 +117,30 @@ Ask the user a concise question when you need confirmation, a choice, or missing
 Source: [`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)
 
 ask_user_question pauses the tool call until the active UI provider returns a human answer.
+
+<a id="deepseek-aidsh-tool-project-members"></a>
+
+## `@deepseek-ai/dsh-tool-project-members`
+
+### `project_members`
+
+Query the roster of a cloud project: every member with their account reference, display name, avatar, permission role, function tags, and presence. Omit projectId to query the project bound to the current workspace. Use it when coordination, review, or task routing needs to know who is on the project, what each member covers, and who is online.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "description": "Cloud project to query; omit to read the project bound to the current workspace."
+    }
+  }
+}
+```
+
+Source: [`packages/interaction/tool-project-members/src/index.ts`](../packages/interaction/tool-project-members/src/index.ts)
+
+The tool reads the membership seam only and owns no permission decision. The composition injects the session-bound account, the workspace→project binding, and the presence/identity presentation through Config; without those faces the tool still registers and answers the stable `ACCOUNT_UNAVAILABLE` / `PROJECT_UNBOUND` errors at call time.
 
 <a id="deepseek-aidsh-tools"></a>
 

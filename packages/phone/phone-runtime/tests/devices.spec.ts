@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { deviceId } from '@deepseek-ai/dsh-phone-runtime'
 import {
@@ -12,6 +13,12 @@ import { PhoneDevicesError } from '../src/errors.ts'
 const ANDROID_EMU = deviceId('emulator-5554')
 const IOS_SIM = deviceId('SIM-UDID-1')
 const IOS_REAL = deviceId('REAL-UDID-1')
+
+/** Real mobilecli 1.0.5 devices.list result envelope captured during acceptance R2-C. */
+const REAL_1_0_5_ENVELOPE = JSON.parse(readFileSync(
+  new URL('./fixtures/mobilecli-1.0.5-devices-envelope.json', import.meta.url),
+  'utf8',
+)) as { result: { devices: Array<Record<string, unknown>> } }
 
 function wire(
   id: string,
@@ -50,6 +57,23 @@ describe('devices.list result validation', () => {
     ])
   })
 
+  it('accepts the real mobilecli 1.0.5 devices.list envelope verbatim, duplicates included', () => {
+    const refs = parseDeviceInfos(REAL_1_0_5_ENVELOPE.result)
+    expect(refs.map(ref => [ref.id, ref.kind, ref.state, ref.online])).toEqual([
+      [deviceId('00008101-000A2B3C4D5E6F70'), 'real', 'online', true],
+      // The real backend listed the handset twice; the parser keeps both rows.
+      [deviceId('00008101-000A2B3C4D5E6F70'), 'real', 'online', true],
+      [deviceId('D5AB1F8E-11D2-4E0A-9C7E-1A2B3C4D5E6F'), 'simulator', 'online', true],
+      [deviceId('9F0E1D2C-3B4A-5968-7788-99AABBCCDDEE'), 'simulator', 'online', true],
+      [deviceId('C7D8E9F0-1122-3344-5566-778899AABBCC'), 'simulator', 'offline', false],
+    ])
+  })
+
+  it('accepts the devices envelope and the bare array shapes identically', () => {
+    const bare = parseDeviceInfos(REAL_1_0_5_ENVELOPE.result.devices)
+    expect(parseDeviceInfos({ devices: REAL_1_0_5_ENVELOPE.result.devices })).toEqual(bare)
+  })
+
   it('reports a change when only the upstream state flips between two non-online values', () => {
     const before = groupEntries(parseDeviceInfos([wire('u', 'ios', 'real', 'unauthorized')]))
     const after = groupEntries(parseDeviceInfos([wire('u', 'ios', 'real', 'offline')]))
@@ -58,6 +82,7 @@ describe('devices.list result validation', () => {
 
   it.each([
     ['non-array', 42, 'result must be a device array'],
+    ['envelope without a devices array', { devices: 42 }, 'result must be a device array'],
     ['element not object', [null], 'must be an object'],
     ['missing id', [{ name: 'x', platform: 'ios', type: 'real', state: 'online' }], '"id"'],
     ['empty name', [{ id: 'i', name: '', platform: 'ios', type: 'real', state: 'online' }], '"name"'],

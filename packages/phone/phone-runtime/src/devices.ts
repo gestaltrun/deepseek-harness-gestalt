@@ -16,11 +16,8 @@ import type {
   PhoneDeviceRef,
 } from './types.ts'
 
-/** One validated upstream device, keeping its platform for grouping. */
-export interface MobilecliDevice extends PhoneDeviceRef {
-  /** Upstream platform this entry was listed under. */
-  readonly platform: 'ios' | 'android'
-}
+/** One validated upstream device; the platform rides the public ref. */
+export interface MobilecliDevice extends PhoneDeviceRef {}
 
 /** Upstream `type` values this Service accepts; anything else breaks protocol. */
 const KINDS: readonly string[] = ['emulator', 'simulator', 'real']
@@ -42,16 +39,19 @@ function stringField(record: Record<string, unknown>, key: string, index: number
 }
 
 /**
- * Validate and map one raw `devices.list` result onto device snapshots.
+ * Validate and map one raw `devices.list` result onto device snapshots. Both
+ * shipped wire shapes are accepted: the bare device array and mobilecli
+ * 1.0.5's `{ devices: [...] }` envelope. Duplicate upstream entries are kept
+ * verbatim — the real backend has listed one handset twice.
  * @param result - JSON-RPC result value as received from the HTTP transport.
  * @returns one entry per reported device, in upstream order.
- * @throws {@link PhoneDevicesError} with `PHONE_PROTOCOL` when the value is not
- * an array or any element misses required fields, names an unknown platform,
- * or reports an unknown `type`.
+ * @throws {@link PhoneDevicesError} with `PHONE_PROTOCOL` when the value is
+ * neither an array nor a devices envelope, or any element misses required
+ * fields, names an unknown platform, or reports an unknown `type`.
  */
 export function parseDeviceInfos(result: unknown): readonly MobilecliDevice[] {
-  if (!Array.isArray(result)) throw protocolError('result must be a device array')
-  return result.map((entry, index) => {
+  const entries = unwrapDeviceEntries(result)
+  return entries.map((entry, index) => {
     if (typeof entry !== 'object' || entry === null) {
       throw protocolError(`device ${String(index)} must be an object`)
     }
@@ -67,6 +67,21 @@ export function parseDeviceInfos(result: unknown): readonly MobilecliDevice[] {
     const device: MobilecliDevice = Object.freeze({ id, name, kind, state, online: state === 'online', platform })
     return device
   })
+}
+
+/**
+ * Unwrap one `devices.list` result onto its device entries.
+ * @param result - JSON-RPC result value as received from the HTTP transport.
+ * @returns the device entries, whatever envelope shape carried them.
+ * @throws {@link PhoneDevicesError} with `PHONE_PROTOCOL` when the value is
+ * neither a bare array nor an envelope carrying a devices array.
+ */
+function unwrapDeviceEntries(result: unknown): readonly unknown[] {
+  if (Array.isArray(result)) return result
+  if (typeof result === 'object' && result !== null && Array.isArray((result as { devices?: unknown }).devices)) {
+    return (result as { devices: readonly unknown[] }).devices
+  }
+  throw protocolError('result must be a device array or a { devices: [...] } envelope')
 }
 
 /**

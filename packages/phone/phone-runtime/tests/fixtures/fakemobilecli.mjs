@@ -163,12 +163,12 @@ async function handleRpc(req, res) {
     }
     case 'devices.list': {
       const includeOffline = params?.includeOffline === true
-      reply(res, id, {
-        result: state.devices.filter(device => includeOffline || device.state === 'online').map(device => ({
-          ...device,
-          provider: { type: 'local' },
-        })),
-      })
+      const entries = state.devices.filter(device => includeOffline || device.state === 'online').map(device => ({
+        ...device,
+        provider: { type: 'local' },
+      }))
+      // Real mobilecli 1.0.5 wraps the array in a `{ devices: [...] }` envelope.
+      reply(res, id, { result: knobs.listEnvelope === true ? { devices: entries } : entries })
       return
     }
     case 'device.boot':

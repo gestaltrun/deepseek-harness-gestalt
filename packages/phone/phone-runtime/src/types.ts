@@ -20,6 +20,8 @@ export interface PhoneDeviceRef {
   readonly name: string
   /** Emulator, iOS simulator, or physical handset class. */
   readonly kind: PhoneDeviceKind
+  /** Upstream platform this entry was listed under. */
+  readonly platform: 'ios' | 'android'
   /** Upstream state verbatim (`online`, `offline`, `unauthorized`, ...); the listing never folds distinct states together. */
   readonly state: string
   /** True only while the upstream reports the device online; every other state reads false. */

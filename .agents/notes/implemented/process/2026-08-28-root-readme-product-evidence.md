@@ -1,4 +1,4 @@
-# Agent Note: Root README leads with product evidence
+# Agent Note: Root README maps the Gestalt product layer
 
 Status: implemented
 
@@ -6,28 +6,32 @@ English | [中文](2026-08-28-root-readme-product-evidence.zh.md)
 
 ## Problem
 
-The root README began with a short Desktop and phone description, then moved directly into run commands. It did not explain why durable Sessions, plugin composition, or several clients belong in one product. Readers could not distinguish the repository's product direction from its installation surface, and the page did not show completed product behavior already demonstrated through exact-product acceptance recordings.
+The root README described Gestalt as a desktop and phone workspace but did not make its relationship to official DeepSeek Harness precise. Readers could not see which capabilities came from the DSH base, which product functions Gestalt added, which community plugins it integrated, or which work remained active or planned.
 
-The architecture reference owns internal composition and the user guides own procedures. Copying either into the README would make the landing page long and create a second home for facts that change with the runtime.
+A short gallery also hid the breadth of completed product work. An exhaustive package inventory would have the opposite failure: it would duplicate generated catalogs and expose implementation structure instead of explaining the product.
 
 ## Decision
 
-The root README is the product landing page for DeepSeek Gestalt and DeepSeek Harness. It introduces the vision first: one durable Session connects models, tools, files, human decisions, and clients, while plugins keep capabilities replaceable. It then shows a small set of current user workflows before listing built capabilities and the shortest supported run paths.
+The root README presents Gestalt as the product layer on top of official DSH. Its direction has four parts: complete the installable product, keep DSH composition and entry points compatible, integrate reviewed community plugins, and preserve one durable authority across clients. The README treats upstream compatibility as ongoing repository work, not a claim that every developer-preview commit is interchangeable.
 
-Each embedded product GIF comes from a merged change's accepted product path and uses an immutable repository object id in its URL. The selected set covers the repository Workbench, durable Side Chat continuation, and encrypted Mobile Companion continuation. The README states only the behavior visible in the current product or owned by the linked architecture and user references; detailed provenance remains in merged pull requests [#317](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/317), [#329](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/329), and [#312](https://github.com/gestaltrun/deepseek-harness-gestalt/pull/312), respectively.
+A tracker-backed product map separates Gestalt additions into product domains. `DONE` requires a capability to be merged into `master`; it does not claim inclusion in the latest packaged release. `DOING` requires an active delivery pull request. `TODO` requires an accepted open issue. Each nonempty state links the pull request, issue, owning reference, or plugin catalog that supports it. The map covers product functions added around the DSH base rather than repeating the official DSH package and tool catalogs.
 
-Installation steps stay short. The README links to the user guide for first-run detail, architecture for composition and lifecycle semantics, generated catalogs for current runtime interfaces, and development documentation for contributor workflows. Community and legal information remain available after the product and run sections.
+Feature tours expand the map with accepted product recordings for Workbench and Better Sidebar, Side Chat, Schedule, AI Browser, Workspace Reference, Annotation, and Mobile Companion. Every embedded GIF comes from a merged change's real product path and uses an immutable repository object id. Provenance remains in the linked pull requests.
+
+Installation steps stay short. The README links first-run procedures to the user guide, composition and lifecycle semantics to architecture and application references, external integrations to the plugin catalog, and contributor workflows to development documentation.
 
 ## Alternatives considered
 
-**Keep the command-first README.** Rejected because installation alone does not explain the product or show why its Desktop, Web, Mobile, Session, and plugin work belongs together.
+**Describe Gestalt only as another DSH client.** Rejected because Desktop, Mobile, Workbench, distribution, acceptance, and community integration are a product layer, not one client implementation.
 
-**List every package and feature.** Rejected because source and generated catalogs already own exhaustive inventories, and a hand-maintained list would drift.
+**List every package and tool.** Rejected because generated catalogs and source own exhaustive inventories. The product map groups user-facing Gestalt additions by outcome.
+
+**Show only completed work.** Rejected because active product direction would remain invisible. Tracker-backed `DOING` and `TODO` states distinguish committed delivery from plans without presenting open work as shipped.
 
 **Use mock screenshots or conceptual artwork.** Rejected because they cannot demonstrate current product behavior. Accepted product recordings provide concrete evidence without turning the README into a test report.
 
-**Embed every available product GIF.** Rejected because repeated animations make the page slow and obscure the three workflows that explain the product direction.
+**Embed every available recording.** Rejected because repeated animations make the page slow and hide the main product domains. One representative recording or paired comparison per tour is sufficient.
 
 ## Consequences
 
-New readers can understand the product before choosing an installation path and can inspect real workflows without leaving the page. The README is longer and downloads three small GIFs, so maintainers keep the set limited and replace an asset only with another accepted product recording. Detailed behavior, configuration, and verification continue to live in their owning documents and pull requests.
+Readers can see the official DSH base, the extra Gestalt product layer, current delivery, and planned work in one pass, then inspect real workflows by domain. The status map can become stale, so every README change that touches product scope verifies its issue and pull-request links against the live tracker. Detailed runtime behavior, configuration, compatibility limits, and verification remain in their owning documents and pull requests.

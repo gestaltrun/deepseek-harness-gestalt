@@ -6,7 +6,7 @@
 
 - `sessionFor(id)` — IO 升级路径以及签名的 `mjpeg` 与 `h264` URL，查询 token 在 `tokenTtlMs` 后过期。
 - `POST /phone/session` — 为最新清单中存在的设备签发这些 URL；先执行 `/api` 信任栅栏。
-- `GET /phone/devices` — 依据最近一次 `phoneDevices.listDevices()` 应答分组后的设备清单（`android`、`ios.simulators`、`ios.reals`；每项含 `id`/`name`/`kind`/`online`）；先执行 `/api` 信任栅栏，仅限精确路径的 GET。
+- `GET /phone/devices` — 依据最近一次 `phoneDevices.listDevices()` 应答分组后的设备清单（`android`、`ios.simulators`、`ios.reals`；每项含 `id`/`name`/`kind`/`state`/`online`，`state` 原样保留上游状态）；先执行 `/api` 信任栅栏，仅限精确路径的 GET。
 - `GET /phone/stream/<id>/<mjpeg|h264>?token=` — 反代 `device.screencapture`。先执行 `/api` 信任栅栏，再执行 loopback Host 栅栏，最后校验 HMAC；过期、伪造或非 loopback 请求返回 403。
 - `GET /phone/ws/io` 升级 — 在 `/api` 信任栅栏之后转发 `device.io.tap` / `gesture` / `text` / `button` JSON-RPC；未信任的升级在协议协商前被拒绝。
 

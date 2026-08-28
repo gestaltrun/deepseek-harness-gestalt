@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-28-ui-phone-settings-wizard-card.md
-2026-08-28-ui-phone-settings-wizard-card.md: f90f85d841482e6eebd71001b0c5021f9510b9a4
-2026-08-28-ui-phone-settings-wizard-card.zh.md: 0e93e761fd8b700c4cceae2405c2bc08c7e07e17
+2026-08-28-ui-phone-settings-wizard-card.md: 5bcc2da9b1ef6f72b6b0d858b9dae1d5bb9b9af2
+2026-08-28-ui-phone-settings-wizard-card.zh.md: 04323bc6e2a7d16feed00d75dc721e45767664e8

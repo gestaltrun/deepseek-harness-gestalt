@@ -21,8 +21,9 @@ import { PhoneSettingsCardController } from './phone-settings-controller.ts'
 import { MISSING_PHONE_ENVIRONMENT_SOURCE } from './phone-environment.ts'
 import { PhoneConnectionController } from './phone-connection.ts'
 import { createHttpPhoneGateway } from './phone-stream-client.ts'
+import { createHttpPhoneListingSource } from './phone-listing.ts'
 import {
-  installPhoneTab, NULL_PHONE_BADGE_SOURCE, phoneDeviceTabMetaOf,
+  installPhoneTab, phoneDeviceTabMetaOf,
   type PhoneTabBodyProps, type PhoneTabEnvironment, type PhoneTabView,
 } from './registry.ts'
 import { PHONE_SETTINGS_NAMESPACE } from '../phone-settings.ts'
@@ -58,13 +59,12 @@ function renderPhoneTabBody(props: PhoneTabBodyProps, env: PhoneTabEnvironment):
   if (device === undefined) {
     return <PhoneTab enabled={env.isEnabled()} source={env.source} onOpenDevice={env.openDevice} />
   }
-  const devices = [...env.source.listDevices('android'), ...env.source.listDevices('ios')]
   return (
     <PhoneConnectedView
       serial={device.serial}
       name={device.name}
       visible={props.visible}
-      devices={devices}
+      source={env.source}
       onOpenDevice={env.openDevice}
       createController={env.createController}
     />
@@ -96,7 +96,7 @@ export function apply(ctx: ClientContext, config: Config): void {
     component: renderPhoneTabBody,
   }
   installPhoneTab(ctx, {
-    source: NULL_PHONE_BADGE_SOURCE,
+    source: createHttpPhoneListingSource(),
     view,
     isEnabled: tabEnabled,
     createController: serial => new PhoneConnectionController({

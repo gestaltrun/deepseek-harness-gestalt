@@ -7,10 +7,11 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
-  buildPhoneTabDescriptor, createPhoneTabOpener, installPhoneTab, NULL_PHONE_BADGE_SOURCE, PHONE_TAB_ID,
+  buildPhoneTabDescriptor, createPhoneTabOpener, installPhoneTab, PHONE_TAB_ID,
   phoneDeviceTabMetaOf,
   type PhoneTabDescriptor, type PhoneTabView,
 } from '../src/client/registry.ts'
+import { createHttpPhoneListingSource } from '../src/client/phone-listing.ts'
 
 /** One tab instance the fake sidebar holds. */
 interface FakeTab {
@@ -69,7 +70,7 @@ describe('per-device phone tabs', () => {
   it('focuses the existing tab when the same serial opens twice', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
-      source: NULL_PHONE_BADGE_SOURCE, view: stubView(), isEnabled: () => true,
+      source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => true,
       openDevice: createPhoneTabOpener(sidebar, () => true),
       createController: () => {
         throw new Error('not expected in this spec')
@@ -88,7 +89,7 @@ describe('per-device phone tabs', () => {
   it('opens one tab per serial and keys dedupe on the serial only', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
-      source: NULL_PHONE_BADGE_SOURCE, view: stubView(), isEnabled: () => true,
+      source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => true,
       openDevice: createPhoneTabOpener(sidebar, () => true),
       createController: () => {
         throw new Error('not expected in this spec')
@@ -106,7 +107,7 @@ describe('per-device phone tabs', () => {
   it('keeps the + menu picker single-instance through the id safety net', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
-      source: NULL_PHONE_BADGE_SOURCE, view: stubView(), isEnabled: () => true,
+      source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => true,
       openDevice: createPhoneTabOpener(sidebar, () => true),
       createController: () => {
         throw new Error('not expected in this spec')
@@ -133,7 +134,7 @@ describe('per-device phone tabs', () => {
   it('drops device-tab opens while the deployment disables connections', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
-      source: NULL_PHONE_BADGE_SOURCE, view: stubView(), isEnabled: () => false,
+      source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => false,
       openDevice: createPhoneTabOpener(sidebar, () => false),
       createController: () => {
         throw new Error('not expected in this spec')
@@ -153,7 +154,7 @@ describe('per-device phone tabs', () => {
     let gate = true
     ctx.provide('betterSidebar', sidebar)
     installPhoneTab(ctx, {
-      source: NULL_PHONE_BADGE_SOURCE,
+      source: createHttpPhoneListingSource(),
       view: {
         icon: () => null,
         component: (props, env) => {

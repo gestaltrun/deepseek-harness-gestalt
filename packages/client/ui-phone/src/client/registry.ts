@@ -1,5 +1,5 @@
 /**
- * Phone tab registration core: the shared value vocabulary (badge source,
+ * Phone tab registration core: the shared value vocabulary (listing source,
  * device summaries), the 「手机」 tab descriptor with per-device tab
  * instances (`phone:<serial>` ids, serial dedupeKey), and the fiber-scoped
  * mount into the better-sidebar registry.
@@ -53,23 +53,30 @@ export interface PhoneDeviceSummary {
   readonly online: boolean
 }
 
-/**
- * Consumer-supplied device abstraction backing both the strip badge and the
- * tab body's list. The shipped default reports no devices; the mobilecli
- * provider mounts here in a later ticket. `getBadge` sits on the per-render
- * hot path and must stay cheap and synchronous.
- */
-export interface PhoneBadgeSource {
-  /** Current badge snapshot (strip pill value). */
-  getBadge(): PhoneBadgeSnapshot
-  /** Devices listed under one platform segment. */
-  listDevices(platform: PhonePlatform): readonly PhoneDeviceSummary[]
+/** One committed listing: summaries grouped per platform segment. */
+export interface PhoneListingSnapshot {
+  /** Devices the Android segment lists. */
+  readonly android: readonly PhoneDeviceSummary[]
+  /** Devices the iOS segment lists (simulators and physical handsets). */
+  readonly ios: readonly PhoneDeviceSummary[]
 }
 
-/** The shipped no-op source: no online devices, an empty list everywhere. */
-export const NULL_PHONE_BADGE_SOURCE: PhoneBadgeSource = {
-  getBadge: () => ({ onlineCount: 0 }),
-  listDevices: () => [],
+/**
+ * Device abstraction backing the strip badge and both tab bodies' lists.
+ * The shipped implementation consumes the Host `GET /phone/devices` route
+ * (see `phone-listing.ts`). `getBadge` sits on the per-render hot path and
+ * must stay cheap and synchronous; `snapshot` keeps its reference stable
+ * between commits so it can seat `useSyncExternalStore`.
+ */
+export interface PhoneListingSource {
+  /** Current badge snapshot (strip pill value). */
+  getBadge(): PhoneBadgeSnapshot
+  /** Current committed listing; the same reference until the next commit. */
+  snapshot(): PhoneListingSnapshot
+  /** Pull the latest fleet listing from the Host; commits only on success. */
+  refresh(): Promise<void>
+  /** Subscribe to commits; returns the disposer. */
+  subscribe(listener: () => void): () => void
 }
 
 /**
@@ -79,7 +86,7 @@ export const NULL_PHONE_BADGE_SOURCE: PhoneBadgeSource = {
  * string/number pill contract, so the quiet arm stays invisible until the
  * contract extends (see the README's known limitation).
  */
-export function phoneBadgeValue(source: PhoneBadgeSource): number | null {
+export function phoneBadgeValue(source: PhoneListingSource): number | null {
   const { onlineCount } = source.getBadge()
   return onlineCount > 0 ? onlineCount : null
 }
@@ -211,8 +218,8 @@ export function createPhoneTabOpener(
 export interface PhoneTabEnvironment {
   /** Current enable gate (the picker pins its strip from this). */
   readonly isEnabled: () => boolean
-  /** Device abstraction backing the picker list and the device dropdown. */
-  readonly source: PhoneBadgeSource
+  /** Listing source backing the picker list and the device dropdown. */
+  readonly source: PhoneListingSource
   /** Open (or focus) the per-device tab of one device. */
   readonly openDevice: (serial: string, name: string) => void
   /** Create the live connection controller for one device tab. */
@@ -273,8 +280,8 @@ export interface PhoneTabDescriptorOptions extends PhoneTabOptions {
 
 /** What {@link installPhoneTab} needs beyond the cordis context. */
 export interface PhoneTabOptions {
-  /** Device abstraction wired into the badge and the tab bodies. */
-  readonly source: PhoneBadgeSource
+  /** Listing source wired into the badge and the tab bodies. */
+  readonly source: PhoneListingSource
   /** Browser-only chrome (icon SVG + styled bodies). */
   readonly view: PhoneTabView
   /** Current enable gate, read at open and render time. */

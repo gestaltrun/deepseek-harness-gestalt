@@ -6,9 +6,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantFailure, InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 import {
-  assertPhoneTabSymmetry, installPhoneTab, NULL_PHONE_BADGE_SOURCE,
+  assertPhoneTabSymmetry, installPhoneTab,
   PHONE_TAB_ID, type PhoneTabView,
 } from './client/registry.ts'
+import { createHttpPhoneListingSource } from './client/phone-listing.ts'
 
 const PACKAGE_NAME = '@deepseek-ai/dsh-client-ui-phone'
 
@@ -91,7 +92,7 @@ const install: InvariantInstaller = async (ctx: Context, fail: InvariantFailure)
     inject: ['betterSidebar'],
     apply: (pluginCtx: Context): void => {
       installPhoneTab(pluginCtx, {
-        source: NULL_PHONE_BADGE_SOURCE,
+        source: createHttpPhoneListingSource(),
         view: stubView,
         isEnabled: () => false,
         createController: () => {

@@ -170,6 +170,15 @@ describe('phone stream Host routes', () => {
     expect((await rawRequest({ origin, path: '/phone/devices', host: 'evil.example' })).status).toBe(403)
   })
 
+  it('answers 502 when the listing fails upstream', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    context.phoneDevices.listDevices = async () => {
+      throw new Error('listing backend down')
+    }
+    expect((await rawRequest({ origin, path: '/phone/devices', host })).status).toBe(502)
+  })
+
   it('refuses a signed capture URL that is expired, forged, or not loopback', async () => {
     const { origin } = await mount()
     const host = new URL(origin).host

@@ -1,15 +1,16 @@
 /**
  * Phone tab body: the not-connected empty state of the locked design —
- * state with the platform selector, the grouped device list, and the inert
- * re-detect placeholder. Connected instances of the same tab type render
- * the live view instead; every fact this component reads arrives through
- * plain props (the enable gate, the device source, the device-tab opener),
- * never through a service or context.
+ * state with the platform selector, the grouped device list, and the
+ * 重新检测环境 control that pulls the fleet listing. Connected instances
+ * of the same tab type render the live view instead; every fact this
+ * component reads arrives through plain props (the enable gate, the
+ * listing source, the device-tab opener), never through a service or
+ * context.
  */
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import {
-  PHONE_PLATFORMS, type PhoneBadgeSource, type PhoneDeviceSummary, type PhonePlatform,
+  PHONE_PLATFORMS, type PhoneDeviceSummary, type PhoneListingSource, type PhonePlatform,
 } from './registry.ts'
 import css from './PhoneTab.module.css'
 import shared from './PhoneShared.module.css'
@@ -18,8 +19,8 @@ import shared from './PhoneShared.module.css'
 export interface PhoneTabProps {
   /** Validated Config.enabled; false renders the top gate strip. */
   readonly enabled: boolean
-  /** Device abstraction backing the list rows (default reports none). */
-  readonly source: PhoneBadgeSource
+  /** Listing source backing the rows (starts empty until a pull commits). */
+  readonly source: PhoneListingSource
   /** Open (or focus) the per-device tab of one listed device. */
   readonly onOpenDevice: (serial: string, name: string) => void
 }
@@ -43,12 +44,27 @@ const GROUP_TITLES: Record<PhoneDeviceSummary['channel'], string> = {
 
 /**
  * Render the empty-state body for one tab.
- * @param props - enable-gate value, the injected device source, and the opener.
+ * @param props - enable-gate value, the injected listing source, and the opener.
  * @returns the not-connected empty state.
  */
 export function PhoneTab({ enabled, source, onOpenDevice }: PhoneTabProps): ReactNode {
   const [platform, setPlatform] = useState<PhonePlatform>('android')
-  const devices = useMemo(() => source.listDevices(platform), [source, platform])
+  // The listing source is the owning observable; uSES is the render-side
+  // adapter (better-sidebar tab hosts have no slot hook channel).
+  const subscribe = useCallback((listener: () => void) => source.subscribe(listener), [source])
+  const getSnapshot = useCallback(() => source.snapshot(), [source])
+  const listing = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+  const [refreshing, setRefreshing] = useState(false)
+  const refresh = (): void => {
+    setRefreshing(true)
+    // A failed pull keeps the committed listing on screen; the next click retries.
+    source.refresh().catch(() => undefined).finally(() => { setRefreshing(false) })
+  }
+  useEffect(() => {
+    if (!enabled) return
+    source.refresh().catch(() => undefined)
+  }, [enabled, source])
+  const devices = listing[platform]
   return (
     <div className={css.phone}>
       {!enabled && (
@@ -106,9 +122,14 @@ export function PhoneTab({ enabled, source, onOpenDevice }: PhoneTabProps): Reac
         )
       })}
       <div className={css.redetectZone}>
-        {/* Detection wiring arrives with the mobilecli ticket; the control is
-            a disabled placeholder until that source exists. */}
-        <button type="button" className={css.redetectButton} disabled>重新检测环境</button>
+        <button
+          type="button"
+          className={css.redetectButton}
+          disabled={!enabled || refreshing}
+          onClick={refresh}
+        >
+          重新检测环境
+        </button>
       </div>
     </div>
   )

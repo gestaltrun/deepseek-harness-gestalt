@@ -2,30 +2,36 @@
 /**
  * Phone tab body behavior on realistic props: the enable gate strips, the
  * platform selector drives the hint and list, device rows render from the
- * injected source with their 打开 action, the USB placeholder follows its
- * group, and re-detect stays a disabled placeholder in this skeleton.
+ * committed listing with their 打开 action, the USB placeholder follows its
+ * group, and 重新检测环境 pulls the fleet listing from the source.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PhoneTab } from '../src/client/PhoneTab.tsx'
-import type { PhoneBadgeSource, PhoneDeviceSummary } from '../src/client/registry.ts'
+import type { PhoneDeviceSummary } from '../src/client/registry.ts'
+import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 
 afterEach(cleanup)
 
-function sourceWith(devices: readonly PhoneDeviceSummary[], onlineCount = devices.filter(d => d.online).length)
-  : PhoneBadgeSource {
-  return { getBadge: () => ({ onlineCount }), listDevices: () => devices }
-}
+const EMULATOR: readonly PhoneDeviceSummary[] = [
+  { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: true },
+]
 
 const openDevice = vi.fn()
 
-function renderTab(props: { readonly enabled: boolean; readonly source: PhoneBadgeSource }): void {
-  render(<PhoneTab {...props} onOpenDevice={openDevice} />)
+async function renderTab(enabled: boolean, source: FakeListingSource): Promise<void> {
+  render(<PhoneTab enabled={enabled} source={source} onOpenDevice={openDevice} />)
+  await act(async () => { await flush() })
+}
+
+function redetect(): HTMLButtonElement {
+  return screen.getByRole('button', { name: '重新检测环境' }) as HTMLButtonElement
 }
 
 describe('PhoneTab empty state', () => {
-  it('renders the gated empty state when disabled', () => {
-    renderTab({ enabled: false, source: sourceWith([]) })
+  it('renders the gated empty state when disabled and never pulls the fleet', async () => {
+    const source = new FakeListingSource()
+    await renderTab(false, source)
     expect(screen.getByRole('note', { name: '手机连接未启用' })).toBeTruthy()
     expect(screen.getByText('该部署未开启设备检测；入口保持可用，启用后即可发现并连接设备。')).toBeTruthy()
     // The full empty-state surface rides below the strip.
@@ -33,33 +39,37 @@ describe('PhoneTab empty state', () => {
     expect(screen.getByText('模拟器')).toBeTruthy()
     expect(screen.getByText('USB 真机')).toBeTruthy()
     expect(screen.getByText('用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。')).toBeTruthy()
-    const redetect = screen.getByRole('button', { name: '重新检测环境' }) as HTMLButtonElement
-    expect(redetect.disabled).toBe(true)
+    expect(redetect().disabled).toBe(true)
+    expect(source.refreshCount).toBe(0)
   })
 
-  it('omits the gate strip once enabled', () => {
-    renderTab({ enabled: true, source: sourceWith([]) })
+  it('omits the gate strip once enabled', async () => {
+    await renderTab(true, new FakeListingSource())
     expect(screen.queryByRole('note', { name: '手机连接未启用' })).toBeNull()
   })
 
-  it('switches the active segment and its guidance copy', () => {
-    renderTab({ enabled: false, source: sourceWith([]) })
+  it('switches the active segment, its guidance copy, and its rows', async () => {
+    const source = new FakeListingSource().seed(listingOf(EMULATOR, [
+      { id: 'iPhone-16', name: 'iPhone 16', channel: 'emulator', online: true },
+    ]))
+    await renderTab(true, source)
     const android = screen.getByRole('button', { name: 'Android' })
     const ios = screen.getByRole('button', { name: 'iOS' })
     expect(android.getAttribute('aria-pressed')).toBe('true')
-    expect(screen.getByText('切换到 iOS 将列出 Xcode 模拟器与 WDA 真机')).toBeTruthy()
+    expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
     fireEvent.click(ios)
     expect(ios.getAttribute('aria-pressed')).toBe('true')
     expect(screen.getByText('切换到 Android 将列出 ADB 模拟器与 USB 真机')).toBeTruthy()
-    expect((android as HTMLButtonElement).getAttribute('aria-pressed')).toBe('false')
+    expect(screen.getByText('iPhone 16')).toBeTruthy()
+    expect(screen.queryByText('Pixel_6_API_35')).toBeNull()
   })
 
-  it('lists devices of both groups straight from the injected source', () => {
-    const devices = [
-      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator' as const, online: true },
-      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb' as const, online: false },
-    ]
-    renderTab({ enabled: true, source: sourceWith(devices) })
+  it('lists devices of both groups straight from the committed listing', async () => {
+    const source = new FakeListingSource().seed(listingOf([
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: true },
+      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: false },
+    ]))
+    await renderTab(true, source)
     expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
     expect(screen.getByText('在线')).toBeTruthy()
     expect(screen.getByText('SM-S9310')).toBeTruthy()
@@ -68,37 +78,86 @@ describe('PhoneTab empty state', () => {
     expect(screen.queryByText('用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。')).toBeNull()
   })
 
-  it('opens the per-device tab only from online rows', () => {
-    const devices = [
-      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator' as const, online: true },
-      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb' as const, online: false },
-    ]
-    renderTab({ enabled: true, source: sourceWith(devices) })
+  it('opens the per-device tab only from online rows', async () => {
+    const source = new FakeListingSource().seed(listingOf([
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: true },
+      { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: false },
+    ]))
+    await renderTab(true, source)
     expect(screen.getAllByRole('button', { name: '打开' })).toHaveLength(1)
     fireEvent.click(screen.getByRole('button', { name: '打开' }))
     expect(openDevice).toHaveBeenCalledWith('emulator-5554', 'Pixel_6_API_35')
   })
 
-  it('keeps the USB placeholder while only simulators answer', () => {
-    const devices = [
-      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator' as const, online: false },
-    ]
-    renderTab({ enabled: true, source: sourceWith(devices) })
+  it('keeps the USB placeholder while only simulators answer', async () => {
+    const source = new FakeListingSource().seed(listingOf([
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: false },
+    ]))
+    await renderTab(true, source)
     expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
     expect(screen.getByText('用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。')).toBeTruthy()
   })
 
-  it('relists devices when the platform switches', () => {
-    const listed: string[] = []
-    const source: PhoneBadgeSource = {
-      getBadge: () => ({ onlineCount: 0 }),
-      listDevices(platform) {
-        listed.push(platform)
-        return []
-      },
-    }
-    renderTab({ enabled: true, source })
-    fireEvent.click(screen.getByRole('button', { name: 'iOS' }))
-    expect(listed).toEqual(['android', 'ios'])
+  it('pulls the fleet on mount when enabled and renders the committed rows', async () => {
+    const source = new FakeListingSource()
+    source.scriptNext(listingOf(EMULATOR))
+    await renderTab(true, source)
+    expect(source.refreshCount).toBe(1)
+    expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '打开' })).toBeTruthy()
+  })
+
+  it('keeps the empty listing on screen when the mount pull fails', async () => {
+    const source = new FakeListingSource()
+    source.scriptNext(Promise.reject(new Error('host down')))
+    await renderTab(true, source)
+    expect(screen.queryByRole('button', { name: '打开' })).toBeNull()
+    expect(redetect().disabled).toBe(false)
+  })
+})
+
+describe('PhoneTab re-detect', () => {
+  it('relists devices when 重新检测环境 runs', async () => {
+    const source = new FakeListingSource()
+    await renderTab(true, source)
+    expect(redetect().disabled).toBe(false)
+    expect(source.refreshCount).toBe(1)
+    source.scriptNext(listingOf(EMULATOR))
+    await act(async () => {
+      fireEvent.click(redetect())
+      await flush()
+    })
+    expect(source.refreshCount).toBe(2)
+    expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
+    expect(redetect().disabled).toBe(false)
+  })
+
+  it('disables the control while a refresh is in flight', async () => {
+    const source = new FakeListingSource()
+    await renderTab(true, source)
+    let release: (() => void) | undefined
+    source.scriptNext(new Promise<void>((resolve) => { release = resolve }))
+    await act(async () => {
+      fireEvent.click(redetect())
+      await flush()
+    })
+    expect(redetect().disabled).toBe(true)
+    await act(async () => {
+      release?.()
+      await flush()
+    })
+    expect(redetect().disabled).toBe(false)
+  })
+
+  it('keeps the committed listing on screen when a refresh fails', async () => {
+    const source = new FakeListingSource().seed(listingOf(EMULATOR))
+    await renderTab(true, source)
+    source.scriptNext(Promise.reject(new Error('host down')))
+    await act(async () => {
+      fireEvent.click(redetect())
+      await flush()
+    })
+    expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
+    expect(redetect().disabled).toBe(false)
   })
 })

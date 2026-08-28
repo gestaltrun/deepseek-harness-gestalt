@@ -14,7 +14,7 @@ Host 半边在 settings 提供方组装时注册持久化 `ui-phone` 命名空�
 
 Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是组装默认值。注册不依赖它——关闭时选择器入口仍然可达，选择器内容会在空态上方固定渲染「手机连接未启用」说明条。持久化开关关闭时不发现设备、不拉起 `mobilecli`、不路由任何流。
 
-条状徽标与两块内容读取同一个注入抽象 `PhoneBadgeSource`（`getBadge(): { onlineCount }` 供每次渲染的徽标读取，`listDevices(platform)` 供清单行读取）。随包默认是空实现 `NULL_PHONE_BADGE_SOURCE`；mobilecli provider 在后续子票替换它。徽标取值：存在在线设备时输出在线台数，否则为 `null`。
+条状徽标与两块内容读取同一个注入抽象 `PhoneListingSource`（`getBadge(): { onlineCount }` 供每次渲染的徽标读取，`snapshot()` / `refresh()` / `subscribe()` 供两块内容读取）。随包实现消费 Host 的 `GET /phone/devices` 路由：每次拉取都会校验分组清单，emulator 与 simulator 类型归入「模拟器」组、真机归入「USB 真机」组，且只在成功时提交——失败的拉取保留上一份清单。启用时选择器在挂载时拉取一次，并由「重新检测环境」再次拉取；已连接 tab 挂载时也会拉取，使其下拉无需先访问选择器即可点亮。徽标取值：存在在线设备时输出在线台数，否则为 `null`。
 
 组装关系：`tsconfig.client.json` 聚合引用本包；`packages/bundle/web-app/cordis.patch.yml` 携带 `ui-phone` 浏览器行；`packages/bundle/web-app/package.json` 声明依赖。包 invariant 伴生体在同进程 fake 注册表上以真实 cordis fiber 证明 tab 注册/注销对称。
 
@@ -31,7 +31,7 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 - **徽标保真缺口**——已锁稿的 灰点（无设备）/ 绿色数字（在线台数）需要点形与配色渲染路径，而钉死的 better-sidebar 徽标契约只提供包裹字符串或数字的中性 pill，且 `null` 会整体隐藏 pill。本包因此先交付值层面的两态（静默 / 计数）；点样式待契约扩展后落地。徽标回调也看不到渲染它的 tab 实例，因此每个手机 tab 显示的是全队在线台数，而非激活设备的绿点。
 - **H264 徽标在位但禁用**——Host 会签名 H264 采集地址，但裸 `avc` 需要 Media Source Extensions 或 WebCodecs 才能播放；该徽标现以 tooltip 禁用渲染，流格式保持 MJPEG，待解码子票落地。`PhoneConnectionController` 已按会话钉住格式。
 - **「截图」禁用**——设计稿把截图存入会话附件；客户端侧暂无可用的附件通道，按钮以 tooltip 禁用渲染，不做假动作。
-- **选择器内容里的「重新检测环境」是禁用占位**——设置卡上的「重新检测」会重新发布注入的 source；真实 `phoneDevices` publisher 随后续引擎子票到来。
+- **设置卡的「重新检测」仍读取 `MISSING_PHONE_ENVIRONMENT_SOURCE`**——选择器内容里的「重新检测环境」现已通过 `PhoneListingSource` 拉取设备清单，但插件标签页的环境向导在 Host 环境 publisher 组装完成前仍以探针失败行渲染；`PhoneEnvironmentSource` 缝隙保持不变。
 - **「最近设备」与行内「启动」是后续界面**——票面点名了最近设备与模拟器启动，但设备历史与浏览器可达的启动路由都不存在；选择器现阶段只交付「打开」。
 - **IME 组合与控制键不上送设备**——可打印字符与 Enter 映射到 `device.io.text`；删除、快捷键与 IME 预编辑需要更完整的文本通道。
 - **中文文案固定**——包内只带 zh 文案、未接 locale 命名空间；本地化与 device-dock 剩余状态一并推进。

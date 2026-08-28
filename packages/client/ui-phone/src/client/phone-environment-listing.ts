@@ -125,6 +125,12 @@ export function createListingPhoneEnvironmentSource(
       }
       notify()
     },
+    ensureDetected: () => {
+      if (phase !== 'idle') return
+      phase = 'probing'
+      notify()
+      void source.redetect()
+    },
     subscribe: (listener) => {
       listeners.add(listener)
       return () => { listeners.delete(listener) }

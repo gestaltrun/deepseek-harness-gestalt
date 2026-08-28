@@ -154,7 +154,7 @@ describe('PhoneTab empty state', () => {
 
   it('keeps the USB placeholder while only simulators answer', async () => {
     const source = new FakeListingSource().seed(listingOf([
-      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', online: false },
+      { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'offline', online: false },
     ]))
     await renderTab(true, source)
     expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()

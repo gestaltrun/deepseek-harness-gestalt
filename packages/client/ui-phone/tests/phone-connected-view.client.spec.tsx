@@ -18,7 +18,7 @@ afterEach(cleanup)
 
 const DEVICES: readonly PhoneDeviceSummary[] = [
   { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
-  { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', online: true },
+  { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'online', online: true },
 ]
 
 interface Harness {

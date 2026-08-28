@@ -72,6 +72,12 @@ export interface PhoneEnvironmentSource {
    * missing-service source resolves immediately and stays on probe-failed.
    */
   redetect(): Promise<void>
+  /**
+   * Trigger the first detection when the source has not run one; a no-op
+   * once probing, ready, or failed. Publishers that cannot detect leave
+   * it undefined.
+   */
+  ensureDetected?(): void
   /** Subscribe to view replacements; returns the disposer. */
   subscribe(listener: () => void): () => void
 }

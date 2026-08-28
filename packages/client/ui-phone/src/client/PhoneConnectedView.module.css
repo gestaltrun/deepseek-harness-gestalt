@@ -134,6 +134,11 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.reslv {
+  color: var(--dsw-alias-label-caption);
+  font-weight: 400;
+}
+
 .liveDot {
   flex: none;
   width: 5px;

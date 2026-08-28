@@ -271,13 +271,17 @@ export function PhoneConnectedView({
           <ChevronDown />
         </button>
         <span className={css.devbarSpacer} />
-        <span className={`${css.tierChip} ${css.tierChipActive}`} aria-label="当前画面编码 MJPEG">
+        {/* The capture cadences are the locked mockup's captions; the stream
+            contract carries no fps field, so no live value exists to bind. */}
+        <span className={`${css.tierChip} ${css.tierChipActive}`} aria-label="当前画面编码 MJPEG · 10 fps">
           <span aria-hidden="true" className={css.liveDot} />
           MJPEG
+          <span className={css.reslv}>10 fps</span>
         </span>
         <button type="button" className={css.tierChip} disabled title="H264 解码将在后续票据接入，当前使用 MJPEG">
           <span aria-hidden="true" className={css.bizDot} />
           H264
+          <span className={css.reslv}>30 fps</span>
         </button>
         {menuOpen && (
           <div role="menu" aria-label="切换设备" className={css.pickMenu}>

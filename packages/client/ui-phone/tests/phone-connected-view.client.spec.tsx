@@ -82,7 +82,9 @@ describe('PhoneConnectedView chrome', () => {
   it('renders the devbar rhythm: device dropdown, format chips, and the 1:2 frame', async () => {
     await renderLive()
     expect(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' })).toBeTruthy()
-    expect(screen.getByLabelText('当前画面编码 MJPEG')).toBeTruthy()
+    const mjpeg = screen.getByLabelText('当前画面编码 MJPEG · 10 fps')
+    expect(mjpeg.textContent).toContain('10 fps')
+    expect(screen.getByText('30 fps')).toBeTruthy()
     const h264 = screen.getByRole('button', { name: /H264/ }) as HTMLButtonElement
     expect(h264.disabled).toBe(true)
     expect(h264.title).toContain('MJPEG')

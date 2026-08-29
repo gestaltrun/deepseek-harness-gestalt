@@ -1,8 +1,8 @@
 /**
  * Phone tab registration core: the shared value vocabulary (listing source,
- * device summaries), the 「手机」 tab descriptor with per-device tab
- * instances (`phone:<serial>` ids, serial dedupeKey), and the fiber-scoped
- * mount into the better-sidebar registry.
+ * device summaries), the single 「手机」 tab descriptor whose device
+ * switches happen in place (U1: user-accepted reversal of the per-device
+ * tab model), and the fiber-scoped mount into the better-sidebar registry.
  *
  * This module carries no stylesheet and no JSX on purpose: the Node-face
  * invariant companion imports it to prove register/dispose symmetry against
@@ -135,16 +135,7 @@ export function assertPhoneTabSymmetry(
 }
 
 /**
- * Tab instance id of the per-device tab for one serial (`phone:<serial>`).
- * @param serial - Android serial or iOS UDID.
- * @returns the sidebar tab id for that device.
- */
-export function phoneTabIdOf(serial: string): string {
-  return `${PHONE_TAB_ID}:${serial}`
-}
-
-/**
- * Tab title of a per-device tab (`手机·<name>`, locked mockup cell B).
+ * Tab title while a device occupies the tab (`手机·<name>`, mockup cell B).
  * @param name - Display name of the device.
  * @returns the sidebar tab title.
  */
@@ -152,9 +143,9 @@ export function phoneTabTitleOf(name: string): string {
   return `手机·${name}`
 }
 
-/** Meta payload carried by every per-device tab (JSON-serializable). */
+/** Meta payload while a device occupies the single tab (JSON-serializable). */
 export interface PhoneDeviceTabMeta {
-  /** Closed discriminant separating device tabs from the picker tab. */
+  /** Closed discriminant separating device occupation from the picker. */
   readonly kind: 'device'
   /** Stable device identity the tab streams and addresses io with. */
   readonly serial: string
@@ -163,9 +154,9 @@ export interface PhoneDeviceTabMeta {
 }
 
 /**
- * Read the device meta back from a persisted tab. Layout restores carry
- * `meta` verbatim, so anything but a well-formed device payload (including
- * the picker tab's own meta) reads as the picker body.
+ * Read the device meta back from the persisted single tab. Layout restores
+ * carry `meta` verbatim, so anything but a well-formed device payload reads
+ * as the picker body.
  * @param meta - untrusted `SidebarTab.meta` value.
  * @returns the device payload when the tab addresses one device.
  */
@@ -180,22 +171,12 @@ export function phoneDeviceTabMetaOf(meta: unknown): PhoneDeviceTabMeta | undefi
 
 /** Structural slice of the sidebar tab the descriptor callbacks receive. */
 export interface PhoneSidebarTab {
-  /** Minted instance id (`phone` for the picker, `phone:<serial>` otherwise). */
+  /** Minted instance id (`phone`; the strip keeps exactly one tab). */
   readonly id: string
+  /** Tab title (手机, or 手机·<name> while a device occupies the tab). */
+  readonly title?: string
   /** Plugin-owned payload persisted with the layout. */
   readonly meta?: unknown
-}
-
-/**
- * Dedupe key of one phone tab: the serial for device tabs, undefined for
- * the picker. Device re-opens with the same serial focus the existing tab
- * (decision-matrix axis 1 cell C); the picker stays single-instance through
- * the service's id safety net.
- * @param tab - the minted or existing sidebar tab.
- * @returns the dedupe key, or undefined when the tab never dedupes by key.
- */
-export function phoneTabDedupeKey(tab: PhoneSidebarTab): string | undefined {
-  return phoneDeviceTabMetaOf(tab.meta)?.serial
 }
 
 /** Body props every tab instance receives from the better-sidebar render. */
@@ -206,36 +187,29 @@ export interface PhoneTabBodyProps {
   readonly visible: boolean
 }
 
-/** Structural slice of `BetterSidebarService` the device-tab opener needs. */
-export interface PhoneTabOpenerFace {
-  /** Seed-carried open; the service's default mint carries id/title/meta. */
-  openTab(seed: {
-    readonly type: string
-    readonly id?: string
-    readonly title?: string
-    readonly meta?: unknown
-  }): void
+/** Structural slice of `BetterSidebarService` the in-place switch needs. */
+export interface PhoneTabSwitchFace {
+  /** Patch one tab's title/meta in place (U1: no second tab is created). */
+  updateTab(tabId: string, patch: { readonly title?: string; readonly meta?: unknown }): void
 }
 
 /**
- * Build the per-device tab opener against one sidebar face. The open seed
- * carries the serial explicitly (id `phone:<serial>`, meta payload, title
- * `手机·<name>`), so the service's serial dedupeKey can focus an already
- * open device tab. A disabled deployment drops the open: with detection off
- * no stream session can be minted, so the entry must not pretend otherwise.
+ * Build the in-place device switcher against one sidebar face: the single
+ * tab's meta flips to the chosen device and the title follows `手机·<name>`
+ * — no second tab is created (U1). A disabled deployment drops the switch:
+ * with detection off no stream session can be minted, so the entry must not
+ * pretend otherwise.
  * @param sidebar - the better-sidebar face resolved from the client context.
  * @param isEnabled - current `ui-phone.enabled` gate read at call time.
- * @returns the opener the picker rows and the device dropdown call.
+ * @returns the switcher the picker rows and the device dropdown call.
  */
-export function createPhoneTabOpener(
-  sidebar: PhoneTabOpenerFace,
+export function createPhoneTabSwitcher(
+  sidebar: PhoneTabSwitchFace,
   isEnabled: () => boolean,
-): (serial: string, name: string) => void {
-  return (serial, name) => {
+): (tabId: string, serial: string, name: string) => void {
+  return (tabId, serial, name) => {
     if (!isEnabled()) return
-    sidebar.openTab({
-      type: PHONE_TAB_ID,
-      id: phoneTabIdOf(serial),
+    sidebar.updateTab(tabId, {
       title: phoneTabTitleOf(name),
       meta: { kind: 'device', serial, name },
     })
@@ -251,7 +225,7 @@ export interface PhoneTabEnvironment {
   /** Listing source backing the picker list and the device dropdown. */
   readonly source: PhoneListingSource
   /** Open (or focus) the per-device tab of one device. */
-  readonly openDevice: (serial: string, name: string) => void
+  readonly switchDevice: (tabId: string, serial: string, name: string) => void
   /** Create the live connection controller for one device tab. */
   readonly createController: (serial: string) => PhoneConnectionController
 }
@@ -286,12 +260,8 @@ export interface PhoneTabDescriptor {
   readonly available?: (ctx: unknown, scope: unknown, state: unknown) => boolean
   /** Strip pill value per render; null hides it. */
   readonly badge?: (ctx: unknown, scope: unknown, state: unknown) => string | number | null | undefined
-  /**
-   * Per-instance dedupe key. Device tabs key on their serial — re-opening a
-   * connected device focuses the existing tab (axis 1 cell C); the picker
-   * returns undefined and stays single-instance via the id safety net.
-   */
-  readonly dedupeKey?: (tab: PhoneSidebarTab) => string | undefined
+  /** Single instance: the strip keeps exactly one 「手机」 tab (U1). */
+  readonly single?: boolean
   /** Tab body renderer invoked with the sidebar's tab props. */
   readonly component: (props: PhoneTabBodyProps) => ReactNode
 }
@@ -304,8 +274,8 @@ interface SidebarRegistry {
 
 /** What {@link buildPhoneTabDescriptor} needs beyond the install options. */
 export interface PhoneTabDescriptorOptions extends PhoneTabOptions {
-  /** The opener {@link installPhoneTab} wired against the resolved sidebar. */
-  readonly openDevice: (serial: string, name: string) => void
+  /** The switcher {@link installPhoneTab} wired against the resolved sidebar. */
+  readonly switchDevice: (tabId: string, serial: string, name: string) => void
 }
 
 /** What {@link installPhoneTab} needs beyond the cordis context. */
@@ -323,13 +293,12 @@ export interface PhoneTabOptions {
 }
 
 /**
- * Build the 「手机」descriptor. There is no `single` flag and no createTab:
- * the picker rides the id safety net, and device tabs mint through
- * seed-carried `phone:<serial>` ids (the editor's per-path pattern) so the
- * serial dedupeKey focuses instead of duplicating. `available` never
- * refuses — the entry stays reachable with zero devices, which routes
- * first-time guidance into the picker body.
- * @param options - sources, chrome, gates, and the wired opener.
+ * Build the 「手机」descriptor. Exactly one instance exists (U1: the user-
+ * accepted reversal of the per-device tab model): `single: true` keeps the
+ * strip at one tab and device switches patch that tab's meta in place.
+ * `available` never refuses — the entry stays reachable with zero devices,
+ * which routes first-time guidance into the picker body.
+ * @param options - sources, chrome, gates, and the wired switcher.
  * @returns the descriptor ready for `BetterSidebarService.registerTab`.
  */
 export function buildPhoneTabDescriptor(options: PhoneTabDescriptorOptions): PhoneTabDescriptor {
@@ -337,7 +306,7 @@ export function buildPhoneTabDescriptor(options: PhoneTabDescriptorOptions): Pho
     isEnabled: options.isEnabled,
     gate: options.gate,
     source: options.source,
-    openDevice: options.openDevice,
+    switchDevice: options.switchDevice,
     createController: options.createController,
   }
   return {
@@ -347,7 +316,7 @@ export function buildPhoneTabDescriptor(options: PhoneTabDescriptorOptions): Pho
     order: PHONE_TAB_ORDER,
     available: () => true,
     badge: () => phoneBadgeValue(options.source),
-    dedupeKey: phoneTabDedupeKey,
+    single: true,
     component: props => options.view.component(props, env),
   }
 }
@@ -362,10 +331,10 @@ export function buildPhoneTabDescriptor(options: PhoneTabDescriptorOptions): Pho
  * @param options - gates, sources, chrome, and the controller factory.
  */
 export function installPhoneTab(ctx: Context, options: PhoneTabOptions): void {
-  const sidebar = ctx.get('betterSidebar') as (SidebarRegistry & PhoneTabOpenerFace) | undefined
+  const sidebar = ctx.get('betterSidebar') as (SidebarRegistry & PhoneTabSwitchFace) | undefined
   if (sidebar === undefined) {
     throw new Error('ui-phone: betterSidebar is not published; mount the Side card client first')
   }
-  const openDevice = createPhoneTabOpener(sidebar, options.isEnabled)
-  ctx.effect(() => sidebar.registerTab(buildPhoneTabDescriptor({ ...options, openDevice })), PHONE_TAB_EFFECT)
+  const switchDevice = createPhoneTabSwitcher(sidebar, options.isEnabled)
+  ctx.effect(() => sidebar.registerTab(buildPhoneTabDescriptor({ ...options, switchDevice })), PHONE_TAB_EFFECT)
 }

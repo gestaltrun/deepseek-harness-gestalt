@@ -48,16 +48,20 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Split one tab instance onto its body: an instance without device meta is
- * the picker (empty state), one with it is the connected view of that device.
+ * Split the single tab onto its body: no device meta is the picker (empty
+ * state), device meta is the connected view of that device. Both arms
+ * switch devices in place through the environment (U1: same tab).
  * @param props - the tab instance props from the better-sidebar render.
  * @param env - the registration environment the descriptor assembled.
  * @returns the body of this tab instance.
  */
 function renderPhoneTabBody(props: PhoneTabBodyProps, env: PhoneTabEnvironment): ReactNode {
   const device = phoneDeviceTabMetaOf(props.tab.meta)
+  const onOpenDevice = (serial: string, name: string): void => {
+    env.switchDevice(props.tab.id, serial, name)
+  }
   if (device === undefined) {
-    return <PhoneTab gate={env.gate} source={env.source} onOpenDevice={env.openDevice} />
+    return <PhoneTab gate={env.gate} source={env.source} onOpenDevice={onOpenDevice} />
   }
   return (
     <PhoneConnectedView
@@ -65,7 +69,7 @@ function renderPhoneTabBody(props: PhoneTabBodyProps, env: PhoneTabEnvironment):
       name={device.name}
       visible={props.visible}
       source={env.source}
-      onOpenDevice={env.openDevice}
+      onOpenDevice={onOpenDevice}
       createController={env.createController}
     />
   )

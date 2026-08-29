@@ -5,7 +5,7 @@ import type { Config } from '@deepseek-ai/dsh-phone-runtime'
 import type { PhoneDeviceChange } from '@deepseek-ai/dsh-phone-runtime'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliServerProcess } from '../src/server-process.ts'
-import { firstMjpegFrame, stageFake, wireDevice } from './helpers.ts'
+import { assertAnnexBH264Stream, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -327,15 +327,20 @@ describe('phone runtime service lifecycle', () => {
     // this opening-mechanics check only requires a complete SOI…EOI JPEG.
     expect(payload.subarray(0, 2).equals(Buffer.from([0xff, 0xd8]))).toBe(true)
     expect(payload.subarray(-2).equals(Buffer.from([0xff, 0xd9]))).toBe(true)
+    expect(jpegDimensions(payload)).toEqual({ width: 390, height: 844 })
     const h264 = await context.phoneDevices.startCapture({
       deviceId: ANDROID_EMULATOR,
       format: 'h264',
     })
     expect(h264.contentType).toMatch(/video\/h264/)
     const h264Reader = h264.body.getReader()
-    const h264Bytes = Buffer.from((await h264Reader.read()).value ?? new Uint8Array())
-    expect(h264Bytes.subarray(0, 4).equals(Buffer.from([0x00, 0x00, 0x00, 0x01]))).toBe(true)
-    await h264Reader.cancel()
+    const h264Chunks: Buffer[] = []
+    for (;;) {
+      const next = await h264Reader.read()
+      if (next.done) break
+      h264Chunks.push(Buffer.from(next.value))
+    }
+    assertAnnexBH264Stream(Buffer.concat(h264Chunks))
   })
 
   it('reports capture cancellation that arrives before the request is sent as PHONE_ABORTED', async () => {

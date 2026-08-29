@@ -6,7 +6,7 @@ import type { Config } from '@deepseek-ai/dsh-phone-runtime'
 import { PhoneDevicesError } from '../src/errors.ts'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliServerProcess } from '../src/server-process.ts'
-import { assertStructurallyDecodableJpeg, firstMjpegFrame, stageFake, wireDevice } from './helpers.ts'
+import { assertAnnexBH264Stream, assertStructurallyDecodableJpeg, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -158,5 +158,23 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
     expect(headers.get('content-type')).toBe('image/jpeg')
     expect(headers.get('content-length')).toBe(String(payload.length))
     assertStructurallyDecodableJpeg(payload)
+    expect(jpegDimensions(payload)).toEqual({ width: 390, height: 844 })
+  })
+
+  it('serves a decodable h264 Annex-B stream for the avc format', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const capture = await context.phoneDevices.startCapture({ deviceId: ANDROID_EMULATOR, format: 'h264' })
+    expect(capture.contentType).toBe('video/h264')
+
+    const reader = capture.body.getReader()
+    const chunks: Buffer[] = []
+    for (;;) {
+      const next = await reader.read()
+      if (next.done) break
+      chunks.push(Buffer.from(next.value))
+    }
+    assertAnnexBH264Stream(Buffer.concat(chunks))
   })
 })

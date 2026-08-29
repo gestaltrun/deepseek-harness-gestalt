@@ -122,6 +122,10 @@ export async function stageFake(knobs: FakeKnobs = {}): Promise<StagedFake> {
   const executablePath = join(fixturesDir, 'fakemobilecli')
   await copyFile(new URL('./fixtures/fakemobilecli.mjs', import.meta.url), executablePath)
   await chmod(executablePath, 0o755)
+  // The U3 visible-picture fixtures the fake reads from its own directory.
+  for (const name of ['u3-gradient-390x844.jpg', 'u3-h264-390x844.264']) {
+    await copyFile(new URL(`./fixtures/${name}`, import.meta.url), join(fixturesDir, name))
+  }
   await writeFile(join(fixturesDir, 'fakemobilecli.config.json'), JSON.stringify(knobs))
   if (knobs.agent !== undefined) {
     await writeFile(join(fixturesDir, 'fakemobilecli.agent-state.json'), JSON.stringify({
@@ -250,7 +254,7 @@ export function assertStructurallyDecodableJpeg(payload: Buffer): void {
   let sawSof0 = false
   let sawSos = false
   while (cursor < payload.length - 1) {
-    if (payload[cursor] !== 0xff) throw new Error(`marker desync at byte ${String(cursor)}`)
+    if ((payload[cursor] ?? 0) !== 0xff) throw new Error(`marker desync at byte ${String(cursor)}`)
     const marker = payload[cursor + 1] ?? -1
     if (marker === 0xd9) {
       cursor += 2
@@ -285,4 +289,58 @@ export function assertStructurallyDecodableJpeg(payload: Buffer): void {
   if (!sawSof0) throw new Error('payload carries no SOF0 frame header')
   if (!sawSos) throw new Error('payload carries no SOS scan header')
   if (cursor !== payload.length) throw new Error(`payload carries ${String(payload.length - cursor)} trailing bytes after EOI`)
+}
+
+/**
+ * Dependency-free Annex-B structural check: walk every NAL unit start code
+ * (four-byte then three-byte forms) and require the capture stream's header
+ * and picture NALs — SPS (7), PPS (8), and an IDR slice (5) — so a bare
+ * prefix or parameter sets alone cannot pass for a decodable stream.
+ * @param payload - One complete H264 Annex-B byte stream.
+ */
+export function assertAnnexBH264Stream(payload: Buffer): void {
+  const nalTypes = new Set<number>()
+  let cursor = 0
+  let sawNal = false
+  while (cursor < payload.length - 3) {
+    const fourByte = payload[cursor] === 0x00 && payload[cursor + 1] === 0x00
+      && payload[cursor + 2] === 0x00 && payload[cursor + 3] === 0x01
+    const threeByte = !fourByte && payload[cursor] === 0x00 && payload[cursor + 1] === 0x00
+      && payload[cursor + 2] === 0x01
+    if (!fourByte && !threeByte) {
+      cursor += 1
+      continue
+    }
+    const nalStart = cursor + (fourByte ? 4 : 3)
+    if (nalStart >= payload.length) break
+    sawNal = true
+    const nalType = (payload[nalStart] ?? 0) & 0x1f
+    nalTypes.add(nalType)
+    cursor = nalStart
+  }
+  if (!sawNal) throw new Error('payload carries no Annex-B NAL start code')
+  if (!nalTypes.has(7)) throw new Error('capture stream carries no SPS NAL')
+  if (!nalTypes.has(8)) throw new Error('capture stream carries no PPS NAL')
+  if (!nalTypes.has(5)) throw new Error('capture stream carries no IDR picture NAL')
+}
+
+/**
+ * Read the picture dimensions a structurally decodable JPEG declares in its
+ * SOF0 segment (must be walked first).
+ * @param payload - One complete JPEG payload, boundaries already stripped.
+ * @returns the SOF0-declared width and height in pixels.
+ */
+export function jpegDimensions(payload: Buffer): { width: number; height: number } {
+  let cursor = 2
+  while (cursor < payload.length - 1) {
+    if ((payload[cursor] ?? 0) !== 0xff) throw new Error(`marker desync at byte ${String(cursor)}`)
+    const marker = payload[cursor + 1] ?? -1
+    if (marker === 0xd9 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) break
+    const segmentLength = payload.readUInt16BE(cursor + 2)
+    if (marker === 0xc0 || (marker >= 0xc1 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc)) {
+      return { width: payload.readUInt16BE(cursor + 7), height: payload.readUInt16BE(cursor + 5) }
+    }
+    cursor += 2 + segmentLength
+  }
+  throw new Error('payload carries no SOF frame header')
 }

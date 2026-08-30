@@ -1533,7 +1533,6 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'settings.plugins.tab\' (client-ui-settings-plugins), so it exists while that entry is mounted',
     occupants: [
-      'client-ui-phone PhoneSettingsItem',
       'client-ui-settings-plugins BashCard',
       'client-ui-settings-plugins AgentLoopCard',
       'client-ui-settings-plugins WebSearchCard',
@@ -1677,6 +1676,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-agent-preset AgentPresetSection id \'agent-presets\'',
       'client-ui-browser BrowserSettingsSection id \'browser\'',
       'client-ui-desktop AccountControl id \'mobile-pairing\'',
+      'client-ui-phone PhoneSettingsSection id \'phone-devices\'',
       'client-ui-settings-general GeneralSection id \'general\'',
       'client-ui-settings-models ModelsSection id \'models\'',
       'client-ui-settings-plugins PluginsSettingsSection id \'plugins\'',

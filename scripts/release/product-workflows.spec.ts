@@ -73,6 +73,7 @@ describe('product release workflows', () => {
     expect(source).toContain('TestFlight recovery from signed IPA')
     const publish = job(mobile, 'publish')
     expect(publish.needs).toEqual(['release-authorization', 'release-version', 'channel-evidence'])
+    expect(publish.if).toBe("${{ always() && inputs.publish_github && needs.release-authorization.result == 'success' && needs.release-version.result == 'success' && needs.channel-evidence.result == 'success' }}")
     const serialized = JSON.stringify(publish)
     expect(serialized).toContain('gh release create')
     expect(serialized).toContain('--prerelease')

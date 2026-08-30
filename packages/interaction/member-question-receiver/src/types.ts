@@ -1,6 +1,7 @@
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import type {
+  CompanionMemberQuestionAnswer,
   CompanionMemberQuestionOperation,
   CompanionMemberQuestionSettledResult,
   InstallationId,
@@ -90,6 +91,13 @@ export interface MemberQuestionTerminalAuthority {
 
 /** Explicit receiver decline or an authoritative first claim delivered by transport. */
 export type MemberQuestionReceiverSettlement =
+  | {
+    readonly kind: 'answered'
+    readonly answers: readonly CompanionMemberQuestionAnswer[]
+    readonly settledByInstallationId: InstallationId
+    readonly settledByDeviceName: string
+    readonly settledAt: number
+  }
   | {
     readonly kind: 'declined'
     readonly settledByInstallationId: InstallationId

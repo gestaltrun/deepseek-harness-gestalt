@@ -41,6 +41,18 @@ export class FakeApiClient implements IApiClient {
   /** Chronological call record: [method, payload]. */
   readonly calls: { method: string; payload: unknown }[] = []
 
+  readonly memberQuestions: IApiClient['memberQuestions'] = {
+    snapshot: payload => this.record('memberQuestion.snapshot', payload, Promise.resolve(ok({
+      revision: 0, pending: [], terminal: [],
+    }))),
+    settle: payload => this.record('memberQuestion.settle', payload, Promise.resolve(ok({
+      type: 'member-question-settled', operationId: 'fake-operation' as never,
+      questionId: 'fake-question' as never, outcome: 'declined',
+      settledByInstallationId: 'fake-installation' as never,
+      settledByDeviceName: 'Fake', settledAt: 1,
+    }))),
+  }
+
   // Programmable slots (defaults answer OK-empty); reassign per case.
   onList: (payload: unknown) => Promise<RpcResponse<{ items: never[] }>> = () => Promise.resolve(ok({ items: [] }))
   onSearch: (payload: unknown) => Promise<RpcResponse<{ items: SessionSearchItem[]; hasMore: boolean }>> =

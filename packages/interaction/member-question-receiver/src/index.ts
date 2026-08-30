@@ -77,6 +77,8 @@ export interface MemberQuestionReceiverConfig {
   readonly terminalRetryMs: number
   /** First-claim authority shared by every receiving Installation. */
   readonly terminalAuthority?: MemberQuestionTerminalAuthority
+  /** Explicit terminal provider selection; development-local is forbidden in production. */
+  readonly terminalAuthorityMode?: 'deferred' | 'development-local'
   /** Authoritative wall clock; production uses Date.now. */
   readonly clock?: () => number
   /** High-level materialize-and-admit adapter; absent keeps human turns fail-closed. */
@@ -96,6 +98,7 @@ export const Config: z<Config> = z.object({
   maxRecords: z.natural().min(1),
   terminalRetryMs: z.natural().min(1),
   terminalAuthority: z.any(),
+  terminalAuthorityMode: z.union(['deferred', 'development-local'] as const).default('deferred'),
   clock: z.any(),
   admitter: z.any(),
   timer: z.any(),
@@ -192,6 +195,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
     this.storageFile = join(resolve(resolved.storagePath), resolved.environment, 'member-question-receiver.json')
     this.maxRecords = resolved.maxRecords
     this.terminalAuthority = resolved.terminalAuthority
+      ?? (resolved.terminalAuthorityMode === 'development-local' ? DEVELOPMENT_LOCAL_TERMINAL_AUTHORITY : undefined)
     this.clock = resolved.clock ?? Date.now
     this.admitter = resolved.admitter
     this.timer = resolved.timer ?? SYSTEM_TIMER
@@ -315,7 +319,16 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
             outcome: 'expired',
             settledAt: this.clock(),
           }
-          : {
+          : settlement.kind === 'answered' ? {
+            type: 'member-question-settled',
+            operationId: question.operation.operationId,
+            questionId,
+            outcome: 'answered',
+            settledByInstallationId: settlement.settledByInstallationId,
+            settledByDeviceName: settlement.settledByDeviceName,
+            settledAt: settlement.settledAt,
+            answers: structuredClone(settlement.answers),
+          } : {
             type: 'member-question-settled',
             operationId: question.operation.operationId,
             questionId,
@@ -546,6 +559,15 @@ function resolveConfig(config: Config): Config {
   if (config.terminalAuthority !== undefined && typeof config.terminalAuthority.claim !== 'function') {
     throw new TypeError('member-question-receiver: config.terminalAuthority must implement claim()')
   }
+  const terminalAuthorityMode: unknown = config.terminalAuthorityMode
+  if (terminalAuthorityMode !== undefined
+    && terminalAuthorityMode !== 'deferred'
+    && terminalAuthorityMode !== 'development-local') {
+    throw new TypeError("member-question-receiver: config.terminalAuthorityMode must be 'deferred' or 'development-local'")
+  }
+  if (config.environment === 'production' && config.terminalAuthorityMode === 'development-local') {
+    throw new TypeError('member-question-receiver: config.terminalAuthorityMode development-local is forbidden in production')
+  }
   if (config.clock !== undefined && typeof config.clock !== 'function') {
     throw new TypeError('member-question-receiver: config.clock must be a function')
   }
@@ -564,6 +586,10 @@ function resolveConfig(config: Config): Config {
 const SYSTEM_TIMER: MemberQuestionReceiverTimer = {
   set: (callback, delayMs) => setTimeout(callback, delayMs),
   clear: (handle) => { clearTimeout(handle as ReturnType<typeof setTimeout>) },
+}
+
+const DEVELOPMENT_LOCAL_TERMINAL_AUTHORITY: MemberQuestionTerminalAuthority = {
+  claim: terminal => Promise.resolve({ claimed: true, terminal: structuredClone(terminal) }),
 }
 
 function humanTurnDigest(

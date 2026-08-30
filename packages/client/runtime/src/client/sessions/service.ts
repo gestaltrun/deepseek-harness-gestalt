@@ -281,7 +281,7 @@ export class SessionRuntime implements ISessions {
    * @param api - wire client shared with every Session.
    * @param remote - generated Remote namespaces shared with every Session.
    * @param conversationRuntime - same-pass registry instances, when runtime apply owns them.
-   * @param receiving - receiver-side clock and timer injection.
+   * @param receiving - optional Client Installation identity.
    */
   constructor(
     private readonly rootCtx: Context,

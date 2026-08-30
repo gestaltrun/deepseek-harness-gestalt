@@ -5,6 +5,7 @@ import {
   memberBriefOf,
   type MemberQuestionComposerProps, type MemberQuestionOrigin, type MemberQuestionRole,
 } from './contract/slots.ts'
+import type { MemberQuestionRecordView } from '@deepseek-ai/dsh-client-runtime/client'
 import css from './MemberQuestionCard.module.css'
 
 export type {
@@ -53,6 +54,32 @@ function roleLabel(t: MemberQuestionComposerProps['t'], role: MemberQuestionRole
   return role === 'owner' ? t('role.owner') : role === 'admin' ? t('role.admin') : t('role.member')
 }
 
+/** Passive Host terminal records retained after a card settles. */
+export function MemberQuestionRecords(props: {
+  matched: readonly MemberQuestionRecordView[]
+  t: MemberQuestionComposerProps['t']
+}) {
+  if (props.matched.length === 0) return null
+  return (
+    <div className={css.recordBands} data-member-question-records>
+      {props.matched.map(record => (
+        <div className={css.recordBand} data-record-state={record.state} key={record.questionId}>
+          <span>{recordLabel(props.t, record)}</span>
+          <time dateTime={new Date(record.terminalAt).toISOString()}>
+            {new Date(record.terminalAt).toLocaleString()}
+          </time>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function recordLabel(t: MemberQuestionComposerProps['t'], record: MemberQuestionRecordView): string {
+  return record.state === 'answered-elsewhere'
+    ? t('record.answered-elsewhere', { device: record.settledByDeviceName ?? t('origin.fallback') })
+    : t(`record.${record.state}`)
+}
+
 /**
  * Member-question request presentation: the remote Decision Brief banner
  * (origin identity, project, source session, expiry countdown, clamped
@@ -76,6 +103,7 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
 
   useEffect(() => {
     const body = bodyRef.current
+    /* v8 ignore next -- React assigns this mounted element ref before running the effect. */
     if (body === null) return
     const sync = (): void => {
       const toggle = body.querySelector('[aria-expanded]')
@@ -112,9 +140,11 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
 
   const folded = (innerCollapsed && !innerRevealed) || (detailsOpen && !detailsRevealed)
   const askerName = brief.origin?.askerDisplayName ?? props.t('origin.fallback')
+  const records = props.session?.memberQuestionRecords ?? []
 
   return (
     <div className={css.frame} data-question-key={props.matched.key} data-folded={folded || undefined}>
+      <MemberQuestionRecords matched={records} t={props.t} />
       <section
         className={clsx(css.card, folded && css.cardFolded)}
         aria-label={props.t('collapsed.bar', { name: askerName })}

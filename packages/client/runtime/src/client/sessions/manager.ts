@@ -152,9 +152,8 @@ export class SessionManager {
    */
   private readonly jobsBySession = new Map<SessionId, readonly JobView[]>()
   /**
-   * Receiver-side member-question book: `question/requested` batches that
-   * declare the member-question intent route here into renderer-only
-   * receiving sessions (one per route key; no host session, no model output).
+   * Host member-question snapshots projected into renderer-only receiving
+   * Sessions under their persisted Host identities.
    */
   readonly receiving: ReceivingQuestionBook
 
@@ -173,7 +172,7 @@ export class SessionManager {
   /**
    * @param api - shared wire client.
    * @param restoredSelection - persisted real-Session selection candidate.
-   * @param receiving - receiving-session identity, clock, and timer options.
+   * @param receiving - optional Client Installation identity.
    */
   constructor(
     private readonly api: IApiClient,
@@ -187,7 +186,7 @@ export class SessionManager {
     this.selected = restoredSelection
     if (restoredAddress !== undefined) this.addresses.set(restoredAddress.childSessionId, restoredAddress)
     this.receiving = new ReceivingQuestionBook(
-      message => this.api.respond(message),
+      this.api,
       { ...receiving, onChange: () => { this.notifier.markDirty() } },
     )
     this.listSnapshotCache = this.buildListSnapshot()
@@ -812,33 +811,13 @@ export class SessionManager {
     } else if (frame.type === 'approval/resolved') {
       this.resolvePending(frame.sessionId, `a:${frame.approvalId}`)
     } else if (frame.type === 'question/requested') {
-      // Member-question batches route into the receiving book first: a claimed
-      // batch renders on its route key's receiving session (tracked pending on
-      // the synthetic id) and must not buffer against the origin session id,
-      // which never instantiates locally.
-      const receivingRow = this.receiving.handleRequested(
-        envelope.rpcId,
+      this.trackPending(
         frame.sessionId,
-        frame.questions,
+        `q:${envelope.rpcId}`,
+        questionInteractionStatus(frame.questions),
       )
-      if (receivingRow !== undefined) {
-        if (receivingRow.active?.rpcId === envelope.rpcId) {
-          this.trackPending(receivingRow.sessionId, `q:${envelope.rpcId}`, 'question')
-        }
-      } else {
-        this.trackPending(
-          frame.sessionId,
-          `q:${envelope.rpcId}`,
-          questionInteractionStatus(frame.questions),
-        )
-      }
     } else if (frame.type === 'question/resolved') {
       this.resolvePending(frame.sessionId, `q:${frame.questionRpcId}`)
-      const receivingSessionId = this.receiving.sessionOfRpc(frame.questionRpcId)
-      if (receivingSessionId !== undefined) {
-        this.receiving.handleResolved(frame.questionRpcId, frame.outcome)
-        this.resolvePending(receivingSessionId, `q:${frame.questionRpcId}`)
-      }
     }
     const session = this.sessions.get(frame.sessionId)
     if (session === undefined) {
@@ -859,10 +838,6 @@ export class SessionManager {
           return
         }
         case 'question/requested': {
-          // Claimed member-question batches render on their receiving session;
-          // the origin session id never instantiates locally, so buffering the
-          // frame against it would only replay a stale ask.
-          if (this.receiving.sessionOfRpc(envelope.rpcId) !== undefined) return
           const buffer = this.pendingBuffers.get(frame.sessionId) ?? []
           const prior = buffer.findIndex(item => bufferedRequestKey(item) === `q:${envelope.rpcId}`)
           if (prior === -1) buffer.push(envelope)
@@ -896,6 +871,14 @@ export class SessionManager {
   handleHostEnvelope(envelope: RpcRequest<HostFrame>): void {
     const frame = envelope.payload
     switch (frame.type) {
+      case 'host/member-question-snapshot': {
+        this.receiving.applySnapshot(frame.snapshot, frame.currentInstallationId)
+        for (const row of this.receiving.rows()) {
+          if (row.active === undefined) this.pendingInteractions.delete(row.sessionId)
+          else this.trackPending(row.sessionId, `q:${row.active.questionId}`, 'question')
+        }
+        return
+      }
       case 'host/session-added': {
         this.provisionalSummaries.delete(frame.sessionId)
         this.mergeSummary({
@@ -987,7 +970,7 @@ export class SessionManager {
    * request with its live rpcId.
   */
   handleDisconnected(): void {
-    this.receiving.resetPending()
+    this.receiving.handleDisconnected()
     if (this.pendingInteractions.size > 0) {
       this.pendingInteractions.clear()
       this.notifier.markDirty()
@@ -1130,15 +1113,14 @@ export class SessionManager {
   }
 
   private buildListSnapshot(): SessionListSnapshot {
-    // A timer-driven expiry can retire a card without a resolved frame, so
-    // pending dots reconcile against the book's current active record here.
+    // A complete Host snapshot can retire a card without a mux resolved
+    // frame, so pending dots reconcile against the current receiver row.
     for (const row of this.receiving.rows()) {
       if (row.active !== undefined) continue
       this.pendingInteractions.delete(row.sessionId)
     }
-    // Receiving sessions are renderer-only rows: they carry their route-key
-    // title directly and never ride the host baseline (session.list cannot
-    // know them), so they prepend the merged list.
+    // Receiving Sessions are renderer-only rows: the receiver Host baseline
+    // supplies them separately from session.list, so they prepend the merge.
     const receivingRows: TitledSessionSummary[] = this.receiving.rows().map(row => ({
       sessionId: row.sessionId,
       updatedAt: row.updatedAt,

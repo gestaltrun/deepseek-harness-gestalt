@@ -6,7 +6,7 @@
 // 「远端 · 发起人」 strip without unmounting (and so without spending) the
 // presentation's drafts.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type {
   ConversationSnapshot, SessionId, SessionListState, WorkspaceListState,
 } from '@deepseek-ai/dsh-client-runtime/client'
@@ -17,9 +17,10 @@ import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import { registerDomSnapshotSerializer } from '@deepseek-ai/dsh-client-test-runtime'
 import {
   BACKGROUND_CLAMP, clampBackground, isMemberQuestionBatch, memberBriefOf, selectMemberQuestion,
+  selectMemberQuestionRecords,
   type MemberQuestionComposerProps,
 } from '../src/client/contract/slots.ts'
-import { MemberQuestionCard } from '../src/client/MemberQuestionCard.tsx'
+import { MemberQuestionCard, MemberQuestionRecords } from '../src/client/MemberQuestionCard.tsx'
 import { en, zh } from '../src/client/locales.ts'
 import { en as questionEn, zh as questionZh } from '@deepseek-ai/dsh-client-ui-user-questions/src/client/locales.ts'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
@@ -144,6 +145,17 @@ function tidyDomForSnapshot(root: HTMLElement): void {
 }
 
 describe('member-question routing', () => {
+  it('claims only non-empty terminal record projections', () => {
+    expect(selectMemberQuestionRecords({ session: undefined })).toBeNull()
+    expect(selectMemberQuestionRecords({ session: {
+      memberQuestionRecords: [],
+    } as unknown as ConversationSnapshot })).toBeNull()
+    const records = [{ questionId: 'q' }] as never
+    expect(selectMemberQuestionRecords({ session: {
+      memberQuestionRecords: records,
+    } as unknown as ConversationSnapshot })).toBe(records)
+  })
+
   it('claims a request whose whole batch declares the member-question intent', () => {
     const { carrier } = memberWait()
     expect(isMemberQuestionBatch(carrier.payload.questions)).toBe(true)
@@ -208,6 +220,13 @@ describe('clampBackground and memberBriefOf', () => {
     expect(brief.references).toEqual([])
     expect(brief.background).toBe('该成员近 30 天无提交记录。')
   })
+
+  it('omits an empty fallback background when neither carried background nor detail exists', () => {
+    const carrier = new PendingWait('question', RpcId('q-empty'), SID, {
+      questions: [{ id: 'plain', question: 'Continue?', intent: { kind: 'member-question' } as never }],
+    }, () => Promise.resolve<RpcReceipt>({ accepted: true }))
+    expect(memberBriefOf(carrier).background).toBeUndefined()
+  })
 })
 
 describe('MemberQuestionCard', () => {
@@ -257,6 +276,34 @@ describe('MemberQuestionCard', () => {
       expect(screen.getByText('已过期')).toBeTruthy()
     } finally {
       vi.restoreAllMocks()
+    }
+  })
+
+  it('renders an avatar URL and tolerates an empty fallback display name', () => {
+    const withImage = memberWait({
+      origin: { ...projection().origin, askerAvatarUrl: 'https://example.test/avatar.png' },
+      expiresAt: NOW + 1_000,
+    }).carrier
+    const first = renderCard(withImage)
+    expect(first.container.querySelector('img')?.getAttribute('src')).toBe('https://example.test/avatar.png')
+    cleanup()
+    const emptyName = memberWait({
+      origin: { ...projection().origin, askerDisplayName: '' },
+      expiresAt: NOW + 1_000,
+    }).carrier
+    expect(renderCard(emptyName).container.querySelector('span[aria-hidden="true"]')?.textContent).toBe('')
+  })
+
+  it('updates the display-only countdown while mounted', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    try {
+      renderCard(memberWait().carrier)
+      expect(screen.getByText(/00:02:05/u)).toBeTruthy()
+      act(() => { vi.advanceTimersByTime(1_000) })
+      expect(screen.getByText(/00:02:04/u)).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
     }
   })
 
@@ -311,6 +358,10 @@ describe('MemberQuestionCard', () => {
     expect(focusDocument).toHaveBeenCalledWith(SID, {
       path: 'docs/roster.md', filename: 'roster.md', from: '王小明', content: '# 成员名单',
     })
+    fireEvent.click(screen.getByRole('button', { name: /activity\.csv/u }))
+    expect(focusDocument).toHaveBeenLastCalledWith(SID, {
+      path: 'reports/activity.csv', filename: 'activity.csv', from: '王小明',
+    })
 
     // Panel opens → the card folds to its strip; panel closes → restored.
     // The linkage rides the persistent details column's aria-expanded. The
@@ -354,6 +405,46 @@ describe('MemberQuestionCard', () => {
     } finally {
       vi.restoreAllMocks()
     }
+  })
+
+  it('renders answered-elsewhere terminal metadata as a passive record band', () => {
+    const intent = memberQuestions({ kind: 'member-question', ...projection() })[0]?.intent
+    if (intent?.kind !== 'member-question') throw new Error('member-question test intent missing')
+    render(<MemberQuestionRecords matched={[{
+      questionId: 'question-1',
+      state: 'answered-elsewhere',
+      askedAt: NOW - 1_000,
+      terminalAt: NOW,
+      intent,
+      settledByDeviceName: 'Office Mac',
+    }]} t={seat('member-question')} />)
+    expect(screen.getByText('已在 Office Mac 回答')).toBeTruthy()
+    expect(document.querySelector('[data-record-state="answered-elsewhere"] time')?.getAttribute('datetime'))
+      .toBe(new Date(NOW).toISOString())
+  })
+
+  it('renders every terminal state and the answered-elsewhere device fallback', () => {
+    const intent = memberQuestions({ kind: 'member-question', ...projection() })[0]?.intent
+    if (intent?.kind !== 'member-question') throw new Error('member-question test intent missing')
+    const states = ['answered', 'declined', 'expired', 'withdrawn', 'superseded'] as const
+    render(<MemberQuestionRecords matched={[
+      ...states.map((state, index) => ({
+        questionId: `question-${String(index)}`, state, askedAt: NOW - 1_000,
+        terminalAt: NOW + index, intent,
+      })),
+      {
+        questionId: 'question-elsewhere', state: 'answered-elsewhere' as const,
+        askedAt: NOW - 1_000, terminalAt: NOW + 10, intent,
+      },
+    ]} t={seat('member-question')} />)
+    expect(screen.getByText('已回答')).toBeTruthy()
+    expect(screen.getByText('已拒绝')).toBeTruthy()
+    expect(screen.getByText('已过期')).toBeTruthy()
+    expect(screen.getByText('已撤回')).toBeTruthy()
+    expect(screen.getByText('已被新问题取代')).toBeTruthy()
+    expect(screen.getByText('已在 成员 回答')).toBeTruthy()
+    cleanup()
+    expect(render(<MemberQuestionRecords matched={[]} t={seat('member-question')} />).container.innerHTML).toBe('')
   })
 
   it('snapshots the full banner under the dark theme attribute', () => {

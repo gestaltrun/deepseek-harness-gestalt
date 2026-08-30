@@ -2086,6 +2086,9 @@ importers:
       '@deepseek-ai/dsh-launch-environment':
         specifier: workspace:^
         version: link:../../util/launch-environment
+      '@deepseek-ai/dsh-member-question-receiver':
+        specifier: workspace:^
+        version: link:../../interaction/member-question-receiver
       '@deepseek-ai/dsh-message-feedback':
         specifier: workspace:^
         version: link:../../feedback/message-feedback
@@ -6155,9 +6158,15 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-member-question-receiver':
+        specifier: workspace:^
+        version: link:../../interaction/member-question-receiver
       '@deepseek-ai/dsh-native-command':
         specifier: workspace:^
         version: link:../../util/native-command
+      '@deepseek-ai/dsh-remote-protocol':
+        specifier: workspace:^
+        version: link:../../platform/remote-protocol
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session

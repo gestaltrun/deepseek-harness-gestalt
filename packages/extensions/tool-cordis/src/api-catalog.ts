@@ -4847,7 +4847,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'MemberQuestionReceiverSettlement',
-    declaration: 'export type MemberQuestionReceiverSettlement = {\n    readonly kind: \'declined\';\n    readonly settledByInstallationId: InstallationId;\n    readonly settledByDeviceName: string;\n    readonly settledAt: number;\n} | {\n    readonly kind: \'authoritative\';\n    readonly claim: MemberQuestionTerminalClaim;\n};',
+    declaration: 'export type MemberQuestionReceiverSettlement = {\n    readonly kind: \'answered\';\n    readonly answers: readonly CompanionMemberQuestionAnswer[];\n    readonly settledByInstallationId: InstallationId;\n    readonly settledByDeviceName: string;\n    readonly settledAt: number;\n} | {\n    readonly kind: \'declined\';\n    readonly settledByInstallationId: InstallationId;\n    readonly settledByDeviceName: string;\n    readonly settledAt: number;\n} | {\n    readonly kind: \'authoritative\';\n    readonly claim: MemberQuestionTerminalClaim;\n};',
   },
   {
     name: 'MemberQuestionReceiverSnapshot',

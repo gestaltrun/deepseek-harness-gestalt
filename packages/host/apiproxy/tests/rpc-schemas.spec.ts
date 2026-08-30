@@ -37,6 +37,9 @@ import { approvalRequestIdSchema, approvalResponsePayloadSchema } from '../src/a
 import { askUserQuestionAnswerSchema, questionResponsePayloadSchema } from '../src/api/questions.schema.ts'
 import { goalEditRequestSchema } from '../src/api/goals.schema.ts'
 import { subagentPromptRequestSchema } from '../src/api/subagents.schema.ts'
+import {
+  memberQuestionSettleRequestSchema, memberQuestionSnapshotRequestSchema,
+} from '../src/api/member-questions.schema.ts'
 
 describe('RpcId', () => {
   it('brands a raw string at zero runtime cost', () => {
@@ -440,6 +443,24 @@ describe('goals domain schemas', () => {
 })
 
 describe('events frame schemas', () => {
+  it('keeps member-question RPC and Host-frame fields exact', () => {
+    expect(memberQuestionSnapshotRequestSchema.parse({})).toEqual({})
+    expect(() => memberQuestionSnapshotRequestSchema.parse({ unexpected: true })).toThrow()
+    const settle = {
+      receivingSessionId: 'receiving-1', revision: 2, questionId: 'question-1',
+      response: { kind: 'declined' },
+    }
+    expect(memberQuestionSettleRequestSchema.parse(settle)).toEqual(settle)
+    expect(() => memberQuestionSettleRequestSchema.parse({ ...settle, unexpected: true })).toThrow()
+    const hostFrame = {
+      type: 'host/member-question-snapshot',
+      currentInstallationId: 'installation-1',
+      snapshot: { revision: 0, pending: [], terminal: [] },
+    }
+    expect(hostFrameSchema.parse(hostFrame)).toEqual(hostFrame)
+    expect(() => hostFrameSchema.parse({ ...hostFrame, unexpected: true })).toThrow()
+  })
+
   it('accepts every mux frame branch', () => {
     const frames = [
       { type: 'session/event', sessionId: 's', event: { type: 't', seq: 0, time: 1, data: null } },

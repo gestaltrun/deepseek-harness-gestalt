@@ -72,6 +72,10 @@ import {
   subagentListRequestSchema,
   subagentPromptRequestSchema,
 } from '../api/subagents.schema.ts'
+import {
+  memberQuestionSettleRequestSchema,
+  memberQuestionSnapshotRequestSchema,
+} from '../api/member-questions.schema.ts'
 
 /**
  * Unary dispatch table, keyed by (and compiler-locked to) RpcMethodMap: a map row without a
@@ -90,6 +94,8 @@ type UnaryRoutes = {
 }
 
 const UNARY_ROUTES: UnaryRoutes = {
+  'memberQuestion.snapshot': { schema: memberQuestionSnapshotRequestSchema, invoke: (api, r) => api.memberQuestions.snapshot(r) },
+  'memberQuestion.settle': { schema: memberQuestionSettleRequestSchema, invoke: (api, r) => api.memberQuestions.settle(r) },
   'session.list': { schema: sessionListRequestSchema, invoke: (api, r) => api.sessions.list(r) },
   'session.search': { schema: sessionSearchRequestSchema, invoke: (api, r, signal) => api.sessions.search(r, signal) },
   'session.create': { schema: sessionCreateRequestSchema, invoke: (api, r) => api.sessions.create(r) },

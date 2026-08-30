@@ -88,6 +88,8 @@ import { SessionTitleInvalidError } from '@deepseek-ai/dsh-session-title'
 import type { CallId } from '@deepseek-ai/dsh-llm/brand'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
 import type { ApprovalOutcome, ApprovalRequestId } from '@deepseek-ai/dsh-user-approval'
+import type { InstallationId } from '@deepseek-ai/dsh-remote-protocol'
+import type {} from '@deepseek-ai/dsh-member-question-receiver'
 // Side-effect type import: resolves the `approval/request` waterfall and
 // `ctx.get('approval')` without a value dependency on the seam (optional composition).
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -636,6 +638,8 @@ export interface ApiProxyDefaults {
    * falls back to platform detection ({@link canOpenNativePath}).
    */
   canOpenPath?: () => boolean
+  /** Authenticated Host Installation used for receiver settlements. */
+  memberQuestionInstallation?: { id: InstallationId; deviceName: string }
 }
 
 /** The tool/call payload fields the presenter path reads. */
@@ -1099,6 +1103,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     ?? DEFAULT_SESSION_LOG_COMPRESSION_LEVEL
   const coldBlankProbeMaxBytes = defaults.coldBlankProbeMaxBytes
     ?? DEFAULT_COLD_BLANK_PROBE_MAX_BYTES
+  const memberQuestionReceiver = ctx.get('memberQuestionReceiver')
   /** The seed model each create/resume declares; re-read so it never goes stale. */
   const agentOptions = (): AgentOptions => {
     const { provider, model } = defaults.defaultModelSelection()
@@ -1988,6 +1993,49 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
 
   return {
+    memberQuestions: {
+      async snapshot(request) {
+        if (memberQuestionReceiver === undefined) {
+          return err(request, { code: 'internal', message: 'member-question receiver is unavailable', details: {} })
+        }
+        return ok(request, await memberQuestionReceiver.snapshot())
+      },
+
+      async settle(request) {
+        if (memberQuestionReceiver === undefined) {
+          return err(request, { code: 'internal', message: 'member-question receiver is unavailable', details: {} })
+        }
+        const installation = defaults.memberQuestionInstallation
+        if (installation === undefined) {
+          return err(request, { code: 'internal', message: 'member-question settlement identity is unavailable', details: {} })
+        }
+        const snapshot = await memberQuestionReceiver.snapshot()
+        const pending = snapshot.pending.find(row => row.questionId === request.payload.questionId)
+        if (pending === undefined
+          || pending.receivingSessionId !== request.payload.receivingSessionId
+          || pending.revision !== request.payload.revision) {
+          return err(request, { code: 'internal', message: 'member-question receiver revision is stale', details: {} })
+        }
+        const response = request.payload.response
+        const settledAt = Date.now()
+        const terminal = await memberQuestionReceiver.settle(
+          request.payload.questionId,
+          response.kind === 'answered'
+            ? {
+              kind: 'answered', answers: response.answers,
+              settledByInstallationId: installation.id,
+              settledByDeviceName: installation.deviceName, settledAt,
+            }
+            : {
+              kind: 'declined',
+              settledByInstallationId: installation.id,
+              settledByDeviceName: installation.deviceName, settledAt,
+            },
+        )
+        return ok(request, terminal)
+      },
+    },
+
     sessions: {
       // Attached sessions summarize from memory; persisted-but-unattached (cold)
       // sessions merge in from the persistence store so history survives restarts.
@@ -3567,6 +3615,29 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       host(_request, signal) {
         const queue = new FrameQueue<RpcRequest<HostFrame>>()
+        const receiverDisposer = memberQuestionReceiver?.changes((snapshot) => {
+          queue.push(frame({
+            type: 'host/member-question-snapshot',
+            snapshot,
+            ...(defaults.memberQuestionInstallation === undefined
+              ? {}
+              : { currentInstallationId: defaults.memberQuestionInstallation.id }),
+          }))
+        })
+        if (memberQuestionReceiver !== undefined) {
+          void memberQuestionReceiver.snapshot().then(
+            (snapshot) => { queue.push(frame({
+              type: 'host/member-question-snapshot',
+              snapshot,
+              ...(defaults.memberQuestionInstallation === undefined
+                ? {}
+                : { currentInstallationId: defaults.memberQuestionInstallation.id }),
+            })) },
+            (error: unknown) => { queue.push(frame({ type: 'stream/error', error: {
+              code: 'internal', message: error instanceof Error ? error.message : String(error), details: {},
+            } })) },
+          )
+        }
         const committedWorkspaces = ctx.workspaceRegistry.list()
         const committedWorkspaceIds = new Set(
           committedWorkspaces.map(workspace => String(workspace.id)),
@@ -3666,7 +3737,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             }),
           )),
         ]
-        return queue.iterate(signal, () => { for (const dispose of disposers) dispose() })
+        return queue.iterate(signal, () => {
+          receiverDisposer?.()
+          for (const dispose of disposers) dispose()
+        })
       },
     },
 

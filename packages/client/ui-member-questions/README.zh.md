@@ -8,7 +8,9 @@
 
 材料芯片是聚焦按钮：点击一枚芯片会通过可选的 `detailsFocus` 服务把该文档写入会话的详情面板，`conversation.details.document` 席位按扩展名分发——markdown 正文走 MarkdownText，html 正文走沙箱化受限预览，其余一律作为纯文件标签。详情面板打开时卡片先折叠；点击窄条可在不关闭面板的情况下恢复卡片，让文档与决策并排显示。
 
-`ReceivingQuestionBook` 以一个指向最早活跃问题的 timer 强制执行携带的过期时刻。过期会结算并移除 pending wait，因此共享呈现无法提交延迟答案；卡片倒计时显示同一截止时刻。
+`ReceivingQuestionBook` 只依据 Host receiver snapshot 与 change feed 构建卡片。倒计时仅用于展示；expiry、supersession、withdrawal 与全部 terminal 状态均来自 Host。回答和拒绝动作经共享呈现调用 Host settlement RPC。
+
+pending 卡片消失后，answered、declined、expired、withdrawn 与 superseded 记录仍以被动条带显示。另一个 Installation 赢得的回答会显示为 elsewhere answered，并带获胜设备名与 settlement time。仅含 terminal 记录的接收 Session 仍占用 composer chain，因此在 human-turn admission 可用前，普通消息 composer 保持隐藏。
 
 ## Model Experience
 
@@ -22,3 +24,4 @@
 
 - **接管以整批为单位** —— 仅当待处理请求中的每个问题都声明 `member-question` 意图时本卡才当选；只要混入一个普通或 `plan-review` 问题，整批就交给共享作曲卡，不存在按问题拆分。
 - **材料芯片依赖组合层的 `detailsFocus` 服务** —— 缺少该可选服务时芯片仍然渲染，但不会向详情面板写入任何文档，被引用材料只能以列表形式查看。
+- **接收 Session 不接纳普通消息** —— pending 回答与拒绝已受支持，但从自由文本消息物化本地 Host Session 属于暂缓的 human-turn admission adapter。

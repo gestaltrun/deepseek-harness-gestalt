@@ -8,7 +8,7 @@ import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { DetailsDocumentFocus } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { MemberQuestionCard } from '../src/client/MemberQuestionCard.tsx'
+import { MemberQuestionCard, MemberQuestionRecords } from '../src/client/MemberQuestionCard.tsx'
 import { apply, inject } from '../src/client/index.ts'
 import { apply as nodeApply } from '../src/index.ts'
 import { en as questionEn, zh as questionZh } from '@deepseek-ai/dsh-client-ui-user-questions/src/client/locales.ts'
@@ -35,11 +35,13 @@ describe('ui-member-questions browser apply', () => {
     const feature = await runtime.mount({ inject: [...inject], apply })
     try {
       const entries = runtime.slots.entries('conversation.composer')
-      expect(entries).toHaveLength(1)
+      expect(entries).toHaveLength(2)
       const entry = entries[0]!
       expect(entry.component).toBe(MemberQuestionCard)
       // Elects before the shared question composer's default-priority entry.
-      expect(entry.options.priority).toBe(-1)
+      expect(entry.options.priority).toBe(-2)
+      expect(entries[1]?.component).toBe(MemberQuestionRecords)
+      expect(entries[1]?.options.priority).toBe(-1)
 
       // The dictionaries ride the standard locale seat.
       const memberT = locale.bind('member-question')

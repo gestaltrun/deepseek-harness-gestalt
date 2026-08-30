@@ -8,6 +8,7 @@
 
 import type { AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import type { ApprovalOutcome, ApprovalRequestId } from '@deepseek-ai/dsh-user-approval/types'
+import type { InstallationId } from '@deepseek-ai/dsh-remote-protocol'
 import type { Message } from '@deepseek-ai/dsh-llm/types'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
 import type { CallId } from '@deepseek-ai/dsh-llm/brand'
@@ -16,6 +17,7 @@ import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools/presen
 import type { RpcError, RpcId, RpcRequest } from './rpc.ts'
 import type { JobView } from './jobs.ts'
 import type { WorkspaceView } from './workspace.ts'
+import type { MemberQuestionReceiverSnapshot } from '@deepseek-ai/dsh-member-question-receiver'
 
 // Client-side consumers take the render-intent vocabulary from the contract;
 // dsh-tools remains its owner.
@@ -125,6 +127,11 @@ export type MuxFrame =
  * workspace-changed — `workspace.list` re-baselines it on reconnect).
  */
 export type HostFrame =
+  | {
+    type: 'host/member-question-snapshot'
+    snapshot: MemberQuestionReceiverSnapshot
+    currentInstallationId?: InstallationId
+  }
   | {
     type: 'host/session-added'
     sessionId: SessionId

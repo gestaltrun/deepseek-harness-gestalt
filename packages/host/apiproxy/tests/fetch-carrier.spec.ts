@@ -16,6 +16,16 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
     }
   }
   return {
+    memberQuestions: {
+      snapshot: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { revision: 0, pending: [], terminal: [] } },
+      }),
+      settle: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } },
+      }),
+    },
     sessions: {
       async list(request) {
         if (overrides.crashOn === 'session.list') throw new Error('impl crashed')
@@ -320,6 +330,19 @@ async function collect<F>(stream: AsyncIterable<RpcRequest<F>>): Promise<RpcRequ
 }
 
 describe('unary round trip (handler ⇄ client, no network)', () => {
+  it('round-trips member-question snapshot and settlement methods', async () => {
+    const c = client()
+    expect((await c.memberQuestions.snapshot({})).result).toEqual({
+      ok: true, value: { revision: 0, pending: [], terminal: [] },
+    })
+    expect((await c.memberQuestions.settle({
+      receivingSessionId: 'receiving-1' as never,
+      revision: 1,
+      questionId: 'question-1' as never,
+      response: { kind: 'declined' },
+    })).result).toMatchObject({ ok: false, error: { code: 'internal' } })
+  })
+
   it('carries a success result and echoes the minted rpcId', async () => {
     const response = await client().sessions.list({})
     expect(response.result).toEqual({ ok: true, value: { items: [] } })

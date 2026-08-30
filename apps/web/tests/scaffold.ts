@@ -431,6 +431,23 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     // to an absolute temp root (removed with the workspace at close) so tests
     // never write the user's harness home.
     { id: 'storage-json', config: { root: join(workspaceCwd, '.dsh-storages') } },
+    {
+      id: 'member-question-receiver',
+      config: {
+        storagePath: join(harnessHome, 'member-question-receiver'),
+        environment: 'development',
+        maxRecords: 1000,
+        terminalRetryMs: 10,
+        terminalAuthorityMode: 'development-local',
+      },
+    },
+    {
+      id: 'api-gateway',
+      config: {
+        memberQuestionInstallationId: 'web-e2e-installation',
+        memberQuestionDeviceName: 'Web E2E',
+      },
+    },
     // Skill discovery is model-visible input. Pin every host-level root inside
     // the owned temp world so ~/.dsh, ~/.agents, and a bundled-root env setting
     // cannot change replay requests or conversation goldens. Project roots stay

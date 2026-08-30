@@ -9,6 +9,12 @@
   ],
   "references": [
     {
+      "path": "../../interaction/member-question-receiver"
+    },
+    {
+      "path": "../../platform/remote-protocol"
+    },
+    {
       "path": "../../goal/goal"
     },
     {

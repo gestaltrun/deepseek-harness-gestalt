@@ -69,6 +69,10 @@ import {
   subagentListValueSchema,
   subagentPromptValueSchema,
 } from '../api/subagents.schema.ts'
+import {
+  memberQuestionSettleValueSchema,
+  memberQuestionSnapshotValueSchema,
+} from '../api/member-questions.schema.ts'
 
 /**
  * Client consumption face of the contract (shape a): same domain tree as ApiProxy, but unary
@@ -87,6 +91,10 @@ import {
  * Derived per method key from RpcMethodMap so a map row addition updates this mechanically.
  */
 export interface IApiClient {
+  memberQuestions: {
+    snapshot(payload: RequestPayload<'memberQuestion.snapshot'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'memberQuestion.snapshot'>>>
+    settle(payload: RequestPayload<'memberQuestion.settle'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'memberQuestion.settle'>>>
+  }
   sessions: {
     list(payload: RequestPayload<'session.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.list'>>>
     search(payload: RequestPayload<'session.search'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.search'>>>
@@ -175,6 +183,8 @@ export interface IApiClient {
  * mirror of the handler's request table; key coverage compiler-enforced against RpcMethodMap).
  */
 const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseValue<K>>> } = {
+  'memberQuestion.snapshot': memberQuestionSnapshotValueSchema,
+  'memberQuestion.settle': memberQuestionSettleValueSchema,
   'session.list': sessionListValueSchema,
   'session.search': sessionSearchValueSchema,
   'session.create': sessionCreateValueSchema,
@@ -416,6 +426,11 @@ export abstract class AbstractApiClient implements IApiClient {
   }
 
   // ---- IApiClient API (arrow properties so destructured/passed references stay bound) ----
+
+  readonly memberQuestions: IApiClient['memberQuestions'] = {
+    snapshot: (payload, signal) => this.callUnary('memberQuestion.snapshot', payload, signal),
+    settle: (payload, signal) => this.callUnary('memberQuestion.settle', payload, signal),
+  }
 
   readonly sessions: IApiClient['sessions'] = {
     list: (payload, signal) => this.callUnary('session.list', payload, signal),

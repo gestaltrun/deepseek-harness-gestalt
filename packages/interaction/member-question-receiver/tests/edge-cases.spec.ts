@@ -312,6 +312,8 @@ describe('member-question receiver edge contracts', () => {
       { ...base, maxRecords: 0 },
       { ...base, terminalRetryMs: 0 },
       { ...base, terminalAuthority: {} },
+      { ...base, terminalAuthorityMode: 'local' },
+      { ...base, environment: 'production', terminalAuthorityMode: 'development-local' },
       { ...base, clock: true },
       { ...base, admitter: true },
       { ...base, timer: {} },
@@ -323,6 +325,23 @@ describe('member-question receiver edge contracts', () => {
       expect(() => new FileMemberQuestionReceiver(context, config as never)).toThrow('config.')
       void context.fiber.dispose()
     }
+  })
+
+  it('uses the development-local authority for an answered settlement', async () => {
+    const receiver = await setup({ terminalAuthorityMode: 'development-local' })
+    const question = operation('development-answer')
+    await receiver.ingest({ authority: { accountId: account }, operation: question })
+    await expect(receiver.settle(question.questionId, {
+      kind: 'answered',
+      answers: [{ id: 'q', selected: ['Continue'] }],
+      settledByInstallationId: 'installation-local' as never,
+      settledByDeviceName: 'Local Mac',
+      settledAt: 1_100,
+    })).resolves.toMatchObject({
+      outcome: 'answered',
+      answers: [{ id: 'q', selected: ['Continue'] }],
+      settledByDeviceName: 'Local Mac',
+    })
   })
 
   it('reports a non-monotonic committed revision through its invariant companion', async () => {

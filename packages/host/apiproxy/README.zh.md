@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-所有客户端共用的 API 网关由三部分组成：TypeScript API 约定（`src/api/`，不依赖 Node，可从浏览器导入）、fetch 载体对（`src/fetch/`：宿主侧的 `toFetchHandler`，以及客户端侧的 `AbstractApiClient` 与平台子类）和宿主侧实现（`src/api-proxy.ts`：`createApiProxy` 加上默认导出的 `ApiProxyService` 网关插件，其配置为 `{nativeOpen?, sessionExportCompressionLevel?, coldBlankProbeMaxBytes?}`，提供 `ctx.apiProxy`）。该包不注册任何路由；HTTP 等载体自行包装 `ctx.apiProxy`。随发行版交付的 Web 组合位于 [`packages/bundle/web-app/cordis.patch.yml`](../../bundle/web-app/cordis.patch.yml)，其默认 Agent（智能体）模型选择属于 base 组合包中的 [`@deepseek-ai/dsh-agent-default-model`](../../core/agent-default-model/README.zh.md)。
+所有客户端共用的 API 网关由三部分组成：TypeScript API 约定（`src/api/`，不依赖 Node，可从浏览器导入）、fetch 载体对（`src/fetch/`：宿主侧的 `toFetchHandler`，以及客户端侧的 `AbstractApiClient` 与平台子类）和宿主侧实现（`src/api-proxy.ts`：`createApiProxy` 加上默认导出的 `ApiProxyService` 网关插件，其配置为 `{nativeOpen?, sessionExportCompressionLevel?, coldBlankProbeMaxBytes?, memberQuestionInstallationId?, memberQuestionDeviceName?}`，提供 `ctx.apiProxy`）。该包不注册任何路由；HTTP 等载体自行包装 `ctx.apiProxy`。随发行版交付的 Web 组合位于 [`packages/bundle/web-app/cordis.patch.yml`](../../bundle/web-app/cordis.patch.yml)，其默认 Agent（智能体）模型选择属于 base 组合包中的 [`@deepseek-ai/dsh-agent-default-model`](../../core/agent-default-model/README.zh.md)。
 
 ## 共享 Agent 默认值（`agent-default-model` Settings 分节）
 
@@ -23,6 +23,8 @@ Settings 分节中的 `reasoningEffort` 在 agent-default-model 插件配置中�
 分层与协议决策记录在 [GUI 分层与 RPC 协议 RFC](../../../.agents/notes/implemented/architecture/2026-07-19-gui-layering-and-rpc-protocol.zh.md) 中；浏览器侧消费架构记录在 [Web 客户端架构 RFC](../../../.agents/notes/implemented/architecture/2026-07-19-gui-web-client-architecture.zh.md) 中。
 
 首个回答认领待处理请求之前，系统会对照该请求校验问题响应。多选题的回答项可以同时携带 `selected` 中的请求选项标签与非空 `custom` 文本；单选题的回答项必须二选一。标签重复、标签未知、id 不匹配、批次不完整以及自定义文本为空都会以 `bad-response` 拒绝。
+
+成员提问接收状态使用精确的 `memberQuestion.snapshot` 与 `memberQuestion.settle` RPC，以及完整的 `host/member-question-snapshot` 基线／变更帧。网关读取组合中的 Host receiver；服务缺失、`ReceivingSessionId`／revision／question tuple 陈旧或 settlement Installation identity 缺失时都会拒绝，不会虚构状态。可选的 Installation id 与设备名配置字段仅用于开发，必须同时配置且非空；生产组合在跨机器 settlement authority 暂缓期间不提供这些字段。存在已认证的当前 Installation id 时，帧会携带它，让各 Client 根据 canonical terminal winner 派生 answered-elsewhere 呈现。
 
 `session.history` 会读取已附加 Session 的内存状态，或通过持久化检查冷日志，而不会恢复或发布 agent，然后按追加来源的消息边界分页：`maxMessages` 统计以追加方式进入 surface 的 `user/message` 和 `assistant/message` 事件，因此仅供模型使用的替换副本不占用配额。每一页仍是一段连续的原始事件区间，从而让压缩（compaction）的仅日志 `compaction/summary` 记录与引用它的替换留在同一页。
 

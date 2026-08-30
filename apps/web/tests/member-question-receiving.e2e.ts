@@ -1,12 +1,16 @@
-// Keyless assembled acceptance for the receiving half of a routed member
-// question. The sender is a mock remote Agent only; the user-questions service,
-// api-proxy pending registry, SSE mux, Client Runtime, dynamic module table,
-// composite card, shared QuestionPresentation, and response POST are shipped
-// production paths. No model call or replay fixture participates.
-import { Context } from '@deepseek-ai/cordis'
-import { Inbox, type Agent } from '@deepseek-ai/dsh-agent'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+// Keyless assembled acceptance: authenticated receiver ingress -> durable Host
+// snapshot/change feed -> real HTTP/WebSocket Client Runtime -> composite card
+// -> Host answer/decline RPC -> passive terminal record band. Arrival creates
+// no Host Session and invokes no model path.
+import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import {
+  createAuthenticatedMemberQuestionIngress,
+  type MemberQuestionReceiverService,
+} from '@deepseek-ai/dsh-member-question-receiver'
 import type { Browser, Page, Request } from 'playwright'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed, vi } from 'vitest'
 import {
@@ -16,74 +20,60 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const MODE = webSnapshotMode()
 
-function mockRemoteAgent(rawId: string): Agent {
-  const id = SessionId(rawId)
-  const session = Session.create(id)
+function isForbiddenSessionRequest(request: Request): boolean {
+  return /\/api\/session\.(?:create|history|prompt)$/.test(new URL(request.url()).pathname)
+}
+
+function operation(questionId: string, operationId: string) {
   return {
-    id,
-    options: {},
-    session,
-    inbox: new Inbox(session, { inserted: () => {}, discarded: () => {}, claimed: () => {} }),
-    status: 'idle',
-    ctx: new Context(),
-    send: () => {},
-    followup: () => {},
-    steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
-    inject: () => {},
-    cancel: () => {},
-    runMaintenance: task => task(new AbortController().signal),
-    whenIdle: () => Promise.resolve(),
+    type: 'member-question' as const,
+    operationId: operationId as never,
+    questionId: questionId as never,
+    projectId: 'project-atlas' as never,
+    originSessionId: 'remote-origin-session-1' as never,
+    expiresAt: Date.now() + 60_000,
+    origin: {
+      projectName: 'Project Atlas',
+      originSessionTitle: 'Receiver launch decision',
+      askerAccountId: 'account:alice',
+      askerRole: 'owner' as const,
+      askerDisplayName: 'Alice',
+      askerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E',
+    },
+    background: 'The preview needs a reversible channel before the wider release.',
+    questions: [{
+      id: 'release-channel',
+      header: 'Choose a channel',
+      question: 'Which release channel should carry the receiver preview?',
+      options: [
+        { label: 'Canary (Recommended)', description: 'Limits the first rollout.' },
+        { label: 'Stable', description: 'Makes the preview broadly visible.' },
+      ],
+    }],
+    references: [{ path: 'docs/receiver-decision.md', reason: 'Lists the rollout constraints' }],
   }
 }
 
-function isForbiddenSessionRequest(request: Request): boolean {
-  return /\/api\/session\.(?:create|history)$/.test(new URL(request.url()).pathname)
-}
-
-describe.skipIf(MODE === 'record')('web e2e: member-question receiving session', () => {
+describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receiving session', () => {
   let scaffold: WebScaffold
   let browser: Browser
   let page: Page
+  let receiver: MemberQuestionReceiverService
   let tripwire: ReturnType<typeof watchConsole>
-  let disposePreviewTripwire: () => void
-  const clientErrors: string[] = []
-  const previewSecurityBlocks: string[] = []
-  const questionFrames: string[] = []
-  const previewNetworkRequests: string[] = []
+  let harnessHome: string
+  const forbiddenRequests: string[] = []
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold()
-    const webServer = scaffold.ctx.get('webServer')
-    if (webServer === undefined) throw new Error('member-question e2e: webServer unavailable')
-    disposePreviewTripwire = webServer.register({
-      kind: 'exact',
-      path: '/preview-network-tripwire',
-      handler: (request, response) => {
-        previewNetworkRequests.push(request.url ?? '')
-        response.writeHead(204)
-        response.end()
-      },
-    })
+    harnessHome = await mkdtemp(join(tmpdir(), 'dsh-web-member-question-home-'))
+    scaffold = await launchWebScaffold({ harnessHome })
+    const service = scaffold.ctx.get('memberQuestionReceiver')
+    if (service === undefined) throw new Error('member-question e2e: receiver unavailable')
+    receiver = service
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
     tripwire = watchConsole(page)
-    page.on('console', (message) => {
-      if (message.type() !== 'error') return
-      const text = message.text()
-      const isRestrictedPreviewBlock = text.includes('/preview-network-tripwire')
-        || text.includes("Blocked script execution in 'about:srcdoc'")
-        || (text.includes('Framing ') && text.includes("default-src 'none'"))
-      if (isRestrictedPreviewBlock) {
-        previewSecurityBlocks.push(text)
-        return
-      }
-      clientErrors.push(text)
-    })
-    page.on('websocket', (socket) => {
-      socket.on('framereceived', ({ payload }) => {
-        const text = String(payload)
-        if (text.includes('question/requested')) questionFrames.push(text)
-      })
+    page.on('request', (request) => {
+      if (isForbiddenSessionRequest(request)) forbiddenRequests.push(request.url())
     })
     await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
@@ -92,141 +82,113 @@ describe.skipIf(MODE === 'record')('web e2e: member-question receiving session',
 
   afterAll(async () => {
     await browser?.close()
-    disposePreviewTripwire?.()
     await scaffold?.close()
+    await rm(harnessHome, { recursive: true, force: true })
   })
 
-  it('receives, focuses material, and answers without creating or opening a Host session', async () => {
-    onTestFailed(() => saveFailureShot(page, 'web-e2e-member-question-receiving'))
+  it('answers and declines through Host authority while retaining terminal bands', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-member-question-host-receiver'))
+    forbiddenRequests.length = 0
     const initialSessionIds = scaffold.ctx.sessions.list().map(session => session.id)
     const create = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'create')
     const history = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'history')
-    const forbiddenRequests: string[] = []
-    const onRequest = (request: Request): void => {
-      if (isForbiddenSessionRequest(request)) forbiddenRequests.push(request.url())
-    }
-    page.on('request', onRequest)
-
-    const sender = mockRemoteAgent('remote-agent-member-question-e2e')
-    const detachSender = scaffold.ctx.agents.enter(sender, undefined)
+    const prompt = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'prompt')
+    const ingress = createAuthenticatedMemberQuestionIngress(receiver)
     try {
-      const asked = scaffold.ctx.userQuestions.ask({
-        agent: sender,
-        questions: [{
-          id: 'release-channel',
-          header: 'Choose a channel',
-          question: 'Which release channel should carry the receiver preview?',
-          detail: 'Use the brief and material before choosing.',
-          options: [
-            { label: 'Canary (Recommended)', description: 'Limits the first rollout.' },
-            { label: 'Stable', description: 'Makes the preview broadly visible.' },
-          ],
-          intent: {
-            kind: 'member-question',
-            questionId: 'mq-web-e2e-1',
-            originSessionId: 'remote-origin-session-1',
-            toProjectMember: 'account:receiver',
-            origin: {
-              projectName: 'Project Atlas',
-              originSessionTitle: 'Receiver launch decision',
-              askerAccountId: 'account:alice',
-              askerRole: 'owner',
-              askerDisplayName: 'Alice',
-              askerAvatarUrl: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E',
-            },
-            background: 'The preview needs a reversible channel before the wider release.',
-            references: [{
-              path: 'docs/receiver-decision.md',
-              reason: 'Lists the rollout constraints',
-              content: '# Receiver decision\n\n**Canary** keeps the initial audience bounded.',
-            }, {
-              path: 'docs/untrusted-preview.html',
-              reason: 'Exercises the restricted HTML preview',
-              content: [
-                `<img src="${scaffold.baseUrl}/preview-network-tripwire?kind=image">`,
-                `<link rel="stylesheet" href="${scaffold.baseUrl}/preview-network-tripwire?kind=style">`,
-                `<iframe src="${scaffold.baseUrl}/preview-network-tripwire?kind=frame"></iframe>`,
-                `<script>fetch('${scaffold.baseUrl}/preview-network-tripwire?kind=fetch')</script>`,
-                `<meta http-equiv="refresh" content="0;url=${scaffold.baseUrl}/preview-network-tripwire?kind=refresh">`,
-                `<a href="${scaffold.baseUrl}/preview-network-tripwire?kind=navigation">Navigation probe</a>`,
-                '<p>Restricted preview ready</p>',
-              ].join(''),
-            }],
-            expiresAt: Date.now() + 60_000,
-          },
-        }],
+      const first = await ingress({
+        authority: { accountId: 'account:receiver' as PlatformAccountId },
+        operation: operation('mq-web-host-1', 'mq-web-operation-1'),
       })
-      // If a later UI assertion fails, scaffold teardown rejects the still
-      // pending sender promise; observe that cleanup edge without replacing
-      // the original promise asserted below.
-      void asked.catch(() => {})
+      expect(first.receivingSessionId).not.toMatch(/^mq-recv:/u)
 
-      const receivingTitle = 'Project Atlas — Receiver launch decision'
-      const row = page.locator('[role="treeitem"]', { hasText: receivingTitle })
-      await expect.poll(async () => ({
-        row: await row.count(),
-        clientErrors,
-        memberIntentFrames: questionFrames.filter(frame => frame.includes('member-question')).length,
-      }), { timeout: 30_000 }).toEqual({ row: 1, clientErrors: [], memberIntentFrames: 1 })
-      await expect.poll(() => row.getByText('Waiting for answer', { exact: true }).count()).toBe(1)
+      const title = 'Project Atlas — Receiver launch decision'
+      const row = page.locator('[role="treeitem"]', { hasText: title })
+      await row.waitFor({ timeout: 30_000 })
       await row.click()
-
-      const card = page.locator('[data-question-key]').filter({
-        has: page.locator('[data-member-presentation]'),
-      })
+      const card = page.locator('[data-question-key]').filter({ has: page.locator('[data-member-presentation]') })
       await card.waitFor({ timeout: 30_000 })
-      await expect.poll(() => card.getByText('Remote', { exact: true }).count()).toBe(1)
-      await expect.poll(() => card.getByText('Alice', { exact: true }).count()).toBe(1)
-      await expect.poll(() => card.getByText('Owner', { exact: true }).count()).toBe(1)
-      await expect.poll(() => card.getByText('Project Atlas', { exact: false }).count()).toBeGreaterThan(0)
-      await expect.poll(() => card.locator('[data-member-presentation]').count()).toBe(1)
-      await expect.poll(() => card.getByText('Canary', { exact: true }).count()).toBe(1)
-
-      await card.getByRole('button', { name: /receiver-decision\.md/ }).click()
-      const details = page.locator('[data-details-panel][aria-expanded="true"]')
-      await details.waitFor({ timeout: 10_000 })
-      await expect.poll(() => details.getByText('Receiver decision', { exact: true }).count()).toBe(1)
-      await expect.poll(() => details.locator('strong').filter({ hasText: 'Canary' }).count()).toBe(1)
-      await expect.poll(() => card.getByRole('button', { name: 'Remote · Alice' }).count()).toBe(1)
-
-      // Restore the card without closing details: document and decision stay
-      // side by side, and the shared presentation remains answerable.
-      await card.getByRole('button', { name: 'Remote · Alice' }).click()
-      await expect.poll(() => details.getAttribute('aria-expanded')).toBe('true')
-      await expect.poll(() => card.getByText('Which release channel should carry the receiver preview?').count()).toBe(1)
-
-      await card.getByRole('button', { name: /untrusted-preview\.html/ }).click()
-      await expect.poll(() => details.getByText('Restricted preview · scripts and network requests are disabled', { exact: true }).count()).toBe(1)
-      const preview = details.locator('iframe').contentFrame()
-      await preview.getByText('Restricted preview ready', { exact: true }).waitFor()
-      await preview.getByText('Navigation probe', { exact: true }).click()
-      await page.waitForTimeout(100)
-      expect(previewNetworkRequests).toEqual([])
-      expect(previewSecurityBlocks.some(message =>
-        message.includes('kind=image') && message.includes("default-src 'none'"))).toBe(true)
-      expect(await preview.locator('meta[http-equiv="refresh"], link, iframe, script').count()).toBe(0)
-      expect(await preview.getByText('Navigation probe', { exact: true }).getAttribute('href')).toBeNull()
-
       await card.getByRole('radio', { name: 'Canary' }).click()
       await card.getByRole('button', { name: 'Submit' }).click()
-      await expect(asked).resolves.toEqual({
-        answers: [{ id: 'release-channel', selected: ['Canary (Recommended)'] }],
+
+      await expect.poll(async () => (await receiver.snapshot()).terminal[0]?.terminal.outcome)
+        .toBe('answered')
+      await expect.poll(() => page.locator('[data-record-state="answered"]').count()).toBe(1)
+
+      await ingress({
+        authority: { accountId: 'account:receiver' as PlatformAccountId },
+        operation: operation('mq-web-host-2', 'mq-web-operation-2'),
       })
-      await expect.poll(() => page.locator('[data-question-key]').count(), { timeout: 10_000 }).toBe(0)
+      const secondCard = page.locator('[data-question-key]').filter({ has: page.locator('[data-member-presentation]') })
+      await secondCard.waitFor({ timeout: 30_000 })
+      await secondCard.getByRole('button', { name: 'Dismiss all questions' }).click()
+      await expect.poll(async () => (await receiver.snapshot()).terminal.at(-1)?.terminal.outcome)
+        .toBe('declined')
+      await expect.poll(() => page.locator('[data-record-state="declined"]').count()).toBe(1)
+
+      const third = await ingress({
+        authority: { accountId: 'account:receiver' as PlatformAccountId },
+        operation: operation('mq-web-host-3', 'mq-web-operation-3'),
+      })
+      expect(third.receivingSessionId).toBe(first.receivingSessionId)
+      await expect.poll(() => page.locator('[data-question-key]').filter({
+        has: page.locator('[data-member-presentation]'),
+      }).count()).toBe(1)
+      const beforeRestart = await receiver.snapshot()
+      expect(beforeRestart.pending.map(row => row.questionId)).toEqual(['mq-web-host-3'])
+      expect(beforeRestart.terminal.map(row => row.terminal.outcome)).toEqual(['answered', 'declined'])
 
       expect(scaffold.ctx.sessions.list().map(session => session.id)).toEqual(initialSessionIds)
       expect(create).not.toHaveBeenCalled()
       expect(history).not.toHaveBeenCalled()
+      expect(prompt).not.toHaveBeenCalled()
       expect(forbiddenRequests).toEqual([])
       expect(tripwire.pageErrors).toEqual([])
       expect(tripwire.warnings).toEqual([])
-      expect(clientErrors).toEqual([])
-      expect(questionFrames).toHaveLength(1)
+
+      await browser.close()
+      await scaffold.close()
+
+      scaffold = await launchWebScaffold({ harnessHome })
+      const restartedService = scaffold.ctx.get('memberQuestionReceiver')
+      if (restartedService === undefined) throw new Error('member-question e2e: restarted receiver unavailable')
+      receiver = restartedService
+      const restartedCreate = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'create')
+      const restartedHistory = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'history')
+      const restartedPrompt = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'prompt')
+      browser = await chromium.launch()
+      page = await newEnglishPage(browser)
+      tripwire = watchConsole(page)
+      forbiddenRequests.length = 0
+      page.on('request', (request) => {
+        if (isForbiddenSessionRequest(request)) forbiddenRequests.push(request.url())
+      })
+      await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+
+      const afterRestart = await receiver.snapshot()
+      expect(afterRestart).toEqual(beforeRestart)
+      const restartedRow = page.locator('[role="treeitem"]', { hasText: title })
+      await restartedRow.waitFor({ timeout: 30_000 })
+      await restartedRow.click()
+      await expect.poll(() => page.locator('[data-question-key]').filter({
+        has: page.locator('[data-member-presentation]'),
+      }).count()).toBe(1)
+      await expect.poll(() => page.locator('[data-record-state="answered"]').count()).toBe(1)
+      await expect.poll(() => page.locator('[data-record-state="declined"]').count()).toBe(1)
+      expect(scaffold.ctx.sessions.list()).toEqual([])
+      expect(restartedCreate).not.toHaveBeenCalled()
+      expect(restartedHistory).not.toHaveBeenCalled()
+      expect(restartedPrompt).not.toHaveBeenCalled()
+      expect(forbiddenRequests).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+      expect(tripwire.warnings).toEqual([])
+      restartedCreate.mockRestore()
+      restartedHistory.mockRestore()
+      restartedPrompt.mockRestore()
     } finally {
-      page.off('request', onRequest)
-      detachSender()
       create.mockRestore()
       history.mockRestore()
+      prompt.mockRestore()
     }
   }, 90_000)
 })

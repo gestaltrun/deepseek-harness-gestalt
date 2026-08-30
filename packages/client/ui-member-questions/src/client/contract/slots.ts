@@ -15,7 +15,9 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // The shared question presentation's namespace merge ('question') and the
 // sanctioned presentation seam this wrapper mounts under the banner.
 import type {} from '@deepseek-ai/dsh-client-ui-user-questions/client'
-import type { PendingInteraction, PendingWait, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type {
+  ConversationSnapshot, MemberQuestionRecordView, PendingInteraction, PendingWait, SessionId,
+} from '@deepseek-ai/dsh-client-runtime/client'
 import type { DetailsDocumentFocus } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 /** The pending question carrier a member brief renders and settles. */
@@ -94,8 +96,7 @@ type MemberQuestionCarriedIntent = Extract<
 
 /** File name of a referenced document path. */
 function filenameOf(path: string): string {
-  const segments = path.split('/')
-  return segments[segments.length - 1] ?? path
+  return path.slice(path.lastIndexOf('/') + 1)
 }
 
 /**
@@ -171,6 +172,18 @@ export function memberBriefOf(wait: MemberQuestionWait): MemberQuestionBrief {
 export function selectMemberQuestion(owner: { interactions: readonly PendingInteraction[] }): MemberQuestionWait | null {
   return owner.interactions.find((wait): wait is MemberQuestionWait =>
     wait.kind === 'question' && isMemberQuestionBatch(wait.payload.questions)) ?? null
+}
+
+/**
+ * Elect the passive record-band surface after the pending card has gone.
+ * @param owner - current conversation snapshot from the composer chain.
+ * @returns non-empty terminal records, or null when the surface does not apply.
+ */
+export function selectMemberQuestionRecords(
+  owner: { session: ConversationSnapshot | undefined },
+): readonly MemberQuestionRecordView[] | null {
+  const records = owner.session?.memberQuestionRecords
+  return records === undefined || records.length === 0 ? null : records
 }
 
 /**

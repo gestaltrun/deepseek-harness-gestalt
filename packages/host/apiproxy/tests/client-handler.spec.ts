@@ -28,12 +28,18 @@ function scriptedApi(overrides: {
   settings?: Partial<ApiProxy['settings']>
   credentials?: Partial<ApiProxy['credentials']>
   llm?: Partial<ApiProxy['llm']>
+  memberQuestions?: Partial<ApiProxy['memberQuestions']>
   respond?: ApiProxy['respond']
 } = {}): ApiProxy {
   async function *empty<F>(): AsyncGenerator<RpcRequest<F>> { /* no frames */ }
   const err = <T>(r: RpcRequest<unknown>): Promise<RpcResponse<T>> =>
     Promise.resolve({ rpcId: r.rpcId, result: { ok: false, error: { code: 'internal' as const, message: 'stub', details: {} } } })
   return {
+    memberQuestions: {
+      snapshot: r => ok(r, { revision: 0, pending: [], terminal: [] }),
+      settle: err,
+      ...overrides.memberQuestions,
+    },
     sessions: {
       list: r => ok(r, { items: [] }),
       search: r => ok(r, { items: [], hasMore: false }),

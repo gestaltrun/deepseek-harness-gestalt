@@ -10,7 +10,7 @@ Host-owned Service Definition, file Provider, and authenticated-ingress Consumer
 
 - `ingest(envelope)` accepts a decoded `member-question` operation only beside the receiver Account authority established by the authenticated endpoint. Replay of the same question is idempotent; conflicting authority or content fails. The Host creates and persists an opaque `ReceivingSessionId` for `(originSessionId, receiver Account)` and never derives an id from `mq-recv` or trusts an addressee inside plaintext.
 - `snapshot()` returns the complete committed revision with pending questions and terminal records. `changes(listener)` publishes the same authoritative projection only after atomic durable replacement; one throwing listener cannot starve another.
-- `settle(questionId, settlement)` either proposes an explicit `declined` terminal through the injected first-claim authority or applies an authoritative transport claim. The retained terminal is canonical, including a losing local claim; human terminals retain typed Installation id, device name, and time, while `expired`, `withdrawn`, and `superseded` remain system terminals.
+- `settle(questionId, settlement)` proposes an explicit `answered` or `declined` terminal through the configured first-claim authority, or applies an authoritative transport claim. The retained terminal is canonical, including a losing local claim; human terminals retain typed Installation id, device name, time, and any answered values, while `expired`, `withdrawn`, and `superseded` remain system terminals.
 - `admitHumanTurn({ receivingSessionId, revision, rpcId, content, mode })` reserves the stable `rpcId` durably, calls one injected high-level materialize-and-admit adapter, and commits after success. A failed adapter or post-admission file commit leaves the reservation retryable. The adapter must be idempotent by `rpcId`; callers never receive separate Session-create and prompt operations.
 - `createAuthenticatedMemberQuestionIngress(receiver)` is the package-folded Consumer adapter for a future authenticated endpoint. It accepts only an `AuthenticatedMemberQuestionEnvelope`; authentication remains the endpoint's responsibility.
 
@@ -26,6 +26,7 @@ One serialized transaction owner orders load, arrival, terminal publication, fil
 - `environment` — `development` or `production`; each has an independent document namespace.
 - `maxRecords` — positive durable question-record ceiling. Exhaustion fails arrival rather than deleting terminal history.
 - `terminalRetryMs` — positive retry delay after an authoritative expiry publication fails.
+- `terminalAuthorityMode` — `deferred` keeps settlement fail-closed without a transport authority; `development-local` enables a keyless single-Host authority only when `environment` is `development`.
 - `terminalAuthority` — optional first-claim adapter. Arrival remains available without it, while any transition requiring publication fails closed.
 - `admitter` — optional high-level materialize-and-admit adapter. Human-turn admission fails closed when absent.
 - `clock`, `timer`, and `stateWriter` — injected time, scheduling, and atomic-storage faces used by deterministic compositions and storage-boundary tests; production uses the system clock/timer and owner-only atomic replacement.
@@ -40,5 +41,5 @@ No direct token cost or cache invalidation. The future Host adapter owns the ord
 
 ## Known Limitations and Deferred Work
 
-- **Host Session and API Proxy wiring are deliberately absent** — this package defines the one high-level admission adapter but does not implement the SessionRuntime/API Proxy adapter or expose two lower-level calls. The receiving UI still needs to consume this Host projection and retire its renderer-only identity derivation.
+- **Human-turn materialization remains deferred** — the shipped API Proxy and Client Runtime consume receiver snapshots and settle answers or declines without creating a Host Session. The high-level admission adapter is defined here but is not mounted by the Web composition, so the receiving Session composer stays disabled.
 - **Cross-machine terminal authority remains injected** — real multi-Installation first-claim publication depends on the project-registry transport. A composition without that authority can retain future pending arrivals but fails closed before decline, expiry, or supersession.

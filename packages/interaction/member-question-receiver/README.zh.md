@@ -10,7 +10,7 @@ Host 所有的成员提问接收状态 Service Definition、文件 Provider 与�
 
 - `ingest(envelope)` 只在认证 endpoint 已建立的接收 Account authority 旁接收解码后的 `member-question` operation。同一提问重放幂等；authority 或内容冲突会失败。Host 为 `(originSessionId, receiver Account)` 创建并持久化 opaque `ReceivingSessionId`，绝不从 `mq-recv` 派生 id，也不信任明文中的收件人。
 - `snapshot()` 返回含 pending 提问与 terminal 记录的完整已提交 revision。`changes(listener)` 只在原子持久替换后发布同一权威投影；一个抛错 listener 不会阻塞其他 listener。
-- `settle(questionId, settlement)` 要么通过注入的 first-claim authority 提议显式 `declined` 终态，要么应用 transport 提供的权威 claim。保留的终态始终 canonical，包括本地 claim 失败的情况；human terminal 保留类型化 Installation id、设备名和时间，`expired`、`withdrawn`、`superseded` 仍是 system terminal。
+- `settle(questionId, settlement)` 通过已配置的 first-claim authority 提议显式 `answered` 或 `declined` 终态，或者应用 transport 提供的权威 claim。保留的终态始终 canonical，包括本地 claim 失败的情况；human terminal 保留类型化 Installation id、设备名、时间与 answered value，`expired`、`withdrawn`、`superseded` 仍是 system terminal。
 - `admitHumanTurn({ receivingSessionId, revision, rpcId, content, mode })` 先持久保留稳定 `rpcId`，再调用一次注入的高层 materialize-and-admit adapter，成功后提交。adapter 失败或 admission 后文件提交失败都会保留可重试 reservation。adapter 必须按 `rpcId` 幂等；调用方永远看不到 Session-create 与 prompt 两个独立操作。
 - `createAuthenticatedMemberQuestionIngress(receiver)` 是包内折叠的未来认证 endpoint Consumer adapter。它只接受 `AuthenticatedMemberQuestionEnvelope`；认证仍由 endpoint 负责。
 
@@ -26,6 +26,7 @@ Provider 通过随机同目录临时文件原子替换，把一个仅所有者�
 - `environment` — `development` 或 `production`；每个环境拥有独立文档 namespace。
 - `maxRecords` — 正数持久提问记录上限。耗尽时拒绝 arrival，不删除 terminal 历史。
 - `terminalRetryMs` — 权威到期 publication 失败后的正数重试延迟。
+- `terminalAuthorityMode` — `deferred` 在缺少 transport authority 时保持 settlement fail closed；`development-local` 仅在 `environment` 为 `development` 时启用 keyless 单 Host authority。
 - `terminalAuthority` — 可选 first-claim adapter。没有它仍能保留未来 pending arrival，但需要 publication 的任何转换都 fail closed。
 - `admitter` — 可选高层 materialize-and-admit adapter。缺失时 human-turn admission fail closed。
 - `clock`、`timer` 与 `stateWriter` — 确定性 composition 与存储边界测试注入的时间、调度与原子存储接口；生产使用系统 clock/timer 与仅所有者可读写的原子替换。
@@ -40,5 +41,5 @@ None, as 认证 arrival、receiver projection、terminal settlement 与 reservat
 
 ## Known Limitations and Deferred Work
 
-- **刻意不包含 Host Session 与 API Proxy wiring** — 本包定义单一高层 admission adapter，但不实现 SessionRuntime/API Proxy adapter，也不暴露两个底层调用。接收 UI 仍需消费该 Host 投影并退役 renderer-only identity 派生。
+- **Human-turn materialization 仍暂缓** — 随发行版交付的 API Proxy 与 Client Runtime 会消费 receiver snapshot，并在不创建 Host Session 的情况下结算回答或拒绝。本包定义的高层 admission adapter 尚未由 Web composition 挂载，因此接收 Session composer 保持禁用。
 - **跨机器 terminal authority 仍由注入提供** — 真实多 Installation first-claim publication 依赖 project-registry transport。没有该 authority 的 composition 可以保留未来 pending arrival，但会在 decline、expiry 或 supersession 前 fail closed。

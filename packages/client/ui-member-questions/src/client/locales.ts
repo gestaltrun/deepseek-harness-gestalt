@@ -14,6 +14,12 @@ export const zh = {
   'collapsed.mark': '已收起',
   'collapsed.bar': '远端 · {name}',
   'origin.fallback': '成员',
+  'record.answered': '已回答',
+  'record.answered-elsewhere': '已在 {device} 回答',
+  'record.declined': '已拒绝',
+  'record.expired': '已过期',
+  'record.withdrawn': '已撤回',
+  'record.superseded': '已被新问题取代',
 } satisfies Record<string, string>
 
 /** The member-question namespace key union. */
@@ -33,4 +39,10 @@ export const en = {
   'collapsed.mark': 'Collapsed',
   'collapsed.bar': 'Remote · {name}',
   'origin.fallback': 'member',
+  'record.answered': 'Answered',
+  'record.answered-elsewhere': 'Answered on {device}',
+  'record.declined': 'Declined',
+  'record.expired': 'Expired',
+  'record.withdrawn': 'Withdrawn',
+  'record.superseded': 'Superseded by a newer question',
 } satisfies Record<MemberQuestionKey, string>

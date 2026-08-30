@@ -11,11 +11,11 @@
  */
 import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { DetailsDocumentFocus } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { MemberQuestionCard } from './MemberQuestionCard.tsx'
-import { selectMemberQuestion } from './contract/slots.ts'
+import { MemberQuestionCard, MemberQuestionRecords } from './MemberQuestionCard.tsx'
+import { selectMemberQuestion, selectMemberQuestionRecords } from './contract/slots.ts'
 import { en, zh, type MemberQuestionKey } from './locales.ts'
 
-export { selectMemberQuestion, isMemberQuestionBatch, memberBriefOf, clampBackground, BACKGROUND_CLAMP } from './contract/slots.ts'
+export { selectMemberQuestion, selectMemberQuestionRecords, isMemberQuestionBatch, memberBriefOf, clampBackground, BACKGROUND_CLAMP } from './contract/slots.ts'
 export type {
   MemberQuestionBrief, MemberQuestionComposerProps, MemberQuestionOrigin,
   MemberQuestionReferenceChip, MemberQuestionRole, MemberQuestionWait,
@@ -60,10 +60,19 @@ export function apply(ctx: ClientContext): void {
     {
       name: 'conversation.composer',
       select: selectMemberQuestion,
-      priority: -1,
+      priority: -2,
       locale: NS,
       inject: () => ({ questionT, focusDocument }),
     },
     MemberQuestionCard,
+  ))
+  ctx.slots.inject('conversation.composer', () => ctx.slots.register(
+    {
+      name: 'conversation.composer',
+      select: selectMemberQuestionRecords,
+      priority: -1,
+      locale: NS,
+    },
+    MemberQuestionRecords,
   ))
 }

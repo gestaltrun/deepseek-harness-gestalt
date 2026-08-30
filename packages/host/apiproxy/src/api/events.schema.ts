@@ -15,6 +15,7 @@ import {
 } from './sessions.schema.ts'
 import { taskViewSchema } from './jobs.schema.ts'
 import { workspaceIdSchema, workspaceViewSchema } from './workspace.schema.ts'
+import { memberQuestionSnapshotValueSchema } from './member-questions.schema.ts'
 
 /** Question fields validated strictly against core dsh-user-questions. */
 export const askUserQuestionItemSchema = z.object({
@@ -96,6 +97,11 @@ export const muxFrameSchema = z.discriminatedUnion('type', [
 
 /** HostFrame union (payload slot of a host-stream ServerRequest). */
 export const hostFrameSchema = z.discriminatedUnion('type', [
+  z.strictObject({
+    type: z.literal('host/member-question-snapshot'),
+    snapshot: memberQuestionSnapshotValueSchema,
+    currentInstallationId: z.string().min(1).optional(),
+  }),
   z.object({
     type: z.literal('host/session-added'),
     sessionId: sessionIdSchema,

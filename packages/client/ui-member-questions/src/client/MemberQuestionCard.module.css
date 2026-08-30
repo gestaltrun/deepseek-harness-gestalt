@@ -1,0 +1,227 @@
+/* The composite card rides the shared composer width axis: same centering
+   clearance and content width as the generic question takeover, so the two
+   shapes swap without re-laying the conversation column. */
+.frame {
+  display: flex;
+  justify-content: center;
+  padding: 6px calc(var(--dsh-composer-side-clearance) + 16px) 10px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--dsh-chat-content-width);
+  max-height: min(70vh, 560px);
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 20px;
+  background: var(--dsw-specific-input-major);
+  box-shadow: var(--dsw-shadow-lv2);
+  color: var(--dsw-alias-label-primary);
+  overflow: hidden;
+}
+
+.card,
+.card * {
+  box-sizing: border-box;
+}
+
+/* Folded to the brief strip: drop the height cap and hide the presentation
+   (kept mounted — it owns the drafts) so the pending ask reads as one line. */
+.cardFolded {
+  max-height: none;
+}
+
+.bodyHidden {
+  display: none;
+}
+
+/* Decision Brief banner. */
+.banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+}
+
+.originRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.remoteTag {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.asker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.avatar,
+.avatarFallback {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.avatar {
+  object-fit: cover;
+}
+
+.avatarFallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dsw-alias-fill-secondary);
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.askerName {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roleBadge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--dsw-alias-fill-secondary);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.countdown {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.countdownExpired {
+  color: var(--dsw-alias-label-danger, var(--dsw-alias-label-secondary));
+}
+
+.contextRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.contextItem {
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.contextLabel {
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary));
+}
+
+.background {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.backgroundText {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
+.references {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px;
+  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.chipFilename {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipReason {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The presentation body scrolls once the card hits the cap above, keeping
+   the shared component's own header/footer reachable. */
+.body {
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Folded strip: the whole card reads as one 「远端 · 发起人」 line. */
+.foldedBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.foldedSummary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foldedMark {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}

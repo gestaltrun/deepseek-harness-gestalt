@@ -104,6 +104,7 @@ describe('PhoneConnectedView chrome', () => {
   it('renders the design unauthorized arm from the listing instead of a dead stream', async () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
+    gateway.queueMint({ error: new PhoneStreamHttpError(502, 'upstream', 'device unauthorized: allow USB debugging') })
     render(
       <PhoneConnectedView
         serial="R3CN30"
@@ -129,6 +130,11 @@ describe('PhoneConnectedView chrome', () => {
     expect(screen.queryByRole('img')).toBeNull()
     // The devpick dot reads the warn state, not offline.
     expect(document.querySelector('._dotOffline_')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '重新连接' }))
+    expect(gateway.mintedDevices).toHaveLength(2)
+    await flush()
+    await step(() => { gateway.lastSocket!.accept() })
+    expect(screen.getByRole('img', { name: 'SM-S9310 实时画面' })).toBeTruthy()
   })
 
   it('keeps the live stream up when the stale listing still flags unauthorized', async () => {

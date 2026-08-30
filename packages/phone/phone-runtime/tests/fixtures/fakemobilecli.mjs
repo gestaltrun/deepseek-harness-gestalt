@@ -10,6 +10,7 @@ import http from 'node:http'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildGradientH264, buildGradientJpeg } from './u3-visible-frames.ts'
 
 const args = process.argv.slice(2)
 const listenIndex = args.indexOf('--listen')
@@ -36,14 +37,19 @@ if (knobs.exitFast === true) {
   process.exit(9)
 }
 
-// Canonical baseline 1×1 JPEG (JFIF APP0, two DQTs, SOF0 1×1, four DHTs, SOS,
-// entropy data, EOI): a frame any standard decoder accepts, unlike a bare
-// SOI+EOI marker pair.
-const JPEG_1X1 = Buffer.from(
-  'ffd8ffe000104a46494600010101006000600000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffdb0043010909090c0b0c180d0d1832211c213232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232323232ffc00011080001000103012200021101031101ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda000c03010002110311003f00f7fa28a2803fffd9',
-  'hex',
-)
-const H264_ANNEX_B = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x67, 0x42])
+// U3: one 390×844 gradient color-bar JPEG plus a Constrained Baseline Annex-B
+// stream of several I_PCM IDR pictures, generated in-process so a browser
+// decoder reconstructs a visible picture instead of a 1×1 or a six-byte prefix.
+let gradientJpeg
+let gradientH264
+function jpegFrame() {
+  gradientJpeg ??= buildGradientJpeg(0)
+  return gradientJpeg
+}
+function h264Stream() {
+  gradientH264 ??= buildGradientH264()
+  return gradientH264
+}
 
 const state = {
   devices: knobs.devices ?? [],
@@ -135,13 +141,13 @@ function reply(res, id, payload) {
   res.end(JSON.stringify({ jsonrpc: '2.0', id, ...payload }))
 }
 
-// One capture payload: an MJPEG multipart stream or a raw H264 Annex-B prefix.
+// One capture payload: an MJPEG multipart stream or a raw H264 Annex-B stream.
 // With streamFrameCount the MJPEG body stays open, emitting a frame every 40ms
 // until the client disconnects — so a mid-stream teardown reaches the proxy.
 function serveCapture(res, format) {
   if (format === 'avc') {
     res.writeHead(200, { 'content-type': 'video/h264', 'cache-control': 'no-store' })
-    res.write(H264_ANNEX_B)
+    res.write(h264Stream())
     res.end()
     return
   }
@@ -150,8 +156,9 @@ function serveCapture(res, format) {
   let sent = 0
   const emitFrame = () => {
     sent += 1
-    res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_1X1.length)}\r\n\r\n`)
-    res.write(JPEG_1X1)
+    const jpeg = jpegFrame()
+    res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(jpeg.length)}\r\n\r\n`)
+    res.write(jpeg)
     res.write('\r\n')
     if (sent >= frameCount) {
       res.write('--frame--\r\n')
@@ -285,10 +292,10 @@ const server = http.createServer((req, res) => {
           const body = Buffer.concat([
             Buffer.from(`--BoundaryString\r\nContent-Type: application/json\r\n\r\n${json}\r\n`),
             Buffer.from('--BoundaryString--\r\n'),
-            Buffer.from(`--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_1X1.length)}\r\n\r\n`),
-            JPEG_1X1,
-            Buffer.from(`\r\n--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(JPEG_1X1.length)}\r\n\r\n`),
-            JPEG_1X1,
+            Buffer.from(`--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(jpegFrame().length)}\r\n\r\n`),
+            jpegFrame(),
+            Buffer.from(`\r\n--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(jpegFrame().length)}\r\n\r\n`),
+            jpegFrame(),
             Buffer.from('\r\n--mjpeg-frame-boundary--\r\n'),
           ])
           res.writeHead(200, { 'content-type': 'multipart/x-mixed-replace; boundary=BoundaryString', 'cache-control': 'no-store' })

@@ -1,5 +1,5 @@
 /** Host apply writes the snapshot prefs patch; the client half binds official pages. */
-import { Context, Service } from '@deepseek-ai/cordis'
+import { Context, FiberState, Service } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
@@ -27,6 +27,12 @@ class SettingsService extends Service {
     this.updates.push(patch)
     const current = this.values.get(ns) ?? {}
     this.values.set(ns, { ...current, ...patch })
+  }
+}
+
+class SnapshotDependency extends Service {
+  constructor(ctx: Context) {
+    super(ctx, 'snapshotDependency')
   }
 }
 
@@ -73,8 +79,9 @@ describe('ui-workbench host apply', () => {
     new SettingsService(ctx)
     const entries: { options: { id: string } }[] = [{ options: { id: 'ui-better-sidebar' } }]
     ctx.provide('loader', { entries: () => entries })
-    setImmediate(() => {
+    queueMicrotask(() => {
       entries.splice(0, entries.length)
+      ctx.emit('loader/partial-dispose', {} as never, {} as never, false)
     })
     await expect(apply(ctx)).rejects.toThrow(/dsh-better-sidebar settings namespace is not registered/)
   })
@@ -119,17 +126,119 @@ describe('ui-workbench host apply', () => {
     }])
   })
 
-  it('waits one turn when the snapshot fiber has not been created yet', async () => {
+  it('waits for a pending snapshot fiber to register its namespace', async () => {
     const ctx = new Context()
     const settings = new SettingsService(ctx)
-    const entry: { options: { id: string }; fiber?: { await(): Promise<void> } } = {
+    const entry: {
+      options: { id: string }
+      fiber?: { await(): Promise<unknown> }
+    } = {
       options: { id: 'ui-better-sidebar' },
     }
     ctx.provide('loader', { entries: () => [entry] })
-    setImmediate(() => {
-      settings.values.set(NS, { tabsEnabled: { git: true } })
+    entry.fiber = ctx.plugin({
+      inject: ['snapshotDependency'],
+      apply() {
+        settings.values.set(NS, { tabsEnabled: { git: true } })
+      },
     })
-    await apply(ctx)
+    const workbench = ctx.plugin({ inject, apply })
+    setImmediate(() => {
+      new SnapshotDependency(ctx)
+    })
+    await workbench.await()
+    expect(settings.updates).toEqual([{
+      tabsEnabled: { git: true, browser: true },
+      browserInterceptLinks: false,
+    }])
+  })
+
+  it('does not patch after disposal while the snapshot is pending', async () => {
+    const ctx = new Context()
+    const settings = new SettingsService(ctx)
+    const inspected = Promise.withResolvers<undefined>()
+    const entry: {
+      options: { id: string }
+      fiber?: { await(): Promise<unknown> }
+    } = {
+      options: { id: 'ui-better-sidebar' },
+    }
+    ctx.provide('loader', {
+      entries: () => {
+        inspected.resolve(undefined)
+        return [entry]
+      },
+    })
+    entry.fiber = ctx.plugin({
+      inject: ['snapshotDependency'],
+      apply() {
+        settings.values.set(NS, { tabsEnabled: { git: true } })
+      },
+    })
+    const workbench = ctx.plugin({ inject, apply })
+    await inspected.promise
+    await workbench.dispose()
+    new SnapshotDependency(ctx)
+    await entry.fiber.await()
+    expect(settings.updates).toEqual([])
+  })
+
+  it('propagates a loader failure while the snapshot is pending', async () => {
+    const ctx = new Context()
+    new SettingsService(ctx)
+    const entries: Array<{
+      options: { id: string }
+      fiber?: { state?: FiberState; await(): Promise<unknown> }
+    }> = [{ options: { id: 'ui-better-sidebar' } }, { options: { id: 'failed-provider' } }]
+    ctx.provide('loader', { entries: () => entries })
+    const workbench = ctx.plugin({ inject, apply })
+    setImmediate(() => {
+      entries[1]!.fiber = {
+        state: FiberState.FAILED,
+        async await() {
+          throw new Error('snapshot dependency provider failed')
+        },
+      }
+      ctx.emit('internal/status', entries[1]!.fiber as never, FiberState.LOADING)
+    })
+    await expect(workbench.await()).rejects.toThrow(/snapshot dependency provider failed/)
+  })
+
+  it('waits for the snapshot fiber to be created without polling', async () => {
+    const ctx = new Context()
+    const settings = new SettingsService(ctx)
+    const entry: {
+      options: { id: string }
+      fiber?: { await(): Promise<unknown> }
+    } = {
+      options: { id: 'ui-better-sidebar' },
+    }
+    ctx.provide('loader', { entries: () => [entry] })
+    const workbench = ctx.plugin({ inject, apply })
+    queueMicrotask(() => {
+      settings.values.set(NS, { tabsEnabled: { git: true } })
+      entry.fiber = ctx.plugin({ apply() {} })
+    })
+    await workbench.await()
+    expect(settings.updates).toEqual([{
+      tabsEnabled: { git: true, browser: true },
+      browserInterceptLinks: false,
+    }])
+  })
+
+  it('patches a namespace that registers before the lifecycle observer settles', async () => {
+    const ctx = new Context()
+    const settings = new SettingsService(ctx)
+    const entry = { options: { id: 'ui-better-sidebar' } }
+    let reads = 0
+    ctx.provide('loader', {
+      entries: () => {
+        reads += 1
+        if (reads === 3) settings.values.set(NS, { tabsEnabled: { git: true } })
+        return [entry]
+      },
+    })
+    await ctx.plugin({ inject, apply }).await()
     expect(settings.updates).toEqual([{
       tabsEnabled: { git: true, browser: true },
       browserInterceptLinks: false,

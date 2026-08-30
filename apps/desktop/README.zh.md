@@ -38,6 +38,8 @@ Pairing-scoped Companion operation ledger 会 single-flight 并发重试，在�
 
 ## 开发
 
+`pnpm run gestalt:overlay-boot` 是在新鲜 checkout 上检查 web-app roster 与 Desktop overlay 的产物面命令。它会先重建仓库库文件、客户端插件 bundle 与 Web 前端，再用操作系统分配的环回端口运行两条组合启动路径；直接执行聚焦 Vitest 命令则要求这些产物已经存在。
+
 ```sh
 pnpm install
 DSH_DESKTOP_OPERATED_PLATFORM_CONFIG=/absolute/path/to/operated-platform.json pnpm gestalt:dev

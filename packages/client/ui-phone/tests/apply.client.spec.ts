@@ -7,10 +7,12 @@
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { stubSettingsScope } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply, Config, inject } from '../src/client/index.tsx'
+import { NS, zh } from '../src/client/locales.ts'
 import { RecordingSidebar } from '../src/invariant.ts'
-import { PHONE_SETTINGS_NAMESPACE, type PhoneSettings } from '../src/phone-settings.ts'
+import type { PhoneSettings } from '../src/phone-settings.ts'
 import {
   buildPhoneTabDescriptor, installPhoneTab,
   type PhoneListingSource, type PhoneTabView,
@@ -56,8 +58,11 @@ async function mount(sidebar: SidebarUnderTest, settings?: ReturnType<typeof stu
   await ctx.plugin(SlotRegistry).await()
   ctx.slots.register({
     name: 'root',
-    children: { 'settings.plugin.item': { kind: 'keyed', scope: 'root' } },
+    children: { 'settings.section': { kind: 'list', scope: 'root' } },
   } as never, () => null)
+  const locale = new LocaleRuntime(ctx)
+  locale.setLocale('zh')
+  ctx.provide('locale', locale)
   const host = settings ?? stubSettingsScope<PhoneSettings>()
   ctx.provide('settingsScope', { bind: () => host.scope })
   // The loader hands apply the schema-validated config; mimic its default here.
@@ -72,17 +77,21 @@ async function mount(sidebar: SidebarUnderTest, settings?: ReturnType<typeof stu
 describe('ui-phone client apply', () => {
   afterEach(() => { vi.unstubAllGlobals() })
 
-  it('declares the Side card and settings-card service edges', () => {
-    expect([...inject]).toEqual(['betterSidebar', 'slots', 'settingsScope'])
+  it('declares the Side card, locale, and settings-section service edges', () => {
+    expect([...inject]).toEqual(['betterSidebar', 'slots', 'locale', 'settingsScope'])
   })
 
-  it('keys the Plugins-tab card on the Host settings namespace', async () => {
+  it('contributes a top-level 手机设备 settings section and leaves Plugins empty', async () => {
     const sidebar = new SidebarUnderTest()
     const { ctx, fiber } = await mount(sidebar)
-    expect(ctx.slots.entries('settings.plugin.item').map(entry => entry.options.key))
-      .toEqual([PHONE_SETTINGS_NAMESPACE])
-    await fiber.dispose()
+    const section = ctx.slots.entries('settings.section')[0]
+    expect(section?.options).toMatchObject({ id: 'phone-devices', order: 40 })
+    expect(section?.locale).toBe(NS)
+    const label = section?.options.label
+    expect(typeof label === 'function' ? label() : label).toBe(zh.nav)
     expect(ctx.slots.entries('settings.plugin.item')).toHaveLength(0)
+    await fiber.dispose()
+    expect(ctx.slots.entries('settings.section')).toHaveLength(0)
   })
 
   it('fails loud when betterSidebar has not been published', () => {
@@ -131,7 +140,7 @@ describe('ui-phone client apply', () => {
       revision: 1,
     })
     const { ctx } = await mount(sidebar, host)
-    const entry = ctx.slots.entries('settings.plugin.item')[0]!
+    const entry = ctx.slots.entries('settings.section')[0]!
     const face = (entry.inject as () => {
       hooks: { phoneSettingsCard: { getSnapshot: () => { view: { kind: string } } } }
     })()
@@ -155,7 +164,7 @@ describe('ui-phone client apply', () => {
       revision: 1,
     })
     const { ctx } = await mount(sidebar, host)
-    const entry = ctx.slots.entries('settings.plugin.item')[0]!
+    const entry = ctx.slots.entries('settings.section')[0]!
     const face = (entry.inject as () => {
       hooks: { phoneSettingsCard: { getSnapshot: () => { view: { kind: string } } } }
     })()
@@ -169,7 +178,7 @@ describe('ui-phone client apply', () => {
     vi.stubGlobal('navigator', { clipboard: { writeText } })
     const sidebar = new SidebarUnderTest()
     const { ctx } = await mount(sidebar)
-    const entry = ctx.slots.entries('settings.plugin.item')[0]!
+    const entry = ctx.slots.entries('settings.section')[0]!
     const face = (entry.inject as () => { copyCommand: (command: string) => void })()
     face.copyCommand('sdkmanager "platform-tools"')
     expect(writeText).toHaveBeenCalledWith('sdkmanager "platform-tools"')

@@ -9,9 +9,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { PhoneSettingsCard } from '../src/client/PhoneSettingsCard.tsx'
-import { PhoneSettingsItem } from '../src/client/PhoneSettingsItem.tsx'
-import type { PhoneSettingsItemProps } from '../src/client/PhoneSettingsItem.tsx'
+import { PhoneSettingsSection } from '../src/client/PhoneSettingsSection.tsx'
+import type { PhoneSettingsSectionProps } from '../src/client/PhoneSettingsSection.tsx'
 import type { PhoneEnvironmentView } from '../src/client/phone-environment.ts'
+import { zh } from '../src/client/locales.ts'
 import type { PhoneSettingsCardState } from '../src/client/phone-settings-controller.ts'
 import {
   ANDROID_CREATE_AVD, ANDROID_INSTALL_PLATFORM_TOOLS, ANDROID_INSTALL_SYSTEM_IMAGE,
@@ -258,22 +259,24 @@ describe('PhoneSettingsCard six states', () => {
   })
 })
 
-describe('PhoneSettingsItem', () => {
-  it('binds the injected snapshot onto the card', () => {
+describe('PhoneSettingsSection', () => {
+  it('renders the page chrome around the six-state card', () => {
     const store = createSnapshotStore<PhoneSettingsCardState>({
       enabled: false,
       writable: true,
       view: { kind: 'off' },
     })
     const props = {
+      t: (key: keyof typeof zh) => zh[key],
       usePhoneSettingsCard: bindSnapshotSelector(store),
       setEnabled: vi.fn(),
       redetect: vi.fn(),
       copyCommand: vi.fn(),
       nextAction: vi.fn(),
-    } as unknown as PhoneSettingsItemProps
-    render(<PhoneSettingsItem {...props} />)
-    expect(screen.getByRole('heading', { name: '手机设备' })).toBeTruthy()
+    } as unknown as PhoneSettingsSectionProps
+    render(<PhoneSettingsSection {...props} />)
+    expect(screen.getByRole('heading', { level: 2, name: '手机设备' })).toBeTruthy()
+    expect(screen.getByText(/这与「移动伴侣」不同/)).toBeTruthy()
     expect(screen.getByRole('switch', { name: '启用手机设备' })).toBeTruthy()
   })
 })

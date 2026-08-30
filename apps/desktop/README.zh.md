@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-DeepSeek Gestalt 的 Desktop Host。Electron 拥有窗口、菜单、GitHub 自动更新，以及进程内 Browser Runtime `webContents`。它启动捆绑的官方 Node 加上 `dsh web --patch ./cordis.patch.yml --no-open --host 127.0.0.1 --port 0`，并打开该环回 URL。`--no-open` 阻止再唤起系统默认浏览器，因为 Desktop Host 已经拥有窗口。叠加层加入 Schedule、GESTALT 次标、拖拽带、Update Control，以及指向 Host loopback Browser origin 的 Tandem 形态 HTTP 客户端；只有更新可操作或发现版本后发生错误时，控件才会出现。浏览器 `dsh web` 不加载这层，并继续使用确定性 Browser Runtime。
+DeepSeek Gestalt 的 Desktop Host。Electron 拥有窗口、菜单、GitHub 自动更新，以及进程内 Browser Runtime `webContents`。它启动捆绑的官方 Node 加上 `dsh web --patch ./cordis.patch.yml --no-open --host 127.0.0.1 --port 0`，并打开该环回 URL。`--no-open` 阻止再唤起系统默认浏览器，因为 Desktop Host 已经拥有窗口。叠加层加入 Schedule、GESTALT 次标、拖拽带、Update Control，以及指向 Host loopback Browser origin 的 Tandem 形态 HTTP 客户端；只有更新可操作或发现版本后发生错误时，控件才会出现。浏览器 `dsh web` 不加载这层，并继续使用确定性 Browser Runtime。这层还会加入 phone runtime、stream 与 tool 三行，它们在 `DSH_PHONE_MOBILECLI` 指向 `mobilecli` 可执行文件之前保持关闭：桌面上的手机设备是 opt-in 的，未设置时该 tab 渲染缺失态。「手机」tab 这一行本身来自 web-app roster，而非这层叠加——重复插入会撞出重复 loader entry id 并中止启动，组合 boot 规格测试正是对此的回归防护。
 
 在所有平台关闭最后一个窗口时，会先以 `window-close` 原因排空 Relay；Ctrl+C、quit 与 smoke 测试结束都会取消尚未完成的启动，停止 Personal Pairing 与受生产 gate 保护的 Relay owner，停止 Web Host，释放隐藏 Browser 窗口，并等待其工作排空后再终止 Electron。系统 sleep 会停止 Remote Access；resume 只为仍处于登录状态的账号重新加载。源码 Electron smoke 会在 sleep、关闭手机访问、关闭窗口与 quit 后读取各次 Relay owner 状态，再检查 Web Host 子进程 PID 已消失。首次启动或后续 Host 崩溃共允许一次重试，之后窗口才显示 Host 错误。不存在无窗口 daemon、后台 Host 或 remote wake 路径。Chromium 持久 partition 位于 Electron `userData/Partitions/<name>`；loopback API token 放在 `userData/browser-runtime` 下，绝不写入 Tandem Browser Application Support。Dock 仍是截图、标题与文本的原生窗格。
 

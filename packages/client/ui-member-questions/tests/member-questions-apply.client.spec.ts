@@ -3,7 +3,9 @@
 // registers the `member-question` dictionaries, and contributes its chain
 // entry ahead of the shared question composer (priority -1); teardown empties
 // the contribution (HMR safety).
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { DetailsDocumentFocus } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { MemberQuestionCard } from '../src/client/MemberQuestionCard.tsx'
@@ -48,6 +50,38 @@ describe('ui-member-questions browser apply', () => {
       // presentation (stable per namespace).
       const injected = (entry.inject as unknown as () => { questionT: (key: string) => string })()
       expect(injected.questionT('nav.minimize')).toBe('收起问题卡片')
+    } finally {
+      await feature.dispose()
+      await runtime.dispose()
+    }
+    expect(runtime.slots.entries('conversation.composer')).toHaveLength(0)
+  })
+
+  it('resolves a late details-focus service per gesture and stops after provider disposal', async () => {
+    const runtime = await SlotTestRuntime.create()
+    const locale = new LocaleRuntime(runtime.ctx)
+    locale.register('question', { zh: questionZh, en: questionEn })
+    runtime.provide('locale', locale)
+    runtime.slots.installLocale(locale)
+    await runtime.declare({ 'conversation.composer': { kind: 'chain', scope: 'session' } })
+    const feature = await runtime.mount({ inject: [...inject], apply })
+    const entry = runtime.slots.entries('conversation.composer')[0]!
+    const injected = (entry.inject as unknown as () => {
+      focusDocument: (sessionId: SessionId, document: DetailsDocumentFocus) => void
+    })()
+    const sessionId = 'receiving-session' as SessionId
+    const document = { path: 'brief.html', filename: 'brief.html', from: 'Alice' }
+    const focus = vi.fn()
+    try {
+      // The optional provider may arrive after this plugin's fiber.
+      expect(() => { injected.focusDocument(sessionId, document) }).not.toThrow()
+      const disposeProvider = runtime.ctx.reflect.provide('detailsFocus', { focus })
+      injected.focusDocument(sessionId, document)
+      expect(focus).toHaveBeenCalledWith(sessionId, document)
+
+      await disposeProvider()
+      injected.focusDocument(sessionId, document)
+      expect(focus).toHaveBeenCalledTimes(1)
     } finally {
       await feature.dispose()
       await runtime.dispose()

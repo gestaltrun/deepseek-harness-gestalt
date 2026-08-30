@@ -68,7 +68,7 @@ export interface MemberQuestionBrief {
   expiresAt?: number
 }
 
-/** Code-point ceiling of the banner's background block, mirroring the sender's T4 bound. */
+/** Code-point ceiling of the banner's background block, matching routed-ask construction. */
 export const BACKGROUND_CLAMP = 600
 
 /**
@@ -83,7 +83,7 @@ export function clampBackground(text: string): string {
 }
 
 /**
- * The member-question intent now carries the receiver projection on the wire
+ * The member-question intent carries the receiver projection on the wire
  * (origin identity, background, references, expiry), so this read narrows the
  * carried brief off the batch's shared intent.
  */
@@ -188,9 +188,9 @@ export type MemberQuestionComposerProps =
   & { questionT: TranslateNS<'question'> }
   & {
     /**
-     * Focus a referenced document in the session's details panel (the
-     * document-focus linkage over `ctx.get('detailsFocus')`); undefined when
-     * ui-conversation is composed out and the chips render inert.
+     * Focus a referenced document in the session's details panel. The callback
+     * resolves `ctx.get('detailsFocus')` per gesture; absent providers make it
+     * a no-op, and providers registered after this entry are available.
      */
-    focusDocument?: ((sessionId: SessionId, document: DetailsDocumentFocus) => void) | undefined
+    focusDocument: (sessionId: SessionId, document: DetailsDocumentFocus) => void
   }

@@ -8,8 +8,17 @@
   },
   "releases": {
     "desktop": "minor",
-    "mobile": "minor",
-    "platform": "minor"
+    "mobile": "none",
+    "platform": "none"
   },
-  "compatibilityExceptions": []
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The planner follows shared Client Runtime and presentation packages, but Mobile imports unchanged presentation faces and does not compose the Web member-question plugin or receiving-session wire path."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The planner follows shared lockfile and aggregate build inputs; the new Project Membership browser and HTTP consumers are not composed into apps/platform, and no Platform image or deployment input changes."
+    }
+  ]
 }

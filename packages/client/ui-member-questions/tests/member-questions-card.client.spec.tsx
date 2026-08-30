@@ -109,7 +109,10 @@ function genericWait(intent: undefined | { kind: 'plan-review'; approve: string 
   return new PendingWait('question', RpcId('q-2'), SID, payload, () => Promise.resolve<RpcReceipt>({ accepted: true }))
 }
 
-function renderCard(carrier: PendingWait<'question'>, focusDocument?: MemberQuestionComposerProps['focusDocument']) {
+function renderCard(
+  carrier: PendingWait<'question'>,
+  focusDocument: MemberQuestionComposerProps['focusDocument'] = () => {},
+) {
   return render(
     <MemberQuestionCard
       matched={carrier}
@@ -297,7 +300,7 @@ describe('MemberQuestionCard', () => {
     expect(screen.getByRole('button', { name: '收起问题卡片' })).toBeTruthy()
   })
 
-  it('focuses a referenced document from its chip and folds while the details panel is open', async () => {
+  it('focuses a referenced document and restores the decision beside the open details panel', async () => {
     const focusDocument = vi.fn()
     const { carrier } = memberWait()
     const { container } = renderCard(carrier, focusDocument)
@@ -315,13 +318,30 @@ describe('MemberQuestionCard', () => {
     const panel = document.createElement('div')
     panel.setAttribute('data-details-panel', '')
     document.body.appendChild(panel)
-    panel.setAttribute('aria-expanded', 'true')
-    await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeTruthy() })
-    expect(screen.getByText('远端 · 王小明')).toBeTruthy()
-    panel.setAttribute('aria-expanded', 'false')
-    await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeNull() })
-    expect(screen.getByText('将王小明移出项目吗？')).toBeTruthy()
-    panel.remove()
+    try {
+      panel.setAttribute('aria-expanded', 'true')
+      await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeTruthy() })
+      expect(screen.getByText('远端 · 王小明')).toBeTruthy()
+
+      fireEvent.click(screen.getByRole('button', { name: '远端 · 王小明' }))
+      await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeNull() })
+      expect(panel.getAttribute('aria-expanded')).toBe('true')
+      expect(screen.getByText('将王小明移出项目吗？')).toBeTruthy()
+
+      fireEvent.click(screen.getByRole('button', { name: '收起问题卡片' }))
+      await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeTruthy() })
+      fireEvent.click(screen.getByRole('button', { name: '远端 · 王小明' }))
+      await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeNull() })
+      fireEvent.click(screen.getByRole('button', { name: '展开问题卡片' }))
+      await waitFor(() => { expect(screen.getByText('将王小明移出项目吗？')).toBeTruthy() })
+
+      panel.setAttribute('aria-expanded', 'false')
+      await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeNull() })
+      panel.setAttribute('aria-expanded', 'true')
+      await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeTruthy() })
+    } finally {
+      panel.remove()
+    }
   })
 
   it('snapshots the full banner and the shared presentation (light)', () => {
@@ -375,6 +395,7 @@ describe('MemberQuestionCard', () => {
           {...kit}
           t={seatEn('member-question')}
           questionT={seatEn('question')}
+          focusDocument={() => {}}
         />,
       )
       expect(screen.getByText('Remote')).toBeTruthy()

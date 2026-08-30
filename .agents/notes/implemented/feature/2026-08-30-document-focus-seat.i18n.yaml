@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-30-document-focus-seat.md
-2026-08-30-document-focus-seat.md: b975920b88e6905e22634411dcb037f9a97fb337
-2026-08-30-document-focus-seat.zh.md: 6bd2aa4678651fcb9a95c1b22a3654e2656046cb
+2026-08-30-document-focus-seat.md: 1a456dcca7b57cd46b5e3ea2b7ece63a3f31e3d2
+2026-08-30-document-focus-seat.zh.md: 5dec056ceaca2e9bdb37c63d714b0ec6720125bd

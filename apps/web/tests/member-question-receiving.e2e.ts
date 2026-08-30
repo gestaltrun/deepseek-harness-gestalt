@@ -45,16 +45,39 @@ describe.skipIf(MODE === 'record')('web e2e: member-question receiving session',
   let browser: Browser
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
+  let disposePreviewTripwire: () => void
   const clientErrors: string[] = []
+  const previewSecurityBlocks: string[] = []
   const questionFrames: string[] = []
+  const previewNetworkRequests: string[] = []
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold()
+    const webServer = scaffold.ctx.get('webServer')
+    if (webServer === undefined) throw new Error('member-question e2e: webServer unavailable')
+    disposePreviewTripwire = webServer.register({
+      kind: 'exact',
+      path: '/preview-network-tripwire',
+      handler: (request, response) => {
+        previewNetworkRequests.push(request.url ?? '')
+        response.writeHead(204)
+        response.end()
+      },
+    })
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
     tripwire = watchConsole(page)
     page.on('console', (message) => {
-      if (message.type() === 'error') clientErrors.push(message.text())
+      if (message.type() !== 'error') return
+      const text = message.text()
+      const isRestrictedPreviewBlock = text.includes('/preview-network-tripwire')
+        || text.includes("Blocked script execution in 'about:srcdoc'")
+        || (text.includes('Framing ') && text.includes("default-src 'none'"))
+      if (isRestrictedPreviewBlock) {
+        previewSecurityBlocks.push(text)
+        return
+      }
+      clientErrors.push(text)
     })
     page.on('websocket', (socket) => {
       socket.on('framereceived', ({ payload }) => {
@@ -69,6 +92,7 @@ describe.skipIf(MODE === 'record')('web e2e: member-question receiving session',
 
   afterAll(async () => {
     await browser?.close()
+    disposePreviewTripwire?.()
     await scaffold?.close()
   })
 
@@ -115,6 +139,18 @@ describe.skipIf(MODE === 'record')('web e2e: member-question receiving session',
               path: 'docs/receiver-decision.md',
               reason: 'Lists the rollout constraints',
               content: '# Receiver decision\n\n**Canary** keeps the initial audience bounded.',
+            }, {
+              path: 'docs/untrusted-preview.html',
+              reason: 'Exercises the restricted HTML preview',
+              content: [
+                `<img src="${scaffold.baseUrl}/preview-network-tripwire?kind=image">`,
+                `<link rel="stylesheet" href="${scaffold.baseUrl}/preview-network-tripwire?kind=style">`,
+                `<iframe src="${scaffold.baseUrl}/preview-network-tripwire?kind=frame"></iframe>`,
+                `<script>fetch('${scaffold.baseUrl}/preview-network-tripwire?kind=fetch')</script>`,
+                `<meta http-equiv="refresh" content="0;url=${scaffold.baseUrl}/preview-network-tripwire?kind=refresh">`,
+                `<a href="${scaffold.baseUrl}/preview-network-tripwire?kind=navigation">Navigation probe</a>`,
+                '<p>Restricted preview ready</p>',
+              ].join(''),
             }],
             expiresAt: Date.now() + 60_000,
           },
@@ -152,10 +188,24 @@ describe.skipIf(MODE === 'record')('web e2e: member-question receiving session',
       await expect.poll(() => details.getByText('Receiver decision', { exact: true }).count()).toBe(1)
       await expect.poll(() => details.locator('strong').filter({ hasText: 'Canary' }).count()).toBe(1)
       await expect.poll(() => card.getByRole('button', { name: 'Remote · Alice' }).count()).toBe(1)
-      await details.getByRole('button', { name: 'Close details' }).focus()
-      await page.keyboard.press('Enter')
-      await expect.poll(() => page.locator('[data-details-panel]').getAttribute('aria-expanded')).toBe('false')
+
+      // Restore the card without closing details: document and decision stay
+      // side by side, and the shared presentation remains answerable.
+      await card.getByRole('button', { name: 'Remote · Alice' }).click()
+      await expect.poll(() => details.getAttribute('aria-expanded')).toBe('true')
       await expect.poll(() => card.getByText('Which release channel should carry the receiver preview?').count()).toBe(1)
+
+      await card.getByRole('button', { name: /untrusted-preview\.html/ }).click()
+      await expect.poll(() => details.getByText('Restricted preview · scripts and network requests are disabled', { exact: true }).count()).toBe(1)
+      const preview = details.locator('iframe').contentFrame()
+      await preview.getByText('Restricted preview ready', { exact: true }).waitFor()
+      await preview.getByText('Navigation probe', { exact: true }).click()
+      await page.waitForTimeout(100)
+      expect(previewNetworkRequests).toEqual([])
+      expect(previewSecurityBlocks.some(message =>
+        message.includes('kind=image') && message.includes("default-src 'none'"))).toBe(true)
+      expect(await preview.locator('meta[http-equiv="refresh"], link, iframe, script').count()).toBe(0)
+      expect(await preview.getByText('Navigation probe', { exact: true }).getAttribute('href')).toBeNull()
 
       await card.getByRole('radio', { name: 'Canary' }).click()
       await card.getByRole('button', { name: 'Submit' }).click()

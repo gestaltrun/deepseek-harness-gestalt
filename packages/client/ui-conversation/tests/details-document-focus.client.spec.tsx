@@ -111,17 +111,21 @@ describe('details document focus', () => {
   it('renders a focused html document as the sandboxed restricted preview', () => {
     const view = renderFocused({
       path: 'reports/brief.html', filename: 'brief.html', from: '王小明',
-      content: '<html><body><p>决策简报</p></body></html>',
+      content: '<meta http-equiv="refresh" content="0;url=https://example.invalid"><a href="https://example.invalid">决策简报</a><script>globalThis.compromised = true</script>',
     })
     // Amber warning strip, verbatim.
     expect(view.container.textContent).toContain('受限预览 · 脚本与网络请求已禁用')
     const frame = view.container.querySelector('iframe')
     expect(frame).not.toBeNull()
-    // Sandboxed without the script grant: relayed markup cannot execute or
-    // reach the network through the frame.
-    expect(frame?.getAttribute('sandbox')).toBe('allow-same-origin')
+    // No sandbox grants and a first-document CSP: relayed markup cannot run
+    // scripts or initiate passive/active network requests.
+    expect(frame?.getAttribute('sandbox')).toBe('')
     expect(frame?.getAttribute('sandbox')).not.toContain('allow-scripts')
+    expect(frame?.getAttribute('srcdoc')).toContain("default-src 'none'")
     expect(frame?.getAttribute('srcdoc')).toContain('决策简报')
+    expect(frame?.getAttribute('srcdoc')).not.toContain('<meta http-equiv="refresh"')
+    expect(frame?.getAttribute('srcdoc')).not.toContain('href=')
+    expect(frame?.getAttribute('srcdoc')).not.toContain('<script>')
   })
 
   it('renders an unrenderable document as a bare file tab without a download affordance', () => {

@@ -50,12 +50,11 @@ export function apply(ctx: ClientContext): void {
   // injected translator never churns memo identity.
   const questionT = ctx.locale.bind('question')
 
-  // The document-focus linkage resolves the optional `detailsFocus` service
-  // lazily per click, so a late-provided (or absent) ui-conversation service
-  // renders the chips inert instead of failing the banner.
-  const focusDocument = ctx.get('detailsFocus') === undefined
-    ? undefined
-    : (sessionId: SessionId, document: DetailsDocumentFocus) => { ctx.get('detailsFocus')?.focus(sessionId, document) }
+  // Resolve the optional provider at gesture time: dynamic client rows may
+  // supply or release ui-conversation after this fiber has registered.
+  const focusDocument = (sessionId: SessionId, document: DetailsDocumentFocus): void => {
+    ctx.get('detailsFocus')?.focus(sessionId, document)
+  }
 
   ctx.slots.inject('conversation.composer', () => ctx.slots.register(
     {

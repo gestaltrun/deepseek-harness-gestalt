@@ -67,11 +67,76 @@ function rawResultText(block: ToolCallBlock): string {
   return parts.join('\n')
 }
 
+const HTML_PREVIEW_ALLOWED_TAGS = new Set([
+  'a', 'abbr', 'b', 'bdi', 'bdo', 'blockquote', 'br', 'caption', 'cite', 'code',
+  'col', 'colgroup', 'dd', 'del', 'details', 'dfn', 'div', 'dl', 'dt', 'em',
+  'figcaption', 'figure', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'i', 'img',
+  'ins', 'kbd', 'li', 'mark', 'ol', 'p', 'pre', 'q', 's', 'samp', 'small',
+  'span', 'strong', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'tfoot',
+  'th', 'thead', 'time', 'tr', 'u', 'ul', 'var', 'wbr',
+])
+
+const HTML_PREVIEW_DROP_CONTENT_TAGS = new Set([
+  'applet', 'base', 'embed', 'frame', 'frameset', 'iframe', 'link', 'meta',
+  'noscript', 'object', 'script', 'style', 'template',
+])
+
+const HTML_PREVIEW_GLOBAL_ATTRIBUTES = new Set(['dir', 'lang', 'title'])
+const HTML_PREVIEW_TAG_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
+  col: new Set(['span']),
+  details: new Set(['open']),
+  img: new Set(['alt', 'height', 'src', 'width']),
+  li: new Set(['value']),
+  ol: new Set(['reversed', 'start', 'type']),
+  td: new Set(['colspan', 'headers', 'rowspan']),
+  th: new Set(['colspan', 'headers', 'rowspan', 'scope']),
+  time: new Set(['datetime']),
+}
+
+/** Copy one untrusted node through the preview's inert tag/attribute allowlist. */
+function appendRestrictedHtml(parent: Node, node: Node, output: Document): void {
+  if (node.nodeType === Node.TEXT_NODE) {
+    parent.appendChild(output.createTextNode(node.textContent ?? ''))
+    return
+  }
+  if (!(node instanceof Element)) return
+  const tag = node.tagName.toLowerCase()
+  if (HTML_PREVIEW_DROP_CONTENT_TAGS.has(tag)) return
+  if (!HTML_PREVIEW_ALLOWED_TAGS.has(tag)) {
+    for (const child of [...node.childNodes]) appendRestrictedHtml(parent, child, output)
+    return
+  }
+  const clean = output.createElement(tag)
+  const tagAttributes = HTML_PREVIEW_TAG_ATTRIBUTES[tag]
+  for (const attribute of [...node.attributes]) {
+    const name = attribute.name.toLowerCase()
+    if (HTML_PREVIEW_GLOBAL_ATTRIBUTES.has(name) || tagAttributes?.has(name) === true) {
+      clean.setAttribute(name, attribute.value)
+    }
+  }
+  for (const child of [...node.childNodes]) appendRestrictedHtml(clean, child, output)
+  parent.appendChild(clean)
+}
+
+/** Retain inert document markup while removing every active or navigable capability. */
+function sanitizeRestrictedHtml(content: string): string {
+  const input = new DOMParser().parseFromString(content, 'text/html')
+  const output = document.implementation.createHTMLDocument('')
+  for (const child of [...input.body.childNodes]) appendRestrictedHtml(output.body, child, output)
+  return output.body.innerHTML
+}
+
+/** Sanitize relayed HTML, then install a policy before any surviving node parses. */
+function restrictedHtmlDocument(content: string): string {
+  const sanitized = sanitizeRestrictedHtml(content)
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'"></head><body>${sanitized}</body></html>`
+}
+
 /**
  * The details panel's focused-document body: the 'conversation.details.document'
- * seat over its three-way dispatch fallback. The html frame is sandboxed with
- * only `allow-same-origin` — no `allow-scripts` and no `allow-same-origin`
- * fetch escape for network reads — so relayed markup cannot execute or load.
+ * seat over its three-way dispatch fallback. The html frame has no sandbox
+ * grants. An inert allowlist removes active and navigable capabilities, and
+ * the first parsed node installs a deny-all policy for passive resources.
  */
 function DocumentFocusBody({ document: doc, renderSlot, t }: {
   document: DetailsDocumentFocus
@@ -92,7 +157,12 @@ function DocumentFocusBody({ document: doc, renderSlot, t }: {
         return (
           <section className={css.section}>
             <div className={css.restricted} role="note">{t('details.document.restricted')}</div>
-            <iframe className={css.frame} sandbox="allow-same-origin" srcDoc={doc.content ?? ''} title={doc.filename} />
+            <iframe
+              className={css.frame}
+              sandbox=""
+              srcDoc={restrictedHtmlDocument(doc.content ?? '')}
+              title={doc.filename}
+            />
           </section>
         )
       }

@@ -70,7 +70,8 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
   // without owning or duplicating the presentation's draft state.
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const [innerCollapsed, setInnerCollapsed] = useState(false)
-  const [revealed, setRevealed] = useState(false)
+  const [innerRevealed, setInnerRevealed] = useState(false)
+  const [detailsRevealed, setDetailsRevealed] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
 
   useEffect(() => {
@@ -102,10 +103,14 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
   }, [])
 
   useEffect(() => {
-    if (!innerCollapsed) setRevealed(false)
+    if (!innerCollapsed) setInnerRevealed(false)
   }, [innerCollapsed])
 
-  const folded = detailsOpen || (innerCollapsed && !revealed)
+  useEffect(() => {
+    if (!detailsOpen) setDetailsRevealed(false)
+  }, [detailsOpen])
+
+  const folded = (innerCollapsed && !innerRevealed) || (detailsOpen && !detailsRevealed)
   const askerName = brief.origin?.askerDisplayName ?? props.t('origin.fallback')
 
   return (
@@ -119,7 +124,10 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
             type="button"
             className={css.foldedBar}
             aria-label={props.t('collapsed.bar', { name: askerName })}
-            onClick={() => { setRevealed(true) }}
+            onClick={() => {
+              if (innerCollapsed) setInnerRevealed(true)
+              if (detailsOpen) setDetailsRevealed(true)
+            }}
           >
             <span className={css.remoteTag}>{props.t('tag.remote')}</span>
             <span className={css.foldedSummary}>
@@ -171,7 +179,7 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
                       className={css.chip}
                       key={`${chip.filename}-${chip.reason}`}
                       onClick={() => {
-                        props.focusDocument?.(props.sessionId, {
+                        props.focusDocument(props.sessionId, {
                           path: chip.path,
                           filename: chip.filename,
                           from: askerName,

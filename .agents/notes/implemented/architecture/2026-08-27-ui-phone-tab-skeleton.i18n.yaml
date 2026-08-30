@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-27-ui-phone-tab-skeleton.md
-2026-08-27-ui-phone-tab-skeleton.md: c43552f6c66f6cf7b3b9756d8d42ddcef796e784
-2026-08-27-ui-phone-tab-skeleton.zh.md: 48b04a2f19891a80905a2ae69150b1f1e8156918
+2026-08-27-ui-phone-tab-skeleton.md: 0ddacda5664e47b104be9783ded320c44db121a6
+2026-08-27-ui-phone-tab-skeleton.zh.md: 65a383c555cedc73603db751ba49daeff2cca575

@@ -224,14 +224,14 @@ export interface PhoneTabEnvironment {
   readonly gate: PhoneGateSource
   /** Listing source backing the picker list and the device dropdown. */
   readonly source: PhoneListingSource
-  /** Open (or focus) the per-device tab of one device. */
+  /** Switch the single tab onto one device in place (U1). */
   readonly switchDevice: (tabId: string, serial: string, name: string) => void
-  /** Create the live connection controller for one device tab. */
+  /** Create the live connection controller for the occupying device. */
   readonly createController: (serial: string) => PhoneConnectionController
 }
 
 /** Chrome that only the browser half can supply (JSX icon + styled bodies).
- *  The body splits picker and per-device instances on the tab meta; the
+ *  The body splits picker and connected occupation on the tab meta; the
  *  descriptor supplies the environment, so components stay prop-driven. */
 export interface PhoneTabView {
   /** Monochrome inline SVG resolving the descriptor's `icon(size)` calls. */

@@ -69,7 +69,7 @@ describe('session minting', () => {
     expect(await mintPhoneSession('emulator-5554')).toEqual(session)
     expect(seen.input).toBe(PHONE_SESSION_PATH)
     expect(seen.init.method).toBe('POST')
-    expect(seen.init.body).toBe(JSON.stringify({ deviceId: 'emulator-5554' }))
+    expect(seen.init.body).toBe(JSON.stringify({ deviceId: 'emulator-5554', format: 'avc' }))
   })
 
   it('maps error payloads and malformed bodies onto the wire error', async () => {

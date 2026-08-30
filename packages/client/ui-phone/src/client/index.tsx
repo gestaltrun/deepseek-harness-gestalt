@@ -1,12 +1,12 @@
 /**
  * Phone plugin, browser half: registers the 「手机」 tab type through the
  * `ctx.betterSidebar` service and the top-level 「手机设备」 settings
- * section. The tab type hosts the always-reachable picker instance (the
- * locked not-connected empty state) plus one connected instance per opened
- * device (`phone:<serial>` ids, serial dedupeKey) whose body consumes the
- * Host `phoneStream` same-origin channel. With `enabled: false` (the
- * default) opens of device tabs are refused and no stream session is ever
- * minted.
+ * section. The tab type hosts one always-reachable 「手机」 instance whose
+ * body splits on `meta`: the locked not-connected empty state, or the
+ * connected view of the device occupying the tab. Device opens switch that
+ * tab in place. The connected body consumes the Host `phoneStream`
+ * same-origin channel. With `enabled: false` (the default) device switches
+ * are refused and no stream session is ever minted.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import z from '@deepseek-ai/schemastery'

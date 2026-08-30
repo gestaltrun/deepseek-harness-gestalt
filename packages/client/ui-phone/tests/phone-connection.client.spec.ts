@@ -38,9 +38,9 @@ describe('PhoneConnectionController lifecycle', () => {
     gateway.lastSocket!.accept()
     expect(controller.snapshot()).toEqual({
       kind: 'live',
-      streamUrl: SESSION_A.mjpeg.url,
-      format: 'mjpeg',
-      expiresAt: SESSION_A.mjpeg.expiresAt,
+      streamUrl: SESSION_A.h264.url,
+      format: 'h264',
+      expiresAt: SESSION_A.h264.expiresAt,
     })
   })
 
@@ -49,7 +49,7 @@ describe('PhoneConnectionController lifecycle', () => {
     const scheduler = new ManualScheduler()
     const controller = await connectToLive(gateway, scheduler)
     gateway.lastSocket!.drop()
-    expect(controller.snapshot()).toEqual({ kind: 'reconnecting', attempt: 1, streamUrl: SESSION_A.mjpeg.url })
+    expect(controller.snapshot()).toEqual({ kind: 'reconnecting', attempt: 1, streamUrl: SESSION_A.h264.url })
     scheduler.runNext()
     await flush()
     expect(gateway.mintedDevices).toHaveLength(2)
@@ -65,7 +65,7 @@ describe('PhoneConnectionController lifecycle', () => {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       gateway.lastSocket!.drop()
       expect(controller.snapshot()).toEqual({
-        kind: 'reconnecting', attempt, streamUrl: SESSION_A.mjpeg.url,
+        kind: 'reconnecting', attempt, streamUrl: SESSION_A.h264.url,
       })
       scheduler.runNext()
       await flush()

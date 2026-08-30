@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "472-ci-risk-tool-catalog-cli-closure",
+  "summary": {
+    "en": "Complete phone CI and tool-catalog projections and the CLI request-trust runtime dependency closure.",
+    "zh": "补全手机能力的 CI 与工具目录投影，并闭合 CLI 的 request-trust 运行时依赖。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The change updates repository CI metadata, generated documentation, and the Desktop CLI dependency closure without changing Mobile source or artifacts."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The change updates repository CI metadata, generated documentation, and the Desktop CLI dependency closure without changing Platform services, deployment inputs, or wire formats."
+    }
+  ]
+}

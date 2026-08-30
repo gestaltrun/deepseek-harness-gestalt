@@ -37,6 +37,7 @@
     { "pattern": "packages/core/**", "area": "area/session" },
     { "pattern": "packages/goal/**", "area": "area/session" },
     { "pattern": "packages/plan/**", "area": "area/session" },
+    { "pattern": "packages/phone/**", "area": "area/tools" },
     { "pattern": "packages/preset/**", "area": "area/session" },
     { "pattern": "packages/schedule/**", "area": "area/session" },
     { "pattern": "packages/session/**", "area": "area/session" },

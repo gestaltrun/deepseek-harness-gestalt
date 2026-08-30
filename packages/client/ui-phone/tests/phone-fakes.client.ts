@@ -40,9 +40,9 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
   const decoderErrors: Array<(error: DOMException) => void> = []
   const drawImage = vi.fn()
   const payload = Uint8Array.from([
-    0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0x80,
-    0, 0, 0, 1, 0x68, 0x80,
-    0, 0, 0, 1, 0x65, 0x80,
+    0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x06, 0x41, 0xaf, 0x9a, 0xd0,
+    0, 0, 0, 1, 0x68, 0xce, 0x38, 0x80,
+    0, 0, 0, 1, 0x65, 0x88, 0x86,
     0, 0, 0, 1, 0x09, 0xf0,
     0, 0, 0, 1, 0x0c, 0x80,
   ])
@@ -51,7 +51,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
     constructor(readonly init: EncodedVideoChunkInit) {}
   }
 
-  class Decoder {
+  class Decoder extends EventTarget {
     static async isConfigSupported(config: VideoDecoderConfig): Promise<VideoDecoderSupport> {
       return { supported: true, config }
     }
@@ -69,6 +69,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
     emitted = 0
 
     constructor(init: { output: Decoder['output']; error: Decoder['error'] }) {
+      super()
       this.output = init.output
       this.error = init.error
       decoderErrors.push(init.error)
@@ -102,6 +103,7 @@ export function installFakeH264Playback(): FakeH264PlaybackRuntime {
     }
   }
 
+  vi.stubGlobal('isSecureContext', true)
   vi.stubGlobal('EncodedVideoChunk', Chunk)
   vi.stubGlobal('VideoDecoder', Decoder)
   vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {

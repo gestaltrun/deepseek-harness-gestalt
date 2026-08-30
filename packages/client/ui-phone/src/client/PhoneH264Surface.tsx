@@ -38,7 +38,7 @@ export function PhoneH264Surface(props: PhoneH264SurfaceProps): ReactNode {
       onSurface: (width, height) => { onSurface.current(width, height) },
       onError: (error) => { onError.current(error) },
     })
-    return () => { playback.close() }
+    return () => { void playback.close() }
   }, [props.url])
 
   return <canvas ref={canvas} role="img" aria-label={props.label} className={props.className} />

@@ -14,8 +14,12 @@ export interface PhoneH264PlaybackOptions {
 
 /** Handle that synchronously prevents later drawing and callbacks. */
 export interface PhoneH264Playback {
-  /** Abort fetch and release the decoder; repeated calls do nothing. */
-  close(): void
+  /**
+   * Abort fetch, release the decoder, and await playback quiescence.
+   * Repeated calls share the same non-rejecting settlement.
+   * @returns completion after reader cancellation and the decode run stop.
+   */
+  close(): Promise<void>
 }
 
 interface AnnexBAccessUnit {
@@ -99,32 +103,166 @@ function rbspOf(nal: Uint8Array): Uint8Array {
   return Uint8Array.from(bytes)
 }
 
-function firstMacroblockOf(nal: Uint8Array): number {
-  const rbsp = rbspOf(nal)
-  let bitOffset = 0
-  const readBit = (): number => {
-    const byte = rbsp.at(bitOffset >> 3)
-    if (byte === undefined) throw new Error('phone H264 stream contains a truncated slice header')
-    const bit = (byte >> (7 - (bitOffset & 7))) & 1
-    bitOffset += 1
-    return bit
+class RbspReader {
+  private bitOffset = 0
+
+  constructor(
+    private readonly bytes: Uint8Array,
+    private readonly label: 'SPS' | 'PPS' | 'slice header',
+  ) {}
+
+  bit(): number {
+    const byte = this.bytes.at(this.bitOffset >> 3)
+    if (byte === undefined) throw new Error(`phone H264 stream contains a truncated ${this.label}`)
+    const value = (byte >> (7 - (this.bitOffset & 7))) & 1
+    this.bitOffset += 1
+    return value
   }
-  let zeroCount = 0
-  while (readBit() === 0) {
-    zeroCount += 1
-    if (zeroCount > 31) throw new Error('phone H264 stream contains an invalid slice header')
+
+  bits(width: number): number {
+    let value = 0
+    for (let index = 0; index < width; index += 1) value = value * 2 + this.bit()
+    return value
   }
-  let value = 1
-  for (let index = 0; index < zeroCount; index += 1) value = value * 2 + readBit()
-  return value - 1
+
+  ue(): number {
+    let zeroCount = 0
+    while (this.bit() === 0) {
+      zeroCount += 1
+      if (zeroCount > 31) throw new Error(`phone H264 stream contains an invalid ${this.label}`)
+    }
+    let value = 1
+    for (let index = 0; index < zeroCount; index += 1) value = value * 2 + this.bit()
+    return value - 1
+  }
+}
+
+interface SequenceParameterSet {
+  readonly id: number
+  readonly log2MaxFrameNum: number
+  readonly picOrderCntType: number
+  readonly log2MaxPicOrderCntLsb: number
+}
+
+interface PictureParameterSet {
+  readonly id: number
+  readonly spsId: number
+}
+
+interface PrimaryPictureIdentity {
+  readonly firstMacroblock: number
+  readonly ppsId: number
+  readonly frameNum: number
+  readonly nalRefIdc: number
+  readonly idr: boolean
+  readonly idrPicId: number
+  readonly picOrderCntLsb: number
+}
+
+function parseSps(nal: Uint8Array): SequenceParameterSet {
+  const reader = new RbspReader(rbspOf(nal), 'SPS')
+  const profile = reader.bits(8)
+  reader.bits(8)
+  reader.bits(8)
+  const id = reader.ue()
+  if ([100, 110, 122, 244, 44, 83, 86, 118, 128, 138, 139, 134, 135].includes(profile)) {
+    const chromaFormat = reader.ue()
+    if (chromaFormat > 2) throw new Error(`phone H264 SPS uses unsupported chroma_format_idc ${String(chromaFormat)}`)
+    reader.ue()
+    reader.ue()
+    reader.bit()
+    if (reader.bit() === 1) throw new Error('phone H264 SPS uses unsupported scaling matrices')
+  }
+  const log2MaxFrameNum = reader.ue() + 4
+  const picOrderCntType = reader.ue()
+  let log2MaxPicOrderCntLsb = 0
+  if (picOrderCntType === 0) {
+    log2MaxPicOrderCntLsb = reader.ue() + 4
+  } else if (picOrderCntType === 1) {
+    throw new Error('phone H264 SPS uses unsupported pic_order_cnt_type 1')
+  } else if (picOrderCntType !== 2) {
+    throw new Error(`phone H264 SPS uses invalid pic_order_cnt_type ${String(picOrderCntType)}`)
+  }
+  reader.ue()
+  reader.bit()
+  reader.ue()
+  reader.ue()
+  if (reader.bit() !== 1) throw new Error('phone H264 SPS uses unsupported interlaced pictures')
+  return {
+    id,
+    log2MaxFrameNum,
+    picOrderCntType,
+    log2MaxPicOrderCntLsb,
+  }
+}
+
+function parsePps(nal: Uint8Array): PictureParameterSet {
+  const reader = new RbspReader(rbspOf(nal), 'PPS')
+  const id = reader.ue()
+  const spsId = reader.ue()
+  reader.bit()
+  if (reader.bit() === 1) throw new Error('phone H264 PPS uses unsupported bottom-field picture order')
+  return { id, spsId }
+}
+
+function parsePrimaryPicture(
+  nal: Uint8Array,
+  ppsById: ReadonlyMap<number, PictureParameterSet>,
+  spsById: ReadonlyMap<number, SequenceParameterSet>,
+): PrimaryPictureIdentity {
+  const reader = new RbspReader(rbspOf(nal), 'slice header')
+  const firstMacroblock = reader.ue()
+  reader.ue()
+  const ppsId = reader.ue()
+  const pps = ppsById.get(ppsId)
+  if (pps === undefined) throw new Error(`phone H264 slice references unknown PPS ${String(ppsId)}`)
+  const sps = spsById.get(pps.spsId)
+  if (sps === undefined) throw new Error(`phone H264 PPS references unknown SPS ${String(pps.spsId)}`)
+  const frameNum = reader.bits(sps.log2MaxFrameNum)
+  const type = nalType(nal)
+  const idr = type === 5
+  const idrPicId = idr ? reader.ue() : 0
+  let picOrderCntLsb = 0
+  if (sps.picOrderCntType === 0) {
+    picOrderCntLsb = reader.bits(sps.log2MaxPicOrderCntLsb)
+  }
+  const header = new DataView(nal.buffer, nal.byteOffset, nal.byteLength).getUint8(nalHeaderOffset(nal))
+  return {
+    firstMacroblock,
+    ppsId,
+    frameNum,
+    nalRefIdc: (header >> 5) & 0x03,
+    idr,
+    idrPicId,
+    picOrderCntLsb,
+  }
+}
+
+function isFollowingPrimaryPicture(
+  previous: PrimaryPictureIdentity,
+  following: PrimaryPictureIdentity,
+): boolean {
+  if (following.firstMacroblock !== 0) return false
+  const keyOf = (picture: PrimaryPictureIdentity): string => [
+    picture.frameNum,
+    picture.ppsId,
+    picture.nalRefIdc === 0 ? 0 : 1,
+    picture.idr ? 1 : 0,
+    picture.idrPicId,
+    picture.picOrderCntLsb,
+  ].join(':')
+  return keyOf(following) !== keyOf(previous)
 }
 
 class AnnexBAccessUnitAssembler {
   private pending = new Uint8Array()
   private current: Uint8Array[] = []
   private currentHasVcl = false
+  private currentPicture: PrimaryPictureIdentity | undefined
   private currentKey = false
   private currentCodec: string | undefined
+  private readonly spsById = new Map<number, SequenceParameterSet>()
+  private readonly ppsById = new Map<number, PictureParameterSet>()
   private readonly ready: AnnexBAccessUnit[] = []
 
   push(bytes: Uint8Array): AnnexBAccessUnit[] {
@@ -150,16 +288,39 @@ class AnnexBAccessUnitAssembler {
 
   private acceptNal(nal: Uint8Array): void {
     const type = nalType(nal)
-    const vcl = type >= 1 && type <= 5
-    const beginsPicture = vcl && firstMacroblockOf(nal) === 0
+    if (type >= 2 && type <= 4) {
+      throw new Error(`phone H264 stream uses unsupported data partition NAL type ${String(type)}`)
+    }
+    const primaryVcl = type === 1 || type === 5
     const beginsFollowingUnit = ACCESS_UNIT_PREFIX_TYPES.has(type)
-    if (this.currentHasVcl && (beginsPicture || beginsFollowingUnit)) this.emitCurrent()
+    if (this.currentHasVcl && beginsFollowingUnit) this.emitCurrent()
+    if (primaryVcl) {
+      const picture = parsePrimaryPicture(nal, this.ppsById, this.spsById)
+      if (this.currentPicture !== undefined && isFollowingPrimaryPicture(this.currentPicture, picture)) {
+        this.emitCurrent()
+      } else if (this.currentPicture !== undefined && picture.firstMacroblock !== 0
+        && isFollowingPrimaryPicture(this.currentPicture, { ...picture, firstMacroblock: 0 })) {
+        throw new Error('phone H264 picture identity changes after its first slice')
+      }
+      if (this.currentPicture === undefined && picture.firstMacroblock !== 0) {
+        throw new Error('phone H264 picture starts after its first macroblock')
+      }
+      this.currentPicture ??= picture
+    }
     this.current.push(nal)
-    if (vcl) {
+    if (primaryVcl) {
       this.currentHasVcl = true
       if (type === 5) this.currentKey = true
     }
-    if (type === 7) this.currentCodec = codecOfSps(nal)
+    if (type === 7) {
+      this.currentCodec = codecOfSps(nal)
+      const sps = parseSps(nal)
+      this.spsById.set(sps.id, sps)
+    }
+    if (type === 8) {
+      const pps = parsePps(nal)
+      this.ppsById.set(pps.id, pps)
+    }
     if (type === 10 || type === 11) this.emitCurrent()
   }
 
@@ -174,6 +335,7 @@ class AnnexBAccessUnitAssembler {
     }
     this.current = []
     this.currentHasVcl = false
+    this.currentPicture = undefined
     this.currentKey = false
     this.currentCodec = undefined
   }
@@ -196,35 +358,51 @@ export function playPhoneH264Stream(options: PhoneH264PlaybackOptions): PhoneH26
   let failed = false
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   let decoder: VideoDecoder | undefined
+  let decoderDequeueListener: (() => void) | undefined
+  let resolveQueueDrain: (() => void) | undefined
+  let stopPromise: Promise<void> | undefined
+  let settlePromise: Promise<void> | undefined
   let paintedFrames = 0
   let surface: { width: number; height: number } | undefined
   const isStopped = (): boolean => closed || failed
 
+  const wakeQueueDrain = (): void => {
+    const resolve = resolveQueueDrain
+    resolveQueueDrain = undefined
+    resolve?.()
+  }
+
   const closeDecoder = (): void => {
+    wakeQueueDrain()
+    if (decoder !== undefined && decoderDequeueListener !== undefined) {
+      decoder.removeEventListener('dequeue', decoderDequeueListener)
+    }
+    decoderDequeueListener = undefined
     if (decoder?.state !== 'closed') decoder?.close()
     decoder = undefined
   }
 
-  const stopResources = (): void => {
+  const stopResources = (): Promise<void> => {
+    if (stopPromise !== undefined) return stopPromise
     abort.abort()
-    void reader?.cancel().catch(() => undefined)
+    const activeReader = reader
     reader = undefined
     closeDecoder()
+    stopPromise = activeReader?.cancel().catch(() => {
+      // Reader cancellation failures are contained after the stream is no longer publishable.
+    }) ?? Promise.resolve()
+    return stopPromise
   }
 
   const fail = (error: unknown): void => {
     if (closed || failed) return
     failed = true
-    stopResources()
-    options.onError(error)
-  }
-
-  const handle: PhoneH264Playback = {
-    close(): void {
-      if (closed) return
-      closed = true
-      stopResources()
-    },
+    void stopResources()
+    try {
+      options.onError(error)
+    } catch {
+      // Consumer notification failures cannot escape the playback lifecycle.
+    }
   }
 
   const paint = (frame: VideoFrame): void => {
@@ -251,6 +429,7 @@ export function playPhoneH264Stream(options: PhoneH264PlaybackOptions): PhoneH26
   }
 
   const run = async (): Promise<void> => {
+    if (!globalThis.isSecureContext) throw new Error('phone H264 playback requires a secure context')
     if (typeof VideoDecoder !== 'function') throw new Error('WebCodecs VideoDecoder is unavailable')
     const response = await fetch(options.url, { signal: abort.signal })
     if (!response.ok) throw new Error(`phone H264 fetch failed with HTTP ${String(response.status)}`)
@@ -258,16 +437,24 @@ export function playPhoneH264Stream(options: PhoneH264PlaybackOptions): PhoneH26
     if (contentType !== 'video/h264') throw new Error(`phone H264 fetch returned ${contentType ?? 'no content type'}`)
     if (response.body === null) throw new Error('phone H264 fetch returned no response body')
     if (closed) return
-    reader = response.body.getReader()
+    const streamReader = response.body.getReader()
+    reader = streamReader
     const assembler = new AnnexBAccessUnitAssembler()
     let configured = false
     let timestamp = 0
     const codec = new VideoDecoder({ output: paint, error: fail })
     decoder = codec
+    decoderDequeueListener = wakeQueueDrain
+    codec.addEventListener('dequeue', decoderDequeueListener)
+
+    const waitForCapacity = async (): Promise<void> => {
+      while (!isStopped() && codec.decodeQueueSize >= MAX_DECODE_QUEUE) {
+        await new Promise<void>((resolve) => { resolveQueueDrain = resolve })
+      }
+    }
 
     const decode = async (units: readonly AnnexBAccessUnit[]): Promise<void> => {
       for (const unit of units) {
-        if (isStopped()) return
         if (!configured) {
           if (unit.codec === undefined) throw new Error('phone H264 stream starts without an SPS')
           const config: VideoDecoderConfig = { codec: unit.codec, optimizeForLatency: true }
@@ -277,7 +464,7 @@ export function playPhoneH264Stream(options: PhoneH264PlaybackOptions): PhoneH26
           codec.configure(config)
           configured = true
         }
-        if (codec.decodeQueueSize >= MAX_DECODE_QUEUE) await codec.flush()
+        await waitForCapacity()
         if (isStopped()) return
         codec.decode(new EncodedVideoChunk({
           type: unit.key ? 'key' : 'delta',
@@ -289,7 +476,7 @@ export function playPhoneH264Stream(options: PhoneH264PlaybackOptions): PhoneH26
     }
 
     while (!isStopped()) {
-      const read = await reader.read()
+      const read = await streamReader.read()
       if (read.done) break
       await decode(assembler.push(read.value))
     }
@@ -298,12 +485,22 @@ export function playPhoneH264Stream(options: PhoneH264PlaybackOptions): PhoneH26
     if (codec.state === 'configured') await codec.flush()
     if (isStopped()) return
     if (paintedFrames === 0) throw new Error('phone H264 stream ended before a frame was decoded')
+    reader = undefined
+    streamReader.releaseLock()
     closeDecoder()
   }
 
-  void run().catch((error: unknown) => {
+  const runPromise = run().catch((error: unknown) => {
     if (closed) return
     fail(error)
   })
+  const handle: PhoneH264Playback = {
+    close(): Promise<void> {
+      if (!closed) closed = true
+      const stopping = stopResources()
+      settlePromise ??= Promise.all([runPromise, stopping]).then(() => undefined)
+      return settlePromise
+    },
+  }
   return handle
 }

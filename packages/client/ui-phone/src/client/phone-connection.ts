@@ -431,6 +431,7 @@ export class PhoneConnectionController {
 
   private teardown(): void {
     this.epoch += 1
+    this.surface = undefined
     this.cancelRetry?.()
     this.cancelRetry = undefined
     this.socket?.close()

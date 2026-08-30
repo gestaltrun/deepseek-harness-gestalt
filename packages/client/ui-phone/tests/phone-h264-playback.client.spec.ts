@@ -1,16 +1,110 @@
 // @vitest-environment jsdom
 /** H264 playback through the browser fetch, WebCodecs, and canvas interfaces. */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { playPhoneH264Stream } from '../src/client/phone-h264-playback.ts'
 
 const START = [0, 0, 0, 1] as const
 
-function nal(header: number, ...rbsp: number[]): Uint8Array {
+function rawNal(header: number, ...rbsp: number[]): Uint8Array {
   return Uint8Array.from([...START, header, ...rbsp])
 }
 
+function unsignedExpGolomb(value: number): number[] {
+  const binary = (value + 1).toString(2)
+  return [...Array.from({ length: binary.length - 1 }, () => 0), ...Array.from(binary, Number)]
+}
+
+function fixedBits(value: number, width: number): number[] {
+  return Array.from({ length: width }, (_, index) => (value >> (width - index - 1)) & 1)
+}
+
+function rbspNal(header: number, bits: number[]): Uint8Array {
+  bits.push(1)
+  while ((bits.length & 7) !== 0) bits.push(0)
+  const rbsp = Array.from({ length: bits.length / 8 }, (_, byte) => bits
+    .slice(byte * 8, byte * 8 + 8).reduce((value, bit) => value * 2 + bit, 0))
+  return rawNal(header, ...rbsp)
+}
+
+function primaryNal(
+  header: number,
+  firstMacroblock: number,
+  idrPicId = 0,
+  frameNum = 0,
+  options: { readonly ppsId?: number; readonly picOrderCntLsb?: number } = {},
+): Uint8Array {
+  const bits = [
+    ...unsignedExpGolomb(firstMacroblock),
+    ...unsignedExpGolomb((header & 0x1f) === 5 ? 7 : 0),
+    ...unsignedExpGolomb(options.ppsId ?? 0),
+    ...fixedBits(frameNum, 4),
+    ...((header & 0x1f) === 5 ? unsignedExpGolomb(idrPicId) : []),
+    ...(options.picOrderCntLsb === undefined ? [] : fixedBits(options.picOrderCntLsb, 4)),
+  ]
+  return rbspNal(header, bits)
+}
+
+function configuredSps(options: {
+  readonly profile?: number
+  readonly chromaFormat?: number
+  readonly scalingMatrices?: boolean
+  readonly picOrderCntType?: number
+  readonly frameMbsOnly?: boolean
+} = {}): Uint8Array {
+  const profile = options.profile ?? 66
+  const bits = [
+    ...fixedBits(profile, 8), ...fixedBits(0, 8), ...fixedBits(31, 8),
+    ...unsignedExpGolomb(0),
+  ]
+  if (profile === 100) {
+    bits.push(
+      ...unsignedExpGolomb(options.chromaFormat ?? 1),
+      ...unsignedExpGolomb(0),
+      ...unsignedExpGolomb(0),
+      0,
+      options.scalingMatrices === true ? 1 : 0,
+    )
+  }
+  const picOrderCntType = options.picOrderCntType ?? 2
+  bits.push(...unsignedExpGolomb(0), ...unsignedExpGolomb(picOrderCntType))
+  if (picOrderCntType === 0) bits.push(...unsignedExpGolomb(0))
+  bits.push(
+    ...unsignedExpGolomb(1),
+    0,
+    ...unsignedExpGolomb(1),
+    ...unsignedExpGolomb(1),
+    options.frameMbsOnly === false ? 0 : 1,
+  )
+  return rbspNal(0x67, bits)
+}
+
+function configuredPps(options: { readonly id?: number; readonly bottomFieldOrder?: boolean } = {}): Uint8Array {
+  return rbspNal(0x68, [
+    ...unsignedExpGolomb(options.id ?? 0),
+    ...unsignedExpGolomb(0),
+    0,
+    options.bottomFieldOrder === true ? 1 : 0,
+  ])
+}
+
+function nal(header: number, ...rbsp: number[]): Uint8Array {
+  if (header === 0x67 && rbsp.join(',') === '66,192,31,128') {
+    return Uint8Array.from([...START, 103, 66, 192, 31, 218, 6, 65, 175, 154, 208])
+  }
+  if (header === 0x68 && rbsp.join(',') === '128') {
+    return Uint8Array.from([...START, 104, 206, 56, 128])
+  }
+  if (((header & 0x1f) === 1 || (header & 0x1f) === 5) && rbsp.join(',') === '128') {
+    return primaryNal(header, 0)
+  }
+  if (((header & 0x1f) === 1 || (header & 0x1f) === 5) && rbsp.join(',') === '64') {
+    return primaryNal(header, 1)
+  }
+  return rawNal(header, ...rbsp)
+}
+
 function nal3(header: number, ...rbsp: number[]): Uint8Array {
-  return Uint8Array.from([0, 0, 1, header, ...rbsp])
+  return Uint8Array.from([0, 0, 1, ...nal(header, ...rbsp).subarray(4)])
 }
 
 function concat(...parts: readonly Uint8Array[]): Uint8Array {
@@ -54,12 +148,13 @@ class FakeVideoFrame {
   close(): void { this.closeCount += 1 }
 }
 
-class FakeVideoDecoder {
+class FakeVideoDecoder extends EventTarget {
   static readonly instances: FakeVideoDecoder[] = []
   static failFlush = false
   static failDecode = false
   static supported = true
   static closeBeforeFlushError = false
+  static autoDequeue = true
   static frameSizes: ReadonlyArray<{ readonly width: number; readonly height: number }> = []
   static async isConfigSupported(config: VideoDecoderConfig): Promise<VideoDecoderSupport> {
     return { supported: FakeVideoDecoder.supported, config }
@@ -75,6 +170,7 @@ class FakeVideoDecoder {
   flushCount = 0
 
   constructor(init: { output: (frame: FakeVideoFrame) => void; error: (error: DOMException) => void }) {
+    super()
     this.init = init
     FakeVideoDecoder.instances.push(this)
   }
@@ -88,6 +184,13 @@ class FakeVideoDecoder {
     this.chunks.push(chunk)
     this.decodeQueueSize += 1
     if (FakeVideoDecoder.failDecode) this.init.error(new DOMException('decode failed', 'EncodingError'))
+    if (FakeVideoDecoder.autoDequeue) queueMicrotask(() => { this.releaseQueue() })
+  }
+
+  releaseQueue(): void {
+    if (this.state === 'closed') return
+    this.decodeQueueSize = 0
+    this.dispatchEvent(new Event('dequeue'))
   }
 
   async flush(): Promise<void> {
@@ -104,7 +207,7 @@ class FakeVideoDecoder {
       this.frames.push(frame)
       this.init.output(frame)
     }
-    this.decodeQueueSize = 0
+    this.releaseQueue()
   }
 
   close(): void {
@@ -140,12 +243,15 @@ async function reportedError(response: Response): Promise<unknown> {
   return errors[0]
 }
 
+beforeEach(() => { vi.stubGlobal('isSecureContext', true) })
+
 afterEach(() => {
   FakeVideoDecoder.instances.length = 0
   FakeVideoDecoder.failFlush = false
   FakeVideoDecoder.failDecode = false
   FakeVideoDecoder.supported = true
   FakeVideoDecoder.closeBeforeFlushError = false
+  FakeVideoDecoder.autoDequeue = true
   FakeVideoDecoder.frameSizes = []
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -157,7 +263,8 @@ describe('playPhoneH264Stream', () => {
     const pps = nal(0x68, 0x80)
     const firstIdr = nal(0x65, 0x80)
     const secondIdr = nal(0x65, 0x80)
-    const payload = concat(sps, pps, firstIdr, secondIdr)
+    const aud = nal(0x09, 0xf0)
+    const payload = concat(sps, pps, firstIdr, aud, secondIdr)
     vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
     vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
     vi.stubGlobal('fetch', vi.fn(async () => streamResponse(
@@ -186,13 +293,13 @@ describe('playPhoneH264Stream', () => {
       { type: 'key', timestamp: 1 },
     ])
     expect(Array.from(decoder.chunks[0]!.data)).toEqual(Array.from(concat(sps, pps, firstIdr)))
-    expect(Array.from(decoder.chunks[1]!.data)).toEqual(Array.from(secondIdr))
+    expect(Array.from(decoder.chunks[1]!.data)).toEqual(Array.from(concat(aud, secondIdr)))
     expect(surfaces).toEqual([{ width: 390, height: 844 }])
     expect(canvas.width).toBe(390)
     expect(canvas.height).toBe(844)
     expect(decoder.frames.every(frame => frame.closeCount === 1)).toBe(true)
     expect(errors).toEqual([])
-    playback.close()
+    await playback.close()
     expect(decoder.closeCount).toBe(1)
   })
 
@@ -205,7 +312,7 @@ describe('playPhoneH264Stream', () => {
     vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
     vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
     vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
-      sps, pps, firstSlice, secondSlice, nextPicture,
+      sps, pps, firstSlice, secondSlice, nal(0x09, 0xf0), nextPicture,
     ))))
     const canvas = document.createElement('canvas')
     vi.spyOn(canvas, 'getContext').mockReturnValue({ drawImage: vi.fn() } as never)
@@ -222,18 +329,112 @@ describe('playPhoneH264Stream', () => {
     const chunks = FakeVideoDecoder.instances[0]!.chunks
     expect(chunks.map(chunk => chunk.type)).toEqual(['delta', 'delta'])
     expect(Array.from(chunks[0]!.data)).toEqual(Array.from(concat(sps, pps, firstSlice, secondSlice)))
-    expect(Array.from(chunks[1]!.data)).toEqual(Array.from(nextPicture))
+    expect(Array.from(chunks[1]!.data)).toEqual(Array.from(concat(nal(0x09, 0xf0), nextPicture)))
     expect(errors).toEqual([])
   })
 
-  it('flushes decoder pressure before accepting an unbounded input queue', async () => {
-    const units = [
+  it('separates primary pictures without AUD from their slice-header identity', async () => {
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
+    vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
       nal(0x67, 0x42, 0xc0, 0x1f, 0x80),
       nal(0x68, 0x80),
-      nal(0x65, 0x80),
-      nal(0x65, 0x80),
-      nal(0x65, 0x80),
-      nal(0x65, 0x80),
+      primaryNal(0x65, 0, 0),
+      primaryNal(0x65, 0, 1),
+    ))))
+    const canvas = document.createElement('canvas')
+    vi.spyOn(canvas, 'getContext').mockReturnValue({ drawImage: vi.fn() } as never)
+    playPhoneH264Stream({
+      url: '/phone/stream/device/h264?token=test',
+      canvas,
+      onSurface: () => {},
+      onError: () => {},
+    })
+    await vi.waitFor(() => { expect(FakeVideoDecoder.instances[0]?.chunks).toHaveLength(2) })
+  })
+
+  it('rejects data-partitioned slices instead of parsing partition B or C as slice headers', async () => {
+    for (const type of [2, 3, 4]) {
+      const error = await reportedError(streamResponse(concat(
+        nal(0x67, 0x42, 0xc0, 0x1f, 0x80),
+        nal(0x68, 0x80),
+        nal(0x60 | type, 0x80),
+      )))
+      expect(error).toEqual(new Error(`phone H264 stream uses unsupported data partition NAL type ${String(type)}`))
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+      vi.stubGlobal('isSecureContext', true)
+    }
+  })
+
+  it('rejects a primary-picture identity change after the first slice', async () => {
+    const error = await reportedError(streamResponse(concat(
+      nal(0x67, 0x42, 0xc0, 0x1f, 0x80),
+      nal(0x68, 0x80),
+      primaryNal(0x41, 0, 0, 0),
+      primaryNal(0x41, 1, 0, 1),
+    )))
+    expect(error).toEqual(new Error('phone H264 picture identity changes after its first slice'))
+  })
+
+  it('associates parameter sets after a picture with the following AUD-delimited picture', async () => {
+    const sps = nal(0x67, 0x42, 0xc0, 0x1f, 0x80)
+    const pps = nal(0x68, 0x80)
+    const idr = nal(0x65, 0x80)
+    const nextSps = nal(0x67, 0x42, 0xc0, 0x1f, 0x80)
+    const nextPps = nal(0x68, 0x80)
+    const aud = nal(0x09, 0xf0)
+    const delta = nal(0x41, 0x80)
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
+    vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
+      sps, pps, idr, nextSps, nextPps, aud, delta,
+    ))))
+    const canvas = document.createElement('canvas')
+    vi.spyOn(canvas, 'getContext').mockReturnValue({ drawImage: vi.fn() } as never)
+
+    playPhoneH264Stream({
+      url: '/phone/stream/device/h264?token=test',
+      canvas,
+      onSurface: () => {},
+      onError: () => {},
+    })
+
+    await vi.waitFor(() => { expect(FakeVideoDecoder.instances[0]?.chunks).toHaveLength(2) })
+    expect(Array.from(FakeVideoDecoder.instances[0]!.chunks[1]!.data))
+      .toEqual(Array.from(concat(nextSps, nextPps, aud, delta)))
+    expect(FakeVideoDecoder.instances[0]!.chunks.map(chunk => chunk.type)).toEqual(['key', 'delta'])
+  })
+
+  it('uses high-profile POC and zero-reference identity fields to split pictures', async () => {
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
+    vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
+      configuredSps({ profile: 100, picOrderCntType: 0 }),
+      configuredPps(),
+      primaryNal(0x65, 0, 0, 0, { picOrderCntLsb: 0 }),
+      primaryNal(0x01, 0, 0, 1, { picOrderCntLsb: 1 }),
+    ))))
+    const canvas = document.createElement('canvas')
+    vi.spyOn(canvas, 'getContext').mockReturnValue({ drawImage: vi.fn() } as never)
+    playPhoneH264Stream({
+      url: '/phone/stream/device/h264?token=test',
+      canvas,
+      onSurface: () => {},
+      onError: () => {},
+    })
+    await vi.waitFor(() => { expect(FakeVideoDecoder.instances[0]?.chunks).toHaveLength(2) })
+    expect(FakeVideoDecoder.instances[0]!.config?.codec).toBe('avc1.64001f')
+    expect(FakeVideoDecoder.instances[0]!.chunks.map(chunk => chunk.type)).toEqual(['key', 'delta'])
+  })
+
+  it('waits for decoder dequeue before feeding delta pressure and flushes only at EOF', async () => {
+    FakeVideoDecoder.autoDequeue = false
+    const units = [
+      nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80), nal(0x65, 0x80),
+      nal(0x09, 0xf0), nal(0x41, 0x80),
+      nal(0x09, 0xf0), nal(0x41, 0x80),
+      nal(0x09, 0xf0), nal(0x41, 0x80),
     ]
     vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
     vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
@@ -248,8 +449,32 @@ describe('playPhoneH264Stream', () => {
       onError: () => {},
     })
 
-    await vi.waitFor(() => { expect(FakeVideoDecoder.instances[0]?.frames).toHaveLength(4) })
-    expect(FakeVideoDecoder.instances[0]!.flushCount).toBe(2)
+    await vi.waitFor(() => { expect(FakeVideoDecoder.instances[0]?.chunks).toHaveLength(2) })
+    const decoder = FakeVideoDecoder.instances[0]!
+    expect(decoder.flushCount).toBe(0)
+    decoder.releaseQueue()
+    await vi.waitFor(() => { expect(decoder.frames).toHaveLength(4) })
+    expect(decoder.chunks.map(chunk => chunk.type)).toEqual(['key', 'delta', 'delta', 'delta'])
+    expect(decoder.flushCount).toBe(1)
+  })
+
+  it('wakes a decoder-capacity wait during close without admitting another chunk', async () => {
+    FakeVideoDecoder.autoDequeue = false
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
+    vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
+      nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80), nal(0x65, 0x80),
+      nal(0x09, 0xf0), nal(0x41, 0x80), nal(0x09, 0xf0), nal(0x41, 0x80),
+    ))))
+    const playback = playPhoneH264Stream({
+      url: '/phone/stream/device/h264?token=test',
+      canvas: document.createElement('canvas'),
+      onSurface: () => {},
+      onError: () => {},
+    })
+    await vi.waitFor(() => { expect(FakeVideoDecoder.instances[0]?.chunks).toHaveLength(2) })
+    await playback.close()
+    expect(FakeVideoDecoder.instances[0]!.chunks).toHaveLength(2)
   })
 
   it('aborts the reader and closes the decoder without reporting cancellation as failure', async () => {
@@ -278,13 +503,45 @@ describe('playPhoneH264Stream', () => {
       onError: (error) => { errors.push(error) },
     })
     await vi.waitFor(() => { expect(FakeVideoDecoder.instances).toHaveLength(1) })
-    playback.close()
-    playback.close()
+    const firstClose = playback.close()
+    const secondClose = playback.close()
 
     await vi.waitFor(() => { expect(cancelCount).toBe(1) })
+    await Promise.all([firstClose, secondClose])
     expect(fetchSignal?.aborted).toBe(true)
     expect(FakeVideoDecoder.instances[0]!.closeCount).toBe(1)
     expect(errors).toEqual([])
+  })
+
+  it('settles close only after reader cancellation and the decode run are quiescent', async () => {
+    let releaseCancel: (() => void) | undefined
+    const cancellation = new Promise<void>((resolve) => { releaseCancel = resolve })
+    const body = new ReadableStream<Uint8Array>({
+      pull() {},
+      cancel: () => cancellation,
+    })
+    vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'video/h264' },
+    })))
+    const playback = playPhoneH264Stream({
+      url: '/phone/stream/device/h264?token=test',
+      canvas: document.createElement('canvas'),
+      onSurface: () => {},
+      onError: () => {},
+    })
+    await vi.waitFor(() => { expect(FakeVideoDecoder.instances).toHaveLength(1) })
+
+    let settled = false
+    const closing = playback.close().then(() => { settled = true })
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(settled).toBe(false)
+    releaseCancel?.()
+    await closing
+    expect(settled).toBe(true)
+    expect(FakeVideoDecoder.instances[0]!.closeCount).toBe(1)
   })
 
   it('closes a frame and reports one failure when canvas drawing throws', async () => {
@@ -292,7 +549,8 @@ describe('playPhoneH264Stream', () => {
     vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
     vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
       nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80),
-      nal(0x65, 0x80), nal(0x65, 0x80), nal(0x65, 0x80), nal(0x65, 0x80),
+      nal(0x65, 0x80), nal(0x09, 0xf0), nal(0x65, 0x80),
+      nal(0x09, 0xf0), nal(0x65, 0x80), nal(0x09, 0xf0), nal(0x65, 0x80),
     ))))
     const canvas = document.createElement('canvas')
     vi.spyOn(canvas, 'getContext').mockReturnValue({
@@ -318,7 +576,8 @@ describe('playPhoneH264Stream', () => {
     vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
     vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
     vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
-      nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80), nal(0x65, 0x80), nal(0x65, 0x80),
+      nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80),
+      nal(0x65, 0x80), nal(0x09, 0xf0), nal(0x65, 0x80),
     ))))
     const errors: unknown[] = []
     playPhoneH264Stream({
@@ -366,6 +625,39 @@ describe('playPhoneH264Stream', () => {
     await vi.waitFor(() => { expect(errors).toHaveLength(1) })
     expect(errors[0]).toEqual(new Error('WebCodecs VideoDecoder is unavailable'))
     expect(fetchStub).not.toHaveBeenCalled()
+  })
+
+  it('fails before fetch outside a secure context', async () => {
+    const fetchStub = vi.fn()
+    vi.stubGlobal('isSecureContext', false)
+    vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
+    vi.stubGlobal('fetch', fetchStub)
+    const errors: unknown[] = []
+    playPhoneH264Stream({
+      url: '/phone/stream/device/h264?token=test',
+      canvas: document.createElement('canvas'),
+      onSurface: () => {},
+      onError: (error) => { errors.push(error) },
+    })
+    await vi.waitFor(() => { expect(errors).toHaveLength(1) })
+    expect(errors[0]).toEqual(new Error('phone H264 playback requires a secure context'))
+    expect(fetchStub).not.toHaveBeenCalled()
+  })
+
+  it('contains consumer callback exceptions while releasing playback resources', async () => {
+    vi.stubGlobal('VideoDecoder', undefined)
+    let errorCalls = 0
+    const playback = playPhoneH264Stream({
+      url: '/phone/stream/device/h264?token=test',
+      canvas: document.createElement('canvas'),
+      onSurface: () => { throw new Error('surface consumer failed') },
+      onError: () => {
+        errorCalls += 1
+        throw new Error('error consumer failed')
+      },
+    })
+    await vi.waitFor(() => { expect(errorCalls).toBe(1) })
+    await expect(playback.close()).resolves.toBeUndefined()
   })
 
   it('reports an unsolicited fetch AbortError as a playback failure', async () => {
@@ -416,14 +708,16 @@ describe('playPhoneH264Stream', () => {
       expect(error).toEqual(new Error(testCase.message))
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
+      vi.stubGlobal('isSecureContext', true)
     }
   })
 
   it('accepts a parameterized H264 MIME and three-byte Annex-B start codes', async () => {
+    const idr = primaryNal(0x65, 0)
     const payload = concat(
       nal3(0x67, 0x42, 0xc0, 0x1f, 0x80),
       nal3(0x68, 0x80),
-      nal3(0x65, 0x80, 0, 0, 3, 1),
+      Uint8Array.from([0, 0, 1, ...idr.subarray(4), 0, 0, 3, 1]),
     )
     vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
     vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
@@ -468,7 +762,7 @@ describe('playPhoneH264Stream', () => {
       },
       {
         payload: concat(pps, nal(0x65, 0x80)),
-        message: 'phone H264 stream starts without an SPS',
+        message: 'phone H264 PPS references unknown SPS 0',
       },
       {
         payload: new Uint8Array(),
@@ -480,15 +774,76 @@ describe('playPhoneH264Stream', () => {
       expect(error).toEqual(new Error(testCase.message))
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
+      vi.stubGlobal('isSecureContext', true)
+    }
+  })
+
+  it('rejects unsupported SPS and PPS coding modes explicitly', async () => {
+    const cases: ReadonlyArray<{ readonly payload: Uint8Array; readonly message: string }> = [
+      {
+        payload: configuredSps({ profile: 100, chromaFormat: 3 }),
+        message: 'phone H264 SPS uses unsupported chroma_format_idc 3',
+      },
+      {
+        payload: configuredSps({ profile: 100, scalingMatrices: true }),
+        message: 'phone H264 SPS uses unsupported scaling matrices',
+      },
+      {
+        payload: configuredSps({ picOrderCntType: 1 }),
+        message: 'phone H264 SPS uses unsupported pic_order_cnt_type 1',
+      },
+      {
+        payload: configuredSps({ picOrderCntType: 3 }),
+        message: 'phone H264 SPS uses invalid pic_order_cnt_type 3',
+      },
+      {
+        payload: configuredSps({ frameMbsOnly: false }),
+        message: 'phone H264 SPS uses unsupported interlaced pictures',
+      },
+      {
+        payload: concat(configuredSps(), configuredPps({ bottomFieldOrder: true })),
+        message: 'phone H264 PPS uses unsupported bottom-field picture order',
+      },
+    ]
+    for (const testCase of cases) {
+      const error = await reportedError(streamResponse(testCase.payload))
+      expect(error).toEqual(new Error(testCase.message))
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+      vi.stubGlobal('isSecureContext', true)
+    }
+  })
+
+  it('rejects missing parameter sets, missing first slices, and detached codec metadata', async () => {
+    const cases: ReadonlyArray<{ readonly payload: Uint8Array; readonly message: string }> = [
+      {
+        payload: concat(configuredSps(), primaryNal(0x65, 0, 0, 0, { ppsId: 1 })),
+        message: 'phone H264 slice references unknown PPS 1',
+      },
+      {
+        payload: concat(configuredSps(), configuredPps(), primaryNal(0x65, 1)),
+        message: 'phone H264 picture starts after its first macroblock',
+      },
+      {
+        payload: concat(configuredSps(), configuredPps(), nal(0x0a, 0x80), primaryNal(0x65, 0)),
+        message: 'phone H264 stream starts without an SPS',
+      },
+    ]
+    for (const testCase of cases) {
+      const error = await reportedError(streamResponse(testCase.payload))
+      expect(error).toEqual(new Error(testCase.message))
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+      vi.stubGlobal('isSecureContext', true)
     }
   })
 
   it('rejects a codec profile that the browser does not support', async () => {
     FakeVideoDecoder.supported = false
     const error = await reportedError(streamResponse(concat(
-      nal(0x67, 0x64, 0, 0x2a, 0x80), nal(0x68, 0x80), nal(0x65, 0x80),
+      nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80), nal(0x65, 0x80),
     )))
-    expect(error).toEqual(new Error('WebCodecs does not support avc1.64002a'))
+    expect(error).toEqual(new Error('WebCodecs does not support avc1.42c01f'))
   })
 
   it('recognizes prefix and end NALs without splitting slices from their picture', async () => {
@@ -530,7 +885,7 @@ describe('playPhoneH264Stream', () => {
     vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
     vi.stubGlobal('fetch', vi.fn(async () => streamResponse(concat(
       nal(0x67, 0x42, 0xc0, 0x1f, 0x80), nal(0x68, 0x80),
-      nal(0x65, 0x80), nal(0x65, 0x80), nal(0x65, 0x80),
+      nal(0x65, 0x80), nal(0x09, 0xf0), nal(0x65, 0x80), nal(0x09, 0xf0), nal(0x65, 0x80),
     ))))
     const canvas = document.createElement('canvas')
     vi.spyOn(canvas, 'getContext').mockReturnValue({ drawImage: vi.fn() } as never)
@@ -557,6 +912,7 @@ describe('playPhoneH264Stream', () => {
       expect(error).toEqual(new Error('phone H264 decoder produced an empty frame'))
       vi.unstubAllGlobals()
       vi.restoreAllMocks()
+      vi.stubGlobal('isSecureContext', true)
     }
 
     FakeVideoDecoder.frameSizes = []
@@ -605,7 +961,7 @@ describe('playPhoneH264Stream', () => {
     expect(errors).toHaveLength(1)
     expect(decoder.closeCount).toBe(0)
 
-    playback.close()
+    await playback.close()
     const closedFrame = new FakeVideoFrame()
     decoder.init.output(closedFrame)
     expect(closedFrame.closeCount).toBe(1)
@@ -624,9 +980,9 @@ describe('playPhoneH264Stream', () => {
       onSurface: () => {},
       onError: (error) => { errors.push(error) },
     })
-    playback.close()
+    const closing = playback.close()
     resolveFetch?.(streamResponse())
-    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    await closing
     expect(FakeVideoDecoder.instances).toEqual([])
     expect(errors).toEqual([])
   })
@@ -642,9 +998,9 @@ describe('playPhoneH264Stream', () => {
       onSurface: () => {},
       onError: (error) => { errors.push(error) },
     })
-    playback.close()
+    const closing = playback.close()
     rejectFetch?.(new DOMException('caller aborted', 'AbortError'))
-    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    await closing
     expect(errors).toEqual([])
   })
 
@@ -665,9 +1021,9 @@ describe('playPhoneH264Stream', () => {
       onError: () => {},
     })
     await vi.waitFor(() => { expect(support).toHaveBeenCalledOnce() })
-    playback.close()
+    const closing = playback.close()
     resolveSupport?.({ supported: true, config: { codec: 'avc1.42c01f' } })
-    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    await closing
     expect(FakeVideoDecoder.instances[0]!.chunks).toEqual([])
     expect(FakeVideoDecoder.instances[0]!.closeCount).toBe(1)
   })

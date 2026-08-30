@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Build and run the isolated Desktop Host phone-tab Electron e2e lane. */
-import { spawn, spawnSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import {
   access, appendFile, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile,
 } from 'node:fs/promises'
@@ -9,6 +10,9 @@ import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  PortHandoffCollision, quiesceRecordedProcesses, runLogged, settleCleanupSteps, withDistinctPortHandoff,
+} from './e2e-electron-runner-support.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = join(here, '..')
@@ -35,51 +39,21 @@ function scrubEnvironment(source) {
       'DSH_DESKTOP_SMOKE', 'DSH_DESKTOP_SMOKE_FILE', 'DSH_HOME', 'DSH_PHONE_MOBILECLI',
       'DSH_PHONE_REAL_UDID', 'DSH_PHONE_SERVER_PORT', 'DSH_ELECTRON_E2E_ARTIFACT_DIR',
       'DSH_ELECTRON_E2E_CDP_PORT', 'DSH_ELECTRON_E2E_FAKE_PORT', 'DSH_ELECTRON_E2E_USER_DATA',
-      'DSH_ELECTRON_E2E_WORKSPACE',
+      'DSH_ELECTRON_E2E_FAKE_OWNER', 'DSH_ELECTRON_E2E_WORKSPACE',
     ].includes(name)
   }))
 }
 
 const cleanEnvironment = scrubEnvironment(process.env)
+const lifetime = new AbortController()
+const interrupt = signal => { lifetime.abort(new Error(`Desktop Electron e2e interrupted by ${signal}`)) }
+const onSigint = () => { interrupt('SIGINT') }
+const onSigterm = () => { interrupt('SIGTERM') }
+process.once('SIGINT', onSigint)
+process.once('SIGTERM', onSigterm)
 
-function listenZero(host) {
-  return new Promise((resolve, reject) => {
-    const probe = createServer()
-    probe.once('error', reject)
-    probe.listen(0, host, () => {
-      const address = probe.address()
-      const port = typeof address === 'object' && address !== null ? address.port : 0
-      probe.close((error) => {
-        if (error !== undefined) reject(error)
-        else if (port > 0) resolve(port)
-        else reject(new Error('failed to allocate an ephemeral port'))
-      })
-    })
-  })
-}
-
-async function runLogged(command, args, options) {
-  const logFile = options.logFile
-  await writeFile(logFile, '')
-  return await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    const onData = (stream, chunk) => {
-      const text = chunk.toString()
-      stream.write(text)
-      void appendFile(logFile, text)
-    }
-    child.stdout?.on('data', chunk => { onData(process.stdout, chunk) })
-    child.stderr?.on('data', chunk => { onData(process.stderr, chunk) })
-    child.once('error', reject)
-    child.once('exit', (code, signal) => {
-      if (signal !== null) reject(new Error(`${command} exited on ${signal}`))
-      else resolve(code ?? 1)
-    })
-  })
+function asError(value) {
+  return value instanceof Error ? value : new Error(String(value))
 }
 
 async function buildCurrentSource() {
@@ -95,6 +69,7 @@ async function buildCurrentSource() {
       cwd,
       env: cleanEnvironment,
       logFile: join(artifactRoot, `build-${String(args.at(-1)).replaceAll(/[^a-z0-9]+/gi, '-')}.log`),
+      signal: lifetime.signal,
     })
     const commandLog = await readFile(join(artifactRoot, `build-${String(args.at(-1)).replaceAll(/[^a-z0-9]+/gi, '-')}.log`))
     await appendFile(buildLog, commandLog)
@@ -136,109 +111,143 @@ async function startKeylessProvider() {
 
 async function stageFake() {
   const root = await mkdtemp(join(tmpdir(), 'dsh-desktop-e2e-fake-'))
-  const fixtures = join(root, 'fixtures')
-  await mkdir(fixtures, { recursive: true })
-  const executable = join(fixtures, 'fakemobilecli')
-  await copyFile(fakeSource, executable)
-  await chmod(executable, 0o755)
-  await copyFile(framesSource, join(fixtures, 'u3-visible-frames.ts'))
-  const devices = JSON.parse(await readFile(devicesSource, 'utf8'))
-  await writeFile(join(fixtures, 'fakemobilecli.config.json'), JSON.stringify({
-    devices,
-    listEnvelope: true,
-    captureEnvelope: true,
-    streamFrameCount: 8,
-  }))
-  return { root, executable }
+  try {
+    const fixtures = join(root, 'fixtures')
+    await mkdir(fixtures, { recursive: true })
+    const executable = join(fixtures, 'fakemobilecli')
+    const ownerToken = randomUUID()
+    await copyFile(fakeSource, executable)
+    await chmod(executable, 0o755)
+    await copyFile(framesSource, join(fixtures, 'u3-visible-frames.ts'))
+    const devices = JSON.parse(await readFile(devicesSource, 'utf8'))
+    await writeFile(join(fixtures, 'fakemobilecli.config.json'), JSON.stringify({
+      devices,
+      listEnvelope: true,
+      captureEnvelope: true,
+      streamFrameCount: 8,
+      ownerToken,
+    }))
+    return { root, executable, ownerToken }
+  } catch (error) {
+    await rm(root, { recursive: true, force: true })
+    throw error
+  }
 }
 
-async function runSpec(name, spec, provider, mobilecli) {
+async function runSpec(name, spec, provider, mobilecli, fakeOwnerToken) {
   const artifactDir = join(artifactRoot, name)
+  try {
+    return await withDistinctPortHandoff(async ({ fakePort, cdpPort }, attempt) => {
+      await rm(artifactDir, { recursive: true, force: true })
+      const result = await runSpecAttempt({
+        name, spec, provider, mobilecli, fakeOwnerToken, artifactDir, fakePort, cdpPort, attempt,
+      })
+      if (result.portCollision) {
+        throw new PortHandoffCollision(`${name} attempt ${String(attempt)} lost port ownership`)
+      }
+      return result
+    })
+  } catch (error) {
+    return { code: 1, errors: [asError(error).message], cleanup: [], portCollision: error instanceof PortHandoffCollision }
+  }
+}
+
+async function runSpecAttempt({
+  name, spec, provider, mobilecli, fakeOwnerToken, artifactDir, fakePort, cdpPort, attempt,
+}) {
   const runtimeRoot = await mkdtemp(join(tmpdir(), `dsh-desktop-e2e-${name}-`))
   const dshHome = join(runtimeRoot, 'dsh-home')
   const userData = join(runtimeRoot, 'electron-user-data')
   const workspace = join(runtimeRoot, 'workspace')
   const smokeFile = join(artifactDir, 'main-smoke.log')
-  const fakePort = await listenZero('127.0.0.1')
-  const cdpPort = await listenZero('127.0.0.1')
-  await mkdir(artifactDir, { recursive: true })
-  await mkdir(dshHome, { recursive: true, mode: 0o700 })
-  await mkdir(userData, { recursive: true, mode: 0o700 })
-  await mkdir(workspace, { recursive: true, mode: 0o700 })
-  await writeFile(smokeFile, '')
-  await writeFile(join(dshHome, 'settings.yaml'), [
-    'ui-phone:',
-    '  enabled: true',
-    'ui-onboarding:',
-    '  welcomeNoticeVersion: "2026-08-13.1"',
-    '',
-  ].join('\n'), { mode: 0o600 })
-  const env = {
-    ...cleanEnvironment,
-    CI: 'true',
-    LANG: 'zh_CN.UTF-8',
-    LANGUAGE: 'zh_CN',
-    DSH_HOME: dshHome,
-    DSH_NODE: process.execPath,
-    DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: operatedPlatform,
-    DSH_DESKTOP_SMOKE_FILE: smokeFile,
-    DSH_PHONE_MOBILECLI: mobilecli,
-    DSH_PHONE_SERVER_PORT: String(fakePort),
-    DSH_ELECTRON_E2E_ARTIFACT_DIR: artifactDir,
-    DSH_ELECTRON_E2E_CDP_PORT: String(cdpPort),
-    DSH_ELECTRON_E2E_FAKE_PORT: String(fakePort),
-    DSH_ELECTRON_E2E_USER_DATA: userData,
-    DSH_ELECTRON_E2E_WORKSPACE: workspace,
-    DEEPSEEK_API_KEY: 'keyless-desktop-electron-e2e',
-    DEEPSEEK_BASE_URL: provider.origin,
-    ELECTRON_ENABLE_LOGGING: '1',
-  }
   let code = 1
+  const errors = []
   try {
+    await mkdir(artifactDir, { recursive: true })
+    await mkdir(dshHome, { recursive: true, mode: 0o700 })
+    await mkdir(userData, { recursive: true, mode: 0o700 })
+    await mkdir(workspace, { recursive: true, mode: 0o700 })
+    await writeFile(smokeFile, '')
+    await writeFile(join(dshHome, 'settings.yaml'), [
+      'ui-phone:',
+      '  enabled: true',
+      'ui-onboarding:',
+      '  welcomeNoticeVersion: "2026-08-13.1"',
+      '',
+    ].join('\n'), { mode: 0o600 })
+    const env = {
+      ...cleanEnvironment,
+      CI: 'true',
+      LANG: 'zh_CN.UTF-8',
+      LANGUAGE: 'zh_CN',
+      DSH_HOME: dshHome,
+      DSH_NODE: process.execPath,
+      DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: operatedPlatform,
+      DSH_DESKTOP_SMOKE_FILE: smokeFile,
+      DSH_PHONE_MOBILECLI: mobilecli,
+      DSH_PHONE_SERVER_PORT: String(fakePort),
+      DSH_ELECTRON_E2E_ARTIFACT_DIR: artifactDir,
+      DSH_ELECTRON_E2E_CDP_PORT: String(cdpPort),
+      DSH_ELECTRON_E2E_FAKE_PORT: String(fakePort),
+      DSH_ELECTRON_E2E_FAKE_OWNER: fakeOwnerToken ?? '',
+      DSH_ELECTRON_E2E_USER_DATA: userData,
+      DSH_ELECTRON_E2E_WORKSPACE: workspace,
+      DEEPSEEK_API_KEY: 'keyless-desktop-electron-e2e',
+      DEEPSEEK_BASE_URL: provider.origin,
+      ELECTRON_ENABLE_LOGGING: '1',
+    }
     code = await runLogged(process.execPath, [wdioBin, 'run', wdioConfig, '--spec', join(e2eDir, spec)], {
       cwd: desktopRoot,
       env,
       logFile: join(artifactDir, 'runner.log'),
+      signal: lifetime.signal,
     })
-    return code
-  } finally {
-    await verifyOwnedProcessesStopped(artifactDir)
-    await rm(runtimeRoot, { recursive: true, force: true })
-    await assertMissing(runtimeRoot)
-    await assertPortClosed(fakePort)
-    await assertPortClosed(cdpPort)
+  } catch (error) {
+    errors.push(asError(error))
+  }
+  let ownership
+  const requiredPids = fakeOwnerToken === undefined
+    ? ['electronPid', 'hostPid']
+    : ['electronPid', 'hostPid', 'fakePid']
+  const settled = await settleCleanupSteps([
+    {
+      name: 'owned process trees',
+      run: async () => {
+        ownership = await quiesceRecordedProcesses(join(artifactDir, 'owned-processes.json'), requiredPids)
+        if (ownership.forced.length > 0) {
+          throw new Error(`owned processes survived WDIO teardown and required termination: ${ownership.forced.join(', ')}`)
+        }
+      },
+    },
+    { name: 'runtime root removal', run: async () => { await rm(runtimeRoot, { recursive: true, force: true }) } },
+    { name: 'runtime root absence', run: async () => { await assertMissing(runtimeRoot) } },
+    { name: 'fake port closure', run: async () => { await assertPortClosed(fakePort) } },
+    { name: 'CDP port closure', run: async () => { await assertPortClosed(cdpPort) } },
+  ])
+  errors.push(...settled.errors)
+  try {
+    await mkdir(artifactDir, { recursive: true })
     await writeFile(join(artifactDir, 'cleanup.json'), JSON.stringify({
-      runtimeRootRemoved: true,
-      fakePortClosed: true,
-      cdpPortClosed: true,
+      attempt,
+      ports: { fakePort, cdpPort },
+      processOwnership: ownership,
+      steps: settled.outcomes,
     }, undefined, 2) + '\n')
+  } catch (error) {
+    errors.push(asError(error))
   }
-}
-
-async function verifyOwnedProcessesStopped(artifactDir) {
-  const file = join(artifactDir, 'owned-processes.json')
-  let owned
-  try {
-    owned = JSON.parse(await readFile(file, 'utf8'))
-  } catch {
-    return
-  }
-  for (const pid of [owned.electronPid, owned.hostPid, owned.fakePid]) {
-    if (!Number.isSafeInteger(pid)) continue
-    const deadline = Date.now() + 10_000
-    while (processExists(pid) && Date.now() < deadline) {
-      await new Promise(resolve => { setTimeout(resolve, 100) })
-    }
-    if (processExists(pid)) throw new Error(`owned process ${String(pid)} survived the WDIO run`)
-  }
-}
-
-function processExists(pid) {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
+  const portStayedOpen = settled.outcomes.some(outcome => (
+    !outcome.ok && (outcome.name === 'fake port closure' || outcome.name === 'CDP port closure')
+  ))
+  const runnerLog = await readFile(join(artifactDir, 'runner.log'), 'utf8').catch(() => '')
+  const collisionEvidence = /port ownership verification failed|EADDRINUSE|address already in use|failed to bind/i
+    .test(runnerLog)
+  const portCollision = portStayedOpen && collisionEvidence
+  return {
+    code: code === 0 && errors.length === 0 ? 0 : 1,
+    errors: errors.map(error => error.message),
+    cleanup: settled.outcomes,
+    portCollision,
   }
 }
 
@@ -248,6 +257,7 @@ async function assertMissing(path) {
     throw new Error(`temporary path survived cleanup: ${path}`)
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('temporary path survived')) throw error
+    if (error?.code !== 'ENOENT') throw error
   }
 }
 
@@ -298,31 +308,50 @@ async function auditLogs() {
 let provider
 let fake
 let exitCode = 1
+const fatalErrors = []
 try {
   await buildCurrentSource()
+  lifetime.signal.throwIfAborted()
   provider = await startKeylessProvider()
   fake = await stageFake()
   const missing = join(tmpdir(), `dsh-no-such-mobilecli-${process.pid}`)
-  const unresolvedCode = await runSpec('phone-unresolved', 'phone-tab-unresolved.e2e.ts', provider, missing)
-  const liveCode = unresolvedCode === 0
-    ? await runSpec('phone-live', 'phone-tab.e2e.ts', provider, fake.executable)
-    : 1
+  const unresolved = await runSpec('phone-unresolved', 'phone-tab-unresolved.e2e.ts', provider, missing)
+  const live = unresolved.code === 0
+    ? await runSpec('phone-live', 'phone-tab.e2e.ts', provider, fake.executable, fake.ownerToken)
+    : { code: 1, errors: ['phone-live skipped because phone-unresolved failed'], cleanup: [], portCollision: false }
   const findings = await auditLogs()
-  const unexplained = findings
   await writeFile(join(artifactRoot, 'result.json'), JSON.stringify({
     head,
-    unresolvedCode,
-    liveCode,
-    unexplainedLogFindings: unexplained,
+    unresolved,
+    live,
+    unexplainedLogFindings: findings,
   }, undefined, 2) + '\n')
-  exitCode = unresolvedCode === 0 && liveCode === 0 && unexplained.length === 0 ? 0 : 1
+  exitCode = unresolved.code === 0 && live.code === 0 && findings.length === 0 ? 0 : 1
+} catch (error) {
+  fatalErrors.push(asError(error))
 } finally {
-  await provider?.close()
-  if (fake !== undefined) {
-    await rm(fake.root, { recursive: true, force: true })
-    await assertMissing(fake.root)
-  }
-  if (provider !== undefined) await assertPortClosed(provider.port)
+  const shutdown = await settleCleanupSteps([
+    { name: 'keyless provider close', run: async () => { await provider?.close() } },
+    {
+      name: 'staged fake removal',
+      run: async () => {
+        if (fake === undefined) return
+        await rm(fake.root, { recursive: true, force: true })
+        await assertMissing(fake.root)
+      },
+    },
+    {
+      name: 'keyless provider port closure',
+      run: async () => { if (provider !== undefined) await assertPortClosed(provider.port) },
+    },
+  ])
+  fatalErrors.push(...shutdown.errors)
+  process.removeListener('SIGINT', onSigint)
+  process.removeListener('SIGTERM', onSigterm)
   process.stdout.write(`Desktop Electron e2e artifacts: ${artifactRoot}\n`)
 }
-process.exit(exitCode)
+if (fatalErrors.length > 0) {
+  process.stderr.write(`${new AggregateError(fatalErrors, 'Desktop Electron e2e runner failed').stack ?? ''}\n`)
+  exitCode = 1
+}
+process.exitCode = exitCode

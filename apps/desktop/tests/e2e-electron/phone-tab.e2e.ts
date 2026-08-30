@@ -9,6 +9,7 @@ import {
 describe('Desktop phone tab live chain', () => {
   it('renders a 390x844 H264 picture and forwards exact tap and Home io', async () => {
     const startup = await assertStartupEvidence()
+    await recordOwnedProcesses(startup.hostPid, true)
     await openSession()
     await openPhoneTabFromPlusMenu()
 
@@ -25,7 +26,6 @@ describe('Desktop phone tab live chain', () => {
     }))
     await writeArtifact('phone-picker.json', picker)
     expect(picker.text).toContain('真机未授权调试')
-    await recordOwnedProcesses(startup.hostPid, true)
     await saveWindowEvidence('phone-picker-window')
 
     await clickSurfaceButton('iOS')
@@ -95,6 +95,15 @@ describe('Desktop phone tab live chain', () => {
     expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])
     await waitForDecodedPicture('Pixel_6_API_35')
     await saveWindowEvidence('phone-pixel-return-window')
+
+    const captureResources = await browser.execute(() => performance.getEntriesByType('resource')
+      .map(entry => new URL(entry.name))
+      .filter(url => url.pathname.startsWith('/phone/stream/'))
+      .map(url => ({ path: url.pathname })))
+    await writeArtifact('phone-capture-resources.json', captureResources)
+    expect(captureResources.length).toBeGreaterThan(0)
+    expect(captureResources.every(resource => resource.path.endsWith('/h264'))).toBe(true)
+    expect(captureResources.some(resource => resource.path.endsWith('/mjpeg'))).toBe(false)
 
     const beforeTap = await fakeCounters()
     await browser.execute(() => {

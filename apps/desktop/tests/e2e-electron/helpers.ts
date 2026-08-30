@@ -197,10 +197,17 @@ export async function recordOwnedProcesses(hostPid: number, includeFake: boolean
   const electronPid = await browser.electron.execute(() => process.pid)
   let fakePid: number | undefined
   if (includeFake) {
-    const response = await fetch(`http://127.0.0.1:${requiredEnv('DSH_ELECTRON_E2E_FAKE_PORT')}/__test/pid`)
-    const record = await response.json() as { readonly pid?: number }
-    if (typeof record.pid !== 'number' || !Number.isSafeInteger(record.pid)) {
-      throw new Error(`invalid fakemobilecli pid: ${JSON.stringify(record)}`)
+    let record: { readonly pid?: number; readonly ownerToken?: string }
+    try {
+      const response = await fetch(`http://127.0.0.1:${requiredEnv('DSH_ELECTRON_E2E_FAKE_PORT')}/__test/pid`)
+      if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
+      record = await response.json() as typeof record
+    } catch {
+      throw new Error('fakemobilecli port ownership verification failed')
+    }
+    if (typeof record.pid !== 'number' || !Number.isSafeInteger(record.pid)
+      || record.ownerToken !== requiredEnv('DSH_ELECTRON_E2E_FAKE_OWNER')) {
+      throw new Error('fakemobilecli port ownership verification failed')
     }
     fakePid = record.pid
   }

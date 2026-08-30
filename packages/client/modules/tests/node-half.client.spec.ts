@@ -30,12 +30,12 @@ function writePackage(
 ): string {
   root ??= realpathSync(mkdtempSync(join(tmpdir(), 'dsh-client-modules-')))
   const pkgRoot = join(root, 'node_modules', ...packageName.split('/'))
-  const clientPath = join(pkgRoot, 'lib', 'client.js')
+  const clientPath = join(pkgRoot, 'lib', 'client.cjs')
   mkdirSync(pkgRoot, { recursive: true })
   writeFileSync(join(pkgRoot, 'package.json'), JSON.stringify({
     name: packageName,
     exports: {
-      './client': './lib/client.js',
+      './client': './lib/client.cjs',
       './package.json': './package.json',
     },
     ...metadata,
@@ -209,40 +209,50 @@ describe('client bundle activation', () => {
     expect(String(thrown)).not.toContain('pnpm run build')
   })
 
-  it('serves the source map beside a registered client bundle', async () => {
+  it('serves the source map URL declared by the public client bundle', async () => {
     const packageName = '@fixture/source-map'
     const clientPath = writePackage(packageName)
     mkdirSync(dirname(clientPath), { recursive: true })
-    writeFileSync(clientPath, 'module.exports = {}\n')
+    writeFileSync(clientPath, 'module.exports = {}\n//# sourceMappingURL=client.cjs.map\n')
     const map = '{"version":3,"sources":["src/client/index.tsx"]}\n'
     writeFileSync(`${clientPath}.map`, map)
     const { route } = constructWithRoute([packageName])
-    let status = 0
-    let headers: Record<string, string> | undefined
-    let body = ''
-    const response = {
-      writeHead(nextStatus: number, nextHeaders?: Record<string, string>) {
-        status = nextStatus
-        headers = nextHeaders
-        return response
-      },
-      end(chunk?: Uint8Array) {
-        body = chunk === undefined ? '' : Buffer.from(chunk).toString('utf8')
-        return response
-      },
-    } as unknown as ServerResponse
+    const request = async (url: string): Promise<{
+      status: number
+      headers: Record<string, string> | undefined
+      body: string
+    }> => {
+      let status = 0
+      let headers: Record<string, string> | undefined
+      let body = ''
+      const response = {
+        writeHead(nextStatus: number, nextHeaders?: Record<string, string>) {
+          status = nextStatus
+          headers = nextHeaders
+          return response
+        },
+        end(chunk?: Uint8Array) {
+          body = chunk === undefined ? '' : Buffer.from(chunk).toString('utf8')
+          return response
+        },
+      } as unknown as ServerResponse
+      await route.handler({ method: 'GET', url } as IncomingMessage, response)
+      return { status, headers, body }
+    }
 
-    await route.handler({
-      method: 'GET',
-      url: `/plugins/${packageName}/client.js.map`,
-    } as IncomingMessage, response)
+    const bundleUrl = `/plugins/${packageName}/client.js`
+    const bundle = await request(bundleUrl)
+    const reference = /\/\/# sourceMappingURL=([^\s]+)/u.exec(bundle.body)?.[1]
+    expect(reference).toBe('client.js.map')
+    const mapUrl = new URL(reference ?? '', `https://dsh.test${bundleUrl}`).pathname
+    const sourceMap = await request(mapUrl)
 
-    expect(status).toBe(200)
-    expect(headers).toEqual({
+    expect(sourceMap.status).toBe(200)
+    expect(sourceMap.headers).toEqual({
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-cache',
     })
-    expect(body).toBe(map)
+    expect(sourceMap.body).toBe(map)
   })
 })
 

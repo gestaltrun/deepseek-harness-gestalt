@@ -45,7 +45,7 @@ const FAST_CONFIG: Partial<Config> = {
 }
 
 async function mountWith(fake: Awaited<ReturnType<typeof stageFake>>, overrides: Partial<Config> = {}): Promise<CordisContext> {
-  fake.claim()
+  await fake.claim()
   const context = new Context()
   contexts.push(context)
   await context.plugin(PhoneDevices, {
@@ -137,7 +137,7 @@ describe('phone runtime on-device agent operations', () => {
   it('fails loudly at composition when the configured profile path is not a file', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const context = new Context()
     contexts.push(context)
     await expect(context.plugin(PhoneDevices, {

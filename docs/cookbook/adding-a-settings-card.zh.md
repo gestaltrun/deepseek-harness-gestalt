@@ -83,7 +83,7 @@ scope 快照携带表单所需的一切：解析后的 `value`、组装层 `base
 {
   "exports": {
     ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
-    "./client": { "types": "./lib/types/client/index.d.ts", "default": "./lib/client.js" }
+    "./client": { "types": "./lib/types/client/index.d.ts", "default": "./lib/client.cjs" }
   },
   "dsh": { "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-client-ui-settings-plugins"] } }
 }

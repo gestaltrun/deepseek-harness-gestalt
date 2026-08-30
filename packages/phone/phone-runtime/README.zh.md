@@ -44,4 +44,4 @@
 - **仅限回环** — 启动的服务始终绑定 `127.0.0.1:<serverPort>`；另一主机上 mobilecli 服务背后的远程设备群不在范围内。
 - **需用户预装** — 未安装 mobilecli 时 Service 按设计仍会组合，但一切操作以 `PHONE_UNRESOLVED` 拒绝；无自动下载、上游无 Homebrew formula，Android 还需 `adb` 在 PATH，iOS 模拟器需 Xcode Command Line Tools。
 - **真机覆盖需显式开启** — 硬件在环套件仅在 `DSH_PHONE_REAL_UDID` 指明已连接真机（`DSH_PHONE_REAL_PROFILE` 指明其签名 profile）时运行；其余环境一律自跳过，因此 CI 只通过 fake mobilecli 垫片钉住真机链路。设备端 agent 工件由 mobilecli 在 `agent install` 时自行下载，本包绝不下载；iOS 设备隧道始终由 mobilecli 服务持有，隧道失败仅通过结构化的 `tunnel-failed` 臂暴露。
-- **无 Windows 覆盖** — 本包套件中的 mobilecli 垫片场景仅限 POSIX；Windows 的 npm 全局 `.cmd` 垫片未经测试。请将 `executablePath` 指向原生 `mobilecli.exe`，在套件覆盖之前 Windows 视为未验证。
+- **Windows npm shim 缺口** — 原生 Windows 套件通过指向当前 Node 可执行文件的测试专用 `fakemobilecli.exe` 符号链接，覆盖生产解析器与进程生命周期。npm 全局 `.cmd` shim 仍未验证；在进程持有者支持批处理 shim 之前，`executablePath` 应指向原生 `mobilecli.exe`。

@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   collectClientPackageViolations,
+  collectClientArtifactViolations,
   collectRuntimeSourcePackageUses,
   collectSourcePackageUses,
   fixClientPackageManifests,
@@ -137,6 +138,32 @@ describe('package modes', () => {
       'packages/client/web/src/platform.ts: parser-preloaded external '
       + '"@deepseek-ai/dsh-client-runtime/client" has no matching PARSER_PRELOAD_IDS row in '
       + 'packages/client/modules/src/index.ts',
+    ])
+  })
+})
+
+describe('dynamic client artifacts', () => {
+  it('rejects a CommonJS client export disguised by an ESM package extension', () => {
+    const root = mkdtempSync(join(tmpdir(), 'client-artifact-contract-'))
+    roots.push(root)
+    const subject = declaration('feature')
+    mkdirSync(dirname(join(root, subject.manifest)), { recursive: true })
+    writeFileSync(join(root, subject.manifest), JSON.stringify({
+      name: subject.name,
+      type: 'module',
+      exports: {
+        './client': {
+          types: './lib/types/client/index.d.ts',
+          default: './lib/client.js',
+        },
+      },
+      dsh: { client: { platform: 'web' } },
+      files: ['lib/index.js', 'lib/client.js', 'lib/types/**/*.d.ts'],
+    }))
+
+    expect(collectClientArtifactViolations(root, [subject])).toEqual([
+      `${subject.manifest}: exports["./client"].default must be ./lib/client.cjs; found ./lib/client.js`,
+      `${subject.manifest}: files must publish lib/client.cjs instead of lib/client.js`,
     ])
   })
 })
@@ -335,7 +362,15 @@ describe('manifest declarations', () => {
     const slots = declaration('ui-slots', { dynamic: false })
     const manifest = {
       name: subject.name,
+      type: 'module',
+      exports: {
+        './client': {
+          types: './lib/types/client/index.d.ts',
+          default: './lib/client.js',
+        },
+      },
       dsh: { client: { external: subject.external, inject: subject.inject, platform: 'web' } },
+      files: ['lib/index.js', 'lib/client.js', 'lib/types/**/*.d.ts'],
       dependencies: subject.dependencies,
       peerDependencies: subject.peerDependencies,
       devDependencies: subject.devDependencies,
@@ -351,7 +386,9 @@ describe('manifest declarations', () => {
     }))).toEqual([subject.manifest])
 
     const fixed = JSON.parse(readFileSync(join(root, subject.manifest), 'utf8')) as {
+      exports: { './client': { default: string } }
       dsh: { client: { external: string[]; inject: string[] } }
+      files: string[]
       dependencies?: Record<string, string>
       peerDependencies: Record<string, string>
       devDependencies: Record<string, string>
@@ -360,6 +397,8 @@ describe('manifest declarations', () => {
       external: ['@deepseek-ai/dsh-missing'],
       inject: ['@deepseek-ai/dsh-agent'],
     })
+    expect(fixed.exports['./client'].default).toBe('./lib/client.cjs')
+    expect(fixed.files).toEqual(['lib/index.js', 'lib/client.cjs', 'lib/types/**/*.d.ts'])
     expect(fixed.dependencies).toBeUndefined()
     expect(fixed.peerDependencies).toEqual({
       '@deepseek-ai/cordis-plugin-loader': 'workspace:^',

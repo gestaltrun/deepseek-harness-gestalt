@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-27-phone-runtime-mobilecli-provider.md
-2026-08-27-phone-runtime-mobilecli-provider.md: 9dde0fc4f61a6b56b391939c7c8fe0e04eeaaf4a
-2026-08-27-phone-runtime-mobilecli-provider.zh.md: 7f73cb3b47df996f841ec19af3eb557a5a405ea6
+2026-08-27-phone-runtime-mobilecli-provider.md: 61cd91dd59917010363ccac6911cb4770aba6190
+2026-08-27-phone-runtime-mobilecli-provider.zh.md: b6c61bf5a254b7ad62238bd6b050ee6fcd03db25

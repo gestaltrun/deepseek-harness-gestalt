@@ -22,7 +22,7 @@ The root build wrapper supplies one exact public environment to both bundlers. I
 
 ## Alternatives considered
 
-**Replace values only in Vite.** A dynamic plugin's `lib/client.js` is loaded as an independent script and never enters Vite's module graph, so the expression would remain in a browser that has no `process`.
+**Replace values only in Vite.** A dynamic plugin's `lib/client.cjs` is loaded as an independent script and never enters Vite's module graph, so the expression would remain in a browser that has no `process`.
 
 **Expose every `DSH_*` value.** Host, test, and CI variables already use that prefix and may contain credentials or local paths. The narrower `DSH_CLIENT_*` prefix makes exposure intent auditable.
 

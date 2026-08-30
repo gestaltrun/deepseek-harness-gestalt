@@ -148,7 +148,7 @@ const UI_PLUGIN_DIRS = [
 ]
 const ROUND_DONE_MARKER = 'WEB_ROUND_DONE'
 const notReady = UI_PLUGIN_DIRS.filter((dir) => {
-  const bundle = join(REPO_ROOT, 'packages/client', dir, 'lib/client.js')
+  const bundle = join(REPO_ROOT, 'packages/client', dir, 'lib/client.cjs')
   return !existsSync(bundle) || !readFileSync(bundle, 'utf8').includes('exports.apply')
 })
 if (notReady.length > 0) console.warn(`[smoke-real] skipped — client bundles not ready: ${notReady.join(', ')}`)

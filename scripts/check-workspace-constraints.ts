@@ -8,6 +8,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { DYNAMIC_CLIENT_ARTIFACT } from './client-artifact-contract.ts'
 import { hasTypertRemoteNavigation, isForbiddenPublicationFile } from './publication-payload.ts'
 import { collectProjectReferenceFaceViolations } from './project-reference-faces.ts'
 
@@ -212,10 +213,11 @@ function expectedDshPackageFiles(manifest: PackageManifest): readonly string[] {
     'lib/invariant.js',
     ...manifest.bin ? ['lib/bin.js'] : [],
     ...manifest.exports?.['./worker'] ? ['lib/worker.cjs'] : [],
-    // UI plugin packages ship their browser bundle beside the node lib
-    // (single-artifact ruling: dist/ retired, ./client resolves lib/client.js).
-    // Keyed on the artifact path, not the subpath name: apiproxy's ./client is
-    // a browser-safe source channel, not a bundle.
+    // Dynamic UI plugin packages ship their CommonJS browser factory beside
+    // the node lib. A package may instead expose an ESM ./client source channel.
+    ...exportDefault(manifest, './client') === DYNAMIC_CLIENT_ARTIFACT.exportPath
+      ? [DYNAMIC_CLIENT_ARTIFACT.relativePath]
+      : [],
     ...exportDefault(manifest, './client') === './lib/client.js' ? ['lib/client.js'] : [],
     // Shared browser presentation subpaths ship an ESM entry and every CSS
     // asset that the product shell compiles alongside it.

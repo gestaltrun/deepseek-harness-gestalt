@@ -2,13 +2,84 @@
 name: Platform Deploy
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      image_tag:
-        description: GHCR tag to deploy (sha-... or latest)
+      candidate_sha:
+        description: Exact Product Release Plan commit whose image is promoted.
         required: true
         type: string
-        default: latest
+      plan_path:
+        description: Numbered Product Release Plan at the candidate commit.
+        required: true
+        type: string
+      image_identity:
+        description: Full immutable GHCR digest.
+        required: true
+        type: string
+      image_candidate_sha:
+        description: Source commit recorded by the image build metadata.
+        required: true
+        type: string
+      version:
+        description: Source-owned Platform release version.
+        required: true
+        type: string
+      deploy:
+        description: Apply the image on both ECS hosts.
+        required: true
+        type: boolean
+      recover:
+        description: Resolve an interrupted deployment from its durable phase.
+        required: true
+        type: boolean
+      publish_only:
+        description: Publish the Platform Release for a previously successful deployment.
+        required: true
+        type: boolean
+      deployment_run_id:
+        description: Prior successful deployment run containing candidate-bound deployment metadata.
+        required: false
+        type: string
+        default: ''
+      attachment_storage:
+        description: PostgreSQL bridge or OSS attachment authority.
+        required: true
+        type: string
+    outputs:
+      deployment:
+        description: GitHub Actions deployment evidence URL.
+        value: ${{ jobs.publish.outputs.deployment || jobs.deploy.outputs.deployment }}
+      tag:
+        description: Published Platform component tag.
+        value: ${{ jobs.publish.outputs.tag }}
+      release_url:
+        description: Published Platform GitHub Release URL.
+        value: ${{ jobs.publish.outputs.release_url }}
+      workflow_run:
+        description: GitHub Actions run that published the Platform release.
+        value: ${{ jobs.publish.outputs.workflow_run }}
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact master commit whose image is promoted; optional for recovery.
+        required: false
+        type: string
+      plan_path:
+        description: Numbered Product Release Plan at the candidate commit; optional only for durable deployment recovery.
+        required: false
+        type: string
+      image_identity:
+        description: Full immutable GHCR digest; optional for durable deployment recovery.
+        required: false
+        type: string
+      image_candidate_sha:
+        description: Source commit recorded by the image build metadata; optional for durable deployment recovery.
+        required: false
+        type: string
+      version:
+        description: Source-owned Platform version; optional for recovery.
+        required: false
+        type: string
       deploy:
         description: Apply the image on both ECS hosts
         required: true
@@ -19,6 +90,15 @@ on:
         required: true
         type: boolean
         default: false
+      publish_only:
+        description: Publish from a prior successful deployment without deploying again
+        required: true
+        type: boolean
+        default: false
+      deployment_run_id:
+        description: Prior successful deployment run containing candidate-bound deployment metadata
+        required: false
+        type: string
       attachment_storage:
         description: Deploy the PostgreSQL atomic bridge first; enable OSS only in a later completed deployment
         required: true
@@ -50,7 +130,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify merged release candidate
+        env:
+          PLATFORM_CANDIDATE_SHA: ${{ inputs.candidate_sha || github.sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$PLATFORM_CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
+          git merge-base --is-ancestor "$PLATFORM_CANDIDATE_SHA" refs/remotes/origin/master
 
       - uses: pnpm/action-setup@v4
 
@@ -115,11 +208,41 @@ jobs:
         env:
           DEPLOY: ${{ inputs.deploy }}
           RECOVER: ${{ inputs.recover }}
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
+          DEPLOYMENT_RUN_ID: ${{ inputs.deployment_run_id }}
         run: |
-          if [ "$DEPLOY" = true ] && [ "$RECOVER" = true ]; then
-            echo 'platform: deploy and recover are mutually exclusive' >&2
+          selected=0
+          for mode in "$DEPLOY" "$RECOVER" "$PUBLISH_ONLY"; do
+            if [[ "$mode" == true ]]; then selected=$((selected + 1)); fi
+          done
+          if (( selected > 1 )); then
+            echo 'platform: deploy, recover, and publish-only are mutually exclusive' >&2
             exit 1
           fi
+          if [[ "$PUBLISH_ONLY" == true && -z "$DEPLOYMENT_RUN_ID" ]]; then
+            echo 'platform: publish-only requires a prior deployment run id' >&2
+            exit 1
+          fi
+          if [[ "$PUBLISH_ONLY" != true && -n "$DEPLOYMENT_RUN_ID" ]]; then
+            echo 'platform: deployment_run_id requires publish-only mode' >&2
+            exit 1
+          fi
+
+      - name: Require an immutable candidate-bound image and plan
+        if: inputs.deploy || inputs.publish_only
+        env:
+          IMAGE_IDENTITY: ${{ inputs.image_identity }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          IMAGE_CANDIDATE_SHA: ${{ inputs.image_candidate_sha }}
+          PLAN_PATH: ${{ inputs.plan_path }}
+          PLATFORM_VERSION: ${{ inputs.version }}
+        run: |
+          node --import tsx/esm -e \
+            "import { assertImmutablePlatformCandidate } from './scripts/release/product.ts'; assertImmutablePlatformCandidate(process.env.IMAGE_IDENTITY, process.env.CANDIDATE_SHA, process.env.IMAGE_CANDIDATE_SHA)"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(node -p "require('./apps/platform/package.json').version")" = "$PLATFORM_VERSION"
+          jq -e --arg version "$PLATFORM_VERSION" \
+            '.releaseUnits.platform.selected == true and .releaseUnits.platform.version == $version' "$PLAN_PATH" >/dev/null
 
       - name: Configure Alibaba Cloud OIDC credentials
         uses: aliyun/configure-aliyun-credentials-action@1e5248c8d5d93a8781ac344a68e19a43341e79e6
@@ -173,9 +296,12 @@ jobs:
       contents: read
       packages: read
       id-token: write
+    outputs:
+      deployment: ${{ steps.deployment.outputs.url }}
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-node@v6
@@ -202,7 +328,7 @@ jobs:
 
       - name: Pull image and encrypt operated configuration
         env:
-          TAG: ${{ inputs.image_tag }}
+          IMAGE_IDENTITY: ${{ inputs.image_identity }}
           DEPLOY_DIR: ${{ runner.temp }}/platform-deploy
           PLATFORM_ENVIRONMENT: production
           PLATFORM_ORIGIN: ${{ vars.PLATFORM_ORIGIN }}
@@ -248,7 +374,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$DEPLOY_DIR"
-          image="${REGISTRY}/$(echo "${GITHUB_REPOSITORY}/platform" | tr '[:upper:]' '[:lower:]'):${TAG}"
+          if [[ "$IMAGE_IDENTITY" == *@sha256:* ]]; then
+            image="$IMAGE_IDENTITY"
+          else
+            image="${REGISTRY}/$(echo "${GITHUB_REPOSITORY}/platform" | tr '[:upper:]' '[:lower:]'):${IMAGE_IDENTITY}"
+          fi
           docker pull "$image"
           docker save "$image" | gzip > "$DEPLOY_DIR/platform.tar.gz"
           config_container=$(docker create \
@@ -468,6 +598,160 @@ jobs:
           test "$finalize_failed" = 0
           state_resolved=1
 
+      - name: Record production deployment evidence
+        id: deployment
+        run: echo "url=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Record candidate-bound deployment metadata
+        env:
+          PLATFORM_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PLATFORM_IMAGE_IDENTITY: ${{ inputs.image_identity }}
+          PLATFORM_VERSION: ${{ inputs.version }}
+          PLATFORM_DEPLOYMENT: ${{ steps.deployment.outputs.url }}
+        run: |
+          mkdir deployment-evidence
+          jq -n --arg candidate "$PLATFORM_CANDIDATE_SHA" --arg image "$PLATFORM_IMAGE_IDENTITY" \
+            --arg version "$PLATFORM_VERSION" --arg deployment "$PLATFORM_DEPLOYMENT" \
+            '{version:1,candidateCommit:$candidate,imageIdentity:$image,productVersion:$version,deployment:$deployment}' \
+            > deployment-evidence/platform-deployment.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: platform-deployment-candidate-${{ inputs.candidate_sha }}
+          path: deployment-evidence/platform-deployment.json
+          if-no-files-found: error
+          retention-days: 30
+
+  deployment-provenance:
+    name: Validate prior Platform deployment
+    needs: validate
+    if: inputs.publish_only
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      deployment: ${{ steps.provenance.outputs.deployment }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Validate successful candidate-bound deployment run
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM_DEPLOYMENT_RUN_ID: ${{ inputs.deployment_run_id }}
+          PLATFORM_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PLATFORM_IMAGE_IDENTITY: ${{ inputs.image_identity }}
+          PLATFORM_VERSION: ${{ inputs.version }}
+        run: |
+          set -Eeuo pipefail
+          artifact_name="platform-deployment-candidate-$PLATFORM_CANDIDATE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_DEPLOYMENT_RUN_ID" > run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_DEPLOYMENT_RUN_ID/jobs?filter=latest&per_page=100" > jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLATFORM_DEPLOYMENT_RUN_ID/artifacts?per_page=100" > artifacts.json
+          workflow_head=$(jq -r .head_sha run.json)
+          [[ "$workflow_head" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master
+          ARTIFACT_NAME="$artifact_name" TRUSTED_WORKFLOW_HEAD="$workflow_head" node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { validatePriorReleaseRun } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, trustedWorkflowHeadCommits: [process.env.TRUSTED_WORKFLOW_HEAD], allowedWorkflows: [".github/workflows/platform-deploy.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Deploy to private ECS through Cloud Assistant" }] });'
+          gh run download "$PLATFORM_DEPLOYMENT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$artifact_name" --dir deployment-evidence
+          node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            const deployment = json("deployment-evidence/platform-deployment.json");
+            if (deployment.version !== 1 || deployment.candidateCommit !== process.env.PLATFORM_CANDIDATE_SHA || deployment.imageIdentity !== process.env.PLATFORM_IMAGE_IDENTITY || deployment.productVersion !== process.env.PLATFORM_VERSION || !/^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/\d+/.test(deployment.deployment)) throw new Error("Platform deployment metadata does not match candidate and image");'
+          echo "deployment=$(jq -r .deployment deployment-evidence/platform-deployment.json)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Platform GitHub Release
+    needs: [validate, deploy, deployment-provenance]
+    if: ${{ always() && needs.validate.result == 'success' && ((inputs.deploy && needs.deploy.result == 'success') || (inputs.publish_only && needs.deployment-provenance.result == 'success')) }}
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
+      release_url: ${{ steps.publish.outputs.release_url }}
+      workflow_run: ${{ steps.publish.outputs.workflow_run }}
+      deployment: ${{ steps.publish.outputs.deployment }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Record immutable image and production deployment
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLATFORM_VERSION: ${{ inputs.version }}
+          PLATFORM_IMAGE_IDENTITY: ${{ inputs.image_identity }}
+          PLATFORM_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PLATFORM_DEPLOYMENT: ${{ needs.deploy.outputs.deployment }}
+          PRIOR_PLATFORM_DEPLOYMENT: ${{ needs.deployment-provenance.outputs.deployment }}
+          PLAN_PATH: ${{ inputs.plan_path }}
+        run: |
+          set -Eeuo pipefail
+          test "$(node -p "require('./apps/platform/package.json').version")" = "$PLATFORM_VERSION"
+          if [[ -z "$PLATFORM_DEPLOYMENT" ]]; then PLATFORM_DEPLOYMENT="$PRIOR_PLATFORM_DEPLOYMENT"; fi
+          tag="platform-v${PLATFORM_VERSION}"
+          notes="$RUNNER_TEMP/platform-release-notes.md"
+          {
+            echo '## Production deployment'
+            echo
+            echo "- Version: \`$PLATFORM_VERSION\`"
+            echo "- Source: \`$PLATFORM_CANDIDATE_SHA\`"
+            echo "- Image: \`$PLATFORM_IMAGE_IDENTITY\`"
+            echo "- Deployment: $PLATFORM_DEPLOYMENT"
+            echo
+            echo '## Changes / 变更'
+            echo
+            jq -r '.releaseUnits.platform.summaries[] | "- " + .en + " / " + .zh' "$PLAN_PATH"
+          } > "$notes"
+          tag_owned=false
+          release_owned=false
+          published=false
+          cleanup() {
+            status=$?
+            trap - EXIT INT TERM
+            if [[ "$published" == true ]]; then exit "$status"; fi
+            if [[ "$release_owned" == true ]]; then gh release delete "$tag" --yes >/dev/null 2>&1 || true; fi
+            if [[ "$tag_owned" == true ]]; then gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" >/dev/null 2>&1 || true; fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" --field ref="refs/tags/$tag" --field sha="$PLATFORM_CANDIDATE_SHA" >/dev/null
+          tag_owned=true
+          gh release create "$tag" --draft --verify-tag --target "$PLATFORM_CANDIDATE_SHA" \
+            --title "DeepSeek Gestalt Platform $PLATFORM_VERSION" --notes-file "$notes"
+          release_owned=true
+          gh release edit "$tag" --draft=false
+          {
+            echo "tag=$tag"
+            echo "release_url=https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag"
+            echo "workflow_run=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "deployment=$PLATFORM_DEPLOYMENT"
+          } >> "$GITHUB_OUTPUT"
+          published=true
+          trap - EXIT INT TERM
+
   recover:
     name: Resolve an interrupted private ECS deployment
     needs: validate
@@ -481,6 +765,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
           persist-credentials: false
 
       - name: Configure Alibaba Cloud OIDC credentials

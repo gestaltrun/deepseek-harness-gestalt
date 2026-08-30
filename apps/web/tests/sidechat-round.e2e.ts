@@ -11,10 +11,13 @@ import {
   webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
 import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
+import {
+  SIDE_CHAT_RESPONSE,
+  SIDE_CHAT_RESUME_RESPONSE,
+  sideChatRoundReplayConfig,
+} from './sidechat-round.fixture.ts'
 
-const FIXTURE = fileURLToPath(new URL('./snapshots/live-interactions/session.jsonl', import.meta.url))
 const SNAPSHOT_DIR = fileURLToPath(new URL('./snapshots/sidechat-round', import.meta.url))
-const RESTORED_CHILD_FIXTURE = join(SNAPSHOT_DIR, 'restored-child.jsonl')
 const EXPECTED = join(SNAPSHOT_DIR, 'ui.expected.md')
 const PICKER_EXPECTED = join(SNAPSHOT_DIR, 'picker.expected.md')
 const FLOAT_EXPECTED = join(SNAPSHOT_DIR, 'float.expected.md')
@@ -22,10 +25,8 @@ const DESCENDANT_EXPECTED = join(SNAPSHOT_DIR, 'descendant.expected.md')
 const MODE = webSnapshotMode()
 const PROMPT = 'Reply with a one-sentence description of event sourcing, then stop.'
 const RESUME_PROMPT = 'Restate that description in one sentence after restoring this Side Chat.'
-const RESUME_RESPONSE = 'After restoration, event sourcing still represents application state as an immutable sequence of recorded changes.'
 const DESCENDANT_PROMPT = 'Describe event sourcing in one sentence for a nested Side Chat, then stop.'
 const SIDE_BOUNDARY_PREFIX = 'Side conversation boundary'
-const RESPONSE = 'Event sourcing is a pattern where all changes to an application\'s state are stored as an immutable, append-only sequence of events, rather than persisting only the current state, enabling full auditability, temporal queries, and event-driven architectures.'
 const SIDE_SKILL = 'side-chat-catalog'
 
 function latestPermissionPreset(events: readonly SessionEvent[]): string | undefined {
@@ -55,8 +56,8 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
 
   beforeAll(async () => {
     scaffold = await launchWebScaffold({
-      replayFixture: FIXTURE,
-      replayChildFixtures: [RESTORED_CHILD_FIXTURE, FIXTURE],
+      replayFixture: sideChatRoundReplayConfig.file,
+      replayChildFixtures: sideChatRoundReplayConfig.childFiles ?? [],
       paceMs: 25,
     })
     await seedSideChatSkill(scaffold.workspaceCwd)
@@ -143,7 +144,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     const childId = await childSettled
     expect(childId).not.toBe(parentId)
 
-    await panel.getByText(RESPONSE, { exact: true }).waitFor({ timeout: 30_000 })
+    await panel.getByText(SIDE_CHAT_RESPONSE, { exact: true }).waitFor({ timeout: 30_000 })
     await selectSideModel()
     const selected = await page.request.post(`${scaffold.baseUrl}/sidebar/api/sidechat.selectModel`, {
       data: {
@@ -219,7 +220,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     await restoredComposer.fill(RESUME_PROMPT)
     await restoredComposer.press('Enter')
     expect(await resumedSettled).toBe(childId)
-    await panel.getByText(RESUME_RESPONSE, { exact: true }).waitFor({ timeout: 30_000 })
+    await panel.getByText(SIDE_CHAT_RESUME_RESPONSE, { exact: true }).waitFor({ timeout: 30_000 })
 
     const childAgent = scaffold.ctx.agents.get(childId)
     if (childAgent === undefined) throw new Error('Side Chat child Agent was not live')
@@ -242,7 +243,7 @@ describe.skipIf(MODE === 'record')('web e2e: Side Chat through the shipped workb
     await nested.waitFor({ timeout: 15_000 })
     await nested.click()
     await panel.getByText(DESCENDANT_PROMPT, { exact: true }).waitFor({ timeout: 30_000 })
-    await panel.getByText(RESPONSE, { exact: true }).waitFor({ timeout: 30_000 })
+    await panel.getByText(SIDE_CHAT_RESPONSE, { exact: true }).waitFor({ timeout: 30_000 })
     await compareOrRefreshGolden(
       DESCENDANT_EXPECTED,
       await captureStableAria(page, '[data-dsh-panel]', scaffold.workspaceCwd),

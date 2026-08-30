@@ -352,6 +352,9 @@ function ciPreflightGates(): Gate[] {
 function ciPreflightCoreGates(): Gate[] {
   return [
     pnpmScript('constraints', 'constraints'),
+    pnpmScript('session-fixture-layout', 'verify-session-fixture-layout', {
+      label: 'session fixture layout',
+    }),
     pnpmScript('translation-pairing', 'verify-translation-pairing', { label: 'translation pairing' }),
     pnpmScript('client-catalog', 'verify-client-catalog', { label: 'client catalog' }),
     pnpmScript('tool-catalog', 'verify-tool-catalog', { label: 'tool catalog' }),

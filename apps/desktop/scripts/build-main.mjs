@@ -24,6 +24,26 @@ await build({
   external: ['electron', 'electron-updater', 'https-proxy-agent', 'ws'],
   logLevel: 'info',
 })
+await build({
+  absWorkingDir: root,
+  entryPoints: [join(root, 'src', 'relay-node-helper-worker.ts')],
+  outfile: join(root, 'out', 'relay-node-helper.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node22',
+  logLevel: 'info',
+})
+await build({
+  absWorkingDir: root,
+  entryPoints: [join(root, 'src', 'system-node-fetch-helper-worker.ts')],
+  outfile: join(root, 'out', 'system-node-fetch-helper.cjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node22',
+  logLevel: 'info',
+})
 await cp(join(root, 'src', 'preload.cjs'), join(root, 'out', 'preload.cjs'))
 await writeFile(
   join(root, 'out', 'operated-platform.json'),

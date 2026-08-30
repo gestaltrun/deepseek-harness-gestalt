@@ -36,19 +36,21 @@ describe('CI workflow', () => {
       name: 'Verify immutable Companion acceptance evidence',
     }))
     expect(android).toMatchObject({
-      needs: 'release-authorization',
-      if: "github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'",
+      needs: ['release-authorization', 'release-version'],
+      if: "needs.release-authorization.result == 'success' && !inputs.recover_artifacts",
     })
     expect(ios).toMatchObject({
-      needs: 'release-authorization',
-      if: "github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'",
+      needs: ['release-authorization', 'release-version'],
+      if: "needs.release-authorization.result == 'success' && !inputs.recover_artifacts",
     })
     const androidBuild = (android.steps as unknown[])
       .find(step => isRecord(step) && step.name === 'Build and verify signed APK')
     const iosBuild = (ios.steps as unknown[])
       .find(step => isRecord(step) && step.name === 'Build signed App Store candidate')
-    const upload = (ios.steps as unknown[])
-      .find(step => isRecord(step) && step.name === 'Upload TestFlight')
+    const testflight = workflow.jobs.testflight
+    if (!isRecord(testflight) || !Array.isArray(testflight.steps)) throw new TypeError('mobile-release workflow must define TestFlight steps')
+    const upload = (testflight.steps as unknown[])
+      .find(step => isRecord(step) && step.name === 'Upload exact signed IPA to TestFlight')
     expect(androidBuild).toMatchObject({ env: {
       ANDROID_KEYSTORE_BASE64: '${{ secrets.ANDROID_KEYSTORE_BASE64 }}',
       ANDROID_KEYSTORE_PASSWORD: '${{ secrets.ANDROID_KEYSTORE_PASSWORD }}',

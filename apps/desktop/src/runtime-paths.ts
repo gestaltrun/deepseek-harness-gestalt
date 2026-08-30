@@ -13,6 +13,10 @@ export interface DesktopRuntimePaths {
   readonly args: readonly string[]
   /** Desktop `--patch` overlay. */
   readonly patch: string
+  /** Bundled system-Node WSS worker outside Electron's BoringSSL process. */
+  readonly relayHelper: string
+  /** Bundled one-request system-Node HTTPS worker. */
+  readonly fetchHelper: string
   /**
    * Unpackaged source-launch cwd (the repo root). Packaged runs use the
    * Launch Directory instead so `tsx` is not required.
@@ -49,7 +53,9 @@ export function resolveDesktopRuntime(options: {
       : join(options.resourcesPath, 'node', 'bin', 'node')
     const dsh = join(options.resourcesPath, 'dsh', 'lib', 'bin.js')
     const patch = join(options.resourcesPath, 'cordis.patch.yml')
-    return { node, args: [dsh, ...webHostArgs(patch)], patch }
+    const relayHelper = join(options.resourcesPath, 'relay-node-helper.cjs')
+    const fetchHelper = join(options.resourcesPath, 'system-node-fetch-helper.cjs')
+    return { node, args: [dsh, ...webHostArgs(patch)], patch, relayHelper, fetchHelper }
   }
   const here = dirname(fileURLToPath(options.moduleUrl))
   const repoRoot = join(here, '..', '..', '..')
@@ -63,6 +69,8 @@ export function resolveDesktopRuntime(options: {
     node,
     args: ['--import', tsx, bin, ...webHostArgs(patch)],
     patch,
+    relayHelper: join(repoRoot, 'apps', 'desktop', 'out', 'relay-node-helper.cjs'),
+    fetchHelper: join(repoRoot, 'apps', 'desktop', 'out', 'system-node-fetch-helper.cjs'),
     workspaceRoot: repoRoot,
   }
 }

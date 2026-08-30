@@ -3,7 +3,51 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>DeepSeek Gestalt</title>
+<title>Gestalt · 獭子哥</title>
+<meta name="description" content="Gestalt（獭子哥）是基于 DeepSeek Harness 构建的开源 AI coding agent（编程智能体）产品，提供桌面端、手机伴侣、会话回放和可组合插件。"/>
+<link rel="canonical" href="https://www.gestaltrun.com/"/>
+<meta property="og:type" content="website"/>
+<meta property="og:site_name" content="Gestalt"/>
+<meta property="og:title" content="Gestalt · 獭子哥"/>
+<meta property="og:description" content="基于 DeepSeek Harness 构建的开源 AI coding agent（编程智能体）产品，包含桌面端、手机伴侣、会话回放和可组合插件。"/>
+<meta property="og:url" content="https://www.gestaltrun.com/"/>
+<meta property="og:image" content="https://www.gestaltrun.com/images/hero-bg.png"/>
+<meta property="og:image:alt" content="Gestalt 产品界面背景"/>
+<meta property="og:locale" content="zh_CN"/>
+<meta property="og:locale:alternate" content="en_US"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="Gestalt · 獭子哥"/>
+<meta name="twitter:description" content="基于 DeepSeek Harness 构建的开源 AI coding agent（编程智能体）产品。"/>
+<meta name="twitter:image" content="https://www.gestaltrun.com/images/hero-bg.png"/>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://www.gestaltrun.com/#website",
+      "url": "https://www.gestaltrun.com/",
+      "name": "Gestalt",
+      "alternateName": ["獭子哥", "DeepSeek Gestalt"],
+      "inLanguage": ["zh-CN", "en-US"]
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://www.gestaltrun.com/#software",
+      "name": "Gestalt",
+      "alternateName": ["獭子哥", "DeepSeek Gestalt"],
+      "url": "https://www.gestaltrun.com/",
+      "description": "An open-source AI coding agent product built on DeepSeek Harness, with desktop and mobile clients, replayable sessions, and composable plugins.",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": ["macOS", "Windows", "iOS", "Android", "Web"],
+      "image": "https://www.gestaltrun.com/images/hero-bg.png",
+      "downloadUrl": "https://github.com/gestaltrun/deepseek-harness-gestalt/releases",
+      "sameAs": "https://github.com/gestaltrun/deepseek-harness-gestalt",
+      "isBasedOn": "https://github.com/deepseek-ai/deepseek-harness"
+    }
+  ]
+}
+</script>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml"/>
 <link rel="stylesheet" href="/css/harness.css"/>
 <style>
@@ -38,7 +82,7 @@
           <button type="button" id="zh" class="ds-locale-toggle-item is-active">中文</button>
           <button type="button" id="en" class="ds-locale-toggle-item">EN</button>
         </div>
-        <a class="ds-btn-primary ds-btn-xs min-w-[80px]" id="gh-head" hidden href="https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt" target="_blank" rel="noopener noreferrer"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>GitHub</a>
+        <a class="ds-btn-primary ds-btn-xs min-w-[80px]" id="gh-head" hidden href="https://github.com/gestaltrun/deepseek-harness-gestalt" target="_blank" rel="noopener noreferrer"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>GitHub</a>
       </div>
     </div>
   </div>
@@ -57,8 +101,8 @@
             <p class="ds-text-body text-ds-description" data-i="heroSub">模型、工具、技能、会话、沙箱、存储、循环、调度、UI 仍由插件组合。Gestalt 加上桌面宿主、手机伴侣和自有源。</p>
           </div>
           <div class="ds-hero-enter hidden md:flex flex-wrap items-center gap-[14px] mt-ds-2" style="--enter-y:16px;animation-duration:0.7s;animation-delay:0.3s">
-            <a class="ds-btn-primary ds-btn-m" href="https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt" target="_blank" rel="noopener noreferrer"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg><span data-i="ctaGithub">查看 GitHub</span></a>
-            <a class="ds-btn-secondary ds-btn-m" href="https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt/releases" target="_blank" rel="noopener noreferrer"><span data-i="ctaDownload">下载桌面版</span></a>
+            <a class="ds-btn-primary ds-btn-m" href="https://github.com/gestaltrun/deepseek-harness-gestalt" target="_blank" rel="noopener noreferrer"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg><span data-i="ctaGithub">查看 GitHub</span></a>
+            <a class="ds-btn-secondary ds-btn-m" href="https://github.com/gestaltrun/deepseek-harness-gestalt/releases" target="_blank" rel="noopener noreferrer"><span data-i="ctaDownload">下载桌面版</span></a>
           </div>
         </div>
         <div class="ds-hero-enter flex flex-col gap-ds-3 order-2" style="--enter-y:20px;animation-duration:0.9s;animation-delay:0.4s">
@@ -76,13 +120,13 @@
               <button type="button" class="copy flex items-center gap-ds-2 text-ds-description text-[12px] cursor-pointer hover:text-ds-primary transition-colors"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span data-i="copy">复制</span></button>
             </div>
             <div class="p-ds-5 grid items-center">
-              <pre id="cmd" class="col-start-1 row-start-1 font-mono text-[14px] text-ds-primary leading-relaxed whitespace-pre-wrap"><span class="select-none text-ds-brand">$ </span>git clone https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt.git</pre>
+              <pre id="cmd" class="col-start-1 row-start-1 font-mono text-[14px] text-ds-primary leading-relaxed whitespace-pre-wrap"><span class="select-none text-ds-brand">$ </span>git clone https://github.com/gestaltrun/deepseek-harness-gestalt.git</pre>
             </div>
           </div>
         </div>
         <div class="flex md:hidden flex-wrap items-center gap-ds-4 order-3">
-          <a class="ds-btn-primary ds-btn-m" href="https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt" target="_blank" rel="noopener noreferrer"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>GitHub</a>
-          <a class="ds-btn-secondary ds-btn-m" href="https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt/releases" target="_blank" rel="noopener noreferrer" data-i="ctaDownload">下载桌面版</a>
+          <a class="ds-btn-primary ds-btn-m" href="https://github.com/gestaltrun/deepseek-harness-gestalt" target="_blank" rel="noopener noreferrer"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>GitHub</a>
+          <a class="ds-btn-secondary ds-btn-m" href="https://github.com/gestaltrun/deepseek-harness-gestalt/releases" target="_blank" rel="noopener noreferrer" data-i="ctaDownload">下载桌面版</a>
         </div>
       </div>
     </section>
@@ -221,7 +265,7 @@
         <div class="bg-ds-surface-3 border border-ds-border-default rounded-ds-media p-ds-6">
           <h3 class="ds-text-title text-ds-primary mb-ds-2" data-i="s2">源码</h3>
           <p class="ds-text-body text-ds-description mb-ds-4" data-i="s2d">完整产品树在本仓库，含 Desktop、Mobile Companion 与 Platform 工作流。</p>
-          <div class="flex items-center justify-between gap-ds-3 rounded-[10px] bg-black/30 border border-ds-border-default px-ds-4 py-ds-3 font-mono text-[13px] text-ds-primary"><span>$ git clone https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt.git</span></div>
+          <div class="flex items-center justify-between gap-ds-3 rounded-[10px] bg-black/30 border border-ds-border-default px-ds-4 py-ds-3 font-mono text-[13px] text-ds-primary"><span>$ git clone https://github.com/gestaltrun/deepseek-harness-gestalt.git</span></div>
         </div>
       </div>
     </section>
@@ -237,7 +281,7 @@
   </main>
 </div>
 <script>
-const clone = 'git clone https://github.com/BeiKeJieDeLiuLangMao/deepseek-harness-gestalt.git'
+const clone = 'git clone https://github.com/gestaltrun/deepseek-harness-gestalt.git'
 const use = 'pnpm gestalt:dev'
 const i18n = {
   zh: {

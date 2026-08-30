@@ -87,6 +87,11 @@ interface MobileCreateTarget {
   label: string
 }
 
+interface PendingAttachmentSelection {
+  sessionId: SessionId
+  file: File
+}
+
 /** Phone-sized Workspace/Session browse without Desktop columns. */
 export function MobileBrowse({
   desktopName, connection, onOpenAccount, onOpenPairing,
@@ -106,6 +111,7 @@ export function MobileBrowse({
   const [refreshState, setRefreshState] = useState<PullRefreshState>('idle')
   const adoptedCurrent = useRef<SessionId>()
   const historyRequested = useRef<SessionId>()
+  const pendingAttachment = useRef<PendingAttachmentSelection>()
   const pullStart = useRef<number>()
   const pullDistanceRef = useRef(0)
   const refreshSessions = useRef(sessions)
@@ -154,7 +160,9 @@ export function MobileBrowse({
   }, [connection, refreshState])
   const connectionLabel = connection === 'unpaired'
     ? locale === 'zh' ? '未连接' : 'Not paired'
-    : connection === 'online' ? 'Remote Online' : 'Remote Offline'
+    : connection === 'online'
+      ? locale === 'zh' ? '远程在线' : 'Remote Online'
+      : locale === 'zh' ? '远程离线' : 'Remote Offline'
   const groups = useMemo(
     () => expandedSessionGroups(sessions, workspaces),
     [sessions, workspaces],
@@ -169,8 +177,20 @@ export function MobileBrowse({
   const openSearchHit = openId === undefined
     ? undefined
     : search.items.find(item => item.sessionId === openId)
-  const openTitle = open?.displayTitle ?? openSearchHit?.sessionId
+  const openTitle = open?.displayTitle
+    ?? (openSearchHit === undefined ? undefined : locale === 'zh' ? '未命名会话' : 'Untitled Session')
   const conversation = openId === undefined ? undefined : conversations[openId]
+  useEffect(() => {
+    const pending = pendingAttachment.current
+    if (pending === undefined) return
+    if (pending.sessionId !== openId) {
+      pendingAttachment.current = undefined
+      return
+    }
+    if (openTitle === undefined || !canMutate || onAttach === undefined) return
+    pendingAttachment.current = undefined
+    onAttach(pending.sessionId, pending.file)
+  }, [canMutate, onAttach, openId, openTitle])
   const detailFailure = operationFailure !== undefined
     && (operationFailure.operation === 'refresh' || operationFailure.sessionId === openId)
     ? operationFailure.failure
@@ -194,6 +214,7 @@ export function MobileBrowse({
     if (canMutate) onCreate(target.input)
   }
   const closeConversation = (): void => {
+    pendingAttachment.current = undefined
     setOpenId(undefined)
     setScreen(returnScreen)
   }
@@ -236,7 +257,7 @@ export function MobileBrowse({
   const refreshText = refreshState === 'refreshing'
     ? locale === 'zh' ? '正在刷新…' : 'Refreshing…'
     : refreshState === 'offline'
-      ? locale === 'zh' ? 'Remote Offline，重新连接后才能刷新。' : 'Remote Offline. Reconnect before refreshing.'
+      ? locale === 'zh' ? '桌面端离线，重新连接后才能刷新。' : 'Remote Offline. Reconnect before refreshing.'
       : refreshState === 'failed'
         ? locale === 'zh' ? '刷新失败，请重试。' : 'Refresh failed. Try again.'
         : pullDistance > 8
@@ -264,7 +285,12 @@ export function MobileBrowse({
           operationFailure={detailFailure}
           {...(onSubmit === undefined ? {} : { onSubmit: (text: string) => onSubmit(openId, text) })}
           {...(onCancel === undefined ? {} : { onCancel: () => { onCancel(openId) } })}
-          {...(onAttach === undefined ? {} : { onAttach: (file: File) => { onAttach(openId, file) } })}
+          {...(onAttach === undefined ? {} : {
+            onAttach: (file: File) => {
+              if (canMutate) onAttach(openId, file)
+              else pendingAttachment.current = { sessionId: openId, file }
+            },
+          })}
           {...(onLoadOlder === undefined ? {} : { onLoadOlder: () => { onLoadOlder(openId) } })}
         />
       )
@@ -277,7 +303,7 @@ export function MobileBrowse({
         </header>
         {connectionAlert !== undefined && <p role="alert">{connectionAlert}</p>}
         {detailFailure !== undefined && <p role="alert">{detailFailure.message}</p>}
-        <p className={css.summary}>{locale === 'zh' ? '尚未加载此 Session 的对话。' : 'This Session conversation is not loaded.'}</p>
+        <p className={css.summary}>{locale === 'zh' ? '尚未加载此会话的对话内容。' : 'This Session conversation is not loaded.'}</p>
       </section>
     )
   }
@@ -285,8 +311,8 @@ export function MobileBrowse({
   if (screen === 'search') {
     const searchText = locale === 'zh'
       ? {
-        title: '搜索', back: '返回项目', field: '搜索 Desktop Sessions', submit: '搜索',
-        placeholder: '搜索聊天记录', intro: '输入关键词搜索 Desktop Session 内容。',
+        title: '搜索', back: '返回项目', field: '搜索桌面端会话', submit: '搜索',
+        placeholder: '搜索聊天记录', intro: '输入关键词搜索桌面端会话内容。',
       }
       : {
         title: 'Search', back: 'Back to projects', field: 'Search Desktop Sessions', submit: 'Search',
@@ -313,7 +339,12 @@ export function MobileBrowse({
           </form>
           {search.query === '' && search.status === 'idle'
             ? <p className={css.routeHint}>{searchText.intro}</p>
-            : <AuthoritativeSearchResults search={search} locale={locale} onOpen={openSession} />}
+            : <AuthoritativeSearchResults
+              search={search}
+              sessions={sessions}
+              locale={locale}
+              onOpen={openSession}
+            />}
         </main>
       </section>
     )
@@ -323,8 +354,8 @@ export function MobileBrowse({
     const createFailure = operationFailure?.operation === 'create' ? operationFailure.failure : undefined
     const createText = locale === 'zh'
       ? {
-        title: '新 Session', back: '返回项目', pending: `正在由 Desktop 在 ${createTarget.label} 中创建 Session…`,
-        offline: 'Remote Offline，重新连接并同步后才能创建 Session。', retry: '重试创建',
+        title: '新会话', back: '返回项目', pending: `正在由桌面端在 ${createTarget.label} 中创建会话…`,
+        offline: '桌面端离线，重新连接并同步后才能创建会话。', retry: '重试创建',
       }
       : {
         title: 'New Session', back: 'Back to projects', pending: `Desktop is creating a Session in ${createTarget.label}…`,
@@ -363,7 +394,7 @@ export function MobileBrowse({
             <span>
               <i className={connection === 'online' ? css.dotOnline : css.dotOffline} />
               {laptopIcon}
-              {desktopName ?? (locale === 'zh' ? '已配对 Desktop' : 'Paired Desktop')}
+              {desktopName ?? (locale === 'zh' ? '已配对桌面端' : 'Paired Desktop')}
             </span>
           )}
           <p className={css.connection} data-connection={connection}>{connectionLabel}</p>
@@ -406,7 +437,7 @@ export function MobileBrowse({
         {cacheFailure !== undefined && <p className={css.error} role="alert">{cacheFailure}</p>}
         {connection === 'unpaired' ? (
           <div className={css.emptyState}>
-            <p>{locale === 'zh' ? '扫码连接 Desktop 后即可查看 Session' : 'Pair a Desktop to browse Sessions.'}</p>
+            <p>{locale === 'zh' ? '扫码连接桌面端后即可查看会话' : 'Pair a Desktop to browse Sessions.'}</p>
           </div>
         ) : (
           <>
@@ -447,7 +478,7 @@ export function MobileBrowse({
                       <button
                         type="button"
                         className={css.compose}
-                        aria-label={locale === 'zh' ? `在 ${label} 新建 Session` : `New Session in ${label}`}
+                        aria-label={locale === 'zh' ? `在 ${label} 中新建会话` : `New Session in ${label}`}
                         onClick={() => {
                           beginCreate(group.workspaceId === undefined
                             ? { input: {}, label }
@@ -496,14 +527,6 @@ export function MobileBrowse({
         <footer className={css.dock}>
           <div className={css.chatHeading}>
             <span>{locale === 'zh' ? '聊天' : 'Chats'}</span>
-            {onCreate !== undefined && (
-              <button
-                type="button"
-                className={css.compose}
-                aria-label={locale === 'zh' ? '新建聊天' : 'New chat'}
-                onClick={() => { beginCreate({ input: {}, label: tw('group.ungrouped') }) }}
-              >{composeIcon}</button>
-            )}
           </div>
           <div className={css.dockActions}>
             {onSearch !== undefined && (
@@ -518,7 +541,7 @@ export function MobileBrowse({
               <button
                 type="button"
                 className={css.round}
-                aria-label={locale === 'zh' ? '新建 Ungrouped Session' : 'New ungrouped Session'}
+                aria-label={locale === 'zh' ? '新建未分组会话' : 'New ungrouped Session'}
                 onClick={() => { beginCreate({ input: {}, label: tw('group.ungrouped') }) }}
               >{composeIcon}</button>
             )}
@@ -555,12 +578,12 @@ function companionConnectionFailureMessage(
     || failure.code === 'COMPANION_SECURITY_CAPABILITY_MISSING') {
     if (failure.updateEndpoint === 'mobile') {
       return locale === 'zh'
-        ? '请升级 Mobile 后再连接此 Desktop。'
+        ? '请升级手机端后再连接这台电脑。'
         : 'Update Mobile to connect to this Desktop.'
     }
     if (failure.updateEndpoint === 'desktop') {
       return locale === 'zh'
-        ? '请升级 Desktop 后再从 Mobile 连接。'
+        ? '请升级桌面端后再用手机连接。'
         : 'Update Desktop to connect from this Mobile.'
     }
   }
@@ -578,7 +601,7 @@ function companionConnectionFailureMessage(
   }
   if (failure.code === 'REMOTE_OFFLINE') {
     return locale === 'zh'
-      ? 'Paired Desktop 当前离线，正在重试。'
+      ? '已配对的桌面端当前离线，正在重试。'
       : 'Paired Desktop is Remote Offline. Retrying.'
   }
   return locale === 'zh'
@@ -594,27 +617,29 @@ function formatRetryDelay(milliseconds: number, locale: ConversationPresentation
 
 function companionCreateFailureMessage(locale: ConversationPresentationLocale): string {
   return locale === 'zh'
-    ? '无法创建 Session。目标 Workspace 可能已被删除，请返回后重试。'
+    ? '无法创建会话。目标项目可能已被删除，请返回后重试。'
     : 'The Session could not be created. The target Workspace may have been removed. Go back and try again.'
 }
 
 function AuthoritativeSearchResults({
   search,
+  sessions,
   locale,
   onOpen,
 }: {
   search: MobileCompanionSearchSnapshot
+  sessions: SessionListState
   locale: ConversationPresentationLocale
   onOpen: (id: SessionId) => void
 }): ReactNode {
   const text = locale === 'zh'
     ? {
-      label: 'Desktop 搜索结果', loading: '正在搜索 Desktop Session 内容…',
-      empty: '没有匹配的 Session', more: '结果较多，请缩小搜索范围。',
+      label: '桌面端搜索结果', loading: '正在搜索桌面端会话内容…',
+      empty: '没有匹配的会话', more: '结果较多，请缩小搜索范围。', untitled: '未命名会话',
     }
     : {
       label: 'Desktop search results', loading: 'Searching Desktop Session content…',
-      empty: 'No matching Sessions', more: 'More results are available. Narrow the search.',
+      empty: 'No matching Sessions', more: 'More results are available. Narrow the search.', untitled: 'Untitled Session',
     }
   return (
     <section className={css.group} aria-label={text.label}>
@@ -630,7 +655,7 @@ function AuthoritativeSearchResults({
                 type="button"
                 onClick={() => { onOpen(sessionId) }}
               >
-                <strong>{hit.sessionId}</strong>
+                <strong>{sessions.byId[sessionId]?.displayTitle ?? text.untitled}</strong>
                 <span>{hit.snippet}</span>
               </button>
             </li>

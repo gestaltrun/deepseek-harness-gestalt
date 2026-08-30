@@ -151,8 +151,14 @@
 }
 
 .connection[data-online='true'] {
-  color: var(--dsw-alias-state-success-primary);
-  background: var(--dsw-alias-state-success-secondary);
+  border: 1px solid var(--dsw-alias-state-success-primary);
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  font-weight: 650;
+}
+
+.connection[data-online='true']::before {
+  background: var(--dsw-alias-state-success-primary);
 }
 
 .deviceAction {

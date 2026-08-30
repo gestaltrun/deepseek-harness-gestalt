@@ -1,4 +1,4 @@
-package com.alibaba.gestalt.mobile;
+package com.gestalt.mobile;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -23,7 +23,7 @@ import javax.crypto.spec.GCMParameterSpec;
 
 @CapacitorPlugin(name = "GestaltProtectedStorage")
 public final class GestaltProtectedStoragePlugin extends Plugin {
-    private static final String KEY_ALIAS = "com.alibaba.gestalt.mobile.protected-storage.v1";
+    private static final String KEY_ALIAS = "com.gestalt.mobile.protected-storage.v1";
     private static final String PREFERENCES = "gestalt-protected-storage";
     private static final int TAG_BITS = 128;
 

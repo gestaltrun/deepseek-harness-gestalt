@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -47,6 +47,11 @@ function operatorEvidence() {
 }
 
 describe('Companion release validation', () => {
+  it('uses complete-link pairing without requiring camera acceptance', () => {
+    expect(COMPANION_RELEASE_FLOWS).toContain('link-pairing')
+    expect(COMPANION_RELEASE_FLOWS).not.toContain('camera-pairing')
+  })
+
   it('does not register an interceptable custom scheme for the pairing invitation', () => {
     const android = readFileSync(new URL('../android/app/src/main/AndroidManifest.xml', import.meta.url), 'utf8')
     const ios = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8')
@@ -116,12 +121,60 @@ describe('Companion release validation', () => {
     },
   )
 
+  it.runIf(process.platform !== 'win32')(
+    'keeps the TestFlight password out of the altool process arguments',
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), 'dsh-mobile-testflight-upload-'))
+      const ipa = join(directory, 'candidate.ipa')
+      const capturedArguments = join(directory, 'arguments.txt')
+      const fakeXcrun = join(directory, 'xcrun')
+      const password = 'test-app-specific-password'
+      writeFileSync(ipa, 'fixture')
+      writeFileSync(fakeXcrun, `#!/usr/bin/env bash
+set -euo pipefail
+[[ -n "\${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]
+printf '%s\n' "$@" > "\${DSH_CAPTURE_ARGUMENTS:?}"
+printf 'upload invoked\n'
+`)
+      chmodSync(fakeXcrun, 0o755)
+      try {
+        const uploader = fileURLToPath(new URL('../scripts/upload-testflight.sh', import.meta.url))
+        const result = spawnSync('bash', [uploader], {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            APPLE_APP_SPECIFIC_PASSWORD: password,
+            APPLE_ID: 'release@example.test',
+            DSH_CAPTURE_ARGUMENTS: capturedArguments,
+            IPA_PATH: ipa,
+            PATH: `${directory}:${process.env.PATH ?? ''}`,
+          },
+        })
+        expect(result.error).toBeUndefined()
+        expect(result.status).toBe(0)
+        const capturedArgumentText = readFileSync(capturedArguments, 'utf8')
+        const argumentsList = capturedArgumentText.trim().split('\n')
+        const passwordIndex = argumentsList.indexOf('--password')
+        expect(argumentsList[passwordIndex + 1]).toBe('@env:APPLE_APP_SPECIFIC_PASSWORD')
+        expect(capturedArgumentText).not.toContain(password)
+        expect(result.stdout).not.toContain(password)
+        expect(result.stderr).not.toContain(password)
+      } finally {
+        rmSync(directory, { force: true, recursive: true })
+      }
+    },
+  )
+
   it('keeps the Session action dock on the phone viewport and styles per-Workspace paging', () => {
     const styles = readFileSync(new URL('../src/MobileBrowse.module.css', import.meta.url), 'utf8')
 
     expect(styles).toMatch(/\.page\s*\{[\s\S]*?height:\s*100dvh;[\s\S]*?overflow:\s*hidden;/u)
     expect(styles).toMatch(/\.dock\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?bottom:\s*0;/u)
     expect(styles).toMatch(/\.groupMore\s*\{[\s\S]*?border-radius:\s*12px;[\s\S]*?background:/u)
+    expect(styles).toMatch(/\.searchPill,[\s\S]*?border:\s*1px solid var\(--dsw-alias-border-l4\);/u)
+    expect(styles).toMatch(/\.searchPill,[\s\S]*?background:\s*var\(--dsw-alias-bg-module-platform\);/u)
+    expect(styles).toMatch(/\.searchPill,[\s\S]*?color:\s*var\(--dsw-alias-label-primary\);/u)
+    expect(styles).toMatch(/\.searchPanel input::placeholder\s*\{[\s\S]*?color:\s*var\(--dsw-alias-label-secondary\);/u)
   })
 
   it('keeps pairing controls beside one replaceable method stage', () => {

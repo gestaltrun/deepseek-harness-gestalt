@@ -24,7 +24,7 @@ JSONL 后端会打包每个持久追加批次。原始模式 `compression: 'none
 
 ### 规范快照 fixture
 
-每个签入仓库的会话格式 JSONL fixture 都使用规范打包表示。`scripts/session-fixture-layout.snapshot.ts` 会在整个仓库中发现已跟踪的 `*.jsonl` 文件，以及未被忽略的新增未跟踪 JSONL 文件，选择首条记录为 `session` header 的文件，解码所有正文记录，并拒绝与 `packChunkRuns()` 输出不同的内容。因此，该清单无需维护路径列表即可覆盖 ACP、headless、TUI、`apps/web`、父会话、子会话以及未来的 fixture 名称。
+每个签入仓库的会话格式 JSONL fixture 都使用规范打包表示。`scripts/verify-session-fixture-layout.ts` 会在整个仓库中发现已跟踪的 `*.jsonl` 文件，以及未被忽略的新增未跟踪 JSONL 文件，选择首条记录为 `session` header 的文件，解码所有正文记录，并在核心 CI preflight 中拒绝与 `packChunkRuns()` 输出不同的内容。因此，该清单无需维护路径列表即可覆盖 ACP、headless、TUI、`apps/web`、父会话、子会话以及未来的 fixture 名称。
 
 ACP 和 headless 快照运行会采集默认 JSONL 后端的输出。TUI 和 web 的记录模式写入器会在写入 fixture 前，对内存事件应用 `packChunkRuns()`。人工编写的 `packed-chunks` ACP 场景在普通配置下运行，并保留全部 3 种打包行类型；其约定先解码独立的源 fixture 和目标 fixture，再断言二者逐事件相等。
 

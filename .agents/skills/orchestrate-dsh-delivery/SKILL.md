@@ -59,22 +59,25 @@ Require each ticket worker to:
 
 1. Fetch the recorded remote baseline, create the ticket branch from its exact SHA, and re-read the ticket and mapped domain sources from that checkout.
 2. Use the Matt `implement` workflow and TDD at an agreed seam where practical. Repository instructions and [DSH pre-push checks](../dsh-pre-push-checks/SKILL.md) override the Matt workflow's generic full-suite advice.
-3. Preserve unrelated worktree changes. Add the required documentation, Agent Note, real runnable snapshot, and visual evidence when their repository rules apply.
-4. Run the narrowest evidence that covers the diff through `dsh-pre-push-checks`, then commit, push, and verify the remote head.
-5. Open or update a pull request targeting the delivery baseline. Link the ticket with `Refs`, carry canonical labels, explain the behavior and evidence, and leave release work out of scope; the final baseline-to-master pull request owns closing keywords.
-6. Return the branch, commit, pull request, checks run, CI state, review blockers, and any changed dependency to the root task.
+3. Preserve unrelated worktree changes. Add the required documentation, Agent Note, and real runnable snapshot when their repository rules apply. For a GUI change, prove the flow with a non-recording smoke before review; defer GIF recording until the reviewed head is frozen.
+4. For an ordinary product pull request, add one [release intent](../../../docs/product-releases.md#pull-request-intent-and-impact-validation) and resolve every planner-reported under-report before review.
+5. Run the narrowest evidence that covers the diff through `dsh-pre-push-checks`, then commit, push, and verify the remote head.
+6. Open or update a pull request targeting the delivery baseline. Link the ticket with `Refs`, carry canonical labels, explain the behavior and evidence, and leave release work out of scope; the final baseline-to-master pull request owns closing keywords.
+7. Return the branch, commit, pull request, checks run, CI state, review blockers, and any changed dependency to the root task.
 
 Complete a worker phase only when the remote pull request represents its full ticket diff and its reported evidence is reproducible.
 
 ## Review and land
 
-1. Review each pull request against both the repository standards and its ticket/specification with `code-review` and `dsh-code-review`; use the project `dsh_reviewer` role when available. Send fixes to the owning worker.
-2. Before each batch and before a ticket's final review, have the root merge-forward current `origin/master` into the delivery baseline once and push it. Each affected worker then merge-forwards the updated remote baseline into its ticket branch, audits semantic conflicts, reruns selected checks, and republishes the exact head. Sibling workers do not merge master independently.
-3. Wait for required CI and live review state. Re-fetch the exact head, base, unresolved threads, approvals, checks, and mergeability after every rewrite or base change.
-4. Merge an independent pull request into the delivery baseline only after its required local evidence, CI, review, and merge requirements pass. For dependent pull requests, follow [the official stack workflow](../dsh-merging-stacked-prs/SKILL.md) and land blocker-first.
-5. Confirm GitHub reports the ticket pull request as merged, comment its verification evidence without closing the ticket, and recompute the ready frontier.
-6. After every selected ticket is on the baseline, merge-forward current `origin/master`, run the feature-level assembled evidence, and open the reviewed baseline-to-master pull request with all closing keywords. Close tickets only after GitHub reports that final pull request merged into the default branch.
-7. Resume a failed or interrupted worker from GitHub state. Ask the user only for missing credentials, permissions, a material product decision, conflicting official stack metadata, or release authorization.
+1. Before each batch and before a ticket's final evidence sequence, have the root merge-forward current `origin/master` into the delivery baseline once and push it. Each affected worker then merge-forwards the updated remote baseline into its ticket branch, audits semantic conflicts, and republishes the exact head. Sibling workers do not merge master independently.
+2. Run the narrow deterministic checks and any non-recording real smoke needed to prove that the acceptance flow can complete. Do not spend model calls or capture frames for a final GIF yet.
+3. Review each pull request against both the repository standards and its ticket/specification with `code-review` and `dsh-code-review`; use the project `dsh_reviewer` role when available. Send fixes to the owning worker and repeat the affected checks and review until no code finding remains.
+4. Freeze the exact reviewed head. For a product-user-visible GUI change, record and publish the required GIF from that head with `record-browser-gif`; verify the served revision before the first real-model call or captured frame. Any code change after freezing invalidates the review and recording sequence: merge-forward if needed, re-run affected checks, re-review, freeze the new head, and re-record.
+5. Wait for required CI and live review state. Re-fetch the exact head, base, unresolved threads, approvals, checks, and mergeability after every rewrite or base change.
+6. Merge an independent pull request into the delivery baseline only after its required local evidence, CI, review, and merge requirements pass. For dependent pull requests, follow [the official stack workflow](../dsh-merging-stacked-prs/SKILL.md) and land blocker-first.
+7. Confirm GitHub reports the ticket pull request as merged, comment its verification evidence without closing the ticket, and recompute the ready frontier.
+8. After every selected ticket is on the baseline, merge-forward current `origin/master`, run the feature-level assembled evidence, and open the reviewed baseline-to-master pull request with all closing keywords. Close tickets only after GitHub reports that final pull request merged into the default branch.
+9. Resume a failed or interrupted worker from GitHub state. Ask the user only for missing credentials, permissions, a material product decision, conflicting official stack metadata, or release authorization.
 
 Complete delivery when every selected ticket is merged or has a concrete reported blocker, GitHub reflects the final state, and no release mutation has occurred without approval.
 
@@ -88,4 +91,4 @@ Complete cleanup when every removed path and branch was exact, merged, clean, an
 
 ## Report
 
-Report baseline and ticket branches, merged ticket and final pull requests, checks actually run, cleanup or retention results, unresolved blockers, remaining ready tickets, and the explicit release stop point. If a newly installed skill or project agent is absent from the current task's catalog, ask the user to start one fresh Codex task once; do not require a new task per ticket.
+Report baseline and ticket branches, merged ticket and final pull requests, checks actually run, cleanup or retention results, unresolved blockers, remaining ready tickets, and the explicit release stop point. After an explicitly authorized Product Release, read its machine-readable manifest and report Desktop, Mobile, and Platform as separate released, skipped, or blocked states; a merged release plan is not publication evidence. If a newly installed skill or project agent is absent from the current task's catalog, ask the user to start one fresh Codex task once; do not require a new task per ticket.

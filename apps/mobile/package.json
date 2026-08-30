@@ -1,11 +1,12 @@
 {
   "name": "@deepseek-ai/dsh-mobile",
   "private": true,
-  "version": "0.1.0-rc.5",
+  "version": "0.1.1",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "verify:brand": "vitest run tests/mobile-brand.spec.ts",
     "native:sync": "pnpm run build && cap sync",
     "native:open:ios": "cap open ios",
     "native:open:android": "cap open android"

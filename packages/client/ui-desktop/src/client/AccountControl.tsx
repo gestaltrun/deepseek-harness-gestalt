@@ -36,15 +36,19 @@ export function AccountControl({ t, useAccount, usePairing }: AccountControlProp
   const pairing = usePairing(value => value)
   const desktop = window.dshDesktop
   if (desktop === undefined) return null
+  const signedIn = (snapshot.status === 'signed-in' || snapshot.status === 'signing-out')
+    && snapshot.account !== undefined
   return (
     <section className={css.root} data-desktop-account-control={snapshot.status}>
-      <header className={css.header}>
-        <span className={css.mark}>G</span>
-        <div>
-          <h2>{t('account.title')}</h2>
-          <p>{t('account.sectionDescription')}</p>
-        </div>
-      </header>
+      {!signedIn && (
+        <header className={css.header}>
+          <span className={css.mark}>G</span>
+          <div>
+            <h2>{t('account.title')}</h2>
+            <p>{t('account.sectionDescription')}</p>
+          </div>
+        </header>
+      )}
       <AccountPanel desktop={desktop} snapshot={snapshot} t={t} />
       {(snapshot.status === 'signed-in' || snapshot.status === 'signing-out')
         && <PairingPanel desktop={desktop} snapshot={pairing} t={t} />}
@@ -162,7 +166,7 @@ function AccountPanel({ desktop, snapshot, t }: {
         <img className={css.profileAvatar} src={snapshot.account.avatarUrl} alt="" />
         <div>
           <strong>{snapshot.account.githubLogin}</strong>
-          <p>{t('account.currentInstallation')}</p>
+          <p>{t('account.signedInDescription')}</p>
         </div>
         <Button
           variant="outline"

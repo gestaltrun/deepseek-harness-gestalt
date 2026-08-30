@@ -169,8 +169,8 @@ describe('bundled Mobile product entry', () => {
       locale: 'zh-CN', colorScheme: 'light' as const, back: '返回', placeholder: '给智能体发消息',
       account: '查看账号', managePairing: '管理配对',
       pairingHeading: '已配对的桌面端', selected: '当前选择', select: '选择此桌面端',
-      searchTrigger: '搜索聊天记录', searchHeading: '搜索', searchField: '搜索 Desktop Sessions',
-      newUngrouped: '新建 Ungrouped Session', newHeading: '新 Session', backProjects: '返回项目',
+      searchTrigger: '搜索聊天记录', searchHeading: '搜索', searchField: '搜索桌面端会话',
+      newUngrouped: '新建未分组会话', newHeading: '新会话', backProjects: '返回项目',
     },
   ])('renders authenticated shared conversation behavior in $locale/$colorScheme', async ({
     locale, colorScheme, back, placeholder, account, managePairing, pairingHeading, selected, select,

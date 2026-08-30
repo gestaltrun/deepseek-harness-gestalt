@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { type SessionEvent } from '@deepseek-ai/dsh-session'
 import { parseSessionLog } from '@deepseek-ai/dsh-llm-replay'
 import { canonicalSessionFixture } from './session-fixture-layout.ts'
+import { verifySessionFixtureLayouts } from './verify-session-fixture-layout.ts'
 
 const HEADER = '  {"type":"session","version":0,"id":"fixture","createdAt":1,"delegationDepth":0}  '
 
@@ -66,5 +67,20 @@ describe('canonicalSessionFixture', () => {
   it('labels malformed packed rows with the fixture path and line', () => {
     expect(() => canonicalSessionFixture(`${HEADER}\n{"type":"text-chunks"}\n`, 'broken.jsonl'))
       .toThrow(/broken\.jsonl: session snapshot line 2: malformed text-chunks storage row/)
+  })
+})
+
+describe('verifySessionFixtureLayouts', () => {
+  it('reports each non-canonical session fixture without rewriting it', () => {
+    const inspected = [
+      { path: 'canonical.jsonl', source: 'same\n', canonical: 'same\n' },
+      { path: 'nested/non-canonical.jsonl', source: 'before\n', canonical: 'after\n' },
+    ]
+
+    expect(verifySessionFixtureLayouts(inspected)).toEqual({
+      inspected: 2,
+      nonCanonical: ['nested/non-canonical.jsonl'],
+    })
+    expect(inspected[1]?.source).toBe('before\n')
   })
 })

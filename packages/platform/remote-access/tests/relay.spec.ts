@@ -323,6 +323,50 @@ describe('RemoteRelayProvider', () => {
     await Promise.all([desktop.close(), mobile.close(), platform.dispose()])
   })
 
+  it('recomputes a delayed peer update from the current shared directory', async () => {
+    const routeStore = new SharedRouteStore()
+    const coordinator = new SharedCoordinator()
+    const mobileInstanceId = parseRelayInstanceId('platform-current-peer-mobile')
+    const mobilePlatform = provider(mobileInstanceId, routeStore, coordinator, 31)
+    const desktopPlatform = provider('platform-current-peer-desktop', routeStore, coordinator, 41)
+    const routeId = parseRelayRouteId('route-current-peer')
+    const selector = parseRelayPairingSelector('pairing-current-peer')
+    const desktopGrant = await rotateCredential(desktopPlatform, routeId, 'desktop', selector)
+    const mobileGrant = await issueCredential(desktopPlatform, routeId, 'mobile', selector)
+    const delivered = vi.fn()
+    const mobileAttachmentId = parseRelayAttachmentId('mobile-current-peer')
+    const mobile = await mobilePlatform.attach({
+      message: {
+        type: 'attach', transportVersion: 1, routeId,
+        attachmentId: mobileAttachmentId, endpoint: 'mobile', credential: mobileGrant.credential,
+      },
+      deliver: delivered,
+    })
+    const desktop = await desktopPlatform.attach({
+      message: {
+        type: 'attach', transportVersion: 1, routeId,
+        attachmentId: parseRelayAttachmentId('desktop-current-peer'), endpoint: 'desktop',
+        credential: desktopGrant.credential,
+      },
+      deliver: async () => {},
+    })
+    await vi.waitFor(() => {
+      expect(delivered).toHaveBeenLastCalledWith(expect.objectContaining({
+        peers: [expect.objectContaining({ attachmentId: 'desktop-current-peer', pairingSelector: selector })],
+      }))
+    })
+    const mobileEntry = await coordinator.locate(routeId, mobileAttachmentId)
+    if (mobileEntry === undefined) throw new Error('Mobile directory entry is unavailable')
+    await coordinator.send(mobileInstanceId, {
+      type: 'peer-update', transportVersion: 1, routeId, attachmentId: mobileAttachmentId, peers: [],
+      targetConnectionToken: mobileEntry.connectionToken, revision: mobileEntry.revision,
+    })
+    expect(delivered).toHaveBeenLastCalledWith(expect.objectContaining({
+      peers: [expect.objectContaining({ attachmentId: 'desktop-current-peer', pairingSelector: selector })],
+    }))
+    await Promise.all([mobile.close(), desktop.close(), mobilePlatform.dispose(), desktopPlatform.dispose()])
+  })
+
   it('projects two credential-bound Mobile peers and replaces one selector with fresh attachment state', async () => {
     const routeStore = new SharedRouteStore()
     const coordinator = new SharedCoordinator()

@@ -1,14 +1,17 @@
 apply plugin: 'com.android.application'
 
+def mobileVersionCode = (project.findProperty('dshMobileVersionCode') ?: '3').toString().toInteger()
+def mobileVersionName = (project.findProperty('dshMobileVersionName') ?: '0.1.0').toString()
+
 android {
-    namespace = "com.alibaba.gestalt.mobile"
+    namespace = "com.gestalt.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.alibaba.gestalt.mobile"
+        applicationId "com.gestalt.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "0.1.0"
+        versionCode mobileVersionCode
+        versionName mobileVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

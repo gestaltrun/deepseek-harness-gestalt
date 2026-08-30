@@ -202,7 +202,7 @@ export function collectClientArtifactViolations(
       )
     }
     const files = Array.isArray(manifest.files) && manifest.files.every(value => typeof value === 'string')
-      ? manifest.files as string[]
+      ? manifest.files
       : []
     if (!files.includes(DYNAMIC_CLIENT_ARTIFACT.relativePath) || files.includes('lib/client.js')) {
       violations.push(
@@ -320,7 +320,7 @@ function normalizeClientArtifactManifest(manifest: Manifest): boolean {
     changed = true
   }
   if (Array.isArray(manifest.files) && manifest.files.every(value => typeof value === 'string')) {
-    const files = manifest.files as string[]
+    const files = manifest.files
     const normalized = files.map(value => value === 'lib/client.js' ? DYNAMIC_CLIENT_ARTIFACT.relativePath : value)
     if (!normalized.includes(DYNAMIC_CLIENT_ARTIFACT.relativePath)) normalized.push(DYNAMIC_CLIENT_ARTIFACT.relativePath)
     if (normalized.length !== files.length || normalized.some((value, index) => value !== files[index])) {

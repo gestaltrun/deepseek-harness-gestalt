@@ -35,13 +35,25 @@ describe('Desktop phone tab live chain', () => {
     const screen = browser.$('div[role="application"]')
     await screen.waitForExist({ timeout: 30_000 })
     await expect(browser.$('[aria-label="当前画面编码 H264 · 30 fps"]')).toBeExisting()
-    const live = browser.$('img[aria-label="Pixel_6_API_35 实时画面"]')
+    const live = browser.$('canvas[aria-label="Pixel_6_API_35 实时画面"]')
     await live.waitForExist({ timeout: 30_000 })
     const initialPicture = await readPicture()
+    let picture: Awaited<ReturnType<typeof readPicture>> | undefined
+    let lastPicture: typeof picture = initialPicture
+    const pictureDeadline = Date.now() + 10_000
+    do {
+      picture = await readPicture()
+      if (picture !== undefined) lastPicture = picture
+      if (picture?.width === 390 && picture.height === 844 && picture.nonTransparentPixels > 0) break
+      await browser.pause(250)
+    } while (Date.now() < pictureDeadline)
     const transport = await browser.execute(async () => {
-      const image = document.querySelector<HTMLImageElement>('img[aria-label="Pixel_6_API_35 实时画面"]')
-      if (image === null) return undefined
-      const url = new URL(image.src)
+      const resource = performance.getEntriesByType('resource').find((entry) => {
+        const url = new URL(entry.name)
+        return url.pathname.startsWith('/phone/stream/') && url.pathname.endsWith('/h264')
+      })
+      if (resource === undefined) return undefined
+      const url = new URL(resource.name)
       const response = await fetch(url)
       const body = new Uint8Array(await response.arrayBuffer())
       return {
@@ -54,25 +66,17 @@ describe('Desktop phone tab live chain', () => {
       }
     })
     await writeArtifact('h264-transport.json', transport)
-    let picture: Awaited<ReturnType<typeof readPicture>> | undefined
-    let lastPicture: typeof picture = initialPicture
-    const pictureDeadline = Date.now() + 10_000
-    do {
-      picture = await readPicture()
-      if (picture !== undefined) lastPicture = picture
-      if (picture?.naturalWidth === 390 && picture.naturalHeight === 844) break
-      await browser.pause(250)
-    } while (Date.now() < pictureDeadline)
     const visibility = await browser.execute(() => ({
-      imagePresent: document.querySelector('img[aria-label="Pixel_6_API_35 实时画面"]') !== null,
+      canvasPresent: document.querySelector('canvas[aria-label="Pixel_6_API_35 实时画面"]') !== null,
       text: document.body.innerText,
     }))
     await writeArtifact('h264-visibility.json', { lastPicture, ...visibility })
     await saveWindowEvidence('phone-h264-visibility-window')
     expect(transport).toMatchObject({ status: 200, contentType: 'video/h264', annexB: true })
     expect(transport?.bytes ?? 0).toBeGreaterThan(0)
-    expect(lastPicture?.naturalWidth ?? 0).toBe(390)
-    expect(lastPicture?.naturalHeight ?? 0).toBe(844)
+    expect(lastPicture?.width ?? 0).toBe(390)
+    expect(lastPicture?.height ?? 0).toBe(844)
+    expect(lastPicture?.nonTransparentPixels ?? 0).toBeGreaterThan(0)
     expect(lastPicture?.display).toBe('block')
     expect(lastPicture?.visibility).toBe('visible')
     expect(lastPicture?.opacity).toBe(1)
@@ -81,7 +85,8 @@ describe('Desktop phone tab live chain', () => {
     await saveWindowEvidence('phone-live-h264-window')
 
     await clickSurfaceButton('切换设备：Pixel_6_API_35')
-    const names = await browser.$$('[role="menu"] [role="menuitem"]').map(async item => await item.getText())
+    const menuItems = await browser.$$('[role="menu"] [role="menuitem"]').getElements()
+    const names = await menuItems.map(async item => await item.getText())
     expect(names.some(name => name.includes('Pixel_6_API_35'))).toBe(true)
     expect(names.some(name => name.includes('SM-S9310'))).toBe(true)
     expect(names.some(name => name.includes('iPhone 16'))).toBe(true)
@@ -120,13 +125,24 @@ describe('Desktop phone tab live chain', () => {
 
 async function readPicture() {
   return await browser.execute(() => {
-    const image = document.querySelector<HTMLImageElement>('img[aria-label="Pixel_6_API_35 实时画面"]')
-    if (image === null) return undefined
-    const style = getComputedStyle(image)
-    const rect = image.getBoundingClientRect()
+    const canvas = document.querySelector<HTMLCanvasElement>('canvas[aria-label="Pixel_6_API_35 实时画面"]')
+    if (canvas === null) return undefined
+    const style = getComputedStyle(canvas)
+    const rect = canvas.getBoundingClientRect()
+    const context = canvas.getContext('2d')
+    const sampleWidth = Math.min(canvas.width, 32)
+    const sampleHeight = Math.min(canvas.height, 32)
+    const pixels = context === null || sampleWidth === 0 || sampleHeight === 0
+      ? new Uint8ClampedArray()
+      : context.getImageData(0, 0, sampleWidth, sampleHeight).data
+    let nonTransparentPixels = 0
+    for (let offset = 3; offset < pixels.length; offset += 4) {
+      if (pixels[offset] !== 0) nonTransparentPixels += 1
+    }
     return {
-      naturalWidth: image.naturalWidth,
-      naturalHeight: image.naturalHeight,
+      width: canvas.width,
+      height: canvas.height,
+      nonTransparentPixels,
       renderedWidth: rect.width,
       renderedHeight: rect.height,
       display: style.display,

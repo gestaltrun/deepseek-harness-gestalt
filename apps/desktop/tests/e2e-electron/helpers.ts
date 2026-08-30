@@ -36,7 +36,7 @@ function newTabButton() {
 }
 
 async function visibleNewTabButton() {
-  const buttons = browser.$$('button[aria-label="新建标签页"], button[aria-label="New tab"]')
+  const buttons = await browser.$$('button[aria-label="新建标签页"], button[aria-label="New tab"]').getElements()
   for (const button of buttons) {
     if (await button.isDisplayed()) return button
   }

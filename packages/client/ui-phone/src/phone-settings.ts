@@ -1,7 +1,7 @@
 /**
  * Durable phone-plugin settings stored in the Host user-settings document.
- * The namespace is the join key with the Plugins tab's `settings.plugin.item`
- * card: Host `settings.register` and the browser card both spell this value.
+ * The namespace is the join key with the Phone Devices settings section:
+ * Host `settings.register` and the browser section both spell this value.
  */
 
 import z from '@deepseek-ai/schemastery'

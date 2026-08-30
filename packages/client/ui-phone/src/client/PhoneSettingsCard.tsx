@@ -59,7 +59,7 @@ const DEVICE_GROUPS: readonly {
 export function PhoneSettingsCard(props: PhoneSettingsCardProps): ReactNode {
   const { enabled, view, onEnabledChange, onRedetect, onCopy, onNextAction } = props
   return (
-    <li className={css.card}>
+    <article className={css.card}>
       <header className={css.head}>
         <div className={css.icon} aria-hidden="true">
           <PhoneTabIcon size={20} />
@@ -91,7 +91,7 @@ export function PhoneSettingsCard(props: PhoneSettingsCardProps): ReactNode {
       </header>
       {bodyOf(view, { onCopy, onNextAction })}
       {footerOf(view)}
-    </li>
+    </article>
   )
 }
 

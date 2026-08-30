@@ -10,7 +10,7 @@ tab 实例按 `meta` 分流。选择器实例（id `phone`，无 serial）渲染
 
 连接生命周期收敛在 `PhoneConnectionController`（无 React，每 tab 一实例）：铸造 → io 打开 → live；`visible: false` 暂停拉流，恢复时重新铸造——签名地址短时效。中断（`onClose`、`onError`、采集元素错误）进入有界自动重连（3 次线性退避），预算耗尽落到错误卡。终态分支——设备离线（铸造 404 或 io `-32010`）、真机调试未授权（上游报文）、被拒绝（403）——跳过重试循环，按已锁稿状态 ④ 渲染带唯一「重新连接」下一步动作的错误卡。渲染层只镜像阶段快照；全部决策留在控制器内，fake gateway 的 spec 逐一证明迁移。
 
-Host 半边在 settings 提供方组装时注册持久化 `ui-phone` 命名空间（`enabled`，boolean，默认 `false`）。浏览器半边把插件配置卡片注册进 `settings.plugin.item`，键就是同一命名空间。卡片拥有已锁稿的六态（关闭 / 探测中 / Android 向导 / iOS 向导 / 就绪清单 / 可恢复错误行）。命令级安装指引带「复制」按钮，剪贴板内容就是稿中的 `sdkmanager` / `avdmanager` / `emulator` / `xcodebuild` / `xcrun simctl` 命令。每条错误行共用动词「下一步动作」。检测数据经窄接口 `PhoneEnvironmentSource` 进入。随包实现包装选择器已在用的 Host `GET /phone/devices` 清单：成功拉取可到达探测中、两端向导与就绪清单；缺失或拒绝的设备路由回落到探测失败行。本包不 import `phone-runtime` 与 `phone-stream`。
+Host 半边在 settings 提供方组装时注册持久化 `ui-phone` 命名空间（`enabled`，boolean，默认 `false`）。浏览器半边贡献顶层设置分区（`id: phone-devices`，导航标签「手机设备」 / Phone Devices），分区主体就是六态环境向导。本页不是「移动伴侣」：伴侣是人用手机连桌面，这里是设备被控调试。向导拥有关闭 / 探测中 / Android 向导 / iOS 向导 / 就绪清单 / 可恢复错误行。命令级安装指引带「复制」按钮，剪贴板内容就是稿中的 `sdkmanager` / `avdmanager` / `emulator` / `xcodebuild` / `xcrun simctl` 命令。每条错误行共用动词「下一步动作」。检测数据经窄接口 `PhoneEnvironmentSource` 进入。随包实现包装选择器已在用的 Host `GET /phone/devices` 清单：成功拉取可到达探测中、两端向导与就绪清单；缺失或拒绝的设备路由回落到探测失败行。本包不 import `phone-runtime` 与 `phone-stream`。
 
 Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是组装默认值。注册不依赖它——关闭时选择器入口仍然可达，选择器内容会在空态上方固定渲染「手机连接未启用」说明条。持久化开关关闭时不发现设备、不拉起 `mobilecli`、不路由任何流。
 

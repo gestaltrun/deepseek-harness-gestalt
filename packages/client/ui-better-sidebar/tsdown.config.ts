@@ -20,14 +20,14 @@
  *   factory}) with the (require) => exports CJS closure shape.
  *
  * Lazy chunks (lib/client-<name>.js): the heavy preview/terminal libraries
- * (CodeMirror, xterm) build as two standalone chunk bundles
+ * (CodeMirror, xterm, Mermaid) build as three standalone chunk bundles
  * (src/client/chunks/<name>.tsx). Each script
  * assigns its factory to the plugin-owned global registry
  * (globalThis.__dshChunks__) and is fetched by
  * the client on first use from the plugin's own /sidebar/bundle route —
  * chunks deliberately do NOT go through the module loader (see
  * src/client/chunk-loader.ts). `codeSplitting: false` keeps every chunk a
- * single script; the core client.js must never statically import a chunks/
+ * single script; the core client.cjs must never statically import a chunks/
  * entry.
  *
  * Types ship from lib/types (tsc -p tsconfig.build.json), not from tsdown.

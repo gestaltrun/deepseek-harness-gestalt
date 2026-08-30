@@ -7,6 +7,7 @@ import {
   assertClientBuildEnvironment,
   clientBuildEnvironmentDefines,
   clientBuildProcessEnvironment,
+  collectDynamicClientSourceMapViolations,
   readClientBuildRecord,
   repositoryCommitHash,
   resolveClientBuildEnvironment,
@@ -46,7 +47,18 @@ function buildFixture(environment: Record<string, string>): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'dsh-client-build-'))
   roots.push(fixtureRoot)
   write(join(fixtureRoot, 'apps/web/dist/index.html'), '<main></main>')
-  write(join(fixtureRoot, 'packages/client/example/lib/client.js'), 'module.exports = {}\n')
+  write(join(fixtureRoot, 'packages/client/example/package.json'), JSON.stringify({
+    name: '@deepseek-ai/dsh-client-example',
+    dsh: { client: { platform: 'web' } },
+  }))
+  write(join(fixtureRoot, 'packages/client/example/lib/client.cjs'), 'module.exports = {}\n')
+  write(join(fixtureRoot, 'packages/client/example/lib/client.cjs.map'), JSON.stringify({
+    version: 3,
+    sources: ['../../../packages/client/example/src/client/index.ts'],
+    sourcesContent: ['export {}\n'],
+    names: [],
+    mappings: '',
+  }))
   writeClientBuildRecord(fixtureRoot, environment)
   return fixtureRoot
 }
@@ -161,6 +173,72 @@ describe('client build environment', () => {
 
     write(join(official, 'apps/web/dist/index.html'), '<main>changed</main>')
     expect(() => { readClientBuildRecord(official) }).toThrow(/artifacts differ/)
+  })
+
+  it('rejects dynamic client maps that expose emitted tsc JavaScript as browser sources', () => {
+    const fixtureRoot = buildFixture({})
+    const mapPath = join(fixtureRoot, 'packages/client/example/lib/client.cjs.map')
+    write(mapPath, JSON.stringify({
+      version: 3,
+      sources: ['types/client/index.js'],
+      sourcesContent: ['export {}\n'],
+    }))
+
+    expect(collectDynamicClientSourceMapViolations(fixtureRoot)).toEqual([
+      'packages/client/example/lib/client.cjs.map: types/client/index.js',
+    ])
+    expect(() => { writeClientBuildRecord(fixtureRoot, {}) }).toThrow(/dynamic client source maps are invalid/)
+  })
+
+  it('rejects repository TypeScript sources outside the public packages or vendor trees', () => {
+    const fixtureRoot = buildFixture({})
+    const mapPath = join(fixtureRoot, 'packages/client/example/lib/client.cjs.map')
+    write(mapPath, JSON.stringify({
+      version: 3,
+      sources: ['../../../src/client/index.ts'],
+      sourcesContent: ['export {}\n'],
+    }))
+
+    expect(collectDynamicClientSourceMapViolations(fixtureRoot)).toEqual([
+      'packages/client/example/lib/client.cjs.map: ../../../src/client/index.ts',
+    ])
+  })
+
+  it('rejects ordinary workspace library JavaScript and permits generated Remote contributions', () => {
+    const fixtureRoot = buildFixture({})
+    const mapPath = join(fixtureRoot, 'packages/client/example/lib/client.cjs.map')
+    write(mapPath, JSON.stringify({
+      version: 3,
+      sources: [
+        '../../../packages/util/request-trust/lib/index.js',
+        '../../../packages/goal/goal/lib/typert.remote-client.js',
+      ],
+      sourcesContent: ['export {}\n', 'export {}\n'],
+    }))
+
+    expect(collectDynamicClientSourceMapViolations(fixtureRoot)).toEqual([
+      'packages/client/example/lib/client.cjs.map: ../../../packages/util/request-trust/lib/index.js',
+    ])
+  })
+
+  it('requires every declared dynamic client pair and aligned embedded sources', () => {
+    const fixtureRoot = buildFixture({})
+    const packageRoot = join(fixtureRoot, 'packages/client/example')
+    write(join(packageRoot, 'lib/client.cjs.map'), JSON.stringify({
+      version: 3,
+      sources: ['../../../packages/client/example/src/client/index.ts'],
+      sourcesContent: [],
+    }))
+    expect(collectDynamicClientSourceMapViolations(fixtureRoot)).toEqual([
+      'packages/client/example/lib/client.cjs.map: sourcesContent must contain one string per source',
+    ])
+
+    rmSync(join(packageRoot, 'lib/client.cjs'))
+    rmSync(join(packageRoot, 'lib/client.cjs.map'))
+    expect(collectDynamicClientSourceMapViolations(fixtureRoot)).toEqual([
+      'packages/client/example/lib/client.cjs.map: missing',
+      'packages/client/example/lib/client.cjs: missing',
+    ])
   })
 
   it('keeps public client values out of workflow-wide environments', () => {

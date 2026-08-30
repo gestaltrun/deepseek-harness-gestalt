@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "452-overlay-boot-registration",
+  "summary": {
+    "en": "Wait for Desktop workbench settings registration before serving the phone overlay.",
+    "zh": "桌面端手机浮层在工作台设置注册完成后再提供服务。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The changed workbench registration and Desktop smoke command are not inputs to the Mobile application."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The changed workbench registration and Desktop smoke command are not inputs to the Platform service."
+    }
+  ]
+}

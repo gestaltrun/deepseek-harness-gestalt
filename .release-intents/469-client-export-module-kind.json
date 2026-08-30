@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "469-client-export-module-kind",
+  "summary": {
+    "en": "Publish dynamic browser factories with an explicit CommonJS extension while preserving their browser routes.",
+    "zh": "以明确的 CommonJS 扩展名发布动态浏览器 factory，同时保持其浏览器路由。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The change only renames Desktop web-plugin package artifacts and leaves Mobile source, wire formats, and runtime inputs unchanged."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The change only renames Desktop web-plugin package artifacts and leaves Platform services, deployment inputs, and wire formats unchanged."
+    }
+  ]
+}

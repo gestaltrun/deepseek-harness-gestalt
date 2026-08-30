@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "nextSequence": 3,
+  "nextSequence": 4,
   "consumedIntentIds": [
     "414-desktop-recovery-version",
     "414-release-orchestration",
     "448-desktop-artifact-assembly",
-    "453-mobile-proof-clock-skew"
+    "453-mobile-proof-clock-skew",
+    "475-mobile-webview-compatibility"
   ]
 }

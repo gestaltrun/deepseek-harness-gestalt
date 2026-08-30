@@ -11,5 +11,10 @@
     "mobile": "none",
     "platform": "none"
   },
-  "compatibilityExceptions": []
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The publish condition only promotes the already signed and candidate-bound APK after either mutually exclusive evidence path; it does not change the Mobile binary or runtime behavior."
+    }
+  ]
 }

@@ -11,7 +11,7 @@ import net from 'node:net'
 import { FRAME_HEIGHT, FRAME_WIDTH, decodeFirstIpcmIdr, lumaAt } from './fixtures/u3-visible-frames.ts'
 
 /** Behavior knobs the fake agent CLI mode reads from its config file per invocation. */
-export interface FakeAgentKnobs {
+interface FakeAgentKnobs {
   /** Seeds the persistent agent state as already installed. */
   installed?: boolean
   statusDelayMs?: number
@@ -51,7 +51,7 @@ export interface FakeKnobs {
 }
 
 /** Persistent agent state the fake CLI mode records across invocations. */
-export interface FakeAgentState {
+interface FakeAgentState {
   installed: boolean
   installCount: number
   statusCount: number
@@ -296,7 +296,7 @@ export function assertStructurallyDecodableJpeg(payload: Buffer): void {
  * prefix or parameter sets alone cannot pass for a decodable stream.
  * @param payload - One complete H264 Annex-B byte stream.
  */
-export function assertAnnexBH264Stream(payload: Buffer): void {
+function assertAnnexBH264Stream(payload: Buffer): void {
   const nalTypes = new Set<number>()
   let cursor = 0
   let sawNal = false

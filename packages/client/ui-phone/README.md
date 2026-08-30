@@ -20,11 +20,11 @@ Composition: the `tsconfig.client.json` aggregate references the package; `packa
 
 ## Model Experience
 
-None. The package registers a sidebar tab and a settings card and renders HTML; it contributes no prompt section, tool schema, stream, or session event, and the enable gate adds no model-visible surface.
+None, as the browser UI and Host settings namespace register no prompt, tool schema, session event, or provider request; model-facing capabilities belong to separate consumers.
 
 #### KV Cache effect
 
-None; the package never assembles or sends provider requests.
+None; UI settings and device state never alter a model request prefix.
 
 ## Known Limitations and Deferred Work
 

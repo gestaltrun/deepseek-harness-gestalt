@@ -1,6 +1,0 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
-#   pnpm run verify-translation-pairing --write .agents/notes/proposed/process/2026-08-27-enable-matt-delivery-skills-model-invocation.md
-2026-08-27-enable-matt-delivery-skills-model-invocation.md: e93e41c4bff32ac4fccc92f46dfcc9c47fbdf89b
-2026-08-27-enable-matt-delivery-skills-model-invocation.zh.md: d56a9e12e1d0a13fad13bbe02b2667cb46d784f3

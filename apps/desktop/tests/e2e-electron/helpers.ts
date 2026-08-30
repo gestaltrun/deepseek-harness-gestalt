@@ -175,11 +175,11 @@ export async function assertPhoneDevicesSettingsSection(): Promise<void> {
 /** Read fakemobilecli counters through its external test endpoint. */
 export async function fakeCounters(): Promise<FakeCounters> {
   const response = await fetch(`http://127.0.0.1:${requiredEnv('DSH_ELECTRON_E2E_FAKE_PORT')}/__test/counters`)
-  const envelope = await response.json() as { readonly result?: FakeCounters }
-  if (envelope.result === undefined || !Array.isArray(envelope.result.io)) {
-    throw new Error(`invalid fakemobilecli counters: ${JSON.stringify(envelope)}`)
+  const record = await response.json() as Partial<FakeCounters>
+  if (typeof record.requests !== 'number' || !Number.isSafeInteger(record.requests) || !Array.isArray(record.io)) {
+    throw new Error(`invalid fakemobilecli counters: ${JSON.stringify(record)}`)
   }
-  return envelope.result
+  return { requests: record.requests, io: record.io }
 }
 
 /** Wait until the external fake records the requested state. */
@@ -198,8 +198,11 @@ export async function recordOwnedProcesses(hostPid: number, includeFake: boolean
   let fakePid: number | undefined
   if (includeFake) {
     const response = await fetch(`http://127.0.0.1:${requiredEnv('DSH_ELECTRON_E2E_FAKE_PORT')}/__test/pid`)
-    const envelope = await response.json() as { readonly result?: { readonly pid?: number } }
-    fakePid = envelope.result?.pid
+    const record = await response.json() as { readonly pid?: number }
+    if (typeof record.pid !== 'number' || !Number.isSafeInteger(record.pid)) {
+      throw new Error(`invalid fakemobilecli pid: ${JSON.stringify(record)}`)
+    }
+    fakePid = record.pid
   }
   await writeArtifact('owned-processes.json', { electronPid, hostPid, ...(fakePid === undefined ? {} : { fakePid }) })
 }

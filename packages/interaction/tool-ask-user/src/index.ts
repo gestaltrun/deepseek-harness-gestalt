@@ -18,6 +18,10 @@ import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import '@deepseek-ai/dsh-user-questions'
 import type { MemberQuestionOrigin } from '@deepseek-ai/dsh-member-question-sender'
 import {
+  parseCompanionSessionId,
+  parseMemberQuestionProjectId,
+} from '@deepseek-ai/dsh-remote-protocol'
+import {
   AskUserQuestionError,
   BACKGROUND_MAX_CODE_POINTS,
 } from './errors.ts'
@@ -259,7 +263,7 @@ export function apply(ctx: Context, config: Config = {}): void {
       const projectId = (await resolved.boundProjectResolver?.()) ?? addressee
       const result = await sender.send({
         toProjectMember: addressee,
-        projectId,
+        projectId: parseMemberQuestionProjectId(projectId),
         background,
         questions,
         references: (references ?? []).map(reference => ({
@@ -267,7 +271,7 @@ export function apply(ctx: Context, config: Config = {}): void {
           reason: reference.reason ?? reference.path,
         })),
         origin,
-        originSessionId: String(exec.agent?.session.id ?? 'unbound-origin'),
+        originSessionId: parseCompanionSessionId(String(exec.agent?.session.id ?? 'unbound-origin')),
       }, {
         ...exec.agent !== undefined ? { session: exec.agent.session } : {},
         signal: exec.signal,

@@ -1610,7 +1610,7 @@ export interface Config {
    * `send()` answers the stable `DELIVERY_UNAVAILABLE` error — the same
    * fail-closed stance as the deferred registry transport.
    */
-  delivery?: MemberQuestionDelivery
+  delivery?: MemberQuestionDeliveryPort
   /**
    * Retrieves the sealed project-peer grant addressed to the member. Absent,
    * encoding still proceeds so a keyless assembly can round-trip the codec
@@ -1637,20 +1637,34 @@ export interface Config {
 }
 
 /**
- * Injected delivery adapter. Cross-machine registry transport is deferred
- * (the T4 Known Limitation); tests and keyless assemblies inject an in-memory
- * stub. Production delivery stays behind that same gap.
+ * Delivery seam for member-question operations and their first-claim terminal
+ * results. Cross-machine registry transport is deferred; tests and keyless
+ * assemblies inject an in-memory implementation, while production remains fail-closed.
  */
-export interface MemberQuestionDelivery {
+export interface MemberQuestionDeliveryPort {
   /**
    * Deliver one encoded member-question operation to the addressed member.
    * @param encoded - codec output plus the addressee and project identity.
-   * @returns fulfillment after the adapter accepts the encoded bytes.
+   * @returns fulfillment after the port accepts the encoded bytes.
    */
   deliver(encoded: EncodedMemberQuestion & {
     toProjectMember: string
-    projectId: string
+    projectId: ProjectId
   }): Promise<void>
+
+  /**
+   * Atomically publish one terminal candidate; the first claim remains authoritative.
+   * @param terminal - candidate encoded by the sender or receiving Installation.
+   * @returns whether this candidate won and the authoritative retained terminal.
+   */
+  publishTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>
+
+  /**
+   * Query the retained first terminal for reconnect replay.
+   * @param questionId - member-question identity to replay.
+   * @returns the authoritative terminal, or undefined while still pending or unknown.
+   */
+  queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined>
 }
 
 /**
@@ -1677,8 +1691,10 @@ export type MemberPresenceLookup = (input: MemberPresenceLookupInput) => Promise
  */
 export type MemberMembershipWatch = (input: MemberMembershipWatchInput) => Promise<void>
 
-/** Encoded Companion operation ready for the injected delivery adapter. */
+/** Encoded Companion operation ready for the injected delivery port. */
 export interface EncodedMemberQuestion {
+  /** Companion mutation identity used by status replay. */
+  readonly operationId: CompanionOperationId
   /** Branded question identity correlated with later settlement. */
   readonly questionId: MemberQuestionId
   /** Companion `member-question` operation message. */
@@ -1687,10 +1703,18 @@ export interface EncodedMemberQuestion {
   readonly encoded: Uint8Array
 }
 
+/** Result of one atomic terminal publication attempt. */
+export interface MemberQuestionTerminalClaim {
+  /** Whether this publication committed the first terminal for the question. */
+  readonly claimed: boolean
+  /** Authoritative first terminal, equal to the candidate only when this publication won. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+}
+
 /** Inputs for retrieving one sealed project-peer grant on the B side. */
 export interface ProjectPeerGrantLookupInput {
   /** Cloud project whose grant records are searched. */
-  projectId: string
+  projectId: ProjectId
   /** Account the sealed grant must address. */
   peerAccountId: string
 }
@@ -1698,7 +1722,7 @@ export interface ProjectPeerGrantLookupInput {
 /** Inputs for a live presence verdict of one project member. */
 export interface MemberPresenceLookupInput {
   /** Cloud project whose roster presence is queried. */
-  projectId: string
+  projectId: ProjectId
   /** Account whose installations are aggregated. */
   peerAccountId: string
 }
@@ -1706,7 +1730,7 @@ export interface MemberPresenceLookupInput {
 /** Inputs for watching one membership row until it is revoked or the ask settles. */
 export interface MemberMembershipWatchInput {
   /** Cloud project whose roster is watched. */
-  projectId: string
+  projectId: ProjectId
   /** Account whose membership is watched. */
   peerAccountId: string
   /** Aborts the watch when the ask settles for any other reason. */
@@ -1714,9 +1738,9 @@ export interface MemberMembershipWatchInput {
 }
 ```
 
-Depends on: [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.md)
+Depends on: [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md) · [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionOperationId`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`ProjectId`](subsystems/project-membership.md) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.md)
 
-Source: [`packages/interaction/member-question-sender/src/index.ts:149`](../packages/interaction/member-question-sender/src/index.ts)
+Source: [`packages/interaction/member-question-sender/src/index.ts:167`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="deepseek-aidsh-message-feedback"></a>
 
@@ -3106,7 +3130,7 @@ export interface OriginResolverInput {
 
 Depends on: [`Agent`](subsystems/core.md) · [`MemberQuestionOrigin`](../packages/interaction/member-question-sender/src/index.ts)
 
-Source: [`packages/interaction/tool-ask-user/src/index.ts:72`](../packages/interaction/tool-ask-user/src/index.ts)
+Source: [`packages/interaction/tool-ask-user/src/index.ts:76`](../packages/interaction/tool-ask-user/src/index.ts)
 
 <a id="deepseek-aidsh-tool-bash"></a>
 

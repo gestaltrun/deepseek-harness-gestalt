@@ -193,7 +193,7 @@ interface MemberQuestionSendPayload {
   /** Account reference of the single addressee. */
   readonly toProjectMember: string
   /** Cloud project whose peer grant addresses that member. */
-  readonly projectId: string
+  readonly projectId: ProjectId
   /** Agent-authored background; already bounded by the asking tool. */
   readonly background: string
   /** Question batch mirrored from `ask_user_question`. */
@@ -203,7 +203,7 @@ interface MemberQuestionSendPayload {
   /** Public identity fields rendered on the receiver's Decision Brief. */
   readonly origin: MemberQuestionOrigin
   /** Originating session identity used as one half of the supersede route key. */
-  readonly originSessionId: string
+  readonly originSessionId: CompanionSessionId
 }
 ```
 
@@ -253,8 +253,19 @@ interface MemberQuestionSendOptions {
 ```ts type-equiv
 /** Successful or declined settlement applied to one in-flight question. */
 type MemberQuestionSettlement =
-  | { outcome: 'answered'; answers: readonly MemberQuestionAnswer[] }
-  | { outcome: 'declined' }
+  | {
+    outcome: 'answered'
+    answers: readonly MemberQuestionAnswer[]
+    settledByInstallationId: InstallationId
+    settledByDeviceName: string
+    settledAt: number
+  }
+  | {
+    outcome: 'declined'
+    settledByInstallationId: InstallationId
+    settledByDeviceName: string
+    settledAt: number
+  }
 ```
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
@@ -277,7 +288,7 @@ Member-question sender capability. `send(payload)` encodes one Companion `member
  * @param payload - Decision Brief origin, background, question batch, and references.
  * @param options - optional asking session and withdrawal signal.
  * @returns the answered or declined settlement plus the encoded Companion bytes.
- * @throws {MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no adapter is composed,
+ * @throws {MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no delivery port is composed,
  *   `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant,
  *   `ENCODE_FAILED` when the T4 codec rejects the payload,
  *   `MEMBER_OFFLINE` when presence is offline at send time,
@@ -292,7 +303,7 @@ abstract send( payload: MemberQuestionSendPayload, options?: MemberQuestionSendO
  * Apply one answered or declined settlement to a pending question.
  * Unknown or already-settled question ids are ignored (idempotent).
  * @param questionId - branded question identity returned by `send()`.
- * @param settlement - answered answers or a declined verdict.
+ * @param settlement - answered answers or a declined verdict with the settling Installation metadata and epoch.
  * @returns fulfillment after the matching `send()` promise settles, or immediately when none is pending.
  */
 abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>
@@ -304,7 +315,16 @@ abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettleme
  * @returns fulfillment after the matching `send()` promise rejects `QUESTION_WITHDRAWN`, or immediately when none is pending.
  */
 abstract withdraw(questionId: MemberQuestionId): Promise<void>
+
+/**
+ * Query the authoritative first terminal retained for reconnect replay.
+ * @param questionId - branded question identity returned by `send()`.
+ * @returns the retained terminal, or undefined while pending or unknown.
+ */
+abstract queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined>
 ```
+
+Types: [CompanionMemberQuestionSettledResult](remote-protocol.zh.md)
 
 Source: [`packages/interaction/member-question-sender/src/index.ts`](../../packages/interaction/member-question-sender/src/index.ts)
 

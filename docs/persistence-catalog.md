@@ -532,7 +532,7 @@ Source: [`packages/llm/llm-retry/src/types.ts:11`](../packages/llm/llm-retry/src
 'member-question/asked': MemberQuestionAskedRecord
 ```
 
-Source: [`packages/interaction/member-question-sender/src/index.ts:72`](../packages/interaction/member-question-sender/src/index.ts)
+Source: [`packages/interaction/member-question-sender/src/index.ts:79`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="member-questionoutcome--log-only"></a>
 
@@ -547,7 +547,7 @@ Source: [`packages/interaction/member-question-sender/src/index.ts:72`](../packa
 'member-question/outcome': MemberQuestionOutcomeRecord
 ```
 
-Source: [`packages/interaction/member-question-sender/src/index.ts:78`](../packages/interaction/member-question-sender/src/index.ts)
+Source: [`packages/interaction/member-question-sender/src/index.ts:85`](../packages/interaction/member-question-sender/src/index.ts)
 
 ### `permission/*`
 

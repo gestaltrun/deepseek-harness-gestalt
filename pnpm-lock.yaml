@@ -7391,6 +7391,12 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-platform-account':
+        specifier: workspace:^
+        version: link:../platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../project-membership
 
   packages/preset/agent-presets:
     dependencies:

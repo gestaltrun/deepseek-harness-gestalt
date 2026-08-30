@@ -2,7 +2,7 @@
  * Service Definition and codec-backed Provider for member-directed questions
  * (`ctx.memberQuestionSender`). The Provider encodes a Companion
  * `member-question` operation through the T4 remote-protocol codec and
- * delivers the bytes through an injected adapter. Peer credentials are
+ * delivers the bytes through an injected port. Peer credentials are
  * retrieved through an injected B-side lookup over Remote Access
  * `getProjectPeerGrant`. Cross-machine registry transport remains the T4
  * Known Limitation, so delivery is injectable and tests use an in-memory stub.
@@ -19,11 +19,16 @@ import {
   encodeCompanionMessage,
   negotiateCompanionProtocol,
   parseCompanionOperationId,
+  parseCompanionSessionId,
   parseMemberQuestionId,
+  type CompanionMemberQuestionSettledResult,
   type CompanionMemberQuestionOperation,
   type CompanionMessage,
+  type CompanionOperationId,
+  type InstallationId,
   type MemberQuestionId,
   type NegotiatedCompanionProtocol,
+  type ProjectId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { MemberQuestionSenderError } from './errors.ts'
@@ -32,11 +37,12 @@ import type {
   EncodedMemberQuestion,
   MemberQuestionAnswer,
   MemberQuestionAskedRecord,
-  MemberQuestionDelivery,
+  MemberQuestionDeliveryPort,
   MemberQuestionLifetimeOutcome,
   MemberQuestionOutcomeRecord,
   MemberQuestionSendPayload,
   MemberQuestionSendResult,
+  MemberQuestionTerminalClaim,
 } from './types.ts'
 
 export { MemberQuestionSenderError } from './errors.ts'
@@ -45,7 +51,8 @@ export type {
   EncodedMemberQuestion,
   MemberQuestionAnswer,
   MemberQuestionAskedRecord,
-  MemberQuestionDelivery,
+  MemberQuestionDeliveryPort,
+  MemberQuestionTerminalClaim,
   MemberQuestionItem,
   MemberQuestionLifetimeOutcome,
   MemberQuestionOrigin,
@@ -85,7 +92,7 @@ export const DEFAULT_QUESTION_TTL_MS = 30 * 60 * 1000
 /** Inputs for retrieving one sealed project-peer grant on the B side. */
 export interface ProjectPeerGrantLookupInput {
   /** Cloud project whose grant records are searched. */
-  projectId: string
+  projectId: ProjectId
   /** Account the sealed grant must address. */
   peerAccountId: string
 }
@@ -101,7 +108,7 @@ export type ProjectPeerGrantLookup = (input: ProjectPeerGrantLookupInput) => Pro
 /** Inputs for a live presence verdict of one project member. */
 export interface MemberPresenceLookupInput {
   /** Cloud project whose roster presence is queried. */
-  projectId: string
+  projectId: ProjectId
   /** Account whose installations are aggregated. */
   peerAccountId: string
 }
@@ -117,7 +124,7 @@ export type MemberPresenceLookup = (input: MemberPresenceLookupInput) => Promise
 /** Inputs for watching one membership row until it is revoked or the ask settles. */
 export interface MemberMembershipWatchInput {
   /** Cloud project whose roster is watched. */
-  projectId: string
+  projectId: ProjectId
   /** Account whose membership is watched. */
   peerAccountId: string
   /** Aborts the watch when the ask settles for any other reason. */
@@ -142,8 +149,19 @@ export interface MemberQuestionSendOptions {
 
 /** Successful or declined settlement applied to one in-flight question. */
 export type MemberQuestionSettlement =
-  | { outcome: 'answered'; answers: readonly MemberQuestionAnswer[] }
-  | { outcome: 'declined' }
+  | {
+    outcome: 'answered'
+    answers: readonly MemberQuestionAnswer[]
+    settledByInstallationId: InstallationId
+    settledByDeviceName: string
+    settledAt: number
+  }
+  | {
+    outcome: 'declined'
+    settledByInstallationId: InstallationId
+    settledByDeviceName: string
+    settledAt: number
+  }
 
 /** Construction-owned faces injected into the sender Provider. */
 export interface Config {
@@ -152,7 +170,7 @@ export interface Config {
    * `send()` answers the stable `DELIVERY_UNAVAILABLE` error — the same
    * fail-closed stance as the deferred registry transport.
    */
-  delivery?: MemberQuestionDelivery
+  delivery?: MemberQuestionDeliveryPort
   /**
    * Retrieves the sealed project-peer grant addressed to the member. Absent,
    * encoding still proceeds so a keyless assembly can round-trip the codec
@@ -192,7 +210,7 @@ const LOOKUP_KEYS = ['lookupGrant', 'presenceLookup', 'watchMembership'] as cons
 
 /** Fully resolved construction-owned faces after loud validation. */
 interface ResolvedConfig {
-  delivery: MemberQuestionDelivery | undefined
+  delivery: MemberQuestionDeliveryPort | undefined
   lookupGrant: ProjectPeerGrantLookup | undefined
   presenceLookup: MemberPresenceLookup | undefined
   watchMembership: MemberMembershipWatch | undefined
@@ -206,8 +224,12 @@ interface ResolvedConfig {
  * @returns the same config once every present face has the expected shape.
  */
 function resolveConfig(config: Config): ResolvedConfig {
-  if (config.delivery !== undefined && typeof config.delivery.deliver !== 'function') {
-    throw new TypeError('member-question-sender: config.delivery must implement deliver()')
+  if (config.delivery !== undefined && (
+    typeof config.delivery.deliver !== 'function'
+    || typeof config.delivery.publishTerminal !== 'function'
+    || typeof config.delivery.queryTerminal !== 'function'
+  )) {
+    throw new TypeError('member-question-sender: config.delivery must implement deliver(), publishTerminal(), and queryTerminal()')
   }
   for (const key of LOOKUP_KEYS) {
     const value = config[key]
@@ -244,7 +266,7 @@ export abstract class MemberQuestionSenderService extends Service {
    * @param payload - Decision Brief origin, background, question batch, and references.
    * @param options - optional asking session and withdrawal signal.
    * @returns the answered or declined settlement plus the encoded Companion bytes.
-   * @throws {MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no adapter is composed,
+   * @throws {MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no delivery port is composed,
    *   `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant,
    *   `ENCODE_FAILED` when the T4 codec rejects the payload,
    *   `MEMBER_OFFLINE` when presence is offline at send time,
@@ -262,7 +284,7 @@ export abstract class MemberQuestionSenderService extends Service {
    * Apply one answered or declined settlement to a pending question.
    * Unknown or already-settled question ids are ignored (idempotent).
    * @param questionId - branded question identity returned by `send()`.
-   * @param settlement - answered answers or a declined verdict.
+   * @param settlement - answered answers or a declined verdict with the settling Installation metadata and epoch.
    * @returns fulfillment after the matching `send()` promise settles, or immediately when none is pending.
    */
   abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>
@@ -274,11 +296,20 @@ export abstract class MemberQuestionSenderService extends Service {
    * @returns fulfillment after the matching `send()` promise rejects `QUESTION_WITHDRAWN`, or immediately when none is pending.
    */
   abstract withdraw(questionId: MemberQuestionId): Promise<void>
+
+  /**
+   * Query the authoritative first terminal retained for reconnect replay.
+   * @param questionId - branded question identity returned by `send()`.
+   * @returns the retained terminal, or undefined while pending or unknown.
+   */
+  abstract queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined>
 }
 
 /** One in-flight routed ask waiting for a terminal settlement. */
 interface PendingAsk {
   readonly questionId: MemberQuestionId
+  readonly operationId: CompanionOperationId
+  readonly delivery: MemberQuestionDeliveryPort
   readonly routeKey: string
   readonly session: Session | undefined
   readonly encoded: Uint8Array
@@ -290,16 +321,17 @@ interface PendingAsk {
   readonly abortSignal: AbortSignal | undefined
   abortListener: (() => void) | undefined
   settled: boolean
+  completion: Promise<boolean> | undefined
 }
 
 /**
  * Codec-backed sender Provider. Encoding reuses the T4 Companion codec;
- * delivery is the injected adapter; grant retrieval is the B-side lookup.
+ * delivery is the injected port; grant retrieval is the B-side lookup.
  */
 export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
   static Config = Config
 
-  private readonly delivery: MemberQuestionDelivery | undefined
+  private readonly delivery: MemberQuestionDeliveryPort | undefined
   private readonly lookupGrant: ProjectPeerGrantLookup | undefined
   private readonly presenceLookup: MemberPresenceLookup | undefined
   private readonly watchMembership: MemberMembershipWatch | undefined
@@ -310,7 +342,7 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
 
   /**
    * @param ctx - composition context receiving this service.
-   * @param config - injected delivery adapter and optional grant lookup.
+   * @param config - injected delivery port and optional grant lookup.
    */
   constructor(ctx: Context, config: Config = {}) {
     super(ctx)
@@ -325,25 +357,26 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
       createCompanionVersionOffer('mobile'),
       createCompanionVersionOffer('desktop'),
     )
-    ctx.effect(() => () => {
-      for (const pending of [...this.pendingById.values()]) {
-        this.complete(pending, {
-          kind: 'error',
-          code: 'QUESTION_WITHDRAWN',
-          message: 'QUESTION_WITHDRAWN: the member-question sender was disposed while the ask was in flight',
-          outcome: 'withdrawn',
-        })
-      }
-    })
+    ctx.effect(() => async () => {
+      await Promise.all([...this.pendingById.values()].map(pending =>
+        this.complete(pending, systemCompletion(
+          pending,
+          'withdrawn',
+          'QUESTION_WITHDRAWN',
+          'QUESTION_WITHDRAWN: the member-question sender was disposed while the ask was in flight',
+        )),
+      ))
+    }, 'member-question-sender: publish pending withdrawals')
   }
 
   override async send(
     payload: MemberQuestionSendPayload,
     options: MemberQuestionSendOptions = {},
   ): Promise<MemberQuestionSendResult> {
-    if (this.delivery === undefined) {
+    const delivery = this.delivery
+    if (delivery === undefined) {
       throw new MemberQuestionSenderError(
-        'DELIVERY_UNAVAILABLE: member-question delivery is not composed; inject a delivery adapter',
+        'DELIVERY_UNAVAILABLE: member-question delivery is not composed; inject a delivery port',
         'DELIVERY_UNAVAILABLE',
       )
     }
@@ -388,29 +421,51 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
         'QUESTION_WITHDRAWN',
       )
     }
-    const encoded = encodeMemberQuestion(this.protocol, payload)
+    const routeKey = routeKeyOf(payload.originSessionId, payload.toProjectMember)
+    for (let superseded = this.pendingByRoute.get(routeKey); superseded !== undefined;
+      superseded = this.pendingByRoute.get(routeKey)) {
+      const published = await this.complete(superseded, systemCompletion(
+        superseded,
+        'superseded',
+        'QUESTION_SUPERSEDED',
+        'QUESTION_SUPERSEDED: a newer question on the same origin-session and member replaced this ask',
+      ))
+      if (!published) {
+        throw new MemberQuestionSenderError(
+          'DELIVERY_UNAVAILABLE: the previous same-route question could not publish its superseded terminal',
+          'DELIVERY_UNAVAILABLE',
+        )
+      }
+    }
+    if (options.signal?.aborted) {
+      throw new MemberQuestionSenderError(
+        'QUESTION_WITHDRAWN: the initiating turn cancelled the ask before delivery',
+        'QUESTION_WITHDRAWN',
+      )
+    }
+    const encoded = encodeMemberQuestion(this.protocol, payload, Date.now() + this.ttlMs)
     const pending = this.registerPending(
-      encoded.questionId,
-      routeKeyOf(payload.originSessionId, payload.toProjectMember),
-      encoded.encoded,
+      encoded,
+      routeKey,
+      delivery,
       options,
     )
     this.recordAsked(pending, payload)
     this.armMembershipWatch(pending, payload)
     try {
-      await this.delivery.deliver({
+      await delivery.deliver({
         ...encoded,
         toProjectMember: payload.toProjectMember,
         projectId: payload.projectId,
       })
     } catch (cause: unknown) {
-      this.complete(pending, {
-        kind: 'error',
-        code: 'DELIVERY_UNAVAILABLE',
-        message: 'DELIVERY_UNAVAILABLE: the composed delivery adapter rejected the encoded operation',
-        outcome: 'withdrawn',
+      await this.complete(pending, systemCompletion(
+        pending,
+        'withdrawn',
+        'DELIVERY_UNAVAILABLE',
+        'DELIVERY_UNAVAILABLE: the composed delivery port rejected the encoded operation',
         cause,
-      })
+      ))
     }
     return pending.promise
   }
@@ -418,54 +473,44 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
   override settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void> {
     const pending = this.pendingById.get(questionId)
     if (pending === undefined) return Promise.resolve()
-    if (settlement.outcome === 'answered') {
-      this.complete(pending, {
-        kind: 'success',
-        result: {
-          questionId: pending.questionId,
-          encoded: pending.encoded,
-          outcome: 'answered',
-          answers: settlement.answers,
-        },
-      })
-      return Promise.resolve()
-    }
-    this.complete(pending, {
-      kind: 'success',
-      result: {
+    return this.complete(pending, {
+      terminal: {
+        type: 'member-question-settled',
+        operationId: pending.operationId,
         questionId: pending.questionId,
-        encoded: pending.encoded,
-        outcome: 'declined',
+        ...settlement,
       },
-    })
-    return Promise.resolve()
+    }).then(() => undefined)
   }
 
   override withdraw(questionId: MemberQuestionId): Promise<void> {
     const pending = this.pendingById.get(questionId)
     if (pending === undefined) return Promise.resolve()
-    this.complete(pending, {
-      kind: 'error',
-      code: 'QUESTION_WITHDRAWN',
-      message: 'QUESTION_WITHDRAWN: the initiating turn cancelled the in-flight ask',
-      outcome: 'withdrawn',
-    })
-    return Promise.resolve()
+    return this.complete(pending, systemCompletion(
+      pending,
+      'withdrawn',
+      'QUESTION_WITHDRAWN',
+      'QUESTION_WITHDRAWN: the initiating turn cancelled the in-flight ask',
+    )).then(() => undefined)
+  }
+
+  override queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined> {
+    return this.delivery?.queryTerminal(questionId) ?? Promise.resolve(undefined)
   }
 
   /**
    * Register one pending ask, arm TTL and abort-signal withdrawal, and index it
    * by route key and question id.
-   * @param questionId - branded identity of the encoded operation.
+   * @param encoded - Companion operation and bounded application bytes.
    * @param routeKey - `(originSession, member)` occupancy key.
-   * @param encoded - Companion application bytes retained for the send result.
+   * @param delivery - port that accepted the operation and retains its terminal.
    * @param options - asking session and withdrawal signal.
    * @returns the pending cell whose promise `send()` returns.
    */
   private registerPending(
-    questionId: MemberQuestionId,
+    encoded: EncodedMemberQuestion,
     routeKey: string,
-    encoded: Uint8Array,
+    delivery: MemberQuestionDeliveryPort,
     options: MemberQuestionSendOptions,
   ): PendingAsk {
     let resolve!: (result: MemberQuestionSendResult) => void
@@ -476,45 +521,39 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
     })
     const watchAbort = new AbortController()
     const pending: PendingAsk = {
-      questionId,
+      questionId: encoded.questionId,
+      operationId: encoded.operationId,
+      delivery,
       routeKey,
       session: options.session,
-      encoded,
+      encoded: encoded.encoded,
       promise,
       resolve,
       reject,
       timer: setTimeout(() => {
-        this.complete(pending, {
-          kind: 'error',
-          code: 'QUESTION_EXPIRED',
-          message: 'QUESTION_EXPIRED: the member-question lifetime elapsed unanswered',
-          outcome: 'expired',
-        })
+        void this.complete(pending, systemCompletion(
+          pending,
+          'expired',
+          'QUESTION_EXPIRED',
+          'QUESTION_EXPIRED: the member-question lifetime elapsed unanswered',
+        ))
       }, this.ttlMs),
       watchAbort,
       abortSignal: options.signal,
       abortListener: undefined,
       settled: false,
+      completion: undefined,
     }
-    const superseded = this.pendingByRoute.get(routeKey)
     this.pendingByRoute.set(routeKey, pending)
-    this.pendingById.set(questionId, pending)
-    if (superseded !== undefined) {
-      this.complete(superseded, {
-        kind: 'error',
-        code: 'QUESTION_SUPERSEDED',
-        message: 'QUESTION_SUPERSEDED: a newer question on the same origin-session and member replaced this ask',
-        outcome: 'superseded',
-      })
-    }
+    this.pendingById.set(encoded.questionId, pending)
     if (options.signal !== undefined) {
       const listener = (): void => {
-        this.complete(pending, {
-          kind: 'error',
-          code: 'QUESTION_WITHDRAWN',
-          message: 'QUESTION_WITHDRAWN: the initiating turn cancelled the in-flight ask',
-          outcome: 'withdrawn',
-        })
+        void this.complete(pending, systemCompletion(
+          pending,
+          'withdrawn',
+          'QUESTION_WITHDRAWN',
+          'QUESTION_WITHDRAWN: the initiating turn cancelled the in-flight ask',
+        ))
       }
       pending.abortListener = listener
       options.signal.addEventListener('abort', listener, { once: true })
@@ -536,22 +575,25 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
       signal: pending.watchAbort.signal,
     }).then(
       () => {
-        this.complete(pending, {
-          kind: 'error',
-          code: 'REVOKED_DURING_FLIGHT',
-          message: 'REVOKED_DURING_FLIGHT: the addressed member lost project membership while the ask was in flight',
-          outcome: 'revoked',
-        })
+        void this.complete(pending, systemCompletion(
+          pending,
+          'withdrawn',
+          'REVOKED_DURING_FLIGHT',
+          'REVOKED_DURING_FLIGHT: the addressed member lost project membership while the ask was in flight',
+          undefined,
+          'revoked',
+        ))
       },
       (cause: unknown) => {
         if (pending.watchAbort.signal.aborted || pending.settled) return
-        this.complete(pending, {
-          kind: 'error',
-          code: 'REVOKED_DURING_FLIGHT',
-          message: 'REVOKED_DURING_FLIGHT: membership watch failed while the ask was in flight',
-          outcome: 'revoked',
+        void this.complete(pending, systemCompletion(
+          pending,
+          'withdrawn',
+          'REVOKED_DURING_FLIGHT',
+          'REVOKED_DURING_FLIGHT: membership watch failed while the ask was in flight',
           cause,
-        })
+          'revoked',
+        ))
       },
     )
   }
@@ -576,50 +618,158 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
   }
 
   /**
-   * Settle one pending ask exactly once: clear timers and watches, record the
-   * durable outcome, and resolve or reject the hanging `send()` promise.
+   * Publish one terminal candidate through the delivery port, then settle the
+   * local ask from the authoritative first claim.
    * @param pending - in-flight ask to complete.
-   * @param completion - success settlement or stable lifetime error.
+   * @param completion - terminal candidate and optional local failure meaning.
+   * @returns `true` when a terminal committed, or `false` when publication failed.
    */
-  private complete(pending: PendingAsk, completion: PendingCompletion): void {
-    if (pending.settled) return
+  private complete(pending: PendingAsk, completion: PendingCompletion): Promise<boolean> {
+    if (pending.completion !== undefined) return pending.completion
+    const publishing = this.publishAndFinish(pending, completion)
+    pending.completion = publishing
+    return publishing
+  }
+
+  /** Publish and apply the first terminal claim for one pending ask. */
+  private async publishAndFinish(pending: PendingAsk, completion: PendingCompletion): Promise<boolean> {
+    let claim: MemberQuestionTerminalClaim
+    try {
+      claim = await pending.delivery.publishTerminal(completion.terminal)
+    } catch (cause: unknown) {
+      this.releasePending(pending)
+      pending.reject(new MemberQuestionSenderError(
+        'DELIVERY_UNAVAILABLE: the delivery port rejected terminal publication',
+        'DELIVERY_UNAVAILABLE',
+        { cause },
+      ))
+      return false
+    }
+    if (claim.claimed && completion.claimedError !== undefined) {
+      this.finishError(pending, completion.claimedError)
+      return true
+    }
+    const terminal = claim.terminal
+    if (terminal.outcome === 'answered') {
+      this.finishSuccess(pending, {
+        questionId: pending.questionId,
+        encoded: pending.encoded,
+        outcome: 'answered',
+        answers: terminal.answers,
+      })
+      return true
+    }
+    if (terminal.outcome === 'declined') {
+      this.finishSuccess(pending, {
+        questionId: pending.questionId,
+        encoded: pending.encoded,
+        outcome: 'declined',
+      })
+      return true
+    }
+    this.finishError(pending, errorForTerminal(terminal.outcome))
+    return true
+  }
+
+  /** Finish common pending ownership and resolve one successful human terminal. */
+  private finishSuccess(pending: PendingAsk, result: MemberQuestionSendResult): void {
+    this.releasePending(pending)
+    pending.session?.append('member-question/outcome', {
+      questionId: pending.questionId,
+      outcome: result.outcome,
+      ...result.outcome === 'answered' ? { answers: result.answers } : {},
+    })
+    pending.resolve(result)
+  }
+
+  /** Finish common pending ownership and reject with one stable lifetime failure. */
+  private finishError(pending: PendingAsk, failure: PendingFailure): void {
+    this.releasePending(pending)
+    pending.session?.append('member-question/outcome', {
+      questionId: pending.questionId,
+      outcome: failure.outcome,
+    })
+    pending.reject(new MemberQuestionSenderError(failure.message, failure.code, {
+      ...failure.cause === undefined ? {} : { cause: failure.cause },
+    }))
+  }
+
+  /** Release timers, watches, listeners, and indexes after terminal publication. */
+  private releasePending(pending: PendingAsk): void {
     pending.settled = true
     clearTimeout(pending.timer)
     pending.watchAbort.abort()
     if (pending.abortSignal !== undefined && pending.abortListener !== undefined) {
       pending.abortSignal.removeEventListener('abort', pending.abortListener)
     }
-    if (this.pendingByRoute.get(pending.routeKey) === pending) this.pendingByRoute.delete(pending.routeKey)
+    this.pendingByRoute.delete(pending.routeKey)
     this.pendingById.delete(pending.questionId)
-    if (completion.kind === 'success') {
-      pending.session?.append('member-question/outcome', {
-        questionId: pending.questionId,
-        outcome: completion.result.outcome,
-        ...completion.result.outcome === 'answered' ? { answers: completion.result.answers } : {},
-      })
-      pending.resolve(completion.result)
-      return
-    }
-    pending.session?.append('member-question/outcome', {
-      questionId: pending.questionId,
-      outcome: completion.outcome,
-    })
-    pending.reject(new MemberQuestionSenderError(completion.message, completion.code, {
-      ...completion.cause === undefined ? {} : { cause: completion.cause },
-    }))
   }
 }
 
 /** Internal terminal of one pending ask. */
-type PendingCompletion =
-  | { kind: 'success'; result: MemberQuestionSendResult }
-  | {
-    kind: 'error'
-    code: MemberQuestionSenderErrorCode
-    message: string
-    outcome: MemberQuestionLifetimeOutcome
-    cause?: unknown
+interface PendingCompletion {
+  terminal: CompanionMemberQuestionSettledResult
+  claimedError?: PendingFailure
+}
+
+/** Local stable failure associated with a terminal candidate. */
+interface PendingFailure {
+  code: MemberQuestionSenderErrorCode
+  message: string
+  outcome: MemberQuestionLifetimeOutcome
+  cause?: unknown
+}
+
+/** Build one system terminal candidate and its local caller-facing failure. */
+function systemCompletion(
+  pending: PendingAsk,
+  terminalOutcome: 'expired' | 'withdrawn' | 'superseded',
+  code: MemberQuestionSenderErrorCode,
+  message: string,
+  cause?: unknown,
+  recordedOutcome: MemberQuestionLifetimeOutcome = terminalOutcome,
+): PendingCompletion {
+  return {
+    terminal: {
+      type: 'member-question-settled',
+      operationId: pending.operationId,
+      questionId: pending.questionId,
+      outcome: terminalOutcome,
+      settledAt: Date.now(),
+    },
+    claimedError: {
+      code,
+      message,
+      outcome: recordedOutcome,
+      ...cause === undefined ? {} : { cause },
+    },
   }
+}
+
+/** Map a terminal first claimed elsewhere onto this sender's stable outcome. */
+function errorForTerminal(outcome: 'expired' | 'withdrawn' | 'superseded'): PendingFailure {
+  switch (outcome) {
+    case 'expired':
+      return {
+        code: 'QUESTION_EXPIRED',
+        message: 'QUESTION_EXPIRED: the member-question lifetime elapsed unanswered',
+        outcome,
+      }
+    case 'withdrawn':
+      return {
+        code: 'QUESTION_WITHDRAWN',
+        message: 'QUESTION_WITHDRAWN: the member question was withdrawn before an answer committed',
+        outcome,
+      }
+    case 'superseded':
+      return {
+        code: 'QUESTION_SUPERSEDED',
+        message: 'QUESTION_SUPERSEDED: a newer question on the same route committed first',
+        outcome,
+      }
+  }
+}
 
 /**
  * Occupancy key of one pending ask: one (origin session, member) pair holds at
@@ -636,18 +786,24 @@ function routeKeyOf(originSessionId: string, toProjectMember: string): string {
  * Encode one member-question payload through the T4 Companion codec.
  * @param protocol - negotiated Companion major 4 protocol.
  * @param payload - Decision Brief origin, background, questions, and references.
+ * @param expiresAt - absolute question expiry in Unix epoch milliseconds.
  * @returns the branded question id, Companion message, and encoded bytes.
  * @throws {MemberQuestionSenderError} `ENCODE_FAILED` when the codec rejects the payload.
  */
 export function encodeMemberQuestion(
   protocol: NegotiatedCompanionProtocol,
   payload: MemberQuestionSendPayload,
+  expiresAt: number,
 ): EncodedMemberQuestion {
   const questionId = parseMemberQuestionId(`mq${randomUUID().replaceAll('-', '')}`)
+  const operationId = parseCompanionOperationId(`op${randomUUID().replaceAll('-', '')}`)
   const operation: CompanionMemberQuestionOperation = {
     type: 'member-question',
-    operationId: parseCompanionOperationId(`op${randomUUID().replaceAll('-', '')}`),
+    operationId,
     questionId,
+    projectId: payload.projectId,
+    originSessionId: parseCompanionSessionId(payload.originSessionId),
+    expiresAt,
     origin: payload.origin,
     background: payload.background,
     questions: payload.questions,
@@ -658,7 +814,7 @@ export function encodeMemberQuestion(
   }
   const message: CompanionMessage = { type: 'operation', operation }
   try {
-    return { questionId, message, encoded: encodeCompanionMessage(protocol, message) }
+    return { operationId, questionId, message, encoded: encodeCompanionMessage(protocol, message) }
   } catch (cause: unknown) {
     throw new MemberQuestionSenderError(
       'ENCODE_FAILED: the member-question payload is not a valid Companion operation',
@@ -684,22 +840,45 @@ export function createMemberQuestionProtocol(): NegotiatedCompanionProtocol {
  * In-memory delivery stub for keyless round-trip tests. It records every
  * encoded operation without crossing a machine boundary.
  */
-export class MemoryMemberQuestionDelivery implements MemberQuestionDelivery {
+export class MemoryMemberQuestionDelivery implements MemberQuestionDeliveryPort {
   /** Encoded operations accepted by this stub, in send order. */
   readonly delivered: EncodedMemberQuestion[] = []
+  private readonly terminals = new Map<MemberQuestionId, CompanionMemberQuestionSettledResult>()
 
   /**
    * Accept one encoded operation into the in-memory log.
    * @param encoded - codec output plus addressee identity.
    * @returns fulfillment after the operation is recorded.
    */
-  deliver(encoded: EncodedMemberQuestion & { toProjectMember: string; projectId: string }): Promise<void> {
+  deliver(encoded: EncodedMemberQuestion & { toProjectMember: string; projectId: MemberQuestionSendPayload['projectId'] }): Promise<void> {
     this.delivered.push({
+      operationId: encoded.operationId,
       questionId: encoded.questionId,
       message: encoded.message,
       encoded: encoded.encoded,
     })
     return Promise.resolve()
+  }
+
+  /**
+   * Retain the first terminal candidate for one question.
+   * @param terminal - candidate terminal to claim.
+   * @returns whether this candidate won and the retained terminal.
+   */
+  publishTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim> {
+    const retained = this.terminals.get(terminal.questionId)
+    if (retained !== undefined) return Promise.resolve({ claimed: false, terminal: retained })
+    this.terminals.set(terminal.questionId, terminal)
+    return Promise.resolve({ claimed: true, terminal })
+  }
+
+  /**
+   * Read one retained terminal for replay.
+   * @param questionId - member question to query.
+   * @returns retained terminal, or undefined while pending or unknown.
+   */
+  queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined> {
+    return Promise.resolve(this.terminals.get(questionId))
   }
 }
 

@@ -594,6 +594,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   MemberQuestionSendResult: 'user-questions.md',
   MemberQuestionSendOptions: 'user-questions.md',
   MemberQuestionSettlement: 'user-questions.md',
+  CompanionMemberQuestionSettledResult: 'remote-protocol.md',
   WebFetchProvider: 'web.md',
   WebFetchRequest: 'web.md',
   WebFetchResult: 'web.md',

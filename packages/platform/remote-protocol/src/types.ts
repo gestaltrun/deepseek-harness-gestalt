@@ -1,4 +1,9 @@
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { InstallationId } from '@deepseek-ai/dsh-platform-account'
+import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
+
+export type { InstallationId } from '@deepseek-ai/dsh-platform-account'
+export type { ProjectId } from '@deepseek-ai/dsh-project-membership'
 
 /** Opaque Relay routing identifier with no application-domain meaning. */
 export type RelayRouteId = Branded<'RelayRouteId'>
@@ -219,6 +224,12 @@ export interface CompanionMemberQuestionOperation {
   operationId: CompanionOperationId
   /** Identity whose settlement results and state projections correlate across endpoints. */
   questionId: MemberQuestionId
+  /** Cloud project whose membership route authorized this question. */
+  projectId: ProjectId
+  /** Originating Session used to reconstruct the receiver-side route key. */
+  originSessionId: CompanionSessionId
+  /** Absolute Unix epoch milliseconds after which the question cannot be answered. */
+  expiresAt: number
   origin: CompanionMemberQuestionOrigin
   /** Agent-authored decision background; bounded at request construction. */
   background: string
@@ -379,18 +390,43 @@ export interface CompanionMemberQuestionAnswer {
  * Global settlement of one routed member question, idempotent by question id.
  * The answer batch is admitted only for the `answered` outcome.
  */
-export interface CompanionMemberQuestionSettledResult {
+interface CompanionMemberQuestionSettledResultBase {
   type: 'member-question-settled'
   operationId: CompanionOperationId
   questionId: MemberQuestionId
-  outcome: MemberQuestionOutcome
-  /** Settling answers echoed by question id; present only when the outcome is `answered`. */
-  answers?: readonly CompanionMemberQuestionAnswer[]
-  /** Identifier of the device that settled the question, named on the receiver's record band. */
-  settledByDeviceId?: string
-  /** Settling moment rendered on the receiver's record band. */
-  settledAtMoment?: string
+  /** Absolute Unix epoch milliseconds at which the first terminal claim committed. */
+  settledAt: number
 }
+
+/** Human-owned terminal result, including the Installation and presentation that won the claim. */
+export type CompanionMemberQuestionHumanSettledResult = CompanionMemberQuestionSettledResultBase & (
+  | {
+    outcome: 'answered'
+    /** Installation whose response won the first terminal claim. */
+    settledByInstallationId: InstallationId
+    /** User-facing name of the winning Installation. */
+    settledByDeviceName: string
+    /** Settling answers echoed by question id. */
+    answers: readonly CompanionMemberQuestionAnswer[]
+  }
+  | {
+    outcome: 'declined'
+    /** Installation whose response won the first terminal claim. */
+    settledByInstallationId: InstallationId
+    /** User-facing name of the winning Installation. */
+    settledByDeviceName: string
+  }
+)
+
+/** System-owned terminal result, which has no receiving Installation claimant. */
+export type CompanionMemberQuestionSystemSettledResult = CompanionMemberQuestionSettledResultBase & {
+  outcome: 'expired' | 'withdrawn' | 'superseded'
+}
+
+/** First-claim terminal result of one routed member question. */
+export type CompanionMemberQuestionSettledResult =
+  | CompanionMemberQuestionHumanSettledResult
+  | CompanionMemberQuestionSystemSettledResult
 
 /** Terminal Desktop result retained for one idempotent Companion mutation. */
 export type CompanionMutationResult =
@@ -531,11 +567,24 @@ export type CompanionLiveSessionProjection = {
 export type MemberQuestionState = 'pending' | MemberQuestionOutcome
 
 /** Derived state projection for one routed member question. */
-export interface CompanionMemberQuestionStateProjection {
+interface CompanionMemberQuestionStateProjectionBase {
   type: 'member-question-state'
   questionId: MemberQuestionId
-  state: MemberQuestionState
 }
+
+/** Derived state projected to every Installation that can display the question. */
+export type CompanionMemberQuestionStateProjection =
+  | (CompanionMemberQuestionStateProjectionBase & { state: 'pending' })
+  | (CompanionMemberQuestionStateProjectionBase & {
+    state: 'answered' | 'declined'
+    settledByInstallationId: InstallationId
+    settledByDeviceName: string
+    settledAt: number
+  })
+  | (CompanionMemberQuestionStateProjectionBase & {
+    state: 'expired' | 'withdrawn' | 'superseded'
+    settledAt: number
+  })
 
 /** Receiver-side progress projection for one chunked document transfer. */
 export interface CompanionDocumentTransferStateProjection {

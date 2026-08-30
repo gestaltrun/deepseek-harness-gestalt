@@ -534,7 +534,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'member-question/asked': MemberQuestionAskedRecord
 ```
 
-来源：[`packages/interaction/member-question-sender/src/index.ts:72`](../packages/interaction/member-question-sender/src/index.ts)
+来源：[`packages/interaction/member-question-sender/src/index.ts:79`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="member-questionoutcome--log-only"></a>
 
@@ -549,7 +549,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'member-question/outcome': MemberQuestionOutcomeRecord
 ```
 
-来源：[`packages/interaction/member-question-sender/src/index.ts:78`](../packages/interaction/member-question-sender/src/index.ts)
+来源：[`packages/interaction/member-question-sender/src/index.ts:85`](../packages/interaction/member-question-sender/src/index.ts)
 
 ### `permission/*`
 

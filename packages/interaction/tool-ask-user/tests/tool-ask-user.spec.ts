@@ -10,11 +10,25 @@ import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
 import UserQuestionService, { type AskUserQuestionRequest } from '@deepseek-ai/dsh-user-questions'
 import CompanionMemberQuestionSender, {
   MemoryMemberQuestionDelivery,
+  type MemberQuestionSettlement,
 } from '@deepseek-ai/dsh-member-question-sender'
 import * as toolAskUser from '@deepseek-ai/dsh-tool-ask-user'
 import { BACKGROUND_MAX_CODE_POINTS } from '@deepseek-ai/dsh-tool-ask-user'
 
 const testToolSignal = new AbortController().signal
+
+function humanSettlement(
+  outcome: 'declined' | { answers: Extract<MemberQuestionSettlement, { outcome: 'answered' }>['answers'] },
+): MemberQuestionSettlement {
+  const metadata = {
+    settledByInstallationId: 'installation-studio' as never,
+    settledByDeviceName: 'Ada Studio',
+    settledAt: 1_788_089_400_000,
+  }
+  return outcome === 'declined'
+    ? { outcome, ...metadata }
+    : { outcome: 'answered', answers: outcome.answers, ...metadata }
+}
 
 async function waitForDelivery(delivery: MemoryMemberQuestionDelivery): Promise<void> {
   const deadline = Date.now() + 1000
@@ -542,10 +556,10 @@ describe('ask_user_question tool', () => {
     await waitForDelivery(delivery)
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
-    await ctx.memberQuestionSender.settle(questionId!, {
-      outcome: 'answered',
-      answers: [{ id: 'pkg', selected: ['yes'] }],
-    })
+    await ctx.memberQuestionSender.settle(
+      questionId!,
+      humanSettlement({ answers: [{ id: 'pkg', selected: ['yes'] }] }),
+    )
     const result = await executing
 
     expect(result.isError).toBe(false)
@@ -580,7 +594,7 @@ describe('ask_user_question tool', () => {
     await waitForDelivery(delivery)
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
-    await ctx.memberQuestionSender.settle(questionId!, { outcome: 'declined' })
+    await ctx.memberQuestionSender.settle(questionId!, humanSettlement('declined'))
     const result = await executing
     expect(result.isError).toBe(false)
     expect(result.content).toEqual([{ type: 'text', text: '{"answers":[]}' }])
@@ -683,10 +697,10 @@ describe('ask_user_question tool', () => {
     await waitForDelivery(delivery)
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
-    await ctx.memberQuestionSender.settle(questionId!, {
-      outcome: 'answered',
-      answers: [{ id: 'pkg', selected: [], custom: 'later' }],
-    })
+    await ctx.memberQuestionSender.settle(
+      questionId!,
+      humanSettlement({ answers: [{ id: 'pkg', selected: [], custom: 'later' }] }),
+    )
     const result = await executing
     expect(result.isError).toBe(false)
     expect(result.content).toEqual([{

@@ -6,14 +6,45 @@ import {
   encodeCompanionMessage,
   negotiateCompanionProtocol,
   parseCompanionOperationId,
+  parseCompanionSessionId,
   parseMemberQuestionId,
+  parseMemberQuestionProjectId,
   REMOTE_PROTOCOL_LIMITS,
   RemoteProtocolError,
   type CompanionMemberQuestionOperation,
   type CompanionMemberQuestionOrigin,
+  type ProjectId,
 } from '../src/index.ts'
 
 describe('Encrypted Companion Protocol member-question carriers', () => {
+  it('admits the project, origin session, and absolute expiry needed to rebuild a receiving session', () => {
+    const protocol = currentProtocol()
+    const operation = rawMemberQuestionOperation()
+    operation.projectId = 'project-atlas'
+    operation.originSessionId = 'session-ingest'
+    operation.expiresAt = 1_788_089_400_000
+
+    expect(() => decodeCompanionMessage(protocol, json({
+      applicationVersion: 4,
+      type: 'operation',
+      operation,
+    }))).not.toThrow()
+  })
+
+  it('admits typed human-settlement metadata and an epoch on terminal results', () => {
+    const protocol = currentProtocol()
+    const result = rawSettledResult()
+    result.settledByInstallationId = 'installation-studio'
+    result.settledByDeviceName = 'Ada Studio'
+    result.settledAt = 1_788_089_400_000
+
+    expect(() => decodeCompanionMessage(protocol, json({
+      applicationVersion: 4,
+      type: 'result',
+      result,
+    }))).not.toThrow()
+  })
+
   it('round-trips a complete member-question operation including an empty reference list', () => {
     const protocol = currentProtocol()
     const message = memberQuestionMessage()
@@ -25,6 +56,9 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
         type: 'member-question' as const,
         operationId: parseCompanionOperationId('operation-member-question'),
         questionId: parseMemberQuestionId('member-question-1'),
+        projectId: 'project-atlas' as ProjectId,
+        originSessionId: parseCompanionSessionId('session-ingest'),
+        expiresAt: 1_788_089_400_000,
         origin: questionOrigin(),
         background: 'Pick one.',
         questions: [{ id: 'q-1', question: 'Proceed?' }],
@@ -53,13 +87,28 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
           { id: 'q-1', selected: ['72 hours'], custom: 'Extend the account locks first' },
           { id: 'q-2', selected: [] },
         ],
-        settledByDeviceId: 'studio-desktop',
-        settledAtMoment: '2026-08-24T00:00:00.000Z',
+        settledByInstallationId: 'installation-studio' as never,
+        settledByDeviceName: 'Ada Studio',
+        settledAt: 1_788_089_400_000,
       },
     }
     expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, answered))).toEqual(answered)
 
-    for (const outcome of ['declined', 'expired', 'withdrawn', 'superseded'] as const) {
+    const declined = {
+      type: 'result' as const,
+      result: {
+        type: 'member-question-settled' as const,
+        operationId,
+        questionId,
+        outcome: 'declined' as const,
+        settledByInstallationId: 'installation-studio' as never,
+        settledByDeviceName: 'Ada Studio',
+        settledAt: 1_788_089_400_000,
+      },
+    }
+    expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, declined))).toEqual(declined)
+
+    for (const outcome of ['expired', 'withdrawn', 'superseded'] as const) {
       const settled = {
         type: 'result' as const,
         result: {
@@ -67,6 +116,7 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
           operationId,
           questionId,
           outcome,
+          settledAt: 1_788_089_400_000,
         },
       }
       expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, settled))).toEqual(settled)
@@ -83,6 +133,9 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
           questionId,
           outcome: 'answered' as const,
           answers: [{ id: 'q-1', selected: ['24 hours'] }],
+          settledByInstallationId: 'installation-studio' as never,
+          settledByDeviceName: 'Ada Studio',
+          settledAt: 1_788_089_400_000,
         },
       },
     }
@@ -91,13 +144,37 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
 
   it('round-trips derived state projections for the receiver status bar', () => {
     const protocol = currentProtocol()
-    for (const state of ['pending', 'answered', 'declined', 'expired', 'withdrawn', 'superseded'] as const) {
+    const pending = {
+      type: 'projection' as const,
+      projection: {
+        type: 'member-question-state' as const,
+        questionId: parseMemberQuestionId('member-question-1'),
+        state: 'pending' as const,
+      },
+    }
+    expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, pending))).toEqual(pending)
+    for (const state of ['answered', 'declined'] as const) {
       const projection = {
         type: 'projection' as const,
         projection: {
           type: 'member-question-state' as const,
           questionId: parseMemberQuestionId('member-question-1'),
           state,
+          settledByInstallationId: 'installation-studio' as never,
+          settledByDeviceName: 'Ada Studio',
+          settledAt: 1_788_089_400_000,
+        },
+      }
+      expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, projection))).toEqual(projection)
+    }
+    for (const state of ['expired', 'withdrawn', 'superseded'] as const) {
+      const projection = {
+        type: 'projection' as const,
+        projection: {
+          type: 'member-question-state' as const,
+          questionId: parseMemberQuestionId('member-question-1'),
+          state,
+          settledAt: 1_788_089_400_000,
         },
       }
       expect(decodeCompanionMessage(protocol, encodeCompanionMessage(protocol, projection))).toEqual(projection)
@@ -108,6 +185,11 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
     const protocol = currentProtocol()
     const invalidMessages: Uint8Array[] = [
       wireOperation((operation) => { operation.extra = true }),
+      wireOperation((operation) => { delete operation.projectId }),
+      wireOperation((operation) => { delete operation.originSessionId }),
+      wireOperation((operation) => { delete operation.expiresAt }),
+      wireOperation((operation) => { operation.expiresAt = 0 }),
+      wireOperation((operation) => { operation.expiresAt = 'tomorrow' }),
       wireOperation((operation) => { (operation.origin as Record<string, unknown>).extra = true }),
       wireOperation((operation) => {
         const first = (operation.questions as Record<string, unknown>[])[0]!
@@ -133,6 +215,15 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
       wireProjection((projection) => { projection.state = 'queued' }),
       wireResult((result) => { result.outcome = 'declined'; result.answers = [{ id: 'q-1', selected: [] }] }),
       wireResult((result) => { result.outcome = 'answered'; delete result.answers }),
+      wireResult((result) => { delete result.settledByInstallationId }),
+      wireResult((result) => { delete result.settledByDeviceName }),
+      wireResult((result) => { delete result.settledAt }),
+      wireResult((result) => { result.outcome = 'expired' }),
+      wireResult((result) => { result.outcome = 'expired'; delete result.answers }),
+      wireResult((result) => { result.settledAt = 0 }),
+      wireResult((result) => { result.settledAt = 'now' }),
+      wireResult((result) => { result.settledByDeviceId = 'legacy-device' }),
+      wireResult((result) => { result.settledAtMoment = '2026-08-30T00:00:00.000Z' }),
       wireOperation((operation) => { operation.background = '' }),
       wireOperation((operation) => {
         const first = (operation.questions as Record<string, unknown>[])[0]!
@@ -155,6 +246,9 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
       }),
       wireOperation((operation) => { operation.questions = 'batch' }),
       wireProjection((projection) => { projection.state = 7 }),
+      wireProjection((projection) => { projection.state = 'answered' }),
+      wireProjection((projection) => { projection.state = 'expired' }),
+      wireProjection((projection) => { projection.settledAt = 1_788_089_400_000 }),
     ]
     for (const wire of invalidMessages) {
       expect(() => decodeCompanionMessage(protocol, wire)).toThrow(
@@ -197,12 +291,8 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
         }),
       },
       {
-        cap: REMOTE_PROTOCOL_LIMITS.memberQuestionSettledByDeviceIdCodePoints,
-        build: value => wireResult((result) => { result.settledByDeviceId = value }),
-      },
-      {
-        cap: REMOTE_PROTOCOL_LIMITS.memberQuestionSettledAtMomentCodePoints,
-        build: value => wireResult((result) => { result.settledAtMoment = value }),
+        cap: REMOTE_PROTOCOL_LIMITS.memberQuestionSettledByDeviceNameCodePoints,
+        build: value => wireResult((result) => { result.settledByDeviceName = value }),
       },
     ]
     for (const { cap, build } of ceilingCases) {
@@ -274,6 +364,9 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
         operationId: parseCompanionOperationId('operation-member-question'),
         questionId: parseMemberQuestionId('member-question-1'),
         outcome: 'declined' as const,
+        settledByInstallationId: 'installation-studio' as never,
+        settledByDeviceName: 'Ada Studio',
+        settledAt: 1_788_089_400_000,
       },
     }
     const projection = {
@@ -306,6 +399,9 @@ describe('Encrypted Companion Protocol member-question carriers', () => {
     expect(() => parseMemberQuestionId('not valid')).toThrow(
       expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
     )
+    expect(() => parseMemberQuestionProjectId('not valid')).toThrow(
+      expect.objectContaining<Partial<RemoteProtocolError>>({ code: 'REMOTE_PROTOCOL_INVALID_MESSAGE' }),
+    )
   })
 })
 
@@ -327,6 +423,9 @@ function memberQuestionMessage(): { type: 'operation'; operation: CompanionMembe
       type: 'member-question',
       operationId: parseCompanionOperationId('operation-member-question'),
       questionId: parseMemberQuestionId('member-question-1'),
+      projectId: 'project-atlas' as ProjectId,
+      originSessionId: parseCompanionSessionId('session-ingest'),
+      expiresAt: 1_788_089_400_000,
       origin: questionOrigin(),
       background: 'The ingest pipeline fails under load; we must pick a rollback window before the Friday freeze.',
       questions: [
@@ -352,6 +451,9 @@ function rawMemberQuestionOperation(): Record<string, unknown> {
     type: operation.type,
     operationId: operation.operationId,
     questionId: operation.questionId,
+    projectId: operation.projectId,
+    originSessionId: operation.originSessionId,
+    expiresAt: operation.expiresAt,
     origin: operation.origin,
     background: operation.background,
     questions: operation.questions,
@@ -366,6 +468,9 @@ function rawSettledResult(): Record<string, unknown> {
     questionId: 'member-question-1',
     outcome: 'answered',
     answers: [{ id: 'q-1', selected: ['72 hours'] }],
+    settledByInstallationId: 'installation-studio',
+    settledByDeviceName: 'Ada Studio',
+    settledAt: 1_788_089_400_000,
   }
 }
 

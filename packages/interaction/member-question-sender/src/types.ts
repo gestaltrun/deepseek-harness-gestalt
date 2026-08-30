@@ -8,8 +8,12 @@ import type {
   CompanionMemberQuestionItem,
   CompanionMemberQuestionOrigin,
   CompanionMemberQuestionReference,
+  CompanionMemberQuestionSettledResult,
   CompanionMessage,
+  CompanionOperationId,
+  CompanionSessionId,
   MemberQuestionId,
+  ProjectId,
 } from '@deepseek-ai/dsh-remote-protocol'
 
 /** One referenced document attached to a routed member question. */
@@ -33,7 +37,7 @@ export interface MemberQuestionSendPayload {
   /** Account reference of the single addressee. */
   readonly toProjectMember: string
   /** Cloud project whose peer grant addresses that member. */
-  readonly projectId: string
+  readonly projectId: ProjectId
   /** Agent-authored background; already bounded by the asking tool. */
   readonly background: string
   /** Question batch mirrored from `ask_user_question`. */
@@ -43,11 +47,13 @@ export interface MemberQuestionSendPayload {
   /** Public identity fields rendered on the receiver's Decision Brief. */
   readonly origin: MemberQuestionOrigin
   /** Originating session identity used as one half of the supersede route key. */
-  readonly originSessionId: string
+  readonly originSessionId: CompanionSessionId
 }
 
-/** Encoded Companion operation ready for the injected delivery adapter. */
+/** Encoded Companion operation ready for the injected delivery port. */
 export interface EncodedMemberQuestion {
+  /** Companion mutation identity used by status replay. */
+  readonly operationId: CompanionOperationId
   /** Branded question identity correlated with later settlement. */
   readonly questionId: MemberQuestionId
   /** Companion `member-question` operation message. */
@@ -56,21 +62,43 @@ export interface EncodedMemberQuestion {
   readonly encoded: Uint8Array
 }
 
+/** Result of one atomic terminal publication attempt. */
+export interface MemberQuestionTerminalClaim {
+  /** Whether this publication committed the first terminal for the question. */
+  readonly claimed: boolean
+  /** Authoritative first terminal, equal to the candidate only when this publication won. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+}
+
 /**
- * Injected delivery adapter. Cross-machine registry transport is deferred
- * (the T4 Known Limitation); tests and keyless assemblies inject an in-memory
- * stub. Production delivery stays behind that same gap.
+ * Delivery seam for member-question operations and their first-claim terminal
+ * results. Cross-machine registry transport is deferred; tests and keyless
+ * assemblies inject an in-memory implementation, while production remains fail-closed.
  */
-export interface MemberQuestionDelivery {
+export interface MemberQuestionDeliveryPort {
   /**
    * Deliver one encoded member-question operation to the addressed member.
    * @param encoded - codec output plus the addressee and project identity.
-   * @returns fulfillment after the adapter accepts the encoded bytes.
+   * @returns fulfillment after the port accepts the encoded bytes.
    */
   deliver(encoded: EncodedMemberQuestion & {
     toProjectMember: string
-    projectId: string
+    projectId: ProjectId
   }): Promise<void>
+
+  /**
+   * Atomically publish one terminal candidate; the first claim remains authoritative.
+   * @param terminal - candidate encoded by the sender or receiving Installation.
+   * @returns whether this candidate won and the authoritative retained terminal.
+   */
+  publishTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>
+
+  /**
+   * Query the retained first terminal for reconnect replay.
+   * @param questionId - member-question identity to replay.
+   * @returns the authoritative terminal, or undefined while still pending or unknown.
+   */
+  queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined>
 }
 
 /** Successful routed-ask settlement: the member answered the batch. */
@@ -115,13 +143,13 @@ export interface MemberQuestionAskedRecord {
   /** Account reference of the single addressee. */
   readonly toProjectMember: string
   /** Cloud project whose peer grant addresses that member. */
-  readonly projectId: string
+  readonly projectId: ProjectId
   /** Agent-authored background already admitted by the asking tool. */
   readonly background: string
   /** Question ids and prompts retained as the model-visible ask summary. */
   readonly questions: readonly { readonly id: string; readonly question: string }[]
   /** Originating session identity used as one half of the supersede route key. */
-  readonly originSessionId: string
+  readonly originSessionId: CompanionSessionId
 }
 
 /** Durable outcome payload recorded on the asking session. */

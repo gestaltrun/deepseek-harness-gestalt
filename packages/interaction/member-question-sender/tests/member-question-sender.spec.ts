@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import {
   decodeCompanionMessage,
+  parseCompanionSessionId,
+  parseMemberQuestionProjectId,
   type CompanionMemberQuestionOperation,
 } from '@deepseek-ai/dsh-remote-protocol'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
@@ -14,12 +16,36 @@ import CompanionMemberQuestionSender, {
   type MemberQuestionSendOptions,
   type MemberQuestionSendPayload,
   type MemberQuestionSendResult,
+  type MemberQuestionSettlement,
 } from '../src/index.ts'
+
+const SETTLED_AT = 1_788_089_400_000
+
+function declinedSettlement(): MemberQuestionSettlement {
+  return {
+    outcome: 'declined',
+    settledByInstallationId: 'installation-studio' as never,
+    settledByDeviceName: 'Ada Studio',
+    settledAt: SETTLED_AT,
+  }
+}
+
+function answeredSettlement(
+  answers: Extract<MemberQuestionSettlement, { outcome: 'answered' }>['answers'],
+): MemberQuestionSettlement {
+  return {
+    outcome: 'answered',
+    answers,
+    settledByInstallationId: 'installation-studio' as never,
+    settledByDeviceName: 'Ada Studio',
+    settledAt: SETTLED_AT,
+  }
+}
 
 function payload(overrides: Partial<MemberQuestionSendPayload> = {}): MemberQuestionSendPayload {
   return {
     toProjectMember: 'account-peer',
-    projectId: 'project-atlas',
+    projectId: parseMemberQuestionProjectId('project-atlas'),
     background: 'The ingest pipeline fails under load; pick a rollback window.',
     questions: [
       {
@@ -42,7 +68,7 @@ function payload(overrides: Partial<MemberQuestionSendPayload> = {}): MemberQues
       askerDisplayName: 'Ada',
       askerAvatarUrl: 'https://example.test/ada.png',
     },
-    originSessionId: 'session-origin',
+    originSessionId: parseCompanionSessionId('session-origin'),
     ...overrides,
   }
 }
@@ -64,7 +90,7 @@ async function startSend(
 describe('member-question sender', () => {
   it('encodes a member-question operation that round-trips the T4 codec', () => {
     const protocol = createMemberQuestionProtocol()
-    const encoded = encodeMemberQuestion(protocol, payload())
+    const encoded = encodeMemberQuestion(protocol, payload(), 1_788_089_400_000)
     const decoded = decodeCompanionMessage(protocol, encoded.encoded)
     expect(decoded).toEqual(encoded.message)
     expect(decoded.type).toBe('operation')
@@ -76,6 +102,9 @@ describe('member-question sender', () => {
     expect(operation.references).toEqual(payload().references)
     expect(operation.origin).toEqual(payload().origin)
     expect(operation.questionId).toBe(encoded.questionId)
+    expect(operation.projectId).toBe(payload().projectId)
+    expect(operation.originSessionId).toBe(payload().originSessionId)
+    expect(operation.expiresAt).toBe(1_788_089_400_000)
   })
 
   it('delivers the encoded operation through an injected memory stub and settles answered', async () => {
@@ -87,10 +116,10 @@ describe('member-question sender', () => {
     expect(delivery.delivered).toHaveLength(1)
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
-    await ctx.memberQuestionSender.settle(questionId!, {
-      outcome: 'answered',
-      answers: [{ id: 'q-1', selected: ['24 hours'] }],
-    })
+    await ctx.memberQuestionSender.settle(
+      questionId!,
+      answeredSettlement([{ id: 'q-1', selected: ['24 hours'] }]),
+    )
     const result = await pending
     expect(result).toMatchObject({
       questionId,
@@ -113,15 +142,20 @@ describe('member-question sender', () => {
       outcome: 'answered',
       answers: [{ id: 'q-1', selected: ['24 hours'] }],
     })
+    await expect(ctx.memberQuestionSender.queryTerminal(questionId!)).resolves.toMatchObject({
+      questionId,
+      outcome: 'answered',
+      settledByInstallationId: 'installation-studio',
+      settledByDeviceName: 'Ada Studio',
+      settledAt: SETTLED_AT,
+    })
   })
 
   it('rejects with DELIVERY_UNAVAILABLE when the adapter throws', async () => {
     const ctx = new Context()
-    await ctx.plugin(Sender, {
-      delivery: {
-        deliver: () => Promise.reject(new Error('route closed')),
-      },
-    })
+    const delivery = new MemoryMemberQuestionDelivery()
+    vi.spyOn(delivery, 'deliver').mockRejectedValue(new Error('route closed'))
+    await ctx.plugin(Sender, { delivery })
     await expect(ctx.memberQuestionSender.send(payload())).rejects.toMatchObject({
       name: 'MemberQuestionSenderError',
       code: 'DELIVERY_UNAVAILABLE',
@@ -135,6 +169,7 @@ describe('member-question sender', () => {
       name: 'MemberQuestionSenderError',
       code: 'DELIVERY_UNAVAILABLE',
     })
+    await expect(ctx.memberQuestionSender.queryTerminal('mqmissing' as never)).resolves.toBeUndefined()
   })
 
   it('wraps a rejecting grant lookup as GRANT_UNAVAILABLE', async () => {
@@ -158,29 +193,36 @@ describe('member-question sender', () => {
         id: `q-${String(index)}`,
         question: 'x'.repeat(400),
       })),
-    }))).toThrow(
+    }), 1_788_089_400_000)).toThrow(
       expect.objectContaining<Partial<MemberQuestionSenderError>>({ code: 'ENCODE_FAILED' }),
     )
   })
 
   it('accepts an empty reference list and still round-trips', () => {
     const protocol = createMemberQuestionProtocol()
-    const encoded = encodeMemberQuestion(protocol, payload({ references: [] }))
+    const encoded = encodeMemberQuestion(protocol, payload({ references: [] }), 1_788_089_400_000)
     const decoded = decodeCompanionMessage(protocol, encoded.encoded)
     expect(decoded).toEqual(encoded.message)
   })
 
   it('unregisters the service when its plugin fiber is disposed', async () => {
     const ctx = new Context()
-    const fiber = await ctx.plugin(CompanionMemberQuestionSender, { delivery: new MemoryMemberQuestionDelivery() })
+    const delivery = new MemoryMemberQuestionDelivery()
+    const fiber = await ctx.plugin(CompanionMemberQuestionSender, { delivery })
     expect(ctx.memberQuestionSender).toBeDefined()
     const abort = new AbortController()
     const { pending } = await startSend(ctx, payload(), { signal: abort.signal })
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
     await fiber.dispose()
     expect(ctx.get('memberQuestionSender')).toBeUndefined()
     await expect(pending).rejects.toMatchObject({
       name: 'MemberQuestionSenderError',
       code: 'QUESTION_WITHDRAWN',
+    })
+    await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
+      questionId,
+      outcome: 'withdrawn',
     })
   })
 
@@ -192,7 +234,7 @@ describe('member-question sender', () => {
     await Promise.resolve()
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
-    await sender.settle(questionId!, { outcome: 'declined' })
+    await sender.settle(questionId!, declinedSettlement())
     await expect(pending).resolves.toMatchObject({ outcome: 'declined' })
   })
 
@@ -232,6 +274,8 @@ describe('member-question sender', () => {
       const asking = session()
       await ctx.plugin(Sender, { delivery, ttlMs: 50 })
       const { pending } = await startSend(ctx, payload(), { session: asking })
+      const questionId = delivery.delivered[0]?.questionId
+      expect(questionId).toBeDefined()
       const expired = expect(pending).rejects.toMatchObject({
         name: 'MemberQuestionSenderError',
         code: 'QUESTION_EXPIRED',
@@ -239,6 +283,10 @@ describe('member-question sender', () => {
       await vi.advanceTimersByTimeAsync(50)
       await expired
       expect(asking.events[1]?.data).toMatchObject({ outcome: 'expired' })
+      await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
+        questionId,
+        outcome: 'expired',
+      })
     } finally {
       vi.clearAllTimers()
       vi.useRealTimers()
@@ -272,6 +320,10 @@ describe('member-question sender', () => {
       name: 'MemberQuestionSenderError',
       code: 'QUESTION_WITHDRAWN',
     })
+    await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
+      questionId,
+      outcome: 'withdrawn',
+    })
   })
 
   it('rejects the first same-route ask with QUESTION_SUPERSEDED when a second ask arrives', async () => {
@@ -287,10 +339,16 @@ describe('member-question sender', () => {
       name: 'MemberQuestionSenderError',
       code: 'QUESTION_SUPERSEDED',
     })
+    const firstId = delivery.delivered[0]?.questionId
+    expect(firstId).toBeDefined()
+    await expect(delivery.queryTerminal(firstId!)).resolves.toMatchObject({
+      questionId: firstId,
+      outcome: 'superseded',
+    })
     expect(delivery.delivered).toHaveLength(2)
     const secondId = delivery.delivered[1]?.questionId
     expect(secondId).toBeDefined()
-    await ctx.memberQuestionSender.settle(secondId!, { outcome: 'declined' })
+    await ctx.memberQuestionSender.settle(secondId!, declinedSettlement())
     await expect(second).resolves.toMatchObject({ outcome: 'declined', questionId: secondId })
     const outcomes = asking.events.filter(event => event.type === 'member-question/outcome')
     expect(outcomes.map(event => event.data.outcome)).toEqual(['superseded', 'declined'])
@@ -313,6 +371,12 @@ describe('member-question sender', () => {
       code: 'REVOKED_DURING_FLIGHT',
     })
     expect(asking.events[1]?.data).toMatchObject({ outcome: 'revoked' })
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
+    await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
+      questionId,
+      outcome: 'withdrawn',
+    })
   })
 
   it('rejects a pre-aborted signal as QUESTION_WITHDRAWN before delivery', async () => {
@@ -331,7 +395,7 @@ describe('member-question sender', () => {
   it('ignores settle() and withdraw() for an unknown question id', async () => {
     const ctx = new Context()
     await ctx.plugin(Sender, { delivery: new MemoryMemberQuestionDelivery() })
-    await expect(ctx.memberQuestionSender.settle('mqmissing' as never, { outcome: 'declined' }))
+    await expect(ctx.memberQuestionSender.settle('mqmissing' as never, declinedSettlement()))
       .resolves.toBeUndefined()
     await expect(ctx.memberQuestionSender.withdraw('mqmissing' as never)).resolves.toBeUndefined()
   })
@@ -357,7 +421,7 @@ describe('member-question sender', () => {
     const { pending } = await startSend(ctx)
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
-    await ctx.memberQuestionSender.settle(questionId!, { outcome: 'declined' })
+    await ctx.memberQuestionSender.settle(questionId!, declinedSettlement())
     await expect(pending).resolves.toMatchObject({ outcome: 'declined' })
     await Promise.resolve()
   })
@@ -372,7 +436,7 @@ describe('member-question sender', () => {
     const { pending } = await startSend(ctx)
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
-    await ctx.memberQuestionSender.settle(questionId!, { outcome: 'declined' })
+    await ctx.memberQuestionSender.settle(questionId!, declinedSettlement())
     await expect(pending).resolves.toMatchObject({ outcome: 'declined' })
   })
 
@@ -390,7 +454,7 @@ describe('member-question sender', () => {
     const { pending } = await startSend(ctx)
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
-    await ctx.memberQuestionSender.settle(questionId!, { outcome: 'declined' })
+    await ctx.memberQuestionSender.settle(questionId!, declinedSettlement())
     await expect(pending).resolves.toMatchObject({ outcome: 'declined' })
     rejectWatch(new Error('late'))
     await Promise.resolve()
@@ -403,18 +467,18 @@ describe('member-question sender', () => {
     const { pending: first } = await startSend(ctx)
     const { pending: second } = await startSend(ctx, payload({
       toProjectMember: 'account-other',
-      originSessionId: 'session-other',
+      originSessionId: parseCompanionSessionId('session-other'),
     }))
     expect(delivery.delivered).toHaveLength(2)
     const firstId = delivery.delivered[0]?.questionId
     const secondId = delivery.delivered[1]?.questionId
     expect(firstId).toBeDefined()
     expect(secondId).toBeDefined()
-    await ctx.memberQuestionSender.settle(firstId!, { outcome: 'declined' })
-    await ctx.memberQuestionSender.settle(secondId!, {
-      outcome: 'answered',
-      answers: [{ id: 'q-1', selected: ['72 hours'] }],
-    })
+    await ctx.memberQuestionSender.settle(firstId!, declinedSettlement())
+    await ctx.memberQuestionSender.settle(
+      secondId!,
+      answeredSettlement([{ id: 'q-1', selected: ['72 hours'] }]),
+    )
     await expect(first).resolves.toMatchObject({ outcome: 'declined', questionId: firstId })
     await expect(second).resolves.toMatchObject({ outcome: 'answered', questionId: secondId })
   })
@@ -440,8 +504,147 @@ describe('member-question sender', () => {
     const { pending } = await startSend(ctx, payload(), { session: asking })
     const questionId = delivery.delivered[0]?.questionId
     expect(questionId).toBeDefined()
-    await ctx.memberQuestionSender.settle(questionId!, { outcome: 'declined' })
+    await ctx.memberQuestionSender.settle(questionId!, declinedSettlement())
     await expect(pending).resolves.toMatchObject({ outcome: 'declined', questionId })
     expect(asking.events[1]?.data).toEqual({ questionId, outcome: 'declined' })
+    await expect(delivery.queryTerminal(questionId!)).resolves.toMatchObject({
+      questionId,
+      outcome: 'declined',
+      settledByInstallationId: 'installation-studio',
+      settledByDeviceName: 'Ada Studio',
+      settledAt: SETTLED_AT,
+    })
+  })
+
+  it('uses the retained first terminal when a later local answer loses the claim', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const { pending } = await startSend(ctx)
+    const delivered = delivery.delivered[0]
+    expect(delivered).toBeDefined()
+    await delivery.publishTerminal({
+      type: 'member-question-settled',
+      operationId: delivered!.operationId,
+      questionId: delivered!.questionId,
+      outcome: 'expired',
+      settledAt: SETTLED_AT,
+    })
+
+    await ctx.memberQuestionSender.settle(
+      delivered!.questionId,
+      answeredSettlement([{ id: 'q-1', selected: ['24 hours'] }]),
+    )
+
+    await expect(pending).rejects.toMatchObject({ code: 'QUESTION_EXPIRED' })
+    await expect(ctx.memberQuestionSender.queryTerminal(delivered!.questionId)).resolves.toEqual({
+      type: 'member-question-settled',
+      operationId: delivered!.operationId,
+      questionId: delivered!.questionId,
+      outcome: 'expired',
+      settledAt: SETTLED_AT,
+    })
+  })
+
+  it.each([
+    ['withdrawn', 'QUESTION_WITHDRAWN'],
+    ['superseded', 'QUESTION_SUPERSEDED'],
+  ] as const)('maps a retained %s terminal onto the local stable error', async (outcome, code) => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const { pending } = await startSend(ctx)
+    const delivered = delivery.delivered[0]
+    expect(delivered).toBeDefined()
+    await delivery.publishTerminal({
+      type: 'member-question-settled',
+      operationId: delivered!.operationId,
+      questionId: delivered!.questionId,
+      outcome,
+      settledAt: SETTLED_AT,
+    })
+
+    await ctx.memberQuestionSender.settle(delivered!.questionId, declinedSettlement())
+
+    await expect(pending).rejects.toMatchObject({ code })
+  })
+
+  it('fails closed when the delivery port rejects terminal publication', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const asking = session()
+    const { pending } = await startSend(ctx, payload(), { session: asking })
+    const questionId = delivery.delivered[0]?.questionId
+    expect(questionId).toBeDefined()
+    vi.spyOn(delivery, 'publishTerminal').mockRejectedValue(new Error('terminal store unavailable'))
+
+    await ctx.memberQuestionSender.settle(questionId!, declinedSettlement())
+
+    await expect(pending).rejects.toMatchObject({ code: 'DELIVERY_UNAVAILABLE' })
+    expect(asking.events).toHaveLength(1)
+    await expect(delivery.queryTerminal(questionId!)).resolves.toBeUndefined()
+  })
+
+  it('publishes supersession before delivering the replacement question', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const { pending: first } = await startSend(ctx)
+    const firstRejected = expect(first).rejects.toMatchObject({ code: 'QUESTION_SUPERSEDED' })
+    const publish = vi.spyOn(delivery, 'publishTerminal')
+    let release!: () => void
+    publish.mockImplementationOnce(terminal => new Promise((resolve) => {
+      release = () => { resolve({ claimed: true, terminal }) }
+    }))
+
+    const second = ctx.memberQuestionSender.send(payload({ background: 'Replacement question.' }))
+    await Promise.resolve()
+    expect(delivery.delivered).toHaveLength(1)
+    release()
+    await firstRejected
+    await vi.waitFor(() => { expect(delivery.delivered).toHaveLength(2) })
+    const secondId = delivery.delivered[1]?.questionId
+    expect(secondId).toBeDefined()
+    await ctx.memberQuestionSender.settle(secondId!, declinedSettlement())
+    await expect(second).resolves.toMatchObject({ outcome: 'declined' })
+  })
+
+  it('does not deliver a replacement when supersession publication fails', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const { pending: first } = await startSend(ctx)
+    const firstRejected = expect(first).rejects.toMatchObject({ code: 'DELIVERY_UNAVAILABLE' })
+    vi.spyOn(delivery, 'publishTerminal').mockRejectedValueOnce(new Error('terminal store unavailable'))
+
+    await expect(ctx.memberQuestionSender.send(payload({ background: 'Replacement question.' })))
+      .rejects.toMatchObject({ code: 'DELIVERY_UNAVAILABLE' })
+    await firstRejected
+    expect(delivery.delivered).toHaveLength(1)
+  })
+
+  it('does not deliver a replacement cancelled while supersession publishes', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const { pending: first } = await startSend(ctx)
+    const firstRejected = expect(first).rejects.toMatchObject({ code: 'QUESTION_SUPERSEDED' })
+    let release!: () => void
+    vi.spyOn(delivery, 'publishTerminal').mockImplementationOnce(terminal => new Promise((resolve) => {
+      release = () => { resolve({ claimed: true, terminal }) }
+    }))
+    const abort = new AbortController()
+
+    const second = ctx.memberQuestionSender.send(payload({ background: 'Cancelled replacement.' }), {
+      signal: abort.signal,
+    })
+    await Promise.resolve()
+    abort.abort()
+    release()
+
+    await firstRejected
+    await expect(second).rejects.toMatchObject({ code: 'QUESTION_WITHDRAWN' })
+    expect(delivery.delivered).toHaveLength(1)
   })
 })

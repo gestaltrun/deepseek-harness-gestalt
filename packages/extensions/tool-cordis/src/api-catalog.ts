@@ -1237,12 +1237,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Encode one member-directed question, deliver it, and wait for settlement.',
         parameters: [{ name: 'payload', description: 'Decision Brief origin, background, question batch, and references.' }, { name: 'options', description: 'optional asking session and withdrawal signal.' }],
         returns: 'the answered or declined settlement plus the encoded Companion bytes.',
-        throws: ['{MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no adapter is composed, `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant, `ENCODE_FAILED` when the T4 codec rejects the payload, `MEMBER_OFFLINE` when presence is offline at send time, `QUESTION_EXPIRED` when the configured TTL elapses unanswered, `QUESTION_WITHDRAWN` when the initiator cancels the turn, `QUESTION_SUPERSEDED` when a newer same-route ask replaces this one, or `REVOKED_DURING_FLIGHT` when membership is withdrawn while waiting.'],
+        throws: ['{MemberQuestionSenderError} `DELIVERY_UNAVAILABLE` when no delivery port is composed, `GRANT_UNAVAILABLE` when a composed grant lookup cannot retrieve the peer grant, `ENCODE_FAILED` when the T4 codec rejects the payload, `MEMBER_OFFLINE` when presence is offline at send time, `QUESTION_EXPIRED` when the configured TTL elapses unanswered, `QUESTION_WITHDRAWN` when the initiator cancels the turn, `QUESTION_SUPERSEDED` when a newer same-route ask replaces this one, or `REVOKED_DURING_FLIGHT` when membership is withdrawn while waiting.'],
       },
       {
         signature: 'abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>',
         description: 'Apply one answered or declined settlement to a pending question. Unknown or already-settled question ids are ignored (idempotent).',
-        parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }, { name: 'settlement', description: 'answered answers or a declined verdict.' }],
+        parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }, { name: 'settlement', description: 'answered answers or a declined verdict with the settling Installation metadata and epoch.' }],
         returns: 'fulfillment after the matching `send()` promise settles, or immediately when none is pending.',
       },
       {
@@ -1250,6 +1250,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Withdraw one pending question as initiator cancellation. Unknown or already-settled question ids are ignored.',
         parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }],
         returns: 'fulfillment after the matching `send()` promise rejects `QUESTION_WITHDRAWN`, or immediately when none is pending.',
+      },
+      {
+        signature: 'abstract queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined>',
+        description: 'Query the authoritative first terminal retained for reconnect replay.',
+        parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }],
+        returns: 'the retained terminal, or undefined while pending or unknown.',
       },
     ],
   },
@@ -4011,6 +4017,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CompanionMemberQuestionAnswer {\n    id: string;\n    selected: readonly string[];\n    custom?: string;\n}',
   },
   {
+    name: 'CompanionMemberQuestionHumanSettledResult',
+    declaration: 'export type CompanionMemberQuestionHumanSettledResult = CompanionMemberQuestionSettledResultBase & ({\n    outcome: \'answered\';\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    answers: readonly CompanionMemberQuestionAnswer[];\n} | {\n    outcome: \'declined\';\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n});',
+  },
+  {
     name: 'CompanionMemberQuestionItem',
     declaration: 'export interface CompanionMemberQuestionItem {\n    id: string;\n    question: string;\n    header?: string;\n    options?: readonly CompanionMemberQuestionOption[];\n    multiSelect?: boolean;\n}',
   },
@@ -4021,6 +4031,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CompanionMemberQuestionReference',
     declaration: 'export interface CompanionMemberQuestionReference {\n    path: string;\n    reason: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionSettledResult',
+    declaration: 'export type CompanionMemberQuestionSettledResult = CompanionMemberQuestionHumanSettledResult | CompanionMemberQuestionSystemSettledResult;',
+  },
+  {
+    name: 'CompanionMemberQuestionSystemSettledResult',
+    declaration: 'export type CompanionMemberQuestionSystemSettledResult = CompanionMemberQuestionSettledResultBase & {\n    outcome: \'expired\' | \'withdrawn\' | \'superseded\';\n};',
+  },
+  {
+    name: 'CompanionSessionId',
+    declaration: 'export type CompanionSessionId = Branded<\'CompanionSessionId\'>;',
   },
   {
     name: 'ConfinedArgv',
@@ -4732,7 +4754,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'MemberQuestionSendPayload',
-    declaration: 'export interface MemberQuestionSendPayload {\n    readonly toProjectMember: string;\n    readonly projectId: string;\n    readonly background: string;\n    readonly questions: readonly MemberQuestionItem[];\n    readonly references: readonly MemberQuestionReference[];\n    readonly origin: MemberQuestionOrigin;\n    readonly originSessionId: string;\n}',
+    declaration: 'export interface MemberQuestionSendPayload {\n    readonly toProjectMember: string;\n    readonly projectId: ProjectId;\n    readonly background: string;\n    readonly questions: readonly MemberQuestionItem[];\n    readonly references: readonly MemberQuestionReference[];\n    readonly origin: MemberQuestionOrigin;\n    readonly originSessionId: CompanionSessionId;\n}',
   },
   {
     name: 'MemberQuestionSendResult',
@@ -4740,7 +4762,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'MemberQuestionSettlement',
-    declaration: 'export type MemberQuestionSettlement = {\n    outcome: \'answered\';\n    answers: readonly MemberQuestionAnswer[];\n} | {\n    outcome: \'declined\';\n};',
+    declaration: 'export type MemberQuestionSettlement = {\n    outcome: \'answered\';\n    answers: readonly MemberQuestionAnswer[];\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n} | {\n    outcome: \'declined\';\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n};',
   },
   {
     name: 'MembershipId',

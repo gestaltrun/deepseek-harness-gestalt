@@ -101,8 +101,7 @@ describe('Desktop phone tab live chain', () => {
     expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])
 
     const beforeTap = await fakeCounters()
-    const size = await screen.getSize()
-    await screen.click({ x: Math.floor(size.width / 2), y: Math.floor(size.height / 2) })
+    await screen.click()
     const afterTap = await waitForFakeIo(counters => counters.io.length === beforeTap.io.length + 1)
     expect(afterTap.io.at(-1)).toMatchObject({
       method: 'device.io.tap',

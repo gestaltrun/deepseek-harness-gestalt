@@ -1,15 +1,12 @@
 # Desktop-only overlay on the web profile. Browser `dsh web` does not load this file.
+# `ui-phone` is not re-inserted here: the web-app roster already carries the
+# row, and a second insert duplicates the loader entry id and kills startup.
 - insert:
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'
 
     - id: ui-desktop
       name: '@deepseek-ai/dsh-client-ui-desktop'
-
-    # Phone tab: always reachable; without phoneDevices the UI renders its
-    # deterministic missing state, so the row itself is not gated.
-    - id: ui-phone
-      name: '@deepseek-ai/dsh-client-ui-phone'
 
 # Phone fleet: entirely opt-in on Desktop. While DSH_PHONE_MOBILECLI is unset
 # the runtime, stream, and tool rows stay unmounted and the Phone tab renders

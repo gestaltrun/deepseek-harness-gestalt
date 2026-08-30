@@ -1,0 +1,28 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "465-docs-mpa-repeat-build",
+  "summary": {
+    "en": "Make consecutive documentation site builds replace their own prior output safely.",
+    "zh": "让连续文档站构建安全替换自身的上次输出。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "desktop",
+      "reason": "Only documentation-site build tooling, its tests and decision record, and the website workspace lockfile entry change; no Desktop production or packaging input changes."
+    },
+    {
+      "releaseUnit": "mobile",
+      "reason": "Only documentation-site build tooling, its tests and decision record, and the website workspace lockfile entry change; no Mobile production or packaging input changes."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "Only documentation-site build tooling, its tests and decision record, and the website workspace lockfile entry change; no Platform production, deployment, or wire input changes."
+    }
+  ]
+}

@@ -2,7 +2,6 @@
 
 .card {
   position: relative;
-  list-style: none;
   overflow: hidden;
   border-radius: 16px;
   border: 1px solid var(--dsw-alias-border-l1);

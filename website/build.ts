@@ -1,8 +1,11 @@
-/** Build the documentation site from a clean, resolved output directory. */
+/** Documentation build-output lifecycle shared by the standard and MPA entrypoints. */
 
 import { lstatSync, rmSync, unlinkSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { build } from 'vitepress'
+
+interface DocumentationBuildOptions {
+  mpa?: string
+  onAfterConfigResolve: (siteConfig: { outDir: string }) => void
+}
 
 /**
  * Remove the exact disposable output directory resolved for one documentation build.
@@ -22,23 +25,17 @@ export function resetDocumentationBuildOutput(outDir: string): void {
   rmSync(outDir, { recursive: true, force: true })
 }
 
-async function buildDocumentationSite(mpa: boolean): Promise<void> {
-  await build(import.meta.dirname, {
+/**
+ * VitePress options that reset the resolved output before the current build writes it.
+ *
+ * @param mpa Whether to enable VitePress's MPA build mode.
+ * @returns Build options sharing one output-ownership lifecycle across modes.
+ */
+export function documentationBuildOptions(mpa: boolean): DocumentationBuildOptions {
+  return {
     ...(mpa ? { mpa: 'true' } : {}),
     onAfterConfigResolve(siteConfig) {
       resetDocumentationBuildOutput(siteConfig.outDir)
     },
-  })
-}
-
-async function main(): Promise<void> {
-  const args = process.argv.slice(2)
-  if (args.some(arg => arg !== '--mpa') || args.filter(arg => arg === '--mpa').length > 1) {
-    throw new Error('Usage: tsx website/build.ts [--mpa]')
   }
-  await buildDocumentationSite(args[0] === '--mpa')
-}
-
-if (process.argv[1] !== undefined && import.meta.filename === resolve(process.argv[1])) {
-  await main()
 }

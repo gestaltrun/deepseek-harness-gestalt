@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { resetDocumentationBuildOutput } from '../website/build.ts'
+import { documentationBuildOptions, resetDocumentationBuildOutput } from '../website/build.ts'
 import { emitRawMarkdownPages, type ProjectionContext } from './project-doc-site.ts'
 
 const roots: string[] = []
@@ -101,5 +101,22 @@ describe('resetDocumentationBuildOutput', () => {
 
     expect(existsSync(outDir)).toBe(false)
     expect(readFileSync(join(target, 'keep.txt'), 'utf8')).toBe('keep\n')
+  })
+})
+
+describe('documentationBuildOptions', () => {
+  it.each([
+    { mpa: false, expected: undefined },
+    { mpa: true, expected: 'true' },
+  ])('resets the resolved output before an mpa=$mpa build', ({ mpa, expected }) => {
+    const { outDir } = fixture()
+    mkdirSync(outDir, { recursive: true })
+    writeFileSync(join(outDir, 'stale.md'), 'stale\n')
+
+    const options = documentationBuildOptions(mpa)
+    options.onAfterConfigResolve({ outDir })
+
+    expect(options.mpa).toBe(expected)
+    expect(existsSync(outDir)).toBe(false)
   })
 })

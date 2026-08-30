@@ -246,7 +246,7 @@ export class PhoneConnectionController {
   }
 
   /**
-   * Report a failed capture element (img/video error) so a broken stream
+   * Report a failed H264 playback so a broken stream
    * reconnects even while the io socket stays open.
    */
   noteCaptureFailure(): void {

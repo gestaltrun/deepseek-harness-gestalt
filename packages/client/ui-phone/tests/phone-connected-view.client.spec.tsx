@@ -6,15 +6,24 @@
  * tap/gesture, keyboard → text, and the error/suspend arms with their
  * next-action copy.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PhoneConnectedView } from '../src/client/PhoneConnectedView.tsx'
 import { PhoneConnectionController } from '../src/client/phone-connection.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
-import { FakeGateway, FakeListingSource, flush, listingOf, ManualScheduler, SESSION_A } from './phone-fakes.client.ts'
+import {
+  FakeGateway, FakeListingSource, flush, installFakeH264Playback, listingOf, ManualScheduler,
+} from './phone-fakes.client.ts'
 
-afterEach(cleanup)
+let h264Runtime: ReturnType<typeof installFakeH264Playback>
+
+beforeEach(() => { h264Runtime = installFakeH264Playback() })
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 const DEVICES: readonly PhoneDeviceSummary[] = [
   { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
@@ -66,7 +75,7 @@ async function step(body: () => void): Promise<void> {
 function stubRect(el: Element, width: number, height: number): void {
   vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
     left: 0, top: 0, right: width, bottom: height, width, height, x: 0, y: 0, toJSON: () => ({}),
-  } as DOMRect)
+  })
 }
 
 async function renderLive(): Promise<Harness> {
@@ -78,6 +87,10 @@ async function renderLive(): Promise<Harness> {
 
 function frame(): HTMLElement {
   return screen.getByRole('application', { name: /Pixel_6_API_35 画面/ })
+}
+
+function parseSentFrame(value: string): unknown {
+  return JSON.parse(value)
 }
 
 describe('PhoneConnectedView chrome', () => {
@@ -92,6 +105,12 @@ describe('PhoneConnectedView chrome', () => {
     expect(screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })).toBeTruthy()
     expect(screen.getByText('代理中')).toBeTruthy()
     expect(screen.getByText(/点击画面即向设备发送触控/)).toBeTruthy()
+  })
+
+  it('does not delegate the raw H264 elementary stream to an image element', async () => {
+    await renderLive()
+    const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
+    expect(surface).not.toBeInstanceOf(HTMLImageElement)
   })
 
   it('hides the live frame and shows the suspend note while the tab is hidden', async () => {
@@ -201,6 +220,8 @@ describe('PhoneConnectedView chrome', () => {
     )
     await flush()
     await step(() => { gateway.lastSocket!.accept() })
+    await vi.waitFor(() => { expect(h264Runtime.abortSignals).toHaveLength(1) })
+    const firstPlayback = h264Runtime.abortSignals[0]!
     expect(gateway.mintedDevices).toEqual(['emulator-5554'])
     rerender(
       <PhoneConnectedView
@@ -217,10 +238,44 @@ describe('PhoneConnectedView chrome', () => {
       />,
     )
     await flush()
+    expect(firstPlayback.aborted).toBe(true)
     await step(() => { gateway.lastSocket!.accept() })
+    await vi.waitFor(() => { expect(h264Runtime.abortSignals).toHaveLength(2) })
     expect(gateway.mintedDevices).toEqual(['emulator-5554', 'R3CN30'])
     expect(screen.getByRole('button', { name: '切换设备：SM-S9310' })).toBeTruthy()
     expect(screen.getByRole('img', { name: 'SM-S9310 实时画面' })).toBeTruthy()
+  })
+
+  it('cancels playback while inactive and starts a fresh decoder after resume', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const source = new FakeListingSource().seed(listingOf(DEVICES))
+    const props = {
+      serial: 'emulator-5554',
+      name: 'Pixel_6_API_35',
+      source,
+      onOpenDevice: () => {},
+      createController: (serial: string) => new PhoneConnectionController({
+        gateway, deviceId: serial, schedule: scheduler.schedule,
+      }),
+    }
+    const { rerender } = render(<PhoneConnectedView {...props} visible={true} />)
+    await flush()
+    await step(() => { gateway.lastSocket!.accept() })
+    await vi.waitFor(() => { expect(h264Runtime.abortSignals).toHaveLength(1) })
+
+    rerender(<PhoneConnectedView {...props} visible={false} />)
+    await act(async () => {})
+    expect(h264Runtime.abortSignals[0]!.aborted).toBe(true)
+    expect(h264Runtime.decoderCloseCounts[0]).toBe(1)
+    expect(screen.queryByRole('img')).toBeNull()
+
+    rerender(<PhoneConnectedView {...props} visible={true} />)
+    await flush()
+    await step(() => { gateway.lastSocket!.accept() })
+    await vi.waitFor(() => { expect(h264Runtime.abortSignals).toHaveLength(2) })
+    expect(h264Runtime.abortSignals[1]!.aborted).toBe(false)
+    expect(screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })).toBeTruthy()
   })
 
   it('lights the dropdown from the mount pull when the tab restores empty', async () => {
@@ -245,10 +300,8 @@ describe('PhoneConnectedView chrome', () => {
 describe('PhoneConnectedView touch and keys', () => {
   async function withSurface(): Promise<Harness> {
     const harness = await renderLive()
-    const img = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
-    Object.defineProperty(img, 'naturalWidth', { value: 360 })
-    Object.defineProperty(img, 'naturalHeight', { value: 720 })
-    fireEvent.load(img)
+    const canvas = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' }) as HTMLCanvasElement
+    expect({ width: canvas.width, height: canvas.height }).toEqual({ width: 390, height: 844 })
     stubRect(frame(), 200, 400)
     return harness
   }
@@ -259,7 +312,7 @@ describe('PhoneConnectedView touch and keys', () => {
     fireEvent.pointerUp(frame(), { clientX: 100, clientY: 100 })
     expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toEqual({
       jsonrpc: '2.0', id: 1, method: 'tap',
-      params: { deviceId: 'emulator-5554', x: 180, y: 180 },
+      params: { deviceId: 'emulator-5554', x: 195, y: 211 },
     })
   })
 
@@ -273,8 +326,8 @@ describe('PhoneConnectedView touch and keys', () => {
       params: {
         deviceId: 'emulator-5554',
         actions: [
-          { type: 'pointerDown', x: 36, y: 36 },
-          { type: 'pointerUp', x: 234, y: 414 },
+          { type: 'pointerDown', x: 39, y: 42 },
+          { type: 'pointerUp', x: 254, y: 485 },
         ],
       },
     })
@@ -286,7 +339,7 @@ describe('PhoneConnectedView touch and keys', () => {
     fireEvent.keyDown(frame(), { key: 'Enter' })
     fireEvent.keyDown(frame(), { key: 'Backspace' })
     fireEvent.keyDown(frame(), { key: 'c', ctrlKey: true })
-    expect(gateway.lastSocket!.sent.map(sentFrame => JSON.parse(sentFrame))).toEqual([
+    expect(gateway.lastSocket!.sent.map(parseSentFrame)).toEqual([
       { jsonrpc: '2.0', id: 1, method: 'text', params: { deviceId: 'emulator-5554', text: 'a' } },
       { jsonrpc: '2.0', id: 2, method: 'text', params: { deviceId: 'emulator-5554', text: '\n' } },
     ])
@@ -301,7 +354,7 @@ describe('PhoneConnectedView toolbar', () => {
     fireEvent.click(screen.getByRole('button', { name: '最近任务' }))
     const screenshot = screen.getByRole('button', { name: '截图' }) as HTMLButtonElement
     expect(screenshot.disabled).toBe(true)
-    expect(gateway.lastSocket!.sent.map(sentFrame => JSON.parse(sentFrame))).toEqual([
+    expect(gateway.lastSocket!.sent.map(parseSentFrame)).toEqual([
       { jsonrpc: '2.0', id: 1, method: 'button', params: { deviceId: 'emulator-5554', button: 'BACK' } },
       { jsonrpc: '2.0', id: 2, method: 'button', params: { deviceId: 'emulator-5554', button: 'HOME' } },
       { jsonrpc: '2.0', id: 3, method: 'button', params: { deviceId: 'emulator-5554', button: 'RECENTS' } },
@@ -310,12 +363,14 @@ describe('PhoneConnectedView toolbar', () => {
 
   it('refreshes the stream through a brand-new session', async () => {
     const harness = await renderLive()
+    const firstPlayback = h264Runtime.abortSignals[0]!
     fireEvent.click(screen.getByRole('button', { name: '刷新流' }))
+    expect(firstPlayback.aborted).toBe(true)
     expect(harness.gateway.mintedDevices).toHaveLength(2)
     await flush()
     await step(() => { harness.gateway.lastSocket!.accept() })
-    expect((screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' }) as HTMLImageElement).src)
-      .toContain(SESSION_A.h264.url)
+    const canvas = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' }) as HTMLCanvasElement
+    expect({ width: canvas.width, height: canvas.height }).toEqual({ width: 390, height: 844 })
   })
 })
 
@@ -345,13 +400,31 @@ describe('PhoneConnectedView error and recovery arms', () => {
 
   it('shows the reconnecting note between interruption retries', async () => {
     const harness = await renderLive()
+    const firstPlayback = h264Runtime.abortSignals[0]!
     await act(async () => { harness.gateway.lastSocket!.drop() })
+    expect(firstPlayback.aborted).toBe(true)
     expect(screen.getByText(/画面重连中/)).toBeTruthy()
     expect(screen.queryByRole('img')).toBeNull()
     await step(() => { harness.scheduler.runNext() })
     harness.gateway.lastSocket!.accept()
     await act(async () => {})
     expect(screen.getByText('代理中')).toBeTruthy()
+  })
+
+  it('routes a decoder failure into the bounded reconnect arm', async () => {
+    await renderLive()
+    await act(async () => { h264Runtime.failLastDecoder() })
+    expect(screen.getByText(/画面重连中/)).toBeTruthy()
+    expect(h264Runtime.abortSignals[0]!.aborted).toBe(true)
+    expect(h264Runtime.decoderCloseCounts[0]).toBe(1)
+  })
+
+  it('releases H264 playback when the connected view unmounts', async () => {
+    await renderLive()
+    cleanup()
+    expect(h264Runtime.abortSignals[0]!.aborted).toBe(true)
+    expect(h264Runtime.decoderCloseCounts[0]).toBe(1)
+    expect(h264Runtime.frameCloseCounts).toEqual([1])
   })
 
   it('surfaces the interrupted error card once the retry budget is spent', async () => {

@@ -6,9 +6,9 @@
 
 条上只保留一个「手机」tab（`single: true`）。内容按 `meta` 分流：无 serial 是空态；`{ kind: 'device', serial, name }` 占用同一 tab，标题为 `手机·<name>`。「打开」与设备下拉经 `updateTab` 就地切换（决策矩阵轴 1：单例就地切换）。关闭部署会拒绝切换：检测关闭时无法铸造任何流会话。清单行读取 listing wire（`online` 为推导值，`state` 按 #421 `PhoneDeviceRefWire` 契约原样透传）：空态清单与已连接下拉只列在线设备；`state === 'unauthorized'` 的真机仍在空态渲染设计稿警示臂——「真机未授权调试」+ 下一步动作「重新检测」——且不进入下拉。在线行带「打开」按钮；`PHONE_UNRESOLVED` 的清单拉取渲染「未找到 mobilecli」并给出 `npm install -g mobilecli@latest` 命令。选择器内容经 gate source 响应式跟随持久化开关：在设置卡拨动开关，已挂载的「手机连接未启用」说明条同 tick 刷新（并武装首次清单拉取）。
 
-清单把占用设备标为未授权时，已连接内容渲染同一条警示臂（实时流优先于过期清单），并消费 Host `phone-stream` 的同源通道但不 import 它：`POST /phone/session` 以 `format: 'avc'` 铸造签名采集地址，`/phone/ws/io` WebSocket 承载 JSON-RPC `tap` / `gesture` / `text` / `button`，签名 H264 URL 用原生 `<img>` 播放并以图片自然尺寸作为触控坐标面。内容按已锁稿状态 ③ 渲染：devbar 对齐 BrowserView 节奏（6×8 边距、28 高控件），承载设备下拉与 H264 徽标；1:2 固定比例画面在面板剩余空间居中（轴 3 格 B）；底部为圆形 返回/主屏幕/最近任务/截图/刷新流 工具条（带已锁稿的 H264 30 fps 说明：流契约无 fps 字段，现为设计稿文案）与触控提示行。点击画面发送 tap，拖动超过 6px 发送 `pointerDown`/`pointerMove`…/`pointerUp` gesture，可打印字符（Enter 为 `\n`）发送 text；「截图」保持禁用，直到会话附件存储就绪。
+清单把占用设备标为未授权时，已连接内容渲染同一条警示臂（实时流优先于过期清单），并消费 Host `phone-stream` 的同源通道但不 import 它：`POST /phone/session` 以 `format: 'avc'` 铸造签名采集地址，`/phone/ws/io` WebSocket 承载 JSON-RPC `tap` / `gesture` / `text` / `button`，`PhoneH264Surface` 把签名 H264 URL 拉取到 canvas。其播放模块解析流式 Annex-B access unit，从 SPS 推导 codec，对 `VideoDecoder` 施加背压，绘制并关闭每个 `VideoFrame`，再把解码后的显示尺寸报告为触控坐标面。内容按已锁稿状态 ③ 渲染：devbar 对齐 BrowserView 节奏（6×8 边距、28 高控件），承载设备下拉与 H264 徽标；1:2 固定比例画面在面板剩余空间居中（轴 3 格 B）；底部为圆形 返回/主屏幕/最近任务/截图/刷新流 工具条（带已锁稿的 H264 30 fps 说明：流契约无 fps 字段，现为设计稿文案）与触控提示行。点击画面发送 tap，拖动超过 6px 发送 `pointerDown`/`pointerMove`…/`pointerUp` gesture，可打印字符（Enter 为 `\n`）发送 text；「截图」保持禁用，直到会话附件存储就绪。
 
-连接生命周期收敛在 `PhoneConnectionController`（无 React，占用设备一实例）：铸造 → io 打开 → live；`visible: false` 暂停拉流，恢复时重新铸造——签名地址短时效。serial 变化会销毁上一份控制器。中断（`onClose`、`onError`、采集元素错误）进入有界自动重连（3 次线性退避），预算耗尽落到错误卡。终态分支——设备离线（铸造 404 或 io `-32010`）、真机调试未授权（上游报文）、被拒绝（403）——跳过重试循环，按已锁稿状态 ④ 渲染带唯一「重新连接」下一步动作的错误卡。渲染层只镜像阶段快照；全部决策留在控制器内，fake gateway 的 spec 逐一证明迁移。
+连接生命周期收敛在 `PhoneConnectionController`（无 React，占用设备一实例）：铸造 → io 打开 → live；`visible: false` 暂停拉流，恢复时重新铸造——签名地址短时效。serial 变化会销毁上一份控制器。中断（`onClose`、`onError`、H264 拉取/解析/解码/绘制失败）进入有界自动重连（3 次线性退避），预算耗尽落到错误卡。`PhoneH264Surface` 会在 URL 变化、暂停、重连与卸载时关闭其 fetch reader 与 decoder。终态分支——设备离线（铸造 404 或 io `-32010`）、真机调试未授权（上游报文）、被拒绝（403）——跳过重试循环，按已锁稿状态 ④ 渲染带唯一「重新连接」下一步动作的错误卡。渲染层只镜像阶段快照；全部决策留在控制器内，fake gateway 的 spec 逐一证明迁移。
 
 Host 半边在 settings 提供方组装时注册持久化 `ui-phone` 命名空间（`enabled`，boolean，默认 `false`）。浏览器半边贡献顶层设置分区（`id: phone-devices`，导航标签「手机设备」 / Phone Devices），分区主体就是六态环境向导。本页不是「移动伴侣」：伴侣是人用手机连桌面，这里是设备被控调试。向导拥有关闭 / 探测中 / Android 向导 / iOS 向导 / 就绪清单 / 可恢复错误行。命令级安装指引带「复制」按钮，剪贴板内容就是稿中的 `sdkmanager` / `avdmanager` / `emulator` / `xcodebuild` / `xcrun simctl` 命令。每条错误行共用动词「下一步动作」。检测数据经窄接口 `PhoneEnvironmentSource` 进入。随包实现包装选择器已在用的 Host `GET /phone/devices` 清单：成功拉取可到达探测中、两端向导与就绪清单；`PHONE_UNRESOLVED` 拉取落到未找到 mobilecli 行并给出安装命令；其余缺失或拒绝的设备路由回落到探测失败行。本包不 import `phone-runtime` 与 `phone-stream`。
 
@@ -20,7 +20,7 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 
 ## Model Experience
 
-无。本包只注册侧栏 tab 与设置卡并渲染 HTML；不贡献 prompt 段、工具 schema、流或会话事件，启用闸门也不增加任何模型可见面。
+无，因为本包只注册浏览器侧控件与视频播放；不贡献 prompt 段、工具 schema、模型流或会话事件。
 
 #### KV Cache effect
 
@@ -29,7 +29,6 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 ## Known Limitations and Deferred Work
 
 - **徽标保真缺口**——pill 节点已 aria-hidden（可访问性 P3：计数不再进入 tab 可访问名），但已锁稿的 灰点（无设备）/ 绿色数字（在线台数）仍需点形与配色渲染路径，而钉死的 better-sidebar 徽标契约只提供包裹字符串或数字的中性 pill，且 `null` 会整体隐藏 pill。本包因此先交付值层面的两态（静默 / 计数）；点样式待契约扩展后落地。徽标回调也看不到渲染它的 tab 实例，因此每个手机 tab 显示的是全队在线台数，而非激活设备的绿点。
-- **裸 `avc` 播放属于 Host/解码器票**——实时画面只请求 H264（`POST /phone/session` 带 `format: 'avc'`）并加载签名的 `h264` URL；基本流的 MSE/WebCodecs 封装不是本包的工作。
 - **「截图」禁用**——设计稿把截图存入会话附件；客户端侧暂无可用的附件通道，按钮以 tooltip 禁用渲染，不做假动作。
 - **设置卡从设备清单推断环境**——Host `phoneDevices` 不在线上发布 adb/SDK/Xcode 探测事实，因此一份成功的空清单仍会打开平台向导（macOS 上为 iOS，否则为 Android），而不是按二进制逐项列出检查表。
 - **「最近设备」与行内「启动」是后续界面**——票面点名了最近设备与模拟器启动，但设备历史与浏览器可达的启动路由都不存在；选择器现阶段只交付「打开」。

@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { PhoneConnectionController, PhoneStreamFailureKind } from './phone-connection.ts'
 import type { PhoneListingSource } from './registry.ts'
+import { PhoneH264Surface } from './PhoneH264Surface.tsx'
 import css from './PhoneConnectedView.module.css'
 import shared from './PhoneShared.module.css'
 
@@ -200,13 +201,11 @@ export function PhoneConnectedView({
           onPointerUp={onPointerUp}
           onKeyDown={onKeyDown}
         >
-          <img
-            role="img"
-            aria-label={`${name} 实时画面`}
+          <PhoneH264Surface
+            label={`${name} 实时画面`}
             className={css.stream}
-            src={phase.streamUrl}
-            alt=""
-            onLoad={(event) => { controller.noteSurface(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight) }}
+            url={phase.streamUrl}
+            onSurface={(width, height) => { controller.noteSurface(width, height) }}
             onError={() => { controller.noteCaptureFailure() }}
           />
           <span className={css.liveFlag}>

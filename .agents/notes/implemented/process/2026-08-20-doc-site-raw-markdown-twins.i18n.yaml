@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-08-20-doc-site-raw-markdown-twins.md
-2026-08-20-doc-site-raw-markdown-twins.md: 5b45657d13d02bc7211e47cad2143afd6890d4e2
-2026-08-20-doc-site-raw-markdown-twins.zh.md: 1730c9e23ee7abc72350943370a0a346ddc4e7f4
+2026-08-20-doc-site-raw-markdown-twins.md: 9030c17e772ab7368ae8c0c4d47de2c098778bff
+2026-08-20-doc-site-raw-markdown-twins.zh.md: 9ddd3c4486a5650405ccb411bfe18b4df5afa370

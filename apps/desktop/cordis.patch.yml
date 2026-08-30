@@ -6,6 +6,30 @@
     - id: ui-desktop
       name: '@deepseek-ai/dsh-client-ui-desktop'
 
+    # Phone tab: always reachable; without phoneDevices the UI renders its
+    # deterministic missing state, so the row itself is not gated.
+    - id: ui-phone
+      name: '@deepseek-ai/dsh-client-ui-phone'
+
+# Phone fleet: entirely opt-in on Desktop. While DSH_PHONE_MOBILECLI is unset
+# the runtime, stream, and tool rows stay unmounted and the Phone tab renders
+# its missing state; setting it to the mobilecli executable path mounts all
+# three, and a bad path fails loud at first use.
+- insert:
+    - id: phone-runtime
+      name: '@deepseek-ai/dsh-phone-runtime'
+      disabled: !!js process.env.DSH_PHONE_MOBILECLI == null
+      config:
+        executablePath: !!js process.env.DSH_PHONE_MOBILECLI
+
+    - id: phone-stream
+      name: '@deepseek-ai/dsh-phone-stream'
+      disabled: !!js process.env.DSH_PHONE_MOBILECLI == null
+
+    - id: tool-phone
+      name: '@deepseek-ai/dsh-tool-phone'
+      disabled: !!js process.env.DSH_PHONE_MOBILECLI == null
+
 # DeepSeek Gestalt owns authoritative Companion search and therefore activates
 # the derived full-text index in its Desktop-only layer. Browser `dsh web`
 # retains the base opt-in stance.

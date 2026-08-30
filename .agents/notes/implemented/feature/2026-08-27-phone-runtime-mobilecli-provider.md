@@ -16,7 +16,7 @@ The mobile device dock (#355) needs a Host-side answer to "what phone hardware e
 - probes readiness (`server.info`), then polls `devices.list` with `includeOffline: true` so shutdown simulators stay visible boot targets; `online` maps from the upstream `state` field, `kind` from the upstream `type` field (`emulator`/`simulator`/`real`, anything else is a loud `PHONE_PROTOCOL`);
 - publishes grouped listings `{ android, ios: { simulators, reals } }` only on a real difference and notifies `onChanged` subscribers with the exact added/removed id delta, enforced at runtime by the package's invariant companion (pre-publication recompute against the published listing);
 - refuses `boot`/`shutdown` on physical handsets locally before any RPC, mirroring the upstream simulator-only restriction;
-- fails loud at every stage: unresolvable binary throws composition-time guidance (`npm install -g mobilecli@latest`; no brew formula exists upstream), pre-ready child death rejects plugin initialization, and post-ready loss (exit, refused socket, protocol breach, invariant breach) marks the Service lost so later operations reject with the recorded reason.
+- fails loud at every stage after activation: an unresolvable binary still activates the Service and every operation then rejects with `PHONE_UNRESOLVED` plus install guidance (`npm install -g mobilecli@latest`; no brew formula exists upstream) instead of killing Host composition ([graceful missing-binary](../bug-fix/2026-08-30-phone-runtime-unresolved-mobilecli.md)); pre-ready child death rejects plugin initialization; post-ready loss (exit, refused socket, protocol breach, invariant breach) marks the Service lost so later operations reject with the recorded reason.
 
 Deployment-varying knobs are validated Config fields (`executablePath`, `serverPort` — upstream default 12000, `pollIntervalMs`, `readyTimeoutMs`, `requestTimeoutMs` — upstream RPC timeout, `bootTimeoutMs` — the upstream extended boot deadline). All operations fuse the caller's `AbortSignal` with these ceilings and normalize every failure onto the closed `PhoneErrorCode` union carried by `PhoneDevicesError`.
 
@@ -26,7 +26,7 @@ Deployment-varying knobs are validated Config fields (`executablePath`, `serverP
 
 **Split Definition/Provider packages now.** Rejected as premature: with exactly one backend, the split only duplicates the manifest/tsconfig boilerplate the seam note warns about; the `ctx.phoneDevices` key and vocabulary already isolate Consumers from the fold.
 
-**Best-effort composition without mobilecli.** Rejected: a silently empty device list is worse than a loud install error; the package's value is trustworthy fleet truth, and "no binary" is a deployment mistake an operator must see.
+**Silently empty composition without mobilecli.** Rejected: a silently empty device list is worse than a loud install error; the package's value is trustworthy fleet truth, and "no binary" is a deployment mistake an operator must see. Composition itself no longer throws — see [the unresolved-binary note](../bug-fix/2026-08-30-phone-runtime-unresolved-mobilecli.md) — because killing the Host for an optional provider hides the guidance.
 
 ## Consequences
 

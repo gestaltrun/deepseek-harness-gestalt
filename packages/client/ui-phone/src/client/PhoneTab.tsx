@@ -12,6 +12,7 @@ import type { ReactNode } from 'react'
 import {
   PHONE_PLATFORMS, type PhoneDeviceSummary, type PhoneGateSource, type PhoneListingSource, type PhonePlatform,
 } from './registry.ts'
+import { PhoneStreamHttpError } from './phone-stream-client.ts'
 import css from './PhoneTab.module.css'
 import shared from './PhoneShared.module.css'
 
@@ -58,6 +59,23 @@ function rowMetaOf(device: PhoneDeviceSummary): string {
   return runningStateOf(device)
 }
 
+/** Copy the picker error arm shows for one listing-pull failure. */
+function listingErrorCopy(error: unknown): { title: string; detail: string; command?: string } {
+  if (error instanceof PhoneStreamHttpError && error.code === 'PHONE_UNRESOLVED') {
+    return {
+      title: '未找到 mobilecli',
+      detail: 'Host 已启动，但无法解析 mobilecli 可执行文件。安装后重新检测。',
+      command: 'npm install -g mobilecli@latest',
+    }
+  }
+  return {
+    title: '无法读取设备清单',
+    detail: error instanceof Error && error.message.length > 0
+      ? error.message
+      : '设备清单请求失败；请重新检测。',
+  }
+}
+
 /**
  * Render the empty-state body for one tab.
  * @param props - enable-gate value, the injected listing source, and the opener.
@@ -74,16 +92,22 @@ export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNo
   const gateSnapshot = useCallback(() => gate.snapshot(), [gate])
   const enabled = useSyncExternalStore(gateSubscribe, gateSnapshot, gateSnapshot)
   const [refreshing, setRefreshing] = useState(false)
-  const refresh = (): void => {
+  const [listingError, setListingError] = useState<unknown>()
+  const refresh = useCallback((): void => {
     setRefreshing(true)
-    // A failed pull keeps the committed listing on screen; the next click retries.
-    source.refresh().catch(() => undefined).finally(() => { setRefreshing(false) })
-  }
+    // A failed pull keeps the committed listing on screen and lights the
+    // error arm; the next click retries.
+    source.refresh()
+      .then(() => { setListingError(undefined) })
+      .catch((error: unknown) => { setListingError(error) })
+      .finally(() => { setRefreshing(false) })
+  }, [source])
   useEffect(() => {
     if (!enabled) return
-    source.refresh().catch(() => undefined)
-  }, [enabled, source])
+    refresh()
+  }, [enabled, refresh])
   const devices = listing[platform]
+  const listingFailure = listingError === undefined ? undefined : listingErrorCopy(listingError)
   return (
     <div className={css.phone}>
       {!enabled && (
@@ -108,6 +132,25 @@ export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNo
         ))}
       </div>
       <p className={css.platformHint}>{PLATFORM_HINTS[platform]}</p>
+      {listingFailure !== undefined && (
+        <div role="alert" className={css.listingFailedArm}>
+          <p className={css.unauthorizedTitle}>{listingFailure.title}</p>
+          <p className={css.unauthorizedDetail}>{listingFailure.detail}</p>
+          {listingFailure.command !== undefined && (
+            <code className={css.listingFailedCommand}>{listingFailure.command}</code>
+          )}
+          <div className={css.alertActions}>
+            <button
+              type="button"
+              className={css.redetectButton}
+              disabled={refreshing}
+              onClick={refresh}
+            >
+              重新检测
+            </button>
+          </div>
+        </div>
+      )}
       {GROUPS.map(({ channel }) => {
         const group = devices.filter(device => device.channel === channel)
         const visible = group.filter(device => device.online || device.state === 'unauthorized')

@@ -17,7 +17,7 @@ All operations accept an optional `AbortSignal` and enforce validated time ceili
 
 | Field | Default | Meaning |
 |---|---|---|
-| `executablePath` | — | Absolute or cwd-relative override; when absent, each `PATH` directory is probed for `mobilecli`. |
+| `executablePath` | — | Absolute or cwd-relative override; when absent, `PATH` is searched first, then npm-global, the npx cache, and `npm_config_prefix`. An Electron-minimal PATH also probes `/opt/homebrew/bin` and `/usr/local/bin`. |
 | `serverPort` | `12000` | Loopback port passed as `--listen 127.0.0.1:<port>`; mirrors the upstream default. |
 | `pollIntervalMs` | `5000` | Health-probe and device-poll cadence. |
 | `readyTimeoutMs` | `60000` | Total window for the first readiness probe; exceeded readiness fails the plugin loudly. |
@@ -28,7 +28,7 @@ All operations accept an optional `AbortSignal` and enforce validated time ceili
 
 ## Extension points
 
-A missing or unusable mobilecli fails composition loudly with install guidance (`npm install -g mobilecli@latest`; no Homebrew formula exists upstream); nothing degrades silently. The package also exports a `./invariant` companion that must ride every real Service generation and validates that every change notification names exactly the difference its own listing has versus the published one.
+A missing or unusable mobilecli still activates the Service; `listDevices`, `boot`, `shutdown`, `io`, `startCapture`, and the agent verbs then reject with `PHONE_UNRESOLVED` and install guidance (`npm install -g mobilecli@latest`; no Homebrew formula exists upstream). The Host stays up. The package also exports a `./invariant` companion that must ride every real Service generation and validates that every change notification names exactly the difference its own listing has versus the published one.
 
 ## Model Experience
 
@@ -42,6 +42,6 @@ Independent of model requests: the Service spawns a local mobilecli child, polls
 
 - **External FSL-1.1-Apache-2.0 dependency edge** — mobilecli is executed, never vendored or copied; its binaries stay outside this repository, so behavior follows whatever version the user installed and this package pins nothing.
 - **Loopback only** — the spawned server is always bound to `127.0.0.1:<serverPort>`; remote device fleets behind a mobilecli server on another host are out of scope.
-- **User preinstall required** — without a user-installed mobilecli the Service refuses to compose (by design); no auto-download, no Homebrew formula exists upstream, and Android support additionally needs `adb` in PATH while iOS simulators need Xcode Command Line Tools.
+- **User preinstall required** — without a user-installed mobilecli the Service stays composed and every operation rejects with `PHONE_UNRESOLVED` (by design); no auto-download, no Homebrew formula exists upstream, and Android support additionally needs `adb` in PATH while iOS simulators need Xcode Command Line Tools.
 - **Real-iPhone coverage is opt-in** — the hardware-in-the-loop suite runs only when `DSH_PHONE_REAL_UDID` names a connected handset (and `DSH_PHONE_REAL_PROFILE` its provisioning profile); every other host self-skips it, so CI pins the real-device link only against the fake mobilecli double. The on-device agent artifacts are downloaded by mobilecli itself during `agent install`, never by this package, and iOS device tunnels stay owned by the mobilecli server — a failed tunnel surfaces only through the structured `tunnel-failed` arm.
 - **No Windows coverage** — the mobilecli shim scenarios in this package's suites are POSIX-only, and Windows npm-global `.cmd` shims are untested; point `executablePath` at a native `mobilecli.exe` and treat Windows as unverified until suites cover it.

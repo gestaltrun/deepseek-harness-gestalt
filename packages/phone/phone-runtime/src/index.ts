@@ -96,8 +96,9 @@ const IO_METHODS = {
  */
 export interface Config {
   /**
-   * Absolute path to the `mobilecli` executable. When omitted, each `PATH`
-   * directory is searched for a matching executable file.
+   * Absolute path to the `mobilecli` executable. When omitted, `PATH` is
+   * searched first, then npm-global, the npx cache, and `npm_config_prefix`.
+   * An Electron-minimal PATH also probes `/opt/homebrew/bin` and `/usr/local/bin`.
    */
   executablePath?: string
   /** Loopback TCP port the spawned server listens on. */
@@ -186,14 +187,16 @@ declare module '@deepseek-ai/cordis' {
  * accept an optional cancellation signal and enforce validated time ceilings;
  * every failure normalizes onto {@link PhoneDevicesError}. A device-set
  * notification is published only after a poll observes a real difference from
- * the previously committed listing, and mobilecli problems fail loudly instead
- * of degrading.
+ * the previously committed listing. An unresolvable mobilecli still activates
+ * the Service; every operation then rejects with `PHONE_UNRESOLVED` and
+ * install guidance instead of failing composition.
  *
  * Operation failure codes:
  * - `PHONE_DISPOSED` — the owning fiber began teardown.
  * - `PHONE_ABORTED` — the caller's signal won before completion.
  * - `PHONE_TIMEOUT` — the operation's configured ceiling elapsed.
  * - `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.
+ * - `PHONE_UNRESOLVED` — the mobilecli executable could not be resolved.
  * - `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.
  * - `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.
  * - `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).
@@ -219,7 +222,8 @@ export class PhoneDevices extends Service {
   readonly [PHONE_RUNTIME_STATE_OWNER]: PhoneRuntimeStateOwner = Object.freeze({})
 
   private readonly resolved: ResolvedConfig
-  private readonly executablePath: string
+  private readonly executablePath: string | undefined
+  private readonly resolutionFailure: PhoneDevicesError | undefined
   private readonly subscribers = new Set<(change: PhoneDeviceChange) => void>()
   private readonly lifetime = new AbortController()
   private queueTail: Promise<void> = Promise.resolve()
@@ -234,10 +238,11 @@ export class PhoneDevices extends Service {
   private pollTimer: ReturnType<typeof setTimeout> | undefined
 
   /**
-   * Resolve the external binary loudly, spawn the loopback server child, and
-   * register lifecycle effects. A missing or unusable mobilecli throws here
-   * with install guidance; later startup failures reject plugin initialization
-   * so composition still fails visibly.
+   * Resolve the external binary, spawn the loopback server child, and
+   * register lifecycle effects. A missing or unusable mobilecli still
+   * activates the Service; later operations reject with `PHONE_UNRESOLVED`
+   * and install guidance. Other startup failures still reject plugin
+   * initialization so a broken child remains visible.
    * @param ctx - Owning Cordis context.
    * @param config - Composition config validated against {@link PhoneDevices.Config}.
    */
@@ -245,11 +250,18 @@ export class PhoneDevices extends Service {
     super(ctx, 'phoneDevices')
     this.resolved = resolveValidatedConfig(config)
     const override = this.resolved.executablePath
-    const executablePath = resolveMobilecliExecutable({
-      ...(override !== undefined ? { executablePath: override } : {}),
-      env: process.env,
-    })
-    this.executablePath = executablePath
+    try {
+      this.executablePath = resolveMobilecliExecutable({
+        ...(override !== undefined ? { executablePath: override } : {}),
+        env: process.env,
+      })
+    } catch (error) {
+      this.resolutionFailure = new PhoneDevicesError(
+        'PHONE_UNRESOLVED',
+        error instanceof Error ? error.message : String(error),
+        { cause: error },
+      )
+    }
     ctx.effect(() => () => {
       this.subscribers.clear()
     }, 'phone runtime subscriber registry cleanup')
@@ -258,20 +270,42 @@ export class PhoneDevices extends Service {
       () => registerPhoneRuntimeStateReader(this[PHONE_RUNTIME_STATE_OWNER], () => this.publishedList),
       'phone runtime state reader',
     )
+    if (this.resolutionFailure !== undefined) return
     this.child = new MobilecliServerProcess({
-      executablePath,
+      executablePath: this.executable,
       port: this.resolved.serverPort,
     })
     this.rpcClient = new MobilecliRpc(`http://127.0.0.1:${String(this.resolved.serverPort)}`)
   }
 
   /**
-   * Await server readiness as part of plugin initialization; a rejected start
-   * fails the whole plugin loudly.
+   * Await server readiness as part of plugin initialization. An unresolved
+   * binary skips the child; a rejected start still fails the plugin loudly.
    */
   protected [Service.init](): Promise<void> {
+    if (this.resolutionFailure !== undefined) return Promise.resolve()
     this.startupOutcome ??= this.startup()
     return this.startupOutcome
+  }
+
+  /** Refuse operations while the mobilecli executable is unresolvable. */
+  private requireResolved(): void {
+    if (this.resolutionFailure !== undefined) throw this.resolutionFailure
+  }
+
+  /**
+   * The resolved executable path.
+   * @returns the path accepted by spawn; callers run after {@link requireResolved}.
+   */
+  private get executable(): string {
+    /* v8 ignore next -- requireResolved already threw for the unresolved arm */
+    if (this.executablePath === undefined) {
+      throw this.resolutionFailure ?? new PhoneDevicesError(
+        'PHONE_UNRESOLVED',
+        'phone-runtime: the mobilecli executable was not resolved',
+      )
+    }
+    return this.executablePath
   }
 
   /** Reject work entering after teardown begins. */
@@ -405,6 +439,7 @@ export class PhoneDevices extends Service {
    */
   async listDevices(signal?: AbortSignal): Promise<PhoneDeviceList> {
     this.assertAccepting()
+    this.requireResolved()
     await this.whenReady(signal)
     const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, signal, this.resolved.requestTimeoutMs)
     return groupEntries(parseDeviceInfos(result))
@@ -419,6 +454,7 @@ export class PhoneDevices extends Service {
    *   and otherwise per the class-documented failure modes.
    */
   async boot(id: DeviceId, signal?: AbortSignal): Promise<void> {
+    this.requireResolved()
     this.requireVirtual(id, 'boot')
     await this.whenReady(signal)
     await this.roundTrip(METHOD_DEVICE_BOOT, { deviceId: id }, signal, this.resolved.bootTimeoutMs)
@@ -436,6 +472,7 @@ export class PhoneDevices extends Service {
    *   and otherwise per the class-documented failure modes.
    */
   async shutdown(id: DeviceId, signal?: AbortSignal): Promise<void> {
+    this.requireResolved()
     this.requireVirtual(id, 'shutdown')
     await this.whenReady(signal)
     await this.roundTrip(METHOD_DEVICE_SHUTDOWN, { deviceId: id }, signal, this.resolved.requestTimeoutMs)
@@ -453,6 +490,7 @@ export class PhoneDevices extends Service {
    *   class-documented failure modes.
    */
   async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void> {
+    this.requireResolved()
     this.requireKnown(request.deviceId, 'io')
     await this.whenReady(signal)
     await this.roundTrip(IO_METHODS[request.method], ioParams(request), signal, this.resolved.requestTimeoutMs)
@@ -469,6 +507,7 @@ export class PhoneDevices extends Service {
    *   class-documented failure modes.
    */
   async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream> {
+    this.requireResolved()
     this.requireKnown(request.deviceId, 'capture')
     await this.whenReady(request.signal)
     this.assertUsable()
@@ -515,11 +554,12 @@ export class PhoneDevices extends Service {
    */
   async agentStatus(id: DeviceId, signal?: AbortSignal): Promise<PhoneAgentStatus> {
     this.assertAccepting()
+    this.requireResolved()
     await this.whenReady(signal)
     this.assertUsable()
     this.requireKnown(id, 'agent status')
     const answer = await runMobilecliAgent({
-      executablePath: this.executablePath,
+      executablePath: this.executable,
       args: ['agent', 'status', '--device', id],
       signal,
       timeoutMs: this.resolved.agentTimeoutMs,
@@ -544,6 +584,7 @@ export class PhoneDevices extends Service {
    */
   async installAgent(id: DeviceId, options: PhoneAgentInstallOptions = {}): Promise<PhoneAgentInstallResult> {
     this.assertAccepting()
+    this.requireResolved()
     await this.whenReady(options.signal)
     this.assertUsable()
     this.requireKnown(id, 'agent install')
@@ -554,7 +595,7 @@ export class PhoneDevices extends Service {
     }
     const profile = this.resolved.provisioningProfilePath
     const answer = await runMobilecliAgent({
-      executablePath: this.executablePath,
+      executablePath: this.executable,
       args: [
         'agent', 'install', '--device', id,
         ...(options.force === true ? ['--force'] : []),

@@ -92,7 +92,7 @@ export class PhoneSettingsCardController {
       redetect: () => { void this.source.redetect() },
       copyCommand: (command) => { void this.clipboard?.writeText(command) },
       nextAction: (kind) => {
-        if (kind === 'no-devices' || kind === 'adb-missing' || kind === 'probe-failed') {
+        if (kind === 'no-devices' || kind === 'adb-missing' || kind === 'probe-failed' || kind === 'mobilecli-missing') {
           void this.source.redetect()
         }
       },

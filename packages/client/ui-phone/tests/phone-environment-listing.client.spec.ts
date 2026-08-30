@@ -5,7 +5,8 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
-import { PROBE_FAILED_ERROR } from '../src/client/phone-environment.ts'
+import { MOBILECLI_MISSING_ERROR, PROBE_FAILED_ERROR } from '../src/client/phone-environment.ts'
+import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import { FakeListingSource, listingOf } from './phone-fakes.client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
 
@@ -92,6 +93,19 @@ describe('createListingPhoneEnvironmentSource', () => {
     const source = createListingPhoneEnvironmentSource(listing)
     await source.redetect()
     expect(source.getView()).toEqual({ kind: 'errors', errors: [PROBE_FAILED_ERROR] })
+  })
+
+  it('renders the mobilecli-missing row when the Host reports PHONE_UNRESOLVED', async () => {
+    const listing = new FakeListingSource()
+    listing.scriptNext(Promise.reject(new PhoneStreamHttpError(
+      502,
+      'PHONE_UNRESOLVED',
+      'phone-runtime: cannot resolve the mobilecli executable.\n  npm install -g mobilecli@latest',
+    )))
+    const source = createListingPhoneEnvironmentSource(listing)
+    await source.redetect()
+    expect(source.getView()).toEqual({ kind: 'errors', errors: [MOBILECLI_MISSING_ERROR] })
+    expect(MOBILECLI_MISSING_ERROR.command).toBe('npm install -g mobilecli@latest')
   })
 
   it('notifies subscribers when a pull settles', async () => {

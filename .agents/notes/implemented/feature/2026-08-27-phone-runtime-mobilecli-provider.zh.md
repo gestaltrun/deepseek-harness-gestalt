@@ -16,7 +16,7 @@
 - 探测就绪（`server.info`），随后以 `includeOffline: true` 轮询 `devices.list`，让已关机的模拟器保持可见的 boot 目标；`online` 映射自上游 `state` 字段，`kind` 映射自上游 `type` 字段（`emulator`/`simulator`/`real`，其余一律响亮的 `PHONE_PROTOCOL`）；
 - 仅在真实差异时发布分组清单 `{ android, ios: { simulators, reals } }`，并以精确的 added/removed id 差值通知 `onChanged` 订阅者；该关系由本包的 invariant 伴生插件在运行时强制（发布前对照已发布清单重推差异）；
 - 在任何 RPC 之前于本包内拒绝真机的 `boot`/`shutdown`，镜像上游仅限模拟器的限制；
-- 每一阶段都响亮失败：二进制不可解析即在组合期抛出安装指引（`npm install -g mobilecli@latest`；上游没有 brew formula）、就绪前子进程退出令插件初始化拒绝、就绪后的失联（退出、拒连、协议违背、invariant 违背）将 Service 置为 lost，后续操作以记录的原因拒绝。
+- 激活后每一阶段都响亮失败：二进制不可解析仍会激活 Service，此后一切操作以 `PHONE_UNRESOLVED` 拒绝并附带安装指引（`npm install -g mobilecli@latest`；上游没有 brew formula），而不是拖垮 Host 组合（[缺失二进制优雅降级](../bug-fix/2026-08-30-phone-runtime-unresolved-mobilecli.zh.md)）；就绪前子进程退出令插件初始化拒绝；就绪后的失联（退出、拒连、协议违背、invariant 违背）将 Service 置为 lost，后续操作以记录的原因拒绝。
 
 部署相关旋钮是经校验的 Config 字段（`executablePath`、`serverPort`——上游默认 12000、`pollIntervalMs`、`readyTimeoutMs`、`requestTimeoutMs`——上游 RPC 超时、`bootTimeoutMs`——上游扩展 boot 截止）。所有操作将调用方 `AbortSignal` 与这些上限融合，并把一切失败归一到 `PhoneDevicesError` 携带的封闭 `PhoneErrorCode` 联合。
 
@@ -26,7 +26,7 @@
 
 **现在就拆分 Definition/Provider 两包。** 否决，为时过早：只有一个 backend 时，拆分只会复制 seam 笔记警示的 manifest/tsconfig 样板；`ctx.phoneDevices` 键与词表已把 Consumer 与折叠实现隔离。
 
-**无 mobilecli 时尽力组合。** 否决：静默的空设备列表比响亮的安装错误更糟；本包的价值就是可信的设备群事实，“没有二进制”是运维必须看见的部署错误。
+**无 mobilecli 时静默空清单。** 否决：静默的空设备列表比响亮的安装错误更糟；本包的价值就是可信的设备群事实，“没有二进制”是运维必须看见的部署错误。组合本身不再抛错——见[不可解析二进制笔记](../bug-fix/2026-08-30-phone-runtime-unresolved-mobilecli.zh.md)——因为为可选提供方拖垮 Host 会把指引一并藏掉。
 
 ## Consequences
 

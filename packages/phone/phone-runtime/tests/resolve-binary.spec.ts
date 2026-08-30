@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -49,7 +49,7 @@ describe('explicit executablePath', () => {
     const dir = await stageDir()
     const missing = join(dir, 'nowhere', 'mobilecli')
     expect(() => resolveMobilecliExecutable({ executablePath: missing, env: {} }))
-      .toThrow(/executablePath.*not an executable file/s)
+      .toThrow(/executablePath.*not an executable file[\s\S]*npm install -g mobilecli@latest/s)
   })
 })
 
@@ -95,8 +95,116 @@ describe('PATH discovery', () => {
     expect(guidance).toContain('executablePath')
   })
 
-  it('treats an empty PATH as a failing search', () => {
-    expect(() => resolveMobilecliExecutable({ env: {} })).toThrow(/\(PATH is empty\)/)
+  it('treats an empty search space as a failing search', () => {
+    expect(() => resolveMobilecliExecutable({ env: {} })).toThrow(/\(no candidate directories\)/)
+  })
+
+  it('finds mobilecli in the npx cache when PATH misses', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const npxBin = join(home, '.npm', '_npx', 'abc123', 'node_modules', '.bin')
+    await mkdir(npxBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(npxBin, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({ env: { PATH: '/no/mobilecli/here' }, home })
+    expect(resolved).toBe(join(npxBin, 'mobilecli'))
+  })
+
+  it('prefers PATH over the npx cache and the npm-global directory', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const npxBin = join(home, '.npm', '_npx', 'abc123', 'node_modules', '.bin')
+    const globalBin = join(home, '.npm-global', 'bin')
+    await mkdir(npxBin, { recursive: true })
+    await mkdir(globalBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(npxBin, 'mobilecli'))
+    await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
+    const pathDir = await stageDir()
+    await copyFile(join(dir, 'mobilecli'), join(pathDir, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({
+      env: { PATH: pathDir },
+      home,
+    })
+    expect(resolved).toBe(join(pathDir, 'mobilecli'))
+  })
+
+  it('finds mobilecli in the npm-global directory when PATH misses', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const globalBin = join(home, '.npm-global', 'bin')
+    await mkdir(globalBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({ env: { PATH: '/no/mobilecli/here' }, home })
+    expect(resolved).toBe(join(globalBin, 'mobilecli'))
+  })
+
+  it('finds mobilecli via npm_config_prefix when PATH and HOME miss', async () => {
+    const dir = await stageDir()
+    const prefixBin = join(dir, 'bin')
+    await mkdir(prefixBin, { recursive: true })
+    await writeExecutable(prefixBin, 'mobilecli')
+    const resolved = resolveMobilecliExecutable({
+      env: { PATH: '/no/mobilecli/here', npm_config_prefix: dir },
+      home: '',
+    })
+    expect(resolved).toBe(join(prefixBin, 'mobilecli'))
+  })
+
+  it('prefers npm-global over the npx cache when PATH misses', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const npxBin = join(home, '.npm', '_npx', 'abc123', 'node_modules', '.bin')
+    const globalBin = join(home, '.npm-global', 'bin')
+    await mkdir(npxBin, { recursive: true })
+    await mkdir(globalBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(npxBin, 'mobilecli'))
+    await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({ env: { PATH: '/no/mobilecli/here' }, home })
+    expect(resolved).toBe(join(globalBin, 'mobilecli'))
+  })
+
+  it('still searches npm locations under an Electron-minimal PATH', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const globalBin = join(home, '.npm-global', 'bin')
+    await mkdir(globalBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({
+      env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+      home,
+    })
+    expect(resolved).toBe(join(globalBin, 'mobilecli'))
+  })
+
+  it('adds Homebrew and /usr/local prefixes only for an Electron-minimal PATH', async () => {
+    const empty = (() => {
+      try {
+        resolveMobilecliExecutable({ env: {}, home: '' })
+        return undefined
+      } catch (error) {
+        return (error as Error).message
+      }
+    })()
+    expect(empty).toContain('(no candidate directories)')
+    expect(empty).not.toContain('/opt/homebrew/bin')
+    const electron = (() => {
+      try {
+        resolveMobilecliExecutable({
+          env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+          home: '',
+        })
+        return undefined
+      } catch (error) {
+        return (error as Error).message
+      }
+    })()
+    expect(electron).toContain('  /opt/homebrew/bin')
+    expect(electron).toContain('  /usr/local/bin')
+    expect(electron).toContain('npm install -g mobilecli@latest')
   })
 })
 

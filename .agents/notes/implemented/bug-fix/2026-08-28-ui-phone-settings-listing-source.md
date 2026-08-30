@@ -10,7 +10,7 @@ Issue #417 P1 records that the Plugins-tab 「手机设备」 card always inject
 
 ## Decision
 
-The card and the picker share one `PhoneListingSource`. `createListingPhoneEnvironmentSource` maps that listing onto `PhoneEnvironmentView`: probing while the pull is in flight, ready when any device is listed, iOS wizard on macOS with an empty listing, Android wizard otherwise, and the probe-failed row only after a refused or unreachable first pull. `PhoneSettingsCardController` follows the source through `subscribe` and starts a pull when `enabled` is true. Public helpers named by `verify-export-jsdoc` carry `@param` / `@returns`.
+The card and the picker share one `PhoneListingSource`. `createListingPhoneEnvironmentSource` maps that listing onto `PhoneEnvironmentView`: probing while the pull is in flight, ready when any device is listed, iOS wizard on macOS with an empty listing, Android wizard otherwise, the mobilecli-missing row when the Host answers `PHONE_UNRESOLVED`, and the probe-failed row after any other refused or unreachable first pull. `PhoneSettingsCardController` follows the source through `subscribe` and starts a pull when `enabled` is true. Public helpers named by `verify-export-jsdoc` carry `@param` / `@returns`.
 
 ## Alternatives considered
 

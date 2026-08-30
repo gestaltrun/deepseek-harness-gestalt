@@ -1,12 +1,13 @@
 /**
  * Settings-card environment source over the same Host fleet listing the
  * picker already consumes. A successful `GET /phone/devices` pull reaches
- * probing, both wizards, and ready; only a failed first pull stays on the
+ * probing, both wizards, and ready; a `PHONE_UNRESOLVED` pull stays on the
+ * mobilecli-missing row; any other failed first pull stays on the
  * missing-service probe-failed row.
  */
 import {
-  PROBE_FAILED_ERROR,
-  type PhoneEnvironmentCheck, type PhoneEnvironmentSource, type PhoneEnvironmentView,
+  environmentErrorOf, PROBE_FAILED_ERROR,
+  type PhoneEnvironmentCheck, type PhoneEnvironmentError, type PhoneEnvironmentSource, type PhoneEnvironmentView,
   type PhoneReadyDevice,
 } from './phone-environment.ts'
 import type { PhoneDeviceSummary, PhoneListingSnapshot, PhoneListingSource } from './registry.ts'
@@ -102,6 +103,7 @@ export function createListingPhoneEnvironmentSource(
   platform: string = globalThis.navigator?.platform ?? '',
 ): PhoneEnvironmentSource {
   let phase: DetectPhase = 'idle'
+  let lastError: PhoneEnvironmentError = PROBE_FAILED_ERROR
   const listeners = new Set<() => void>()
   const notify = (): void => {
     for (const listener of [...listeners]) listener()
@@ -111,7 +113,7 @@ export function createListingPhoneEnvironmentSource(
     getView: () => {
       if (phase === 'probing') return PROBING_VIEW
       if (phase === 'ready') return viewFromListing(listing.snapshot(), platform)
-      return { kind: 'errors', errors: [PROBE_FAILED_ERROR] }
+      return { kind: 'errors', errors: [lastError] }
     },
     redetect: async () => {
       phase = 'probing'
@@ -119,8 +121,10 @@ export function createListingPhoneEnvironmentSource(
       try {
         await listing.refresh()
         phase = 'ready'
-      } catch {
-        // A refused or unreachable fleet route is the missing-service arm.
+      } catch (error) {
+        // A refused or unreachable fleet route is the missing-service arm;
+        // PHONE_UNRESOLVED is the unresolvable-binary arm with install copy.
+        lastError = environmentErrorOf(error)
         phase = 'failed'
       }
       notify()

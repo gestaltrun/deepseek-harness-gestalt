@@ -4,6 +4,7 @@
  * JSON-compatible face so the card can still render when that service is
  * absent (the missing-service arm is the probe-failed state).
  */
+import { PhoneStreamHttpError } from './phone-stream-client.ts'
 
 /** One checklist row the probing / ready states display. */
 export interface PhoneEnvironmentCheck {
@@ -35,8 +36,8 @@ export interface PhoneReadyDevice {
 
 /** Recoverable error row with a single next-action verb. */
 export interface PhoneEnvironmentError {
-  /** Closed error kind matching the three locked mockup rows. */
-  readonly kind: 'adb-missing' | 'no-devices' | 'wda-unbuilt' | 'probe-failed'
+  /** Closed error kind matching the mockup rows plus the unresolvable-binary arm. */
+  readonly kind: 'adb-missing' | 'no-devices' | 'wda-unbuilt' | 'probe-failed' | 'mobilecli-missing'
   /** Primary line. */
   readonly title: string
   /** Secondary explanation. */
@@ -88,6 +89,25 @@ export const PROBE_FAILED_ERROR: PhoneEnvironmentError = {
   title: '未能探测本机环境',
   detail: '本部署没有挂载 phoneDevices 服务，无法检测 adb、模拟器运行时或已连接设备。',
   nextAction: '下一步动作',
+}
+
+/** Error row shown when Host `GET /phone/devices` reports an unresolvable mobilecli. */
+export const MOBILECLI_MISSING_ERROR: PhoneEnvironmentError = {
+  kind: 'mobilecli-missing',
+  title: '未找到 mobilecli',
+  detail: 'Host 已启动，但无法解析 mobilecli 可执行文件。安装后重新检测：',
+  nextAction: '下一步动作',
+  command: 'npm install -g mobilecli@latest',
+}
+
+/**
+ * Map one fleet-listing failure onto a settings-card error row.
+ * @param error - Thrown listing failure.
+ * @returns the mobilecli-missing row when the Host named `PHONE_UNRESOLVED`; otherwise the probe-failed row.
+ */
+export function environmentErrorOf(error: unknown): PhoneEnvironmentError {
+  if (error instanceof PhoneStreamHttpError && error.code === 'PHONE_UNRESOLVED') return MOBILECLI_MISSING_ERROR
+  return PROBE_FAILED_ERROR
 }
 
 /** Shipped source while `phoneDevices` is not composed: probe-failed. */

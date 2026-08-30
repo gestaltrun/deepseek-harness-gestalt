@@ -239,8 +239,9 @@ describe('PhoneSettingsCardController', () => {
     face.nextAction('adb-missing')
     face.nextAction('no-devices')
     face.nextAction('probe-failed')
+    face.nextAction('mobilecli-missing')
     face.nextAction('wda-unbuilt')
-    expect(redetect).toHaveBeenCalledTimes(3)
+    expect(redetect).toHaveBeenCalledTimes(4)
     controller.dispose()
   })
 

@@ -1,47 +1,55 @@
 /**
  * Loud resolution of the external `mobilecli` executable. Discovery searches
- * `PATH` the way Node's `spawn` would; nothing here executes or vendors
- * mobilecli, so the FSL-1.1-Apache-2.0 external-dependency edge stays intact.
+ * `executablePath`, then `PATH`, then npm-global / npx-cache / well-known
+ * prefixes so an Electron GUI process with a minimal PATH still finds a
+ * global install. Nothing here executes or vendors mobilecli, so the
+ * FSL-1.1-Apache-2.0 external-dependency edge stays intact.
  * @module @deepseek-ai/dsh-phone-runtime/resolve-binary
  */
 
-import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, isAbsolute, resolve } from 'node:path'
+import { accessSync, constants, readdirSync, statSync } from 'node:fs'
+import { delimiter, isAbsolute, join, resolve } from 'node:path'
 
 /** Inputs for {@link resolveMobilecliExecutable}. */
 export interface ResolveMobilecliOptions {
-  /** Configured absolute or cwd-relative override, or `undefined` to search `PATH`. */
+  /** Configured absolute or cwd-relative override, or `undefined` to search `PATH` then npm locations. */
   readonly executablePath?: string
-  /** Environment providing `PATH` and, on Windows, `PATHEXT`. */
+  /** Environment providing `PATH`, `HOME` / `USERPROFILE`, optional `npm_config_prefix`, and on Windows `PATHEXT`. */
   readonly env: NodeJS.ProcessEnv
   /** Windows behavior switch (executable-bit checks and extension probing); defaults to `process.platform === 'win32'`. */
   readonly isWindows?: boolean
+  /** Home directory for the npm-global and npx-cache candidates; defaults to `env.HOME` then `env.USERPROFILE`. */
+  readonly home?: string
 }
 
+const INSTALL_LINES = [
+  'Install it first, then retry:',
+  '  npm install -g mobilecli@latest',
+  '(or run it once via `npx mobilecli@latest`). No Homebrew formula exists upstream;',
+  'prerequisites: Android SDK with adb in PATH for Android devices, Xcode Command Line',
+  'Tools for iOS simulators.',
+  '',
+  'Set the phoneDevices config field `executablePath` to override discovery.',
+] as const
+
 /**
- * Compose the fail-loud installation guidance carried by activation failures.
+ * Compose the fail-loud installation guidance carried by unresolved-binary failures.
  * @param searched - Directory list that was searched, rendered into the message.
  * @returns the multi-line guidance text including the npm install line.
  */
 export function mobilecliInstallGuidance(searched: readonly string[]): string {
-  const listed = searched.length > 0 ? searched.map(dir => `  ${dir}`).join('\n') : '  (PATH is empty)'
+  const listed = searched.length > 0 ? searched.map(dir => `  ${dir}`).join('\n') : '  (no candidate directories)'
   return [
     'phone-runtime: cannot resolve the mobilecli executable. Searched:',
     listed,
     '',
-    'Install it first, then retry composition:',
-    '  npm install -g mobilecli@latest',
-    '(or run it once via `npx mobilecli@latest`). No Homebrew formula exists upstream;',
-    'prerequisites: Android SDK with adb in PATH for Android devices, Xcode Command Line',
-    'Tools for iOS simulators.',
-    '',
-    'Set the phoneDevices config field `executablePath` to override discovery.',
+    ...INSTALL_LINES,
   ].join('\n')
 }
 
 /**
- * Resolve the mobilecli executable before any spawn happens, so a missing
- * binary fails composition loudly instead of degrading at first use.
+ * Resolve the mobilecli executable before any spawn happens. A missing binary
+ * throws install guidance; the Service catches that and stays composed.
  * @param options - Override path, environment, and platform switch.
  * @returns the absolute executable path accepted by `child_process.spawn`.
  * @throws an `Error` carrying {@link mobilecliInstallGuidance} when discovery fails,
@@ -56,7 +64,8 @@ export function resolveMobilecliExecutable(options: ResolveMobilecliOptions): st
     assertExecutableFile(explicit, isWindows, `the configured phoneDevices \`executablePath\` ${JSON.stringify(explicit)}`)
     return explicit
   }
-  const searched = searchPaths(options.env)
+  const home = options.home ?? options.env.HOME ?? options.env.USERPROFILE ?? ''
+  const searched = searchPaths(options.env, home, isWindows)
   for (const directory of searched) {
     for (const candidate of candidateNames(isWindows, options.env)) {
       const full = resolve(directory, candidate)
@@ -66,8 +75,49 @@ export function resolveMobilecliExecutable(options: ResolveMobilecliOptions): st
   throw new Error(mobilecliInstallGuidance(searched))
 }
 
-function searchPaths(env: NodeJS.ProcessEnv): string[] {
-  return (env.PATH ?? '').split(delimiter).filter(directory => directory.length > 0)
+/** Directories Electron GUI processes keep when they replace the user PATH. */
+const ELECTRON_MINIMAL_PATH = new Set(['/usr/bin', '/bin', '/usr/sbin', '/sbin'])
+
+function searchPaths(env: NodeJS.ProcessEnv, home: string, isWindows: boolean): string[] {
+  const seen = new Set<string>()
+  const directories: string[] = []
+  const add = (directory: string): void => {
+    if (directory.length === 0 || seen.has(directory)) return
+    seen.add(directory)
+    directories.push(directory)
+  }
+  const pathDirs = (env.PATH ?? '').split(delimiter).filter(directory => directory.length > 0)
+  for (const directory of pathDirs) add(directory)
+  // Electron GUI processes ship a minimal PATH; npm's well-known locations
+  // cover the global install and the npx cache the CLI docs point at.
+  if (home.length > 0) {
+    add(join(home, '.npm-global', 'bin'))
+    add(join(home, '.local', 'bin'))
+    if (isWindows) add(join(home, 'AppData', 'Roaming', 'npm'))
+    for (const directory of npxBinDirectories(join(home, '.npm', '_npx'))) add(directory)
+  }
+  const prefix = env.npm_config_prefix
+  if (prefix !== undefined && prefix.length > 0) {
+    add(isWindows ? prefix : join(prefix, 'bin'))
+  }
+  if (!isWindows && isElectronMinimalPath(pathDirs)) {
+    add('/opt/homebrew/bin')
+    add('/usr/local/bin')
+  }
+  return directories
+}
+
+function isElectronMinimalPath(pathDirs: readonly string[]): boolean {
+  return pathDirs.length > 0 && pathDirs.every(directory => ELECTRON_MINIMAL_PATH.has(directory))
+}
+
+function npxBinDirectories(npxRoot: string): string[] {
+  try {
+    return readdirSync(npxRoot).map(entry => join(npxRoot, entry, 'node_modules', '.bin'))
+  } catch {
+    // Missing or unreadable npx cache; PATH and npm-global candidates still apply.
+    return []
+  }
 }
 
 function candidateNames(isWindows: boolean, env: NodeJS.ProcessEnv): readonly string[] {
@@ -90,5 +140,9 @@ function isExecutableFile(path: string, isWindows: boolean): boolean {
 
 function assertExecutableFile(path: string, isWindows: boolean, subject: string): void {
   if (isExecutableFile(path, isWindows)) return
-  throw new Error(`phone-runtime: ${subject} is not an executable file; fix the path or drop the field to search PATH.`)
+  throw new Error([
+    `phone-runtime: ${subject} is not an executable file; fix the path or drop the field to search PATH.`,
+    '',
+    ...INSTALL_LINES,
+  ].join('\n'))
 }

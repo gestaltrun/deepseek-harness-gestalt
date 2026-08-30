@@ -17,7 +17,7 @@
 
 | 字段 | 默认 | 含义 |
 |---|---|---|
-| `executablePath` | — | 绝对路径或相对 cwd 的覆盖；缺省时逐个探测 `PATH` 目录寻找 `mobilecli`。 |
+| `executablePath` | — | 绝对路径或相对 cwd 的覆盖；缺省时先搜 `PATH`，再搜 npm 全局、npx 缓存和 `npm_config_prefix`。Electron 极简 PATH 还会探测 `/opt/homebrew/bin` 与 `/usr/local/bin`。 |
 | `serverPort` | `12000` | 以 `--listen 127.0.0.1:<port>` 传入的回环端口；对齐上游默认。 |
 | `pollIntervalMs` | `5000` | 健康探测与设备轮询节奏。 |
 | `readyTimeoutMs` | `60000` | 首次就绪探测的总窗口；超时就绪失败将使插件响亮失败。 |
@@ -28,7 +28,7 @@
 
 ## 扩展点
 
-缺失或不可用的 mobilecli 会让组合响亮失败并附带安装指引（`npm install -g mobilecli@latest`；上游没有 Homebrew formula），绝不静默降级。本包同时导出 `./invariant` 伴生插件：它必须伴随每一个真实 Service 生成，并校验每条变更通知所标注的差异与其自身清单相对已发布清单的差异完全一致。
+缺失或不可用的 mobilecli 仍会激活 Service；`listDevices`、`boot`、`shutdown`、`io`、`startCapture` 与 agent 动词随后以 `PHONE_UNRESOLVED` 拒绝并附带安装指引（`npm install -g mobilecli@latest`；上游没有 Homebrew formula）。Host 保持存活。本包同时导出 `./invariant` 伴生插件：它必须伴随每一个真实 Service 生成，并校验每条变更通知所标注的差异与其自身清单相对已发布清单的差异完全一致。
 
 ## 模型体验
 
@@ -42,6 +42,6 @@
 
 - **外部 FSL-1.1-Apache-2.0 依赖边界** — mobilecli 只被执行、绝不 vendor 或拷贝；其二进制不进入本仓库，行为随用户安装的版本而定，本包不锁定版本。
 - **仅限回环** — 启动的服务始终绑定 `127.0.0.1:<serverPort>`；另一主机上 mobilecli 服务背后的远程设备群不在范围内。
-- **需用户预装** — 未安装 mobilecli 时 Service 按设计拒绝组合；无自动下载、上游无 Homebrew formula，Android 还需 `adb` 在 PATH，iOS 模拟器需 Xcode Command Line Tools。
+- **需用户预装** — 未安装 mobilecli 时 Service 按设计仍会组合，但一切操作以 `PHONE_UNRESOLVED` 拒绝；无自动下载、上游无 Homebrew formula，Android 还需 `adb` 在 PATH，iOS 模拟器需 Xcode Command Line Tools。
 - **真机覆盖需显式开启** — 硬件在环套件仅在 `DSH_PHONE_REAL_UDID` 指明已连接真机（`DSH_PHONE_REAL_PROFILE` 指明其签名 profile）时运行；其余环境一律自跳过，因此 CI 只通过 fake mobilecli 垫片钉住真机链路。设备端 agent 工件由 mobilecli 在 `agent install` 时自行下载，本包绝不下载；iOS 设备隧道始终由 mobilecli 服务持有，隧道失败仅通过结构化的 `tunnel-failed` 臂暴露。
 - **无 Windows 覆盖** — 本包套件中的 mobilecli 垫片场景仅限 POSIX；Windows 的 npm 全局 `.cmd` 垫片未经测试。请将 `executablePath` 指向原生 `mobilecli.exe`，在套件覆盖之前 Windows 视为未验证。

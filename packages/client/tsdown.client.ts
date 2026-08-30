@@ -304,18 +304,7 @@ function staticLinkedConfig(
           return isBareSpecifier(source) ? { id: source, external: true } : null
         },
       },
-    }, {
-      // Contract 3. Rolldown does not read the `//# sourceMappingURL` of its
-      // inputs, so each tsc map is handed over as that module's map and
-      // composed into the bundle map; without it frames stop at the emitted
-      // lib/types JavaScript instead of reaching the TSX.
-      name: 'dsh-tsc-sourcemap',
-      async load(id: string) {
-        if (!id.includes(TYPES_MARKER) || !id.endsWith('.js') || !existsSync(`${id}.map`)) return null
-        const code = await readFile(id, 'utf8')
-        return { code: code.replace(SOURCEMAP_COMMENT, ''), map: await readFile(`${id}.map`, 'utf8') }
-      },
-    }, {
+    }, tscSourceMapPlugin(), {
       // Contract 4. The import survives verbatim and the sheet lands beside the
       // JavaScript, so the shell's CSS Modules pipeline sees a real stylesheet.
       name: 'dsh-css-asset',
@@ -529,7 +518,7 @@ function clientConfig(id: string, entry: string): UserConfig {
           + '(type-only imports are erased and never reach this gate)',
         )
       },
-    }, {
+    }, tscSourceMapPlugin(), {
       name: 'dsh-css-modules-inline',
       resolveId(source: string, importer: string | undefined) {
         if (!source.endsWith('.module.css')) return null
@@ -612,6 +601,18 @@ const SOURCE_MARKER = `${sep}src${sep}`
 
 /** Trailing sourcemap reference tsc appends to every emitted module. */
 const SOURCEMAP_COMMENT = /\n\/\/# sourceMappingURL=.*\s*$/
+
+/** Compose emitted tsc maps into browser bundles that consume `lib/types` JavaScript. */
+function tscSourceMapPlugin() {
+  return {
+    name: 'dsh-tsc-sourcemap',
+    async load(id: string) {
+      if (!id.includes(TYPES_MARKER) || !id.endsWith('.js') || !existsSync(`${id}.map`)) return null
+      const code = await readFile(id, 'utf8')
+      return { code: code.replace(SOURCEMAP_COMMENT, ''), map: await readFile(`${id}.map`, 'utf8') }
+    },
+  }
+}
 
 /** Resolve an emitted JS asset import against its source-tree counterpart. */
 function sourceAssetPath(source: string, importer: string): string {

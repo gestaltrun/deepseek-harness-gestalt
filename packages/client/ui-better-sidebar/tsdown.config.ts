@@ -1,18 +1,12 @@
 /**
  * tsdown build for dsh-better-sidebar: the host-half lib (lib/index.js and
- * the lib/invariant.js companion, ESM node) plus the two browser client
- * bundles (lib/client.cjs and lib/client-registry.js, CJS closure factory) —
- * one per install channel:
+ * the lib/invariant.js companion, ESM node) plus the browser client bundle
+ * (lib/client.cjs, CJS closure factory). The bundle serves the official
+ * profile channel and registers with the package-name id
+ * `dsh-better-sidebar` (the client-modules compose keys on the package name;
+ * keep it in sync with package.json `name`). The registry channel is omitted.
  *
- * - `lib/client.cjs` serves the official profile channel, registering with
- *   the package-name id `dsh-better-sidebar` (the client-modules compose
- *   keys on the package name; keep it in sync with package.json `name`),
- * - `lib/client-registry.js` serves the plugin-registry channel
- *   (dsh.plugin.json), registering with the manifest id
- *   `dsh-external/dsh-better-sidebar` (the registry browser-side `arrive()`
- *   check requires bundle id === plugin id).
- *
- * Both bundles replicate the official DSH client-bundle preset
+ * The bundle replicates the official DSH client-bundle preset
  * (packages/client/tsdown.client.ts) and are compiled from the same
  * src/client/index.tsx source — only the registered id and the output file
  * name differ, so they cannot drift:

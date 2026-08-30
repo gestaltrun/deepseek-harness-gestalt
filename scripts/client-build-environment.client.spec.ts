@@ -7,6 +7,7 @@ import {
   assertClientBuildEnvironment,
   clientBuildEnvironmentDefines,
   clientBuildProcessEnvironment,
+  collectDynamicClientSourceMapViolations,
   readClientBuildRecord,
   repositoryCommitHash,
   resolveClientBuildEnvironment,
@@ -47,6 +48,13 @@ function buildFixture(environment: Record<string, string>): string {
   roots.push(fixtureRoot)
   write(join(fixtureRoot, 'apps/web/dist/index.html'), '<main></main>')
   write(join(fixtureRoot, 'packages/client/example/lib/client.cjs'), 'module.exports = {}\n')
+  write(join(fixtureRoot, 'packages/client/example/lib/client.cjs.map'), JSON.stringify({
+    version: 3,
+    sources: ['../../../packages/client/example/src/client/index.ts'],
+    sourcesContent: ['export {}\n'],
+    names: [],
+    mappings: '',
+  }))
   writeClientBuildRecord(fixtureRoot, environment)
   return fixtureRoot
 }
@@ -161,6 +169,17 @@ describe('client build environment', () => {
 
     write(join(official, 'apps/web/dist/index.html'), '<main>changed</main>')
     expect(() => { readClientBuildRecord(official) }).toThrow(/artifacts differ/)
+  })
+
+  it('rejects dynamic client maps that expose emitted tsc JavaScript as browser sources', () => {
+    const fixtureRoot = buildFixture({})
+    const mapPath = join(fixtureRoot, 'packages/client/example/lib/client.cjs.map')
+    write(mapPath, JSON.stringify({ version: 3, sources: ['types/client/index.js'] }))
+
+    expect(collectDynamicClientSourceMapViolations(fixtureRoot)).toEqual([
+      'packages/client/example/lib/client.cjs.map: types/client/index.js',
+    ])
+    expect(() => { writeClientBuildRecord(fixtureRoot, {}) }).toThrow(/dynamic client source maps are invalid/)
   })
 
   it('keeps public client values out of workflow-wide environments', () => {

@@ -35,6 +35,8 @@ const CLIENT_ARTIFACT_PATTERNS = [
   `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.relativePath}`,
   `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.sourceMapPath}`,
 ] as const
+const DYNAMIC_CLIENT_SOURCE_MAP_PATTERN = `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.sourceMapPath}`
+const DYNAMIC_CLIENT_BUNDLE_PATTERN = `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.relativePath}`
 
 /** Public values embedded in one set of client artifacts. */
 export type ClientBuildEnvironment = Readonly<Record<string, string>>
@@ -199,6 +201,10 @@ export function writeClientBuildRecord(
   root: string,
   environment: ClientBuildEnvironment,
 ): ClientBuildRecord {
+  const sourceMapViolations = collectDynamicClientSourceMapViolations(root)
+  if (sourceMapViolations.length > 0) {
+    throw new Error(`dynamic client source maps are invalid:\n${sourceMapViolations.join('\n')}`)
+  }
   const record: ClientBuildRecord = {
     formatVersion: CLIENT_BUILD_RECORD_FORMAT,
     environment: clientBuildEnvironment(environment),
@@ -208,6 +214,51 @@ export function writeClientBuildRecord(
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`)
   return record
+}
+
+/**
+ * Find dynamic client maps whose browser frames stop at emitted tsc JavaScript.
+ * @param root - repository root containing generated dynamic client bundles.
+ * @returns sorted map-and-source diagnostics for invalid artifacts.
+ */
+export function collectDynamicClientSourceMapViolations(root: string): string[] {
+  const violations: string[] = []
+  const paths = globSync(DYNAMIC_CLIENT_SOURCE_MAP_PATTERN, { cwd: root })
+    .map(path => path.replaceAll('\\', '/'))
+    .sort()
+  const sourceMapPaths = new Set(paths)
+  const bundlePaths = globSync(DYNAMIC_CLIENT_BUNDLE_PATTERN, { cwd: root })
+    .map(path => path.replaceAll('\\', '/'))
+    .sort()
+
+  for (const bundlePath of bundlePaths) {
+    const sourceMapPath = `${bundlePath}.map`
+    if (!sourceMapPaths.has(sourceMapPath)) violations.push(`${sourceMapPath}: missing`)
+  }
+
+  for (const path of paths) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(readFileSync(resolve(root, path), 'utf8'))
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      violations.push(`${path}: invalid JSON: ${detail}`)
+      continue
+    }
+    if (!isObject(parsed) || !Array.isArray(parsed.sources)
+      || !parsed.sources.every(source => typeof source === 'string')) {
+      violations.push(`${path}: sources must be a string array`)
+      continue
+    }
+    for (const source of parsed.sources) {
+      const normalized = source.replaceAll('\\', '/')
+      if (/(?:^|\/)lib\/types\/.*\.js$/u.test(normalized)
+        || /(?:^|\/)types\/.*\.js$/u.test(normalized)) {
+        violations.push(`${path}: ${source}`)
+      }
+    }
+  }
+  return violations
 }
 
 /**

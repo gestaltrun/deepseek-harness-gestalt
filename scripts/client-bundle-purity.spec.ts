@@ -154,6 +154,13 @@ describe('client bundle debug artifacts', () => {
     expect(configs[0]?.sourcemap).toBe(true)
   })
 
+  it('composes tsc maps into every dynamic browser bundle', () => {
+    const configs = clientConfigs()
+    const plugins = (configs[0] as { plugins: { name: string }[] }).plugins
+
+    expect(plugins.some(plugin => plugin.name === 'dsh-tsc-sourcemap')).toBe(true)
+  })
+
   it('maps first-party sources to their repository package paths', () => {
     const configs = clientConfigs('@deepseek-ai/dsh-client-ui-goal')
     const outputOptions = configs[0]?.outputOptions

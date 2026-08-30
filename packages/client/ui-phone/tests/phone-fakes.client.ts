@@ -47,6 +47,18 @@ export class FakeSocket implements PhoneIoSocket {
     this.handlers.onClose()
   }
 
+  /** Deliver a remote close without a preceding socket error. */
+  closeFromRemote(): void {
+    if (!this.opened) return
+    this.opened = false
+    this.handlers.onClose()
+  }
+
+  /** Deliver an error callback even after the socket stopped being current. */
+  fail(): void {
+    this.handlers.onError()
+  }
+
   send(data: string): void {
     this.sent.push(data)
   }

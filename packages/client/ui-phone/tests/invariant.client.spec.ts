@@ -7,7 +7,7 @@
  * probes.
  */
 import { Context } from '@deepseek-ai/cordis'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import * as PhoneInvariant from '../src/invariant.ts'
 import { assertPhoneTabSymmetry } from '../src/client/registry.ts'
@@ -18,6 +18,8 @@ function throwingFail(message: string): never {
 }
 
 describe('ui-phone invariant companion', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
   it('reserves package ownership under its declared companion name', async () => {
     const ctx = new Context()
     await ctx.plugin(InvariantRegistry, { enabled: true })
@@ -33,6 +35,54 @@ describe('ui-phone invariant companion', () => {
     // assert the shared assertion itself on the same observation shape.
     expect(() => assertPhoneTabSymmetry({ mounted: true, survivedDispose: false }, throwingFail))
       .not.toThrow()
+  })
+
+  it('keeps duplicate registration loud and stale disposers ownership-safe', async () => {
+    const sidebar = new PhoneInvariant.RecordingSidebar()
+    const first = { id: 'phone' }
+    const disposeFirst = sidebar.registerTab(first)
+    expect(() => sidebar.registerTab({ id: 'phone' })).toThrow('already registered')
+    const removed = sidebar.whenUnregistered
+    disposeFirst()
+    await expect(removed).resolves.toBeUndefined()
+
+    const second = { id: 'phone' }
+    const disposeSecond = sidebar.registerTab(second)
+    disposeFirst()
+    expect(sidebar.getTab('phone')).toBe(second)
+    disposeSecond()
+  })
+
+  it('yields when the hosting context already publishes betterSidebar', async () => {
+    const ctx = new Context()
+    const sidebar = new PhoneInvariant.RecordingSidebar()
+    const registerTab = vi.spyOn(sidebar, 'registerTab')
+    ctx.provide('betterSidebar', sidebar)
+    await ctx.plugin(InvariantRegistry, { enabled: true })
+    const fiber = ctx.plugin(PhoneInvariant)
+    await expect(fiber.await()).resolves.toBeDefined()
+    expect(registerTab).not.toHaveBeenCalled()
+    await fiber.dispose()
+  })
+
+  it('fails through the package reporter when activation exposes no phone tab', async () => {
+    vi.spyOn(PhoneInvariant.RecordingSidebar.prototype, 'getTab').mockReturnValue(undefined)
+    const ctx = new Context()
+    await ctx.plugin(InvariantRegistry, { enabled: true })
+    await expect(ctx.plugin(PhoneInvariant).await()).rejects.toThrow(/phone.*missing after the plugin fiber activated/)
+  })
+
+  it('settles disposal through the removal signal when the registry view lags one read', async () => {
+    const original = PhoneInvariant.RecordingSidebar.prototype.getTab
+    let calls = 0
+    vi.spyOn(PhoneInvariant.RecordingSidebar.prototype, 'getTab').mockImplementation(function (id) {
+      calls += 1
+      if (calls === 2) return { id }
+      return original.call(this, id)
+    })
+    const ctx = new Context()
+    await ctx.plugin(InvariantRegistry, { enabled: true })
+    await expect(ctx.plugin(PhoneInvariant).await()).resolves.toBeDefined()
   })
 
   it('rejects a missing post-activation registration', () => {

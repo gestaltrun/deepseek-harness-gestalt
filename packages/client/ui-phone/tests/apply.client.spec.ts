@@ -34,8 +34,14 @@ interface RegisteredTab {
 
 /** The suite's view of the shared fake: one registered descriptor by id. */
 class SidebarUnderTest extends RecordingSidebar {
+  readonly updates: Array<{ tabId: string; patch: { readonly title?: string; readonly meta?: unknown } }> = []
+
   override getTab(id: string): RegisteredTab | undefined {
     return super.getTab(id) as RegisteredTab | undefined
+  }
+
+  updateTab(tabId: string, patch: { readonly title?: string; readonly meta?: unknown }): void {
+    this.updates.push({ tabId, patch })
   }
 }
 
@@ -52,7 +58,11 @@ function sourceWith(onlineCount: number): PhoneListingSource {
   }
 }
 
-async function mount(sidebar: SidebarUnderTest, settings?: ReturnType<typeof stubSettingsScope<PhoneSettings>>) {
+async function mount(
+  sidebar: SidebarUnderTest,
+  settings?: ReturnType<typeof stubSettingsScope<PhoneSettings>>,
+  config: { readonly enabled?: boolean } = Config({}),
+) {
   const ctx = new Context()
   ctx.provide('betterSidebar', sidebar)
   await ctx.plugin(SlotRegistry).await()
@@ -68,7 +78,7 @@ async function mount(sidebar: SidebarUnderTest, settings?: ReturnType<typeof stu
   // The loader hands apply the schema-validated config; mimic its default here.
   const fiber = ctx.plugin({
     inject: [...inject],
-    apply: (pluginCtx: Context) => { apply(pluginCtx as never, Config({})) },
+    apply: (pluginCtx: Context) => { apply(pluginCtx as never, config) },
   })
   await fiber.await()
   return { ctx, fiber, host }
@@ -197,6 +207,60 @@ describe('ui-phone client apply', () => {
     })
     await mount(sidebar, host)
     expect(sidebar.getTab('phone')!.component({ tab: { id: 'phone', title: '手机' }, visible: false })).toBeTruthy()
+  })
+
+  it('uses composition enablement until the Host scope publishes its durable value', async () => {
+    const sidebar = new SidebarUnderTest()
+    const host = stubSettingsScope<PhoneSettings>()
+    await mount(sidebar, host, Config({ enabled: true }))
+    const picker = sidebar.getTab('phone')!.component({
+      tab: { id: 'phone', title: '手机' }, visible: false,
+    }) as { props: { gate: { snapshot(): boolean; subscribe(listener: () => void): () => void } } }
+    expect(picker.props.gate.snapshot()).toBe(true)
+
+    const invalidations: boolean[] = []
+    const stop = picker.props.gate.subscribe(() => { invalidations.push(picker.props.gate.snapshot()) })
+    host.publish({
+      status: 'ready', writable: true, value: undefined, base: { enabled: false }, user: {}, revision: 1,
+    } as never)
+    expect(picker.props.gate.snapshot()).toBe(true)
+    host.publish({
+      status: 'ready', writable: true, value: { enabled: false }, base: { enabled: false }, user: {}, revision: 2,
+    })
+    expect(invalidations.at(-1)).toBe(false)
+    stop()
+  })
+
+  it('renders a restored device occupation with the wired switcher and controller factory', async () => {
+    const sidebar = new SidebarUnderTest()
+    await mount(sidebar, undefined, Config({ enabled: true }))
+    const body = sidebar.getTab('phone')!.component({
+      tab: {
+        id: 'phone', title: '手机·SM-S9310',
+        meta: { kind: 'device', serial: 'R3CN30', name: 'SM-S9310' },
+      },
+      visible: false,
+    }) as {
+      props: {
+        serial: string
+        name: string
+        visible: boolean
+        onOpenDevice(serial: string, name: string): void
+        createController(serial: string): { snapshot(): { kind: string }; dispose(): void }
+      }
+    }
+    expect(body.props).toMatchObject({ serial: 'R3CN30', name: 'SM-S9310', visible: false })
+    body.props.onOpenDevice('emulator-5554', 'Pixel_6_API_35')
+    expect(sidebar.updates).toEqual([{
+      tabId: 'phone',
+      patch: {
+        title: '手机·Pixel_6_API_35',
+        meta: { kind: 'device', serial: 'emulator-5554', name: 'Pixel_6_API_35' },
+      },
+    }])
+    const controller = body.props.createController('R3CN30')
+    expect(controller.snapshot()).toEqual({ kind: 'idle' })
+    controller.dispose()
   })
 
   it('drives both badge arms from the injected snapshot values', async () => {

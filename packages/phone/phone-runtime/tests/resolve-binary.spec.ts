@@ -1,7 +1,7 @@
 import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mobilecliInstallGuidance, resolveMobilecliExecutable } from '../src/resolve-binary.ts'
 
@@ -60,6 +60,14 @@ describe('PATH discovery', () => {
     const wanted = await writeExecutable(second, 'mobilecli')
     await writeExecutable(first, 'unrelated')
     const found = resolveMobilecliExecutable({ env: { PATH: `${first}:${second}` } })
+    expect(found).toBe(wanted)
+  })
+
+  it('deduplicates repeated PATH directories without changing search order', async () => {
+    const empty = await stageDir()
+    const real = await stageDir()
+    const wanted = await writeExecutable(real, 'mobilecli')
+    const found = resolveMobilecliExecutable({ env: { PATH: [empty, empty, real].join(delimiter) }, home: '' })
     expect(found).toBe(wanted)
   })
 
@@ -193,18 +201,21 @@ describe('PATH discovery', () => {
     expect(empty).not.toContain('/opt/homebrew/bin')
     const electron = (() => {
       try {
-        resolveMobilecliExecutable({
+        return { resolved: resolveMobilecliExecutable({
           env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
           home: '',
-        })
-        return undefined
+        }) }
       } catch (error) {
-        return (error as Error).message
+        return { guidance: (error as Error).message }
       }
     })()
-    expect(electron).toContain('  /opt/homebrew/bin')
-    expect(electron).toContain('  /usr/local/bin')
-    expect(electron).toContain('npm install -g mobilecli@latest')
+    if ('resolved' in electron) {
+      expect(['/opt/homebrew/bin/mobilecli', '/usr/local/bin/mobilecli']).toContain(electron.resolved)
+    } else {
+      expect(electron.guidance).toContain('  /opt/homebrew/bin')
+      expect(electron.guidance).toContain('  /usr/local/bin')
+      expect(electron.guidance).toContain('npm install -g mobilecli@latest')
+    }
   })
 })
 
@@ -231,5 +242,23 @@ describe('Windows candidate probing', () => {
     const dir = await stageDir()
     const exe = await writeExecutable(dir, 'customcli.cmd')
     expect(resolveMobilecliExecutable({ executablePath: exe, env: { PATH: dir }, isWindows: true })).toBe(exe)
+  })
+
+  it('searches the Windows roaming npm directory under the supplied home', async () => {
+    const home = await stageDir()
+    const roamingBin = join(home, 'AppData', 'Roaming', 'npm')
+    await mkdir(roamingBin, { recursive: true })
+    const wanted = await writeExecutable(roamingBin, 'mobilecli.cmd')
+    expect(resolveMobilecliExecutable({ env: { PATH: '/missing' }, home, isWindows: true })).toBe(wanted)
+  })
+
+  it('uses npm_config_prefix itself as the Windows npm bin directory', async () => {
+    const prefix = await stageDir()
+    const wanted = await writeExecutable(prefix, 'mobilecli.exe')
+    expect(resolveMobilecliExecutable({
+      env: { PATH: '/missing', npm_config_prefix: prefix },
+      home: '',
+      isWindows: true,
+    })).toBe(wanted)
   })
 })

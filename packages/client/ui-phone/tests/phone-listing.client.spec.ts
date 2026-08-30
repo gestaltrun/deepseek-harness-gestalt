@@ -178,6 +178,13 @@ describe('phone listing source', () => {
     const network = await source.refresh().catch(error => error)
     expect(network).toBeInstanceOf(PhoneStreamHttpError)
     expect(network.status).toBe(0)
+
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw 'socket reset'
+    }))
+    const nonError = await source.refresh().catch(error => error)
+    expect(nonError).toBeInstanceOf(PhoneStreamHttpError)
+    expect(nonError.message).toBe('socket reset')
   })
 
   it('keeps the snapshot reference stable between commits', async () => {

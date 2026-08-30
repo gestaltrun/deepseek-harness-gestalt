@@ -4,8 +4,9 @@
  * terminal error arms (device offline, unauthorized, refused), visible
  * suspend/resume, and the touch/keyboard io frames with their coordinates.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PhoneConnectionController } from '../src/client/phone-connection.ts'
+import type { PhoneStreamGateway } from '../src/client/phone-connection.ts'
 import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import { FakeGateway, flush, ManualScheduler, SESSION_A } from './phone-fakes.client.ts'
 
@@ -16,6 +17,8 @@ function controllerOn(gateway: FakeGateway, scheduler: ManualScheduler): PhoneCo
     schedule: scheduler.schedule,
   })
 }
+
+afterEach(() => { vi.useRealTimers() })
 
 /** Drive one full connect cycle to the live phase. */
 async function connectToLive(gateway: FakeGateway, scheduler: ManualScheduler): Promise<PhoneConnectionController> {
@@ -42,6 +45,47 @@ describe('PhoneConnectionController lifecycle', () => {
       format: 'h264',
       expiresAt: SESSION_A.h264.expiresAt,
     })
+  })
+
+  it('ignores duplicate connect requests and uses the default retry scheduler', async () => {
+    vi.useFakeTimers()
+    const gateway = new FakeGateway()
+    const controller = new PhoneConnectionController({
+      gateway,
+      deviceId: 'emulator-5554',
+      retryLimit: 1,
+      retryBaseDelayMs: 5,
+    })
+    controller.connect()
+    controller.connect()
+    expect(gateway.mintedDevices).toEqual(['emulator-5554'])
+    await vi.advanceTimersByTimeAsync(0)
+    gateway.lastSocket!.accept()
+    controller.connect()
+    expect(gateway.mintedDevices).toHaveLength(1)
+
+    gateway.lastSocket!.closeFromRemote()
+    expect(controller.snapshot()).toEqual({ kind: 'reconnecting', attempt: 1, streamUrl: SESSION_A.h264.url })
+    await vi.advanceTimersByTimeAsync(5)
+    expect(gateway.mintedDevices).toHaveLength(2)
+    controller.dispose()
+  })
+
+  it('cancels the default retry timer when the controller disposes', async () => {
+    vi.useFakeTimers()
+    const gateway = new FakeGateway()
+    const controller = new PhoneConnectionController({
+      gateway,
+      deviceId: 'emulator-5554',
+      retryBaseDelayMs: 5,
+    })
+    controller.connect()
+    await vi.advanceTimersByTimeAsync(0)
+    gateway.lastSocket!.accept()
+    gateway.lastSocket!.closeFromRemote()
+    controller.dispose()
+    await vi.advanceTimersByTimeAsync(5)
+    expect(gateway.mintedDevices).toEqual(['emulator-5554'])
   })
 
   it('reconnects with a fresh session after a live socket drop', async () => {
@@ -95,6 +139,26 @@ describe('PhoneConnectionController lifecycle', () => {
     expect(controller.snapshot()).toEqual({ kind: 'suspended' })
   })
 
+  it('drops a successful mint continuation after an explicit disconnect', async () => {
+    let resolveMint!: (session: typeof SESSION_A) => void
+    const pending = new Promise<typeof SESSION_A>((resolve) => { resolveMint = resolve })
+    let socketAttempts = 0
+    const gateway: PhoneStreamGateway = {
+      mintSession: () => pending,
+      connectIo: () => {
+        socketAttempts += 1
+        throw new Error('a stale mint must not open io')
+      },
+    }
+    const controller = new PhoneConnectionController({ gateway, deviceId: 'emulator-5554' })
+    controller.connect()
+    controller.disconnect()
+    resolveMint(SESSION_A)
+    await Promise.resolve()
+    expect(controller.snapshot()).toEqual({ kind: 'idle' })
+    expect(socketAttempts).toBe(0)
+  })
+
   it('maps mint status codes onto the terminal error arms', async () => {
     const cases: readonly {
       readonly name: string
@@ -127,6 +191,16 @@ describe('PhoneConnectionController lifecycle', () => {
       expect(controller.snapshot()).toEqual({ kind: 'error', failure: testCase.failure })
       expect(scheduler.scheduledCount).toBe(0)
     }
+  })
+
+  it('classifies a non-authorization upstream failure as unavailable', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    gateway.queueMint({ error: new PhoneStreamHttpError(502, 'upstream', 'upstream unavailable') })
+    const controller = controllerOn(gateway, scheduler)
+    controller.connect()
+    await flush()
+    expect(controller.snapshot()).toEqual({ kind: 'reconnecting', attempt: 1 })
   })
 
   it('exhausts transient mint failures into the unavailable error arm', async () => {
@@ -163,6 +237,22 @@ describe('PhoneConnectionController lifecycle', () => {
     expect(controller.snapshot().kind).toBe('live')
   })
 
+  it('keeps a terminal error visible while the tab hides', async () => {
+    const gateway = new FakeGateway()
+    gateway.queueMint({ error: new PhoneStreamHttpError(404, 'not-found', 'gone') })
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.connect()
+    await flush()
+    controller.setVisible(false)
+    expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'device-offline' } })
+  })
+
+  it('ignores capture failures before a stream is live', () => {
+    const controller = controllerOn(new FakeGateway(), new ManualScheduler())
+    controller.noteCaptureFailure()
+    expect(controller.snapshot()).toEqual({ kind: 'idle' })
+  })
+
   it('reconnects when the visible live capture element fails', async () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()
@@ -184,6 +274,20 @@ describe('PhoneConnectionController lifecycle', () => {
     controller.refresh()
     expect(controller.snapshot()).toEqual({ kind: 'connecting' })
     expect(gateway.mintedDevices).toHaveLength(2)
+  })
+
+  it('drops stale socket callbacks after refresh replaces the generation', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    const stale = gateway.lastSocket!
+    controller.refresh()
+    stale.accept()
+    stale.fail()
+    stale.receive(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32010 } }))
+    expect(controller.snapshot()).toEqual({ kind: 'connecting' })
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot().kind).toBe('live')
   })
 
   it('notifies subscribers on every phase change until unsubscribed', async () => {
@@ -261,6 +365,7 @@ describe('PhoneConnectionController io', () => {
     expect(buttonFrame).toEqual({
       jsonrpc: '2.0', id: 2, method: 'button', params: { deviceId: 'emulator-5554', button: 'HOME' },
     })
+    expect(controller.text('')).toBe(false)
   })
 
   it('drops touches unless the phase is live', async () => {
@@ -302,6 +407,10 @@ describe('PhoneConnectionController io', () => {
     const controller = await connectToLive(gateway, scheduler)
     gateway.lastSocket!.receive('not json')
     gateway.lastSocket!.receive(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { status: 'ok' } }))
+    gateway.lastSocket!.receive(JSON.stringify({ jsonrpc: '2.0', id: 2, error: { code: -32000 } }))
+    gateway.lastSocket!.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 3, error: { code: -32000, message: 'upstream rejected input' },
+    }))
     expect(controller.snapshot().kind).toBe('live')
   })
 })

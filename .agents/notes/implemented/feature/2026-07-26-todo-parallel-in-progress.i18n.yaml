@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-07-26-todo-parallel-in-progress.md
-2026-07-26-todo-parallel-in-progress.md: 3d7b80e94762f8ca24b716c42619bf20d9a13608
-2026-07-26-todo-parallel-in-progress.zh.md: f6c94e7f41ca607e78f312b129de18142b4249c2
+2026-07-26-todo-parallel-in-progress.md: 4915befacc0bd7630e0b5fba90f62dfe2a589e02
+2026-07-26-todo-parallel-in-progress.zh.md: 50c4ad2cd435f24e72c76853d318f233f86531ba

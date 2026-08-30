@@ -42,7 +42,7 @@ vendored Loader 经其 `internal` 约定消费模块系统——唯一调用点�
 
 每个图行的 `url` 交给一个带 `async` 的同源外部 classic `<script src>`。浏览器拥有网络请求与脚本执行；`load` 或 `error` 结算后节点立即移除，避免 HMR 累积失效节点。成功结算还要求图行对应的工厂 id 已出现在模块表中，否则到达失败；登记仍不运行工厂，副作用边界继续落在首次物化。
 
-共享 tsdown 预设为每个插件产出 `lib/client.cjs.map`，并把第一方源码路径重写成浏览器可识别的仓库形状 `/packages/<group>/<package>/src/...`。内联进 bundle 的其他 workspace 源码同样回到其 `packages/` 归属，依赖包路径保持原样；`sourcesContent` 承载源码，因此 host 将该物理 map 供给在 `/plugins/<id>/client.js.map`，无需开放源码路由。Vite 壳也产出 sourcemap，使壳代码与图外插件都能从 stack 和性能 profile 回到 TypeScript/TSX。
+共享 tsdown 预设为每个插件产出 `lib/client.cjs.map`，并把第一方源码路径重写成浏览器可识别的仓库形状 `/packages/<group>/<package>/src/...`。内联进 bundle 的其他 workspace 源码同样回到其 `packages/` 归属，依赖包路径保持原样；`sourcesContent` 承载源码。Host 将所供给 bundle 末尾的引用从物理 `client.cjs.map` 改写为公开 `client.js.map`，用物理 map 响应该 URL，并且不开放源码路由。Vite 壳也产出 sourcemap，使壳代码与图外插件都能从 stack 和性能 profile 回到 TypeScript/TSX。
 
 `rev` 继续作为脚本 URL 的查询参数和内容一致性锚点，bundle 与 map 都以 `no-cache` 供给。外部脚本的 `error` 事件不给响应状态与正文，因此失败诊断只报告 URL；同源 host 供给与构建期写入的 registration id 是身份边界，`load` 后的工厂存在性检查负责拒绝未登记预期 id 的产物。
 

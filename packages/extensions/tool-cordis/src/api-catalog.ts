@@ -3652,7 +3652,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AskUserQuestionIntent',
-    declaration: 'export type AskUserQuestionIntent = {\n    kind: \'plan-review\';\n    approve: string;\n};',
+    declaration: 'export type AskUserQuestionIntent = {\n    kind: \'plan-review\';\n    approve: string;\n} | {\n    kind: \'member-question\';\n    questionId: string;\n    originSessionId: string;\n    toProjectMember: string;\n    origin: {\n        projectName: string;\n        originSessionTitle: string;\n        askerAccountId: string;\n        askerRole: \'owner\' | \'admin\' | \'member\';\n        askerDisplayName: string;\n        askerAvatarUrl: string;\n    };\n    background: string;\n    references: readonly {\n        path: string;\n        reason: string;\n        content?: string;\n    }[];\n    expiresAt: number;\n};',
   },
   {
     name: 'AskUserQuestionItem',
@@ -4017,10 +4017,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CompanionMemberQuestionOption',
     declaration: 'export interface CompanionMemberQuestionOption {\n    label: string;\n    description?: string;\n}',
-  },
-  {
-    name: 'CompanionMemberQuestionOrigin',
-    declaration: 'export interface CompanionMemberQuestionOrigin {\n    projectName: string;\n    originSessionTitle: string;\n    askerAccountId: string;\n    askerRole: MemberQuestionRole;\n    askerDisplayName: string;\n    askerAvatarUrl: string;\n}',
   },
   {
     name: 'CompanionMemberQuestionReference',
@@ -4727,16 +4723,8 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type MemberQuestionItem = CompanionMemberQuestionItem;',
   },
   {
-    name: 'MemberQuestionOrigin',
-    declaration: 'export type MemberQuestionOrigin = CompanionMemberQuestionOrigin;',
-  },
-  {
     name: 'MemberQuestionReference',
     declaration: 'export type MemberQuestionReference = CompanionMemberQuestionReference;',
-  },
-  {
-    name: 'MemberQuestionRole',
-    declaration: 'export type MemberQuestionRole = \'owner\' | \'admin\' | \'member\';',
   },
   {
     name: 'MemberQuestionSendOptions',

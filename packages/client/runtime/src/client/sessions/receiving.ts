@@ -118,7 +118,10 @@ export class ReceivingQuestionBook {
     this.#clock = clock
   }
 
-  /** Current receiving-session rows (snapshot order: arrival order). */
+  /**
+   * Current receiving-session rows (snapshot order: arrival order).
+   * @returns the rows snapshot in arrival order.
+   */
   rows(): readonly ReceivingSessionRow[] {
     return [...this.#rows.values()]
   }

@@ -3983,6 +3983,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-input-trigger`（[`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-jobs`（[`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-layout`（[`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-member-questions`（[`packages/client/ui-member-questions/src/index.ts`](../packages/client/ui-member-questions/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-message-feedback`（[`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-model-selection`（[`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-permission-presets`（[`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts)）
@@ -4086,6 +4087,7 @@ export interface Config {
 - `@deepseek-ai/dsh-noise-channel`（[`packages/platform/noise-channel/src/index.ts`](../packages/platform/noise-channel/src/index.ts)）
 - `@deepseek-ai/dsh-output-retention`（[`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts)）
 - `@deepseek-ai/dsh-platform-account-client`（[`packages/platform/platform-account-client/src/index.ts`](../packages/platform/platform-account-client/src/index.ts)）
+- `@deepseek-ai/dsh-project-membership-client`（[`packages/platform/project-membership-client/src/index.ts`](../packages/platform/project-membership-client/src/index.ts)）
 - `@deepseek-ai/dsh-remote-access-client`（[`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts)）
 - `@deepseek-ai/dsh-remote-access-redis`（[`packages/platform/remote-access-redis/src/index.ts`](../packages/platform/remote-access-redis/src/index.ts)）
 - `@deepseek-ai/dsh-remote-protocol`（[`packages/platform/remote-protocol/src/index.ts`](../packages/platform/remote-protocol/src/index.ts)）

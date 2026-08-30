@@ -41,11 +41,11 @@ describe('createChatStore', () => {
 
     // Document focus is exclusive with the tool selection: writing one
     // replaces the other.
-    store.actions.focusDocument({ path: 'docs/plan.md', filename: 'plan.md', from: '李四' })
-    expect(store.store.getSnapshot().documentFocus).toEqual({ path: 'docs/plan.md', filename: 'plan.md', from: '李四' })
+    store.actions.focusDocument({ path: 'docs/subsystems/plan.md', filename: 'plan.md', from: '李四' })
+    expect(store.store.getSnapshot().documentFocus).toEqual({ path: 'docs/subsystems/plan.md', filename: 'plan.md', from: '李四' })
     store.actions.select({ turnSeq: 3, callId: 'c1', toolName: 'bash' })
     expect(store.store.getSnapshot().documentFocus).toBeNull()
-    store.actions.focusDocument({ path: 'docs/plan.md', filename: 'plan.md', from: '李四' })
+    store.actions.focusDocument({ path: 'docs/subsystems/plan.md', filename: 'plan.md', from: '李四' })
     store.actions.clearDocumentFocus()
     expect(store.store.getSnapshot().documentFocus).toBeNull()
   })

@@ -164,10 +164,11 @@ export function memberBriefOf(wait: MemberQuestionWait): MemberQuestionBrief {
  * member-question request (pure — owner props only). Registered ahead of the
  * generic question entry so `plan-review` requests and generic requests keep
  * electing the shared composer unchanged.
+ * @param owner - the composer chain's owner props, carrying `interactions`.
+ * @returns the member-question wait when the batch declares the intent, else null.
  */
-export function selectMemberQuestion({ interactions }: { interactions: readonly PendingInteraction[] }):
-    MemberQuestionWait | null {
-  return interactions.find((wait): wait is MemberQuestionWait =>
+export function selectMemberQuestion(owner: { interactions: readonly PendingInteraction[] }): MemberQuestionWait | null {
+  return owner.interactions.find((wait): wait is MemberQuestionWait =>
     wait.kind === 'question' && isMemberQuestionBatch(wait.payload.questions)) ?? null
 }
 

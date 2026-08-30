@@ -22,7 +22,7 @@ interface AskUserQuestionOption {
 
 ## 呈现意图
 
-`AskUserQuestionIntent` 可选地声明一种已知的决策类型。它按 `kind` 打标签，因此可以增加新的意图；不认识某个标签的 UI 渲染通用选项列表。意图只改变呈现方式——遵循它的 UI 回答的仍是通用 UI 会发送的那些选项标签，因此调用方两种情况下读到的回答字段相同。`approve` 指名肯定选项，而不依赖选项顺序。`ask()` 会拒绝两种无法由类型系统表达的情况：`approve` 未指向该问题自身的任何选项，以及为没有 `detail` 的问题指定意图。
+`AskUserQuestionIntent` 可选地声明一种已知的决策类型。它按 `kind` 打标签，因此可以增加新的意图；不认识某个标签的 UI 渲染通用选项列表。意图只改变呈现方式——遵循它的 UI 回答的仍是通用 UI 会发送的那些选项标签，因此调用方两种情况下读到的回答字段相同。`approve` 指名肯定选项，而不依赖选项顺序。`member-question` 携带来自配对安装的成员导向提问的完整路由决策简报——来源身份、代理撰写的背景、被引用材料与到期时刻。`ask()` 会拒绝两种无法由类型系统表达的情况：`approve` 未指向该问题自身的任何选项，以及为没有 `detail` 的问题指定意图。
 
 ```ts type-equiv
 /**
@@ -32,7 +32,8 @@ interface AskUserQuestionOption {
  * not know a tag renders the generic flow, and the answer encoding is identical
  * either way — an intent changes presentation only, never the protocol.
  */
-type AskUserQuestionIntent = {
+type AskUserQuestionIntent =
+  | {
   /** A plan submitted for review: `detail` is the plan markdown `ask()` requires, and the decision approves or declines it. */
   kind: 'plan-review'
   /**
@@ -41,6 +42,51 @@ type AskUserQuestionIntent = {
    * An `approve` naming no option of its own question is rejected at `ask()`.
    */
   approve: string
+  }
+  | {
+  /**
+   * A question about one project member: the question IS one member-directed
+   * decision routed from a paired installation, and the intent carries the
+   * whole Decision Brief — origin identity, agent-authored background,
+   * referenced materials, and the expiry instant — aligned field-for-field
+   * with the Companion `member-question` codec bounds (T4) and the sender's
+   * `MemberQuestionSendPayload` (T5). A UI that does not know the kind still
+   * renders the generic option list; the answer encoding is identical either
+   * way — an intent changes presentation only, never the protocol.
+   */
+  kind: 'member-question'
+  /** Branded question identity the settlement correlates across endpoints. */
+  questionId: string
+  /** Originating remote session id — one half of the receiver's supersede route key. */
+  originSessionId: string
+  /** Account reference of the receiving member (the local user on the receiver). */
+  toProjectMember: string
+  /** Public origin identity rendered on the receiver's brief banner (T4 bounds). */
+  origin: {
+    /** Display name of the cloud project the asking workspace is bound to. */
+    projectName: string
+    /** One-line title of the originating session; never carries conversation content. */
+    originSessionTitle: string
+    /** Platform account reference of the asking member. */
+    askerAccountId: string
+    askerRole: 'owner' | 'admin' | 'member'
+    /** Public display name shown beside the asker avatar. */
+    askerDisplayName: string
+    /** Avatar image URL rendered by the receiver's brief banner. */
+    askerAvatarUrl: string
+  }
+  /** Agent-authored decision background; bounded at the sender (T4 bound). */
+  background: string
+  /**
+   * Workspace-relative referenced documents with their rendering reasons.
+   * `content` carries the inline document body for the renderable kinds
+   * (`.md`/`.html`) so the receiver's document-focus panel can render the
+   * referenced material without reading the asking workspace's filesystem;
+   * it stays absent for kinds the panel renders as a bare file tab.
+   */
+  references: readonly { path: string; reason: string; content?: string }[]
+  /** Epoch milliseconds after which the routed ask expires on both endpoints. */
+  expiresAt: number
 }
 ```
 

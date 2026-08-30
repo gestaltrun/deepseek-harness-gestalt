@@ -22,7 +22,7 @@ interface AskUserQuestionOption {
 
 ## Presentation intent
 
-`AskUserQuestionIntent` optionally declares a known decision kind. It is tagged on `kind` so intents can be added; a UI that does not recognise a tag renders the generic option list. An intent changes presentation only — a UI honouring it answers with the same option labels a generic UI would send, so the caller reads the same answer fields either way. `approve` names the affirmative option instead of relying on option order. `ask()` rejects the two assertions no type can carry: an `approve` naming none of its own question's options, and an intent on a question with no `detail`.
+`AskUserQuestionIntent` optionally declares a known decision kind. It is tagged on `kind` so intents can be added; a UI that does not recognise a tag renders the generic option list. An intent changes presentation only — a UI honouring it answers with the same option labels a generic UI would send, so the caller reads the same answer fields either way. `approve` names the affirmative option instead of relying on option order. `member-question` carries the whole routed Decision Brief of a member-directed ask from a paired installation — origin identity, agent-authored background, referenced materials, and the expiry instant. `ask()` rejects the two assertions no type can carry: an `approve` naming none of its own question's options, and an intent on a question with no `detail`.
 
 ```ts type-equiv
 /**
@@ -32,7 +32,8 @@ interface AskUserQuestionOption {
  * not know a tag renders the generic flow, and the answer encoding is identical
  * either way — an intent changes presentation only, never the protocol.
  */
-type AskUserQuestionIntent = {
+type AskUserQuestionIntent =
+  | {
   /** A plan submitted for review: `detail` is the plan markdown `ask()` requires, and the decision approves or declines it. */
   kind: 'plan-review'
   /**
@@ -41,6 +42,51 @@ type AskUserQuestionIntent = {
    * An `approve` naming no option of its own question is rejected at `ask()`.
    */
   approve: string
+  }
+  | {
+  /**
+   * A question about one project member: the question IS one member-directed
+   * decision routed from a paired installation, and the intent carries the
+   * whole Decision Brief — origin identity, agent-authored background,
+   * referenced materials, and the expiry instant — aligned field-for-field
+   * with the Companion `member-question` codec bounds (T4) and the sender's
+   * `MemberQuestionSendPayload` (T5). A UI that does not know the kind still
+   * renders the generic option list; the answer encoding is identical either
+   * way — an intent changes presentation only, never the protocol.
+   */
+  kind: 'member-question'
+  /** Branded question identity the settlement correlates across endpoints. */
+  questionId: string
+  /** Originating remote session id — one half of the receiver's supersede route key. */
+  originSessionId: string
+  /** Account reference of the receiving member (the local user on the receiver). */
+  toProjectMember: string
+  /** Public origin identity rendered on the receiver's brief banner (T4 bounds). */
+  origin: {
+    /** Display name of the cloud project the asking workspace is bound to. */
+    projectName: string
+    /** One-line title of the originating session; never carries conversation content. */
+    originSessionTitle: string
+    /** Platform account reference of the asking member. */
+    askerAccountId: string
+    askerRole: 'owner' | 'admin' | 'member'
+    /** Public display name shown beside the asker avatar. */
+    askerDisplayName: string
+    /** Avatar image URL rendered by the receiver's brief banner. */
+    askerAvatarUrl: string
+  }
+  /** Agent-authored decision background; bounded at the sender (T4 bound). */
+  background: string
+  /**
+   * Workspace-relative referenced documents with their rendering reasons.
+   * `content` carries the inline document body for the renderable kinds
+   * (`.md`/`.html`) so the receiver's document-focus panel can render the
+   * referenced material without reading the asking workspace's filesystem;
+   * it stays absent for kinds the panel renders as a bare file tab.
+   */
+  references: readonly { path: string; reason: string; content?: string }[]
+  /** Epoch milliseconds after which the routed ask expires on both endpoints. */
+  expiresAt: number
 }
 ```
 

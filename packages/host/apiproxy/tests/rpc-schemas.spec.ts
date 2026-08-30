@@ -542,7 +542,7 @@ describe('events frame schemas', () => {
         askerAvatarUrl: 'https://example.com/a.png',
       },
       background: 'We are offboarding this member.',
-      references: [{ path: 'docs/offboard.md', reason: 'Checklist' }],
+      references: [{ path: 'docs/subsystems/project-membership.md', reason: 'Checklist' }],
       expiresAt: 1_000,
     } as const
   }

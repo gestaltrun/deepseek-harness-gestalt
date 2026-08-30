@@ -15,6 +15,7 @@
   "scripts": {
     "dev": "node scripts/build-main.mjs && electron out/main.mjs",
     "build:main": "node scripts/build-main.mjs",
+    "test:e2e-electron": "node scripts/run-e2e-electron.mjs",
     "package": "node scripts/build-main.mjs && electron-builder --publish never",
     "package:unsigned": "node scripts/build-main.mjs && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 --publish never -c.mac.notarize=false"
   },
@@ -67,12 +68,21 @@
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.0",
     "@types/ws": "^8.18.1",
+    "@wdio/cli": "^9.31.4",
+    "@wdio/electron-service": "^10.2.0",
+    "@wdio/globals": "^9.31.3",
+    "@wdio/local-runner": "^9.31.4",
+    "@wdio/mocha-framework": "^9.31.2",
+    "@wdio/native-types": "^2.5.0",
+    "@wdio/spec-reporter": "^9.31.2",
+    "@wdio/types": "^9.31.2",
     "electron": "41.2.1",
     "electron-builder": "^26.8.1",
     "esbuild": "^0.24.0",
     "jsdom": "29.1.1",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "webdriverio": "^9.31.4"
   },
   "build": {
     "appId": "com.gestalt.deepseek",

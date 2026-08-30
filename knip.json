@@ -733,7 +733,8 @@
         "src/main.ts",
         "src/preload.cjs",
         "scripts/**/*.mjs",
-        "tests/**/*.spec.ts"
+        "tests/**/*.spec.ts",
+        "tests/e2e-electron/**/*.ts"
       ],
       "project": [
         "src/**/*.ts",

@@ -9,6 +9,7 @@
     "types": ["node"]
   },
   "include": ["src", "tests", "scripts"],
+  "exclude": ["tests/e2e-electron", "scripts/run-e2e-electron.mjs"],
   "references": [
     { "path": "../../packages/attachment/attachment" },
     { "path": "../../packages/attachment/attachment-local" },

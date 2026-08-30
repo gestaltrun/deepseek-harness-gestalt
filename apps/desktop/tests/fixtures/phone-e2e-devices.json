@@ -1,0 +1,47 @@
+[
+  {
+    "id": "emulator-5554",
+    "name": "Pixel_6_API_35",
+    "platform": "android",
+    "type": "emulator",
+    "state": "online",
+    "model": "Pixel_6_API_35-model",
+    "provider": { "type": "local" }
+  },
+  {
+    "id": "R3CN30",
+    "name": "SM-S9310",
+    "platform": "android",
+    "type": "real",
+    "state": "online",
+    "model": "SM-S9310-model",
+    "provider": { "type": "local" }
+  },
+  {
+    "id": "offline-emulator",
+    "name": "Offline Pixel",
+    "platform": "android",
+    "type": "emulator",
+    "state": "offline",
+    "model": "offline-model",
+    "provider": { "type": "local" }
+  },
+  {
+    "id": "unauthorized-handset",
+    "name": "Unauthorized Android",
+    "platform": "android",
+    "type": "real",
+    "state": "unauthorized",
+    "model": "unauthorized-model",
+    "provider": { "type": "local" }
+  },
+  {
+    "id": "iPhone-16",
+    "name": "iPhone 16",
+    "platform": "ios",
+    "type": "simulator",
+    "state": "online",
+    "model": "iPhone 16-model",
+    "provider": { "type": "local" }
+  }
+]

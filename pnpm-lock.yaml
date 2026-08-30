@@ -452,9 +452,18 @@ importers:
       '@deepseek-ai/dsh-client-ui-desktop':
         specifier: workspace:^
         version: link:../../packages/client/ui-desktop
+      '@deepseek-ai/dsh-client-ui-phone':
+        specifier: workspace:^
+        version: link:../../packages/client/ui-phone
       '@deepseek-ai/dsh-noise-channel':
         specifier: workspace:^
         version: link:../../packages/platform/noise-channel
+      '@deepseek-ai/dsh-phone-runtime':
+        specifier: workspace:^
+        version: link:../../packages/phone/phone-runtime
+      '@deepseek-ai/dsh-phone-stream':
+        specifier: workspace:^
+        version: link:../../packages/phone/phone-stream
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../../packages/platform/platform-account
@@ -473,6 +482,9 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../packages/core/session
+      '@deepseek-ai/dsh-tool-phone':
+        specifier: workspace:^
+        version: link:../../packages/phone/tool-phone
       electron-updater:
         specifier: ^6.8.3
         version: 6.8.9
@@ -3307,6 +3319,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-client-locale':
+        specifier: workspace:^
+        version: link:../locale
       '@deepseek-ai/dsh-client-runtime':
         specifier: workspace:^
         version: link:../runtime
@@ -3319,9 +3334,6 @@ importers:
       '@deepseek-ai/dsh-client-ui-settings':
         specifier: workspace:^
         version: link:../ui-settings
-      '@deepseek-ai/dsh-client-ui-settings-plugins':
-        specifier: workspace:^
-        version: link:../ui-settings-plugins
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: workspace:^
         version: link:../ui-slots

@@ -15,7 +15,8 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // The shared question presentation's namespace merge ('question') and the
 // sanctioned presentation seam this wrapper mounts under the banner.
 import type {} from '@deepseek-ai/dsh-client-ui-user-questions/client'
-import type { PendingInteraction, PendingWait } from '@deepseek-ai/dsh-client-runtime/client'
+import type { PendingInteraction, PendingWait, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { DetailsDocumentFocus } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 /** The pending question carrier a member brief renders and settles. */
 export type MemberQuestionWait = PendingWait<'question'>
@@ -46,6 +47,10 @@ export interface MemberQuestionReferenceChip {
   filename: string
   /** Why this document matters, rendered as the chip subtitle. */
   reason: string
+  /** Workspace-relative document path, forwarded on document focus. */
+  path: string
+  /** Inline document body for the renderable kinds; absent renders the bare file tab. */
+  content?: string
 }
 
 /**
@@ -147,6 +152,8 @@ export function memberBriefOf(wait: MemberQuestionWait): MemberQuestionBrief {
     references: (carried?.references ?? []).map(reference => ({
       filename: filenameOf(reference.path),
       reason: reference.reason,
+      path: reference.path,
+      ...(reference.content === undefined ? {} : { content: reference.content }),
     })),
     ...(carried === undefined ? {} : { expiresAt: carried.expiresAt }),
   }
@@ -177,3 +184,11 @@ export type MemberQuestionComposerProps =
   & { matched: MemberQuestionWait }
   & PropsLocale<'member-question'>
   & { questionT: TranslateNS<'question'> }
+  & {
+    /**
+     * Focus a referenced document in the session's details panel (the
+     * document-focus linkage over `ctx.get('detailsFocus')`); undefined when
+     * ui-conversation is composed out and the chips render inert.
+     */
+    focusDocument?: ((sessionId: SessionId, document: DetailsDocumentFocus) => void) | undefined
+  }

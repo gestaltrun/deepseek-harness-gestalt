@@ -96,8 +96,9 @@ exports[`MemberQuestionCard > snapshots the English copy 1`] = `
           <div
             class="chips"
           >
-            <span
+            <button
               class="chip"
+              type="button"
             >
               <span
                 class="chipFilename"
@@ -109,9 +110,10 @@ exports[`MemberQuestionCard > snapshots the English copy 1`] = `
               >
                 当前成员名单与角色
               </span>
-            </span>
-            <span
+            </button>
+            <button
               class="chip"
+              type="button"
             >
               <span
                 class="chipFilename"
@@ -123,7 +125,7 @@ exports[`MemberQuestionCard > snapshots the English copy 1`] = `
               >
                 近 30 天活跃度
               </span>
-            </span>
+            </button>
           </div>
         </div>
       </header>
@@ -486,8 +488,9 @@ exports[`MemberQuestionCard > snapshots the full banner and the shared presentat
           <div
             class="chips"
           >
-            <span
+            <button
               class="chip"
+              type="button"
             >
               <span
                 class="chipFilename"
@@ -499,9 +502,10 @@ exports[`MemberQuestionCard > snapshots the full banner and the shared presentat
               >
                 当前成员名单与角色
               </span>
-            </span>
-            <span
+            </button>
+            <button
               class="chip"
+              type="button"
             >
               <span
                 class="chipFilename"
@@ -513,7 +517,7 @@ exports[`MemberQuestionCard > snapshots the full banner and the shared presentat
               >
                 近 30 天活跃度
               </span>
-            </span>
+            </button>
           </div>
         </div>
       </header>
@@ -876,8 +880,9 @@ exports[`MemberQuestionCard > snapshots the full banner under the dark theme att
           <div
             class="chips"
           >
-            <span
+            <button
               class="chip"
+              type="button"
             >
               <span
                 class="chipFilename"
@@ -889,9 +894,10 @@ exports[`MemberQuestionCard > snapshots the full banner under the dark theme att
               >
                 当前成员名单与角色
               </span>
-            </span>
-            <span
+            </button>
+            <button
               class="chip"
+              type="button"
             >
               <span
                 class="chipFilename"
@@ -903,7 +909,7 @@ exports[`MemberQuestionCard > snapshots the full banner under the dark theme att
               >
                 近 30 天活跃度
               </span>
-            </span>
+            </button>
           </div>
         </div>
       </header>

@@ -79,7 +79,7 @@ const projection = () => ({
     askerRole: 'admin' as const,
   },
   references: [
-    { path: 'docs/roster.md', reason: '当前成员名单与角色' },
+    { path: 'docs/roster.md', reason: '当前成员名单与角色', content: '# 成员名单' },
     { path: 'reports/activity.csv', reason: '近 30 天活跃度' },
   ],
   expiresAt: NOW + 125 * 1000,
@@ -109,7 +109,7 @@ function genericWait(intent: undefined | { kind: 'plan-review'; approve: string 
   return new PendingWait('question', RpcId('q-2'), SID, payload as MemberQuestionComposerProps['matched']['payload'], () => Promise.resolve<RpcReceipt>({ accepted: true }))
 }
 
-function renderCard(carrier: PendingWait<'question'>) {
+function renderCard(carrier: PendingWait<'question'>, focusDocument?: MemberQuestionComposerProps['focusDocument']) {
   return render(
     <MemberQuestionCard
       matched={carrier}
@@ -117,6 +117,7 @@ function renderCard(carrier: PendingWait<'question'>) {
       {...kit}
       t={seat('member-question')}
       questionT={seat('question')}
+      focusDocument={focusDocument}
     />,
   )
 }
@@ -188,8 +189,8 @@ describe('clampBackground and memberBriefOf', () => {
     const brief = memberBriefOf(carrier)
     expect(brief.origin).toEqual(projection().origin)
     expect(brief.references).toEqual([
-      { filename: 'roster.md', reason: '当前成员名单与角色' },
-      { filename: 'activity.csv', reason: '近 30 天活跃度' },
+      { filename: 'roster.md', reason: '当前成员名单与角色', path: 'docs/roster.md', content: '# 成员名单' },
+      { filename: 'activity.csv', reason: '近 30 天活跃度', path: 'reports/activity.csv' },
     ])
     expect(brief.expiresAt).toBe(NOW + 3_600_000)
     // The carrier's detail is the background, byte-for-byte under the budget.
@@ -294,6 +295,33 @@ describe('MemberQuestionCard', () => {
     fireEvent.click(screen.getByRole('button', { name: '展开问题卡片' }))
     await waitFor(() => expect(screen.getByText('将王小明移出项目吗？')).toBeTruthy())
     expect(screen.getByRole('button', { name: '收起问题卡片' })).toBeTruthy()
+  })
+
+  it('focuses a referenced document from its chip and folds while the details panel is open', async () => {
+    const focusDocument = vi.fn()
+    const { carrier } = memberWait()
+    const { container } = renderCard(carrier, focusDocument)
+
+    // Chip click focuses that document: identity, provenance, and the inline
+    // body for the renderable kind.
+    fireEvent.click(screen.getByRole('button', { name: /roster\.md/ }))
+    expect(focusDocument).toHaveBeenCalledWith(SID, {
+      path: 'docs/roster.md', filename: 'roster.md', from: '王小明', content: '# 成员名单',
+    })
+
+    // Panel opens → the card folds to its strip; panel closes → restored.
+    // The linkage rides the persistent details column's aria-expanded. The
+    // panel mounts first, so the attribute flips are observed mutations.
+    const panel = document.createElement('div')
+    panel.setAttribute('data-details-panel', '')
+    document.body.appendChild(panel)
+    panel.setAttribute('aria-expanded', 'true')
+    await waitFor(() => expect(container.querySelector('[data-folded]')).toBeTruthy())
+    expect(screen.getByText('远端 · 王小明')).toBeTruthy()
+    panel.setAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(container.querySelector('[data-folded]')).toBeNull())
+    expect(screen.getByText('将王小明移出项目吗？')).toBeTruthy()
+    panel.remove()
   })
 
   it('snapshots the full banner and the shared presentation (light)', () => {

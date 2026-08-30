@@ -20,7 +20,7 @@ export type { IConversation } from './service.ts'
 export type { DraftAttachmentId } from './input/contract.ts'
 
 export type {
-  CallId, ChatStoreState, SelectionTarget, ViewTab,
+  CallId, ChatStoreState, DetailsDocumentFocus, SelectionTarget, ViewTab,
 } from './contract/views.ts'
 export type { ConversationKey } from './locales.ts'
 export type {
@@ -33,7 +33,8 @@ export type {
   ComposerAttachment, ComposerAttachmentsOwnerProps, ComposerAttachmentsProps, ComposerChainProps, ConversationInjected,
   ConversationHeaderLineageOwnerProps, ConversationSessionHeaderInjected, ConversationSessionInjected,
   ConversationSlotProps, ConvViewOwnerProps,
-  ConvViewProps, DetailsInjected, DetailsSlotProps, DetailsToolOwnerProps, EmptyWorkspaceOwnerProps, HeroBrandMarkOwnerProps,
+  ConvViewProps, DetailsDocumentOwnerProps, DetailsFocus, DetailsInjected, DetailsSlotProps,
+  DetailsToolOwnerProps, EmptyWorkspaceOwnerProps, HeroBrandMarkOwnerProps,
   MessageImagesOwnerProps, MessageImagesProps, RenderMessageImages, TurnTailOwnerProps, UseChatNodeTurnData,
 } from './contract/slots.ts'
 // Export discipline: packages/client/AGENTS.md.

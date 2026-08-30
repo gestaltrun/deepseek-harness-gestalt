@@ -470,7 +470,9 @@ describe('details inject API', () => {
   it('details injects the one layout callback; selection rides the shared store instead', async () => {
     const b = await bench()
     const entry = b.entryOf('details')
-    const injected = (entry.inject as unknown as () => DetailsInjected)()
+    const sessionId: SessionId = ROOT
+    const injected = (entry.inject as unknown as (sid: SessionId, actions: { clearDocumentFocus(): void }) => DetailsInjected)(
+      sessionId, b.runtime.storeOf('details', ROOT).actions as unknown as { clearDocumentFocus(): void })
     expect(Object.keys(injected)).toEqual(['closeDetails'])
     injected.closeDetails()
     expect(b.layoutFake.closeDetails).toHaveBeenCalledTimes(1)

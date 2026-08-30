@@ -71,6 +71,7 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const [innerCollapsed, setInnerCollapsed] = useState(false)
   const [revealed, setRevealed] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
 
   useEffect(() => {
     const body = bodyRef.current
@@ -85,11 +86,26 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
     return () => { observer.disconnect() }
   }, [])
 
+  // Details-panel linkage: the persistent details column carries its open
+  // state as `aria-expanded` on `[data-details-panel]` (ui-layout's AppFrame);
+  // the same observation mechanism folds the card to its strip while the
+  // panel is open and restores it when the panel closes.
+  useEffect(() => {
+    const sync = (): void => {
+      const panel = document.querySelector('[data-details-panel]')
+      setDetailsOpen(panel?.getAttribute('aria-expanded') === 'true')
+    }
+    sync()
+    const observer = new MutationObserver(sync)
+    observer.observe(document.body, { attributes: true, attributeFilter: ['aria-expanded'], subtree: true })
+    return () => { observer.disconnect() }
+  }, [])
+
   useEffect(() => {
     if (!innerCollapsed) setRevealed(false)
   }, [innerCollapsed])
 
-  const folded = innerCollapsed && !revealed
+  const folded = detailsOpen || (innerCollapsed && !revealed)
   const askerName = brief.origin?.askerDisplayName ?? props.t('origin.fallback')
 
   return (
@@ -150,10 +166,22 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
                 <span className={css.contextLabel}>{props.t('references.label')}</span>
                 <div className={css.chips}>
                   {brief.references.map(chip => (
-                    <span className={css.chip} key={`${chip.filename}-${chip.reason}`}>
+                    <button
+                      type="button"
+                      className={css.chip}
+                      key={`${chip.filename}-${chip.reason}`}
+                      onClick={() => {
+                        props.focusDocument?.(props.sessionId, {
+                          path: chip.path,
+                          filename: chip.filename,
+                          from: askerName,
+                          ...(chip.content === undefined ? {} : { content: chip.content }),
+                        })
+                      }}
+                    >
                       <span className={css.chipFilename}>{chip.filename}</span>
                       <span className={css.chipReason}>{chip.reason}</span>
-                    </span>
+                    </button>
                   ))}
                 </div>
               </div>

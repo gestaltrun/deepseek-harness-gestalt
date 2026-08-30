@@ -9,7 +9,8 @@
  * presentation seam under its Decision Brief banner and binds the `question`
  * dictionary through the standard locale seat for it.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { DetailsDocumentFocus } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { MemberQuestionCard } from './MemberQuestionCard.tsx'
 import { selectMemberQuestion } from './contract/slots.ts'
 import { en, zh, type MemberQuestionKey } from './locales.ts'
@@ -49,13 +50,20 @@ export function apply(ctx: ClientContext): void {
   // injected translator never churns memo identity.
   const questionT = ctx.locale.bind('question')
 
+  // The document-focus linkage resolves the optional `detailsFocus` service
+  // lazily per click, so a late-provided (or absent) ui-conversation service
+  // renders the chips inert instead of failing the banner.
+  const focusDocument = ctx.get('detailsFocus') === undefined
+    ? undefined
+    : (sessionId: SessionId, document: DetailsDocumentFocus) => { ctx.get('detailsFocus')?.focus(sessionId, document) }
+
   ctx.slots.inject('conversation.composer', () => ctx.slots.register(
     {
       name: 'conversation.composer',
       select: selectMemberQuestion,
       priority: -1,
       locale: NS,
-      inject: () => ({ questionT }),
+      inject: () => ({ questionT, focusDocument }),
     },
     MemberQuestionCard,
   ))

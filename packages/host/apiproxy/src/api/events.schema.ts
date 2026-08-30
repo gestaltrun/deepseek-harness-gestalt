@@ -46,7 +46,13 @@ export const askUserQuestionItemSchema = z.object({
         askerAvatarUrl: z.string().min(1),
       }),
       background: z.string(),
-      references: z.array(z.object({ path: z.string().min(1), reason: z.string() })),
+      references: z.array(z.object({
+        path: z.string().min(1),
+        reason: z.string(),
+        // Inline document body for the renderable kinds (.md/.html); absent
+        // renders the receiver's bare file tab.
+        content: z.string().optional(),
+      })),
       expiresAt: z.number().finite(),
     }),
   ]).optional(),

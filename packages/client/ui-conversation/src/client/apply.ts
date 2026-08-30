@@ -131,6 +131,18 @@ export function apply(ctx: Context): void {
 
   // Apply-time construction keeps store identity bound to this fiber.
   const chatStore = createChatStore()
+
+  // Document-focus linkage channel: the current session's bound chat-store
+  // actions, stashed by the details registration's inject (the same
+  // sanctioned assembly side effect as LayoutController.attachPanels — on
+  // registration re-run the fresh set overwrites the stale one).
+  const focusActions = new Map<SessionId, BoundActions<typeof chatStore>>()
+  ctx.provide('detailsFocus', {
+    focus: (sessionId, document) => {
+      focusActions.get(sessionId)?.focusDocument(document)
+      layout.openDetails()
+    },
+  })
   const submissionPolicy = new ComposerSubmissionPolicy(
     ctx.settingsScope.bind<ConversationSettings>({ namespace: CONVERSATION_SETTINGS_NAMESPACE }),
   )
@@ -482,11 +494,20 @@ export function apply(ctx: Context): void {
     locale: NS,
     children: {
       'conversation.details.tool': { kind: 'single', scope: 'session' },
+      'conversation.details.document': { kind: 'single', scope: 'session' },
     },
     store: chatStore,
-    inject: (): DetailsInjected => ({
-      closeDetails: () => { layout.closeDetails() },
-    }),
+    inject: (sessionId: SessionId, actions: BoundActions<typeof chatStore>): DetailsInjected => {
+      focusActions.set(sessionId, actions)
+      return {
+        // Closing the panel releases the focused document with it, so the
+        // next open shows the tool selection again.
+        closeDetails: () => {
+          actions.clearDocumentFocus()
+          layout.closeDetails()
+        },
+      }
+    },
   }, DetailsPanel)
 
 }

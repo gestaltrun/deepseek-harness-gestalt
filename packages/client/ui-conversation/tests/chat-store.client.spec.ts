@@ -12,7 +12,7 @@ beforeEach(() => {
 describe('createChatStore', () => {
   it('init shape: empty selection/draft/view', () => {
     const store = createChatStore().create()
-    expect(store.store.getSnapshot()).toEqual({ selection: null, draft: '', view: null, inspect: null, annotationDraft: null })
+    expect(store.store.getSnapshot()).toEqual({ selection: null, draft: '', view: null, inspect: null, annotationDraft: null, documentFocus: null })
   })
 
   it('actions cover the declared write set', () => {
@@ -38,6 +38,16 @@ describe('createChatStore', () => {
     expect(store.store.getSnapshot().annotationDraft).toEqual({ annotations: [], nextSeq: 1 })
     store.actions.setAnnotationDraft(null)
     expect(store.store.getSnapshot().annotationDraft).toBeNull()
+
+    // Document focus is exclusive with the tool selection: writing one
+    // replaces the other.
+    store.actions.focusDocument({ path: 'docs/plan.md', filename: 'plan.md', from: '李四' })
+    expect(store.store.getSnapshot().documentFocus).toEqual({ path: 'docs/plan.md', filename: 'plan.md', from: '李四' })
+    store.actions.select({ turnSeq: 3, callId: 'c1', toolName: 'bash' })
+    expect(store.store.getSnapshot().documentFocus).toBeNull()
+    store.actions.focusDocument({ path: 'docs/plan.md', filename: 'plan.md', from: '李四' })
+    store.actions.clearDocumentFocus()
+    expect(store.store.getSnapshot().documentFocus).toBeNull()
   })
 
   it('persists per scope key and rehydrates a fresh instance', () => {

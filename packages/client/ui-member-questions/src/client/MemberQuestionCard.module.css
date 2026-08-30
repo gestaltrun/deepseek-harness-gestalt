@@ -19,6 +19,12 @@
   box-shadow: var(--dsw-shadow-lv2);
   color: var(--dsw-alias-label-primary);
   overflow: hidden;
+  /* Elevated surface: `.body` scrolls inside this card, so the thumb takes
+     the l2 elevation tokens. Declared here because the elevation belongs to
+     the surface, and the custom properties inherit down to `.body` (see
+     ui-theme styles/scrollbar.css for the rebinding contract). */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
 .card,
@@ -175,6 +181,15 @@
   border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
   border-radius: 8px;
   min-width: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--dsw-alias-border-l1);
 }
 
 .chipFilename {

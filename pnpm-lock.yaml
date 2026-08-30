@@ -567,6 +567,9 @@ importers:
       '@types/react-dom':
         specifier: ~18.3.0
         version: 18.3.7(@types/react@18.3.31)
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       electron:
         specifier: 41.2.1
         version: 41.2.1
@@ -740,6 +743,9 @@ importers:
       '@types/pg':
         specifier: ^8.15.5
         version: 8.23.1
+      playwright:
+        specifier: ^1.49.0
+        version: 1.61.1
       tsdown:
         specifier: ^0.22.2
         version: 0.22.2(oxc-resolver@11.20.0)(publint@0.3.21)(tsx@4.22.4)(typescript@6.0.3)

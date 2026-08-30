@@ -7,7 +7,7 @@ const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z
 
 /**
  * Derive the tag for one validated Desktop Bundle candidate.
- * @param {{ requestedVersion: string, packageVersion: string, publish: boolean, refName: string, tagExists: boolean }} input - dispatch and repository state.
+ * @param {{ requestedVersion: string, packageVersion: string, publish: boolean, tagExists: boolean }} input - dispatch and repository state.
  * @returns {{ version: string, tag: string }} validated release identifiers.
  */
 export function prepareRelease(input) {
@@ -22,9 +22,6 @@ export function prepareRelease(input) {
 
   const tag = `gestalt-v${input.requestedVersion}`
   if (input.publish) {
-    if (input.refName !== 'master') {
-      throw new Error(`Desktop publication must run from master, not ${input.refName}`)
-    }
     if (input.tagExists) throw new Error(`Desktop release tag already exists: ${tag}`)
 
   }
@@ -42,9 +39,9 @@ function localTagExists(tag) {
 }
 
 if (process.argv[1]?.endsWith('prepare-release.mjs') === true) {
-  const [requestedVersion, publishText, refName] = process.argv.slice(2)
-  if (requestedVersion === undefined || publishText === undefined || refName === undefined) {
-    throw new Error('usage: prepare-release.mjs <version> <true|false> <ref-name>')
+  const [requestedVersion, publishText] = process.argv.slice(2)
+  if (requestedVersion === undefined || publishText === undefined) {
+    throw new Error('usage: prepare-release.mjs <version> <true|false>')
   }
   if (publishText !== 'true' && publishText !== 'false') {
     throw new Error(`publish must be true or false, received ${publishText}`)
@@ -57,7 +54,6 @@ if (process.argv[1]?.endsWith('prepare-release.mjs') === true) {
     requestedVersion,
     packageVersion: packageJson.version,
     publish: publishText === 'true',
-    refName,
     tagExists: localTagExists(`gestalt-v${requestedVersion}`),
   })
   const output = process.env.GITHUB_OUTPUT

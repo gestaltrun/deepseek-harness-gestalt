@@ -273,8 +273,14 @@ describe('web e2e: composer and history image annotation pins', () => {
       mixed.replace(/at \d+\.\d%, \d+\.\d%/, 'at {x}%, {y}%'),
       MODE,
     )
-    await expect(page.getByRole('button', { name: '1 annotation' }).count()).resolves.toBe(0)
-    await expect(page.getByRole('button', { name: '2 annotations' }).count()).resolves.toBe(0)
+    await expect.poll(
+      () => page.getByRole('button', { name: '1 annotation' }).count(),
+      { timeout: 5_000 },
+    ).toBe(0)
+    await expect.poll(
+      () => page.getByRole('button', { name: '2 annotations' }).count(),
+      { timeout: 5_000 },
+    ).toBe(0)
     // Unavailable-image send failure is not cheap here: the Host has no UI to
     // unlink a still-rendered history attachment, and deleting store objects
     // from the test process is not a user-visible assembled journey.

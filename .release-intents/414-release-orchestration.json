@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "414-release-orchestration",
+  "summary": {
+    "en": "Coordinate Desktop, Mobile, and Platform through one reviewed product release plan.",
+    "zh": "通过一个经过评审的产品发布计划协调桌面端、移动端和平台端。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "patch",
+    "platform": "patch"
+  },
+  "compatibilityExceptions": []
+}

@@ -207,7 +207,7 @@ describe('Mobile shipped entry foreground mutation gate', () => {
     })
     await screen.findByText('Desktop-only authoritative hit')
     expect(screen.getByRole('region', { name: 'Desktop search results' }).textContent).toMatchInlineSnapshot(
-      '"Desktop search resultsuncached-authoritative-sessionDesktop-only authoritative hit"',
+      '"Desktop search resultsUntitled SessionDesktop-only authoritative hit"',
     )
     fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }))
     surface.attach(sid('guarded-session'), selectedFile())

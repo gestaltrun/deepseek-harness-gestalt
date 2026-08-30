@@ -450,8 +450,10 @@ export class RemoteRelayProvider extends RemoteRelayService {
       if (target === undefined || target.closed
         || target.entry.connectionToken !== event.targetConnectionToken
         || target.entry.revision !== event.revision) return
-      const { targetConnectionToken: _targetConnectionToken, revision: _revision, ...message } = event
-      await this.deliver(target, message)
+      // Concurrent route changes can publish complete snapshots out of order across Platform Instances.
+      // Treat the event as an edge notification and project the current shared directory at delivery time.
+      const entries = await this.options.coordinator.list(event.routeId)
+      await this.deliver(target, relayPeerUpdate(target.entry, entries, this.now()))
       return
     }
     const target = this.attachments.get(attachmentKey(event.routeId, event.targetAttachmentId))

@@ -3,7 +3,6 @@
 export const COMPANION_RELEASE_FLOWS = [
   'github-login',
   'account',
-  'camera-pairing',
   'link-pairing',
   'desktop-navigation',
   'search',

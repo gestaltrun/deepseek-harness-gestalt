@@ -24,7 +24,7 @@ The JSONL backend packs each durable append batch. Raw `compression: 'none'` and
 
 ### Canonical snapshot fixtures
 
-Every committed session-format JSONL fixture uses the canonical packed representation. `scripts/session-fixture-layout.snapshot.ts` discovers tracked `*.jsonl` files and unignored untracked additions repository-wide, selects those whose first record is a `session` header, decodes all body records, and rejects content that differs from `packChunkRuns()` output. The inventory therefore includes ACP, headless, TUI, `apps/web`, parent sessions, child sessions, and future fixture names without a maintained path list.
+Every committed session-format JSONL fixture uses the canonical packed representation. `scripts/verify-session-fixture-layout.ts` discovers tracked `*.jsonl` files and unignored untracked additions repository-wide, selects those whose first record is a `session` header, decodes all body records, and rejects content that differs from `packChunkRuns()` output during core CI preflight. The inventory therefore includes ACP, headless, TUI, `apps/web`, parent sessions, child sessions, and future fixture names without a maintained path list.
 
 ACP and headless snapshot runs harvest the default JSONL backend output. TUI and web record-mode writers apply `packChunkRuns()` to their in-memory events before writing fixtures. The authored `packed-chunks` ACP scenario runs under the ordinary config and retains all three packed row kinds; its contract decodes both its independent source fixture and target fixture before asserting event-for-event equality.
 

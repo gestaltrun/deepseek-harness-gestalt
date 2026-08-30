@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-28-system-node-desktop-relay-carrier.md
+2026-08-28-system-node-desktop-relay-carrier.md: 32b9171cc514eeb4ae27c62b4dbf6ae10a5b2461
+2026-08-28-system-node-desktop-relay-carrier.zh.md: 86fc03b46fbceeac7314bc5839149109d44d50c6

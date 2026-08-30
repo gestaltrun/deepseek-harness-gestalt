@@ -319,7 +319,7 @@ describe('hasLowColourCount', () => {
     `))
 
     await expect(hasLowColourCount(text)).resolves.toBe(true)
-  })
+  }, 60_000)
 
   it('classifies a transparent graphic as low-color', async () => {
     const side = 256

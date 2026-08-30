@@ -1,0 +1,19 @@
+# Gestalt · 獭子哥
+
+> Gestalt is an open-source AI coding agent product built on DeepSeek Harness. It packages the compatible plugin runtime as desktop, mobile, and operated Platform experiences.
+
+## Product
+
+Gestalt keeps the DeepSeek Harness plugin model and adds an installable desktop host, a paired mobile companion, replayable sessions, release delivery, and the production Platform service at this origin.
+
+## Links
+
+- Product: https://www.gestaltrun.com/
+- Source: https://github.com/gestaltrun/deepseek-harness-gestalt
+- Documentation: https://gestaltrun.github.io/deepseek-harness-gestalt/
+- Releases: https://github.com/gestaltrun/deepseek-harness-gestalt/releases
+- Official DeepSeek Harness: https://github.com/deepseek-ai/deepseek-harness
+
+## Languages
+
+The product page contains Chinese and English content at the same canonical URL. Use the documentation site for linkable pages in each language.

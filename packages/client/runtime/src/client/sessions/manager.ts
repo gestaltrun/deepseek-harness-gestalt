@@ -20,6 +20,7 @@ import type { PendingInteractionStatus } from './pending.ts'
 import type {} from '@deepseek-ai/dsh-session-title/client'
 import { Notifier } from './notifier.ts'
 import { ProjectionValueStore } from './projection-store.ts'
+import { ReceivingQuestionBook } from './receiving.ts'
 import { Session } from './session.ts'
 import type { SessionRemotes } from './remotes.ts'
 import type { SessionAdmissionAdapter } from '../contract/sessions.ts'
@@ -150,6 +151,12 @@ export class SessionManager {
    * is stored as an absent key, so absence and `[]` are one representation.
    */
   private readonly jobsBySession = new Map<SessionId, readonly JobView[]>()
+  /**
+   * Receiver-side member-question book: `question/requested` batches that
+   * declare the member-question intent route here into renderer-only
+   * receiving sessions (one per route key; no host session, no model output).
+   */
+  readonly receiving: ReceivingQuestionBook
 
   private selected: SessionId | undefined
 
@@ -166,6 +173,9 @@ export class SessionManager {
   /**
    * @param api - shared wire client.
    * @param restoredSelection - persisted real-Session selection candidate.
+   * @param receiving - receiving-session book options: the local receiving
+   * member identity (route-key half; boot wiring lands with the conversation
+   * milestone) and an injectable clock for expiry tests.
    */
   constructor(
     private readonly api: IApiClient,
@@ -174,9 +184,14 @@ export class SessionManager {
     restoredAddress?: SubagentAddress,
     private readonly conversation?: ConversationRuntime,
     private readonly admissionFor?: (sessionId: SessionId) => SessionAdmissionAdapter | undefined,
+    receiving?: { receiverMemberId?: string; clock?: () => number },
   ) {
     this.selected = restoredSelection
     if (restoredAddress !== undefined) this.addresses.set(restoredAddress.childSessionId, restoredAddress)
+    this.receiving = new ReceivingQuestionBook(
+      receiving?.receiverMemberId ?? 'self',
+      receiving?.clock ?? (() => Date.now()),
+    )
     this.listSnapshotCache = this.buildListSnapshot()
   }
 
@@ -795,13 +810,27 @@ export class SessionManager {
     } else if (frame.type === 'approval/resolved') {
       this.resolvePending(frame.sessionId, `a:${frame.approvalId}`)
     } else if (frame.type === 'question/requested') {
-      this.trackPending(
-        frame.sessionId,
-        `q:${envelope.rpcId}`,
-        questionInteractionStatus(frame.questions),
-      )
+      // Member-question batches route into the receiving book first: a claimed
+      // batch renders on its route key's receiving session (tracked pending on
+      // the synthetic id) and must not buffer against the origin session id,
+      // which never instantiates locally.
+      const receivingRow = this.receiving.handleRequested(envelope.rpcId, frame.questions)
+      if (receivingRow !== undefined) {
+        this.trackPending(receivingRow.sessionId, `q:${envelope.rpcId}`, 'question')
+      } else {
+        this.trackPending(
+          frame.sessionId,
+          `q:${envelope.rpcId}`,
+          questionInteractionStatus(frame.questions),
+        )
+      }
     } else if (frame.type === 'question/resolved') {
       this.resolvePending(frame.sessionId, `q:${frame.questionRpcId}`)
+      const receivingSessionId = this.receiving.sessionOfRpc(frame.questionRpcId)
+      if (receivingSessionId !== undefined) {
+        this.receiving.handleResolved(frame.questionRpcId, frame.outcome)
+        this.resolvePending(receivingSessionId, `q:${frame.questionRpcId}`)
+      }
     }
     const session = this.sessions.get(frame.sessionId)
     if (session === undefined) {
@@ -812,13 +841,22 @@ export class SessionManager {
       // backfills it from history.
       switch (frame.type) {
         case 'approval/requested':
-        case 'question/requested':
         case 'session/queue': {
           const buffer = this.pendingBuffers.get(frame.sessionId) ?? []
-          const key = frame.type === 'approval/requested'
-            ? `a:${frame.approvalId}`
-            : frame.type === 'question/requested' ? `q:${envelope.rpcId}` : 'queue'
+          const key = frame.type === 'approval/requested' ? `a:${frame.approvalId}` : 'queue'
           const prior = buffer.findIndex(item => bufferedRequestKey(item) === key)
+          if (prior === -1) buffer.push(envelope)
+          else buffer[prior] = envelope
+          this.pendingBuffers.set(frame.sessionId, buffer)
+          return
+        }
+        case 'question/requested': {
+          // Claimed member-question batches render on their receiving session;
+          // the origin session id never instantiates locally, so buffering the
+          // frame against it would only replay a stale ask.
+          if (this.receiving.sessionOfRpc(envelope.rpcId) !== undefined) return
+          const buffer = this.pendingBuffers.get(frame.sessionId) ?? []
+          const prior = buffer.findIndex(item => bufferedRequestKey(item) === `q:${envelope.rpcId}`)
           if (prior === -1) buffer.push(envelope)
           else buffer[prior] = envelope
           this.pendingBuffers.set(frame.sessionId, buffer)
@@ -1074,18 +1112,40 @@ export class SessionManager {
   }
 
   private buildListSnapshot(): SessionListSnapshot {
-    const merged: TitledSessionSummary[] = this.summaries.map((summary) => {
-      // List rows read the generic 'title' projection key (host-computed unit
-      // value; there is no dedicated title frame).
-      const projectionStore = this.projectionStores.get(summary.sessionId)
-      const title = projectionStore?.get('title')
-      const projectionValues = projectionStore?.values()
-      return {
-        ...summary,
-        ...(typeof title === 'string' && title !== '' ? { title } : {}),
-        ...(projectionValues === undefined ? {} : { projectionValues }),
-      }
-    })
+    // Countdown sweep first: a clock-driven expiry must be observable through
+    // the very snapshot read that follows it (no timer of its own). The sweep
+    // can retire a card no resolved frame reports, so the pending dots of
+    // receiving sessions reconcile against the post-sweep book state here.
+    this.receiving.sweep()
+    for (const row of this.receiving.rows()) {
+      if (row.active !== undefined) continue
+      this.pendingInteractions.delete(row.sessionId)
+    }
+    // Receiving sessions are renderer-only rows: they carry their route-key
+    // title directly and never ride the host baseline (session.list cannot
+    // know them), so they prepend the merged list.
+    const receivingRows: TitledSessionSummary[] = this.receiving.rows().map(row => ({
+      sessionId: row.sessionId,
+      updatedAt: row.updatedAt,
+      running: false,
+      blank: false,
+      title: row.title,
+    }))
+    const merged: TitledSessionSummary[] = [
+      ...receivingRows,
+      ...this.summaries.map((summary) => {
+        // List rows read the generic 'title' projection key (host-computed unit
+        // value; there is no dedicated title frame).
+        const projectionStore = this.projectionStores.get(summary.sessionId)
+        const title = projectionStore?.get('title')
+        const projectionValues = projectionStore?.values()
+        return {
+          ...summary,
+          ...(typeof title === 'string' && title !== '' ? { title } : {}),
+          ...(projectionValues === undefined ? {} : { projectionValues }),
+        }
+      }),
+    ]
     const pendingInteractions = new Map<SessionId, PendingInteractionStatus>()
     for (const [sessionId, interactions] of this.pendingInteractions) {
       const statuses = [...interactions.values()]

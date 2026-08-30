@@ -220,12 +220,12 @@ describe('UserQuestionService', () => {
     expect(p.seen[0]?.questions[1]?.intent).toEqual(intent)
   })
 
-  it('accepts a member-question intent without extra required fields', async () => {
+  it('accepts a member-question intent carrying its Decision Brief fields', async () => {
     const ctx = new Context()
     await ctx.plugin(UserQuestionService)
     const p = provider('Remove')
     ctx.userQuestions.registerProvider(p)
-    const intent = { kind: 'member-question' } as const
+    const intent = memberQuestionIntent()
 
     const result = await ctx.userQuestions.ask({
       questions: [{
@@ -239,3 +239,24 @@ describe('UserQuestionService', () => {
     expect(p.seen[0]?.questions[0]?.intent).toEqual(intent)
   })
 })
+
+/** A fully carried member-question intent (the T4/T5 aligned Decision Brief). */
+function memberQuestionIntent() {
+  return {
+    kind: 'member-question',
+    questionId: 'mq-1',
+    originSessionId: 'remote-session-1',
+    toProjectMember: 'member-b',
+    origin: {
+      projectName: 'Atlas',
+      originSessionTitle: 'Offboard planning',
+      askerAccountId: 'member-a',
+      askerRole: 'member',
+      askerDisplayName: 'Alice',
+      askerAvatarUrl: 'https://example.com/a.png',
+    },
+    background: 'We are offboarding this member.',
+    references: [{ path: 'docs/offboard.md', reason: 'Checklist' }],
+    expiresAt: 1_000,
+  } as const
+}

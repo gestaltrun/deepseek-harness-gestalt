@@ -25,9 +25,30 @@ export const askUserQuestionItemSchema = z.object({
   options: z.array(z.object({ label: z.string(), description: z.string().optional() })).optional(),
   multiSelect: z.boolean().optional(),
   // Presentation intent: a tagged union on the wire, so an unknown tag is a
-  // rejected frame rather than a silently generic render.
+  // rejected frame rather than a silently generic render. The member-question
+  // variant carries its whole Decision Brief (origin identity, background,
+  // material references, expiry instant) with the same bounds the Companion
+  // codec (T4) and the sender payload (T5) already enforce upstream — every
+  // field is required here, so an incomplete brief fails loud at the frame.
   intent: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('plan-review'), approve: z.string() }),
+    z.object({
+      kind: z.literal('member-question'),
+      questionId: z.string().min(1),
+      originSessionId: z.string().min(1),
+      toProjectMember: z.string().min(1),
+      origin: z.object({
+        projectName: z.string().min(1),
+        originSessionTitle: z.string().min(1),
+        askerAccountId: z.string().min(1),
+        askerRole: z.union([z.literal('owner'), z.literal('admin'), z.literal('member')]),
+        askerDisplayName: z.string().min(1),
+        askerAvatarUrl: z.string().min(1),
+      }),
+      background: z.string(),
+      references: z.array(z.object({ path: z.string().min(1), reason: z.string() })),
+      expiresAt: z.number().finite(),
+    }),
   ]).optional(),
 }) satisfies z.ZodType<Wire<AskUserQuestionItem>>
 

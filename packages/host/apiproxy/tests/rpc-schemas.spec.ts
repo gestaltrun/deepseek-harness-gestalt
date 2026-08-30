@@ -496,6 +496,57 @@ describe('events frame schemas', () => {
     }
   })
 
+  it('carries a member-question intent and its Decision Brief, and rejects an incomplete or mislabelled one', () => {
+    const intent = memberQuestionIntent()
+    const parsed = askUserQuestionItemSchema.parse({
+      id: 'member-q', question: 'Remove this member?',
+      options: [{ label: 'Remove' }, { label: 'Keep' }], intent,
+    })
+    expect(parsed.intent).toEqual(intent)
+    // The whole question/requested frame accepts the carried brief.
+    expect(muxFrameSchema.parse({
+      type: 'question/requested', sessionId: 's', questions: [{ id: 'member-q', question: 'Q?', intent }],
+    }).type).toBe('question/requested')
+    // Fail loud: an unknown member-question-ish tag, and every required
+    // carried field missing or out of bound (an incomplete Decision Brief
+    // never degrades to a generic render).
+    for (const invalid of [
+      { ...intent, kind: 'member-questions' },
+      { ...intent, questionId: '' },
+      { ...intent, originSessionId: '' },
+      { ...intent, toProjectMember: '' },
+      { ...intent, origin: { ...intent.origin, projectName: '' } },
+      { ...intent, origin: { ...intent.origin, askerRole: 'guest' } },
+      { ...intent, origin: { ...intent.origin, askerAvatarUrl: undefined } },
+      { ...intent, background: undefined },
+      { ...intent, references: [{ path: '', reason: 'x' }] },
+      { ...intent, expiresAt: 'soon' },
+    ]) {
+      expect(() => askUserQuestionItemSchema.parse({ id: 'q', question: 'Q?', intent: invalid })).toThrow()
+    }
+  })
+
+  /** A fully carried member-question intent (the T4/T5 aligned Decision Brief). */
+  function memberQuestionIntent() {
+    return {
+      kind: 'member-question',
+      questionId: 'mq-1',
+      originSessionId: 'remote-session-1',
+      toProjectMember: 'member-b',
+      origin: {
+        projectName: 'Atlas',
+        originSessionTitle: 'Offboard planning',
+        askerAccountId: 'member-a',
+        askerRole: 'member',
+        askerDisplayName: 'Alice',
+        askerAvatarUrl: 'https://example.com/a.png',
+      },
+      background: 'We are offboarding this member.',
+      references: [{ path: 'docs/offboard.md', reason: 'Checklist' }],
+      expiresAt: 1_000,
+    } as const
+  }
+
   it('accepts every queue placement and rejects unknown placements', () => {
     const item = (placement: string) => ({ type: 'session/queue', sessionId: 's', items: [{
       id: 'm', placement,

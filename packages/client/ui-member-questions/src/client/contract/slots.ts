@@ -78,17 +78,14 @@ export function clampBackground(text: string): string {
 }
 
 /**
- * The receiver projection carried beside the question batch on the requested
- * frame: origin identity, referenced documents, and the expiry instant. The
- * relay milestone owns putting the fields on the wire; until it lands they are
- * absent and {@link memberBriefOf} yields the identity-lite brief, so this
- * structural read is the single narrowing site for the projection.
+ * The member-question intent now carries the receiver projection on the wire
+ * (origin identity, background, references, expiry), so this read narrows the
+ * carried brief off the batch's shared intent.
  */
-interface MemberQuestionProjection {
-  origin?: MemberQuestionOrigin
-  references?: readonly { path: string; reason: string }[]
-  expiresAt?: number
-}
+type MemberQuestionCarriedIntent = Extract<
+  NonNullable<MemberQuestionWait['payload']['questions'][number]['intent']>,
+  { kind: 'member-question' }
+>
 
 /** File name of a referenced document path. */
 function filenameOf(path: string): string {
@@ -115,27 +112,43 @@ export function isMemberQuestionBatch(
 
 /**
  * Build the banner's Decision Brief over a claimed member-question request.
- * Background comes from the first question carrying supporting detail,
- * clamped to the banner budget; origin, references, and expiry ride the
- * receiver projection beside the batch and are absent until the relay
- * milestone puts them on the wire.
+ * Origin, background, references, and expiry come from the batch's shared
+ * carried intent; when a request predates the carried fields (or a test
+ * fixture omits them), background falls back to the first supporting detail
+ * and the brief renders identity-lite.
  *
  * @param wait - the claimed question carrier.
  * @returns The rendered brief.
  */
 export function memberBriefOf(wait: MemberQuestionWait): MemberQuestionBrief {
-  const projection = wait.payload as MemberQuestionProjection
-  const background = clampBackground(
+  const intent = wait.payload.questions.find(question => question.intent?.kind === 'member-question')
+    ?.intent
+  // A brief counts as carried only with its origin identity present: a bare
+  // `member-question` tag (pre-relay payloads, minimal fixtures) renders the
+  // identity-lite face with the detail-derived background fallback.
+  const carried = intent?.kind === 'member-question' && intent.origin !== undefined
+    ? intent as MemberQuestionCarriedIntent
+    : undefined
+  const fallback = clampBackground(
     wait.payload.questions.find(question => question.detail !== undefined)?.detail ?? '',
   )
+  const background = clampBackground(carried?.background ?? fallback)
   return {
-    ...(projection.origin === undefined ? {} : { origin: projection.origin }),
+    ...(carried === undefined ? {} : {
+      origin: {
+        projectName: carried.origin.projectName,
+        originSessionTitle: carried.origin.originSessionTitle,
+        askerDisplayName: carried.origin.askerDisplayName,
+        askerAvatarUrl: carried.origin.askerAvatarUrl,
+        askerRole: carried.origin.askerRole,
+      },
+    }),
     ...(background === '' ? {} : { background }),
-    references: (projection.references ?? []).map(reference => ({
+    references: (carried?.references ?? []).map(reference => ({
       filename: filenameOf(reference.path),
       reason: reference.reason,
     })),
-    ...(projection.expiresAt === undefined ? {} : { expiresAt: projection.expiresAt }),
+    ...(carried === undefined ? {} : { expiresAt: carried.expiresAt }),
   }
 }
 

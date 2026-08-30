@@ -57,8 +57,8 @@ const kit = {
 
 const NOW = 1_800_000_000_000
 
-/** One member-question batch: the intent tag rides every question. */
-const memberQuestions = (): MemberQuestionComposerProps['matched']['payload']['questions'] => [{
+/** One member-question batch: the carried intent rides every question. */
+const memberQuestions = (intent: Record<string, unknown>): MemberQuestionComposerProps['matched']['payload']['questions'] => [{
   id: 'remove-member',
   header: '成员管理',
   question: '将王小明移出项目吗？',
@@ -67,10 +67,10 @@ const memberQuestions = (): MemberQuestionComposerProps['matched']['payload']['q
     { label: '移出 (recommended)', description: '收回项目访问权。' },
     { label: '保留', description: '保持只读成员身份。' },
   ],
-  intent: { kind: 'member-question' },
-}]
+  intent,
+}] as MemberQuestionComposerProps['matched']['payload']['questions']
 
-/** Receiver projection: origin identity, materials, and the expiry instant. */
+/** Carried Decision Brief fields: origin identity, materials, and the expiry instant. */
 const projection = () => ({
   origin: {
     projectName: '千帆平台',
@@ -85,12 +85,14 @@ const projection = () => ({
   expiresAt: NOW + 125 * 1000,
 })
 
-/** Carrier fixture over a scripted respond carrier, with the projection cast at the narrowing site. */
+/** Carrier fixture over a scripted respond carrier; the extras ride the shared intent. */
 function memberWait(
-  payloadExtras: Record<string, unknown> = projection(),
+  carriedOver: Record<string, unknown> = projection(),
   respond = vi.fn(() => Promise.resolve<RpcReceipt>({ accepted: true })),
 ) {
-  const payload = { questions: memberQuestions(), ...payloadExtras }
+  const payload = {
+    questions: memberQuestions({ kind: 'member-question', ...carriedOver }),
+  }
   const carrier = new PendingWait(
     'question', RpcId('q-1'), SID, payload as MemberQuestionComposerProps['matched']['payload'], respond)
   return { carrier, respond }
@@ -157,7 +159,7 @@ describe('member-question routing', () => {
   it('declines a mixed batch to the generic flow', () => {
     const payload = {
       questions: [
-        ...memberQuestions(),
+        ...memberQuestions({ kind: 'member-question' }),
         { id: 'plain', question: '继续吗？', options: [{ label: '是' }] },
       ],
     }

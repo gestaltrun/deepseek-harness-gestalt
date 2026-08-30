@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { browser, expect } from '@wdio/globals'
 import type {} from '@wdio/native-types'
+import { readOwnedFakeProcess } from '../../scripts/e2e-electron-runner-support.mjs'
 
 interface FakeIoRecord {
   readonly method?: string
@@ -197,18 +198,10 @@ export async function recordOwnedProcesses(hostPid: number, includeFake: boolean
   const electronPid = await browser.electron.execute(() => process.pid)
   let fakePid: number | undefined
   if (includeFake) {
-    let record: { readonly pid?: number; readonly ownerToken?: string }
-    try {
-      const response = await fetch(`http://127.0.0.1:${requiredEnv('DSH_ELECTRON_E2E_FAKE_PORT')}/__test/pid`)
-      if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
-      record = await response.json() as typeof record
-    } catch {
-      throw new Error('fakemobilecli port ownership verification failed')
-    }
-    if (typeof record.pid !== 'number' || !Number.isSafeInteger(record.pid)
-      || record.ownerToken !== requiredEnv('DSH_ELECTRON_E2E_FAKE_OWNER')) {
-      throw new Error('fakemobilecli port ownership verification failed')
-    }
+    const record = await readOwnedFakeProcess(
+      Number(requiredEnv('DSH_ELECTRON_E2E_FAKE_PORT')),
+      requiredEnv('DSH_ELECTRON_E2E_FAKE_OWNER'),
+    )
     fakePid = record.pid
   }
   await writeArtifact('owned-processes.json', { electronPid, hostPid, ...(fakePid === undefined ? {} : { fakePid }) })

@@ -31,7 +31,7 @@
     "ci:impact": "tsx scripts/ci-impact.ts",
     "pr:create": "tsx scripts/create-pull-request.ts",
     "typecheck": "npm run build:lib:host && npm run typecheck:contracts-ready",
-    "typecheck:contracts-ready": "tsc -b tsconfig.client.json",
+    "typecheck:contracts-ready": "tsc -b tsconfig.client.json && pnpm --filter @deepseek-ai/dsh-desktop run typecheck:e2e-electron",
     "lint": "npm run build:lib:host && npm run lint:contracts-ready",
     "lint:contracts-ready": "tsx scripts/run-oxlint.ts .",
     "lint:fix": "npm run build:lib:host && npm run lint:fix:contracts-ready",

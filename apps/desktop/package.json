@@ -15,6 +15,7 @@
   "scripts": {
     "dev": "node scripts/build-main.mjs && electron out/main.mjs",
     "build:main": "node scripts/build-main.mjs",
+    "typecheck:e2e-electron": "tsc -p tests/e2e-electron/tsconfig.json",
     "test:e2e-electron": "node scripts/run-e2e-electron.mjs",
     "package": "node scripts/build-main.mjs && electron-builder --publish never",
     "package:unsigned": "node scripts/build-main.mjs && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 --publish never -c.mac.notarize=false"

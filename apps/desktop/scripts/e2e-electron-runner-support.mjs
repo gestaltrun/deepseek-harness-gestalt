@@ -1,7 +1,7 @@
 /** Lifecycle primitives owned by the Desktop Electron acceptance runner. */
 import { spawn, spawnSync } from 'node:child_process'
 import { open, readFile } from 'node:fs/promises'
-import { createServer } from 'node:net'
+import { createConnection, createServer } from 'node:net'
 
 function asError(value) {
   return value instanceof Error ? value : new Error(String(value))
@@ -226,6 +226,71 @@ export async function withDistinctPortHandoff(run) {
   throw new PortHandoffCollision(
     `port ownership collision persisted for ${String(maxAttempts)} attempts: ${lastCollision?.message ?? 'unknown collision'}`,
   )
+}
+
+async function loopbackPortAcceptsConnections(port) {
+  return await new Promise((resolve, reject) => {
+    const socket = createConnection({ host: '127.0.0.1', port })
+    socket.once('connect', () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.once('error', (error) => {
+      if (error?.code === 'ECONNREFUSED' || error?.code === 'ECONNRESET') resolve(false)
+      else reject(error)
+    })
+    socket.setTimeout(1_000, () => {
+      socket.destroy()
+      reject(new Error(`timed out while checking loopback port ${String(port)}`))
+    })
+  })
+}
+
+/**
+ * Verify the fake process identity through its external ownership endpoint.
+ * @param {number} port - fakemobilecli loopback port.
+ * @param {string} ownerToken - attempt-specific token written into the staged fixture.
+ * @returns {Promise<{ pid: number }>} verified fake process identity.
+ */
+export async function readOwnedFakeProcess(port, ownerToken) {
+  let record
+  try {
+    const response = await fetch(`http://127.0.0.1:${String(port)}/__test/pid`)
+    if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
+    record = await response.json()
+  } catch (error) {
+    throw new Error('fakemobilecli port ownership verification failed', { cause: error })
+  }
+  if (typeof record?.pid !== 'number' || !Number.isSafeInteger(record.pid)
+    || record.ownerToken !== ownerToken) {
+    throw new Error('fakemobilecli port ownership verification failed')
+  }
+  return { pid: record.pid }
+}
+
+/**
+ * Retry a port handoff only when a launch log identifies an ownership/bind failure and one handed-off port still accepts connections.
+ * @template T
+ * @param {string} name - scenario name included in terminal collision diagnostics.
+ * @param {(ports: { fakePort: number, cdpPort: number }, attempt: number) => Promise<{ value: T, runnerLog: string }>} run - one real launch attempt and its drained runner log.
+ * @returns {Promise<T>} first attempt without verified collision evidence.
+ */
+export async function runWithVerifiedPortHandoff(name, run) {
+  return await withDistinctPortHandoff(async (ports, attempt) => {
+    const observed = await run(ports, attempt)
+    const collisionEvidence = /port ownership verification failed|EADDRINUSE|address already in use|failed to bind/i
+      .test(observed.runnerLog)
+    if (collisionEvidence) {
+      const occupied = await Promise.all([
+        loopbackPortAcceptsConnections(ports.fakePort),
+        loopbackPortAcceptsConnections(ports.cdpPort),
+      ])
+      if (occupied.some(Boolean)) {
+        throw new PortHandoffCollision(`${name} attempt ${String(attempt)} lost port ownership`)
+      }
+    }
+    return observed.value
+  })
 }
 
 /**

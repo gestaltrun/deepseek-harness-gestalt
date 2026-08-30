@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  PortHandoffCollision, quiesceRecordedProcesses, runLogged, settleCleanupSteps, withDistinctPortHandoff,
+  PortHandoffCollision, quiesceRecordedProcesses, runLogged, runWithVerifiedPortHandoff, settleCleanupSteps,
 } from './e2e-electron-runner-support.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -137,15 +137,11 @@ async function stageFake() {
 async function runSpec(name, spec, provider, mobilecli, fakeOwnerToken) {
   const artifactDir = join(artifactRoot, name)
   try {
-    return await withDistinctPortHandoff(async ({ fakePort, cdpPort }, attempt) => {
+    return await runWithVerifiedPortHandoff(name, async ({ fakePort, cdpPort }, attempt) => {
       await rm(artifactDir, { recursive: true, force: true })
-      const result = await runSpecAttempt({
+      return await runSpecAttempt({
         name, spec, provider, mobilecli, fakeOwnerToken, artifactDir, fakePort, cdpPort, attempt,
       })
-      if (result.portCollision) {
-        throw new PortHandoffCollision(`${name} attempt ${String(attempt)} lost port ownership`)
-      }
-      return result
     })
   } catch (error) {
     return { code: 1, errors: [asError(error).message], cleanup: [], portCollision: error instanceof PortHandoffCollision }
@@ -236,18 +232,15 @@ async function runSpecAttempt({
   } catch (error) {
     errors.push(asError(error))
   }
-  const portStayedOpen = settled.outcomes.some(outcome => (
-    !outcome.ok && (outcome.name === 'fake port closure' || outcome.name === 'CDP port closure')
-  ))
   const runnerLog = await readFile(join(artifactDir, 'runner.log'), 'utf8').catch(() => '')
-  const collisionEvidence = /port ownership verification failed|EADDRINUSE|address already in use|failed to bind/i
-    .test(runnerLog)
-  const portCollision = portStayedOpen && collisionEvidence
   return {
-    code: code === 0 && errors.length === 0 ? 0 : 1,
-    errors: errors.map(error => error.message),
-    cleanup: settled.outcomes,
-    portCollision,
+    value: {
+      code: code === 0 && errors.length === 0 ? 0 : 1,
+      errors: errors.map(error => error.message),
+      cleanup: settled.outcomes,
+      portCollision: false,
+    },
+    runnerLog,
   }
 }
 

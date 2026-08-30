@@ -43,3 +43,13 @@ export interface ElectronE2ePorts {
 export function withDistinctPortHandoff<T>(
   run: (ports: ElectronE2ePorts, attempt: number) => T | Promise<T>,
 ): Promise<T>
+
+export function readOwnedFakeProcess(port: number, ownerToken: string): Promise<{ readonly pid: number }>
+
+export function runWithVerifiedPortHandoff<T>(
+  name: string,
+  run: (
+    ports: ElectronE2ePorts,
+    attempt: number,
+  ) => Promise<{ readonly value: T; readonly runnerLog: string }>,
+): Promise<T>

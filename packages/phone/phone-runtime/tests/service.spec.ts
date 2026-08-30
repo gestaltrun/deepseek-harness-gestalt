@@ -5,7 +5,7 @@ import type { Config } from '@deepseek-ai/dsh-phone-runtime'
 import type { PhoneDeviceChange } from '@deepseek-ai/dsh-phone-runtime'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliServerProcess } from '../src/server-process.ts'
-import { assertAnnexBH264Stream, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
+import { assertRecognizableH264Picture, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -340,7 +340,7 @@ describe('phone runtime service lifecycle', () => {
       if (next.done) break
       h264Chunks.push(Buffer.from(next.value))
     }
-    assertAnnexBH264Stream(Buffer.concat(h264Chunks))
+    assertRecognizableH264Picture(Buffer.concat(h264Chunks))
   })
 
   it('reports capture cancellation that arrives before the request is sent as PHONE_ABORTED', async () => {

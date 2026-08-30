@@ -6,7 +6,7 @@ import type { Config } from '@deepseek-ai/dsh-phone-runtime'
 import { PhoneDevicesError } from '../src/errors.ts'
 import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliServerProcess } from '../src/server-process.ts'
-import { assertAnnexBH264Stream, assertStructurallyDecodableJpeg, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
+import { assertRecognizableH264Picture, assertStructurallyDecodableJpeg, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -76,6 +76,7 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
     expect(headers.get('content-type')).toBe('image/jpeg')
     expect(headers.get('content-length')).toBe(String(payload.length))
     assertStructurallyDecodableJpeg(payload)
+    expect(jpegDimensions(payload)).toEqual({ width: 390, height: 844 })
   })
 
   it('shows an io tap round trip in the fixture counters', async () => {
@@ -175,6 +176,6 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
       if (next.done) break
       chunks.push(Buffer.from(next.value))
     }
-    assertAnnexBH264Stream(Buffer.concat(chunks))
+    assertRecognizableH264Picture(Buffer.concat(chunks))
   })
 })

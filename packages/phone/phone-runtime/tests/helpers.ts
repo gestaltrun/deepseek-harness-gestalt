@@ -1,13 +1,14 @@
 /**
  * Test helpers: staging the fakemobilecli executable, its config knobs, test
- * device shapes, and ephemeral-port picking. POSIX-only; the vitest config
- * excludes this package's suites on Windows.
+ * device shapes, ephemeral-port picking, and capture-frame assertions.
+ * POSIX-only; the vitest config excludes this package's suites on Windows.
  */
 
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import net from 'node:net'
+import { FRAME_HEIGHT, FRAME_WIDTH, decodeFirstIpcmIdr, lumaAt } from './fixtures/u3-visible-frames.ts'
 
 /** Behavior knobs the fake agent CLI mode reads from its config file per invocation. */
 export interface FakeAgentKnobs {
@@ -122,10 +123,7 @@ export async function stageFake(knobs: FakeKnobs = {}): Promise<StagedFake> {
   const executablePath = join(fixturesDir, 'fakemobilecli')
   await copyFile(new URL('./fixtures/fakemobilecli.mjs', import.meta.url), executablePath)
   await chmod(executablePath, 0o755)
-  // The U3 visible-picture fixtures the fake reads from its own directory.
-  for (const name of ['u3-gradient-390x844.jpg', 'u3-h264-390x844.264']) {
-    await copyFile(new URL(`./fixtures/${name}`, import.meta.url), join(fixturesDir, name))
-  }
+  await copyFile(new URL('./fixtures/u3-visible-frames.ts', import.meta.url), join(fixturesDir, 'u3-visible-frames.ts'))
   await writeFile(join(fixturesDir, 'fakemobilecli.config.json'), JSON.stringify(knobs))
   if (knobs.agent !== undefined) {
     await writeFile(join(fixturesDir, 'fakemobilecli.agent-state.json'), JSON.stringify({
@@ -322,6 +320,34 @@ export function assertAnnexBH264Stream(payload: Buffer): void {
   if (!nalTypes.has(7)) throw new Error('capture stream carries no SPS NAL')
   if (!nalTypes.has(8)) throw new Error('capture stream carries no PPS NAL')
   if (!nalTypes.has(5)) throw new Error('capture stream carries no IDR picture NAL')
+}
+
+/**
+ * Reconstruct luma of the first I_PCM IDR and require a 390×844 picture whose
+ * sampled pixels match the fixture gradient, so a six-byte prefix or
+ * parameter-set-only stream cannot pass as a visible frame.
+ * @param payload - One complete H264 Annex-B byte stream.
+ */
+export function assertRecognizableH264Picture(payload: Buffer): void {
+  assertAnnexBH264Stream(payload)
+  const picture = decodeFirstIpcmIdr(payload)
+  if (picture.width !== FRAME_WIDTH || picture.height !== FRAME_HEIGHT) {
+    throw new Error(`IDR luma is ${String(picture.width)}x${String(picture.height)}, not ${String(FRAME_WIDTH)}x${String(FRAME_HEIGHT)}`)
+  }
+  const samples: Array<readonly [number, number]> = [
+    [0, 0],
+    [48, 0],
+    [195, FRAME_HEIGHT >> 1],
+    [244, FRAME_HEIGHT - 1],
+    [389, 0],
+  ]
+  for (const [x, y] of samples) {
+    const actual = picture.y[y * FRAME_WIDTH + x] ?? -1
+    const expected = lumaAt(x, y, 0)
+    if (Math.abs(actual - expected) > 1) {
+      throw new Error(`IDR luma at ${String(x)},${String(y)} is ${String(actual)}, expected ${String(expected)}`)
+    }
+  }
 }
 
 /**

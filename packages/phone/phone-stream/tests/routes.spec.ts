@@ -5,7 +5,7 @@ import WebServer from '@deepseek-ai/dsh-host-webserver'
 import PhoneDevices, { deviceId } from '@deepseek-ai/dsh-phone-runtime'
 import WebSocket from 'ws'
 import PhoneStream, { PHONE_IO_PATH } from '../src/index.ts'
-import { assertAnnexBH264Stream, assertStructurallyDecodableJpeg, jpegDimensions, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
+import { assertRecognizableH264Picture, assertStructurallyDecodableJpeg, jpegDimensions, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -216,7 +216,7 @@ describe('phone stream Host routes', () => {
     const h264 = await readFrame(origin, session.h264.url, host)
     expect(h264.status).toBe(200)
     expect(h264.contentType).toMatch(/video\/h264/)
-    assertAnnexBH264Stream(h264.body)
+    assertRecognizableH264Picture(h264.body)
   })
 
   it('delivers decodable frames when the real backend answers the capture envelope', async () => {
@@ -230,6 +230,7 @@ describe('phone stream Host routes', () => {
     expect(headerEnd).toBeGreaterThanOrEqual(0)
     const frame = mjpeg.body.subarray(headerEnd + 4, mjpeg.body.indexOf('\r\n--frame'))
     assertStructurallyDecodableJpeg(frame)
+    expect(jpegDimensions(frame)).toEqual({ width: 390, height: 844 })
   })
 
   it('normalizes the real R4 dual-boundary stream to a single image-frame boundary', async () => {
@@ -250,6 +251,7 @@ describe('phone stream Host routes', () => {
     const headerEnd = mjpeg.body.indexOf('\r\n\r\n')
     const frame = mjpeg.body.subarray(headerEnd + 4, mjpeg.body.indexOf('\r\n--frame'))
     assertStructurallyDecodableJpeg(frame)
+    expect(jpegDimensions(frame)).toEqual({ width: 390, height: 844 })
   })
 
   it('cancels the upstream capture when the browser disconnects mid-stream', async () => {

@@ -10,6 +10,7 @@ import http from 'node:http'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildGradientH264, buildGradientJpeg } from './u3-visible-frames.ts'
 
 const args = process.argv.slice(2)
 const listenIndex = args.indexOf('--listen')
@@ -36,14 +37,19 @@ if (knobs.exitFast === true) {
   process.exit(9)
 }
 
-// Canonical baseline 1×1 JPEG (JFIF APP0, two DQTs, SOF0 1×1, four DHTs, SOS,
-// entropy data, EOI): a frame any standard decoder accepts, unlike a bare
-// SOI+EOI marker pair.
-// U3: a recognizable 390x844 gradient color-bar picture (pre-generated with
-// ffmpeg: libx264 baseline Annex-B for the h264 path, one JPEG frame for the
-// MJPEG path) so a browser decodes a visible picture instead of a white 1x1.
-const GRADIENT_JPEG = readFileSync(join(selfDir, 'u3-gradient-390x844.jpg'))
-const GRADIENT_H264 = readFileSync(join(selfDir, 'u3-h264-390x844.264'))
+// U3: one 390×844 gradient color-bar JPEG plus a Constrained Baseline Annex-B
+// stream of several I_PCM IDR pictures, generated in-process so a browser
+// decoder reconstructs a visible picture instead of a 1×1 or a six-byte prefix.
+let gradientJpeg
+let gradientH264
+function jpegFrame() {
+  gradientJpeg ??= buildGradientJpeg(0)
+  return gradientJpeg
+}
+function h264Stream() {
+  gradientH264 ??= buildGradientH264()
+  return gradientH264
+}
 
 const state = {
   devices: knobs.devices ?? [],
@@ -135,13 +141,13 @@ function reply(res, id, payload) {
   res.end(JSON.stringify({ jsonrpc: '2.0', id, ...payload }))
 }
 
-// One capture payload: an MJPEG multipart stream or a raw H264 Annex-B prefix.
+// One capture payload: an MJPEG multipart stream or a raw H264 Annex-B stream.
 // With streamFrameCount the MJPEG body stays open, emitting a frame every 40ms
 // until the client disconnects — so a mid-stream teardown reaches the proxy.
 function serveCapture(res, format) {
   if (format === 'avc') {
     res.writeHead(200, { 'content-type': 'video/h264', 'cache-control': 'no-store' })
-    res.write(GRADIENT_H264)
+    res.write(h264Stream())
     res.end()
     return
   }
@@ -150,8 +156,9 @@ function serveCapture(res, format) {
   let sent = 0
   const emitFrame = () => {
     sent += 1
-    res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(GRADIENT_JPEG.length)}\r\n\r\n`)
-    res.write(GRADIENT_JPEG)
+    const jpeg = jpegFrame()
+    res.write(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(jpeg.length)}\r\n\r\n`)
+    res.write(jpeg)
     res.write('\r\n')
     if (sent >= frameCount) {
       res.write('--frame--\r\n')
@@ -285,10 +292,10 @@ const server = http.createServer((req, res) => {
           const body = Buffer.concat([
             Buffer.from(`--BoundaryString\r\nContent-Type: application/json\r\n\r\n${json}\r\n`),
             Buffer.from('--BoundaryString--\r\n'),
-            Buffer.from(`--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(GRADIENT_JPEG.length)}\r\n\r\n`),
-            GRADIENT_JPEG,
-            Buffer.from(`\r\n--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(GRADIENT_JPEG.length)}\r\n\r\n`),
-            GRADIENT_JPEG,
+            Buffer.from(`--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(jpegFrame().length)}\r\n\r\n`),
+            jpegFrame(),
+            Buffer.from(`\r\n--mjpeg-frame-boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${String(jpegFrame().length)}\r\n\r\n`),
+            jpegFrame(),
             Buffer.from('\r\n--mjpeg-frame-boundary--\r\n'),
           ])
           res.writeHead(200, { 'content-type': 'multipart/x-mixed-replace; boundary=BoundaryString', 'cache-control': 'no-store' })

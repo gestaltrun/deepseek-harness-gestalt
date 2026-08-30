@@ -20,19 +20,11 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 
 ## 模型体验
 
-### 手机界面状态与模型工具分离
-
-#### 模型看到什么
-
-本包不向模型提供任何内容。`enabled` 设置只控制浏览器侧设备发现与流传输，不增加提示词、Session 事件或工具 schema。组合可单独挂载 `@deepseek-ai/dsh-tool-phone`；该 Consumer 拥有六个延迟加载的[手机工具 schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-phone)及其结果。
-
-#### Token 影响
-
-直接 token 为零。启用 tab、刷新清单或切换占用设备都不进入模型请求；手机工具的 schema 与结果 token 归 `@deepseek-ai/dsh-tool-phone` 所有。
+无，因为浏览器界面与 Host 设置命名空间不注册提示词、工具 schema、会话事件或 provider 请求；模型侧能力归独立消费方所有。
 
 #### KV Cache 影响
 
-无。界面设置与设备状态不会改变模型请求前缀；单独组装或调用 `@deepseek-ai/dsh-tool-phone` 所产生的缓存影响由该包文档说明。
+无；界面设置与设备状态不会改变模型请求前缀。
 
 ## Known Limitations and Deferred Work
 

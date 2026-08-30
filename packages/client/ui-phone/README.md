@@ -20,19 +20,11 @@ Composition: the `tsconfig.client.json` aggregate references the package; `packa
 
 ## Model Experience
 
-### Phone UI state and model-tool separation
-
-#### What the model sees
-
-Nothing from this package. The `enabled` setting controls browser-side device discovery and streaming but does not add a prompt, Session event, or tool schema. A composition may mount `@deepseek-ai/dsh-tool-phone` separately; that Consumer owns the six deferred [phone tool schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-phone) and their results.
-
-#### Token effect
-
-Zero direct tokens. Enabling the tab, refreshing its listing, or switching its occupying device does not enter a model request; any phone-tool schema and result tokens belong to `@deepseek-ai/dsh-tool-phone`.
+None, as the browser UI and Host settings namespace register no prompt, tool schema, session event, or provider request; model-facing capabilities belong to separate consumers.
 
 #### KV Cache effect
 
-None. UI settings and device state never change a model request prefix; separately composing or invoking `@deepseek-ai/dsh-tool-phone` has the cache effects documented by that package.
+None; UI settings and device state never alter a model request prefix.
 
 ## Known Limitations and Deferred Work
 

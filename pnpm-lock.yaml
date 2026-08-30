@@ -247,6 +247,9 @@ importers:
       '@deepseek-ai/dsh-persona':
         specifier: workspace:^
         version: link:../../packages/preset/persona
+      '@deepseek-ai/dsh-phone-runtime':
+        specifier: workspace:^
+        version: link:../../packages/phone/phone-runtime
       '@deepseek-ai/dsh-plan-mode':
         specifier: workspace:^
         version: link:../../packages/plan/plan-mode
@@ -265,6 +268,9 @@ importers:
       '@deepseek-ai/dsh-remote-protocol':
         specifier: workspace:^
         version: link:../../packages/platform/remote-protocol
+      '@deepseek-ai/dsh-request-trust':
+        specifier: workspace:^
+        version: link:../../packages/util/request-trust
       '@deepseek-ai/dsh-sandbox':
         specifier: workspace:^
         version: link:../../packages/sandbox/sandbox
@@ -349,6 +355,9 @@ importers:
       '@deepseek-ai/dsh-tool-jobs':
         specifier: workspace:^
         version: link:../../packages/jobs/tool-jobs
+      '@deepseek-ai/dsh-tool-phone':
+        specifier: workspace:^
+        version: link:../../packages/phone/tool-phone
       '@deepseek-ai/dsh-tool-pwsh':
         specifier: workspace:^
         version: link:../../packages/shell/tool-pwsh

@@ -9,10 +9,31 @@ export const inject = []
 
 /** Same listing as the tool-phone spec fake: one online Android emulator, one offline iOS simulator, one online iOS real. */
 const LISTING = {
-  android: [{ id: 'emulator-5554', name: 'Pixel_6', kind: 'emulator', online: true }],
+  android: [{
+    id: 'emulator-5554',
+    name: 'Pixel_6',
+    kind: 'emulator',
+    platform: 'android',
+    state: 'online',
+    online: true,
+  }],
   ios: {
-    simulators: [{ id: 'SIM-UDID', name: 'iPhone 16', kind: 'simulator', online: false }],
-    reals: [{ id: 'REAL-UDID', name: 'iPhone', kind: 'real', online: true }],
+    simulators: [{
+      id: 'SIM-UDID',
+      name: 'iPhone 16',
+      kind: 'simulator',
+      platform: 'ios',
+      state: 'shutdown',
+      online: false,
+    }],
+    reals: [{
+      id: 'REAL-UDID',
+      name: 'iPhone',
+      kind: 'real',
+      platform: 'ios',
+      state: 'online',
+      online: true,
+    }],
   },
 }
 

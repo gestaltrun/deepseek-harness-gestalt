@@ -3,8 +3,8 @@
   "version": 1,
   "id": "472-ci-risk-tool-catalog-cli-closure",
   "summary": {
-    "en": "Complete phone CI and tool-catalog projections and the CLI request-trust runtime dependency closure.",
-    "zh": "补全手机能力的 CI 与工具目录投影，并闭合 CLI 的 request-trust 运行时依赖。"
+    "en": "Complete phone CI and tool-catalog projections and the CLI request-trust and phone-tool runtime dependency closure.",
+    "zh": "补全手机能力的 CI 与工具目录投影，并闭合 CLI 的 request-trust 与手机工具运行时依赖。"
   },
   "releases": {
     "desktop": "patch",

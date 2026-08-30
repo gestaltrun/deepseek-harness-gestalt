@@ -10,10 +10,9 @@
  * The sources are deployment configuration, not code: they resolve from a JSON
  * file (`DSH_DESKTOP_SUB2API_SOURCES` path override, otherwise
  * `sub2api-sources.json` beside the packaged main entry, mirroring the operated
- * Platform configuration). Without the file the sources stay unpublished —
- * the GitHub Release that will host these artifacts requires separate user
- * approval — and the offer card states exactly that instead of pretending a
- * default feed exists.
+ * Platform configuration). Without the file the deployment has no component
+ * source, and the offer card states that configuration failure instead of
+ * pretending a default feed exists.
  * @module @deepseek-ai/dsh-desktop/sub2api-sources
  */
 
@@ -100,7 +99,7 @@ export function resolveSub2ApiSourcesPath(moduleUrl: string): string {
  * Read the Sub2API download sources.
  * @param moduleUrl - `import.meta.url` of the caller.
  * @returns the validated sources, or `undefined` when no sources file exists
- *   (the placeholder state: the component Release is not published yet).
+ *   (the placeholder state: the deployment has no component source).
  * @throws when a sources file exists but is unreadable or invalid.
  */
 export function readDesktopSub2ApiSources(moduleUrl: string): DesktopSub2ApiSources | undefined {

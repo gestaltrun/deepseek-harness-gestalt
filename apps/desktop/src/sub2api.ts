@@ -36,20 +36,23 @@ const PROBE_INTERVAL_MS = 2_000
 /** probe budget: first boots run PostgreSQL initdb plus migrations (the sidecar's own budget is 120s). */
 const PROBE_TIMEOUT_MS = 180_000
 
+/** Web Host startup budget only for the first boot after installation. */
+const FRESH_INSTALL_HOST_START_TIMEOUT_MS = 180_000
+
 /** The proxy-seam route a 2xx from proves the supervised chain is healthy. */
-export const SUB2API_PROBE_PATH = '/plugins/dsh-sub2api/quota-snapshot'
+const SUB2API_PROBE_PATH = '/plugins/dsh-sub2api/quota-snapshot'
 
 /** Web Host lifecycle facts the controller needs. */
 export interface Sub2ApiHostControl {
   /** Stop and respawn the Web Host child; resolves with the new origin. */
-  readonly restart: () => Promise<string>
+  readonly restart: (startTimeoutMs?: number) => Promise<string>
   /** Current Web Host origin, or `undefined` while it is down. */
   readonly origin: () => string | undefined
 }
 
 /** Everything the controller does on the caller's behalf, injectable for tests. */
 export interface Sub2ApiControllerOptions {
-  /** Download sources; `undefined` keeps the unpublished-Release placeholder state. */
+  /** Download sources; `undefined` reports an unconfigured deployment. */
   readonly sources: DesktopSub2ApiSources | undefined
   /** The `web` profile directory (`$DSH_HOME/profiles/web`). */
   readonly profileDir: string
@@ -283,7 +286,9 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
    */
   private async restartAndProbe(): Promise<void> {
     try {
-      const origin = await this.options.host.restart()
+      const origin = this.justInstalled
+        ? await this.options.host.restart(FRESH_INSTALL_HOST_START_TIMEOUT_MS)
+        : await this.options.host.restart()
       await this.probeUntilRunning(origin)
     } catch (error) {
       if (!this.justInstalled) throw error
@@ -357,9 +362,9 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
 // The two enable paths set this around their install call so the restart
 // failure handler can tell a fresh install (rollback) from a re-enable (report).
 
-/** Error text for the unpublished-Release placeholder. */
-export const PLACEHOLDER_ERROR =
-  'Sub2API 组件源尚未上架：GitHub Release 上架需要单独批准。开发与测试可通过 DSH_DESKTOP_SUB2API_SOURCES 指向本地 fixture 源。'
+/** Error text for a deployment without configured component sources. */
+const PLACEHOLDER_ERROR =
+  'Sub2API 组件下载源未配置。请使用包含 sub2api-sources.json 的 Desktop 发行版，或通过 DSH_DESKTOP_SUB2API_SOURCES 指向经批准的发布源。'
 
 /** Error text prefix after a rolled-back failed install. */
 export const ROLLBACK_ERROR_PREFIX = '安装失败，已回滚到未安装状态：'

@@ -59,12 +59,6 @@ export interface Sub2ApiProfileManifest {
   [key: string]: unknown
 }
 
-/** The profile directory paths the installer needs. */
-export interface Sub2ApiProfilePaths {
-  /** The profile directory (`$DSH_HOME/profiles/web`). */
-  readonly dir: string
-}
-
 function manifestPath(dir: string): string {
   return `${dir}/package.json`
 }

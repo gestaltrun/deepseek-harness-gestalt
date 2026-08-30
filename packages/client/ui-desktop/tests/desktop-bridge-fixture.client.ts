@@ -24,7 +24,7 @@ export function installDesktopBridgeFixture(platform: 'darwin' | 'win32'): Deskt
   const updater: UpdaterStatus = { state: 'disabled', lastCheckedAt: null }
   const account: DesktopAccountSnapshot = { status: 'unavailable', privacyAccepted: false }
   const pairing: DesktopPairingSnapshot = { status: 'unavailable', enabled: false, pairings: [] }
-  const sub2api: DesktopSub2ApiSnapshot = { state: 'missing', enabled: true }
+  let sub2api: DesktopSub2ApiSnapshot = { state: 'missing', enabled: true }
   const statusListeners = new Set<(status: UpdaterStatus) => void>()
   const accountListeners = new Set<(snapshot: DesktopAccountSnapshot) => void>()
   const pairingListeners = new Set<(snapshot: DesktopPairingSnapshot) => void>()
@@ -106,6 +106,11 @@ export function installDesktopBridgeFixture(platform: 'darwin' | 'win32'): Deskt
     },
     sub2ApiGetSnapshot: async () => sub2api,
     sub2ApiEnable: async () => {
+      sub2api = {
+        state: 'error',
+        enabled: true,
+        error: 'Sub2API 组件下载源未配置。请使用包含 sub2api-sources.json 的 Desktop 发行版，或通过 DSH_DESKTOP_SUB2API_SOURCES 指向经批准的发布源。',
+      }
       notifySub2api(sub2api)
       return sub2api
     },

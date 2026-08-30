@@ -29,6 +29,7 @@ const DIALOG_EN_EXPECTED = join(SNAPSHOT_DIR, 'dialog-en.expected.md')
 // The Desktop composition's overlay-document surface: the same page the Host
 // overlay view paints above official pages.
 const DESKTOP_SETTINGS_EXPECTED = join(SNAPSHOT_DIR, 'desktop-settings.expected.md')
+const SUB2API_ERROR_EXPECTED = join(SNAPSHOT_DIR, 'sub2api-error.expected.md')
 const PLUGIN_ROW_SELECTOR = '[data-plugin-entry$="ui-settings"]'
 const DESKTOP_BRIDGE_FIXTURE = fileURLToPath(
   new URL('../../../packages/client/ui-desktop/tests/desktop-bridge-fixture.client.ts', import.meta.url),
@@ -629,7 +630,15 @@ describe('web e2e: the Desktop composition settings overlay document', () => {
     await expect.poll(() => offer.count(), { timeout: 10_000 }).toBe(1)
     await expect.poll(() => offer.getByRole('heading', { name: 'Sub2API 账号池' }).count()).toBe(1)
     await expect.poll(() => offer.getByText(/~\/\.dsh\/sub2api\/data/).count()).toBe(1)
-    await expect.poll(() => offer.getByRole('button', { name: '下载并启用' }).count()).toBe(1)
+    const enable = offer.getByRole('button', { name: '下载并启用' })
+    await expect.poll(() => enable.count()).toBe(1)
+    await enable.click()
+    await expect.poll(() => dialog.locator('[data-desktop-sub2api-state="error"]').count()).toBe(1)
+    await compareOrRefreshGolden(SUB2API_ERROR_EXPECTED, await captureStableAria(
+      page,
+      '[data-desktop-sub2api-state="error"]',
+      scaffold.workspaceCwd,
+    ), MODE)
     // Closing reports through the overlay result channel with the Host's
     // request id — the page has no local close state in this mode. The Host
     // then hides the view and pushes the null state; the page unmounts.
@@ -646,6 +655,7 @@ describe('web e2e: the Desktop composition settings overlay document', () => {
     expect(tripwire.warnings).toEqual([])
     await assertFixtureInventory(SNAPSHOT_DIR, [
       'desktop-settings.expected.md', 'dialog-en.expected.md', 'dialog.expected.md', 'plugins.expected.md',
+      'sub2api-error.expected.md',
     ])
   }, 60_000)
 })

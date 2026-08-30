@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "445-sub2api-electron-e2e",
+  "summary": {
+    "en": "Make release-backed Sub2API installation reliable in Desktop and cover it with a real Electron lifecycle test.",
+    "zh": "提升桌面端从 Release 安装 Sub2API 的可靠性，并用真实 Electron 生命周期测试覆盖。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The WebdriverIO lockfile additions are Desktop-only test infrastructure; the Mobile production dependency closure is unchanged."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The WebdriverIO lockfile additions are Desktop-only test infrastructure; the Platform production dependency closure is unchanged."
+    }
+  ]
+}

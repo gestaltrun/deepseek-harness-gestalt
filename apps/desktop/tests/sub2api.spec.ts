@@ -6,7 +6,6 @@ import {
   createDesktopSub2Api,
   DesktopSub2ApiController,
   parseSub2ApiDeleteData,
-  PLACEHOLDER_ERROR,
   probeByProxySeam,
   ROLLBACK_ERROR_PREFIX,
   STARTUP_TIMEOUT_ERROR,
@@ -89,7 +88,7 @@ async function harness(overrides?: {
   disabled?: boolean
   noPackage?: boolean
   probe?: (origin: string) => Promise<boolean>
-  restart?: () => Promise<string>
+  restart?: (startTimeoutMs?: number) => Promise<string>
   origin?: string | undefined
   installGate?: (input: Sub2ApiInstallInput) => Promise<void>
 }): Promise<Harness> {
@@ -162,16 +161,20 @@ describe('DesktopSub2ApiController', () => {
     expect(final.version).toBe('0.9.9')
     expect(h.installRuns()).toBe(1)
     expect(h.host.restart).toHaveBeenCalledOnce()
+    expect(h.host.restart).toHaveBeenCalledWith(180_000)
     expect(await rowPresent(h.profileDir)).toBe(true)
     expect(h.events.map(event => event.state)).toEqual([
       'missing', 'downloading', 'installed', 'starting', 'running',
     ])
   })
 
-  it('reports the unpublished-source placeholder as an actionable error', async () => {
+  it('reports missing deployment sources as an actionable error', async () => {
     const h = await harness({ sources: undefined })
     const final = await h.controller.enable()
-    expect(final).toMatchObject({ state: 'error', error: PLACEHOLDER_ERROR })
+    expect(final).toMatchObject({
+      state: 'error',
+      error: 'Sub2API 组件下载源未配置。请使用包含 sub2api-sources.json 的 Desktop 发行版，或通过 DSH_DESKTOP_SUB2API_SOURCES 指向经批准的发布源。',
+    })
     expect(h.installRuns()).toBe(0)
     expect(h.host.restart).not.toHaveBeenCalled()
   })
@@ -187,6 +190,8 @@ describe('DesktopSub2ApiController', () => {
     })
     const final = await h.controller.enable()
     expect(restarts).toBe(2)
+    expect(h.host.restart).toHaveBeenNthCalledWith(1, 180_000)
+    expect(h.host.restart).toHaveBeenNthCalledWith(2)
     expect(final.state).toBe('error')
     expect(final.error?.startsWith(ROLLBACK_ERROR_PREFIX)).toBe(true)
     expect(final.error).toContain('dsh web exited')
@@ -208,6 +213,7 @@ describe('DesktopSub2ApiController', () => {
     expect(final.error).toBe('restart refused')
     expect(final.error?.startsWith(ROLLBACK_ERROR_PREFIX)).toBe(false)
     expect(h.installRuns()).toBe(0)
+    expect(h.host.restart).toHaveBeenCalledWith()
     expect(await rowPresent(h.profileDir)).toBe(true)
   })
 
@@ -223,6 +229,7 @@ describe('DesktopSub2ApiController', () => {
     const disabled = await h.controller.disable()
     expect(disabled).toMatchObject({ state: 'installed', enabled: false })
     expect(h.host.restart).toHaveBeenCalledOnce()
+    expect(h.host.restart).toHaveBeenCalledWith()
     const patch = await readFile(join(h.profileDir, 'cordis.patch.yml'), 'utf8')
     expect(patch).toContain('disabled: true')
 
@@ -235,6 +242,7 @@ describe('DesktopSub2ApiController', () => {
     expect(enabled).toMatchObject({ state: 'running', enabled: true })
     expect(h.installRuns()).toBe(0)
     expect(h.host.restart).toHaveBeenCalledOnce()
+    expect(h.host.restart).toHaveBeenCalledWith()
     const patchAfter = await readFile(join(h.profileDir, 'cordis.patch.yml'), 'utf8')
     expect(patchAfter).not.toContain('disabled: true')
   })
@@ -247,6 +255,7 @@ describe('DesktopSub2ApiController', () => {
     const removed = await h.controller.uninstall(true)
     expect(removed.state).toBe('missing')
     expect(h.host.restart).toHaveBeenCalledOnce()
+    expect(h.host.restart).toHaveBeenCalledWith()
     expect(await rowPresent(h.profileDir)).toBe(false)
     await expect(stat(h.dataDir)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(stat(h.runtimeDir)).rejects.toMatchObject({ code: 'ENOENT' })

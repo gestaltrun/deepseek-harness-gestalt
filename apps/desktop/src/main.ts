@@ -7,7 +7,7 @@ import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, powerMonitor, safeStorage,
+  app, autoUpdater as electronAutoUpdater, BrowserWindow, Menu, WebContentsView, ipcMain, net, powerMonitor, safeStorage,
   session, shell,
   type IpcMainEvent, type IpcMainInvokeEvent,
 } from 'electron'
@@ -248,9 +248,9 @@ async function boot(): Promise<void> {
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)
   sub2api = await createDesktopSub2Api({
-    fetch: systemFetch,
+    fetch: async (input, init) => await net.fetch(input, init),
     host: {
-      restart: async () => (await replaceWebHost()).url,
+      restart: async startTimeoutMs => (await replaceWebHost(startTimeoutMs)).url,
       origin: () => host?.url,
     },
   })
@@ -460,7 +460,7 @@ function syncTrafficLights(target: BrowserWindow, fullscreen: boolean): void {
   }
 }
 
-async function startHost(): Promise<RunningWebHost> {
+async function startHost(timeoutMs?: number): Promise<RunningWebHost> {
   if (hostStartController.signal.aborted) throw new Error('dsh web startup aborted')
   const paths = resolveDesktopRuntime({
     packaged: app.isPackaged,
@@ -481,7 +481,7 @@ async function startHost(): Promise<RunningWebHost> {
       DSH_ELECTRON_BROWSER_TOKEN_FILE: browserRuntime.tokenFile,
     },
     signal: hostStartController.signal,
-  })
+  }, timeoutMs)
   pendingHost = pending
   try {
     return await pending
@@ -499,7 +499,7 @@ function observeHostExit(running: RunningWebHost): void {
  * point the window and the native overlay at its new URL. The Electron window
  * stays alive across the swap; sessions survive on disk.
  */
-async function replaceWebHost(): Promise<RunningWebHost> {
+async function replaceWebHost(startTimeoutMs?: number): Promise<RunningWebHost> {
   const starting = pendingHost
   const previous = host
   host = undefined
@@ -507,7 +507,7 @@ async function replaceWebHost(): Promise<RunningWebHost> {
   const startedEarly = await starting?.catch(() => undefined)
   if (startedEarly !== undefined && startedEarly !== previous) await startedEarly.stop()
   await previous?.stop()
-  const started = await startHost()
+  const started = await startHost(startTimeoutMs)
   host = started
   installCompanionHost(started)
   observeHostExit(started)

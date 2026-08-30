@@ -26,6 +26,7 @@ describe('Desktop phone tab live chain', () => {
     await writeArtifact('phone-picker.json', picker)
     expect(picker.text).toContain('真机未授权调试')
     await recordOwnedProcesses(startup.hostPid, true)
+    await saveWindowEvidence('phone-picker-window')
 
     await clickSurfaceButton('iOS')
     await expect(browser.$('div*=iPhone 16')).toBeExisting()
@@ -37,16 +38,7 @@ describe('Desktop phone tab live chain', () => {
     await expect(browser.$('[aria-label="当前画面编码 H264 · 30 fps"]')).toBeExisting()
     const live = browser.$('canvas[aria-label="Pixel_6_API_35 实时画面"]')
     await live.waitForExist({ timeout: 30_000 })
-    const initialPicture = await readPicture()
-    let picture: Awaited<ReturnType<typeof readPicture>> | undefined
-    let lastPicture: typeof picture = initialPicture
-    const pictureDeadline = Date.now() + 10_000
-    do {
-      picture = await readPicture()
-      if (picture !== undefined) lastPicture = picture
-      if (picture?.width === 390 && picture.height === 844 && picture.nonTransparentPixels > 0) break
-      await browser.pause(250)
-    } while (Date.now() < pictureDeadline)
+    const lastPicture = await waitForDecodedPicture('Pixel_6_API_35')
     const transport = await browser.execute(async () => {
       const resource = performance.getEntriesByType('resource').find((entry) => {
         const url = new URL(entry.name)
@@ -80,8 +72,8 @@ describe('Desktop phone tab live chain', () => {
     expect(lastPicture?.display).toBe('block')
     expect(lastPicture?.visibility).toBe('visible')
     expect(lastPicture?.opacity).toBe(1)
-    expect(picture?.renderedWidth ?? 0).toBeGreaterThan(0)
-    expect(picture?.renderedHeight ?? 0).toBeGreaterThan(0)
+    expect(lastPicture.renderedWidth).toBeGreaterThan(0)
+    expect(lastPicture.renderedHeight).toBeGreaterThan(0)
     await saveWindowEvidence('phone-live-h264-window')
 
     await clickSurfaceButton('切换设备：Pixel_6_API_35')
@@ -95,10 +87,14 @@ describe('Desktop phone tab live chain', () => {
     await clickSurfaceButton('iPhone 16切换')
     await browser.$('button[aria-label="切换设备：iPhone 16"]').waitForExist({ timeout: 30_000 })
     expect(await phoneTabTitles()).toEqual(['手机·iPhone 16'])
+    await waitForDecodedPicture('iPhone 16')
+    await saveWindowEvidence('phone-iphone-window')
     await clickSurfaceButton('切换设备：iPhone 16')
     await clickSurfaceButton('Pixel_6_API_35切换')
     await browser.$('button[aria-label="切换设备：Pixel_6_API_35"]').waitForExist({ timeout: 30_000 })
     expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])
+    await waitForDecodedPicture('Pixel_6_API_35')
+    await saveWindowEvidence('phone-pixel-return-window')
 
     const beforeTap = await fakeCounters()
     await browser.execute(() => {
@@ -149,9 +145,19 @@ describe('Desktop phone tab live chain', () => {
   })
 })
 
-async function readPicture() {
-  return await browser.execute(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>('canvas[aria-label="Pixel_6_API_35 实时画面"]')
+async function waitForDecodedPicture(label: string): Promise<NonNullable<Awaited<ReturnType<typeof readPicture>>>> {
+  let picture: Awaited<ReturnType<typeof readPicture>>
+  await browser.waitUntil(async () => {
+    picture = await readPicture(label)
+    return picture?.width === 390 && picture.height === 844 && picture.nonTransparentPixels > 0
+  }, { timeout: 10_000, interval: 250, timeoutMsg: `${label} did not paint a decoded 390x844 picture` })
+  if (picture === undefined) throw new Error(`${label} decoded picture disappeared after readiness`)
+  return picture
+}
+
+async function readPicture(label: string) {
+  return await browser.execute((name: string) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(`canvas[aria-label="${name} 实时画面"]`)
     if (canvas === null) return undefined
     const style = getComputedStyle(canvas)
     const rect = canvas.getBoundingClientRect()
@@ -175,5 +181,5 @@ async function readPicture() {
       visibility: style.visibility,
       opacity: Number(style.opacity),
     }
-  })
+  }, label)
 }

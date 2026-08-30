@@ -12,7 +12,7 @@
 
 `pnpm run test:e2e-electron` 构建当前源码，并通过 WebdriverIO Electron service 对 `apps/desktop/out/main.mjs` 运行两个场景。运行器使用 operated-platform fixture、全新的 `DSH_HOME`、Electron 用户数据与 Workspace 根目录、临时 mobilecli 服务端口，并把 Desktop smoke 日志作为 Host URL 权威。Session Surface 与 Desktop overlay 保持为两个 WebDriver 窗口，通过 overlay 文档标记选择。
 
-实时场景把真实 Desktop Host 与仓库 fakemobilecli fixture 的临时可执行副本组装起来。fixture 返回当前设备信封与 390×844 H264 流。场景通过产品 RPC 路由创建带 Workspace 的 Session，经 overlay 菜单选择手机 tab，检查可用设备分组和仅在线选择器，打开设备，并同时要求 H264 传输有效与 390×844 已解码画面实际渲染。随后在单例 tab 中切换设备，把中心点按与主屏幕按钮转发给 fake，并打开独立的「手机设备」设置分区。
+实时场景把真实 Desktop Host 与仓库 fakemobilecli fixture 的临时可执行副本组装起来。fixture 返回当前设备信封与 390×844 H264 流。场景通过产品 RPC 路由创建带 Workspace 的 Session，经 overlay 菜单选择手机 tab，检查可用设备分组和仅在线选择器，打开设备，并同时要求 H264 传输有效与 390×844 已解码画面实际渲染。随后在单例 tab 中切换设备，要求每个 replacement 都绘制一幅 390×844 已解码画面，再把中心点按与主屏幕按钮转发给 fake，并打开独立的「手机设备」设置分区。
 
 降级场景用不可解析的 mobilecli 路径启动同一 Desktop 组合，要求 Host 保持存活并显示安装指引。两个场景都要求 URL 宣布、入口 HTTP 200、Session Surface 已渲染，并且稳定等待后 Desktop smoke 日志中没有错误。
 

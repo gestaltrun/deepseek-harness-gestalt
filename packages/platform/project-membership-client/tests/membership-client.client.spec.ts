@@ -1,0 +1,152 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { InvitationView, MemberView, ProjectId, ProjectView } from '@deepseek-ai/dsh-project-membership'
+import {
+  ProjectMembershipClientError,
+  ProjectMembershipHttpTransport,
+} from '../src/index.ts'
+
+const ORIGIN = 'https://membership.dev.example.com'
+const AUTH = { authorization: 'Bearer token-1' }
+
+/** Fetch stub over JSON answers keyed by `METHOD path`; a thrown matcher records the raw request. */
+function wire(responses: Record<string, { status: number; body?: unknown }>) {
+  const calls: Array<{ path: string; method: string; body?: unknown; headers: Record<string, string> }> = []
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === 'string'
+      ? new URL(input)
+      : input instanceof URL
+        ? input
+        : new URL(input.url)
+    const method = init?.method ?? 'GET'
+    const key = `${method} ${url.pathname}`
+    calls.push({
+      path: url.pathname, method,
+      body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
+      headers: Object.fromEntries(new Headers(init?.headers).entries()),
+    })
+    const answer = responses[key]
+    if (answer === undefined) throw new Error(`unexpected request: ${key}`)
+    return new Response(answer.body === undefined ? null : JSON.stringify(answer.body), {
+      status: answer.status,
+      headers: { 'content-type': 'application/json' },
+    })
+  })
+  return { transport: new ProjectMembershipHttpTransport({ origin: ORIGIN, fetch }), calls }
+}
+
+afterEach(() => { vi.restoreAllMocks() })
+
+function project(): ProjectView {
+  return { id: 'project-1' as ProjectId, name: 'Assembled', boundRemoteUrl: 'https://github.com/o/r', createdAt: 1 }
+}
+
+function invitation(): InvitationView {
+  return {
+    id: 'invitation-1' as never, projectId: 'project-1' as ProjectId,
+    inviterAccountId: 'account-1' as never, inviteeAccountId: 'account-2' as never,
+    state: 'pending', invitedAt: 1,
+  }
+}
+
+function member(): MemberView {
+  return {
+    id: 'membership-2' as never, accountId: 'account-2' as never, role: 'member',
+    tags: ['triage' as never], link: { workspaceName: 'mona-local' }, joinedAt: 2,
+  }
+}
+
+describe('ProjectMembershipHttpTransport', () => {
+  it('routes the upgrade operations onto the /v1/projects wire contract', async () => {
+    const { transport, calls } = wire({
+      'POST /v1/projects': { status: 201, body: project() },
+      'GET /v1/projects/project-1/members': {
+        status: 200,
+        body: {
+          project: project(),
+          members: [{ ...member(), presence: 'online', displayName: 'mona', avatarRef: 'https://a/m' }],
+        },
+      },
+      'POST /v1/projects/invitations': { status: 201, body: invitation() },
+      'POST /v1/projects/invitations/invitation-1/decision': { status: 200, body: member() },
+      'POST /v1/projects/invitations/invitation-1/retraction': { status: 204 },
+      'GET /v1/projects/invitations/pending': { status: 200, body: [invitation()] },
+      'POST /v1/projects/memberships/membership-2/role': { status: 204 },
+      'POST /v1/projects/memberships/membership-2/tags': { status: 204 },
+      'DELETE /v1/projects/memberships/membership-2': { status: 204 },
+    })
+
+    expect(await transport.createProject(AUTH, { name: 'Assembled', remoteUrl: 'https://github.com/o/r' }))
+      .toMatchObject({ id: 'project-1' })
+    expect(await transport.roster(AUTH, 'project-1' as ProjectId)).toMatchObject({
+      members: [{ presence: 'online', displayName: 'mona', role: 'member' }],
+    })
+    expect(await transport.invite(AUTH, { projectId: 'project-1' as ProjectId, inviteeAccountId: 'account-2' as never }))
+      .toMatchObject({ id: 'invitation-1', state: 'pending' })
+    expect(await transport.decideInvitation(AUTH, 'invitation-1' as never, {
+      decision: 'accept-with-link', link: { workspaceName: 'mona-local' },
+    })).toMatchObject({ id: 'membership-2' })
+    await transport.retractInvitation(AUTH, 'invitation-1' as never)
+    expect(await transport.pendingInvitations(AUTH)).toHaveLength(1)
+    await transport.changeRole(AUTH, 'membership-2' as never, 'admin')
+    await transport.setMemberTags(AUTH, 'membership-2' as never, ['triage' as never])
+    await transport.removeMember(AUTH, 'membership-2' as never)
+
+    expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
+      'POST /v1/projects',
+      'GET /v1/projects/project-1/members',
+      'POST /v1/projects/invitations',
+      'POST /v1/projects/invitations/invitation-1/decision',
+      'POST /v1/projects/invitations/invitation-1/retraction',
+      'GET /v1/projects/invitations/pending',
+      'POST /v1/projects/memberships/membership-2/role',
+      'POST /v1/projects/memberships/membership-2/tags',
+      'DELETE /v1/projects/memberships/membership-2',
+    ])
+    expect(calls[0]).toMatchObject({ body: { name: 'Assembled', remoteUrl: 'https://github.com/o/r' } })
+    expect(calls[3]).toMatchObject({
+      body: { decision: 'accept-with-link', link: { workspaceName: 'mona-local' } },
+    })
+    expect(calls[6]).toMatchObject({ body: { role: 'admin' } })
+    expect(calls[7]).toMatchObject({ body: { tags: ['triage'] } })
+    // Every call carries the caller-supplied account session presentation.
+    expect(calls.every(call => call.headers.authorization === 'Bearer token-1')).toBe(true)
+  })
+
+  it('resolves a decline decision to undefined on the 204 answer', async () => {
+    const { transport } = wire({
+      'POST /v1/projects/invitations/invitation-1/decision': { status: 204 },
+    })
+    expect(await transport.decideInvitation(AUTH, 'invitation-1' as never, { decision: 'decline' })).toBeUndefined()
+  })
+
+  it('keeps the 403 role-gate envelope: stable code plus HTTP status', async () => {
+    const { transport } = wire({
+      'POST /v1/projects': {
+        status: 403,
+        body: { error: { code: 'ROLE_REQUIRED', message: 'only owners and admins create projects' } },
+      },
+    })
+    const failure = await transport.createProject(AUTH, { name: 'X', remoteUrl: 'https://github.com/o/r' })
+      .catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(ProjectMembershipClientError)
+    expect(failure).toMatchObject({ code: 'ROLE_REQUIRED', status: 403 })
+  })
+
+  it('reports a non-JSON failure as an HTTP_<status> envelope code', async () => {
+    const fetch = vi.fn(async (): Promise<Response> => new Response('bad gateway', { status: 502 }))
+    const transport = new ProjectMembershipHttpTransport({ origin: ORIGIN, fetch })
+    const failure = await transport.pendingInvitations(AUTH).catch((error: unknown) => error)
+    expect(failure).toMatchObject({ code: 'HTTP_502', status: 502 })
+  })
+
+  it('rejects malformed success payloads instead of leaking them to the UI', async () => {
+    const { transport } = wire({
+      'POST /v1/projects': { status: 201, body: { id: 'project-1' } },
+      'GET /v1/projects/project-1/members': { status: 200, body: { project: project(), members: [{ role: 'spectator' }] } },
+      'GET /v1/projects/invitations/pending': { status: 200, body: { not: 'an array' } },
+    })
+    await expect(transport.createProject(AUTH, { name: 'X', remoteUrl: 'https://github.com/o/r' })).rejects.toThrow(TypeError)
+    await expect(transport.roster(AUTH, 'project-1' as ProjectId)).rejects.toThrow('presence')
+    await expect(transport.pendingInvitations(AUTH)).rejects.toThrow('array')
+  })
+})

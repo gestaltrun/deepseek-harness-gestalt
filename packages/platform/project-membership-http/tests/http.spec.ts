@@ -143,6 +143,20 @@ describe('Project Membership HTTP consumer', () => {
     expect(await error(post(server.origin, '/v1/projects/memberships/membership-1/unknown', {}, authHeaders()))).toEqual([404, 'NOT_FOUND'])
   })
 
+  it('serves the invitee pending-invitation poll for the acting account', async () => {
+    const membership = membershipService()
+    membership.pendingInvitationsFor.mockResolvedValue([invitation()])
+    const server = await start(membership, accountService())
+    const pending = await fetch(`${server.origin}/v1/projects/invitations/pending`, {
+      headers: { origin: ENVIRONMENT.origin, ...authHeaders() },
+    })
+    expect(pending.status).toBe(200)
+    expect(await pending.json()).toMatchObject([{ id: 'invitation-1', state: 'pending' }])
+    expect(membership.pendingInvitationsFor).toHaveBeenCalledWith('account-1')
+    expect(await error(post(server.origin, '/v1/projects/invitations/pending', {}, authHeaders())))
+      .toEqual([405, 'METHOD_NOT_ALLOWED'])
+  })
+
   it('rejects the wrong method and a heartbeat path that no subroute owns', async () => {
     const server = await start(membershipService(), accountService())
     expect(await error(fetch(`${server.origin}/v1/projects`, { headers: { origin: ENVIRONMENT.origin } }))).toEqual([405, 'METHOD_NOT_ALLOWED'])
@@ -256,6 +270,7 @@ interface MockMembershipService {
   setMemberTags: Mock<ProjectMembershipService['setMemberTags']>
   removeMember: Mock<ProjectMembershipService['removeMember']>
   roster: Mock<ProjectMembershipService['roster']>
+  pendingInvitationsFor: Mock<ProjectMembershipService['pendingInvitationsFor']>
 }
 
 function accountService(): MockAccountService {
@@ -305,6 +320,7 @@ function membershipService(): MockMembershipService {
     setMemberTags: vi.fn<ProjectMembershipService['setMemberTags']>().mockResolvedValue(undefined),
     removeMember: vi.fn<ProjectMembershipService['removeMember']>().mockResolvedValue(undefined),
     roster: vi.fn<ProjectMembershipService['roster']>().mockResolvedValue(roster()),
+    pendingInvitationsFor: vi.fn<ProjectMembershipService['pendingInvitationsFor']>().mockResolvedValue([]),
   }
 }
 

@@ -132,6 +132,12 @@ export function apply(ctx: Context, config: Config): void {
 
   route('prefix', '/v1/projects/invitations', async (req, res) => {
     const pathname = requestPath(req)
+    if (matchPath(pathname, '/v1/projects/invitations/pending') !== undefined) {
+      requireMethod(req, 'GET')
+      const actor = await requireActor(ctx, req)
+      writeJson(res, 200, await ctx.projectMembership.pendingInvitationsFor(actor))
+      return
+    }
     if (matchPath(pathname, '/v1/projects/invitations') !== undefined) {
       requireMethod(req, 'POST')
       const actor = await requireActor(ctx, req)

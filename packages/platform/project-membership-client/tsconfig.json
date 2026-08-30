@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.base.client.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [
+    { "path": "../platform-account" },
+    { "path": "../project-membership" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

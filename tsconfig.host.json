@@ -190,6 +190,7 @@
     { "path": "./packages/identity/anonymous-user-id" },
     { "path": "./packages/platform/platform-account" },
     { "path": "./packages/platform/platform-account-client" },
+    { "path": "./packages/platform/project-membership-client" },
     { "path": "./packages/platform/platform-account-core" },
     { "path": "./packages/platform/platform-account-http" },
     { "path": "./packages/platform/project-membership" },

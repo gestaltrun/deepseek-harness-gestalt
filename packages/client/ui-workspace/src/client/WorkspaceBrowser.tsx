@@ -24,6 +24,8 @@ import { deriveFlat, deriveGroups, deriveSearchResults, UNGROUPED_KEY } from './
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './rows/Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from './stores.ts'
 import { WorkspacePickFlow } from './WorkspacePicker.tsx'
+import { InviteWizardModal, WorkspaceSettingsModal, type WizardWorkspace } from './WorkspaceSettings.tsx'
+import type { WorkspacePendingInvitation } from './contract/slots.ts'
 import css from './WorkspaceBrowser.module.css'
 
 /**
@@ -37,6 +39,8 @@ const SEARCH_DEBOUNCE_MS = 250
 const SEARCH_QUERY_MAX_CODE_UNITS = 500
 /** Session rows visible per Workspace before the local overflow control. */
 const COLLAPSED_SESSION_LIMIT = 5
+/** Milliseconds between pending-invitation polls while a membership gateway is composed. */
+const INVITE_POLL_MS = 15_000
 
 /** Keep controlled input and RPC payload inside the session.search wire contract. */
 function sanitizeSearchQuery(value: string): string {
@@ -235,6 +239,8 @@ type SessionTreeProps = Pick<
   setSessionOrder: (accountKey: string, order: string[]) => void
   /** Registry-global archive set (hidden rows). */
   archivedSessionIds: readonly SessionNode['id'][]
+  /** Open the browser-owned settings modal for a real Workspace group. */
+  onSettingsRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned rename dialog for a real Workspace group. */
   onRenameRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned delete-confirmation dialog for a real Workspace group. */
@@ -250,7 +256,7 @@ type SessionTreeProps = Pick<
 /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
 function SessionTree({
   useSessions, startSession, open, forkSession, workspaces, archivedSessionIds,
-  onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
+  onSettingsRequest, onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
   insertWorkspaceBefore, insertSessionBefore, orderBy,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, home, t,
@@ -470,6 +476,10 @@ function SessionTree({
                 actions={group.workspaceId === undefined
                   ? undefined
                   : {
+                    settings: () => {
+                    /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                      if (group.workspaceId !== undefined) onSettingsRequest(group.workspaceId, group.label)
+                    },
                     rename: () => {
                     /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
                       if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
@@ -742,6 +752,7 @@ function SearchResults({
  * @returns the region element tree.
  */
 export function WorkspaceBrowser({
+  projectMembership,
   wide,
   expandSidebar,
   useSessions,
@@ -828,6 +839,35 @@ export function WorkspaceBrowser({
   const [wsPickerOpen, setWsPickerOpen] = useState(false)
   const wsPlusRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
+
+  // Settings modal (browser-owned so it outlives row unmounts during collapse).
+  const [settingsTarget, setSettingsTarget] = useState<{ workspaceId: WorkspaceId; title: string } | null>(null)
+
+  // Invite wizard source: the pending-invitation poll. Closing the wizard
+  // decides nothing, so the invitation cools down for one poll interval and
+  // is offered again while it is still pending.
+  const [wizardInvitation, setWizardInvitation] = useState<WorkspacePendingInvitation | null>(null)
+  const wizardCoolUntil = useRef(0)
+  useEffect(() => {
+    if (projectMembership === undefined) return
+    let disposed = false
+    const poll = () => {
+      if (disposed) return
+      projectMembership.pendingInvitations().then((rows) => {
+        if (disposed || rows.length === 0) return
+        if (wizardInvitation !== null || Date.now() < wizardCoolUntil.current) return
+        setWizardInvitation(rows[0] ?? null)
+      }).catch(() => {
+        // Poll failures are non-fatal: the next tick retries.
+      })
+    }
+    poll()
+    const timer = window.setInterval(poll, INVITE_POLL_MS)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [projectMembership, wizardInvitation])
 
   // Rail search = expand + land in the search box: the flag arms before the
   // expand request; once the shell flips wide the input mounts and takes focus.
@@ -1189,6 +1229,7 @@ export function WorkspaceBrowser({
                 orderBy={orderBy}
                 home={home}
                 t={t}
+                onSettingsRequest={(workspaceId, title) => { setSettingsTarget({ workspaceId, title }) }}
                 onRenameRequest={(workspaceId, currentTitle) => {
                   setRenameTarget({ workspaceId, currentTitle })
                   setRenameDraft(currentTitle)
@@ -1201,6 +1242,30 @@ export function WorkspaceBrowser({
               />
             ))}
       </div>
+
+      {settingsTarget !== null && projectMembership !== undefined && (
+        <WorkspaceSettingsModal
+          workspaceTitle={settingsTarget.title}
+          gateway={projectMembership}
+          onClose={() => { setSettingsTarget(null) }}
+          t={t}
+        />
+      )}
+      {wizardInvitation !== null && projectMembership !== undefined && (
+        <InviteWizardModal
+          invitation={wizardInvitation}
+          workspaces={workspaces.map((workspace): WizardWorkspace => ({
+            workspaceId: workspace.workspaceId,
+            title: workspace.title,
+          }))}
+          gateway={projectMembership}
+          onClose={() => {
+            wizardCoolUntil.current = Date.now() + INVITE_POLL_MS
+            setWizardInvitation(null)
+          }}
+          t={t}
+        />
+      )}
 
       <Modal
         open={renameTarget !== null}

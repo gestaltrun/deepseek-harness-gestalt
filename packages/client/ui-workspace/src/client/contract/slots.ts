@@ -33,6 +33,67 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { createWorkspaceViewStore } from '../stores.ts'
 
+/** Client-face projection of one bound cloud project. */
+export interface WorkspaceProjectView {
+  id: string
+  name: string
+  boundRemoteUrl: string
+}
+
+/** Permission role inside one cloud project. */
+export type WorkspaceProjectRole = 'owner' | 'admin' | 'member'
+
+/** One roster row as the settings surface renders it. */
+export interface WorkspaceMemberRow {
+  membershipId: string
+  accountId: string
+  /** Public GitHub login; empty when the Account plane does not know the account. */
+  displayName: string
+  role: WorkspaceProjectRole
+  tags: readonly string[]
+  presence: 'online' | 'offline'
+}
+
+/** One invitation issued from the settings surface, still awaiting confirmation. */
+export interface WorkspaceIssuedInvitation {
+  invitationId: string
+  /** Invitee shown to the inviter (GitHub login as entered). */
+  inviteeName: string
+}
+
+/** One pending invitation addressed to the local account (poll source of the wizard). */
+export interface WorkspacePendingInvitation {
+  invitationId: string
+  projectName: string
+  inviterName: string
+  /** Normalized remote of the invited project, for same-origin link advice. */
+  remoteUrl?: string
+}
+
+/**
+ * Upgrade seam between this surface and the membership client composition:
+ * the browser routes every upgrade action through it. Composition adapts
+ * `@deepseek-ai/dsh-project-membership-client`'s transport; compositions
+ * without it render no upgrade affordance.
+ */
+export interface ProjectMembershipGateway {
+  createProject(input: { name: string; remoteUrl: string }): Promise<WorkspaceProjectView>
+  roster(projectId: string): Promise<{ project: WorkspaceProjectView; members: readonly WorkspaceMemberRow[] }>
+  invite(input: { projectId: string; githubLogin: string }): Promise<WorkspaceIssuedInvitation>
+  retractInvitation(invitationId: string): Promise<void>
+  decideInvitation(
+    invitationId: string,
+    input: { decision: 'decline' } | { decision: 'accept-with-link'; link: { workspaceName: string; normalizedRemoteUrl?: string } },
+  ): Promise<void>
+  changeRole(membershipId: string, role: WorkspaceProjectRole): Promise<void>
+  setMemberTags(membershipId: string, tags: readonly string[]): Promise<void>
+  removeMember(membershipId: string): Promise<void>
+  /** Invitations addressed to the local account; polled while the browser is open. */
+  pendingInvitations(): Promise<readonly WorkspacePendingInvitation[]>
+  /** Normalized git remote of one local workspace checkout, when known. */
+  localRemoteFor?: (workspaceId: WorkspaceId) => string | undefined
+}
+
 /**
  * Owner share of the directory-flow holes: the complete conversation between
  * the trigger surface and the picking interaction. The occupant reads `open`
@@ -147,6 +208,14 @@ export type WorkspaceBrowserProps =
   & Omit<WorkspaceBrowserInjected, 'hooks'>
   & PropsHooks<WorkspaceBrowserInjected['hooks']>
   & PropsLocale<'workspace'>
+  & {
+    /**
+     * Upgrade seam to the Project Membership client; absent in compositions
+     * without the membership client (the row menu then offers settings only
+     * as the rename/delete companion with no upgrade body).
+     */
+    projectMembership?: ProjectMembershipGateway | undefined
+  }
 
 /**
  * Picker-private injected share. Pick semantics remain in the owner's onPick

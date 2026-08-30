@@ -36,6 +36,7 @@ export function isForbiddenPublicationFile(file: string): boolean {
     || normalized.startsWith('src/')
     || normalized.endsWith('.d.ts.map')
     || normalized.endsWith('.js.map')
+    || normalized.endsWith('.cjs.map')
 }
 
 /**

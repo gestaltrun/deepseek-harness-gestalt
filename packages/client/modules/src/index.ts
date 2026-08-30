@@ -163,6 +163,15 @@ function shortHash(input: string | Buffer): string {
   return createHash('sha1').update(input).digest('hex').slice(0, 12)
 }
 
+const PHYSICAL_SOURCE_MAP_REFERENCE = /(\/\/# sourceMappingURL=)client\.cjs\.map(?=\s*$)/u
+
+/** Rewrite the build artifact's physical map name to the stable public map route. */
+function publicBundleBytes(input: Buffer): Buffer {
+  const source = input.toString('utf8')
+  const rewritten = source.replace(PHYSICAL_SOURCE_MAP_REFERENCE, '$1client.js.map')
+  return rewritten === source ? input : Buffer.from(rewritten)
+}
+
 /** Graph row for one bundle rev (url carries the rev as its cache-busting query). */
 function graphRow(id: string, rev: string, fields: WebBootRowFields): WebBootEntry {
   return {
@@ -231,7 +240,7 @@ const PARSER_PRELOAD_IDS = [CLIENT_MODULES_ID, CLIENT_RUNTIME_ID] as const
 /**
  * The boot protocol as index injection rows. The inline registration queue
  * precedes blocking classic scripts for modules' and runtime's ordinary
- * `lib/client.js` artifacts. Its `create()` method materializes the modules
+ * `lib/client.cjs` artifacts. Its `create()` method materializes the modules
  * bundle, delegates construction to that bundle, and leaves the same facade
  * in live-registration mode. The graph global follows before the shell reads
  * it.
@@ -371,7 +380,7 @@ export class ClientModuleRegistry extends Service {
   rebuilt(id: string): string | undefined {
     const record = this.table.get(id)
     if (record === undefined) return undefined
-    const rev = shortHash(readFileSync(record.meta.clientPath))
+    const rev = shortHash(publicBundleBytes(readFileSync(record.meta.clientPath)))
     if (rev === record.entry.rev) return rev
     record.entry = graphRow(id, rev, record.meta)
     this.composed = this.compose()
@@ -471,7 +480,7 @@ export class ClientModuleRegistry extends Service {
    */
   private initialBundleRevision(pkgName: string, clientPath: string): string {
     try {
-      return shortHash(readFileSync(clientPath))
+      return shortHash(publicBundleBytes(readFileSync(clientPath)))
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       throw new MissingClientBundleError(pkgName, clientPath, error)
@@ -551,7 +560,8 @@ export class ClientModuleRegistry extends Service {
       return
     }
     try {
-      const body = await readFile(path)
+      const stored = await readFile(path)
+      const body = isSourceMap ? stored : publicBundleBytes(stored)
       res.writeHead(200, {
         'content-type': isSourceMap ? 'application/json; charset=utf-8' : 'text/javascript; charset=utf-8',
         'cache-control': 'no-cache',

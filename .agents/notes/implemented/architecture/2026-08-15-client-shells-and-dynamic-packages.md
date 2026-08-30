@@ -10,7 +10,7 @@ English | [中文](2026-08-15-client-shells-and-dynamic-packages.zh.md)
 
 Client npm dependency sections describe installation and development relationships, but they do not reliably describe bundle contents. Treating `dependencies`, `peerDependencies`, or `devDependencies` as implicit bundler instructions can inline a shared React or workspace identity, or leave a built library carrying unresolved child imports without the host that is meant to assemble them.
 
-The browser application also contains distinct roles: the HTML/Vite compilation entry, the framework-free Cordis startup kernel, static assembly libraries, and Loader-governed plugins. Early execution from HTML is an arrival policy, not a package kind. Runtime and modules need to arrive before the Vite main module while retaining ordinary `lib/client.js` artifacts and dynamic graph rows.
+The browser application also contains distinct roles: the HTML/Vite compilation entry, the framework-free Cordis startup kernel, static assembly libraries, and Loader-governed plugins. Early execution from HTML is an arrival policy, not a package kind. Runtime and modules need to arrive before the Vite main module while retaining CommonJS `lib/client.cjs` artifacts and dynamic graph rows.
 
 Shared UI libraries still expose synchronous TypeScript and React values to many consumers. Until those values move behind services or slots, making the libraries formal dynamic entries would preserve the value coupling while obscuring which module identity the shell must share.
 
@@ -23,8 +23,8 @@ Shared UI libraries still expose synchronous TypeScript and React values to many
 | Web compilation shell | `apps/web` | Owns `index.html`, Vite configuration, dist chunks, and static assets | Assembles final browser output from built package exports |
 | Startup kernel | `packages/client/web` | Owns the plain-DOM boot page, module-system wiring, Cordis settlement, and renderer handoff | `staticLinked` `lib/index.js`; no `dsh.client` row |
 | Static assembly libraries | Cordis, `ui-primitives`, `ui-slots` | Supply shared module identities and direct value APIs | ESM `lib/index.js`, merged and chunked by Vite; not Loader entries |
-| Module bootstrap | `packages/client/modules` | Supplies the client module table and its Cordis wrapper | Dynamic package with one ordinary `lib/client.js`; the host delivers its factory early |
-| Dynamic client packages | runtime, `ui-renderer`, theme, and feature plugins | Participate through Cordis services, slots, and effects | Declare `dsh.client`, emit self-registering `lib/client.js`, and remain host-graph entries |
+| Module bootstrap | `packages/client/modules` | Supplies the client module table and its Cordis wrapper | Dynamic package with one CommonJS `lib/client.cjs`; the host delivers its factory early |
+| Dynamic client packages | runtime, `ui-renderer`, theme, and feature plugins | Participate through Cordis services, slots, and effects | Declare `dsh.client`, emit self-registering `lib/client.cjs`, and remain host-graph entries |
 
 `packages/client/web` keeps Cordis as matching peer and development dependencies and uses modules and static UI packages as development compilation inputs. `apps/web` consumes built package exports rather than aliases into workspace source.
 
@@ -46,8 +46,8 @@ There is no general `dsh.client.provide` alias mechanism. Dynamic rows and stati
 The modules Node half injects the startup protocol into the served HTML in this order:
 
 1. Install `window.__ModuleLoader__` in queue mode with `pendingQueue`, `load()`, and `create()`.
-2. Execute the modules graph row's ordinary `lib/client.js` as a blocking classic script.
-3. Execute runtime's ordinary `lib/client.js` the same way.
+2. Execute the modules graph row's `lib/client.cjs` through `/plugins/<id>/client.js` as a blocking classic script.
+3. Execute runtime's `lib/client.cjs` through the same route form.
 4. Assign `window.__DSH_BOOT__`.
 5. Execute the Vite main module.
 

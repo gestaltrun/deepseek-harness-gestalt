@@ -1228,6 +1228,43 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'memberQuestionReceiver',
+    summary: 'Host authority for member-question arrival, projection, settlement, expiry, and one-step explicit human admission.',
+    description: 'Host authority for member-question arrival, projection, settlement, expiry, and one-step explicit human admission.',
+    methods: [
+      {
+        signature: 'abstract ingest(envelope: AuthenticatedMemberQuestionEnvelope): Promise<MemberQuestionIngestResult>',
+        description: 'Persist or replay one authenticated arrival.',
+        parameters: [{ name: 'envelope', description: 'endpoint authority beside the decoded operation.' }],
+        returns: 'Host receiving identity and committed revision.',
+      },
+      {
+        signature: 'abstract snapshot(): Promise<MemberQuestionReceiverSnapshot>',
+        description: 'Read one complete committed projection.',
+        parameters: [],
+        returns: 'the complete authoritative pending and terminal projection.',
+      },
+      {
+        signature: 'abstract changes(listener: MemberQuestionReceiverListener): () => void',
+        description: 'Subscribe to complete projections published after durable commits.',
+        parameters: [{ name: 'listener', description: 'projection observer; its exceptions are contained.' }],
+        returns: 'disposer that removes this exact observer.',
+      },
+      {
+        signature: 'abstract settle( questionId: MemberQuestionId, settlement: MemberQuestionReceiverSettlement, ): Promise<CompanionMemberQuestionSettledResult>',
+        description: 'Apply an explicit decline or authoritative first terminal.',
+        parameters: [{ name: 'questionId', description: 'routed question identity.' }, { name: 'settlement', description: 'local decline metadata or retained global claim.' }],
+        returns: 'the canonical persisted terminal.',
+      },
+      {
+        signature: 'abstract admitHumanTurn( input: AdmitMemberQuestionHumanTurnInput, ): Promise<AdmitMemberQuestionHumanTurnResult>',
+        description: 'Reserve, materialize, and admit one explicit human turn under one rpc id.',
+        parameters: [{ name: 'input', description: 'Host receiving identity, observed revision, rpc id, content, and mode.' }],
+        returns: 'the durable idempotent admission result.',
+      },
+    ],
+  },
+  {
     key: 'memberQuestionSender',
     summary: 'Member-question sender capability.',
     description: 'Member-question sender capability. `send(payload)` encodes one Companion `member-question` operation, delivers it, and waits for a terminal settlement or a stable lifetime error.',
@@ -3313,6 +3350,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'options', description: 'the full request. A LOOP-built request carries the process-local {@link markAgentLoopRequest} identity and arrives deep-frozen (mutation throws): its content is a pure function of the session log (the reconstructability Agent Note), so listeners read it, never rewrite it. Hand-built calls do not carry that marker; their messages already obey the immutable creation contract.' }],
   },
   {
+    name: 'member-question-receiver/changed',
+    mode: 'emit',
+    signature: '\'member-question-receiver/changed\'(change: MemberQuestionReceiverChange): void',
+    summary: 'The receiver ledger committed one authoritative question-state change.',
+    description: 'The receiver ledger committed one authoritative question-state change.',
+    parameters: [{ name: 'change', description: 'durable revision, question identity, and committed state.' }],
+  },
+  {
     name: 'project-membership/roster-invalidated',
     mode: 'emit',
     signature: '\'project-membership/roster-invalidated\'(change: RosterInvalidation): void',
@@ -3589,6 +3634,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
   {
+    name: 'AdmitMemberQuestionHumanTurnInput',
+    declaration: 'export interface AdmitMemberQuestionHumanTurnInput {\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly revision: number;\n    readonly rpcId: MemberQuestionReceiverRpcId;\n    readonly content: readonly MemberQuestionHumanTurnContent[];\n    readonly mode: \'queue\' | \'steer\';\n}',
+  },
+  {
+    name: 'AdmitMemberQuestionHumanTurnResult',
+    declaration: 'export interface AdmitMemberQuestionHumanTurnResult {\n    readonly accepted: true;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly revision: number;\n    readonly rpcId: MemberQuestionReceiverRpcId;\n}',
+  },
+  {
     name: 'AfterScheduleRecord',
     declaration: 'export interface AfterScheduleRecord {\n    readonly id: ScheduleId;\n    readonly kind: \'after\';\n    readonly prompt: string;\n    readonly afterSeconds: number;\n    readonly scheduledAt: string;\n}',
   },
@@ -3715,6 +3768,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'AuthenticatedInstallationView',
     declaration: 'export interface AuthenticatedInstallationView {\n    account: PlatformAccountView;\n    installation: AuthenticatedInstallation;\n}',
+  },
+  {
+    name: 'AuthenticatedMemberQuestionEnvelope',
+    declaration: 'export interface AuthenticatedMemberQuestionEnvelope {\n    readonly authority: MemberQuestionReceiverAuthority;\n    readonly operation: CompanionMemberQuestionOperation;\n}',
   },
   {
     name: 'AuthorizationEntry',
@@ -4025,8 +4082,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface CompanionMemberQuestionItem {\n    id: string;\n    question: string;\n    header?: string;\n    options?: readonly CompanionMemberQuestionOption[];\n    multiSelect?: boolean;\n}',
   },
   {
+    name: 'CompanionMemberQuestionOperation',
+    declaration: 'export interface CompanionMemberQuestionOperation {\n    type: \'member-question\';\n    operationId: CompanionOperationId;\n    questionId: MemberQuestionId;\n    projectId: ProjectId;\n    originSessionId: CompanionSessionId;\n    expiresAt: number;\n    origin: CompanionMemberQuestionOrigin;\n    background: string;\n    questions: readonly CompanionMemberQuestionItem[];\n    references: readonly CompanionMemberQuestionReference[];\n}',
+  },
+  {
     name: 'CompanionMemberQuestionOption',
     declaration: 'export interface CompanionMemberQuestionOption {\n    label: string;\n    description?: string;\n}',
+  },
+  {
+    name: 'CompanionMemberQuestionOrigin',
+    declaration: 'export interface CompanionMemberQuestionOrigin {\n    projectName: string;\n    originSessionTitle: string;\n    askerAccountId: string;\n    askerRole: MemberQuestionRole;\n    askerDisplayName: string;\n    askerAvatarUrl: string;\n}',
   },
   {
     name: 'CompanionMemberQuestionReference',
@@ -4039,6 +4104,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CompanionMemberQuestionSystemSettledResult',
     declaration: 'export type CompanionMemberQuestionSystemSettledResult = CompanionMemberQuestionSettledResultBase & {\n    outcome: \'expired\' | \'withdrawn\' | \'superseded\';\n};',
+  },
+  {
+    name: 'CompanionOperationId',
+    declaration: 'export type CompanionOperationId = Branded<\'CompanionOperationId\'>;',
   },
   {
     name: 'CompanionSessionId',
@@ -4737,12 +4806,52 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface MemberQuestionDeclinedResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'declined\';\n}',
   },
   {
+    name: 'MemberQuestionHumanImageContent',
+    declaration: 'export interface MemberQuestionHumanImageContent {\n    readonly type: \'image\';\n    readonly mediaType: string;\n    readonly data: string;\n    readonly name?: string;\n}',
+  },
+  {
+    name: 'MemberQuestionHumanTextContent',
+    declaration: 'export interface MemberQuestionHumanTextContent {\n    readonly type: \'text\';\n    readonly text: string;\n}',
+  },
+  {
+    name: 'MemberQuestionHumanTurnContent',
+    declaration: 'export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent;',
+  },
+  {
     name: 'MemberQuestionId',
     declaration: 'export type MemberQuestionId = Branded<\'MemberQuestionId\'>;',
   },
   {
+    name: 'MemberQuestionIngestResult',
+    declaration: 'export interface MemberQuestionIngestResult {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly revision: number;\n}',
+  },
+  {
     name: 'MemberQuestionItem',
     declaration: 'export type MemberQuestionItem = CompanionMemberQuestionItem;',
+  },
+  {
+    name: 'MemberQuestionReceiverAuthority',
+    declaration: 'export interface MemberQuestionReceiverAuthority {\n    readonly accountId: PlatformAccountId;\n}',
+  },
+  {
+    name: 'MemberQuestionReceiverChange',
+    declaration: 'export interface MemberQuestionReceiverChange {\n    readonly revision: number;\n    readonly questionId: MemberQuestionId;\n    readonly state: \'pending\' | CompanionMemberQuestionSettledResult[\'outcome\'];\n}',
+  },
+  {
+    name: 'MemberQuestionReceiverListener',
+    declaration: 'export type MemberQuestionReceiverListener = (snapshot: MemberQuestionReceiverSnapshot) => void;',
+  },
+  {
+    name: 'MemberQuestionReceiverRpcId',
+    declaration: 'export type MemberQuestionReceiverRpcId = Branded<\'MemberQuestionReceiverRpcId\'>;',
+  },
+  {
+    name: 'MemberQuestionReceiverSettlement',
+    declaration: 'export type MemberQuestionReceiverSettlement = {\n    readonly kind: \'declined\';\n    readonly settledByInstallationId: InstallationId;\n    readonly settledByDeviceName: string;\n    readonly settledAt: number;\n} | {\n    readonly kind: \'authoritative\';\n    readonly claim: MemberQuestionTerminalClaim;\n};',
+  },
+  {
+    name: 'MemberQuestionReceiverSnapshot',
+    declaration: 'export interface MemberQuestionReceiverSnapshot {\n    readonly revision: number;\n    readonly pending: readonly PendingMemberQuestionView[];\n    readonly terminal: readonly TerminalMemberQuestionView[];\n}',
   },
   {
     name: 'MemberQuestionReference',
@@ -4933,6 +5042,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PairingRendezvousId = Branded<\'PairingRendezvousId\'>;',
   },
   {
+    name: 'PendingMemberQuestionView',
+    declaration: 'export interface PendingMemberQuestionView {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly revision: number;\n    readonly arrivedAt: number;\n    readonly operation: CompanionMemberQuestionOperation;\n}',
+  },
+  {
     name: 'PendingPairingId',
     declaration: 'export type PendingPairingId = Branded<\'PendingPairingId\'>;',
   },
@@ -5087,6 +5200,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ReasoningEffortId',
     declaration: 'export type ReasoningEffortId = Branded<\'ReasoningEffortId\'>;',
+  },
+  {
+    name: 'ReceivingSessionId',
+    declaration: 'export type ReceivingSessionId = Branded<\'ReceivingSessionId\'>;',
   },
   {
     name: 'RedactedSecret',
@@ -5975,6 +6092,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TerminalCallView',
     declaration: 'export interface TerminalCallView {\n    card: \'terminal\';\n    title: string;\n    description?: string;\n    cwd?: string;\n}',
+  },
+  {
+    name: 'TerminalMemberQuestionView',
+    declaration: 'export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionView, \'operation\'> {\n    readonly terminal: CompanionMemberQuestionSettledResult;\n    readonly brief: Omit<CompanionMemberQuestionOperation, \'questions\'> & {\n        readonly questions: CompanionMemberQuestionOperation[\'questions\'];\n    };\n}',
   },
   {
     name: 'TerminalReadRequest',

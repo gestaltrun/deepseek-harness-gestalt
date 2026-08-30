@@ -1598,6 +1598,125 @@ export interface ReconnectConfig {
 
 Source: [`packages/mcp/mcp-client/src/index.ts:103`](../packages/mcp/mcp-client/src/index.ts)
 
+<a id="deepseek-aidsh-member-question-receiver"></a>
+
+## `@deepseek-ai/dsh-member-question-receiver`
+
+```ts config-catalog
+/** Loader-facing receiver Provider configuration. */
+export type Config = MemberQuestionReceiverConfig
+
+/** File Provider configuration and injected Host authority adapters. */
+export interface MemberQuestionReceiverConfig {
+  /** Root directory whose environment child contains the receiver ledger. */
+  readonly storagePath: string
+  /** Deployment namespace isolating development from production state. */
+  readonly environment: 'development' | 'production'
+  /** Maximum durable question records retained before arrival fails loud. */
+  readonly maxRecords: number
+  /** Retry delay after authoritative expiry publication fails. */
+  readonly terminalRetryMs: number
+  /** First-claim authority shared by every receiving Installation. */
+  readonly terminalAuthority?: MemberQuestionTerminalAuthority
+  /** Authoritative wall clock; production uses Date.now. */
+  readonly clock?: () => number
+  /** High-level materialize-and-admit adapter; absent keeps human turns fail-closed. */
+  readonly admitter?: MemberQuestionHumanTurnAdmitter
+  /** Injectable expiry scheduler; production uses platform timers. */
+  readonly timer?: MemberQuestionReceiverTimer
+  /** Atomic state writer override for storage-boundary verification. */
+  readonly stateWriter?: MemberQuestionReceiverStateWriter
+}
+
+/** Authority adapter retaining exactly one global terminal per question id. */
+export interface MemberQuestionTerminalAuthority {
+  /**
+   * Commit or replay the first terminal for one question.
+   * @param candidate - terminal proposed by this Host.
+   * @returns the canonical retained terminal, including when another Installation won.
+   */
+  claim(candidate: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>
+}
+
+/**
+ * High-level Host adapter that materializes the receiving Session if needed
+ * and admits the human turn atomically under `rpcId` idempotency.
+ */
+export type MemberQuestionHumanTurnAdmitter = (
+  input: AdmitMemberQuestionHumanTurnInput,
+) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
+
+/** Injectable scheduler used for the one earliest authoritative expiry. */
+export interface MemberQuestionReceiverTimer {
+  set(callback: () => void, delayMs: number): unknown
+  clear(handle: unknown): void
+}
+
+/** Atomic durable replacement adapter; production uses `writeFileAtomic`. */
+export type MemberQuestionReceiverStateWriter = (path: string, content: string) => Promise<void>
+
+/** Result of one global first-terminal claim. */
+export interface MemberQuestionTerminalClaim {
+  /** Whether this candidate committed the first global terminal. */
+  readonly claimed: boolean
+  /** Canonical first terminal, whether this candidate won or lost. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+}
+
+/** One explicit human turn addressed to a receiving Session. */
+export interface AdmitMemberQuestionHumanTurnInput {
+  /** Host-owned receiving thread to materialize or continue. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Exact receiving-thread revision the human observed. */
+  readonly revision: number
+  /** Stable idempotency identity retained across retries. */
+  readonly rpcId: MemberQuestionReceiverRpcId
+  /** Human-authored content excluded from the receiver ledger body. */
+  readonly content: readonly MemberQuestionHumanTurnContent[]
+  /** Ordinary Host queue or steering admission mode. */
+  readonly mode: 'queue' | 'steer'
+}
+
+/** Successful high-level Host adapter admission. */
+export interface MemberQuestionHumanTurnAdmissionReceipt {
+  /** The adapter materialized and admitted the human turn. */
+  readonly accepted: true
+}
+
+/** Host-owned durable identity of one member-question receiving thread. */
+export type ReceivingSessionId = Branded<'ReceivingSessionId'>
+
+/** Stable caller idempotency identity for one explicit human turn. */
+export type MemberQuestionReceiverRpcId = Branded<'MemberQuestionReceiverRpcId'>
+
+/** High-level human content handed to the future Host Session adapter. */
+export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent
+
+/** Human-authored text handed to the future Host Session adapter. */
+export interface MemberQuestionHumanTextContent {
+  /** Content discriminant. */
+  readonly type: 'text'
+  /** Human-authored text. */
+  readonly text: string
+}
+
+/** Human-selected image handed to the future Host Session adapter. */
+export interface MemberQuestionHumanImageContent {
+  /** Content discriminant. */
+  readonly type: 'image'
+  /** Browser-declared image media type. */
+  readonly mediaType: string
+  /** Base64 payload consumed by the future Host adapter. */
+  readonly data: string
+  /** Optional human-facing file name. */
+  readonly name?: string
+}
+```
+
+Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md)
+
+Source: [`packages/interaction/member-question-receiver/src/index.ts:91`](../packages/interaction/member-question-receiver/src/index.ts)
+
 <a id="deepseek-aidsh-member-question-sender"></a>
 
 ## `@deepseek-ai/dsh-member-question-sender`

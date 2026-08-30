@@ -186,6 +186,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/interaction/permission-presets': { kind: 'indirect', reason: 'The service writes mechanism events rendered by dsh-user-approval and dsh-tool-bash.' },
   'packages/interaction/user-questions': { kind: 'indirect', reason: 'Model-facing consumers render provider answers and seam errors.' },
   'packages/interaction/member-question-sender': { kind: 'indirect', reason: 'The sender encodes Companion member-question operations; dsh-tool-ask-user owns the model-visible schema and routed-ask errors.' },
+  'packages/interaction/member-question-receiver': { kind: 'none', reason: 'Receiver arrival and terminal projection are model-free; only an explicit human turn reaches the injected Host admission adapter.' },
   'packages/util/timeout': { kind: 'indirect', reason: 'Only timeout consumers render timeout outcomes.' },
   'packages/util/output-retention': { kind: 'indirect', reason: 'Only retention consumers render retained content and omission metadata.' },
   'packages/util/native-command': { kind: 'none', reason: 'The host-side subprocess runner registers nothing model-facing.' },

@@ -358,6 +358,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Encodes a Companion member-question operation through the T4 codec and delivers the bytes through an injected adapter; peer credentials are retrieved through a B-side project-peer grant lookup.',
   },
   {
+    key: 'memberQuestionReceiver',
+    pkg: 'member-question-receiver',
+    title: 'Member-question receiver seam',
+    mode: 'seam',
+    implementations: ['member-question-receiver'],
+    consumers: ['member-question-receiver'],
+    note: 'Persists authenticated arrivals, canonical terminals, expiry, and one reserved high-level human admission; its package-folded ingress adapter is the current Consumer.',
+  },
+  {
     key: 'planMode',
     pkg: 'plan-mode',
     title: 'Plan collaboration state',

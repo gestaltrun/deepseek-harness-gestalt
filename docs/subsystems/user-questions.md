@@ -276,6 +276,53 @@ type MemberQuestionSettlement =
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxmemberquestionreceiver--memberquestionreceiverservice-abstract-seam"></a>
+
+### `ctx.memberQuestionReceiver` — `MemberQuestionReceiverService` (abstract seam)
+
+Host authority for member-question arrival, projection, settlement, expiry, and one-step explicit human admission.
+
+```ts cordis-catalog
+/**
+ * Persist or replay one authenticated arrival.
+ * @param envelope - endpoint authority beside the decoded operation.
+ * @returns Host receiving identity and committed revision.
+ */
+abstract ingest(envelope: AuthenticatedMemberQuestionEnvelope): Promise<MemberQuestionIngestResult>
+
+/**
+ * Read one complete committed projection.
+ * @returns the complete authoritative pending and terminal projection.
+ */
+abstract snapshot(): Promise<MemberQuestionReceiverSnapshot>
+
+/**
+ * Subscribe to complete projections published after durable commits.
+ * @param listener - projection observer; its exceptions are contained.
+ * @returns disposer that removes this exact observer.
+ */
+abstract changes(listener: MemberQuestionReceiverListener): () => void
+
+/**
+ * Apply an explicit decline or authoritative first terminal.
+ * @param questionId - routed question identity.
+ * @param settlement - local decline metadata or retained global claim.
+ * @returns the canonical persisted terminal.
+ */
+abstract settle( questionId: MemberQuestionId, settlement: MemberQuestionReceiverSettlement, ): Promise<CompanionMemberQuestionSettledResult>
+
+/**
+ * Reserve, materialize, and admit one explicit human turn under one rpc id.
+ * @param input - Host receiving identity, observed revision, rpc id, content, and mode.
+ * @returns the durable idempotent admission result.
+ */
+abstract admitHumanTurn( input: AdmitMemberQuestionHumanTurnInput, ): Promise<AdmitMemberQuestionHumanTurnResult>
+```
+
+Types: [CompanionMemberQuestionSettledResult](remote-protocol.md)
+
+Source: [`packages/interaction/member-question-receiver/src/index.ts`](../../packages/interaction/member-question-receiver/src/index.ts)
+
 <a id="ctxmemberquestionsender--memberquestionsenderservice-abstract-seam"></a>
 
 ### `ctx.memberQuestionSender` — `MemberQuestionSenderService` (abstract seam)
@@ -362,4 +409,25 @@ async ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer>
 ```
 
 Source: [`packages/interaction/user-questions/src/index.ts`](../../packages/interaction/user-questions/src/index.ts)
+
+<a id="member-question-receiver-events"></a>
+
+### `member-question-receiver/*` events
+
+<a id="member-question-receiverchanged--emit"></a>
+
+#### `member-question-receiver/changed` — emit
+
+The receiver ledger committed one authoritative question-state change.
+
+```ts cordis-catalog
+/**
+ * The receiver ledger committed one authoritative question-state change.
+ * @param change - durable revision, question identity, and committed state.
+ * @mode emit
+ */
+'member-question-receiver/changed'(change: MemberQuestionReceiverChange): void
+```
+
+Source: [`packages/interaction/member-question-receiver/src/types.ts`](../../packages/interaction/member-question-receiver/src/types.ts)
 <!-- END GENERATED cordis-surface -->

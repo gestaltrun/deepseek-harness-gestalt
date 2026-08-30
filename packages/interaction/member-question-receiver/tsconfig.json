@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../util/atomic-write" },
+    { "path": "../../util/brand" },
+    { "path": "../../platform/platform-account" },
+    { "path": "../../platform/remote-protocol" },
+    { "path": "../../runtime-diagnostics/invariants" }
+  ]
+}

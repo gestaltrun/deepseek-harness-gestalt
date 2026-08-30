@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-platform",
   "private": true,
-  "version": "0.1.0-rc.8",
+  "version": "0.1.0",
   "license": "MIT",
   "type": "module",
   "description": "Platform composition image: Account HTTP, homepage, and Remote Access tables packaged by GitHub Actions",
@@ -34,6 +34,7 @@
   "devDependencies": {
     "@types/ali-oss": "^6.23.3",
     "@types/pg": "^8.15.5",
+    "playwright": "^1.49.0",
     "tsdown": "^0.22.2"
   }
 }

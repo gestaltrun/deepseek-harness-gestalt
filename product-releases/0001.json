@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "sequence": 1,
+  "intentIds": [
+    "414-desktop-recovery-version",
+    "414-release-orchestration"
+  ],
+  "summaries": [
+    {
+      "en": "Require explicit Desktop recovery versions from the reviewed release plan.",
+      "zh": "Desktop 恢复版本必须显式来自已评审的发布计划。"
+    },
+    {
+      "en": "Coordinate Desktop, Mobile, and Platform through one reviewed product release plan.",
+      "zh": "通过一个经过评审的产品发布计划协调桌面端、移动端和平台端。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": true,
+      "previousVersion": "0.1.9",
+      "version": "0.1.10",
+      "tag": "gestalt-v0.1.10",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Require explicit Desktop recovery versions from the reviewed release plan.",
+          "zh": "Desktop 恢复版本必须显式来自已评审的发布计划。"
+        },
+        {
+          "en": "Coordinate Desktop, Mobile, and Platform through one reviewed product release plan.",
+          "zh": "通过一个经过评审的产品发布计划协调桌面端、移动端和平台端。"
+        }
+      ]
+    },
+    "mobile": {
+      "selected": true,
+      "previousVersion": "0.1.0",
+      "version": "0.1.1",
+      "tag": "mobile-v0.1.1",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Coordinate Desktop, Mobile, and Platform through one reviewed product release plan.",
+          "zh": "通过一个经过评审的产品发布计划协调桌面端、移动端和平台端。"
+        }
+      ],
+      "buildNumber": 6
+    },
+    "platform": {
+      "selected": true,
+      "previousVersion": "0.1.0-rc.8",
+      "version": "0.1.0",
+      "tag": "platform-v0.1.0",
+      "bump": "patch",
+      "summaries": [
+        {
+          "en": "Coordinate Desktop, Mobile, and Platform through one reviewed product release plan.",
+          "zh": "通过一个经过评审的产品发布计划协调桌面端、移动端和平台端。"
+        }
+      ]
+    }
+  }
+}

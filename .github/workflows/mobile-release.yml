@@ -1,12 +1,83 @@
 name: Mobile Release
 
 on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Exact Product Release Plan commit to build or publish.
+        required: true
+        type: string
+      plan_path:
+        description: Numbered Product Release Plan at the candidate commit.
+        required: true
+        type: string
+      version:
+        description: Exact Mobile version selected by the plan.
+        required: true
+        type: string
+      build_number:
+        description: Exact Mobile build number selected by the plan.
+        required: true
+        type: number
+      acceptance_run_id:
+        description: Successful Mobile Companion Acceptance run for this exact candidate.
+        required: true
+        type: string
+      upload_testflight:
+        description: Upload the signed iOS candidate to TestFlight.
+        required: true
+        type: boolean
+      accept_transport_risk:
+        description: Accept the reviewed Companion transport test evidence for this candidate.
+        required: true
+        type: boolean
+      publish_github:
+        description: Publish the signed Android candidate as a durable GitHub prerelease.
+        required: true
+        type: boolean
+      artifact_run_id:
+        description: Prior run containing the exact signed Mobile artifacts for publication recovery.
+        required: false
+        type: string
+        default: ''
+      recover_artifacts:
+        description: Promote or upload channels from a validated prior signed Mobile candidate.
+        required: true
+        type: boolean
+    outputs:
+      tag:
+        description: Published Mobile component tag.
+        value: ${{ jobs.publish.outputs.tag }}
+      release_url:
+        description: Published Mobile GitHub prerelease URL.
+        value: ${{ jobs.publish.outputs.release_url }}
+      artifact_digests:
+        description: JSON array of promoted Android APK SHA-256 values.
+        value: ${{ jobs.publish.outputs.artifact_digests }}
+      testflight_build:
+        description: Validated TestFlight build uploaded by this run or the recovered source run.
+        value: ${{ jobs.channel-evidence.outputs.testflight_build }}
+      workflow_run:
+        description: GitHub Actions run that published the Mobile prerelease.
+        value: ${{ jobs.publish.outputs.workflow_run }}
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Exact reviewed master commit to build and sign.
+        description: Exact Product Release Plan commit to build or publish.
         required: true
         type: string
+      plan_path:
+        description: Numbered Product Release Plan at the candidate commit.
+        required: true
+        type: string
+      version:
+        description: Exact Mobile version selected by the plan.
+        required: true
+        type: string
+      build_number:
+        description: Exact Mobile build number selected by the plan.
+        required: true
+        type: number
       acceptance_run_id:
         description: Successful Mobile Companion Acceptance run for this exact candidate.
         required: true
@@ -18,6 +89,20 @@ on:
         default: false
       accept_transport_risk:
         description: Accept the reviewed Companion transport test evidence without an external security review for this candidate.
+        required: true
+        type: boolean
+        default: false
+      publish_github:
+        description: Publish the signed Android candidate as a durable GitHub prerelease.
+        required: true
+        type: boolean
+        default: false
+      artifact_run_id:
+        description: Prior run containing the exact signed Mobile artifacts; required for manual publication recovery.
+        required: false
+        type: string
+      recover_artifacts:
+        description: Promote or upload channels from a validated prior signed Mobile candidate.
         required: true
         type: boolean
         default: false
@@ -34,6 +119,52 @@ env:
   PRIMARY_NODE_VERSION: '24'
 
 jobs:
+  release-version:
+    name: Read tracked Mobile release identity
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_number: ${{ steps.version.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read source-owned version and build number
+        id: version
+        env:
+          PLAN_PATH: ${{ inputs.plan_path }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
+          MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          RECOVER_ARTIFACTS: ${{ inputs.recover_artifacts }}
+          PUBLISH_GITHUB: ${{ inputs.publish_github }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
+          git merge-base --is-ancestor "$MOBILE_CANDIDATE_SHA" refs/remotes/origin/master
+          version=$(node -p "require('./apps/mobile/package.json').version")
+          build_number=$(node -p "require('./apps/mobile/release.json').buildNumber")
+          node -e "const v=process.argv[1], b=Number(process.argv[2]); if (!/^\\d+\\.\\d+\\.\\d+$/.test(v) || !Number.isSafeInteger(b) || b < 1) process.exit(1)" "$version" "$build_number"
+          test "$version" = "$INPUT_VERSION"
+          test "$build_number" = "$INPUT_BUILD_NUMBER"
+          jq -e --arg version "$version" --argjson build "$build_number" \
+            '.releaseUnits.mobile.selected == true and .releaseUnits.mobile.version == $version and .releaseUnits.mobile.buildNumber == $build' \
+            "$PLAN_PATH" >/dev/null
+          if [[ "$RECOVER_ARTIFACTS" == true && -z "$ARTIFACT_RUN_ID" ]] || [[ "$RECOVER_ARTIFACTS" != true && -n "$ARTIFACT_RUN_ID" ]]; then
+            echo 'Mobile recover_artifacts and artifact_run_id must be provided together' >&2
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "build_number=$build_number"
+          } >> "$GITHUB_OUTPUT"
+
   release-authorization:
     name: Verify candidate-bound release evidence
     runs-on: ubuntu-24.04
@@ -43,13 +174,11 @@ jobs:
           ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
           fetch-depth: 0
-      - name: Verify exact master candidate
+      - name: Verify exact plan candidate
         env:
           MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
-          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
-          test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -73,14 +202,14 @@ jobs:
 
   android:
     name: Signed Android APK
-    needs: release-authorization
-    if: github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'
+    needs: [release-authorization, release-version]
+    if: needs.release-authorization.result == 'success' && !inputs.recover_artifacts
     runs-on: ubuntu-24.04
     environment: mobile-release
     env:
       MOBILE_BUNDLE_ID: ${{ vars.MOBILE_BUNDLE_ID }}
-      MOBILE_VERSION: ${{ vars.MOBILE_VERSION }}
-      MOBILE_BUILD_NUMBER: ${{ vars.MOBILE_BUILD_NUMBER }}
+      MOBILE_VERSION: ${{ needs.release-version.outputs.version }}
+      MOBILE_BUILD_NUMBER: ${{ needs.release-version.outputs.build_number }}
       VITE_PLATFORM_ORIGIN: ${{ vars.VITE_PLATFORM_ORIGIN }}
       VITE_PLATFORM_CALLBACK_URL: ${{ vars.VITE_PLATFORM_CALLBACK_URL }}
       VITE_PLATFORM_GITHUB_CLIENT_ID: ${{ vars.VITE_PLATFORM_GITHUB_CLIENT_ID }}
@@ -99,13 +228,11 @@ jobs:
           ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
           fetch-depth: 0
-      - name: Verify exact master candidate
+      - name: Verify exact plan candidate
         env:
           MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
-          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
-          test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -125,21 +252,21 @@ jobs:
         run: bash apps/mobile/scripts/build-android-release.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: gestalt-android-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
+          name: gestalt-android-${{ needs.release-version.outputs.version }}-${{ needs.release-version.outputs.build_number }}
           path: apps/mobile/release/*.apk
           if-no-files-found: error
           retention-days: 30
 
   ios:
     name: Signed iOS and TestFlight
-    needs: release-authorization
-    if: github.ref == 'refs/heads/master' && needs.release-authorization.result == 'success'
+    needs: [release-authorization, release-version]
+    if: needs.release-authorization.result == 'success' && !inputs.recover_artifacts
     runs-on: [self-hosted, macOS, ARM64, mobile-release]
     environment: mobile-release
     env:
       MOBILE_BUNDLE_ID: ${{ vars.MOBILE_BUNDLE_ID }}
-      MOBILE_VERSION: ${{ vars.MOBILE_VERSION }}
-      MOBILE_BUILD_NUMBER: ${{ vars.MOBILE_BUILD_NUMBER }}
+      MOBILE_VERSION: ${{ needs.release-version.outputs.version }}
+      MOBILE_BUILD_NUMBER: ${{ needs.release-version.outputs.build_number }}
       MOBILE_PROVISIONING_PROFILE: Gestalt Mobile App Store com.gestalt.mobile
       VITE_PLATFORM_ORIGIN: ${{ vars.VITE_PLATFORM_ORIGIN }}
       VITE_PLATFORM_CALLBACK_URL: ${{ vars.VITE_PLATFORM_CALLBACK_URL }}
@@ -159,13 +286,11 @@ jobs:
           ref: ${{ inputs.candidate_sha }}
           persist-credentials: false
           fetch-depth: 0
-      - name: Verify exact master candidate
+      - name: Verify exact plan candidate
         env:
           MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$MOBILE_CANDIDATE_SHA"
-          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
-          test "$(git rev-parse refs/remotes/origin/master)" = "$MOBILE_CANDIDATE_SHA"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
@@ -176,17 +301,285 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash apps/mobile/scripts/build-ios-release.sh
-      - name: Upload TestFlight
-        if: inputs.upload_testflight
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gestalt-ios-${{ needs.release-version.outputs.version }}-${{ needs.release-version.outputs.build_number }}
+          path: apps/mobile/release/*.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+  candidate-evidence:
+    name: Record signed Mobile candidate
+    needs: [release-version, android, ios]
+    if: ${{ !inputs.recover_artifacts && needs.android.result == 'success' && needs.ios.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gestalt-*-${{ needs.release-version.outputs.version }}-${{ needs.release-version.outputs.build_number }}
+          path: candidate
+          merge-multiple: true
+      - name: Record signed APK and IPA digests
+        env:
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PLAN_PATH: ${{ inputs.plan_path }}
+          MOBILE_VERSION: ${{ needs.release-version.outputs.version }}
+          MOBILE_BUILD_NUMBER: ${{ needs.release-version.outputs.build_number }}
+        run: |
+          set -Eeuo pipefail
+          digests=$(for asset in candidate/*; do sha256sum "$asset"; done | jq -Rn \
+            '[inputs | capture("^(?<digest>[0-9a-f]{64})  (?<path>.+)$") | {key:(.path | split("/") | last),value:("sha256:" + .digest)}] | from_entries')
+          jq -n --arg candidate "$CANDIDATE_SHA" --arg plan "$PLAN_PATH" --arg version "$MOBILE_VERSION" \
+            --argjson build "$MOBILE_BUILD_NUMBER" --argjson digests "$digests" \
+            '{version:1,surface:"mobile",candidateCommit:$candidate,planPath:$plan,productVersion:$version,buildNumber:$build,artifactDigests:$digests}' \
+            > candidate/release-candidate.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-release-candidate-${{ inputs.candidate_sha }}
+          path: candidate
+          if-no-files-found: error
+          retention-days: 30
+
+  provenance:
+    name: Validate prior Mobile candidate
+    needs: release-version
+    if: inputs.recover_artifacts
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      prior_testflight_build: ${{ steps.validate.outputs.testflight_build }}
+      prior_testflight_run: ${{ steps.validate.outputs.testflight_run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Validate prior run, manifest, and downloaded digests
+        id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOBILE_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PLAN_PATH: ${{ inputs.plan_path }}
+          MOBILE_VERSION: ${{ needs.release-version.outputs.version }}
+          MOBILE_BUILD_NUMBER: ${{ needs.release-version.outputs.build_number }}
+        run: |
+          set -Eeuo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MOBILE_ARTIFACT_RUN_ID" > run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MOBILE_ARTIFACT_RUN_ID/jobs?filter=latest&per_page=100" > jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$MOBILE_ARTIFACT_RUN_ID/artifacts?per_page=100" > artifacts.json
+          workflow_head=$(jq -r .head_sha run.json)
+          [[ "$workflow_head" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master
+          artifact_name=$(TRUSTED_WORKFLOW_HEAD="$workflow_head" node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { validatePriorReleaseRun } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            const candidate = process.env.CANDIDATE_SHA;
+            const result = validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, trustedWorkflowHeadCommits: [process.env.TRUSTED_WORKFLOW_HEAD], allowedWorkflows: [".github/workflows/mobile-release.yml", ".github/workflows/product-release.yml"], artifactProducers: [
+              { artifactName: "mobile-release-channel-candidate-" + candidate, producerJob: "Record Mobile channel evidence" },
+              { artifactName: "mobile-release-candidate-" + candidate, producerJob: "Record signed Mobile candidate" },
+            ] });
+            process.stdout.write(result.artifactName);')
+          gh run download "$MOBILE_ARTIFACT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$artifact_name" --dir candidate
+          digests=$(for asset in candidate/*; do
+            if [[ "$(basename "$asset")" != release-candidate.json ]]; then sha256sum "$asset"; fi
+          done | jq -Rn '[inputs | capture("^(?<digest>[0-9a-f]{64})  (?<path>.+)$") | {key:(.path | split("/") | last),value:("sha256:" + .digest)}] | from_entries')
+          printf '%s\n' "$digests" > digests.json
+          node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { validateReleaseArtifactManifest } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            validateReleaseArtifactManifest(json("candidate/release-candidate.json"), { surface: "mobile", candidateCommit: process.env.CANDIDATE_SHA, planPath: process.env.PLAN_PATH, productVersion: process.env.MOBILE_VERSION, buildNumber: Number(process.env.MOBILE_BUILD_NUMBER) }, json("digests.json"));'
+          {
+            echo "testflight_build=$(jq -r '.testFlight.buildNumber // empty' candidate/release-candidate.json)"
+            echo "testflight_run=$(jq -r '.testFlight.workflowRun // empty' candidate/release-candidate.json)"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-release-candidate-${{ inputs.candidate_sha }}
+          path: candidate
+          if-no-files-found: error
+          retention-days: 7
+
+  testflight:
+    name: TestFlight recovery from signed IPA
+    needs: [release-version, candidate-evidence, provenance]
+    if: ${{ always() && inputs.upload_testflight && (needs.candidate-evidence.result == 'success' || needs.provenance.result == 'success') }}
+    runs-on: [self-hosted, macOS, ARM64, mobile-release]
+    environment: mobile-release
+    outputs:
+      build_number: ${{ steps.upload.outputs.build_number }}
+      workflow_run: ${{ steps.upload.outputs.workflow_run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-release-candidate-${{ inputs.candidate_sha }}
+          path: candidate
+      - name: Upload exact signed IPA to TestFlight
+        id: upload
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
-          IPA_PATH="$(find apps/mobile/release -maxdepth 1 -name '*.ipa' -print -quit)" \
+          IPA_PATH="$(find candidate -maxdepth 1 -name '*.ipa' -print -quit)" \
             bash apps/mobile/scripts/upload-testflight.sh
+          {
+            echo "build_number=${{ needs.release-version.outputs.build_number }}"
+            echo "workflow_run=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
+
+  channel-evidence:
+    name: Record Mobile channel evidence
+    needs: [release-version, candidate-evidence, provenance, testflight]
+    if: ${{ always() && (needs.candidate-evidence.result == 'success' || needs.provenance.result == 'success') && (needs.testflight.result == 'success' || needs.testflight.result == 'skipped') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      testflight_build: ${{ steps.evidence.outputs.testflight_build }}
+      testflight_run: ${{ steps.evidence.outputs.testflight_run }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-release-candidate-${{ inputs.candidate_sha }}
+          path: candidate
+      - name: Preserve or update TestFlight evidence
+        id: evidence
+        env:
+          CURRENT_TESTFLIGHT_BUILD: ${{ needs.testflight.outputs.build_number }}
+          CURRENT_TESTFLIGHT_RUN: ${{ needs.testflight.outputs.workflow_run }}
+          PRIOR_TESTFLIGHT_BUILD: ${{ needs.provenance.outputs.prior_testflight_build }}
+          PRIOR_TESTFLIGHT_RUN: ${{ needs.provenance.outputs.prior_testflight_run }}
+        run: |
+          build=${CURRENT_TESTFLIGHT_BUILD:-$PRIOR_TESTFLIGHT_BUILD}
+          run=${CURRENT_TESTFLIGHT_RUN:-$PRIOR_TESTFLIGHT_RUN}
+          if [[ -n "$build" ]]; then
+            jq --argjson build "$build" --arg run "$run" '.testFlight = {buildNumber:$build,workflowRun:$run}' \
+              candidate/release-candidate.json > candidate/manifest.tmp
+            mv candidate/manifest.tmp candidate/release-candidate.json
+          fi
+          {
+            echo "testflight_build=$build"
+            echo "testflight_run=$run"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: gestalt-ios-${{ vars.MOBILE_VERSION }}-${{ vars.MOBILE_BUILD_NUMBER }}
-          path: apps/mobile/release/*.ipa
+          name: mobile-release-channel-candidate-${{ inputs.candidate_sha }}
+          path: candidate
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    name: GitHub Mobile prerelease
+    needs: [release-authorization, release-version, channel-evidence]
+    if: ${{ inputs.publish_github && needs.release-authorization.result == 'success' && needs.release-version.result == 'success' && needs.channel-evidence.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: mobile-release
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
+      release_url: ${{ steps.publish.outputs.release_url }}
+      artifact_digests: ${{ steps.publish.outputs.artifact_digests }}
+      workflow_run: ${{ steps.publish.outputs.workflow_run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobile-release-channel-candidate-${{ inputs.candidate_sha }}
+          path: dist
+      - name: Publish signed APK and checksum
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MOBILE_VERSION: ${{ needs.release-version.outputs.version }}
+          MOBILE_BUILD_NUMBER: ${{ needs.release-version.outputs.build_number }}
+          MOBILE_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          MOBILE_ACCEPTANCE_RUN_ID: ${{ inputs.acceptance_run_id }}
+          PLAN_PATH: ${{ inputs.plan_path }}
+        run: |
+          set -Eeuo pipefail
+          tag="mobile-v${MOBILE_VERSION}"
+          apk=$(find dist -maxdepth 1 -name '*.apk' -type f -print -quit)
+          test -n "$apk"
+          (cd dist && sha256sum "$(basename "$apk")" > SHA256SUMS)
+          notes="$RUNNER_TEMP/mobile-release-notes.md"
+          cat > "$notes" <<EOF
+          ## Install
+
+          - iPhone: [Install through TestFlight](https://testflight.apple.com/join/pKCZtn7q). The public beta link can advance to a newer build.
+          - Android: download \`$(basename "$apk")\` from this Release.
+
+          ## Build identity
+
+          - Version: \`${MOBILE_VERSION} (${MOBILE_BUILD_NUMBER})\`
+          - Application ID / Bundle ID: \`com.gestalt.mobile\`
+          - Source: \`${MOBILE_CANDIDATE_SHA}\`
+          - Acceptance run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${MOBILE_ACCEPTANCE_RUN_ID}
+          - Release run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          \`SHA256SUMS\` authenticates the immutable Android asset. The signed IPA remains protected release evidence; TestFlight is the iOS installation channel.
+          EOF
+          {
+            echo
+            echo '## Changes / 变更'
+            echo
+            jq -r '.releaseUnits.mobile.summaries[] | "- " + .en + " / " + .zh' "$PLAN_PATH"
+          } >> "$notes"
+          tag_owned=false
+          release_owned=false
+          published=false
+          cleanup() {
+            status=$?
+            trap - EXIT INT TERM
+            if [[ "$published" == true ]]; then exit "$status"; fi
+            if [[ "$release_owned" == true ]]; then gh release delete "$tag" --yes >/dev/null 2>&1 || true; fi
+            if [[ "$tag_owned" == true ]]; then gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$tag" >/dev/null 2>&1 || true; fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" --field ref="refs/tags/$tag" --field sha="$MOBILE_CANDIDATE_SHA" >/dev/null
+          tag_owned=true
+          gh release create "$tag" --draft --prerelease --verify-tag --target "$MOBILE_CANDIDATE_SHA" \
+            --title "獭子哥 ${MOBILE_VERSION} (${MOBILE_BUILD_NUMBER})" --notes-file "$notes"
+          release_owned=true
+          gh release upload "$tag" "$apk" dist/SHA256SUMS
+          download="$RUNNER_TEMP/release-download"
+          mkdir -p "$download"
+          gh release download "$tag" --dir "$download" --pattern "$(basename "$apk")" --pattern SHA256SUMS
+          (cd "$download" && sha256sum -c SHA256SUMS)
+          gh release edit "$tag" --draft=false --prerelease
+          digest=$(cut -d ' ' -f 1 dist/SHA256SUMS)
+          {
+            echo "tag=$tag"
+            echo "release_url=https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag"
+            echo "artifact_digests=[\"sha256:$digest\"]"
+            echo "workflow_run=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
+          published=true
+          trap - EXIT INT TERM

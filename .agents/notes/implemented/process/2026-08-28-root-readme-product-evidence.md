@@ -12,7 +12,7 @@ A short gallery also hid the breadth of completed product work. An exhaustive pa
 
 ## Decision
 
-The root README presents Gestalt as the product layer on top of official DSH. Its direction has four parts: complete the installable product, keep DSH composition and entry points compatible, integrate reviewed community plugins, and preserve one durable authority across clients. The README treats upstream compatibility as ongoing repository work, not a claim that every developer-preview commit is interchangeable.
+The root README presents Gestalt as an open-source AI coding agent product and the product layer on top of official DSH. Its direction has four parts: complete the installable product, keep DSH composition and entry points compatible, integrate reviewed community plugins, and preserve one durable authority across clients. The README treats upstream compatibility as ongoing repository work, not a claim that every developer-preview commit is interchangeable.
 
 The English product name is **Gestalt**. The Chinese product name and IP character are **獭子哥**. The landing page stores and displays the approved character sheet. Existing package names, application identifiers, release tags, and historical references remain unchanged until a separately coordinated rename requires their migration.
 

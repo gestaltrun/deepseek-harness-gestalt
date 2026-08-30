@@ -1,23 +1,89 @@
 # Pack DeepSeek Gestalt installers and publish a GitHub Release for electron-updater.
-# A publish dispatch from master creates its gestalt-v* tag after every packaged smoke passes.
+# A publish call creates its candidate-bound gestalt-v* tag after every packaged smoke passes.
 name: Desktop Release
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
+      candidate_sha:
+        description: Exact Product Release Plan commit to package or publish.
+        required: true
+        type: string
+      plan_path:
+        description: Numbered Product Release Plan at the candidate commit.
+        required: true
+        type: string
       version:
         description: Desktop Bundle version from apps/desktop/package.json.
         required: true
         type: string
-        default: '0.1.8'
       publish:
         description: Create the gestalt-v* tag and GitHub Release after packaging succeeds.
+        required: true
+        type: boolean
+      artifact_run_id:
+        description: Prior run containing the exact signed Desktop artifacts for publication recovery.
+        required: false
+        type: string
+        default: ''
+      recover_artifacts:
+        description: Promote a validated prior signed-candidate artifact without packaging again.
+        required: true
+        type: boolean
+      sign_artifacts:
+        description: Sign and notarize newly packaged artifacts even when publication is deferred.
+        required: true
+        type: boolean
+    outputs:
+      tag:
+        description: Published Desktop component tag.
+        value: ${{ jobs.publish.outputs.tag }}
+      release_url:
+        description: Published GitHub Release URL.
+        value: ${{ jobs.publish.outputs.release_url }}
+      artifact_digests:
+        description: JSON array of promoted installer and update-feed SHA-256 values.
+        value: ${{ jobs.publish.outputs.artifact_digests }}
+      workflow_run:
+        description: GitHub Actions run that published the Desktop release.
+        value: ${{ jobs.publish.outputs.workflow_run }}
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        description: Exact Product Release Plan commit to package or publish.
+        required: true
+        type: string
+      plan_path:
+        description: Numbered Product Release Plan at the candidate commit.
+        required: true
+        type: string
+      version:
+        description: Desktop Bundle version from apps/desktop/package.json.
+        required: true
+        type: string
+      publish:
+        description: Create the gestalt-v* tag and GitHub Release after packaging succeeds.
+        required: true
+        type: boolean
+        default: false
+      artifact_run_id:
+        description: Prior run containing the exact signed Desktop artifacts; required for manual publication recovery.
+        required: false
+        type: string
+      recover_artifacts:
+        description: Promote a validated prior signed-candidate artifact without packaging again.
+        required: true
+        type: boolean
+        default: false
+      sign_artifacts:
+        description: Sign and notarize newly packaged artifacts even when publication is deferred.
         required: true
         type: boolean
         default: false
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: desktop-release-${{ inputs.version }}
@@ -37,6 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.candidate_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -45,16 +112,39 @@ jobs:
         env:
           INPUT_VERSION: ${{ inputs.version }}
           PUBLISH: ${{ inputs.publish }}
-        run: node apps/desktop/scripts/prepare-release.mjs "$INPUT_VERSION" "$PUBLISH" "$GITHUB_REF_NAME"
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          CURRENT_WORKFLOW_SHA: ${{ github.sha }}
+          PLAN_PATH: ${{ inputs.plan_path }}
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          RECOVER_ARTIFACTS: ${{ inputs.recover_artifacts }}
+          SIGN_ARTIFACTS: ${{ inputs.sign_artifacts }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          [[ "$CURRENT_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$CURRENT_WORKFLOW_SHA" refs/remotes/origin/master
+          git merge-base --is-ancestor "$CANDIDATE_SHA" refs/remotes/origin/master
+          jq -e --arg version "$INPUT_VERSION" \
+            '.releaseUnits.desktop.selected == true and .releaseUnits.desktop.version == $version' "$PLAN_PATH" >/dev/null
+          if [[ "$RECOVER_ARTIFACTS" == true && -z "$ARTIFACT_RUN_ID" ]] || [[ "$RECOVER_ARTIFACTS" != true && -n "$ARTIFACT_RUN_ID" ]]; then
+            echo 'Desktop recover_artifacts and artifact_run_id must be provided together' >&2
+            exit 1
+          fi
+          if [[ "$PUBLISH" == true && "$RECOVER_ARTIFACTS" != true && "$SIGN_ARTIFACTS" != true ]]; then
+            echo 'Desktop publication requires signed artifacts' >&2
+            exit 1
+          fi
+          node apps/desktop/scripts/prepare-release.mjs "$INPUT_VERSION" "$PUBLISH"
 
   pack-mac:
     name: Pack macOS ${{ matrix.arch }}
     needs: prepare
+    if: ${{ !inputs.recover_artifacts }}
     runs-on: ${{ matrix.runner }}
     env:
       NODE_OPTIONS: --max-old-space-size=8192
     environment:
-      name: ${{ inputs.publish && 'desktop-release' || 'desktop-dry-run' }}
+      name: ${{ inputs.sign_artifacts && 'desktop-release' || 'desktop-dry-run' }}
     strategy:
       fail-fast: false
       matrix:
@@ -65,7 +155,7 @@ jobs:
             runner: macos-15-intel
     steps:
       - name: Validate release credentials
-        if: inputs.publish
+        if: inputs.sign_artifacts
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
@@ -84,6 +174,7 @@ jobs:
 
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.candidate_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -136,7 +227,7 @@ jobs:
           node apps/desktop/scripts/isolate-dsh-snapshot.mjs
 
       - name: Package unsigned
-        if: ${{ !inputs.publish }}
+        if: ${{ !inputs.sign_artifacts }}
         working-directory: apps/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -146,7 +237,7 @@ jobs:
             -c.mac.identity=null -c.mac.notarize=false
 
       - name: Package signed and notarized
-        if: inputs.publish
+        if: inputs.sign_artifacts
         working-directory: apps/desktop
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -161,7 +252,7 @@ jobs:
           node_modules/.bin/electron-builder --mac --${{ matrix.arch }} --publish never -c.forceCodeSigning=true
 
       - name: Verify signed app
-        if: inputs.publish
+        if: inputs.sign_artifacts
         run: |
           app_bundle=$(find apps/desktop/release -name 'DeepSeek Gestalt.app' -type d -print -quit)
           test -n "$app_bundle"
@@ -184,14 +275,16 @@ jobs:
   pack-win:
     name: Pack Windows x64
     needs: prepare
+    if: ${{ !inputs.recover_artifacts }}
     runs-on: windows-2025
     env:
       NODE_OPTIONS: --max-old-space-size=8192
     environment:
-      name: ${{ inputs.publish && 'desktop-release' || 'desktop-dry-run' }}
+      name: ${{ inputs.sign_artifacts && 'desktop-release' || 'desktop-dry-run' }}
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.candidate_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -300,37 +393,142 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  publish:
-    name: GitHub Release
-    if: inputs.publish
+  candidate-evidence:
+    name: Record signed Desktop candidate
     needs: [prepare, pack-mac, pack-win]
+    if: ${{ !inputs.recover_artifacts && inputs.sign_artifacts && needs.pack-mac.result == 'success' && needs.pack-win.result == 'success' }}
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.candidate_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Assemble signed-candidate manifest
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PLAN_PATH: ${{ inputs.plan_path }}
+        run: |
+          set -Eeuo pipefail
+          node apps/desktop/scripts/merge-latest-mac.mjs dist
+          mkdir candidate
+          mapfile -t assets < <(node apps/desktop/scripts/release-assets.mjs dist "$RELEASE_VERSION")
+          for asset in "${assets[@]}"; do cp "$asset" candidate/; done
+          digests=$(for asset in candidate/*; do sha256sum "$asset"; done | jq -Rn \
+            '[inputs | capture("^(?<digest>[0-9a-f]{64})  (?<path>.+)$") | {key:(.path | split("/") | last),value:("sha256:" + .digest)}] | from_entries')
+          jq -n --arg candidate "$CANDIDATE_SHA" --arg plan "$PLAN_PATH" --arg version "$RELEASE_VERSION" --argjson digests "$digests" \
+            '{version:1,surface:"desktop",candidateCommit:$candidate,planPath:$plan,productVersion:$version,artifactDigests:$digests}' \
+            > candidate/release-candidate.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-candidate-${{ inputs.candidate_sha }}
+          path: candidate
+          if-no-files-found: error
+          retention-days: 30
+
+  provenance:
+    name: Validate prior Desktop candidate
+    needs: prepare
+    if: inputs.recover_artifacts
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Validate prior run, manifest, and downloaded digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESKTOP_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+          PLAN_PATH: ${{ inputs.plan_path }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          artifact_name="desktop-release-candidate-$CANDIDATE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DESKTOP_ARTIFACT_RUN_ID" > run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DESKTOP_ARTIFACT_RUN_ID/jobs?filter=latest&per_page=100" > jobs.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$DESKTOP_ARTIFACT_RUN_ID/artifacts?per_page=100" > artifacts.json
+          workflow_head=$(jq -r .head_sha run.json)
+          [[ "$workflow_head" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$workflow_head" refs/remotes/origin/master
+          ARTIFACT_NAME="$artifact_name" TRUSTED_WORKFLOW_HEAD="$workflow_head" node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { validatePriorReleaseRun } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            validatePriorReleaseRun(json("run.json"), json("jobs.json"), json("artifacts.json"), { repository: process.env.GITHUB_REPOSITORY, trustedWorkflowHeadCommits: [process.env.TRUSTED_WORKFLOW_HEAD], allowedWorkflows: [".github/workflows/desktop-release.yml", ".github/workflows/product-release.yml"], artifactProducers: [{ artifactName: process.env.ARTIFACT_NAME, producerJob: "Record signed Desktop candidate" }] });'
+          gh run download "$DESKTOP_ARTIFACT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$artifact_name" --dir candidate
+          digests=$(for asset in candidate/*; do
+            if [[ "$(basename "$asset")" != release-candidate.json ]]; then sha256sum "$asset"; fi
+          done | jq -Rn '[inputs | capture("^(?<digest>[0-9a-f]{64})  (?<path>.+)$") | {key:(.path | split("/") | last),value:("sha256:" + .digest)}] | from_entries')
+          printf '%s\n' "$digests" > digests.json
+          node --import tsx/esm -e '
+            import { readFileSync } from "node:fs";
+            import { validateReleaseArtifactManifest } from "./scripts/release/product.ts";
+            const json = path => JSON.parse(readFileSync(path, "utf8"));
+            validateReleaseArtifactManifest(json("candidate/release-candidate.json"), { surface: "desktop", candidateCommit: process.env.CANDIDATE_SHA, planPath: process.env.PLAN_PATH, productVersion: process.env.RELEASE_VERSION }, json("digests.json"));'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-candidate-${{ inputs.candidate_sha }}
+          path: candidate
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: GitHub Release
+    if: ${{ inputs.publish && always() && needs.prepare.result == 'success' && (needs.candidate-evidence.result == 'success' || needs.provenance.result == 'success') }}
+    needs: [prepare, candidate-evidence, provenance]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
+      release_url: ${{ steps.publish.outputs.release_url }}
+      artifact_digests: ${{ steps.publish.outputs.artifact_digests }}
+      workflow_run: ${{ steps.publish.outputs.workflow_run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.candidate_sha }}
           fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/download-artifact@v4
         with:
+          name: desktop-release-candidate-${{ inputs.candidate_sha }}
           path: dist
-
-      - name: Merge macOS update feeds
-        run: node apps/desktop/scripts/merge-latest-mac.mjs dist
 
       - name: Render release notes
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_NOTES_FILE: ${{ runner.temp }}/desktop-release-notes.md
-        run: node apps/desktop/scripts/render-release-notes.mjs "$RELEASE_VERSION" "$GITHUB_SHA" "$RELEASE_NOTES_FILE"
+        run: node apps/desktop/scripts/render-release-notes.mjs "$RELEASE_VERSION" "${{ inputs.candidate_sha }}" "$RELEASE_NOTES_FILE"
 
       - name: Publish release
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_NOTES_FILE: ${{ runner.temp }}/desktop-release-notes.md
+          DESKTOP_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
         run: |
           set -Eeuo pipefail
           tag=${{ needs.prepare.outputs.tag }}
@@ -357,12 +555,12 @@ jobs:
           trap 'exit 143' TERM
           gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
             --field ref="refs/tags/$tag" \
-            --field sha="$GITHUB_SHA" >/dev/null
+            --field sha="$DESKTOP_CANDIDATE_SHA" >/dev/null
           tag_owned=true
           gh release create "$tag" \
             --draft \
             --verify-tag \
-            --target "$GITHUB_SHA" \
+            --target "$DESKTOP_CANDIDATE_SHA" \
             --title "DeepSeek Gestalt ${{ needs.prepare.outputs.version }}" \
             --notes-file "$RELEASE_NOTES_FILE"
           release_owned=true
@@ -375,5 +573,13 @@ jobs:
             exit 1
           fi
           gh release edit "$tag" --draft=false --latest
+          artifact_digests=$(for asset in "${assets[@]}"; do sha256sum "$asset"; done \
+            | jq -Rsc 'split("\n") | map(select(length > 0) | split(" ")[0])')
+          {
+            echo "tag=$tag"
+            echo "release_url=https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag"
+            echo "artifact_digests=$artifact_digests"
+            echo "workflow_run=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
           published=true
           trap - EXIT INT TERM

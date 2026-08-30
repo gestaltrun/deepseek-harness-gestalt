@@ -1,0 +1,36 @@
+{
+  "version": "0.1.10",
+  "tag": "gestalt-v0.1.10",
+  "source": {
+    "baselineKind": "previous-release",
+    "baselineRepository": "gestaltrun/deepseek-harness-gestalt",
+    "releaseRepository": "gestaltrun/deepseek-harness-gestalt",
+    "baselineCommit": "f4165e8ab4867cb5aad2b0b68b00a0de4b8642a7"
+  },
+  "content": {
+    "zh": {
+      "intro": "DeepSeek Gestalt 0.1.10 收录上一版本之后的 {{commitCount}} 个提交。",
+      "sections": [
+        {
+          "heading": "产品变更",
+          "items": [
+            "Desktop 恢复版本必须显式来自已评审的发布计划。",
+            "通过一个经过评审的产品发布计划协调桌面端、移动端和平台端。"
+          ]
+        }
+      ]
+    },
+    "en": {
+      "intro": "DeepSeek Gestalt 0.1.10 contains the {{commitCount}} commits after the previous Desktop Bundle.",
+      "sections": [
+        {
+          "heading": "Product changes",
+          "items": [
+            "Require explicit Desktop recovery versions from the reviewed release plan.",
+            "Coordinate Desktop, Mobile, and Platform through one reviewed product release plan."
+          ]
+        }
+      ]
+    }
+  }
+}

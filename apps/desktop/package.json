@@ -2,7 +2,7 @@
   "name": "@deepseek-ai/dsh-desktop",
   "productName": "DeepSeek Gestalt",
   "description": "DeepSeek Gestalt Desktop Host: Electron window around bundled dsh web",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "type": "module",
   "main": "out/main.mjs",

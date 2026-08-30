@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "470-phone-view-dedup",
+  "summary": {
+    "en": "Share the Desktop phone reconnect card without changing its interaction behavior.",
+    "zh": "复用桌面端手机重连卡片，不改变交互行为。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The refactor changes only the Desktop browser phone view and is not an input to the Mobile application."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The refactor changes only the Desktop browser phone view and does not alter Platform production, deployment, or wire inputs."
+    }
+  ]
+}

@@ -18,7 +18,7 @@ Status: implemented
 
 语言服务器的资源清理会终止整棵后代进程树：POSIX 使用负数进程组 ID，Windows 同步执行 `taskkill /T /F`。Windows 只会忽略 taskkill 返回的「进程树已经不存在」状态；命令执行失败、权限错误及其他终止进程树的失败仍属于资源清理失败。只读的提供方查询仅在选定的池化传输于该次查询开始前或执行期间失效时重试一次；服务器仍存活时返回的错误不会触发重试。终端测试会等待可观察的渲染输出，不假设一次事件循环轮转已经足够。
 
-phone-runtime 套件通过 `stageFake` 暂存唯一的 `fakemobilecli.mjs` 实现。POSIX 宿主执行无扩展名的 shebang 副本。Windows 宿主执行名为 `fakemobilecli.exe`、指向当前原生 Node 可执行文件的文件符号链接；测试专用 `NODE_OPTIONS` preload 通过 `process.argv0` 识别稳定的调用文件名，把同目录 fake 模块插入为主脚本，对其余 Node 子进程不产生作用。所有场景都接收该 helper 的 `executablePath`，因此服务启动、一次性 agent 命令、stderr 保留与完全停稳的资源清理继续经过生产解析器与进程持有者。POSIX 证明忽略 SIGTERM 后升级到 SIGKILL；Windows 证明宿主终止以 SIGTERM 结束原生 launcher 后达到完全停稳，因为该 launcher 无法在 Windows 终止后保留 JavaScript 信号处理器。
+phone-runtime 套件通过 `stageFake` 暂存唯一的 `fakemobilecli.mjs` 实现。POSIX 宿主执行无扩展名的 shebang 副本。Windows 宿主执行名为 `fakemobilecli.exe`、指向当前原生 Node 可执行文件的文件符号链接；测试专用 `NODE_OPTIONS` preload 通过 `process.argv0` 识别稳定的调用文件名，把同目录 fake 模块插入为主脚本，对其余 Node 子进程不产生作用。`stageFake` 会持续持有占位端口，直到调用方在启动进程前等待 `claim()`，或由 `dispose()` 释放；两条路径共用同一个幂等结算。所有场景都接收该 helper 的 `executablePath`，因此服务启动、一次性 agent 命令、stderr 保留与完全停稳的资源清理继续经过生产解析器与进程持有者。POSIX 证明忽略 SIGTERM 后升级到 SIGKILL；Windows 证明宿主终止以 SIGTERM 结束原生 launcher 后达到完全停稳，因为该 launcher 无法在 Windows 终止后保留 JavaScript 信号处理器。
 
 对于真正仅存在于 POSIX 的原语，测试只在该用例上排除 Windows。相邻的跨平台用例仍会固定拒绝非普通文件、不可用命令和无法访问的工作目录的行为。Windows 上受支持的路径仍受逐文件覆盖率门禁约束，不会随测试文件一起排除。
 

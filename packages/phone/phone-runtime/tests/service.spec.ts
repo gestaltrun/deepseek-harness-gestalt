@@ -46,7 +46,7 @@ const FAST_CONFIG: Partial<Config> = {
 }
 
 async function mountWith(fake: Awaited<ReturnType<typeof stageFake>>, overrides: Partial<Config> = {}): Promise<CordisContext> {
-  fake.claim()
+  await fake.claim()
   const context = new Context()
   contexts.push(context)
   try {
@@ -105,7 +105,7 @@ describe('phone runtime service lifecycle', () => {
   it('refuses lifecycle verbs that arrive before the first baseline exists', async () => {
     const fake = await stageFake({ hang: true })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const context = new Context()
     contexts.push(context)
     const pending = context.plugin(PhoneDevices, {
@@ -125,7 +125,7 @@ describe('phone runtime service lifecycle', () => {
   it('times the readiness wait out with PHONE_TIMEOUT when no caller signal exists', async () => {
     const fake = await stageFake({ hang: true })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const context = new Context()
     contexts.push(context)
     const pending = context.plugin(PhoneDevices, {
@@ -230,7 +230,7 @@ describe('phone runtime service lifecycle', () => {
   it('reports cancellation arriving during the readiness wait as PHONE_ABORTED', async () => {
     const fake = await stageFake({ hang: true })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const context = new Context()
     contexts.push(context)
     const pending = context.plugin(PhoneDevices, {
@@ -499,7 +499,7 @@ describe('phone runtime service lifecycle', () => {
   it('fails initialization loudly when the server exits before answering readiness', async () => {
     const fake = await stageFake({ devices: [], exitFast: true })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const context = new Context()
     contexts.push(context)
     const failure = context.plugin(PhoneDevices, {
@@ -514,7 +514,7 @@ describe('phone runtime service lifecycle', () => {
   it('fails initialization loudly when the server never answers within its window', async () => {
     const fake = await stageFake({ hang: true })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const context = new Context()
     contexts.push(context)
     const failure = context.plugin(PhoneDevices, {

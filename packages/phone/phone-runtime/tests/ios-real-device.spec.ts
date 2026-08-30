@@ -29,7 +29,7 @@ const FAST_CONFIG: Partial<Config> = {
 }
 
 async function mountWith(fake: Awaited<ReturnType<typeof stageFake>>, overrides: Partial<Config> = {}): Promise<CordisContext> {
-  fake.claim()
+  await fake.claim()
   const context = new Context()
   contexts.push(context)
   await context.plugin(PhoneDevices, {

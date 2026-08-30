@@ -15,7 +15,7 @@ describe('MobilecliServerProcess', () => {
   it('spawns the fake, reaches liveness, and stops to exit quiescence on SIGTERM', async () => {
     const fake = await stageFake()
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const proc = new MobilecliServerProcess({ executablePath: fake.executablePath, port: fake.port })
     processes.push(proc)
     expect(proc.alive).toBe(true)
@@ -31,7 +31,7 @@ describe('MobilecliServerProcess', () => {
   it.skipIf(process.platform === 'win32')('escalates to SIGKILL when the child ignores SIGTERM', async () => {
     const fake = await stageFake({ ignoreTerm: true })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const proc = new MobilecliServerProcess({ executablePath: fake.executablePath, port: fake.port })
     processes.push(proc)
     await fake.awaitOnline()
@@ -44,7 +44,7 @@ describe('MobilecliServerProcess', () => {
   it.runIf(process.platform === 'win32')('reaches quiescence when Windows terminates the native launcher on SIGTERM', async () => {
     const fake = await stageFake({ ignoreTerm: true })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const proc = new MobilecliServerProcess({ executablePath: fake.executablePath, port: fake.port })
     processes.push(proc)
     await fake.awaitOnline()

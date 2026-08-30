@@ -65,8 +65,8 @@ export interface StagedFake {
   readonly baseUrl: string
   /** Staged dummy provisioning profile that satisfies composition validation. */
   readonly profilePath: string
-  /** Release the placeholder port reservation right before the child spawns. */
-  claim(): void
+  /** Release the placeholder port reservation and wait until the child can bind it. */
+  claim(): Promise<void>
   setDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
   /** Rewrite the `agent` behavior knobs the next CLI invocation reads. */
   setAgent(agent: FakeAgentKnobs): Promise<void>
@@ -97,12 +97,19 @@ function randomPort(): Promise<number> {
  * Hold one staged port until {@link StagedFake.claim}, so parallel vitest
  * workers cannot steal the ephemeral slot between staging and spawning.
  */
-function holdPort(port: number): { release(): void } {
+async function holdPort(port: number): Promise<{ release(): Promise<void> }> {
   const placeholder = net.createServer()
-  placeholder.listen(port, '127.0.0.1')
+  await new Promise<void>((resolve, reject) => {
+    placeholder.once('error', reject)
+    placeholder.listen(port, '127.0.0.1', resolve)
+  })
+  let releasePromise: Promise<void> | undefined
   return {
-    release(): void {
-      placeholder.close()
+    release(): Promise<void> {
+      releasePromise ??= new Promise<void>((resolve, reject) => {
+        placeholder.close((error) => { if (error === undefined) resolve(); else reject(error) })
+      })
+      return releasePromise
     },
   }
 }
@@ -177,18 +184,19 @@ export async function stageFake(
         lastInstallArgv: null,
       }))
     }
-    const port = await randomPort()
-    const hold = holdPort(port)
-    const baseUrl = `http://127.0.0.1:${String(port)}`
     const profilePath = join(fixturesDir, 'profile.mobileprovision')
     await writeFile(profilePath, 'fake provisioning profile payload')
+    const port = await randomPort()
+    const hold = await holdPort(port)
+    const baseUrl = `http://127.0.0.1:${String(port)}`
+    let disposal: Promise<void> | undefined
     const facade: StagedFake = {
       port,
       executablePath,
       baseUrl,
       profilePath,
-      claim(): void {
-        hold.release()
+      claim(): Promise<void> {
+        return hold.release()
       },
       async setDevices(devices): Promise<void> {
         const response = await fetch(`${baseUrl}/__test/set-devices`, {
@@ -230,12 +238,23 @@ export async function stageFake(
           }
         }
       },
-      async dispose(): Promise<void> {
-        try {
-          await rm(root, { recursive: true, force: true })
-        } finally {
+      dispose(): Promise<void> {
+        disposal ??= (async () => {
+          const settled = await Promise.allSettled([
+            hold.release(),
+            rm(root, { recursive: true, force: true }),
+          ])
           releaseLauncher?.()
-        }
+          const errors: Error[] = []
+          for (const result of settled) {
+            if (result.status !== 'rejected') continue
+            const reason: unknown = result.reason
+            errors.push(reason instanceof Error ? reason : new Error(String(reason)))
+          }
+          if (errors.length === 1) throw errors[0]
+          if (errors.length > 1) throw new AggregateError(errors, 'staged fake cleanup failed')
+        })()
+        return disposal
       },
     }
     return facade

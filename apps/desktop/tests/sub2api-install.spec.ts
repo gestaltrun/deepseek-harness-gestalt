@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { AddressInfo } from 'node:net'
 import * as tar from 'tar'
@@ -85,7 +85,7 @@ async function served(
   sumsPath: string,
 ): Promise<{ archiveUrl: string; sumsUrl: string }> {
   const bytes = await readFile(archive)
-  const sums = `${createHash('sha256').update(bytes).digest('hex')}  ${archive.split('/').pop()}\n`
+  const sums = `${createHash('sha256').update(bytes).digest('hex')}  ${basename(archive)}\n`
   routes.set(`/${archivePath}`, () => bytes)
   routes.set(`/${sumsPath}`, () => Buffer.from(sums))
   return { archiveUrl: `${baseUrl}/${archivePath}`, sumsUrl: `${baseUrl}/${sumsPath}` }

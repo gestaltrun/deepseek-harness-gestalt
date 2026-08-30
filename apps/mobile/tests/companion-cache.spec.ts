@@ -7,6 +7,7 @@ import {
   parseCompanionSessionId,
   REMOTE_PROTOCOL_LIMITS,
   type CompanionConfirmedResult,
+  type CompanionOperationFailedResult,
   type CompanionSessionCreatedResult,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
@@ -306,6 +307,29 @@ describe('Companion Cache', () => {
     await expect(store.loadReceipts(desktopA)).resolves.toEqual([{
       operationId, status: 'committed', kind: 'session-create', original,
     }])
+  })
+
+  it('round-trips every durable Desktop Host failure without structuredClone', async () => {
+    const store = namespacedStore('host-failure-results')
+    const failures = [
+      { kind: 'http', code: 'HOST_HTTP_STATUS', message: 'HTTP failure', status: 503 },
+      { kind: 'wire', code: 'HOST_WIRE_INVALID', message: 'Wire failure' },
+      { kind: 'business', code: 'SESSION_MISSING', message: 'Business failure' },
+      { kind: 'timeout', code: 'HOST_TIMEOUT', message: 'Timeout failure' },
+    ] satisfies CompanionOperationFailedResult['failure'][]
+    for (const [index, failure] of failures.entries()) {
+      const operationId = parseCompanionOperationId(`failure-${String(index)}`)
+      await store.saveReceipt(desktopA, {
+        operationId,
+        status: 'committed',
+        original: { type: 'operation-failed', operationId, failure },
+      })
+    }
+    expect((await store.loadReceipts(desktopA)).map(receipt => receipt.original)).toEqual(
+      failures.map((failure, index) => ({
+        type: 'operation-failed', operationId: `failure-${String(index)}`, failure,
+      })),
+    )
   })
 
   it('names the cache database from the account storage namespace', () => {

@@ -8,7 +8,7 @@ Both scripts require the production `VITE_PLATFORM_*` and `VITE_REMOTE_RELAY_*` 
 
 ## Android
 
-`scripts/build-android-release.sh` decodes `ANDROID_KEYSTORE_BASE64` into a mode-0600 temporary file, builds the bundled Web entry, runs Capacitor sync, assembles Release with `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`, verifies the APK signature, then removes the temporary keystore.
+`scripts/build-android-release.sh` decodes `ANDROID_KEYSTORE_BASE64` into a mode-0600 temporary file, builds the bundled Web entry, runs Capacitor sync, assembles Release with `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`, verifies the APK signature, then removes the temporary keystore. Android System WebView 83 is the release floor. Candidate acceptance launches the bundled entry on that runtime and requires either the operated account surface or the bilingual startup diagnostic; an empty WebView is a failure.
 
 ```sh
 MOBILE_VERSION=0.1.0 MOBILE_BUILD_NUMBER=3 \

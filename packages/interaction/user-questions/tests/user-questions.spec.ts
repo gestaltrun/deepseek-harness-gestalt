@@ -219,4 +219,23 @@ describe('UserQuestionService', () => {
     expect(result.answers).toEqual([{ id: 'plain', selected: ['Approve'] }])
     expect(p.seen[0]?.questions[1]?.intent).toEqual(intent)
   })
+
+  it('accepts a member-question intent without extra required fields', async () => {
+    const ctx = new Context()
+    await ctx.plugin(UserQuestionService)
+    const p = provider('Remove')
+    ctx.userQuestions.registerProvider(p)
+    const intent = { kind: 'member-question' } as const
+
+    const result = await ctx.userQuestions.ask({
+      questions: [{
+        id: 'member-q', question: 'Remove this member?',
+        options: [{ label: 'Remove' }, { label: 'Keep' }],
+        intent,
+      }],
+    })
+
+    expect(result.answers).toEqual([{ id: 'member-q', selected: ['Remove'] }])
+    expect(p.seen[0]?.questions[0]?.intent).toEqual(intent)
+  })
 })

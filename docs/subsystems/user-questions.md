@@ -317,6 +317,16 @@ abstract settle( questionId: MemberQuestionId, settlement: MemberQuestionReceive
  * @returns the durable idempotent admission result.
  */
 abstract admitHumanTurn( input: AdmitMemberQuestionHumanTurnInput, ): Promise<AdmitMemberQuestionHumanTurnResult>
+
+/** Resume every durable human action left reserved by an interrupted Host. */
+abstract resumeReservedHumanTurns(): Promise<void>
+
+/**
+ * Install the single Host materialize-and-admit adapter.
+ * @param admitter - high-level Host transaction adapter.
+ * @returns disposer for this exact registration.
+ */
+abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void
 ```
 
 Types: [CompanionMemberQuestionSettledResult](remote-protocol.md)
@@ -374,6 +384,26 @@ abstract queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQue
 Types: [CompanionMemberQuestionSettledResult](remote-protocol.md)
 
 Source: [`packages/interaction/member-question-sender/src/index.ts`](../../packages/interaction/member-question-sender/src/index.ts)
+
+<a id="ctxmemberquestionworkspacebinding--memberquestionworkspacebinding"></a>
+
+### `ctx.memberQuestionWorkspaceBinding` — `MemberQuestionWorkspaceBinding`
+
+Local project-member Workspace association supplied by the Host composition.
+
+```ts cordis-catalog
+/**
+ * Resolve one authenticated receiver/project pair to an existing Workspace id.
+ * @param accountId - authenticated receiving Account.
+ * @param projectId - cloud Project carried by the received operation.
+ * @returns exact local Workspace identity.
+ */
+resolve(accountId: PlatformAccountId, projectId: ProjectId): Promise<Branded<'WorkspaceId'>>
+```
+
+Types: [PlatformAccountId](platform-account.md) · [ProjectId](project-membership.md) · [WorkspaceId](workspace.md)
+
+Source: [`packages/interaction/member-question-receiver/src/types.ts`](../../packages/interaction/member-question-receiver/src/types.ts)
 
 <a id="ctxuserquestions--userquestionservice"></a>
 

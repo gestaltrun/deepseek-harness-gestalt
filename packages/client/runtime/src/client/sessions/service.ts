@@ -455,7 +455,8 @@ export class SessionRuntime implements ISessions {
 
   /** Resolve model operations without bypassing feature-owned Session routing. */
   modelRoute(sessionId: SessionId): SessionModelRoute | undefined {
-    if (this.manager.receiving.face(sessionId) !== undefined) return undefined
+    if (this.manager.receiving.face(sessionId) !== undefined
+      && !this.manager.receiving.isMaterialized(sessionId)) return undefined
     const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
     const featureRoute = admission?.modelRoute?.(sessionId)
     if (admission !== undefined) return featureRoute
@@ -475,7 +476,8 @@ export class SessionRuntime implements ISessions {
 
   /** Resolve the identity whose ordinary command routes may serve this Session. */
   commandCatalogSessionId(sessionId: SessionId): SessionId | undefined {
-    if (this.manager.receiving.face(sessionId) !== undefined) return undefined
+    if (this.manager.receiving.face(sessionId) !== undefined
+      && !this.manager.receiving.isMaterialized(sessionId)) return undefined
     const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
     if (admission !== undefined) return admission.commandCatalogSessionId?.(sessionId)
     if (this.manager.subagentAddress(sessionId) !== undefined) return undefined
@@ -484,7 +486,8 @@ export class SessionRuntime implements ISessions {
 
   /** Resolve the catalog identity whose skills apply to this Session. */
   skillCatalogSessionId(sessionId: SessionId): SessionId | undefined {
-    if (this.manager.receiving.face(sessionId) !== undefined) return undefined
+    if (this.manager.receiving.face(sessionId) !== undefined
+      && !this.manager.receiving.isMaterialized(sessionId)) return undefined
     const admission = this.admissionAdapters.find(adapter => adapter.handles(sessionId))
     if (admission !== undefined) return admission.skillCatalogSessionId?.(sessionId)
     if (this.manager.subagentAddress(sessionId) !== undefined) return undefined
@@ -724,7 +727,13 @@ export class SessionRuntime implements ISessions {
     if (!this.eligible(id)) return undefined
     const { fiber, ctx } = createScope(this.rootCtx, id)
     const receivingFace = this.manager.receiving.face(id)
-    const hostSession = receivingFace === undefined ? this.manager.get(id) : undefined
+    const hostSession = receivingFace === undefined
+      || (this.manager.receiving.isMaterialized(id) && this.manager.isHostListed(id))
+      ? this.manager.get(id)
+      : undefined
+    if (receivingFace !== undefined && hostSession !== undefined) {
+      this.manager.receiving.bindHost(id, hostSession)
+    }
     const face = receivingFace ?? hostSession
     if (face === undefined) return undefined
     // Only a Host Session owns the scoped dispatch point and history window.
@@ -821,6 +830,19 @@ export class SessionRuntime implements ISessions {
         sessionId: current,
         ...(currentAddress === undefined ? {} : { subagentAddress: currentAddress }),
       })
+    }
+    for (const [id, record] of this.scopes) {
+      if (record.hostSession !== undefined
+        || !this.manager.receiving.isMaterialized(id)
+        || !this.manager.isHostListed(id)) continue
+      const host = this.manager.get(id)
+      host.bindScope(record.ctx)
+      this.manager.receiving.bindHost(id, host)
+      record.hostSession = host
+      if (id === current) {
+        void host.open()
+        void this.manager.refreshSubagents(id)
+      }
     }
     this.list.set({ ids, byId, current, phase, subagentsByParent, jobsBySession, currentAddress })
     this.pruneScopes()

@@ -117,6 +117,7 @@ flowchart LR
   svc_memberQuestionSender["ctx.memberQuestionSender<br/>Member-question sender seam"]
   pkg_member_question_receiver["member-question-receiver"]
   svc_memberQuestionReceiver["ctx.memberQuestionReceiver<br/>Member-question receiver seam"]
+  svc_memberQuestionWorkspaceBinding["ctx.memberQuestionWorkspaceBinding<br/>Member-question local Workspace binding"]
   pkg_plan_mode["plan-mode"]
   svc_planMode["ctx.planMode<br/>Plan collaboration state"]
   pkg_agent_presets["agent-presets"]
@@ -288,6 +289,7 @@ flowchart LR
   pkg_lsp --> svc_lsp
   pkg_lsp_local --> svc_lsp
   pkg_member_question_receiver --> svc_memberQuestionReceiver
+  pkg_member_question_receiver --> svc_memberQuestionWorkspaceBinding
   pkg_member_question_sender --> svc_memberQuestionSender
   pkg_message_feedback --> svc_messageFeedback
   pkg_modules --> svc_clientModules
@@ -401,6 +403,7 @@ flowchart LR
   svc_lsp --> pkg_tool_lsp
   svc_memberQuestionReceiver --> pkg_member_question_receiver
   svc_memberQuestionSender --> pkg_tool_ask_user
+  svc_memberQuestionWorkspaceBinding --> pkg_apiproxy
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
   svc_platformAccount --> pkg_project_membership_http
@@ -527,6 +530,7 @@ flowchart LR
 | `ctx.userQuestions` | `seam` | [`user-questions`](../packages/interaction/user-questions) | - | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | UI 前端提供当前生效的人工回答提供方；tool-ask-user 在提供方无关的 ask() promise 上暂停工具调用。 |
 | `ctx.memberQuestionSender` | `seam` | [`member-question-sender`](../packages/interaction/member-question-sender) | [`member-question-sender`](../packages/interaction/member-question-sender) | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | 通过 T4 codec 编码一项 Companion member-question operation，并经注入的 adapter 投递 bytes；对端凭证通过 B 侧 project-peer grant lookup 获取。 |
 | `ctx.memberQuestionReceiver` | `seam` | [`member-question-receiver`](../packages/interaction/member-question-receiver) | [`member-question-receiver`](../packages/interaction/member-question-receiver) | [`member-question-receiver`](../packages/interaction/member-question-receiver) | - | 持久化认证 arrival、canonical terminal、expiry 与一次已 reservation 的高层 human admission；包内折叠的 ingress adapter 是当前 Consumer。 |
+| `ctx.memberQuestionWorkspaceBinding` | `core` | [`member-question-receiver`](../packages/interaction/member-question-receiver) | - | `apiproxy` | - | 把已认证的 receiver Account 与 cloud Project 解析为唯一且既存的本地 Workspace；API Proxy 未获得该 binding 时，会从 project membership 派生同一关联。 |
 | `ctx.planMode` | `core` | [`plan-mode`](../packages/plan/plan-mode) | - | - | - | 折叠已记录的计划／模式状态，在轮次边界刷新用户选择，渲染由部署方拥有的指导信息，注册 /plan，并在状态转换期间保持计划退出 schema 稳定。 |
 | `ctx.agentPresets` | `core` | [`agent-presets`](../packages/preset/agent-presets) | - | - | - | 在受信任根目录与用户创作根目录上发现 preset 目录，并在创建期把一份 preset cordis.yml 挂载到 agent 作用域之下，拒绝始终未激活或向根服务 realm 发布服务的行。 |
 | `ctx.commands` | `core` | [`commands`](../packages/interaction/commands) | - | - | - | 插件注册直接面向人的命令，而不会把调用发送给模型。 |

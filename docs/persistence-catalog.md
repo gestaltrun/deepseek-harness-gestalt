@@ -90,7 +90,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }[T]
 ```
 
-Sources: [`packages/core/session/src/types.ts:340`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:408`](../packages/core/session/src/types.ts)
+Sources: [`packages/core/session/src/types.ts:340`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:414`](../packages/core/session/src/types.ts)
 
 ## Events
 
@@ -548,6 +548,38 @@ Source: [`packages/interaction/member-question-sender/src/index.ts:79`](../packa
 ```
 
 Source: [`packages/interaction/member-question-sender/src/index.ts:85`](../packages/interaction/member-question-sender/src/index.ts)
+
+<a id="member-questionreceived--log-only"></a>
+
+#### `member-question/received` — log-only
+
+```ts persistence-catalog
+/** Bounded Decision Brief metadata received from another project member. */
+'member-question/received': {
+  questionId: MemberQuestionId
+  projectId: ProjectId
+  originSessionId: HostSessionId
+  arrivedAt: number
+  expiresAt: number
+  origin: CompanionMemberQuestionOperation['origin']
+  background: string
+  questions: CompanionMemberQuestionOperation['questions']
+  references: CompanionMemberQuestionOperation['references']
+}
+```
+
+Source: [`packages/interaction/member-question-receiver/src/types.ts:213`](../packages/interaction/member-question-receiver/src/types.ts)
+
+<a id="member-questionsettled--log-only"></a>
+
+#### `member-question/settled` — log-only
+
+```ts persistence-catalog
+/** Canonical terminal metadata for one received member question. */
+'member-question/settled': CompanionMemberQuestionSettledResult
+```
+
+Source: [`packages/interaction/member-question-receiver/src/types.ts:225`](../packages/interaction/member-question-receiver/src/types.ts)
 
 ### `permission/*`
 

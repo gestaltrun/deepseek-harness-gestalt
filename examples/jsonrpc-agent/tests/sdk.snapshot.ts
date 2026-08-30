@@ -39,6 +39,8 @@ const minimalLiveConfig = join(testsDir, '..', 'minimal.cordis.yml')
 const minimalReplayConfig = join(testsDir, '..', 'minimal.snapshot.cordis.yml')
 const deferredLiveConfig = join(testsDir, '..', 'deferred.cordis.yml')
 const deferredReplayConfig = join(testsDir, '..', 'deferred.snapshot.cordis.yml')
+const memberEventsLiveConfig = join(testsDir, '..', 'member-events.cordis.yml')
+const memberEventsReplayConfig = join(testsDir, '..', 'member-events.snapshot.cordis.yml')
 const runtimeBin = fileURLToPath(new URL('../../../packages/examples/jsonrpc-demo/src/bin.ts', import.meta.url))
 const repoTsconfig = fileURLToPath(new URL('../../../tsconfig.json', import.meta.url))
 
@@ -91,6 +93,13 @@ const SCENARIOS: SdkScenario[] = [
     prompt: 'Reply with exactly: SDK snapshot OK',
     sessionId: 'sdk-snapshot-text',
     children: 0,
+  },
+  {
+    name: 'member-question-events',
+    prompt: 'Reply with exactly: SDK snapshot OK',
+    sessionId: 'sdk-snapshot-member-question-events',
+    children: 0,
+    configs: { live: memberEventsLiveConfig, replay: memberEventsReplayConfig },
   },
   {
     name: 'bash-tool',
@@ -266,6 +275,10 @@ function normalizeResult(result: RunResult, ctx: NormalizeContext): string {
   return normalizeStdout(`${JSON.stringify({
     sessionId: result.sessionId,
     finalResponse: result.finalResponse,
+    memberQuestionEvents: result.events.flatMap(event =>
+      event.type === 'member-question/received' || event.type === 'member-question/settled'
+        ? [{ type: event.type, data: event.data, ignorable: event.ignorable }]
+        : []),
   })}\n`, ctx)
 }
 

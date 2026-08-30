@@ -48,6 +48,30 @@ for line in sys.stdin:
             "params": {
                 "sessionId": params["sessionId"],
                 "event": {
+                    "type": "member-question/received",
+                    "ignorable": True,
+                    "data": {"questionId": "question-sdk", "background": "SDK bounded brief"},
+                },
+            },
+        }), flush=True)
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "session.event",
+            "params": {
+                "sessionId": params["sessionId"],
+                "event": {
+                    "type": "member-question/settled",
+                    "ignorable": True,
+                    "data": {"questionId": "question-sdk", "outcome": "expired"},
+                },
+            },
+        }), flush=True)
+        print(json.dumps({
+            "jsonrpc": "2.0",
+            "method": "session.event",
+            "params": {
+                "sessionId": params["sessionId"],
+                "event": {
                     "type": "assistant/message",
                     "data": {
                         "message": {
@@ -110,6 +134,18 @@ for line in sys.stdin:
     assert result.final_response == "hello from runtime"
     assert result.finish_reason == "max-tokens"
     assert result.events[-1]["type"] == "turn/end"
+    assert [event for event in result.events if event["type"].startswith("member-question/")] == [
+        {
+            "type": "member-question/received",
+            "ignorable": True,
+            "data": {"questionId": "question-sdk", "background": "SDK bounded brief"},
+        },
+        {
+            "type": "member-question/settled",
+            "ignorable": True,
+            "data": {"questionId": "question-sdk", "outcome": "expired"},
+        },
+    ]
     dumped_env = json.loads(env_dump.read_text())
     assert dumped_env["DEEPSEEK_API_KEY"] == "env-key"
     assert dumped_env["DEEPSEEK_BASE_URL"] == "http://127.0.0.1:4321"

@@ -8,7 +8,7 @@ import {
   type MemberQuestionReceiverService,
 } from '@deepseek-ai/dsh-member-question-receiver'
 import type { Browser, Page, Request } from 'playwright'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
@@ -19,17 +19,18 @@ import {
 import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './support.ts'
 
 const MODE = webSnapshotMode()
+const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 
 function isForbiddenSessionRequest(request: Request): boolean {
-  return /\/api\/session\.(?:create|history|prompt)$/.test(new URL(request.url()).pathname)
+  return /\/api\/session\.(?:create|prompt)$/.test(new URL(request.url()).pathname)
 }
 
-function operation(questionId: string, operationId: string) {
+function operation(questionId: string, operationId: string, projectId: string) {
   return {
     type: 'member-question' as const,
     operationId: operationId as never,
     questionId: questionId as never,
-    projectId: 'project-atlas' as never,
+    projectId: projectId as never,
     originSessionId: 'remote-origin-session-1' as never,
     expiresAt: Date.now() + 60_000,
     origin: {
@@ -62,6 +63,8 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
   let tripwire: ReturnType<typeof watchConsole>
   let harnessHome: string
   const forbiddenRequests: string[] = []
+  const admissionRequests: { readonly rpcId: string; readonly revision: number }[] = []
+  const admissionResults: unknown[] = []
 
   beforeAll(async () => {
     harnessHome = await mkdtemp(join(tmpdir(), 'dsh-web-member-question-home-'))
@@ -74,6 +77,15 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
     tripwire = watchConsole(page)
     page.on('request', (request) => {
       if (isForbiddenSessionRequest(request)) forbiddenRequests.push(request.url())
+      if (new URL(request.url()).pathname.endsWith('/api/memberQuestion.admitHumanTurn')) {
+        const body = request.postDataJSON() as { rpcId: string; payload: { revision: number } }
+        admissionRequests.push({ rpcId: body.rpcId, revision: body.payload.revision })
+      }
+    })
+    page.on('response', (response) => {
+      if (new URL(response.url()).pathname.endsWith('/api/memberQuestion.admitHumanTurn')) {
+        void response.json().then((value) => { admissionResults.push(value) })
+      }
     })
     await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
@@ -90,6 +102,13 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
     onTestFailed(() => saveFailureShot(page, 'web-e2e-member-question-host-receiver'))
     forbiddenRequests.length = 0
     const initialSessionIds = scaffold.ctx.sessions.list().map(session => session.id)
+    const receiverWorkspace = scaffold.ctx.workspaceRegistry.list()
+      .find(workspace => workspace.path === join(scaffold.workspaceCwd, 'workspace'))
+    if (receiverWorkspace === undefined) throw new Error('member-question e2e: receiver workspace unavailable')
+    scaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+      resolve: () => Promise.resolve(receiverWorkspace.id),
+    })
+    const projectId = 'project-atlas'
     const create = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'create')
     const history = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'history')
     const prompt = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'prompt')
@@ -97,7 +116,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
     try {
       const first = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
-        operation: operation('mq-web-host-1', 'mq-web-operation-1'),
+        operation: operation('mq-web-host-1', 'mq-web-operation-1', projectId),
       })
       expect(first.receivingSessionId).not.toMatch(/^mq-recv:/u)
 
@@ -107,16 +126,32 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await row.click()
       const card = page.locator('[data-question-key]').filter({ has: page.locator('[data-member-presentation]') })
       await card.waitFor({ timeout: 30_000 })
+      expect(scaffold.ctx.sessions.list().map(session => session.id)).toEqual(initialSessionIds)
+      expect(create).not.toHaveBeenCalled()
+      expect(history).not.toHaveBeenCalled()
+      expect(prompt).not.toHaveBeenCalled()
+      const agentComposer = page.locator('[data-composer-card]')
+      const composer = agentComposer.locator('textarea:enabled')
+      await composer.fill('Help me evaluate the rollout tradeoffs before I answer.')
+      await agentComposer.getByRole('button', { name: 'Send message', exact: true }).click()
+      await expect.poll(() => scaffold.ctx.sessions.list().map(session => session.id))
+        .toEqual([...initialSessionIds, first.receivingSessionId])
+      await expect.poll(() => scaffold.ctx.sessions.get(first.receivingSessionId as never)?.events
+        .filter(event => event.type === 'turn/start').length).toBe(1)
       await card.getByRole('radio', { name: 'Canary' }).click()
       await card.getByRole('button', { name: 'Submit' }).click()
 
       await expect.poll(async () => (await receiver.snapshot()).terminal[0]?.terminal.outcome)
         .toBe('answered')
       await expect.poll(() => page.locator('[data-record-state="answered"]').count()).toBe(1)
+      await expect.poll(() => scaffold.ctx.sessions.get(first.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'member-question/settled'
+        && event.data.questionId === 'mq-web-host-1'
+        && event.data.outcome === 'answered').length).toBe(1)
 
       await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
-        operation: operation('mq-web-host-2', 'mq-web-operation-2'),
+        operation: operation('mq-web-host-2', 'mq-web-operation-2', projectId),
       })
       const secondCard = page.locator('[data-question-key]').filter({ has: page.locator('[data-member-presentation]') })
       await secondCard.waitFor({ timeout: 30_000 })
@@ -124,31 +159,53 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await expect.poll(async () => (await receiver.snapshot()).terminal.at(-1)?.terminal.outcome)
         .toBe('declined')
       await expect.poll(() => page.locator('[data-record-state="declined"]').count()).toBe(1)
+      await expect.poll(() => scaffold.ctx.sessions.get(first.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'member-question/settled'
+        && event.data.questionId === 'mq-web-host-2'
+        && event.data.outcome === 'declined').length).toBe(1)
 
       const third = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
-        operation: operation('mq-web-host-3', 'mq-web-operation-3'),
+        operation: operation('mq-web-host-3', 'mq-web-operation-3', projectId),
       })
       expect(third.receivingSessionId).toBe(first.receivingSessionId)
       await expect.poll(() => page.locator('[data-question-key]').filter({
         has: page.locator('[data-member-presentation]'),
       }).count()).toBe(1)
+      expect(scaffold.ctx.sessions.get(first.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'member-question/received' && event.data.questionId === 'mq-web-host-3')).toHaveLength(0)
+      const nextAgentComposer = page.locator('[data-composer-card]')
+      await nextAgentComposer.locator('textarea:enabled').fill('Include the newly arrived rollback question too.')
+      await nextAgentComposer.getByRole('button', { name: 'Send message', exact: true }).click()
+      await expect.poll(() => admissionRequests.length).toBe(2)
+      await expect.poll(() => admissionResults.length).toBe(2)
+      expect(admissionResults[1]).toMatchObject({ result: { ok: true } })
+      await expect.poll(() => scaffold.ctx.sessions.get(first.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'member-question/received' && event.data.questionId === 'mq-web-host-3').length).toBe(1)
+      await expect.poll(() => scaffold.ctx.sessions.get(first.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'user/message' && event.data.id === 'member-question-brief:mq-web-host-3').length).toBe(1)
+      await expect.poll(() => scaffold.ctx.sessions.get(first.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'turn/start').length).toBe(2)
       const beforeRestart = await receiver.snapshot()
       expect(beforeRestart.pending.map(row => row.questionId)).toEqual(['mq-web-host-3'])
       expect(beforeRestart.terminal.map(row => row.terminal.outcome)).toEqual(['answered', 'declined'])
 
-      expect(scaffold.ctx.sessions.list().map(session => session.id)).toEqual(initialSessionIds)
+      expect(scaffold.ctx.sessions.list().map(session => session.id))
+        .toEqual([...initialSessionIds, first.receivingSessionId])
       expect(create).not.toHaveBeenCalled()
-      expect(history).not.toHaveBeenCalled()
+      expect(history).toHaveBeenCalledTimes(1)
       expect(prompt).not.toHaveBeenCalled()
       expect(forbiddenRequests).toEqual([])
       expect(tripwire.pageErrors).toEqual([])
       expect(tripwire.warnings).toEqual([])
 
+      const sessionBackup = join(harnessHome, 'session-backup')
+      await cp(scaffold.persistenceRoot, sessionBackup, { recursive: true })
       await browser.close()
       await scaffold.close()
 
       scaffold = await launchWebScaffold({ harnessHome })
+      await cp(sessionBackup, scaffold.persistenceRoot, { recursive: true })
       const restartedService = scaffold.ctx.get('memberQuestionReceiver')
       if (restartedService === undefined) throw new Error('member-question e2e: restarted receiver unavailable')
       receiver = restartedService
@@ -164,6 +221,11 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       })
       await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
       await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      await mkdir(receiverWorkspace.path, { recursive: true })
+      const restartedWorkspace = await scaffold.ctx.workspaceRegistry.create(receiverWorkspace.path)
+      scaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        resolve: () => Promise.resolve(restartedWorkspace.id),
+      })
 
       const afterRestart = await receiver.snapshot()
       expect(afterRestart).toEqual(beforeRestart)
@@ -175,9 +237,15 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       }).count()).toBe(1)
       await expect.poll(() => page.locator('[data-record-state="answered"]').count()).toBe(1)
       await expect.poll(() => page.locator('[data-record-state="declined"]').count()).toBe(1)
-      expect(scaffold.ctx.sessions.list()).toEqual([])
+      const persistedSessions = await scaffold.ctx.sessionPersistence.list()
+      expect(persistedSessions.map(session => session.id)).toContain(first.receivingSessionId)
+      await expect.poll(() => scaffold.ctx.sessions.get(first.receivingSessionId as never)).toBeDefined()
+      const restartedSession = scaffold.ctx.sessions.get(first.receivingSessionId as never)
+      expect(restartedSession?.events.filter(event => event.type === 'member-question/settled'))
+        .toHaveLength(2)
       expect(restartedCreate).not.toHaveBeenCalled()
-      expect(restartedHistory).not.toHaveBeenCalled()
+      expect(new Set(restartedHistory.mock.calls.map(([request]) => request.payload.sessionId)))
+        .toEqual(new Set([first.receivingSessionId]))
       expect(restartedPrompt).not.toHaveBeenCalled()
       expect(forbiddenRequests).toEqual([])
       expect(tripwire.pageErrors).toEqual([])
@@ -189,6 +257,281 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       create.mockRestore()
       history.mockRestore()
       prompt.mockRestore()
+    }
+  }, 90_000)
+
+  it('recovers one reserved post-prompt admission across Host restart through the same wire rpcId', async () => {
+    const restartHome = await mkdtemp(join(tmpdir(), 'dsh-web-member-question-reserved-restart-'))
+    let restartScaffold = await launchWebScaffold({ harnessHome: restartHome })
+    const workspacePath = join(restartScaffold.workspaceCwd, 'workspace')
+    const backup = join(restartHome, 'reserved-session-backup')
+    try {
+      await mkdir(workspacePath, { recursive: true })
+      let workspace = await restartScaffold.ctx.workspaceRegistry.create(workspacePath)
+      restartScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        resolve: () => Promise.resolve(workspace.id),
+      })
+      let service = restartScaffold.ctx.get('memberQuestionReceiver')
+      if (service === undefined) throw new Error('member-question restart e2e: receiver unavailable')
+      const arrived = await createAuthenticatedMemberQuestionIngress(service)({
+        authority: { accountId: 'account:receiver' as PlatformAccountId },
+        operation: operation('mq-web-host-restart', 'mq-operation-host-restart', 'project-host-restart'),
+      })
+      const rpcId = 'rpc-post-prompt-host-restart'
+      const payload = {
+        receivingSessionId: arrived.receivingSessionId,
+        revision: arrived.revision,
+        content: [
+          { type: 'text' as const, text: 'Recover this reserved human turn.' },
+          { type: 'image' as const, mediaType: 'image/png' as const, data: PNG_1X1, name: 'decision.png' },
+        ],
+        mode: 'queue' as const,
+      }
+      const realFlush = restartScaffold.ctx.sessions.flush.bind(restartScaffold.ctx.sessions)
+      vi.spyOn(restartScaffold.ctx.sessions, 'flush')
+        .mockImplementationOnce(realFlush)
+        .mockRejectedValueOnce(new Error('injected post-prompt restart failure'))
+      const failed = await restartScaffold.ctx.apiProxy.memberQuestions.admitHumanTurn({
+        rpcId: rpcId as never,
+        payload,
+      })
+      expect(failed.result).toMatchObject({ ok: false })
+      expect((await service.snapshot()).pending[0]?.reservedAdmission?.rpcId).toBe(rpcId)
+      const ledger = await readFile(join(
+        restartHome,
+        'member-question-receiver',
+        'development',
+        'member-question-receiver.json',
+      ), 'utf8')
+      expect(ledger).not.toContain(PNG_1X1)
+      expect(ledger).toContain('"attachmentId"')
+      await cp(restartScaffold.persistenceRoot, backup, { recursive: true })
+      vi.restoreAllMocks()
+      await restartScaffold.close()
+
+      restartScaffold = await launchWebScaffold({ harnessHome: restartHome })
+      await cp(backup, restartScaffold.persistenceRoot, { recursive: true })
+      await mkdir(workspacePath, { recursive: true })
+      workspace = await restartScaffold.ctx.workspaceRegistry.create(workspacePath)
+      restartScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        resolve: () => Promise.resolve(workspace.id),
+      })
+      service = restartScaffold.ctx.get('memberQuestionReceiver')
+      if (service === undefined) throw new Error('member-question restart e2e: restarted receiver unavailable')
+      expect((await service.snapshot()).pending[0]?.reservedAdmission?.rpcId).toBe(rpcId)
+      const recovered = await restartScaffold.ctx.apiProxy.memberQuestions.admitHumanTurn({
+        rpcId: rpcId as never,
+        payload,
+      })
+      expect(recovered.result).toMatchObject({ ok: true })
+      const session = restartScaffold.ctx.sessions.get(arrived.receivingSessionId as never)
+      expect(session?.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+      expect(session?.events.filter(event => event.type === 'user/message'
+        ? event.data.id === `member-question-human:${rpcId}`
+        : event.type === 'agent/inbox/spliced'
+          && event.data.inserted.some(message => message.id === `member-question-human:${rpcId}`))).toHaveLength(1)
+      const humanContent = session?.events.flatMap((event) => {
+        if (event.type === 'user/message' && event.data.id === `member-question-human:${rpcId}`) {
+          return [event.data.content]
+        }
+        if (event.type !== 'agent/inbox/spliced') return []
+        const message = event.data.inserted.find(row => row.id === `member-question-human:${rpcId}`)
+        return message === undefined ? [] : [message.content]
+      })[0]
+      expect(humanContent?.some(block => block.type === 'image'
+        && block.attachment.mediaType === 'image/png')).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+      await restartScaffold.close()
+      await rm(restartHome, { recursive: true, force: true })
+    }
+  }, 90_000)
+
+  it('reuses the browser-generated rpcId after an admitted response is lost', async () => {
+    const faultHome = await mkdtemp(join(tmpdir(), 'dsh-web-member-question-lost-response-'))
+    const faultScaffold = await launchWebScaffold({ harnessHome: faultHome })
+    const faultBrowser = await chromium.launch()
+    const faultPage = await newEnglishPage(faultBrowser)
+    try {
+      await faultPage.goto(faultScaffold.baseUrl, { waitUntil: 'load' })
+      await faultPage.waitForSelector('[class*="frame"]', { timeout: 30_000 })
+      await connectFreshWorkspace(faultPage, faultScaffold.workspaceCwd)
+      const workspace = faultScaffold.ctx.workspaceRegistry.list()
+        .find(candidate => candidate.path === join(faultScaffold.workspaceCwd, 'workspace'))
+      if (workspace === undefined) throw new Error('member-question lost-response e2e: workspace unavailable')
+      faultScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        resolve: () => Promise.resolve(workspace.id),
+      })
+      const service = faultScaffold.ctx.get('memberQuestionReceiver')
+      if (service === undefined) throw new Error('member-question lost-response e2e: receiver unavailable')
+      const arrived = await createAuthenticatedMemberQuestionIngress(service)({
+        authority: { accountId: 'account:receiver' as PlatformAccountId },
+        operation: operation('mq-web-lost-response', 'mq-operation-lost-response', 'project-lost-response'),
+      })
+      await faultPage.locator('[role="treeitem"]', { hasText: 'Project Atlas — Receiver launch decision' }).click()
+      const rpcIds: string[] = []
+      faultPage.on('request', (request) => {
+        if (!new URL(request.url()).pathname.endsWith('/api/memberQuestion.admitHumanTurn')) return
+        rpcIds.push((request.postDataJSON() as { rpcId: string }).rpcId)
+      })
+      const realFlush = faultScaffold.ctx.sessions.flush.bind(faultScaffold.ctx.sessions)
+      vi.spyOn(faultScaffold.ctx.sessions, 'flush')
+        .mockImplementationOnce(realFlush)
+        .mockRejectedValueOnce(new Error('response lost after Host admission'))
+      const composer = faultPage.locator('[data-composer-card] textarea:enabled')
+      const text = 'Retain this exact human action across the lost response.'
+      await composer.fill(text)
+      await faultPage.getByRole('button', { name: 'Send message', exact: true }).click()
+      await expect.poll(() => rpcIds.length).toBe(1)
+      await composer.fill(text)
+      await faultPage.getByRole('button', { name: 'Send message', exact: true }).click()
+      await expect.poll(() => rpcIds.length).toBe(2)
+      expect(new Set(rpcIds).size).toBe(1)
+      await expect.poll(() => faultScaffold.ctx.sessions.get(arrived.receivingSessionId as never)?.events
+        .filter(event => event.type === 'turn/start').length).toBe(1)
+      await expect.poll(() => faultScaffold.ctx.sessions.get(arrived.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'user/message'
+          && event.data.id === `member-question-human:${rpcIds[0]}`).length).toBe(1)
+    } finally {
+      await faultBrowser.close()
+      await faultScaffold.close()
+      await rm(faultHome, { recursive: true, force: true })
+    }
+  }, 90_000)
+
+  it('retries terminal persistence and drains the owned retry before Host disposal', async () => {
+    const faultHome = await mkdtemp(join(tmpdir(), 'dsh-web-member-question-terminal-retry-'))
+    const faultScaffold = await launchWebScaffold({ harnessHome: faultHome })
+    let closeStarted = false
+    try {
+      const faultReceiver = faultScaffold.ctx.get('memberQuestionReceiver')
+      if (faultReceiver === undefined) throw new Error('member-question terminal retry e2e: receiver unavailable')
+      const workspacePath = join(faultScaffold.workspaceCwd, 'workspace')
+      await mkdir(workspacePath, { recursive: true })
+      const workspace = await faultScaffold.ctx.workspaceRegistry.create(workspacePath)
+      faultScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        resolve: () => Promise.resolve(workspace.id),
+      })
+      const arrived = await createAuthenticatedMemberQuestionIngress(faultReceiver)({
+        authority: { accountId: 'account:receiver' as PlatformAccountId },
+        operation: operation('mq-web-terminal-retry', 'mq-operation-terminal-retry', 'project-terminal-retry'),
+      })
+      await faultReceiver.admitHumanTurn({
+        receivingSessionId: arrived.receivingSessionId,
+        revision: arrived.revision,
+        rpcId: 'rpc-terminal-retry' as never,
+        content: [{ type: 'text', text: 'Materialize before terminal publication.' }],
+        mode: 'queue',
+      })
+
+      let releaseRetry!: () => void
+      const retryGate = new Promise<boolean>((resolve) => { releaseRetry = () => { resolve(true) } })
+      const realFlush = faultScaffold.ctx.sessions.flush.bind(faultScaffold.ctx.sessions)
+      let terminalAttempts = 0
+      vi.spyOn(faultScaffold.ctx.sessions, 'flush').mockImplementation((session) => {
+        const terminal = session.events.some(event => event.type === 'member-question/settled'
+          && event.data.questionId === arrived.questionId)
+        if (!terminal) return realFlush(session)
+        terminalAttempts += 1
+        if (terminalAttempts === 1) return Promise.reject(new Error('injected terminal persistence failure'))
+        if (terminalAttempts === 2) return retryGate
+        return realFlush(session)
+      })
+      await faultReceiver.settle(arrived.questionId, {
+        kind: 'declined',
+        settledByInstallationId: 'receiver-installation' as never,
+        settledByDeviceName: 'Receiver Desktop',
+        settledAt: Date.now(),
+      })
+      await expect.poll(() => terminalAttempts, { timeout: 5_000 }).toBe(2)
+      expect(faultScaffold.ctx.sessions.get(arrived.receivingSessionId as never)?.events.filter(event =>
+        event.type === 'member-question/settled'
+        && event.data.questionId === arrived.questionId)).toHaveLength(1)
+
+      let closed = false
+      const closing = faultScaffold.close().then(() => { closed = true })
+      closeStarted = true
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(closed).toBe(false)
+      releaseRetry()
+      await closing
+      expect(closed).toBe(true)
+    } finally {
+      vi.restoreAllMocks()
+      if (!closeStarted) await faultScaffold.close()
+      await rm(faultHome, { recursive: true, force: true })
+    }
+  }, 90_000)
+
+  it.each([
+    'post-create',
+    'post-record',
+    'post-prompt',
+  ] as const)('retries a %s Host admission failure without duplicating the Session or turn', async (stage) => {
+    const faultHome = await mkdtemp(join(tmpdir(), `dsh-web-member-question-${stage}-`))
+    const faultScaffold = await launchWebScaffold({ harnessHome: faultHome })
+    try {
+      const faultReceiver = faultScaffold.ctx.get('memberQuestionReceiver')
+      if (faultReceiver === undefined) throw new Error('member-question fault e2e: receiver unavailable')
+      const workspacePath = join(faultScaffold.workspaceCwd, 'workspace')
+      await mkdir(workspacePath, { recursive: true })
+      const workspace = await faultScaffold.ctx.workspaceRegistry.create(workspacePath)
+      faultScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        resolve: () => Promise.resolve(workspace.id),
+      })
+      const ingress = createAuthenticatedMemberQuestionIngress(faultReceiver)
+      const arrived = await ingress({
+        authority: { accountId: 'account:receiver' as PlatformAccountId },
+        operation: operation(`mq-web-${stage}`, `mq-operation-${stage}`, `project-${stage}`),
+      })
+      const request = {
+        receivingSessionId: arrived.receivingSessionId,
+        revision: arrived.revision,
+        rpcId: `rpc-${stage}` as never,
+        content: [{ type: 'text' as const, text: `Human prompt after ${stage}.` }],
+        mode: 'queue' as const,
+      }
+
+      if (stage === 'post-create') {
+        vi.spyOn(workspace, 'attachSession').mockRejectedValueOnce(new Error('injected post-create failure'))
+      } else {
+        const realFlush = faultScaffold.ctx.sessions.flush.bind(faultScaffold.ctx.sessions)
+        const flush = vi.spyOn(faultScaffold.ctx.sessions, 'flush')
+        if (stage === 'post-record') {
+          flush.mockRejectedValueOnce(new Error('injected post-record failure'))
+        } else {
+          flush.mockImplementationOnce(realFlush)
+          flush.mockRejectedValueOnce(new Error('injected post-prompt failure'))
+        }
+      }
+
+      await expect(faultReceiver.admitHumanTurn(request)).rejects.toThrow(`injected ${stage} failure`)
+      vi.restoreAllMocks()
+      await expect(faultReceiver.admitHumanTurn(request)).resolves.toMatchObject({ accepted: true })
+      await expect.poll(() => faultScaffold.ctx.sessions.get(arrived.receivingSessionId as never)?.events
+        .filter(event => event.type === 'turn/start').length).toBe(1)
+      await expect.poll(() => faultScaffold.ctx.sessions.get(arrived.receivingSessionId as never)?.events
+        .filter(event => event.type === 'user/message'
+          ? event.data.id === `member-question-human:rpc-${stage}`
+          : event.type === 'agent/inbox/spliced'
+            && event.data.inserted.some(message => message.id === `member-question-human:rpc-${stage}`)).length)
+        .toBe(1)
+
+      const materialized = faultScaffold.ctx.sessions.get(arrived.receivingSessionId as never)
+      expect(materialized).toBeDefined()
+      expect(faultScaffold.ctx.sessions.list()
+        .filter(session => String(session.id) === String(arrived.receivingSessionId))).toHaveLength(1)
+      expect(materialized?.events.filter(event => event.type === 'member-question/received'
+        && event.data.questionId === `mq-web-${stage}`)).toHaveLength(1)
+      expect(materialized?.events.filter(event => event.type === 'user/message'
+        ? event.data.id === `member-question-human:rpc-${stage}`
+        : event.type === 'agent/inbox/spliced'
+          && event.data.inserted.some(message => message.id === `member-question-human:rpc-${stage}`)))
+        .toHaveLength(1)
+    } finally {
+      vi.restoreAllMocks()
+      await faultScaffold.close()
+      await rm(faultHome, { recursive: true, force: true })
     }
   }, 90_000)
 })

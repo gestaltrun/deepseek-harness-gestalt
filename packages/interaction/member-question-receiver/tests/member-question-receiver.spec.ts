@@ -173,6 +173,23 @@ describe('FileMemberQuestionReceiver', () => {
     })
   })
 
+  it('advances only the reused route Session while preserving unrelated routes', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
+    roots.push(storagePath)
+    const receiver = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      terminalAuthority: new MemoryTerminalAuthority(),
+    })
+    await receiver.ingest(envelopeWith('route-a', 3_000))
+    await receiver.ingest({
+      ...envelopeWith('route-b', 3_000),
+      authority: { accountId: 'account:other' as PlatformAccountId },
+    })
+    await receiver.ingest(envelopeWith('route-a-next', 3_000))
+    const snapshot = await receiver.snapshot()
+    expect(snapshot.pending.map(row => row.questionId).sort()).toEqual(['route-a-next', 'route-b'])
+  })
+
   it('keeps decline distinct from withdrawal and applies a losing claim from the authoritative Installation', async () => {
     const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
     roots.push(storagePath)
@@ -230,9 +247,11 @@ describe('FileMemberQuestionReceiver', () => {
     const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
     roots.push(storagePath)
     const effects = new Set<string>()
+    const attemptedContent: unknown[] = []
     let attempts = 0
     const admitter: MemberQuestionHumanTurnAdmitter = async (request) => {
       attempts += 1
+      attemptedContent.push(request.content)
       if (attempts === 1) throw new Error('materialization interrupted')
       effects.add(request.rpcId)
       return { accepted: true }
@@ -252,17 +271,109 @@ describe('FileMemberQuestionReceiver', () => {
     }
 
     await expect(receiver.admitHumanTurn(request)).rejects.toThrow('materialization interrupted')
+    await expect(receiver.admitHumanTurn({
+      ...request,
+      content: [{ type: 'text', text: 'Edited after failure' }],
+    })).rejects.toThrow('different content')
     const admitted = await receiver.admitHumanTurn(request)
     expect(admitted).toMatchObject({ accepted: true, receivingSessionId: arrived.receivingSessionId })
     expect(attempts).toBe(2)
     expect(effects).toEqual(new Set(['rpc-human-1']))
+    expect(attemptedContent).toEqual([request.content, request.content])
 
     await expect(receiver.admitHumanTurn(request)).resolves.toEqual(admitted)
     expect(attempts).toBe(2)
     await expect(receiver.admitHumanTurn({
       ...request,
       content: [{ type: 'text', text: 'Conflicting replay' }],
-    })).rejects.toThrow(/different content or mode/)
+    })).rejects.toThrow('different content')
+  })
+
+  it('replays the original durable image reference after a Host restart', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
+    roots.push(storagePath)
+    const content = [{
+      type: 'image' as const,
+      attachment: {
+        attachmentId: 'attachment-human-restart' as never,
+        mediaType: 'image/png' as const,
+        bytes: 68,
+        width: 1,
+        height: 1,
+        name: 'decision.png',
+      },
+    }]
+    const first = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      admitter: () => Promise.reject(new Error('Host stopped after reservation')),
+    })
+    const arrived = await first.ingest(envelopeWith('question-image-restart', 3_000))
+    await expect(first.admitHumanTurn({
+      receivingSessionId: arrived.receivingSessionId,
+      revision: arrived.revision,
+      rpcId: 'rpc-image-restart' as never,
+      content,
+      mode: 'queue',
+    })).rejects.toThrow('Host stopped after reservation')
+    await contexts.pop()!.fiber.dispose()
+
+    const admittedContent: unknown[] = []
+    const reopened = await createReceiver(storagePath, {
+      clock: () => 1_100,
+      admitter: (request) => {
+        admittedContent.push(request.content)
+        return Promise.resolve({ accepted: true })
+      },
+    })
+    await reopened.resumeReservedHumanTurns()
+    expect(admittedContent).toEqual([content])
+    expect((await reopened.snapshot()).pending[0]?.reservedAdmission).toBeUndefined()
+  })
+
+  it('registers one Host admitter and projects its materialized terminal Session identity', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
+    roots.push(storagePath)
+    const receiver = await createReceiver(storagePath, {
+      clock: () => 1_000,
+      terminalAuthority: new MemoryTerminalAuthority(),
+    })
+    const contextsSeen: Parameters<MemberQuestionHumanTurnAdmitter>[1][] = []
+    const admitter: MemberQuestionHumanTurnAdmitter = (_request, context) => {
+      contextsSeen.push(context)
+      return Promise.resolve({ accepted: true })
+    }
+    const unregister = receiver.registerHumanTurnAdmitter(admitter)
+    expect(() => receiver.registerHumanTurnAdmitter(admitter)).toThrow('already registered')
+    const arrived = await receiver.ingest(envelopeWith('question-registered', 3_000))
+    await receiver.admitHumanTurn({
+      receivingSessionId: arrived.receivingSessionId,
+      revision: arrived.revision,
+      rpcId: 'rpc-registered-1' as never,
+      content: [{ type: 'text', text: 'First prompt.' }],
+      mode: 'queue',
+    })
+    await receiver.settle('question-registered' as never, {
+      kind: 'declined',
+      settledByInstallationId: 'installation-local' as never,
+      settledByDeviceName: 'Local Mac',
+      settledAt: 1_100,
+    })
+    const terminal = (await receiver.snapshot()).terminal[0]
+    expect(terminal?.hostSessionId).toBe(arrived.receivingSessionId)
+    await receiver.admitHumanTurn({
+      receivingSessionId: arrived.receivingSessionId,
+      revision: terminal!.revision,
+      rpcId: 'rpc-registered-2' as never,
+      content: [{ type: 'text', text: 'Second prompt.' }],
+      mode: 'queue',
+    })
+    expect(contextsSeen.at(-1)?.questions[0]).toMatchObject({
+      questionId: 'question-registered',
+      terminal: { outcome: 'declined' },
+    })
+    unregister()
+    unregister()
+    expect(() => receiver.registerHumanTurnAdmitter(admitter)).not.toThrow()
   })
 
   it('keeps the predecessor pending when terminal publication fails, then retries without admitting the newer question early', async () => {

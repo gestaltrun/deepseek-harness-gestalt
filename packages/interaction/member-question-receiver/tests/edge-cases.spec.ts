@@ -231,7 +231,7 @@ describe('member-question receiver edge contracts', () => {
     }
     await expect(receiver.admitHumanTurn(reserved)).rejects.toThrow('admitter is required')
     await expect(receiver.admitHumanTurn({ ...reserved, mode: 'steer' }))
-      .rejects.toThrow('different content or mode')
+      .rejects.toThrow('different content, Session, revision, or mode')
   })
 
   it('retries authoritative timer expiry after publication failure and selects the earliest of two routes', async () => {

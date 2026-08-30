@@ -7,7 +7,7 @@ import type {
 import type { SessionFace } from '../src/client/contract/session.ts'
 import { SessionRuntime } from '../src/client/sessions/service.ts'
 import type { PendingWait } from '../src/client/sessions/pending.ts'
-import { FakeApiClient, fakeRemote } from './fake-api.client.ts'
+import { err, FakeApiClient, fakeRemote, ok } from './fake-api.client.ts'
 
 const operation = {
   type: 'member-question' as const,
@@ -26,7 +26,7 @@ const operation = {
   },
   background: 'Choose the launch channel.',
   questions: [{ id: 'channel', question: 'Which channel?', options: [{ label: 'Canary' }, { label: 'Stable' }] }],
-  references: [{ path: 'docs/release.md', reason: 'Rollout constraints' }],
+  references: [{ path: 'docs/architecture.md', reason: 'Rollout constraints' }],
 }
 
 function snapshot(
@@ -112,11 +112,56 @@ describe('Host-authoritative receiving projection', () => {
       kind: 'member-question',
       questionId: 'question-1',
     })
-    expect(face(runtime).getSnapshot().composerPhase).toBe('disabled')
+    expect(face(runtime).getSnapshot().composerPhase).toBe('active')
+    await expect(face(runtime).prompt([{ type: 'text', text: 'Help me decide.' }], 'queue'))
+      .resolves.toMatchObject({ ok: true })
+    expect(api.callsOf('memberQuestion.admitHumanTurn')).toEqual([{
+      receivingSessionId: 'receiving-host-1',
+      revision: 1,
+      content: [{ type: 'text', text: 'Help me decide.' }],
+      mode: 'queue',
+    }])
     expect(api.callsOf('session.create')).toEqual([])
     expect(api.callsOf('session.history')).toEqual([])
     expect(api.callsOf('session.prompt')).toEqual([])
     expect(runtime.modelRoute(receivingId)).toBeUndefined()
+  })
+
+  it('restores a reserved admission rpcId from the Host snapshot after Client restart', async () => {
+    const { api, runtime } = bench()
+    const pending = snapshot(4, 'pending').pending[0]!
+    runtime.handleHostEnvelope(envelope({
+      revision: 4,
+      pending: [{
+        ...pending,
+        hostSessionId: pending.receivingSessionId as never,
+        reservedAdmission: { rpcId: 'reserved-human-turn' as never, mode: 'queue' },
+      }],
+      terminal: [],
+    }))
+    runtime.open('receiving-host-1' as SessionId)
+    await expect(face(runtime).prompt([{ type: 'text', text: 'Retry retained text.' }], 'queue'))
+      .resolves.toMatchObject({ ok: true })
+    expect(api.memberQuestionAdmissionRpcIds).toEqual(['reserved-human-turn'])
+  })
+
+  it('clears a failed admission error when the stable human action succeeds on retry', async () => {
+    const { api, runtime } = bench()
+    runtime.handleHostEnvelope(envelope(snapshot(1, 'pending')))
+    runtime.open('receiving-host-1' as SessionId)
+    api.onMemberQuestionAdmit = () => Promise.resolve(err({
+      code: 'internal', message: 'temporary admission failure', details: {},
+    }))
+    const receiving = face(runtime)
+    await receiving.prompt([{ type: 'text', text: 'Retry this action.' }], 'queue')
+    expect(receiving.getSnapshot().promptError).toMatchObject({ error: { message: 'temporary admission failure' } })
+
+    api.onMemberQuestionAdmit = payload => Promise.resolve(ok({
+      accepted: true, sessionId: payload.receivingSessionId,
+    }))
+    await receiving.prompt([{ type: 'text', text: 'Retry this action.' }], 'queue')
+    expect(receiving.getSnapshot().promptError).toBeNull()
+    expect(new Set(api.memberQuestionAdmissionRpcIds).size).toBe(1)
   })
 
   it('routes shared presentation answers and cancellation through Host settle RPC', async () => {

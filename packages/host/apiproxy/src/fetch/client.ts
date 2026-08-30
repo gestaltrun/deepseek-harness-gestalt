@@ -72,6 +72,7 @@ import {
 import {
   memberQuestionSettleValueSchema,
   memberQuestionSnapshotValueSchema,
+  memberQuestionAdmitHumanTurnValueSchema,
 } from '../api/member-questions.schema.ts'
 
 /**
@@ -94,6 +95,7 @@ export interface IApiClient {
   memberQuestions: {
     snapshot(payload: RequestPayload<'memberQuestion.snapshot'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'memberQuestion.snapshot'>>>
     settle(payload: RequestPayload<'memberQuestion.settle'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'memberQuestion.settle'>>>
+    admitHumanTurn(payload: RequestPayload<'memberQuestion.admitHumanTurn'>, signal?: AbortSignal, rpcId?: RpcId): Promise<RpcResponse<ResponseValue<'memberQuestion.admitHumanTurn'>>>
   }
   sessions: {
     list(payload: RequestPayload<'session.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.list'>>>
@@ -185,6 +187,7 @@ export interface IApiClient {
 const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseValue<K>>> } = {
   'memberQuestion.snapshot': memberQuestionSnapshotValueSchema,
   'memberQuestion.settle': memberQuestionSettleValueSchema,
+  'memberQuestion.admitHumanTurn': memberQuestionAdmitHumanTurnValueSchema,
   'session.list': sessionListValueSchema,
   'session.search': sessionSearchValueSchema,
   'session.create': sessionCreateValueSchema,
@@ -353,8 +356,9 @@ export abstract class AbstractApiClient implements IApiClient {
     payload: RequestPayload<K>,
     signal?: AbortSignal,
     timeoutPolicy: UnaryTimeoutPolicy = 'default',
+    rpcId?: RpcId,
   ): Promise<RpcResponse<ResponseValue<K>>> {
-    const message: ClientRequest = { type: 'client-request', rpcId: this.mintRpcId(), method, payload }
+    const message: ClientRequest = { type: 'client-request', rpcId: rpcId ?? this.mintRpcId(), method, payload }
     this.onEnvelope(message)
     const response = await this.postJson(`/api/${method}`, message, signal, timeoutPolicy)
     const full = serverResponseSchema.parse(await response.json())
@@ -430,6 +434,9 @@ export abstract class AbstractApiClient implements IApiClient {
   readonly memberQuestions: IApiClient['memberQuestions'] = {
     snapshot: (payload, signal) => this.callUnary('memberQuestion.snapshot', payload, signal),
     settle: (payload, signal) => this.callUnary('memberQuestion.settle', payload, signal),
+    admitHumanTurn: (payload, signal, rpcId) => this.callUnary(
+      'memberQuestion.admitHumanTurn', payload, signal, 'default', rpcId,
+    ),
   }
 
   readonly sessions: IApiClient['sessions'] = {

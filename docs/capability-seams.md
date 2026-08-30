@@ -115,6 +115,7 @@ flowchart LR
   svc_memberQuestionSender["ctx.memberQuestionSender<br/>Member-question sender seam"]
   pkg_member_question_receiver["member-question-receiver"]
   svc_memberQuestionReceiver["ctx.memberQuestionReceiver<br/>Member-question receiver seam"]
+  svc_memberQuestionWorkspaceBinding["ctx.memberQuestionWorkspaceBinding<br/>Member-question local Workspace binding"]
   pkg_plan_mode["plan-mode"]
   svc_planMode["ctx.planMode<br/>Plan collaboration state"]
   pkg_agent_presets["agent-presets"]
@@ -286,6 +287,7 @@ flowchart LR
   pkg_lsp --> svc_lsp
   pkg_lsp_local --> svc_lsp
   pkg_member_question_receiver --> svc_memberQuestionReceiver
+  pkg_member_question_receiver --> svc_memberQuestionWorkspaceBinding
   pkg_member_question_sender --> svc_memberQuestionSender
   pkg_message_feedback --> svc_messageFeedback
   pkg_modules --> svc_clientModules
@@ -399,6 +401,7 @@ flowchart LR
   svc_lsp --> pkg_tool_lsp
   svc_memberQuestionReceiver --> pkg_member_question_receiver
   svc_memberQuestionSender --> pkg_tool_ask_user
+  svc_memberQuestionWorkspaceBinding --> pkg_apiproxy
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
   svc_platformAccount --> pkg_project_membership_http
@@ -525,6 +528,7 @@ flowchart LR
 | `ctx.userQuestions` | `seam` | [`user-questions`](../packages/interaction/user-questions) | - | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | UI front ends provide the active human-answer provider; tool-ask-user pauses a tool call on the provider-neutral ask() promise. |
 | `ctx.memberQuestionSender` | `seam` | [`member-question-sender`](../packages/interaction/member-question-sender) | [`member-question-sender`](../packages/interaction/member-question-sender) | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | Encodes a Companion member-question operation through the T4 codec and delivers the bytes through an injected adapter; peer credentials are retrieved through a B-side project-peer grant lookup. |
 | `ctx.memberQuestionReceiver` | `seam` | [`member-question-receiver`](../packages/interaction/member-question-receiver) | [`member-question-receiver`](../packages/interaction/member-question-receiver) | [`member-question-receiver`](../packages/interaction/member-question-receiver) | - | Persists authenticated arrivals, canonical terminals, expiry, and one reserved high-level human admission; its package-folded ingress adapter is the current Consumer. |
+| `ctx.memberQuestionWorkspaceBinding` | `core` | [`member-question-receiver`](../packages/interaction/member-question-receiver) | - | `apiproxy` | - | Resolves an authenticated receiver Account and cloud Project to one existing local Workspace; the API Proxy otherwise derives the same association from project membership. |
 | `ctx.planMode` | `core` | [`plan-mode`](../packages/plan/plan-mode) | - | - | - | Folds logged plan/mode state, flushes user selections at turn boundaries, renders deployment-owned guidance, registers /plan, and keeps the plan-exit schema stable across transitions. |
 | `ctx.agentPresets` | `core` | [`agent-presets`](../packages/preset/agent-presets) | - | - | - | Discovers preset directories over trusted and user-authored roots and mounts one preset cordis.yml under an agent scope during creation, rejecting a row that never activates or that publishes into the root service realm. |
 | `ctx.commands` | `core` | [`commands`](../packages/interaction/commands) | - | - | - | Plugins register direct human commands without sending invocations to the model. |

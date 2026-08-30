@@ -16,7 +16,7 @@ Status: implemented
 
 Decision Brief 继续放在每个提问的 `member-question` intent 上，而不是放在同级 request frame 上。因此，任一被转发的 item 都是自包含的；Host receiver snapshot 只增加 authority 所有的 routing、revision 与 terminal 字段。
 
-环境 ledger 是 pending 与 terminal projection 的 authority。它只存 Companion codec 已接纳的有界 Decision Brief 字段、reference path/reason 元数据、routing identity、terminal 元数据与 admission request digest；不存参考文档正文或 human-turn content。启动通过当前 Companion codec 校验完整文档，并对外来格式、畸形记录、悬空引用或不一致 terminal 失败。
+环境 ledger 是 pending 与 terminal projection 的 authority。它存 Companion codec 已接纳的有界 Decision Brief 字段、reference path/reason 元数据、routing identity、terminal 元数据，以及由 text 与持久 attachment reference 组成、受 request digest 保护的 reserved human action；不存参考文档正文或浏览器原始图片 bytes。启动通过当前 Companion codec 校验完整文档，并对外来格式、畸形记录、悬空引用、不一致 terminal 或 admission digest 不匹配失败。
 
 一个串行 transaction owner 强制 publication order。幂等 arrival 返回已记录 identity。新同路线提问成为 pending 前，旧 pending 提问的 `expired` 或 `superseded` candidate 必须通过注入的全局 first-claim authority，canonical 保留 terminal 随后提交到 ledger。Decline 是与 initiator withdrawal 不同的 human terminal，并携带获胜的 `InstallationId`、设备名与 settlement epoch。本地 claim 失败时提交返回的 canonical terminal，而不是 candidate。Change listener 只观察提交后的完整 projection，callback exception 会被隔离。
 
@@ -24,9 +24,9 @@ Host clock 与唯一 earliest-deadline scheduler 决定 expiry。scheduler 先 c
 
 随发行版交付的 Web Host 挂载 receiver，并暴露精确的 `memberQuestion.snapshot` 与 `memberQuestion.settle` RPC，以及完整的 `host/member-question-snapshot` 基线／变更帧。settlement 校验持久化 `ReceivingSessionId`、revision 与 question id，并使用 Host Installation identity；receiver 缺失、tuple 陈旧或 identity 缺失时都会 fail loud。开发环境可以选择 keyless 本地 terminal authority；生产环境在认证跨机器 publication 完成组合前保持 deferred 与 fail closed。
 
-`ReceivingQuestionBook` 只把 revision 更高的 Host 帧投影成使用持久化 Host id 的 renderer-only Session face。断连保留最近的投影；重连通过完整基线替换它，不会丢失 pending 或 terminal 记录。Client 经 Host RPC 发送回答与拒绝；expiry、supersession、withdrawal 与 canonical terminal winner 只来自 Host。Terminal 记录在 conversation snapshot 中公开保留；Client Installation 与获胜回答不同的情况下，会根据获胜设备名与 settlement time 派生 `answered-elsewhere`。普通 composer 保持 disabled，因为 human-turn materialization 尚未挂载。
+`ReceivingQuestionBook` 只把 revision 更高的 Host 帧投影成使用持久化 Host id 的 identity-stable receiving Session face。断连保留最近的投影；重连通过完整基线替换它，不会丢失 pending 或 terminal 记录。Client 经 Host RPC 发送回答与拒绝；expiry、supersession、withdrawal 与 canonical terminal winner 只来自 Host。Terminal 记录在 conversation snapshot 中公开保留；Client Installation 与获胜回答不同的情况下，会根据获胜设备名与 settlement time 派生 `answered-elsewhere`。materialization 之前唯一的 prompt route 是 `memberQuestion.admitHumanTurn`；后续 snapshot 携带 `hostSessionId` 时，同一 face 会绑定到普通 Host Session。
 
-`admitHumanTurn({ receivingSessionId, revision, rpcId, content, mode })` 是唯一 materialization interface。receiver 在调用注入的高层 adapter 前，先持久保留 `rpcId` 与 content/mode digest；该 adapter 在需要时物化 Host Session 并 admit turn。adapter 返回后才提交 materialization 与 admission。失败会保留 reservation；重试提供相同 request 与 `rpcId`。adapter 必须按 `rpcId` 幂等，从而闭合 adapter 成功与 ledger commit 之间的 crash interval，而不向调用方暴露 `session.create` 后再 `prompt`。arrival 永远不会调用 adapter。
+`admitHumanTurn({ receivingSessionId, revision, rpcId, content, mode })` 是唯一 materialization interface。API Proxy 先通过普通 attachment service 提升浏览器图片，随后 receiver 在调用高层 adapter 前持久保留 `rpcId`、规范化 content、mode 与 digest。adapter 解析唯一的本地 Workspace，复用 opaque receiving id 作为 Host `SessionId`，关联 Workspace，追加可忽略的 `member-question/received` 与 `member-question/settled` record，以稳定 plugin message id 注入每条有界 brief，接纳稳定 human message，并 flush 普通 Session log。adapter 返回后才提交 materialization 与 admission。失败会保留 reservation；重试必须提供相同 action 与 `rpcId`，稳定 Session／message identity 和日志会识别已完成阶段。该机制闭合 adapter 成功与 ledger commit 之间的 crash interval，而不向调用方暴露 `session.create` 后再 `prompt`。arrival 永远不会调用 adapter。
 
 ## Supersession check
 
@@ -40,7 +40,7 @@ Host clock 与唯一 earliest-deadline scheduler 决定 expiry。scheduler 先 c
 
 **分别暴露 `createReceivingSession()` 与 `prompt()`。** 拒绝，因为两次调用之间的 crash 或 retry 会创建重复 Session、丢失第一条 human message 或重复 admit。一个处于 durable `rpcId` reservation 下的高层 adapter 拥有两个动作。
 
-**在 receiver ledger 中存参考文档正文或 human-turn content。** 拒绝，因为 Companion document transfer 与普通 Session log 拥有这些 bytes。receiver 需要有界 display metadata 与 admission digest，而不是第二个 content store。
+**在 receiver ledger 中存参考文档正文或浏览器原始图片 bytes。** 拒绝，因为 Companion document transfer 与 attachment service 拥有这些 bytes。crash-safe admission 只保留重放 reserved action 所需的有界 human text 与持久 attachment reference。
 
 **把 renderer countdown 当作 expiry authority。** 拒绝，因为暂停或断连的 renderer 无法结算全局状态，并可能在 Installation 间产生分歧。Host clock、canonical terminal authority 与 durable commit 建立唯一 outcome。
 
@@ -50,8 +50,8 @@ Host clock 与唯一 earliest-deadline scheduler 决定 expiry。scheduler 先 c
 
 Receiver 状态可在 Host 重启后恢复，并以稳定 Host identity 暴露唯一权威 pending/terminal projection。同路线 replacement、expiry、answer、decline 与跨设备 winner 按一个顺序提交。浏览器 reload 与 reconnect 会保留相同 id 与记录，且不创建 Host Session 或模型路径。普通提问与 plan-review 提问保留现有 Host-session 流程。
 
-显式 human admission 无需两跳 client protocol 即可重试，但 Web composition 尚未挂载其 materialize-and-admit adapter。跨机器 first-claim publication 在 project-registry transport 存在前仍由注入提供，因此生产环境中需要它的转换会 fail closed。文件格式为预发布版本 `0`，没有 compatibility shim。
+显式 human admission 无需两跳 client protocol 即可重试，Web Host 通过 API Proxy 挂载该 adapter。跨机器 first-claim publication 在 project-registry transport 存在前仍由注入提供，因此生产环境中需要它的转换会 fail closed。文件格式为预发布版本 `0`，没有 compatibility shim。
 
 ## Testing
 
-Focused public-interface tests 覆盖幂等与冲突 arrival、环境 persistence、restart recovery、expired-before-newer ordering、supersede publication failure、answer 以及 decline 与 withdrawal、first-claim loser、timer retry 与 dispose quiescence、reservation retry、admission 后 persistence failure、callback containment、严格 wire 字段、carried-intent acceptance、invalid durable state 与完整逐文件 coverage。Client Runtime 测试针对同一 canonical answer 驱动两个 Installation context，并固定 `answered` 与 `answered-elsewhere`。真实 Web composition 会驱动认证 ingress，经过 Host snapshot delivery、answer 与 decline RPC、terminal band 和零 Session／模型调用，随后在同一 ledger 上重启 receiver 并 reload Client，以恢复完全相同的 pending 与 terminal projection。
+Focused public-interface tests 覆盖幂等与冲突 arrival、环境 persistence、restart recovery、expiry 与 supersession ordering、reservation retry、callback containment、严格 wire 字段和 invalid durable state。Client Runtime 测试固定高 revision projection、双 Installation terminal presentation、admission RPC 与 materialized route binding。真实 Web composition 证明 arrival 不创建 Session 或模型请求，显式提交只创建一个 Host Session 与一个 turn，post-create／post-record／post-prompt 失败使用相同 `rpcId` 恢复，后续同路线 arrival 保留 record，receiver 与 Session persistence 在 restart 后仍可恢复。归属 built-Web 的 keyless snapshot 固定 bounded received record 以及 brief 先于 human 的模型 transcript。可运行的 TypeScript SDK snapshot 与 Python client expected-output test 都保留这两个 ignorable event envelope。

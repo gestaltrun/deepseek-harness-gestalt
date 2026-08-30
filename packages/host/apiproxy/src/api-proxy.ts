@@ -85,11 +85,16 @@ import type { SettingsDescriptor, SettingsNamespace, SettingsPathOp } from '@dee
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 // Value edge: the rename impl narrows the title service's validation failure; the import also resolves `ctx.get('sessionTitle')`.
 import { SessionTitleInvalidError } from '@deepseek-ai/dsh-session-title'
-import type { CallId } from '@deepseek-ai/dsh-llm/brand'
+import { MessageId, type CallId } from '@deepseek-ai/dsh-llm/brand'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
 import type { ApprovalOutcome, ApprovalRequestId } from '@deepseek-ai/dsh-user-approval'
 import type { InstallationId } from '@deepseek-ai/dsh-remote-protocol'
-import type {} from '@deepseek-ai/dsh-member-question-receiver'
+import type {
+  MemberQuestionHumanTurnAdmissionContext,
+  MemberQuestionHumanTurnContent,
+  TerminalMemberQuestionView,
+} from '@deepseek-ai/dsh-member-question-receiver'
+import type {} from '@deepseek-ai/dsh-project-membership'
 // Side-effect type import: resolves the `approval/request` waterfall and
 // `ctx.get('approval')` without a value dependency on the seam (optional composition).
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -139,6 +144,19 @@ async function durablePromptContent(ctx: Context, content: readonly PromptConten
     ? { type: 'text', text: part.text }
     // admitEncodedImages returns one reference per image part in order.
     : { type: 'image', attachment: refs[next++] as ImageAttachmentRef })
+}
+
+/** Promote browser bytes before the receiver journal owns a crash-safe human action. */
+async function durableMemberQuestionContent(
+  ctx: Context,
+  content: readonly PromptContentPart[],
+): Promise<MemberQuestionHumanTurnContent[]> {
+  const durable = await durablePromptContent(ctx, content)
+  return durable.map((block): MemberQuestionHumanTurnContent => {
+    if (block.type === 'text') return { type: 'text', text: block.text }
+    if (block.type === 'image') return { type: 'image', attachment: block.attachment }
+    throw new Error(`member-question human admission produced unsupported durable content ${JSON.stringify(block.type)}`)
+  })
 }
 
 /** Search durable content for an image reference, including nested tool results. */
@@ -1715,6 +1733,233 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return operation
   }
 
+  /** Resolve one receiving account/project association to its exact local Workspace. */
+  async function receivingWorkspace(admission: MemberQuestionHumanTurnAdmissionContext): Promise<Workspace> {
+    const binding = ctx.get('memberQuestionWorkspaceBinding')
+    if (binding !== undefined) {
+      const workspaceId = await binding.resolve(admission.receivingAccountId, admission.projectId)
+      const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(workspaceId))
+      if (workspace === undefined) {
+        throw new Error(`member-question workspace binding returned unknown Workspace ${workspaceId}`)
+      }
+      return workspace
+    }
+    const membership = ctx.get('projectMembership')
+    if (membership === undefined) {
+      throw new Error('member-question admission requires project membership authority')
+    }
+    const roster = await membership.roster(admission.receivingAccountId, admission.projectId)
+    const member = roster.members.find(row => row.accountId === admission.receivingAccountId)
+    const workspaceName = member?.link?.workspaceName
+    if (workspaceName === undefined) {
+      throw new Error(`member-question admission has no local workspace link for account ${admission.receivingAccountId}`)
+    }
+    const matches = ctx.workspaceRegistry.list().filter(workspace => workspace.title === workspaceName)
+    const [workspace] = matches
+    if (workspace === undefined || matches.length !== 1) {
+      throw new Error(`member-question workspace link ${JSON.stringify(workspaceName)} resolved ${matches.length} local workspaces`)
+    }
+    return workspace
+  }
+
+  /** Whether one stable message identity already entered this Session or remains pending. */
+  function hasMessage(session: Session, messageId: string): boolean {
+    return session.events.some((event) => {
+      if (event.type === 'user/message') return event.data.id === messageId
+      return event.type === 'agent/inbox/spliced'
+        && event.data.inserted.some(message => message.id === messageId)
+    })
+  }
+
+  /** Compact model-visible Decision Brief for one received operation. */
+  function decisionBrief(operation: MemberQuestionHumanTurnAdmissionContext['questions'][number]): string {
+    const brief = 'operation' in operation ? operation.operation : operation.brief
+    const questions = brief.questions.map((question) => {
+      const options = question.options?.map(option => option.label).join(' | ')
+      return options === undefined ? `- ${question.question}` : `- ${question.question}\n  Options: ${options}`
+    }).join('\n')
+    const references = brief.references.length === 0
+      ? 'None'
+      : brief.references.map(reference => `- ${reference.path}: ${reference.reason}`).join('\n')
+    return [
+      `Decision Brief from ${brief.origin.askerDisplayName} (${brief.origin.askerRole})`,
+      `Project: ${brief.origin.projectName}`,
+      `Origin Session: ${brief.origin.originSessionTitle}`,
+      `Background: ${brief.background}`,
+      'Questions:', questions,
+      'References:', references,
+    ].join('\n')
+  }
+
+  /** Preserve browser content at the ordinary attachment admission seam. */
+  function admissionContent(content: readonly MemberQuestionHumanTurnContent[]): ContentBlock[] {
+    return content.map(block => structuredClone(block))
+  }
+
+  if (memberQuestionReceiver !== undefined) {
+    ctx.effect(() => memberQuestionReceiver.registerHumanTurnAdmitter(async (input, admission) => {
+      const workspace = await receivingWorkspace(admission)
+      const sessionId = input.receivingSessionId as unknown as SessionId
+      const agent = await ensureSession(sessionId, workspace.path, true)
+      await workspace.attachSession(sessionId)
+
+      for (const question of admission.questions) {
+        const operation = 'operation' in question ? question.operation : question.brief
+        if (!agent.session.events.some(event => event.type === 'member-question/received'
+          && event.data.questionId === operation.questionId)) {
+          agent.session.append('member-question/received', {
+            questionId: operation.questionId,
+            projectId: operation.projectId,
+            originSessionId: operation.originSessionId as unknown as SessionId,
+            arrivedAt: question.arrivedAt,
+            expiresAt: operation.expiresAt,
+            origin: operation.origin,
+            background: operation.background,
+            questions: operation.questions,
+            references: operation.references,
+          }, { ignorable: true })
+        }
+        if ('terminal' in question && !agent.session.events.some(event =>
+          event.type === 'member-question/settled'
+          && event.data.questionId === question.terminal.questionId)) {
+          agent.session.append('member-question/settled', question.terminal, { ignorable: true })
+        }
+        const briefId = MessageId(`member-question-brief:${operation.questionId}`)
+        if (!hasMessage(agent.session, briefId)) {
+          agent.inject(freezeMessage({
+            id: briefId,
+            role: 'user',
+            content: [{ type: 'text', text: decisionBrief(question) }],
+            source: { kind: 'plugin', plugin: 'member-question-receiver', form: 'relay' },
+          }))
+        }
+      }
+      await ctx.sessions.flush(agent.session)
+
+      const humanId = MessageId(`member-question-human:${input.rpcId}`)
+      if (!hasMessage(agent.session, humanId)) {
+        const message = freezeMessage({
+          id: humanId,
+          role: 'user' as const,
+          content: admissionContent(input.content),
+          source: { kind: 'user' as const, rpcId: input.rpcId as unknown as RpcId },
+        })
+        if (input.mode === 'steer') agent.steer(message)
+        else agent.followup(message)
+      }
+      await ctx.sessions.flush(agent.session)
+      return { accepted: true }
+    }), 'api-proxy: member-question human admission')
+  }
+
+  const terminalSyncs = new Map<string, Promise<void>>()
+  const terminalRetryPending = new Map<string, TerminalMemberQuestionView>()
+  const terminalOwnedTasks = new Set<Promise<unknown>>()
+  let terminalRetryTimer: ReturnType<typeof setTimeout> | undefined
+  let receiverRecoveryTimer: ReturnType<typeof setTimeout> | undefined
+  let receiverLifecycleDisposed = false
+
+  function trackReceiverTask<T>(task: Promise<T>, cleanup?: () => void): Promise<T> {
+    terminalOwnedTasks.add(task)
+    const settle = (): void => {
+      terminalOwnedTasks.delete(task)
+      cleanup?.()
+    }
+    void task.then(settle, settle)
+    return task
+  }
+
+  async function syncMaterializedTerminal(view: TerminalMemberQuestionView): Promise<void> {
+    if (view.hostSessionId === undefined) return
+    const workspace = await receivingWorkspace({
+      receivingAccountId: view.receivingAccountId,
+      projectId: view.brief.projectId,
+      questions: [view],
+    })
+    const sessionId = view.hostSessionId
+    const agent = await ensureSession(sessionId, workspace.path, true)
+    await workspace.attachSession(sessionId)
+    if (!agent.session.events.some(event => event.type === 'member-question/settled'
+      && event.data.questionId === view.questionId)) {
+      agent.session.append('member-question/settled', view.terminal, { ignorable: true })
+    }
+    // A preceding attempt may have appended the event before its flush failed.
+    await ctx.sessions.flush(agent.session)
+  }
+
+  function scheduleTerminalSync(view: TerminalMemberQuestionView): Promise<void> {
+    if (receiverLifecycleDisposed) return Promise.reject(new Error('member-question terminal sync is disposed'))
+    const key = view.questionId
+    const task = (terminalSyncs.get(key) ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => syncMaterializedTerminal(view))
+    terminalSyncs.set(key, task)
+    return trackReceiverTask(task, () => {
+      if (terminalSyncs.get(key) === task) terminalSyncs.delete(key)
+    })
+  }
+
+  function queueTerminalRetry(view: TerminalMemberQuestionView): void {
+    if (receiverLifecycleDisposed) return
+    terminalRetryPending.set(view.questionId, view)
+    if (terminalRetryTimer !== undefined) return
+    terminalRetryTimer = setTimeout(() => {
+      terminalRetryTimer = undefined
+      const task = drainTerminalRetries()
+      void trackReceiverTask(task)
+    }, 1_000)
+  }
+
+  async function drainTerminalRetries(): Promise<void> {
+    for (const [questionId, view] of [...terminalRetryPending]) {
+      if (receiverLifecycleDisposed) return
+      try {
+        await scheduleTerminalSync(view)
+        terminalRetryPending.delete(questionId)
+      } catch (error: unknown) {
+        console.error('member-question terminal Session sync retry failed:', error)
+      }
+    }
+    const next = terminalRetryPending.values().next().value
+    if (next !== undefined) queueTerminalRetry(next)
+  }
+
+  if (memberQuestionReceiver !== undefined) {
+    ctx.effect(() => {
+      const disposeChanges = memberQuestionReceiver.changes((snapshot) => {
+        for (const view of snapshot.terminal) {
+          void scheduleTerminalSync(view).catch((error: unknown) => {
+            console.error('member-question terminal Session sync failed:', error)
+            queueTerminalRetry(view)
+          })
+        }
+      })
+      const recover = async (): Promise<void> => {
+        try {
+          await memberQuestionReceiver.resumeReservedHumanTurns()
+          const snapshot = await memberQuestionReceiver.snapshot()
+          for (const view of snapshot.terminal) await scheduleTerminalSync(view)
+        } catch (error: unknown) {
+          if (receiverLifecycleDisposed) return
+          console.error('member-question Host recovery failed:', error)
+          receiverRecoveryTimer = setTimeout(() => {
+            receiverRecoveryTimer = undefined
+            void trackReceiverTask(recover())
+          }, 1_000)
+        }
+      }
+      void trackReceiverTask(recover())
+      return async () => {
+        receiverLifecycleDisposed = true
+        disposeChanges()
+        if (terminalRetryTimer !== undefined) clearTimeout(terminalRetryTimer)
+        if (receiverRecoveryTimer !== undefined) clearTimeout(receiverRecoveryTimer)
+        terminalRetryPending.clear()
+        await Promise.allSettled([...terminalOwnedTasks])
+      }
+    }, 'api-proxy: member-question recovery and terminal Session sync')
+  }
+
   /**
    * Build the session.list baseline shared by listing and search visibility.
    * Attached sessions come from memory; servable cold sessions merge from
@@ -2032,7 +2277,39 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
               settledByDeviceName: installation.deviceName, settledAt,
             },
         )
+        const terminalView = (await memberQuestionReceiver.snapshot()).terminal.find(
+          view => view.questionId === terminal.questionId,
+        )
+        if (terminalView !== undefined) await scheduleTerminalSync(terminalView)
         return ok(request, terminal)
+      },
+
+      async admitHumanTurn(request) {
+        if (memberQuestionReceiver === undefined) {
+          return err(request, { code: 'internal', message: 'member-question receiver is unavailable', details: {} })
+        }
+        try {
+          const content = await durableMemberQuestionContent(ctx, request.payload.content)
+          const admitted = await memberQuestionReceiver.admitHumanTurn({
+            ...request.payload,
+            content,
+            rpcId: request.rpcId as never,
+          })
+          return ok(request, { accepted: true as const, sessionId: admitted.receivingSessionId })
+        } catch (error: unknown) {
+          if (error instanceof AttachmentError) {
+            return err(request, {
+              code: 'attachment-error',
+              message: error.message,
+              details: { reason: error.code },
+            })
+          }
+          return err(request, {
+            code: 'internal',
+            message: `member-question human turn admission failed: ${String(error)}`,
+            details: {},
+          })
+        }
       },
     },
 

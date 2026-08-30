@@ -120,6 +120,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   userQuestions: 'user-questions.md',
   memberQuestionSender: 'user-questions.md',
   memberQuestionReceiver: 'user-questions.md',
+  memberQuestionWorkspaceBinding: 'user-questions.md',
   web: 'web.md',
   workflowEngine: 'workflow.md',
   workspaceRegistry: 'workspace.md',
@@ -604,6 +605,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   MemberQuestionReceiverSettlement: 'user-questions.md',
   AdmitMemberQuestionHumanTurnInput: 'user-questions.md',
   AdmitMemberQuestionHumanTurnResult: 'user-questions.md',
+  MemberQuestionHumanTurnAdmitter: 'user-questions.md',
   CompanionMemberQuestionSettledResult: 'remote-protocol.md',
   WebFetchProvider: 'web.md',
   WebFetchRequest: 'web.md',
@@ -686,6 +688,7 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
+  Branded: 'opaque identity helper is owned by packages/util/brand/src/index.ts',
   z: 'schemastery schema constructor is owned by vendor/schemastery (vendored upstream)',
   BeginCommandRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',
   InsertReferenceRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',

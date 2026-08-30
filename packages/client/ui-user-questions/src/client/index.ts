@@ -45,7 +45,8 @@ export const inject = ['slots', 'locale']
 
 /** Chain routing: claim the composer while a question wait is pending (pure — owner props only). */
 function selectQuestion({ interactions }: ComposerChainProps): QuestionWait | null {
-  return interactions.find((i): i is QuestionWait => i.kind === 'question') ?? null
+  return interactions.find((i): i is QuestionWait => i.kind === 'question'
+    && !i.payload.questions.every(question => question.intent?.kind === 'member-question')) ?? null
 }
 
 /**

@@ -25,6 +25,10 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
         rpcId: request.rpcId,
         result: { ok: false, error: { code: 'internal', message: 'stub', details: {} } },
       }),
+      admitHumanTurn: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { accepted: true, sessionId: request.payload.receivingSessionId } },
+      }),
     },
     sessions: {
       async list(request) {
@@ -341,6 +345,14 @@ describe('unary round trip (handler ⇄ client, no network)', () => {
       questionId: 'question-1' as never,
       response: { kind: 'declined' },
     })).result).toMatchObject({ ok: false, error: { code: 'internal' } })
+    expect((await c.memberQuestions.admitHumanTurn({
+      receivingSessionId: 'receiving-1' as never,
+      revision: 1,
+      content: [{ type: 'text', text: 'Help me decide.' }],
+      mode: 'queue',
+    })).result).toEqual({
+      ok: true, value: { accepted: true, sessionId: 'receiving-1' },
+    })
   })
 
   it('carries a success result and echoes the minted rpcId', async () => {

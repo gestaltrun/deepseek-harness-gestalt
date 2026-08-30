@@ -3,7 +3,9 @@ import clsx from 'clsx'
 import { QuestionPresentation } from '@deepseek-ai/dsh-client-ui-user-questions/client'
 import {
   memberBriefOf,
-  type MemberQuestionComposerProps, type MemberQuestionOrigin, type MemberQuestionRole,
+  selectMemberQuestion,
+  type MemberQuestionComposerProps, type MemberQuestionDockProps,
+  type MemberQuestionOrigin, type MemberQuestionRole,
 } from './contract/slots.ts'
 import type { MemberQuestionRecordView } from '@deepseek-ai/dsh-client-runtime/client'
 import css from './MemberQuestionCard.module.css'
@@ -234,4 +236,13 @@ export function MemberQuestionCard(props: MemberQuestionComposerProps) {
       </section>
     </div>
   )
+}
+
+/** Additive Decision Brief dock above the unchanged product composer. */
+export function MemberQuestionDock(props: MemberQuestionDockProps) {
+  const matched = selectMemberQuestion({ interactions: props.session.pending })
+  if (matched === null) {
+    return <MemberQuestionRecords matched={props.session.memberQuestionRecords ?? []} t={props.t} />
+  }
+  return <MemberQuestionCard {...props} interactions={props.session.pending} matched={matched} />
 }

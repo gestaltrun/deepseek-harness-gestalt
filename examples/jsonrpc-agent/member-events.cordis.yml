@@ -1,0 +1,8 @@
+- id: base
+  name: '@deepseek-ai/cordis-plugin-include'
+  config:
+    path: ./cordis.yml
+    patches:
+      - insert:
+          - id: member-question-events-fixture
+            name: './tests/member-question-events.plugin.mjs'

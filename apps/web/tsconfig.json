@@ -29,6 +29,7 @@
     "tests/minimal-preset.snapshot.ts",
     "tests/desktop-schedule.snapshot.ts",
     "tests/message-feedback-protocol.snapshot.ts",
+    "tests/member-question-receiving.snapshot.ts",
     "tests/live-interactions.e2e.ts",
     "tests/question-composer.e2e.ts",
     "tests/member-question-receiving.e2e.ts",

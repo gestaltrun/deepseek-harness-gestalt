@@ -9,6 +9,7 @@ import type {
   MemberQuestionId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { RpcRequest, RpcResponse } from './rpc.ts'
+import type { PromptContentPart } from './sessions.ts'
 
 export type {
   MemberQuestionReceiverSnapshot,
@@ -29,4 +30,11 @@ export interface MemberQuestionsApi {
       | { kind: 'answered'; answers: readonly CompanionMemberQuestionAnswer[] }
       | { kind: 'declined' }
   }>): Promise<RpcResponse<CompanionMemberQuestionSettledResult>>
+  /** Materialize the Host receiving Session and admit one explicit human turn. */
+  admitHumanTurn(request: RpcRequest<{
+    receivingSessionId: ReceivingSessionId
+    revision: number
+    content: readonly PromptContentPart[]
+    mode: 'queue' | 'steer'
+  }>): Promise<RpcResponse<{ accepted: true; sessionId: ReceivingSessionId }>>
 }

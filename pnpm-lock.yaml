@@ -6436,6 +6436,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-attachment':
+        specifier: workspace:^
+        version: link:../../attachment/attachment
       '@deepseek-ai/dsh-atomic-write':
         specifier: workspace:^
         version: link:../../util/atomic-write
@@ -6448,9 +6451,15 @@ importers:
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../../platform/platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../../platform/project-membership
       '@deepseek-ai/dsh-remote-protocol':
         specifier: workspace:^
         version: link:../../platform/remote-protocol
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
 
   packages/interaction/member-question-sender:
     dependencies:

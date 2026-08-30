@@ -367,6 +367,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Persists authenticated arrivals, canonical terminals, expiry, and one reserved high-level human admission; its package-folded ingress adapter is the current Consumer.',
   },
   {
+    key: 'memberQuestionWorkspaceBinding',
+    pkg: 'member-question-receiver',
+    title: 'Member-question local Workspace binding',
+    mode: 'core',
+    consumers: ['apiproxy'],
+    note: 'Resolves an authenticated receiver Account and cloud Project to one existing local Workspace; the API Proxy otherwise derives the same association from project membership.',
+  },
+  {
     key: 'planMode',
     pkg: 'plan-mode',
     title: 'Plan collaboration state',

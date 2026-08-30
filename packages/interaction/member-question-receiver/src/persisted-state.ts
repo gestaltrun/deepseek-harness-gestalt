@@ -2,6 +2,9 @@ import type {
   CompanionMemberQuestionOperation,
   CompanionMemberQuestionSettledResult,
 } from '@deepseek-ai/dsh-remote-protocol'
+import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import { createHash } from 'node:crypto'
+import type { MemberQuestionHumanTurnContent } from './types.ts'
 import {
   createCompanionNegotiationChannel,
   createCompanionVersionOffer,
@@ -9,7 +12,7 @@ import {
   negotiateCompanionProtocol,
 } from '@deepseek-ai/dsh-remote-protocol'
 
-export const MEMBER_QUESTION_RECEIVER_FORMAT_VERSION = 0
+const MEMBER_QUESTION_RECEIVER_FORMAT_VERSION = 0
 const PERSISTED_PROTOCOL = negotiateCompanionProtocol(
   createCompanionNegotiationChannel(),
   createCompanionVersionOffer('mobile'),
@@ -30,6 +33,7 @@ export interface PersistedHumanTurnAdmission {
   readonly rpcId: string
   readonly expectedRevision: number
   readonly requestDigest: string
+  readonly content: readonly MemberQuestionHumanTurnContent[]
   readonly mode: 'queue' | 'steer'
   readonly state: 'reserved' | 'committed'
   readonly reservedAt: number
@@ -185,17 +189,102 @@ function parseAdmission(value: unknown, sessionIds: ReadonlySet<string>): Persis
   if ((value.state === 'committed') !== (committedAt !== undefined && committedRevision !== undefined)) {
     throw new Error('member-question-receiver: durable committed admission requires committedAt and committedRevision only')
   }
+  const content = parseHumanTurnContent(value.content)
+  const requestDigest = nonEmpty(value.requestDigest, 'admission requestDigest')
+  if (requestDigest !== humanTurnDigest(content, value.mode)) {
+    throw new Error('member-question-receiver: durable admission content digest does not match')
+  }
   return {
     receivingSessionId,
     rpcId: nonEmpty(value.rpcId, 'admission rpcId'),
     expectedRevision: safeInteger(value.expectedRevision, 'admission expectedRevision'),
-    requestDigest: nonEmpty(value.requestDigest, 'admission requestDigest'),
+    requestDigest,
+    content,
     mode: value.mode,
     state: value.state,
     reservedAt: safeInteger(value.reservedAt, 'reservedAt'),
     ...(committedAt === undefined ? {} : { committedAt }),
     ...(committedRevision === undefined ? {} : { committedRevision }),
   }
+}
+
+function parseHumanTurnContent(value: unknown): readonly MemberQuestionHumanTurnContent[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('member-question-receiver: durable admission content must be a non-empty array')
+  }
+  return value.map((part): MemberQuestionHumanTurnContent => {
+    if (!isRecord(part)) throw new Error('member-question-receiver: durable admission content part must be an object')
+    if (part.type === 'text') return { type: 'text', text: stringValue(part.text, 'admission text') }
+    if (part.type === 'image') {
+      return {
+        type: 'image',
+        attachment: parseImageAttachment(part.attachment),
+      }
+    }
+    throw new Error('member-question-receiver: durable admission content type must be text or image')
+  })
+}
+
+function parseImageAttachment(value: unknown): ImageAttachmentRef {
+  if (!isRecord(value)) {
+    throw new Error('member-question-receiver: durable admission image attachment must be an object')
+  }
+  const mediaType = nonEmpty(value.mediaType, 'admission image mediaType')
+  if (!isImageMediaType(mediaType)) {
+    throw new Error(`member-question-receiver: durable admission image mediaType ${JSON.stringify(mediaType)} is unsupported`)
+  }
+  const originalDimensions = value.originalDimensions === undefined
+    ? undefined
+    : parseDimensions(value.originalDimensions, 'admission image originalDimensions')
+  return {
+    attachmentId: nonEmpty(value.attachmentId, 'admission image attachmentId') as ImageAttachmentRef['attachmentId'],
+    mediaType,
+    bytes: positiveSafeInteger(value.bytes, 'admission image bytes'),
+    ...parseDimensions(value, 'admission image'),
+    ...(value.name === undefined ? {} : { name: stringValue(value.name, 'admission image name') }),
+    ...(originalDimensions === undefined ? {} : { originalDimensions }),
+  }
+}
+
+function parseDimensions(value: unknown, name: string): { width: number; height: number } {
+  if (!isRecord(value)) throw new Error(`member-question-receiver: durable ${name} must be an object`)
+  return {
+    width: positiveSafeInteger(value.width, `${name} width`),
+    height: positiveSafeInteger(value.height, `${name} height`),
+  }
+}
+
+function isImageMediaType(value: string): value is ImageMediaType {
+  return value === 'image/png' || value === 'image/jpeg' || value === 'image/webp' || value === 'image/gif'
+}
+
+/**
+ * Hash one human admission from canonical field order instead of JavaScript object insertion order.
+ * @param content - Durable text and attachment-reference blocks.
+ * @param mode - Requested queue or steer behavior.
+ * @returns Stable digest used for idempotent replay validation.
+ */
+export function humanTurnDigest(
+  content: readonly MemberQuestionHumanTurnContent[],
+  mode: 'queue' | 'steer',
+): string {
+  const canonical = content.map(part => part.type === 'text'
+    ? { type: 'text' as const, text: part.text }
+    : {
+      type: 'image' as const,
+      attachment: {
+        attachmentId: part.attachment.attachmentId,
+        mediaType: part.attachment.mediaType,
+        width: part.attachment.width,
+        height: part.attachment.height,
+        bytes: part.attachment.bytes,
+        ...(part.attachment.name === undefined ? {} : { name: part.attachment.name }),
+        ...(part.attachment.originalDimensions === undefined
+          ? {}
+          : { originalDimensions: part.attachment.originalDimensions }),
+      },
+    })
+  return createHash('sha256').update(JSON.stringify({ content: canonical, mode })).digest('hex')
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -207,11 +296,22 @@ function nonEmpty(value: unknown, name: string): string {
   return value
 }
 
+function stringValue(value: unknown, name: string): string {
+  if (typeof value !== 'string') throw new Error(`member-question-receiver: durable ${name} must be a string`)
+  return value
+}
+
 function safeInteger(value: unknown, name: string): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw new Error(`member-question-receiver: durable ${name} must be a safe integer >= 0`)
   }
   return value
+}
+
+function positiveSafeInteger(value: unknown, name: string): number {
+  const parsed = safeInteger(value, name)
+  if (parsed < 1) throw new Error(`member-question-receiver: durable ${name} must be positive`)
+  return parsed
 }
 
 function optionalSafeInteger(value: unknown, name: string): number | undefined {

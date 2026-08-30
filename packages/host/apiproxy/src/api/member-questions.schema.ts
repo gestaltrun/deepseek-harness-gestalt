@@ -1,6 +1,6 @@
 /** Exact wire schemas for Host-authoritative member-question receiver RPCs. */
 import { z } from 'zod'
-import type { MemberQuestionReceiverSnapshot } from '@deepseek-ai/dsh-member-question-receiver'
+import type { MemberQuestionReceiverSnapshot, ReceivingSessionId } from '@deepseek-ai/dsh-member-question-receiver'
 import type { CompanionMemberQuestionSettledResult } from '@deepseek-ai/dsh-remote-protocol'
 import type { Wire } from './rpc.schema.ts'
 import type { MemberQuestionsApi } from './member-questions.ts'
@@ -66,6 +66,11 @@ const pendingSchema = z.strictObject({
   revision: z.number().int().nonnegative(),
   arrivedAt: safeEpochSchema,
   operation: memberQuestionOperationSchema,
+  hostSessionId: idSchema.optional(),
+  reservedAdmission: z.strictObject({
+    rpcId: idSchema,
+    mode: z.union([z.literal('queue'), z.literal('steer')]),
+  }).optional(),
 })
 const terminalViewSchema = z.strictObject({
   questionId: idSchema,
@@ -75,6 +80,7 @@ const terminalViewSchema = z.strictObject({
   arrivedAt: safeEpochSchema,
   terminal: terminalSchema,
   brief: memberQuestionOperationSchema,
+  hostSessionId: idSchema.optional(),
 })
 
 /** Exact empty request for the complete receiver baseline. */
@@ -97,3 +103,20 @@ export const memberQuestionSettleRequestSchema = z.strictObject({
 }) as unknown as z.ZodType<Wire<Parameters<MemberQuestionsApi['settle']>[0]['payload']>>
 /** Canonical terminal returned by Host settlement. */
 export const memberQuestionSettleValueSchema = terminalSchema
+/** Exact explicit-human-turn admission request. */
+export const memberQuestionAdmitHumanTurnRequestSchema = z.strictObject({
+  receivingSessionId: idSchema,
+  revision: z.number().int().nonnegative(),
+  content: z.array(z.discriminatedUnion('type', [
+    z.strictObject({ type: z.literal('text'), text: z.string() }),
+    z.strictObject({
+      type: z.literal('image'), mediaType: z.string(), data: z.string(), name: z.string().optional(),
+    }),
+  ])).min(1),
+  mode: z.union([z.literal('queue'), z.literal('steer')]),
+}) as unknown as z.ZodType<Wire<Parameters<MemberQuestionsApi['admitHumanTurn']>[0]['payload']>>
+/** Materialized Host Session identity. */
+export const memberQuestionAdmitHumanTurnValueSchema = z.strictObject({
+  accepted: z.literal(true),
+  sessionId: idSchema,
+}) as unknown as z.ZodType<Wire<{ accepted: true; sessionId: ReceivingSessionId }>>

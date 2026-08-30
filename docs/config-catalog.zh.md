@@ -952,7 +952,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-host-apiproxy`
 
-需要：`agentDefaultModel` · `agents` · `attachments` · `directoryPicker` · `llm` · `sessions` · `subagents` · `sessionQuery` · `tools` · `userQuestions` · `workspaceRegistry`
+需要：`agentDefaultModel` · `agents` · `attachments` · `directoryPicker` · `llm` · `sessions` · `subagents` · `sessionQuery` · `tools` · `userQuestions` · `workspaceRegistry` · `memberQuestionReceiver`
 
 ```ts config-catalog
 /** Gateway plugin configuration. */
@@ -977,10 +977,14 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /** Development-only Host Installation id for keyless receiver settlement. */
+  memberQuestionInstallationId?: string
+  /** Development-only user-facing Host Installation name. */
+  memberQuestionDeviceName?: string
 }
 ```
 
-来源：[`packages/host/apiproxy/src/index.ts:41`](../packages/host/apiproxy/src/index.ts)
+来源：[`packages/host/apiproxy/src/index.ts:42`](../packages/host/apiproxy/src/index.ts)
 
 <a id="deepseek-aidsh-host-directory-picker-browse"></a>
 
@@ -1620,6 +1624,8 @@ export interface MemberQuestionReceiverConfig {
   readonly terminalRetryMs: number
   /** First-claim authority shared by every receiving Installation. */
   readonly terminalAuthority?: MemberQuestionTerminalAuthority
+  /** Explicit terminal provider selection; development-local is forbidden in production. */
+  readonly terminalAuthorityMode?: 'deferred' | 'development-local'
   /** Authoritative wall clock; production uses Date.now. */
   readonly clock?: () => number
   /** High-level materialize-and-admit adapter; absent keeps human turns fail-closed. */
@@ -1646,6 +1652,7 @@ export interface MemberQuestionTerminalAuthority {
  */
 export type MemberQuestionHumanTurnAdmitter = (
   input: AdmitMemberQuestionHumanTurnInput,
+  context: MemberQuestionHumanTurnAdmissionContext,
 ) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
 
 /** Injectable scheduler used for the one earliest authoritative expiry. */
@@ -1673,14 +1680,24 @@ export interface AdmitMemberQuestionHumanTurnInput {
   readonly revision: number
   /** Stable idempotency identity retained across retries. */
   readonly rpcId: MemberQuestionReceiverRpcId
-  /** Human-authored content excluded from the receiver ledger body. */
+  /** Human-authored content retained durably for crash-safe admission replay. */
   readonly content: readonly MemberQuestionHumanTurnContent[]
   /** Ordinary Host queue or steering admission mode. */
   readonly mode: 'queue' | 'steer'
 }
 
+/** Durable receiver facts needed by one Host materialize-and-admit operation. */
+export interface MemberQuestionHumanTurnAdmissionContext {
+  /** Account whose local workspace receives the Host Session. */
+  readonly receivingAccountId: PlatformAccountId
+  /** Cloud project whose accepted membership selects that workspace. */
+  readonly projectId: ProjectId
+  /** Every retained question on this receiving thread, in arrival order. */
+  readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[]
+}
+
 /** Successful high-level Host adapter admission. */
-export interface MemberQuestionHumanTurnAdmissionReceipt {
+interface MemberQuestionHumanTurnAdmissionReceipt {
   /** The adapter materialized and admitted the human turn. */
   readonly accepted: true
 }
@@ -1691,33 +1708,65 @@ export type ReceivingSessionId = Branded<'ReceivingSessionId'>
 /** Stable caller idempotency identity for one explicit human turn. */
 export type MemberQuestionReceiverRpcId = Branded<'MemberQuestionReceiverRpcId'>
 
-/** High-level human content handed to the future Host Session adapter. */
+/** Durable human content handed to the Host Session adapter. */
 export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent
 
+/** Pending receiver projection retained without referenced document bodies. */
+export interface PendingMemberQuestionView {
+  /** Stable question identity from the authenticated operation. */
+  readonly questionId: MemberQuestionId
+  /** Opaque Host identity of the receiving thread. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Account whose endpoint accepted the operation. */
+  readonly receivingAccountId: PlatformAccountId
+  /** Durable receiver revision that published this row. */
+  readonly revision: number
+  /** Absolute Unix epoch milliseconds when the Host accepted the operation. */
+  readonly arrivedAt: number
+  /** Bounded authenticated member-question operation. */
+  readonly operation: CompanionMemberQuestionOperation
+  /** Ordinary Host Session identity after the first explicit human admission. */
+  readonly hostSessionId?: HostSessionId
+  /** Durable retry identity while a human-turn admission remains reserved. */
+  readonly reservedAdmission?: {
+    /** Envelope identity the Client must reuse for the reserved action. */
+    readonly rpcId: MemberQuestionReceiverRpcId
+    /** Original admission mode retained even if the Session begins running. */
+    readonly mode: 'queue' | 'steer'
+  }
+}
+
+/** Terminal receiver record retaining the globally authoritative first claim. */
+export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionView, 'operation'> {
+  /** Globally authoritative first-claim terminal. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+  /** Bounded received operation retained for passive record rendering. */
+  readonly brief: Omit<CompanionMemberQuestionOperation, 'questions'> & {
+    /** Original question batch retained with the terminal record. */
+    readonly questions: CompanionMemberQuestionOperation['questions']
+  }
+}
+
 /** Human-authored text handed to the future Host Session adapter. */
-export interface MemberQuestionHumanTextContent {
+interface MemberQuestionHumanTextContent {
   /** Content discriminant. */
   readonly type: 'text'
   /** Human-authored text. */
   readonly text: string
 }
 
-/** Human-selected image handed to the future Host Session adapter. */
-export interface MemberQuestionHumanImageContent {
+/** Human-selected image committed by the Host attachment service before reservation. */
+interface MemberQuestionHumanImageContent {
   /** Content discriminant. */
   readonly type: 'image'
-  /** Browser-declared image media type. */
-  readonly mediaType: string
-  /** Base64 payload consumed by the future Host adapter. */
-  readonly data: string
-  /** Optional human-facing file name. */
-  readonly name?: string
+  /** Durable normalized attachment; raw browser bytes never enter the receiver ledger. */
+  readonly attachment: ImageAttachmentRef
 }
 ```
 
-Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.zh.md)
+Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionOperation`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.zh.md) · [`HostSessionId`](subsystems/core.zh.md) · [`ImageAttachmentRef`](subsystems/attachment.zh.md) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`PlatformAccountId`](subsystems/platform-account.zh.md) · [`ProjectId`](subsystems/project-membership.zh.md)
 
-Source: [`packages/interaction/member-question-receiver/src/index.ts:91`](../packages/interaction/member-question-receiver/src/index.ts)
+Source: [`packages/interaction/member-question-receiver/src/index.ts:97`](../packages/interaction/member-question-receiver/src/index.ts)
 
 <a id="deepseek-aidsh-member-question-sender"></a>
 

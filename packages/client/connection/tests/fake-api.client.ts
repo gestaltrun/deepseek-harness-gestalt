@@ -51,6 +51,10 @@ export class FakeApiClient implements IApiClient {
       settledByInstallationId: 'fake-installation' as never,
       settledByDeviceName: 'Fake', settledAt: 1,
     }))),
+    admitHumanTurn: payload => this.record('memberQuestion.admitHumanTurn', payload, Promise.resolve(ok({
+      accepted: true,
+      sessionId: payload.receivingSessionId,
+    }))),
   }
 
   // Programmable slots (defaults answer OK-empty); reassign per case.

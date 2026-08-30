@@ -126,6 +126,35 @@ describe('DeepSeekHarness', () => {
     await harness.close()
   })
 
+  it('retains ignorable member-question lifecycle events in the typed result', async () => {
+    const harness = harnessWith({ FAKE_MEMBER_QUESTION_EVENTS: '1' })
+    const result = await harness.run('continue the received decision')
+    const received = result.events.find(event => event.type === 'member-question/received')
+    const settled = result.events.find(event => event.type === 'member-question/settled')
+    expect(received?.type === 'member-question/received' ? {
+      type: received.type,
+      ignorable: received.ignorable,
+      questionId: received.data.questionId,
+      background: received.data.background,
+    } : undefined).toEqual({
+      type: 'member-question/received',
+      ignorable: true,
+      questionId: 'question-sdk',
+      background: 'SDK bounded brief',
+    })
+    expect(settled?.type === 'member-question/settled' ? {
+      type: settled.type,
+      ignorable: settled.ignorable,
+      questionId: settled.data.questionId,
+      outcome: settled.data.outcome,
+    } : undefined).toEqual({
+      type: 'member-question/settled',
+      ignorable: true,
+      questionId: 'question-sdk',
+      outcome: 'expired',
+    })
+  })
+
   it('keeps events root-scoped while streaming notifications for the session tree', async () => {
     const harness = harnessWith({ FAKE_SUBAGENT: '1' })
     const seen: HarnessNotification[] = []

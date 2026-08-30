@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 // The browser half on a real SlotRegistry: the plugin declares its services,
-// registers the `member-question` dictionaries, and contributes its chain
-// entry ahead of the shared question composer (priority -1); teardown empties
+// registers the `member-question` dictionaries, and contributes its additive
+// input-dock entry above the shared product composer; teardown empties
 // the contribution (HMR safety).
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { DetailsDocumentFocus } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { MemberQuestionCard, MemberQuestionRecords } from '../src/client/MemberQuestionCard.tsx'
+import { MemberQuestionDock } from '../src/client/MemberQuestionCard.tsx'
 import { apply, inject } from '../src/client/index.ts'
 import { apply as nodeApply } from '../src/index.ts'
 import { en as questionEn, zh as questionZh } from '@deepseek-ai/dsh-client-ui-user-questions/src/client/locales.ts'
@@ -22,7 +22,7 @@ describe('ui-member-questions browser apply', () => {
     expect(() => { nodeApply() }).not.toThrow()
   })
 
-  it('registers the chain entry ahead of the shared composer and unregisters on teardown', async () => {
+  it('registers the additive input-dock entry and unregisters on teardown', async () => {
     const runtime = await SlotTestRuntime.create()
     const locale = new LocaleRuntime(runtime.ctx)
     locale.setLocale('zh')
@@ -31,17 +31,14 @@ describe('ui-member-questions browser apply', () => {
     locale.register('question', { zh: questionZh, en: questionEn })
     runtime.provide('locale', locale)
     runtime.slots.installLocale(locale)
-    await runtime.declare({ 'conversation.composer': { kind: 'chain', scope: 'session' } })
+    await runtime.declare({ 'conversation.input.dock': { kind: 'list', scope: 'session' } })
     const feature = await runtime.mount({ inject: [...inject], apply })
     try {
-      const entries = runtime.slots.entries('conversation.composer')
-      expect(entries).toHaveLength(2)
+      const entries = runtime.slots.entries('conversation.input.dock')
+      expect(entries).toHaveLength(1)
       const entry = entries[0]!
-      expect(entry.component).toBe(MemberQuestionCard)
-      // Elects before the shared question composer's default-priority entry.
-      expect(entry.options.priority).toBe(-2)
-      expect(entries[1]?.component).toBe(MemberQuestionRecords)
-      expect(entries[1]?.options.priority).toBe(-1)
+      expect(entry.component).toBe(MemberQuestionDock)
+      expect(entry.options.order).toBe(-20)
 
       // The dictionaries ride the standard locale seat.
       const memberT = locale.bind('member-question')
@@ -56,7 +53,7 @@ describe('ui-member-questions browser apply', () => {
       await feature.dispose()
       await runtime.dispose()
     }
-    expect(runtime.slots.entries('conversation.composer')).toHaveLength(0)
+    expect(runtime.slots.entries('conversation.input.dock')).toHaveLength(0)
   })
 
   it('resolves a late details-focus service per gesture and stops after provider disposal', async () => {
@@ -65,9 +62,9 @@ describe('ui-member-questions browser apply', () => {
     locale.register('question', { zh: questionZh, en: questionEn })
     runtime.provide('locale', locale)
     runtime.slots.installLocale(locale)
-    await runtime.declare({ 'conversation.composer': { kind: 'chain', scope: 'session' } })
+    await runtime.declare({ 'conversation.input.dock': { kind: 'list', scope: 'session' } })
     const feature = await runtime.mount({ inject: [...inject], apply })
-    const entry = runtime.slots.entries('conversation.composer')[0]!
+    const entry = runtime.slots.entries('conversation.input.dock')[0]!
     const injected = (entry.inject as unknown as () => {
       focusDocument: (sessionId: SessionId, document: DetailsDocumentFocus) => void
     })()
@@ -88,6 +85,6 @@ describe('ui-member-questions browser apply', () => {
       await feature.dispose()
       await runtime.dispose()
     }
-    expect(runtime.slots.entries('conversation.composer')).toHaveLength(0)
+    expect(runtime.slots.entries('conversation.input.dock')).toHaveLength(0)
   })
 })

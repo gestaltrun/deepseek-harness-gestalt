@@ -74,8 +74,8 @@ function notify(method: string, params: object): void {
 }
 
 let seq = 0
-function event(sessionId: string, type: string, data: object): void {
-  notify('session.event', { sessionId, event: { type, seq: seq++, time: 0, data } })
+function event(sessionId: string, type: string, data: object, intent?: { ignorable: true }): void {
+  notify('session.event', { sessionId, event: { type, seq: seq++, time: 0, data, ...intent } })
 }
 
 function assistantText(): string {
@@ -216,6 +216,32 @@ reader.on('line', (line) => {
       if (env.FAKE_MALFORMED !== undefined || env.FAKE_MALFORMED_PROMPT !== undefined) {
         respond({})
         return
+      }
+      if (env.FAKE_MEMBER_QUESTION_EVENTS !== undefined) {
+        event(sessionId, 'member-question/received', {
+          questionId: 'question-sdk',
+          projectId: 'project-sdk',
+          originSessionId: 'origin-sdk',
+          arrivedAt: 1,
+          expiresAt: 2,
+          origin: {
+            projectName: 'SDK project',
+            originSessionTitle: 'SDK origin',
+            askerAccountId: 'account-sdk',
+            askerRole: 'owner',
+            askerDisplayName: 'SDK asker',
+          },
+          background: 'SDK bounded brief',
+          questions: [{ id: 'choice', question: 'Choose?' }],
+          references: [{ path: 'docs/architecture.md', reason: 'SDK projection' }],
+        }, { ignorable: true })
+        event(sessionId, 'member-question/settled', {
+          type: 'member-question-settled',
+          operationId: 'operation-sdk',
+          questionId: 'question-sdk',
+          settledAt: 3,
+          outcome: 'expired',
+        }, { ignorable: true })
       }
       runTurn(sessionId)
       notify('session.status', { sessionId, status: 'idle' })

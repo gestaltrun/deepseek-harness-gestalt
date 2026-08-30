@@ -20,7 +20,7 @@ import {
   selectMemberQuestionRecords,
   type MemberQuestionComposerProps,
 } from '../src/client/contract/slots.ts'
-import { MemberQuestionCard, MemberQuestionRecords } from '../src/client/MemberQuestionCard.tsx'
+import { MemberQuestionCard, MemberQuestionDock, MemberQuestionRecords } from '../src/client/MemberQuestionCard.tsx'
 import { en, zh } from '../src/client/locales.ts'
 import { en as questionEn, zh as questionZh } from '@deepseek-ai/dsh-client-ui-user-questions/src/client/locales.ts'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
@@ -52,8 +52,9 @@ const kit = {
   useSessions: (() => { throw new Error('unused') }) as unknown as SnapshotSelectorHook<SessionListState>,
   useWorkspaces: (() => { throw new Error('unused') }) as unknown as SnapshotSelectorHook<WorkspaceListState>,
   useProjection: (() => undefined) as never,
-  useInput: (() => { throw new Error('unused') }) as never,
-  inputActions: { setDraft: () => { throw new Error('unused') }, submit: () => { throw new Error('unused') } } as never,
+  useInput: ((selector: (state: { draft: string; phase: 'plain' }) => unknown) =>
+    selector({ draft: '', phase: 'plain' })) as never,
+  inputActions: { setDraft: () => undefined, submit: () => undefined } as never,
 }
 
 const NOW = 1_800_000_000_000
@@ -145,6 +146,38 @@ function tidyDomForSnapshot(root: HTMLElement): void {
 }
 
 describe('member-question routing', () => {
+  it('renders the pending card or terminal bands in the additive product-composer dock', () => {
+    const { carrier } = memberWait()
+    const props = {
+      ...kit,
+      input: { draft: '', phase: 'plain' },
+      session: { pending: [carrier], memberQuestionRecords: [] },
+      t: seat('member-question'),
+      questionT: seat('question'),
+      focusDocument: () => {},
+    }
+    const pending = render(MemberQuestionDock(props as never))
+    expect(pending.container.querySelector('[data-member-presentation]')).not.toBeNull()
+    pending.unmount()
+    const terminal = render(MemberQuestionDock({
+      ...props,
+      session: {
+        pending: [],
+        memberQuestionRecords: [{
+          questionId: 'terminal', state: 'withdrawn', askedAt: 100, terminalAt: 200,
+          intent: { kind: 'member-question', questionId: 'terminal' },
+        }],
+      },
+    } as never))
+    expect(terminal.container.querySelector('[data-record-state="withdrawn"]')).not.toBeNull()
+    terminal.unmount()
+    const empty = render(MemberQuestionDock({
+      ...props,
+      session: { pending: [] },
+    } as never))
+    expect(empty.container.innerHTML).toBe('')
+  })
+
   it('claims only non-empty terminal record projections', () => {
     expect(selectMemberQuestionRecords({ session: undefined })).toBeNull()
     expect(selectMemberQuestionRecords({ session: {

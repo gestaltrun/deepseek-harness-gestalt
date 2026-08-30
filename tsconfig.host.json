@@ -17,6 +17,7 @@
     "apps/web/tests/minimal-preset.snapshot.ts",
     "apps/web/tests/desktop-schedule.snapshot.ts",
     "apps/web/tests/message-feedback-protocol.snapshot.ts",
+    "apps/web/tests/member-question-receiving.snapshot.ts",
     "apps/web/tests/live-interactions.e2e.ts",
     "apps/web/tests/question-composer.e2e.ts",
     "apps/web/tests/member-question-receiving.e2e.ts",

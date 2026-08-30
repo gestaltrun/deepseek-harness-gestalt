@@ -385,6 +385,15 @@ export class SessionManager {
     return this.provisionalSummaries.has(sessionId)
   }
 
+  /**
+   * Whether the Host session baseline contains this exact ordinary Session.
+   * @param sessionId - candidate Session identity.
+   * @returns true when the current Host baseline lists the Session.
+   */
+  isHostListed(sessionId: SessionId): boolean {
+    return this.summaries.some(summary => summary.sessionId === sessionId)
+  }
+
   /** Rebuild every resident Session after one coalesced registry transaction. */
   rebuildConversationRegistry(): void {
     for (const session of this.sessions.values()) session.rebuildConversationRegistry()

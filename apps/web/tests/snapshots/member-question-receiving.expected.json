@@ -1,0 +1,88 @@
+{
+  "arrival": {
+    "sessionCount": 0,
+    "requestCount": 0
+  },
+  "firstHumanTurn": {
+    "eventTypes": [
+      "member-question/received",
+      "agent/inbox/spliced",
+      "agent/inbox/spliced",
+      "turn/start",
+      "agent/inbox/spliced",
+      "agent/inbox/spliced",
+      "user/message",
+      "user/message",
+      "user/message",
+      "request/header"
+    ],
+    "received": {
+      "questionId": "question-snapshot",
+      "projectId": "project-snapshot",
+      "originSessionId": "origin-session-snapshot",
+      "expiresAt": 1893456000000,
+      "origin": {
+        "projectName": "Project Atlas",
+        "originSessionTitle": "Receiver launch decision",
+        "askerAccountId": "account:alice",
+        "askerRole": "owner",
+        "askerDisplayName": "Alice",
+        "askerAvatarUrl": "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E"
+      },
+      "background": "The preview needs a reversible channel before the wider release.",
+      "questions": [
+        {
+          "id": "release-channel",
+          "question": "Which release channel should carry the receiver preview?",
+          "header": "Choose a channel",
+          "options": [
+            {
+              "label": "Canary (Recommended)",
+              "description": "Limits the first rollout."
+            },
+            {
+              "label": "Stable",
+              "description": "Makes the preview broadly visible."
+            }
+          ]
+        }
+      ],
+      "references": [
+        {
+          "path": "docs/receiver-decision.md",
+          "reason": "Lists the rollout constraints"
+        }
+      ]
+    },
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Decision Brief from Alice (owner)\nProject: Project Atlas\nOrigin Session: Receiver launch decision\nBackground: The preview needs a reversible channel before the wider release.\nQuestions:\n- Which release channel should carry the receiver preview?\n  Options: Canary (Recommended) | Stable\nReferences:\n- docs/receiver-decision.md: Lists the rollout constraints"
+          }
+        ],
+        "source": {
+          "kind": "plugin",
+          "plugin": "member-question-receiver",
+          "form": "relay"
+        }
+      },
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Help me evaluate the rollout tradeoffs before I answer."
+          }
+        ],
+        "source": {
+          "kind": "user",
+          "rpcId": "rpc-snapshot"
+        }
+      }
+    ],
+    "requestCount": 1
+  }
+}

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
@@ -11,6 +11,7 @@ import type {
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
   EMPTY_PERSISTED_RECEIVER_STATE,
+  humanTurnDigest,
   parseReceiverState,
   serializeReceiverState,
   type PersistedReceiverState,
@@ -24,6 +25,7 @@ import type {
   AuthenticatedMemberQuestionIngress,
   AuthenticatedMemberQuestionEnvelope,
   MemberQuestionHumanTurnAdmitter,
+  MemberQuestionHumanTurnAdmissionContext,
   MemberQuestionIngestResult,
   MemberQuestionReceiverListener,
   MemberQuestionReceiverSnapshot,
@@ -42,6 +44,8 @@ export type {
   AuthenticatedMemberQuestionEnvelope,
   AuthenticatedMemberQuestionIngress,
   MemberQuestionHumanTurnAdmitter,
+  MemberQuestionHumanTurnAdmissionContext,
+  MemberQuestionWorkspaceBinding,
   MemberQuestionHumanTurnContent,
   MemberQuestionIngestResult,
   MemberQuestionReceiverChange,
@@ -153,6 +157,16 @@ export abstract class MemberQuestionReceiverService extends Service {
   abstract admitHumanTurn(
     input: AdmitMemberQuestionHumanTurnInput,
   ): Promise<AdmitMemberQuestionHumanTurnResult>
+
+  /** Resume every durable human action left reserved by an interrupted Host. */
+  abstract resumeReservedHumanTurns(): Promise<void>
+
+  /**
+   * Install the single Host materialize-and-admit adapter.
+   * @param admitter - high-level Host transaction adapter.
+   * @returns disposer for this exact registration.
+   */
+  abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void
 }
 
 /**
@@ -178,6 +192,8 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
   private readonly terminalAuthority: MemberQuestionTerminalAuthority | undefined
   private readonly clock: () => number
   private readonly admitter: MemberQuestionHumanTurnAdmitter | undefined
+  private runtimeAdmitter: MemberQuestionHumanTurnAdmitter | undefined
+  private runtimeAdmitterRevision = 0
   private readonly timer: MemberQuestionReceiverTimer
   private readonly terminalRetryMs: number
   private readonly stateWriter: MemberQuestionReceiverStateWriter
@@ -247,6 +263,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
         createdAt: now,
         materialized: false,
       }
+      const currentSession = routeSession === undefined ? session : { ...routeSession, revision }
       let terminal: CompanionMemberQuestionSettledResult | undefined
       if (now >= envelope.operation.expiresAt) {
         if (this.terminalAuthority === undefined) {
@@ -272,7 +289,9 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
       const next: PersistedReceiverState = {
         ...this.state,
         revision,
-        sessions: routeSession === undefined ? [...this.state.sessions, session] : this.state.sessions,
+        sessions: routeSession === undefined
+          ? [...this.state.sessions, currentSession]
+          : this.state.sessions.map(row => row.id === currentSession.id ? currentSession : row),
         questions: [...this.state.questions, question],
       }
       await this.commit(next)
@@ -362,7 +381,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
           || admission.expectedRevision !== request.revision
           || admission.requestDigest !== digest
           || admission.mode !== request.mode) {
-          throw new Error(`member-question-receiver: rpcId ${request.rpcId} was replayed with different content or mode`)
+          throw new Error(`member-question-receiver: rpcId ${request.rpcId} was replayed with different content, Session, revision, or mode`)
         }
         if (admission.state === 'committed') return admissionResult(admission)
       } else {
@@ -374,6 +393,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
           rpcId: request.rpcId,
           expectedRevision: request.revision,
           requestDigest: digest,
+          content: structuredClone(request.content),
           mode: request.mode,
           state: 'reserved',
           reservedAt: this.clock(),
@@ -384,10 +404,21 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
           admissions: [...this.state.admissions, admission],
         })
       }
-      if (this.admitter === undefined) {
+      const admitter = this.runtimeAdmitter ?? this.admitter
+      if (admitter === undefined) {
         throw new Error('member-question-receiver: admitter is required to admit a human turn')
       }
-      await this.admitter(request)
+      const questions = this.state.questions.filter(row => row.receivingSessionId === request.receivingSessionId)
+      /* v8 ignore next -- every persisted receiving Session is created with its first question in one commit. */
+      if (questions[0] === undefined) throw new Error('member-question-receiver: receiving Session has no questions')
+      const context: MemberQuestionHumanTurnAdmissionContext = {
+        receivingAccountId: session.receivingAccountId as PlatformAccountId,
+        projectId: questions[0].operation.projectId,
+        questions: questions.map(row => row.terminal === undefined
+          ? toPendingView(row)
+          : toTerminalView(row)),
+      }
+      await admitter({ ...request, content: structuredClone(admission.content) }, context)
       const revision = this.state.revision + 1
       const committed: PersistedHumanTurnAdmission = {
         ...admission,
@@ -409,6 +440,34 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
       this.scheduleExpiry()
       return admissionResult(committed)
     })
+  }
+
+  override async resumeReservedHumanTurns(): Promise<void> {
+    const reserved = await this.enqueue(() => Promise.resolve(structuredClone(
+      this.state.admissions.filter(admission => admission.state === 'reserved'),
+    )))
+    for (const admission of reserved) {
+      await this.admitHumanTurn({
+        receivingSessionId: admission.receivingSessionId as ReceivingSessionId,
+        revision: admission.expectedRevision,
+        rpcId: admission.rpcId as import('./types.ts').MemberQuestionReceiverRpcId,
+        content: admission.content,
+        mode: admission.mode,
+      })
+    }
+  }
+
+  override registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void {
+    if (this.runtimeAdmitter !== undefined) {
+      throw new Error('member-question-receiver: a Host human-turn admitter is already registered')
+    }
+    this.runtimeAdmitter = admitter
+    const revision = ++this.runtimeAdmitterRevision
+    return () => {
+      if (this.runtimeAdmitterRevision !== revision) return
+      this.runtimeAdmitter = undefined
+      this.runtimeAdmitterRevision += 1
+    }
   }
 
   private async claimAndPersist(
@@ -482,11 +541,21 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
   private currentSnapshot(): MemberQuestionReceiverSnapshot {
     return {
       revision: this.state.revision,
-      pending: this.state.questions.flatMap(question =>
-        question.terminal === undefined ? [toPendingView(question)] : []),
+      pending: this.state.questions.flatMap(question => question.terminal === undefined
+        ? [toPendingView(
+          question,
+          this.materialized(question),
+          this.state.admissions.find(admission => admission.receivingSessionId === question.receivingSessionId
+            && admission.state === 'reserved'),
+        )]
+        : []),
       terminal: this.state.questions.flatMap(question =>
-        question.terminal === undefined ? [] : [toTerminalView(question)]),
+        question.terminal === undefined ? [] : [toTerminalView(question, this.materialized(question))]),
     }
+  }
+
+  private materialized(question: PersistedReceivingQuestion): boolean {
+    return this.state.sessions.find(session => session.id === question.receivingSessionId)?.materialized === true
   }
 
   private async expireDue(): Promise<void> {
@@ -592,13 +661,6 @@ const DEVELOPMENT_LOCAL_TERMINAL_AUTHORITY: MemberQuestionTerminalAuthority = {
   claim: terminal => Promise.resolve({ claimed: true, terminal: structuredClone(terminal) }),
 }
 
-function humanTurnDigest(
-  content: readonly import('./types.ts').MemberQuestionHumanTurnContent[],
-  mode: 'queue' | 'steer',
-): string {
-  return createHash('sha256').update(JSON.stringify({ content, mode })).digest('hex')
-}
-
 function admissionResult(admission: PersistedHumanTurnAdmission): AdmitMemberQuestionHumanTurnResult {
   const revision = admission.committedRevision
   /* v8 ignore next -- persisted parsing and the sole caller require committedRevision before this helper. */
@@ -619,7 +681,11 @@ function ingestResult(question: PersistedReceivingQuestion): MemberQuestionInges
   }
 }
 
-function toPendingView(question: PersistedReceivingQuestion): PendingMemberQuestionView {
+function toPendingView(
+  question: PersistedReceivingQuestion,
+  materialized = false,
+  admission?: PersistedHumanTurnAdmission,
+): PendingMemberQuestionView {
   return {
     questionId: question.questionId as MemberQuestionId,
     receivingSessionId: question.receivingSessionId as ReceivingSessionId,
@@ -627,10 +693,17 @@ function toPendingView(question: PersistedReceivingQuestion): PendingMemberQuest
     revision: question.revision,
     arrivedAt: question.arrivedAt,
     operation: structuredClone(question.operation),
+    ...(materialized ? { hostSessionId: question.receivingSessionId as unknown as import('@deepseek-ai/dsh-session/types').SessionId } : {}),
+    ...(admission === undefined ? {} : {
+      reservedAdmission: {
+        rpcId: admission.rpcId as import('./types.ts').MemberQuestionReceiverRpcId,
+        mode: admission.mode,
+      },
+    }),
   }
 }
 
-function toTerminalView(question: PersistedReceivingQuestion): TerminalMemberQuestionView {
+function toTerminalView(question: PersistedReceivingQuestion, materialized = false): TerminalMemberQuestionView {
   const terminal = question.terminal
   /* v8 ignore next -- currentSnapshot calls this helper only from the terminal-defined branch. */
   if (terminal === undefined) throw new Error('member-question-receiver: terminal projection requires a terminal record')
@@ -642,5 +715,6 @@ function toTerminalView(question: PersistedReceivingQuestion): TerminalMemberQue
     arrivedAt: question.arrivedAt,
     terminal: structuredClone(terminal),
     brief: structuredClone(question.operation),
+    ...(materialized ? { hostSessionId: question.receivingSessionId as unknown as import('@deepseek-ai/dsh-session/types').SessionId } : {}),
   }
 }

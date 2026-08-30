@@ -39,6 +39,8 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'llm/retry-started',
   'member-question/asked',
   'member-question/outcome',
+  'member-question/received',
+  'member-question/settled',
   'permission/preset',
   'plan/mode',
   'request/context',

@@ -38,6 +38,7 @@ function scriptedApi(overrides: {
     memberQuestions: {
       snapshot: r => ok(r, { revision: 0, pending: [], terminal: [] }),
       settle: err,
+      admitHumanTurn: r => ok(r, { accepted: true as const, sessionId: r.payload.receivingSessionId }),
       ...overrides.memberQuestions,
     },
     sessions: {

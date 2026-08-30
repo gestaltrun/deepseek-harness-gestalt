@@ -1262,6 +1262,17 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'input', description: 'Host receiving identity, observed revision, rpc id, content, and mode.' }],
         returns: 'the durable idempotent admission result.',
       },
+      {
+        signature: 'abstract resumeReservedHumanTurns(): Promise<void>',
+        description: 'Resume every durable human action left reserved by an interrupted Host.',
+        parameters: [],
+      },
+      {
+        signature: 'abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void',
+        description: 'Install the single Host materialize-and-admit adapter.',
+        parameters: [{ name: 'admitter', description: 'high-level Host transaction adapter.' }],
+        returns: 'disposer for this exact registration.',
+      },
     ],
   },
   {
@@ -1293,6 +1304,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Query the authoritative first terminal retained for reconnect replay.',
         parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }],
         returns: 'the retained terminal, or undefined while pending or unknown.',
+      },
+    ],
+  },
+  {
+    key: 'memberQuestionWorkspaceBinding',
+    summary: 'Local project-member Workspace association supplied by the Host composition.',
+    description: 'Local project-member Workspace association supplied by the Host composition.',
+    methods: [
+      {
+        signature: 'resolve(accountId: PlatformAccountId, projectId: ProjectId): Promise<Branded<\'WorkspaceId\'>>',
+        description: 'Resolve one authenticated receiver/project pair to an existing Workspace id.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'cloud Project carried by the received operation.' }],
+        returns: 'exact local Workspace identity.',
       },
     ],
   },
@@ -4806,12 +4830,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface MemberQuestionDeclinedResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'declined\';\n}',
   },
   {
-    name: 'MemberQuestionHumanImageContent',
-    declaration: 'export interface MemberQuestionHumanImageContent {\n    readonly type: \'image\';\n    readonly mediaType: string;\n    readonly data: string;\n    readonly name?: string;\n}',
+    name: 'MemberQuestionHumanTurnAdmissionContext',
+    declaration: 'export interface MemberQuestionHumanTurnAdmissionContext {\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[];\n}',
   },
   {
-    name: 'MemberQuestionHumanTextContent',
-    declaration: 'export interface MemberQuestionHumanTextContent {\n    readonly type: \'text\';\n    readonly text: string;\n}',
+    name: 'MemberQuestionHumanTurnAdmitter',
+    declaration: 'export type MemberQuestionHumanTurnAdmitter = (input: AdmitMemberQuestionHumanTurnInput, context: MemberQuestionHumanTurnAdmissionContext) => Promise<MemberQuestionHumanTurnAdmissionReceipt>;',
   },
   {
     name: 'MemberQuestionHumanTurnContent',
@@ -5043,7 +5067,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PendingMemberQuestionView',
-    declaration: 'export interface PendingMemberQuestionView {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly revision: number;\n    readonly arrivedAt: number;\n    readonly operation: CompanionMemberQuestionOperation;\n}',
+    declaration: 'export interface PendingMemberQuestionView {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly revision: number;\n    readonly arrivedAt: number;\n    readonly operation: CompanionMemberQuestionOperation;\n    readonly hostSessionId?: HostSessionId;\n    readonly reservedAdmission?: {\n        readonly rpcId: MemberQuestionReceiverRpcId;\n        readonly mode: \'queue\' | \'steer\';\n    };\n}',
   },
   {
     name: 'PendingPairingId',

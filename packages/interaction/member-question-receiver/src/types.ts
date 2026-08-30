@@ -1,5 +1,8 @@
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
+import type { SessionId as HostSessionId } from '@deepseek-ai/dsh-session/types'
 import type {
   CompanionMemberQuestionAnswer,
   CompanionMemberQuestionOperation,
@@ -26,18 +29,36 @@ export interface AuthenticatedMemberQuestionEnvelope {
 
 /** Pending receiver projection retained without referenced document bodies. */
 export interface PendingMemberQuestionView {
+  /** Stable question identity from the authenticated operation. */
   readonly questionId: MemberQuestionId
+  /** Opaque Host identity of the receiving thread. */
   readonly receivingSessionId: ReceivingSessionId
+  /** Account whose endpoint accepted the operation. */
   readonly receivingAccountId: PlatformAccountId
+  /** Durable receiver revision that published this row. */
   readonly revision: number
+  /** Absolute Unix epoch milliseconds when the Host accepted the operation. */
   readonly arrivedAt: number
+  /** Bounded authenticated member-question operation. */
   readonly operation: CompanionMemberQuestionOperation
+  /** Ordinary Host Session identity after the first explicit human admission. */
+  readonly hostSessionId?: HostSessionId
+  /** Durable retry identity while a human-turn admission remains reserved. */
+  readonly reservedAdmission?: {
+    /** Envelope identity the Client must reuse for the reserved action. */
+    readonly rpcId: MemberQuestionReceiverRpcId
+    /** Original admission mode retained even if the Session begins running. */
+    readonly mode: 'queue' | 'steer'
+  }
 }
 
 /** Terminal receiver record retaining the globally authoritative first claim. */
 export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionView, 'operation'> {
+  /** Globally authoritative first-claim terminal. */
   readonly terminal: CompanionMemberQuestionSettledResult
+  /** Bounded received operation retained for passive record rendering. */
   readonly brief: Omit<CompanionMemberQuestionOperation, 'questions'> & {
+    /** Original question batch retained with the terminal record. */
     readonly questions: CompanionMemberQuestionOperation['questions']
   }
 }
@@ -110,26 +131,22 @@ export type MemberQuestionReceiverSettlement =
   }
 
 /** Human-authored text handed to the future Host Session adapter. */
-export interface MemberQuestionHumanTextContent {
+interface MemberQuestionHumanTextContent {
   /** Content discriminant. */
   readonly type: 'text'
   /** Human-authored text. */
   readonly text: string
 }
 
-/** Human-selected image handed to the future Host Session adapter. */
-export interface MemberQuestionHumanImageContent {
+/** Human-selected image committed by the Host attachment service before reservation. */
+interface MemberQuestionHumanImageContent {
   /** Content discriminant. */
   readonly type: 'image'
-  /** Browser-declared image media type. */
-  readonly mediaType: string
-  /** Base64 payload consumed by the future Host adapter. */
-  readonly data: string
-  /** Optional human-facing file name. */
-  readonly name?: string
+  /** Durable normalized attachment; raw browser bytes never enter the receiver ledger. */
+  readonly attachment: ImageAttachmentRef
 }
 
-/** High-level human content handed to the future Host Session adapter. */
+/** Durable human content handed to the Host Session adapter. */
 export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent
 
 /** One explicit human turn addressed to a receiving Session. */
@@ -140,7 +157,7 @@ export interface AdmitMemberQuestionHumanTurnInput {
   readonly revision: number
   /** Stable idempotency identity retained across retries. */
   readonly rpcId: MemberQuestionReceiverRpcId
-  /** Human-authored content excluded from the receiver ledger body. */
+  /** Human-authored content retained durably for crash-safe admission replay. */
   readonly content: readonly MemberQuestionHumanTurnContent[]
   /** Ordinary Host queue or steering admission mode. */
   readonly mode: 'queue' | 'steer'
@@ -155,9 +172,30 @@ export interface AdmitMemberQuestionHumanTurnResult {
 }
 
 /** Successful high-level Host adapter admission. */
-export interface MemberQuestionHumanTurnAdmissionReceipt {
+interface MemberQuestionHumanTurnAdmissionReceipt {
   /** The adapter materialized and admitted the human turn. */
   readonly accepted: true
+}
+
+/** Durable receiver facts needed by one Host materialize-and-admit operation. */
+export interface MemberQuestionHumanTurnAdmissionContext {
+  /** Account whose local workspace receives the Host Session. */
+  readonly receivingAccountId: PlatformAccountId
+  /** Cloud project whose accepted membership selects that workspace. */
+  readonly projectId: ProjectId
+  /** Every retained question on this receiving thread, in arrival order. */
+  readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[]
+}
+
+/** Local project-member Workspace association supplied by the Host composition. */
+export interface MemberQuestionWorkspaceBinding {
+  /**
+   * Resolve one authenticated receiver/project pair to an existing Workspace id.
+   * @param accountId - authenticated receiving Account.
+   * @param projectId - cloud Project carried by the received operation.
+   * @returns exact local Workspace identity.
+   */
+  resolve(accountId: PlatformAccountId, projectId: ProjectId): Promise<Branded<'WorkspaceId'>>
 }
 
 /**
@@ -166,7 +204,33 @@ export interface MemberQuestionHumanTurnAdmissionReceipt {
  */
 export type MemberQuestionHumanTurnAdmitter = (
   input: AdmitMemberQuestionHumanTurnInput,
+  context: MemberQuestionHumanTurnAdmissionContext,
 ) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /** Bounded Decision Brief metadata received from another project member. */
+    'member-question/received': {
+      questionId: MemberQuestionId
+      projectId: ProjectId
+      originSessionId: HostSessionId
+      arrivedAt: number
+      expiresAt: number
+      origin: CompanionMemberQuestionOperation['origin']
+      background: string
+      questions: CompanionMemberQuestionOperation['questions']
+      references: CompanionMemberQuestionOperation['references']
+    }
+    /** Canonical terminal metadata for one received member question. */
+    'member-question/settled': CompanionMemberQuestionSettledResult
+  }
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    memberQuestionWorkspaceBinding: MemberQuestionWorkspaceBinding
+  }
+}
 
 /** Injectable scheduler used for the one earliest authoritative expiry. */
 export interface MemberQuestionReceiverTimer {

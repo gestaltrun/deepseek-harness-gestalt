@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createHash } from 'node:crypto'
 import {
   parseCompanionOperationId,
   parseCompanionSessionId,
@@ -12,6 +13,8 @@ import {
 } from '../src/persisted-state.ts'
 
 function validState(): PersistedReceiverState {
+  const reservedContent = [{ type: 'text' as const, text: 'reserved' }]
+  const committedContent = [{ type: 'text' as const, text: 'committed' }]
   const operation = {
     type: 'member-question' as const,
     operationId: parseCompanionOperationId('operation-persisted'),
@@ -76,7 +79,10 @@ function validState(): PersistedReceiverState {
         receivingSessionId: 'receiving-persisted',
         rpcId: 'rpc-reserved',
         expectedRevision: 2,
-        requestDigest: 'digest-reserved',
+        requestDigest: createHash('sha256').update(JSON.stringify({
+          content: reservedContent, mode: 'queue',
+        })).digest('hex'),
+        content: reservedContent,
         mode: 'queue',
         state: 'reserved',
         reservedAt: 5,
@@ -85,7 +91,10 @@ function validState(): PersistedReceiverState {
         receivingSessionId: 'receiving-persisted',
         rpcId: 'rpc-committed',
         expectedRevision: 2,
-        requestDigest: 'digest-committed',
+        requestDigest: createHash('sha256').update(JSON.stringify({
+          content: committedContent, mode: 'steer',
+        })).digest('hex'),
+        content: committedContent,
         mode: 'steer',
         state: 'committed',
         reservedAt: 6,
@@ -103,6 +112,28 @@ function document(): Record<string, unknown> {
 describe('member-question receiver durable state', () => {
   it('round-trips pending, terminal, reserved, and committed rows', () => {
     expect(parseReceiverState(serializeReceiverState(validState()))).toEqual(validState())
+  })
+
+  it('validates an image admission independently of durable object key order', () => {
+    const durable = document()
+    const admission = (durable.admissions as Array<Record<string, unknown>>)[0]!
+    const content = [{
+      type: 'image',
+      attachment: {
+        attachmentId: `sha256:${'a'.repeat(64)}`,
+        mediaType: 'image/png',
+        width: 1,
+        height: 1,
+        bytes: 68,
+        name: 'decision.png',
+      },
+    }]
+    admission.content = content
+    admission.requestDigest = createHash('sha256').update(JSON.stringify({
+      content, mode: admission.mode,
+    })).digest('hex')
+
+    expect(parseReceiverState(JSON.stringify(durable)).admissions[0]?.content).toEqual(content)
   })
 
   it('rejects invalid JSON, non-object roots, foreign versions, and missing collections', () => {

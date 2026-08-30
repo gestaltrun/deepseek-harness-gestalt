@@ -11,12 +11,12 @@ Host-owned Service Definition, file Provider, and authenticated-ingress Consumer
 - `ingest(envelope)` accepts a decoded `member-question` operation only beside the receiver Account authority established by the authenticated endpoint. Replay of the same question is idempotent; conflicting authority or content fails. The Host creates and persists an opaque `ReceivingSessionId` for `(originSessionId, receiver Account)` and never derives an id from `mq-recv` or trusts an addressee inside plaintext.
 - `snapshot()` returns the complete committed revision with pending questions and terminal records. `changes(listener)` publishes the same authoritative projection only after atomic durable replacement; one throwing listener cannot starve another.
 - `settle(questionId, settlement)` proposes an explicit `answered` or `declined` terminal through the configured first-claim authority, or applies an authoritative transport claim. The retained terminal is canonical, including a losing local claim; human terminals retain typed Installation id, device name, time, and any answered values, while `expired`, `withdrawn`, and `superseded` remain system terminals.
-- `admitHumanTurn({ receivingSessionId, revision, rpcId, content, mode })` reserves the stable `rpcId` durably, calls one injected high-level materialize-and-admit adapter, and commits after success. A failed adapter or post-admission file commit leaves the reservation retryable. The adapter must be idempotent by `rpcId`; callers never receive separate Session-create and prompt operations.
+- `admitHumanTurn({ receivingSessionId, revision, rpcId, content, mode })` reserves the stable `rpcId`, normalized content, mode, and digest durably, projects that reserved id and mode for Client restart, calls one injected high-level materialize-and-admit adapter, and commits after success. A failed adapter or post-admission file commit leaves the exact action retryable; replay under the same `rpcId` rejects different content. The adapter must be idempotent by `rpcId`; callers never receive separate Session-create and prompt operations.
 - `createAuthenticatedMemberQuestionIngress(receiver)` is the package-folded Consumer adapter for a future authenticated endpoint. It accepts only an `AuthenticatedMemberQuestionEnvelope`; authentication remains the endpoint's responsibility.
 
 ## Persistence and ordering
 
-The Provider writes one owner-only JSON document at `<storagePath>/<environment>/member-question-receiver.json` through random-sibling atomic replacement. The format stores bounded origin, background, question/options, reference path/reason metadata, route identity, terminal metadata, and SHA-256 admission request digests. It never stores referenced document bodies or human-turn content.
+The Provider writes one owner-only JSON document at `<storagePath>/<environment>/member-question-receiver.json` through random-sibling atomic replacement. The format stores bounded origin, background, question/options, reference path/reason metadata, route identity, terminal metadata, and each reserved human action as text plus durable attachment references under a SHA-256 request digest. Referenced document bodies and raw browser image bytes remain outside this ledger.
 
 One serialized transaction owner orders load, arrival, terminal publication, file commit, admission reservation, materialization, and admission commit. A newer same-route ask becomes pending only after the previous pending ask's canonical `superseded` or already-due `expired` terminal commits. The one earliest-deadline scheduler claims and persists expiry; publication failure retries after `terminalRetryMs`. Startup settles overdue rows before reads become available, so restart cannot revive an expired card. Disposal clears timers and listeners, waits for the transaction tail, and retains the ledger.
 
@@ -37,9 +37,9 @@ None, as authenticated arrival, receiver projection, terminal settlement, and re
 
 #### KV Cache effect
 
-No direct token cost or cache invalidation. The future Host adapter owns the ordinary Session request produced after explicit human admission.
+Arrival and terminal browsing have no token cost or cache invalidation. The Host admission adapter produces one ordinary Session request only after explicit human submission, with each not-yet-admitted bounded brief logged before the human prompt.
 
 ## Known Limitations and Deferred Work
 
-- **Human-turn materialization remains deferred** — the shipped API Proxy and Client Runtime consume receiver snapshots and settle answers or declines without creating a Host Session. The high-level admission adapter is defined here but is not mounted by the Web composition, so the receiving Session composer stays disabled.
+- **Admission requires one authoritative local Workspace binding** — the Host resolves the receiver Account and Project through the composed binding or project-membership link. A missing or ambiguous association fails the single admission RPC without exposing Session creation or prompt compensation to the Client.
 - **Cross-machine terminal authority remains injected** — real multi-Installation first-claim publication depends on the project-registry transport. A composition without that authority can retain future pending arrivals but fails closed before decline, expiry, or supersession.

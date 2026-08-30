@@ -2550,6 +2550,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       settle: request => err(request, {
         code: 'internal', message: 'fixture has no member-question receiver', details: {},
       }),
+      admitHumanTurn: request => err(request, {
+        code: 'internal', message: 'fixture has no member-question receiver', details: {},
+      }),
     },
     sessions: {
       list: request => ok(request, { items: [...sessions].sort((a, b) => b.updatedAt - a.updatedAt) }),
@@ -3485,6 +3488,7 @@ export class FixtureApiClient extends AbstractApiClient {
     switch (method) {
       case 'memberQuestion.snapshot': return this.api.memberQuestions.snapshot(request)
       case 'memberQuestion.settle': return this.api.memberQuestions.settle(request)
+      case 'memberQuestion.admitHumanTurn': return this.api.memberQuestions.admitHumanTurn(request)
       case 'session.list': return this.api.sessions.list(request)
       case 'session.search': return this.api.sessions.search(request, signal)
       case 'session.create': return this.api.sessions.create(request)

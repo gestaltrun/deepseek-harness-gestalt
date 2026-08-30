@@ -72,6 +72,7 @@ export function fakeRemote(): SessionRemotes {
 export class FakeApiClient implements IApiClient {
   /** Chronological call record: [method, payload]. */
   readonly calls: { method: string; payload: unknown }[] = []
+  readonly memberQuestionAdmissionRpcIds: string[] = []
 
   onMemberQuestionSnapshot: IApiClient['memberQuestions']['snapshot'] = () => Promise.resolve(ok({
     revision: 0, pending: [], terminal: [],
@@ -82,9 +83,18 @@ export class FakeApiClient implements IApiClient {
     settledByInstallationId: 'fake-installation' as never,
     settledByDeviceName: 'Fake', settledAt: 1,
   }))
+  onMemberQuestionAdmit: IApiClient['memberQuestions']['admitHumanTurn'] = payload => Promise.resolve(ok({
+    accepted: true, sessionId: payload.receivingSessionId,
+  }))
   readonly memberQuestions: IApiClient['memberQuestions'] = {
     snapshot: (payload, signal) => this.record('memberQuestion.snapshot', payload, this.onMemberQuestionSnapshot(payload, signal)),
     settle: (payload, signal) => this.record('memberQuestion.settle', payload, this.onMemberQuestionSettle(payload, signal)),
+    admitHumanTurn: (payload, signal, rpcId) => {
+      if (rpcId !== undefined) this.memberQuestionAdmissionRpcIds.push(rpcId)
+      return this.record(
+        'memberQuestion.admitHumanTurn', payload, this.onMemberQuestionAdmit(payload, signal, rpcId),
+      )
+    },
   }
 
   // Programmable slots (defaults answer OK-empty); reassign per case.

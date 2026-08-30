@@ -207,3 +207,10 @@ export type MemberQuestionComposerProps =
      */
     focusDocument: (sessionId: SessionId, document: DetailsDocumentFocus) => void
   }
+
+/** Additive input-dock carrier that leaves the product composer mounted. */
+export type MemberQuestionDockProps =
+  PropsRuntime<'conversation.input.dock'>
+  & PropsLocale<'member-question'>
+  & { questionT: TranslateNS<'question'> }
+  & Pick<MemberQuestionComposerProps, 'focusDocument'>

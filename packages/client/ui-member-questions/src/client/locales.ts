@@ -20,6 +20,8 @@ export const zh = {
   'record.expired': '已过期',
   'record.withdrawn': '已撤回',
   'record.superseded': '已被新问题取代',
+  'agent.placeholder': '向我的智能体咨询这个问题',
+  'agent.submit': '发送消息',
 } satisfies Record<string, string>
 
 /** The member-question namespace key union. */
@@ -45,4 +47,6 @@ export const en = {
   'record.expired': 'Expired',
   'record.withdrawn': 'Withdrawn',
   'record.superseded': 'Superseded by a newer question',
+  'agent.placeholder': 'Ask my agent about this question',
+  'agent.submit': 'Send message',
 } satisfies Record<MemberQuestionKey, string>

@@ -25,6 +25,7 @@ import type { MemberQuestionsApi } from './member-questions.ts'
 export interface RpcMethodMap {
   'memberQuestion.snapshot': MemberQuestionsApi['snapshot']
   'memberQuestion.settle': MemberQuestionsApi['settle']
+  'memberQuestion.admitHumanTurn': MemberQuestionsApi['admitHumanTurn']
   'session.list': SessionsApi['list']
   'session.search': SessionsApi['search']
   'session.create': SessionsApi['create']

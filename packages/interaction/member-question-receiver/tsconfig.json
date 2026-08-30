@@ -5,10 +5,13 @@
   "references": [
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
+    { "path": "../../attachment/attachment" },
     { "path": "../../util/atomic-write" },
     { "path": "../../util/brand" },
     { "path": "../../platform/platform-account" },
+    { "path": "../../platform/project-membership" },
     { "path": "../../platform/remote-protocol" },
+    { "path": "../../core/session" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }

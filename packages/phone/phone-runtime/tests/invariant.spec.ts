@@ -97,7 +97,7 @@ describe('phone runtime invariant companion', () => {
       devices: [wireDevice('SIM-1', 'ios', 'simulator', 'offline')],
     })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const context = new Context()
     contexts.push(context)
     await context.plugin(InvariantRegistry).await()
@@ -128,7 +128,7 @@ describe('phone runtime invariant companion', () => {
       devices: [wireDevice('SIM-1', 'ios', 'simulator', 'offline')],
     })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     const context = new Context()
     contexts.push(context)
     // The invariant companion stays unmounted, so this test owns the seat.

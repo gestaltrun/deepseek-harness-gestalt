@@ -540,7 +540,7 @@ describe('createDesktopSub2Api', () => {
     const originalSources = process.env[SUB2API_SOURCES_ENV]
     try {
       process.env['DSH_HOME'] = root
-      process.env[SUB2API_SOURCES_ENV] = undefined
+      delete process.env.DSH_DESKTOP_SUB2API_SOURCES
       const host: Sub2ApiHostControl = { restart: async () => 'http://127.0.0.1:12/', origin: () => undefined }
       const actions = await createDesktopSub2Api({ fetch, host })
       expect(actions.getSnapshot().state).toBe('missing')
@@ -554,7 +554,7 @@ describe('createDesktopSub2Api', () => {
     } finally {
       if (originalHome === undefined) delete process.env['DSH_HOME']
       else process.env['DSH_HOME'] = originalHome
-      if (originalSources === undefined) process.env[SUB2API_SOURCES_ENV] = undefined
+      if (originalSources === undefined) delete process.env.DSH_DESKTOP_SUB2API_SOURCES
       else process.env[SUB2API_SOURCES_ENV] = originalSources
     }
   })

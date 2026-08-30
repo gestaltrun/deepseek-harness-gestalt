@@ -35,13 +35,13 @@ describe('resolveSub2ApiSourcesPath', () => {
   it('prefers the environment override over the file beside the main entry', () => {
     const original = process.env[SUB2API_SOURCES_ENV]
     try {
-      process.env[SUB2API_SOURCES_ENV] = undefined
+      delete process.env.DSH_DESKTOP_SUB2API_SOURCES
       const moduleUrl = 'file:///app/out/main.mjs'
       expect(resolveSub2ApiSourcesPath(moduleUrl)).toBe('/app/out/sub2api-sources.json')
       process.env[SUB2API_SOURCES_ENV] = '/custom/sources.json'
       expect(resolveSub2ApiSourcesPath(moduleUrl)).toBe('/custom/sources.json')
     } finally {
-      if (original === undefined) process.env[SUB2API_SOURCES_ENV] = undefined
+      if (original === undefined) delete process.env.DSH_DESKTOP_SUB2API_SOURCES
       else process.env[SUB2API_SOURCES_ENV] = original
     }
   })
@@ -95,7 +95,7 @@ describe('readDesktopSub2ApiSources', () => {
   }
 
   function restore(original: string | undefined): void {
-    if (original === undefined) process.env[SUB2API_SOURCES_ENV] = undefined
+    if (original === undefined) delete process.env.DSH_DESKTOP_SUB2API_SOURCES
     else process.env[SUB2API_SOURCES_ENV] = original
   }
 })

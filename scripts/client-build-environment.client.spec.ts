@@ -182,6 +182,16 @@ describe('client build environment', () => {
     expect(() => { writeClientBuildRecord(fixtureRoot, {}) }).toThrow(/dynamic client source maps are invalid/)
   })
 
+  it('rejects repository TypeScript sources outside the public packages or vendor trees', () => {
+    const fixtureRoot = buildFixture({})
+    const mapPath = join(fixtureRoot, 'packages/client/example/lib/client.cjs.map')
+    write(mapPath, JSON.stringify({ version: 3, sources: ['../../../src/client/index.ts'] }))
+
+    expect(collectDynamicClientSourceMapViolations(fixtureRoot)).toEqual([
+      'packages/client/example/lib/client.cjs.map: ../../../src/client/index.ts',
+    ])
+  })
+
   it('keeps public client values out of workflow-wide environments', () => {
     for (const name of dshBuildWorkflows) {
       const path = `.github/workflows/${name}`

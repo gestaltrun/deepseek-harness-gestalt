@@ -255,6 +255,12 @@ export function collectDynamicClientSourceMapViolations(root: string): string[] 
       if (/(?:^|\/)lib\/types\/.*\.js$/u.test(normalized)
         || /(?:^|\/)types\/.*\.js$/u.test(normalized)) {
         violations.push(`${path}: ${source}`)
+        continue
+      }
+      if (/\.(?:ts|tsx)$/u.test(normalized) && !normalized.includes('/node_modules/')
+        && !/^\.\.\/\.\.\/\.\.\/packages\/[^/]+\/[^/]+\/src\//u.test(normalized)
+        && !/^\.\.\/\.\.\/\.\.\/\.\.\/vendor\/[^/]+\/src\//u.test(normalized)) {
+        violations.push(`${path}: ${source}`)
       }
     }
   }

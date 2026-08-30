@@ -7,9 +7,7 @@
  * keep it in sync with package.json `name`). The registry channel is omitted.
  *
  * The bundle replicates the official DSH client-bundle preset
- * (packages/client/tsdown.client.ts) and are compiled from the same
- * src/client/index.tsx source — only the registered id and the output file
- * name differ, so they cannot drift:
+ * (packages/client/tsdown.client.ts) and compiles src/client/index.tsx:
  * - externals resolve through the loader module table at runtime (the
  *   PLATFORM_MODULES seed list from apps/web's platform.ts, plus the
  *   runtime/client exemption),
@@ -23,7 +21,7 @@
  *
  * Lazy chunks (lib/client-<name>.js): the heavy preview/terminal libraries
  * (CodeMirror, xterm) build as two standalone chunk bundles
- * (src/client/chunks/<name>.tsx), shared by both channels. Each script
+ * (src/client/chunks/<name>.tsx). Each script
  * assigns its factory to the plugin-owned global registry
  * (globalThis.__dshChunks__) and is fetched by
  * the client on first use from the plugin's own /sidebar/bundle route —
@@ -87,7 +85,8 @@ const INLINE_SAFE = /^@deepseek-ai\/dsh-(host-apiproxy|session|llm|tools|brand)(
 const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
 const CSS_VIRTUAL_SUFFIX = '.mjs'
 
-const REPOSITORY_ROOT = fileURLToPath(new URL('.', import.meta.url))
+const PACKAGE_ROOT = fileURLToPath(new URL('.', import.meta.url))
+const REPOSITORY_ROOT = fileURLToPath(new URL('../../../', import.meta.url))
 
 let snapshotDtsEmitted = false
 
@@ -104,7 +103,7 @@ function emitSnapshotDts(): BuildPlugin {
       snapshotDtsEmitted = true
       const tsc = fileURLToPath(new URL('../../../node_modules/typescript/bin/tsc', import.meta.url))
       const result = spawnSync(process.execPath, [tsc, '-p', 'tsconfig.dts.json', '--pretty', 'false'], {
-        cwd: REPOSITORY_ROOT,
+        cwd: PACKAGE_ROOT,
         encoding: 'utf8',
       })
       if (result.status !== 0) {
@@ -139,11 +138,7 @@ function browserSourcePath(source: string, sourcemapPath: string): string {
 }
 
 /**
- * One client bundle build for a plugin id. The same src/client/index.tsx is
- * compiled twice with only the registered id and the output file name
- * differing: the official channel uses the package name (`dsh-better-sidebar`)
- * and the registry channel uses the manifest id
- * (`dsh-external/dsh-better-sidebar`).
+ * Build the official client bundle registered under its package id.
  * @param pluginId - the `__ModuleLoader__.load({ id })` value and the
  *   data-plugin style-tag prefix of this bundle.
  * @param entryFile - the output file name under lib/.
@@ -208,9 +203,8 @@ function clientBundle(pluginId: string, entryFile: string): UserConfig {
  * loader (src/client/chunk-loader.ts) materializes it with a require built
  * from the module table's seed words.
  *
- * Chunk css tags use the constant plugin id `dsh-better-sidebar` (matching
- * the official channel; the registry channel re-injects an identical copy
- * of the shared module css — same content, no functional impact).
+ * Chunk css tags use the package id `dsh-better-sidebar` to match the
+ * official client bundle.
  * @param name - chunk name; entry src/client/chunks/<name>.tsx, output
  *   lib/client-<name>.js. Keep in sync with CHUNK_NAMES in src/bundle-route.ts.
  */

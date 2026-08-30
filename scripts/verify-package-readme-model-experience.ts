@@ -79,6 +79,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/client/ui-layout': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/ui-sidebar': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/ui-desktop': { kind: 'none', reason: 'Desktop-only UI plugin layer; registers nothing model-facing.' },
+  'packages/client/ui-phone': { kind: 'none', reason: 'The browser UI and Host settings namespace register no prompt, tool schema, session event, or provider request.' },
   'packages/platform/platform-account': { kind: 'none', reason: 'Platform identity service; Account state never enters a model request.' },
   'packages/platform/platform-account-core': { kind: 'none', reason: 'Platform identity provider; Account state never enters a model request.' },
   'packages/platform/platform-account-http': { kind: 'none', reason: 'Platform identity HTTP consumer; Account state never enters a model request.' },

@@ -8,14 +8,11 @@
  * @module fixtures/r4-upstream-stream
  */
 
-/** Upstream response content type exactly as the real backend declares it. */
-export const R4_UPSTREAM_CONTENT_TYPE = 'multipart/x-mixed-replace; boundary=BoundaryString'
-
 /** Notification family boundary (declared in the content type). */
-export const R4_NOTIFICATION_BOUNDARY = 'BoundaryString'
+const R4_NOTIFICATION_BOUNDARY = 'BoundaryString'
 
 /** Image family boundary (undeclared; appears mid-stream). */
-export const R4_FRAME_BOUNDARY = 'mjpeg-frame-boundary'
+const R4_FRAME_BOUNDARY = 'mjpeg-frame-boundary'
 
 /** Canonical baseline 1×1 JPEG standing in for the captured 1206×2622 frames. */
 export const R4_FRAME = Buffer.from(

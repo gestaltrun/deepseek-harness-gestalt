@@ -671,6 +671,11 @@
         "@deepseek-ai/dsh-client-ui-better-sidebar"
       ]
     },
+    "packages/client/ui-phone": {
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-client-ui-better-sidebar"
+      ]
+    },
     "packages/client/web": {
       "project": [
         "src/**/*.ts",
@@ -734,6 +739,12 @@
         "src/**/*.ts",
         "scripts/**/*.mjs",
         "tests/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "@deepseek-ai/dsh-client-ui-phone",
+        "@deepseek-ai/dsh-phone-runtime",
+        "@deepseek-ai/dsh-phone-stream",
+        "@deepseek-ai/dsh-tool-phone"
       ]
     },
     "apps/platform": {

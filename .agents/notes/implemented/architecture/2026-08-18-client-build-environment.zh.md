@@ -22,7 +22,7 @@ Vite 配置与动态 client bundle 的共享 tsdown preset 使用同一 define �
 
 ## Alternatives considered
 
-**只在 Vite 中替换。** 动态插件的 `lib/client.js` 作为独立脚本由浏览器加载，不进入 Vite 模块图，表达式会残留到无 `process` 的浏览器。
+**只在 Vite 中替换。** 动态插件的 `lib/client.cjs` 作为独立脚本由浏览器加载，不进入 Vite 模块图，表达式会残留到无 `process` 的浏览器。
 
 **公开全部 `DSH_*`。** 仓库中的 Host、测试和 CI 变量使用该前缀，其中可能包含凭据或本地路径；更窄的 `DSH_CLIENT_*` 让公开意图可审计。
 

@@ -59,11 +59,11 @@ it('rebuilds a client-plugin bundle after its source changes', async () => {
 import { defineConfig } from 'tsdown'
 export default defineConfig({
   entry: { client: 'src.ts' }, outDir: 'lib', format: 'cjs', platform: 'browser', dts: false, clean: false,
-  outputOptions: { entryFileNames: 'client.js' },
+  outputOptions: { entryFileNames: 'client.cjs' },
 })
 `)
     const sourcePath = join(root, 'src.ts')
-    const bundlePath = join(root, 'lib/client.js')
+    const bundlePath = join(root, 'lib/client.cjs')
     await writeFile(sourcePath, 'export const version = "watch-v1"\n')
     bundles = await watchClientPlugins(root, ['.'], 50)
     expect(await readFile(bundlePath, 'utf8')).toContain('watch-v1')

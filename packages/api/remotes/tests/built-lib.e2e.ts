@@ -15,16 +15,16 @@ const artifact = (path: string): string => join(root, path)
 const artifactUrl = (path: string): string => pathToFileURL(artifact(path)).href
 
 const requiredArtifacts = [
-  'packages/client/connection/lib/client.js',
+  'packages/client/connection/lib/client.cjs',
   'packages/client/connection/lib/index.js',
-  'packages/api/remotes/lib/client.js',
+  'packages/api/remotes/lib/client.cjs',
   'packages/core/agent/lib/index.js',
   'packages/core/session/lib/index.js',
   'packages/goal/goal/lib/index.js',
   'packages/goal/goal/lib/typert.host.js',
-  'packages/api/gateway/lib/client.js',
+  'packages/api/gateway/lib/client.cjs',
   'packages/api/gateway/lib/index.js',
-  'packages/typert/registry/lib/client.js',
+  'packages/typert/registry/lib/client.cjs',
   'packages/typert/registry/lib/index.js',
 ].every(path => existsSync(artifact(path)))
 
@@ -32,15 +32,15 @@ describe.skipIf(!requiredArtifacts)('Goal Remote built LIB chain', () => {
   it('runs root and Agent-scoped calls through generated bundles and real HTTP', async () => {
     const urls = Object.fromEntries(Object.entries({
       agent: 'packages/core/agent/lib/index.js',
-      apiGatewayClient: 'packages/api/gateway/lib/client.js',
+      apiGatewayClient: 'packages/api/gateway/lib/client.cjs',
       apiGatewayHost: 'packages/api/gateway/lib/index.js',
-      connectionClient: 'packages/client/connection/lib/client.js',
+      connectionClient: 'packages/client/connection/lib/client.cjs',
       connectionHost: 'packages/client/connection/lib/index.js',
       goal: 'packages/goal/goal/lib/index.js',
       goalTypert: 'packages/goal/goal/lib/typert.host.js',
-      registryClient: 'packages/typert/registry/lib/client.js',
+      registryClient: 'packages/typert/registry/lib/client.cjs',
       registryHost: 'packages/typert/registry/lib/index.js',
-      remotesClient: 'packages/api/remotes/lib/client.js',
+      remotesClient: 'packages/api/remotes/lib/client.cjs',
       session: 'packages/core/session/lib/index.js',
     }).map(([key, path]) => [key, artifactUrl(path)]))
     const script = `

@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { DYNAMIC_CLIENT_ARTIFACT } from './client-artifact-contract.ts'
 
 /** Prefix reserved for build-time values that may be embedded in browser artifacts. */
 const CLIENT_BUILD_ENV_PREFIX = 'DSH_CLIENT_'
@@ -31,9 +32,12 @@ export const CLIENT_BUILD_RECORD_PATH = '.dsh-build/client-build-environment.jso
 const CLIENT_BUILD_RECORD_FORMAT = 1
 const CLIENT_ARTIFACT_PATTERNS = [
   'apps/web/dist/**/*',
-  'packages/*/*/lib/client.js',
-  'packages/*/*/lib/client.js.map',
+  `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.relativePath}`,
+  `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.sourceMapPath}`,
 ] as const
+const DYNAMIC_CLIENT_SOURCE_MAP_PATTERN = `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.sourceMapPath}`
+const DYNAMIC_CLIENT_BUNDLE_PATTERN = `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.relativePath}`
+const CLIENT_MANIFEST_PATTERNS = ['packages/*/*/package.json', 'apps/*/package.json', 'vendor/*/package.json']
 
 /** Public values embedded in one set of client artifacts. */
 export type ClientBuildEnvironment = Readonly<Record<string, string>>
@@ -198,6 +202,10 @@ export function writeClientBuildRecord(
   root: string,
   environment: ClientBuildEnvironment,
 ): ClientBuildRecord {
+  const sourceMapViolations = collectDynamicClientSourceMapViolations(root)
+  if (sourceMapViolations.length > 0) {
+    throw new Error(`dynamic client source maps are invalid:\n${sourceMapViolations.join('\n')}`)
+  }
   const record: ClientBuildRecord = {
     formatVersion: CLIENT_BUILD_RECORD_FORMAT,
     environment: clientBuildEnvironment(environment),
@@ -207,6 +215,77 @@ export function writeClientBuildRecord(
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`)
   return record
+}
+
+/**
+ * Find dynamic client maps whose browser frames stop at emitted tsc JavaScript.
+ * @param root - repository root containing generated dynamic client bundles.
+ * @returns sorted map-and-source diagnostics for invalid artifacts.
+ */
+export function collectDynamicClientSourceMapViolations(root: string): string[] {
+  const violations: string[] = []
+  const paths = globSync(DYNAMIC_CLIENT_SOURCE_MAP_PATTERN, { cwd: root })
+    .map(path => path.replaceAll('\\', '/'))
+    .sort()
+  const sourceMapPaths = new Set(paths)
+  const bundlePaths = globSync(DYNAMIC_CLIENT_BUNDLE_PATTERN, { cwd: root })
+    .map(path => path.replaceAll('\\', '/'))
+    .sort()
+
+  for (const manifestPath of globSync(CLIENT_MANIFEST_PATTERNS, { cwd: root }).sort()) {
+    const manifest: unknown = JSON.parse(readFileSync(resolve(root, manifestPath), 'utf8'))
+    if (!isObject(manifest) || !isObject(manifest.dsh) || !isObject(manifest.dsh.client)) continue
+    const packageDirectory = dirname(manifestPath).replaceAll('\\', '/')
+    const bundlePath = `${packageDirectory}/${DYNAMIC_CLIENT_ARTIFACT.relativePath}`
+    const sourceMapPath = `${packageDirectory}/${DYNAMIC_CLIENT_ARTIFACT.sourceMapPath}`
+    if (!existsSync(resolve(root, bundlePath))) violations.push(`${bundlePath}: missing`)
+    if (!existsSync(resolve(root, sourceMapPath))) violations.push(`${sourceMapPath}: missing`)
+  }
+
+  for (const bundlePath of bundlePaths) {
+    const sourceMapPath = `${bundlePath}.map`
+    if (!sourceMapPaths.has(sourceMapPath)) violations.push(`${sourceMapPath}: missing`)
+  }
+
+  for (const path of paths) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(readFileSync(resolve(root, path), 'utf8'))
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      violations.push(`${path}: invalid JSON: ${detail}`)
+      continue
+    }
+    if (!isObject(parsed) || !Array.isArray(parsed.sources)
+      || !parsed.sources.every(source => typeof source === 'string')) {
+      violations.push(`${path}: sources must be a string array`)
+      continue
+    }
+    if (!Array.isArray(parsed.sourcesContent)
+      || parsed.sourcesContent.length !== parsed.sources.length
+      || !parsed.sourcesContent.every(content => typeof content === 'string')) {
+      violations.push(`${path}: sourcesContent must contain one string per source`)
+    }
+    for (const source of parsed.sources) {
+      const normalized = source.replaceAll('\\', '/')
+      if (/(?:^|\/)lib\/types\/.*\.js$/u.test(normalized)
+        || /(?:^|\/)types\/.*\.js$/u.test(normalized)) {
+        violations.push(`${path}: ${source}`)
+        continue
+      }
+      if (/^\.\.\/\.\.\/\.\.\/packages\/[^/]+\/[^/]+\/lib\/.*\.js$/u.test(normalized)
+        && !normalized.endsWith('/lib/typert.remote-client.js')) {
+        violations.push(`${path}: ${source}`)
+        continue
+      }
+      if (/\.(?:ts|tsx)$/u.test(normalized) && !normalized.includes('/node_modules/')
+        && !/^\.\.\/\.\.\/\.\.\/packages\/[^/]+\/[^/]+\/src\//u.test(normalized)
+        && !/^\.\.\/\.\.\/\.\.\/\.\.\/vendor\/[^/]+\/src\//u.test(normalized)) {
+        violations.push(`${path}: ${source}`)
+      }
+    }
+  }
+  return [...new Set(violations)].sort()
 }
 
 /**

@@ -343,7 +343,7 @@ Remote DTS、Remote JS、`TypertClientRemote`、`InvocationDescriptor`、Remote 
 
 TUI 的 runtime 挂载、carrier、Agent Scope 关联和 SRC 启动接线均仍延后，不在本决策之内。
 
-Web 本身依赖 `lib/client.js` 等构建产物，因此启动 Web 前要求完整 `build:lib`。Host Remote 约定变化后，开发者需重新执行 lib build，再启动或重启 Web；系统不实现 Remote contract 的增量 watch。
+Web 本身依赖 `lib/client.cjs` 等构建产物，因此启动 Web 前要求完整 `build:lib`。Host Remote 约定变化后，开发者需重新执行 lib build，再启动或重启 Web；系统不实现 Remote contract 的增量 watch。
 
 ## SRC 与 LIB 运行模式
 

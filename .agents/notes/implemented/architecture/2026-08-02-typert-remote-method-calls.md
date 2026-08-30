@@ -343,7 +343,7 @@ A future TUI can join the same call abstraction without changing business decora
 
 TUI runtime mounting, carriers, Agent Scope association, and SRC startup wiring remain deferred outside this decision.
 
-The Web already depends on build artifacts such as `lib/client.js`, so it requires a complete `build:lib` before startup. After the Host Remote contract changes, developers rebuild the lib and then start or restart the Web. Incremental watching of the Remote contract is not implemented.
+The Web already depends on build artifacts such as `lib/client.cjs`, so it requires a complete `build:lib` before startup. After the Host Remote contract changes, developers rebuild the lib and then start or restart the Web. Incremental watching of the Remote contract is not implemented.
 
 ## SRC and LIB operating modes
 

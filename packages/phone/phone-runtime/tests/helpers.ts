@@ -1,7 +1,7 @@
 /**
  * Test helpers: staging the fakemobilecli executable, its config knobs, test
  * device shapes, ephemeral-port picking, and capture-frame assertions.
- * POSIX-only; the vitest config excludes this package's suites on Windows.
+ * The staged launcher follows the host's native executable form.
  */
 
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -114,15 +114,28 @@ function wait(ms: number): Promise<void> {
 /**
  * Stage one fakemobilecli executable plus its knob config in a fresh temp dir.
  * @param knobs - Devices seed and behavioral knobs baked into the config file.
+ * @param platform - Native launcher form; defaults to the current host.
  * @returns endpoints and handles for driving and observing the fake.
  */
-export async function stageFake(knobs: FakeKnobs = {}): Promise<StagedFake> {
+export async function stageFake(
+  knobs: FakeKnobs = {},
+  platform: NodeJS.Platform = process.platform,
+): Promise<StagedFake> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-phone-fake-'))
   const fixturesDir = join(root, 'fixtures')
   await mkdir(fixturesDir, { recursive: true })
-  const executablePath = join(fixturesDir, 'fakemobilecli')
-  await copyFile(new URL('./fixtures/fakemobilecli.mjs', import.meta.url), executablePath)
-  await chmod(executablePath, 0o755)
+  const fakeSource = new URL('./fixtures/fakemobilecli.mjs', import.meta.url)
+  const executablePath = platform === 'win32'
+    ? join(fixturesDir, 'fakemobilecli.cmd')
+    : join(fixturesDir, 'fakemobilecli')
+  if (platform === 'win32') {
+    await copyFile(fakeSource, join(fixturesDir, 'fakemobilecli.mjs'))
+    const node = process.execPath.replaceAll('%', '%%')
+    await writeFile(executablePath, `@echo off\r\n"${node}" "%~dp0fakemobilecli.mjs" %*\r\n`)
+  } else {
+    await copyFile(fakeSource, executablePath)
+    await chmod(executablePath, 0o755)
+  }
   await copyFile(new URL('./fixtures/u3-visible-frames.ts', import.meta.url), join(fixturesDir, 'u3-visible-frames.ts'))
   await writeFile(join(fixturesDir, 'fakemobilecli.config.json'), JSON.stringify(knobs))
   if (knobs.agent !== undefined) {

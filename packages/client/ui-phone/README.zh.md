@@ -20,7 +20,7 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 
 ## 模型体验
 
-无，因为浏览器界面与 Host 设置命名空间不注册提示词、工具 schema、会话事件或 provider 请求；模型侧能力归独立消费方所有。
+无，因为浏览器界面与 Host 设置命名空间不注册提示词、工具 schema、会话事件或提供方请求；模型侧能力归独立消费方所有。
 
 #### KV Cache 影响
 

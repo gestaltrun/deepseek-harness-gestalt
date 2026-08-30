@@ -5,13 +5,15 @@
  * ever touching a host session (zero local model output).
  */
 
+import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
 import type { AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions/types'
 import {
   briefSourceLine, memberQuestionIntentOf, receivingSessionId, ReceivingQuestionBook,
 } from '../src/client/sessions/receiving.ts'
-import { SessionManager } from '../src/client/sessions/manager.ts'
+import type { SessionFace } from '../src/client/contract/session.ts'
+import { SessionRuntime } from '../src/client/sessions/service.ts'
 import { FakeApiClient, fakeRemote } from './fake-api.client.ts'
 
 const intent = {
@@ -32,6 +34,8 @@ const intent = {
   expiresAt: 1_000,
 }
 
+const rid = (value: string) => value as never
+
 function memberQuestion(over: Partial<typeof intent> = {}): AskUserQuestionItem {
   return {
     id: 'member-q', question: 'Remove this member?',
@@ -40,13 +44,55 @@ function memberQuestion(over: Partial<typeof intent> = {}): AskUserQuestionItem 
   }
 }
 
-/** A fake clock: a mutable instant the tests advance by hand. */
+/** A fake clock and timeout seat that executes every deadline reached by advance(). */
 function fakeClock() {
   let now = 0
+  let nextHandle = 0
+  const timers = new Map<number, { at: number; callback: () => void }>()
   return {
     get now() { return now },
-    advance(to: number) { now = to },
+    get timerCount() { return timers.size },
+    timer: {
+      set(callback: () => void, delayMs: number) {
+        const handle = ++nextHandle
+        timers.set(handle, { at: now + delayMs, callback })
+        return handle
+      },
+      clear(handle: unknown) { timers.delete(handle as number) },
+    },
+    advance(to: number) {
+      now = to
+      for (;;) {
+        const due = [...timers].sort((a, b) => a[1].at - b[1].at)
+          .find(([, timer]) => timer.at <= now)
+        if (due === undefined) return
+        timers.delete(due[0])
+        due[1].callback()
+      }
+    },
   }
+}
+
+function questionBook(clock = fakeClock(), receiverMemberId = 'member-b') {
+  return {
+    book: new ReceivingQuestionBook(
+      () => Promise.resolve({ accepted: true }),
+      { receiverMemberId, clock: () => clock.now, timer: clock.timer },
+    ),
+    clock,
+  }
+}
+
+function deliver(
+  book: ReceivingQuestionBook,
+  rpcId: string,
+  question: AskUserQuestionItem = memberQuestion(),
+) {
+  return book.handleRequested(
+    rid(rpcId),
+    'remote-session-1' as SessionId,
+    [question],
+  )
 }
 
 describe('intent narrowing', () => {
@@ -69,159 +115,240 @@ describe('intent narrowing', () => {
 
 describe('ReceivingQuestionBook', () => {
   it('locates one receiving session per route key with the brief source line as its title', () => {
-    const clock = fakeClock()
-    const book = new ReceivingQuestionBook('member-b', () => clock.now)
-    const row = book.handleRequested('r1', [memberQuestion()])!
+    const { book } = questionBook()
+    const row = deliver(book, 'r1')!
     expect(row.sessionId).toBe(receivingSessionId('remote-session-1::member-b'))
     expect(row.routeKey).toBe('remote-session-1::member-b')
     expect(row.title).toBe('Atlas — Offboard planning')
     expect(row.active?.state).toBe('pending')
     // The same remote ask locates the same session again (no duplicate rows).
-    const again = book.handleRequested('r2', [memberQuestion({ questionId: 'mq-2' })])
+    const again = deliver(book, 'r2', memberQuestion({ questionId: 'mq-2' }))
     expect(again!.sessionId).toBe(row.sessionId)
     expect(book.rows()).toHaveLength(1)
   })
 
   it('keeps a single active card: a new ask supersedes the still-pending predecessor', () => {
-    const clock = fakeClock()
-    const book = new ReceivingQuestionBook('member-b', () => clock.now)
-    const row = book.handleRequested('r1', [memberQuestion()])!
+    const { book, clock } = questionBook()
+    const row = deliver(book, 'r1')!
     clock.advance(50)
-    book.handleRequested('r2', [memberQuestion({ questionId: 'mq-2' })])
+    deliver(book, 'r2', memberQuestion({ questionId: 'mq-2' }))
     expect(row.active?.rpcId).toBe('r2')
     expect(row.records.map(record => [record.rpcId, record.state])).toEqual([['r1', 'superseded']])
     expect(row.records[0]?.terminalAt).toBe(50)
   })
 
   it('does not supersede a predecessor that already reached a terminal state', () => {
-    const clock = fakeClock()
-    const book = new ReceivingQuestionBook('member-b', () => clock.now)
-    const row = book.handleRequested('r1', [memberQuestion()])!
-    book.handleResolved('r1', 'answered')
+    const { book, clock } = questionBook()
+    const row = deliver(book, 'r1')!
+    book.handleResolved(rid('r1'), 'answered')
     clock.advance(10)
-    book.handleRequested('r2', [memberQuestion({ questionId: 'mq-2' })])
+    deliver(book, 'r2', memberQuestion({ questionId: 'mq-2' }))
     expect(row.records.map(record => record.state)).toEqual(['answered'])
     expect(row.active?.rpcId).toBe('r2')
   })
 
   it('propagates a sender cancellation as withdrawn and a decline as declined', () => {
-    const clock = fakeClock()
-    const book = new ReceivingQuestionBook('member-b', () => clock.now)
-    const row = book.handleRequested('r1', [memberQuestion()])!
-    book.handleResolved('r1', 'cancelled')
+    const { book } = questionBook()
+    const row = deliver(book, 'r1')!
+    book.handleResolved(rid('r1'), 'cancelled')
     expect(row.active).toBeUndefined()
     expect(row.records[0]?.state).toBe('withdrawn')
-    book.handleRequested('r2', [memberQuestion({ questionId: 'mq-2' })])
-    book.decline('r2')
+    deliver(book, 'r2', memberQuestion({ questionId: 'mq-2' }))
+    book.decline(rid('r2'))
     expect(row.active).toBeUndefined()
     expect(row.records[1]?.state).toBe('declined')
   })
 
   it('records a cross-device settlement as answered-elsewhere', () => {
-    const clock = fakeClock()
-    const book = new ReceivingQuestionBook('member-b', () => clock.now)
-    const row = book.handleRequested('r1', [memberQuestion()])!
+    const { book } = questionBook()
+    const row = deliver(book, 'r1')!
     book.markAnsweredElsewhere('mq-1')
     expect(row.active).toBeUndefined()
     expect(row.records[0]?.state).toBe('answered-elsewhere')
   })
 
   it('expires the pending card when the countdown passes, on both sweeps and arrivals', () => {
-    const clock = fakeClock()
-    const book = new ReceivingQuestionBook('member-b', () => clock.now)
-    const row = book.handleRequested('r1', [memberQuestion()])!
+    const { book, clock } = questionBook()
+    const row = deliver(book, 'r1')!
     // Before the instant nothing flips.
     clock.advance(999)
     expect(book.sweep()).toBe(false)
     expect(row.active?.state).toBe('pending')
     clock.advance(1_000)
-    expect(book.sweep()).toBe(true)
+    expect(book.sweep()).toBe(false)
     expect(row.active).toBeUndefined()
     expect(row.records[0]?.state).toBe('expired')
     // An arrival after the pass records the new ask as the only pending card.
-    book.handleRequested('r2', [memberQuestion({ questionId: 'mq-2', expiresAt: 2_000 })])
+    deliver(book, 'r2', memberQuestion({ questionId: 'mq-2', expiresAt: 2_000 }))
     expect(row.records.map(record => record.state)).toEqual(['expired'])
     expect(row.active?.rpcId).toBe('r2')
   })
 
   it('expires before superseding: a passed ask records expired, not superseded', () => {
-    const clock = fakeClock()
-    const book = new ReceivingQuestionBook('member-b', () => clock.now)
-    const row = book.handleRequested('r1', [memberQuestion()])!
+    const { book, clock } = questionBook()
+    const row = deliver(book, 'r1')!
     clock.advance(1_500)
-    book.handleRequested('r2', [memberQuestion({ questionId: 'mq-2', expiresAt: 2_500 })])
+    deliver(book, 'r2', memberQuestion({ questionId: 'mq-2', expiresAt: 2_500 }))
     expect(row.records.map(record => [record.rpcId, record.state])).toEqual([['r1', 'expired']])
   })
 
   it('routes different receiving members to different receiving sessions', () => {
-    const book = new ReceivingQuestionBook('member-b', () => 0)
-    const forB = book.handleRequested('r1', [memberQuestion()])!
-    const forC = book.handleRequested('r2', [memberQuestion({
+    const { book, clock } = questionBook()
+    const forB = deliver(book, 'r1')!
+    const forC = deliver(book, 'r2', memberQuestion({
       questionId: 'mq-2', toProjectMember: 'member-c', expiresAt: 5_000,
-    })])!
+    }))!
     expect(forB.sessionId).not.toBe(forC.sessionId)
     expect(book.rows()).toHaveLength(2)
+    expect(clock.timerCount).toBe(1)
   })
 })
 
-describe('SessionManager receiving wiring', () => {
+describe('SessionRuntime receiving wiring', () => {
   function envelope(rpcId: string, payload: unknown) {
     return { rpcId: rpcId as never, payload: payload as never }
   }
 
-  it('routes a member-question frame into a receiving row and buffers nothing against the origin id', () => {
+  function bench() {
+    const ctx = new Context()
     const api = new FakeApiClient()
-    const manager = new SessionManager(api, fakeRemote())
-    manager.handleMuxEnvelope(envelope('r1', {
-      type: 'question/requested', sessionId: 'remote-session-1', questions: [memberQuestion({ expiresAt: Number.MAX_SAFE_INTEGER })],
-    }))
-    const row = manager.receiving.rows()[0]!
-    const snapshot = manager.getListSnapshot()
-    const entry = snapshot.items.find(item => item.sessionId === row.sessionId)
-    expect(entry).toMatchObject({ title: 'Atlas — Offboard planning', pendingInteraction: 'question' })
-    // Silence: no host session was created, instantiated, or listed for the ask.
-    expect(api.callsOf('session.create')).toHaveLength(0)
-    expect(snapshot.items.some(item => item.sessionId === 'remote-session-1')).toBe(false)
-  })
-
-  it('resolves the receiving card on a withdrawal frame and clears the pending dot', () => {
-    const manager = new SessionManager(new FakeApiClient(), fakeRemote())
-    manager.handleMuxEnvelope(envelope('r1', {
-      type: 'question/requested', sessionId: 'remote-session-1', questions: [memberQuestion({ expiresAt: Number.MAX_SAFE_INTEGER })],
-    }))
-    const row = manager.receiving.rows()[0]!
-    manager.handleMuxEnvelope(envelope('x1', {
-      type: 'question/resolved', sessionId: 'remote-session-1', questionRpcId: 'r1', outcome: 'cancelled',
-    }))
-    expect(row.records[0]?.state).toBe('withdrawn')
-    expect(manager.getListSnapshot().items.find(item => item.sessionId === row.sessionId)
-      ?.pendingInteraction).toBeUndefined()
-  })
-
-  it('flips an expired card on the next snapshot read (fake clock, no timer)', () => {
     const clock = fakeClock()
-    const clockSource = (): number => clock.now
-    const manager = new SessionManager(
-      new FakeApiClient(), fakeRemote(), undefined, undefined, undefined, undefined, { clock: clockSource })
-    manager.handleMuxEnvelope(envelope('r1', {
-      type: 'question/requested', sessionId: 'remote-session-1', questions: [memberQuestion()],
+    const runtime = new SessionRuntime(ctx, api, fakeRemote(), undefined, {
+      receiverMemberId: 'member-b',
+      clock: () => clock.now,
+      timer: clock.timer,
+    })
+    return { api, clock, runtime }
+  }
+
+  function request(
+    runtime: SessionRuntime,
+    rpcId: string,
+    question: AskUserQuestionItem = memberQuestion(),
+  ): void {
+    runtime.handleMuxEnvelope(envelope(rpcId, {
+      type: 'question/requested',
+      sessionId: 'remote-session-1',
+      questions: [question],
     }))
-    const row = manager.receiving.rows()[0]!
-    clock.advance(1_000)
-    const entry = manager.getListSnapshot().items.find(item => item.sessionId === row.sessionId)
-    expect(entry?.pendingInteraction).toBeUndefined()
-    expect(row.records[0]?.state).toBe('expired')
+  }
+
+  function currentFace(runtime: SessionRuntime): SessionFace {
+    return runtime.currentProvideInfo.getSnapshot().hooks['session'] as SessionFace
+  }
+
+  it('opens a receiving row through the outward SessionFace with one identity-stable wait', async () => {
+    const { api, runtime } = bench()
+    request(runtime, 'r1')
+    await Promise.resolve()
+    const receivingId = receivingSessionId('remote-session-1::member-b')
+    expect(runtime.list.getSnapshot().byId[receivingId]).toMatchObject({
+      title: 'Atlas — Offboard planning', pendingInteraction: 'question',
+    })
+
+    runtime.open(receivingId)
+    const face = currentFace(runtime)
+    const first = face.getSnapshot()
+    expect(first.pending).toHaveLength(1)
+    expect(first.pending[0]?.sessionId).toBe('remote-session-1')
+    expect(face.getSnapshot().pending[0]).toBe(first.pending[0])
+    request(runtime, 'r1')
+    expect(face.getSnapshot().pending[0]).toBe(first.pending[0])
+    await expect(first.pending[0]!.respond({ ok: true, value: { answers: [] } } as never))
+      .resolves.toEqual({ accepted: true })
+    expect(api.callsOf('respond')).toMatchObject([{ rpcId: 'r1' }])
+    expect(api.callsOf('session.create')).toEqual([])
+    expect(api.callsOf('session.history')).toEqual([])
+    expect(api.callsOf('subagent.list')).toEqual([])
+    expect(runtime.modelRoute(receivingId)).toBeUndefined()
+    expect(runtime.commandCatalogSessionId(receivingId)).toBeUndefined()
+    expect(runtime.skillCatalogSessionId(receivingId)).toBeUndefined()
+    await expect(face.prompt([{ type: 'text', text: 'not routed' }], 'queue'))
+      .rejects.toThrow(/no prompt route/)
+    runtime.handleConnected()
+    await Promise.resolve()
+    expect(api.callsOf('session.models')).toEqual([])
+    expect(api.callsOf('session.prompt')).toEqual([])
+    expect(api.callsOf('skill.list')).toEqual([])
+    expect(api.callsOf('subagent.list')).toEqual([])
   })
 
-  it('keeps generic question batches on the host-session flow, not the receiving book', () => {
-    const manager = new SessionManager(new FakeApiClient(), fakeRemote())
-    manager.handleHostEnvelope(envelope('h1', { type: 'host/session-added', sessionId: 'fk-m1', blank: false }))
-    manager.handleMuxEnvelope(envelope('r1', {
+  it('replaces and resolves the real pending wait through the same outward face', async () => {
+    const { runtime } = bench()
+    request(runtime, 'r1')
+    await Promise.resolve()
+    const receivingId = receivingSessionId('remote-session-1::member-b')
+    runtime.open(receivingId)
+    const face = currentFace(runtime)
+    const firstWait = face.getSnapshot().pending[0]!
+
+    request(runtime, 'r2', memberQuestion({ questionId: 'mq-2', expiresAt: 2_000 }))
+    const secondWait = face.getSnapshot().pending[0]!
+    expect(secondWait).not.toBe(firstWait)
+    expect(face.getSnapshot().pending[0]).toBe(secondWait)
+    expect(() => firstWait.respond({ ok: true, value: { answers: [] } } as never)).toThrow(/already settled/)
+
+    runtime.handleMuxEnvelope(envelope('resolved', {
+      type: 'question/resolved',
+      sessionId: 'remote-session-1',
+      questionRpcId: 'r2',
+      outcome: 'answered',
+    }))
+    expect(face.getSnapshot().pending).toEqual([])
+    expect(() => secondWait.respond({ ok: true, value: { answers: [] } } as never)).toThrow(/already settled/)
+    await Promise.resolve()
+    expect(runtime.list.getSnapshot().byId[receivingId]?.pendingInteraction).toBeUndefined()
+  })
+
+  it('expires the outward wait from one injected earliest-deadline timer', async () => {
+    const { clock, runtime } = bench()
+    request(runtime, 'r1')
+    await Promise.resolve()
+    const receivingId = receivingSessionId('remote-session-1::member-b')
+    runtime.open(receivingId)
+    const face = currentFace(runtime)
+    const wait = face.getSnapshot().pending[0]!
+    expect(clock.timerCount).toBe(1)
+
+    clock.advance(1_000)
+    expect(face.getSnapshot().pending).toEqual([])
+    expect(() => wait.respond({ ok: true, value: { answers: [] } } as never)).toThrow(/already settled/)
+    expect(clock.timerCount).toBe(0)
+    await Promise.resolve()
+    expect(runtime.list.getSnapshot().byId[receivingId]?.pendingInteraction).toBeUndefined()
+  })
+
+  it('settles the generation wait on disconnect and remints it from replay', async () => {
+    const { clock, runtime } = bench()
+    request(runtime, 'r1')
+    await Promise.resolve()
+    const receivingId = receivingSessionId('remote-session-1::member-b')
+    runtime.open(receivingId)
+    const face = currentFace(runtime)
+    const generationWait = face.getSnapshot().pending[0]!
+
+    runtime.handleDisconnected()
+    expect(face.getSnapshot().pending).toEqual([])
+    expect(clock.timerCount).toBe(0)
+    expect(() => generationWait.respond({ ok: true, value: { answers: [] } } as never))
+      .toThrow(/already settled/)
+
+    request(runtime, 'r1')
+    const replayedWait = face.getSnapshot().pending[0]!
+    expect(replayedWait).not.toBe(generationWait)
+    expect(replayedWait.sessionId).toBe('remote-session-1')
+    expect(clock.timerCount).toBe(1)
+  })
+
+  it('keeps generic question batches on the host-session flow', async () => {
+    const { runtime } = bench()
+    runtime.handleHostEnvelope(envelope('h1', { type: 'host/session-added', sessionId: 'fk-m1', blank: false }))
+    runtime.handleMuxEnvelope(envelope('r1', {
       type: 'question/requested',
       sessionId: 'fk-m1',
       questions: [{ id: 'q', question: 'Q?', options: [{ label: 'A' }] }],
     }))
-    expect(manager.receiving.rows()).toHaveLength(0)
-    expect(manager.getListSnapshot().items[0]?.pendingInteraction).toBe('question')
+    await Promise.resolve()
+    expect(runtime.list.getSnapshot().byId['fk-m1' as SessionId]?.pendingInteraction).toBe('question')
   })
 })

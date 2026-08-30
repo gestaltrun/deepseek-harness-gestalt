@@ -20,7 +20,7 @@ import type { PendingInteractionStatus } from './pending.ts'
 import type {} from '@deepseek-ai/dsh-session-title/client'
 import { Notifier } from './notifier.ts'
 import { ProjectionValueStore } from './projection-store.ts'
-import { ReceivingQuestionBook } from './receiving.ts'
+import { ReceivingQuestionBook, type ReceivingQuestionBookOptions } from './receiving.ts'
 import { Session } from './session.ts'
 import type { SessionRemotes } from './remotes.ts'
 import type { SessionAdmissionAdapter } from '../contract/sessions.ts'
@@ -173,9 +173,7 @@ export class SessionManager {
   /**
    * @param api - shared wire client.
    * @param restoredSelection - persisted real-Session selection candidate.
-   * @param receiving - receiving-session book options: the local receiving
-   * member identity (route-key half; boot wiring lands with the conversation
-   * milestone) and an injectable clock for expiry tests.
+   * @param receiving - receiving-session identity, clock, and timer options.
    */
   constructor(
     private readonly api: IApiClient,
@@ -184,13 +182,13 @@ export class SessionManager {
     restoredAddress?: SubagentAddress,
     private readonly conversation?: ConversationRuntime,
     private readonly admissionFor?: (sessionId: SessionId) => SessionAdmissionAdapter | undefined,
-    receiving?: { receiverMemberId?: string; clock?: () => number },
+    receiving?: ReceivingQuestionBookOptions,
   ) {
     this.selected = restoredSelection
     if (restoredAddress !== undefined) this.addresses.set(restoredAddress.childSessionId, restoredAddress)
     this.receiving = new ReceivingQuestionBook(
-      receiving?.receiverMemberId ?? 'self',
-      receiving?.clock ?? (() => Date.now()),
+      message => this.api.respond(message),
+      { ...receiving, onChange: () => { this.notifier.markDirty() } },
     )
     this.listSnapshotCache = this.buildListSnapshot()
   }
@@ -198,12 +196,16 @@ export class SessionManager {
   // ---- Selection ----
 
   /**
-   * Select a listed Session or a retained catalog-addressed child.
-   * @param sessionId - listed or catalog-addressed Session id.
+   * Select a listed Session, a retained catalog-addressed child, or a
+   * renderer-only receiving Session face.
+   * @param sessionId - listed, catalog-addressed, or receiving session id.
    */
   select(sessionId: SessionId): void {
     const address = this.navigationAddress(sessionId)
-    if (!this.summaries.some(summary => summary.sessionId === sessionId) && address === undefined) {
+    // A receiving session is a merged list row with no host Session behind it;
+    // selecting it must work so its Decision Brief and document focus render.
+    const isReceiving = this.receiving.face(sessionId) !== undefined
+    if (!this.summaries.some(summary => summary.sessionId === sessionId) && address === undefined && !isReceiving) {
       throw new Error(`sessions.select: unknown session ${sessionId}`)
     }
     if (address !== undefined) this.addresses.set(sessionId, address)
@@ -216,7 +218,7 @@ export class SessionManager {
     this.selected = sessionId
     // Looking at the session consumes its completion reminder (dot clears).
     this.completedNotifications.delete(sessionId)
-    void this.refreshSubagents(sessionId)
+    if (!isReceiving) void this.refreshSubagents(sessionId)
     this.notifier.notifyNow()
   }
 
@@ -814,9 +816,15 @@ export class SessionManager {
       // batch renders on its route key's receiving session (tracked pending on
       // the synthetic id) and must not buffer against the origin session id,
       // which never instantiates locally.
-      const receivingRow = this.receiving.handleRequested(envelope.rpcId, frame.questions)
+      const receivingRow = this.receiving.handleRequested(
+        envelope.rpcId,
+        frame.sessionId,
+        frame.questions,
+      )
       if (receivingRow !== undefined) {
-        this.trackPending(receivingRow.sessionId, `q:${envelope.rpcId}`, 'question')
+        if (receivingRow.active?.rpcId === envelope.rpcId) {
+          this.trackPending(receivingRow.sessionId, `q:${envelope.rpcId}`, 'question')
+        }
       } else {
         this.trackPending(
           frame.sessionId,
@@ -979,6 +987,7 @@ export class SessionManager {
    * request with its live rpcId.
   */
   handleDisconnected(): void {
+    this.receiving.resetPending()
     if (this.pendingInteractions.size > 0) {
       this.pendingInteractions.clear()
       this.notifier.markDirty()
@@ -992,12 +1001,21 @@ export class SessionManager {
     }
   }
 
+  /** Cancel manager-owned timers when the client runtime fiber collapses. */
+  dispose(): void {
+    this.receiving.dispose()
+    for (const timer of this.catalogDebounce.values()) clearTimeout(timer)
+    this.catalogDebounce.clear()
+  }
+
   /** After each connection generation: refresh the session baseline and rebuild opened windows. */
   handleConnected(): void {
     void this.refreshList()
     const selectedAddress = this.selected === undefined ? undefined : this.addresses.get(this.selected)
     if (selectedAddress !== undefined) void this.refreshSubagents(selectedAddress.parentSessionId)
-    if (this.selected !== undefined) void this.refreshSubagents(this.selected)
+    if (this.selected !== undefined && this.receiving.face(this.selected) === undefined) {
+      void this.refreshSubagents(this.selected)
+    }
     for (const parentSessionId of this.openCatalogs) void this.refreshSubagents(parentSessionId)
     for (const session of this.sessions.values()) void session.resync()
   }
@@ -1112,11 +1130,8 @@ export class SessionManager {
   }
 
   private buildListSnapshot(): SessionListSnapshot {
-    // Countdown sweep first: a clock-driven expiry must be observable through
-    // the very snapshot read that follows it (no timer of its own). The sweep
-    // can retire a card no resolved frame reports, so the pending dots of
-    // receiving sessions reconcile against the post-sweep book state here.
-    this.receiving.sweep()
+    // A timer-driven expiry can retire a card without a resolved frame, so
+    // pending dots reconcile against the book's current active record here.
     for (const row of this.receiving.rows()) {
       if (row.active !== undefined) continue
       this.pendingInteractions.delete(row.sessionId)

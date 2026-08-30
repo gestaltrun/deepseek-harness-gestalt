@@ -14,7 +14,7 @@ The carried fields ride the intent, not a sibling frame. `AskUserQuestionIntent`
 
 Receiving sessions are renderer-only. `ReceivingQuestionBook` in dsh-client-runtime routes a claimed batch (every question carries the same brief) to a local session whose id is derived deterministically from the route key `<originSessionId>::<toProjectMember>`, titled with the brief's first source line (`project — origin session`). No host session is created and no Session instance is built, so a receiving session can never carry local model output by construction. The SessionManager merges book rows into the list snapshot and tracks the pending dot against the synthetic id; a claimed frame is not buffered against the origin session id, which never instantiates locally.
 
-One card per route key. A newer ask supersedes a still-pending predecessor (`superseded` with its terminal instant); a predecessor already terminal is never relabelled. `question/resolved` maps `answered` → answered and `cancelled` → withdrawn; `decline()` and `markAnsweredElsewhere()` cover the receiver's decline and a cross-device settlement. The countdown sweep derives expiry locally from the carried `expiresAt` and runs before every delivery and snapshot read with the injected clock, so both endpoints flip from the same instant without a timer; expiry wins over supersede when the predecessor's countdown has already passed.
+One card per route key. A newer ask supersedes a still-pending predecessor (`superseded` with its terminal instant); a predecessor already terminal is never relabelled. `question/resolved` maps `answered` → answered and `cancelled` → withdrawn; `decline()` and `markAnsweredElsewhere()` cover the receiver's decline and a cross-device settlement. The carried `expiresAt` remains the shared expiry instant, while the [renderer-only receiving Session face](2026-08-30-web-receiving-experience-assembly-fixes.md) owns the current single earliest-deadline timer and settled wait publication. Expiry wins over supersede when the predecessor's countdown has already passed.
 
 ## Alternatives considered
 
@@ -22,12 +22,12 @@ One card per route key. A newer ask supersedes a still-pending predecessor (`sup
 
 **Create a real host session on the receiver.** Rejected: a host session owns an agent and a model loop; a receiving session is a decision surface, and "zero local model output" must be structural, not a discipline.
 
-**Timer-driven client countdown.** Rejected: both endpoints derive the same flip from the same carried instant; a sweep at read points is observably equivalent without background timers.
+**One timer per receiving card.** Rejected: the book needs only the earliest active deadline and recalculates it whenever a record changes.
 
 ## Consequences
 
-Generic and plan-review asks keep the host-session flow unchanged. Receiving rows do not ride `session.list` and do not survive a cross-generation wipe of host state — they are client-local by design; the conversation mount that renders the Decision Brief inside a receiving session, boot wiring of the receiving member identity (currently the `'self'` default), and answer round-trip back to the sender are the next milestones.
+Generic and plan-review asks keep the host-session flow unchanged. Receiving rows do not ride `session.list` and remain client-local by design. Their renderer-only Session faces expose the real pending response carrier without creating a Host Session; boot wiring of the receiving member identity (currently the `'self'` default) and cross-install delivery remain separate composition work.
 
 ## Testing
 
-`packages/host/apiproxy/tests/rpc-schemas.spec.ts` pins carried-brief acceptance on the item and the frame, and rejects an unknown tag plus every required field missing or out of bound. `packages/client/runtime/tests/receiving.client.spec.ts` pins intent narrowing, route keys and deterministic ids, single-active-card supersede, expiry with a fake clock, withdrawal propagation, and the manager wiring including the no-host-session silence. `packages/interaction/user-questions/tests/user-questions.spec.ts` pins the carried intent through `ask()`.
+`packages/host/apiproxy/tests/rpc-schemas.spec.ts` pins carried-brief acceptance on the item and the frame, and rejects an unknown tag plus every required field missing or out of bound. `packages/client/runtime/tests/receiving.client.spec.ts` pins intent narrowing, route keys and deterministic ids, single-active-card supersede, expiry with an injected timer, withdrawal propagation, and the outward `SessionFace` through a real `SessionRuntime`. `packages/interaction/user-questions/tests/user-questions.spec.ts` pins the carried intent through `ask()`.

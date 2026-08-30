@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
-import { QuestionPresentation } from '@deepseek-ai/dsh-client-ui-user-questions/presentation'
+import { QuestionPresentation } from '@deepseek-ai/dsh-client-ui-user-questions/client'
 import {
   memberBriefOf,
   type MemberQuestionComposerProps, type MemberQuestionOrigin, type MemberQuestionRole,

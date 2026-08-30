@@ -115,7 +115,7 @@ export async function downloadToFile(
   onBytes: (percent: number | undefined) => void,
   signal: AbortSignal | undefined,
 ): Promise<void> {
-  const response = await fetchImpl(url, { signal, redirect: 'follow' })
+  const response = await fetchImpl(url, { signal })
   if (!response.ok || response.body === null) {
     throw new Error(`Sub2API installer: download failed for ${url} (status ${String(response.status)})`)
   }

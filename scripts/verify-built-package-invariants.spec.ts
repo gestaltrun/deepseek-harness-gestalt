@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -13,18 +13,19 @@ afterEach(() => {
 })
 
 function fixture(options: {
+  files?: string[]
   invariantSource?: string
   invariantExport?: string
-  runtimeChunk?: string
+  runtimeChunks?: Record<string, string>
 } = {}): { root: string; loaderUrl: string } {
   const root = mkdtempSync(join(tmpdir(), 'dsh-built-package-invariants-'))
   roots.push(root)
-  const packageDir = join(root, 'packages/core/probe')
+  const packageDir = join(root, 'packages', 'core', 'probe')
   mkdirSync(join(packageDir, 'lib'), { recursive: true })
   writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify({
     name: '@deepseek-ai/dsh-probe',
     type: 'module',
-    files: ['lib/invariant.js'],
+    files: options.files ?? ['lib/invariant.js'],
     exports: {
       './invariant': {
         default: options.invariantExport ?? './lib/invariant.js',
@@ -35,8 +36,10 @@ function fixture(options: {
     join(packageDir, 'lib/invariant.js'),
     options.invariantSource ?? "export const name = 'probe-invariant'\nexport const inject = ['invariants']\nexport const apply = () => {}\n",
   )
-  if (options.runtimeChunk !== undefined) {
-    writeFileSync(join(packageDir, 'lib/chunk.js'), options.runtimeChunk)
+  for (const [relativePath, source] of Object.entries(options.runtimeChunks ?? {})) {
+    const path = join(packageDir, ...relativePath.split('/'))
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, source)
   }
   const loaderPath = join(root, 'loader.mjs')
   writeFileSync(loaderPath, 'export default class Loader { unwrapExports(value) { return value } }\n')
@@ -76,13 +79,30 @@ describe('built package invariant verifier', () => {
     expect(exportResult.stderr).toContain('@deepseek-ai/dsh-probe')
   })
 
-  it('rejects an invariant bundle that needs an unstaged runtime chunk', () => {
+  it('stages manifest-declared transitive chunks from portable package paths', () => {
     const { root, loaderUrl } = fixture({
-      invariantSource: "export * from './chunk.js'\n",
-      runtimeChunk: "export const name = 'probe-invariant'\nexport const inject = ['invariants']\nexport const apply = () => {}\n",
+      files: ['lib/invariant.js', 'lib/chunks/**/*.js'],
+      invariantSource: "export * from './chunks/entry.js'\n",
+      runtimeChunks: {
+        'lib/chunks/entry.js': "export * from './nested/runtime.js'\n",
+        'lib/chunks/nested/runtime.js': "export const name = 'probe-invariant'\nexport const inject = ['invariants']\nexport const apply = () => {}\n",
+      },
+    })
+    const result = verify(root, loaderUrl)
+    expect(result.status, result.stderr).toBe(0)
+  })
+
+  it('rejects an invariant bundle whose staged chunk needs an undeclared transitive chunk', () => {
+    const { root, loaderUrl } = fixture({
+      files: ['lib/invariant.js', 'lib/chunks/entry.js'],
+      invariantSource: "export * from './chunks/entry.js'\n",
+      runtimeChunks: {
+        'lib/chunks/entry.js': "export * from './nested/runtime.js'\n",
+        'lib/chunks/nested/runtime.js': "export const name = 'probe-invariant'\nexport const inject = ['invariants']\nexport const apply = () => {}\n",
+      },
     })
     const result = verify(root, loaderUrl)
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain('chunk.js')
+    expect(result.stderr).toContain('runtime.js')
   })
 })

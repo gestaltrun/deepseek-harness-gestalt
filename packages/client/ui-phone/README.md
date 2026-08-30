@@ -20,11 +20,11 @@ Composition: the `tsconfig.client.json` aggregate references the package; `packa
 
 ## Model Experience
 
-None, as the package only registers browser-side controls and video playback; it contributes no prompt section, tool schema, model stream, or session event.
+None, as the browser UI, Host settings namespace, and video playback register no prompt, tool schema, session event, or provider request; model-facing capabilities belong to separate consumers.
 
 #### KV Cache effect
 
-None; the package never assembles or sends provider requests.
+None; UI settings and device state never alter a model request prefix.
 
 ## Known Limitations and Deferred Work
 

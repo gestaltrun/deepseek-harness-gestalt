@@ -97,6 +97,7 @@ export function isLoopbackHostname(hostname: string): boolean {
  * unbracketed IPv6; IDN hosts are declared in punycode, the form the wire
  * carries).
  * @param entry - the configured value, verbatim.
+ * @returns true when the entry is a canonical bare authority.
  */
 export function isBareAuthority(entry: string): boolean {
   const entryUrl = parseAuthority(entry)

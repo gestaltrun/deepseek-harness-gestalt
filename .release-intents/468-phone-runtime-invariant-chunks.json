@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "468-phone-runtime-invariant-chunks",
+  "summary": {
+    "en": "Include the phone device runtime chunks required by Desktop invariant diagnostics.",
+    "zh": "在 Desktop 产物中携带手机设备运行时不变量诊断所需的分片。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The change affects only the Desktop Host package publication payload and repository artifact verification; the Mobile application has no production dependency on dsh-phone-runtime."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The change affects only the Desktop Host package publication payload and repository artifact verification; Platform has no production dependency on dsh-phone-runtime."
+    }
+  ]
+}

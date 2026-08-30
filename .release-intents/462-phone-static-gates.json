@@ -1,0 +1,28 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "462-phone-static-gates",
+  "summary": {
+    "en": "Align phone documentation and static-analysis ownership without changing product runtime behavior.",
+    "zh": "校准手机功能文档与静态分析归属，不改变产品运行时行为。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "desktop",
+      "reason": "The only production-source edit is an @returns JSDoc addition; the Knip config, package READMEs, and test-only export visibility do not alter Desktop bytes or behavior."
+    },
+    {
+      "releaseUnit": "mobile",
+      "reason": "No Mobile production or build input changes; the remaining files are static configuration, documentation, or phone test helpers."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "No Platform production, deployment, or wire input changes; the remaining files are static configuration, documentation, or phone test helpers."
+    }
+  ]
+}

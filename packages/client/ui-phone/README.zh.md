@@ -18,13 +18,13 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 
 组装关系：`tsconfig.client.json` 聚合引用本包；`packages/bundle/web-app/cordis.patch.yml` 携带 `ui-phone` 浏览器行；`packages/bundle/web-app/package.json` 声明依赖。包 invariant 伴生体在同进程 fake 注册表上以真实 cordis fiber 证明 tab 注册/注销对称。
 
-## Model Experience
+## 模型体验
 
-无，因为本包只注册浏览器侧控件与视频播放；不贡献 prompt 段、工具 schema、模型流或会话事件。
+无，因为浏览器界面、Host 设置命名空间与视频播放不注册提示词、工具 schema、会话事件或提供方请求；模型侧能力归独立消费方所有。
 
-#### KV Cache effect
+#### KV Cache 影响
 
-无；本包从不组装或发送 provider 请求。
+无；界面设置与设备状态不会改变模型请求前缀。
 
 ## Known Limitations and Deferred Work
 

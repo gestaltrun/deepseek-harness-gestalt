@@ -422,6 +422,7 @@ flowchart TD
   pkg_anonymous_user_id --> pkg_invariants
   pkg_phone_runtime --> pkg_brand
   pkg_phone_runtime --> pkg_invariants
+  pkg_phone_runtime --> pkg_request_trust
   pkg_phone_runtime --> pkg_subprocess
   pkg_phone_runtime --> pkg_timeout
   pkg_platform_account --> pkg_brand
@@ -1604,10 +1605,10 @@ flowchart TD
   pkg_client_ui_permission_presets --> pkg_client_ui_settings
   pkg_client_ui_permission_presets --> pkg_invariants
   pkg_client_ui_permission_presets --> pkg_permission_presets
+  pkg_client_ui_phone --> pkg_client_locale
   pkg_client_ui_phone --> pkg_client_runtime
   pkg_client_ui_phone --> pkg_client_ui_better_sidebar
   pkg_client_ui_phone --> pkg_client_ui_settings
-  pkg_client_ui_phone --> pkg_client_ui_settings_plugins
   pkg_client_ui_phone --> pkg_invariants
   pkg_client_ui_phone --> pkg_settings
   pkg_client_ui_skill --> pkg_api_remotes
@@ -1683,7 +1684,7 @@ flowchart TD
 | [`host-frontend-static`](../packages/host/frontend-static) | `host` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`host-plugin-inventory`](../packages/host/plugin-inventory) | `host` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`typert-protocol`](../packages/typert/protocol) |
 | [`anonymous-user-id`](../packages/identity/anonymous-user-id) | `identity` | [`brand`](../packages/util/brand), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants) |
-| [`phone-runtime`](../packages/phone/phone-runtime) | `phone` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
+| [`phone-runtime`](../packages/phone/phone-runtime) | `phone` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants), [`request-trust`](../packages/util/request-trust), [`subprocess`](../packages/subprocess/subprocess), [`timeout`](../packages/util/timeout) |
 | [`platform-account`](../packages/platform/platform-account) | `platform` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`remote-protocol`](../packages/platform/remote-protocol) | `platform` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`settings`](../packages/settings/settings) | `settings` | [`brand`](../packages/util/brand), [`invariants`](../packages/runtime-diagnostics/invariants) |
@@ -1896,7 +1897,7 @@ flowchart TD
 | [`client-ui-directory-picker-native`](../packages/client/ui-directory-picker-native) | `client` | [`client-runtime`](../packages/client/runtime), [`client-ui-workspace`](../packages/client/ui-workspace), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-model-selection`](../packages/client/ui-model-selection) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-commands`](../packages/client/ui-commands), [`client-ui-conversation`](../packages/client/ui-conversation), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-permission-presets`](../packages/client/ui-permission-presets) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-commands`](../packages/client/ui-commands), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-settings`](../packages/client/ui-settings), [`invariants`](../packages/runtime-diagnostics/invariants), [`permission-presets`](../packages/interaction/permission-presets) |
-| [`client-ui-phone`](../packages/client/ui-phone) | `client` | [`client-runtime`](../packages/client/runtime), [`client-ui-better-sidebar`](../packages/client/ui-better-sidebar), [`client-ui-settings`](../packages/client/ui-settings), [`client-ui-settings-plugins`](../packages/client/ui-settings-plugins), [`invariants`](../packages/runtime-diagnostics/invariants), [`settings`](../packages/settings/settings) |
+| [`client-ui-phone`](../packages/client/ui-phone) | `client` | [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-better-sidebar`](../packages/client/ui-better-sidebar), [`client-ui-settings`](../packages/client/ui-settings), [`invariants`](../packages/runtime-diagnostics/invariants), [`settings`](../packages/settings/settings) |
 | [`client-ui-skill`](../packages/client/ui-skill) | `client` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-tool`](../packages/client/ui-tool), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`client-ui-workbench`](../packages/client/ui-workbench) | `client` | [`api-remotes`](../packages/api/remotes), [`browser-workspace`](../packages/browser/browser-workspace), [`client-runtime`](../packages/client/runtime), [`client-ui-better-sidebar`](../packages/client/ui-better-sidebar), [`client-ui-browser`](../packages/client/ui-browser), [`client-ui-settings`](../packages/client/ui-settings), [`invariants`](../packages/runtime-diagnostics/invariants), [`settings`](../packages/settings/settings), [`typert-protocol`](../packages/typert/protocol) |
 | [`client-ui-cordis`](../packages/extensions/ui-cordis) | `extensions` | [`api-remotes`](../packages/api/remotes), [`client-connection`](../packages/client/connection), [`client-locale`](../packages/client/locale), [`client-runtime`](../packages/client/runtime), [`client-ui-input-trigger`](../packages/client/ui-input-trigger), [`client-ui-sidebar`](../packages/client/ui-sidebar), [`client-ui-tool`](../packages/client/ui-tool), [`cordis-client-runner`](../packages/extensions/cordis-client-runner), [`invariants`](../packages/runtime-diagnostics/invariants) |

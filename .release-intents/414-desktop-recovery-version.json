@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "414-desktop-recovery-version",
+  "summary": {
+    "en": "Require explicit Desktop recovery versions from the reviewed release plan.",
+    "zh": "Desktop 恢复版本必须显式来自已评审的发布计划。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": []
+}

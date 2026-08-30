@@ -61,7 +61,6 @@ on:
         description: Desktop Bundle version from apps/desktop/package.json.
         required: true
         type: string
-        default: '0.1.9'
       publish:
         description: Create the gestalt-v* tag and GitHub Release after packaging succeeds.
         required: true

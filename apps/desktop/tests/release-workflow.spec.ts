@@ -36,7 +36,8 @@ describe('Desktop release workflow', () => {
 
     const dispatch = record(record(record(parsed).on).workflow_dispatch)
     const inputs = record(dispatch.inputs)
-    expect(record(inputs.version).default).toBe(record(desktopPackage).version)
+    expect(record(inputs.version).required).toBe(true)
+    expect(record(inputs.version)).not.toHaveProperty('default')
   })
 
   it('keeps release credentials out of preparation and dry-run packaging', () => {

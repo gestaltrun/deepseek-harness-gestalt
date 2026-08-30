@@ -38,6 +38,8 @@ The Desktop owner consumes the authoritative Host mux and Session event streams 
 
 ## Develop
 
+`pnpm run gestalt:overlay-boot` is the fresh-checkout artifact-plane check for the web-app roster plus Desktop overlay. It rebuilds repository libraries, client plugin bundles, and the Web frontend before running both composed-boot paths on OS-assigned loopback ports; a bare focused Vitest invocation requires those artifacts to exist already.
+
 ```sh
 pnpm install
 DSH_DESKTOP_OPERATED_PLATFORM_CONFIG=/absolute/path/to/operated-platform.json pnpm gestalt:dev

@@ -97,15 +97,16 @@ async function awaitSnapshotRegistration(ctx: Context): Promise<boolean> {
   const loader = ctx.get('loader') as SnapshotLoader | undefined
   if (loader === undefined) return true
   if (![...loader.entries()].some(isSnapshotEntry)) return true
-  while (ctx.settings.get(ns) === undefined) {
+  while (true) {
+    if (ctx.fiber.uid === null) return false
+    if (ctx.settings.get(ns) !== undefined) return true
     const entries = [...loader.entries()]
-    const failed = entries.find(entry => entry.fiber?.state === FiberState.FAILED)
-    if (failed?.fiber !== undefined) await failed.fiber.await()
     const snapshot = entries.find(isSnapshotEntry)
     if (snapshot === undefined) return true
+    if (snapshot.fiber?.state === FiberState.FAILED) await snapshot.fiber.await()
     if (snapshot.fiber !== undefined && snapshot.fiber.state !== FiberState.PENDING) {
       await snapshot.fiber.await()
-      return true
+      return ctx.fiber.uid !== null
     }
     const lifecycle = nextSnapshotLifecycle(ctx)
     const current = [...loader.entries()].find(isSnapshotEntry)
@@ -120,7 +121,6 @@ async function awaitSnapshotRegistration(ctx: Context): Promise<boolean> {
     }
     if (!await lifecycle.promise) return false
   }
-  return true
 }
 
 /**
@@ -129,7 +129,9 @@ async function awaitSnapshotRegistration(ctx: Context): Promise<boolean> {
  */
 export async function apply(ctx: Context): Promise<void> {
   const ns = settingsNamespace(SNAPSHOT_PREFS_NS)
-  if (ctx.settings.get(ns) === undefined && !await awaitSnapshotRegistration(ctx)) return
+  if (ctx.settings.get(ns) === undefined) {
+    if (!await awaitSnapshotRegistration(ctx) || ctx.fiber.uid === null) return
+  }
   const current = ctx.settings.get(ns) as SnapshotBrowserPrefs | undefined
   if (current === undefined) {
     throw new Error(

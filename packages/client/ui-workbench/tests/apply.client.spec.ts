@@ -183,25 +183,71 @@ describe('ui-workbench host apply', () => {
     expect(settings.updates).toEqual([])
   })
 
-  it('propagates a loader failure while the snapshot is pending', async () => {
+  it('does not patch or reject when a lifecycle event races disposal', async () => {
+    const ctx = new Context()
+    const settings = new SettingsService(ctx)
+    const entry = { options: { id: 'ui-better-sidebar' } }
+    let reads = 0
+    let disposal!: Promise<void>
+    ctx.provide('loader', {
+      entries: () => {
+        reads += 1
+        if (reads === 3) {
+          ctx.emit('internal/status', ctx.fiber, FiberState.ACTIVE)
+          disposal = workbench.dispose()
+        }
+        return [entry]
+      },
+    })
+    const workbench = ctx.plugin({ inject, apply })
+    await expect(workbench.await()).resolves.toBeDefined()
+    await expect(disposal).resolves.toBeUndefined()
+    expect(settings.updates).toEqual([])
+  })
+
+  it('propagates a failed snapshot row', async () => {
     const ctx = new Context()
     new SettingsService(ctx)
     const entries: Array<{
       options: { id: string }
       fiber?: { state?: FiberState; await(): Promise<unknown> }
-    }> = [{ options: { id: 'ui-better-sidebar' } }, { options: { id: 'failed-provider' } }]
+    }> = [{
+      options: { id: 'ui-better-sidebar' },
+      fiber: {
+        state: FiberState.FAILED,
+        async await() {
+          throw new Error('snapshot row failed')
+        },
+      },
+    }]
+    ctx.provide('loader', { entries: () => entries })
+    await expect(ctx.plugin({ inject, apply }).await()).rejects.toThrow(/snapshot row failed/)
+  })
+
+  it('ignores an unrelated failed loader row while the snapshot registers', async () => {
+    const ctx = new Context()
+    const settings = new SettingsService(ctx)
+    const unrelated = {
+      state: FiberState.FAILED,
+      async await() {
+        throw new Error('unrelated loader row failed')
+      },
+    }
+    const entries = [
+      { options: { id: 'ui-better-sidebar' } },
+      { options: { id: 'unrelated-plugin' }, fiber: unrelated },
+    ]
     ctx.provide('loader', { entries: () => entries })
     const workbench = ctx.plugin({ inject, apply })
     setImmediate(() => {
-      entries[1]!.fiber = {
-        state: FiberState.FAILED,
-        async await() {
-          throw new Error('snapshot dependency provider failed')
-        },
-      }
-      ctx.emit('internal/status', entries[1]!.fiber as never, FiberState.LOADING)
+      settings.values.set(NS, { tabsEnabled: { git: true } })
+      ctx.emit('internal/status', unrelated as never, FiberState.LOADING)
     })
-    await expect(workbench.await()).rejects.toThrow(/snapshot dependency provider failed/)
+    await workbench.await()
+    expect(settings.updates).toEqual([{
+      tabsEnabled: { git: true, browser: true },
+      browserInterceptLinks: false,
+    }])
   })
 
   it('waits for the snapshot fiber to be created without polling', async () => {

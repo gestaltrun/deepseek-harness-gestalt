@@ -94,7 +94,7 @@ function memberWait(
     questions: memberQuestions({ kind: 'member-question', ...carriedOver }),
   }
   const carrier = new PendingWait(
-    'question', RpcId('q-1'), SID, payload as MemberQuestionComposerProps['matched']['payload'], respond)
+    'question', RpcId('q-1'), SID, payload, respond)
   return { carrier, respond }
 }
 
@@ -106,7 +106,7 @@ function genericWait(intent: undefined | { kind: 'plan-review'; approve: string 
       ...(intent === undefined ? {} : { intent }),
     }],
   }
-  return new PendingWait('question', RpcId('q-2'), SID, payload as MemberQuestionComposerProps['matched']['payload'], () => Promise.resolve<RpcReceipt>({ accepted: true }))
+  return new PendingWait('question', RpcId('q-2'), SID, payload, () => Promise.resolve<RpcReceipt>({ accepted: true }))
 }
 
 function renderCard(carrier: PendingWait<'question'>, focusDocument?: MemberQuestionComposerProps['focusDocument']) {
@@ -165,7 +165,7 @@ describe('member-question routing', () => {
       ],
     }
     const carrier = new PendingWait(
-      'question', RpcId('q-3'), SID, payload as MemberQuestionComposerProps['matched']['payload'],
+      'question', RpcId('q-3'), SID, payload,
       () => Promise.resolve<RpcReceipt>({ accepted: true }))
     expect(selectMemberQuestion({ interactions: [carrier] })).toBeNull()
   })
@@ -277,7 +277,7 @@ describe('MemberQuestionCard', () => {
     const { container } = renderCard(carrier)
 
     fireEvent.click(screen.getByRole('button', { name: '收起问题卡片' }))
-    await waitFor(() => expect(container.querySelector('[data-folded]')).toBeTruthy())
+    await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeTruthy() })
     // The whole card folded: the presentation stays mounted but hidden, and
     // the strip carries the collapse mark.
     expect(screen.getByText('远端 · 王小明')).toBeTruthy()
@@ -288,12 +288,12 @@ describe('MemberQuestionCard', () => {
     // Revealing from the strip shows the presentation still minimized — the
     // shared component's own maximize toggle stays the way back in.
     fireEvent.click(screen.getByRole('button', { name: '远端 · 王小明' }))
-    await waitFor(() => expect(container.querySelector('[data-folded]')).toBeNull())
+    await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeNull() })
     expect(screen.getByRole('button', { name: '展开问题卡片' })).toBeTruthy()
 
     // Re-expanding the presentation clears the linkage state.
     fireEvent.click(screen.getByRole('button', { name: '展开问题卡片' }))
-    await waitFor(() => expect(screen.getByText('将王小明移出项目吗？')).toBeTruthy())
+    await waitFor(() => { expect(screen.getByText('将王小明移出项目吗？')).toBeTruthy() })
     expect(screen.getByRole('button', { name: '收起问题卡片' })).toBeTruthy()
   })
 
@@ -316,10 +316,10 @@ describe('MemberQuestionCard', () => {
     panel.setAttribute('data-details-panel', '')
     document.body.appendChild(panel)
     panel.setAttribute('aria-expanded', 'true')
-    await waitFor(() => expect(container.querySelector('[data-folded]')).toBeTruthy())
+    await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeTruthy() })
     expect(screen.getByText('远端 · 王小明')).toBeTruthy()
     panel.setAttribute('aria-expanded', 'false')
-    await waitFor(() => expect(container.querySelector('[data-folded]')).toBeNull())
+    await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeNull() })
     expect(screen.getByText('将王小明移出项目吗？')).toBeTruthy()
     panel.remove()
   })
@@ -356,7 +356,7 @@ describe('MemberQuestionCard', () => {
     tidyDomForSnapshot(container)
     expect(container).toMatchSnapshot()
     fireEvent.click(screen.getByRole('button', { name: '收起问题卡片' }))
-    await waitFor(() => expect(container.querySelector('[data-folded]')).toBeTruthy())
+    await waitFor(() => { expect(container.querySelector('[data-folded]')).toBeTruthy() })
     // No origin rides the carrier: the strip names the generic member face.
     expect(screen.getByText('远端 · 成员')).toBeTruthy()
     tidyDomForSnapshot(container)

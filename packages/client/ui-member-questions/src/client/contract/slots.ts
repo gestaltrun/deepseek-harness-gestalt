@@ -131,8 +131,9 @@ export function memberBriefOf(wait: MemberQuestionWait): MemberQuestionBrief {
   // A brief counts as carried only with its origin identity present: a bare
   // `member-question` tag (pre-relay payloads, minimal fixtures) renders the
   // identity-lite face with the detail-derived background fallback.
-  const carried = intent?.kind === 'member-question' && intent.origin !== undefined
-    ? intent as MemberQuestionCarriedIntent
+  const carried = intent?.kind === 'member-question'
+    && (intent as Partial<MemberQuestionCarriedIntent>).origin !== undefined
+    ? intent
     : undefined
   const fallback = clampBackground(
     wait.payload.questions.find(question => question.detail !== undefined)?.detail ?? '',

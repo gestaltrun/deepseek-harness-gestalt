@@ -10,7 +10,6 @@ import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import {
   createSnapshotStore, EMPTY_CHAT_SNAPSHOT, EMPTY_CONVERSATION_VIEWS,
 } from '@deepseek-ai/dsh-client-runtime/client'
-import type { UseSession } from '@deepseek-ai/dsh-client-test-runtime'
 import type { ConversationSnapshot, SessionId, SessionListState, WorkspaceListState } from '@deepseek-ai/dsh-client-runtime/client'
 import type { SessionProviderComponent } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DetailsDocumentFocus, DetailsDocumentOwnerProps, DetailsSlotProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -85,8 +84,7 @@ function renderFocused(
       SessionProvider={SessionProviderStub}
       renderSlot={renderSlot}
       sessionId={SID}
-      useSession={bindSnapshotSelector({ getSnapshot: () => snap, subscribe: () => () => {} }) as unknown as
-        UseSession<ConversationSnapshot>}
+      useSession={bindSnapshotSelector({ getSnapshot: () => snap, subscribe: () => () => {} })}
       useSessions={bindSnapshotSelector(emptyList)}
       useWorkspaces={bindSnapshotSelector(emptyWorkspaces)}
       useProjection={(() => undefined)}

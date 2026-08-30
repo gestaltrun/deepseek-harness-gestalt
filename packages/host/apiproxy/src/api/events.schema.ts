@@ -53,6 +53,7 @@ export const askUserQuestionItemSchema = z.object({
         // renders the receiver's bare file tab.
         content: z.string().optional(),
       })),
+      // oxlint-disable-next-line typescript/no-deprecated -- Zod's default v3-compatible export accepts infinite numbers.
       expiresAt: z.number().finite(),
     }),
   ]).optional(),

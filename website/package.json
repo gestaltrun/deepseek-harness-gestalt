@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vitepress dev . --host 127.0.0.1 --port 5173",
-    "build": "vitepress build .",
+    "build": "tsx build-cli.ts",
+    "build:mpa": "tsx build-cli.ts --mpa",
     "preview": "vitepress preview . --host 127.0.0.1 --port 4173"
   },
   "devDependencies": {
@@ -15,6 +16,7 @@
     "dayjs": "1.11.21",
     "debug": "4.4.3",
     "mermaid": "11.16.0",
+    "tsx": "^4.22.4",
     "vite": "^5.4.14",
     "vitepress": "^1.6.4",
     "vitepress-plugin-mermaid": "^2.0.17"

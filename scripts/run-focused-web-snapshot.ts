@@ -7,7 +7,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import { DSH_ENV_PREFIX, SENSITIVE_ENV_PATTERN } from '@deepseek-ai/dsh-subprocess'
 import { pnpmInvocation } from './pnpm-invocation.ts'
 
-const WEB_SNAPSHOT_FILE = /^(?:apps\/web\/tests\/.+\.(?:e2e|snapshot)\.ts|apps\/mobile\/tests\/.+\.snapshot\.ts)$/u
+const WEB_SNAPSHOT_FILE = /^(?:apps\/web\/tests\/.+\.(?:e2e|snapshot)\.ts|apps\/(?:mobile|platform)\/tests\/.+\.snapshot\.ts)$/u
 
 /** One shell-free child invocation owned by the focused runner. */
 export interface FocusedWebCommand {

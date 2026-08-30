@@ -1,0 +1,90 @@
+# Generate or update the source-owned Product Release PR; this workflow never publishes a product.
+name: Product Release Plan
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.release-intents/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-release-plan
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare Product Release PR
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create release planning token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ vars.DSH_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DSH_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+      - name: Apply unconsumed release intent
+        id: plan
+        run: |
+          branch=automation/product-release
+          git switch -c "$branch"
+          pnpm product-release:prepare --write | tee "$RUNNER_TEMP/product-release-plan.json"
+          if git diff --quiet; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/desktop/package.json apps/desktop/release-notes apps/mobile/package.json apps/mobile/release.json \
+            apps/platform/package.json product-releases
+          git commit -m 'chore(release): prepare product release'
+          remote_oid=$(git ls-remote --heads origin "refs/heads/$branch" | cut -f 1)
+          if [[ -n "$remote_oid" ]]; then
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              "HEAD:refs/heads/$branch" --force-with-lease="refs/heads/$branch:$remote_oid"
+          else
+            git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$branch"
+          fi
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+      - name: Create or update Draft Product Release PR
+        if: steps.plan.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          body="$RUNNER_TEMP/product-release-pr.md"
+          plan=$(find product-releases -maxdepth 1 -type f -name '[0-9][0-9][0-9][0-9].json' -print | sort | tail -1)
+          {
+            echo '## Product Release Plan'
+            echo
+            echo "Source-owned plan: \`$plan\`"
+            echo
+            jq -r '.intentIds[] | select(test("^[0-9]+-")) | capture("^(?<issue>[0-9]+)-").issue | "Refs #" + .' "$plan"
+            echo
+            echo 'This PR selects versions and notes only. Signing, TestFlight, GitHub Release publication, and production deployment remain protected by their owning Environments.'
+          } > "$body"
+          existing=$(gh pr list --state open --head automation/product-release --json number --jq '.[0].number // empty')
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --title 'chore(release): prepare Product Release Plan' --body-file "$body"
+          else
+            gh pr create --draft --base master --head automation/product-release \
+              --title 'chore(release): prepare Product Release Plan' --body-file "$body" \
+              --label kind/feature --label area/infra
+          fi

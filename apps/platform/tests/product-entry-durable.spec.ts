@@ -1309,6 +1309,19 @@ describe.skipIf(!durableProgramsAvailable)('operated Platform resource entry wit
     ]))
 
     const listenOrigin = `http://127.0.0.1:${String(running.context.webServer.port)}`
+    const homepage = await fetch(`${listenOrigin}/`)
+    expect(homepage.status).toBe(200)
+    expect(homepage.headers.get('content-type')).toBe('text/html; charset=utf-8')
+    expect(await homepage.text()).toContain('<link rel="canonical" href="https://www.gestaltrun.com/"')
+    for (const [path, contentType] of [
+      ['/robots.txt', 'text/plain; charset=utf-8'],
+      ['/sitemap.xml', 'application/xml; charset=utf-8'],
+      ['/llms.txt', 'text/plain; charset=utf-8'],
+    ] as const) {
+      const response = await fetch(`${listenOrigin}${path}`)
+      expect(response.status, path).toBe(200)
+      expect(response.headers.get('content-type'), path).toBe(contentType)
+    }
     for (const path of [
       '/v1/account/login-attempts',
       '/v1/remote-access/personal-pairing',

@@ -30,7 +30,7 @@
       "path": "../ui-settings"
     },
     {
-      "path": "../ui-settings-plugins"
+      "path": "../locale"
     }
   ]
 }

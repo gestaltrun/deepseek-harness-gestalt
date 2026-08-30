@@ -10,7 +10,7 @@ Issue #360 requires the six-state 「手机设备」 settings card from [setting
 
 ## Decision
 
-The Node half registers the durable `ui-phone` section (`enabled: boolean`, default `false`) through `ctx.inject(['settings'], …)` / `settings.register`, the same optional-settings pattern as ui-theme and ui-browser. The browser half injects `settings.plugin.item` with `key: 'ui-phone'` and owns the card chrome. The card is a pure-props component switching on `PhoneEnvironmentView`; command rows copy the locked mockup strings (`sdkmanager --install …`, `avdmanager create avd …`, `emulator -avd Pixel_6_API_35`, `xcodebuild -downloadPlatform iOS`, `xcrun simctl create …`) through an injected `onCopy`. Error rows share one verb, 「下一步动作」. Detection rides a narrow `PhoneEnvironmentSource`; the shipped `MISSING_PHONE_ENVIRONMENT_SOURCE` is the probe-failed row used when `phoneDevices` is absent. `phone-runtime` is not imported.
+The Node half registers the durable `ui-phone` section (`enabled: boolean`, default `false`) through `ctx.inject(['settings'], …)` / `settings.register`, the same optional-settings pattern as ui-theme and ui-browser. The browser half owns the six-state wizard chrome; the page that hosts it is the top-level Phone Devices section recorded in [the settings-section note](2026-08-28-ui-phone-settings-section.md). The card is a pure-props component switching on `PhoneEnvironmentView`; command rows copy the locked mockup strings (`sdkmanager --install …`, `avdmanager create avd …`, `emulator -avd Pixel_6_API_35`, `xcodebuild -downloadPlatform iOS`, `xcrun simctl create …`) through an injected `onCopy`. Error rows share one verb, 「下一步动作」. Detection rides a narrow `PhoneEnvironmentSource`; the shipped `MISSING_PHONE_ENVIRONMENT_SOURCE` is the probe-failed row used when `phoneDevices` is absent. `phone-runtime` is not imported.
 
 ## Alternatives considered
 
@@ -24,4 +24,4 @@ The Node half registers the durable `ui-phone` section (`enabled: boolean`, defa
 
 ## Consequences
 
-The Plugins-tab card now wraps the same Host `GET /phone/devices` listing the picker uses: a successful pull reaches probing, both wizards, and ready, and a missing fleet route stays on the probe-failed row. Device-tool registration stays off while `enabled` is false; this package still does not spawn mobilecli. The tab strip reads `PhoneListingSource` as [the skeleton note](2026-08-27-ui-phone-tab-skeleton.md) records.
+The Phone Devices section wraps the same Host `GET /phone/devices` listing the picker uses: a successful pull reaches probing, both wizards, and ready, and a missing fleet route stays on the probe-failed row. Device-tool registration stays off while `enabled` is false; this package still does not spawn mobilecli. The tab strip reads `PhoneListingSource` as [the skeleton note](2026-08-27-ui-phone-tab-skeleton.md) records.

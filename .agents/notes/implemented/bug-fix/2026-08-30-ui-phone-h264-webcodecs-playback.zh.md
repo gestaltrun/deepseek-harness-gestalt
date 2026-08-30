@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-`PhoneH264Surface` 是 `PhoneConnectedView` 内的 React 所有权适配器。其接口只包含签名 URL、canvas 样式与可访问名称、解码画面尺寸回调和失败回调。挂载与 URL 生命周期拥有一份 `playPhoneH264Stream` 句柄；cleanup 会先关闭该句柄，另一台设备、另一会话或另一可见性状态才可绘制。
+`PhoneH264Surface` 是 `PhoneConnectedView` 内的 canvas 适配器。其接口包含签名 URL、canvas 样式与可访问名称、解码画面尺寸回调、失败回调，以及由 connected view 保留的播放 owner。该 owner 跨越非 live 阶段，在上一份句柄 settlement 后才启动 replacement，并阻止已过时的排队 replacement 启动。
 
 `playPhoneH264Stream` 在单个异步 `close()` 操作后拥有浏览器播放实现。它拉取签名同源 URL，要求成功的 `video/h264` 应答，增量识别三字节与四字节 Annex-B 起始码，根据 AUD 或 SPS、PPS 与 slice header 中的 AVC picture-identity 字段解析未使用 data partition 的 primary coded picture，从 SPS 推导完整 AVC codec 字符串，并把每幅 picture 作为一个 `EncodedVideoChunk` 送入 `VideoDecoder`。同一 identity 的多个 slice 保持在一幅 picture；缺失首个 macroblock 的 picture、首 slice 之后改变 identity 以及 2–4 型 data-partition NAL 都会显式失败。parser 接受 chroma format 0–2、POC type 0 或 2 的 progressive picture；interlaced picture、scaling matrix、bottom-field picture-order signaling、chroma format 3 与 POC type 1 会在进入 decoder 前失败。decoder 队列产生背压时等待 `dequeue` 事件；`flush()` 只用于有限流 EOF，之后不会再接收 delta chunk。每个输出 `VideoFrame` 都在同一回调中绘制到 canvas 并关闭；其显示宽高会更新 canvas 与 `PhoneConnectionController` 的触控面。
 
@@ -18,7 +18,7 @@ Status: implemented
 
 ## 验证
 
-包测试覆盖网络分片切点、三字节与四字节起始码、无 AUD 的 picture identity、AUD 与 parameter set 排序、多 slice access unit、拒绝中途改变 identity/data-partitioned 流、SPS 推导的 codec 输入、IDR-to-delta 队列背压、不支持与畸形输入、尺寸变化、精确 390×844 触控映射、静止态取消、decoder 失败、consumer callback 收容、陈旧回调和帧关闭。loopback Electron 41.2.1 probe 把 fakemobilecli 的 1,534,614 字节 Annex-B fixture 解码为三幅 390×844 `VideoFrame`，并绘制到 390×844 canvas。
+包测试覆盖网络分片切点、三字节与四字节起始码、无 AUD 的 picture identity、AUD 与 parameter set 排序、多 slice access unit、拒绝中途改变 identity/data-partitioned 流、SPS 推导的 codec 输入、IDR-to-delta 队列背压、不支持与畸形输入、尺寸变化、精确 390×844 触控映射、静止态取消、跨非 live 阶段的三代设备 replacement、decoder 失败、consumer callback 收容、陈旧回调和帧关闭。loopback Electron 41.2.1 probe 把 fakemobilecli 的 1,534,614 字节 Annex-B fixture 解码为三幅 390×844 `VideoFrame`，并绘制到 390×844 canvas。
 
 ## Alternatives considered
 

@@ -10,7 +10,7 @@ The `phone-stream` Host route returns a raw Annex-B H264 elementary stream. Pass
 
 ## Decision
 
-`PhoneH264Surface` is the React ownership adapter inside `PhoneConnectedView`. Its interface is the signed URL, canvas styling and accessible name, decoded-surface callback, and failure callback. Mount and URL lifetime own one `playPhoneH264Stream` handle; cleanup closes that handle before another device, session, or visibility state can paint.
+`PhoneH264Surface` is the canvas adapter inside `PhoneConnectedView`. Its interface is the signed URL, canvas styling and accessible name, decoded-surface callback, failure callback, and a playback owner retained by the connected view. That owner survives non-live phases, waits for the preceding handle to settle before starting a replacement, and prevents an obsolete queued replacement from starting.
 
 `playPhoneH264Stream` owns the browser playback implementation behind one asynchronous `close()` operation. It fetches the signed same-origin URL, requires a successful `video/h264` response, incrementally finds three- and four-byte Annex-B start codes, parses non-partitioned primary coded pictures from AUDs or the AVC picture-identity fields in SPS, PPS, and slice headers, derives the fully qualified AVC codec string from the SPS, and feeds one picture per `EncodedVideoChunk` into `VideoDecoder`. Multiple slices with one identity remain in one picture; a picture missing its first macroblock, an identity change after the first slice, and data-partition NAL types 2–4 fail explicitly. The parser accepts progressive chroma formats 0–2 with POC type 0 or 2; interlaced pictures, scaling matrices, bottom-field picture-order signaling, chroma format 3, and POC type 1 fail before decoder input. Decoder queue pressure waits for the `dequeue` event; `flush()` is reserved for finite-stream EOF so a following delta chunk is never admitted after flush. Every output `VideoFrame` is drawn to the canvas and closed in the same callback; its display width and height update the canvas and `PhoneConnectionController` touch surface.
 
@@ -18,7 +18,7 @@ The handle owns `AbortController`, response reader, decoder, output frames, and 
 
 ## Verification
 
-The package tests cover network-chunk splits, three- and four-byte start codes, AUD-free picture identity, AUD and parameter-set ordering, multi-slice access units, rejected identity-changing/data-partitioned streams, SPS-derived codec input, IDR-to-delta queue pressure, unsupported and malformed inputs, dimension changes, exact 390×844 touch mapping, quiescent cancellation, decoder failures, contained consumer callbacks, stale callbacks, and frame closure. A loopback Electron 41.2.1 probe decodes the 1,534,614-byte fakemobilecli Annex-B fixture into three 390×844 `VideoFrame`s and paints a 390×844 canvas.
+The package tests cover network-chunk splits, three- and four-byte start codes, AUD-free picture identity, AUD and parameter-set ordering, multi-slice access units, rejected identity-changing/data-partitioned streams, SPS-derived codec input, IDR-to-delta queue pressure, unsupported and malformed inputs, dimension changes, exact 390×844 touch mapping, quiescent cancellation, three-generation device replacement across a non-live phase, decoder failures, contained consumer callbacks, stale callbacks, and frame closure. A loopback Electron 41.2.1 probe decodes the 1,534,614-byte fakemobilecli Annex-B fixture into three 390×844 `VideoFrame`s and paints a 390×844 canvas.
 
 ## Alternatives considered
 

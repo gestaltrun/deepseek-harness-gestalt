@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { PhoneConnectionController, PhoneStreamFailureKind } from './phone-connection.ts'
 import type { PhoneListingSource } from './registry.ts'
-import { PhoneH264Surface } from './PhoneH264Surface.tsx'
+import { PhoneH264PlaybackOwner, PhoneH264Surface } from './PhoneH264Surface.tsx'
 import css from './PhoneConnectedView.module.css'
 import shared from './PhoneShared.module.css'
 
@@ -106,6 +106,8 @@ export function PhoneConnectedView({
   serial, name, visible, source, onOpenDevice, createController,
 }: PhoneConnectedViewProps): ReactNode {
   const createControllerRef = useRef(createController)
+  const h264PlaybackOwnerRef = useRef<PhoneH264PlaybackOwner | undefined>(undefined)
+  const h264PlaybackOwner = h264PlaybackOwnerRef.current ??= new PhoneH264PlaybackOwner()
   createControllerRef.current = createController
   // The tab is a singleton (U1): a serial change disposes the previous
   // controller and mints a new session for the chosen device.
@@ -221,6 +223,7 @@ export function PhoneConnectedView({
           onKeyDown={onKeyDown}
         >
           <PhoneH264Surface
+            owner={h264PlaybackOwner}
             label={`${name} 实时画面`}
             className={css.stream}
             url={phase.streamUrl}

@@ -80,22 +80,26 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
 }
 
 describe('phone runtime service lifecycle', () => {
-  it('searches PATH and fails composition with install guidance when absent', async () => {
+  it('activates with an unavailable service when PATH carries no mobilecli', async () => {
     const context = new Context()
     contexts.push(context)
     const previousPath = process.env.PATH
+    const previousHome = process.env.HOME
     process.env.PATH = ''
-    let message: string | undefined
+    process.env.HOME = ''
     try {
+      // Composition survives: the Host must not die for an optional provider.
       await context.plugin(PhoneDevices, { ...FAST_CONFIG }).await()
-    } catch (error) {
-      message = (error as Error).message
+      const unavailable = await errorOf(() => context.phoneDevices.listDevices())
+      expect(unavailable.code).toBe('PHONE_UNRESOLVED')
+      expect(unavailable.message).toContain('npm install -g mobilecli@latest')
+      expect(unavailable.message).toContain('(no candidate directories)')
     } finally {
       if (previousPath === undefined) delete process.env.PATH
       else process.env.PATH = previousPath
+      if (previousHome === undefined) delete process.env.HOME
+      else process.env.HOME = previousHome
     }
-    expect(message).toContain('npm install -g mobilecli@latest')
-    expect(message).toContain('(PATH is empty)')
   })
 
   it('refuses lifecycle verbs that arrive before the first baseline exists', async () => {
@@ -139,22 +143,20 @@ describe('phone runtime service lifecycle', () => {
     await pending
   })
 
-  it('fails composition loudly when the mobilecli executable cannot be resolved', async () => {
+  it('keeps the Host alive when a configured executablePath is unusable', async () => {
     const context = new Context()
     contexts.push(context)
-    const first = context.plugin(PhoneDevices, {
+    await context.plugin(PhoneDevices, {
       ...FAST_CONFIG,
       executablePath: '/no-such-directory/mobilecli',
-    })
-    void Promise.resolve(first).catch(() => undefined)
-    await expect(first.await()).rejects.toThrow(/executablePath.*not an executable file/s)
-    // The failed plugin unloaded its Service registration with the fiber.
-    const second = context.plugin(PhoneDevices, {
-      ...FAST_CONFIG,
-      executablePath: '/no-such-directory/mobilecli',
-    })
-    void Promise.resolve(second).catch(() => undefined)
-    await expect(second.await()).rejects.toThrow(/not an executable file/)
+    }).await()
+    const unavailable = await errorOf(() => context.phoneDevices.listDevices())
+    expect(unavailable.code).toBe('PHONE_UNRESOLVED')
+    expect(unavailable.message).toContain('/no-such-directory/mobilecli')
+    expect(unavailable.message).toContain('not an executable file')
+    // Every operation surfaces the same diagnosable failure.
+    const capture = await errorOf(() => context.phoneDevices.startCapture({ deviceId: deviceId('x'), format: 'mjpeg' }))
+    expect(capture.code).toBe('PHONE_UNRESOLVED')
   })
 
   it('answers listDevices with grouped Android/iOS listings including offline devices', async () => {

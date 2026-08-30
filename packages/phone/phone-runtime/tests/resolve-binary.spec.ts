@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -95,8 +95,49 @@ describe('PATH discovery', () => {
     expect(guidance).toContain('executablePath')
   })
 
-  it('treats an empty PATH as a failing search', () => {
-    expect(() => resolveMobilecliExecutable({ env: {} })).toThrow(/\(PATH is empty\)/)
+  it('treats an empty search space as a failing search', () => {
+    expect(() => resolveMobilecliExecutable({ env: {} })).toThrow(/\(no candidate directories\)/)
+  })
+
+  it('finds mobilecli in the npx cache when PATH misses', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const npxBin = join(home, '.npm', '_npx', 'abc123', 'node_modules', '.bin')
+    await mkdir(npxBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(npxBin, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({ env: { PATH: '/no/mobilecli/here' }, home })
+    expect(resolved).toBe(join(npxBin, 'mobilecli'))
+  })
+
+  it('prefers PATH over the npx cache and the npm-global directory', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const npxBin = join(home, '.npm', '_npx', 'abc123', 'node_modules', '.bin')
+    const globalBin = join(home, '.npm-global', 'bin')
+    await mkdir(npxBin, { recursive: true })
+    await mkdir(globalBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(npxBin, 'mobilecli'))
+    await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
+    const pathDir = await stageDir()
+    await copyFile(join(dir, 'mobilecli'), join(pathDir, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({
+      env: { PATH: pathDir },
+      home,
+    })
+    expect(resolved).toBe(join(pathDir, 'mobilecli'))
+  })
+
+  it('finds mobilecli in the npm-global directory when PATH misses', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const globalBin = join(home, '.npm-global', 'bin')
+    await mkdir(globalBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({ env: { PATH: '/no/mobilecli/here' }, home })
+    expect(resolved).toBe(join(globalBin, 'mobilecli'))
   })
 })
 

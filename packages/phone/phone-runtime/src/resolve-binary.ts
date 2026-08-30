@@ -5,8 +5,8 @@
  * @module @deepseek-ai/dsh-phone-runtime/resolve-binary
  */
 
-import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, isAbsolute, resolve } from 'node:path'
+import { accessSync, constants, readdirSync, statSync } from 'node:fs'
+import { delimiter, isAbsolute, join, resolve } from 'node:path'
 
 /** Inputs for {@link resolveMobilecliExecutable}. */
 export interface ResolveMobilecliOptions {
@@ -16,6 +16,8 @@ export interface ResolveMobilecliOptions {
   readonly env: NodeJS.ProcessEnv
   /** Windows behavior switch (executable-bit checks and extension probing); defaults to `process.platform === 'win32'`. */
   readonly isWindows?: boolean
+  /** Home directory for the npm-global and npx-cache candidates; defaults to `env.HOME`. */
+  readonly home?: string
 }
 
 /**
@@ -24,7 +26,7 @@ export interface ResolveMobilecliOptions {
  * @returns the multi-line guidance text including the npm install line.
  */
 export function mobilecliInstallGuidance(searched: readonly string[]): string {
-  const listed = searched.length > 0 ? searched.map(dir => `  ${dir}`).join('\n') : '  (PATH is empty)'
+  const listed = searched.length > 0 ? searched.map(dir => `  ${dir}`).join('\n') : '  (no candidate directories)'
   return [
     'phone-runtime: cannot resolve the mobilecli executable. Searched:',
     listed,
@@ -56,7 +58,8 @@ export function resolveMobilecliExecutable(options: ResolveMobilecliOptions): st
     assertExecutableFile(explicit, isWindows, `the configured phoneDevices \`executablePath\` ${JSON.stringify(explicit)}`)
     return explicit
   }
-  const searched = searchPaths(options.env)
+  const home = options.home ?? options.env.HOME ?? ''
+  const searched = searchPaths(options.env, home)
   for (const directory of searched) {
     for (const candidate of candidateNames(isWindows, options.env)) {
       const full = resolve(directory, candidate)
@@ -66,8 +69,22 @@ export function resolveMobilecliExecutable(options: ResolveMobilecliOptions): st
   throw new Error(mobilecliInstallGuidance(searched))
 }
 
-function searchPaths(env: NodeJS.ProcessEnv): string[] {
-  return (env.PATH ?? '').split(delimiter).filter(directory => directory.length > 0)
+function searchPaths(env: NodeJS.ProcessEnv, home: string): string[] {
+  const directories = (env.PATH ?? '').split(delimiter).filter(directory => directory.length > 0)
+  // Electron GUI processes ship a minimal PATH; npm's well-known locations
+  // cover the global install and the npx cache the CLI docs point at.
+  if (home.length > 0) {
+    directories.push(join(home, '.npm-global', 'bin'))
+    const npxRoot = join(home, '.npm', '_npx')
+    try {
+      for (const entry of readdirSync(npxRoot)) {
+        directories.push(join(npxRoot, entry, 'node_modules', '.bin'))
+      }
+    } catch {
+      // No npx cache is the normal case; the PATH candidates still apply.
+    }
+  }
+  return directories
 }
 
 function candidateNames(isWindows: boolean, env: NodeJS.ProcessEnv): readonly string[] {

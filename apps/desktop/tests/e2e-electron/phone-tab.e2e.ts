@@ -101,12 +101,38 @@ describe('Desktop phone tab live chain', () => {
     expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])
 
     const beforeTap = await fakeCounters()
-    // Explicit zero offsets select WDIO pointer actions at the geometric center instead of native element-click rounding.
-    await screen.click({ x: 0, y: 0 })
+    await browser.execute(() => {
+      const target = document.querySelector<HTMLDivElement>('div[role="application"]')
+      const canvas = target?.querySelector<HTMLCanvasElement>('canvas')
+      if (target === null || target === undefined || canvas === null || canvas === undefined) {
+        throw new Error('phone surface and canvas are required')
+      }
+      target.addEventListener('pointerdown', (event) => {
+        const rect = target.getBoundingClientRect()
+        const u = (event.clientX - rect.left) / rect.width
+        const v = (event.clientY - rect.top) / rect.height
+        Object.assign(window, {
+          __DSH_PHONE_E2E_POINTER__: {
+            u, v, x: Math.round(u * canvas.width), y: Math.round(v * canvas.height),
+          },
+        })
+      }, { capture: true, once: true })
+    })
+    await screen.click()
     const afterTap = await waitForFakeIo(counters => counters.io.length === beforeTap.io.length + 1)
+    const pointer = await browser.execute(() => (
+      window as typeof window & {
+        __DSH_PHONE_E2E_POINTER__?: { readonly u: number; readonly v: number; readonly x: number; readonly y: number }
+      }
+    ).__DSH_PHONE_E2E_POINTER__)
+    if (pointer === undefined) throw new Error('phone surface did not receive pointerdown')
+    expect(pointer.u).toBeGreaterThan(0.49)
+    expect(pointer.u).toBeLessThan(0.51)
+    expect(pointer.v).toBeGreaterThan(0.49)
+    expect(pointer.v).toBeLessThan(0.51)
     expect(afterTap.io.at(-1)).toMatchObject({
       method: 'device.io.tap',
-      params: { deviceId: 'emulator-5554', x: 195, y: 422 },
+      params: { deviceId: 'emulator-5554', x: pointer.x, y: pointer.y },
     })
 
     const beforeHome = afterTap.io.length

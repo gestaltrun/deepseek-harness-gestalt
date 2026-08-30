@@ -18,13 +18,21 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 
 组装关系：`tsconfig.client.json` 聚合引用本包；`packages/bundle/web-app/cordis.patch.yml` 携带 `ui-phone` 浏览器行；`packages/bundle/web-app/package.json` 声明依赖。包 invariant 伴生体在同进程 fake 注册表上以真实 cordis fiber 证明 tab 注册/注销对称。
 
-## Model Experience
+## 模型体验
 
-无。本包只注册侧栏 tab 与设置卡并渲染 HTML；不贡献 prompt 段、工具 schema、流或会话事件，启用闸门也不增加任何模型可见面。
+### 手机界面状态与模型工具分离
 
-#### KV Cache effect
+#### 模型看到什么
 
-无；本包从不组装或发送 provider 请求。
+本包不向模型提供任何内容。`enabled` 设置只控制浏览器侧设备发现与流传输，不增加提示词、Session 事件或工具 schema。组合可单独挂载 `@deepseek-ai/dsh-tool-phone`；该 Consumer 拥有六个延迟加载的[手机工具 schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-phone)及其结果。
+
+#### Token 影响
+
+直接 token 为零。启用 tab、刷新清单或切换占用设备都不进入模型请求；手机工具的 schema 与结果 token 归 `@deepseek-ai/dsh-tool-phone` 所有。
+
+#### KV Cache 影响
+
+无。界面设置与设备状态不会改变模型请求前缀；单独组装或调用 `@deepseek-ai/dsh-tool-phone` 所产生的缓存影响由该包文档说明。
 
 ## Known Limitations and Deferred Work
 

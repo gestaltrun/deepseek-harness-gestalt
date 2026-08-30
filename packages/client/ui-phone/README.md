@@ -20,11 +20,19 @@ Composition: the `tsconfig.client.json` aggregate references the package; `packa
 
 ## Model Experience
 
-None. The package registers a sidebar tab and a settings card and renders HTML; it contributes no prompt section, tool schema, stream, or session event, and the enable gate adds no model-visible surface.
+### Phone UI state and model-tool separation
+
+#### What the model sees
+
+Nothing from this package. The `enabled` setting controls browser-side device discovery and streaming but does not add a prompt, Session event, or tool schema. A composition may mount `@deepseek-ai/dsh-tool-phone` separately; that Consumer owns the six deferred [phone tool schemas](../../../docs/tool-catalog.md#deepseek-aidsh-tool-phone) and their results.
+
+#### Token effect
+
+Zero direct tokens. Enabling the tab, refreshing its listing, or switching its occupying device does not enter a model request; any phone-tool schema and result tokens belong to `@deepseek-ai/dsh-tool-phone`.
 
 #### KV Cache effect
 
-None; the package never assembles or sends provider requests.
+None. UI settings and device state never change a model request prefix; separately composing or invoking `@deepseek-ai/dsh-tool-phone` has the cache effects documented by that package.
 
 ## Known Limitations and Deferred Work
 

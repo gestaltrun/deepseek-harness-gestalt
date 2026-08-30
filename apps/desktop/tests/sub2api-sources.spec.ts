@@ -1,6 +1,7 @@
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import {
   parseDesktopSub2ApiSources, resolveSub2ApiSourcesPath, SUB2API_SOURCES_ENV,
@@ -36,8 +37,9 @@ describe('resolveSub2ApiSourcesPath', () => {
     const original = process.env[SUB2API_SOURCES_ENV]
     try {
       delete process.env.DSH_DESKTOP_SUB2API_SOURCES
-      const moduleUrl = 'file:///app/out/main.mjs'
-      expect(resolveSub2ApiSourcesPath(moduleUrl)).toBe('/app/out/sub2api-sources.json')
+      const entryDir = join(tmpdir(), 'dsh-sub2api-app', 'out')
+      const moduleUrl = pathToFileURL(join(entryDir, 'main.mjs')).href
+      expect(resolveSub2ApiSourcesPath(moduleUrl)).toBe(join(entryDir, 'sub2api-sources.json'))
       process.env[SUB2API_SOURCES_ENV] = '/custom/sources.json'
       expect(resolveSub2ApiSourcesPath(moduleUrl)).toBe('/custom/sources.json')
     } finally {

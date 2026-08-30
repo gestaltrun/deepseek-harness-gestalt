@@ -1,6 +1,6 @@
 # Agent Note: Enable model invocation for the Matt delivery skill batch
 
-Status: proposed
+Status: implemented
 
 English | [中文](2026-08-27-enable-matt-delivery-skills-model-invocation.zh.md)
 
@@ -8,19 +8,18 @@ English | [中文](2026-08-27-enable-matt-delivery-skills-model-invocation.zh.md
 
 Orchestrated ticket writers run as fresh subagents that must execute the delivery workflow themselves, but `implement`, `to-spec`, and `to-tickets` carried `disable-model-invocation: true`, so a writer could neither invoke nor formally enter the workflow it was contracted to follow; instructions degraded to free-form imitation of the skill text.
 
-## Proposal
+## Decision
 
-Remove the flag from exactly `.agents/skills/{implement,to-spec,to-tickets}/SKILL.md`. Writers self-invoke the workflow and its `/tdd` and `/code-review` steps; repository overrides (`dsh-pre-push-checks`, testing policy) keep pruning the generic full-suite advice. `tdd` and `code-review` were already model-invocable and stay unchanged.
+The `implement`, `to-spec`, and `to-tickets` skills are model-invoked in both supported products. Their `SKILL.md` files omit `disable-model-invocation`, and their Codex `agents/openai.yaml` files set `policy.allow_implicit_invocation: true`. Writers self-invoke the workflow and its `/tdd` and `/code-review` steps; repository overrides (`dsh-pre-push-checks`, testing policy) keep pruning the generic full-suite advice. `tdd` and `code-review` remain model-invoked.
 
-## Acceptance criteria
+## Verification
 
-- The three named `SKILL.md` files contain no `disable-model-invocation` frontmatter.
-- A dispatched ticket writer can enter the implement workflow without the root task pasting its body into the handoff.
-- Skills outside the named trio keep their previous invocation policy.
+- `verify-skill-invocation-metadata` requires the Claude Code and Codex policies to agree for every skill carrying Codex metadata.
+- The skill validators parse the three skill entrypoints and Codex metadata files.
 
-## Risks
+## Consequences
 
-An upstream sync that restores the flag silently would send writers back to imitation; the delivery contract must fail at dispatch if the flag reappears, and restoring the deletion belongs in that sync's local-modification log. Widening the change to the other nineteen flagged skills would expose human-owned chat surfaces to model invocation without a product request.
+The three descriptions remain in the model's discovery context so router and delivery workflows can invoke them without copying their bodies into handoffs. The invocation metadata check rejects product-specific drift. Skills outside this batch retain their existing invocation policy.
 
 ## Alternatives considered
 

@@ -2,7 +2,7 @@ import { request as httpRequest } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
-import PhoneDevices, { deviceId } from '@deepseek-ai/dsh-phone-runtime'
+import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
 import WebSocket from 'ws'
 import PhoneStream, { PHONE_IO_PATH } from '../src/index.ts'
 import { assertStructurallyDecodableJpeg, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
@@ -185,6 +185,22 @@ describe('phone stream Host routes', () => {
       throw new Error('listing backend down')
     }
     expect((await rawRequest({ origin, path: '/phone/devices', host })).status).toBe(502)
+  })
+
+  it('answers 502 with PHONE_UNRESOLVED and install guidance when mobilecli is missing', async () => {
+    const { origin, context } = await mount()
+    const host = new URL(origin).host
+    context.phoneDevices.listDevices = async () => {
+      throw new PhoneDevicesError(
+        'PHONE_UNRESOLVED',
+        'phone-runtime: cannot resolve the mobilecli executable.\nInstall it first, then retry:\n  npm install -g mobilecli@latest',
+      )
+    }
+    const response = await rawRequest({ origin, path: '/phone/devices', host })
+    expect(response.status).toBe(502)
+    const body = JSON.parse(response.body.toString('utf8')) as { error?: { code?: string; message?: string } }
+    expect(body.error?.code).toBe('PHONE_UNRESOLVED')
+    expect(body.error?.message).toContain('npm install -g mobilecli@latest')
   })
 
   it('refuses a signed capture URL that is expired, forged, or not loopback', async () => {

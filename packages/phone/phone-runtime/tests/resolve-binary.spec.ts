@@ -49,7 +49,7 @@ describe('explicit executablePath', () => {
     const dir = await stageDir()
     const missing = join(dir, 'nowhere', 'mobilecli')
     expect(() => resolveMobilecliExecutable({ executablePath: missing, env: {} }))
-      .toThrow(/executablePath.*not an executable file/s)
+      .toThrow(/executablePath.*not an executable file[\s\S]*npm install -g mobilecli@latest/s)
   })
 })
 
@@ -138,6 +138,73 @@ describe('PATH discovery', () => {
     await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
     const resolved = resolveMobilecliExecutable({ env: { PATH: '/no/mobilecli/here' }, home })
     expect(resolved).toBe(join(globalBin, 'mobilecli'))
+  })
+
+  it('finds mobilecli via npm_config_prefix when PATH and HOME miss', async () => {
+    const dir = await stageDir()
+    const prefixBin = join(dir, 'bin')
+    await mkdir(prefixBin, { recursive: true })
+    await writeExecutable(prefixBin, 'mobilecli')
+    const resolved = resolveMobilecliExecutable({
+      env: { PATH: '/no/mobilecli/here', npm_config_prefix: dir },
+      home: '',
+    })
+    expect(resolved).toBe(join(prefixBin, 'mobilecli'))
+  })
+
+  it('prefers npm-global over the npx cache when PATH misses', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const npxBin = join(home, '.npm', '_npx', 'abc123', 'node_modules', '.bin')
+    const globalBin = join(home, '.npm-global', 'bin')
+    await mkdir(npxBin, { recursive: true })
+    await mkdir(globalBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(npxBin, 'mobilecli'))
+    await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({ env: { PATH: '/no/mobilecli/here' }, home })
+    expect(resolved).toBe(join(globalBin, 'mobilecli'))
+  })
+
+  it('still searches npm locations under an Electron-minimal PATH', async () => {
+    const dir = await stageDir()
+    await writeExecutable(dir, 'mobilecli')
+    const home = await stageDir()
+    const globalBin = join(home, '.npm-global', 'bin')
+    await mkdir(globalBin, { recursive: true })
+    await copyFile(join(dir, 'mobilecli'), join(globalBin, 'mobilecli'))
+    const resolved = resolveMobilecliExecutable({
+      env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+      home,
+    })
+    expect(resolved).toBe(join(globalBin, 'mobilecli'))
+  })
+
+  it('adds Homebrew and /usr/local prefixes only for an Electron-minimal PATH', async () => {
+    const empty = (() => {
+      try {
+        resolveMobilecliExecutable({ env: {}, home: '' })
+        return undefined
+      } catch (error) {
+        return (error as Error).message
+      }
+    })()
+    expect(empty).toContain('(no candidate directories)')
+    expect(empty).not.toContain('/opt/homebrew/bin')
+    const electron = (() => {
+      try {
+        resolveMobilecliExecutable({
+          env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+          home: '',
+        })
+        return undefined
+      } catch (error) {
+        return (error as Error).message
+      }
+    })()
+    expect(electron).toContain('  /opt/homebrew/bin')
+    expect(electron).toContain('  /usr/local/bin')
+    expect(electron).toContain('npm install -g mobilecli@latest')
   })
 })
 

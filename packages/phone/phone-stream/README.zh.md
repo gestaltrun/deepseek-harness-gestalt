@@ -6,7 +6,7 @@
 
 - `sessionFor(id)` — IO 升级路径以及签名的 `mjpeg` 与 `h264` URL，查询 token 在 `tokenTtlMs` 后过期。
 - `POST /phone/session` — 为最新清单中存在的设备签发这些 URL；先执行 `/api` 信任栅栏。
-- `GET /phone/devices` — 依据最近一次 `phoneDevices.listDevices()` 应答分组后的设备清单（`android`、`ios.simulators`、`ios.reals`；每项含 `id`/`name`/`kind`/`state`/`online`，`state` 原样保留上游状态）；先执行 `/api` 信任栅栏，仅限精确路径的 GET。
+- `GET /phone/devices` — 依据最近一次 `phoneDevices.listDevices()` 应答分组后的设备清单（`android`、`ios.simulators`、`ios.reals`；每项含 `id`/`name`/`kind`/`state`/`online`，`state` 原样保留上游状态）；先执行 `/api` 信任栅栏，仅限精确路径的 GET。`PHONE_DEVICE_NOT_FOUND` 以外的 `PhoneDevicesError` 以 502 返回 `{ error: { code, message } }`，因此 `PHONE_UNRESOLVED` 会把安装指引带到浏览器。
 - `GET /phone/stream/<id>/<mjpeg|h264>?token=` — 反代 `device.screencapture`。先执行 `/api` 信任栅栏，再执行 loopback Host 栅栏，最后校验 HMAC；过期、伪造或非 loopback 请求返回 403。代理接受上游 `device.screencapture` 的两种应答形态——裸字节流，以及 mobilecli 1.0.5 的 `{ format, sessionUrl }` 信封（会话 URL 必须留在回环栅栏内）——并把 multipart MJPEG 体在单一归一化边界下重新发出：丢弃非图像段（JSON 通知），帧字节原样保留。
 - `GET /phone/ws/io` 升级 — 在 `/api` 信任栅栏之后转发 `device.io.tap` / `gesture` / `text` / `button` JSON-RPC；未信任的升级在协议协商前被拒绝。
 

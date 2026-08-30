@@ -1692,8 +1692,9 @@ export interface Config {
  */
 export interface Config {
   /**
-   * Absolute path to the `mobilecli` executable. When omitted, each `PATH`
-   * directory is searched for a matching executable file.
+   * Absolute path to the `mobilecli` executable. When omitted, `PATH` is
+   * searched first, then npm-global, the npx cache, and `npm_config_prefix`.
+   * An Electron-minimal PATH also probes `/opt/homebrew/bin` and `/usr/local/bin`.
    */
   executablePath?: string
   /** Loopback TCP port the spawned server listens on. */
@@ -1706,10 +1707,19 @@ export interface Config {
   requestTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
+  /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
+  agentTimeoutMs?: number
+  /**
+   * Absolute path to the `.mobileprovision` file passed as
+   * `--provisioning-profile` when installing or re-signing the on-device agent
+   * on a physical handset; the upstream command requires it for real iOS
+   * installs. When set, the path must name an existing file.
+   */
+  provisioningProfilePath?: string
 }
 ```
 
-来源：[`packages/phone/phone-runtime/src/index.ts:75`](../packages/phone/phone-runtime/src/index.ts)
+来源：[`packages/phone/phone-runtime/src/index.ts:97`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 
@@ -1729,7 +1739,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-stream/src/index.ts:54`](../packages/phone/phone-stream/src/index.ts)
+来源：[`packages/phone/phone-stream/src/index.ts:58`](../packages/phone/phone-stream/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 
@@ -3867,6 +3877,7 @@ export interface Config {
 - `@deepseek-ai/dsh-remote-access-client`（[`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts)）
 - `@deepseek-ai/dsh-remote-access-redis`（[`packages/platform/remote-access-redis/src/index.ts`](../packages/platform/remote-access-redis/src/index.ts)）
 - `@deepseek-ai/dsh-remote-protocol`（[`packages/platform/remote-protocol/src/index.ts`](../packages/platform/remote-protocol/src/index.ts)）
+- `@deepseek-ai/dsh-request-trust`（[`packages/util/request-trust/src/index.ts`](../packages/util/request-trust/src/index.ts)）
 - `@deepseek-ai/dsh-sandbox-windows-acl`（[`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts)）
 - `@deepseek-ai/dsh-scope`（[`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts)）
 - `@deepseek-ai/dsh-sdk-client`（[`packages/sdk/client/src/index.ts`](../packages/sdk/client/src/index.ts)）

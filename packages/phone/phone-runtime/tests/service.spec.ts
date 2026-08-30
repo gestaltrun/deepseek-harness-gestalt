@@ -154,9 +154,14 @@ describe('phone runtime service lifecycle', () => {
     expect(unavailable.code).toBe('PHONE_UNRESOLVED')
     expect(unavailable.message).toContain('/no-such-directory/mobilecli')
     expect(unavailable.message).toContain('not an executable file')
-    // Every operation surfaces the same diagnosable failure.
-    const capture = await errorOf(() => context.phoneDevices.startCapture({ deviceId: deviceId('x'), format: 'mjpeg' }))
+    expect(unavailable.message).toContain('npm install -g mobilecli@latest')
+    const missing = deviceId('x')
+    const capture = await errorOf(() => context.phoneDevices.startCapture({ deviceId: missing, format: 'mjpeg' }))
     expect(capture.code).toBe('PHONE_UNRESOLVED')
+    expect((await errorOf(() => context.phoneDevices.boot(missing))).code).toBe('PHONE_UNRESOLVED')
+    expect((await errorOf(() => context.phoneDevices.shutdown(missing))).code).toBe('PHONE_UNRESOLVED')
+    expect((await errorOf(() => context.phoneDevices.io({ method: 'tap', deviceId: missing, x: 1, y: 1 }))).code)
+      .toBe('PHONE_UNRESOLVED')
   })
 
   it('answers listDevices with grouped Android/iOS listings including offline devices', async () => {

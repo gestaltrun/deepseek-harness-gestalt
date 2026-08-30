@@ -10,7 +10,7 @@ Issue #417 P1 记录：插件配置标签页的「手机设备」卡片始终注
 
 ## Decision
 
-卡片与选择器共用同一个 `PhoneListingSource`。`createListingPhoneEnvironmentSource` 把该清单映射为 `PhoneEnvironmentView`：拉取进行中为探测中，列出任何设备即为就绪，macOS 上空清单为 iOS 向导，否则为 Android 向导，仅在首次拉取被拒绝或不可达时落到探测失败行。`PhoneSettingsCardController` 通过 `subscribe` 跟随该源，并在 `enabled` 为 true 时启动一次拉取。`verify-export-jsdoc` 点名的公开辅助函数补齐 `@param` / `@returns`。
+卡片与选择器共用同一个 `PhoneListingSource`。`createListingPhoneEnvironmentSource` 把该清单映射为 `PhoneEnvironmentView`：拉取进行中为探测中，列出任何设备即为就绪，macOS 上空清单为 iOS 向导，否则为 Android 向导，Host 应答 `PHONE_UNRESOLVED` 时为未找到 mobilecli 行，其余首次拉取被拒绝或不可达时落到探测失败行。`PhoneSettingsCardController` 通过 `subscribe` 跟随该源，并在 `enabled` 为 true 时启动一次拉取。`verify-export-jsdoc` 点名的公开辅助函数补齐 `@param` / `@returns`。
 
 ## Alternatives considered
 

@@ -8,6 +8,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PhoneTab } from '../src/client/PhoneTab.tsx'
+import { PhoneStreamHttpError } from '../src/client/phone-stream-client.ts'
 import type { PhoneDeviceSummary } from '../src/client/registry.ts'
 import { FakeGate, FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 
@@ -176,6 +177,22 @@ describe('PhoneTab empty state', () => {
     await renderTab(true, source)
     expect(screen.queryByRole('button', { name: '打开' })).toBeNull()
     expect(redetect().disabled).toBe(false)
+    expect(screen.getByRole('alert')).toBeTruthy()
+    expect(screen.getByText('无法读取设备清单')).toBeTruthy()
+  })
+
+  it('renders the install command when the Host reports PHONE_UNRESOLVED', async () => {
+    const source = new FakeListingSource()
+    source.scriptNext(Promise.reject(new PhoneStreamHttpError(
+      502,
+      'PHONE_UNRESOLVED',
+      'phone-runtime: cannot resolve the mobilecli executable.\n  npm install -g mobilecli@latest',
+    )))
+    await renderTab(true, source)
+    expect(screen.getByRole('alert')).toBeTruthy()
+    expect(screen.getByText('未找到 mobilecli')).toBeTruthy()
+    expect(screen.getByText('npm install -g mobilecli@latest')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '重新检测' })).toBeTruthy()
   })
 })
 

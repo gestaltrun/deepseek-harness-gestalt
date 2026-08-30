@@ -12,7 +12,7 @@ Model-facing Consumer for `ctx.phoneDevices`. It registers `device_list`, `devic
 
 `device_act`, `device_open`, and `device_close` default to `tools/pre-execute` `ask` after earlier listeners return `allow`. A prior deny or ask is left unchanged. An `allowed-once` approval runs the fleet call once; a rejection leaves the device untouched.
 
-Fleet failures that already carry a `PhoneDevicesError` code (`PHONE_DISPOSED`, `PHONE_ABORTED`, `PHONE_TIMEOUT`, `PHONE_UNAVAILABLE`, `PHONE_PROTOCOL`, `PHONE_UPSTREAM`, `PHONE_DEVICE_NOT_FOUND`, `PHONE_REAL_DEVICE`) are rethrown as `HarnessError` with that same code. `device_act` forwards a closed tap, swipe, type, or button onto `phoneDevices.io`. Empty type text, or an injected fleet missing `io` / `screenshot`, uses `PHONE_UNSUPPORTED`. `device_screenshot` still requires an injected screenshot method; live MJPEG/H264 capture stays on `dsh-phone-stream`.
+Fleet failures that already carry a `PhoneDevicesError` code (`PHONE_DISPOSED`, `PHONE_ABORTED`, `PHONE_TIMEOUT`, `PHONE_UNAVAILABLE`, `PHONE_UNRESOLVED`, `PHONE_PROTOCOL`, `PHONE_UPSTREAM`, `PHONE_DEVICE_NOT_FOUND`, `PHONE_REAL_DEVICE`) are rethrown as `HarnessError` with that same code. `device_act` forwards a closed tap, swipe, type, or button onto `phoneDevices.io`. Empty type text, or an injected fleet missing `io` / `screenshot`, uses `PHONE_UNSUPPORTED`. `device_screenshot` still requires an injected screenshot method; live MJPEG/H264 capture stays on `dsh-phone-stream`.
 
 ## Model Experience
 

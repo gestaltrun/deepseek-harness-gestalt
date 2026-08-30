@@ -4,7 +4,7 @@
 
 手机设备群缝：`packages/phone/phone-runtime` 在 mobilecli 仍是唯一后端期间，将 Service Definition 与其 mobilecli Service Provider 折叠于一个包；`packages/phone/tool-phone` 是延迟模型 Consumer。Service 持有外部 `mobilecli server start` 子进程（仅回环，使用去除凭据后的父环境启动），探测其 HTTP JSON-RPC 端点直至首个 `server.info` 成功应答，随后按配置节奏轮询 `devices.list`——结果接受裸设备数组或 mobilecli 1.0.5 的 `{ devices: [...] }` 信封两种形态，上游重复条目原样保留。设备 id 是 branded `DeviceId`（Android 序列号或 iOS UDID）；分组清单 `{ android, ios: { simulators, reals } }` 携带冻结的 `PhoneDeviceRef`，其 `kind` 翻译自上游 `type` 字段，其 `state` 原样保留上游状态——`unauthorized` 真机保留自身状态、在其接受信任提示前上游拒绝其 io，而非折叠进 offline——且 `online` 仅在上游 `online` 状态时为真。
 
-失败语义是全量的：缺失或不可用的 mobilecli 二进制让组合响亮失败并附带安装指引；就绪前退出的子进程令插件初始化拒绝；就绪后的异常退出（或拒连、协议违背）将 Service 置为 lost，此后一切操作以记录的原因拒绝而非降级。所有操作将调用方 `AbortSignal` 与经校验的 Config 上限（`requestTimeoutMs`、`bootTimeoutMs`、`agentTimeoutMs`）融合；boot 与 shutdown 在任何 RPC 之前就在本包内拒绝真机。`io` 与 `startCapture` 接受真机，仅拒绝最新清单中不存在的 id。`startCapture` 将 `h264` 映射为上游 `avc`，并且只约束等待响应头的时间；未读的采集 body 由调用方持有。采集应答的两种上游形态均被跟随——裸流，以及 mobilecli 1.0.5 的 `{ format, sessionUrl }` 信封，会话 URL 相对服务器源归一并强制回到回环栅栏内。
+失败语义是全量的：缺失或不可用的 mobilecli 二进制仍会激活 Service，此后一切操作以 `PHONE_UNRESOLVED` 拒绝并附带安装指引；就绪前退出的子进程令插件初始化拒绝；就绪后的异常退出（或拒连、协议违背）将 Service 置为 lost，此后一切操作以记录的原因拒绝而非降级。所有操作将调用方 `AbortSignal` 与经校验的 Config 上限（`requestTimeoutMs`、`bootTimeoutMs`、`agentTimeoutMs`）融合；boot 与 shutdown 在任何 RPC 之前就在本包内拒绝真机。`io` 与 `startCapture` 接受真机，仅拒绝最新清单中不存在的 id。`startCapture` 将 `h264` 映射为上游 `avc`，并且只约束等待响应头的时间；未读的采集 body 由调用方持有。采集应答的两种上游形态均被跟随——裸流，以及 mobilecli 1.0.5 的 `{ format, sessionUrl }` 信封，会话 URL 相对服务器源归一并强制回到回环栅栏内。
 
 iOS 真机链路位于清单的 real 分组之后：`agentStatus` 与 `installAgent` 以同一可执行文件的一次性 `agent status` / `agent install` 子进程驱动，幂等地保持设备端 agent 处于安装状态，并通过所配置的 `provisioningProfilePath` 为真机重签（上游要求真机 iOS 安装必须提供）。凡关于已安装、已重签真机的应答都携带 `FREE_SIGNING_PROFILE_REMINDER`——免费团队签名 7 天过期，`installAgent(id, { force: true })` 是复跑入口。输出中出现结构化错误臂的失败以 `PHONE_REAL_DEVICE_ISSUE` 暴露，错误臂由 `PhoneDevicesError.issue` 携带，agent 命令输出与上游 JSON-RPC 错误消息按同一规则分类；上游 `-32010` 仍保持 `PHONE_DEVICE_NOT_FOUND`。
 
@@ -114,7 +114,7 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 ### `ctx.phoneDevices` — `PhoneDevices`
 
-Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing, and mobilecli problems fail loudly instead of degrading.
+Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing. An unresolvable mobilecli still activates the Service; every operation then rejects with `PHONE_UNRESOLVED` and install guidance instead of failing composition.
 
 Operation failure codes:
 
@@ -122,6 +122,7 @@ Operation failure codes:
 - `PHONE_ABORTED` — the caller's signal won before completion.
 - `PHONE_TIMEOUT` — the operation's configured ceiling elapsed.
 - `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.
+- `PHONE_UNRESOLVED` — the mobilecli executable could not be resolved.
 - `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.
 - `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.
 - `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).

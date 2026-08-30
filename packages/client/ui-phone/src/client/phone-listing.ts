@@ -93,8 +93,18 @@ async function pullListing(): Promise<PhoneListingSnapshot> {
   } catch (error) {
     throw new PhoneStreamHttpError(0, 'network', error instanceof Error ? error.message : String(error))
   }
-  if (!response.ok) throw wireError(response.status, `phone device listing failed with HTTP ${String(response.status)}`)
   const body: unknown = await response.json().catch(() => null)
+  if (!response.ok) {
+    const record = isRecord(body) ? body : {}
+    const error = isRecord(record.error) ? record.error : {}
+    throw new PhoneStreamHttpError(
+      response.status,
+      typeof error.code === 'string' ? error.code : 'http',
+      typeof error.message === 'string' && error.message.length > 0
+        ? error.message
+        : `phone device listing failed with HTTP ${String(response.status)}`,
+    )
+  }
   return parseListing(body)
 }
 

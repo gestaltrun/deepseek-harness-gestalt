@@ -79,6 +79,8 @@ describe('phone listing source', () => {
     const refused = await source.refresh().catch(error => error)
     expect(refused).toBeInstanceOf(PhoneStreamHttpError)
     expect(refused.status).toBe(403)
+    expect(refused.code).toBe('forbidden')
+    expect(refused.message).toBe('forbidden')
 
     stubFetch(200, { android: 'nope', ios: {} })
     const malformed = await source.refresh().catch(error => error)
@@ -151,6 +153,21 @@ describe('phone listing source', () => {
     dispose()
     await source.refresh()
     expect(commits).toEqual([])
+  })
+
+  it('carries a PHONE_UNRESOLVED listing failure with the Host install guidance', async () => {
+    stubFetch(502, {
+      error: {
+        code: 'PHONE_UNRESOLVED',
+        message: 'phone-runtime: cannot resolve the mobilecli executable.\n  npm install -g mobilecli@latest',
+      },
+    })
+    const source = createHttpPhoneListingSource()
+    const unresolved = await source.refresh().catch(error => error)
+    expect(unresolved).toBeInstanceOf(PhoneStreamHttpError)
+    expect(unresolved.status).toBe(502)
+    expect(unresolved.code).toBe('PHONE_UNRESOLVED')
+    expect(unresolved.message).toContain('npm install -g mobilecli@latest')
   })
 
   it('wraps network refusals as status-0 wire errors', async () => {

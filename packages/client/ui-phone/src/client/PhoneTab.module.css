@@ -140,6 +140,23 @@
   color: var(--dsw-alias-state-warn-label);
 }
 
+/* Listing-pull failure arm: unresolvable mobilecli or a refused Host route. */
+.listingFailedArm {
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.listingFailedCommand {
+  display: block;
+  margin-top: 8px;
+  font: var(--dsw-font-markdown-code-block-small);
+  color: var(--dsw-alias-label-tertiary);
+  white-space: pre-wrap;
+}
+
 .unauthorizedTitle {
   margin: 0;
   font: var(--dsw-font-xs-strong-13);

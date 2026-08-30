@@ -346,6 +346,10 @@ export class PhoneStream extends Service {
       writeHttpError(res, new HttpError(404, 'not-found', error.message))
       return
     }
+    if (error instanceof PhoneDevicesError) {
+      writeHttpError(res, new HttpError(502, error.code, error.message))
+      return
+    }
     /* v8 ignore next -- PhoneDevicesError and HttpError already returned */
     const message = error instanceof Error ? error.message : String(error)
     writeHttpError(res, new HttpError(502, 'upstream', message))

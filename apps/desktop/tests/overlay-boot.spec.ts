@@ -49,11 +49,19 @@ describe('Desktop overlay composed boot', () => {
     try {
       // An Electron GUI process ships a minimal PATH and an empty HOME npx
       // cache; the optional phone provider must not kill the whole Host.
+      // DSH_PHONE_MOBILECLI mounts the overlay phone rows; a missing path
+      // is the unresolvable-binary case, not the opt-in-disabled case.
       running = await spawnWebHost({
         node: launch.command,
         args: launch.args,
         cwd: repo,
-        env: { ...launch.env, DSH_HOME: home, HOME: emptyHome, PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+        env: {
+          ...launch.env,
+          DSH_HOME: home,
+          HOME: emptyHome,
+          PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+          DSH_PHONE_MOBILECLI: join(emptyHome, 'no-such-mobilecli'),
+        },
       }, 120_000)
       expect(running.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
       const page = await fetch(running.url)
@@ -62,7 +70,8 @@ describe('Desktop overlay composed boot', () => {
       // failure the tab's error arm renders.
       const devices = await fetch(`${running.url}/phone/devices`)
       expect(devices.status).toBe(502)
-      const body = (await devices.json()) as { error?: { message?: string } }
+      const body = (await devices.json()) as { error?: { code?: string; message?: string } }
+      expect(body.error?.code).toBe('PHONE_UNRESOLVED')
       expect(body.error?.message).toContain('npm install -g mobilecli@latest')
     } finally {
       await running?.stop()

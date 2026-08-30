@@ -1690,8 +1690,9 @@ Source: [`packages/preset/persona/src/index.ts:34`](../packages/preset/persona/s
  */
 export interface Config {
   /**
-   * Absolute path to the `mobilecli` executable. When omitted, each `PATH`
-   * directory is searched for a matching executable file.
+   * Absolute path to the `mobilecli` executable. When omitted, `PATH` is
+   * searched first, then npm-global, the npx cache, and `npm_config_prefix`.
+   * An Electron-minimal PATH also probes `/opt/homebrew/bin` and `/usr/local/bin`.
    */
   executablePath?: string
   /** Loopback TCP port the spawned server listens on. */
@@ -1736,7 +1737,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/phone-stream/src/index.ts:54`](../packages/phone/phone-stream/src/index.ts)
+Source: [`packages/phone/phone-stream/src/index.ts:58`](../packages/phone/phone-stream/src/index.ts)
 
 <a id="deepseek-aidsh-plan-mode"></a>
 
@@ -3874,6 +3875,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-remote-access-client` ([`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts))
 - `@deepseek-ai/dsh-remote-access-redis` ([`packages/platform/remote-access-redis/src/index.ts`](../packages/platform/remote-access-redis/src/index.ts))
 - `@deepseek-ai/dsh-remote-protocol` ([`packages/platform/remote-protocol/src/index.ts`](../packages/platform/remote-protocol/src/index.ts))
+- `@deepseek-ai/dsh-request-trust` ([`packages/util/request-trust/src/index.ts`](../packages/util/request-trust/src/index.ts))
 - `@deepseek-ai/dsh-sandbox-windows-acl` ([`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts))
 - `@deepseek-ai/dsh-scope` ([`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts))
 - `@deepseek-ai/dsh-sdk-client` ([`packages/sdk/client/src/index.ts`](../packages/sdk/client/src/index.ts))

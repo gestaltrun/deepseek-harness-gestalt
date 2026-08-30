@@ -18,6 +18,7 @@ import { transform } from 'lightningcss'
 import { optionalStringArray } from './modules/src/client/manifest.ts'
 import { PLATFORM_MODULES, PRELOADED_CLIENT_EXTERNALS } from './web/src/platform.ts'
 import { clientBuildEnvironmentDefines } from '../../scripts/client-build-environment.ts'
+import { DYNAMIC_CLIENT_ARTIFACT } from '../../scripts/client-artifact-contract.ts'
 
 /**
  * Virtual-id wrapper keeping module CSS away from tsdown's own css pipeline
@@ -473,7 +474,7 @@ function clientConfig(id: string, entry: string): UserConfig {
     name: `${id}/client`,
     entry: { client: entry },
     // Browser bundle lands next to the node half (single lib/ artifact dir;
-    // the entryFileNames pin keeps it exactly lib/client.js). clean must stay
+    // the entryFileNames pin keeps it exactly lib/client.cjs). clean must stay
     // off — a default clean would wipe the node-half output emitted above.
     outDir: 'lib',
     format: 'cjs',
@@ -586,7 +587,7 @@ function clientConfig(id: string, entry: string): UserConfig {
       },
     }],
     outputOptions: {
-      entryFileNames: 'client.js',
+      entryFileNames: DYNAMIC_CLIENT_ARTIFACT.entryFileName,
       // The map is served from /plugins/<scoped-package>/client.js.map. The
       // browser resolves its local sources back into URLs that mirror the
       // /packages/<group>/<package>/src directories; sourcesContent keeps them usable

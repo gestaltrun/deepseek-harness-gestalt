@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { dirname, resolve } from 'node:path'
+import { DYNAMIC_CLIENT_ARTIFACT } from './client-artifact-contract.ts'
 
 /** Prefix reserved for build-time values that may be embedded in browser artifacts. */
 const CLIENT_BUILD_ENV_PREFIX = 'DSH_CLIENT_'
@@ -31,8 +32,8 @@ export const CLIENT_BUILD_RECORD_PATH = '.dsh-build/client-build-environment.jso
 const CLIENT_BUILD_RECORD_FORMAT = 1
 const CLIENT_ARTIFACT_PATTERNS = [
   'apps/web/dist/**/*',
-  'packages/*/*/lib/client.js',
-  'packages/*/*/lib/client.js.map',
+  `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.relativePath}`,
+  `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.sourceMapPath}`,
 ] as const
 
 /** Public values embedded in one set of client artifacts. */

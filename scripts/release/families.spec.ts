@@ -30,7 +30,7 @@ function buildFixture(environment: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'dsh-release-build-'))
   roots.push(root)
   write(join(root, 'apps/web/dist/index.html'), '<main></main>')
-  write(join(root, 'packages/client/example/lib/client.js'), 'module.exports = {}\n')
+  write(join(root, 'packages/client/example/lib/client.cjs'), 'module.exports = {}\n')
   writeClientBuildRecord(root, environment)
   return root
 }
@@ -120,7 +120,7 @@ describe('release families', () => {
     expect(() => { dsh.verifyBuildArtifacts(join(defaultBuild, 'missing')) }).toThrow(/record.*missing/)
     expect(() => { vendor.verifyBuildArtifacts(join(defaultBuild, 'missing')) }).not.toThrow()
 
-    write(join(official, 'packages/client/example/lib/client.js'), 'module.exports = { changed: true }\n')
+    write(join(official, 'packages/client/example/lib/client.cjs'), 'module.exports = { changed: true }\n')
     expect(() => { dsh.verifyBuildArtifacts(official) }).toThrow(/artifacts differ/)
   })
 

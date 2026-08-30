@@ -30,8 +30,8 @@ describe('publication payload policy', () => {
     'lib/types/index.d.ts.map',
     './lib/types/index.d.ts.map',
     'lib/typert.remote-client.d.ts.map',
-    'lib/client.js.map',
-    './lib/client.js.map',
+    'lib/client.cjs.map',
+    './lib/client.cjs.map',
   ])('rejects static manifest path %s', (file) => {
     expect(isForbiddenPublicationFile(file)).toBe(true)
   })
@@ -54,8 +54,8 @@ describe('publication payload policy', () => {
     ])).toThrow('fixture.tgz publishes source map package/lib/typert.remote-client.d.ts.map')
     expect(validateFixtureTarball([
       'package/package.json',
-      'package/lib/client.js.map',
-    ])).toThrow('fixture.tgz publishes source map package/lib/client.js.map')
+      'package/lib/client.cjs.map',
+    ])).toThrow('fixture.tgz publishes source map package/lib/client.cjs.map')
   })
 
   it('accepts a clean packed tarball', () => {

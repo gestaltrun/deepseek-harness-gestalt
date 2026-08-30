@@ -7,6 +7,7 @@ import { globSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { DYNAMIC_CLIENT_ARTIFACT } from './client-artifact-contract.ts'
 import { TypeScriptProject } from './ts-project.ts'
 
 const GATE = 'verify-client-packages'
@@ -177,6 +178,41 @@ export function collectClientPackageViolations(facts: ClientPackageFacts): strin
   ].sort((left, right) => left.localeCompare(right))
 }
 
+/**
+ * Verify that dynamic package manifests publish the CommonJS browser factory
+ * with an extension that remains CommonJS inside an ESM package.
+ * @param root - Absolute repository root.
+ * @param declarations - Workspace browser-module declarations.
+ * @returns Stable manifest diagnostics.
+ */
+export function collectClientArtifactViolations(
+  root: string,
+  declarations: readonly ClientDeclaration[],
+): string[] {
+  const violations: string[] = []
+  for (const declaration of declarations.filter(entry => entry.dynamic)) {
+    const manifest = JSON.parse(readFileSync(resolve(root, declaration.manifest), 'utf8')) as Manifest
+    const exports = isRecord(manifest.exports) ? manifest.exports : undefined
+    const clientExport = isRecord(exports?.['./client']) ? exports['./client'] : undefined
+    const defaultExport = clientExport?.default
+    if (defaultExport !== DYNAMIC_CLIENT_ARTIFACT.exportPath) {
+      violations.push(
+        `${declaration.manifest}: exports["./client"].default must be ${DYNAMIC_CLIENT_ARTIFACT.exportPath}; `
+        + `found ${typeof defaultExport === 'string' ? defaultExport : 'no string default'}`,
+      )
+    }
+    const files = Array.isArray(manifest.files) && manifest.files.every(value => typeof value === 'string')
+      ? manifest.files as string[]
+      : []
+    if (!files.includes(DYNAMIC_CLIENT_ARTIFACT.relativePath) || files.includes('lib/client.js')) {
+      violations.push(
+        `${declaration.manifest}: files must publish ${DYNAMIC_CLIENT_ARTIFACT.relativePath} instead of lib/client.js`,
+      )
+    }
+  }
+  return violations.sort((left, right) => left.localeCompare(right))
+}
+
 interface ManifestDocument {
   readonly path: string
   readonly manifest: Manifest
@@ -211,6 +247,7 @@ export function fixClientPackageManifests(root: string, facts: ClientPackageFact
     const dsh = isRecord(target.manifest.dsh) ? target.manifest.dsh : undefined
     const client = isRecord(dsh?.client) ? dsh.client : undefined
     if (client === undefined) continue
+    target.changed = normalizeClientArtifactManifest(target.manifest) || target.changed
     target.changed = normalizeClientArray(client, 'inject', () => false) || target.changed
     target.changed = normalizeClientArray(
       client,
@@ -272,6 +309,26 @@ export function fixClientPackageManifests(root: string, facts: ClientPackageFact
     writeFileSync(resolve(root, target.path), JSON.stringify(target.manifest, null, 2) + '\n')
   }
   return changed.map(target => target.path)
+}
+
+function normalizeClientArtifactManifest(manifest: Manifest): boolean {
+  const exports = isRecord(manifest.exports) ? manifest.exports : undefined
+  const clientExport = isRecord(exports?.['./client']) ? exports['./client'] : undefined
+  let changed = false
+  if (clientExport !== undefined && clientExport.default !== DYNAMIC_CLIENT_ARTIFACT.exportPath) {
+    clientExport.default = DYNAMIC_CLIENT_ARTIFACT.exportPath
+    changed = true
+  }
+  if (Array.isArray(manifest.files) && manifest.files.every(value => typeof value === 'string')) {
+    const files = manifest.files as string[]
+    const normalized = files.map(value => value === 'lib/client.js' ? DYNAMIC_CLIENT_ARTIFACT.relativePath : value)
+    if (!normalized.includes(DYNAMIC_CLIENT_ARTIFACT.relativePath)) normalized.push(DYNAMIC_CLIENT_ARTIFACT.relativePath)
+    if (normalized.length !== files.length || normalized.some((value, index) => value !== files[index])) {
+      manifest.files = normalized
+      changed = true
+    }
+  }
+  return changed
 }
 
 function normalizeClientArray(
@@ -658,6 +715,8 @@ function formatCycle(
 interface Manifest {
   name?: unknown
   dsh?: unknown
+  exports?: unknown
+  files?: unknown
   dependencies?: Record<string, string>
   peerDependencies?: Record<string, string>
   devDependencies?: Record<string, string>
@@ -820,7 +879,7 @@ async function readFacts(root: string): Promise<ClientPackageFacts> {
     platformModules: readStringLiteralArray(root, PLATFORM_SOURCE, 'PLATFORM_MODULES'),
     preloadedExternals: readStringLiteralArray(root, PLATFORM_SOURCE, 'PRELOADED_CLIENT_EXTERNALS'),
     parserPreloadIds: readStringLiteralArray(root, PARSER_PRELOAD_SOURCE, 'PARSER_PRELOAD_IDS'),
-    malformed,
+    malformed: [...malformed, ...collectClientArtifactViolations(root, declarations)],
   }
 }
 

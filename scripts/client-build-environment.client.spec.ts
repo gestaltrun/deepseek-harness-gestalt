@@ -46,7 +46,7 @@ function buildFixture(environment: Record<string, string>): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'dsh-client-build-'))
   roots.push(fixtureRoot)
   write(join(fixtureRoot, 'apps/web/dist/index.html'), '<main></main>')
-  write(join(fixtureRoot, 'packages/client/example/lib/client.js'), 'module.exports = {}\n')
+  write(join(fixtureRoot, 'packages/client/example/lib/client.cjs'), 'module.exports = {}\n')
   writeClientBuildRecord(fixtureRoot, environment)
   return fixtureRoot
 }

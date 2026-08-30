@@ -33,10 +33,17 @@ describe('client bundle build faces', () => {
     expect(development?.entry).toEqual({ client: 'src/client/index.ts' })
     expect(artifact?.entry).toEqual({ client: 'lib/types/client/index.js' })
   })
+
+  it('publishes the loader factory as CommonJS with an explicit CommonJS extension', () => {
+    const artifact = clientConfigs()[0]
+
+    expect(artifact?.format).toBe('cjs')
+    expect(artifact?.outputOptions).toMatchObject({ entryFileNames: 'client.cjs' })
+  })
 })
 
 function clientSourceMapPath(packagePath: string): string {
-  return fileURLToPath(new URL(`../packages/${packagePath}/lib/client.js.map`, import.meta.url))
+  return fileURLToPath(new URL(`../packages/${packagePath}/lib/client.cjs.map`, import.meta.url))
 }
 
 function purityResolveId(id = REQUESTING_PACKAGE): ResolveId {

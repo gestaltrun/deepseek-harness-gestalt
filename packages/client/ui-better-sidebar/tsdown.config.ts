@@ -1,10 +1,10 @@
 /**
  * tsdown build for dsh-better-sidebar: the host-half lib (lib/index.js and
  * the lib/invariant.js companion, ESM node) plus the two browser client
- * bundles (lib/client.js and lib/client-registry.js, CJS closure factory) —
+ * bundles (lib/client.cjs and lib/client-registry.js, CJS closure factory) —
  * one per install channel:
  *
- * - `lib/client.js` serves the official profile channel, registering with
+ * - `lib/client.cjs` serves the official profile channel, registering with
  *   the package-name id `dsh-better-sidebar` (the client-modules compose
  *   keys on the package name; keep it in sync with package.json `name`),
  * - `lib/client-registry.js` serves the plugin-registry channel
@@ -47,6 +47,7 @@ import { builtinModules, createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
+import { DYNAMIC_CLIENT_ARTIFACT } from '../../../scripts/client-artifact-contract.ts'
 
 const require = createRequire(import.meta.url)
 
@@ -367,7 +368,7 @@ const nodeLibrary: UserConfig = {
 }
 
 const clientBundles: UserConfig[] = [
-  clientBundle('@deepseek-ai/dsh-client-ui-better-sidebar', 'client.js'),
+  clientBundle('@deepseek-ai/dsh-client-ui-better-sidebar', DYNAMIC_CLIENT_ARTIFACT.entryFileName),
   ...CHUNKS.map(chunkBundle),
 ]
 

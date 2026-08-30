@@ -30,12 +30,12 @@ function writePackage(
 ): string {
   root ??= realpathSync(mkdtempSync(join(tmpdir(), 'dsh-client-modules-')))
   const pkgRoot = join(root, 'node_modules', ...packageName.split('/'))
-  const clientPath = join(pkgRoot, 'lib', 'client.js')
+  const clientPath = join(pkgRoot, 'lib', 'client.cjs')
   mkdirSync(pkgRoot, { recursive: true })
   writeFileSync(join(pkgRoot, 'package.json'), JSON.stringify({
     name: packageName,
     exports: {
-      './client': './lib/client.js',
+      './client': './lib/client.cjs',
       './package.json': './package.json',
     },
     ...metadata,

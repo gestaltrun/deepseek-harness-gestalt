@@ -1,3 +1,4 @@
+import './webview-compat.ts'
 import { Device } from '@capacitor/device'
 import {
   IndexedDbInstallationAccountStore,
@@ -54,6 +55,7 @@ import { mobileSystemBrowser } from './system-browser.ts'
 import { loadMobilePlatformEnvironment } from './platform-environment.ts'
 import { MobileCompanionProjectionCacheRuntime } from './companion-cache-runtime.ts'
 import { launchMobileProduct } from './mobile-product-launch.ts'
+import { randomUuid } from './random-uuid.ts'
 import './root.css'
 
 let companionVisibilityDisposer: (() => Promise<void>) | undefined
@@ -147,7 +149,7 @@ async function mountMobileProduct(): Promise<void> {
       pendingPairingSelector = undefined
     }
     const relay = new MobileRelayEndpointLifecycle({
-      attachmentId: () => parseRelayAttachmentId(crypto.randomUUID()),
+      attachmentId: () => parseRelayAttachmentId(randomUuid()),
       connect: async signal => await BrowserRelayEndpointSocket.connect(relayUrl, signal, {
         maxBytes: inboundMaxBytes,
         maxMessages: inboundMaxMessages,

@@ -23,6 +23,7 @@ export interface PhoneH264SurfaceProps {
  */
 export function PhoneH264Surface(props: PhoneH264SurfaceProps): ReactNode {
   const canvas = useRef<HTMLCanvasElement>(null)
+  const settlement = useRef<Promise<void> | undefined>(undefined)
   const onSurface = useRef(props.onSurface)
   const onError = useRef(props.onError)
   onSurface.current = props.onSurface
@@ -32,13 +33,31 @@ export function PhoneH264Surface(props: PhoneH264SurfaceProps): ReactNode {
     const target = canvas.current
     /* v8 ignore next -- React assigns the host ref before running this effect. */
     if (target === null) return
-    const playback = playPhoneH264Stream({
-      url: props.url,
-      canvas: target,
-      onSurface: (width, height) => { onSurface.current(width, height) },
-      onError: (error) => { onError.current(error) },
-    })
-    return () => { void playback.close() }
+    let disposed = false
+    let playback: ReturnType<typeof playPhoneH264Stream> | undefined
+    const start = (): void => {
+      if (disposed) return
+      playback = playPhoneH264Stream({
+        url: props.url,
+        canvas: target,
+        onSurface: (width, height) => { onSurface.current(width, height) },
+        onError: (error) => { onError.current(error) },
+      })
+    }
+    const prior = settlement.current
+    let started: Promise<void>
+    if (prior === undefined) {
+      start()
+      started = Promise.resolve()
+    } else {
+      started = prior.then(start)
+    }
+    return () => {
+      disposed = true
+      settlement.current = playback === undefined
+        ? started.then(async () => { await playback?.close() })
+        : playback.close()
+    }
   }, [props.url])
 
   return <canvas ref={canvas} role="img" aria-label={props.label} className={props.className} />

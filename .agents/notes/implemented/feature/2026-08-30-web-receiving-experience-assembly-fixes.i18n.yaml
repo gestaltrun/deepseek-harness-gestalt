@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-30-web-receiving-experience-assembly-fixes.md
-2026-08-30-web-receiving-experience-assembly-fixes.md: 758b5edcf2422385946d85d8663f4d88d8d13e18
-2026-08-30-web-receiving-experience-assembly-fixes.zh.md: 2f5b1b7b50e9c4fb8d688a24c5c14872b9f5b51a
+2026-08-30-web-receiving-experience-assembly-fixes.md: 8ef0278c40e85de7bf9bacb67385367c9421ce95
+2026-08-30-web-receiving-experience-assembly-fixes.zh.md: d1413af1aa5cf07c6f85d92e7def0c245a759f15

@@ -18,6 +18,8 @@ book 只在最早的活跃 `expiresAt` 上安排一个可注入 timer。添加�
 
 `SessionRuntime` 把每个可寻址 id 绑定到对外 `SessionFace`，并可选持有具体 Host `Session`。只有 Host 变体绑定 Agent scope dispatch point，打开或翻页历史，执行重同步，刷新 subagent，并参与 scope prune 的实例拆卸。选中接收 Session 与重连都跳过 subagent 刷新，模型、命令与 skill 路由返回不可用。调用接收 face 的 prompt、取消、队列、重命名、附件、历史或命令行为会 fail-loud，而不会回退到 Host RPC。
 
+接收行没有 Host Workspace 成员资格，因此位于浏览器的 Ungrouped 记账中。Workspace 浏览器按到达边沿观察 pending Ungrouped 身份，并为每个新 pending 身份打开该记账一次，而不更改当前 Session。人类随后可以折叠它；同一 pending 身份的普通更新不会再次打开。
+
 跨插件值导入使用供应方的动态模块表行。`dsh-client-ui-user-questions/client` 导出 `QuestionPresentation`；`dsh-client-ui-member-questions` 导入该行，并在 `dsh.client.external` 中声明。runtime 将 `dsh-user-questions` 类型依赖声明为 peer 与开发输入，而 `ui-member-questions` 的静态 `ui-slots` 编译输入仅留在开发依赖中。
 
 ## 已考虑的替代方案
@@ -32,10 +34,10 @@ book 只在最早的活跃 `expiresAt` 上安排一个可注入 timer。添加�
 
 ## 后果
 
-标准 Session renderer 通过与 Host 问题相同的对外 face 和 `PendingWait` 接口观察成员提问，但不获得 Host 权限。接收 face 刻意不接受普通人类 prompt；从接收 Session 唤醒本地 agent 需要另外归属的 admission 设计。
+标准 Session renderer 通过与 Host 问题相同的对外 face 和 `PendingWait` 接口观察成员提问，但不获得 Host 权限。接收 face 刻意不接受普通人类 prompt；从接收 Session 唤醒本地 agent 需要另外归属的 admission 设计。新的接收行会在侧边栏中变得可见，同时用户当前的 Session 保持选中。
 
 浏览器 E2E 与必需的演示 GIF 仍是分立的验收证据；本决策只记录不依赖 React 的 runtime 与 client 装配行为。
 
 ## 测试
 
-`packages/client/runtime/tests/receiving.client.spec.ts` 使用 `FakeApiClient` 驱动真实 `SessionRuntime`，选中合成行，并观察 `currentProvideInfo.hooks.session.getSnapshot()`。测试固定 wait 身份、原始协议 Session 身份、解决、supersession、timer 过期、断连结算与回放，不可用的模型／命令／skill／prompt 路由，以及 `session.create`、历史、subagent、模型、skill 与 prompt 调用均为零。`pnpm run build:lib:client` 与 `pnpm run verify-client-packages` 覆盖 client 模块行与 package 声明。
+`packages/client/runtime/tests/receiving.client.spec.ts` 使用 `FakeApiClient` 驱动真实 `SessionRuntime`，选中合成行，并观察 `currentProvideInfo.hooks.session.getSnapshot()`。测试固定 wait 身份、原始协议 Session 身份、解决、supersession、timer 过期、断连结算与回放，不可用的模型／命令／skill／prompt 路由，以及 `session.create`、历史、subagent、模型、skill 与 prompt 调用均为零。`packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx` 固定到达边沿展开与到达后的人类折叠。`apps/web/tests/member-question-receiving.e2e.ts` 让一个 mock remote Agent 经过 shipped user-questions provider、api-proxy pending registry、WebSocket mux、Client Runtime、动态模块表、组合卡片、共享问题呈现、文档聚焦与 response POST；它断言不会增加 Host Session，也不会调用 `session.create`、`session.history` 或模型。`pnpm run build:lib:client` 与 `pnpm run verify-client-packages` 覆盖 client 模块行与 package 声明。

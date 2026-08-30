@@ -18,6 +18,8 @@ The book schedules exactly one injectable timer at the earliest active `expiresA
 
 `SessionRuntime` binds every eligible id to an outward `SessionFace`, with an optional concrete Host `Session`. Only the Host variant binds the Agent scope dispatch point, opens or pages history, resynchronizes, refreshes subagents, and participates in scope-prune instance teardown. Receiving selection and reconnect skip subagent refresh, and model, command, and skill routing return unavailable. Calling a receiving face's prompt, cancellation, queue, rename, attachment, history, or command behavior fails loud instead of falling through to a Host RPC.
 
+Receiving rows have no Host Workspace membership and therefore occupy the browser's Ungrouped account. The Workspace browser observes pending Ungrouped identities by arrival edge and opens that account once for each newly pending identity without changing the current Session. A human may collapse it afterward; ordinary updates to the same pending identity do not reopen it.
+
 Cross-plugin value imports use the supplier's dynamic module-table row. `dsh-client-ui-user-questions/client` exports `QuestionPresentation`; `dsh-client-ui-member-questions` imports that row and declares it in `dsh.client.external`. The runtime declares its `dsh-user-questions` type dependency as peer plus development input, while the static `ui-slots` compile input of `ui-member-questions` remains development-only.
 
 ## Alternatives considered
@@ -32,10 +34,10 @@ Cross-plugin value imports use the supplier's dynamic module-table row. `dsh-cli
 
 ## Consequences
 
-The standard Session renderer observes member questions through the same outward face and `PendingWait` interface as Host questions without granting Host authority. The receiving face deliberately cannot accept an ordinary human prompt; waking a local agent from a receiving session requires a separately owned admission design.
+The standard Session renderer observes member questions through the same outward face and `PendingWait` interface as Host questions without granting Host authority. The receiving face deliberately cannot accept an ordinary human prompt; waking a local agent from a receiving session requires a separately owned admission design. A new receiving row becomes visible in the sidebar while the user's current Session remains selected.
 
 Browser E2E and the required demonstration GIF remain separate acceptance evidence; this decision records only the React-free runtime and client assembly behavior.
 
 ## Testing
 
-`packages/client/runtime/tests/receiving.client.spec.ts` drives a real `SessionRuntime` with `FakeApiClient`, selects the synthetic row, and observes `currentProvideInfo.hooks.session.getSnapshot()`. It pins wait identity, original protocol Session identity, resolution, supersession, timer expiry, disconnect settlement and replay, unavailable model, command, skill, and prompt routes, and zero `session.create`, history, subagent, model, skill, or prompt calls. `pnpm run build:lib:client` and `pnpm run verify-client-packages` cover the client module row and package declarations.
+`packages/client/runtime/tests/receiving.client.spec.ts` drives a real `SessionRuntime` with `FakeApiClient`, selects the synthetic row, and observes `currentProvideInfo.hooks.session.getSnapshot()`. It pins wait identity, original protocol Session identity, resolution, supersession, timer expiry, disconnect settlement and replay, unavailable model, command, skill, and prompt routes, and zero `session.create`, history, subagent, model, skill, or prompt calls. `packages/client/ui-workspace/tests/workspace-browser.client.spec.tsx` pins arrival-edge expansion and post-arrival human collapse. `apps/web/tests/member-question-receiving.e2e.ts` drives a mock remote Agent through the shipped user-questions provider, api-proxy pending registry, WebSocket mux, Client Runtime, dynamic module table, composite card, shared question presentation, document focus, and response POST; it asserts no additional Host Session, `session.create`, `session.history`, or model call. `pnpm run build:lib:client` and `pnpm run verify-client-packages` cover the client module row and package declarations.

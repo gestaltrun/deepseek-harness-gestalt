@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "344-member-question-receiving",
+  "summary": {
+    "en": "Show routed member questions as silent receiving sessions with Decision Briefs and focused reference documents.",
+    "zh": "将定向成员提问显示为静默接收 Session，并呈现决策简报与聚焦参考文档。"
+  },
+  "releases": {
+    "desktop": "minor",
+    "mobile": "minor",
+    "platform": "minor"
+  },
+  "compatibilityExceptions": []
+}

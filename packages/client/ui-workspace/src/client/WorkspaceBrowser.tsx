@@ -288,6 +288,17 @@ function SessionTree({
     const accounted = new Set(workspaces.flatMap(workspace => workspace.sessionIds))
     return list.ids.filter(id => list.byId[id] !== undefined && !accounted.has(id))
   }, [list, workspaces])
+  const pendingUngroupedSessionIds = useMemo(
+    () => ungroupedSessionIds.filter(id => list.byId[id]?.pendingInteraction !== undefined),
+    [list, ungroupedSessionIds],
+  )
+  const observedPendingUngrouped = useRef(new Set<SessionId>())
+  useEffect(() => {
+    const next = new Set(pendingUngroupedSessionIds)
+    const arrived = pendingUngroupedSessionIds.some(id => !observedPendingUngrouped.current.has(id))
+    observedPendingUngrouped.current = next
+    if (arrived) setGroupExpanded(UNGROUPED_KEY, true)
+  }, [pendingUngroupedSessionIds, setGroupExpanded])
   useEffect(() => {
     if (list.phase !== 'ready') return
     const switchedToUpdated = previousOrderBy.current !== 'updated' && orderBy === 'updated'

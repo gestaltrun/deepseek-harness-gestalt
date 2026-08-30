@@ -6,7 +6,7 @@
 
 `./presentation` 入口接收 Client Runtime 的原始 `SessionListState` 与 `WorkspaceView` 投影。`expandedSessionGroups` 执行与 `WorkspaceBrowser` 相同的 `deriveGroups` owner，`SessionListPresentation` 则执行同一个 `SessionNodeItem` 行，但不提供 Desktop 专属的 rename、fork 或 archive capability。每个公共 list 都提供自己的 accessible tree label，并拥有一个支持 Arrow、Enter 与 Space 的 roving tab stop；Desktop owner 省略 `tabIndex` 时，裸 `SessionNodeItem` 不会自行增加 tab stop。因此，窄屏产品 shell 可复用 Desktop 的分组、状态、无障碍和行语义，而不创建平行 Session 摘要或列表 renderer。
 
-该浏览器通过全局运行时钩子将 Session 行渲染为分组或扁平形式，并负责 Workspace 添加／重命名／重排序以及 Session 重排序。每个 Workspace 会记住自身是关闭还是显示 Session；打开后默认显示五条 Session，其余条目通过临时的**展开其余**控件显示，而关闭并重新打开整个 Workspace 后会恢复为五条。从 Workspace 行创建 Session 时会先打开该分组，使 Session 状态到达后新行保持可见。Workspace 列表基线就绪后，浏览器持久化的展开状态与 Session 顺序记录只保留当前 Workspace id、Ungrouped 和单列表记账。视图选项把分组方式和每个记账各自的一份浏览器持久化 Session 顺序放在一起：真实 Workspace 从 `WorkspaceView.sessionIds` 初始化，Ungrouped 和跨 Workspace 的单列表则从最近更新时间顺序初始化。**手动排序**和**最近更新**在两种呈现方式下都可用。进入最近更新时会执行一次完整的时间排序，后续 user prompt 或 steer 会将对应 Session 置顶一次；进入手动排序则保留所有当前位置并停用后续置顶。两种模式下的拖拽都会编辑当前顺序；真实 Workspace 在手动模式下的拖拽还会更新 Host Session 记账，而 Ungrouped 和单列表因没有单一 Workspace 记账，其顺序始终只保存在浏览器本地。单列表没有父级层次，因此不显示空的左侧状态槽；Session 存在可见状态时仍保留该槽。无论采用哪种 Session 顺序，Workspace 拖拽顺序都由 Host 持久化。
+该浏览器通过全局运行时钩子将 Session 行渲染为分组或扁平形式，并负责 Workspace 添加／重命名／重排序以及 Session 重排序。每个 Workspace 会记住自身是关闭还是显示 Session；打开后默认显示五条 Session，其余条目通过临时的**展开其余**控件显示，而关闭并重新打开整个 Workspace 后会恢复为五条。从 Workspace 行创建 Session 时会先打开该分组，使 Session 状态到达后新行保持可见。新的 pending Ungrouped Session 到达时同样会打开 Ungrouped，使仅渲染的接收 Session 可见且不移动当前 selection；之后的人类折叠会保持，直至另一条 pending Ungrouped Session 到达。Workspace 列表基线就绪后，浏览器持久化的展开状态与 Session 顺序记录只保留当前 Workspace id、Ungrouped 和单列表记账。视图选项把分组方式和每个记账各自的一份浏览器持久化 Session 顺序放在一起：真实 Workspace 从 `WorkspaceView.sessionIds` 初始化，Ungrouped 和跨 Workspace 的单列表则从最近更新时间顺序初始化。**手动排序**和**最近更新**在两种呈现方式下都可用。进入最近更新时会执行一次完整的时间排序，后续 user prompt 或 steer 会将对应 Session 置顶一次；进入手动排序则保留所有当前位置并停用后续置顶。两种模式下的拖拽都会编辑当前顺序；真实 Workspace 在手动模式下的拖拽还会更新 Host Session 记账，而 Ungrouped 和单列表因没有单一 Workspace 记账，其顺序始终只保存在浏览器本地。单列表没有父级层次，因此不显示空的左侧状态槽；Session 存在可见状态时仍保留该槽。无论采用哪种 Session 顺序，Workspace 拖拽顺序都由 Host 持久化。
 
 折叠搜索是视图和添加操作旁的一枚区头按钮。在轨道中，添加和搜索会渲染为沿外壳共用横向进入路径移动的 36px 控件。激活搜索后，输入框会扩展并占据区头；点击外部只会收起经清除首尾空白后为空的查询——但轨道搜索手势仍在进行期间（直至列滑动结束、焦点落入输入框）除外，这样触发展开的那次点击不会收起它刚打开的搜索——而清除控件总会重置并收起搜索。非空白查询会以单一扁平结果列表替代任一浏览模式：不区分大小写的标题和 Workspace 子串匹配项会立即显示，经 250 ms 防抖的 Host 请求则会加入经过排序的当前对话内容匹配项及其摘要片段。英文搜索输入框及其防御性请求路径会移除 NUL，将查询限制在传输 schema 规定的 500 个 UTF-16 代码单元内且不会拆分代理项对，并保留现有的防抖与取消行为。每次新查询都会中止前一个请求；内容搜索失败时，元数据匹配项仍会显示，同时给出警告。列表最多显示 20 条结果，并会在查询过宽时提示用户缩小范围；打开所选 Session 时既不会清除查询，也不会跳转至特定事件。
 
@@ -36,5 +36,5 @@ Session 行渲染运行时的实时 `pendingInteraction` 分类：审批显示**
 
 - **没有模糊内容搜索或事件深链接**：内容后端采用字面 token／短语匹配，选择结果会打开 Session，而不是匹配的事件。
 - **没有 Session 删除与取消归档控件**：会话可以归档，但已归档会话没有查看或取消归档入口；删除 Workspace 注册记录不会删除 Session。
-- **待处理的用户交互不会聚合到折叠的分组上**：折叠分组内正在等待的行不会点亮分组头指示，只有展开该分组后才可见。
+- **待处理的用户交互不会聚合到折叠的真实 Workspace 分组上**：折叠 Workspace 内正在等待的行不会点亮分组头指示，只有展开该分组后才可见；新 pending 行到达时，Ungrouped 会打开一次。
 - **原生文件夹选择依赖本地 Host 载体**：在 `-native` 组合下，进程内部署或远程浏览器部署无法打开本地操作系统对话框；模态框会显示平台故障，并允许重试。可远程的选取是 `-browse` 组合的应用内流程。

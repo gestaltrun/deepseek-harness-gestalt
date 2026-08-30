@@ -1,6 +1,6 @@
 /**
  * Connected phone tab body (locked design states ③④): the BrowserView-
- * rhythm devbar (device dropdown + MJPEG/H264 chips), the 1:2 fixed-ratio
+ * rhythm devbar (device dropdown + the H264 chip), the 1:2 fixed-ratio
  * live frame centered in the panel, the circular Back/Home/Recents/
  * screenshot toolbar, and the error cards whose copy states the next
  * action. Everything reactive arrives through one per-tab
@@ -24,7 +24,7 @@ export interface PhoneConnectedViewProps {
   readonly visible: boolean
   /** Listing source backing the device dropdown. */
   readonly source: PhoneListingSource
-  /** Open (or focus) the per-device tab of one dropdown entry. */
+  /** Switch the single tab onto another listed device in place (U1). */
   readonly onOpenDevice: (serial: string, name: string) => void
   /** Controller factory; the tab owns the created instance for its lifetime. */
   readonly createController: (serial: string) => PhoneConnectionController
@@ -83,9 +83,11 @@ function ChevronDown(): ReactNode {
 export function PhoneConnectedView({
   serial, name, visible, source, onOpenDevice, createController,
 }: PhoneConnectedViewProps): ReactNode {
-  const controllerRef = useRef<PhoneConnectionController | undefined>(undefined)
-  controllerRef.current ??= createController(serial)
-  const controller = controllerRef.current
+  const createControllerRef = useRef(createController)
+  createControllerRef.current = createController
+  // The tab is a singleton (U1): a serial change disposes the previous
+  // controller and mints a new session for the chosen device.
+  const controller = useMemo(() => createControllerRef.current(serial), [serial])
   // The controller and the listing source are the owning observables; uSES
   // is the render-side adapter (the better-sidebar tab hosts have no slot
   // hook channel).
@@ -96,6 +98,7 @@ export function PhoneConnectedView({
   const listSnapshot = useCallback(() => source.snapshot(), [source])
   const listing = useSyncExternalStore(listSubscribe, listSnapshot, listSnapshot)
   const devices = useMemo(() => [...listing.android, ...listing.ios], [listing])
+  const switchable = useMemo(() => devices.filter(device => device.online), [devices])
   const [menuOpen, setMenuOpen] = useState(false)
   /** The press being tracked: its fixed origin, the move trail, the drag flag. */
   const drag = useRef<{
@@ -271,21 +274,16 @@ export function PhoneConnectedView({
           <ChevronDown />
         </button>
         <span className={css.devbarSpacer} />
-        {/* The capture cadences are the locked mockup's captions; the stream
+        {/* The capture cadence is the locked mockup's caption; the stream
             contract carries no fps field, so no live value exists to bind. */}
-        <span className={`${css.tierChip} ${css.tierChipActive}`} aria-label="当前画面编码 MJPEG · 10 fps">
+        <span className={`${css.tierChip} ${css.tierChipActive}`} aria-label="当前画面编码 H264 · 30 fps">
           <span aria-hidden="true" className={css.liveDot} />
-          MJPEG
-          <span className={css.reslv}>10 fps</span>
-        </span>
-        <button type="button" className={css.tierChip} disabled title="H264 解码将在后续票据接入，当前使用 MJPEG">
-          <span aria-hidden="true" className={css.bizDot} />
           H264
           <span className={css.reslv}>30 fps</span>
-        </button>
+        </span>
         {menuOpen && (
           <div role="menu" aria-label="切换设备" className={css.pickMenu}>
-            {devices.map(device => (
+            {switchable.map(device => (
               <button
                 key={device.id}
                 type="button"
@@ -296,7 +294,7 @@ export function PhoneConnectedView({
                   if (device.id !== serial) onOpenDevice(device.id, device.name)
                 }}
               >
-                <span aria-hidden="true" className={device.online ? css.dot : `${css.dot} ${css.dotOffline}`} />
+                <span aria-hidden="true" className={css.dot} />
                 {device.name}
                 <span className={css.pickMeta}>{device.id === serial ? '当前 ✓' : '切换'}</span>
               </button>

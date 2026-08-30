@@ -1,31 +1,28 @@
 /**
- * Per-device phone tab semantics on a fake better-sidebar that mirrors the
- * documented openTab contract (default seed mint, dedupeKey focus, id
- * safety net): the same serial focuses the existing tab instead of
- * rebuilding it, different serials coexist as separate tabs, the + menu
- * picker stays single-instance, and a disabled deployment refuses opens.
+ * Single phone tab with in-place device switching (U1, reversing the
+ #419 per-device model): 打开 and the device dropdown patch the one
+ tab instance's meta via the sidebar's updateTab — the tab strip keeps
+ a single 「手机」 tab, and a disabled deployment refuses switches.
  */
 import { describe, expect, it } from 'vitest'
 import {
-  buildPhoneTabDescriptor, createPhoneTabOpener, installPhoneTab, PHONE_TAB_ID,
+  buildPhoneTabDescriptor, installPhoneTab, PHONE_TAB_ID,
   phoneDeviceTabMetaOf,
-  type PhoneTabDescriptor, type PhoneTabView,
+  type PhoneListingSource, type PhoneTabDescriptor, type PhoneTabView,
 } from '../src/client/registry.ts'
-import { createHttpPhoneListingSource } from '../src/client/phone-listing.ts'
 
 /** One tab instance the fake sidebar holds. */
 interface FakeTab {
   readonly id: string
   readonly type: string
-  readonly title: string
-  readonly meta?: unknown
+  title: string
+  meta?: unknown
 }
 
 /**
- * The documented BetterSidebarService.openTab contract in miniature for a
- * descriptor without createTab: mint `{id: seed.id ?? type, type, title,
- * meta}` from the seed, focus the existing same-type tab whose dedupeKey
- * matches (an undefined key falls to the id safety net), otherwise insert.
+ * The documented sidebar contract in miniature: registerTab holds one
+ * descriptor, openTab mints `{id: seed.id ?? type, …}` (single:true
+ * focuses the existing instance), updateTab patches title/meta in place.
  */
 class ContractSidebar {
   descriptor: PhoneTabDescriptor | undefined
@@ -33,6 +30,7 @@ class ContractSidebar {
   activeId: string | undefined
   readonly opened: string[] = []
   readonly activated: string[] = []
+  readonly patches: { readonly tabId: string; readonly patch: { readonly title?: string; readonly meta?: unknown } }[] = []
 
   registerTab(descriptor: PhoneTabDescriptor): () => void {
     this.descriptor = descriptor
@@ -46,11 +44,7 @@ class ContractSidebar {
       title: seed.title ?? '手机',
       ...(seed.meta !== undefined ? { meta: seed.meta } : {}),
     }
-    const dedupeKey = this.descriptor?.dedupeKey
-    const key = dedupeKey?.(tab)
-    const existing = (key !== undefined
-      ? this.tabs.find(candidate => candidate.type === tab.type && dedupeKey!(candidate) === key)
-      : this.tabs.find(candidate => candidate.id === tab.id))
+    const existing = this.tabs.find(candidate => candidate.id === tab.id)
     if (existing !== undefined) {
       this.activeId = existing.id
       this.activated.push(existing.id)
@@ -60,58 +54,81 @@ class ContractSidebar {
     this.activeId = tab.id
     this.opened.push(tab.id)
   }
+
+  updateTab(tabId: string, patch: { readonly title?: string; readonly meta?: unknown }): void {
+    const tab = this.tabs.find(candidate => candidate.id === tabId)
+    if (tab === undefined) return
+    if (patch.title !== undefined) tab.title = patch.title
+    if (patch.meta !== undefined) tab.meta = patch.meta
+    this.patches.push({ tabId, patch })
+  }
 }
 
 function stubView(): PhoneTabView {
   return { icon: () => null, component: () => null }
 }
 
-describe('per-device phone tabs', () => {
-  it('focuses the existing tab when the same serial opens twice', () => {
+const NULL_SOURCE: PhoneListingSource = {
+  getBadge: () => ({ onlineCount: 0 }),
+  snapshot: () => ({ android: [], ios: [] }),
+  refresh: async () => {},
+  subscribe: () => () => {},
+}
+
+describe('single phone tab with in-place switching', () => {
+  it('keeps a single tab and switches it in place when a device opens', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
-      source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => true,
+      source: NULL_SOURCE, view: stubView(), isEnabled: () => true,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
-      openDevice: createPhoneTabOpener(sidebar, () => true),
+      switchDevice: (tabId, serial, name) => sidebar.updateTab(tabId, {
+        title: `手机·${name}`,
+        meta: { kind: 'device', serial, name },
+      }),
       createController: () => {
         throw new Error('not expected in this spec')
       },
     }))
-    const openDevice = createPhoneTabOpener(sidebar, () => true)
-    openDevice('emulator-5554', 'Pixel_6_API_35')
-    openDevice('emulator-5554', 'Pixel_6_API_35')
+    sidebar.openTab({ type: PHONE_TAB_ID })
+    // U1 reverses the per-device model: one tab, switching happens in place.
+    expect(sidebar.descriptor!.single).toBe(true)
+  })
+
+  it('patches the one tab in place when a device opens and re-opens', () => {
+    const sidebar = new ContractSidebar()
+    sidebar.registerTab(buildPhoneTabDescriptor({
+      source: NULL_SOURCE, view: stubView(), isEnabled: () => true,
+      gate: { snapshot: () => false, subscribe: () => () => undefined },
+      switchDevice: (tabId, serial, name) => sidebar.updateTab(tabId, {
+        title: `手机·${name}`,
+        meta: { kind: 'device', serial, name },
+      }),
+      createController: () => {
+        throw new Error('not expected in this spec')
+      },
+    }))
+    sidebar.openTab({ type: PHONE_TAB_ID })
+    const switchDevice = (serial: string, name: string): void => sidebar.updateTab(PHONE_TAB_ID, {
+      title: `手机·${name}`,
+      meta: { kind: 'device', serial, name },
+    })
+    switchDevice('emulator-5554', 'Pixel_6_API_35')
+    switchDevice('R3CN30', 'SM-S9310')
     expect(sidebar.tabs).toHaveLength(1)
-    expect(sidebar.tabs[0]).toMatchObject({ id: 'phone:emulator-5554', title: '手机·Pixel_6_API_35' })
-    expect(sidebar.opened).toEqual(['phone:emulator-5554'])
-    expect(sidebar.activated).toEqual(['phone:emulator-5554'])
-    expect(sidebar.activeId).toBe('phone:emulator-5554')
+    expect(sidebar.opened).toEqual([PHONE_TAB_ID])
+    expect(sidebar.tabs[0]).toMatchObject({
+      id: PHONE_TAB_ID,
+      title: '手机·SM-S9310',
+      meta: { kind: 'device', serial: 'R3CN30', name: 'SM-S9310' },
+    })
   })
 
-  it('opens one tab per serial and keys dedupe on the serial only', () => {
+  it('keeps the + menu picker single-instance', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({
-      source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => true,
+      source: NULL_SOURCE, view: stubView(), isEnabled: () => true,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
-      openDevice: createPhoneTabOpener(sidebar, () => true),
-      createController: () => {
-        throw new Error('not expected in this spec')
-      },
-    }))
-    const openDevice = createPhoneTabOpener(sidebar, () => true)
-    openDevice('emulator-5554', 'Pixel_6_API_35')
-    openDevice('R3CN30', 'SM-S9310')
-    openDevice('emulator-5554', 'Pixel_6_API_35')
-    expect(sidebar.tabs.map(tab => tab.id)).toEqual(['phone:emulator-5554', 'phone:R3CN30'])
-    expect(sidebar.opened).toEqual(['phone:emulator-5554', 'phone:R3CN30'])
-    expect(sidebar.activeId).toBe('phone:emulator-5554')
-  })
-
-  it('keeps the + menu picker single-instance through the id safety net', () => {
-    const sidebar = new ContractSidebar()
-    sidebar.registerTab(buildPhoneTabDescriptor({
-      source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => true,
-      gate: { snapshot: () => false, subscribe: () => () => undefined },
-      openDevice: createPhoneTabOpener(sidebar, () => true),
+      switchDevice: () => {},
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -120,8 +137,6 @@ describe('per-device phone tabs', () => {
     sidebar.openTab({ type: PHONE_TAB_ID })
     expect(sidebar.tabs).toHaveLength(1)
     expect(sidebar.tabs[0]!.id).toBe(PHONE_TAB_ID)
-    // The picker tab carries no serial, so the dedupeKey leaves it to the id net.
-    expect(sidebar.descriptor!.dedupeKey?.(sidebar.tabs[0]!)).toBeUndefined()
     expect(sidebar.opened).toEqual([PHONE_TAB_ID])
     expect(sidebar.activated).toEqual([PHONE_TAB_ID])
   })
@@ -134,23 +149,36 @@ describe('per-device phone tabs', () => {
     expect(phoneDeviceTabMetaOf(undefined)).toBeUndefined()
   })
 
-  it('drops device-tab opens while the deployment disables connections', () => {
+  it('drops device switches while the deployment disables connections', async () => {
+    const { Context } = await import('@deepseek-ai/cordis')
     const sidebar = new ContractSidebar()
-    sidebar.registerTab(buildPhoneTabDescriptor({
-      source: createHttpPhoneListingSource(), view: stubView(), isEnabled: () => false,
+    const seen: { readonly env: unknown }[] = []
+    const ctx = new Context()
+    ctx.provide('betterSidebar', sidebar)
+    installPhoneTab(ctx, {
+      source: NULL_SOURCE,
+      view: {
+        icon: () => null,
+        component: (_props, env) => {
+          seen.push({ env })
+          return null
+        },
+      },
+      isEnabled: () => false,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
-      openDevice: createPhoneTabOpener(sidebar, () => false),
       createController: () => {
         throw new Error('not expected in this spec')
       },
-    }))
-    const openDevice = createPhoneTabOpener(sidebar, () => false)
-    openDevice('emulator-5554', 'Pixel_6_API_35')
-    expect(sidebar.tabs).toHaveLength(0)
-    expect(sidebar.opened).toHaveLength(0)
+    })
+    sidebar.openTab({ type: PHONE_TAB_ID })
+    sidebar.descriptor!.component({ tab: { id: PHONE_TAB_ID, title: '手机' }, visible: false })
+    const env = seen[0]!.env as { switchDevice(tabId: string, serial: string, name: string): void }
+    env.switchDevice(PHONE_TAB_ID, 'emulator-5554', 'Pixel_6_API_35')
+    expect(sidebar.patches).toHaveLength(0)
+    expect(sidebar.tabs[0]!.meta).toBeUndefined()
   })
 
-  it('installs the fiber-owned opener and hands it to the body environment', async () => {
+  it('installs the fiber-owned switcher and hands it to the body environment', async () => {
     const { Context } = await import('@deepseek-ai/cordis')
     const sidebar = new ContractSidebar()
     const seen: { readonly props: unknown; readonly env: unknown }[] = []
@@ -158,11 +186,11 @@ describe('per-device phone tabs', () => {
     let gate = true
     ctx.provide('betterSidebar', sidebar)
     installPhoneTab(ctx, {
-      source: createHttpPhoneListingSource(),
+      source: NULL_SOURCE,
       view: {
         icon: () => null,
-        component: (props, env) => {
-          seen.push({ props, env })
+        component: (_props, env) => {
+          seen.push({ props: _props, env })
           return null
         },
       },
@@ -172,21 +200,24 @@ describe('per-device phone tabs', () => {
         throw new Error('not expected in this spec')
       },
     })
-    // The descriptor supplies its own environment; the opener wired against
-    // the resolved fake sidebar rides inside it.
+    // The descriptor supplies its own environment; the switcher wired
+    // against the resolved fake sidebar rides inside it.
     const descriptor = sidebar.descriptor!
-    const deviceTab = {
-      tab: { id: 'phone:emulator-5554', title: '手机·Pixel_6_API_35', meta: { kind: 'device', serial: 'emulator-5554', name: 'Pixel_6_API_35' } },
-      visible: true,
-    }
-    descriptor.component(deviceTab)
+    sidebar.openTab({ type: PHONE_TAB_ID })
+    descriptor.component({ tab: { id: PHONE_TAB_ID, title: '手机', meta: undefined }, visible: true })
     expect(seen).toHaveLength(1)
-    const env = seen[0]!.env as { isEnabled(): boolean; openDevice(serial: string, name: string): void }
+    const env = seen[0]!.env as {
+      isEnabled(): boolean
+      switchDevice(tabId: string, serial: string, name: string): void
+    }
     expect(env.isEnabled()).toBe(true)
-    env.openDevice('emulator-5554', 'Pixel_6_API_35')
-    expect(sidebar.tabs.map(tab => tab.id)).toEqual(['phone:emulator-5554'])
+    env.switchDevice(PHONE_TAB_ID, 'emulator-5554', 'Pixel_6_API_35')
+    expect(sidebar.tabs[0]).toMatchObject({
+      title: '手机·Pixel_6_API_35',
+      meta: { kind: 'device', serial: 'emulator-5554' },
+    })
     gate = false
-    env.openDevice('R3CN30', 'SM-S9310')
-    expect(sidebar.tabs).toHaveLength(1)
+    env.switchDevice(PHONE_TAB_ID, 'R3CN30', 'SM-S9310')
+    expect(sidebar.tabs[0]!.meta).toMatchObject({ serial: 'emulator-5554' })
   })
 })

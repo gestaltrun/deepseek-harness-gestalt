@@ -84,7 +84,7 @@ describe('PhoneTab empty state', () => {
     expect(screen.queryByText('Pixel_6_API_35')).toBeNull()
   })
 
-  it('lists devices of both groups straight from the committed listing', async () => {
+  it('lists only online devices and keeps the USB placeholder when no handset is available', async () => {
     const source = new FakeListingSource().seed(listingOf([
       { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
       { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'offline', online: false },
@@ -92,13 +92,12 @@ describe('PhoneTab empty state', () => {
     await renderTab(true, source)
     expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
     expect(screen.getByText('运行中')).toBeTruthy()
-    expect(screen.getByText('SM-S9310')).toBeTruthy()
-    expect(screen.getByText('离线')).toBeTruthy()
-    // Rows replace the USB placeholder once a device answers.
-    expect(screen.queryByText('用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。')).toBeNull()
+    expect(screen.queryByText('SM-S9310')).toBeNull()
+    expect(screen.queryByText('离线')).toBeNull()
+    expect(screen.getByText('用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。')).toBeTruthy()
   })
 
-  it('opens the per-device tab only from online rows', async () => {
+  it('opens the occupying device only from listed online rows', async () => {
     const source = new FakeListingSource().seed(listingOf([
       { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
       { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'offline', online: false },
@@ -140,17 +139,17 @@ describe('PhoneTab empty state', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it('shows the per-channel running state in the row meta', async () => {
+  it('shows the per-channel running state in the row meta of listed devices', async () => {
     const source = new FakeListingSource().seed(listingOf([
       { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
       { id: 'emulator-9999', name: 'Galaxy_A54_API_34', channel: 'emulator', state: 'offline', online: false },
       { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'online', online: true },
     ]))
     await renderTab(true, source)
-    // The wire carries no OS version field, so the meta degrades to the
-    // running state alone (P5 leftover note).
     expect(screen.getByText('运行中')).toBeTruthy()
-    expect(screen.getByText('已停止')).toBeTruthy()
+    expect(screen.getByText('在线')).toBeTruthy()
+    expect(screen.queryByText('已停止')).toBeNull()
+    expect(screen.queryByText('Galaxy_A54_API_34')).toBeNull()
   })
 
   it('keeps the USB placeholder while only simulators answer', async () => {
@@ -158,7 +157,7 @@ describe('PhoneTab empty state', () => {
       { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'offline', online: false },
     ]))
     await renderTab(true, source)
-    expect(screen.getByText('Pixel_6_API_35')).toBeTruthy()
+    expect(screen.queryByText('Pixel_6_API_35')).toBeNull()
     expect(screen.getByText('用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。')).toBeTruthy()
   })
 

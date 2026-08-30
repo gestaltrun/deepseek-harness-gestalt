@@ -33,9 +33,9 @@ export interface PhoneStreamSessionView {
   readonly deviceId: string
   /** Exact-path WebSocket upgrade path for io frames. */
   readonly ioPath: string
-  /** Signed MJPEG capture URL. */
+  /** Signed MJPEG capture URL (Host still signs it; the live view does not request it). */
   readonly mjpeg: PhoneStreamUrlView
-  /** Signed H264 capture URL (playback lands with a later ticket). */
+  /** Signed H264 capture URL (the live view's only requested encoding). */
   readonly h264: PhoneStreamUrlView
 }
 
@@ -131,7 +131,7 @@ function isStreamUrlView(value: unknown): value is PhoneStreamUrlView {
 /**
  * Mint one signed same-origin session for one device.
  * @param deviceId - Android serial or iOS UDID present in the latest listing.
- * @returns the session with the io path and both signed capture URLs.
+ * @returns the session with the io path and signed capture URLs. The live view requests `format: 'avc'` (Host `h264`).
  * @throws {@link PhoneStreamHttpError} when the Host refuses the mint.
  * @throws the network error when the Host is unreachable.
  */
@@ -141,7 +141,7 @@ export async function mintPhoneSession(deviceId: string): Promise<PhoneStreamSes
     response = await fetch(PHONE_SESSION_PATH, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deviceId }),
+      body: JSON.stringify({ deviceId, format: 'avc' }),
     })
   } catch (error) {
     throw new PhoneStreamHttpError(0, 'network', error instanceof Error ? error.message : String(error))

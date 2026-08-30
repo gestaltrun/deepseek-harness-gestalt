@@ -1,11 +1,11 @@
 /**
  * Phone tab body: the not-connected empty state of the locked design —
  * state with the platform selector, the grouped device list, and the
- * 重新检测环境 control that pulls the fleet listing. Connected instances
- * of the same tab type render the live view instead; every fact this
- * component reads arrives through plain props (the enable gate, the
- * listing source, the device-tab opener), never through a service or
- * context.
+ * 重新检测环境 control that pulls the fleet listing. The same tab
+ * instance renders the live view once a device occupies it; every fact
+ * this component reads arrives through plain props (the enable gate, the
+ * listing source, the in-place device switcher), never through a service
+ * or context.
  */
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
@@ -22,7 +22,7 @@ export interface PhoneTabProps {
   readonly gate: PhoneGateSource
   /** Listing source backing the rows (starts empty until a pull commits). */
   readonly source: PhoneListingSource
-  /** Open (or focus) the per-device tab of one listed device. */
+  /** Switch the single tab onto one listed online device in place (U1). */
   readonly onOpenDevice: (serial: string, name: string) => void
 }
 
@@ -44,14 +44,11 @@ const GROUP_TITLES: Record<PhoneDeviceSummary['channel'], string> = {
 }
 
 /**
- * Row meta state caption per channel (the mockup fixes the emulator pair).
- * The upstream `state === 'unauthorized'` overrides with the design's
- * 未授权 caption; other verbatim states fall back to the derived value.
+ * Row meta caption for a listed online device. Offline rows are omitted
+ * (U2); unauthorized handsets render the warn arm instead of this caption.
  */
 function runningStateOf(device: PhoneDeviceSummary): string {
-  if (device.state === 'unauthorized') return '未授权'
-  if (device.channel === 'emulator') return device.online ? '运行中' : '已停止'
-  return device.online ? '在线' : '离线'
+  return device.channel === 'emulator' ? '运行中' : '在线'
 }
 
 /**
@@ -156,10 +153,11 @@ export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNo
       )}
       {GROUPS.map(({ channel }) => {
         const group = devices.filter(device => device.channel === channel)
+        const visible = group.filter(device => device.online || device.state === 'unauthorized')
         return (
           <section key={channel} aria-label={GROUP_TITLES[channel]}>
             <div className={css.groupName}>{GROUP_TITLES[channel]}</div>
-            {group.map(device => (
+            {visible.map(device => (
               device.state === 'unauthorized' ? (
                 <div key={device.id} role="alert" className={css.unauthorizedArm}>
                   <p className={css.unauthorizedTitle}>真机未授权调试</p>
@@ -181,25 +179,21 @@ export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNo
                 <div key={device.id} className={css.deviceRow}>
                   <span
                     aria-hidden="true"
-                    className={
-                      device.online ? css.deviceDot : `${css.deviceDot} ${css.deviceDotOffline}`
-                    }
+                    className={css.deviceDot}
                   />
                   <span className={css.deviceName}>{device.name}</span>
                   <span className={css.deviceMeta}>{rowMetaOf(device)}</span>
-                  {device.online && (
-                    <button
-                      type="button"
-                      className={shared.minibtnPrimary}
-                      onClick={() => { onOpenDevice(device.id, device.name) }}
-                    >
-                      打开
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className={shared.minibtnPrimary}
+                    onClick={() => { onOpenDevice(device.id, device.name) }}
+                  >
+                    打开
+                  </button>
                 </div>
               )
             ))}
-            {channel === 'usb' && group.length === 0 && (
+            {channel === 'usb' && visible.length === 0 && (
               <div className={css.emptyRow}>用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。</div>
             )}
           </section>

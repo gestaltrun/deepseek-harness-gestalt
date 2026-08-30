@@ -5,12 +5,11 @@ import WebServer from '@deepseek-ai/dsh-host-webserver'
 import PhoneDevices, { deviceId, PhoneDevicesError } from '@deepseek-ai/dsh-phone-runtime'
 import WebSocket from 'ws'
 import PhoneStream, { PHONE_IO_PATH } from '../src/index.ts'
-import { assertStructurallyDecodableJpeg, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
+import { assertRecognizableH264Picture, assertStructurallyDecodableJpeg, jpegDimensions, stageFake, wireDevice } from '../../phone-runtime/tests/helpers.ts'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
 const ANDROID = deviceId('emulator-5554')
-const H264 = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x67, 0x42])
 
 const contexts: Context[] = []
 const fakes: Array<Awaited<ReturnType<typeof stageFake>>> = []
@@ -229,10 +228,11 @@ describe('phone stream Host routes', () => {
     const frame = mjpeg.body.subarray(headerEnd + 4, mjpeg.body.indexOf('\r\n--frame'))
     expect(frame.subarray(0, 2).equals(Buffer.from([0xff, 0xd8]))).toBe(true)
     expect(frame.subarray(-2).equals(Buffer.from([0xff, 0xd9]))).toBe(true)
+    expect(jpegDimensions(frame)).toEqual({ width: 390, height: 844 })
     const h264 = await readFrame(origin, session.h264.url, host)
     expect(h264.status).toBe(200)
     expect(h264.contentType).toMatch(/video\/h264/)
-    expect(h264.body.subarray(0, 4).equals(H264.subarray(0, 4))).toBe(true)
+    assertRecognizableH264Picture(h264.body)
   })
 
   it('delivers decodable frames when the real backend answers the capture envelope', async () => {
@@ -246,6 +246,7 @@ describe('phone stream Host routes', () => {
     expect(headerEnd).toBeGreaterThanOrEqual(0)
     const frame = mjpeg.body.subarray(headerEnd + 4, mjpeg.body.indexOf('\r\n--frame'))
     assertStructurallyDecodableJpeg(frame)
+    expect(jpegDimensions(frame)).toEqual({ width: 390, height: 844 })
   })
 
   it('normalizes the real R4 dual-boundary stream to a single image-frame boundary', async () => {
@@ -266,6 +267,7 @@ describe('phone stream Host routes', () => {
     const headerEnd = mjpeg.body.indexOf('\r\n\r\n')
     const frame = mjpeg.body.subarray(headerEnd + 4, mjpeg.body.indexOf('\r\n--frame'))
     assertStructurallyDecodableJpeg(frame)
+    expect(jpegDimensions(frame)).toEqual({ width: 390, height: 844 })
   })
 
   it('cancels the upstream capture when the browser disconnects mid-stream', async () => {

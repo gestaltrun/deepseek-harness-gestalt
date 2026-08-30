@@ -1,12 +1,12 @@
 /**
  * Phone plugin, browser half: registers the 「手机」 tab type through the
  * `ctx.betterSidebar` service and the top-level 「手机设备」 settings
- * section. The tab type hosts the always-reachable picker instance (the
- * locked not-connected empty state) plus one connected instance per opened
- * device (`phone:<serial>` ids, serial dedupeKey) whose body consumes the
- * Host `phoneStream` same-origin channel. With `enabled: false` (the
- * default) opens of device tabs are refused and no stream session is ever
- * minted.
+ * section. The tab type hosts one always-reachable 「手机」 instance whose
+ * body splits on `meta`: the locked not-connected empty state, or the
+ * connected view of the device occupying the tab. Device opens switch that
+ * tab in place. The connected body consumes the Host `phoneStream`
+ * same-origin channel. With `enabled: false` (the default) device switches
+ * are refused and no stream session is ever minted.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import z from '@deepseek-ai/schemastery'
@@ -56,16 +56,20 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Split one tab instance onto its body: an instance without device meta is
- * the picker (empty state), one with it is the connected view of that device.
+ * Split the single tab onto its body: no device meta is the picker (empty
+ * state), device meta is the connected view of that device. Both arms
+ * switch devices in place through the environment (U1: same tab).
  * @param props - the tab instance props from the better-sidebar render.
  * @param env - the registration environment the descriptor assembled.
  * @returns the body of this tab instance.
  */
 function renderPhoneTabBody(props: PhoneTabBodyProps, env: PhoneTabEnvironment): ReactNode {
   const device = phoneDeviceTabMetaOf(props.tab.meta)
+  const onOpenDevice = (serial: string, name: string): void => {
+    env.switchDevice(props.tab.id, serial, name)
+  }
   if (device === undefined) {
-    return <PhoneTab gate={env.gate} source={env.source} onOpenDevice={env.openDevice} />
+    return <PhoneTab gate={env.gate} source={env.source} onOpenDevice={onOpenDevice} />
   }
   return (
     <PhoneConnectedView
@@ -73,7 +77,7 @@ function renderPhoneTabBody(props: PhoneTabBodyProps, env: PhoneTabEnvironment):
       name={device.name}
       visible={props.visible}
       source={env.source}
-      onOpenDevice={env.openDevice}
+      onOpenDevice={onOpenDevice}
       createController={env.createController}
     />
   )

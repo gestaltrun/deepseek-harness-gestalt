@@ -1,11 +1,11 @@
 /**
  * Phone live-view connection controller: the React-free state machine one
- * device tab runs against the same-origin stream gateway. It mints signed
- * capture sessions, owns the io WebSocket lifecycle, bounds automatic
- * reconnects after stream interruptions, and maps normalized screen touches
- * onto JSON-RPC io frames. Renderers subscribe and read phase snapshots;
- * every decision stays in this module so the machine is testable without a
- * browser.
+ * occupying device runs against the same-origin stream gateway. It mints
+ * signed H264 capture sessions (`format: 'avc'` on the Host mint), owns
+ * the io WebSocket lifecycle, bounds automatic reconnects after stream
+ * interruptions, and maps normalized screen touches onto JSON-RPC io
+ * frames. Renderers subscribe and read phase snapshots; every decision
+ * stays in this module so the machine is testable without a browser.
  * @module @deepseek-ai/dsh-client-ui-phone/client/phone-connection
  */
 import {
@@ -13,8 +13,8 @@ import {
   type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
 } from './phone-stream-client.ts'
 
-/** Capture encodings the Host signs (the `phoneStream` URL vocabulary). */
-export type PhoneCaptureFormat = 'mjpeg' | 'h264'
+/** Capture encoding the live view requests (Host `h264` maps onto upstream `avc`). */
+export type PhoneCaptureFormat = 'h264'
 
 /** Closed failure vocabulary the error copy switches on. */
 export type PhoneStreamFailureKind =
@@ -350,8 +350,8 @@ export class PhoneConnectionController {
         this.setPhase({
           kind: 'live',
           streamUrl: this.streamUrlOf(session),
-          format: 'mjpeg',
-          expiresAt: session.mjpeg.expiresAt,
+          format: 'h264',
+          expiresAt: session.h264.expiresAt,
         })
       },
       onClose: () => {
@@ -419,7 +419,7 @@ export class PhoneConnectionController {
   }
 
   private streamUrlOf(session: PhoneStreamSessionView): string {
-    return session.mjpeg.url
+    return session.h264.url
   }
 
   private send(request: PhoneClientIoRequest): boolean {

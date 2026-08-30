@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "444-desktop-phone-electron-e2e",
+  "summary": {
+    "en": "Add a keyless Desktop phone Electron acceptance lane and configurable mobilecli server port.",
+    "zh": "新增无需密钥的桌面手机 Electron 验收通道与可配置的 mobilecli 服务端口。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The test runner and WebdriverIO dependencies are Desktop development inputs; the mobilecli port setting belongs to the Desktop Host overlay and does not change the Mobile application."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The test runner and WebdriverIO dependencies are Desktop development inputs; the mobilecli port setting does not change Platform deployment or wire behavior."
+    }
+  ]
+}

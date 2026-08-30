@@ -609,9 +609,27 @@ function tscSourceMapPlugin() {
     async load(id: string) {
       if (!id.includes(TYPES_MARKER) || !id.endsWith('.js') || !existsSync(`${id}.map`)) return null
       const code = await readFile(id, 'utf8')
-      return { code: code.replace(SOURCEMAP_COMMENT, ''), map: await readFile(`${id}.map`, 'utf8') }
+      const mapPath = `${id}.map`
+      const parsed: unknown = JSON.parse(await readFile(mapPath, 'utf8'))
+      if (!isSourceMap(parsed)) throw new Error(`invalid tsc source map ${mapPath}`)
+      const sourceRoot = typeof parsed.sourceRoot === 'string' ? parsed.sourceRoot : ''
+      const sourcesContent = await Promise.all(parsed.sources.map(source => readFile(
+        resolvePath(dirname(mapPath), sourceRoot, source),
+        'utf8',
+      )))
+      return {
+        code: code.replace(SOURCEMAP_COMMENT, ''),
+        map: JSON.stringify({ ...parsed, sourcesContent }),
+      }
     },
   }
+}
+
+/** Return whether a parsed tsc map names each source file needed for content embedding. */
+function isSourceMap(value: unknown): value is Record<string, unknown> & { sources: string[] } {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const sources = Reflect.get(value, 'sources')
+  return Array.isArray(sources) && sources.every(source => typeof source === 'string')
 }
 
 /** Resolve an emitted JS asset import against its source-tree counterpart. */

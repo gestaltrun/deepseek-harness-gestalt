@@ -37,6 +37,7 @@ const CLIENT_ARTIFACT_PATTERNS = [
 ] as const
 const DYNAMIC_CLIENT_SOURCE_MAP_PATTERN = `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.sourceMapPath}`
 const DYNAMIC_CLIENT_BUNDLE_PATTERN = `packages/*/*/${DYNAMIC_CLIENT_ARTIFACT.relativePath}`
+const CLIENT_MANIFEST_PATTERNS = ['packages/*/*/package.json', 'apps/*/package.json', 'vendor/*/package.json']
 
 /** Public values embedded in one set of client artifacts. */
 export type ClientBuildEnvironment = Readonly<Record<string, string>>
@@ -231,6 +232,16 @@ export function collectDynamicClientSourceMapViolations(root: string): string[] 
     .map(path => path.replaceAll('\\', '/'))
     .sort()
 
+  for (const manifestPath of globSync(CLIENT_MANIFEST_PATTERNS, { cwd: root }).sort()) {
+    const manifest: unknown = JSON.parse(readFileSync(resolve(root, manifestPath), 'utf8'))
+    if (!isObject(manifest) || !isObject(manifest.dsh) || !isObject(manifest.dsh.client)) continue
+    const packageDirectory = dirname(manifestPath).replaceAll('\\', '/')
+    const bundlePath = `${packageDirectory}/${DYNAMIC_CLIENT_ARTIFACT.relativePath}`
+    const sourceMapPath = `${packageDirectory}/${DYNAMIC_CLIENT_ARTIFACT.sourceMapPath}`
+    if (!existsSync(resolve(root, bundlePath))) violations.push(`${bundlePath}: missing`)
+    if (!existsSync(resolve(root, sourceMapPath))) violations.push(`${sourceMapPath}: missing`)
+  }
+
   for (const bundlePath of bundlePaths) {
     const sourceMapPath = `${bundlePath}.map`
     if (!sourceMapPaths.has(sourceMapPath)) violations.push(`${sourceMapPath}: missing`)
@@ -250,6 +261,11 @@ export function collectDynamicClientSourceMapViolations(root: string): string[] 
       violations.push(`${path}: sources must be a string array`)
       continue
     }
+    if (!Array.isArray(parsed.sourcesContent)
+      || parsed.sourcesContent.length !== parsed.sources.length
+      || !parsed.sourcesContent.every(content => typeof content === 'string')) {
+      violations.push(`${path}: sourcesContent must contain one string per source`)
+    }
     for (const source of parsed.sources) {
       const normalized = source.replaceAll('\\', '/')
       if (/(?:^|\/)lib\/types\/.*\.js$/u.test(normalized)
@@ -264,7 +280,7 @@ export function collectDynamicClientSourceMapViolations(root: string): string[] 
       }
     }
   }
-  return violations
+  return [...new Set(violations)].sort()
 }
 
 /**

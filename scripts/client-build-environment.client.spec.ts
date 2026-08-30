@@ -204,6 +204,23 @@ describe('client build environment', () => {
     ])
   })
 
+  it('rejects ordinary workspace library JavaScript and permits generated Remote contributions', () => {
+    const fixtureRoot = buildFixture({})
+    const mapPath = join(fixtureRoot, 'packages/client/example/lib/client.cjs.map')
+    write(mapPath, JSON.stringify({
+      version: 3,
+      sources: [
+        '../../../packages/util/request-trust/lib/index.js',
+        '../../../packages/goal/goal/lib/typert.remote-client.js',
+      ],
+      sourcesContent: ['export {}\n', 'export {}\n'],
+    }))
+
+    expect(collectDynamicClientSourceMapViolations(fixtureRoot)).toEqual([
+      'packages/client/example/lib/client.cjs.map: ../../../packages/util/request-trust/lib/index.js',
+    ])
+  })
+
   it('requires every declared dynamic client pair and aligned embedded sources', () => {
     const fixtureRoot = buildFixture({})
     const packageRoot = join(fixtureRoot, 'packages/client/example')

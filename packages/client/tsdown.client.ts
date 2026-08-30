@@ -591,6 +591,8 @@ function clientConfig(id: string, entry: string): UserConfig {
 
 /** Path segment separating a package's tsc output from the sources it was emitted from. */
 const TYPES_MARKER = `${sep}lib${sep}types${sep}`
+/** Path segment separating a package root from its generated library artifacts. */
+const LIB_MARKER = `${sep}lib${sep}`
 
 /** Plugin name carrying contract 1, and the marker that identifies a statically linked config. */
 const STATIC_LINKED_PLUGIN = 'dsh-static-linked-external'
@@ -602,27 +604,46 @@ const SOURCE_MARKER = `${sep}src${sep}`
 /** Trailing sourcemap reference tsc appends to every emitted module. */
 const SOURCEMAP_COMMENT = /\n\/\/# sourceMappingURL=.*\s*$/
 
-/** Compose emitted tsc maps into browser bundles that consume `lib/types` JavaScript. */
+/** Compose map-bearing tsc output into browser bundles that consume generated JavaScript. */
 function tscSourceMapPlugin() {
   return {
     name: 'dsh-tsc-sourcemap',
     async load(id: string) {
-      if (!id.includes(TYPES_MARKER) || !id.endsWith('.js') || !existsSync(`${id}.map`)) return null
-      const code = await readFile(id, 'utf8')
-      const mapPath = `${id}.map`
+      if (!id.endsWith('.js')) return null
+      const emittedPath = tscModulePath(id)
+      if (emittedPath === undefined) return null
+      const code = await readFile(emittedPath, 'utf8')
+      const mapPath = `${emittedPath}.map`
       const parsed: unknown = JSON.parse(await readFile(mapPath, 'utf8'))
       if (!isSourceMap(parsed)) throw new Error(`invalid tsc source map ${mapPath}`)
       const sourceRoot = typeof parsed.sourceRoot === 'string' ? parsed.sourceRoot : ''
-      const sourcesContent = await Promise.all(parsed.sources.map(source => readFile(
-        resolvePath(dirname(mapPath), sourceRoot, source),
-        'utf8',
-      )))
+      const physicalSources = parsed.sources.map(source => resolvePath(dirname(mapPath), sourceRoot, source))
+      const sources = physicalSources.map((source) => {
+        const path = relative(dirname(id), source).split(sep).join('/')
+        return path.startsWith('.') ? path : `./${path}`
+      })
+      const sourcesContent = await Promise.all(physicalSources.map(source => readFile(source, 'utf8')))
       return {
         code: code.replace(SOURCEMAP_COMMENT, ''),
-        map: JSON.stringify({ ...parsed, sourcesContent }),
+        map: JSON.stringify({ ...parsed, sourceRoot: '', sources, sourcesContent }),
       }
     },
   }
+}
+
+/** Resolve a first-party bundled library module to its map-bearing tsc output. */
+function tscModulePath(id: string): string | undefined {
+  if (id.includes(TYPES_MARKER)) return existsSync(`${id}.map`) ? id : undefined
+  const packagesRoot = resolvePath(REPOSITORY_ROOT, 'packages') + sep
+  const boundary = id.indexOf(LIB_MARKER)
+  if (!id.startsWith(packagesRoot) || boundary < 0) return existsSync(`${id}.map`) ? id : undefined
+  const candidate = resolvePath(
+    id.slice(0, boundary),
+    'lib',
+    'types',
+    id.slice(boundary + LIB_MARKER.length),
+  )
+  return existsSync(candidate) && existsSync(`${candidate}.map`) ? candidate : undefined
 }
 
 /** Return whether a parsed tsc map names each source file needed for content embedding. */

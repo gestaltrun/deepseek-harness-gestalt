@@ -273,6 +273,11 @@ export function collectDynamicClientSourceMapViolations(root: string): string[] 
         violations.push(`${path}: ${source}`)
         continue
       }
+      if (/^\.\.\/\.\.\/\.\.\/packages\/[^/]+\/[^/]+\/lib\/.*\.js$/u.test(normalized)
+        && !normalized.endsWith('/lib/typert.remote-client.js')) {
+        violations.push(`${path}: ${source}`)
+        continue
+      }
       if (/\.(?:ts|tsx)$/u.test(normalized) && !normalized.includes('/node_modules/')
         && !/^\.\.\/\.\.\/\.\.\/packages\/[^/]+\/[^/]+\/src\//u.test(normalized)
         && !/^\.\.\/\.\.\/\.\.\/\.\.\/vendor\/[^/]+\/src\//u.test(normalized)) {

@@ -76,6 +76,27 @@ function ChevronDown(): ReactNode {
   )
 }
 
+interface ReconnectAlertProps {
+  readonly tone: 'warn' | 'err'
+  readonly title: string
+  readonly detail: string
+  readonly onReconnect: () => void
+}
+
+function ReconnectAlert({ tone, title, detail, onReconnect }: ReconnectAlertProps): ReactNode {
+  return (
+    <div role="alert" className={`${css.alertCard} ${tone === 'warn' ? css.alertWarn : css.alertErr}`}>
+      <p className={css.alertTitle}>{title}</p>
+      <p className={css.alertDetail}>{detail}</p>
+      <div className={css.alertActions}>
+        <button type="button" className={shared.minibtnPrimary} onClick={onReconnect}>
+          重新连接
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Render the connected body for one device tab.
  * @param props - the device identity, visibility, fleet list, and callbacks.
@@ -177,16 +198,14 @@ export function PhoneConnectedView({
     // replaces the stream area (a live stream wins — the device may have
     // been authorized since the listing committed).
     if (unauthorized && phase.kind !== 'live') {
+      const copy = FAILURE_COPY.unauthorized
       return (
-        <div role="alert" className={`${css.alertCard} ${css.alertWarn}`}>
-          <p className={css.alertTitle}>真机未授权调试</p>
-          <p className={css.alertDetail}>{`${name} 已通过 USB 连接；请在手机上允许「USB 调试」后重新连接。`}</p>
-          <div className={css.alertActions}>
-            <button type="button" className={shared.minibtnPrimary} onClick={() => { controller.connect() }}>
-              重新连接
-            </button>
-          </div>
-        </div>
+        <ReconnectAlert
+          tone={copy.tone}
+          title={copy.title}
+          detail={copy.detail(name)}
+          onReconnect={() => { controller.connect() }}
+        />
       )
     }
     if (phase.kind === 'live') {
@@ -228,20 +247,12 @@ export function PhoneConnectedView({
     if (phase.kind === 'error') {
       const copy = FAILURE_COPY[phase.failure.kind]
       return (
-        <div
-          role="alert"
-          className={copy.tone === 'warn'
-            ? `${css.alertCard} ${css.alertWarn}`
-            : `${css.alertCard} ${css.alertErr}`}
-        >
-          <p className={css.alertTitle}>{copy.title}</p>
-          <p className={css.alertDetail}>{copy.detail(name)}</p>
-          <div className={css.alertActions}>
-            <button type="button" className={shared.minibtnPrimary} onClick={() => { controller.connect() }}>
-              重新连接
-            </button>
-          </div>
-        </div>
+        <ReconnectAlert
+          tone={copy.tone}
+          title={copy.title}
+          detail={copy.detail(name)}
+          onReconnect={() => { controller.connect() }}
+        />
       )
     }
     return (

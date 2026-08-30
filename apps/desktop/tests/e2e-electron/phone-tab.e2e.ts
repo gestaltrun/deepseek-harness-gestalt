@@ -101,8 +101,8 @@ describe('Desktop phone tab live chain', () => {
     expect(await phoneTabTitles()).toEqual(['手机·Pixel_6_API_35'])
 
     const beforeTap = await fakeCounters()
-    // WDIO offsets from the integer element center; +1 reaches the exact half-surface device coordinate.
-    await screen.click({ x: 1, y: 1 })
+    // Explicit zero offsets select WDIO pointer actions at the geometric center instead of native element-click rounding.
+    await screen.click({ x: 0, y: 0 })
     const afterTap = await waitForFakeIo(counters => counters.io.length === beforeTap.io.length + 1)
     expect(afterTap.io.at(-1)).toMatchObject({
       method: 'device.io.tap',

@@ -12,9 +12,11 @@
     "javac",
     "keytool",
     "musl-gcc",
+    "mkfifo",
     "openssl",
     "postgres",
     "python3",
+    "ps",
     "postgres",
     "redis-server",
     "sandbox-exec",
@@ -745,7 +747,13 @@
         "@deepseek-ai/dsh-client-ui-phone",
         "@deepseek-ai/dsh-phone-runtime",
         "@deepseek-ai/dsh-phone-stream",
-        "@deepseek-ai/dsh-tool-phone"
+        "@deepseek-ai/dsh-tool-phone",
+        "@wdio/cli",
+        "@wdio/electron-service",
+        "@wdio/local-runner",
+        "@wdio/mocha-framework",
+        "@wdio/spec-reporter",
+        "@wdio/types"
       ]
     },
     "apps/platform": {

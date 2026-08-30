@@ -19,6 +19,8 @@ afterEach(cleanup)
 const DEVICES: readonly PhoneDeviceSummary[] = [
   { id: 'emulator-5554', name: 'Pixel_6_API_35', channel: 'emulator', state: 'online', online: true },
   { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'online', online: true },
+  { id: 'offline-1', name: 'Galaxy_A54_API_34', channel: 'emulator', state: 'offline', online: false },
+  { id: 'unauth-1', name: 'Pixel_8', channel: 'usb', state: 'unauthorized', online: false },
 ]
 
 interface Harness {
@@ -82,12 +84,11 @@ describe('PhoneConnectedView chrome', () => {
   it('renders the devbar rhythm: device dropdown, format chips, and the 1:2 frame', async () => {
     await renderLive()
     expect(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' })).toBeTruthy()
-    const mjpeg = screen.getByLabelText('当前画面编码 MJPEG · 10 fps')
-    expect(mjpeg.textContent).toContain('10 fps')
-    expect(screen.getByText('30 fps')).toBeTruthy()
-    const h264 = screen.getByRole('button', { name: /H264/ }) as HTMLButtonElement
-    expect(h264.disabled).toBe(true)
-    expect(h264.title).toContain('MJPEG')
+    const h264 = screen.getByLabelText('当前画面编码 H264 · 30 fps')
+    expect(h264.textContent).toContain('H264')
+    expect(h264.textContent).toContain('30 fps')
+    expect(screen.queryByText('MJPEG')).toBeNull()
+    expect(screen.queryByRole('button', { name: /H264/ })).toBeNull()
     expect(screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })).toBeTruthy()
     expect(screen.getByText('代理中')).toBeTruthy()
     expect(screen.getByText(/点击画面即向设备发送触控/)).toBeTruthy()
@@ -168,6 +169,58 @@ describe('PhoneConnectedView chrome', () => {
     expect(menu.textContent).toContain('当前')
     fireEvent.click(screen.getByRole('menuitem', { name: /SM-S9310/ }))
     expect(harness.onOpenDevice).toHaveBeenCalledWith('R3CN30', 'SM-S9310')
+  })
+
+  it('lists only online devices in the switcher and keeps unauthorized off the menu', async () => {
+    await renderLive()
+    fireEvent.click(screen.getByRole('button', { name: '切换设备：Pixel_6_API_35' }))
+    const items = screen.getAllByRole('menuitem').map(item => item.textContent)
+    expect(items.some(text => text?.includes('Pixel_6_API_35'))).toBe(true)
+    expect(items.some(text => text?.includes('SM-S9310'))).toBe(true)
+    expect(screen.queryByRole('menuitem', { name: /Galaxy_A54_API_34/ })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /Pixel_8/ })).toBeNull()
+  })
+
+  it('rebuilds the live session for the new serial when the same tab switches devices', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const source = new FakeListingSource().seed(listingOf(DEVICES))
+    const { rerender } = render(
+      <PhoneConnectedView
+        serial="emulator-5554"
+        name="Pixel_6_API_35"
+        visible={true}
+        source={source}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({
+          gateway,
+          deviceId: serial,
+          schedule: scheduler.schedule,
+        })}
+      />,
+    )
+    await flush()
+    await step(() => { gateway.lastSocket!.accept() })
+    expect(gateway.mintedDevices).toEqual(['emulator-5554'])
+    rerender(
+      <PhoneConnectedView
+        serial="R3CN30"
+        name="SM-S9310"
+        visible={true}
+        source={source}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({
+          gateway,
+          deviceId: serial,
+          schedule: scheduler.schedule,
+        })}
+      />,
+    )
+    await flush()
+    await step(() => { gateway.lastSocket!.accept() })
+    expect(gateway.mintedDevices).toEqual(['emulator-5554', 'R3CN30'])
+    expect(screen.getByRole('button', { name: '切换设备：SM-S9310' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'SM-S9310 实时画面' })).toBeTruthy()
   })
 
   it('lights the dropdown from the mount pull when the tab restores empty', async () => {
@@ -262,7 +315,7 @@ describe('PhoneConnectedView toolbar', () => {
     await flush()
     await step(() => { harness.gateway.lastSocket!.accept() })
     expect((screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' }) as HTMLImageElement).src)
-      .toContain(SESSION_A.mjpeg.url)
+      .toContain(SESSION_A.h264.url)
   })
 })
 

@@ -113,12 +113,9 @@ describe('ui-phone client apply', () => {
     const descriptor = sidebar.getTab('phone')!
     expect(descriptor.title).toBe('手机')
     expect(descriptor.order).toBe(55)
-    // Per-device tabs: the serial dedupeKey replaces the single flag — the
-    // picker dedupes through the service's id safety net instead.
-    expect(descriptor.single).toBeUndefined()
-    expect(descriptor.dedupeKey?.({ id: 'phone:emulator-5554', meta: { kind: 'device', serial: 'emulator-5554', name: 'x' } }))
-      .toBe('emulator-5554')
-    expect(descriptor.dedupeKey?.({ id: 'phone', meta: undefined })).toBeUndefined()
+    // U1: the strip keeps exactly one 「手机」 tab; devices switch in place.
+    expect(descriptor.single).toBe(true)
+    expect(descriptor.dedupeKey).toBeUndefined()
     // 恒可达 decision: zero devices never disables the + menu row.
     expect(descriptor.available(undefined, undefined, undefined)).toBe(true)
     // The monochrome inline SVG resolves the icon(size) contract.
@@ -209,7 +206,7 @@ describe('ui-phone client apply', () => {
         view: stubView(),
         isEnabled: () => false,
         gate: { snapshot: () => false, subscribe: () => () => undefined },
-        openDevice: () => {},
+        switchDevice: () => {},
         createController: () => {
           throw new Error('not expected in this spec')
         },

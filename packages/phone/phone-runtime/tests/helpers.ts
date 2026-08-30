@@ -23,7 +23,7 @@ interface FakeAgentKnobs {
   installExitCode?: number
   /** When set, a successful install prints this JSON answer verbatim. */
   installAnswer?: string
-  /** Makes the agent child ignore SIGTERM so the caller's SIGKILL escape runs. */
+  /** Makes the POSIX agent child ignore SIGTERM so the caller's SIGKILL escape runs. */
   ignoreTerm?: boolean
 }
 
@@ -36,7 +36,7 @@ export interface FakeKnobs {
   exitAfter?: number
   /** Exit before binding anything; simulates a binary that cannot start. */
   exitFast?: boolean
-  /** Ignore SIGTERM to exercise the SIGKILL escape in stop(). */
+  /** Ignore SIGTERM on POSIX to exercise the SIGKILL escape in stop(). */
   ignoreTerm?: boolean
   /** One-shot `agent` CLI behavior; state lives in a sibling state file. */
   agent?: FakeAgentKnobs

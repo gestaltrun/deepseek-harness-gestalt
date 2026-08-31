@@ -1,0 +1,28 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "474-windows-fake-mobilecli",
+  "summary": {
+    "en": "Make the phone-runtime fake mobilecli launcher executable in native Windows tests.",
+    "zh": "让 phone-runtime 的 fake mobilecli launcher 可在原生 Windows 测试中执行。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "desktop",
+      "reason": "Only phone-runtime test helpers, their tests, and current testing documentation change; Desktop production and packaging inputs are unchanged."
+    },
+    {
+      "releaseUnit": "mobile",
+      "reason": "Only phone-runtime test helpers, their tests, and current testing documentation change; Mobile production and build inputs are unchanged."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "Only phone-runtime test helpers, their tests, and current testing documentation change; Platform production, deployment, and wire inputs are unchanged."
+    }
+  ]
+}

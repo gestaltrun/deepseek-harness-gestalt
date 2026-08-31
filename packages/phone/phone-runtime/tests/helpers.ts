@@ -1,10 +1,10 @@
 /**
  * Test helpers: staging the fakemobilecli executable, its config knobs, test
  * device shapes, ephemeral-port picking, and capture-frame assertions.
- * POSIX-only; the vitest config excludes this package's suites on Windows.
+ * The staged launcher follows the host's native executable form.
  */
 
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import net from 'node:net'
@@ -23,7 +23,7 @@ interface FakeAgentKnobs {
   installExitCode?: number
   /** When set, a successful install prints this JSON answer verbatim. */
   installAnswer?: string
-  /** Makes the agent child ignore SIGTERM so the caller's SIGKILL escape runs. */
+  /** Makes the POSIX agent child ignore SIGTERM so the caller's SIGKILL escape runs. */
   ignoreTerm?: boolean
 }
 
@@ -36,7 +36,7 @@ export interface FakeKnobs {
   exitAfter?: number
   /** Exit before binding anything; simulates a binary that cannot start. */
   exitFast?: boolean
-  /** Ignore SIGTERM to exercise the SIGKILL escape in stop(). */
+  /** Ignore SIGTERM on POSIX to exercise the SIGKILL escape in stop(). */
   ignoreTerm?: boolean
   /** One-shot `agent` CLI behavior; state lives in a sibling state file. */
   agent?: FakeAgentKnobs
@@ -65,8 +65,8 @@ export interface StagedFake {
   readonly baseUrl: string
   /** Staged dummy provisioning profile that satisfies composition validation. */
   readonly profilePath: string
-  /** Release the placeholder port reservation right before the child spawns. */
-  claim(): void
+  /** Release the placeholder port reservation and wait until the child can bind it. */
+  claim(): Promise<void>
   setDevices(devices: ReadonlyArray<Record<string, unknown>>): Promise<void>
   /** Rewrite the `agent` behavior knobs the next CLI invocation reads. */
   setAgent(agent: FakeAgentKnobs): Promise<void>
@@ -97,12 +97,19 @@ function randomPort(): Promise<number> {
  * Hold one staged port until {@link StagedFake.claim}, so parallel vitest
  * workers cannot steal the ephemeral slot between staging and spawning.
  */
-function holdPort(port: number): { release(): void } {
+async function holdPort(port: number): Promise<{ release(): Promise<void> }> {
   const placeholder = net.createServer()
-  placeholder.listen(port, '127.0.0.1')
+  await new Promise<void>((resolve, reject) => {
+    placeholder.once('error', reject)
+    placeholder.listen(port, '127.0.0.1', resolve)
+  })
+  let releasePromise: Promise<void> | undefined
   return {
-    release(): void {
-      placeholder.close()
+    release(): Promise<void> {
+      releasePromise ??= new Promise<void>((resolve, reject) => {
+        placeholder.close((error) => { if (error === undefined) resolve(); else reject(error) })
+      })
+      return releasePromise
     },
   }
 }
@@ -111,86 +118,151 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolveWait => setTimeout(resolveWait, ms))
 }
 
+const WINDOWS_BOOTSTRAP_OPTION = `--import=${new URL('./fixtures/fakemobilecli-bootstrap.mjs', import.meta.url).href}`
+let windowsLauncherUsers = 0
+let previousNodeOptions: string | undefined
+
+/** Retain the test-only Node preload while staged Windows launchers may spawn. */
+function retainWindowsLauncher(): () => void {
+  if (windowsLauncherUsers === 0) {
+    previousNodeOptions = process.env.NODE_OPTIONS
+    process.env.NODE_OPTIONS = previousNodeOptions === undefined || previousNodeOptions.length === 0
+      ? WINDOWS_BOOTSTRAP_OPTION
+      : `${previousNodeOptions} ${WINDOWS_BOOTSTRAP_OPTION}`
+  }
+  windowsLauncherUsers += 1
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    windowsLauncherUsers -= 1
+    if (windowsLauncherUsers > 0) return
+    if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS
+    else process.env.NODE_OPTIONS = previousNodeOptions
+    previousNodeOptions = undefined
+  }
+}
+
+/** Symlink the current native Node executable under the fake's stable basename. */
+async function stageWindowsLauncher(executablePath: string): Promise<void> {
+  await symlink(process.execPath, executablePath, 'file')
+}
+
 /**
  * Stage one fakemobilecli executable plus its knob config in a fresh temp dir.
  * @param knobs - Devices seed and behavioral knobs baked into the config file.
+ * @param platform - Native launcher form; defaults to the current host.
  * @returns endpoints and handles for driving and observing the fake.
  */
-export async function stageFake(knobs: FakeKnobs = {}): Promise<StagedFake> {
+export async function stageFake(
+  knobs: FakeKnobs = {},
+  platform: NodeJS.Platform = process.platform,
+): Promise<StagedFake> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-phone-fake-'))
-  const fixturesDir = join(root, 'fixtures')
-  await mkdir(fixturesDir, { recursive: true })
-  const executablePath = join(fixturesDir, 'fakemobilecli')
-  await copyFile(new URL('./fixtures/fakemobilecli.mjs', import.meta.url), executablePath)
-  await chmod(executablePath, 0o755)
-  await copyFile(new URL('./fixtures/u3-visible-frames.ts', import.meta.url), join(fixturesDir, 'u3-visible-frames.ts'))
-  await writeFile(join(fixturesDir, 'fakemobilecli.config.json'), JSON.stringify(knobs))
-  if (knobs.agent !== undefined) {
-    await writeFile(join(fixturesDir, 'fakemobilecli.agent-state.json'), JSON.stringify({
-      installed: knobs.agent.installed === true,
-      installCount: 0,
-      statusCount: 0,
-      lastInstallArgv: null,
-    }))
-  }
-  const port = await randomPort()
-  const hold = holdPort(port)
-  const baseUrl = `http://127.0.0.1:${String(port)}`
-  const profilePath = join(fixturesDir, 'profile.mobileprovision')
-  await writeFile(profilePath, 'fake provisioning profile payload')
-  const facade: StagedFake = {
-    port,
-    executablePath,
-    baseUrl,
-    profilePath,
-    claim(): void {
-      hold.release()
-    },
-    async setDevices(devices): Promise<void> {
-      const response = await fetch(`${baseUrl}/__test/set-devices`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ devices }),
-      })
-      if (!response.ok) throw new Error(`set-devices failed: HTTP ${String(response.status)}`)
-    },
-    async setAgent(agent): Promise<void> {
-      const configPath = join(fixturesDir, 'fakemobilecli.config.json')
-      const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
-      await writeFile(configPath, JSON.stringify({ ...current, agent }))
-    },
-    async agentState(): Promise<FakeAgentState> {
-      try {
-        return JSON.parse(await readFile(join(fixturesDir, 'fakemobilecli.agent-state.json'), 'utf8')) as FakeAgentState
-      } catch {
-        return { installed: false, installCount: 0, statusCount: 0, lastInstallArgv: null }
-      }
-    },
-    async counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }> {
-      return await (await fetch(`${baseUrl}/__test/counters`)).json() as {
-        requests: number
-        bootCount: number
-        shutdownCount: number
-        io: unknown[]
-      }
-    },
-    async awaitOnline(timeoutMs = 5_000): Promise<void> {
-      const deadline = Date.now() + timeoutMs
-      for (;;) {
+  const releaseLauncher = platform === 'win32' ? retainWindowsLauncher() : undefined
+  try {
+    const fixturesDir = join(root, 'fixtures')
+    await mkdir(fixturesDir, { recursive: true })
+    const fakeSource = new URL('./fixtures/fakemobilecli.mjs', import.meta.url)
+    const executablePath = platform === 'win32'
+      ? join(fixturesDir, 'fakemobilecli.exe')
+      : join(fixturesDir, 'fakemobilecli')
+    if (platform === 'win32') {
+      await copyFile(fakeSource, join(fixturesDir, 'fakemobilecli.mjs'))
+      await stageWindowsLauncher(executablePath)
+    } else {
+      await copyFile(fakeSource, executablePath)
+      await chmod(executablePath, 0o755)
+    }
+    await copyFile(new URL('./fixtures/u3-visible-frames.ts', import.meta.url), join(fixturesDir, 'u3-visible-frames.ts'))
+    await writeFile(join(fixturesDir, 'fakemobilecli.config.json'), JSON.stringify(knobs))
+    if (knobs.agent !== undefined) {
+      await writeFile(join(fixturesDir, 'fakemobilecli.agent-state.json'), JSON.stringify({
+        installed: knobs.agent.installed === true,
+        installCount: 0,
+        statusCount: 0,
+        lastInstallArgv: null,
+      }))
+    }
+    const profilePath = join(fixturesDir, 'profile.mobileprovision')
+    await writeFile(profilePath, 'fake provisioning profile payload')
+    const port = await randomPort()
+    const hold = await holdPort(port)
+    const baseUrl = `http://127.0.0.1:${String(port)}`
+    let disposal: Promise<void> | undefined
+    const facade: StagedFake = {
+      port,
+      executablePath,
+      baseUrl,
+      profilePath,
+      claim(): Promise<void> {
+        return hold.release()
+      },
+      async setDevices(devices): Promise<void> {
+        const response = await fetch(`${baseUrl}/__test/set-devices`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ devices }),
+        })
+        if (!response.ok) throw new Error(`set-devices failed: HTTP ${String(response.status)}`)
+      },
+      async setAgent(agent): Promise<void> {
+        const configPath = join(fixturesDir, 'fakemobilecli.config.json')
+        const current = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>
+        await writeFile(configPath, JSON.stringify({ ...current, agent }))
+      },
+      async agentState(): Promise<FakeAgentState> {
         try {
-          await fetch(`${baseUrl}/__test/counters`)
-          return
+          return JSON.parse(await readFile(join(fixturesDir, 'fakemobilecli.agent-state.json'), 'utf8')) as FakeAgentState
         } catch {
-          if (Date.now() > deadline) throw new Error('fakemobilecli never came online')
-          await wait(10)
+          return { installed: false, installCount: 0, statusCount: 0, lastInstallArgv: null }
         }
-      }
-    },
-    async dispose(): Promise<void> {
-      await rm(root, { recursive: true, force: true })
-    },
+      },
+      async counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }> {
+        return await (await fetch(`${baseUrl}/__test/counters`)).json() as {
+          requests: number
+          bootCount: number
+          shutdownCount: number
+          io: unknown[]
+        }
+      },
+      async awaitOnline(timeoutMs = 5_000): Promise<void> {
+        const deadline = Date.now() + timeoutMs
+        for (;;) {
+          try {
+            await fetch(`${baseUrl}/__test/counters`)
+            return
+          } catch {
+            if (Date.now() > deadline) throw new Error('fakemobilecli never came online')
+            await wait(10)
+          }
+        }
+      },
+      dispose(): Promise<void> {
+        disposal ??= (async () => {
+          const settled = await Promise.allSettled([
+            hold.release(),
+            rm(root, { recursive: true, force: true }),
+          ])
+          releaseLauncher?.()
+          const errors: Error[] = []
+          for (const result of settled) {
+            if (result.status !== 'rejected') continue
+            const reason: unknown = result.reason
+            errors.push(reason instanceof Error ? reason : new Error(String(reason)))
+          }
+          if (errors.length === 1) throw errors[0]
+          if (errors.length > 1) throw new AggregateError(errors, 'staged fake cleanup failed')
+        })()
+        return disposal
+      },
+    }
+    return facade
+  } catch (error) {
+    releaseLauncher?.()
+    await rm(root, { recursive: true, force: true })
+    throw error
   }
-  return facade
 }
 
 /** Canonical wire-shape factory for device entries. */

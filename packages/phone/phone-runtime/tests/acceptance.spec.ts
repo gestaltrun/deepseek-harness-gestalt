@@ -42,7 +42,7 @@ const REAL_1_0_5_ENVELOPE = JSON.parse(readFileSync(
 )) as { result: { devices: Array<Record<string, unknown>> } }
 
 async function mountWith(fake: Awaited<ReturnType<typeof stageFake>>, overrides: Partial<Config> = {}): Promise<CordisContext> {
-  fake.claim()
+  await fake.claim()
   const context = new Context()
   contexts.push(context)
   await context.plugin(PhoneDevices, {

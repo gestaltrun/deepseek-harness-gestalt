@@ -31,7 +31,7 @@ describe('phone runtime Loader composition', () => {
       ],
     })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     root = await mkdtemp(join(tmpdir(), 'dsh-phone-loader-'))
     const configPath = join(root, 'cordis.yml')
     const composedConfig: Partial<Config> = {

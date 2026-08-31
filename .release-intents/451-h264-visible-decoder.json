@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "451-h264-visible-decoder",
+  "summary": {
+    "en": "Render the Desktop phone tab's H264 stream as a visible, interactive device picture.",
+    "zh": "在桌面端手机 tab 中把 H264 流渲染为可见且可交互的设备画面。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "The ui-phone runtime is composed only by Desktop; the shared catalog and repository-gate records are static evidence and do not enter the Mobile application."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The ui-phone runtime is composed only by Desktop; the shared catalog and repository-gate records are static evidence and do not enter the Platform service."
+    }
+  ]
+}

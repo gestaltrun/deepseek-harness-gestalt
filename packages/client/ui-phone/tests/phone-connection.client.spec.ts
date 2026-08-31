@@ -20,6 +20,10 @@ function controllerOn(gateway: FakeGateway, scheduler: ManualScheduler): PhoneCo
 
 afterEach(() => { vi.useRealTimers() })
 
+function parseSentFrame(value: string): unknown {
+  return JSON.parse(value)
+}
+
 /** Drive one full connect cycle to the live phase. */
 async function connectToLive(gateway: FakeGateway, scheduler: ManualScheduler): Promise<PhoneConnectionController> {
   const controller = controllerOn(gateway, scheduler)
@@ -100,6 +104,29 @@ describe('PhoneConnectionController lifecycle', () => {
     expect(controller.snapshot()).toEqual({ kind: 'connecting' })
     gateway.lastSocket!.accept()
     expect(controller.snapshot().kind).toBe('live')
+  })
+
+  it('forgets the old coordinate surface until the reconnected stream paints a frame', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const controller = await connectToLive(gateway, scheduler)
+    controller.noteSurface(360, 720)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+
+    gateway.lastSocket!.drop()
+    scheduler.runNext()
+    await flush()
+    gateway.lastSocket!.accept()
+    expect(controller.snapshot().kind).toBe('live')
+    expect(controller.tap(0.5, 0.5)).toBe(false)
+    expect(gateway.lastSocket!.sent).toEqual([])
+
+    controller.noteSurface(390, 844)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+    expect(JSON.parse(gateway.lastSocket!.sent[0]!)).toMatchObject({
+      method: 'tap',
+      params: { x: 195, y: 422 },
+    })
   })
 
   it('exhausts the bounded retries into the interrupted error arm', async () => {
@@ -312,7 +339,7 @@ describe('PhoneConnectionController lifecycle', () => {
     gateway.lastSocket!.drop()
     controller.dispose()
     expect(controller.snapshot()).toEqual({ kind: 'idle' })
-    expect(() => scheduler.runNext()).toThrow('no pending retry')
+    expect(() => { scheduler.runNext() }).toThrow('no pending retry')
   })
 })
 
@@ -358,7 +385,7 @@ describe('PhoneConnectionController io', () => {
     controller.noteSurface(360, 720)
     controller.text('验证码')
     controller.button('HOME')
-    const [textFrame, buttonFrame] = gateway.lastSocket!.sent.map(frame => JSON.parse(frame))
+    const [textFrame, buttonFrame] = gateway.lastSocket!.sent.map(parseSentFrame)
     expect(textFrame).toEqual({
       jsonrpc: '2.0', id: 1, method: 'text', params: { deviceId: 'emulator-5554', text: '验证码' },
     })

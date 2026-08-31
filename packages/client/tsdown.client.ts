@@ -112,7 +112,9 @@ export function clientBundle(
   const lib = clientLibraryConfig(id, libEntry, options.lib)
   return ({ env }) => {
     const face = buildFace(env?.DSH_BUILD_FACE)
-    const clientEntry = face === undefined ? 'src/client/index.ts' : 'lib/types/client/index.js'
+    const clientEntry = face === undefined
+      ? options.clientSourceEntry ?? 'src/client/index.ts'
+      : 'lib/types/client/index.js'
     const client = clientConfig(id, clientEntry)
     const node = [lib, ...(options.companions ?? [])]
     if (face === 'host') return options.hostPhase === true ? node : [SKIP_WORKSPACE_BUILD]
@@ -212,6 +214,8 @@ export function clientOnly(configs: readonly UserConfig[]): BuildFaceConfig {
 }
 
 interface ClientBundleOptions {
+  /** TypeScript source entry consumed by the development watcher. */
+  readonly clientSourceEntry?: string
   /** Emit the Node-side artifacts during the Host pass instead of the Client pass. */
   readonly hostPhase?: boolean
   /** Additional Node-side configs emitted alongside the package library. */

@@ -292,6 +292,8 @@ registerAndroidEnvironment(provider: AndroidEnvironmentProvider): () => void
 
 /**
  * Register the iOS platform Provider while retaining this Service as the full-snapshot owner.
+ * A running snapshot discovered during registration remains pending until
+ * the active mobilecli generation passes list and picture verification.
  * @param provider - Xcode runtime and Simulator lifecycle owner.
  * @returns disposer that detaches the Provider and restores the deferred state.
  */

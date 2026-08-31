@@ -33,6 +33,13 @@ function filterMatches(filter: string): string[] {
 }
 
 describe('coverage-exempt roster', () => {
+  it('runs the Desktop overlay composed boot without parent-process instrumentation', () => {
+    expect(coverageExemptHeavySuites).toContainEqual({
+      filter: 'apps/desktop/tests/overlay-boot.spec.ts',
+      exclude: 'apps/desktop/tests/overlay-boot.spec.ts',
+    })
+  })
+
   it.each(coverageExemptHeavySuites.map(suite => [suite.filter, suite] as const))(
     'filter and exclude select the same non-empty spec set for %s',
     (_filter, suite) => {

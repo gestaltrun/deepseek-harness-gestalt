@@ -27,6 +27,12 @@ export const COVERAGE_EXEMPT_ENV = 'DSH_COVERAGE_EXEMPT_HEAVY'
 
 /** Coverage-exempt heavy suites; keep filter and exclude selecting the same files. */
 export const coverageExemptHeavySuites: readonly CoverageExemptSuite[] = [
+  // The test starts complete Host subprocesses whose code cannot contribute to
+  // the parent V8 report; in-process launcher sources are covered elsewhere.
+  {
+    filter: 'apps/desktop/tests/overlay-boot.spec.ts',
+    exclude: 'apps/desktop/tests/overlay-boot.spec.ts',
+  },
   // Whole-workspace compiler analysis per case — the lane's longest tail.
   // Generator src is threshold-excluded; tools-catalog's registry and
   // tool-cordis imports are fully covered by those packages' own tests.

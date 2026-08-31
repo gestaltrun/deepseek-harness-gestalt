@@ -8,7 +8,7 @@ Status: implemented
 
 「手机设备」设置分区会改变组装后的 Web 设置导航，并从「插件」中移除手机卡片。既有 Web golden 描述的是旧组合，因此首个不一致会让设置弹窗保持打开，后续用例再因指针被遮挡而失败，掩盖最初的快照差异。
 
-release family fixture 还会创建缺少 source map 的动态 client bundle，不满足 client build record 的要求。分区 coverage 会让 Desktop overlay boot 与普通插桩测试竞争资源，还会让它继承共享 process-bound 批次的进程状态，尽管该套件会启动完整 Host 子进程。Electron runner 日志测试则假设父进程退出后后代仍保留继承 pipe；这是 POSIX 行为，不是可移植的 Windows 日志契约。
+release family fixture 还会创建缺少 source map 的动态 client bundle，不满足 client build record 的要求。Desktop overlay boot 会启动完整 Host 子进程，V8 插桩 coverage 无法观测这些子进程；在该插桩下，托管 Linux 与 Windows 都未到达 URL 宣布。Electron runner 日志测试则假设父进程退出后后代仍保留继承 pipe；这是 POSIX 行为，不是可移植的 Windows 日志契约。
 
 手机二进制发现测试还使用 POSIX 分隔符拼接临时 `PATH`，让 POSIX npm prefix 与 Homebrew 预期继承 runner 平台，并在未解析服务场景中保留 `USERPROFILE` 和 `npm_config_prefix`。这些输入导致 Windows coverage 实际检查的搜索空间与各测试声明的不一致。
 
@@ -16,7 +16,7 @@ release family fixture 还会创建缺少 source map 的动态 client bundle，�
 
 受影响的 Web golden 包含顶层「手机设备」导航行，并且不再在「插件」中包含手机卡片。刷新后以 replay 模式运行全部受影响文件，证明更新 golden 没有掩盖交互失败。
 
-release family fixture 会先创建动态 client bundle 与最小有效 source map，再记录产物摘要。Desktop overlay 组合启动 coverage 使用独立的 exclusive suite 清单，coordinator 因此将它从并发分区和共享 process-bound 批次中排除，再在全新的插桩进程中只运行一次。
+release family fixture 会先创建动态 client bundle 与最小有效 source map，再记录产物摘要。Desktop overlay 组合启动归入 `coverageExemptHeavySuites`：插桩门禁排除它，配套的非插桩门禁只运行一次。该套件不会贡献子进程覆盖率；它在当前进程导入的 launcher 源码仍由各自所属测试保持完整覆盖。client apply 套件还覆盖 ready 设置快照缺少 Phone namespace 值时的组合启用回退。
 
 `runLogged` 在所有平台验证直接子进程的延迟 stdout 与 stderr 都完成持久化。独立的 POSIX-only 测试保留更强的后代继承 pipe 义务；Windows 进程树终止继续通过 `taskkill /t` 行为覆盖，不依赖 pipe 继承假设。
 
@@ -32,4 +32,4 @@ release family fixture 会先创建动态 client bundle 与最小有效 source m
 
 ## 结果
 
-修复后的门禁描述已交付的设置组合，验证完整的 client 产物 fixture，按资源归属调度真实 Host 子进程测试，并让二进制发现断言不受 runner 无关环境状态影响。这些变更只影响测试证据，不授权发布或合入 `master`。
+修复后的门禁描述已交付的设置组合，验证完整的 client 产物 fixture，在没有无关父进程插桩的情况下运行真实 Host 子进程测试，并让二进制发现断言不受 runner 无关环境状态影响。这些变更只影响测试证据，不授权发布或合入 `master`。

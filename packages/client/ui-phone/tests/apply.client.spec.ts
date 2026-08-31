@@ -211,6 +211,24 @@ describe('ui-phone client apply', () => {
     expect(sidebar.getTab('phone')!.component({ tab: { id: 'phone', title: '手机' }, visible: false })).toBeTruthy()
   })
 
+  it('uses composition enablement when the ready Host scope has no namespace value', async () => {
+    const sidebar = new SidebarUnderTest()
+    const host = stubSettingsScope<PhoneSettings>()
+    host.publish({
+      status: 'ready',
+      writable: true,
+      value: undefined,
+      base: undefined,
+      user: undefined,
+      revision: 1,
+    })
+    await mount(sidebar, host, Config({ enabled: true }))
+    const picker = sidebar.getTab('phone')!.component({
+      tab: { id: 'phone', title: '手机' }, visible: false,
+    }) as { props: { gate: { snapshot(): boolean } } }
+    expect(picker.props.gate.snapshot()).toBe(true)
+  })
+
   it('uses composition enablement until the Host scope publishes its durable value', async () => {
     const sidebar = new SidebarUnderTest()
     const host = stubSettingsScope<PhoneSettings>()

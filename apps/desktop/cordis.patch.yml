@@ -29,6 +29,9 @@
       config:
         root: !!js dshHomePath('phone')
 
+    - id: phone-environment-ios
+      name: '@deepseek-ai/dsh-phone-environment-ios'
+
     - id: phone-stream
       name: '@deepseek-ai/dsh-phone-stream'
 

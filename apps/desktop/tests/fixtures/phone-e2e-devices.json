@@ -45,7 +45,7 @@
     "provider": { "type": "local" }
   },
   {
-    "id": "iPhone-16",
+    "id": "8294A429-4C99-411F-A46D-0AD9499B7FDD",
     "name": "iPhone 16",
     "platform": "ios",
     "type": "simulator",

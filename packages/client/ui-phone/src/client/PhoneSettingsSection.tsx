@@ -42,6 +42,10 @@ export function PhoneSettingsSection(props: PhoneSettingsSectionProps) {
         onCancelAndroid={props.cancelAndroid}
         onRefreshAndroid={props.refreshAndroid}
         onStartAndroid={props.startAndroid}
+        onPrepareIos={props.prepareIos}
+        onCancelIos={props.cancelIos}
+        onRefreshIos={props.refreshIos}
+        onStartIos={props.startIos}
       />
       <PhoneSettingsCard
         enabled={state.enabled}

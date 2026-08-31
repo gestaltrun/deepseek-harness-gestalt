@@ -8,9 +8,6 @@ import clsx from 'clsx'
 import type {
   PhoneEnvironmentCheck, PhoneEnvironmentError, PhoneEnvironmentView, PhoneReadyDevice,
 } from './phone-environment.ts'
-import {
-  IOS_CREATE_SIMULATOR, IOS_DOWNLOAD_PLATFORM,
-} from './phone-wizard-commands.ts'
 import { PhoneTabIcon } from './phone-icon.tsx'
 import css from './PhoneSettingsCard.module.css'
 
@@ -29,11 +26,6 @@ export interface PhoneSettingsCardProps {
   /** Fire the unified next-action verb for one error row. */
   readonly onNextAction: (kind: string) => void
 }
-
-const IOS_WIZARD_ROWS = [
-  { comment: '# 下载 iOS 模拟器运行时', command: IOS_DOWNLOAD_PLATFORM },
-  { comment: '# 创建一台 iPhone 16 Pro 模拟器', command: IOS_CREATE_SIMULATOR },
-] as const
 
 const DEVICE_GROUPS: readonly {
   readonly id: PhoneReadyDevice['group']
@@ -68,7 +60,7 @@ const FOOTERS = {
   off: <p className={css.foot}>关闭时不注册任何 device_* 工具，也不监听 adb / mobilecli 进程；本机环境不受影响。</p>,
   probing: null,
   'android-wizard': <p className={css.foot}>Android 自动准备与 USB 调试、RSA 信任等人工前置条件分开显示。</p>,
-  'ios-wizard': <p className={css.foot}>模拟器不需要 WDA；真机上的每次点击都有真实后果，涉及登录与支付的步骤请人工接管。</p>,
+  'ios-wizard': <p className={css.foot}>模拟器由设备控制代理连接；真机上的每次点击都有真实后果，涉及登录与支付的步骤请人工接管。</p>,
   ready: <p className={css.foot}>停止的设备先用「启动」拉起再打开面板；清单变化会实时刷新，无需重启会话。</p>,
   errors: null,
 } satisfies Record<PhoneEnvironmentKind, ReactNode>
@@ -141,7 +133,7 @@ function bodyOf(
     case 'android-wizard':
       return <AndroidWizardBody platformToolsInstalled={view.platformToolsInstalled} onCopy={actions.onCopy} />
     case 'ios-wizard':
-      return <IosWizardBody onCopy={actions.onCopy} />
+      return <IosWizardBody />
     case 'ready':
       return <ReadyBody devices={view.devices} />
     case 'errors':
@@ -214,22 +206,21 @@ function AndroidWizardBody(props: {
   )
 }
 
-function IosWizardBody({ onCopy }: { onCopy: (command: string) => void }): ReactNode {
+function IosWizardBody(): ReactNode {
   return (
     <div className={css.body}>
       <div className={clsx(css.alert, css.warn)}>
         <span className={clsx(css.iconDot, css.warnDot)} aria-hidden="true">!</span>
         <p>
-          未找到 iOS 模拟器运行时
-          <small>Xcode → Settings → Components 中下载 iOS 平台，或执行以下命令（约数 GB）：</small>
+          iOS 环境尚未准备
+          <small>使用上方 iOS 分栏检测完整 Xcode，并一键下载 iOS Runtime、创建默认模拟器。</small>
         </p>
       </div>
-      <CommandList rows={IOS_WIZARD_ROWS} onCopy={onCopy} />
       <div className={clsx(css.alert, css.info)}>
-        <span className={clsx(css.iconDot, css.infoDot)} aria-hidden="true">W</span>
+        <span className={clsx(css.iconDot, css.infoDot)} aria-hidden="true">A</span>
         <p>
-          USB 真机的前置条件：WebDriverAgent
-          <small>控制真机需自备 WDA checkout 并完成签名与设备信任；免费开发者证书 7 天过期，过期后需重新构建。就绪后面板内会出现「构建 WDA」入口。</small>
+          USB 真机需要人工授权
+          <small>设备解锁、信任、Developer Mode、Apple ID、系统权限和签名配置保持手动；设备控制代理会报告具体状态。</small>
         </p>
       </div>
     </div>
@@ -290,31 +281,6 @@ function ErrorsBody(props: {
             onClick={() => { props.onNextAction(error.kind) }}
           >
             {error.nextAction}
-          </button>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function CommandList(props: {
-  rows: readonly { readonly comment: string; readonly command: string }[]
-  onCopy: (command: string) => void
-}): ReactNode {
-  return (
-    <div className={css.cmdlist}>
-      {props.rows.map(row => (
-        <div key={row.command} className={css.cmd}>
-          <span className={css.txt}>
-            <span className={css.cmt}>{row.comment}</span>
-            <code>{row.command}</code>
-          </span>
-          <button
-            type="button"
-            className={css.copy}
-            onClick={() => { props.onCopy(row.command) }}
-          >
-            复制
           </button>
         </div>
       ))}

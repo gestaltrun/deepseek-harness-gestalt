@@ -116,7 +116,9 @@ describe('Desktop phone tab live chain', () => {
       { deviceId: 'emulator-5554', format: 'avc' },
       { deviceId: 'emulator-5554', format: 'mjpeg' },
     ])
-    expect(captureCounters.captures).toContainEqual({ deviceId: 'iPhone-16', format: 'avc' })
+    expect(captureCounters.captures).toContainEqual({
+      deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', format: 'avc',
+    })
 
     const beforeTap = await fakeCounters()
     await browser.execute(() => {

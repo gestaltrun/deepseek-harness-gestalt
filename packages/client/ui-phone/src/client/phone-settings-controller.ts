@@ -10,7 +10,7 @@ import {
 } from './phone-environment.ts'
 import {
   MISSING_PHONE_ENVIRONMENT, MISSING_PHONE_RUNTIME, type PhoneManagedRuntimeView,
-  type PhoneAndroidView, type PhonePlatformView, type PhoneRuntimeSource,
+  type PhoneAndroidView, type PhoneIosView, type PhoneRuntimeSource,
 } from './phone-runtime-source.ts'
 
 /** What the phone settings card renders. */
@@ -24,7 +24,7 @@ export interface PhoneSettingsCardState {
   /** Shared Host-managed mobilecli runtime state. */
   readonly runtime: PhoneManagedRuntimeView
   /** Host platform capabilities, including unsupported reasons. */
-  readonly platforms: { readonly android: PhoneAndroidView; readonly ios: PhonePlatformView }
+  readonly platforms: { readonly android: PhoneAndroidView; readonly ios: PhoneIosView }
 }
 
 /** The registration-side face the card's slot entry injects. */
@@ -55,6 +55,14 @@ export interface PhoneSettingsCardFace {
   refreshAndroid: () => void
   /** Start the prepared default Android emulator. */
   startAndroid: () => void
+  /** Prepare the Xcode iOS Runtime and product Simulator. */
+  prepareIos: () => void
+  /** Cancel iOS Runtime download, creation, or boot. */
+  cancelIos: () => void
+  /** Re-detect Xcode, iOS Runtime, and Simulator state. */
+  refreshIos: () => void
+  /** Start the prepared product iOS Simulator. */
+  startIos: () => void
 }
 
 /**
@@ -131,6 +139,10 @@ export class PhoneSettingsCardController {
       cancelAndroid: () => { void this.runtime?.cancelAndroid().catch(() => {}) },
       refreshAndroid: () => { void this.runtime?.refreshAndroid().catch(() => {}) },
       startAndroid: () => { void this.runtime?.startAndroid().catch(() => {}) },
+      prepareIos: () => { void this.runtime?.prepareIos().catch(() => {}) },
+      cancelIos: () => { void this.runtime?.cancelIos().catch(() => {}) },
+      refreshIos: () => { void this.runtime?.refreshIos().catch(() => {}) },
+      startIos: () => { void this.runtime?.startIos().catch(() => {}) },
     }
   }
 

@@ -14,9 +14,7 @@ import type { PhoneSettingsSectionProps } from '../src/client/PhoneSettingsSecti
 import type { PhoneEnvironmentView } from '../src/client/phone-environment.ts'
 import { zh } from '../src/client/locales.ts'
 import type { PhoneSettingsCardState } from '../src/client/phone-settings-controller.ts'
-import {
-  ANDROID_INSTALL_PLATFORM_TOOLS, IOS_CREATE_SIMULATOR, IOS_DOWNLOAD_PLATFORM,
-} from '../src/client/phone-wizard-commands.ts'
+import { ANDROID_INSTALL_PLATFORM_TOOLS } from '../src/client/phone-wizard-commands.ts'
 
 afterEach(() => {
   cleanup()
@@ -118,20 +116,16 @@ describe('PhoneSettingsCard six states', () => {
     expect(onCopy).not.toHaveBeenCalled()
   })
 
-  it('renders the iOS wizard with runtime commands and the WDA note', () => {
+  it('routes the iOS wizard to product-managed preparation and manual real-device prerequisites', () => {
     const onCopy = vi.fn()
     renderCard({ kind: 'ios-wizard' }, { onCopy })
     expect(screen.getByRole('heading', { name: 'iOS 环境差两步' })).toBeTruthy()
-    expect(screen.getByText('未找到 iOS 模拟器运行时')).toBeTruthy()
-    expect(screen.getByText(IOS_DOWNLOAD_PLATFORM)).toBeTruthy()
-    expect(screen.getByText(IOS_CREATE_SIMULATOR)).toBeTruthy()
-    expect(screen.getByText(/USB 真机的前置条件：WebDriverAgent/)).toBeTruthy()
-    const buttons = screen.getAllByRole('button', { name: '复制' })
-    expect(buttons).toHaveLength(2)
-    fireEvent.click(buttons[0]!)
-    expect(onCopy).toHaveBeenCalledWith(IOS_DOWNLOAD_PLATFORM)
-    fireEvent.click(buttons[1]!)
-    expect(onCopy).toHaveBeenCalledWith(IOS_CREATE_SIMULATOR)
+    expect(screen.getByText('iOS 环境尚未准备')).toBeTruthy()
+    expect(screen.getByText(/使用上方 iOS 分栏/)).toBeTruthy()
+    expect(screen.getByText('USB 真机需要人工授权')).toBeTruthy()
+    expect(screen.getByText(/设备控制代理会报告具体状态/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '复制' })).toBeNull()
+    expect(onCopy).not.toHaveBeenCalled()
   })
 
   it('renders the ready inventory grouped by platform', () => {
@@ -302,6 +296,7 @@ describe('PhoneSettingsSection', () => {
       cancelAndroid: vi.fn(),
       refreshAndroid: vi.fn(),
       startAndroid: vi.fn(),
+      prepareIos: vi.fn(), cancelIos: vi.fn(), refreshIos: vi.fn(), startIos: vi.fn(),
     } as unknown as PhoneSettingsSectionProps
     render(<PhoneSettingsSection {...props} />)
     expect(screen.getByRole('heading', { level: 2, name: '手机设备' })).toBeTruthy()
@@ -340,6 +335,7 @@ describe('PhoneSettingsSection', () => {
       setEnabled: vi.fn(), redetect: vi.fn(), copyCommand: vi.fn(), nextAction: vi.fn(),
       prepareRuntime: vi.fn(), cancelRuntime: vi.fn(), refreshRuntime: vi.fn(),
       prepareAndroid, cancelAndroid: vi.fn(), refreshAndroid: vi.fn(), startAndroid: vi.fn(),
+      prepareIos: vi.fn(), cancelIos: vi.fn(), refreshIos: vi.fn(), startIos: vi.fn(),
     } as unknown as PhoneSettingsSectionProps
     render(<PhoneSettingsSection {...props} />)
     fireEvent.click(screen.getByRole('button', { name: '一键准备 Android' }))
@@ -351,5 +347,38 @@ describe('PhoneSettingsSection', () => {
     expect(submit.disabled).toBe(false)
     fireEvent.click(submit)
     expect(prepareAndroid).toHaveBeenCalledOnce()
+  })
+
+  it('offers managed iOS Runtime preparation and reports MJPEG after verified readiness', () => {
+    const prepareIos = vi.fn()
+    const plan = {
+      developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
+      simulatorName: 'DSH Gestalt iPhone',
+      deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
+    }
+    const store = createSnapshotStore<PhoneSettingsCardState>({
+      enabled: true, writable: true, view: { kind: 'ios-wizard' },
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'runtime-missing', plan } },
+    })
+    const props = {
+      t: (key: keyof typeof zh) => zh[key], usePhoneSettingsCard: bindSnapshotSelector(store),
+      setEnabled: vi.fn(), redetect: vi.fn(), copyCommand: vi.fn(), nextAction: vi.fn(),
+      prepareRuntime: vi.fn(), cancelRuntime: vi.fn(), refreshRuntime: vi.fn(),
+      prepareAndroid: vi.fn(), cancelAndroid: vi.fn(), refreshAndroid: vi.fn(), startAndroid: vi.fn(),
+      prepareIos, cancelIos: vi.fn(), refreshIos: vi.fn(), startIos: vi.fn(),
+    } as unknown as PhoneSettingsSectionProps
+    const rendered = render(<PhoneSettingsSection {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '一键准备 iOS' }))
+    expect(prepareIos).toHaveBeenCalledOnce()
+
+    store.set({ ...store.getSnapshot(), platforms: { android: { kind: 'deferred' }, ios: {
+      kind: 'ready', plan: { ...plan, runtime: {
+        identifier: 'runtime-26-0', name: 'iOS 26.0', version: '26.0', available: true,
+      } }, deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', running: true,
+    } } })
+    rendered.rerender(<PhoneSettingsSection {...props} />)
+    expect(screen.getByText(/MJPEG 实时画面/)).toBeTruthy()
+    expect(screen.queryByText(/设备控制代理验证 mobilecli MJPEG/)).toBeNull()
   })
 })

@@ -12,6 +12,28 @@ function snapshot(runtime: unknown, revision = 1, platforms: unknown = {
 }
 
 describe('Host phone runtime source', () => {
+  it('projects iOS preparation plans and invokes the trusted managed operation', async () => {
+    const plan = {
+      developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
+      simulatorName: 'DSH Gestalt iPhone',
+      runtime: { identifier: 'runtime-26-0', name: 'iOS 26.0', version: '26.0', isAvailable: true },
+      deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
+    }
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(snapshot(
+      { kind: 'ready', version: '1.0.5', source: 'managed' }, 2,
+      { android: { kind: 'deferred' }, ios: { kind: 'no-simulator', plan: {
+        ...plan, runtime: { ...plan.runtime, available: true },
+      } } },
+    ))
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+    await source.prepareIos()
+    expect(source.getSnapshot().platforms.ios).toMatchObject({
+      kind: 'no-simulator', plan: { simulatorName: 'DSH Gestalt iPhone', runtime: { version: '26.0' } },
+    })
+    expect(fetcher).toHaveBeenCalledWith('/phone/environment/ios/prepare', expect.objectContaining({ method: 'POST' }))
+  })
+
   it('projects Android plans and sends explicit license consent to the trusted Host operation', async () => {
     const plan = {
       sdkRoot: '/dsh/phone/android/sdk', sdkSource: 'managed', avdHome: '/dsh/phone/android/avd',

@@ -14,6 +14,27 @@ export type PhonePlatformView =
   | { readonly kind: 'deferred' }
   | { readonly kind: 'unsupported'; readonly reason: string }
 
+/** Xcode and product-Simulator facts displayed by the iOS preparation lane. */
+export interface IosPreparationPlanView {
+  readonly developerDir: string
+  readonly xcodeVersion: string
+  readonly simulatorName: string
+  readonly runtime?: { readonly identifier: string; readonly name: string; readonly version: string; readonly available: true }
+  readonly deviceType?: { readonly identifier: string; readonly name: string }
+}
+
+/** iOS platform state projected from the Host full snapshot. */
+export type PhoneIosView =
+  | PhonePlatformView
+  | { readonly kind: 'checking' }
+  | { readonly kind: 'xcode-missing'; readonly message: string }
+  | { readonly kind: 'license-required'; readonly developerDir: string; readonly message: string }
+  | { readonly kind: 'manual-required'; readonly code: 'first-launch' | 'xcode-update'; readonly message: string; readonly developerDir?: string }
+  | { readonly kind: 'runtime-missing' | 'no-simulator'; readonly plan: IosPreparationPlanView }
+  | { readonly kind: 'preparing'; readonly plan: IosPreparationPlanView; readonly step: 'downloading-runtime' | 'creating-simulator' | 'booting' }
+  | { readonly kind: 'ready'; readonly plan: IosPreparationPlanView; readonly deviceId: string; readonly running: boolean }
+  | { readonly kind: 'failed'; readonly plan?: IosPreparationPlanView; readonly code: string; readonly message: string; readonly retryable: boolean }
+
 /** Immutable Android SDK plan displayed before the user accepts Google's terms. */
 export interface AndroidPreparationPlanView {
   readonly sdkRoot: string
@@ -80,7 +101,7 @@ export interface PhoneEnvironmentClientSnapshot {
   readonly runtime: PhoneManagedRuntimeView
   readonly platforms: {
     readonly android: PhoneAndroidView
-    readonly ios: PhonePlatformView
+    readonly ios: PhoneIosView
   }
 }
 
@@ -94,6 +115,10 @@ export interface PhoneRuntimeSource {
   cancelAndroid(): Promise<void>
   refreshAndroid(): Promise<void>
   startAndroid(): Promise<void>
+  prepareIos(): Promise<void>
+  cancelIos(): Promise<void>
+  refreshIos(): Promise<void>
+  startIos(): Promise<void>
   ensureDetected(): void
   subscribe(listener: () => void): () => void
 }
@@ -206,6 +231,10 @@ export function createHttpPhoneRuntimeSource(
     cancelAndroid: () => requestWithBody(`${PATH}/android/cancel`),
     refreshAndroid: () => runPolled(`${PATH}/android/refresh`),
     startAndroid: () => runPolled(`${PATH}/android/start`),
+    prepareIos: () => runPolled(`${PATH}/ios/prepare`),
+    cancelIos: () => requestWithBody(`${PATH}/ios/cancel`),
+    refreshIos: () => runPolled(`${PATH}/ios/refresh`),
+    startIos: () => runPolled(`${PATH}/ios/start`),
     ensureDetected: () => { if (!detected && active === undefined) void run(PATH, 'GET') },
     subscribe: (listener) => {
       listeners.add(listener)
@@ -220,7 +249,7 @@ function parseSnapshot(value: unknown): PhoneEnvironmentClientSnapshot {
     throw new Error('phone environment response was not a full revisioned snapshot')
   }
   const android = parseAndroid(value.platforms.android)
-  const ios = parsePlatform(value.platforms.ios)
+  const ios = parseIos(value.platforms.ios)
   return Object.freeze({
     revision: value.revision,
     enabled: value.enabled,
@@ -261,6 +290,63 @@ function parsePlatform(value: unknown): PhonePlatformView {
     return Object.freeze({ kind: 'unsupported', reason: value.reason })
   }
   throw new Error('phone environment snapshot carried an invalid platform state')
+}
+
+function parseIos(value: unknown): PhoneIosView {
+  if (!record(value) || !string(value.kind)) throw new Error('phone environment snapshot carried an invalid iOS state')
+  if (value.kind === 'deferred' || value.kind === 'unsupported') return parsePlatform(value)
+  if (value.kind === 'checking') return Object.freeze({ kind: 'checking' })
+  if (value.kind === 'xcode-missing' && string(value.message)) return Object.freeze({ kind: value.kind, message: value.message })
+  if (value.kind === 'license-required' && string(value.developerDir) && string(value.message)) {
+    return Object.freeze({ kind: value.kind, developerDir: value.developerDir, message: value.message })
+  }
+  if (value.kind === 'manual-required' && (value.code === 'first-launch' || value.code === 'xcode-update')
+    && string(value.message) && (value.developerDir === undefined || string(value.developerDir))) {
+    return Object.freeze({
+      kind: value.kind, code: value.code, message: value.message,
+      ...(value.developerDir === undefined ? {} : { developerDir: value.developerDir }),
+    })
+  }
+  if (value.kind === 'failed' && string(value.code) && string(value.message) && typeof value.retryable === 'boolean') {
+    return Object.freeze({
+      kind: value.kind, code: value.code, message: value.message, retryable: value.retryable,
+      ...(value.plan === undefined ? {} : { plan: parseIosPlan(value.plan) }),
+    })
+  }
+  const plan = parseIosPlan(value.plan)
+  if (value.kind === 'runtime-missing' || value.kind === 'no-simulator') return Object.freeze({ kind: value.kind, plan })
+  if (value.kind === 'preparing' && ['downloading-runtime', 'creating-simulator', 'booting'].includes(String(value.step))) {
+    return Object.freeze({ kind: value.kind, plan, step: value.step as 'downloading-runtime' | 'creating-simulator' | 'booting' })
+  }
+  if (value.kind === 'ready' && string(value.deviceId) && typeof value.running === 'boolean') {
+    return Object.freeze({ kind: value.kind, plan, deviceId: value.deviceId, running: value.running })
+  }
+  throw new Error('phone environment snapshot carried an invalid iOS state')
+}
+
+function parseIosPlan(value: unknown): IosPreparationPlanView {
+  if (!record(value) || !string(value.developerDir) || !string(value.xcodeVersion) || !string(value.simulatorName)) {
+    throw new Error('phone environment snapshot carried an invalid iOS plan')
+  }
+  const runtime = value.runtime
+  const deviceType = value.deviceType
+  if (runtime !== undefined && (!record(runtime) || !string(runtime.identifier) || !string(runtime.name)
+    || !string(runtime.version) || runtime.available !== true)) {
+    throw new Error('phone environment snapshot carried an invalid iOS runtime')
+  }
+  if (deviceType !== undefined && (!record(deviceType) || !string(deviceType.identifier) || !string(deviceType.name))) {
+    throw new Error('phone environment snapshot carried an invalid iOS device type')
+  }
+  return Object.freeze({
+    developerDir: value.developerDir, xcodeVersion: value.xcodeVersion, simulatorName: value.simulatorName,
+    ...(runtime === undefined ? {} : { runtime: Object.freeze({
+      identifier: runtime.identifier as string, name: runtime.name as string,
+      version: runtime.version as string, available: true as const,
+    }) }),
+    ...(deviceType === undefined ? {} : { deviceType: Object.freeze({
+      identifier: deviceType.identifier as string, name: deviceType.name as string,
+    }) }),
+  })
 }
 
 function parseAndroid(value: unknown): PhoneAndroidView {

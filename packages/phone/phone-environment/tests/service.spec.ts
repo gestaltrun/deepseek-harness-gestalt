@@ -22,9 +22,9 @@ const ANDROID_PLAN: AndroidPreparationPlan = {
   components: { commandLineTools: true, platformTools: true, emulator: true, systemImage: true, avd: true },
 }
 const H264_PICTURE = Uint8Array.from([
-  0, 0, 0, 1, 0x67, 0x64, 0, 0x1f,
-  0, 0, 1, 0x68, 0xce,
-  0, 0, 0, 1, 0x65, 0x88,
+  0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xda, 0x06, 0x41, 0xaf, 0x9a, 0xd0,
+  0, 0, 0, 1, 0x68, 0xce, 0x38, 0x80,
+  0, 0, 0, 1, 0x65, 0x88, 0x84, 0x86, 0x80, 0xff, 0xff, 0xff, 0xff,
   0, 0, 1, 0x09, 0xf0,
 ])
 
@@ -105,7 +105,7 @@ function runningAndroidProvider() {
     }),
     onChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
   }
-  return { provider, deactivate }
+  return { provider, deactivate, emit }
 }
 
 describe('PhoneEnvironment', () => {
@@ -125,10 +125,7 @@ describe('PhoneEnvironment', () => {
       body: new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(Uint8Array.from([
-            0, 0, 0, 1, 0x67, 0x64, 0, 0x1f,
-            0, 0, 1, 0x68, 0xce,
-            0, 0, 0, 1, 0x65, 0x88,
-            0, 0, 1, 0x09, 0xf0,
+            ...H264_PICTURE,
           ]))
         },
       }),
@@ -282,6 +279,43 @@ describe('PhoneEnvironment', () => {
     expect(service.snapshot().platforms.android).toEqual({ kind: 'booting', plan: ANDROID_PLAN })
   })
 
+  it('does not restore running readiness after the Emulator exits during H264 verification', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    let picture!: ReadableStreamDefaultController<Uint8Array>
+    const startCapture = vi.fn(async () => ({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>({ start(controller) { picture = controller } }),
+    }))
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({
+        android: [{
+          id: deviceId('emulator-5554'), name: 'Pixel 6', kind: 'emulator', platform: 'android', state: 'online', online: true,
+        }],
+        ios: { simulators: [], reals: [] },
+      }),
+      startCapture,
+    }, { executablePath: path })
+    const { provider, emit } = runningAndroidProvider()
+    service.registerAndroidEnvironment(provider)
+    await service.setEnabled(true)
+
+    const starting = fetch(`${origin}${PHONE_ENVIRONMENT_ANDROID_START_PATH}`, { method: 'POST' })
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalled() })
+    emit({
+      kind: 'failed', plan: ANDROID_PLAN, code: 'PHONE_ANDROID_EMULATOR_EXIT',
+      message: 'Android Emulator exited by SIGABRT', retryable: true,
+    })
+    picture.enqueue(H264_PICTURE)
+
+    expect((await starting).status).toBe(502)
+    expect(service.snapshot().platforms.android).toMatchObject({
+      kind: 'failed', code: 'PHONE_ANDROID_EMULATOR_EXIT',
+    })
+  })
+
   it('cancels Android capture verification without publishing stale running readiness', async () => {
     const path = await executable()
     const context = new Context()
@@ -318,6 +352,33 @@ describe('PhoneEnvironment', () => {
     expect(deactivate).toHaveBeenCalled()
     expect(seen.some(state => state.kind === 'ready' && state.running)).toBe(false)
     expect(service.snapshot().platforms.android).toMatchObject({ kind: 'ready', running: false })
+  })
+
+  it('surfaces an Android process-tree stop failure from the cancel response', async () => {
+    const context = new Context()
+    contexts.push(context)
+    const { service, origin } = await mountEnvironment(context)
+    const stopFailure = new Error('taskkill refused the Android process tree')
+    const provider: AndroidEnvironmentProvider = {
+      snapshot: () => ({ kind: 'ready', plan: ANDROID_PLAN, running: false }),
+      refresh: async () => ({ kind: 'ready', plan: ANDROID_PLAN, running: false }),
+      prepare: async () => ({ kind: 'ready', plan: ANDROID_PLAN, running: false }),
+      start: async () => ({ kind: 'ready', plan: ANDROID_PLAN, running: false }),
+      cancel: vi.fn(),
+      deactivate: async () => { throw stopFailure },
+      runtimeEnvironment: () => ({}),
+      onChanged: () => () => {},
+    }
+    const unregister = service.registerAndroidEnvironment(provider)
+
+    const response = await fetch(`${origin}${PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH}`, { method: 'POST' })
+
+    expect(response.status).toBe(502)
+    expect(await response.json()).toMatchObject({
+      error: { code: 'PHONE_ENVIRONMENT_ACTIVATION', message: stopFailure.message },
+    })
+    expect(provider.cancel).toHaveBeenCalled()
+    unregister()
   })
 
   it('drains Android capture verification before disable settles', async () => {

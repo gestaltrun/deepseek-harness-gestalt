@@ -6,9 +6,9 @@
 
 托管命令行工具清单固定 Google build `15859902`，覆盖 macOS arm64/x64、Windows x64 与 Linux x64，并记录精确下载 URL、字节长度和 SHA-256。准备流程通过 `sdkmanager` 安装固定的 `platform-tools`、`emulator` 与 `system-images;android-35;google_apis;<Host ABI>` 包，再通过 `avdmanager` 创建 `Pixel_6_API_35_Gestalt`。Apple silicon 使用 `arm64-v8a`，受支持的 x64 Host 使用 `x86_64`。Google 没有发布所需 Host 工具链，因此 Windows 与 Linux arm64 稳定显示为不支持。
 
-设置页展示 Google 来源、下载信息、16 GB 可用空间要求、SDK 根目录、AVD 标识和 [Android SDK License](https://developer.android.com/studio/terms) 后，准备请求必须携带 `licenseAccepted: true`。探测阶段绝不接受许可。下载和解压使用仅所有者可访问的 staging 目录，校验固定长度和 SHA-256，并只接受 `cmdline-tools/` ZIP 根。失败或取消不会发布 ready，staging 会被删除；已安装的 SDK 包保留为可续装状态。
+设置页展示 Google 来源、下载信息、16 GB 可用空间要求、SDK 根目录、AVD 标识和 [Android SDK License](https://developer.android.com/studio/terms) 后，准备请求必须携带 `licenseAccepted: true`。探测阶段绝不接受许可。下载和解压使用仅所有者可访问的 staging 目录，校验固定长度和 SHA-256，并只接受 `cmdline-tools/` ZIP 根。私有 AVD 输出会在创建前清理，并在取消或失败后再次清理，因此上次未写完的内容不会阻塞重试。失败或取消不会发布 ready；已安装的 SDK 包保留为可续装状态。
 
-准备流程只安装 SDK 和私有 AVD，不会自行启动。每次显式启动前，提供方都运行 `emulator -accel-check`。Windows Hypervisor Platform 与 BIOS 虚拟化、Linux KVM 安装与用户组权限、不可用的 macOS 虚拟化都会成为 `manual-required` 状态。USB 开发者模式、USB 调试、RSA 信任和 Windows OEM 驱动也保持人工处理。产品启动的 Emulator 进程由提供方持有，关闭功能、取消或插件 teardown 都会等待其退出；进程意外退出会立即撤销运行就绪状态。
+准备流程只安装 SDK 和私有 AVD，不会自行启动。每次显式启动前，提供方都运行 `emulator -accel-check`。Windows Hypervisor Platform 与 BIOS 虚拟化、Linux KVM 安装与用户组权限、不可用的 macOS 虚拟化都会成为 `manual-required` 状态。USB 开发者模式、USB 调试、RSA 信任和 Windows OEM 驱动也保持人工处理。产品启动的 Emulator 进程由提供方持有，关闭功能、取消或插件 teardown 都会等待其退出；进程意外退出会立即撤销运行就绪状态。停止过程有界，多个生命周期调用方共享同一个任务；Windows 进程树终止失败会显式报错，不会伪称完全停稳。
 
 ## Config
 
@@ -20,7 +20,7 @@
 
 ## Model Experience
 
-通过 `dsh-tool-phone` 间接可见。Android 环境运行后，选中的 mobilecli 代会携带托管 SDK/AVD 环境重新启动；只有该代将模拟器列为在线并识别出完整的 Annex-B SPS、PPS 与 IDR 图像后才发布 ready。启动、重新激活、列举与采集共享同一个取消所有者，因此关闭功能、取消和 teardown 不会发布过期的运行就绪状态。GUI 与模型可见 `device_*` 工具操作的是同一台已验证模拟器。
+通过 `dsh-tool-phone` 间接可见。Android 环境运行后，选中的 mobilecli 代会携带托管 SDK/AVD 环境重新启动；只有该代将模拟器列为在线并识别出语法有效的 Annex-B key access unit，且其中的 SPS、PPS 与 IDR slice header 相互引用一致后，才发布 ready。Host 探测不解码像素；最终验收仍单独要求 GUI 显示真实画面。启动、重新激活、列举与采集共享同一个取消所有者，因此关闭功能、取消和 teardown 不会发布过期的运行就绪状态。GUI 与模型可见 `device_*` 工具操作的是同一台已验证模拟器。
 
 #### KV Cache effect
 

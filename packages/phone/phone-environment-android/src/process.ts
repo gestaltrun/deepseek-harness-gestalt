@@ -9,6 +9,7 @@ export interface AndroidCommandResult {
   readonly signal: NodeJS.Signals | null
   readonly timedOut: boolean
   readonly callerAborted: boolean
+  readonly terminationError?: string
   readonly stdout: string
   readonly stderr: string
 }
@@ -38,7 +39,11 @@ export interface AndroidCommandRunner {
 export interface AndroidProcessInternals {
   readonly platform?: NodeJS.Platform
   readonly taskkill?: (pid: number, force: boolean) => void
+  /** Test-only stop grace; production uses two seconds per phase. */
+  readonly stopGraceMs?: number
 }
+
+interface TerminationState { error?: Error }
 
 /** Executable and argv admitted to Node's direct process spawn. */
 export interface AndroidSpawnSpec {
@@ -82,6 +87,7 @@ export function androidSpawnSpec(
 export function createNodeAndroidCommandRunner(internals: AndroidProcessInternals = {}): AndroidCommandRunner {
   const platform = internals.platform ?? process.platform
   const taskkill = internals.taskkill ?? runTaskkill
+  const stopGraceMs = internals.stopGraceMs ?? STOP_GRACE_MS
   return {
     run: async (command, args, options) => {
       const request = androidSpawnSpec(command, args, platform)
@@ -92,7 +98,7 @@ export function createNodeAndroidCommandRunner(internals: AndroidProcessInternal
         detached: platform !== 'win32',
       })
       child.stdin.end(options.input)
-      return await settleChild(child, options.signal, options.timeoutMs, platform, taskkill)
+      return await settleChild(child, options.signal, options.timeoutMs, platform, taskkill, stopGraceMs)
     },
     spawn: (command, args, options) => {
       const request = androidSpawnSpec(command, args, platform)
@@ -102,15 +108,24 @@ export function createNodeAndroidCommandRunner(internals: AndroidProcessInternal
         windowsHide: true,
         detached: platform !== 'win32',
       })
-      const exit = settleChild(child, options.signal, undefined, platform, taskkill)
+      const termination: TerminationState = {}
+      const exit = settleChild(child, options.signal, undefined, platform, taskkill, stopGraceMs, termination)
       return {
         pid: child.pid,
         exit,
         stop: async () => {
-          if (child.exitCode === null && child.signalCode === null) terminate(child, 'SIGTERM', platform, taskkill)
-          await Promise.race([exit, delay(STOP_GRACE_MS)])
-          if (child.exitCode === null && child.signalCode === null) terminate(child, 'SIGKILL', platform, taskkill)
-          await exit
+          if (child.exitCode === null && child.signalCode === null) {
+            recordTerminationError(termination, terminate(child, 'SIGTERM', platform, taskkill))
+          }
+          let outcome = await boundedExit(exit, stopGraceMs)
+          if (outcome === undefined && child.exitCode === null && child.signalCode === null) {
+            recordTerminationError(termination, terminate(child, 'SIGKILL', platform, taskkill))
+            outcome = await boundedExit(exit, stopGraceMs)
+          }
+          if (outcome === undefined) {
+            throw new Error(termination.error?.message ?? `Android process ${String(child.pid)} did not exit after forced termination`)
+          }
+          if (outcome.terminationError !== undefined) throw new Error(outcome.terminationError)
         },
       }
     },
@@ -126,20 +141,38 @@ async function settleChild(
   timeoutMs?: number,
   platform: NodeJS.Platform = process.platform,
   taskkill: (pid: number, force: boolean) => void = runTaskkill,
+  stopGraceMs = STOP_GRACE_MS,
+  termination: TerminationState = {},
 ): Promise<AndroidCommandResult> {
   let stdout = ''
   let stderr = ''
   let escape: ReturnType<typeof setTimeout> | undefined
+  let abandon: ReturnType<typeof setTimeout> | undefined
+  let resolvePending: ((result: AndroidCommandResult) => void) | undefined
   let timedOut = false
   let callerAborted = false
   child.stdout?.on('data', (chunk: Buffer) => { stdout = retain(stdout, chunk.toString('utf8')) })
   child.stderr?.on('data', (chunk: Buffer) => { stderr = retain(stderr, chunk.toString('utf8')) })
   const terminateGracefully = (): void => {
-    terminate(child, 'SIGTERM', platform, taskkill)
+    recordTerminationError(termination, terminate(child, 'SIGTERM', platform, taskkill))
     if (escape !== undefined) return
-    escape = setTimeout(() => { terminate(child, 'SIGKILL', platform, taskkill) }, STOP_GRACE_MS)
+    escape = setTimeout(() => {
+      recordTerminationError(termination, terminate(child, 'SIGKILL', platform, taskkill))
+      abandon = setTimeout(() => {
+        recordTerminationError(termination, new Error(
+          `Android process ${String(child.pid)} did not exit after forced termination`,
+        ))
+        resolvePending?.(resultOf(null, null))
+      }, stopGraceMs)
+      abandon.unref()
+    }, stopGraceMs)
     escape.unref()
   }
+  const resultOf = (exitCode: number | null, exitSignal: NodeJS.Signals | null): AndroidCommandResult => ({
+    exitCode, signal: exitSignal, timedOut, callerAborted,
+    ...(termination.error === undefined ? {} : { terminationError: termination.error.message }),
+    stdout, stderr,
+  })
   const abort = (): void => { callerAborted = true; terminateGracefully() }
   const expire = (): void => { timedOut = true; terminateGracefully() }
   if (signal?.aborted === true) abort()
@@ -148,15 +181,18 @@ async function settleChild(
   timeout?.unref()
   try {
     return await new Promise((resolve, reject) => {
+      resolvePending = resolve
       child.once('error', reject)
       child.once('close', (exitCode, exitSignal) => {
-        resolve({ exitCode, signal: exitSignal, timedOut, callerAborted, stdout, stderr })
+        resolve(resultOf(exitCode, exitSignal))
       })
     })
   } finally {
     signal?.removeEventListener('abort', abort)
     if (timeout !== undefined) clearTimeout(timeout)
     if (escape !== undefined) clearTimeout(escape)
+    if (abandon !== undefined) clearTimeout(abandon)
+    resolvePending = undefined
   }
 }
 
@@ -165,22 +201,36 @@ function terminate(
   signal: NodeJS.Signals,
   platform: NodeJS.Platform,
   taskkill: (pid: number, force: boolean) => void,
-): void {
-  if (child.pid === undefined) return
-  if (platform === 'win32') taskkill(child.pid, signal === 'SIGKILL')
+): Error | undefined {
+  if (child.pid === undefined) return undefined
+  if (platform === 'win32') {
+    try {
+      taskkill(child.pid, signal === 'SIGKILL')
+      return undefined
+    } catch (error) {
+      return error instanceof Error ? error : new Error(String(error))
+    }
+  }
   else {
     try {
       process.kill(-child.pid, signal)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+        return error instanceof Error ? error : new Error(String(error))
+      }
     }
   }
+  return undefined
 }
 
 function runTaskkill(pid: number, force: boolean): void {
-  spawnSync('taskkill', windowsTaskkillArgs(pid, force), {
+  const result = spawnSync('taskkill', windowsTaskkillArgs(pid, force), {
     stdio: 'ignore', windowsHide: true,
   })
+  if (result.error !== undefined) throw result.error
+  if (result.status !== 0) {
+    throw new Error(`taskkill exited with ${String(result.status)}${result.signal === null ? '' : ` by ${result.signal}`}`)
+  }
 }
 
 /**
@@ -204,4 +254,12 @@ function delay(ms: number): Promise<void> {
     const timer = setTimeout(resolve, ms)
     timer.unref()
   })
+}
+
+async function boundedExit(exit: Promise<AndroidCommandResult>, ms: number): Promise<AndroidCommandResult | undefined> {
+  return await Promise.race([exit, delay(ms).then(() => undefined)])
+}
+
+function recordTerminationError(state: TerminationState, error: Error | undefined): void {
+  if (error !== undefined && state.error === undefined) state.error = error
 }

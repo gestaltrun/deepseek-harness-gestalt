@@ -75,4 +75,22 @@ describe('Android SDK process launch', () => {
       callerAborted: false,
     })
   })
+
+  it.skipIf(process.platform === 'win32')('bounds and surfaces a failed Windows process-tree stop', async () => {
+    const runner = createNodeAndroidCommandRunner({
+      platform: 'win32', stopGraceMs: 5,
+      taskkill: () => { throw new Error('taskkill refused the process tree') },
+    })
+    const owned = runner.spawn(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1_000)'],
+      { env: {} },
+    )
+
+    await expect(owned.stop()).rejects.toThrow(/taskkill refused the process tree/)
+    if (owned.pid !== undefined) process.kill(owned.pid, 'SIGKILL')
+    await expect(owned.exit).resolves.toMatchObject({
+      terminationError: 'taskkill refused the process tree',
+    })
+  })
 })

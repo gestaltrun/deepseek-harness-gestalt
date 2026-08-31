@@ -31,7 +31,10 @@ export const name = 'phone-environment-android'
 /** Register the Android Provider into the stable full-snapshot owner. */
 export function apply(ctx: Context, config: Config = {}): void {
   const root = resolve(config.root ?? join(resolveDshHome(), 'phone'))
-  const manager = new AndroidEnvironmentManager({ phoneRoot: root })
+  const manager = new AndroidEnvironmentManager({
+    phoneRoot: root,
+    reportError: (error) => { ctx.logger.error(error) },
+  })
   ctx.effect(() => ctx.phoneEnvironment.registerAndroidEnvironment(manager), 'Android phone environment Provider')
   ctx.effect(() => async () => { await manager.deactivate() }, 'Android phone environment teardown')
 }

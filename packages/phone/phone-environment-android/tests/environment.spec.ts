@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -150,6 +150,43 @@ describe('Android environment manager', () => {
     await expect(first).rejects.toMatchObject({ code: 'PHONE_ANDROID_ABORTED' })
   })
 
+  it('keeps initial detection under one joinable Provider transaction owner', async () => {
+    const root = await tempRoot()
+    const sdkRoot = await stageReadySdk(root)
+    const probeStarted = Promise.withResolvers<undefined>()
+    const releaseProbe = Promise.withResolvers<undefined>()
+    const runner: AndroidCommandRunner = {
+      run: async (_command, args) => {
+        if (args.includes('--version')) {
+          probeStarted.resolve(undefined)
+          await releaseProbe.promise
+          return commandResult({ stdout: '20.0\n' })
+        }
+        if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
+        return commandResult()
+      },
+      spawn: () => { throw new Error('busy detection must not start an emulator') },
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64',
+      environment: { ANDROID_HOME: sdkRoot, PATH: '' }, homeDirectory: root, runner,
+      freeBytes: async () => 32 * 1024 ** 3,
+    })
+
+    const refreshing = manager.refresh()
+    await probeStarted.promise
+    await expect(manager.prepare({ licenseAccepted: true })).rejects.toMatchObject({ code: 'PHONE_ANDROID_BUSY' })
+    await expect(manager.start()).rejects.toMatchObject({ code: 'PHONE_ANDROID_BUSY' })
+    let deactivated = false
+    const deactivating = manager.deactivate().then(() => { deactivated = true })
+    await Promise.resolve()
+    expect(deactivated).toBe(false)
+    releaseProbe.resolve(undefined)
+
+    await expect(refreshing).rejects.toMatchObject({ code: 'PHONE_ANDROID_ABORTED' })
+    await deactivating
+  })
+
   it('downloads the pinned tools, accepts licenses, installs fixed packages, creates one AVD, and boots it', async () => {
     const root = await tempRoot()
     const fixture = archiveAsset()
@@ -197,6 +234,50 @@ describe('Android environment manager', () => {
     await manager.deactivate()
     expect(runner.stops).toBe(2)
     expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
+  })
+
+  it('removes a cancelled partial AVD before a retry creates the private default', async () => {
+    const root = await tempRoot()
+    const fixture = archiveAsset()
+    const base = new FixtureRunner(root)
+    const createStarted = Promise.withResolvers<undefined>()
+    let blockCreate = true
+    const runner: AndroidCommandRunner = {
+      run: async (command, args, options) => {
+        if (command.endsWith('avdmanager') && args.includes('create') && blockCreate) {
+          const avdHome = options.env.ANDROID_AVD_HOME as string
+          const avd = join(avdHome, 'Pixel_6_API_35_Gestalt.avd')
+          await mkdir(avd, { recursive: true })
+          await writeFile(join(avd, 'config.ini'), 'partial\n')
+          await writeFile(join(avdHome, 'Pixel_6_API_35_Gestalt.ini'), 'partial\n')
+          createStarted.resolve(undefined)
+          return await new Promise<AndroidCommandResult>((_resolve, reject) => {
+            options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+          })
+        }
+        return await base.run(command, args, options)
+      },
+      spawn: () => base.spawn(),
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64', environment: { PATH: '' },
+      homeDirectory: root, runner, freeBytes: async () => 32 * 1024 ** 3,
+      commandLineToolsAsset: fixture.asset,
+      fetch: async () => new Response(bodyOf(fixture.bytes), { headers: { 'content-length': String(fixture.bytes.byteLength) } }),
+    })
+    await manager.refresh()
+    const staleAvd = join(root, 'android', 'avd', 'Pixel_6_API_35_Gestalt.avd')
+    await mkdir(staleAvd, { recursive: true })
+    await writeFile(join(staleAvd, 'config.ini'), 'crash-partial\n')
+    const preparing = manager.prepare({ licenseAccepted: true })
+    await createStarted.promise
+    manager.cancel()
+    await expect(preparing).rejects.toMatchObject({ code: 'PHONE_ANDROID_ABORTED' })
+    await expect(access(join(root, 'android', 'avd', 'Pixel_6_API_35_Gestalt.avd'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(join(root, 'android', 'avd', 'Pixel_6_API_35_Gestalt.ini'))).rejects.toMatchObject({ code: 'ENOENT' })
+
+    blockCreate = false
+    await expect(manager.prepare({ licenseAccepted: true })).resolves.toMatchObject({ kind: 'ready', running: false })
   })
 
   it('stops before download when the target volume has less than 16 GB free', async () => {
@@ -385,6 +466,147 @@ describe('Android environment manager', () => {
     await expect(starting).rejects.toMatchObject({ code: 'PHONE_ANDROID_ABORTED' })
     expect(stops).toBe(1)
     expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
+  })
+
+  it('does not parse partial stdout from failed adb boot probes', async () => {
+    vi.useFakeTimers()
+    try {
+      const root = await tempRoot()
+      const sdkRoot = await stageReadySdk(root)
+      let devices = 0
+      let names = 0
+      let boots = 0
+      const runner: AndroidCommandRunner = {
+        run: async (_command, args) => {
+          if (args.includes('--version')) return commandResult({ stdout: '20.0\n' })
+          if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
+          if (args[0] === '-accel-check') return commandResult({ stdout: 'accel ok' })
+          if (args[0] === 'devices') {
+            devices += 1
+            return commandResult({
+              exitCode: devices === 1 ? 1 : 0,
+              stdout: 'emulator-5554\tdevice\n',
+            })
+          }
+          if (args.includes('name')) {
+            names += 1
+            return commandResult({ exitCode: names === 1 ? 1 : 0, stdout: 'Pixel_6_API_35_Gestalt\n' })
+          }
+          boots += 1
+          return commandResult({ exitCode: boots === 1 ? 1 : 0, stdout: '1\n' })
+        },
+        spawn: () => ({ pid: 42, exit: new Promise(() => {}), stop: async () => {} }),
+      }
+      const manager = new AndroidEnvironmentManager({
+        phoneRoot: root, platform: 'darwin', architecture: 'arm64',
+        environment: { ANDROID_HOME: sdkRoot, PATH: '' }, homeDirectory: root, runner,
+        freeBytes: async () => 32 * 1024 ** 3,
+      })
+      await manager.refresh()
+      const starting = manager.start()
+      await vi.advanceTimersByTimeAsync(4_000)
+
+      await expect(starting).resolves.toMatchObject({ kind: 'ready', running: true })
+      expect({ devices, names, boots }).toEqual({ devices: 4, names: 3, boots: 2 })
+      await manager.deactivate()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shares one pending Emulator stop across cancel and deactivate', async () => {
+    const root = await tempRoot()
+    const sdkRoot = await stageReadySdk(root)
+    const stopStarted = Promise.withResolvers<undefined>()
+    const releaseStop = Promise.withResolvers<undefined>()
+    let stops = 0
+    const runner: AndroidCommandRunner = {
+      run: async (_command, args) => {
+        if (args.includes('--version')) return commandResult({ stdout: '20.0\n' })
+        if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
+        if (args[0] === '-accel-check') return commandResult({ stdout: 'accel ok' })
+        if (args[0] === 'devices') return commandResult({ stdout: 'emulator-5554\tdevice\n' })
+        if (args.includes('name')) return commandResult({ stdout: 'Pixel_6_API_35_Gestalt\n' })
+        return commandResult({ stdout: '1\n' })
+      },
+      spawn: () => ({
+        pid: 42,
+        exit: new Promise(() => {}),
+        stop: async () => {
+          stops += 1
+          stopStarted.resolve(undefined)
+          await releaseStop.promise
+        },
+      }),
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64',
+      environment: { ANDROID_HOME: sdkRoot, PATH: '' }, homeDirectory: root, runner,
+      freeBytes: async () => 32 * 1024 ** 3,
+    })
+    await manager.refresh()
+    await manager.start()
+
+    manager.cancel()
+    await stopStarted.promise
+    let deactivated = false
+    const deactivating = manager.deactivate().then(() => { deactivated = true })
+    await Promise.resolve()
+    expect(deactivated).toBe(false)
+    expect(stops).toBe(1)
+    releaseStop.resolve(undefined)
+    await deactivating
+    expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
+  })
+
+  it('reports a cancel-started Emulator stop failure and preserves it for deactivate', async () => {
+    const root = await tempRoot()
+    const sdkRoot = await stageReadySdk(root)
+    const stopFailure = new Error('taskkill refused the process tree')
+    const reportError = vi.fn()
+    const runner: AndroidCommandRunner = {
+      run: async (_command, args) => {
+        if (args.includes('--version')) return commandResult({ stdout: '20.0\n' })
+        if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
+        if (args[0] === '-accel-check') return commandResult({ stdout: 'accel ok' })
+        if (args[0] === 'devices') return commandResult({ stdout: 'emulator-5554\tdevice\n' })
+        if (args.includes('name')) return commandResult({ stdout: 'Pixel_6_API_35_Gestalt\n' })
+        return commandResult({ stdout: '1\n' })
+      },
+      spawn: () => ({
+        pid: 42, exit: new Promise(() => {}), stop: async () => { throw stopFailure },
+      }),
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64',
+      environment: { ANDROID_HOME: sdkRoot, PATH: '' }, homeDirectory: root, runner,
+      freeBytes: async () => 32 * 1024 ** 3, reportError,
+    })
+    await manager.refresh()
+    await manager.start()
+
+    manager.cancel()
+    await vi.waitFor(() => { expect(reportError).toHaveBeenCalledWith(stopFailure) })
+    await expect(manager.deactivate()).rejects.toBe(stopFailure)
+  })
+
+  it('contains and reports a subscriber failure before notifying the next subscriber', async () => {
+    const root = await tempRoot()
+    const reportError = vi.fn()
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64', environment: { PATH: '' },
+      homeDirectory: root, runner: new FixtureRunner(root), freeBytes: async () => 32 * 1024 ** 3,
+      reportError,
+    })
+    const failure = new Error('subscriber failed')
+    const following = vi.fn()
+    manager.onChanged(() => { throw failure })
+    manager.onChanged(following)
+
+    await manager.refresh()
+
+    expect(reportError).toHaveBeenCalledWith(failure)
+    expect(following).toHaveBeenCalled()
   })
 
   it('fails immediately when the owned Emulator exits during boot', async () => {

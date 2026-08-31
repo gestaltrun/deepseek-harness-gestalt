@@ -10,7 +10,7 @@ iOS 真机链路位于清单的 real 分组之后：`agentStatus` 与 `installAg
 
 发布是单调且变更驱动的：只有当新分组清单与已发布清单存在差异（id 集、名称、kind 或 online 事实）时才发布，每条 `PhoneDeviceChange` 精确标注该差异的 added/removed id。`./invariant` 伴生插件基于已发布清单重推每条候选差异，不一致即响亮停轮询。
 
-`ctx.phoneEnvironment` 发布供「手机设备」设置使用的 revisioned `PhoneEnvironmentSnapshot`：其中包含持久化启用值、共享运行时状态，以及相互独立的 Android/iOS 准备状态。运行时按运维 override、托管 current、系统发现的顺序选择。平台提供方注册在同一服务后方；Android 提供方准备固定 API 35 SDK/AVD，并贡献仅子进程使用的 SDK 环境项。运行中的平台只有在选中的 mobilecli 代携带这些环境项重新激活、将 branded emulator id 列为在线并产出完整的 Annex-B SPS、PPS 与 IDR 图像后才成为 ready。关闭、取消或 teardown 会取消整段事务并停止所持有的 Emulator 与 mobilecli 子进程。
+`ctx.phoneEnvironment` 发布供「手机设备」设置使用的 revisioned `PhoneEnvironmentSnapshot`：其中包含持久化启用值、共享运行时状态，以及相互独立的 Android/iOS 准备状态。运行时按运维 override、托管 current、系统发现的顺序选择。平台提供方注册在同一服务后方；Android 提供方准备固定 API 35 SDK/AVD，并贡献仅子进程使用的 SDK 环境项。运行中的平台只有在选中的 mobilecli 代携带这些环境项重新激活、将 branded emulator id 列为在线并产出语法有效的 Annex-B key access unit，且其中的 SPS、PPS 与 IDR slice header 相互引用一致后，才成为 ready。Host 探测不解码像素；真实画面的 GUI 验收保持独立。关闭、取消或 teardown 会取消整段事务并停止所持有的 Emulator 与 mobilecli 子进程。
 
 ```ts type-equiv
 /** Upstream OpenRPC `device.io.*` verbs this Service forwards. */

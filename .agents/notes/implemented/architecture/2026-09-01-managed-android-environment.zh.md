@@ -16,7 +16,7 @@ Status: implemented
 
 Google command-line tools build `15859902` 按 Host tuple 固定，并记录精确长度与 SHA-256。包 id 固定为 `platform-tools`、`emulator` 与使用 Host CPU ABI 的 API 35 Google APIs。准备只会在显式接受 Android SDK License 且通过 16 GB 可用空间检查后开始。`sdkmanager` 持有上游包下载与许可文件，提供方持有经过校验的 command-line tools staging 和幂等 `Pixel_6_API_35_Gestalt` AVD。
 
-准备流程只安装 SDK 与 AVD，不会自行启动。提供方在显式启动 AVD 前检查加速能力。Windows Hypervisor Platform、Linux KVM 权限、BIOS 虚拟化、USB 调试、RSA 信任和 OEM 驱动保持为人工要求。产品启动的 Emulator 进程树会在取消、关闭功能或 teardown 时完全停稳，意外退出会撤销就绪状态。运行中的平台状态携带 branded emulator id，并使 mobilecli 携带 Android 环境重新激活；只有 mobilecli 将该 id 列为在线并产出完整的 Annex-B SPS、PPS 与 IDR 图像后才成为 ready。启动、重新激活、列举与采集共享同一个取消所有者。
+准备流程只安装 SDK 与 AVD，不会自行启动。提供方在显式启动 AVD 前检查加速能力。Windows Hypervisor Platform、Linux KVM 权限、BIOS 虚拟化、USB 调试、RSA 信任和 OEM 驱动保持为人工要求。产品启动的 Emulator 进程树会在取消、关闭功能或 teardown 时完全停稳，意外退出会撤销就绪状态。运行中的平台状态携带 branded emulator id，并使 mobilecli 携带 Android 环境重新激活；只有 mobilecli 将该 id 列为在线并产出语法有效的 Annex-B key access unit，且其中的 SPS、PPS 与 IDR slice header 相互引用一致后，才成为 ready。Host 探测不解码像素；真实画面的 GUI 验收仍是独立发布要求。启动、重新激活、列举与采集共享同一个取消所有者。
 
 ## Alternatives considered
 

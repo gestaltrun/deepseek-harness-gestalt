@@ -7,7 +7,7 @@ import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { writeJson } from '@deepseek-ai/dsh-host-webserver'
 import {
-  resolveMobilecliExecutable, verifyAnnexBH264Picture, type DeviceId,
+  resolveMobilecliExecutable, verifyAnnexBH264KeyAccessUnit, type DeviceId,
 } from '@deepseek-ai/dsh-phone-runtime'
 import { isTrustedApiRequest } from '@deepseek-ai/dsh-request-trust'
 import {
@@ -47,7 +47,7 @@ export const PHONE_ENVIRONMENT_ANDROID_REFRESH_PATH = '/phone/environment/androi
 /** Start the prepared default Android emulator. */
 export const PHONE_ENVIRONMENT_ANDROID_START_PATH = '/phone/environment/android/start'
 
-/** Maximum wait for one recognizable H264 key picture from a booted Android device. */
+/** Maximum wait for one syntactically recognizable H264 key access unit from a booted Android device. */
 const ANDROID_RUNTIME_VERIFY_MS = 15_000
 /** Maximum Android H264 bytes inspected before readiness fails. */
 const ANDROID_H264_PROBE_MAX_BYTES = 4 * 1024 * 1024
@@ -118,17 +118,19 @@ export class PhoneEnvironment extends Service {
       }
     }), 'phone environment runtime readiness tracking')
     ctx.effect(() => async () => {
+      const failures: unknown[] = []
       this.disposed = true
       this.lifetime.abort(new PhoneEnvironmentError(
         'PHONE_ENVIRONMENT_DISPOSED', 'the phone environment service is disposed',
       ))
       this.cancel()
-      await this.androidTask?.catch(() => {})
-      await this.android?.deactivate().catch(() => {})
+      try { await this.androidTask } catch (error) { if (!isCancellation(error)) failures.push(error) }
+      try { await this.android?.deactivate() } catch (error) { failures.push(error) }
       await this.prepareTask?.catch(() => {})
       await this.refreshTask?.catch(() => {})
       await this.enableTail.catch(() => {})
       await ctx.phoneDevices.deactivate().catch(() => {})
+      if (failures.length > 0) throw new AggregateError(failures, 'phone environment teardown failed')
     }, 'phone environment teardown')
   }
 
@@ -353,6 +355,7 @@ export class PhoneEnvironment extends Service {
       await this.activateCandidate(this.candidate, this.candidateVersion, signal)
       await this.verifyAndroidRuntime(state.deviceId, signal)
       signal.throwIfAborted()
+      this.requireCurrentAndroidRuntime(state.deviceId)
       this.publishAndroid(state)
     } catch (error) {
       await this.ctx.phoneDevices.deactivate().catch(() => {})
@@ -369,6 +372,19 @@ export class PhoneEnvironment extends Service {
     return state.kind === 'ready' && state.running
       ? { kind: 'booting', plan: state.plan }
       : state
+  }
+
+  private requireCurrentAndroidRuntime(expectedId: DeviceId): void {
+    const current = this.android?.snapshot()
+    if (current?.kind === 'failed') {
+      throw new PhoneEnvironmentError(current.code, current.message)
+    }
+    if (current?.kind !== 'ready' || !current.running || current.deviceId !== expectedId) {
+      throw new PhoneEnvironmentError(
+        'PHONE_ANDROID_RUNTIME_VERIFY',
+        `the Android Provider revoked running device ${expectedId} before Host readiness commit`,
+      )
+    }
   }
 
   private async runAndroidOperation(
@@ -396,9 +412,11 @@ export class PhoneEnvironment extends Service {
       'PHONE_ANDROID_ABORTED', 'the Android environment operation was cancelled',
     ))
     this.android?.cancel()
-    await this.androidTask?.catch(() => {})
-    await this.android?.deactivate().catch(() => {})
+    let failure: unknown
+    try { await this.androidTask } catch (error) { if (!isCancellation(error)) failure = error }
+    try { await this.android?.deactivate() } catch (error) { failure ??= error }
     if (this.android !== undefined) this.publishAndroid(this.android.snapshot())
+    if (failure !== undefined) throw failure
   }
 
   private async verifyAndroidRuntime(id: DeviceId, signal: AbortSignal): Promise<void> {
@@ -430,7 +448,7 @@ export class PhoneEnvironment extends Service {
           `mobilecli returned ${capture.contentType || 'no Content-Type'} for the Android H264 probe`,
         )
       }
-      await verifyAnnexBH264Picture(capture.body, {
+      await verifyAnnexBH264KeyAccessUnit(capture.body, {
         signal: verificationSignal, maxBytes: ANDROID_H264_PROBE_MAX_BYTES,
       })
     } catch (error) {
@@ -597,7 +615,7 @@ export class PhoneEnvironment extends Service {
       writeJson(res, 200, this.current)
     } catch (error) {
       const failure = environmentError(error)
-      writeJson(res, failure.code === 'PHONE_ENVIRONMENT_BUSY' ? 409 : 502, {
+      writeJson(res, failure.code === 'PHONE_ENVIRONMENT_BUSY' || failure.code === 'PHONE_ANDROID_BUSY' ? 409 : 502, {
         error: { code: failure.code, message: failure.message },
       })
     }
@@ -649,6 +667,14 @@ function environmentError(error: unknown): PhoneEnvironmentError {
     : new PhoneEnvironmentError(
       'PHONE_ENVIRONMENT_ACTIVATION', error instanceof Error ? error.message : String(error), { cause: error },
     )
+}
+
+function isCancellation(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false
+  const code = (error as { readonly code?: unknown }).code
+  return code === 'PHONE_ANDROID_ABORTED'
+    || code === 'PHONE_ENVIRONMENT_ABORTED'
+    || code === 'PHONE_ENVIRONMENT_DISPOSED'
 }
 
 function sameSnapshot(previous: PhoneEnvironmentSnapshot, next: PhoneEnvironmentSnapshot): boolean {

@@ -75,7 +75,10 @@ describe('ui-phone invariant companion', () => {
   it('settles disposal through the removal signal when the registry view lags one read', async () => {
     const original = PhoneInvariant.RecordingSidebar.prototype.getTab
     let calls = 0
-    vi.spyOn(PhoneInvariant.RecordingSidebar.prototype, 'getTab').mockImplementation(function (id) {
+    vi.spyOn(PhoneInvariant.RecordingSidebar.prototype, 'getTab').mockImplementation(function (
+      this: PhoneInvariant.RecordingSidebar,
+      id,
+    ) {
       calls += 1
       if (calls === 2) return { id }
       return original.call(this, id)

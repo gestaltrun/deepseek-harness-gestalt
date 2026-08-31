@@ -49,7 +49,10 @@ export class IosEnvironmentManager {
     this.lastActionable = this.current
   }
 
-  /** @returns the latest committed iOS environment state. */
+  /**
+   * Read the atomically committed iOS environment state.
+   * @returns the latest committed state.
+   */
   snapshot(): PhoneIosState {
     return this.current
   }

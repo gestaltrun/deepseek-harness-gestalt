@@ -268,6 +268,19 @@ export async function openProviderEditor(providerLabels: readonly string[]): Pro
   if (!clicked) throw new Error(`Models Settings has no provider editor matching ${providerLabels.join(' / ')}`)
 }
 
+/** Expand the customized settings owned by the open provider editor. */
+export async function expandProviderSettings(labels: readonly string[]): Promise<void> {
+  await switchToDesktopOverlay()
+  const clicked = await browser.execute((summaryLabels: readonly string[]) => {
+    const summary = [...document.querySelectorAll<HTMLElement>('details summary')].find(element =>
+      summaryLabels.some(label => element.textContent?.includes(label)))
+    if (summary === undefined) return false
+    summary.click()
+    return true
+  }, labels)
+  if (!clicked) throw new Error(`Models Settings has no customized section matching ${labels.join(' / ')}`)
+}
+
 /** Read the iframe and scroll ownership at the public Settings/account-workspace seam. */
 export async function overlayAccountWorkspaceLayout(): Promise<AccountWorkspaceLayoutSnapshot> {
   await switchToDesktopOverlay()

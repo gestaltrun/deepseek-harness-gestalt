@@ -48,7 +48,6 @@ function scrubEnvironment(source) {
       'DSH_PHONE_MANAGED_FIXTURE_BYTES', 'DSH_PHONE_MANAGED_FIXTURE_SHA256',
       'DSH_PHONE_MANAGED_FIXTURE_URL',
       'DSH_ANDROID_E2E_PID_FILE', 'ANDROID_HOME', 'ANDROID_SDK_ROOT', 'ANDROID_AVD_HOME',
-      'DSH_IOS_E2E_STATE',
     ].includes(name)
   }))
 }
@@ -280,7 +279,6 @@ async function runSpecAttempt({
         ANDROID_SDK_ROOT: android.sdkRoot,
         DSH_ANDROID_E2E_PID_FILE: android.pidFile,
       }),
-      ...(ios === undefined ? {} : { DSH_IOS_E2E_STATE: ios.stateFile }),
       ...(managedFixture === undefined ? {} : {
         DSH_PHONE_MANAGED_FIXTURE_URL: managedFixture.url,
         DSH_PHONE_MANAGED_FIXTURE_BYTES: String(managedFixture.bytes),
@@ -413,27 +411,29 @@ async function stageIosFixture(runtimeRoot) {
   ].join('\n'), { mode: 0o700 })
   await writeFile(join(bin, 'xcodebuild'), [
     '#!/bin/sh',
+    `state_file=${JSON.stringify(stateFile)}`,
     'case "$1 $2" in',
     '  "-version ") printf "Xcode 17.0\\nBuild version 17A1\\n" ;;',
     '  "-license check") exit 0 ;;',
     '  "-checkFirstLaunchStatus ") exit 0 ;;',
-    '  "-downloadPlatform iOS") printf "runtime\\n" >> "$DSH_IOS_E2E_STATE" ;;',
+    '  "-downloadPlatform iOS") printf "runtime\\n" >> "$state_file" ;;',
     '  *) exit 1 ;;',
     'esac',
     '',
   ].join('\n'), { mode: 0o700 })
   await writeFile(join(bin, 'xcrun'), [
     '#!/bin/sh',
+    `state_file=${JSON.stringify(stateFile)}`,
     'uuid="8294A429-4C99-411F-A46D-0AD9499B7FDD"',
     'case "$*" in',
     '  "simctl list runtimes --json")',
-    '    if grep -q runtime "$DSH_IOS_E2E_STATE"; then printf \'{"runtimes":[{"identifier":"runtime-26-0","name":"iOS 26.0","version":"26.0","isAvailable":true}]}\\n\'; else printf \'{"runtimes":[]}\\n\'; fi ;;',
+    '    if grep -q runtime "$state_file"; then printf \'{"runtimes":[{"identifier":"runtime-26-0","name":"iOS 26.0","version":"26.0","isAvailable":true}]}\\n\'; else printf \'{"runtimes":[]}\\n\'; fi ;;',
     '  "simctl list devicetypes --json") printf \'{"devicetypes":[{"identifier":"type-iphone-17","name":"iPhone 17"}]}\\n\' ;;',
     '  "simctl list devices available --json")',
-    '    if grep -q created "$DSH_IOS_E2E_STATE"; then state=Shutdown; grep -q booted "$DSH_IOS_E2E_STATE" && state=Booted; printf \'{"devices":{"runtime-26-0":[{"udid":"%s","name":"DSH Gestalt iPhone","state":"%s","isAvailable":true}]}}\\n\' "$uuid" "$state"; else printf \'{"devices":{"runtime-26-0":[]}}\\n\'; fi ;;',
-    '  simctl\\ create*) printf "created\\n" >> "$DSH_IOS_E2E_STATE"; printf "%s\\n" "$uuid" ;;',
+    '    if grep -q created "$state_file"; then state=Shutdown; grep -q booted "$state_file" && state=Booted; printf \'{"devices":{"runtime-26-0":[{"udid":"%s","name":"DSH Gestalt iPhone","state":"%s","isAvailable":true}]}}\\n\' "$uuid" "$state"; else printf \'{"devices":{"runtime-26-0":[]}}\\n\'; fi ;;',
+    '  simctl\\ create*) printf "created\\n" >> "$state_file"; printf "%s\\n" "$uuid" ;;',
     '  simctl\\ bootstatus*) exit 0 ;;',
-    '  simctl\\ boot*) printf "booted\\n" >> "$DSH_IOS_E2E_STATE" ;;',
+    '  simctl\\ boot*) printf "booted\\n" >> "$state_file" ;;',
     '  simctl\\ shutdown*) exit 0 ;;',
     '  *) exit 1 ;;',
     'esac',
@@ -523,7 +523,7 @@ try {
   if (android.code === 0) await fake.configure(['emulator-5554'])
   const live = android.code === 0 && ios.code === 0
     ? await runSpec('phone-live', 'phone-tab.e2e.ts', provider, fake.executable, fake.ownerToken)
-    : { code: 1, errors: ['phone-live skipped because phone-android failed'], cleanup: [], portCollision: false }
+    : { code: 1, errors: ['phone-live skipped because an environment prerequisite failed'], cleanup: [], portCollision: false }
   const findings = await auditLogs()
   await writeFile(join(artifactRoot, 'result.json'), JSON.stringify({
     head,

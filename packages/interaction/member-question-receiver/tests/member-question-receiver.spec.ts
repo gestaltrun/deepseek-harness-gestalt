@@ -44,6 +44,14 @@ async function createReceiver(
   return context.memberQuestionReceiver as FileMemberQuestionReceiver
 }
 
+function bindReceiverWorkspace(receiver: FileMemberQuestionReceiver): Promise<void> {
+  return receiver.bind(
+    envelope.authority.accountId,
+    envelope.operation.projectId,
+    'workspace-receiver' as never,
+  )
+}
+
 const envelope = {
   authority: { accountId: 'account-receiver' as PlatformAccountId },
   operation: {
@@ -305,6 +313,7 @@ describe('FileMemberQuestionReceiver', () => {
       admitter,
     })
     const arrived = await receiver.ingest(envelopeWith('question-admit', 3_000))
+    await bindReceiverWorkspace(receiver)
     expect(attempts).toBe(0)
     const request = {
       receivingSessionId: arrived.receivingSessionId,
@@ -352,6 +361,7 @@ describe('FileMemberQuestionReceiver', () => {
       admitter: () => Promise.reject(new Error('Host stopped after reservation')),
     })
     const arrived = await first.ingest(envelopeWith('question-image-restart', 3_000))
+    await bindReceiverWorkspace(first)
     await expect(first.admitHumanTurn({
       receivingSessionId: arrived.receivingSessionId,
       revision: arrived.revision,
@@ -389,6 +399,7 @@ describe('FileMemberQuestionReceiver', () => {
     const unregister = receiver.registerHumanTurnAdmitter(admitter)
     expect(() => receiver.registerHumanTurnAdmitter(admitter)).toThrow('already registered')
     const arrived = await receiver.ingest(envelopeWith('question-registered', 3_000))
+    await bindReceiverWorkspace(receiver)
     await receiver.admitHumanTurn({
       receivingSessionId: arrived.receivingSessionId,
       revision: arrived.revision,
@@ -415,6 +426,7 @@ describe('FileMemberQuestionReceiver', () => {
       questionId: 'question-registered',
       terminal: { outcome: 'declined' },
     })
+    expect(contextsSeen.at(-1)?.workspaceId).toBe('workspace-receiver')
     unregister()
     unregister()
     expect(() => receiver.registerHumanTurnAdmitter(admitter)).not.toThrow()
@@ -467,6 +479,7 @@ describe('FileMemberQuestionReceiver', () => {
       },
     })
     const arrived = await receiver.ingest(envelopeWith('question-write-failure', 3_000))
+    await bindReceiverWorkspace(receiver)
     const request = {
       receivingSessionId: arrived.receivingSessionId,
       revision: arrived.revision,

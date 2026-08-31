@@ -464,7 +464,9 @@ describe('memberQuestion.bindWorkspace', () => {
     let currentWorkspaceId: WorkspaceId | undefined = workspace.workspaceId
     const bind = vi.fn(async () => {})
     const lookup = vi.fn(async () => currentWorkspaceId)
-    const bindIfCurrent = vi.fn(async (_accountId, _projectId, expected, replacement) => {
+    const bindIfCurrent = vi.fn<MemberQuestionWorkspaceBinding['bindIfCurrent']>(async (
+      _accountId, _projectId, expected, replacement,
+    ) => {
       if (currentWorkspaceId !== expected) return false
       currentWorkspaceId = replacement
       return true

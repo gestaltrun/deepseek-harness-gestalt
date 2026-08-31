@@ -55,6 +55,14 @@ function operation(questionId: string, operationId: string, projectId: string) {
   }
 }
 
+function bindReceiverWorkspace(
+  receiver: MemberQuestionReceiverService,
+  projectId: string,
+  workspaceId: Parameters<MemberQuestionReceiverService['bind']>[2],
+): Promise<void> {
+  return receiver.bind('account:receiver' as PlatformAccountId, projectId as never, workspaceId)
+}
+
 describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receiving session', () => {
   let scaffold: WebScaffold
   let browser: Browser
@@ -105,13 +113,8 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
     const receiverWorkspace = scaffold.ctx.workspaceRegistry.list()
       .find(workspace => workspace.path === join(scaffold.workspaceCwd, 'workspace'))
     if (receiverWorkspace === undefined) throw new Error('member-question e2e: receiver workspace unavailable')
-    scaffold.ctx.provide('memberQuestionWorkspaceBinding', {
-      bind: () => Promise.resolve(),
-      lookup: () => Promise.resolve(receiverWorkspace.id),
-      bindIfCurrent: () => Promise.resolve(false),
-      resolve: () => Promise.resolve(receiverWorkspace.id),
-    })
     const projectId = 'project-atlas'
+    await bindReceiverWorkspace(receiver, projectId, receiverWorkspace.id)
     const create = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'create')
     const history = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'history')
     const prompt = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'prompt')
@@ -226,15 +229,10 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
       await mkdir(receiverWorkspace.path, { recursive: true })
       const restartedWorkspace = await scaffold.ctx.workspaceRegistry.create(receiverWorkspace.path)
-      scaffold.ctx.provide('memberQuestionWorkspaceBinding', {
-        bind: () => Promise.resolve(),
-        lookup: () => Promise.resolve(restartedWorkspace.id),
-        bindIfCurrent: () => Promise.resolve(false),
-        resolve: () => Promise.resolve(restartedWorkspace.id),
-      })
+      await bindReceiverWorkspace(receiver, projectId, restartedWorkspace.id)
 
       const afterRestart = await receiver.snapshot()
-      expect(afterRestart).toEqual(beforeRestart)
+      expect(afterRestart).toEqual({ ...beforeRestart, revision: beforeRestart.revision + 1 })
       const restartedRow = page.locator('[role="treeitem"]', { hasText: title })
       await restartedRow.waitFor({ timeout: 30_000 })
       await restartedRow.click()
@@ -274,14 +272,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
     try {
       await mkdir(workspacePath, { recursive: true })
       let workspace = await restartScaffold.ctx.workspaceRegistry.create(workspacePath)
-      restartScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
-        bind: () => Promise.resolve(),
-        lookup: () => Promise.resolve(workspace.id),
-        bindIfCurrent: () => Promise.resolve(false),
-        resolve: () => Promise.resolve(workspace.id),
-      })
       let service = restartScaffold.ctx.get('memberQuestionReceiver')
       if (service === undefined) throw new Error('member-question restart e2e: receiver unavailable')
+      await bindReceiverWorkspace(service, 'project-host-restart', workspace.id)
       const arrived = await createAuthenticatedMemberQuestionIngress(service)({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
         operation: operation('mq-web-host-restart', 'mq-operation-host-restart', 'project-host-restart'),
@@ -322,14 +315,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await cp(backup, restartScaffold.persistenceRoot, { recursive: true })
       await mkdir(workspacePath, { recursive: true })
       workspace = await restartScaffold.ctx.workspaceRegistry.create(workspacePath)
-      restartScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
-        bind: () => Promise.resolve(),
-        lookup: () => Promise.resolve(workspace.id),
-        bindIfCurrent: () => Promise.resolve(false),
-        resolve: () => Promise.resolve(workspace.id),
-      })
       service = restartScaffold.ctx.get('memberQuestionReceiver')
       if (service === undefined) throw new Error('member-question restart e2e: restarted receiver unavailable')
+      await bindReceiverWorkspace(service, 'project-host-restart', workspace.id)
       expect((await service.snapshot()).pending[0]?.reservedAdmission?.rpcId).toBe(rpcId)
       const recovered = await restartScaffold.ctx.apiProxy.memberQuestions.admitHumanTurn({
         rpcId: rpcId as never,
@@ -371,14 +359,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       const workspace = faultScaffold.ctx.workspaceRegistry.list()
         .find(candidate => candidate.path === join(faultScaffold.workspaceCwd, 'workspace'))
       if (workspace === undefined) throw new Error('member-question lost-response e2e: workspace unavailable')
-      faultScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
-        bind: () => Promise.resolve(),
-        lookup: () => Promise.resolve(workspace.id),
-        bindIfCurrent: () => Promise.resolve(false),
-        resolve: () => Promise.resolve(workspace.id),
-      })
       const service = faultScaffold.ctx.get('memberQuestionReceiver')
       if (service === undefined) throw new Error('member-question lost-response e2e: receiver unavailable')
+      await bindReceiverWorkspace(service, 'project-lost-response', workspace.id)
       const arrived = await createAuthenticatedMemberQuestionIngress(service)({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
         operation: operation('mq-web-lost-response', 'mq-operation-lost-response', 'project-lost-response'),
@@ -424,12 +407,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       const workspacePath = join(faultScaffold.workspaceCwd, 'workspace')
       await mkdir(workspacePath, { recursive: true })
       const workspace = await faultScaffold.ctx.workspaceRegistry.create(workspacePath)
-      faultScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
-        bind: () => Promise.resolve(),
-        lookup: () => Promise.resolve(workspace.id),
-        bindIfCurrent: () => Promise.resolve(false),
-        resolve: () => Promise.resolve(workspace.id),
-      })
+      await bindReceiverWorkspace(faultReceiver, 'project-terminal-retry', workspace.id)
       const arrived = await createAuthenticatedMemberQuestionIngress(faultReceiver)({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
         operation: operation('mq-web-terminal-retry', 'mq-operation-terminal-retry', 'project-terminal-retry'),
@@ -494,12 +472,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       const workspacePath = join(faultScaffold.workspaceCwd, 'workspace')
       await mkdir(workspacePath, { recursive: true })
       const workspace = await faultScaffold.ctx.workspaceRegistry.create(workspacePath)
-      faultScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
-        bind: () => Promise.resolve(),
-        lookup: () => Promise.resolve(workspace.id),
-        bindIfCurrent: () => Promise.resolve(false),
-        resolve: () => Promise.resolve(workspace.id),
-      })
+      await bindReceiverWorkspace(faultReceiver, `project-${stage}`, workspace.id)
       const ingress = createAuthenticatedMemberQuestionIngress(faultReceiver)
       const arrived = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },

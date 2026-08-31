@@ -312,24 +312,25 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
   }
 
   private async request(path: string, init: RequestInit): Promise<Response> {
-    const headers = headerRecord(init.headers)
-    if (init.body !== undefined) headers['content-type'] = 'application/json'
-    const response = await this.fetch(`${this.origin}${path}`, { ...init, headers })
+    const response = await this.fetch(`${this.origin}${path}`, jsonRequest(init))
     if (response.ok) return response
-    let message = `Project Membership request failed with HTTP ${response.status}`
-    let code = `HTTP_${response.status}`
-    let body: unknown
-    try {
-      body = await response.json()
-    } catch {
-      // A non-JSON proxy failure has no stable membership envelope.
-    }
-    if (isErrorBody(body)) {
-      code = body.error.code
-      message = body.error.message
-    }
-    throw new ProjectMembershipClientError(code, response.status, message)
+    throw await projectMembershipRequestError(response)
   }
+}
+
+function jsonRequest(init: RequestInit): RequestInit {
+  const headers = headerRecord(init.headers)
+  if (init.body !== undefined) headers['content-type'] = 'application/json'
+  return { ...init, headers }
+}
+
+async function projectMembershipRequestError(response: Response): Promise<ProjectMembershipClientError> {
+  const body: unknown = await response.json().catch(() => undefined)
+  const code = isErrorBody(body) ? body.error.code : `HTTP_${response.status}`
+  const message = isErrorBody(body)
+    ? body.error.message
+    : `Project Membership request failed with HTTP ${response.status}`
+  return new ProjectMembershipClientError(code, response.status, message)
 }
 
 function isErrorBody(value: unknown): value is { error: { code: string; message: string } } {

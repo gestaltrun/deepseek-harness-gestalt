@@ -1690,6 +1690,8 @@ export interface MemberQuestionHumanTurnAdmissionContext {
   readonly receivingAccountId: PlatformAccountId
   /** Cloud project whose accepted membership selects that workspace. */
   readonly projectId: ProjectId
+  /** Exact bound local Workspace selected for the receiving Account and Project. */
+  readonly workspaceId: Branded<'WorkspaceId'>
   /** Every retained question on this receiving thread, in arrival order. */
   readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[]
 }

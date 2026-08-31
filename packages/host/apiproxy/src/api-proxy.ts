@@ -1795,18 +1795,24 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     })
   }
 
-  /** Resolve one receiving account/project association to its exact local Workspace. */
-  async function receivingWorkspace(admission: MemberQuestionHumanTurnAdmissionContext): Promise<Workspace> {
+  /** Resolve one exact local Workspace identity carried by receiver state. */
+  function workspaceFromId(workspaceId: MemberQuestionHumanTurnAdmissionContext['workspaceId']): Workspace {
+    const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(workspaceId))
+    if (workspace === undefined) {
+      throw new Error(`member-question binding references unknown Workspace ${workspaceId}`)
+    }
+    return workspace
+  }
+
+  /** Resolve one receiving account/project association outside the receiver transaction. */
+  async function receivingWorkspace(
+    admission: Pick<MemberQuestionHumanTurnAdmissionContext, 'receivingAccountId' | 'projectId'>,
+  ): Promise<Workspace> {
     const binding = ctx.get('memberQuestionWorkspaceBinding')
     if (binding === undefined) {
       throw new Error('member-question admission requires exact local Workspace binding authority')
     }
-    const workspaceId = await binding.resolve(admission.receivingAccountId, admission.projectId)
-    const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(workspaceId))
-    if (workspace === undefined) {
-      throw new Error(`member-question workspace binding returned unknown Workspace ${workspaceId}`)
-    }
-    return workspace
+    return workspaceFromId(await binding.resolve(admission.receivingAccountId, admission.projectId))
   }
 
   /** Whether one stable message identity already entered this Session or remains pending. */
@@ -1845,7 +1851,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
   if (memberQuestionReceiver !== undefined) {
     ctx.effect(() => memberQuestionReceiver.registerHumanTurnAdmitter(async (input, admission) => {
-      const workspace = await receivingWorkspace(admission)
+      const workspace = workspaceFromId(admission.workspaceId)
       const sessionId = input.receivingSessionId as unknown as SessionId
       const agent = await ensureSession(sessionId, workspace.path, true)
       await workspace.attachSession(sessionId)
@@ -1921,7 +1927,6 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     const workspace = await receivingWorkspace({
       receivingAccountId: view.receivingAccountId,
       projectId: view.brief.projectId,
-      questions: [view],
     })
     const sessionId = view.hostSessionId
     const agent = await ensureSession(sessionId, workspace.path, true)

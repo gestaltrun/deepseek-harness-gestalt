@@ -23,12 +23,11 @@ describe('member-question receiving keyless assembled snapshot', () => {
       const workspacePath = join(scaffold.workspaceCwd, 'workspace')
       await mkdir(workspacePath, { recursive: true })
       const workspace = await scaffold.ctx.workspaceRegistry.create(workspacePath)
-      scaffold.ctx.provide('memberQuestionWorkspaceBinding', {
-        bind: () => Promise.resolve(),
-        lookup: () => Promise.resolve(workspace.id),
-        bindIfCurrent: () => Promise.resolve(false),
-        resolve: () => Promise.resolve(workspace.id),
-      })
+      await receiver.bind(
+        'account:receiver' as PlatformAccountId,
+        'project-snapshot' as never,
+        workspace.id,
+      )
       const ingress = createAuthenticatedMemberQuestionIngress(receiver)
       const arrived = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },

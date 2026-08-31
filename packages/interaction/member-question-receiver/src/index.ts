@@ -545,9 +545,19 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
       const questions = this.state.questions.filter(row => row.receivingSessionId === request.receivingSessionId)
       /* v8 ignore next -- every persisted receiving Session is created with its first question in one commit. */
       if (questions[0] === undefined) throw new Error('member-question-receiver: receiving Session has no questions')
+      const projectId = questions[0].operation.projectId
+      const workspaceId = this.state.workspaceBindings.find(binding =>
+        binding.receivingAccountId === session.receivingAccountId
+        && binding.projectId === projectId)?.workspaceId
+      if (workspaceId === undefined) {
+        throw new Error(
+          `member-question-receiver: no local Workspace binding for account ${session.receivingAccountId} and project ${projectId}`,
+        )
+      }
       const context: MemberQuestionHumanTurnAdmissionContext = {
         receivingAccountId: session.receivingAccountId as PlatformAccountId,
-        projectId: questions[0].operation.projectId,
+        projectId,
+        workspaceId: workspaceId as Branded<'WorkspaceId'>,
         questions: questions.map(row => row.terminal === undefined
           ? toPendingView(row)
           : toTerminalView(row)),

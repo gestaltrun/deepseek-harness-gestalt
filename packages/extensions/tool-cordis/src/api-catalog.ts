@@ -4970,7 +4970,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'MemberQuestionHumanTurnAdmissionContext',
-    declaration: 'export interface MemberQuestionHumanTurnAdmissionContext {\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[];\n}',
+    declaration: 'export interface MemberQuestionHumanTurnAdmissionContext {\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly workspaceId: Branded<\'WorkspaceId\'>;\n    readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[];\n}',
   },
   {
     name: 'MemberQuestionHumanTurnAdmitter',

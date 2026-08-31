@@ -172,7 +172,7 @@ describe('workspace settings and invite wizard (M4)', () => {
       await tick()
       fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
       expect(screen.getByText('此工作区必须是带有 origin remote 的 Git checkout，才能升级为云项目。')).toBeTruthy()
-      expect((screen.getByRole('button', { name: '创建云项目' }) as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.getByRole<HTMLButtonElement>('button', { name: '创建云项目' }).disabled).toBe(true)
       expect(membership.createProject).not.toHaveBeenCalled()
     } finally {
       vi.useRealTimers()

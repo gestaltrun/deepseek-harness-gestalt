@@ -13,7 +13,6 @@ import { CLIENT_BUILD_PROFILE_SELECTOR } from './client-build-environment.ts'
 import {
   COVERAGE_EXEMPT_ENV,
   coverageExemptHeavySuites,
-  coverageExemptIsolatedSuites,
 } from './coverage-exempt.ts'
 import {
   COVERAGE_PARTITIONS_ENV,
@@ -774,13 +773,7 @@ function coverageGates(needs?: string[]): Gate[] {
       label: 'test:coverage-exempt-heavy',
       ...dependency,
     }),
-    pnpmExec('coverage-exempt-isolated', [
-      'vitest',
-      'run',
-      ...coverageExemptIsolatedSuites.map(suite => suite.filter),
-      '--maxWorkers=1',
-      ...timeouts,
-    ], {
+    pnpmScript('coverage-exempt-isolated', 'gestalt:overlay-boot', {
       label: 'test:coverage-exempt-isolated',
       after: ['coverage', 'coverage-exempt-heavy'],
       ...dependency,
@@ -813,13 +806,7 @@ function coverageExemptGates(): Gate[] {
       ...workers.instrumented,
       ...timeouts,
     ], { label: 'test:coverage-exempt-heavy' }),
-    pnpmExec('coverage-exempt-isolated', [
-      'vitest',
-      'run',
-      ...coverageExemptIsolatedSuites.map(suite => suite.filter),
-      '--maxWorkers=1',
-      ...timeouts,
-    ], {
+    pnpmScript('coverage-exempt-isolated', 'gestalt:overlay-boot', {
       label: 'test:coverage-exempt-isolated',
       after: ['coverage-exempt-heavy'],
     }),

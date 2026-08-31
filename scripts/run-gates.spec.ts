@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { coverageExemptHeavySuites, coverageExemptIsolatedSuites } from './coverage-exempt.ts'
+import { coverageExemptHeavySuites } from './coverage-exempt.ts'
 import {
   defaultConcurrency,
   formatGateResultReason,
@@ -254,14 +254,18 @@ describe('gate graph validation', () => {
       }
       expect(gates.find(subject => subject.id === 'coverage-exempt-isolated')?.after)
         .toEqual(['coverage', 'coverage-exempt-heavy'])
+      expect(gates.find(subject => subject.id === 'coverage-exempt-isolated')).toMatchObject({
+        displayCommand: 'pnpm run gestalt:overlay-boot',
+        args: ['/private/pnpm.cjs', 'run', 'gestalt:overlay-boot'],
+      })
     },
   )
 
-  it('applies one configured test and polling timeout to both coverage gates', () => {
+  it('applies one configured test and polling timeout to both parallel coverage gates', () => {
     const gates = withEnv('DSH_COVERAGE_TEST_TIMEOUT_MS', '15000', () =>
       withPnpmEntrypoint(() => gatesForMode('ci-windows-complete')))
 
-    for (const id of ['coverage', 'coverage-exempt-heavy', 'coverage-exempt-isolated']) {
+    for (const id of ['coverage', 'coverage-exempt-heavy']) {
       expect(gates.find(subject => subject.id === id)?.args).toEqual(expect.arrayContaining([
         '--testTimeout=15000',
         '--expect.poll.timeout=15000',
@@ -273,7 +277,7 @@ describe('gate graph validation', () => {
     const gates = withEnv('DSH_COVERAGE_TEST_TIMEOUT_MS', undefined, () =>
       withPnpmEntrypoint(() => gatesForMode('ci-windows-complete')))
 
-    for (const id of ['coverage', 'coverage-exempt-heavy', 'coverage-exempt-isolated']) {
+    for (const id of ['coverage', 'coverage-exempt-heavy']) {
       expect(gates.find(subject => subject.id === id)?.args).not.toEqual(expect.arrayContaining([
         expect.stringMatching(/^--(?:testTimeout|expect\.poll\.timeout)=/),
       ]))
@@ -321,10 +325,10 @@ describe('gate graph validation', () => {
     expect(gates[0]?.args).toEqual(expect.arrayContaining(
       coverageExemptHeavySuites.map(suite => suite.filter),
     ))
-    expect(gates[1]?.args).toEqual(expect.arrayContaining([
-      ...coverageExemptIsolatedSuites.map(suite => suite.filter),
-      '--maxWorkers=1',
-    ]))
+    expect(gates[1]).toMatchObject({
+      displayCommand: 'pnpm run gestalt:overlay-boot',
+      args: ['/private/pnpm.cjs', 'run', 'gestalt:overlay-boot'],
+    })
     expect(gates[1]?.after).toEqual(['coverage-exempt-heavy'])
   })
 

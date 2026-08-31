@@ -407,6 +407,9 @@ export class PhoneDevices extends Service {
       settledExit = exit
     })
     const window = deadline(undefined, this.resolved.readyTimeoutMs, 'READY_WINDOW')
+    const startupSignal = signal === undefined
+      ? AbortSignal.any([window.signal, this.lifetime.signal])
+      : AbortSignal.any([window.signal, this.lifetime.signal, signal])
     try {
       for (;;) {
         if (settledExit !== undefined) throw exitedBeforeReady(child, settledExit)
@@ -414,10 +417,7 @@ export class PhoneDevices extends Service {
         if (window.signal.aborted) throw this.readinessWindowElapsed(child)
         try {
           // The lifetime signal lets teardown interrupt a hung probe at once.
-          const probeSignal = signal === undefined
-            ? AbortSignal.any([window.signal, this.lifetime.signal])
-            : AbortSignal.any([window.signal, this.lifetime.signal, signal])
-          await client.call(METHOD_SERVER_INFO, {}, probeSignal)
+          await client.call(METHOD_SERVER_INFO, {}, startupSignal)
           break
         } catch {
           // Probes fail while the server binary is still starting up; the next
@@ -434,7 +434,7 @@ export class PhoneDevices extends Service {
       void child.exit.then((exit) => { this.onChildExit(child, exit) })
       // Commit the baseline listing inside initialization so every observer
       // attaches to a stable starting point and receives only later changes.
-      await this.pollAttempt(true)
+      await this.pollAttempt(true, startupSignal)
       // Hold readiness for the configured stability interval. A process can flush
       // the baseline response immediately before exiting; the close event may
       // arrive on a later event-loop turn and must win before readiness is
@@ -818,17 +818,20 @@ export class PhoneDevices extends Service {
     }
   }
 
-  /** One bounded devices.list attempt followed by publication, never throwing outward. */
-  private async pollAttempt(required = false): Promise<void> {
+  /**
+   * Run one bounded devices.list attempt and publish it. Background misses stay
+   * contained; the required startup attempt rejects every failure.
+   * @param required - Whether this attempt must establish the startup baseline.
+   * @param signal - Optional startup cancellation and readiness budget.
+   */
+  private async pollAttempt(required = false, signal?: AbortSignal): Promise<void> {
     let next: PhoneDeviceList
     try {
-      const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, undefined, this.resolved.requestTimeoutMs)
+      const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, signal, this.resolved.requestTimeoutMs)
       next = groupEntries(parseDeviceInfos(result))
     } catch (error) {
       const normalized = normalizeOperationError(error)
-      if (required && (normalized.code === 'PHONE_UNAVAILABLE' || normalized.code === 'PHONE_PROTOCOL')) {
-        throw normalized
-      }
+      if (required) throw normalized
       if (normalized.code === 'PHONE_UNAVAILABLE' || normalized.code === 'PHONE_PROTOCOL') {
         this.markLost(normalized)
         return

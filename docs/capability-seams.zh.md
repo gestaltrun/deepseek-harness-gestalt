@@ -397,6 +397,7 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_phoneDevices --> pkg_phone_environment
   svc_phoneDevices --> pkg_phone_stream
   svc_phoneDevices --> pkg_tool_phone
   svc_phoneEnvironment --> pkg_client_ui_phone
@@ -547,7 +548,7 @@ flowchart LR
 | `ctx.jobs` | `seam` | [`jobs`](../packages/jobs/jobs) | [`jobs-local`](../packages/jobs/jobs-local) | [`tool-bash`](../packages/shell/tool-bash), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-jobs`](../packages/jobs/tool-jobs) | - | 生产方（后台 bash、PTY 发送和 subagent 委派）登记正在运行的工作；tool-jobs 是面向模型的控制器，用于读取、列出和终止这些工作；jobs-local 是进程本地注册表。 |
 | `ctx.browserRuntime` | `seam` | `browser` | [`browser-runtime-deterministic`](../packages/browser/browser-runtime-deterministic), [`browser-runtime-electron`](../packages/browser/browser-runtime-electron), [`browser-runtime-tandem`](../packages/browser/browser-runtime-tandem) | [`tool-browser`](../packages/browser/tool-browser), [`browser-workspace`](../packages/browser/browser-workspace) | - | 不透明的 Profile、Workspace、浏览器与标签页身份保留在 ctx.browserRuntime 后；deferred Consumer 使用普通发现、结果与展示路径。 |
 | `ctx.browserWorkspace` | `core` | `browser` | - | [`tool-browser`](../packages/browser/tool-browser), [`client-ui-browser`](../packages/client/ui-browser), [`client-ui-workbench`](../packages/client/ui-workbench) | - | 每个 Session 独立持有 Dock 事实、实例与标签页，并建立在 ctx.browserRuntime 身份之上；当调用 Agent Session 存在时，deferred Consumer 会绑定所创建的标签页；工作台侧栏读取同一份快照。 |
-| `ctx.phoneDevices` | `seam` | [`phone-runtime`](../packages/phone/phone-runtime) | - | [`tool-phone`](../packages/phone/tool-phone), [`phone-stream`](../packages/phone/phone-stream) | - | 不透明 DeviceId 身份保留在 ctx.phoneDevices 后；deferred Consumer 使用普通发现、结果，并对变更默认走 tools/pre-execute ask；同源流 Consumer 反代 io 与采集。 |
+| `ctx.phoneDevices` | `seam` | [`phone-runtime`](../packages/phone/phone-runtime) | - | [`tool-phone`](../packages/phone/tool-phone), [`phone-stream`](../packages/phone/phone-stream), [`phone-environment`](../packages/phone/phone-environment) | - | 不透明 DeviceId 身份保留在 ctx.phoneDevices 后；deferred Consumer 使用普通发现、结果，并对变更默认走 tools/pre-execute ask；同源流 Consumer 反代 io 与采集。 |
 | `ctx.phoneEnvironment` | `core` | [`phone-environment`](../packages/phone/phone-environment) | - | [`client-ui-phone`](../packages/client/ui-phone) | - | 负责可信运行时发现、托管准备、激活与带 revision 的完整快照；设置 Consumer 驱动持久启用值并渲染准备状态。 |
 | `ctx.phoneStream` | `core` | [`phone-stream`](../packages/phone/phone-stream) | - | - | - | 注册 Host WebSocket 与签名 HTTP 采集路由，使浏览器永不直连 mobilecli :12000。 |
 | `ctx.web` | `seam` | [`web`](../packages/web/web) | [`web-search-exa`](../packages/web/web-search-exa), [`web-search-perplexity`](../packages/web/web-search-perplexity), [`web-search-deepseek`](../packages/web/web-search-deepseek), [`web-fetch-http`](../packages/web/web-fetch-http) | [`tool-web`](../packages/web/tool-web) | - | 搜索和抓取提供方注册到同一个 ctx.web seam；tool-web 负责稳定的面向模型名称。 |

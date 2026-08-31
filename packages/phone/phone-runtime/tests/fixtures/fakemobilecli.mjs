@@ -64,6 +64,7 @@ const state = {
 let requests = 0
 
 const listDelayMs = knobs.listDelayMs ?? 0
+const listDelayAfterRequests = knobs.listDelayAfterRequests ?? 0
 const hangEveryResponse = knobs.hang === true
 const exitAfter = typeof knobs.exitAfter === 'number' ? knobs.exitAfter : null
 // When set, the named RPC method answers with this JSON-RPC error instead of
@@ -185,7 +186,7 @@ async function handleRpc(req, res) {
     reply(res, id, { error: { code: failArm.code ?? -32000, message: failArm.message } })
     return
   }
-  if (listDelayMs > 0 && method === 'devices.list') {
+  if (listDelayMs > 0 && requests > listDelayAfterRequests && method === 'devices.list') {
     await new Promise(resolveDelay => setTimeout(resolveDelay, listDelayMs))
   }
   // The exit knob fires only after the real method reply, so response content

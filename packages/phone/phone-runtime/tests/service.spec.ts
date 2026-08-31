@@ -136,6 +136,52 @@ describe('phone runtime service lifecycle', () => {
     expect(readiness).toEqual([])
   })
 
+  it('rejects a timed-out baseline listing without publishing readiness', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 300 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      requestTimeoutMs: 50,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    await expect(context.phoneDevices.activateExecutable(fake.executablePath))
+      .rejects.toMatchObject({ code: 'PHONE_TIMEOUT' })
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).toEqual([])
+  })
+
+  it('cancels the in-flight baseline listing without publishing readiness', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 300 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    const controller = new AbortController()
+    const activation = context.phoneDevices.activateExecutable(fake.executablePath, controller.signal)
+    await fake.awaitOnline()
+    await waitFor(async () => (await fake.counters()).requests >= 2)
+    controller.abort(new Error('cancel during baseline listing'))
+
+    await expect(activation).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).toEqual([])
+  })
+
   it('activates with an unavailable service when PATH carries no mobilecli', async () => {
     const context = new Context()
     contexts.push(context)
@@ -477,7 +523,7 @@ describe('phone runtime service lifecycle', () => {
   })
 
   it('bounds a hung upstream answer with the configured method ceiling', async () => {
-    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 1_500 })
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 1_500, listDelayAfterRequests: 2 })
     fakes.push(fake)
     const context = await mountWith(fake, { requestTimeoutMs: 60, pollIntervalMs: 60_000 })
     const timedOut = await errorOf(() => context.phoneDevices.listDevices())

@@ -45,10 +45,15 @@ describe('Sub2API Desktop installation', () => {
     expect(new URL(consoleWindow.url).pathname).toBe('/home')
     expect(consoleWindow.text).toContain('Sub2API')
     await navigateMainWindow(hostSurface.url)
-    await waitForSessionSurface()
+    await waitForSessionSurface(hostSurface.url)
     await connectTemporaryWorkspace()
     const expected = 'DSH445_MODEL_OK_7F3A'
-    await selectModelAndSend('Claude Sonnet 4.5', `Reply with exactly ${expected} and no other text.`, expected)
+    await selectModelAndSend(
+      'Claude Sonnet 4.5',
+      `Reply with exactly ${expected} and no other text.`,
+      expected,
+      hostSurface.url,
+    )
     await recordOwnedProcesses()
   })
 })

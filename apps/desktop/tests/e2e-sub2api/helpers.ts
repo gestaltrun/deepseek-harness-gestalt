@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { browser } from '@wdio/globals'
 import type {} from '@wdio/native-types'
 import { load } from 'js-yaml'
+import { isExpectedSessionSurface } from './session-surface.ts'
 
 const ADMIN_PREFIX = '/plugins/dsh-sub2api/admin'
 const REAL_PROVIDER_CREDENTIAL_REF = 'ZAI_CODING_CN_API_KEY'
@@ -31,24 +32,40 @@ function requiredEnv(name: string): string {
 }
 
 /** Focus the Session Surface rather than the Desktop overlay document. */
-export async function switchToSessionSurface(): Promise<void> {
+export async function switchToSessionSurface(expectedUrl?: string): Promise<void> {
+  const handles = await browser.getWindowHandles()
+  for (const handle of handles) {
+    await browser.switchToWindow(handle)
+    const candidate = await browser.execute(() => ({
+      overlay: document.documentElement.hasAttribute('data-dsh-desktop-overlay'),
+      url: location.href,
+    }))
+    if (isExpectedSessionSurface(candidate, expectedUrl)) return
+  }
+  throw new Error('Desktop Host exposed no Session Surface window')
+}
+
+/** Focus the native Desktop overlay through its WebDriver window handle. */
+async function switchToDesktopOverlay(): Promise<void> {
   const handles = await browser.getWindowHandles()
   for (const handle of handles) {
     await browser.switchToWindow(handle)
     const overlay = await browser.execute(() =>
       document.documentElement.hasAttribute('data-dsh-desktop-overlay'))
-    if (!overlay) return
+    if (overlay) return
   }
-  throw new Error('Desktop Host exposed no Session Surface window')
+  throw new Error('Desktop Host exposed no overlay WebContentsView')
 }
 
 /** Wait for the built client runtime to paint the real Desktop Session Surface. */
-export async function waitForSessionSurface(): Promise<void> {
-  await switchToSessionSurface()
+export async function waitForSessionSurface(expectedUrl?: string): Promise<void> {
+  await switchToSessionSurface(expectedUrl)
   await browser.waitUntil(async () => {
     const url = await browser.getUrl()
     const rendered = await browser.execute(() => document.body?.innerText.length > 0)
-    return /^http:\/\/127\.0\.0\.1:\d+\//u.test(url) && rendered
+    return (expectedUrl === undefined
+      ? /^http:\/\/127\.0\.0\.1:\d+\//u.test(url)
+      : new URL(url).href === new URL(expectedUrl).href) && rendered
   }, { timeout: 120_000, timeoutMsg: 'Desktop Session Surface did not render' })
   for (let step = 0; step < 3; step += 1) {
     let completed = false
@@ -148,35 +165,47 @@ export async function openSettings(): Promise<void> {
   const trigger = browser.$('button[aria-haspopup="dialog"]')
   await trigger.waitForClickable({ timeout: 30_000 })
   await trigger.click()
-  await browser.waitUntil(async () => await overlayExecute<boolean>(`
-    return document.body?.innerText?.includes('设置') === true
-      || document.body?.innerText?.includes('Settings') === true
-  `), { timeout: 30_000, timeoutMsg: 'Desktop Settings overlay did not open' })
+  await browser.waitUntil(async () => {
+    try {
+      await switchToDesktopOverlay()
+      return await browser.execute(() => {
+        const text = document.body?.innerText ?? ''
+        return text.includes('设置') || text.includes('Settings')
+      })
+    } catch {
+      return false
+    }
+  }, { timeout: 30_000, timeoutMsg: 'Desktop Settings overlay did not open' })
 }
 
 /** Click a visible button in the native Desktop overlay by bilingual label. */
 export async function clickOverlayButton(labels: readonly string[]): Promise<void> {
-  const clicked = await overlayExecute<boolean>(`
-    const labels = ${JSON.stringify(labels)}
-    const button = [...document.querySelectorAll('button')].find((element) =>
-      labels.some((label) => element.textContent?.includes(label)))
+  await switchToDesktopOverlay()
+  const clicked = await browser.execute((buttonLabels: readonly string[]) => {
+    const button = [...document.querySelectorAll('button')].find(element =>
+      buttonLabels.some(label => element.textContent?.includes(label)))
     if (button === undefined) return false
     button.click()
     return true
-  `)
+  }, labels)
   if (!clicked) throw new Error(`Desktop overlay has no button matching ${labels.join(' / ')}`)
 }
 
 /** Return the visible text from the native Desktop overlay. */
 export async function overlayText(): Promise<string> {
-  return await overlayExecute<string>('return document.body?.innerText ?? \'\'')
+  await switchToDesktopOverlay()
+  return await browser.execute(() => document.body?.innerText ?? '')
 }
 
 /** Read Sub2API state through the same isolated preload bridge used by the UI. */
 export async function sub2apiSnapshot(): Promise<Sub2ApiSnapshot | undefined> {
-  return await overlayExecute<Sub2ApiSnapshot | undefined>(`
-    return await window.dshDesktop?.sub2ApiGetSnapshot()
-  `)
+  await switchToDesktopOverlay()
+  return await browser.execute(async () => {
+    const desktopWindow = window as typeof window & {
+      dshDesktop?: { sub2ApiGetSnapshot: () => Promise<Sub2ApiSnapshot> }
+    }
+    return await desktopWindow.dshDesktop?.sub2ApiGetSnapshot()
+  })
 }
 
 /** Read the one product BrowserWindow rather than an overlay CDP target. */
@@ -292,8 +321,13 @@ export async function connectTemporaryWorkspace(): Promise<void> {
 }
 
 /** Select the Sub2API model in the composer and wait for one real reply. */
-export async function selectModelAndSend(model: string, prompt: string, expected: string): Promise<void> {
-  await switchToSessionSurface()
+export async function selectModelAndSend(
+  model: string,
+  prompt: string,
+  expected: string,
+  sessionUrl: string,
+): Promise<void> {
+  await switchToSessionSurface(sessionUrl)
   const triggerSelector = 'button[aria-label^="选择模型"], button[aria-label^="Select model"]'
   const trigger = browser.$(triggerSelector)
   await trigger.waitForClickable({ timeout: 30_000 })
@@ -392,16 +426,6 @@ async function isDescendantProcess(pid: number, ownerPid: number): Promise<boole
     current = parent
   }
   return false
-}
-
-async function overlayExecute<T>(source: string): Promise<T> {
-  const value = await browser.electron.execute(async (electron, script) => {
-    const contents = electron.webContents.getAllWebContents()
-      .find(entry => entry.getURL().includes('dsh-desktop-overlay=1'))
-    if (contents === undefined) return undefined
-    return await contents.executeJavaScript(`(async () => { ${script} })()`) as unknown
-  }, source)
-  return value as T
 }
 
 async function adminJson<T = unknown>(origin: string, path: string, init?: RequestInit): Promise<T> {

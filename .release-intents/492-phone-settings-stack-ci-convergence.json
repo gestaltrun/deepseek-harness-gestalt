@@ -1,0 +1,28 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "492-phone-settings-stack-ci-convergence",
+  "summary": {
+    "en": "Align Phone Devices Web snapshots and cross-platform CI fixtures without changing product runtime behavior.",
+    "zh": "校准手机设备 Web 快照与跨平台 CI fixture，不改变产品运行时行为。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "desktop",
+      "reason": "Only Web goldens, test fixtures, coverage scheduling, runner tests, and their decision record change; Desktop production and packaging inputs are unchanged."
+    },
+    {
+      "releaseUnit": "mobile",
+      "reason": "Only Web goldens, test fixtures, coverage scheduling, runner tests, and their decision record change; Mobile production and build inputs are unchanged."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "Only Web goldens, test fixtures, coverage scheduling, runner tests, and their decision record change; Platform production, deployment, and wire inputs are unchanged."
+    }
+  ]
+}

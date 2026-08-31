@@ -16,6 +16,9 @@
     - button "浏览器":
       - img
       - text: 浏览器
+    - button "手机设备":
+      - img
+      - text: 手机设备
     - button "手机配对":
       - img
       - text: 手机配对

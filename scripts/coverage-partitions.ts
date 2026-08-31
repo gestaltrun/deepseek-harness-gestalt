@@ -33,6 +33,7 @@ export const coveragePersistentStateSuites = [
 
 /** Process-bound suites that must not overlap other instrumented processes. */
 export const coverageProcessBoundSuites = [
+  'apps/desktop/tests/overlay-boot.spec.ts',
   'packages/attachment/attachment-local/tests/normalization.spec.ts',
   'packages/shell/pwsh-local/tests/executor.spec.ts',
   'packages/shell/pwsh-sandbox/tests/sandbox.spec.ts',

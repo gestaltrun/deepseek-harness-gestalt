@@ -7092,6 +7092,12 @@ importers:
         specifier: workspace:^
         version: link:../../subprocess/subprocess
 
+  packages/phone/phone-environment-ios:
+    devDependencies:
+      '@deepseek-ai/dsh-subprocess':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess
+
   packages/phone/phone-runtime:
     dependencies:
       '@deepseek-ai/schemastery':

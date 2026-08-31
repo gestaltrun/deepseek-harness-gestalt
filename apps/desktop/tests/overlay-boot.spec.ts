@@ -15,6 +15,7 @@ describe('Desktop overlay composed boot', () => {
     const launch = resolveExampleLaunch({
       srcBin: join(repo, 'apps', 'cli', 'src', 'bin.ts'),
       configArgs: ['web', '--patch', join(here, '..', 'cordis.patch.yml'), '--port', '0'],
+      mode: 'lib',
       tsconfigPath: join(repo, 'tsconfig.base.json'),
     })
     let running: RunningWebHost | undefined
@@ -43,6 +44,7 @@ describe('Desktop overlay composed boot', () => {
     const launch = resolveExampleLaunch({
       srcBin: join(repo, 'apps', 'cli', 'src', 'bin.ts'),
       configArgs: ['web', '--patch', join(here, '..', 'cordis.patch.yml'), '--port', '0'],
+      mode: 'lib',
       tsconfigPath: join(repo, 'tsconfig.base.json'),
     })
     let running: RunningWebHost | undefined

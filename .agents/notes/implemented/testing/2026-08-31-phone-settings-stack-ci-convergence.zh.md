@@ -8,7 +8,7 @@ Status: implemented
 
 「手机设备」设置分区会改变组装后的 Web 设置导航，并从「插件」中移除手机卡片。既有 Web golden 描述的是旧组合，因此首个不一致会让设置弹窗保持打开，后续用例再因指针被遮挡而失败，掩盖最初的快照差异。
 
-release family fixture 还会创建缺少 source map 的动态 client bundle，不满足 client build record 的要求。Desktop overlay boot 会启动完整 Host 子进程，V8 插桩 coverage 无法观测这些子进程；在该插桩下，托管 Linux 与 Windows 都未到达 URL 宣布。移除插桩和 worker 竞争仍不足以解决问题：全新的 Windows runner 仍直接运行聚焦 Vitest 命令，却没有先生成这条产物面测试会消费的仓库产物。本地 standalone 通过时复用了既有产物，因此没有复现 clean runner 状态。Electron runner 日志测试则假设父进程退出后后代仍保留继承 pipe；这是 POSIX 行为，不是可移植的 Windows 日志契约。
+release family fixture 还会创建缺少 source map 的动态 client bundle，不满足 client build record 的要求。Desktop overlay boot 会启动完整 Host 子进程，V8 插桩 coverage 无法观测这些子进程；在该插桩下，托管 Linux 与 Windows 都未到达 URL 宣布。移除插桩和 worker 竞争仍不足以解决问题：全新的 Windows runner 仍直接运行聚焦 Vitest 命令，却没有先生成这条产物面测试会消费的仓库产物。本地 standalone 通过时复用了既有产物，因此没有复现 clean runner 状态。选择构建后的 CLI 又暴露出 CLI 安装闭包漏掉 `@deepseek-ai/dsh-phone-stream`，尽管启用手机后端时 Desktop overlay 会挂载它。Electron runner 日志测试则假设父进程退出后后代仍保留继承 pipe；这是 POSIX 行为，不是可移植的 Windows 日志契约。
 
 手机二进制发现测试还使用 POSIX 分隔符拼接临时 `PATH`，让 POSIX npm prefix 与 Homebrew 预期继承 runner 平台，并在未解析服务场景中保留 `USERPROFILE` 和 `npm_config_prefix`。这些输入导致 Windows coverage 实际检查的搜索空间与各测试声明的不一致。
 
@@ -16,7 +16,7 @@ release family fixture 还会创建缺少 source map 的动态 client bundle，�
 
 受影响的 Web golden 包含顶层「手机设备」导航行，并且不再在「插件」中包含手机卡片。刷新后以 replay 模式运行全部受影响文件，证明更新 golden 没有掩盖交互失败。
 
-release family fixture 会先创建动态 client bundle 与最小有效 source map，再记录产物摘要。Desktop overlay 组合启动归入 `coverageExemptIsolatedSuites`：插桩门禁排除它，随后由 `gestalt:overlay-boot` 产物面命令执行完整构建，再以单 worker 运行两条场景。Linux 会等插桩 coverage 与共享 heavy 门禁都结束后启动该命令；原生 Windows owner 则在自己的共享 heavy 门禁结束后启动。该套件不会贡献子进程覆盖率；它在当前进程导入的 launcher 源码仍由各自所属测试保持完整覆盖。client apply 套件还覆盖 ready 设置快照缺少 Phone namespace 值时的组合启用回退。
+release family fixture 会先创建动态 client bundle 与最小有效 source map，再记录产物摘要。Desktop overlay 组合启动归入 `coverageExemptIsolatedSuites`：插桩门禁排除它，随后由 `gestalt:overlay-boot` 产物面命令执行完整构建，再以单 worker 和显式 `lib` 启动运行两条场景。CLI manifest 声明 phone stream，确保 profile module healing 纳入 Desktop overlay 可能挂载的全部插件。Linux 会等插桩 coverage 与共享 heavy 门禁都结束后启动该命令；原生 Windows owner 则在自己的共享 heavy 门禁结束后启动。该套件不会贡献子进程覆盖率；它在当前进程导入的 launcher 源码仍由各自所属测试保持完整覆盖。client apply 套件还覆盖 ready 设置快照缺少 Phone namespace 值时的组合启用回退。
 
 `runLogged` 在所有平台验证直接子进程的延迟 stdout 与 stderr 都完成持久化。独立的 POSIX-only 测试保留更强的后代继承 pipe 义务；Windows 进程树终止继续通过 `taskkill /t` 行为覆盖，不依赖 pipe 继承假设。
 

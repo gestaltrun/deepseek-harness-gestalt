@@ -150,6 +150,8 @@ describe('assembled keyless Project Members acceptance', () => {
         },
         originSessionId: parseCompanionSessionId(originSessionId),
       })
+      expect((await platform.heartbeat(b1)).status).toBe(204)
+      expect((await platform.heartbeat(b2)).status).toBe(204)
       const expired = aCtx.memberQuestionSender.send(terminalPayload('session-a1-expired', 'Expire assembled ask'))
       await expect(expired).rejects.toMatchObject({ code: 'QUESTION_EXPIRED' })
       await expect.poll(async () => (await receiverB2.snapshot()).terminal.some(row => (

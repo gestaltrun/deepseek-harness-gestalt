@@ -56,6 +56,13 @@ function operation(questionId: string, operationId: string, projectId: string) {
   }
 }
 
+function documents() {
+  return [{
+    path: 'docs/receiver-decision.md',
+    bytes: new TextEncoder().encode('# Receiver decision\n\nUse a reversible release channel.\n'),
+  }]
+}
+
 function bindReceiverWorkspace(
   receiver: MemberQuestionReceiverService,
   projectId: string,
@@ -129,6 +136,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
     try {
       const first = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: documents(),
         operation: operation('mq-web-host-1', 'mq-web-operation-1', projectId),
       })
       expect(first.receivingSessionId).not.toMatch(/^mq-recv:/u)
@@ -165,6 +173,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
 
       await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: documents(),
         operation: operation('mq-web-host-2', 'mq-web-operation-2', projectId),
       })
       const secondCard = page.locator('[data-question-key]').filter({ has: page.locator('[data-member-presentation]') })
@@ -180,6 +189,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
 
       const third = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: documents(),
         operation: operation('mq-web-host-3', 'mq-web-operation-3', projectId),
       })
       expect(third.receivingSessionId).toBe(first.receivingSessionId)
@@ -300,6 +310,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await bindReceiverWorkspace(service, 'project-host-restart', workspace.id)
       const arrived = await createAuthenticatedMemberQuestionIngress(service)({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: documents(),
         operation: operation('mq-web-host-restart', 'mq-operation-host-restart', 'project-host-restart'),
       })
       const rpcId = 'rpc-post-prompt-host-restart'
@@ -386,6 +397,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await bindReceiverWorkspace(service, 'project-lost-response', workspace.id)
       const arrived = await createAuthenticatedMemberQuestionIngress(service)({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: documents(),
         operation: operation('mq-web-lost-response', 'mq-operation-lost-response', 'project-lost-response'),
       })
       const faultRow = sessionRow(faultPage, 'Project Atlas — Receiver launch decision')
@@ -434,6 +446,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await bindReceiverWorkspace(faultReceiver, 'project-terminal-retry', workspace.id)
       const arrived = await createAuthenticatedMemberQuestionIngress(faultReceiver)({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: documents(),
         operation: operation('mq-web-terminal-retry', 'mq-operation-terminal-retry', 'project-terminal-retry'),
       })
       await faultReceiver.admitHumanTurn({
@@ -500,6 +513,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       const ingress = createAuthenticatedMemberQuestionIngress(faultReceiver)
       const arrived = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: documents(),
         operation: operation(`mq-web-${stage}`, `mq-operation-${stage}`, `project-${stage}`),
       })
       const request = {

@@ -16,7 +16,9 @@ describe('PhoneRuntimeBar', () => {
     />)
     expect(screen.getByText(/未准备 · v1.0.5 · 5.2 MB/)).toBeTruthy()
     expect(screen.getByText(/安装到 \$DSH_HOME\/phone/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '准备 mobilecli' }))
+    const prepare = screen.getByRole('button', { name: '准备 mobilecli' })
+    expect(prepare.className).toContain('primary')
+    fireEvent.click(prepare)
     expect(onPrepare).toHaveBeenCalledOnce()
   })
 
@@ -29,7 +31,9 @@ describe('PhoneRuntimeBar', () => {
       onRefresh={() => {}}
     />)
     expect(screen.getByRole('progressbar', { name: 'mobilecli 下载进度' })).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    const cancel = screen.getByRole('button', { name: '取消' })
+    expect(cancel.className).toContain('outline')
+    fireEvent.click(cancel)
     expect(onCancel).toHaveBeenCalledOnce()
 
     const onRefresh = vi.fn()

@@ -1,6 +1,7 @@
 /** Shared managed-mobilecli row above the Android and iOS preparation sections. */
 
 import type { ReactNode } from 'react'
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PhoneManagedRuntimeView } from './phone-runtime-source.ts'
 import css from './PhoneRuntimeBar.module.css'
 
@@ -27,10 +28,10 @@ export function PhoneRuntimeBar(props: PhoneRuntimeBarProps): ReactNode {
         <progress max={runtime.totalBytes} value={runtime.receivedBytes} aria-label="mobilecli 下载进度" />
       )}
       {busy
-        ? <button type="button" onClick={props.onCancel}>取消</button>
+        ? <Button variant="outline" onClick={props.onCancel}>取消</Button>
         : runtime.kind === 'ready'
-          ? <button type="button" onClick={props.onRefresh}>重新检测</button>
-          : <button type="button" onClick={props.onPrepare}>准备 mobilecli</button>}
+          ? <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
+          : <Button variant="primary" onClick={props.onPrepare}>准备 mobilecli</Button>}
     </article>
   )
 }

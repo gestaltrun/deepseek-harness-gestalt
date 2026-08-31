@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url'
 import tsconfigPaths from 'vite-tsconfig-paths'
 import { defineConfig } from 'vitest/config'
 import { standardDecoratorPlugin, vitestExecArgv } from './vitest.shared.ts'
-import { COVERAGE_EXEMPT_ENV, coverageExemptHeavySuites } from './scripts/coverage-exempt.ts'
+import { COVERAGE_EXEMPT_ENV, coverageExemptSuites } from './scripts/coverage-exempt.ts'
 import {
   COVERAGE_EXCLUSIVE_MODE_ENV,
   COVERAGE_PARTITION_MODE_ENV,
@@ -102,15 +102,15 @@ const testIncludes = [
   'scripts/**/*.spec.ts',
 ]
 
-// The instrumented coverage gate sets this env; the exempt heavy suites then
-// run beside it uninstrumented (membership contract in scripts/coverage-exempt.ts).
+// The instrumented coverage gate sets this env; separate uninstrumented gates
+// retain the exempt suites (membership contract in scripts/coverage-exempt.ts).
 // A set-but-not-'1' value is a misconfiguration, not a silent no-op.
 const coverageExemptRaw = process.env[COVERAGE_EXEMPT_ENV]
 if (coverageExemptRaw !== undefined && coverageExemptRaw !== '' && coverageExemptRaw !== '1') {
   throw new Error(`vitest config: ${COVERAGE_EXEMPT_ENV} must be '1' or unset, got ${JSON.stringify(coverageExemptRaw)}.`)
 }
 const coverageExemptExcludes = coverageExemptRaw === '1'
-  ? coverageExemptHeavySuites.map(suite => suite.exclude)
+  ? coverageExemptSuites.map(suite => suite.exclude)
   : []
 
 const coveragePartitionRaw = process.env[COVERAGE_PARTITION_MODE_ENV]

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { coverageExemptHeavySuites } from './coverage-exempt.ts'
+import { coverageExemptHeavySuites, coverageExemptIsolatedSuites } from './coverage-exempt.ts'
 import {
   defaultConcurrency,
   formatGateResultReason,
@@ -224,7 +224,11 @@ describe('gate graph validation', () => {
       'built-package-invariants',
       'built-bin-smoke',
     ])
-    expect(coverage.map(gate => gate.id)).toEqual(['coverage', 'coverage-exempt-heavy'])
+    expect(coverage.map(gate => gate.id)).toEqual([
+      'coverage',
+      'coverage-exempt-heavy',
+      'coverage-exempt-isolated',
+    ])
     expect(staticGates.map(gate => gate.id)).not.toContain('doc-typecheck')
     expect(staticGates.map(gate => gate.id)).not.toContain('docs-site-build')
     expect(staticGates.map(gate => gate.id)).toContain('duplication')
@@ -245,9 +249,11 @@ describe('gate graph validation', () => {
     'keeps %s coverage free of a workspace-build dependency',
     (mode) => {
       const gates = withPnpmEntrypoint(() => gatesForMode(mode))
-      for (const id of ['coverage', 'coverage-exempt-heavy']) {
+      for (const id of ['coverage', 'coverage-exempt-heavy', 'coverage-exempt-isolated']) {
         expect(gates.find(subject => subject.id === id)?.needs).toBeUndefined()
       }
+      expect(gates.find(subject => subject.id === 'coverage-exempt-isolated')?.after)
+        .toEqual(['coverage', 'coverage-exempt-heavy'])
     },
   )
 
@@ -255,7 +261,7 @@ describe('gate graph validation', () => {
     const gates = withEnv('DSH_COVERAGE_TEST_TIMEOUT_MS', '15000', () =>
       withPnpmEntrypoint(() => gatesForMode('ci-windows-complete')))
 
-    for (const id of ['coverage', 'coverage-exempt-heavy']) {
+    for (const id of ['coverage', 'coverage-exempt-heavy', 'coverage-exempt-isolated']) {
       expect(gates.find(subject => subject.id === id)?.args).toEqual(expect.arrayContaining([
         '--testTimeout=15000',
         '--expect.poll.timeout=15000',
@@ -267,7 +273,7 @@ describe('gate graph validation', () => {
     const gates = withEnv('DSH_COVERAGE_TEST_TIMEOUT_MS', undefined, () =>
       withPnpmEntrypoint(() => gatesForMode('ci-windows-complete')))
 
-    for (const id of ['coverage', 'coverage-exempt-heavy']) {
+    for (const id of ['coverage', 'coverage-exempt-heavy', 'coverage-exempt-isolated']) {
       expect(gates.find(subject => subject.id === id)?.args).not.toEqual(expect.arrayContaining([
         expect.stringMatching(/^--(?:testTimeout|expect\.poll\.timeout)=/),
       ]))
@@ -307,11 +313,19 @@ describe('gate graph validation', () => {
     const gates = withEnv('DSH_COVERAGE_MAX_WORKERS', '8', () =>
       withPnpmEntrypoint(() => gatesForMode('ci-windows-native-coverage-exempt')))
 
-    expect(gates.map(gate => gate.id)).toEqual(['coverage-exempt-heavy'])
+    expect(gates.map(gate => gate.id)).toEqual([
+      'coverage-exempt-heavy',
+      'coverage-exempt-isolated',
+    ])
     expect(gates[0]?.args).toContain('--maxWorkers=6')
     expect(gates[0]?.args).toEqual(expect.arrayContaining(
       coverageExemptHeavySuites.map(suite => suite.filter),
     ))
+    expect(gates[1]?.args).toEqual(expect.arrayContaining([
+      ...coverageExemptIsolatedSuites.map(suite => suite.filter),
+      '--maxWorkers=1',
+    ]))
+    expect(gates[1]?.after).toEqual(['coverage-exempt-heavy'])
   })
 
   it('rejects an invalid coverage partition count before starting a gate', () => {

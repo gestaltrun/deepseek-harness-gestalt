@@ -57,7 +57,6 @@ describe('Sub2API Desktop installation', () => {
     expect(consoleWindow.text).toContain('Sub2API')
     expect((await mainWindowSnapshot()).url).toBe(hostSurface.url)
     await clickOverlayButton(['关闭账号台', 'Close account console'])
-    await clickOverlayButton(['关闭', 'Close'])
     await waitForSessionSurface(hostSurface.url)
     await connectTemporaryWorkspace()
     const expected = 'DSH445_MODEL_OK_7F3A'

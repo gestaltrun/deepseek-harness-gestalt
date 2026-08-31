@@ -473,6 +473,9 @@ importers:
       '@deepseek-ai/dsh-noise-channel':
         specifier: workspace:^
         version: link:../../packages/platform/noise-channel
+      '@deepseek-ai/dsh-phone-environment':
+        specifier: workspace:^
+        version: link:../../packages/phone/phone-environment
       '@deepseek-ai/dsh-phone-runtime':
         specifier: workspace:^
         version: link:../../packages/phone/phone-runtime
@@ -2235,9 +2238,6 @@ importers:
       '@deepseek-ai/dsh-request-trust':
         specifier: workspace:^
         version: link:../../util/request-trust
-      '@deepseek-ai/dsh-subprocess':
-        specifier: workspace:^
-        version: link:../../subprocess/subprocess
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
@@ -7057,6 +7057,9 @@ importers:
       '@deepseek-ai/dsh-request-trust':
         specifier: workspace:^
         version: link:../../util/request-trust
+      '@deepseek-ai/dsh-subprocess':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess
 
   packages/phone/phone-runtime:
     dependencies:

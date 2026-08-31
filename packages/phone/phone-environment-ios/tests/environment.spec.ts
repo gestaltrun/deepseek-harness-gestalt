@@ -69,6 +69,17 @@ function result(code = 0, stdout = '', stderr = ''): IosCommandResult {
 }
 
 describe('iOS environment manager', () => {
+  it('reserves operation ownership before checking-state notification', async () => {
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner: new FixtureRunner('ready') })
+    let reentry: Promise<unknown> | undefined
+    manager.onChanged((state) => {
+      if (state.kind !== 'checking' || reentry !== undefined) return
+      reentry = manager.refresh()
+      void reentry.catch(() => {})
+    })
+    await manager.refresh()
+    await expect(reentry).rejects.toMatchObject({ code: 'PHONE_IOS_BUSY' })
+  })
   it.each([
     ['win32', 'Windows'],
     ['linux', 'Linux'],
@@ -144,6 +155,25 @@ describe('iOS environment manager', () => {
     })
   })
 
+  it.each([
+    [{ code: 0, signal: 'SIGTERM', timedOut: false }, /SIGTERM/u],
+    [{ code: 0, signal: null, timedOut: true }, /timed out/u],
+    [{ code: 0, signal: null, timedOut: false, terminationError: 'termination facts failed' }, /termination facts failed/u],
+  ] as const)('rejects contradictory successful download exit facts', async (facts, message) => {
+    const fixture = new FixtureRunner('runtime')
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => command === 'xcodebuild' && args[0] === '-downloadPlatform'
+        ? { ...result(0), ...facts }
+        : await fixture.run(command, args, options),
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await manager.refresh()
+    await expect(manager.prepare()).rejects.toMatchObject({
+      code: 'PHONE_IOS_RUNTIME_DOWNLOAD', message: expect.stringMatching(message),
+    })
+    expect(manager.snapshot()).toMatchObject({ kind: 'failed', code: 'PHONE_IOS_RUNTIME_DOWNLOAD' })
+  })
+
   it('cancels the controlled download and restores the last actionable state', async () => {
     const fixture = new FixtureRunner('runtime')
     let downloadStarted!: () => void
@@ -191,5 +221,49 @@ describe('iOS environment manager', () => {
       command: 'xcrun', args: ['simctl', 'shutdown', '8294A429-4C99-411F-A46D-0AD9499B7FDD'],
     })
     expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
+  })
+
+  it('retains Simulator ownership until a failed shutdown can be retried', async () => {
+    const fixture = new FixtureRunner('no-simulator')
+    let shutdowns = 0
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => {
+        if (command !== 'xcrun' || args[1] !== 'shutdown') return await fixture.run(command, args, options)
+        shutdowns += 1
+        return shutdowns === 1 ? result(1, '', 'shutdown temporarily failed') : await fixture.run(command, args, options)
+      },
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await manager.prepare()
+    await manager.start()
+    await expect(manager.deactivate()).rejects.toMatchObject({ code: 'PHONE_IOS_SHUTDOWN' })
+    expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: true })
+    await expect(manager.deactivate()).resolves.toBeUndefined()
+    expect(shutdowns).toBe(2)
+    expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
+  })
+
+  it('does not take ownership when simctl reports that another owner already booted the Simulator', async () => {
+    const fixture = new FixtureRunner('no-simulator')
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => command === 'xcrun' && args[1] === 'boot'
+        ? result(149, '', 'Unable to boot device in current state: Booted')
+        : await fixture.run(command, args, options),
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await manager.prepare()
+    await expect(manager.start()).resolves.toMatchObject({ kind: 'ready', running: true })
+    await manager.deactivate()
+    expect(fixture.calls.some(call => call.command === 'xcrun' && call.args[1] === 'shutdown')).toBe(false)
+    expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: true })
+  })
+
+  it('preserves the running fact for a user-owned Simulator during deactivate', async () => {
+    const fixture = new FixtureRunner('ready')
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner: fixture })
+    await manager.refresh()
+    await manager.deactivate()
+    expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: true })
+    expect(fixture.calls.some(call => call.command === 'xcrun' && call.args[1] === 'shutdown')).toBe(false)
   })
 })

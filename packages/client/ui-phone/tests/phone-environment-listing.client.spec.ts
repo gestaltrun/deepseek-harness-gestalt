@@ -106,7 +106,8 @@ describe('createListingPhoneEnvironmentSource', () => {
     const source = createListingPhoneEnvironmentSource(listing)
     await source.redetect()
     expect(source.getView()).toEqual({ kind: 'errors', errors: [MOBILECLI_MISSING_ERROR] })
-    expect(MOBILECLI_MISSING_ERROR.command).toBe('npm install -g mobilecli@latest')
+    expect(MOBILECLI_MISSING_ERROR).toMatchObject({ nextAction: '准备 mobilecli' })
+    expect(MOBILECLI_MISSING_ERROR.command).toBeUndefined()
   })
 
   it('notifies subscribers when a pull settles', async () => {

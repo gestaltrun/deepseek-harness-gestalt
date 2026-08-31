@@ -12,7 +12,7 @@ Status: implemented
 
 `phone-environment-ios` 向稳定 `phoneEnvironment` 服务注册一个平台提供方。Host `process.platform` 是权威事实：Windows 与 Linux 发布稳定的不可用状态，绝不运行 iOS 子进程。macOS 上的提供方探测已选中的完整 Xcode 应用、许可接受、首次启动组件、可用 iOS 运行时、iPhone 设备类型和模拟器清单。
 
-只有 Xcode、许可和首次启动前提都完成后，提供方才运行 `xcodebuild -downloadPlatform iOS`。它选择最新的可用 iOS 运行时和 iPhone 设备类型，创建一台 `DSH Gestalt iPhone`，并通过 `simctl` 启动。一个控制器在首个异步命令前预留操作。取消会恢复最近一个可操作状态，进程退出事实保持独立，关闭功能或 teardown 只关闭由提供方启动的模拟器。
+只有 Xcode、许可和首次启动前提都完成后，提供方才运行 `xcodebuild -downloadPlatform iOS`。它选择最新的可用 iOS 运行时和 iPhone 设备类型，创建一台 `DSH Gestalt iPhone`，并通过 `simctl` 启动。一个控制器会在首次通知或异步命令前预留操作。取消会恢复最近一个可操作状态，timeout、signal、退出码、终止错误与输出溢出事实保持独立。模拟器 JSON 使用一 MiB 的 fail-loud 上限，让普通 `simctl` 清单能够完整保留。关闭功能或 teardown 只关闭由提供方成功启动的模拟器，在关闭成功前保留所有权，并为外部启动的模拟器保留运行事实。
 
 Xcode 安装或更新、Apple 许可接受、首次启动授权、Apple ID、系统权限、真机解锁与信任、开发者模式、签名身份和预置描述文件都保持人工处理。产品文案把手机侧组件称为「设备控制代理」，不承诺某一种上游内部实现。
 

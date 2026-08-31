@@ -37,8 +37,8 @@ export function planIosEnvironment(platform: string, probe?: IosInstallationProb
     developerDir: probe.developerDir,
     xcodeVersion: probe.xcodeVersion,
     simulatorName: IOS_SIMULATOR_NAME,
-    ...(runtime === undefined ? {} : { runtime }),
-    ...(deviceType === undefined ? {} : { deviceType }),
+    ...(runtime === undefined ? {} : { runtime: Object.freeze({ ...runtime }) }),
+    ...(deviceType === undefined ? {} : { deviceType: Object.freeze({ ...deviceType }) }),
   })
   if (runtime === undefined) return { kind: 'runtime-missing', plan }
   if (deviceType === undefined) return {

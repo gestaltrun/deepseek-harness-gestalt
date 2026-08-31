@@ -219,20 +219,19 @@ describe('PhoneSettingsCard six states', () => {
     expect(onNextAction).toHaveBeenCalledWith('wda-unbuilt')
   })
 
-  it('renders the mobilecli-missing row with the install command', () => {
+  it('renders the mobilecli-missing row with managed preparation guidance', () => {
     renderCard({
       kind: 'errors',
       errors: [{
         kind: 'mobilecli-missing',
         title: '未找到 mobilecli',
-        detail: 'Host 已启动，但无法解析 mobilecli 可执行文件。安装后重新检测：',
-        nextAction: '下一步动作',
-        command: 'npm install -g mobilecli@latest',
+        detail: 'Host 已启动，但无法解析 mobilecli 可执行文件。使用本页的「准备 mobilecli」完成一键准备。',
+        nextAction: '准备 mobilecli',
       }],
     })
     expect(screen.getByText('未找到 mobilecli')).toBeTruthy()
-    expect(screen.getByText('npm install -g mobilecli@latest')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '下一步动作' })).toBeTruthy()
+    expect(screen.queryByText('npm install -g mobilecli@latest')).toBeNull()
+    expect(screen.getByRole('button', { name: '准备 mobilecli' })).toBeTruthy()
   })
 
   it('renders the missing-service probe-failed row with the same next-action verb', () => {

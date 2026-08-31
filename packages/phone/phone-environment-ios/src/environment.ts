@@ -8,6 +8,7 @@ import { nodeIosCommandRunner, type IosCommandResult, type IosCommandRunner } fr
 
 const COMMAND_TIMEOUT_MS = 15 * 60_000
 const BOOT_TIMEOUT_MS = 5 * 60_000
+const SIMCTL_JSON_MAX_BYTES = 1024 * 1024
 
 /** Stable iOS preparation failure consumed by the Host snapshot. */
 export class IosEnvironmentError extends Error {
@@ -120,8 +121,11 @@ export class IosEnvironmentManager {
     const active = this.operation
     active?.controller.abort(new IosEnvironmentError('PHONE_IOS_ABORTED', 'iOS environment operation cancelled'))
     await active?.task.catch(() => {})
+    const ownedDeviceId = this.ownedDeviceId
     await this.stopOwnedSimulator()
-    if (this.current.kind === 'ready') this.publish({ ...this.current, running: false })
+    if (ownedDeviceId !== undefined && this.current.kind === 'ready' && this.current.deviceId === ownedDeviceId) {
+      this.publish({ ...this.current, running: false })
+    }
   }
 
   private startOperation(
@@ -135,7 +139,7 @@ export class IosEnvironmentManager {
     const signal = ownerSignal === undefined
       ? controller.signal
       : AbortSignal.any([controller.signal, ownerSignal])
-    const task = work(signal).catch(async (error: unknown) => {
+    const task = Promise.resolve().then(async () => await work(signal)).catch(async (error: unknown) => {
       let failure = signal.aborted
         ? signal.reason instanceof IosEnvironmentError
           ? signal.reason
@@ -216,10 +220,12 @@ export class IosEnvironmentManager {
       env: this.commandEnvironment(state.plan.developerDir), signal, timeoutMs: COMMAND_TIMEOUT_MS,
     })
     signal.throwIfAborted()
-    if (boot.code !== 0 && !/current state:\s*Booted/iu.test(`${boot.stdout}\n${boot.stderr}`)) {
+    const alreadyBooted = normalExitFacts(boot) && boot.code !== 0
+      && /current state:\s*Booted/iu.test(`${boot.stdout}\n${boot.stderr}`)
+    if (!commandSucceeded(boot) && !alreadyBooted) {
       throw commandFailure('PHONE_IOS_SIMULATOR_BOOT', 'simctl boot', boot)
     }
-    this.ownedDeviceId = state.deviceId
+    if (commandSucceeded(boot)) this.ownedDeviceId = state.deviceId
     await this.requireSuccess(
       'xcrun', ['simctl', 'bootstatus', state.deviceId, '-b'], signal,
       'PHONE_IOS_SIMULATOR_BOOT', 'simctl bootstatus', BOOT_TIMEOUT_MS,
@@ -240,6 +246,7 @@ export class IosEnvironmentManager {
       env: this.commandEnvironment(), signal, timeoutMs: COMMAND_TIMEOUT_MS,
     })
     signal.throwIfAborted()
+    requireNormalExitFacts('PHONE_IOS_XCODE_SELECT', 'xcode-select -p', selected)
     const developerDir = selected.stdout.trim()
     if (selected.code !== 0 || !/\.app\/Contents\/Developer\/?$/u.test(developerDir)) {
       const missing = planIosEnvironment('darwin')
@@ -250,6 +257,7 @@ export class IosEnvironmentManager {
       env: this.commandEnvironment(developerDir), signal, timeoutMs: COMMAND_TIMEOUT_MS,
     })
     signal.throwIfAborted()
+    requireNormalExitFacts('PHONE_IOS_XCODE_VERSION', 'xcodebuild -version', version)
     const xcodeVersion = /^Xcode\s+(.+)$/mu.exec(version.stdout)?.[1]?.trim()
     if (version.code !== 0 || xcodeVersion === undefined) {
       this.publish({
@@ -262,12 +270,16 @@ export class IosEnvironmentManager {
       env: this.commandEnvironment(developerDir), signal, timeoutMs: COMMAND_TIMEOUT_MS,
     })
     signal.throwIfAborted()
+    requireNormalExitFacts('PHONE_IOS_XCODE_LICENSE', 'xcodebuild -license check', license)
     const firstLaunch = license.code === 0
       ? await this.runner.run('xcodebuild', ['-checkFirstLaunchStatus'], {
         env: this.commandEnvironment(developerDir), signal, timeoutMs: COMMAND_TIMEOUT_MS,
       })
       : undefined
     signal.throwIfAborted()
+    if (firstLaunch !== undefined) {
+      requireNormalExitFacts('PHONE_IOS_XCODE_FIRST_LAUNCH', 'xcodebuild -checkFirstLaunchStatus', firstLaunch)
+    }
     const probeBase = {
       developerDir, xcodeVersion, licenseAccepted: license.code === 0,
       firstLaunchComplete: firstLaunch?.code === 0,
@@ -291,7 +303,7 @@ export class IosEnvironmentManager {
   private async readRuntimes(developerDir: string, signal: AbortSignal): Promise<readonly IosRuntime[]> {
     const result = await this.requireSuccess(
       'xcrun', ['simctl', 'list', 'runtimes', '--json'], signal,
-      'PHONE_IOS_SIMCTL', 'simctl list runtimes', COMMAND_TIMEOUT_MS, developerDir,
+      'PHONE_IOS_SIMCTL', 'simctl list runtimes', COMMAND_TIMEOUT_MS, developerDir, SIMCTL_JSON_MAX_BYTES,
     )
     const root = jsonRecord(result.stdout, 'simctl runtimes')
     if (!Array.isArray(root.runtimes)) throw protocolError('simctl runtimes omitted runtimes')
@@ -309,7 +321,7 @@ export class IosEnvironmentManager {
   private async readDeviceTypes(developerDir: string, signal: AbortSignal): Promise<readonly IosDeviceType[]> {
     const result = await this.requireSuccess(
       'xcrun', ['simctl', 'list', 'devicetypes', '--json'], signal,
-      'PHONE_IOS_SIMCTL', 'simctl list devicetypes', COMMAND_TIMEOUT_MS, developerDir,
+      'PHONE_IOS_SIMCTL', 'simctl list devicetypes', COMMAND_TIMEOUT_MS, developerDir, SIMCTL_JSON_MAX_BYTES,
     )
     const root = jsonRecord(result.stdout, 'simctl device types')
     if (!Array.isArray(root.devicetypes)) throw protocolError('simctl device types omitted devicetypes')
@@ -325,7 +337,7 @@ export class IosEnvironmentManager {
   private async readDevices(developerDir: string, signal: AbortSignal): Promise<readonly IosSimulator[]> {
     const result = await this.requireSuccess(
       'xcrun', ['simctl', 'list', 'devices', 'available', '--json'], signal,
-      'PHONE_IOS_SIMCTL', 'simctl list devices', COMMAND_TIMEOUT_MS, developerDir,
+      'PHONE_IOS_SIMCTL', 'simctl list devices', COMMAND_TIMEOUT_MS, developerDir, SIMCTL_JSON_MAX_BYTES,
     )
     const root = jsonRecord(result.stdout, 'simctl devices')
     const groups = objectAt(root.devices, 'devices')
@@ -354,12 +366,14 @@ export class IosEnvironmentManager {
     subject: string,
     timeoutMs = COMMAND_TIMEOUT_MS,
     developerDir?: string,
+    stdoutMaxBytes?: number,
   ): Promise<IosCommandResult> {
     const result = await this.runner.run(command, args, {
       env: this.commandEnvironment(developerDir), signal, timeoutMs,
+      ...(stdoutMaxBytes === undefined ? {} : { stdoutMaxBytes }),
     })
     signal.throwIfAborted()
-    if (result.code !== 0) throw commandFailure(code, subject, result)
+    if (!commandSucceeded(result)) throw commandFailure(code, subject, result)
     return result
   }
 
@@ -384,14 +398,16 @@ export class IosEnvironmentManager {
 
   private async stopOwnedSimulator(): Promise<void> {
     const ownedDeviceId = this.ownedDeviceId
-    this.ownedDeviceId = undefined
     if (ownedDeviceId === undefined || this.platform !== 'darwin') return
     const outcome = await this.runner.run('xcrun', ['simctl', 'shutdown', ownedDeviceId], {
       env: this.commandEnvironment(), timeoutMs: COMMAND_TIMEOUT_MS,
     })
-    if (outcome.code !== 0 && !/current state:\s*Shutdown/iu.test(`${outcome.stdout}\n${outcome.stderr}`)) {
+    const alreadyShutdown = normalExitFacts(outcome) && outcome.code !== 0
+      && /current state:\s*Shutdown/iu.test(`${outcome.stdout}\n${outcome.stderr}`)
+    if (!commandSucceeded(outcome) && !alreadyShutdown) {
       throw commandFailure('PHONE_IOS_SHUTDOWN', 'simctl shutdown', outcome)
     }
+    if (this.ownedDeviceId === ownedDeviceId) this.ownedDeviceId = undefined
   }
 }
 
@@ -435,10 +451,23 @@ function protocolError(message: string, cause?: unknown): IosEnvironmentError {
 
 function commandFailure(code: string, subject: string, result: IosCommandResult): IosEnvironmentError {
   const detail = tail(result.stderr || result.stdout)
-  const reason = result.timedOut ? 'timed out' : result.signal !== null
-    ? `exited by ${result.signal}`
-    : `failed with code ${String(result.code)}`
+  const reason = result.terminationError !== undefined ? result.terminationError
+    : result.timedOut ? 'timed out' : result.signal !== null
+      ? `exited by ${result.signal}`
+      : `failed with code ${String(result.code)}`
   return new IosEnvironmentError(code, `${subject} ${reason}${detail.length === 0 ? '' : `: ${detail}`}`)
+}
+
+function normalExitFacts(result: IosCommandResult): boolean {
+  return !result.timedOut && result.signal === null && result.terminationError === undefined
+}
+
+function commandSucceeded(result: IosCommandResult): boolean {
+  return normalExitFacts(result) && result.code === 0
+}
+
+function requireNormalExitFacts(code: string, subject: string, result: IosCommandResult): void {
+  if (!normalExitFacts(result)) throw commandFailure(code, subject, result)
 }
 
 function planOf(state: PhoneIosState): IosPreparationPlan | undefined {

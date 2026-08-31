@@ -95,9 +95,8 @@ export const PROBE_FAILED_ERROR: PhoneEnvironmentError = {
 export const MOBILECLI_MISSING_ERROR: PhoneEnvironmentError = {
   kind: 'mobilecli-missing',
   title: '未找到 mobilecli',
-  detail: 'Host 已启动，但无法解析 mobilecli 可执行文件。安装后重新检测：',
-  nextAction: '下一步动作',
-  command: 'npm install -g mobilecli@latest',
+  detail: 'Host 已启动，但无法解析 mobilecli 可执行文件。使用本页的「准备 mobilecli」完成一键准备。',
+  nextAction: '准备 mobilecli',
 }
 
 /**

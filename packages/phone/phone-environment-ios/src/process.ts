@@ -2,12 +2,15 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { childEnv } from '@deepseek-ai/dsh-subprocess'
 
 const STOP_GRACE_MS = 2_000
+const DEFAULT_STDOUT_MAX_BYTES = 16_384
+const STDERR_TAIL_BYTES = 16_384
 
 /** Independent exit facts from one bounded Xcode or simctl command. */
 export interface IosCommandResult {
   readonly code: number | null
   readonly signal: NodeJS.Signals | null
   readonly timedOut: boolean
+  readonly terminationError?: string
   readonly stdout: string
   readonly stderr: string
 }
@@ -17,6 +20,8 @@ export interface IosCommandOptions {
   readonly env: Readonly<Record<string, string>>
   readonly signal?: AbortSignal
   readonly timeoutMs?: number
+  /** Maximum stdout bytes retained before the child is terminated fail-loud. */
+  readonly stdoutMaxBytes?: number
 }
 
 /** Injectable process adapter used by production and official-layout fixtures. */
@@ -24,21 +29,38 @@ export interface IosCommandRunner {
   run(command: string, args: readonly string[], options: IosCommandOptions): Promise<IosCommandResult>
 }
 
+/** Injectable process-tree edges for bounded termination tests. */
+export interface IosProcessInternals {
+  /** Test-only grace per termination phase; production uses two seconds. */
+  readonly stopGraceMs?: number
+  /** Test-only process-group signal edge. */
+  readonly killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void
+}
+
 /**
  * Create the direct-spawn iOS command adapter with credential scrubbing and quiescent cancellation.
  * @returns the production-capable Xcode and simctl command runner.
  */
-export function createNodeIosCommandRunner(): IosCommandRunner {
+export function createNodeIosCommandRunner(internals: IosProcessInternals = {}): IosCommandRunner {
+  const stopGraceMs = internals.stopGraceMs ?? STOP_GRACE_MS
+  const killProcessGroup = internals.killProcessGroup ?? ((pid, signal) => { process.kill(-pid, signal) })
   return {
     run: async (command, args, options) => {
       options.signal?.throwIfAborted()
+      const stdoutMaxBytes = options.stdoutMaxBytes ?? DEFAULT_STDOUT_MAX_BYTES
+      if (!Number.isSafeInteger(stdoutMaxBytes) || stdoutMaxBytes < 1) {
+        throw new TypeError('iOS command stdoutMaxBytes must be a positive safe integer')
+      }
       const child = spawn(command, [...args], {
         env: childEnv(options.env),
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         detached: true,
       })
-      return await settleChild(child, options.signal, options.timeoutMs)
+      return await settleChild(
+        child, options.signal, options.timeoutMs, stdoutMaxBytes,
+        stopGraceMs, killProcessGroup,
+      )
     },
   }
 }
@@ -49,26 +71,58 @@ export const nodeIosCommandRunner: IosCommandRunner = createNodeIosCommandRunner
 async function settleChild(
   child: ChildProcess,
   signal: AbortSignal | undefined,
-  timeoutMs?: number,
+  timeoutMs: number | undefined,
+  stdoutMaxBytes: number,
+  stopGraceMs: number,
+  killProcessGroup: (pid: number, signal: NodeJS.Signals) => void,
 ): Promise<IosCommandResult> {
-  let stdout = ''
+  const stdoutChunks: Buffer[] = []
+  let stdoutBytes = 0
   let stderr = ''
   let timedOut = false
   let escape: ReturnType<typeof setTimeout> | undefined
-  child.stdout?.on('data', (chunk: Buffer) => { stdout = retain(stdout, chunk.toString('utf8')) })
-  child.stderr?.on('data', (chunk: Buffer) => { stderr = retain(stderr, chunk.toString('utf8')) })
-  const terminate = (force: boolean): void => {
+  let abandon: ReturnType<typeof setTimeout> | undefined
+  let resolvePending: ((result: IosCommandResult) => void) | undefined
+  let terminationError: Error | undefined
+  const resultOf = (code: number | null, exitSignal: NodeJS.Signals | null): IosCommandResult => ({
+    code, signal: exitSignal, timedOut,
+    ...(terminationError === undefined ? {} : { terminationError: terminationError.message }),
+    stdout: Buffer.concat(stdoutChunks, stdoutBytes).toString('utf8'), stderr,
+  })
+  const recordTerminationError = (error: unknown): void => {
+    if (terminationError !== undefined || error === undefined) return
+    terminationError = error instanceof Error ? error : new Error(String(error))
+  }
+  const terminate = (exitSignal: NodeJS.Signals): void => {
     if (child.pid === undefined) return
-    try { process.kill(-child.pid, force ? 'SIGKILL' : 'SIGTERM') } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+    try { killProcessGroup(child.pid, exitSignal) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') recordTerminationError(error)
     }
   }
   const abort = (): void => {
-    terminate(false)
+    terminate('SIGTERM')
     if (escape !== undefined) return
-    escape = setTimeout(() => { terminate(true) }, STOP_GRACE_MS)
+    escape = setTimeout(() => {
+      terminate('SIGKILL')
+      abandon = setTimeout(() => {
+        recordTerminationError(new Error(`iOS process ${String(child.pid)} did not exit after forced termination`))
+        resolvePending?.(resultOf(null, null))
+      }, stopGraceMs)
+      abandon.unref()
+    }, stopGraceMs)
     escape.unref()
   }
+  child.stdout?.on('data', (chunk: Buffer) => {
+    if (terminationError !== undefined) return
+    if (stdoutBytes + chunk.byteLength > stdoutMaxBytes) {
+      recordTerminationError(new Error(`iOS command stdout exceeded ${String(stdoutMaxBytes)} bytes`))
+      abort()
+      return
+    }
+    stdoutChunks.push(chunk)
+    stdoutBytes += chunk.byteLength
+  })
+  child.stderr?.on('data', (chunk: Buffer) => { stderr = retain(stderr, chunk.toString('utf8'), STDERR_TAIL_BYTES) })
   signal?.addEventListener('abort', abort, { once: true })
   if (signal?.aborted === true) abort()
   const timeout = timeoutMs === undefined ? undefined : setTimeout(() => {
@@ -79,16 +133,19 @@ async function settleChild(
   try {
     return await new Promise((resolve, reject) => {
       child.once('error', reject)
-      child.once('close', (code, exitSignal) => { resolve({ code, signal: exitSignal, timedOut, stdout, stderr }) })
+      resolvePending = resolve
+      child.once('close', (code, exitSignal) => { resolve(resultOf(code, exitSignal)) })
     })
   } finally {
     signal?.removeEventListener('abort', abort)
     if (timeout !== undefined) clearTimeout(timeout)
     if (escape !== undefined) clearTimeout(escape)
+    if (abandon !== undefined) clearTimeout(abandon)
+    resolvePending = undefined
   }
 }
 
-function retain(current: string, addition: string): string {
+function retain(current: string, addition: string, maxBytes: number): string {
   const joined = `${current}${addition}`
-  return joined.length > 16_384 ? joined.slice(-16_384) : joined
+  return Buffer.byteLength(joined) > maxBytes ? joined.slice(-maxBytes) : joined
 }

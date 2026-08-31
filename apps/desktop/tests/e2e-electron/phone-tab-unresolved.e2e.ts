@@ -5,14 +5,16 @@ import {
 } from './helpers.ts'
 
 describe('Desktop phone tab when mobilecli is unresolvable', () => {
-  it('boots the Desktop Host and renders mobilecli installation guidance', async () => {
+  it('boots the Desktop Host and renders managed mobilecli preparation guidance', async () => {
     const startup = await assertStartupEvidence()
     await recordOwnedProcesses(startup.hostPid, false)
     await openSession()
     await openPhoneTabFromPlusMenu()
     const title = browser.$('p*=未找到 mobilecli')
     await title.waitForDisplayed({ timeout: 30_000 })
-    await expect(browser.$('code*=npm install -g mobilecli@latest')).toBeDisplayed()
+    await expect(browser.$('button=准备 mobilecli')).toBeDisplayed()
+    expect(await browser.execute(() => document.body.innerText.includes('设置 → 手机设备'))).toBe(true)
+    expect(await browser.execute(() => document.body.innerText.includes('npm install -g mobilecli'))).toBe(false)
     expect(await browser.execute(() => document.body.innerText.includes('Web Host exited'))).toBe(false)
     await saveWindowEvidence('phone-unresolved-window')
   })

@@ -9,7 +9,7 @@ import {
   type PhoneEnvironmentSource, type PhoneEnvironmentView,
 } from '../src/client/phone-environment.ts'
 import { PhoneSettingsCardController } from '../src/client/phone-settings-controller.ts'
-import type { PhoneRuntimeSource } from '../src/client/phone-runtime-source.ts'
+import { MISSING_PHONE_ENVIRONMENT, type PhoneRuntimeSource } from '../src/client/phone-runtime-source.ts'
 import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
 import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 import type { PhoneSettings } from '../src/phone-settings.ts'
@@ -271,7 +271,15 @@ describe('PhoneSettingsCardController', () => {
       subscribe: () => () => {},
     }
     const writeText = vi.fn(() => Promise.resolve())
-    const controller = new PhoneSettingsCardController(host.scope, source, { writeText })
+    const prepare = vi.fn(async () => {})
+    const runtime: PhoneRuntimeSource = {
+      getSnapshot: () => MISSING_PHONE_ENVIRONMENT,
+      refresh: async () => {}, prepare, cancel: async () => {},
+      prepareAndroid: async () => {}, cancelAndroid: async () => {}, refreshAndroid: async () => {}, startAndroid: async () => {},
+      prepareIos: async () => {}, cancelIos: async () => {}, refreshIos: async () => {}, startIos: async () => {},
+      ensureDetected: () => {}, subscribe: () => () => {},
+    }
+    const controller = new PhoneSettingsCardController(host.scope, source, { writeText }, runtime)
     const face = controller.inject()
     face.copyCommand('sdkmanager "platform-tools"')
     expect(writeText).toHaveBeenCalledWith('sdkmanager "platform-tools"')
@@ -280,7 +288,8 @@ describe('PhoneSettingsCardController', () => {
     face.nextAction('probe-failed')
     face.nextAction('mobilecli-missing')
     face.nextAction('wda-unbuilt')
-    expect(redetect).toHaveBeenCalledTimes(4)
+    expect(redetect).toHaveBeenCalledTimes(3)
+    expect(prepare).toHaveBeenCalledOnce()
     controller.dispose()
   })
 

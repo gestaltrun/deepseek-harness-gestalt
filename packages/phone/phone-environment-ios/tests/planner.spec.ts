@@ -65,6 +65,23 @@ describe('iOS environment planner', () => {
     })
   })
 
+  it('copies and freezes nested plan facts before publication', () => {
+    const runtime = { identifier: 'runtime-26-0', name: 'iOS 26.0', version: '26.0', available: true }
+    const deviceType = { identifier: 'type-iphone-17', name: 'iPhone 17' }
+    const planned = planIosEnvironment('darwin', {
+      developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
+      licenseAccepted: true, firstLaunchComplete: true,
+      runtimes: [runtime], deviceTypes: [deviceType], devices: [],
+    })
+    if (planned.kind !== 'no-simulator') throw new Error(`unexpected plan ${planned.kind}`)
+    runtime.name = 'mutated runtime'
+    deviceType.name = 'mutated device type'
+    expect(planned.plan.runtime?.name).toBe('iOS 26.0')
+    expect(planned.plan.deviceType?.name).toBe('iPhone 17')
+    expect(Object.isFrozen(planned.plan.runtime)).toBe(true)
+    expect(Object.isFrozen(planned.plan.deviceType)).toBe(true)
+  })
+
   it('reports a missing runtime before requiring a simulator', () => {
     expect(planIosEnvironment('darwin', {
       developerDir: '/Applications/Xcode.app/Contents/Developer',

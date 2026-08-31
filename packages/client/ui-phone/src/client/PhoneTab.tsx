@@ -60,12 +60,11 @@ function rowMetaOf(device: PhoneDeviceSummary): string {
 }
 
 /** Copy the picker error arm shows for one listing-pull failure. */
-function listingErrorCopy(error: unknown): { title: string; detail: string; command?: string } {
+function listingErrorCopy(error: unknown): { title: string; detail: string } {
   if (error instanceof PhoneStreamHttpError && error.code === 'PHONE_UNRESOLVED') {
     return {
       title: '未找到 mobilecli',
-      detail: 'Host 已启动，但无法解析 mobilecli 可执行文件。安装后重新检测。',
-      command: 'npm install -g mobilecli@latest',
+      detail: '前往「设置 → 手机设备」使用一键准备 mobilecli，完成后重新检测。',
     }
   }
   return {
@@ -136,9 +135,6 @@ export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNo
         <div role="alert" className={css.listingFailedArm}>
           <p className={css.unauthorizedTitle}>{listingFailure.title}</p>
           <p className={css.unauthorizedDetail}>{listingFailure.detail}</p>
-          {listingFailure.command !== undefined && (
-            <code className={css.listingFailedCommand}>{listingFailure.command}</code>
-          )}
           <div className={css.alertActions}>
             <button
               type="button"
@@ -162,7 +158,9 @@ export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNo
                 <div key={device.id} role="alert" className={css.unauthorizedArm}>
                   <p className={css.unauthorizedTitle}>真机未授权调试</p>
                   <p className={css.unauthorizedDetail}>
-                    {`${device.name} 已通过 USB 连接；请在手机上允许「USB 调试」后重新检测。`}
+                    {platform === 'ios'
+                      ? `${device.name} 已通过 USB 连接；请解锁设备，确认信任此 Mac 并启用 Developer Mode，设备控制代理就绪后重新检测。`
+                      : `${device.name} 已通过 USB 连接；请在手机上允许「USB 调试」后重新检测。`}
                   </p>
                   <div className={css.alertActions}>
                     <button
@@ -194,7 +192,9 @@ export function PhoneTab({ gate, source, onOpenDevice }: PhoneTabProps): ReactNo
               )
             ))}
             {channel === 'usb' && visible.length === 0 && (
-              <div className={css.emptyRow}>用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。</div>
+              <div className={css.emptyRow}>{platform === 'ios'
+                ? '用数据线连接 iPhone，解锁并确认信任此 Mac、启用 Developer Mode；设备控制代理就绪后会出现在这里。'
+                : '用数据线连接手机并在设备上允许 USB 调试后，会出现在这里。'}</div>
             )}
           </section>
         )

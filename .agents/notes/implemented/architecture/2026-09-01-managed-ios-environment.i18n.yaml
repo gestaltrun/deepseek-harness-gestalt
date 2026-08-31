@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-01-managed-ios-environment.md
-2026-09-01-managed-ios-environment.md: 3ae546881fa31e5a73c193f836d4f7ca141df1a3
-2026-09-01-managed-ios-environment.zh.md: 9f2316bd2b5d567e62a9a72b367eff2b077dd841
+2026-09-01-managed-ios-environment.md: d9f9061e7ce053f72862c35108ddffef8fb7b4c9
+2026-09-01-managed-ios-environment.zh.md: 18825a6b2eba1725af60bcdd8a2e8ee195708b3f

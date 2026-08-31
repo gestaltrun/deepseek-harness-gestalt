@@ -9,9 +9,25 @@ export type PhoneManagedRuntimeView =
   | { readonly kind: 'ready'; readonly version: string; readonly source: 'override' | 'managed' | 'system' }
   | { readonly kind: 'failed'; readonly targetVersion: string; readonly code: string; readonly message: string }
 
+/** Host capability state for one platform-specific preparation lane. */
+export type PhonePlatformView =
+  | { readonly kind: 'deferred' }
+  | { readonly kind: 'unsupported'; readonly reason: string }
+
+/** Complete revisioned environment snapshot retained by the browser. */
+export interface PhoneEnvironmentClientSnapshot {
+  readonly revision: number
+  readonly enabled: boolean
+  readonly runtime: PhoneManagedRuntimeView
+  readonly platforms: {
+    readonly android: PhonePlatformView
+    readonly ios: PhonePlatformView
+  }
+}
+
 /** Browser source for full-snapshot refresh and trusted Host operations. */
 export interface PhoneRuntimeSource {
-  getRuntime(): PhoneManagedRuntimeView
+  getSnapshot(): PhoneEnvironmentClientSnapshot
   refresh(): Promise<void>
   prepare(): Promise<void>
   cancel(): Promise<void>
@@ -24,6 +40,17 @@ export const MISSING_PHONE_RUNTIME: PhoneManagedRuntimeView = Object.freeze({
   kind: 'missing', targetVersion: '1.0.5',
 })
 
+/** Initial browser snapshot before the first trusted Host response. */
+export const MISSING_PHONE_ENVIRONMENT: PhoneEnvironmentClientSnapshot = Object.freeze({
+  revision: -1,
+  enabled: false,
+  runtime: MISSING_PHONE_RUNTIME,
+  platforms: Object.freeze({
+    android: Object.freeze({ kind: 'deferred' }),
+    ios: Object.freeze({ kind: 'deferred' }),
+  }),
+})
+
 const PATH = '/phone/environment'
 const PREPARE_POLL_MS = 100
 
@@ -32,18 +59,29 @@ const PREPARE_POLL_MS = 100
  * @returns the full-snapshot runtime source.
  */
 export function createHttpPhoneRuntimeSource(): PhoneRuntimeSource {
-  let runtime = MISSING_PHONE_RUNTIME
+  let snapshot = MISSING_PHONE_ENVIRONMENT
   let detected = false
   let active: Promise<void> | undefined
   const listeners = new Set<() => void>()
-  const notify = (): void => { for (const listener of [...listeners]) listener() }
+  const notify = (): void => {
+    for (const listener of [...listeners]) {
+      try {
+        listener()
+      } catch {
+        // One renderer subscriber cannot prevent later subscribers from observing a committed revision.
+      }
+    }
+  }
   const request = async (path: string, method: 'GET' | 'POST'): Promise<void> => {
     const response = await fetch(path, { method, headers: { accept: 'application/json' } })
     const body: unknown = await response.json()
     if (!response.ok) throw new Error(errorMessage(body, response.status))
-    runtime = parseRuntime(body)
+    const next = parseSnapshot(body)
     detected = true
-    notify()
+    if (next.revision > snapshot.revision) {
+      snapshot = next
+      notify()
+    }
   }
   const run = (path: string, method: 'GET' | 'POST'): Promise<void> => {
     if (active !== undefined) return active
@@ -79,8 +117,8 @@ export function createHttpPhoneRuntimeSource(): PhoneRuntimeSource {
     return operation
   }
   return {
-    getRuntime: () => runtime,
-    refresh: () => run(PATH, 'GET'),
+    getSnapshot: () => snapshot,
+    refresh: () => run(`${PATH}/refresh`, 'POST'),
     prepare,
     cancel: () => request(`${PATH}/cancel`, 'POST'),
     ensureDetected: () => { if (!detected && active === undefined) void run(PATH, 'GET') },
@@ -91,9 +129,22 @@ export function createHttpPhoneRuntimeSource(): PhoneRuntimeSource {
   }
 }
 
-function parseRuntime(value: unknown): PhoneManagedRuntimeView {
-  if (!record(value) || !record(value.runtime)) throw new Error('phone environment snapshot omitted runtime')
-  const runtime = value.runtime
+function parseSnapshot(value: unknown): PhoneEnvironmentClientSnapshot {
+  if (!record(value) || !number(value.revision) || typeof value.enabled !== 'boolean'
+    || !record(value.runtime) || !record(value.platforms)) {
+    throw new Error('phone environment response was not a full revisioned snapshot')
+  }
+  const android = parsePlatform(value.platforms.android)
+  const ios = parsePlatform(value.platforms.ios)
+  return Object.freeze({
+    revision: value.revision,
+    enabled: value.enabled,
+    runtime: parseRuntime(value.runtime),
+    platforms: Object.freeze({ android, ios }),
+  })
+}
+
+function parseRuntime(runtime: Record<string, unknown>): PhoneManagedRuntimeView {
   const kind = runtime.kind
   if (kind === 'missing' && string(runtime.targetVersion)) {
     return {
@@ -116,6 +167,15 @@ function parseRuntime(value: unknown): PhoneManagedRuntimeView {
     return { kind, targetVersion: runtime.targetVersion, code: runtime.code, message: runtime.message }
   }
   throw new Error('phone environment snapshot carried an invalid runtime state')
+}
+
+function parsePlatform(value: unknown): PhonePlatformView {
+  if (!record(value)) throw new Error('phone environment snapshot carried an invalid platform state')
+  if (value.kind === 'deferred') return Object.freeze({ kind: 'deferred' })
+  if (value.kind === 'unsupported' && string(value.reason)) {
+    return Object.freeze({ kind: 'unsupported', reason: value.reason })
+  }
+  throw new Error('phone environment snapshot carried an invalid platform state')
 }
 
 function errorMessage(value: unknown, status: number): string {

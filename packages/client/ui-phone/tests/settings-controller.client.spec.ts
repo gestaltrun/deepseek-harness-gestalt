@@ -147,7 +147,12 @@ describe('PhoneSettingsCardController', () => {
   it('keeps the runtime subscription across environment-source replacement and disposes it', () => {
     const runtimeListeners = new Set<() => void>()
     const runtime: PhoneRuntimeSource = {
-      getRuntime: () => ({ kind: 'missing', targetVersion: '1.0.5' }),
+      getSnapshot: () => ({
+        revision: 0,
+        enabled: false,
+        runtime: { kind: 'missing', targetVersion: '1.0.5' },
+        platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
+      }),
       refresh: async () => {},
       prepare: async () => {},
       cancel: async () => {},
@@ -176,6 +181,7 @@ describe('PhoneSettingsCardController', () => {
       writable: true,
       view: { kind: 'off' },
       runtime: { kind: 'missing', targetVersion: '1.0.5' },
+      platforms: { android: { kind: 'deferred' }, ios: { kind: 'deferred' } },
     })
     face.setEnabled(true)
     expect(host.set).toHaveBeenCalledWith('enabled', true)

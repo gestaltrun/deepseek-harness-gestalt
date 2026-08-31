@@ -33,6 +33,12 @@ export function PhoneSettingsSection(props: PhoneSettingsSectionProps) {
         onCancel={props.cancelRuntime}
         onRefresh={props.refreshRuntime}
       />
+      {state.platforms.ios.kind === 'unsupported' && (
+        <p className={css.platformNotice} data-phone-platform-ios="unsupported">
+          <strong>iOS</strong>
+          <span>{state.platforms.ios.reason}</span>
+        </p>
+      )}
       <PhoneSettingsCard
         enabled={state.enabled}
         view={state.view}

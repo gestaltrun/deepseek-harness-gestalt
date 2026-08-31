@@ -19,6 +19,7 @@ All operations accept an optional `AbortSignal` and enforce validated time ceili
 | Field | Default | Meaning |
 |---|---|---|
 | `executablePath` | — | Absolute or cwd-relative override; when absent, `PATH` is searched first, then npm-global, the npx cache, and `npm_config_prefix`. An Electron-minimal PATH also probes `/opt/homebrew/bin` and `/usr/local/bin`. |
+| `deferStart` | `false` | Keep the stable Service unresolved until an environment owner calls `activateExecutable(path, signal?)`; use this when runtime selection or managed preparation happens after Host composition. |
 | `serverPort` | `12000` | Loopback port passed as `--listen 127.0.0.1:<port>`; mirrors the upstream default. |
 | `pollIntervalMs` | `5000` | Health-probe and device-poll cadence. |
 | `readyTimeoutMs` | `60000` | Total window for the first readiness probe; exceeded readiness fails the plugin loudly. |

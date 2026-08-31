@@ -9,7 +9,8 @@ import {
   type PhoneEnvironmentSource, type PhoneEnvironmentView,
 } from './phone-environment.ts'
 import {
-  MISSING_PHONE_RUNTIME, type PhoneManagedRuntimeView, type PhoneRuntimeSource,
+  MISSING_PHONE_ENVIRONMENT, MISSING_PHONE_RUNTIME, type PhoneManagedRuntimeView,
+  type PhonePlatformView, type PhoneRuntimeSource,
 } from './phone-runtime-source.ts'
 
 /** What the phone settings card renders. */
@@ -22,6 +23,8 @@ export interface PhoneSettingsCardState {
   readonly view: PhoneEnvironmentView
   /** Shared Host-managed mobilecli runtime state. */
   readonly runtime: PhoneManagedRuntimeView
+  /** Host platform capabilities, including unsupported reasons. */
+  readonly platforms: { readonly android: PhonePlatformView; readonly ios: PhonePlatformView }
 }
 
 /** The registration-side face the card's slot entry injects. */
@@ -55,6 +58,7 @@ export class PhoneSettingsCardController {
     writable: false,
     view: { kind: 'off' },
     runtime: MISSING_PHONE_RUNTIME,
+    platforms: MISSING_PHONE_ENVIRONMENT.platforms,
   })
   private readonly unsubscribeScope: () => void
   private unsubscribeSource: () => void
@@ -138,11 +142,13 @@ export class PhoneSettingsCardController {
       if (this.isEnabled()) this.source.ensureDetected?.()
       this.runtime?.ensureDetected()
       const enabled = snapshot.value?.enabled === true
+      const environment = this.runtime?.getSnapshot() ?? MISSING_PHONE_ENVIRONMENT
       this.store.set({
         enabled,
         writable: snapshot.writable,
         view: resolvePhoneCardView(enabled, this.source),
-        runtime: this.runtime?.getRuntime() ?? MISSING_PHONE_RUNTIME,
+        runtime: environment.runtime,
+        platforms: environment.platforms,
       })
     } finally {
       this.publishing = false

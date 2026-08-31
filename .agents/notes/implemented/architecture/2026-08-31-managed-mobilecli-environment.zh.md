@@ -1,4 +1,4 @@
-# Agent Note：托管 mobilecli 环境
+# Agent Note: 托管 mobilecli 环境
 
 状态：已实现
 

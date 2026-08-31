@@ -19,6 +19,7 @@
 | 字段 | 默认 | 含义 |
 |---|---|---|
 | `executablePath` | — | 绝对路径或相对 cwd 的覆盖；缺省时先搜 `PATH`，再搜 npm 全局、npx 缓存和 `npm_config_prefix`。Electron 极简 PATH 还会探测 `/opt/homebrew/bin` 与 `/usr/local/bin`。 |
+| `deferStart` | `false` | 让稳定 Service 保持未解析，直到环境 owner 调用 `activateExecutable(path, signal?)`；运行时选择或托管准备发生在 Host 组合之后时使用。 |
 | `serverPort` | `12000` | 以 `--listen 127.0.0.1:<port>` 传入的回环端口；对齐上游默认。 |
 | `pollIntervalMs` | `5000` | 健康探测与设备轮询节奏。 |
 | `readyTimeoutMs` | `60000` | 首次就绪探测的总窗口；超时就绪失败将使插件响亮失败。 |

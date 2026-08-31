@@ -58,7 +58,9 @@ const PREPARE_POLL_MS = 100
  * Create the production source over the Host's trusted phone-environment routes.
  * @returns the full-snapshot runtime source.
  */
-export function createHttpPhoneRuntimeSource(): PhoneRuntimeSource {
+export function createHttpPhoneRuntimeSource(
+  onListenerError: (error: unknown) => void = (error) => { console.error('phone runtime subscriber failed', error) },
+): PhoneRuntimeSource {
   let snapshot = MISSING_PHONE_ENVIRONMENT
   let detected = false
   let active: Promise<void> | undefined
@@ -67,8 +69,8 @@ export function createHttpPhoneRuntimeSource(): PhoneRuntimeSource {
     for (const listener of [...listeners]) {
       try {
         listener()
-      } catch {
-        // One renderer subscriber cannot prevent later subscribers from observing a committed revision.
+      } catch (error) {
+        onListenerError(error)
       }
     }
   }

@@ -50,7 +50,8 @@ describe('Host phone runtime source', () => {
         8,
         { android: { kind: 'deferred' }, ios: { kind: 'unsupported', reason: 'iOS simulators require macOS and Xcode.' } },
       )))
-    const source = createHttpPhoneRuntimeSource()
+    const listenerError = vi.fn()
+    const source = createHttpPhoneRuntimeSource(listenerError)
     const first = source.cancel()
     const later = source.prepare()
     source.subscribe(() => { throw new Error('broken renderer subscriber') })
@@ -65,6 +66,7 @@ describe('Host phone runtime source', () => {
       platforms: { ios: { kind: 'unsupported', reason: 'iOS simulators require macOS and Xcode.' } },
     })
     expect(survivor).toHaveBeenCalledOnce()
+    expect(listenerError).toHaveBeenCalledOnce()
   })
 
   it('polls the full snapshot while managed preparation is in flight', async () => {

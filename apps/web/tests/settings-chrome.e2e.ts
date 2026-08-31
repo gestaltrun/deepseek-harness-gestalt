@@ -49,6 +49,21 @@ describe('web e2e: the settings page and General preferences', () => {
     // the client derives from it (the English default has its own spec below).
     page = await browser.newPage({ viewport: { width: 1680, height: 1000 }, locale: ZH_BROWSER_LOCALE })
     tripwire = watchConsole(page)
+    await page.route('**/phone/environment', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          revision: 1,
+          enabled: false,
+          runtime: { kind: 'missing', targetVersion: '1.0.5', assetBytes: 5_458_848 },
+          platforms: {
+            android: { kind: 'deferred' },
+            ios: { kind: 'unsupported', reason: 'iOS simulators require macOS and Xcode.' },
+          },
+        }),
+      })
+    })
     await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
   }, 120_000)

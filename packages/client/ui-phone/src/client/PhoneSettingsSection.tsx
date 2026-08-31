@@ -36,7 +36,7 @@ export function PhoneSettingsSection(props: PhoneSettingsSectionProps) {
       {state.platforms.ios.kind === 'unsupported' && (
         <p className={css.platformNotice} data-phone-platform-ios="unsupported">
           <strong>iOS</strong>
-          <span>{state.platforms.ios.reason}</span>
+          <span>{props.t('iosUnsupported')}</span>
         </p>
       )}
       <PhoneSettingsCard

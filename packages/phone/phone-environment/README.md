@@ -10,6 +10,15 @@ The Host exposes the full snapshot at `GET /phone/environment` and the `prepare`
 
 mobilecli is licensed under FSL-1.1 with an Apache-2.0 future license. A runtime download directly from the upstream release is not a copy inside the Desktop Bundle, but product release remains blocked until counsel or the upstream licensor confirms that the intended product use is permitted. The package does not vendor or redistribute mobilecli.
 
+## Config
+
+| Field | Default | Meaning |
+|---|---|---|
+| `root` | `$DSH_HOME/phone` | Private managed installation root containing staging directories, immutable versions, and `current.json`. |
+| `executablePath` | — | Operator-owned executable override. It remains authoritative over managed and system candidates, and managed preparation rejects with `PHONE_ENVIRONMENT_OVERRIDE` while configured. |
+
+Preparation rejects concurrent calls with `PHONE_ENVIRONMENT_BUSY`; cancellation uses `PHONE_ENVIRONMENT_ABORTED`. Download trust failures use `PHONE_ENVIRONMENT_DOWNLOAD`, `PHONE_ENVIRONMENT_LENGTH`, or `PHONE_ENVIRONMENT_DIGEST`; archive, version, current-pointer, and filesystem failures use `PHONE_ENVIRONMENT_ARCHIVE`, `PHONE_ENVIRONMENT_VERSION`, `PHONE_ENVIRONMENT_CURRENT`, or `PHONE_ENVIRONMENT_DISK`. Activation and unexpected runtime loss use `PHONE_ENVIRONMENT_ACTIVATION` and `PHONE_ENVIRONMENT_RUNTIME_LOST`. Failed detection or preparation never silently selects a lower-precedence candidate or leaves the prior child and tools active.
+
 ## Model Experience
 
 Indirectly, through `dsh-tool-phone`, which registers deferred `device_*` tools only when an enabled runtime generation is ready.

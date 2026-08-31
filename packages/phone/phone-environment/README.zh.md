@@ -10,6 +10,15 @@ Host 通过共享同源信任栅栏，在 `GET /phone/environment` 提供全量�
 
 mobilecli 使用 FSL-1.1，并带 Apache-2.0 future license。运行时从上游 Release 直连下载不等于把副本放进 Desktop Bundle，但在法务或上游许可方确认预期产品用途获准之前，产品发布仍被阻塞。本包不 vendor 或再分发 mobilecli。
 
+## 配置
+
+| 字段 | 默认 | 含义 |
+|---|---|---|
+| `root` | `$DSH_HOME/phone` | 私有托管安装根目录，包含 staging 目录、不可变版本与 `current.json`。 |
+| `executablePath` | — | 运维方持有的可执行文件 override。其优先级始终高于托管和系统 candidate；配置期间托管准备以 `PHONE_ENVIRONMENT_OVERRIDE` 拒绝。 |
+
+并发准备以 `PHONE_ENVIRONMENT_BUSY` 拒绝，取消使用 `PHONE_ENVIRONMENT_ABORTED`。下载信任失败使用 `PHONE_ENVIRONMENT_DOWNLOAD`、`PHONE_ENVIRONMENT_LENGTH` 或 `PHONE_ENVIRONMENT_DIGEST`；归档、版本、current 指针与文件系统失败使用 `PHONE_ENVIRONMENT_ARCHIVE`、`PHONE_ENVIRONMENT_VERSION`、`PHONE_ENVIRONMENT_CURRENT` 或 `PHONE_ENVIRONMENT_DISK`。激活与运行时意外丢失使用 `PHONE_ENVIRONMENT_ACTIVATION` 和 `PHONE_ENVIRONMENT_RUNTIME_LOST`。检测或准备失败时，Service 不会静默选择低优先级 candidate，也不会让旧 child 与工具继续活动。
+
 ## Model Experience
 
 通过 `dsh-tool-phone` 间接影响模型；仅当启用的运行时 generation 就绪后，该 Consumer 才注册延迟 `device_*` 工具。

@@ -311,6 +311,6 @@ describe('PhoneSettingsSection', () => {
     expect(screen.getByRole('heading', { level: 2, name: '手机设备' })).toBeTruthy()
     expect(screen.getByText(/这与「移动伴侣」不同/)).toBeTruthy()
     expect(screen.getByRole('switch', { name: '启用手机设备' })).toBeTruthy()
-    expect(screen.getByText('iOS simulators require macOS and Xcode.')).toBeTruthy()
+    expect(screen.getByText('iOS 模拟器需要在安装 Xcode 的 macOS 上使用。')).toBeTruthy()
   })
 })

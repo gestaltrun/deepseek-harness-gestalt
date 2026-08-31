@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "sequence": 4,
+  "intentIds": [
+    "459-release-plan-pipefail"
+  ],
+  "summaries": [
+    {
+      "en": "Stop Product Release planning before it can push partial generated state after a preparation failure.",
+      "zh": "让 Product Release 规划在准备失败后、推送不完整生成状态之前停止。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": false,
+      "version": "0.1.11"
+    },
+    "mobile": {
+      "selected": false,
+      "version": "0.1.2"
+    },
+    "platform": {
+      "selected": false,
+      "version": "0.1.1"
+    }
+  }
+}

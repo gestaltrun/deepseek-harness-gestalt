@@ -160,6 +160,10 @@ describe('PhoneSettingsCardController', () => {
       cancelAndroid: async () => {},
       refreshAndroid: async () => {},
       startAndroid: async () => {},
+      prepareIos: async () => {},
+      cancelIos: async () => {},
+      refreshIos: async () => {},
+      startIos: async () => {},
       ensureDetected: () => {},
       subscribe: (listener) => {
         runtimeListeners.add(listener)

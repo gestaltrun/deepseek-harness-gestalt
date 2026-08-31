@@ -158,8 +158,10 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await agentComposer.getByRole('button', { name: 'Send message', exact: true }).click()
       await expect.poll(() => scaffold.ctx.sessions.list().map(session => session.id))
         .toEqual([...initialSessionIds, first.receivingSessionId])
+      await expect.poll(() => admissionResults.length, { timeout: 15_000 }).toBe(1)
+      expect(admissionResults[0]).toMatchObject({ result: { ok: true } })
       await expect.poll(() => scaffold.ctx.sessions.get(first.receivingSessionId as never)?.events
-        .filter(event => event.type === 'turn/start').length).toBe(1)
+        .filter(event => event.type === 'turn/start').length, { timeout: 15_000 }).toBe(1)
       await card.getByRole('radio', { name: 'Canary' }).click()
       await card.getByRole('button', { name: 'Submit' }).click()
 

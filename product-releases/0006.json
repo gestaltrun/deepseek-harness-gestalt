@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "sequence": 6,
+  "intentIds": [
+    "502-windows-coverage-retry"
+  ],
+  "summaries": [
+    {
+      "en": "Retry isolated Windows coverage worker exits after concurrent partitions settle.",
+      "zh": "在并发分区结束后重试孤立的 Windows 覆盖率 worker 退出。"
+    }
+  ],
+  "releaseUnits": {
+    "desktop": {
+      "selected": false,
+      "version": "0.1.11"
+    },
+    "mobile": {
+      "selected": false,
+      "version": "0.1.2"
+    },
+    "platform": {
+      "selected": false,
+      "version": "0.1.2"
+    }
+  }
+}

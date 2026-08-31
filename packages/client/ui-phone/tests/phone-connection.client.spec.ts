@@ -24,6 +24,12 @@ function parseSentFrame(value: string): unknown {
   return JSON.parse(value)
 }
 
+/** Exercise the state machine's defensive guard against late internal retry requests. */
+function requestDefensiveRetry(controller: PhoneConnectionController): void {
+  const testController = controller as unknown as { scheduleRetry(): void }
+  testController.scheduleRetry()
+}
+
 /** Drive one full connect cycle to the live phase. */
 async function connectToLive(gateway: FakeGateway, scheduler: ManualScheduler): Promise<PhoneConnectionController> {
   const controller = controllerOn(gateway, scheduler)
@@ -274,6 +280,25 @@ describe('PhoneConnectionController lifecycle', () => {
     expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'device-offline' } })
   })
 
+  it('refuses late retry requests from idle, suspended, and terminal phases', async () => {
+    const gateway = new FakeGateway()
+    const scheduler = new ManualScheduler()
+    const controller = controllerOn(gateway, scheduler)
+
+    requestDefensiveRetry(controller)
+    expect(controller.snapshot()).toEqual({ kind: 'idle' })
+    controller.setVisible(false)
+    requestDefensiveRetry(controller)
+    expect(controller.snapshot()).toEqual({ kind: 'suspended' })
+
+    gateway.queueMint({ error: new PhoneStreamHttpError(404, 'not-found', 'gone') })
+    controller.setVisible(true)
+    await flush()
+    requestDefensiveRetry(controller)
+    expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'device-offline' } })
+    expect(scheduler.scheduledCount).toBe(0)
+  })
+
   it('ignores capture failures before a stream is live', () => {
     const controller = controllerOn(new FakeGateway(), new ManualScheduler())
     controller.noteCaptureFailure()
@@ -344,6 +369,29 @@ describe('PhoneConnectionController lifecycle', () => {
 })
 
 describe('PhoneConnectionController io', () => {
+  it('keeps the last valid surface when an invalid size is reported', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    controller.noteSurface(360, 720)
+    controller.noteSurface(Number.NaN, 720)
+    controller.noteSurface(360, Number.POSITIVE_INFINITY)
+    controller.noteSurface(0, 720)
+    controller.noteSurface(360, -1)
+    expect(controller.tap(0.5, 0.5)).toBe(true)
+    expect(parseSentFrame(gateway.lastSocket!.sent[0]!)).toMatchObject({
+      method: 'tap', params: { x: 180, y: 360 },
+    })
+  })
+
+  it('drops swipes until a surface exists and drops an empty path afterward', async () => {
+    const gateway = new FakeGateway()
+    const controller = await connectToLive(gateway, new ManualScheduler())
+    expect(controller.swipe([{ u: 0, v: 0 }])).toBe(false)
+    controller.noteSurface(360, 720)
+    expect(controller.swipe([])).toBe(false)
+    expect(gateway.lastSocket!.sent).toEqual([])
+  })
+
   it('maps a normalized tap through the learned surface onto integer device coordinates', async () => {
     const gateway = new FakeGateway()
     const scheduler = new ManualScheduler()

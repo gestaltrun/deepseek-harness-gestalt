@@ -1,0 +1,28 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "473-phone-coverage",
+  "summary": {
+    "en": "Complete behavior coverage for every phone-runtime and ui-phone source file.",
+    "zh": "补齐 phone-runtime 与 ui-phone 全部源文件的行为覆盖率。"
+  },
+  "releases": {
+    "desktop": "none",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "desktop",
+      "reason": "Only phone-owned tests, testing documentation, and release metadata change; Desktop production and packaging inputs are unchanged."
+    },
+    {
+      "releaseUnit": "mobile",
+      "reason": "Only phone-owned tests, testing documentation, and release metadata change; Mobile production and build inputs are unchanged."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "Only phone-owned tests, testing documentation, and release metadata change; Platform production, deployment, and wire inputs are unchanged."
+    }
+  ]
+}

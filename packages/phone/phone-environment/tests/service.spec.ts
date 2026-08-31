@@ -577,6 +577,7 @@ describe('PhoneEnvironment', () => {
   })
 
   it('serializes disable and re-enable around one activating generation', async () => {
+    const path = await executable()
     const context = new Context()
     contexts.push(context)
     let releaseActivation: (() => void) | undefined
@@ -585,7 +586,7 @@ describe('PhoneEnvironment', () => {
     const { service } = await mountEnvironment(context, {
       activateExecutable: async () => { calls.push('activate'); await activation },
       deactivate: async () => { calls.push('deactivate') },
-    })
+    }, { executablePath: path })
     const first = service.setEnabled(true)
     await vi.waitFor(() => { expect(calls).toContain('activate') })
     const off = service.setEnabled(false)

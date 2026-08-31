@@ -1693,7 +1693,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/phone-environment/src/index.ts:52`](../packages/phone/phone-environment/src/index.ts)
+Source: [`packages/phone/phone-environment/src/index.ts:56`](../packages/phone/phone-environment/src/index.ts)
 
 <a id="deepseek-aidsh-phone-environment-android"></a>
 
@@ -1755,7 +1755,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/phone-runtime/src/index.ts:98`](../packages/phone/phone-runtime/src/index.ts)
+Source: [`packages/phone/phone-runtime/src/index.ts:100`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 

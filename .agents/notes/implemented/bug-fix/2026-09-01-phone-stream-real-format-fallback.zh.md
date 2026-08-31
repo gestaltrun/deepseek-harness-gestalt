@@ -10,13 +10,13 @@ mobilecli 1.0.5 可能重复报告同一台物理手机，也可能接受 AVC �
 
 ## 决策
 
-phone runtime 会验证每一条 `devices.list` 记录，再为每个 `(platform, id)` 组合保留首行。该 wire 身份既保留不同平台上的同名 id，又阻止上游重复项进入设置、手机 picker、已连接下拉框或在线 badge。
+phone runtime 会验证每一条 `devices.list` 记录，再为每个 `(platform, id)` 组合保留首行。由于每个 operation 只接受 `deviceId`，同一 id 出现在两个平台时会以 `PHONE_PROTOCOL` 失败，不会投影成无法区分的目标。同平台重复项不会进入设置、手机 picker、已连接下拉框或在线 badge。
 
 `PhoneConnectionController` 对每份已铸造 session 先启动 H264。H264 拉取、协议、解析、浏览器支持、解码、绘制或零帧结束中的任一失败都会清空已学习的触控面，并把 live 阶段切换到同一 session 的签名 MJPEG URL，不关闭或替换其 io socket。devbar 显示 live 阶段的实际编码。MJPEG 元素把 `naturalWidth` 与 `naturalHeight` 发布为触控坐标面；已被替换的 H264 renderer 回调不能覆盖它。MJPEG 失败后才关闭当前资源并进入既有三次有界重连策略。
 
 ## 验证
 
-包测试固定 `(platform, id)` 去重、首行选择、跨平台身份、无需再次铸造或换 socket 的同 session 回退、陈旧回调拒绝、MJPEG natural 尺寸触控映射，以及只在 MJPEG 失败后重试。built Desktop fixture 覆盖重复清单输入、H264 HTTP 200 错误正文随后出现可见 390×844 MJPEG、另一台设备成功显示 390×844 H264、精确触控与 Home io，以及完整的进程、端口和临时根目录 teardown。fixture 仅是自动化证据；用户验收仍需在真实 Android 手机、iOS 真机与 iOS Simulator 上看到 live 画面并完成控制。
+包测试固定 `(platform, id)` 去重、首行选择、跨平台歧义拒绝、无需再次铸造或换 socket 的同 session 回退、陈旧回调拒绝、MJPEG natural 尺寸触控映射，以及只在 MJPEG 失败后重试。built Desktop fixture 覆盖重复清单输入、H264 HTTP 200 错误正文随后出现可见 390×844 MJPEG、另一台设备成功显示 390×844 H264、精确触控与 Home io，以及完整的进程、端口和临时根目录 teardown。fixture 仅是自动化证据；用户验收仍需在真实 Android 手机、iOS 真机与 iOS Simulator 上看到 live 画面并完成控制。
 
 ## Alternatives considered
 

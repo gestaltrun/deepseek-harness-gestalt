@@ -67,16 +67,18 @@ describe('devices.list result validation', () => {
     ])
   })
 
-  it('deduplicates only an exact platform/id pair and keeps its first validated row', () => {
+  it('keeps the first same-platform row and rejects an id shared across platforms', () => {
     const refs = parseDeviceInfos([
       wire('shared', 'android', 'emulator', 'online', 'first'),
       wire('shared', 'android', 'real', 'offline', 'later duplicate'),
-      wire('shared', 'ios', 'real', 'online', 'other platform'),
     ])
     expect(refs.map(ref => [ref.platform, ref.id, ref.name, ref.kind, ref.state])).toEqual([
       ['android', deviceId('shared'), 'first', 'emulator', 'online'],
-      ['ios', deviceId('shared'), 'other platform', 'real', 'online'],
     ])
+    expect(() => parseDeviceInfos([
+      wire('shared', 'android', 'emulator'),
+      wire('shared', 'ios', 'real'),
+    ])).toThrow(expect.objectContaining({ code: 'PHONE_PROTOCOL', message: expect.stringContaining('ambiguous') }))
   })
 
   it('accepts the devices envelope and the bare array shapes identically', () => {

@@ -282,7 +282,7 @@ export function PhoneConnectedView({
   }
 
   return (
-    <div className={css.view}>
+    <div className={css.view} data-phone-connected>
       <div className={css.devbar}>
         <button
           type="button"

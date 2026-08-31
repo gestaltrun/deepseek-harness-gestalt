@@ -264,7 +264,7 @@ describe('playPhoneH264Stream', () => {
     const firstIdr = nal(0x65, 0x80)
     const secondIdr = nal(0x65, 0x80)
     const aud = nal(0x09, 0xf0)
-    const payload = concat(sps, pps, firstIdr, aud, secondIdr)
+    const payload = concat(Uint8Array.of(0, 0, 0), sps, pps, firstIdr, aud, secondIdr)
     vi.stubGlobal('EncodedVideoChunk', FakeEncodedVideoChunk)
     vi.stubGlobal('VideoDecoder', FakeVideoDecoder)
     vi.stubGlobal('fetch', vi.fn(async () => streamResponse(

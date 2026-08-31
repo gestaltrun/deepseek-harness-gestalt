@@ -1,0 +1,24 @@
+before: format=H264 renderer=canvas
+- button "切换设备：Android Real": Android Real
+- text: H264 30 fps
+- application "Android Real 画面，点击发送触控，按住拖动为滑动，键入发送文本":
+  - img "Android Real 实时画面"
+  - text: 代理中
+- button "返回"
+- button "主屏幕"
+- button "最近任务"
+- button "截图" [disabled]
+- button "刷新流"
+- text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。
+after: format=MJPEG renderer=img
+- button "切换设备：Android Real": Android Real
+- text: MJPEG
+- application "Android Real 画面，点击发送触控，按住拖动为滑动，键入发送文本":
+  - img "Android Real 实时画面"
+  - text: 代理中
+- button "返回"
+- button "主屏幕"
+- button "最近任务"
+- button "截图" [disabled]
+- button "刷新流"
+- text: 点击画面即向设备发送触控；按住拖动为滑动。画面左上角显示当前操作方（你 / Agent）。

@@ -42,12 +42,14 @@ function stringField(record: Record<string, unknown>, key: string, index: number
  * Validate and map one raw `devices.list` result onto device snapshots. Both
  * shipped wire shapes are accepted: the bare device array and mobilecli
  * 1.0.5's `{ devices: [...] }` envelope. Every row is validated before the
- * first row for each platform/id pair is retained.
+ * first row for each platform/id pair is retained. An id reported for both
+ * platforms is rejected because every upstream operation accepts only an id.
  * @param result - JSON-RPC result value as received from the HTTP transport.
- * @returns one entry per unique platform/id pair, in first-seen upstream order.
+ * @returns the first entry for each id when every id belongs to one platform, in upstream order.
  * @throws {@link PhoneDevicesError} with `PHONE_PROTOCOL` when the value is
  * neither an array nor a devices envelope, or any element misses required
- * fields, names an unknown platform, or reports an unknown `type`.
+ * fields, names an unknown platform, reports an unknown `type`, or shares an
+ * id across both platforms.
  */
 export function parseDeviceInfos(result: unknown): readonly MobilecliDevice[] {
   const entries = unwrapDeviceEntries(result)
@@ -72,7 +74,16 @@ export function parseDeviceInfos(result: unknown): readonly MobilecliDevice[] {
     const key = `${device.platform}\u0000${device.id}`
     if (!unique.has(key)) unique.set(key, device)
   }
-  return [...unique.values()]
+  const uniqueDevices = [...unique.values()]
+  const platforms = new Map<DeviceId, 'ios' | 'android'>()
+  for (const device of uniqueDevices) {
+    const platform = platforms.get(device.id)
+    if (platform !== undefined && platform !== device.platform) {
+      throw protocolError(`device id ${JSON.stringify(device.id)} is ambiguous across ${platform} and ${device.platform}`)
+    }
+    platforms.set(device.id, device.platform)
+  }
+  return uniqueDevices
 }
 
 /**

@@ -10,13 +10,13 @@ mobilecli 1.0.5 can report one physical handset more than once and can accept an
 
 ## Decision
 
-The phone runtime validates every `devices.list` row, then keeps the first row for each `(platform, id)` pair. This wire-level identity keeps equal ids on different platforms distinct while preventing one upstream duplicate from reaching settings, the phone picker, the connected dropdown, or the online badge.
+The phone runtime validates every `devices.list` row, then keeps the first row for each `(platform, id)` pair. Because every operation accepts only `deviceId`, one id reported for both platforms fails with `PHONE_PROTOCOL` instead of projecting indistinguishable targets. Same-platform duplicates cannot reach settings, the phone picker, the connected dropdown, or the online badge.
 
 `PhoneConnectionController` starts each minted session with H264. Any H264 fetch, protocol, parse, browser-support, decode, draw, or zero-frame failure clears the learned touch surface and switches the live phase to that same session's signed MJPEG URL without closing or replacing its io socket. The devbar names the live phase's actual encoding. The MJPEG element publishes `naturalWidth` and `naturalHeight` as the touch-coordinate surface; callbacks from the replaced H264 renderer cannot overwrite it. An MJPEG failure closes the current resources and enters the existing three-attempt bounded reconnect policy.
 
 ## Verification
 
-Package tests pin `(platform, id)` deduplication, first-row selection, cross-platform identity, same-session fallback without another mint or socket, stale callback rejection, MJPEG natural-dimension touch mapping, and retry only after MJPEG failure. The built Desktop fixture covers duplicate listing input, an H264 HTTP 200 error body followed by visible 390×844 MJPEG, a separate successful 390×844 H264 device, exact touch and Home io, and complete process, port, and temporary-root teardown. Fixture evidence is automation only; user acceptance still requires visible live frames and control on the real Android handset, iOS handset, and iOS Simulator.
+Package tests pin `(platform, id)` deduplication, first-row selection, cross-platform ambiguity rejection, same-session fallback without another mint or socket, stale callback rejection, MJPEG natural-dimension touch mapping, and retry only after MJPEG failure. The built Desktop fixture covers duplicate listing input, an H264 HTTP 200 error body followed by visible 390×844 MJPEG, a separate successful 390×844 H264 device, exact touch and Home io, and complete process, port, and temporary-root teardown. Fixture evidence is automation only; user acceptance still requires visible live frames and control on the real Android handset, iOS handset, and iOS Simulator.
 
 ## Alternatives considered
 

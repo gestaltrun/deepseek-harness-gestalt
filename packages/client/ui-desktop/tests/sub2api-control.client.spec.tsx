@@ -116,6 +116,44 @@ describe('Sub2ApiControl', () => {
     expect(screen.getByRole('button', { name: 'Uninstall' }).closest('header')).not.toBeNull()
   })
 
+  it('grows the native account workspace so Settings owns vertical scrolling', () => {
+    const observers: Array<{ callback: ResizeObserverCallback; disconnect: ReturnType<typeof vi.fn> }> = []
+    vi.stubGlobal('ResizeObserver', class {
+      readonly callback: ResizeObserverCallback
+      readonly disconnect = vi.fn()
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback
+        observers.push(this)
+      }
+      observe = vi.fn()
+      unobserve = vi.fn()
+    })
+    window.dshDesktop = bridge()
+    renderControl({ state: 'running', enabled: true })
+    const frame = screen.getByTitle('Sub2API account console') as HTMLIFrameElement
+    const embeddedRoot = document.createElement('html')
+    const embeddedBody = document.createElement('body')
+    Object.defineProperty(embeddedRoot, 'scrollHeight', {
+      configurable: true,
+      value: 1180,
+    })
+    Object.defineProperty(embeddedBody, 'scrollHeight', {
+      configurable: true,
+      value: 1120,
+    })
+    Object.defineProperty(frame, 'contentDocument', {
+      configurable: true,
+      value: { documentElement: embeddedRoot, body: embeddedBody },
+    })
+
+    fireEvent.load(frame)
+
+    expect(frame.style.height).toBe('1180px')
+    expect(observers).toHaveLength(1)
+    cleanup()
+    expect(observers[0]?.disconnect).toHaveBeenCalledOnce()
+  })
+
   it('follows live Desktop theme and locale changes', async () => {
     window.dshDesktop = bridge()
     document.documentElement.style.colorScheme = 'light'

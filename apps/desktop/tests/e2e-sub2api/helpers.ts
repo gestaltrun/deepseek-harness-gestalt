@@ -11,6 +11,7 @@ import { isExpectedSessionSurface } from './session-surface.ts'
 const ADMIN_PREFIX = '/plugins/dsh-sub2api/admin'
 const REAL_PROVIDER_CREDENTIAL_REF = 'ZAI_CODING_CN_API_KEY'
 const SUB2API_PUBLIC_MODEL = 'claude-sonnet-4-5-20250929'
+export const DYNAMIC_PROVIDER_MODEL = 'dsh445-dynamic-model'
 const execFileAsync = promisify(execFile)
 
 interface Sub2ApiSnapshot {
@@ -23,6 +24,26 @@ interface Sub2ApiSnapshot {
 export interface MainWindowSnapshot {
   readonly url: string
   readonly text: string
+}
+
+export interface AccountWorkspaceLayoutSnapshot {
+  readonly borderTopWidth: string
+  readonly frameHeight: number
+  readonly contentHeight: number
+  readonly settingsOverflowY: string | undefined
+  readonly tableClientHeight: number | undefined
+  readonly tableScrollHeight: number | undefined
+}
+
+export interface AccountDialogSnapshot {
+  readonly text: string
+  readonly zIndex: string
+  readonly ownsCenter: boolean
+}
+
+export interface AccountWorkspaceUiSnapshot {
+  readonly text: string
+  readonly headers: readonly string[]
 }
 
 function requiredEnv(name: string): string {
@@ -216,6 +237,89 @@ export async function overlayAccountConsoleSnapshot(): Promise<MainWindowSnapsho
   })
 }
 
+/** Read the visible account table contract from the embedded native workspace. */
+export async function overlayAccountWorkspaceUi(): Promise<AccountWorkspaceUiSnapshot> {
+  await switchToDesktopOverlay()
+  return await browser.execute(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const content = frame?.contentDocument
+    if (content === null || content === undefined) return { text: '', headers: [] }
+    return {
+      text: content.body?.innerText ?? '',
+      headers: [...content.querySelectorAll<HTMLTableCellElement>('thead th')]
+        .map(header => header.innerText.trim())
+        .filter(header => header.length > 0),
+    }
+  })
+}
+
+/** Open one provider editor in Models Settings by its visible identity. */
+export async function openProviderEditor(providerLabels: readonly string[]): Promise<void> {
+  await switchToDesktopOverlay()
+  const clicked = await browser.execute((labels: readonly string[]) => {
+    const row = [...document.querySelectorAll<HTMLElement>('li')].find(element =>
+      labels.some(label => element.textContent?.includes(label)))
+    const button = [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(element =>
+      /编辑|Edit/u.test(element.textContent ?? ''))
+    if (button === undefined) return false
+    button.click()
+    return true
+  }, providerLabels)
+  if (!clicked) throw new Error(`Models Settings has no provider editor matching ${providerLabels.join(' / ')}`)
+}
+
+/** Read the iframe and scroll ownership at the public Settings/account-workspace seam. */
+export async function overlayAccountWorkspaceLayout(): Promise<AccountWorkspaceLayoutSnapshot> {
+  await switchToDesktopOverlay()
+  return await browser.execute(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    if (frame === null || frame.contentDocument === null) {
+      return {
+        borderTopWidth: '', frameHeight: 0, contentHeight: 0,
+        settingsOverflowY: undefined, tableClientHeight: undefined, tableScrollHeight: undefined,
+      }
+    }
+    let settingsOverflowY: string | undefined
+    let ancestor = frame.parentElement
+    while (ancestor !== null) {
+      const overflow = getComputedStyle(ancestor).overflowY
+      if (overflow === 'auto' || overflow === 'scroll') {
+        settingsOverflowY = overflow
+        break
+      }
+      ancestor = ancestor.parentElement
+    }
+    const table = frame.contentDocument.querySelector<HTMLElement>('.table-wrapper')
+    return {
+      borderTopWidth: getComputedStyle(frame).borderTopWidth,
+      frameHeight: frame.getBoundingClientRect().height,
+      contentHeight: frame.contentDocument.documentElement.scrollHeight,
+      settingsOverflowY,
+      tableClientHeight: table?.clientHeight,
+      tableScrollHeight: table?.scrollHeight,
+    }
+  })
+}
+
+/** Read visible native-dialog stacking and which dialog owns the viewport center. */
+export async function overlayAccountDialogStack(): Promise<readonly AccountDialogSnapshot[]> {
+  await switchToDesktopOverlay()
+  return await browser.execute(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const content = frame?.contentDocument
+    const contentWindow = frame?.contentWindow
+    if (content === null || content === undefined || contentWindow === null || contentWindow === undefined) return []
+    const center = content.elementFromPoint(contentWindow.innerWidth / 2, contentWindow.innerHeight / 2)
+    return [...content.querySelectorAll<HTMLElement>('[role="dialog"]')]
+      .filter(dialog => dialog.offsetParent !== null)
+      .map(dialog => ({
+        text: dialog.textContent?.trim().slice(0, 160) ?? '',
+        zIndex: getComputedStyle(dialog).zIndex,
+        ownsCenter: center !== null && dialog.contains(center),
+      }))
+  })
+}
+
 /** Click a bilingual button inside the native Sub2API account workspace. */
 export async function clickAccountConsoleButton(labels: readonly string[]): Promise<void> {
   await switchToDesktopOverlay()
@@ -228,6 +332,27 @@ export async function clickAccountConsoleButton(labels: readonly string[]): Prom
     return true
   }, labels)
   if (!clicked) throw new Error(`Sub2API account workspace has no button matching ${labels.join(' / ')}`)
+}
+
+/** Click a bilingual button in the topmost visible native account-workspace dialog. */
+export async function clickTopAccountDialogButton(labels: readonly string[]): Promise<void> {
+  await switchToDesktopOverlay()
+  const clicked = await browser.execute((buttonLabels: readonly string[]) => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const content = frame?.contentDocument
+    if (content === null || content === undefined) return false
+    const dialogs = [...content.querySelectorAll<HTMLElement>('[role="dialog"]')]
+      .filter(dialog => dialog.offsetParent !== null)
+      .sort((left, right) => Number.parseInt(getComputedStyle(left).zIndex || '0', 10)
+        - Number.parseInt(getComputedStyle(right).zIndex || '0', 10))
+    const top = dialogs.at(-1)
+    const button = [...(top?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(element =>
+      element.offsetParent !== null && buttonLabels.some(label => element.textContent?.includes(label)))
+    if (button === undefined) return false
+    button.click()
+    return true
+  }, labels)
+  if (!clicked) throw new Error(`Top Sub2API dialog has no button matching ${labels.join(' / ')}`)
 }
 
 /** Click one structural control inside the native Sub2API account workspace. */
@@ -339,23 +464,25 @@ export async function configureRealModelRoute(hostOrigin: string): Promise<void>
     hostOrigin,
     `/groups/${String(composite.id)}/composite-routes`,
   )
-  const route = routes.find(entry => entry.public_model === SUB2API_PUBLIC_MODEL)
-  const routePath = `/groups/${String(composite.id)}/composite-routes`
-    + (route === undefined ? '' : `/${String(route.id)}`)
-  await adminJson(hostOrigin, routePath, {
-    method: route === undefined ? 'POST' : 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      public_model: SUB2API_PUBLIC_MODEL,
-      match_type: 'exact',
-      target_platform: 'zhipu',
-      upstream_model: 'glm-5.3-flash',
-      endpoint: 'chat_completions',
-      priority: 100,
-      enabled: true,
-      notes: 'ephemeral Electron E2E route',
-    }),
-  })
+  for (const publicModel of [SUB2API_PUBLIC_MODEL, DYNAMIC_PROVIDER_MODEL]) {
+    const route = routes.find(entry => entry.public_model === publicModel)
+    const routePath = `/groups/${String(composite.id)}/composite-routes`
+      + (route === undefined ? '' : `/${String(route.id)}`)
+    await adminJson(hostOrigin, routePath, {
+      method: route === undefined ? 'POST' : 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        public_model: publicModel,
+        match_type: 'exact',
+        target_platform: 'zhipu',
+        upstream_model: 'glm-5.3-flash',
+        endpoint: 'chat_completions',
+        priority: 100,
+        enabled: true,
+        notes: 'ephemeral Electron E2E route',
+      }),
+    })
+  }
 }
 
 /** Connect an empty temporary workspace so the first Session composer unlocks. */

@@ -1,6 +1,6 @@
 /** Desktop-only Sub2API offer card in Settings: render-only, Host pushes state. */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DesktopSub2ApiSnapshot } from '../protocol.ts'
@@ -27,6 +27,7 @@ export type Sub2ApiControlProps = PropsRuntime<'settings.section'>
 export function Sub2ApiControl({ t, useSub2api }: Sub2ApiControlProps) {
   const snapshot = useSub2api(value => value)
   const consoleUrl = useSub2ApiConsoleUrl()
+  const frame = useAutoSizedConsoleFrame()
   const desktop = window.dshDesktop
   if (desktop === undefined) return null
   const running = snapshot.state === 'running'
@@ -43,14 +44,52 @@ export function Sub2ApiControl({ t, useSub2api }: Sub2ApiControlProps) {
         {!running && <OfferPanel desktop={desktop} snapshot={snapshot} t={t} />}
         {running && (
           <iframe
+            ref={frame.ref}
             className={css.consoleFrame}
             src={consoleUrl}
+            style={{ height: `${String(frame.height)}px` }}
             title={t('sub2api.consoleTitle')}
+            onLoad={frame.connect}
           />
         )}
       </div>
     </section>
   )
+}
+
+const DEFAULT_CONSOLE_HEIGHT = 720
+
+/** Grow the same-origin native workspace so the surrounding Settings page owns vertical scrolling. */
+function useAutoSizedConsoleFrame(): {
+  ref: RefObject<HTMLIFrameElement>
+  height: number
+  connect: () => void
+} {
+  const ref = useRef<HTMLIFrameElement>(null)
+  const observer = useRef<ResizeObserver | undefined>(undefined)
+  const [height, setHeight] = useState(DEFAULT_CONSOLE_HEIGHT)
+  const measure = useCallback(() => {
+    const content = ref.current?.contentDocument
+    if (content === undefined || content === null) return
+    const next = Math.max(
+      DEFAULT_CONSOLE_HEIGHT,
+      content.documentElement.scrollHeight,
+      content.body?.scrollHeight ?? 0,
+    )
+    setHeight(current => current === next ? current : next)
+  }, [])
+  const connect = useCallback(() => {
+    observer.current?.disconnect()
+    const content = ref.current?.contentDocument
+    if (content === undefined || content === null) return
+    const nextObserver = new ResizeObserver(measure)
+    nextObserver.observe(content.documentElement)
+    if (content.body !== null) nextObserver.observe(content.body)
+    observer.current = nextObserver
+    measure()
+  }, [measure])
+  useEffect(() => () => { observer.current?.disconnect() }, [])
+  return { ref, height, connect }
 }
 
 function sub2ApiConsoleUrl(): string {

@@ -37,10 +37,9 @@
 .consoleFrame {
   display: block;
   width: 100%;
-  min-height: min(720px, calc(100vh - 300px));
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 12px;
-  background: var(--dsw-alias-background-primary, #17181a);
+  min-height: 720px;
+  border: 0;
+  background: transparent;
 }
 
 .stack {

@@ -2,9 +2,11 @@
 import { browser, expect } from '@wdio/globals'
 import {
   clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
-  clickAccountConsoleSelector, clickOverlayButton,
-  configureRealModelRoute, connectTemporaryWorkspace, mainWindowSnapshot,
-  openSettings, overlayAccountConsoleSnapshot, overlayText, overlayUrl, recordOwnedProcesses,
+  clickAccountConsoleSelector, clickOverlayButton, clickTopAccountDialogButton,
+  configureRealModelRoute, connectTemporaryWorkspace, DYNAMIC_PROVIDER_MODEL, mainWindowSnapshot,
+  openProviderEditor,
+  openSettings, overlayAccountConsoleSnapshot, overlayAccountDialogStack, overlayAccountWorkspaceLayout,
+  overlayAccountWorkspaceUi, overlayText, overlayUrl, recordOwnedProcesses,
   recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, waitForSessionSurface,
 } from './helpers.ts'
 
@@ -77,6 +79,12 @@ describe('Sub2API Desktop installation', () => {
     const modelsText = await overlayText()
     expect(modelsText).toMatch(/添加提供方|Add provider/u)
     expect(modelsText).not.toMatch(/加载提供方目录失败|Loading the provider directory failed/u)
+    await openProviderEditor(['Sub2API (sub2api)', 'Sub2API'])
+    await browser.waitUntil(async () => (await overlayText()).includes(DYNAMIC_PROVIDER_MODEL), {
+      timeout: 30_000,
+      interval: 500,
+      timeoutMsg: 'Models Settings did not receive the live Sub2API account catalog',
+    })
 
     await clickOverlayButton(['账号池', 'Account pool'])
     const consoleWindow = await overlayAccountConsoleSnapshot()
@@ -90,7 +98,18 @@ describe('Sub2API Desktop installation', () => {
     expect(consoleUrl.searchParams.get('embed')).toBe('desktop')
     expect(consoleWindow.text).toMatch(/添加账号|Create Account/u)
     expect(consoleWindow.text).toMatch(/Composite 路由|Composite Routes/u)
+    const workspaceUi = await overlayAccountWorkspaceUi()
+    expect(workspaceUi.text).not.toMatch(/全部分组|All Groups|更多操作|More Actions|批量更新|Batch Update/u)
+    expect(workspaceUi.headers).toEqual([
+      '名称', '账号ID', '平台/类型', '容量', '状态', '调度', '今日统计', '用量窗口',
+      '代理', '优先级', '调度权值', '最近使用', '创建时间', '过期时间', '备注', '操作',
+    ])
     expect((await mainWindowSnapshot()).url).toBe(hostSurface.url)
+    const layout = await overlayAccountWorkspaceLayout()
+    expect(layout.borderTopWidth).toBe('0px')
+    expect(layout.frameHeight + 1).toBeGreaterThanOrEqual(layout.contentHeight)
+    expect(layout.settingsOverflowY).toBe('auto')
+    expect((layout.tableClientHeight ?? 0) + 1).toBeGreaterThanOrEqual(layout.tableScrollHeight ?? 1)
 
     await clickAccountConsoleButton(['Composite 路由', 'Composite Routes'])
     await browser.waitUntil(async () => /已保存路由|Saved Routes/u.test((await overlayAccountConsoleSnapshot()).text), {
@@ -104,6 +123,9 @@ describe('Sub2API Desktop installation', () => {
       timeout: 15_000,
       timeoutMsg: 'Native add-account dialog did not open',
     })
+    expect((await overlayAccountConsoleSnapshot()).text).not.toMatch(
+      /池模式|Pool Mode|账号计费倍率|Billing Rate Multiplier|自动探测上游声明倍率|Automatically probe upstream declared rate|配额控制|Quota Control/u,
+    )
     await clickAccountConsoleSelector('.select-trigger')
     await clickAccountConsoleOption(['Anthropic'])
     await clickAccountConsoleButton(['下一步', 'Next'])
@@ -121,6 +143,20 @@ describe('Sub2API Desktop installation', () => {
       timeout: 15_000,
       timeoutMsg: 'Integrated IP management did not open inside the account form',
     })
+    await clickAccountConsoleButton(['添加代理', 'Create Proxy'])
+    await browser.waitUntil(async () => {
+      const dialogs = await overlayAccountDialogStack()
+      return dialogs.length >= 3 && dialogs.some(dialog =>
+        /添加代理|Create Proxy/u.test(dialog.text) && dialog.ownsCenter)
+    }, {
+      timeout: 15_000,
+      timeoutMsg: 'Create Proxy dialog did not become the topmost integrated IP-management surface',
+    })
+    const dialogStack = await overlayAccountDialogStack()
+    const createProxyDialog = dialogStack.find(dialog =>
+      /添加代理|Create Proxy/u.test(dialog.text) && dialog.ownsCenter)
+    expect(createProxyDialog?.zIndex).toBe('80')
+    await clickTopAccountDialogButton(['取消', 'Cancel'])
     await clickAccountConsoleButton(['返回', 'Back'])
     await waitForSessionSurface(hostSurface.url)
     await connectTemporaryWorkspace()

@@ -1,4 +1,4 @@
-# Agent Note：显式声明开发态 client 入口
+# Agent Note: 显式声明开发态 client 入口
 
 Status: implemented
 
@@ -6,7 +6,7 @@ Status: implemented
 
 ## 问题
 
-共享 client bundle preset 为开发 watcher 选择 `src/client/index.ts`，为完整 Client build 选择 `lib/types/client/index.js`。源码入口为 TSX 的包可以通过完整 build，却只在 `pnpm run dev:web` 下失败：tsdown 返回其 watcher bundle，但初始 build 不完成，导致 HMR 就绪栅栏无限等待。
+共享 client bundle preset 为开发 watcher 选择 `src/client/index.ts`，为完整 Client build 选择 `lib/types/client/index.js`。源码入口为 TSX 的包可以通过完整 build，却只在 `pnpm run dev:web` 下失败：tsdown 返回其 watcher bundle，但初始 build 不完成，导致 HMR（热模块替换）就绪栅栏无限等待。
 
 ## 决策
 
@@ -28,4 +28,4 @@ HMR 就绪栅栏继续要求每个 tsdown bundle 完成初始 build。缺失或�
 
 ## 验证
 
-client bundle preset 测试覆盖 `ui-phone` 的 TSX 声明。真实 HMR 浏览器 E2E 必须到达 `dev-web: watching`，编辑 client 源码，在不刷新页面的情况下观察更新，并恢复其自有源码与 build 产物。
+client bundle preset 测试覆盖显式 `.tsx` 源码入口与固定产物入口。真实 HMR 浏览器 E2E 通过要求每个 bundle 先进入就绪态来覆盖 `ui-phone` 调用处，随后编辑 client 源码、在不刷新页面的情况下观察更新，并恢复其自有源码与 build 产物。

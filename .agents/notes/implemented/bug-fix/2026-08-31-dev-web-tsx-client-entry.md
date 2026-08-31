@@ -24,8 +24,8 @@ The HMR readiness barrier continues to require every tsdown bundle to complete i
 
 ## Consequences
 
-Development watchers and complete Client builds may use different physical entry filenames while preserving one package-owned declaration. New packages keep the default unless their source entry differs. The preset test checks both the declared development entry and the fixed emitted entry.
+Development watchers and complete Client builds may use different physical entry filenames while preserving one package-owned declaration. New packages keep the default unless their source entry differs. The preset test checks both the explicit development entry and the fixed emitted entry.
 
 ## Verification
 
-The client bundle preset test covers the `ui-phone` TSX declaration. The real HMR browser E2E must reach `dev-web: watching`, edit a client source file, observe the updated page without reload, and restore its owned source and build artifacts.
+The client bundle preset test covers an explicit `.tsx` source entry and the fixed emitted entry. The real HMR browser E2E covers the `ui-phone` call site by requiring every bundle to become ready before it edits a client source file, observes the updated page without reload, and restores its owned source and build artifacts.

@@ -101,7 +101,8 @@ function browserSourcePath(source: string, sourcemapPath: string): string {
  * @param libEntry - node-half entries, spelled at the call site so the
  * package-invariants gate can see `lib/types/invariant.js` in each package's
  * own tsdown.config.ts (a preset-side glob hides it from the mechanical check).
- * @param options - phase placement, lib overrides, and companion Node configs.
+ * @param options - development client entry, phase placement, lib overrides,
+ * and companion Node configs.
  * @returns ENV-selected tsdown config for the current build face.
  */
 export function clientBundle(

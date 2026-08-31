@@ -332,7 +332,10 @@ export async function overlayAccountDialogStack(): Promise<readonly AccountDialo
     if (content === null || content === undefined || contentWindow === null || contentWindow === undefined) return []
     const center = content.elementFromPoint(contentWindow.innerWidth / 2, contentWindow.innerHeight / 2)
     return [...content.querySelectorAll<HTMLElement>('[role="dialog"]')]
-      .filter(dialog => dialog.offsetParent !== null)
+      .filter((dialog) => {
+        const style = getComputedStyle(dialog)
+        return dialog.getClientRects().length > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+      })
       .map(dialog => ({
         text: dialog.textContent?.trim().slice(0, 160) ?? '',
         zIndex: getComputedStyle(dialog).zIndex,
@@ -363,7 +366,10 @@ export async function clickTopAccountDialogButton(labels: readonly string[]): Pr
     const content = frame?.contentDocument
     if (content === null || content === undefined) return false
     const dialogs = [...content.querySelectorAll<HTMLElement>('[role="dialog"]')]
-      .filter(dialog => dialog.offsetParent !== null)
+      .filter((dialog) => {
+        const style = getComputedStyle(dialog)
+        return dialog.getClientRects().length > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+      })
       .sort((left, right) => Number.parseInt(getComputedStyle(left).zIndex || '0', 10)
         - Number.parseInt(getComputedStyle(right).zIndex || '0', 10))
     const top = dialogs.at(-1)

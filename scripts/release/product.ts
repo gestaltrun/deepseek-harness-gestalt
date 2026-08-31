@@ -386,7 +386,11 @@ function aggregateProductReleaseFromAuthorities(
   }
 }
 
-/** Write one retry-stable plan after validating every external release baseline. */
+/**
+ * Write one retry-stable plan, selected versions, Mobile build, Desktop notes,
+ * and consumed-intent state. A missing Desktop release tag rejects before any
+ * of those files change.
+ */
 export async function writeProductRelease(root: string, plan: ProductReleasePlan, priorState: ProductReleaseState): Promise<void> {
   validateState(priorState)
   if (plan.sequence !== priorState.nextSequence) throw new Error('product release plan sequence is stale')
@@ -1057,7 +1061,7 @@ function runGit(root: string, args: string[]): string {
 
 function resolveDesktopReleaseBaseline(root: string, version: string): string {
   const tag = `${TAG_PREFIX.desktop}${version}`
-  const result = spawnSync('git', ['-C', root, 'rev-parse', `${tag}^{commit}`], { encoding: 'utf8' })
+  const result = spawnSync('git', ['-C', root, 'rev-parse', `refs/tags/${tag}^{commit}`], { encoding: 'utf8' })
   if (result.status !== 0) {
     throw new Error(`publish or recover Desktop ${tag} before preparing another Desktop release`)
   }

@@ -215,6 +215,11 @@ describe('product release plan', () => {
     const before = await Promise.all(paths.map(path => readFile(join(root, path), 'utf8')))
     git(root, 'init')
     git(root, 'config', 'core.hooksPath', '/dev/null')
+    git(root, 'config', 'user.email', 'release-test@example.com')
+    git(root, 'config', 'user.name', 'Release Test')
+    git(root, 'add', '.')
+    git(root, 'commit', '-m', 'base')
+    git(root, 'branch', 'gestalt-v0.1.0')
 
     await expect(writeProductRelease(root, plan, state)).rejects.toThrow(
       'publish or recover Desktop gestalt-v0.1.0 before preparing another Desktop release',

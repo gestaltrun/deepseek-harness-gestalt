@@ -751,7 +751,6 @@
         "@wdio/cli",
         "@wdio/electron-service",
         "@wdio/local-runner",
-        "@wdio/mocha-framework",
         "@wdio/spec-reporter",
         "@wdio/types"
       ]

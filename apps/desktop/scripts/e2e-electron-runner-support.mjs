@@ -11,6 +11,8 @@ function delay(milliseconds) {
   return new Promise(resolve => { setTimeout(resolve, milliseconds) })
 }
 
+const FAKE_OWNERSHIP_FETCH_TIMEOUT_MS = 1_000
+
 function signalProcessGroup(pid, signal) {
   try {
     process.kill(-pid, signal)
@@ -249,13 +251,15 @@ async function loopbackPortAcceptsConnections(port) {
 /**
  * Verify the fake process identity through its external ownership endpoint.
  * @param {number} port - fakemobilecli loopback port.
- * @param {string} ownerToken - attempt-specific token written into the staged fixture.
+ * @param {string} ownerToken - run-specific token written into the staged fake and reused across port attempts.
  * @returns {Promise<{ pid: number }>} verified fake process identity.
  */
 export async function readOwnedFakeProcess(port, ownerToken) {
   let record
   try {
-    const response = await fetch(`http://127.0.0.1:${String(port)}/__test/pid`)
+    const response = await fetch(`http://127.0.0.1:${String(port)}/__test/pid`, {
+      signal: AbortSignal.timeout(FAKE_OWNERSHIP_FETCH_TIMEOUT_MS),
+    })
     if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
     record = await response.json()
   } catch (error) {

@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决定
 
-`pnpm run test:e2e-electron` 构建当前源码，并通过 WebdriverIO Electron service 对 `apps/desktop/out/main.mjs` 运行两个场景。运行器使用 operated-platform fixture、全新的 `DSH_HOME`、Electron 用户数据与 Workspace 根目录，并把 Desktop smoke 日志作为 Host URL 权威。运行器会把 mobilecli 与 CDP 的不同回环端口租约持有到启动前，通过每次尝试专属的所有权 token 验证临时 fake；只有已完成 drain 的运行器日志报告所有权或 bind 失败，且交接后的端口仍接受连接时，运行器才会改用一组全新端口重试。Session Surface 与 Desktop overlay 保持为两个 WebDriver 窗口，通过 overlay 文档标记选择。
+`pnpm run test:e2e-electron` 构建当前源码，并通过 WebdriverIO Electron service 对 `apps/desktop/out/main.mjs` 运行两个场景。运行器使用 operated-platform fixture、全新的 `DSH_HOME`、Electron 用户数据与 Workspace 根目录，并把 Desktop smoke 日志作为 Host URL 权威。运行器会把 mobilecli 与 CDP 的不同回环端口租约持有到启动前，并通过一个所有权 token 验证临时 fake；该 token 随本次运行暂存的 fake 创建，并在端口交接重试之间复用。所有权请求会在 1 秒后超时，并通过同一种验证失败报告。只有已完成 drain 的运行器日志报告所有权或 bind 失败，且交接后的端口仍接受连接时，运行器才会改用一组全新端口重试。Session Surface 与 Desktop overlay 保持为两个 WebDriver 窗口，通过 overlay 文档标记选择。
 
 实时场景把真实 Desktop Host 与仓库 fakemobilecli fixture 的临时可执行副本组装起来。fixture 返回当前设备信封与 390×844 H264 流。场景通过产品 RPC 路由创建带 Workspace 的 Session，经 overlay 菜单选择手机 tab，检查可用设备分组和仅在线选择器，打开设备，并同时要求 H264 传输有效与 390×844 已解码画面实际渲染。场景会记录全部 `/phone/stream/*` 资源，并要求集合非空、每条路径都以 `/h264` 结尾且不存在 `/mjpeg` 路径，否则测试失败。随后在单例 tab 中切换设备，要求每个 replacement 都绘制一幅 390×844 已解码画面，再把中心点按与主屏幕按钮转发给 fake，并打开独立的「手机设备」设置分区。
 

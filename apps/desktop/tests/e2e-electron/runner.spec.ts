@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { mkdtemp, open, readFile, rm } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
+import { createServer as createTcpServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Writable } from 'node:stream'
@@ -61,6 +62,34 @@ async function closeServer(server: Server): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => { if (error === undefined) resolve(); else reject(error) })
   })
+}
+
+async function startHangingTcpServer(port: number): Promise<{
+  readonly accepted: () => number
+  readonly close: () => Promise<void>
+}> {
+  const sockets = new Set<Socket>()
+  let accepted = 0
+  const server = createTcpServer((socket) => {
+    accepted += 1
+    sockets.add(socket)
+    socket.once('close', () => { sockets.delete(socket) })
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, '127.0.0.1', resolve)
+  })
+  let closure: Promise<void> | undefined
+  return {
+    accepted: () => accepted,
+    close: () => {
+      closure ??= new Promise<void>((resolve, reject) => {
+        for (const socket of sockets) socket.destroy()
+        server.close((error) => { if (error === undefined) resolve(); else reject(error) })
+      })
+      return closure
+    },
+  }
 }
 
 describe('Desktop Electron runner ownership', () => {
@@ -217,6 +246,49 @@ describe('Desktop Electron runner ownership', () => {
     }
 
     expect(value).toBe('owned')
+    expect(seen).toHaveLength(2)
+    expect(seen[1]?.fakePort).not.toBe(seen[0]?.fakePort)
+    expect(seen[1]?.cdpPort).not.toBe(seen[0]?.cdpPort)
+  })
+
+  it('times out a foreign TCP listener that never answers HTTP and retries with fresh ports', async () => {
+    const seen: Array<{ fakePort: number; cdpPort: number }> = []
+    const servers: Server[] = []
+    let hanging: Awaited<ReturnType<typeof startHangingTcpServer>> | undefined
+    const watchdog = setTimeout(() => { void hanging?.close() }, 2_000)
+    let value: string
+    try {
+      value = await runWithVerifiedPortHandoff('phone-live', async (ports, attempt) => {
+        seen.push(ports)
+        const ownerToken = `run-owner-${String(attempt)}`
+        if (attempt === 1) {
+          hanging = await startHangingTcpServer(ports.fakePort)
+        } else {
+          const owned = createServer((_request, response) => {
+            response.writeHead(200, { 'content-type': 'application/json' })
+            response.end(JSON.stringify({ pid: process.pid, ownerToken }))
+          })
+          await new Promise<void>((resolve, reject) => {
+            owned.once('error', reject)
+            owned.listen(ports.fakePort, '127.0.0.1', resolve)
+          })
+          servers.push(owned)
+        }
+        let runnerLog = ''
+        try {
+          await readOwnedFakeProcess(ports.fakePort, ownerToken)
+        } catch (error) {
+          runnerLog = error instanceof Error ? error.message : String(error)
+        }
+        return { value: attempt === 1 ? 'hung' : 'owned', runnerLog }
+      })
+    } finally {
+      clearTimeout(watchdog)
+      await Promise.all([hanging?.close(), ...servers.map(closeServer)])
+    }
+
+    expect(value).toBe('owned')
+    expect(hanging?.accepted()).toBeGreaterThan(0)
     expect(seen).toHaveLength(2)
     expect(seen[1]?.fakePort).not.toBe(seen[0]?.fakePort)
     expect(seen[1]?.cdpPort).not.toBe(seen[0]?.cdpPort)

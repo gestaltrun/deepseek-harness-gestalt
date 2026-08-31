@@ -534,6 +534,40 @@ describe('phone runtime service lifecycle', () => {
     expect(unavailable.message).toMatch(/exited unexpectedly|socket is gone/)
   })
 
+  it('does not publish readiness when the first device listing violates the protocol', async () => {
+    const fake = await stageFake({ devices: [{ id: 'malformed' }] as never })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    const fiber = context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      executablePath: fake.executablePath,
+      serverPort: fake.port,
+    })
+    const outcome = await fiber.await().then(() => undefined, (error: unknown) => error)
+    expect(outcome).toBeInstanceOf(PhoneDevicesError)
+    expect((outcome as PhoneDevicesError).code).toBe('PHONE_PROTOCOL')
+  })
+
+  it('publishes removals when a ready child is lost', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const changes: PhoneDeviceChange[] = []
+    context.phoneDevices.onChanged(change => changes.push(change))
+    const pidResponse = await fetch(`${fake.baseUrl}/__test/pid`)
+    const { pid } = await pidResponse.json() as { pid: number }
+    process.kill(pid, 'SIGKILL')
+    await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
+    expect(changes.at(-1)?.removed).toEqual([
+      ANDROID_EMULATOR, IOS_SIMULATOR, IOS_REAL,
+    ])
+    expect(changes.at(-1)?.list).toEqual({
+      android: [], ios: { simulators: [], reals: [] },
+    })
+  })
+
   it('cancels a replacement while its child is waiting for readiness', async () => {
     const initial = await stageFake({ devices: BASE_DEVICES })
     const hanging = await stageFake({ hang: true })

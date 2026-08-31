@@ -428,11 +428,11 @@ export class PhoneDevices extends Service {
         )
       }
       void child.exit.then((exit) => { this.onChildExit(child, exit) })
-      this.ready = true
-      this.publishReadiness(true)
       // Commit the baseline listing inside initialization so every observer
       // attaches to a stable starting point and receives only later changes.
-      await this.pollAttempt()
+      await this.pollAttempt(true)
+      this.ready = true
+      this.publishReadiness(true)
       this.armPoll()
     } catch (error) {
       const failure = signal?.aborted === true
@@ -574,6 +574,7 @@ export class PhoneDevices extends Service {
    */
   async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void> {
     this.requireResolved()
+    this.assertUsable()
     this.requireKnown(request.deviceId, 'io')
     await this.whenReady(signal)
     await this.roundTrip(IO_METHODS[request.method], ioParams(request), signal, this.resolved.requestTimeoutMs)
@@ -591,6 +592,7 @@ export class PhoneDevices extends Service {
    */
   async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream> {
     this.requireResolved()
+    this.assertUsable()
     this.requireKnown(request.deviceId, 'capture')
     await this.whenReady(request.signal)
     this.assertUsable()
@@ -795,13 +797,16 @@ export class PhoneDevices extends Service {
   }
 
   /** One bounded devices.list attempt followed by publication, never throwing outward. */
-  private async pollAttempt(): Promise<void> {
+  private async pollAttempt(required = false): Promise<void> {
     let next: PhoneDeviceList
     try {
       const result = await this.roundTrip(METHOD_DEVICES_LIST, { includeOffline: true }, undefined, this.resolved.requestTimeoutMs)
       next = groupEntries(parseDeviceInfos(result))
     } catch (error) {
       const normalized = normalizeOperationError(error)
+      if (required && (normalized.code === 'PHONE_UNAVAILABLE' || normalized.code === 'PHONE_PROTOCOL')) {
+        throw normalized
+      }
       if (normalized.code === 'PHONE_UNAVAILABLE' || normalized.code === 'PHONE_PROTOCOL') {
         this.markLost(normalized)
         return
@@ -813,16 +818,19 @@ export class PhoneDevices extends Service {
     }
     const delta = changeSets(this.publishedList, next)
     if (!delta.changed) return
-    this.publish(Object.freeze({
+    const published = this.publish(Object.freeze({
       list: next,
       added: Object.freeze(delta.added),
       removed: Object.freeze(delta.removed),
     }))
+    if (required && !published) throw this.lost ?? new PhoneDevicesError(
+      'PHONE_PROTOCOL', 'the initial mobilecli device listing was rejected',
+    )
   }
 
-  private publish(change: PhoneDeviceChange): void {
+  private publish(change: PhoneDeviceChange): boolean {
     const validator = phoneRuntimeStateValidator(this[PHONE_RUNTIME_STATE_OWNER])
-    if (validator !== undefined && !this.guarded(validator, change)) return
+    if (validator !== undefined && !this.guarded(validator, change)) return false
     this.publishedList = change.list
     for (const sub of [...this.subscribers]) {
       try {
@@ -832,6 +840,7 @@ export class PhoneDevices extends Service {
         this.ctx.logger.warn(error)
       }
     }
+    return true
   }
 
   /**
@@ -861,6 +870,15 @@ export class PhoneDevices extends Service {
     this.ready = false
     this.publishReadiness(false)
     this.clearPollTimer()
+    if (this.publishedList !== undefined && allRefsOf(this.publishedList).length > 0) {
+      const empty = emptyDeviceList()
+      const delta = changeSets(this.publishedList, empty)
+      this.publish(Object.freeze({
+        list: empty,
+        added: Object.freeze(delta.added),
+        removed: Object.freeze(delta.removed),
+      }))
+    }
     this.ctx.logger.error(reason.message)
     void this.child?.stop().catch((error: unknown) => {
       this.ctx.logger.warn('phone-runtime: failed to stop the lost mobilecli child')

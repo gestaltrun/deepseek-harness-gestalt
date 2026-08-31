@@ -20,6 +20,7 @@ import { connectFreshWorkspace, newEnglishPage, saveFailureShot } from './suppor
 
 const MODE = webSnapshotMode()
 const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+const SESSION_SELECTION_KEY = 'dsh.sessions.current'
 
 function isForbiddenSessionRequest(request: Request): boolean {
   return /\/api\/session\.(?:create|prompt)$/.test(new URL(request.url()).pathname)
@@ -105,18 +106,20 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
   }, 120_000)
 
   afterAll(async () => {
-    await browser?.close()
-    await scaffold?.close()
-    await rm(harnessHome, { recursive: true, force: true })
+    const failures: unknown[] = []
+    await browser?.close().catch((error: unknown) => failures.push(error))
+    await scaffold?.close().catch((error: unknown) => failures.push(error))
+    await rm(harnessHome, { recursive: true, force: true }).catch((error: unknown) => failures.push(error))
+    if (failures.length > 0) throw new AggregateError(failures, 'member-question e2e cleanup failed')
   })
 
   it('answers and declines through Host authority while retaining terminal bands', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-member-question-host-receiver'))
     forbiddenRequests.length = 0
     const initialSessionIds = scaffold.ctx.sessions.list().map(session => session.id)
-    const receiverWorkspace = scaffold.ctx.workspaceRegistry.list()
-      .find(workspace => workspace.path === join(scaffold.workspaceCwd, 'workspace'))
-    if (receiverWorkspace === undefined) throw new Error('member-question e2e: receiver workspace unavailable')
+    const receiverWorkspacePath = join(harnessHome, 'receiver-workspace')
+    await mkdir(receiverWorkspacePath, { recursive: true })
+    const receiverWorkspace = await scaffold.ctx.workspaceRegistry.create(receiverWorkspacePath)
     const projectId = 'project-atlas'
     await bindReceiverWorkspace(receiver, projectId, receiverWorkspace.id)
     const create = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'create')
@@ -211,11 +214,21 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       expect(tripwire.warnings).toEqual([])
 
       const sessionBackup = join(harnessHome, 'session-backup')
-      await cp(scaffold.persistenceRoot, sessionBackup, { recursive: true })
+      const storageBackup = join(harnessHome, 'storage-backup')
+      const clientSelection = await page.evaluate(key => localStorage.getItem(key), SESSION_SELECTION_KEY)
+      if (clientSelection === null) throw new Error('member-question e2e: client selection was not persisted')
+      expect(JSON.parse(clientSelection) as unknown).toMatchObject({ sessionId: first.receivingSessionId })
       await browser.close()
-      await scaffold.close()
+      await scaffold.closeWithStateBackup({
+        persistenceRoot: sessionBackup,
+        storageRoot: storageBackup,
+      })
 
-      scaffold = await launchWebScaffold({ harnessHome, persistenceSeed: sessionBackup })
+      scaffold = await launchWebScaffold({
+        harnessHome,
+        persistenceSeed: sessionBackup,
+        storageSeed: storageBackup,
+      })
       const restartedService = scaffold.ctx.get('memberQuestionReceiver')
       if (restartedService === undefined) throw new Error('member-question e2e: restarted receiver unavailable')
       receiver = restartedService
@@ -224,19 +237,24 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       const restartedPrompt = vi.spyOn(scaffold.ctx.apiProxy.sessions, 'prompt')
       browser = await chromium.launch()
       page = await newEnglishPage(browser)
+      await page.addInitScript(({ key, value }) => { localStorage.setItem(key, value) }, {
+        key: SESSION_SELECTION_KEY,
+        value: clientSelection,
+      })
       tripwire = watchConsole(page)
       forbiddenRequests.length = 0
       page.on('request', (request) => {
         if (isForbiddenSessionRequest(request)) forbiddenRequests.push(request.url())
       })
-      await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
-      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
-      await mkdir(receiverWorkspace.path, { recursive: true })
-      const restartedWorkspace = await scaffold.ctx.workspaceRegistry.create(receiverWorkspace.path)
-      await bindReceiverWorkspace(receiver, projectId, restartedWorkspace.id)
+      const restartedWorkspace = scaffold.ctx.workspaceRegistry.get(receiverWorkspace.id)
+      if (restartedWorkspace === undefined) throw new Error('member-question e2e: restarted workspace unavailable')
+      expect(await receiver.lookup('account:receiver' as PlatformAccountId, projectId as never))
+        .toBe(restartedWorkspace.id)
 
       const afterRestart = await receiver.snapshot()
-      expect(afterRestart).toEqual({ ...beforeRestart, revision: beforeRestart.revision + 1 })
+      expect(afterRestart).toEqual(beforeRestart)
+      await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
+      await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
       const restartedRow = sessionRow(page, title)
       await restartedRow.waitFor({ timeout: 30_000 })
       await restartedRow.click()

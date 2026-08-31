@@ -183,12 +183,22 @@ export interface WebScaffold {
   harnessHome: string
   /** Await a settled turn end: in-process turn/end, then the agent's idle flip (which follows the persistence flush). */
   whenTurnSettled(timeoutMs?: number): Promise<SessionId>
+  /** Quiesce the Host, copy both durable state roots, then remove the scaffold-owned world. */
+  closeWithStateBackup(backup: WebScaffoldStateBackup): Promise<void>
   /**
    * Tear everything down; asserts the replay fixture was fully consumed first
    * (replay/refresh), unless booted with replayProvidersOnly (whose fixture
    * is validated call-free at boot).
    */
   close(): Promise<void>
+}
+
+/** Destinations for one quiescent Host-state backup. */
+export interface WebScaffoldStateBackup {
+  /** Destination receiving the complete JSONL persistence tree. */
+  persistenceRoot: string
+  /** Destination receiving the complete storage-domain tree. */
+  storageRoot: string
 }
 
 /** Options for {@link launchWebScaffold}. */
@@ -302,14 +312,34 @@ export interface LaunchOptions {
   harnessHome?: string
   /** Copy an existing JSONL persistence tree before the Host boots and reads it. */
   persistenceSeed?: string
+  /** Copy an existing storage-domain tree before the Host boots and reads it. */
+  storageSeed?: string
   /** Force the Host native-path capability for platform-independent UI assertions. */
   nativeOpen?: boolean
 }
 
 /** Dispose the booted tree and remove both owned temp roots, reporting every independent cleanup failure. */
-async function cleanupScaffoldWorld(ctx: Context, workspaceCwd: string, persistenceRoot: string): Promise<unknown[]> {
+async function cleanupScaffoldWorld(
+  ctx: Context,
+  workspaceCwd: string,
+  persistenceRoot: string,
+  backup?: WebScaffoldStateBackup,
+): Promise<unknown[]> {
   const failures: unknown[] = []
-  await Promise.resolve(ctx.fiber.dispose()).catch((error: unknown) => failures.push(error))
+  let quiesced = true
+  await Promise.resolve(ctx.fiber.dispose()).catch((error: unknown) => {
+    quiesced = false
+    failures.push(error)
+  })
+  if (backup !== undefined && quiesced) {
+    const copies = await Promise.allSettled([
+      cp(persistenceRoot, backup.persistenceRoot, { recursive: true }),
+      cp(join(workspaceCwd, '.dsh-storages'), backup.storageRoot, { recursive: true }),
+    ])
+    for (const copy of copies) {
+      if (copy.status === 'rejected') failures.push(copy.reason)
+    }
+  }
   await rm(workspaceCwd, { recursive: true, force: true }).catch((error: unknown) => failures.push(error))
   await rm(persistenceRoot, { recursive: true, force: true }).catch((error: unknown) => failures.push(error))
   return failures
@@ -347,6 +377,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     }
   }
   const workspaceCwd = await realpath(await mkdtemp(join(tmpdir(), 'dsh-web-e2e-ws-')))
+  const storageRoot = join(workspaceCwd, '.dsh-storages')
   // Isolated harness home: the settings/credentials rows resolve $DSH_HOME
   // paths at load, and an in-process boot must NEVER touch the developer's
   // real ~/.dsh document or credential file.
@@ -384,6 +415,9 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     persistenceRoot = await mkdtemp(join(tmpdir(), 'dsh-web-e2e-sessions-'))
     if (options.persistenceSeed !== undefined) {
       await cp(options.persistenceSeed, persistenceRoot, { recursive: true })
+    }
+    if (options.storageSeed !== undefined) {
+      await cp(options.storageSeed, storageRoot, { recursive: true })
     }
   } catch (error) {
     const failures: unknown[] = [error]
@@ -441,7 +475,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     // storage-json's yml root is anchored to the real $DSH_HOME; pin the row
     // to an absolute temp root (removed with the workspace at close) so tests
     // never write the user's harness home.
-    { id: 'storage-json', config: { root: join(workspaceCwd, '.dsh-storages') } },
+    { id: 'storage-json', config: { root: storageRoot } },
     {
       id: 'member-question-receiver',
       config: {
@@ -676,6 +710,28 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     if (process.cwd() !== originalCwd) process.chdir(originalCwd)
   }
 
+  const closeScaffold = async (backup?: WebScaffoldStateBackup): Promise<void> => {
+    const failures: unknown[] = []
+    // Fixture-consumption check first, while the run's binding state is
+    // still authoritative — a scenario that drove fewer model calls than
+    // recorded fails here instead of drifting green. Skipped for
+    // replayProvidersOnly, whose fixture is validated call-free at boot.
+    if (!options.replayProvidersOnly) {
+      try {
+        replayHandle?.assertConsumed()
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+    try {
+      failures.push(...await cleanupScaffoldWorld(ctx, workspaceCwd, persistenceRoot, backup))
+    } finally {
+      restoreCredentialEnvironment()
+      restoreSkillRootEnvironment()
+    }
+    if (failures.length > 0) throw new AggregateError(failures, 'web scaffold teardown failed')
+  }
+
   return {
     harnessHome,
     mode,
@@ -701,27 +757,8 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
         })
       })
     },
-    async close(): Promise<void> {
-      const failures: unknown[] = []
-      // Fixture-consumption check first, while the run's binding state is
-      // still authoritative — a scenario that drove fewer model calls than
-      // recorded fails here instead of drifting green. Skipped for
-      // replayProvidersOnly, whose fixture is validated call-free at boot.
-      if (!options.replayProvidersOnly) {
-        try {
-          replayHandle?.assertConsumed()
-        } catch (error) {
-          failures.push(error)
-        }
-      }
-      try {
-        failures.push(...await cleanupScaffoldWorld(ctx, workspaceCwd, persistenceRoot))
-      } finally {
-        restoreCredentialEnvironment()
-        restoreSkillRootEnvironment()
-      }
-      if (failures.length > 0) throw new AggregateError(failures, 'web scaffold teardown failed')
-    },
+    closeWithStateBackup: async (backup) => { await closeScaffold(backup) },
+    close: async () => { await closeScaffold() },
   }
 }
 

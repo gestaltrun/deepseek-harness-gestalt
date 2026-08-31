@@ -80,6 +80,7 @@ describe('Sub2API Desktop installation', () => {
     expect(modelsText).toMatch(/添加提供方|Add provider/u)
     expect(modelsText).not.toMatch(/加载提供方目录失败|Loading the provider directory failed/u)
     await openProviderEditor(['Sub2API (sub2api)', 'Sub2API'])
+    await clickOverlayButton(['自定义设置', 'Customized settings'])
     await browser.waitUntil(async () => (await overlayText()).includes(DYNAMIC_PROVIDER_MODEL), {
       timeout: 30_000,
       interval: 500,

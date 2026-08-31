@@ -19,12 +19,13 @@ export type { AndroidCommandLineToolsAsset, AndroidHostPlan, AndroidInstallation
 
 /** Host-private root shared with the stable phone environment Service. */
 export interface Config {
+  /** Private phone environment root; defaults to `$DSH_HOME/phone`. */
   readonly root?: string
 }
 
 /** Runtime configuration schema. */
 export const Config: z<Config> = z.object({ root: z.string() })
-export const inject = ['phoneEnvironment'] as const
+export const inject = ['phoneEnvironment']
 export const name = 'phone-environment-android'
 
 /** Register the Android Provider into the stable full-snapshot owner. */

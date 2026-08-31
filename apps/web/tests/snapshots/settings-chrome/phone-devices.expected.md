@@ -4,9 +4,21 @@
   - strong: 设备运行时 · mobilecli
   - text: 未准备 · v1.0.5 · 5.2 MB 来源：mobile-next/mobilecli 官方 1.0.5 · 安装到 $DSH_HOME/phone
   - button "准备 mobilecli"
-- paragraph:
-  - strong: iOS
-  - text: iOS 模拟器需要在安装 Xcode 的 macOS 上使用。
+- article:
+  - heading "Android" [level=3]
+  - paragraph: 模拟器与 USB 真机
+  - strong: platform-tools
+  - text: 正在检测
+  - strong: Android Emulator
+  - text: 正在检测
+  - strong: Pixel 6 · API 35
+  - text: 正在检测
+  - paragraph: 等待 Android 环境 Provider…
+- article:
+  - heading "iOS" [level=3]
+  - paragraph: 模拟器与 USB 真机
+  - strong: iOS 设备需要 Mac
+  - paragraph: iOS 模拟器需要在安装 Xcode 的 macOS 上使用。
 - article:
   - heading "手机设备" [level=3]
   - paragraph: 把 Android / iOS 模拟器与 USB 真机接入会话。启用后 Agent 获得设备工具，你可以在右侧面板实时观看画面并随时接管。

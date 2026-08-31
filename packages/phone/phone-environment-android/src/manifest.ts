@@ -45,7 +45,12 @@ export const ANDROID_COMMAND_LINE_TOOLS_ASSETS: readonly AndroidCommandLineTools
   },
 ])
 
-/** Select one pinned asset or return the official unsupported Host reason. */
+/**
+ * Select one pinned command-line tools asset for a Host tuple.
+ * @param platform - Node platform name.
+ * @param architecture - Node architecture name.
+ * @returns the admitted asset, or `undefined` for an unsupported tuple.
+ */
 export function selectAndroidCommandLineToolsAsset(
   platform: string,
   architecture: string,

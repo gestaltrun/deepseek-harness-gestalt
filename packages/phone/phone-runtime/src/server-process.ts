@@ -7,7 +7,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { childEnv } from '@deepseek-ai/dsh-subprocess'
 
 /** Stderr bytes retained for failure diagnostics. */
 const STDERR_TAIL_BYTES = 4096
@@ -84,7 +84,7 @@ export class MobilecliServerProcess {
       options.executablePath,
       ['server', 'start', '--listen', `127.0.0.1:${String(options.port)}`],
       {
-        env: { ...scrubbedParentEnv(), ...options.environment },
+        env: childEnv(options.environment),
         stdio: ['ignore', 'ignore', 'pipe'],
         windowsHide: true,
       },

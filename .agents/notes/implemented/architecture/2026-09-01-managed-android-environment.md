@@ -16,7 +16,7 @@ Compatible writable SDK roots are reused. Otherwise the Provider uses `$DSH_HOME
 
 Google command-line tools build `15859902` is fixed by Host tuple with exact length and SHA-256. The package ids are `platform-tools`, `emulator`, and API 35 Google APIs with the Host CPU ABI. Preparation starts only after an explicit Android SDK license acceptance request and a 16 GB free-space check. `sdkmanager` owns upstream package download and license files; the Provider owns the verified command-line tools staging and the idempotent `Pixel_6_API_35_Gestalt` AVD.
 
-The Provider checks acceleration before starting the AVD. Windows Hypervisor Platform, Linux KVM permissions, BIOS virtualization, USB debugging, RSA trust, and OEM drivers remain manual requirements. Product-started Emulator processes stop to quiescence on cancellation, disable, or teardown. A ready platform state carries the actual emulator id and causes mobilecli to reactivate with the Android environment.
+The Provider checks acceleration before starting the AVD. Windows Hypervisor Platform, Linux KVM permissions, BIOS virtualization, USB debugging, RSA trust, and OEM drivers remain manual requirements. Product-started Emulator process trees stop to quiescence on cancellation, disable, or teardown. A running platform state carries the actual emulator id, causes mobilecli to reactivate with the Android environment, and becomes ready only after mobilecli lists that id online and yields a non-empty H264 chunk.
 
 ## Alternatives considered
 

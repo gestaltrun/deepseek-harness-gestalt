@@ -159,7 +159,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
       )
       if (installed.kind !== 'supported') throw new AndroidEnvironmentError('PHONE_ANDROID_UNSUPPORTED', installed.reason)
       this.plan = installed.plan
-      return await this.start(operationSignal)
+      return await this.startEmulator(operationSignal)
     } catch (error) {
       if (operationSignal.aborted) {
         await this.stopOwnedEmulator()
@@ -175,6 +175,33 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   }
 
   async start(signal?: AbortSignal): Promise<PhoneAndroidState> {
+    if (this.operation !== undefined) throw new AndroidEnvironmentError('PHONE_ANDROID_BUSY', 'an Android operation is already running')
+    const controller = new AbortController()
+    this.operation = controller
+    const operationSignal = signal === undefined
+      ? controller.signal
+      : AbortSignal.any([controller.signal, signal])
+    try {
+      return await this.startEmulator(operationSignal)
+    } catch (error) {
+      await this.stopOwnedEmulator()
+      if (operationSignal.aborted) {
+        const plan = this.requirePlan()
+        this.publish({ kind: 'ready', plan, running: false })
+        throw new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android Emulator start was cancelled', { cause: error })
+      }
+      const failure = androidFailure(error)
+      this.publish({
+        kind: 'failed', ...(this.plan === undefined ? {} : { plan: this.plan }),
+        code: failure.code, message: failure.message, retryable: true,
+      })
+      throw failure
+    } finally {
+      if (this.operation === controller) this.operation = undefined
+    }
+  }
+
+  private async startEmulator(signal?: AbortSignal): Promise<PhoneAndroidState> {
     const plan = this.requirePlan()
     if (!Object.values(plan.components).every(Boolean) && !await exists(this.avdConfig(plan))) {
       throw new AndroidEnvironmentError('PHONE_ANDROID_NOT_PREPARED', 'the default Android emulator is not prepared')
@@ -264,7 +291,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     await chmod(staging, 0o700)
     try {
       this.publish({ kind: 'downloading', plan, receivedBytes: 0, totalBytes: asset.bytes })
-      const response = await this.fetcher(asset.url, { signal })
+      const response = await this.fetcher(asset.url, { signal, redirect: 'error' })
       if (!response.ok || response.body === null) {
         throw new AndroidEnvironmentError('PHONE_ANDROID_DOWNLOAD', `command-line tools download failed with HTTP ${String(response.status)}`)
       }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { PassThrough } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
-import { scrubbedParentEnv, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
+import { childEnv, scrubbedParentEnv, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   SubprocessHandle,
   SubprocessOutputRead,
@@ -95,6 +95,20 @@ describe('SubprocessRuntime seam', () => {
       delete process.env.SCRUB_PROBE_TOKEN
       delete process.env.SCRUB_PROBE_PASSWORD
       delete process.env.SCRUB_PROBE_PLAIN
+    }
+  })
+
+  it('childEnv replaces case-insensitive Windows names without an ambiguous duplicate', () => {
+    const inheritedPath = process.env.PATH
+    delete process.env.PATH
+    process.env.Path = 'ambient'
+    try {
+      const env = childEnv({ PATH: 'explicit', android_home: 'sdk' }, 'win32')
+      expect(Object.entries(env).filter(([key]) => key.toUpperCase() === 'PATH')).toEqual([['PATH', 'explicit']])
+      expect(env.android_home).toBe('sdk')
+    } finally {
+      delete process.env.Path
+      if (inheritedPath !== undefined) process.env.PATH = inheritedPath
     }
   })
 })

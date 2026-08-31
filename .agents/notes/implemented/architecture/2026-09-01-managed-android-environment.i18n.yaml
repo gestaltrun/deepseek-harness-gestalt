@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-01-managed-android-environment.md
-2026-09-01-managed-android-environment.md: fa65a4cb15e6c4824ead1eac15ff4e8ce381654f
-2026-09-01-managed-android-environment.zh.md: b832e13761718a0c28c0106691ee27798f55a4fa
+2026-09-01-managed-android-environment.md: fb195976663695a89975a1a9fcb4fa00c453ec5e
+2026-09-01-managed-android-environment.zh.md: 0de455d5657bf9f3b776bfe1f558266ba415a577

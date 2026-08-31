@@ -1693,7 +1693,23 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/phone-environment/src/index.ts:39`](../packages/phone/phone-environment/src/index.ts)
+Source: [`packages/phone/phone-environment/src/index.ts:52`](../packages/phone/phone-environment/src/index.ts)
+
+<a id="deepseek-aidsh-phone-environment-android"></a>
+
+## `@deepseek-ai/dsh-phone-environment-android`
+
+Requires: `phoneEnvironment`
+
+```ts config-catalog
+/** Host-private root shared with the stable phone environment Service. */
+export interface Config {
+  /** Private phone environment root; defaults to `$DSH_HOME/phone`. */
+  readonly root?: string
+}
+```
+
+Source: [`packages/phone/phone-environment-android/src/index.ts:21`](../packages/phone/phone-environment-android/src/index.ts)
 
 <a id="deepseek-aidsh-phone-runtime"></a>
 

@@ -6,14 +6,25 @@ import {
 } from './manifest.ts'
 import type { AndroidHostPlan, AndroidInstallationProbe } from './types.ts'
 
-/** Build the fixed Android SDK package id for the Host CPU. */
+/**
+ * Build the fixed Android SDK package id for the Host CPU.
+ * @param architecture - Node architecture name.
+ * @returns the API 35 Google APIs package id, or `undefined` for an unsupported CPU.
+ */
 export function androidSystemImagePackage(architecture: string): string | undefined {
   if (architecture === 'arm64') return `system-images;android-${String(ANDROID_API_LEVEL)};google_apis;arm64-v8a`
   if (architecture === 'x64') return `system-images;android-${String(ANDROID_API_LEVEL)};google_apis;x86_64`
   return undefined
 }
 
-/** Build one user-visible plan without performing filesystem or process work. */
+/**
+ * Build one user-visible plan without performing filesystem or process work.
+ * @param platform - Node platform name.
+ * @param architecture - Node architecture name.
+ * @param phoneRoot - private phone environment root.
+ * @param probe - optional compatible SDK facts discovered on the Host.
+ * @returns the supported immutable plan or an explicit unsupported reason.
+ */
 export function planAndroidEnvironment(
   platform: string,
   architecture: string,

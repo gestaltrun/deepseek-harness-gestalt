@@ -1,5 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { childEnv } from '@deepseek-ai/dsh-subprocess'
 
 const STOP_GRACE_MS = 2_000
 
@@ -31,42 +31,98 @@ export interface AndroidCommandRunner {
   spawn(command: string, args: readonly string[], options: AndroidCommandOptions): AndroidOwnedProcess
 }
 
-/** Production process adapter with credential scrubbing, deadlines, and quiescent teardown. */
-export const nodeAndroidCommandRunner: AndroidCommandRunner = {
-  run: async (command, args, options) => {
-    const child = spawn(command, [...args], {
-      env: { ...scrubbedParentEnv(), ...options.env },
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    })
-    child.stdin.end(options.input)
-    return await settleChild(child, options.signal, options.timeoutMs)
-  },
-  spawn: (command, args, options) => {
-    const child = spawn(command, [...args], {
-      env: { ...scrubbedParentEnv(), ...options.env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-      detached: process.platform !== 'win32',
-    })
-    const exit = settleChild(child, options.signal)
-    return {
-      pid: child.pid,
-      exit,
-      stop: async () => {
-        if (child.exitCode === null && child.signalCode === null) terminate(child, 'SIGTERM')
-        await Promise.race([exit, delay(STOP_GRACE_MS)])
-        if (child.exitCode === null && child.signalCode === null) terminate(child, 'SIGKILL')
-        await exit
-      },
-    }
-  },
+/** Injectable platform edge for deterministic process-tree tests. */
+export interface AndroidProcessInternals {
+  readonly platform?: NodeJS.Platform
+  readonly taskkill?: (pid: number, force: boolean) => void
 }
+
+/** Executable and argv admitted to Node's direct process spawn. */
+export interface AndroidSpawnSpec {
+  readonly command: string
+  readonly args: readonly string[]
+}
+
+/**
+ * Resolve Windows SDK batch launchers through `cmd.exe`; native binaries stay
+ * direct children on every platform. Android package ids and manager switches
+ * are fixed product inputs, while unsafe command-expansion characters in an
+ * installation path fail before reaching the shell.
+ * @param command - absolute SDK tool path.
+ * @param args - fixed manager or emulator arguments.
+ * @param platform - target platform; production uses the current host.
+ * @param commandProcessor - Windows command interpreter selected by the Host.
+ * @returns the direct executable and argument vector for Node spawn.
+ */
+export function androidSpawnSpec(
+  command: string,
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+  commandProcessor = process.env.ComSpec ?? 'cmd.exe',
+): AndroidSpawnSpec {
+  if (platform !== 'win32' || !/\.(?:bat|cmd)$/i.test(command)) return { command, args }
+  const values = [command, ...args]
+  for (const value of values) {
+    if (/[\r\n"%!]/u.test(value)) {
+      throw new Error('Android SDK batch command contains a Windows command-expansion character')
+    }
+  }
+  const commandLine = `"${values.map(value => `"${value}"`).join(' ')}"`
+  return { command: commandProcessor, args: ['/d', '/s', '/c', commandLine] }
+}
+
+/**
+ * Create a process adapter with credential scrubbing, deadlines, and quiescent tree teardown.
+ * @param internals - injectable platform and Windows tree-termination edges.
+ * @returns the Android SDK and Emulator process adapter.
+ */
+export function createNodeAndroidCommandRunner(internals: AndroidProcessInternals = {}): AndroidCommandRunner {
+  const platform = internals.platform ?? process.platform
+  const taskkill = internals.taskkill ?? runTaskkill
+  return {
+    run: async (command, args, options) => {
+      const request = androidSpawnSpec(command, args, platform)
+      const child = spawn(request.command, [...request.args], {
+        env: childEnv(options.env),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        detached: platform !== 'win32',
+      })
+      child.stdin.end(options.input)
+      return await settleChild(child, options.signal, options.timeoutMs, platform, taskkill)
+    },
+    spawn: (command, args, options) => {
+      const request = androidSpawnSpec(command, args, platform)
+      const child = spawn(request.command, [...request.args], {
+        env: childEnv(options.env),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+        detached: platform !== 'win32',
+      })
+      const exit = settleChild(child, options.signal, undefined, platform, taskkill)
+      return {
+        pid: child.pid,
+        exit,
+        stop: async () => {
+          if (child.exitCode === null && child.signalCode === null) terminate(child, 'SIGTERM', platform, taskkill)
+          await Promise.race([exit, delay(STOP_GRACE_MS)])
+          if (child.exitCode === null && child.signalCode === null) terminate(child, 'SIGKILL', platform, taskkill)
+          await exit
+        },
+      }
+    },
+  }
+}
+
+/** Production process adapter with credential scrubbing, deadlines, and quiescent teardown. */
+export const nodeAndroidCommandRunner: AndroidCommandRunner = createNodeAndroidCommandRunner()
 
 async function settleChild(
   child: ChildProcess,
   signal: AbortSignal | undefined,
   timeoutMs?: number,
+  platform: NodeJS.Platform = process.platform,
+  taskkill: (pid: number, force: boolean) => void = runTaskkill,
 ): Promise<AndroidCommandResult> {
   let stdout = ''
   let stderr = ''
@@ -74,9 +130,9 @@ async function settleChild(
   child.stdout?.on('data', (chunk: Buffer) => { stdout = retain(stdout, chunk.toString('utf8')) })
   child.stderr?.on('data', (chunk: Buffer) => { stderr = retain(stderr, chunk.toString('utf8')) })
   const abort = (): void => {
-    terminate(child, 'SIGTERM')
+    terminate(child, 'SIGTERM', platform, taskkill)
     if (escape !== undefined) return
-    escape = setTimeout(() => { terminate(child, 'SIGKILL') }, STOP_GRACE_MS)
+    escape = setTimeout(() => { terminate(child, 'SIGKILL', platform, taskkill) }, STOP_GRACE_MS)
     escape.unref()
   }
   signal?.addEventListener('abort', abort, { once: true })
@@ -94,9 +150,14 @@ async function settleChild(
   }
 }
 
-function terminate(child: ChildProcess, signal: NodeJS.Signals): void {
+function terminate(
+  child: ChildProcess,
+  signal: NodeJS.Signals,
+  platform: NodeJS.Platform,
+  taskkill: (pid: number, force: boolean) => void,
+): void {
   if (child.pid === undefined) return
-  if (process.platform === 'win32') child.kill(signal)
+  if (platform === 'win32') taskkill(child.pid, signal === 'SIGKILL')
   else {
     try {
       process.kill(-child.pid, signal)
@@ -104,6 +165,23 @@ function terminate(child: ChildProcess, signal: NodeJS.Signals): void {
       if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
     }
   }
+}
+
+function runTaskkill(pid: number, force: boolean): void {
+  spawnSync('taskkill', windowsTaskkillArgs(pid, force), {
+    stdio: 'ignore', windowsHide: true,
+  })
+}
+
+/**
+ * Build the Windows whole-tree termination request used for normal and forced
+ * emulator teardown.
+ * @param pid - direct child process id.
+ * @param force - include `/F` after the normal teardown grace elapses.
+ * @returns taskkill arguments targeting the complete child tree.
+ */
+export function windowsTaskkillArgs(pid: number, force: boolean): readonly string[] {
+  return ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])]
 }
 
 function retain(current: string, addition: string): string {

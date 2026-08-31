@@ -20,7 +20,7 @@ Preparation failures use stable `PHONE_ANDROID_*` codes for license, download, l
 
 ## Model Experience
 
-Indirectly, through `dsh-tool-phone`. A ready Android environment restarts the selected mobilecli generation with the managed SDK/AVD environment, so the same real emulator appears to the GUI, H264 stream, and model-facing `device_*` tools.
+Indirectly, through `dsh-tool-phone`. A running Android environment restarts the selected mobilecli generation with the managed SDK/AVD environment, requires that generation to list the emulator online, and reads a non-empty H264 chunk before publishing ready. The GUI and model-facing `device_*` tools therefore address the same verified emulator.
 
 #### KV Cache effect
 

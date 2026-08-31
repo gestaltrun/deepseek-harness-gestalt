@@ -246,8 +246,9 @@ async function runSpecAttempt({
     const env = {
       ...cleanEnvironment,
       ...(managedFixture === undefined ? {} : {
-        // The managed lane admits one test-owned Node entry and no user tool roots.
-        PATH: managedBin,
+        // The managed lane admits one test-owned Node entry plus the OS roots
+        // Electron itself needs, while excluding user package-manager roots.
+        PATH: [managedBin, '/usr/bin', '/bin'].join(':'),
         HOME: managedHome,
         USERPROFILE: managedHome,
       }),
@@ -344,7 +345,7 @@ async function stageAndroidSdkFixture(runtimeRoot, dshHome) {
   const emulatorDir = join(sdkRoot, 'emulator')
   const image = join(sdkRoot, 'system-images', 'android-35', 'google_apis', 'arm64-v8a')
   const avd = join(avdHome, 'Pixel_6_API_35_Gestalt.avd')
-  const pidFile = join(runtimeRoot, 'android-emulator.pid')
+  const pidFile = join(dshHome, 'phone', 'android', 'emulator.pid')
   await Promise.all([
     mkdir(bin, { recursive: true, mode: 0o700 }),
     mkdir(platformTools, { recursive: true, mode: 0o700 }),
@@ -370,7 +371,7 @@ async function stageAndroidSdkFixture(runtimeRoot, dshHome) {
     '  printf "accel:\\n0\\nfixture hypervisor\\n"',
     '  exit 0',
     'fi',
-    'printf "%s\\n" "$$" > "$DSH_ANDROID_E2E_PID_FILE"',
+    'printf "%s\\n" "$$" > "${ANDROID_AVD_HOME%/*}/emulator.pid"',
     'trap "exit 0" TERM INT',
     'while :; do /bin/sleep 1; done',
     '',

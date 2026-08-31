@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { writeJson } from '@deepseek-ai/dsh-host-webserver'
-import { resolveMobilecliExecutable } from '@deepseek-ai/dsh-phone-runtime'
+import { deviceId, resolveMobilecliExecutable } from '@deepseek-ai/dsh-phone-runtime'
 import { isTrustedApiRequest } from '@deepseek-ai/dsh-request-trust'
 import {
   installManagedMobilecli, PhoneEnvironmentError, probeMobilecliVersion, readManagedMobilecli,
@@ -44,6 +44,9 @@ export const PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH = '/phone/environment/android
 export const PHONE_ENVIRONMENT_ANDROID_REFRESH_PATH = '/phone/environment/android/refresh'
 /** Start the prepared default Android emulator. */
 export const PHONE_ENVIRONMENT_ANDROID_START_PATH = '/phone/environment/android/start'
+
+/** Maximum wait for the first non-empty H264 chunk from a booted Android device. */
+const ANDROID_RUNTIME_VERIFY_MS = 15_000
 
 /** Host-specific configuration; release trust facts remain fixed in source. */
 export interface Config {
@@ -185,7 +188,9 @@ export class PhoneEnvironment extends Service {
   registerAndroidEnvironment(provider: AndroidEnvironmentProvider): () => void {
     if (this.android !== undefined) throw new Error('phone-environment: Android Provider is already registered')
     this.android = provider
-    this.unsubscribeAndroid = provider.onChanged((state) => { this.publishAndroid(state) })
+    this.unsubscribeAndroid = provider.onChanged((state) => {
+      this.publishAndroid(this.pendingAndroidRuntime(state))
+    })
     this.publishAndroid(provider.snapshot())
     void provider.refresh(this.lifetime.signal).catch(() => {})
     return () => {
@@ -323,7 +328,74 @@ export class PhoneEnvironment extends Service {
 
   private async activateAndroidRuntime(state: PhoneAndroidState): Promise<void> {
     if (state.kind !== 'ready' || !this.current.enabled || this.candidate === undefined || this.candidateVersion === undefined) return
-    await this.activateCandidate(this.candidate, this.candidateVersion, this.lifetime.signal)
+    if (!state.running || state.deviceId === undefined) return
+    this.publishAndroid({ kind: 'booting', plan: state.plan })
+    try {
+      await this.activateCandidate(this.candidate, this.candidateVersion, this.lifetime.signal)
+      await this.verifyAndroidRuntime(state.deviceId, this.lifetime.signal)
+      this.publishAndroid(state)
+    } catch (error) {
+      await this.ctx.phoneDevices.deactivate().catch(() => {})
+      await this.android?.deactivate().catch(() => {})
+      const failure = environmentError(error)
+      this.publishAndroid({
+        kind: 'failed', plan: state.plan, code: failure.code, message: failure.message, retryable: true,
+      })
+      throw error
+    }
+  }
+
+  private pendingAndroidRuntime(state: PhoneAndroidState): PhoneAndroidState {
+    return state.kind === 'ready' && state.running && this.current.enabled
+      ? { kind: 'booting', plan: state.plan }
+      : state
+  }
+
+  private async verifyAndroidRuntime(id: string, signal: AbortSignal): Promise<void> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => {
+      controller.abort(new PhoneEnvironmentError(
+        'PHONE_ANDROID_RUNTIME_VERIFY',
+        `mobilecli did not produce an Android H264 frame within ${String(ANDROID_RUNTIME_VERIFY_MS)}ms`,
+      ))
+    }, ANDROID_RUNTIME_VERIFY_MS)
+    timeout.unref()
+    const verificationSignal = AbortSignal.any([signal, controller.signal])
+    try {
+      const devices = await this.ctx.phoneDevices.listDevices(verificationSignal)
+      const listed = devices.android.find(device => device.id === id && device.online)
+      if (listed === undefined) {
+        throw new PhoneEnvironmentError(
+          'PHONE_ANDROID_RUNTIME_VERIFY',
+          `mobilecli did not list the prepared Android device ${id} online`,
+        )
+      }
+      const capture = await this.ctx.phoneDevices.startCapture({
+        deviceId: deviceId(id), format: 'h264', signal: verificationSignal,
+      })
+      if (!/^video\/h264(?:;|$)/iu.test(capture.contentType)) {
+        await capture.body.cancel()
+        throw new PhoneEnvironmentError(
+          'PHONE_ANDROID_RUNTIME_VERIFY',
+          `mobilecli returned ${capture.contentType || 'no Content-Type'} for the Android H264 probe`,
+        )
+      }
+      const reader = capture.body.getReader()
+      const first = await reader.read()
+      if (first.done || first.value.byteLength === 0) {
+        await reader.cancel()
+        throw new PhoneEnvironmentError(
+          'PHONE_ANDROID_RUNTIME_VERIFY',
+          'mobilecli ended the Android H264 probe before the first frame',
+        )
+      }
+      await reader.cancel()
+    } catch (error) {
+      if (controller.signal.aborted && controller.signal.reason instanceof Error) throw controller.signal.reason
+      throw error
+    } finally {
+      clearTimeout(timeout)
+    }
   }
 
   /**

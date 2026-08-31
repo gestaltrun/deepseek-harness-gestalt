@@ -20,7 +20,7 @@
 
 ## Model Experience
 
-通过 `dsh-tool-phone` 间接可见。Android 环境 ready 后，选中的 mobilecli generation 会携带托管 SDK/AVD 环境重新启动，因此 GUI、H264 流和模型可见 `device_*` 工具看到同一台真实模拟器。
+通过 `dsh-tool-phone` 间接可见。Android 环境运行后，选中的 mobilecli generation 会携带托管 SDK/AVD 环境重新启动；只有该 generation 将模拟器列为在线并读到非空 H264 数据块后才发布 ready。因此 GUI 与模型可见 `device_*` 工具操作的是同一台已验证模拟器。
 
 #### KV Cache effect
 

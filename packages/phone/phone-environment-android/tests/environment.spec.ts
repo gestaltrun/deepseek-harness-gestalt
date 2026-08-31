@@ -112,8 +112,9 @@ describe('Android environment manager', () => {
       phoneRoot: root, platform: 'darwin', architecture: 'arm64',
       environment: { PATH: '/usr/bin' }, homeDirectory: join(root, 'home'), runner,
       commandLineToolsAsset: fixture.asset, freeBytes: async () => 32 * 1024 ** 3,
-      fetch: async (url) => {
+      fetch: async (url, init) => {
         expect(url).toBe(fixture.asset.url)
+        expect(init).toMatchObject({ redirect: 'error', signal: expect.any(AbortSignal) })
         return new Response(bodyOf(fixture.bytes), { headers: { 'content-length': String(fixture.bytes.byteLength) } })
       },
     })
@@ -228,5 +229,54 @@ describe('Android environment manager', () => {
     await expect(manager.prepare({ licenseAccepted: true })).resolves.toMatchObject({
       kind: 'manual-required', code,
     })
+  })
+
+  it('cancels a direct emulator start and joins the owned process', async () => {
+    const root = await tempRoot()
+    const sdkRoot = join(root, 'sdk')
+    const avdHome = join(root, 'android', 'avd')
+    for (const path of [
+      join(sdkRoot, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'),
+      join(sdkRoot, 'platform-tools', 'adb'),
+      join(sdkRoot, 'emulator', 'emulator'),
+      join(sdkRoot, 'system-images', 'android-35', 'google_apis', 'arm64-v8a', 'package.xml'),
+      join(avdHome, 'Pixel_6_API_35_Gestalt.avd', 'config.ini'),
+    ]) {
+      await mkdir(join(path, '..'), { recursive: true })
+      await writeFile(path, path.endsWith('config.ini')
+        ? 'image.sysdir.1=system-images/android-35/google_apis/arm64-v8a/\n'
+        : 'fixture\n')
+    }
+    let bootProbeStarted!: () => void
+    const bootProbe = new Promise<void>((resolve) => { bootProbeStarted = resolve })
+    let stops = 0
+    const runner: AndroidCommandRunner = {
+      run: async (_command, args, options) => {
+        if (args[0] === '-accel-check') return { code: 0, stdout: 'accel ok', stderr: '' }
+        bootProbeStarted()
+        return await new Promise<AndroidCommandResult>((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => {
+            reject(options.signal?.reason instanceof Error ? options.signal.reason : new Error('cancelled'))
+          }, { once: true })
+        })
+      },
+      spawn: () => ({
+        pid: 42,
+        exit: new Promise(() => {}),
+        stop: async () => { stops += 1 },
+      }),
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64',
+      environment: { ANDROID_HOME: sdkRoot, PATH: '' }, homeDirectory: root, runner,
+      freeBytes: async () => 32 * 1024 ** 3,
+    })
+    await manager.refresh()
+    const starting = manager.start()
+    await bootProbe
+    manager.cancel()
+    await expect(starting).rejects.toMatchObject({ code: 'PHONE_ANDROID_ABORTED' })
+    expect(stops).toBe(1)
+    expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
   })
 })

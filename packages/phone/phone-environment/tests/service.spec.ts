@@ -10,6 +10,13 @@ import type { AndroidEnvironmentProvider, AndroidPreparationPlan, PhoneAndroidSt
 
 const contexts: Context[] = []
 const roots: string[] = []
+const ANDROID_PLAN: AndroidPreparationPlan = {
+  sdkRoot: '/managed/android/sdk', sdkSource: 'managed', avdHome: '/managed/android/avd',
+  avdName: 'Pixel_6_API_35_Gestalt', abi: 'arm64-v8a', commandLineToolsVersion: '15859902',
+  commandLineToolsBytes: 1, packageIds: ['platform-tools', 'emulator', 'system-image'],
+  minimumFreeBytes: 16 * 1024 ** 3, licenseUrl: 'https://developer.android.com/studio/terms',
+  components: { commandLineTools: true, platformTools: true, emulator: true, systemImage: true, avd: true },
+}
 
 async function rawGet(url: string, host: string): Promise<{ status: number; body: unknown }> {
   return await new Promise((resolveResponse, rejectResponse) => {
@@ -69,14 +76,20 @@ describe('PhoneEnvironment', () => {
     const context = new Context()
     contexts.push(context)
     const activateExecutable = vi.fn(async () => {})
-    const { service, origin } = await mountEnvironment(context, { activateExecutable }, { executablePath: path })
-    const plan: AndroidPreparationPlan = {
-      sdkRoot: '/managed/android/sdk', sdkSource: 'managed', avdHome: '/managed/android/avd',
-      avdName: 'Pixel_6_API_35_Gestalt', abi: 'arm64-v8a', commandLineToolsVersion: '15859902',
-      commandLineToolsBytes: 1, packageIds: ['platform-tools', 'emulator', 'system-image'],
-      minimumFreeBytes: 16 * 1024 ** 3, licenseUrl: 'https://developer.android.com/studio/terms',
-      components: { commandLineTools: true, platformTools: true, emulator: true, systemImage: true, avd: true },
-    }
+    const listDevices = vi.fn(async () => ({
+      android: [{
+        id: 'emulator-5554', name: 'Pixel 6', kind: 'emulator', platform: 'android', state: 'online', online: true,
+      }],
+      ios: { simulators: [], reals: [] },
+    }))
+    const startCapture = vi.fn(async () => ({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array([0, 0, 0, 1])) } }),
+    }))
+    const { service, origin } = await mountEnvironment(
+      context, { activateExecutable, listDevices, startCapture }, { executablePath: path },
+    )
+    const plan = ANDROID_PLAN
     let state: PhoneAndroidState = { kind: 'missing', plan }
     const listeners = new Set<(value: PhoneAndroidState) => void>()
     const provider: AndroidEnvironmentProvider = {
@@ -108,8 +121,53 @@ describe('PhoneEnvironment', () => {
       expect.any(AbortSignal),
       { ANDROID_SDK_ROOT: plan.sdkRoot, ANDROID_AVD_HOME: plan.avdHome },
     )
+    expect(listDevices).toHaveBeenCalledWith(expect.any(AbortSignal))
+    expect(startCapture).toHaveBeenCalledWith({
+      deviceId: 'emulator-5554', format: 'h264', signal: expect.any(AbortSignal),
+    })
+    expect(service.snapshot().platforms.android).toMatchObject({ kind: 'ready', running: true })
     unregister()
     expect(service.snapshot().platforms.android).toEqual({ kind: 'deferred' })
+  })
+
+  it('rejects Android readiness when mobilecli cannot list the booted device', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const deactivateRuntime = vi.fn(async () => {})
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      deactivate: deactivateRuntime,
+      listDevices: async () => ({ android: [], ios: { simulators: [], reals: [] } }),
+    }, { executablePath: path })
+    let state: PhoneAndroidState = { kind: 'missing', plan: ANDROID_PLAN }
+    const listeners = new Set<(value: PhoneAndroidState) => void>()
+    const deactivateAndroid = vi.fn(async () => {})
+    service.registerAndroidEnvironment({
+      snapshot: () => state,
+      refresh: async () => state,
+      prepare: async () => {
+        state = { kind: 'ready', plan: ANDROID_PLAN, deviceId: 'emulator-5554', running: true }
+        for (const listener of listeners) listener(state)
+        return state
+      },
+      start: async () => state,
+      cancel: () => {},
+      deactivate: deactivateAndroid,
+      runtimeEnvironment: () => ({}),
+      onChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    })
+    await service.setEnabled(true)
+    const response = await fetch(`${origin}${PHONE_ENVIRONMENT_PATH}/android/prepare`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licenseAccepted: true }),
+    })
+    expect(response.status).toBe(502)
+    expect(await response.json()).toMatchObject({ error: { code: 'PHONE_ANDROID_RUNTIME_VERIFY' } })
+    expect(deactivateRuntime).toHaveBeenCalled()
+    expect(deactivateAndroid).toHaveBeenCalled()
+    expect(service.snapshot().platforms.android).toMatchObject({
+      kind: 'failed', code: 'PHONE_ANDROID_RUNTIME_VERIFY', retryable: true,
+    })
   })
 
   it('updates the durable enable gate without remounting the Service', async () => {

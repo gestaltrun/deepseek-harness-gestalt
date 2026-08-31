@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   failLockCreateWithEPERM: false,
   renameAttempts: 0,
   renameFailures: [] as string[],
+  tempWriteAttempts: 0,
 }))
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -23,6 +24,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       return actual.rename(...args)
     }) as typeof actual.rename,
     writeFile: (async (path: unknown, ...rest: never[]) => {
+      if (String(path).endsWith('.tmp')) state.tempWriteAttempts += 1
       if (state.failLockCreateWithEPERM && String(path).endsWith('.lock')) {
         state.failLockCreateWithEPERM = false
         throw Object.assign(new Error('EPERM: injected exclusive-create failure'), { code: 'EPERM' })
@@ -36,6 +38,7 @@ afterEach(() => {
   state.failLockCreateWithEPERM = false
   state.renameAttempts = 0
   state.renameFailures = []
+  state.tempWriteAttempts = 0
   vi.restoreAllMocks()
 })
 
@@ -103,6 +106,7 @@ describe('writeFileAtomic', () => {
     await writeFileAtomic(target, 'new', { mode: 0o600 })
 
     expect(state.renameAttempts).toBe(4)
+    expect(state.tempWriteAttempts).toBe(1)
     expect(await readFile(target, 'utf8')).toBe('new')
     expect((await readdir(dir)).filter(entry => entry.endsWith('.tmp'))).toEqual([])
   })
@@ -117,6 +121,7 @@ describe('writeFileAtomic', () => {
     await expect(writeFileAtomic(target, 'new', { mode: 0o600 })).rejects.toMatchObject({ code: 'EPERM' })
 
     expect(state.renameAttempts).toBe(6)
+    expect(state.tempWriteAttempts).toBe(1)
     expect(await readFile(target, 'utf8')).toBe('old')
     expect((await readdir(dir)).filter(entry => entry.endsWith('.tmp'))).toEqual([])
   })
@@ -131,6 +136,7 @@ describe('writeFileAtomic', () => {
     await expect(writeFileAtomic(target, 'new', { mode: 0o600 })).rejects.toMatchObject({ code: 'EPERM' })
 
     expect(state.renameAttempts).toBe(1)
+    expect(state.tempWriteAttempts).toBe(1)
     expect(await readFile(target, 'utf8')).toBe('old')
     expect((await readdir(dir)).filter(entry => entry.endsWith('.tmp'))).toEqual([])
   })

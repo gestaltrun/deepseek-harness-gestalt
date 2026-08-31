@@ -27,8 +27,10 @@ describe('Desktop managed mobilecli environment', () => {
 
     const before = await get('/phone/environment')
     expect(before.status).toBe(200)
-    expect(before.body).toMatchObject({ enabled: true })
-    expect((before.body as { runtime: { kind: string } }).runtime.kind).not.toBe('ready')
+    expect(before.body).toMatchObject({
+      enabled: true,
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
+    })
     await browser.$('button=准备 mobilecli').click()
     const ready = browser.$('[data-phone-runtime="ready"]')
     await ready.waitForDisplayed({ timeout: 30_000 })

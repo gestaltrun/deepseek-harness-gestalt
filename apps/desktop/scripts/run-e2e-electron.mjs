@@ -3,12 +3,12 @@
 import { spawnSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  access, appendFile, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile,
+  access, appendFile, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile,
 } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zipSync } from 'fflate'
 import {
@@ -26,11 +26,6 @@ const devicesSource = join(desktopRoot, 'tests', 'fixtures', 'phone-e2e-devices.
 const managedEnvironmentFixture = join(e2eDir, 'managed-phone-environment.mjs')
 const wdioConfig = join(e2eDir, 'wdio.conf.ts')
 const wdioBin = join(desktopRoot, 'node_modules', '@wdio', 'cli', 'bin', 'wdio.js')
-const managedPath = [
-  dirname(process.execPath),
-  ...(process.platform === 'win32' ? [] : ['/usr/bin', '/bin', '/usr/sbin', '/sbin']),
-].join(delimiter)
-
 const head = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim()
 const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
 const artifactRoot = process.env.DSH_ELECTRON_E2E_ARTIFACTS
@@ -207,6 +202,8 @@ async function runSpecAttempt({
   const dshHome = join(runtimeRoot, 'dsh-home')
   const userData = join(runtimeRoot, 'electron-user-data')
   const workspace = join(runtimeRoot, 'workspace')
+  const managedHome = join(runtimeRoot, 'managed-home')
+  const managedBin = join(runtimeRoot, 'managed-bin')
   const smokeFile = join(artifactDir, 'main-smoke.log')
   let code = 1
   const errors = []
@@ -215,6 +212,13 @@ async function runSpecAttempt({
     await mkdir(dshHome, { recursive: true, mode: 0o700 })
     await mkdir(userData, { recursive: true, mode: 0o700 })
     await mkdir(workspace, { recursive: true, mode: 0o700 })
+    if (managedFixture !== undefined) {
+      await mkdir(managedHome, { recursive: true, mode: 0o700 })
+      await mkdir(managedBin, { recursive: true, mode: 0o700 })
+      const node = join(managedBin, process.platform === 'win32' ? 'node.exe' : 'node')
+      if (process.platform === 'win32') await copyFile(process.execPath, node)
+      else await symlink(process.execPath, node)
+    }
     await writeFile(smokeFile, '')
     await writeFile(join(dshHome, 'settings.yaml'), [
       'ui-phone:',
@@ -234,8 +238,10 @@ async function runSpecAttempt({
     const env = {
       ...cleanEnvironment,
       ...(managedFixture === undefined ? {} : {
-        // The managed lane admits Node and OS utilities but no user-installed mobilecli.
-        PATH: managedPath,
+        // The managed lane admits one test-owned Node entry and no user tool roots.
+        PATH: managedBin,
+        HOME: managedHome,
+        USERPROFILE: managedHome,
       }),
       CI: 'true',
       LANG: 'zh_CN.UTF-8',
@@ -260,6 +266,10 @@ async function runSpecAttempt({
       DEEPSEEK_API_KEY: 'keyless-desktop-electron-e2e',
       DEEPSEEK_BASE_URL: provider.origin,
       ELECTRON_ENABLE_LOGGING: '1',
+    }
+    if (managedFixture !== undefined) {
+      delete env.npm_config_prefix
+      delete env.NPM_CONFIG_PREFIX
     }
     code = await runLogged(process.execPath, [wdioBin, 'run', wdioConfig, '--spec', join(e2eDir, spec)], {
       cwd: desktopRoot,

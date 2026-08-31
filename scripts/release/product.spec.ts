@@ -202,10 +202,7 @@ describe('product release plan', () => {
 
   it('rejects an unpublished Desktop baseline before writing any release authority', async () => {
     const root = await fixtureRepository()
-    const state = { version: 1 as const, nextSequence: 1, consumedIntentIds: [] }
-    const plan = await aggregateProductRelease(root, [
-      intent('all-release', { desktop: 'patch', mobile: 'patch', platform: 'patch' }),
-    ], state)
+    const { state, plan } = await plannedAllRelease(root)
     const paths = [
       'apps/desktop/package.json',
       'apps/mobile/package.json',
@@ -305,10 +302,7 @@ describe('product release plan', () => {
 
   it('binds the exact plan, candidate checkout, versions, and Mobile build', async () => {
     const root = await fixtureRepository()
-    const state = { version: 1 as const, nextSequence: 1, consumedIntentIds: [] }
-    const plan = await aggregateProductRelease(root, [
-      intent('all-release', { desktop: 'patch', mobile: 'patch', platform: 'patch' }),
-    ], state)
+    const { plan } = await plannedAllRelease(root)
     await writeFile(join(root, 'product-releases/0001.json'), `${JSON.stringify(plan, null, 2)}\n`)
     for (const unit of all) {
       const release = plan.releaseUnits[unit]
@@ -497,6 +491,14 @@ async function plannedMobileRelease(root: string) {
   const state = { version: 1 as const, nextSequence: 1, consumedIntentIds: [] }
   const plan = await aggregateProductRelease(root, [
     intent('planned-mobile', { desktop: 'none', mobile: 'patch', platform: 'none' }),
+  ], state)
+  return { state, plan }
+}
+
+async function plannedAllRelease(root: string) {
+  const state = { version: 1 as const, nextSequence: 1, consumedIntentIds: [] }
+  const plan = await aggregateProductRelease(root, [
+    intent('all-release', { desktop: 'patch', mobile: 'patch', platform: 'patch' }),
   ], state)
   return { state, plan }
 }

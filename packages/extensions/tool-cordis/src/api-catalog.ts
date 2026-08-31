@@ -1399,9 +1399,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the disposer.',
       },
       {
-        signature: 'refresh(): Promise<PhoneEnvironmentSnapshot>',
+        signature: 'refresh(signal?: AbortSignal): Promise<PhoneEnvironmentSnapshot>',
         description: 'Re-detect runtime sources in fixed override-managed-system precedence.',
-        parameters: [],
+        parameters: [{ name: 'signal', description: 'optional owner cancellation for detection and activation.' }],
         returns: 'the committed full snapshot after detection settles.',
       },
       {
@@ -1409,10 +1409,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Download, verify, publish, and optionally activate the pinned host asset.',
         parameters: [],
         returns: 'the committed full snapshot after preparation settles.',
+        throws: ['{@link PhoneEnvironmentError} with `PHONE_ENVIRONMENT_OVERRIDE` while `executablePath` is authoritative, `PHONE_ENVIRONMENT_BUSY` for concurrent preparation, or the documented download, verification, filesystem, cancellation, and activation codes.'],
       },
       {
         signature: 'cancel(): void',
-        description: 'Cancel the current download, verification read, or version probe.',
+        description: 'Cancel the current detection, download, version probe, or child activation.',
         parameters: [],
       },
     ],

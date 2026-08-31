@@ -284,17 +284,22 @@ onChanged(listener: (snapshot: PhoneEnvironmentSnapshot) => void): () => void
 
 /**
  * Re-detect runtime sources in fixed override-managed-system precedence.
+ * @param signal - optional owner cancellation for detection and activation.
  * @returns the committed full snapshot after detection settles.
  */
-refresh(): Promise<PhoneEnvironmentSnapshot>
+refresh(signal?: AbortSignal): Promise<PhoneEnvironmentSnapshot>
 
 /**
  * Download, verify, publish, and optionally activate the pinned host asset.
  * @returns the committed full snapshot after preparation settles.
+ * @throws {@link PhoneEnvironmentError} with `PHONE_ENVIRONMENT_OVERRIDE` while
+ *   `executablePath` is authoritative, `PHONE_ENVIRONMENT_BUSY` for concurrent
+ *   preparation, or the documented download, verification, filesystem,
+ *   cancellation, and activation codes.
  */
 prepare(): Promise<PhoneEnvironmentSnapshot>
 
-/** Cancel the current download, verification read, or version probe. */
+/** Cancel the current detection, download, version probe, or child activation. */
 cancel(): void
 ```
 

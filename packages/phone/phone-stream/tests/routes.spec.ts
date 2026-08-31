@@ -13,7 +13,11 @@ vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 const ANDROID = deviceId('emulator-5554')
 
 function parseWebSocketJson(data: RawData): unknown {
-  const bytes = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data)
+  const bytes = Array.isArray(data)
+    ? Buffer.concat(data)
+    : data instanceof ArrayBuffer
+      ? Buffer.from(new Uint8Array(data))
+      : data
   return JSON.parse(bytes.toString('utf8')) as unknown
 }
 

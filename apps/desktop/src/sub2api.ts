@@ -36,8 +36,22 @@ const PROBE_INTERVAL_MS = 2_000
 /** probe budget: first boots run PostgreSQL initdb plus migrations (the sidecar's own budget is 120s). */
 const PROBE_TIMEOUT_MS = 180_000
 
-/** Web Host startup budget only for the first boot after installation. */
-const FRESH_INSTALL_HOST_START_TIMEOUT_MS = 180_000
+/** Web Host startup budget when enablement starts PostgreSQL and the sidecar. */
+const ENABLE_HOST_START_TIMEOUT_MS = 180_000
+
+/**
+ * Give ordinary Desktop boot the component startup budget only when the
+ * profile will start an installed Sub2API component.
+ * @param snapshot - Controller state read before the first Web Host spawn.
+ * @returns the extended startup timeout, or the Web Host default.
+ */
+export function sub2ApiBootHostStartTimeout(
+  snapshot: DesktopSub2ApiSnapshot,
+): number | undefined {
+  return snapshot.state === 'installed' && snapshot.enabled
+    ? ENABLE_HOST_START_TIMEOUT_MS
+    : undefined
+}
 
 /** The proxy-seam route a 2xx from proves the supervised chain is healthy. */
 const SUB2API_PROBE_PATH = '/plugins/dsh-sub2api/quota-snapshot'
@@ -291,9 +305,7 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
       ...(this.snapshot.version === undefined ? {} : { version: this.snapshot.version }),
     })
     try {
-      const origin = this.justInstalled
-        ? await this.options.host.restart(FRESH_INSTALL_HOST_START_TIMEOUT_MS)
-        : await this.options.host.restart()
+      const origin = await this.options.host.restart(ENABLE_HOST_START_TIMEOUT_MS)
       await this.probeUntilRunning(origin)
     } catch (error) {
       if (!this.justInstalled) throw error

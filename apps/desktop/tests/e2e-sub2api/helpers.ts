@@ -111,7 +111,7 @@ export async function recordReleaseChecksums(): Promise<void> {
   if (version === undefined
     || assets[0]?.name !== `dsh-sub2api-sidecar-${version}.tgz`
     || assets[1]?.name !== 'bundle-sha256sums.txt'
-    || !/^runtime-pack-\d+\.\d+\.\d+-(?:darwin|linux|win32)-(?:arm64|x64)\.tar\.gz$/u.test(assets[2]?.name ?? '')
+    || !/^runtime-pack-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?-(?:darwin|linux|win32)-(?:arm64|x64)\.tar\.gz$/u.test(assets[2]?.name ?? '')
     || assets[3]?.name !== 'runtime-pack-sha256sums.txt') {
     throw new Error('Sub2API Release has unexpected asset names')
   }
@@ -207,13 +207,40 @@ export async function overlayUrl(): Promise<string> {
 export async function overlayAccountConsoleSnapshot(): Promise<MainWindowSnapshot> {
   await switchToDesktopOverlay()
   return await browser.execute(() => {
-    const frame = document.querySelector<HTMLIFrameElement>('iframe[src="/plugins/dsh-sub2api/ui/"]')
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
     if (frame === null || frame.contentWindow === null || frame.contentDocument === null) return { url: '', text: '' }
     return {
       url: frame.contentWindow.location.href,
       text: frame.contentDocument.body?.innerText ?? '',
     }
   })
+}
+
+/** Click a bilingual button inside the native Sub2API account workspace. */
+export async function clickAccountConsoleButton(labels: readonly string[]): Promise<void> {
+  await switchToDesktopOverlay()
+  const clicked = await browser.execute((buttonLabels: readonly string[]) => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const button = [...(frame?.contentDocument?.querySelectorAll('button') ?? [])].find(element =>
+      buttonLabels.some(label => element.textContent?.includes(label)))
+    if (button === undefined) return false
+    button.click()
+    return true
+  }, labels)
+  if (!clicked) throw new Error(`Sub2API account workspace has no button matching ${labels.join(' / ')}`)
+}
+
+/** Click one structural control inside the native Sub2API account workspace. */
+export async function clickAccountConsoleSelector(selector: string): Promise<void> {
+  await switchToDesktopOverlay()
+  const clicked = await browser.execute((target: string) => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const element = frame?.contentDocument?.querySelector<HTMLElement>(target)
+    if (element === null || element === undefined) return false
+    element.click()
+    return true
+  }, selector)
+  if (!clicked) throw new Error(`Sub2API account workspace has no element matching ${selector}`)
 }
 
 /** Read Sub2API state through the same isolated preload bridge used by the UI. */

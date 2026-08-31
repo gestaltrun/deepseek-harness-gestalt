@@ -156,6 +156,26 @@ describe('SettingsRoot Desktop Host', () => {
 })
 
 describe('SettingsRoot overlay document', () => {
+  it('publishes section navigation under the live Settings request', async () => {
+    document.documentElement.setAttribute('data-dsh-desktop-overlay', '')
+    const show = vi.fn()
+    ;(globalThis as { dshDesktop?: unknown }).dshDesktop = {
+      chromeOverlayShow: show,
+      chromeOverlayGetState: async () => ({ kind: 'settings', requestId: 'live-settings', sectionId: 'general' }),
+      chromeOverlayResult: () => {},
+      onChromeOverlayState: () => () => {},
+      onChromeOverlayResult: () => () => {},
+    }
+    await act(async () => { mount() })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Models' }))
+
+    expect(screen.getByTestId('section-models')).toBeTruthy()
+    expect(show).toHaveBeenCalledWith({
+      kind: 'settings', requestId: 'live-settings', sectionId: 'models',
+    })
+  })
+
   it('paints the current settings request and reports close', async () => {
     document.documentElement.setAttribute('data-dsh-desktop-overlay', '')
     const result = vi.fn()

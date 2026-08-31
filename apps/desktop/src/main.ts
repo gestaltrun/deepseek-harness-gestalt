@@ -69,13 +69,14 @@ import {
 import { DesktopSnowPairingVault, EncryptedDesktopSnowPairingStore } from './snow-pairing-vault.ts'
 import { disposeDesktopOwners } from './shutdown.ts'
 import {
-  createDesktopSub2Api, uninstallSub2ApiFromIpc,
+  createDesktopSub2Api, sub2ApiBootHostStartTimeout, uninstallSub2ApiFromIpc,
   type DesktopSub2ApiActions,
 } from './sub2api.ts'
 import { startDesktopBrowserRuntime, type DesktopBrowserRuntime } from './browser-runtime.ts'
 import { parseBrowserPresentRequest, parseBrowserPresentTarget } from './browser-present.ts'
 import {
-  bindChromeOverlayHost, hideChromeOverlayView, isOverlaySender, parseChromeOverlayResult,
+  bindChromeOverlayHost, hideChromeOverlayView, isOverlaySender, isOverlaySettingsUpdate,
+  parseChromeOverlayResult,
   parseChromeOverlayShow, prepareChromeOverlayView, showChromeOverlayView,
   syncChromeOverlayBounds,
 } from './chrome-overlay.ts'
@@ -256,11 +257,14 @@ async function boot(): Promise<void> {
   })
   stopSub2ApiEvents = sub2api.subscribe(pushSub2ApiSnapshot)
   installIntegrationsOnce()
+  const initialHostStartTimeout = sub2ApiBootHostStartTimeout(sub2api.getSnapshot())
+  const startInitialHost = (): Promise<RunningWebHost> =>
+    startHost(initialHostStartTimeout)
   try {
     const started = respawned
-      ? { value: await startHost(), retried: false }
+      ? { value: await startInitialHost(), retried: false }
       : await startWithOneRetry(
-        startHost,
+        startInitialHost,
         () => { respawned = true },
         () => !hostStartController.signal.aborted,
       )
@@ -883,9 +887,12 @@ async function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Prom
 
 async function showNativeOverlay(event: IpcMainInvokeEvent, raw: unknown): Promise<void> {
   if (window === undefined || host === undefined) return
-  if (isOverlaySender(event.sender.id, overlayView?.webContents.id)) return
   const request = parseChromeOverlayShow(raw)
   if (request === undefined) return
+  if (
+    isOverlaySender(event.sender.id, overlayView?.webContents.id)
+    && !isOverlaySettingsUpdate(overlayOpen, request)
+  ) return
   overlayOpen = request
   const view = await ensureChromeOverlay(window, host.url)
   if (window.isDestroyed()) return

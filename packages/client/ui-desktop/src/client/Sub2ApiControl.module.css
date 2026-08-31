@@ -15,6 +15,12 @@
   max-width: 640px;
 }
 
+.runningControls {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
 .header p {
   margin: 4px 0 0;
   color: var(--dsw-alias-label-secondary);

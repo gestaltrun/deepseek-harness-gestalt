@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { DesktopBridge, DesktopSub2ApiSnapshot } from '../src/protocol.ts'
 import { Sub2ApiControl } from '../src/client/Sub2ApiControl.tsx'
 import { en } from '../src/client/locales.ts'
@@ -8,6 +8,8 @@ import { en } from '../src/client/locales.ts'
 afterEach(() => {
   cleanup()
   delete window.dshDesktop
+  document.documentElement.style.colorScheme = ''
+  document.documentElement.lang = ''
 })
 
 const t = (key: string) => (en as Record<string, string>)[key] ?? key
@@ -44,14 +46,14 @@ describe('Sub2ApiControl', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
-  it('offers restart while installed and enabled', () => {
+  it('does not require a manual restart action while installed and enabled', () => {
     const desktop = bridge()
     window.dshDesktop = desktop
     renderControl({ state: 'installed', enabled: true, version: '0.1.0' })
 
     expect(screen.getByText('Installed · 0.1.0')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Restart Web Host and start' }))
-    expect(desktop.sub2ApiEnable).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('button', { name: 'Restart Web Host and start' })).toBeNull()
+    expect(desktop.sub2ApiEnable).not.toHaveBeenCalled()
 
     // An install whose package manifest is unreadable renders without a version.
     cleanup()
@@ -98,15 +100,34 @@ describe('Sub2ApiControl', () => {
     expect(desktop.sub2ApiUninstall).toHaveBeenCalledWith(true)
   })
 
-  it('embeds the account console inside Settings without navigating the Session Surface', () => {
+  it('embeds the native account workspace by default while running', () => {
     window.dshDesktop = bridge()
+    document.documentElement.style.colorScheme = 'dark'
+    document.documentElement.lang = 'zh-CN'
     renderControl({ state: 'running', enabled: true, version: '0.1.0' })
 
-    expect(screen.queryByTitle('Sub2API account console')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Open account console' }))
-    expect(screen.getByTitle('Sub2API account console').getAttribute('src')).toBe('/plugins/dsh-sub2api/ui/')
-    fireEvent.click(screen.getByRole('button', { name: 'Close account console' }))
-    expect(screen.queryByTitle('Sub2API account console')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open account console' })).toBeNull()
+    expect(screen.getByTitle('Sub2API account console').getAttribute('src')).toBe(
+      '/plugins/dsh-sub2api/ui/admin/accounts?embed=desktop&theme=dark&lang=zh',
+    )
+    expect(screen.getByText('Running · 0.1.0').closest('header')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Disable' }).closest('header')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Uninstall' }).closest('header')).not.toBeNull()
+  })
+
+  it('follows live Desktop theme and locale changes', async () => {
+    window.dshDesktop = bridge()
+    document.documentElement.style.colorScheme = 'light'
+    document.documentElement.lang = 'en'
+    renderControl({ state: 'running', enabled: true })
+    const frame = screen.getByTitle('Sub2API account console')
+    expect(frame.getAttribute('src')).toContain('theme=light&lang=en')
+
+    document.documentElement.style.colorScheme = 'dark'
+    document.documentElement.lang = 'zh-CN'
+    await waitFor(() => {
+      expect(frame.getAttribute('src')).toContain('theme=dark&lang=zh')
+    })
   })
 
   it('shows the actionable error with retry and uninstall exits', () => {

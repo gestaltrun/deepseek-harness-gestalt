@@ -10,6 +10,7 @@ import {
   ROLLBACK_ERROR_PREFIX,
   STARTUP_TIMEOUT_ERROR,
   sub2ApiPathsFromHome,
+  sub2ApiBootHostStartTimeout,
   uninstallSub2ApiFromIpc,
   UnavailableDesktopSub2ApiController,
   type DesktopSub2ApiActions,
@@ -151,6 +152,13 @@ async function rowPresent(profileDir: string): Promise<boolean> {
 }
 
 describe('DesktopSub2ApiController', () => {
+  it('extends ordinary Desktop boot only for an installed enabled component', () => {
+    expect(sub2ApiBootHostStartTimeout({ state: 'installed', enabled: true, version: '0.1.4' })).toBe(180_000)
+    expect(sub2ApiBootHostStartTimeout({ state: 'installed', enabled: false, version: '0.1.4' })).toBeUndefined()
+    expect(sub2ApiBootHostStartTimeout({ state: 'missing', enabled: true })).toBeUndefined()
+    expect(sub2ApiBootHostStartTimeout({ state: 'error', enabled: true, error: 'failed' })).toBeUndefined()
+  })
+
   it('starts missing and enables through install, restart, and probe', async () => {
     const h = await harness()
     expect(h.controller.getSnapshot().state).toBe('missing')
@@ -226,7 +234,7 @@ describe('DesktopSub2ApiController', () => {
     expect(final.error).toBe('restart refused')
     expect(final.error?.startsWith(ROLLBACK_ERROR_PREFIX)).toBe(false)
     expect(h.installRuns()).toBe(0)
-    expect(h.host.restart).toHaveBeenCalledWith()
+    expect(h.host.restart).toHaveBeenCalledWith(180_000)
     expect(await rowPresent(h.profileDir)).toBe(true)
   })
 
@@ -255,7 +263,7 @@ describe('DesktopSub2ApiController', () => {
     expect(enabled).toMatchObject({ state: 'running', enabled: true })
     expect(h.installRuns()).toBe(0)
     expect(h.host.restart).toHaveBeenCalledOnce()
-    expect(h.host.restart).toHaveBeenCalledWith()
+    expect(h.host.restart).toHaveBeenCalledWith(180_000)
     const patchAfter = await readFile(join(h.profileDir, 'cordis.patch.yml'), 'utf8')
     expect(patchAfter).not.toContain('disabled: true')
   })

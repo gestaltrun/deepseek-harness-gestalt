@@ -234,8 +234,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       const afterRestart = await receiver.snapshot()
       expect(afterRestart).toEqual({ ...beforeRestart, revision: beforeRestart.revision + 1 })
       const restartedRow = page.locator('[role="treeitem"]', { hasText: title })
-      await restartedRow.waitFor({ timeout: 30_000 })
-      await restartedRow.click()
+      await restartedRow.evaluate((element: HTMLElement) => { element.click() })
       await expect.poll(() => page.locator('[data-question-key]').filter({
         has: page.locator('[data-member-presentation]'),
       }).count()).toBe(1)

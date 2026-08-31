@@ -164,4 +164,28 @@ describe('iOS environment manager', () => {
     await expect(preparing).rejects.toMatchObject({ code: 'PHONE_IOS_ABORTED' })
     expect(manager.snapshot()).toMatchObject({ kind: 'runtime-missing' })
   })
+
+  it('joins cancellation during boot and shuts down the Simulator it started', async () => {
+    const fixture = new FixtureRunner('no-simulator')
+    let bootWaitStarted!: () => void
+    const started = new Promise<void>((resolve) => { bootWaitStarted = resolve })
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => {
+        if (command !== 'xcrun' || args[1] !== 'bootstatus') return await fixture.run(command, args, options)
+        bootWaitStarted()
+        return await new Promise<IosCommandResult>((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+        })
+      },
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    const preparing = manager.prepare()
+    await started
+    manager.cancel()
+    await expect(preparing).rejects.toMatchObject({ code: 'PHONE_IOS_ABORTED' })
+    expect(fixture.calls).toContainEqual({
+      command: 'xcrun', args: ['simctl', 'shutdown', '8294A429-4C99-411F-A46D-0AD9499B7FDD'],
+    })
+    expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
+  })
 })

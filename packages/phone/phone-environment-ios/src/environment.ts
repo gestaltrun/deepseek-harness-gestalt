@@ -34,6 +34,7 @@ export class IosEnvironmentManager {
   private readonly listeners = new Set<(state: PhoneIosState) => void>()
   private operation: { readonly controller: AbortController; readonly task: Promise<PhoneIosState> } | undefined
   private ownedDeviceId: string | undefined
+  private lastActionable: PhoneIosState
 
   constructor(options: IosEnvironmentOptions = {}) {
     this.platform = options.platform ?? process.platform
@@ -41,6 +42,7 @@ export class IosEnvironmentManager {
     this.homeDirectory = options.homeDirectory ?? homedir()
     this.runner = options.runner ?? nodeIosCommandRunner
     this.current = Object.freeze(planIosEnvironment(this.platform))
+    this.lastActionable = this.current
   }
 
   /** Read the latest committed iOS environment state. */
@@ -82,16 +84,7 @@ export class IosEnvironmentManager {
     const active = this.operation
     active?.controller.abort(new IosEnvironmentError('PHONE_IOS_ABORTED', 'iOS environment operation cancelled'))
     await active?.task.catch(() => {})
-    const ownedDeviceId = this.ownedDeviceId
-    this.ownedDeviceId = undefined
-    if (ownedDeviceId !== undefined && this.platform === 'darwin') {
-      const outcome = await this.runner.run('xcrun', ['simctl', 'shutdown', ownedDeviceId], {
-        env: this.commandEnvironment(), timeoutMs: COMMAND_TIMEOUT_MS,
-      })
-      if (outcome.code !== 0 && !/current state:\s*Shutdown/iu.test(`${outcome.stdout}\n${outcome.stderr}`)) {
-        throw commandFailure('PHONE_IOS_SHUTDOWN', 'simctl shutdown', outcome)
-      }
-    }
+    await this.stopOwnedSimulator()
     if (this.current.kind === 'ready') this.publish({ ...this.current, running: false })
   }
 
@@ -103,17 +96,21 @@ export class IosEnvironmentManager {
       return Promise.reject(new IosEnvironmentError('PHONE_IOS_BUSY', 'an iOS environment operation is already running'))
     }
     const controller = new AbortController()
-    const previous = this.current
     const signal = ownerSignal === undefined
       ? controller.signal
       : AbortSignal.any([controller.signal, ownerSignal])
-    const task = work(signal).catch((error: unknown) => {
-      const failure = signal.aborted
+    const task = work(signal).catch(async (error: unknown) => {
+      let failure = signal.aborted
         ? signal.reason instanceof IosEnvironmentError
           ? signal.reason
           : new IosEnvironmentError('PHONE_IOS_ABORTED', 'iOS environment operation cancelled', { cause: error })
         : iosFailure(error)
-      if (failure.code === 'PHONE_IOS_ABORTED') this.publish(previous)
+      try {
+        await this.stopOwnedSimulator()
+      } catch (cleanupError) {
+        failure = iosFailure(cleanupError)
+      }
+      if (failure.code === 'PHONE_IOS_ABORTED') this.publish(this.lastActionable)
       else {
         const plan = planOf(this.current)
         this.publish(plan === undefined
@@ -161,6 +158,7 @@ export class IosEnvironmentManager {
         throw new IosEnvironmentError('PHONE_IOS_SIMULATOR_CREATE', 'simctl create returned no Simulator UDID')
       }
       state = { kind: 'ready', plan: state.plan, deviceId, running: false }
+      this.publish(state)
     }
     if (state.kind !== 'ready') {
       throw new IosEnvironmentError('PHONE_IOS_STATE', `iOS preparation ended in ${state.kind}`)
@@ -174,12 +172,12 @@ export class IosEnvironmentManager {
     if (boot.code !== 0 && !/current state:\s*Booted/iu.test(`${boot.stdout}\n${boot.stderr}`)) {
       throw commandFailure('PHONE_IOS_SIMULATOR_BOOT', 'simctl boot', boot)
     }
+    this.ownedDeviceId = state.deviceId
     await this.requireSuccess(
       'xcrun', ['simctl', 'bootstatus', state.deviceId, '-b'], signal,
       'PHONE_IOS_SIMULATOR_BOOT', 'simctl bootstatus', BOOT_TIMEOUT_MS,
       state.plan.developerDir,
     )
-    this.ownedDeviceId = state.deviceId
     this.publish({ ...state, running: true })
     return this.current
   }
@@ -234,11 +232,9 @@ export class IosEnvironmentManager {
       this.publish(planned)
       return this.current
     }
-    const [runtimes, deviceTypes, devices] = await Promise.all([
-      this.readRuntimes(developerDir, signal),
-      this.readDeviceTypes(developerDir, signal),
-      this.readDevices(developerDir, signal),
-    ])
+    const runtimes = await this.readRuntimes(developerDir, signal)
+    const deviceTypes = await this.readDeviceTypes(developerDir, signal)
+    const devices = await this.readDevices(developerDir, signal)
     const probe: IosInstallationProbe = { ...probeBase, runtimes, deviceTypes, devices }
     const planned = planIosEnvironment('darwin', probe)
     this.publish(planned)
@@ -331,8 +327,23 @@ export class IosEnvironmentManager {
   private publish(state: PhoneIosState): void {
     if (JSON.stringify(state) === JSON.stringify(this.current)) return
     this.current = Object.freeze(state)
+    if (state.kind !== 'checking' && state.kind !== 'preparing' && state.kind !== 'failed') {
+      this.lastActionable = this.current
+    }
     for (const listener of [...this.listeners]) {
       try { listener(this.current) } catch { /* A consumer callback cannot break Simulator lifecycle. */ }
+    }
+  }
+
+  private async stopOwnedSimulator(): Promise<void> {
+    const ownedDeviceId = this.ownedDeviceId
+    this.ownedDeviceId = undefined
+    if (ownedDeviceId === undefined || this.platform !== 'darwin') return
+    const outcome = await this.runner.run('xcrun', ['simctl', 'shutdown', ownedDeviceId], {
+      env: this.commandEnvironment(), timeoutMs: COMMAND_TIMEOUT_MS,
+    })
+    if (outcome.code !== 0 && !/current state:\s*Shutdown/iu.test(`${outcome.stdout}\n${outcome.stderr}`)) {
+      throw commandFailure('PHONE_IOS_SHUTDOWN', 'simctl shutdown', outcome)
     }
   }
 }

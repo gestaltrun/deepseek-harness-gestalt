@@ -28,6 +28,7 @@ export interface IosCommandRunner {
 export function createNodeIosCommandRunner(): IosCommandRunner {
   return {
     run: async (command, args, options) => {
+      options.signal?.throwIfAborted()
       const child = spawn(command, [...args], {
         env: childEnv(options.env),
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -66,6 +67,7 @@ async function settleChild(
     escape.unref()
   }
   signal?.addEventListener('abort', abort, { once: true })
+  if (signal?.aborted === true) abort()
   const timeout = timeoutMs === undefined ? undefined : setTimeout(() => {
     timedOut = true
     abort()

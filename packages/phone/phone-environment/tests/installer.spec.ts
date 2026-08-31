@@ -95,7 +95,7 @@ describe('managed mobilecli installer', () => {
     expect(JSON.parse(await readFile(join(root, 'current.json'), 'utf8'))).toMatchObject({
       version: '1.0.5', platform: 'darwin', architecture: 'arm64',
     })
-    expect((await stat(root)).mode & 0o777).toBe(0o700)
+    if (process.platform !== 'win32') expect((await stat(root)).mode & 0o777).toBe(0o700)
     expect((await readdir(root)).filter(name => name.startsWith('.staging-'))).toEqual([])
   })
 

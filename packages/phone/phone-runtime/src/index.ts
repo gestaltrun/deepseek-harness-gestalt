@@ -308,7 +308,10 @@ export class PhoneDevices extends Service {
     return this.startupOutcome
   }
 
-  /** @returns whether the current mobilecli generation completed readiness. */
+  /**
+   * Read whether the current child may accept fleet operations.
+   * @returns current generation readiness.
+   */
   isReady(): boolean {
     return this.ready && this.lost === undefined && !this.closing && !this.disposed
   }

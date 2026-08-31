@@ -25,8 +25,12 @@ export const MISSING_PHONE_RUNTIME: PhoneManagedRuntimeView = Object.freeze({
 })
 
 const PATH = '/phone/environment'
+const PREPARE_POLL_MS = 100
 
-/** Create the production source over the Host's trusted phone-environment routes. */
+/**
+ * Create the production source over the Host's trusted phone-environment routes.
+ * @returns the full-snapshot runtime source.
+ */
 export function createHttpPhoneRuntimeSource(): PhoneRuntimeSource {
   let runtime = MISSING_PHONE_RUNTIME
   let detected = false
@@ -51,10 +55,33 @@ export function createHttpPhoneRuntimeSource(): PhoneRuntimeSource {
     )
     return operation
   }
+  const prepare = (): Promise<void> => {
+    if (active !== undefined) return active
+    const operation = request(`${PATH}/prepare`, 'POST')
+    active = operation
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = (): void => {
+      if (active !== operation) return
+      void request(PATH, 'GET').catch(() => {})
+      timer = setTimeout(poll, PREPARE_POLL_MS)
+    }
+    timer = setTimeout(poll, 0)
+    void operation.then(
+      () => {
+        if (active === operation) active = undefined
+        if (timer !== undefined) clearTimeout(timer)
+      },
+      () => {
+        if (active === operation) active = undefined
+        if (timer !== undefined) clearTimeout(timer)
+      },
+    )
+    return operation
+  }
   return {
     getRuntime: () => runtime,
     refresh: () => run(PATH, 'GET'),
-    prepare: () => run(`${PATH}/prepare`, 'POST'),
+    prepare,
     cancel: () => request(`${PATH}/cancel`, 'POST'),
     ensureDetected: () => { if (!detected && active === undefined) void run(PATH, 'GET') },
     subscribe: (listener) => {

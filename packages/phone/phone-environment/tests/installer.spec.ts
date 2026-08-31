@@ -57,8 +57,9 @@ function assetOf(bytes: Uint8Array, overrides: Partial<MobilecliReleaseAsset> = 
   }
 }
 
-function responseOf(bytes: Uint8Array): Response {
-  return new Response(bytes, { status: 200, headers: { 'content-length': String(bytes.byteLength) } })
+function responseOf(bytes: Uint8Array, declaredBytes = bytes.byteLength): Response {
+  const body = new Uint8Array(bytes).buffer
+  return new Response(body, { status: 200, headers: { 'content-length': String(declaredBytes) } })
 }
 
 describe('managed mobilecli installer', () => {
@@ -94,7 +95,7 @@ describe('managed mobilecli installer', () => {
     ['digest', (bytes: Uint8Array) => ({ asset: assetOf(bytes, { sha256: '0'.repeat(64) }), response: responseOf(bytes) })],
     ['truncation', (bytes: Uint8Array) => ({
       asset: assetOf(bytes),
-      response: new Response(bytes.slice(0, -1), { headers: { 'content-length': String(bytes.byteLength) } }),
+      response: responseOf(bytes.slice(0, -1), bytes.byteLength),
     })],
   ])('rejects a %s mismatch without publishing current', async (_name, arrange) => {
     const root = await tempRoot()

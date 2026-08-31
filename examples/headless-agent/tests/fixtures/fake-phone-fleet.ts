@@ -50,6 +50,8 @@ function record(op: string, deviceId?: string): void {
 /** Provide the recording fake under the `phoneDevices` service name tool-phone injects. */
 export function apply(ctx: Context): void {
   ctx.provide('phoneDevices', {
+    isReady() { return true },
+    onReadinessChanged() { return () => {} },
     async listDevices() {
       record('listDevices')
       return LISTING

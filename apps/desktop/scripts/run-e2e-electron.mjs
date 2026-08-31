@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Build and run the isolated Desktop Host phone-tab Electron e2e lane. */
 import { spawnSync } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   access, appendFile, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile,
 } from 'node:fs/promises'
@@ -9,7 +9,8 @@ import { createServer } from 'node:http'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { zipSync } from 'fflate'
 import {
   PortHandoffCollision, quiesceRecordedProcesses, runLogged, runWithVerifiedPortHandoff, settleCleanupSteps,
 } from './e2e-electron-runner-support.mjs'
@@ -22,6 +23,7 @@ const operatedPlatform = join(desktopRoot, 'tests', 'fixtures', 'operated-platfo
 const fakeSource = join(repoRoot, 'packages', 'phone', 'phone-runtime', 'tests', 'fixtures', 'fakemobilecli.mjs')
 const framesSource = join(repoRoot, 'packages', 'phone', 'phone-runtime', 'tests', 'fixtures', 'u3-visible-frames.ts')
 const devicesSource = join(desktopRoot, 'tests', 'fixtures', 'phone-e2e-devices.json')
+const managedEnvironmentFixture = join(e2eDir, 'managed-phone-environment.mjs')
 const wdioConfig = join(e2eDir, 'wdio.conf.ts')
 const wdioBin = join(desktopRoot, 'node_modules', '@wdio', 'cli', 'bin', 'wdio.js')
 
@@ -40,6 +42,8 @@ function scrubEnvironment(source) {
       'DSH_PHONE_REAL_UDID', 'DSH_PHONE_SERVER_PORT', 'DSH_ELECTRON_E2E_ARTIFACT_DIR',
       'DSH_ELECTRON_E2E_CDP_PORT', 'DSH_ELECTRON_E2E_FAKE_PORT', 'DSH_ELECTRON_E2E_USER_DATA',
       'DSH_ELECTRON_E2E_FAKE_OWNER', 'DSH_ELECTRON_E2E_WORKSPACE',
+      'DSH_PHONE_MANAGED_FIXTURE_BYTES', 'DSH_PHONE_MANAGED_FIXTURE_SHA256',
+      'DSH_PHONE_MANAGED_FIXTURE_URL',
     ].includes(name)
   }))
 }
@@ -134,13 +138,57 @@ async function stageFake() {
   }
 }
 
-async function runSpec(name, spec, provider, mobilecli, fakeOwnerToken) {
+async function startManagedArchiveFixture(fakeExecutable) {
+  const wrapper = new TextEncoder().encode([
+    '#!/usr/bin/env node',
+    `await import(${JSON.stringify(pathToFileURL(fakeExecutable).href)})`,
+    '',
+  ].join('\n'))
+  const executableName = process.platform === 'win32' ? 'mobilecli.exe' : 'mobilecli'
+  const archive = zipSync({ [executableName]: wrapper })
+  let requests = 0
+  const server = createServer((request, response) => {
+    if (request.url !== '/mobilecli.zip') {
+      response.writeHead(404).end()
+      return
+    }
+    requests += 1
+    response.writeHead(200, {
+      'content-type': 'application/zip',
+      'content-length': String(archive.byteLength),
+    })
+    const cut = Math.max(1, Math.floor(archive.byteLength / 2))
+    response.write(archive.subarray(0, cut))
+    setTimeout(() => { response.end(archive.subarray(cut)) }, 250)
+  })
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('managed archive fixture exposed no TCP address')
+  return {
+    url: `http://127.0.0.1:${String(address.port)}/mobilecli.zip`,
+    bytes: archive.byteLength,
+    sha256: createHash('sha256').update(archive).digest('hex'),
+    requests: () => requests,
+    port: address.port,
+    close: async () => {
+      server.closeAllConnections()
+      await new Promise((resolve, reject) => {
+        server.close(error => { if (error === undefined) resolve(); else reject(error) })
+      })
+    },
+  }
+}
+
+async function runSpec(name, spec, provider, mobilecli, fakeOwnerToken, managedFixture) {
   const artifactDir = join(artifactRoot, name)
   try {
     return await runWithVerifiedPortHandoff(name, async ({ fakePort, cdpPort }, attempt) => {
       await rm(artifactDir, { recursive: true, force: true })
       return await runSpecAttempt({
-        name, spec, provider, mobilecli, fakeOwnerToken, artifactDir, fakePort, cdpPort, attempt,
+        name, spec, provider, mobilecli, fakeOwnerToken, managedFixture, artifactDir, fakePort, cdpPort, attempt,
       })
     })
   } catch (error) {
@@ -149,7 +197,7 @@ async function runSpec(name, spec, provider, mobilecli, fakeOwnerToken) {
 }
 
 async function runSpecAttempt({
-  name, spec, provider, mobilecli, fakeOwnerToken, artifactDir, fakePort, cdpPort, attempt,
+  name, spec, provider, mobilecli, fakeOwnerToken, managedFixture, artifactDir, fakePort, cdpPort, attempt,
 }) {
   const runtimeRoot = await mkdtemp(join(tmpdir(), `dsh-desktop-e2e-${name}-`))
   const dshHome = join(runtimeRoot, 'dsh-home')
@@ -171,6 +219,14 @@ async function runSpecAttempt({
       '  welcomeNoticeVersion: "2026-08-13.1"',
       '',
     ].join('\n'), { mode: 0o600 })
+    if (managedFixture !== undefined) {
+      await writeFile(join(dshHome, 'cordis.patch.yml'), [
+        '- insert:',
+        '    - id: phone-environment-managed-fixture',
+        `      name: ${JSON.stringify(managedEnvironmentFixture)}`,
+        '',
+      ].join('\n'), { mode: 0o600 })
+    }
     const env = {
       ...cleanEnvironment,
       CI: 'true',
@@ -180,7 +236,7 @@ async function runSpecAttempt({
       DSH_NODE: process.execPath,
       DSH_DESKTOP_OPERATED_PLATFORM_CONFIG: operatedPlatform,
       DSH_DESKTOP_SMOKE_FILE: smokeFile,
-      DSH_PHONE_MOBILECLI: mobilecli,
+      ...(mobilecli === undefined ? {} : { DSH_PHONE_MOBILECLI: mobilecli }),
       DSH_PHONE_SERVER_PORT: String(fakePort),
       DSH_ELECTRON_E2E_ARTIFACT_DIR: artifactDir,
       DSH_ELECTRON_E2E_CDP_PORT: String(cdpPort),
@@ -188,6 +244,11 @@ async function runSpecAttempt({
       DSH_ELECTRON_E2E_FAKE_OWNER: fakeOwnerToken ?? '',
       DSH_ELECTRON_E2E_USER_DATA: userData,
       DSH_ELECTRON_E2E_WORKSPACE: workspace,
+      ...(managedFixture === undefined ? {} : {
+        DSH_PHONE_MANAGED_FIXTURE_URL: managedFixture.url,
+        DSH_PHONE_MANAGED_FIXTURE_BYTES: String(managedFixture.bytes),
+        DSH_PHONE_MANAGED_FIXTURE_SHA256: managedFixture.sha256,
+      }),
       DEEPSEEK_API_KEY: 'keyless-desktop-electron-e2e',
       DEEPSEEK_BASE_URL: provider.origin,
       ELECTRON_ENABLE_LOGGING: '1',
@@ -300,6 +361,7 @@ async function auditLogs() {
 
 let provider
 let fake
+let managedFixture
 let exitCode = 1
 const fatalErrors = []
 try {
@@ -307,24 +369,31 @@ try {
   lifetime.signal.throwIfAborted()
   provider = await startKeylessProvider()
   fake = await stageFake()
+  managedFixture = await startManagedArchiveFixture(fake.executable)
   const missing = join(tmpdir(), `dsh-no-such-mobilecli-${process.pid}`)
   const unresolved = await runSpec('phone-unresolved', 'phone-tab-unresolved.e2e.ts', provider, missing)
-  const live = unresolved.code === 0
+  const managed = unresolved.code === 0
+    ? await runSpec('phone-managed', 'phone-managed-environment.e2e.ts', provider, missing, fake.ownerToken, managedFixture)
+    : { code: 1, errors: ['phone-managed skipped because phone-unresolved failed'], cleanup: [], portCollision: false }
+  const live = managed.code === 0
     ? await runSpec('phone-live', 'phone-tab.e2e.ts', provider, fake.executable, fake.ownerToken)
-    : { code: 1, errors: ['phone-live skipped because phone-unresolved failed'], cleanup: [], portCollision: false }
+    : { code: 1, errors: ['phone-live skipped because phone-managed failed'], cleanup: [], portCollision: false }
   const findings = await auditLogs()
   await writeFile(join(artifactRoot, 'result.json'), JSON.stringify({
     head,
     unresolved,
+    managed: { ...managed, fixtureRequests: managedFixture.requests() },
     live,
     unexplainedLogFindings: findings,
   }, undefined, 2) + '\n')
-  exitCode = unresolved.code === 0 && live.code === 0 && findings.length === 0 ? 0 : 1
+  exitCode = unresolved.code === 0 && managed.code === 0 && live.code === 0
+    && managedFixture.requests() === 1 && findings.length === 0 ? 0 : 1
 } catch (error) {
   fatalErrors.push(asError(error))
 } finally {
   const shutdown = await settleCleanupSteps([
     { name: 'keyless provider close', run: async () => { await provider?.close() } },
+    { name: 'managed archive fixture close', run: async () => { await managedFixture?.close() } },
     {
       name: 'staged fake removal',
       run: async () => {
@@ -336,6 +405,10 @@ try {
     {
       name: 'keyless provider port closure',
       run: async () => { if (provider !== undefined) await assertPortClosed(provider.port) },
+    },
+    {
+      name: 'managed archive fixture port closure',
+      run: async () => { if (managedFixture !== undefined) await assertPortClosed(managedFixture.port) },
     },
   ])
   fatalErrors.push(...shutdown.errors)

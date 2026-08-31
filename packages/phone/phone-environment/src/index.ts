@@ -26,10 +26,13 @@ export type {
   PhonePlatformState, PhoneRuntimeCandidate, PhoneRuntimeSource, PhoneRuntimeState,
 } from './types.ts'
 
-/** Full snapshot and operation paths consumed by the Phone Devices settings client. */
+/** Full snapshot path consumed by the Phone Devices settings client. */
 export const PHONE_ENVIRONMENT_PATH = '/phone/environment'
+/** Managed preparation operation path. */
 export const PHONE_ENVIRONMENT_PREPARE_PATH = '/phone/environment/prepare'
+/** Active preparation cancellation path. */
 export const PHONE_ENVIRONMENT_CANCEL_PATH = '/phone/environment/cancel'
+/** Runtime source re-detection path. */
 export const PHONE_ENVIRONMENT_REFRESH_PATH = '/phone/environment/refresh'
 
 /** Host-specific configuration; release trust facts remain fixed in source. */
@@ -91,7 +94,10 @@ export class PhoneEnvironment extends Service {
     return this.refresh().then(() => {}, () => {})
   }
 
-  /** @returns the current immutable full snapshot. */
+  /**
+   * Read the latest committed environment state.
+   * @returns the current immutable full snapshot.
+   */
   snapshot(): PhoneEnvironmentSnapshot {
     return this.current
   }
@@ -123,7 +129,10 @@ export class PhoneEnvironment extends Service {
     return () => { this.listeners.delete(listener) }
   }
 
-  /** Re-detect runtime sources in fixed override-managed-system precedence. */
+  /**
+   * Re-detect runtime sources in fixed override-managed-system precedence.
+   * @returns the committed full snapshot after detection settles.
+   */
   refresh(): Promise<PhoneEnvironmentSnapshot> {
     if (this.refreshTask !== undefined) return this.refreshTask
     const operation = this.detectRuntime()
@@ -135,14 +144,17 @@ export class PhoneEnvironment extends Service {
     return operation
   }
 
-  /** Download, verify, publish, and optionally activate the pinned host asset. */
+  /**
+   * Download, verify, publish, and optionally activate the pinned host asset.
+   * @returns the committed full snapshot after preparation settles.
+   */
   prepare(): Promise<PhoneEnvironmentSnapshot> {
     if (this.prepareTask !== undefined) {
       return Promise.reject(new PhoneEnvironmentError('PHONE_ENVIRONMENT_BUSY', 'mobilecli preparation is already running'))
     }
     let asset
     try {
-      asset = selectMobilecliReleaseAsset(process.platform, process.arch)
+      asset = this.selectManagedAsset(process.platform, process.arch)
     } catch (error) {
       this.publishRuntime(environmentFailure(error))
       return Promise.reject(error)
@@ -184,6 +196,16 @@ export class PhoneEnvironment extends Service {
     this.prepareController?.abort(new PhoneEnvironmentError(
       'PHONE_ENVIRONMENT_ABORTED', 'mobilecli preparation was cancelled',
     ))
+  }
+
+  /**
+   * Resolve the immutable release row used by managed preparation.
+   * @param platform - current Node platform.
+   * @param architecture - current Node architecture.
+   * @returns the pinned asset admitted for this Host tuple.
+   */
+  protected selectManagedAsset(platform: string, architecture: string) {
+    return selectMobilecliReleaseAsset(platform, architecture)
   }
 
   private async detectRuntime(): Promise<PhoneEnvironmentSnapshot> {

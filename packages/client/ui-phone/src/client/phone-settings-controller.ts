@@ -112,9 +112,9 @@ export class PhoneSettingsCardController {
           void this.source.redetect()
         }
       },
-      prepareRuntime: () => { void this.runtime?.prepare() },
-      cancelRuntime: () => { void this.runtime?.cancel() },
-      refreshRuntime: () => { void this.runtime?.refresh() },
+      prepareRuntime: () => { void this.runtime?.prepare().catch(() => {}) },
+      cancelRuntime: () => { void this.runtime?.cancel().catch(() => {}) },
+      refreshRuntime: () => { void this.runtime?.refresh().catch(() => {}) },
     }
   }
 

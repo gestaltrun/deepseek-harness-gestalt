@@ -13,6 +13,10 @@ import { fileURLToPath } from 'node:url'
 import { buildGradientH264, buildGradientJpeg } from './u3-visible-frames.ts'
 
 const args = process.argv.slice(2)
+if (args.length === 1 && args[0] === '--version') {
+  process.stdout.write('mobilecli version 1.0.5\n')
+  process.exit(0)
+}
 const listenIndex = args.indexOf('--listen')
 const address = listenIndex >= 0 ? (args[listenIndex + 1] ?? '127.0.0.1:12000') : '127.0.0.1:12000'
 const port = Number(address.split(':').at(-1))

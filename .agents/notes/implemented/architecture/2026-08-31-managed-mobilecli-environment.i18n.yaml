@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-31-managed-mobilecli-environment.md
+2026-08-31-managed-mobilecli-environment.md: abba85e6d824a79e008fea95dd8e089d38b740b7
+2026-08-31-managed-mobilecli-environment.zh.md: 3283cdcbc33b31a88ed5fe1ec99ffe7f211561f2

@@ -90,7 +90,7 @@ describe('phone runtime service lifecycle', () => {
     contexts.push(context)
     await context.plugin(PhoneDevices, {
       ...FAST_CONFIG,
-      executablePath: `${fake.executablePath}.missing`,
+      deferStart: true,
       serverPort: fake.port,
     }).await()
 

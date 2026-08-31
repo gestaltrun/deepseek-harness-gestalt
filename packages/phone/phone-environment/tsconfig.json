@@ -10,6 +10,24 @@
       "path": "../../../vendor/cordis"
     },
     {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../util/atomic-write"
+    },
+    {
+      "path": "../../util/home-paths"
+    },
+    {
+      "path": "../../host/webserver"
+    },
+    {
+      "path": "../phone-runtime"
+    },
+    {
+      "path": "../../util/request-trust"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

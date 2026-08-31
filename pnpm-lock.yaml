@@ -250,6 +250,9 @@ importers:
       '@deepseek-ai/dsh-phone-runtime':
         specifier: workspace:^
         version: link:../../packages/phone/phone-runtime
+      '@deepseek-ai/dsh-phone-environment':
+        specifier: workspace:^
+        version: link:../../packages/phone/phone-environment
       '@deepseek-ai/dsh-phone-stream':
         specifier: workspace:^
         version: link:../../packages/phone/phone-stream
@@ -7016,13 +7019,35 @@ importers:
         version: 2026.7.10(zod@4.4.3)
 
   packages/phone/phone-environment:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.3
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-atomic-write':
+        specifier: workspace:^
+        version: link:../../util/atomic-write
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../util/home-paths
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:^
+        version: link:../../host/webserver
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-phone-runtime':
+        specifier: workspace:^
+        version: link:../phone-runtime
+      '@deepseek-ai/dsh-request-trust':
+        specifier: workspace:^
+        version: link:../../util/request-trust
 
   packages/phone/phone-runtime:
     dependencies:

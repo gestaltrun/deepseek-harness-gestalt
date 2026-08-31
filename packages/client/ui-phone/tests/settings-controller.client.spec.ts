@@ -151,6 +151,7 @@ describe('PhoneSettingsCardController', () => {
       enabled: false,
       writable: true,
       view: { kind: 'off' },
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
     })
     face.setEnabled(true)
     expect(host.set).toHaveBeenCalledWith('enabled', true)

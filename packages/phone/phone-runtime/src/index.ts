@@ -61,6 +61,7 @@ export type {
 } from './types.ts'
 export { PhoneDevicesError } from './errors.ts'
 export { deviceId } from './ids.ts'
+export { resolveMobilecliExecutable } from './resolve-binary.ts'
 export type { ServerExit } from './server-process.ts'
 
 /**
@@ -101,6 +102,8 @@ export interface Config {
    * An Electron-minimal PATH also probes `/opt/homebrew/bin` and `/usr/local/bin`.
    */
   executablePath?: string
+  /** Wait for the environment owner to select and activate an executable. */
+  deferStart?: boolean
   /** Loopback TCP port the spawned server listens on. */
   serverPort?: number
   /** Interval between health probes and device-list polls, in milliseconds. */
@@ -124,6 +127,7 @@ export interface Config {
 
 /** Runtime configuration schema applied by composition. */
 export const Config: z<Config> = z.object({
+  deferStart: z.boolean().default(false),
   serverPort: z.number().default(12_000),
   pollIntervalMs: z.number().default(5_000),
   readyTimeoutMs: z.number().default(60_000),
@@ -252,19 +256,37 @@ export class PhoneDevices extends Service {
   constructor(ctx: Context, config: Config) {
     super(ctx, 'phoneDevices')
     this.resolved = resolveValidatedConfig(config)
-    const override = this.resolved.executablePath
-    try {
-      this.executablePath = resolveMobilecliExecutable({
-        ...(override !== undefined ? { executablePath: override } : {}),
-        env: process.env,
-      })
-    } catch (error) {
+    if (this.resolved.deferStart) {
       this.resolutionFailure = new PhoneDevicesError(
         'PHONE_UNRESOLVED',
-        error instanceof Error ? error.message : String(error),
-        { cause: error },
+        'the phone runtime is waiting for its environment owner to select mobilecli',
       )
     }
+    if (this.resolutionFailure === undefined) {
+      const override = this.resolved.executablePath
+      try {
+        this.executablePath = resolveMobilecliExecutable({
+          ...(override !== undefined ? { executablePath: override } : {}),
+          env: process.env,
+        })
+      } catch (error) {
+        this.resolutionFailure = new PhoneDevicesError(
+          'PHONE_UNRESOLVED',
+          error instanceof Error ? error.message : String(error),
+          { cause: error },
+        )
+      }
+    }
+    this.registerEffects(ctx)
+    if (this.resolutionFailure !== undefined) return
+    this.child = new MobilecliServerProcess({
+      executablePath: this.executable,
+      port: this.resolved.serverPort,
+    })
+    this.rpcClient = new MobilecliRpc(`http://127.0.0.1:${String(this.resolved.serverPort)}`)
+  }
+
+  private registerEffects(ctx: Context): void {
     ctx.effect(() => () => {
       this.subscribers.clear()
       this.readinessSubscribers.clear()
@@ -274,12 +296,6 @@ export class PhoneDevices extends Service {
       () => registerPhoneRuntimeStateReader(this[PHONE_RUNTIME_STATE_OWNER], () => this.publishedList),
       'phone runtime state reader',
     )
-    if (this.resolutionFailure !== undefined) return
-    this.child = new MobilecliServerProcess({
-      executablePath: this.executable,
-      port: this.resolved.serverPort,
-    })
-    this.rpcClient = new MobilecliRpc(`http://127.0.0.1:${String(this.resolved.serverPort)}`)
   }
 
   /**

@@ -290,6 +290,7 @@ describe('PhoneSettingsSection', () => {
       enabled: false,
       writable: true,
       view: { kind: 'off' },
+      runtime: { kind: 'missing', targetVersion: '1.0.5' },
     })
     const props = {
       t: (key: keyof typeof zh) => zh[key],
@@ -298,6 +299,9 @@ describe('PhoneSettingsSection', () => {
       redetect: vi.fn(),
       copyCommand: vi.fn(),
       nextAction: vi.fn(),
+      prepareRuntime: vi.fn(),
+      cancelRuntime: vi.fn(),
+      refreshRuntime: vi.fn(),
     } as unknown as PhoneSettingsSectionProps
     render(<PhoneSettingsSection {...props} />)
     expect(screen.getByRole('heading', { level: 2, name: '手机设备' })).toBeTruthy()

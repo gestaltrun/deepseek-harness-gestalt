@@ -10,7 +10,7 @@
 
 连接生命周期收敛在 `PhoneConnectionController`（无 React，占用设备一实例）：铸造 → io 打开 → live；`visible: false` 暂停拉流，恢复时重新铸造——签名地址短时效。serial 变化会销毁上一份控制器。中断（`onClose`、`onError`、H264 拉取/解析/解码/绘制失败）进入有界自动重连（3 次线性退避），预算耗尽落到错误卡。`PhoneConnectedView` 在 live、suspended、reconnecting 与 error 阶段之间保留同一份 H264 播放 owner。surface cleanup 会同步请求关闭 fetch reader 与 decoder；新 URL 或设备只在不会 reject 的 settlement 完成后启动，已过时的排队 replacement 永不启动。每次 teardown 都会清空已学习的触控面，因此重连后的 socket 会在首幅新解码帧提供尺寸前拒绝 tap。终态分支——设备离线（铸造 404 或 io `-32010`）、真机调试未授权（上游报文）、被拒绝（403）——跳过重试循环，按已锁稿状态 ④ 渲染带唯一「重新连接」下一步动作的错误卡。渲染层只镜像阶段快照；全部决策留在控制器内，fake gateway 的 spec 逐一证明迁移。
 
-Host 半边在 settings 提供方组装时注册持久化 `ui-phone` 命名空间（`enabled`，boolean，默认 `false`）。浏览器半边贡献顶层设置分区（`id: phone-devices`，导航标签「手机设备」 / Phone Devices），分区主体就是六态环境向导。本页不是「移动伴侣」：伴侣是人用手机连桌面，这里是设备被控调试。向导拥有关闭 / 探测中 / Android 向导 / iOS 向导 / 就绪清单 / 可恢复错误行。命令级安装指引带「复制」按钮，剪贴板内容就是稿中的 `sdkmanager` / `avdmanager` / `emulator` / `xcodebuild` / `xcrun simctl` 命令。每条错误行共用动词「下一步动作」。检测数据经窄接口 `PhoneEnvironmentSource` 进入。随包实现包装选择器已在用的 Host `GET /phone/devices` 清单：成功拉取可到达探测中、两端向导与就绪清单；`PHONE_UNRESOLVED` 拉取落到未找到 mobilecli 行并给出安装命令；其余缺失或拒绝的设备路由回落到探测失败行。本包不 import `phone-runtime` 与 `phone-stream`。
+Host 半边注册持久化 `ui-phone` 命名空间（`enabled`，boolean，默认 `false`），并把该 gate 接到 `ctx.phoneEnvironment`。浏览器半边贡献顶层设置分区（`id: phone-devices`，导航标签「手机设备」 / Phone Devices）。顶部共享运行时栏消费 `GET /phone/environment` 全量快照，展示缺失 / 下载中 / 校验中 / 激活中 / 就绪 / 失败，并提供准备、取消与刷新操作。它标明官方固定的 1.0.5 运行时与私有 `$DSH_HOME/phone` 位置，不提供全局 npm 或 `PATH` 步骤。下方平台卡保持为可扩展 Android/iOS 行。本页不是「移动伴侣」：伴侣是人用手机连桌面，这里是设备被控调试。本包的 client face 不 import `phone-runtime`、`phone-environment` 或 `phone-stream`。
 
 Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是组装默认值。注册不依赖它——关闭时选择器入口仍然可达，选择器内容会在空态上方固定渲染「手机连接未启用」说明条。持久化开关关闭时不发现设备、不拉起 `mobilecli`、不路由任何流。
 
@@ -30,7 +30,7 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 
 - **徽标保真缺口**——pill 节点已 aria-hidden（可访问性 P3：计数不再进入 tab 可访问名），但已锁稿的 灰点（无设备）/ 绿色数字（在线台数）仍需点形与配色渲染路径，而钉死的 better-sidebar 徽标契约只提供包裹字符串或数字的中性 pill，且 `null` 会整体隐藏 pill。本包因此先交付值层面的两态（静默 / 计数）；点样式待契约扩展后落地。徽标回调也看不到渲染它的 tab 实例，因此每个手机 tab 显示的是全队在线台数，而非激活设备的绿点。
 - **「截图」禁用**——设计稿把截图存入会话附件；客户端侧暂无可用的附件通道，按钮以 tooltip 禁用渲染，不做假动作。
-- **设置卡从设备清单推断环境**——Host `phoneDevices` 不在线上发布 adb/SDK/Xcode 探测事实，因此一份成功的空清单仍会打开平台向导（macOS 上为 iOS，否则为 Android），而不是按二进制逐项列出检查表。
+- **平台准备仍属后续**——共享托管 mobilecli 栏已接生产 Host；Android SDK/模拟器与仅 macOS 可用的 iOS 模拟器下载流程归各自平台环境包。
 - **「最近设备」与行内「启动」是后续界面**——票面点名了最近设备与模拟器启动，但设备历史与浏览器可达的启动路由都不存在；选择器现阶段只交付「打开」。
 - **IME 组合与控制键不上送设备**——可打印字符与 Enter 映射到 `device.io.text`；删除、快捷键与 IME 预编辑需要更完整的文本通道。
 - **中文文案固定**——包内只带 zh 文案、未接 locale 命名空间；本地化与 device-dock 剩余状态一并推进。

@@ -1,0 +1,342 @@
+<!doctype html>
+<!-- PROTOTYPE ONLY — never import this file into production. -->
+<!-- Three variants of Phone Devices setup, switchable with ?variant=A|B|C and ?platform=mac|windows|linux. -->
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PROTOTYPE · 手机环境一键准备</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --sidebar: #15171c;
+      --panel: #1c1e24;
+      --panel-2: #23262d;
+      --panel-3: #292d35;
+      --line: rgba(255,255,255,.09);
+      --line-strong: rgba(255,255,255,.16);
+      --text: #f4f6f8;
+      --muted: #a6acb6;
+      --dim: #727985;
+      --blue: #679efe;
+      --blue-bg: rgba(103,158,254,.14);
+      --green: #4ed17e;
+      --green-bg: rgba(78,209,126,.13);
+      --amber: #f7ad31;
+      --amber-bg: rgba(247,173,49,.13);
+      --red: #f25a5a;
+      --red-bg: rgba(242,90,90,.13);
+      --radius: 14px;
+      --font: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+      --mono: "SFMono-Regular",Consolas,monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 var(--font); }
+    button { font: inherit; }
+    .app { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0,1fr); }
+    .sidebar { position: sticky; top: 0; height: 100vh; padding: 18px 12px; border-right: 1px solid var(--line); background: var(--sidebar); }
+    .brand { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px; font-weight: 650; letter-spacing: -.01em; }
+    .brand-mark { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; background: linear-gradient(145deg,#4a73da,#83abff); color: white; }
+    .proto { margin: 12px 8px 20px; padding: 8px 10px; border: 1px dashed rgba(247,173,49,.55); border-radius: 9px; color: #e9bd70; font: 11px/1.45 var(--mono); }
+    .nav-label { padding: 0 10px; margin: 16px 0 6px; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .nav-item { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 10px; margin: 2px 0; border-radius: 9px; color: var(--muted); }
+    .nav-item.active { color: var(--text); background: rgba(255,255,255,.075); }
+    .nav-icon { width: 20px; text-align: center; }
+    .main { min-width: 0; padding: 34px 42px 120px; }
+    .top { max-width: 980px; margin: 0 auto 24px; display: flex; align-items: flex-start; gap: 24px; }
+    .top-copy { flex: 1; }
+    h1 { margin: 0 0 6px; font-size: 23px; line-height: 1.25; letter-spacing: -.02em; }
+    .subtitle { margin: 0; color: var(--muted); }
+    .platforms { display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+    .platforms button { border: 0; padding: 6px 10px; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; }
+    .platforms button.active { color: var(--text); background: var(--panel-3); box-shadow: 0 1px 2px rgba(0,0,0,.35); }
+    .state-line { max-width: 980px; margin: -10px auto 18px; color: var(--dim); font: 11px/1.4 var(--mono); }
+    .surface { max-width: 980px; margin: 0 auto; }
+    .card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; box-shadow: 0 10px 35px rgba(0,0,0,.18); }
+    .card + .card { margin-top: 14px; }
+    .card-head { display: flex; align-items: center; gap: 13px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+    .phone-icon { flex: 0 0 auto; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 12px; color: #9bb9ff; background: var(--blue-bg); font-size: 20px; }
+    .grow { flex: 1; min-width: 0; }
+    .title { font-size: 16px; font-weight: 650; }
+    .desc { margin-top: 2px; color: var(--muted); font-size: 13px; }
+    .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .badge.warn { color: var(--amber); background: var(--amber-bg); }
+    .badge.ok { color: var(--green); background: var(--green-bg); }
+    .badge.off { color: var(--dim); background: rgba(255,255,255,.05); }
+    .body { padding: 20px; }
+    .primary,.secondary,.ghost { border-radius: 9px; cursor: pointer; transition: .15s ease; }
+    .primary { border: 1px solid transparent; background: var(--blue); color: #0e1420; font-weight: 650; padding: 9px 15px; }
+    .primary:hover { filter: brightness(1.08); }
+    .secondary { border: 1px solid var(--line-strong); background: var(--panel-3); color: var(--text); padding: 8px 13px; }
+    .ghost { border: 0; background: transparent; color: var(--blue); padding: 7px 9px; }
+    button[disabled] { opacity: .45; cursor: not-allowed; }
+    .fine { color: var(--dim); font-size: 12px; }
+    .callout { display: flex; gap: 11px; padding: 12px 14px; border-radius: 10px; background: var(--blue-bg); color: #c6d8ff; }
+    .callout.warn { color: #f2c77f; background: var(--amber-bg); }
+    .callout strong { display: block; color: var(--text); margin-bottom: 2px; }
+    .callout p { margin: 0; color: inherit; font-size: 12px; }
+
+    /* Variant A: one guided journey. */
+    .hero { display: grid; grid-template-columns: minmax(0,1fr) 255px; gap: 22px; align-items: center; padding: 20px; background: linear-gradient(115deg,rgba(103,158,254,.12),transparent 60%); }
+    .hero h2 { margin: 0 0 7px; font-size: 19px; }
+    .hero p { margin: 0; color: var(--muted); }
+    .hero-action { display: flex; flex-direction: column; gap: 8px; align-items: stretch; text-align: center; }
+    .steps { padding: 0 20px 20px; }
+    .step { display: grid; grid-template-columns: 32px minmax(0,1fr) auto; gap: 12px; align-items: center; min-height: 74px; border-top: 1px solid var(--line); }
+    .step-num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-3); color: var(--muted); font-size: 12px; }
+    .step-main strong { display: block; }
+    .step-main span { color: var(--muted); font-size: 12px; }
+    .platform-block { color: var(--dim); }
+
+    /* Variant B: operational status center. */
+    .overview { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+    .score { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; border: 7px solid rgba(103,158,254,.16); border-top-color: var(--blue); font-size: 18px; font-weight: 700; }
+    .overview h2 { margin: 0 0 3px; font-size: 18px; }
+    .overview p { margin: 0; color: var(--muted); }
+    .overview .primary { margin-left: auto; }
+    .tiles { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+    .tile { min-height: 220px; display: flex; flex-direction: column; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+    .tile-top { display: flex; align-items: flex-start; gap: 10px; }
+    .tile-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; background: rgba(255,255,255,.06); }
+    .tile h3 { margin: 0; font-size: 14px; }
+    .tile .meta { margin: 2px 0 12px; color: var(--dim); font-size: 11px; }
+    .facts { display: grid; gap: 7px; margin: 4px 0 16px; color: var(--muted); font-size: 12px; }
+    .facts span { display: flex; justify-content: space-between; gap: 8px; }
+    .tile .secondary,.tile .ghost { margin-top: auto; width: 100%; }
+    .unsupported { border-color: rgba(247,173,49,.28); background: linear-gradient(140deg,rgba(247,173,49,.08),var(--panel-2)); }
+
+    /* Variant C: platform-first split view. */
+    .runtime-bar { display: flex; align-items: center; gap: 13px; margin-bottom: 14px; padding: 14px 16px; border: 1px solid rgba(103,158,254,.26); border-radius: 12px; background: var(--blue-bg); }
+    .runtime-bar .primary { margin-left: auto; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .platform-card { min-height: 380px; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+    .platform-title { display: flex; align-items: center; gap: 12px; }
+    .platform-logo { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 13px; background: var(--panel-3); font-size: 20px; }
+    .platform-title h2 { margin: 0; font-size: 18px; }
+    .platform-title p { margin: 1px 0 0; color: var(--muted); font-size: 12px; }
+    .capabilities { display: grid; gap: 8px; margin: 22px 0; }
+    .cap { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .cap:last-child { border-bottom: 0; }
+    .cap-mark { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; color: var(--green); background: var(--green-bg); font-size: 11px; }
+    .cap-mark.na { color: var(--amber); background: var(--amber-bg); }
+    .platform-actions { display: flex; gap: 8px; }
+    .platform-actions .primary { flex: 1; }
+    .os-message { min-height: 220px; display: grid; place-items: center; text-align: center; padding: 22px; color: var(--muted); }
+    .os-message .big { font-size: 30px; margin-bottom: 8px; }
+    .os-message strong { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+
+    .progress { display: none; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 12px; border-radius: 9px; background: var(--panel-3); color: var(--muted); font-size: 12px; }
+    .progress.show { display: flex; }
+    .spinner { width: 14px; height: 14px; border: 2px solid var(--line-strong); border-top-color: var(--blue); border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .switcher { position: fixed; z-index: 50; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 7px; border: 1px solid var(--line-strong); border-radius: 999px; background: rgba(20,22,27,.94); box-shadow: 0 12px 40px rgba(0,0,0,.45); backdrop-filter: blur(16px); }
+    .switcher button { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--panel-3); color: var(--text); cursor: pointer; }
+    .switch-label { min-width: 190px; text-align: center; }
+    .switch-label strong { display: block; font-size: 12px; }
+    .switch-label span { display: block; color: var(--dim); font-size: 10px; }
+    .hidden { display: none !important; }
+    @media (max-width: 860px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .main { padding: 24px 16px 110px; }
+      .top { flex-direction: column; }
+      .hero,.tiles,.split { grid-template-columns: 1fr; }
+      .hero-action { align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">G</span> DeepSeek Gestalt</div>
+      <div class="proto">PROTOTYPE ONLY<br>问题：手机依赖如何在产品里一键准备？</div>
+      <div class="nav-label">设置</div>
+      <div class="nav-item"><span class="nav-icon">⌁</span>模型</div>
+      <div class="nav-item"><span class="nav-icon">◫</span>外观</div>
+      <div class="nav-item active"><span class="nav-icon">▯</span>手机设备</div>
+      <div class="nav-item"><span class="nav-icon">↗</span>移动伴侣</div>
+      <div class="nav-item"><span class="nav-icon">⬆</span>软件更新</div>
+    </aside>
+    <main class="main">
+      <header class="top">
+        <div class="top-copy">
+          <h1>手机设备</h1>
+          <p class="subtitle">准备本机运行时、模拟器与真机连接，让你和 Agent 使用同一套设备能力。</p>
+        </div>
+        <div class="platforms" aria-label="预览操作系统">
+          <button data-platform="mac">macOS</button>
+          <button data-platform="windows">Windows</button>
+          <button data-platform="linux">Linux</button>
+        </div>
+      </header>
+      <div class="state-line" id="state-line"></div>
+      <div class="surface" id="surface"></div>
+    </main>
+  </div>
+
+  <div class="switcher" aria-label="原型方案切换器">
+    <button id="prev" aria-label="上一个方案">←</button>
+    <div class="switch-label"><strong id="variant-name"></strong><span>← → 键也可以切换</span></div>
+    <button id="next" aria-label="下一个方案">→</button>
+  </div>
+
+  <template id="variant-A">
+    <article class="card">
+      <div class="card-head">
+        <div class="phone-icon">▯</div>
+        <div class="grow"><div class="title">设备环境向导</div><div class="desc">一次准备当前系统支持的全部组件，必要的人工作业会单独停下来说明。</div></div>
+        <span class="badge warn">尚未完成</span>
+      </div>
+      <div class="hero">
+        <div><h2>让这台电脑可以控制手机</h2><p>Gestalt 会把 mobilecli 安装在应用自己的运行时目录；不会修改系统 PATH，也不会要求全局 npm 权限。</p></div>
+        <div class="hero-action"><button class="primary prepare">一键准备此电脑</button><span class="fine">开始前先展示下载量与磁盘需求</span></div>
+      </div>
+      <div class="steps">
+        <div class="step"><div class="step-num">1</div><div class="step-main"><strong>Gestalt 手机引擎</strong><span>mobilecli · 产品托管版本 · 自动校验</span></div><span class="badge off">待下载</span></div>
+        <div class="step"><div class="step-num">2</div><div class="step-main"><strong>Android 环境</strong><span>platform-tools、Emulator 与 API 35 系统镜像</span></div><span class="badge off">待准备</span></div>
+        <div class="step ios-step"><div class="step-num">3</div><div class="step-main"><strong>iOS 环境</strong><span class="ios-copy">Xcode iOS Runtime 与一台 iPhone 模拟器</span></div><span class="badge off ios-badge">待准备</span></div>
+        <div class="progress"><span class="spinner"></span><span>正在模拟准备流程：校验运行时清单…（原型不会下载任何内容）</span></div>
+      </div>
+    </article>
+    <div class="callout warn platform-note" style="margin-top:14px"><span>!</span><div><strong>系统限制会提前说明</strong><p>iOS 模拟器与 iOS USB 真机控制依赖 macOS + Xcode；Windows/Linux 不显示伪操作按钮。</p></div></div>
+  </template>
+
+  <template id="variant-B">
+    <article class="card">
+      <div class="body">
+        <div class="overview">
+          <div class="score">1/3</div>
+          <div class="grow"><h2>设备能力状态中心</h2><p>分别管理运行时和两套平台环境；也可以一次准备全部可用项。</p></div>
+          <button class="primary prepare">准备全部可用项</button>
+        </div>
+        <div class="tiles">
+          <section class="tile">
+            <div class="tile-top"><div class="tile-icon">G</div><div><h3>手机引擎</h3><div class="meta">mobilecli · 应用托管</div></div></div>
+            <div class="facts"><span><em>状态</em><b>未准备</b></span><span><em>安装位置</em><b>Gestalt 数据目录</b></span><span><em>权限</em><b>无需管理员</b></span></div>
+            <button class="secondary prepare">下载并校验</button>
+          </section>
+          <section class="tile">
+            <div class="tile-top"><div class="tile-icon">A</div><div><h3>Android 模拟器</h3><div class="meta">跨平台</div></div></div>
+            <div class="facts"><span><em>platform-tools</em><b>已安装</b></span><span><em>Emulator</em><b>缺失</b></span><span><em>API 35 镜像</em><b>缺失</b></span></div>
+            <button class="secondary prepare">一键准备 Android</button>
+          </section>
+          <section class="tile ios-tile">
+            <div class="tile-top"><div class="tile-icon"></div><div><h3>iOS 模拟器</h3><div class="meta ios-meta">仅 macOS + Xcode</div></div></div>
+            <div class="facts ios-facts"><span><em>Xcode</em><b>已检测</b></span><span><em>iOS Runtime</em><b>缺失</b></span><span><em>模拟器</em><b>未创建</b></span></div>
+            <button class="secondary prepare ios-button">一键准备 iOS</button>
+          </section>
+        </div>
+        <div class="progress"><span class="spinner"></span><span>正在模拟组件准备…（原型不会改动本机）</span></div>
+      </div>
+    </article>
+  </template>
+
+  <template id="variant-C">
+    <div class="runtime-bar"><div class="phone-icon">G</div><div class="grow"><strong>共享运行时：mobilecli 未准备</strong><div class="desc">由 Gestalt 下载、校验和升级，不依赖用户的全局 Node/npm。</div></div><button class="primary prepare">准备手机引擎</button></div>
+    <div class="split">
+      <section class="platform-card">
+        <div class="platform-title"><div class="platform-logo">A</div><div><h2>Android</h2><p>模拟器与 USB 真机</p></div></div>
+        <div class="capabilities">
+          <div class="cap"><span class="cap-mark">✓</span><div class="grow"><strong>platform-tools</strong><div class="fine">已检测 adb</div></div></div>
+          <div class="cap"><span class="cap-mark na">!</span><div class="grow"><strong>Android Emulator</strong><div class="fine">需要下载</div></div></div>
+          <div class="cap"><span class="cap-mark na">!</span><div class="grow"><strong>Pixel 6 · API 35 镜像</strong><div class="fine">需要下载并创建 AVD</div></div></div>
+        </div>
+        <div class="platform-actions"><button class="primary prepare">一键准备 Android</button><button class="secondary">查看明细</button></div>
+      </section>
+      <section class="platform-card ios-platform">
+        <div class="platform-title"><div class="platform-logo"></div><div><h2>iOS</h2><p>模拟器与 USB 真机</p></div></div>
+        <div class="ios-supported">
+          <div class="capabilities">
+            <div class="cap"><span class="cap-mark">✓</span><div class="grow"><strong>Xcode</strong><div class="fine">已检测完整安装</div></div></div>
+            <div class="cap"><span class="cap-mark na">!</span><div class="grow"><strong>iOS Runtime</strong><div class="fine">需要通过 Xcode 下载</div></div></div>
+            <div class="cap"><span class="cap-mark na">!</span><div class="grow"><strong>iPhone 模拟器</strong><div class="fine">准备后自动创建</div></div></div>
+          </div>
+          <div class="platform-actions"><button class="primary prepare">一键准备 iOS</button><button class="secondary">真机前置条件</button></div>
+        </div>
+        <div class="os-message hidden"><div><div class="big"></div><strong>iOS 设备需要 Mac</strong><span>iOS 模拟器和 USB 真机控制依赖 macOS + Xcode。当前系统仍可完整使用 Android。</span></div></div>
+      </section>
+    </div>
+    <div class="progress"><span class="spinner"></span><span>正在模拟平台准备…（原型不会下载任何内容）</span></div>
+  </template>
+
+  <script>
+    const variants = [
+      { key: 'A', name: 'A — 单路径向导' },
+      { key: 'B', name: 'B — 状态中心' },
+      { key: 'C', name: 'C — 平台分栏' },
+    ]
+    const params = new URLSearchParams(location.search)
+    let variant = variants.some(item => item.key === params.get('variant')) ? params.get('variant') : 'A'
+    let platform = ['mac','windows','linux'].includes(params.get('platform')) ? params.get('platform') : 'mac'
+    const platformNames = { mac: 'macOS', windows: 'Windows', linux: 'Linux' }
+
+    function updateUrl() {
+      const next = new URL(location.href)
+      next.searchParams.set('variant', variant)
+      next.searchParams.set('platform', platform)
+      history.replaceState(null, '', next)
+    }
+
+    function render() {
+      const surface = document.querySelector('#surface')
+      const template = document.querySelector(`#variant-${variant}`)
+      surface.replaceChildren(template.content.cloneNode(true))
+      document.querySelector('#variant-name').textContent = variants.find(item => item.key === variant).name
+      document.querySelectorAll('[data-platform]').forEach(button => button.classList.toggle('active', button.dataset.platform === platform))
+      const iosSupported = platform === 'mac'
+      document.querySelector('#state-line').textContent = `platform=${platform}; mobilecli=missing; android=partial; ios=${iosSupported ? 'partial' : 'unsupported'}; mutations=stubbed`
+      surface.querySelectorAll('.ios-step').forEach(row => {
+        row.classList.toggle('platform-block', !iosSupported)
+        row.querySelector('.ios-copy').textContent = iosSupported
+          ? 'Xcode iOS Runtime 与一台 iPhone 模拟器'
+          : `当前为 ${platformNames[platform]}；iOS 模拟器与 USB 真机控制需要 macOS + Xcode`
+        row.querySelector('.ios-badge').textContent = iosSupported ? '待准备' : '此系统不可用'
+      })
+      surface.querySelectorAll('.ios-tile').forEach(tile => {
+        tile.classList.toggle('unsupported', !iosSupported)
+        tile.querySelector('.ios-meta').textContent = iosSupported ? '仅 macOS + Xcode' : `${platformNames[platform]} 不支持`
+        tile.querySelector('.ios-facts').innerHTML = iosSupported
+          ? '<span><em>Xcode</em><b>已检测</b></span><span><em>iOS Runtime</em><b>缺失</b></span><span><em>模拟器</em><b>未创建</b></span>'
+          : '<span><em>原因</em><b>需要 macOS</b></span><span><em>依赖</em><b>Xcode</b></span><span><em>可用能力</em><b>Android</b></span>'
+        tile.querySelector('.ios-button').textContent = iosSupported ? '一键准备 iOS' : 'iOS 需在 Mac 上使用'
+        tile.querySelector('.ios-button').disabled = !iosSupported
+      })
+      surface.querySelectorAll('.ios-supported').forEach(node => node.classList.toggle('hidden', !iosSupported))
+      surface.querySelectorAll('.os-message').forEach(node => node.classList.toggle('hidden', iosSupported))
+      surface.querySelectorAll('.prepare').forEach(button => button.addEventListener('click', () => {
+        const progress = surface.querySelector('.progress')
+        if (progress) progress.classList.add('show')
+        button.textContent = '正在检查…'
+        button.disabled = true
+        setTimeout(() => {
+          if (progress) progress.querySelector('span:last-child').textContent = '原型演示完成：真实实现会在下载前展示体积、来源与安装位置。'
+          button.textContent = '演示完成'
+        }, 900)
+      }))
+      updateUrl()
+    }
+
+    function cycle(delta) {
+      const index = variants.findIndex(item => item.key === variant)
+      variant = variants[(index + delta + variants.length) % variants.length].key
+      render()
+    }
+
+    document.querySelector('#prev').addEventListener('click', () => cycle(-1))
+    document.querySelector('#next').addEventListener('click', () => cycle(1))
+    document.querySelectorAll('[data-platform]').forEach(button => button.addEventListener('click', () => {
+      platform = button.dataset.platform
+      render()
+    }))
+    addEventListener('keydown', event => {
+      if (['INPUT','TEXTAREA'].includes(document.activeElement.tagName) || document.activeElement.isContentEditable) return
+      if (event.key === 'ArrowLeft') cycle(-1)
+      if (event.key === 'ArrowRight') cycle(1)
+    })
+    render()
+  </script>
+</body>
+</html>

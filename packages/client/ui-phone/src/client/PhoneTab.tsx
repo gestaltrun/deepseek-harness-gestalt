@@ -28,7 +28,7 @@ export interface PhoneTabProps {
 
 /** Copy under each platform segment (the mockup fixes the Android→iOS one). */
 const PLATFORM_HINTS: Record<PhonePlatform, string> = {
-  android: '切换到 iOS 将列出 Xcode 模拟器与 WDA 真机',
+  android: '切换到 iOS 将列出 Xcode 模拟器与设备控制代理真机',
   ios: '切换到 Android 将列出 ADB 模拟器与 USB 真机',
 }
 

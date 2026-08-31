@@ -31,9 +31,13 @@ export const coveragePersistentStateSuites = [
   'packages/session/session-persistence-sqlite/tests/differential.spec.ts',
 ] as const
 
+/** Desktop overlay suites that require a fresh instrumented process. */
+export const coverageDesktopOverlaySuites = [
+  'apps/desktop/tests/overlay-boot.spec.ts',
+] as const
+
 /** Process-bound suites that must not overlap other instrumented processes. */
 export const coverageProcessBoundSuites = [
-  'apps/desktop/tests/overlay-boot.spec.ts',
   'packages/attachment/attachment-local/tests/normalization.spec.ts',
   'packages/shell/pwsh-local/tests/executor.spec.ts',
   'packages/shell/pwsh-sandbox/tests/sandbox.spec.ts',
@@ -47,6 +51,7 @@ export const coverageProcessBoundSuites = [
 /** Suites excluded from ordinary concurrent coverage partitions. */
 export const coverageExclusiveSuites = [
   ...coveragePersistentStateSuites,
+  ...coverageDesktopOverlaySuites,
   ...coverageProcessBoundSuites,
 ] as const
 
@@ -240,6 +245,11 @@ export class CoveragePartitionCoordinator {
       ))
       const exclusiveCommands = this.partitionIndexes.includes(1)
         ? [
+          this.exclusiveCommand(
+            'exclusive desktop overlay coverage',
+            'exclusive-desktop-overlay.json',
+            coverageDesktopOverlaySuites,
+          ),
           this.exclusiveCommand(
             'exclusive resource-bound coverage',
             'exclusive-resource-bound.json',

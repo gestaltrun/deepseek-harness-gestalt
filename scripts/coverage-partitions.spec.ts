@@ -11,6 +11,7 @@ import {
   COVERAGE_PARTITIONS_ENV,
   COVERAGE_TEST_TIMEOUT_ENV,
   CoveragePartitionCoordinator,
+  coverageDesktopOverlaySuites,
   coverageExclusiveSuites,
   coveragePersistentStateSuites,
   coverageProcessBoundSuites,
@@ -135,11 +136,20 @@ describe('coverage partition coordinator', () => {
       'partition 1/3',
       'partition 2/3',
       'partition 3/3',
+      'exclusive desktop overlay coverage',
       'exclusive resource-bound coverage',
       'exclusive persistent-state coverage',
       'merged coverage report',
     ])
-    const exclusive = commands[3]
+    const desktopOverlay = commands[3]
+    if (desktopOverlay === undefined) throw new Error('desktop overlay coverage command was not observed')
+    expect(desktopOverlay.args).toEqual(expect.arrayContaining([
+      '--coverage',
+      '--coverage.reportOnFailure',
+      '--maxWorkers=1',
+      ...coverageDesktopOverlaySuites,
+    ]))
+    const exclusive = commands[4]
     if (exclusive === undefined) throw new Error('exclusive coverage command was not observed')
     expect(exclusive.args).toEqual(expect.arrayContaining([
       '--coverage',
@@ -153,10 +163,13 @@ describe('coverage partition coordinator', () => {
     expect(coverageProcessBoundSuites).toContain(
       'packages/util/atomic-write/tests/atomic-write.spec.ts',
     )
-    expect(coverageProcessBoundSuites).toContain(
+    expect(coverageDesktopOverlaySuites).toEqual([
+      'apps/desktop/tests/overlay-boot.spec.ts',
+    ])
+    expect(coverageProcessBoundSuites).not.toContain(
       'apps/desktop/tests/overlay-boot.spec.ts',
     )
-    const persistentState = commands[4]
+    const persistentState = commands[5]
     if (persistentState === undefined) throw new Error('persistent-state coverage command was not observed')
     expect(persistentState.args).toEqual(expect.arrayContaining([
       ...coveragePersistentStateSuites,
@@ -169,6 +182,7 @@ describe('coverage partition coordinator', () => {
     )
     expect(coverageExclusiveSuites).toEqual([
       ...coveragePersistentStateSuites,
+      ...coverageDesktopOverlaySuites,
       ...coverageProcessBoundSuites,
     ])
     expect(exclusive.args.some(argument => argument.startsWith('--shard='))).toBe(false)
@@ -198,9 +212,12 @@ describe('coverage partition coordinator', () => {
       'partition 2/8',
       'partition 3/8',
       'partition 4/8',
+      'exclusive desktop overlay coverage',
       'exclusive resource-bound coverage',
       'exclusive persistent-state coverage',
     ])
+    await expect(access(join(root, 'coverage/.partitioned/blobs/exclusive-desktop-overlay.json')))
+      .resolves.toBeUndefined()
     await expect(access(join(root, 'coverage/.partitioned/blobs/exclusive-resource-bound.json')))
       .resolves.toBeUndefined()
     await expect(access(join(root, 'coverage/.partitioned/blobs/exclusive-persistent-state.json')))
@@ -260,6 +277,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/3',
       'partition 2/3',
       'partition 3/3',
+      'exclusive desktop overlay coverage',
       'exclusive resource-bound coverage',
       'exclusive persistent-state coverage',
       'merged coverage report',
@@ -284,6 +302,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/3',
       'partition 2/3',
       'partition 3/3',
+      'exclusive desktop overlay coverage',
       'exclusive resource-bound coverage',
       'exclusive persistent-state coverage',
       'merged coverage report',
@@ -308,7 +327,7 @@ describe('coverage partition coordinator', () => {
         [COVERAGE_PRESERVE_BLOBS_ENV]: undefined,
       })
     }
-    const mergeCommand = commands[5]
+    const mergeCommand = commands[6]
     if (mergeCommand === undefined) throw new Error('coverage merge command was not observed')
     expect(mergeCommand.args).toContain('--coverage')
     expect(mergeCommand.args.some(argument => argument.startsWith('--merge-reports='))).toBe(true)
@@ -333,7 +352,7 @@ describe('coverage partition coordinator', () => {
     })
 
     await expect(coordinator.run()).resolves.toBe(0)
-    expect(commands).toHaveLength(5)
+    expect(commands).toHaveLength(6)
     for (const command of commands) {
       expect(command.command).toBe('/tools/pnpm')
       expect(command.args[0]).toBe('exec')
@@ -361,7 +380,7 @@ describe('coverage partition coordinator', () => {
     expect(reported).toHaveBeenCalledWith(
       'coverage-partitions: output tail for partition 2/2:\nspecific Vitest failure',
     )
-    expect(runCommand).toHaveBeenCalledTimes(5)
+    expect(runCommand).toHaveBeenCalledTimes(6)
   })
 
   it('merges an exclusive-suite failure and returns its failed status', async () => {
@@ -390,6 +409,7 @@ describe('coverage partition coordinator', () => {
     expect(runCommand.mock.calls.map(([command]) => command.label)).toEqual([
       'partition 1/2',
       'partition 2/2',
+      'exclusive desktop overlay coverage',
       'exclusive resource-bound coverage',
       'exclusive persistent-state coverage',
       'merged coverage report',
@@ -430,6 +450,7 @@ describe('coverage partition coordinator', () => {
       'partition 1/2',
       'partition 1/2',
       'partition 2/2',
+      'exclusive desktop overlay coverage',
       'exclusive resource-bound coverage',
       'exclusive persistent-state coverage',
       'merged coverage report',
@@ -450,7 +471,7 @@ describe('coverage partition coordinator', () => {
     })
 
     await expect(coordinator.run()).rejects.toThrow('coverage partitions produced')
-    expect(runCommand).toHaveBeenCalledTimes(4)
+    expect(runCommand).toHaveBeenCalledTimes(5)
   })
 
   it('reports signal termination before missing-blob validation', async () => {
@@ -495,7 +516,7 @@ describe('coverage partition coordinator', () => {
     await expect(coordinator.run()).resolves.toBe(1)
     expect(reported).toHaveBeenCalledWith('coverage-partitions: FAIL partition 1/2 (spawn unavailable)')
     expect(secondFinished).toBe(true)
-    expect(runCommand).toHaveBeenCalledTimes(5)
+    expect(runCommand).toHaveBeenCalledTimes(6)
   })
 
   it('unlinks a link-shaped coverage path without touching its target', async () => {

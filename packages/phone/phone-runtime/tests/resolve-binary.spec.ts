@@ -72,7 +72,7 @@ describe('PATH discovery', () => {
     expect(found).toBe(wanted)
   })
 
-  it('skips non-executable and directory collisions under POSIX semantics', async () => {
+  it.skipIf(process.platform === 'win32')('skips non-executable and directory collisions under POSIX semantics', async () => {
     const dir = await stageDir()
     await writeFile(join(dir, 'mobilecli'), 'plain data')
     const real = await stageDir()

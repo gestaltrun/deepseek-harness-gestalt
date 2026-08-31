@@ -27,3 +27,5 @@ Issue #417 后续用户验收推翻了[已连接多 tab 笔记](2026-08-28-ui-ph
 ## Consequences
 
 多设备监视不再等于并行 tab：切换会替换占用设备及其流。布局不再恢复 `phone:<serial>` id；恢复得到的是单例 `phone` id 加上设备 meta。空态清单不再出现「离线 / 已停止」行。H264 徽标是当前格式说明，不再是禁用的未来臂。[已连接多 tab 笔记](2026-08-28-ui-phone-connected-device-tabs.zh.md)继续拥有控制器、网关与错误臂决策，并记录这次对 tab 模型与采集格式的改定；[H264 播放笔记](../bug-fix/2026-08-30-ui-phone-h264-webcodecs-playback.zh.md)拥有客户端解码与 canvas 资源生命周期。
+
+本决策中的 H264-only 与固定格式说明部分由[真实格式回退记录](../bug-fix/2026-09-01-phone-stream-real-format-fallback.zh.md)取代；单例 tab 与仅列在线设备的决策仍有效。

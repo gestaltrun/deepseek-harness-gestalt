@@ -1,6 +1,6 @@
 /**
  * Connected phone tab body (locked design states ③④): the BrowserView-
- * rhythm devbar (device dropdown + the H264 chip), the 1:2 fixed-ratio
+ * rhythm devbar (device dropdown + the active-format chip), the 1:2 fixed-ratio
  * live frame centered in the panel, the circular Back/Home/Recents/
  * screenshot toolbar, and the error cards whose copy states the next
  * action. Everything reactive arrives through one per-tab
@@ -211,6 +211,29 @@ export function PhoneConnectedView({
       )
     }
     if (phase.kind === 'live') {
+      const surface = phase.format === 'h264'
+        ? (
+          <PhoneH264Surface
+            owner={h264PlaybackOwner}
+            label={`${name} 实时画面`}
+            className={css.stream}
+            url={phase.streamUrl}
+            onSurface={(width, height) => { controller.noteSurface('h264', width, height) }}
+            onError={() => { controller.noteCaptureFailure('h264') }}
+          />
+        )
+        : (
+          <img
+            src={phase.streamUrl}
+            alt={`${name} 实时画面`}
+            className={css.stream}
+            draggable={false}
+            onLoad={(event) => {
+              controller.noteSurface('mjpeg', event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)
+            }}
+            onError={() => { controller.noteCaptureFailure('mjpeg') }}
+          />
+        )
       return (
         <div
           role="application"
@@ -222,14 +245,7 @@ export function PhoneConnectedView({
           onPointerUp={onPointerUp}
           onKeyDown={onKeyDown}
         >
-          <PhoneH264Surface
-            owner={h264PlaybackOwner}
-            label={`${name} 实时画面`}
-            className={css.stream}
-            url={phase.streamUrl}
-            onSurface={(width, height) => { controller.noteSurface(width, height) }}
-            onError={() => { controller.noteCaptureFailure() }}
-          />
+          {surface}
           <span className={css.liveFlag}>
             <span aria-hidden="true" className={css.liveDot} />
             代理中
@@ -287,12 +303,17 @@ export function PhoneConnectedView({
           <ChevronDown />
         </button>
         <span className={css.devbarSpacer} />
-        {/* The capture cadence is the locked mockup's caption; the stream
-            contract carries no fps field, so no live value exists to bind. */}
-        <span className={`${css.tierChip} ${css.tierChipActive}`} aria-label="当前画面编码 H264 · 30 fps">
+        {/* The H264 cadence is the locked mockup's caption; the stream
+            contract carries no fps field, so MJPEG names only its encoding. */}
+        <span
+          className={`${css.tierChip} ${css.tierChipActive}`}
+          aria-label={phase.kind === 'live' && phase.format === 'mjpeg'
+            ? '当前画面编码 MJPEG'
+            : '当前画面编码 H264 · 30 fps'}
+        >
           <span aria-hidden="true" className={css.liveDot} />
-          H264
-          <span className={css.reslv}>30 fps</span>
+          {phase.kind === 'live' && phase.format === 'mjpeg' ? 'MJPEG' : 'H264'}
+          {!(phase.kind === 'live' && phase.format === 'mjpeg') && <span className={css.reslv}>30 fps</span>}
         </span>
         {menuOpen && (
           <div role="menu" aria-label="切换设备" className={css.pickMenu}>

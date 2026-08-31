@@ -31,3 +31,5 @@ Status: implemented
 ## 后果
 
 已连接视图保持 H264-only，且不增加 npm 依赖。它要求支持 WebCodecs AVC 的安全上下文浏览器；不支持的运行时进入普通 interrupted/重连臂，不会静默尝试另一种格式。解码后的显示尺寸仍是设备 tap 与 gesture 坐标的权威值，CSS 与容器尺寸不是。
+
+本决策中的 H264-only 与禁止回退部分由[真实格式回退记录](2026-09-01-phone-stream-real-format-fallback.zh.md)取代；Annex-B parser、WebCodecs decoder 与静止态 canvas 资源所有权仍用于首选 H264 路径。

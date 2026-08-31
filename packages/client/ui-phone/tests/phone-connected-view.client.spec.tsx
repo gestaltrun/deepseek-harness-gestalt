@@ -113,6 +113,37 @@ describe('PhoneConnectedView chrome', () => {
     expect(surface).not.toBeInstanceOf(HTMLImageElement)
   })
 
+  it('switches the actual-format badge and touch surface to MJPEG after H264 playback fails', async () => {
+    const harness = await renderLive()
+    await act(async () => { h264Runtime.failLastDecoder(); await flush() })
+
+    expect(screen.queryByLabelText('当前画面编码 H264 · 30 fps')).toBeNull()
+    expect(screen.getByLabelText('当前画面编码 MJPEG').textContent).toContain('MJPEG')
+    const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
+    expect(surface).toBeInstanceOf(HTMLImageElement)
+    expect(surface.getAttribute('src')).toBe('/phone/stream/emulator-5554/mjpeg?token=a')
+    Object.defineProperties(surface, {
+      naturalWidth: { configurable: true, value: 1080 },
+      naturalHeight: { configurable: true, value: 2400 },
+    })
+    fireEvent.load(surface)
+    stubRect(frame(), 270, 600)
+    fireEvent.pointerDown(frame(), { clientX: 135, clientY: 300 })
+    fireEvent.pointerUp(frame(), { clientX: 135, clientY: 300 })
+    expect(parseSentFrame(harness.gateway.lastSocket!.sent[0]!)).toMatchObject({
+      method: 'tap', params: { x: 540, y: 1200 },
+    })
+  })
+
+  it('enters the existing retry arm only after the MJPEG fallback element fails', async () => {
+    const harness = await renderLive()
+    await act(async () => { h264Runtime.failLastDecoder(); await flush() })
+    const surface = screen.getByRole('img', { name: 'Pixel_6_API_35 实时画面' })
+    await act(async () => { fireEvent.error(surface); await flush() })
+    expect(screen.getByText(/画面重连中（第 1 次尝试）/)).toBeTruthy()
+    expect(harness.scheduler.scheduledCount).toBe(1)
+  })
+
   it('hides the live frame and shows the suspend note while the tab is hidden', async () => {
     renderView(false)
     await flush()
@@ -484,10 +515,10 @@ describe('PhoneConnectedView error and recovery arms', () => {
     expect(screen.getByText('代理中')).toBeTruthy()
   })
 
-  it('routes a decoder failure into the bounded reconnect arm', async () => {
+  it('releases the failed H264 decoder while the same session falls back to MJPEG', async () => {
     await renderLive()
     await act(async () => { h264Runtime.failLastDecoder() })
-    expect(screen.getByText(/画面重连中/)).toBeTruthy()
+    expect(screen.getByLabelText('当前画面编码 MJPEG')).toBeTruthy()
     expect(h264Runtime.abortSignals[0]!.aborted).toBe(true)
     expect(h264Runtime.decoderCloseCounts[0]).toBe(1)
   })

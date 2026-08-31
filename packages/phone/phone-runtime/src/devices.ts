@@ -44,14 +44,14 @@ function stringField(record: Record<string, unknown>, key: string, index: number
  * 1.0.5's `{ devices: [...] }` envelope. Duplicate upstream entries are kept
  * verbatim — the real backend has listed one handset twice.
  * @param result - JSON-RPC result value as received from the HTTP transport.
- * @returns one entry per reported device, in upstream order.
+ * @returns one entry per unique platform/id pair, in first-seen upstream order.
  * @throws {@link PhoneDevicesError} with `PHONE_PROTOCOL` when the value is
  * neither an array nor a devices envelope, or any element misses required
  * fields, names an unknown platform, or reports an unknown `type`.
  */
 export function parseDeviceInfos(result: unknown): readonly MobilecliDevice[] {
   const entries = unwrapDeviceEntries(result)
-  return entries.map((entry, index) => {
+  const devices = entries.map((entry, index) => {
     if (typeof entry !== 'object' || entry === null) {
       throw protocolError(`device ${String(index)} must be an object`)
     }
@@ -67,6 +67,12 @@ export function parseDeviceInfos(result: unknown): readonly MobilecliDevice[] {
     const device: MobilecliDevice = Object.freeze({ id, name, kind, state, online: state === 'online', platform })
     return device
   })
+  const unique = new Map<string, MobilecliDevice>()
+  for (const device of devices) {
+    const key = `${device.platform}\u0000${device.id}`
+    if (!unique.has(key)) unique.set(key, device)
+  }
+  return [...unique.values()]
 }
 
 /**

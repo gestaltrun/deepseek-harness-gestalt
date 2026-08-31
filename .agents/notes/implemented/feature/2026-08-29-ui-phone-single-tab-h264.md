@@ -27,3 +27,5 @@ The switcher lists only `online` devices. Offline rows are omitted from both the
 ## Consequences
 
 Multi-device monitoring no longer means parallel tabs: switching replaces the occupying device and its stream. Layout restore of a `phone:<serial>` id is gone; a restored tab is the singleton `phone` id with device meta. The empty-state list no longer shows 离线 / 已停止 rows. The H264 chip is the live format caption, not a disabled future arm. [The connected-tabs note](2026-08-28-ui-phone-connected-device-tabs.md) keeps the controller, gateway, and error-arm decisions and records this reversal of the tab model and capture format; [the H264 playback note](../bug-fix/2026-08-30-ui-phone-h264-webcodecs-playback.md) owns client decode and canvas resource lifetime.
+
+The H264-only and fixed-format-caption parts of this decision are superseded by [the real-format fallback note](../bug-fix/2026-09-01-phone-stream-real-format-fallback.md). The singleton tab and online-only listing decisions remain current.

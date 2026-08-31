@@ -31,3 +31,5 @@ The package tests cover network-chunk splits, three- and four-byte start codes, 
 ## Consequences
 
 The connected view remains H264-only and adds no npm dependency. It requires a secure-context browser with WebCodecs AVC support; unsupported runtimes take the ordinary interrupted/reconnect arm instead of silently trying another format. The decoded display dimensions, rather than CSS or container dimensions, remain authoritative for device tap and gesture coordinates.
+
+The H264-only and no-fallback parts of this decision are superseded by [the real-format fallback note](2026-09-01-phone-stream-real-format-fallback.md). The Annex-B parser, WebCodecs decoder, and quiescent canvas resource ownership remain current for the preferred H264 path.

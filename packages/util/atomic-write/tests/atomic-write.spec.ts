@@ -22,7 +22,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         throw Object.assign(new Error(`${code}: injected rename failure`), { code })
       }
       return actual.rename(...args)
-    }) as typeof actual.rename,
+    }),
     writeFile: (async (path: unknown, ...rest: never[]) => {
       if (String(path).endsWith('.tmp')) state.tempWriteAttempts += 1
       if (state.failLockCreateWithEPERM && String(path).endsWith('.lock')) {

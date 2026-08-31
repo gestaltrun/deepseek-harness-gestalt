@@ -13,11 +13,13 @@ interface HttpEvidence {
 }
 
 async function get(path: string): Promise<HttpEvidence> {
-  return await browser.execute(async (pathname: string) => {
+  const result: HttpEvidence = await browser.execute(async (pathname: string) => {
     const url = new URL(pathname, location.origin)
     const response = await fetch(url)
-    return { url: url.href, status: response.status, body: await response.json() }
+    const body: unknown = await response.json()
+    return { url: url.href, status: response.status, body }
   }, path)
+  return result
 }
 
 describe('Desktop managed mobilecli environment', () => {

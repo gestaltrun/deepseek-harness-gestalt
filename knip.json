@@ -745,6 +745,7 @@
       ],
       "ignoreDependencies": [
         "@deepseek-ai/dsh-client-ui-phone",
+        "@deepseek-ai/dsh-phone-environment",
         "@deepseek-ai/dsh-phone-runtime",
         "@deepseek-ai/dsh-phone-stream",
         "@deepseek-ai/dsh-tool-phone",

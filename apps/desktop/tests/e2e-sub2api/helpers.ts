@@ -281,6 +281,14 @@ export async function expandProviderSettings(labels: readonly string[]): Promise
   if (!clicked) throw new Error(`Models Settings has no customized section matching ${labels.join(' / ')}`)
 }
 
+/** Read input values rendered by the currently open provider editor. */
+export async function overlayProviderInputValues(): Promise<readonly string[]> {
+  await switchToDesktopOverlay()
+  return await browser.execute(() => [...document.querySelectorAll<HTMLInputElement>('details[open] input')]
+    .map(input => input.value)
+    .filter(value => value.length > 0))
+}
+
 /** Read the iframe and scroll ownership at the public Settings/account-workspace seam. */
 export async function overlayAccountWorkspaceLayout(): Promise<AccountWorkspaceLayoutSnapshot> {
   await switchToDesktopOverlay()

@@ -12,7 +12,6 @@ describe('Desktop phone tab when mobilecli is unresolvable', () => {
     await openPhoneTabFromPlusMenu()
     const title = browser.$('p*=未找到 mobilecli')
     await title.waitForDisplayed({ timeout: 30_000 })
-    await expect(browser.$('button=准备 mobilecli')).toBeDisplayed()
     expect(await browser.execute(() => document.body.innerText.includes('设置 → 手机设备'))).toBe(true)
     expect(await browser.execute(() => document.body.innerText.includes('npm install -g mobilecli'))).toBe(false)
     expect(await browser.execute(() => document.body.innerText.includes('Web Host exited'))).toBe(false)

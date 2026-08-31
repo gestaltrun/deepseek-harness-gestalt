@@ -305,12 +305,43 @@ describe('Android environment manager', () => {
     await expect(readFile(join(avd, 'config.ini'), 'utf8')).resolves.toContain('android-35')
   })
 
+  it('removes a link substituted while a regular AVD is deleted from quarantine', async () => {
+    const root = await tempRoot()
+    const fixture = archiveAsset()
+    const runner = new FixtureRunner(root)
+    const external = join(root, 'race-external-target')
+    const sentinel = join(external, 'keep.txt')
+    const avd = join(root, 'android', 'avd', 'Pixel_6_API_35_Gestalt.avd')
+    let substituted = false
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64', environment: { PATH: '' },
+      homeDirectory: root, runner, freeBytes: async () => 32 * 1024 ** 3,
+      commandLineToolsAsset: fixture.asset,
+      removalRaceHook: async (path) => {
+        if (path !== avd || substituted) return
+        substituted = true
+        await symlink(external, path, 'junction')
+      },
+      fetch: async () => new Response(bodyOf(fixture.bytes), { headers: { 'content-length': String(fixture.bytes.byteLength) } }),
+    })
+    await manager.refresh()
+    await mkdir(avd, { recursive: true })
+    await writeFile(join(avd, 'config.ini'), 'stale regular directory\n')
+    await mkdir(external, { recursive: true })
+    await writeFile(sentinel, 'keep\n')
+
+    await expect(manager.prepare({ licenseAccepted: true })).resolves.toMatchObject({ kind: 'ready', running: false })
+
+    expect(substituted).toBe(true)
+    await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep\n')
+    await expect(readFile(join(avd, 'config.ini'), 'utf8')).resolves.toContain('android-35')
+  })
+
   it('keeps cancellation and AVD cleanup failure facts in the terminal state', async () => {
     const root = await tempRoot()
     const fixture = archiveAsset()
     const base = new FixtureRunner(root)
     const createStarted = Promise.withResolvers<undefined>()
-    const cleanupFailure = new Error('private AVD cleanup was denied')
     const reportError = vi.fn()
     let removals = 0
     const runner: AndroidCommandRunner = {
@@ -334,7 +365,9 @@ describe('Android environment manager', () => {
       commandLineToolsAsset: fixture.asset, reportError,
       removePath: async (path, recursive) => {
         removals += 1
-        if (removals > 2) throw cleanupFailure
+        if (removals > 2) {
+          throw new Error(path.endsWith('.ini') ? 'AVD ini cleanup was denied' : 'AVD directory cleanup was denied')
+        }
         await rm(path, { recursive, force: true })
       },
       fetch: async () => new Response(bodyOf(fixture.bytes), { headers: { 'content-length': String(fixture.bytes.byteLength) } }),
@@ -343,16 +376,23 @@ describe('Android environment manager', () => {
     const preparing = manager.prepare({ licenseAccepted: true })
     await createStarted.promise
     manager.cancel()
+    const deactivating = manager.deactivate()
 
     await expect(preparing).rejects.toMatchObject({
-      code: 'PHONE_ANDROID_ABORTED',
-      message: expect.stringMatching(/cancelled; private AVD cleanup failed: private AVD cleanup was denied/u),
+      code: 'PHONE_ANDROID_CLEANUP',
+      message: expect.stringMatching(/PHONE_ANDROID_ABORTED.*AVD directory cleanup was denied; AVD ini cleanup was denied/u),
       cause: expect.any(AggregateError),
     })
-    expect(reportError).toHaveBeenCalledWith(cleanupFailure)
+    await expect(deactivating).rejects.toMatchObject({ code: 'PHONE_ANDROID_CLEANUP' })
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({
+      errors: [
+        expect.objectContaining({ message: 'AVD directory cleanup was denied' }),
+        expect.objectContaining({ message: 'AVD ini cleanup was denied' }),
+      ],
+    }))
     expect(manager.snapshot()).toMatchObject({
-      kind: 'failed', code: 'PHONE_ANDROID_ABORTED',
-      message: expect.stringMatching(/cleanup failed/u), retryable: true,
+      kind: 'failed', code: 'PHONE_ANDROID_CLEANUP',
+      message: expect.stringMatching(/cleanup was denied/u), retryable: true,
     })
   })
 

@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import {
-  access, chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, statfs, unlink, writeFile,
+  access, chmod, mkdir, mkdtemp, readFile, rename, rm, rmdir, statfs, writeFile,
 } from 'node:fs/promises'
-import { constants } from 'node:fs'
+import { constants, lstatSync, mkdtempSync, renameSync, unlinkSync } from 'node:fs'
 import { dirname, join, normalize, posix, relative, resolve, sep, win32 } from 'node:path'
 import { homedir } from 'node:os'
 import { unzipSync } from 'fflate'
@@ -44,6 +44,8 @@ export interface AndroidEnvironmentOptions {
   readonly reportError?: (error: unknown) => void
   /** Test-only filesystem removal edge; production refuses to follow links. */
   readonly removePath?: (path: string, recursive: boolean) => Promise<void>
+  /** Test-only substitution edge after an entry enters its private cleanup directory. */
+  readonly removalRaceHook?: (path: string) => Promise<void>
   /** Test-only pinned asset replacement; production never supplies it. */
   readonly commandLineToolsAsset?: AndroidCommandLineToolsAsset
 }
@@ -77,7 +79,9 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     this.runner = options.runner ?? nodeAndroidCommandRunner
     this.freeBytes = options.freeBytes ?? availableBytes
     this.reportError = options.reportError ?? ((error) => { console.error(error) })
-    this.removePath = options.removePath ?? removeWithoutFollowing
+    this.removePath = options.removePath ?? (async (path, recursive) => {
+      await removeWithoutFollowing(path, recursive, options.removalRaceHook)
+    })
   }
 
   snapshot(): PhoneAndroidState {
@@ -630,10 +634,19 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   }
 
   private async removeOwnedAvd(plan: AndroidPreparationPlan): Promise<void> {
-    await Promise.all([
+    const settlements = await Promise.allSettled([
       this.removePath(join(plan.avdHome, `${plan.avdName}.avd`), true),
       this.removePath(join(plan.avdHome, `${plan.avdName}.ini`), false),
     ])
+    const failures = settlements
+      .filter((settlement): settlement is PromiseRejectedResult => settlement.status === 'rejected')
+      .map(settlement => asError(settlement.reason))
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `private AVD removal failed: ${failures.map(failure => failure.message).join('; ')}`,
+      )
+    }
   }
 
   private publishStopFailure(error: unknown): void {
@@ -731,8 +744,8 @@ function combinePreparationAndCleanup(
   cleanup: Error,
 ): AndroidEnvironmentError {
   return new AndroidEnvironmentError(
-    primary.code,
-    `${primary.message}; private AVD cleanup failed: ${cleanup.message}`,
+    'PHONE_ANDROID_CLEANUP',
+    `${primary.code}: ${primary.message}; ${cleanup.message}`,
     { cause: new AggregateError([primary, cleanup], 'Android preparation and private AVD cleanup failed') },
   )
 }
@@ -765,19 +778,39 @@ async function exists(path: string): Promise<boolean> {
   try { await access(path); return true } catch { return false }
 }
 
-async function removeWithoutFollowing(path: string, recursive: boolean): Promise<void> {
-  let entry: Awaited<ReturnType<typeof lstat>>
-  try {
-    entry = await lstat(path)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-    throw error
+async function removeWithoutFollowing(
+  path: string,
+  recursive: boolean,
+  raceHook?: (path: string) => Promise<void>,
+): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    let entry: ReturnType<typeof lstatSync>
+    try {
+      entry = lstatSync(path)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    if (entry.isSymbolicLink()) {
+      unlinkSync(path)
+      continue
+    }
+    const quarantine = mkdtempSync(join(dirname(path), '.dsh-avd-cleanup-'))
+    const moved = join(quarantine, 'entry')
+    try {
+      renameSync(path, moved)
+    } catch (error) {
+      await rmdir(quarantine)
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
+    }
+    await raceHook?.(path)
+    const movedEntry = lstatSync(moved)
+    if (movedEntry.isSymbolicLink()) unlinkSync(moved)
+    else await rm(moved, { recursive, force: true })
+    await rmdir(quarantine)
   }
-  if (entry.isSymbolicLink()) {
-    await unlink(path)
-    return
-  }
-  await rm(path, { recursive, force: true })
+  throw new Error(`private AVD path changed during cleanup: ${path}`)
 }
 
 async function writable(path: string): Promise<boolean> {

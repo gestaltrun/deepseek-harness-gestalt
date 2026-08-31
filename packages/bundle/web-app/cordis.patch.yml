@@ -110,7 +110,7 @@
       name: '@deepseek-ai/dsh-member-question-receiver'
       config:
         storagePath: !!js dshHomePath('member-question-receiver')
-        environment: !!js process.env.DSH_PLATFORM_ENVIRONMENT === 'production' ? 'production' : 'development'
+        environment: !!js "process.env.DSH_PLATFORM_ENVIRONMENT === 'production' ? 'production' : 'development'"
         maxRecords: 1000
         terminalRetryMs: 1000
         terminalAuthorityMode: deferred

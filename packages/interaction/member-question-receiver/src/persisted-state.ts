@@ -52,7 +52,7 @@ export interface PersistedReceivingQuestion {
 }
 
 /** Exact local Workspace selected by one member for one Cloud Project. */
-export interface PersistedMemberQuestionWorkspaceBinding {
+interface PersistedMemberQuestionWorkspaceBinding {
   readonly receivingAccountId: string
   readonly projectId: string
   readonly workspaceId: string

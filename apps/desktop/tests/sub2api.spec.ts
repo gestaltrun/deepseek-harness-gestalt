@@ -168,6 +168,19 @@ describe('DesktopSub2ApiController', () => {
     ])
   })
 
+  it('announces starting before waiting for the Web Host replacement', async () => {
+    let finishRestart: ((origin: string) => void) | undefined
+    const restart = vi.fn(() => new Promise<string>((resolve) => { finishRestart = resolve }))
+    const h = await harness({ restart })
+
+    const enabling = h.controller.enable()
+    await vi.waitFor(() => { expect(restart).toHaveBeenCalledOnce() })
+    expect(h.controller.getSnapshot()).toMatchObject({ state: 'starting', enabled: true, version: '0.9.9' })
+
+    finishRestart?.('http://127.0.0.1:10/')
+    await expect(enabling).resolves.toMatchObject({ state: 'running', enabled: true, version: '0.9.9' })
+  })
+
   it('reports missing deployment sources as an actionable error', async () => {
     const h = await harness({ sources: undefined })
     const final = await h.controller.enable()

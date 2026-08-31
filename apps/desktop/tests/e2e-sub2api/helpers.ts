@@ -197,6 +197,25 @@ export async function overlayText(): Promise<string> {
   return await browser.execute(() => document.body?.innerText ?? '')
 }
 
+/** Return the current overlay document URL after a Web Host replacement. */
+export async function overlayUrl(): Promise<string> {
+  await switchToDesktopOverlay()
+  return await browser.getUrl()
+}
+
+/** Read the same-origin account console embedded inside the Settings overlay. */
+export async function overlayAccountConsoleSnapshot(): Promise<MainWindowSnapshot> {
+  await switchToDesktopOverlay()
+  return await browser.execute(() => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src="/plugins/dsh-sub2api/ui/"]')
+    if (frame === null || frame.contentWindow === null || frame.contentDocument === null) return { url: '', text: '' }
+    return {
+      url: frame.contentWindow.location.href,
+      text: frame.contentDocument.body?.innerText ?? '',
+    }
+  })
+}
+
 /** Read Sub2API state through the same isolated preload bridge used by the UI. */
 export async function sub2apiSnapshot(): Promise<Sub2ApiSnapshot | undefined> {
   await switchToDesktopOverlay()
@@ -275,15 +294,6 @@ export async function configureRealModelRoute(hostOrigin: string): Promise<void>
       notes: 'ephemeral Electron E2E route',
     }),
   })
-}
-
-/** Return the product BrowserWindow to the Host Session Surface. */
-export async function navigateMainWindow(url: string): Promise<void> {
-  await browser.electron.execute(async (electron, target) => {
-    const window = electron.BrowserWindow.getAllWindows().find(candidate => !candidate.isDestroyed())
-    if (window === undefined) throw new Error('Desktop BrowserWindow is unavailable')
-    await window.loadURL(target)
-  }, url)
 }
 
 /** Connect an empty temporary workspace so the first Session composer unlocks. */

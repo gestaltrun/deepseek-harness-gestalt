@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  hideChromeOverlayView, isOverlaySender, overlayBoundsFromContentSize, overlayUrlFromHost,
+  bindChromeOverlayHost, hideChromeOverlayView, isOverlaySender, overlayBoundsFromContentSize, overlayUrlFromHost,
   parseChromeOverlayResult, parseChromeOverlayShow, prepareChromeOverlayView,
   showChromeOverlayView, syncChromeOverlayBounds,
 } from '../src/chrome-overlay.ts'
@@ -10,6 +10,24 @@ describe('chrome overlay helpers', () => {
     expect(overlayUrlFromHost('http://127.0.0.1:58463/')).toBe(
       'http://127.0.0.1:58463/?dsh-desktop-overlay=1',
     )
+  })
+
+  it('rebinds an existing overlay document when the Web Host origin changes', async () => {
+    const loadURL = vi.fn(async () => {})
+    const view = {
+      webContents: {
+        getURL: () => 'http://127.0.0.1:55352/?dsh-desktop-overlay=1',
+        loadURL,
+      },
+    }
+
+    await bindChromeOverlayHost(view, 'http://127.0.0.1:64654/')
+    expect(loadURL).toHaveBeenCalledWith('http://127.0.0.1:64654/?dsh-desktop-overlay=1')
+
+    loadURL.mockClear()
+    view.webContents.getURL = () => 'http://127.0.0.1:64654/?dsh-desktop-overlay=1'
+    await bindChromeOverlayHost(view, 'http://127.0.0.1:64654/')
+    expect(loadURL).not.toHaveBeenCalled()
   })
 
   it('sizes a full-window overlay and rejects a tiny content box', () => {

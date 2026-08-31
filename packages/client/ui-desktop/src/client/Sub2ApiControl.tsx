@@ -26,18 +26,31 @@ export type Sub2ApiControlProps = PropsRuntime<'settings.section'>
 /** Render the offer card from the Host-pushed snapshot; no local state machine. */
 export function Sub2ApiControl({ t, useSub2api }: Sub2ApiControlProps) {
   const snapshot = useSub2api(value => value)
+  const [consoleOpen, setConsoleOpen] = useState(false)
   const desktop = window.dshDesktop
   if (desktop === undefined) return null
   return (
     <section className={css.root} data-desktop-sub2api-state={snapshot.state}>
       <header className={css.header}>
-        <div>
+        <div className={css.headerCopy}>
           <h2>{t('sub2api.title')}</h2>
           <p>{t('sub2api.offerBody')}</p>
         </div>
+        {snapshot.state === 'running' && (
+          <Button variant="primary" onClick={() => { setConsoleOpen(open => !open) }}>
+            {t(consoleOpen ? 'sub2api.closeConsole' : 'sub2api.openConsole')}
+          </Button>
+        )}
       </header>
       <div className={css.body} data-desktop-sub2api-enabled={snapshot.enabled}>
         <OfferPanel desktop={desktop} snapshot={snapshot} t={t} />
+        {snapshot.state === 'running' && consoleOpen && (
+          <iframe
+            className={css.consoleFrame}
+            src="/plugins/dsh-sub2api/ui/"
+            title={t('sub2api.consoleTitle')}
+          />
+        )}
       </div>
     </section>
   )
@@ -127,9 +140,6 @@ function OfferPanel({ desktop, snapshot, t }: {
             {t('sub2api.running')}{snapshot.version === undefined ? '' : ` · ${snapshot.version}`}
           </strong>
           <div className={css.actions}>
-            <Button variant="primary" onClick={() => { desktop.sub2ApiOpenConsole() }}>
-              {t('sub2api.openConsole')}
-            </Button>
             <Button variant="outline" onClick={() => { void desktop.sub2ApiDisable() }}>
               {t('sub2api.disable')}
             </Button>

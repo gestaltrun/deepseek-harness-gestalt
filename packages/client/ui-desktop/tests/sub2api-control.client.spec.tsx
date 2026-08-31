@@ -75,13 +75,11 @@ describe('Sub2ApiControl', () => {
     expect(desktop.sub2ApiUninstall).toHaveBeenCalledWith(false)
   })
 
-  it('drives console, disable, and the two-step uninstall while running', () => {
+  it('drives disable and the two-step uninstall while running', () => {
     const desktop = bridge()
     window.dshDesktop = desktop
     renderControl({ state: 'running', enabled: true, version: '0.1.0' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open account console' }))
-    expect(desktop.sub2ApiOpenConsole).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole('button', { name: 'Disable' }))
     expect(desktop.sub2ApiDisable).toHaveBeenCalledOnce()
 
@@ -98,6 +96,17 @@ describe('Sub2ApiControl', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Uninstall' }))
     fireEvent.click(screen.getByRole('button', { name: 'Uninstall and delete account data' }))
     expect(desktop.sub2ApiUninstall).toHaveBeenCalledWith(true)
+  })
+
+  it('embeds the account console inside Settings without navigating the Session Surface', () => {
+    window.dshDesktop = bridge()
+    renderControl({ state: 'running', enabled: true, version: '0.1.0' })
+
+    expect(screen.queryByTitle('Sub2API account console')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open account console' }))
+    expect(screen.getByTitle('Sub2API account console').getAttribute('src')).toBe('/plugins/dsh-sub2api/ui/')
+    fireEvent.click(screen.getByRole('button', { name: 'Close account console' }))
+    expect(screen.queryByTitle('Sub2API account console')).toBeNull()
   })
 
   it('shows the actionable error with retry and uninstall exits', () => {
@@ -160,7 +169,6 @@ function bridge(): DesktopBridge {
     sub2ApiEnable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
     sub2ApiDisable: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
     sub2ApiUninstall: vi.fn(() => Promise.resolve<DesktopSub2ApiSnapshot>({ state: 'missing', enabled: true })),
-    sub2ApiOpenConsole: vi.fn(),
     onSub2ApiSnapshot: () => () => {},
     chromeOverlayShow: async () => {},
     chromeOverlayHide: async () => {},

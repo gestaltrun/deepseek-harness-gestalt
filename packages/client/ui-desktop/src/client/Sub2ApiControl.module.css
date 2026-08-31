@@ -1,6 +1,17 @@
 .root {
   display: grid;
   gap: 20px;
+  width: 100%;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.headerCopy {
   max-width: 640px;
 }
 
@@ -11,8 +22,19 @@
 }
 
 .body {
+  display: grid;
+  gap: 18px;
   padding-top: 18px;
   border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.consoleFrame {
+  display: block;
+  width: 100%;
+  min-height: min(720px, calc(100vh - 300px));
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  background: var(--dsw-alias-background-primary, #17181a);
 }
 
 .stack {

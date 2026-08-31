@@ -122,7 +122,6 @@ export function installDesktopBridgeFixture(platform: 'darwin' | 'win32'): Deskt
       notifySub2api(sub2api)
       return sub2api
     },
-    sub2ApiOpenConsole: () => {},
     onSub2ApiSnapshot: (listener) => {
       sub2apiListeners.add(listener)
       listener(sub2api)

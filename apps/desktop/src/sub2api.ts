@@ -285,6 +285,11 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
    * that cannot boot must not strand a half-installed component.
    */
   private async restartAndProbe(): Promise<void> {
+    this.set({
+      state: 'starting',
+      enabled: true,
+      ...(this.snapshot.version === undefined ? {} : { version: this.snapshot.version }),
+    })
     try {
       const origin = this.justInstalled
         ? await this.options.host.restart(FRESH_INSTALL_HOST_START_TIMEOUT_MS)
@@ -316,11 +321,13 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
     const interval = this.options.probeIntervalMs ?? PROBE_INTERVAL_MS
     // v8 ignore next -- production budget; every test overrides it.
     const deadline = Date.now() + (this.options.probeTimeoutMs ?? PROBE_TIMEOUT_MS)
-    this.set({
-      state: 'starting',
-      enabled: true,
-      ...(this.snapshot.version === undefined ? {} : { version: this.snapshot.version }),
-    })
+    if (this.snapshot.state !== 'starting') {
+      this.set({
+        state: 'starting',
+        enabled: true,
+        ...(this.snapshot.version === undefined ? {} : { version: this.snapshot.version }),
+      })
+    }
     for (;;) {
       if (this.probeStopped(abort)) return
       if (await probe(start)) {

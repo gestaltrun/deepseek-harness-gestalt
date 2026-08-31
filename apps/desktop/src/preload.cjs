@@ -40,7 +40,6 @@ contextBridge.exposeInMainWorld('dshDesktop', {
   sub2ApiEnable: () => ipcRenderer.invoke('sub2api:enable'),
   sub2ApiDisable: () => ipcRenderer.invoke('sub2api:disable'),
   sub2ApiUninstall: (deleteData) => ipcRenderer.invoke('sub2api:uninstall', deleteData === true),
-  sub2ApiOpenConsole: () => { ipcRenderer.send('sub2api:openConsole') },
   onSub2ApiSnapshot: (listener) => {
     const wrapped = (_event, snapshot) => { listener(snapshot) }
     ipcRenderer.on('sub2api:snapshot-changed', wrapped)

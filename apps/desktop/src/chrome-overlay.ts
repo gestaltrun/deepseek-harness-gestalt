@@ -20,6 +20,8 @@ export interface ChromeOverlayView {
   webContents?: {
     send?(channel: string, payload: unknown): void
     focus?(): void
+    getURL?(): string
+    loadURL?(url: string): Promise<void>
   }
 }
 
@@ -38,6 +40,20 @@ export function overlayUrlFromHost(hostUrl: string): string {
   const url = new URL(hostUrl)
   url.searchParams.set(DESKTOP_OVERLAY_PARAM, '1')
   return url.href
+}
+
+/**
+ * Keep an existing overlay document on the current Web Host origin.
+ * @param view - Desktop overlay `WebContentsView`.
+ * @param hostUrl - current loopback Web Host URL.
+ * @returns after the overlay document is ready on the current Host.
+ */
+export async function bindChromeOverlayHost(view: ChromeOverlayView, hostUrl: string): Promise<void> {
+  const target = overlayUrlFromHost(hostUrl)
+  const webContents = view.webContents
+  if (webContents?.getURL?.() === target) return
+  if (webContents?.loadURL === undefined) throw new Error('Desktop overlay view cannot load the current Web Host')
+  await webContents.loadURL(target)
 }
 
 /**

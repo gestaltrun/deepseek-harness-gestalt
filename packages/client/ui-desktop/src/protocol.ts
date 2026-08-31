@@ -60,8 +60,6 @@ export const SUB2API_ENABLE = 'sub2api:enable'
 export const SUB2API_DISABLE = 'sub2api:disable'
 /** IPC / preload channel uninstalling the component; payload deletes data when true. */
 export const SUB2API_UNINSTALL = 'sub2api:uninstall'
-/** IPC / preload channel pointing the main window at the embedded console. */
-export const SUB2API_OPEN_CONSOLE = 'sub2api:openConsole'
 /** IPC event pushed for every Sub2API component transition. */
 export const SUB2API_SNAPSHOT_CHANGED = 'sub2api:snapshot-changed'
 /** IPC / preload channel: place one official page over the sidebar viewport. */
@@ -302,8 +300,6 @@ export interface DesktopBridge {
    * @param deleteData - also delete `$DSH_HOME/sub2api/data` (accounts, keys).
    */
   readonly sub2ApiUninstall: (deleteData: boolean) => Promise<DesktopSub2ApiSnapshot>
-  /** Point the main window at the embedded console route. */
-  readonly sub2ApiOpenConsole: () => void
   /** Subscribe to Sub2API component transitions. */
   readonly onSub2ApiSnapshot: (listener: (snapshot: DesktopSub2ApiSnapshot) => void) => () => void
   /** Place one official Runtime page over the sidebar viewport. */

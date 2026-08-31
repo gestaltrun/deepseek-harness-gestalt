@@ -1,9 +1,9 @@
 /** Release-backed Electron flow: Settings offer, installer, Web Host restart, embedded console. */
 import { browser, expect } from '@wdio/globals'
 import {
-  clickOverlayButton, configureRealModelRoute, connectTemporaryWorkspace, mainWindowSnapshot, navigateMainWindow,
-  openSettings, overlayText, recordOwnedProcesses, recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot,
-  waitForSessionSurface,
+  clickOverlayButton, configureRealModelRoute, connectTemporaryWorkspace, mainWindowSnapshot,
+  openSettings, overlayAccountConsoleSnapshot, overlayText, overlayUrl, recordOwnedProcesses,
+  recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, waitForSessionSurface,
 } from './helpers.ts'
 
 describe('Sub2API Desktop installation', () => {
@@ -33,18 +33,31 @@ describe('Sub2API Desktop installation', () => {
     await configureRealModelRoute(new URL(hostSurface.url).origin)
 
     await openSettings()
+    expect(new URL(await overlayUrl()).origin).toBe(new URL(hostSurface.url).origin)
+    await clickOverlayButton(['模型', 'Models'])
+    await browser.waitUntil(async () => {
+      const text = await overlayText()
+      return /添加提供方|Add provider/u.test(text)
+        || /加载提供方目录失败|Loading the provider directory failed/u.test(text)
+    }, { timeout: 30_000, timeoutMsg: 'Models Settings did not settle after the Web Host replacement' })
+    const modelsText = await overlayText()
+    expect(modelsText).toMatch(/添加提供方|Add provider/u)
+    expect(modelsText).not.toMatch(/加载提供方目录失败|Loading the provider directory failed/u)
+
     await clickOverlayButton(['账号池', 'Account pool'])
     await clickOverlayButton(['打开账号台', 'Open account console'])
-    await browser.waitUntil(async () => (await mainWindowSnapshot()).text.includes('Sub2API'), {
+    await browser.waitUntil(async () => (await overlayAccountConsoleSnapshot()).text.includes('Sub2API'), {
       timeout: 60_000,
-      timeoutMsg: 'Desktop did not navigate to the embedded Sub2API console',
+      timeoutMsg: 'Settings did not render the embedded Sub2API account console',
     })
-    const consoleWindow = await mainWindowSnapshot()
+    const consoleWindow = await overlayAccountConsoleSnapshot()
     // The sidecar shim loads through the host prefix, then exposes the
     // unprefixed inner route required by the upstream absolute-base router.
     expect(new URL(consoleWindow.url).pathname).toBe('/home')
     expect(consoleWindow.text).toContain('Sub2API')
-    await navigateMainWindow(hostSurface.url)
+    expect((await mainWindowSnapshot()).url).toBe(hostSurface.url)
+    await clickOverlayButton(['关闭账号台', 'Close account console'])
+    await clickOverlayButton(['关闭', 'Close'])
     await waitForSessionSurface(hostSurface.url)
     await connectTemporaryWorkspace()
     const expected = 'DSH445_MODEL_OK_7F3A'

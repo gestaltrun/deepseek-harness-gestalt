@@ -19,7 +19,7 @@ import {
   CHROME_OVERLAY_GET_STATE, CHROME_OVERLAY_HIDE, CHROME_OVERLAY_RESULT,
   CHROME_OVERLAY_SHOW, CHROME_OVERLAY_STATE,
   PAIRING_GET_SNAPSHOT, PAIRING_REJECT, PAIRING_REVOKE, PAIRING_SET_ENABLED, PAIRING_SNAPSHOT_CHANGED,
-  SUB2API_DISABLE, SUB2API_ENABLE, SUB2API_GET_SNAPSHOT, SUB2API_OPEN_CONSOLE,
+  SUB2API_DISABLE, SUB2API_ENABLE, SUB2API_GET_SNAPSHOT,
   SUB2API_SNAPSHOT_CHANGED, SUB2API_UNINSTALL,
   UPDATER_CHECK_NOW, UPDATER_DOWNLOAD_NOW, UPDATER_GET_STATUS,
   UPDATER_QUIT_AND_INSTALL, UPDATER_STATUS_CHANGED,
@@ -75,7 +75,7 @@ import {
 import { startDesktopBrowserRuntime, type DesktopBrowserRuntime } from './browser-runtime.ts'
 import { parseBrowserPresentRequest, parseBrowserPresentTarget } from './browser-present.ts'
 import {
-  hideChromeOverlayView, isOverlaySender, overlayUrlFromHost, parseChromeOverlayResult,
+  bindChromeOverlayHost, hideChromeOverlayView, isOverlaySender, parseChromeOverlayResult,
   parseChromeOverlayShow, prepareChromeOverlayView, showChromeOverlayView,
   syncChromeOverlayBounds,
 } from './chrome-overlay.ts'
@@ -821,13 +821,6 @@ function installIpc(): void {
     if (sub2api === undefined) return Promise.resolve({ state: 'missing', enabled: true })
     return uninstallSub2ApiFromIpc(sub2api, deleteData)
   })
-  ipcMain.on(SUB2API_OPEN_CONSOLE, () => {
-    if (window === undefined || host === undefined) return
-    void window.loadURL(new URL('/plugins/dsh-sub2api/ui/', host.url).toString())
-      .catch((error: unknown) => {
-        console.error('[desktop-sub2api] openConsole failed:', error)
-      })
-  })
   ipcMain.handle(BROWSER_PRESENT, (_event, raw: unknown) => {
     const request = parseBrowserPresentRequest(raw)
     if (request === undefined || window === undefined || browserRuntime === undefined) return
@@ -855,8 +848,16 @@ function installIpc(): void {
   })
 }
 
-function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Promise<WebContentsView> {
-  if (overlayReady !== undefined) return overlayReady
+async function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Promise<WebContentsView> {
+  if (overlayReady !== undefined) {
+    const view = await overlayReady
+    await bindChromeOverlayHost(view, hostUrl)
+    if (overlayOpen !== undefined) {
+      view.webContents.send(CHROME_OVERLAY_STATE, overlayOpen)
+      showChromeOverlayView(target, view)
+    }
+    return view
+  }
   overlayReady = (async () => {
     const view = new WebContentsView({
       webPreferences: {
@@ -869,7 +870,7 @@ function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Promise<We
     prepareChromeOverlayView(view)
     target.contentView.addChildView(view)
     syncChromeOverlayBounds(target, view)
-    await view.webContents.loadURL(overlayUrlFromHost(hostUrl))
+    await bindChromeOverlayHost(view, hostUrl)
     overlayView = view
     if (overlayOpen !== undefined) {
       view.webContents.send(CHROME_OVERLAY_STATE, overlayOpen)
@@ -877,7 +878,7 @@ function ensureChromeOverlay(target: BrowserWindow, hostUrl: string): Promise<We
     }
     return view
   })()
-  return overlayReady
+  return await overlayReady
 }
 
 async function showNativeOverlay(event: IpcMainInvokeEvent, raw: unknown): Promise<void> {

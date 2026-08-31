@@ -198,6 +198,13 @@ External packages **directly declared** only by repository tooling, test infrast
 | [`@types/ws`](https://github.com/DefinitelyTyped/DefinitelyTyped) | MIT |
 | [`@vitejs/plugin-react`](https://github.com/vitejs/vite-plugin-react) | MIT |
 | [`@vitest/coverage-v8`](https://github.com/vitest-dev/vitest) | MIT |
+| [`@wdio/cli`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@wdio/electron-service`](https://github.com/webdriverio/desktop-mobile) | MIT |
+| [`@wdio/globals`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@wdio/local-runner`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@wdio/mocha-framework`](https://github.com/webdriverio/webdriverio) | MIT |
+| [`@wdio/native-types`](https://github.com/webdriverio/desktop-mobile) | MIT |
+| [`@wdio/spec-reporter`](https://github.com/webdriverio/webdriverio) | MIT |
 | [`@yarnpkg/cli-dist`](https://github.com/yarnpkg/berry) | BSD-2-Clause |
 | [`cytoscape`](https://github.com/cytoscape/cytoscape.js) | MIT |
 | [`cytoscape-cose-bilkent`](https://github.com/cytoscape/cytoscape.js-cose-bilkent) | MIT |
@@ -229,6 +236,7 @@ External packages **directly declared** only by repository tooling, test infrast
 | [`vitepress`](https://github.com/vuejs/vitepress) | MIT |
 | [`vitepress-plugin-mermaid`](https://github.com/emersonbottero/vitepress-plugin-mermaid) | MIT |
 | [`vitest`](https://github.com/vitest-dev/vitest) | MIT |
+| [`webdriverio`](https://github.com/webdriverio/webdriverio) | MIT |
 
 `eslint-plugin-sonarjs` (LGPL-3.0-only) and `lightningcss` (MPL-2.0) run only as development tooling; their code is not linked into or distributed with any DeepSeek Harness artifact.
 

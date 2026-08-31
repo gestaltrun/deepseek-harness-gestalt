@@ -9,10 +9,12 @@ import {
   createCompanionNegotiationChannel,
   createCompanionVersionOffer,
   decodeCompanionMessage,
+  decodeProtocolBase64Url,
   negotiateCompanionProtocol,
+  REMOTE_PROTOCOL_LIMITS,
 } from '@deepseek-ai/dsh-remote-protocol'
 
-const MEMBER_QUESTION_RECEIVER_FORMAT_VERSION = 1
+const MEMBER_QUESTION_RECEIVER_FORMAT_VERSION = 2
 const PERSISTED_PROTOCOL = negotiateCompanionProtocol(
   createCompanionNegotiationChannel(),
   createCompanionVersionOffer('mobile'),
@@ -48,7 +50,15 @@ export interface PersistedReceivingQuestion {
   readonly revision: number
   readonly arrivedAt: number
   readonly operation: CompanionMemberQuestionOperation
+  /** Base64url document bytes aligned to the operation references, or empty when no transfer was requested. */
+  readonly documents: readonly PersistedMemberQuestionDocument[]
   readonly terminal?: CompanionMemberQuestionSettledResult
+}
+
+/** One durable reassembled document whose bytes remain opaque in JSON. */
+interface PersistedMemberQuestionDocument {
+  readonly path: string
+  readonly bytes: string
 }
 
 /** Exact local Workspace selected by one member for one Cloud Project. */
@@ -121,6 +131,7 @@ export function parseReceiverState(text: string): PersistedReceiverState {
       revision: safeInteger(entry.revision, 'question revision'),
       arrivedAt: safeInteger(entry.arrivedAt, 'arrivedAt'),
       operation,
+      documents: parsePersistedDocuments(entry.documents, operation),
       ...(terminal === undefined ? {} : {
         terminal,
       }),
@@ -146,6 +157,36 @@ export function parseReceiverState(text: string): PersistedReceiverState {
     admissions,
     workspaceBindings,
   }
+}
+
+function parsePersistedDocuments(
+  value: unknown,
+  operation: CompanionMemberQuestionOperation,
+): readonly PersistedMemberQuestionDocument[] {
+  if (!Array.isArray(value)) {
+    throw new Error('member-question-receiver: durable question documents must be an array')
+  }
+  if (value.length !== 0 && value.length !== operation.references.length) {
+    throw new Error('member-question-receiver: durable question documents must align with operation references')
+  }
+  const byteLimit = Math.min(
+    REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+    REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
+  )
+  return value.map((entry, index) => {
+    if (!isRecord(entry)) throw new Error('member-question-receiver: durable question document must be an object')
+    const path = nonEmpty(entry.path, 'document path')
+    if (path !== operation.references[index]?.path) {
+      throw new Error('member-question-receiver: durable question documents must align with operation references')
+    }
+    const bytes = stringValue(entry.bytes, 'document bytes')
+    try {
+      decodeProtocolBase64Url(bytes, byteLimit, 'member-question durable document bytes')
+    } catch (cause) {
+      throw new Error(`member-question-receiver: durable question document bytes are invalid: ${String(cause)}`)
+    }
+    return { path, bytes }
+  })
 }
 
 function parseWorkspaceBinding(value: unknown): PersistedMemberQuestionWorkspaceBinding {

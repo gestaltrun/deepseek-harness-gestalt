@@ -18,6 +18,22 @@ interface DesktopProjectMembershipOptions {
   readonly fetch: typeof globalThis.fetch
 }
 
+/** Default Desktop liveness cadence, below the Platform's 90-second presence TTL. */
+const DESKTOP_PROJECT_PRESENCE_HEARTBEAT_MS = 60_000
+
+/** Desktop-owned presence lifecycle controlled by Account sign-in state. */
+export interface DesktopProjectMembershipPresence {
+  setSignedIn(signedIn: boolean): void
+  dispose(): Promise<void>
+}
+
+export interface DesktopProjectMembershipPresenceOptions extends DesktopProjectMembershipOptions {
+  readonly intervalMs?: number
+  readonly schedule?: (task: () => void, delayMs: number) => ReturnType<typeof setTimeout>
+  readonly cancel?: (handle: ReturnType<typeof setTimeout>) => void
+  readonly onError?: (error: unknown) => void
+}
+
 /**
  * Bind every Platform request to a fresh current-Installation proof retained only in Electron main.
  * @param options - live Account owner, selected Platform environment, and system-network fetch.
@@ -57,6 +73,97 @@ export function createDesktopProjectMembershipClient(
     setMemberTags: (membershipId, tags) => authorized(headers =>
       transport.setMemberTags(headers, membershipId, tags)),
     removeMember: membershipId => authorized(headers => transport.removeMember(headers, membershipId)),
+  }
+}
+
+/**
+ * Heartbeat the signed-in Desktop Installation without exposing Account credentials to renderer code.
+ * @param options - live Account owner, Platform transport, cadence, timers, and contained error reporter.
+ * @returns lifecycle toggled only by authoritative Account snapshots.
+ */
+export function createDesktopProjectMembershipPresence(
+  options: DesktopProjectMembershipPresenceOptions,
+): DesktopProjectMembershipPresence {
+  const intervalMs = options.intervalMs ?? DESKTOP_PROJECT_PRESENCE_HEARTBEAT_MS
+  if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) {
+    throw new TypeError('Desktop Project Membership presence interval must be a positive safe integer')
+  }
+  const schedule = options.schedule ?? setTimeout
+  const cancel = options.cancel ?? clearTimeout
+  const onError = options.onError ?? ((error: unknown) => {
+    console.error('[desktop-project-membership] presence heartbeat failed:', error)
+  })
+  let signedIn = false
+  let disposed = false
+  let generation = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let active: { controller: AbortController; promise: Promise<void> } | undefined
+  const beat = async (ownedGeneration: number): Promise<void> => {
+    if (!signedIn || disposed || generation !== ownedGeneration) return
+    const owned = {
+      controller: new AbortController(),
+      promise: Promise.resolve(),
+    }
+    active = owned
+    owned.promise = (async () => {
+      try {
+        const authorization = await options.account().authorizeCurrentInstallation()
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- sign-out or disposal can occur while authorization is awaited.
+        if (!signedIn || disposed || generation !== ownedGeneration) return
+        const transport = new ProjectMembershipHttpTransport({
+          origin: options.environment.origin,
+          fetch: (input, init) => options.fetch(input, { ...init, signal: owned.controller.signal }),
+        })
+        await transport.heartbeat({
+          Authorization: `Bearer ${authorization.accessToken}`,
+          'X-Gestalt-Proof-Jti': authorization.proof.jti,
+          'X-Gestalt-Proof-Issued-At': String(authorization.proof.issuedAt),
+          'X-Gestalt-Proof-Signature': authorization.proof.signature,
+        })
+      } catch (error) {
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- sign-out or disposal can occur across the awaited operation.
+        if (signedIn && !disposed && generation === ownedGeneration) onError(error)
+      } finally {
+        if (active === owned) active = undefined
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- sign-out or disposal can occur across the awaited operation.
+        if (signedIn && !disposed && generation === ownedGeneration) {
+          timer = schedule(() => { void beat(ownedGeneration) }, intervalMs)
+          timer.unref()
+        }
+      }
+    })()
+    await owned.promise
+  }
+  const abortActive = (): Promise<void> => {
+    const owned = active
+    if (owned === undefined) return Promise.resolve()
+    owned.controller.abort()
+    return owned.promise
+  }
+  return {
+    setSignedIn(next) {
+      if (disposed || signedIn === next) return
+      signedIn = next
+      generation += 1
+      if (timer !== undefined) {
+        cancel(timer)
+        timer = undefined
+      }
+      const settled = abortActive()
+      if (next) {
+        const ownedGeneration = generation
+        void settled.then(() => beat(ownedGeneration))
+      }
+    },
+    async dispose() {
+      if (disposed) return
+      disposed = true
+      signedIn = false
+      generation += 1
+      if (timer !== undefined) cancel(timer)
+      timer = undefined
+      await abortActive()
+    },
   }
 }
 

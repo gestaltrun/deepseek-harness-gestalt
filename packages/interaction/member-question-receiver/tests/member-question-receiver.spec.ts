@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -73,6 +73,7 @@ const envelope = {
     questions: [{ id: 'choice', question: 'Which owner?' }],
     references: [{ path: 'docs/architecture.md', reason: 'Current ownership map' }],
   },
+  documents: [{ path: 'docs/architecture.md', bytes: new TextEncoder().encode('# Architecture\n') }],
 }
 
 function envelopeWith(questionId: string, expiresAt: number = 2_000) {
@@ -150,6 +151,61 @@ describe('FileMemberQuestionReceiver', () => {
       }],
       terminal: [],
     })
+  })
+
+  it('persists reassembled document bytes and restores renderable reference content', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-documents-'))
+    roots.push(storagePath)
+    const documentsEnvelope = {
+      ...envelope,
+      operation: {
+        ...envelope.operation,
+        references: [
+          { path: 'brief.md', reason: 'Markdown brief' },
+          { path: 'preview.html', reason: 'Restricted preview' },
+          { path: 'payload.bin', reason: 'Arbitrary bytes' },
+        ],
+      },
+      documents: [
+        { path: 'brief.md', bytes: new TextEncoder().encode('# Decision\n') },
+        { path: 'preview.html', bytes: new TextEncoder().encode('<p>Preview</p>') },
+        { path: 'payload.bin', bytes: Uint8Array.of(0, 255, 1, 254) },
+      ],
+    }
+    const first = await createReceiver(storagePath, { clock: () => 1_000 })
+    await first.ingest(documentsEnvelope)
+    const firstSnapshot = await first.snapshot()
+    expect(firstSnapshot.pending[0]?.operation.references).toEqual([
+      { path: 'brief.md', reason: 'Markdown brief', content: '# Decision\n' },
+      { path: 'preview.html', reason: 'Restricted preview', content: '<p>Preview</p>' },
+      { path: 'payload.bin', reason: 'Arbitrary bytes' },
+    ])
+    const durable = await readFile(first.storageFile, 'utf8')
+    expect(durable).not.toContain('# Decision')
+    expect(durable).not.toContain('<p>Preview</p>')
+
+    await contexts.pop()!.fiber.dispose()
+    const reopened = await createReceiver(storagePath, { clock: () => 1_000 })
+    expect((await reopened.snapshot()).pending[0]?.operation.references)
+      .toEqual(firstSnapshot.pending[0]?.operation.references)
+    await expect(reopened.ingest({
+      ...documentsEnvelope,
+      documents: documentsEnvelope.documents.map((document, index) => index === 0
+        ? { ...document, bytes: new TextEncoder().encode('different') }
+        : document),
+    })).rejects.toThrow('replayed with different authority or content')
+  })
+
+  it('rejects document bytes that do not align exactly with operation references', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-document-alignment-'))
+    roots.push(storagePath)
+    const receiver = await createReceiver(storagePath, { clock: () => 1_000 })
+    await expect(receiver.ingest({
+      ...envelope,
+      documents: [{ path: 'different.md', bytes: new TextEncoder().encode('body') }],
+    })).rejects.toThrow('document bytes must align')
+    const { documents: _documents, ...withoutDocuments } = envelope
+    await expect(receiver.ingest(withoutDocuments)).rejects.toThrow('document bytes must align')
   })
 
   it('persists and replaces exact Account/Project Workspace bindings across restart', async () => {
@@ -442,6 +498,37 @@ describe('FileMemberQuestionReceiver', () => {
     unregister()
     unregister()
     expect(() => receiver.registerHumanTurnAdmitter(admitter)).not.toThrow()
+  })
+
+  it('registers and disposes one transport-owned terminal authority', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-terminal-runtime-'))
+    roots.push(storagePath)
+    const receiver = await createReceiver(storagePath, { clock: () => 1_000 })
+    const authority = new MemoryTerminalAuthority()
+    const dispose = receiver.registerTerminalAuthority(authority)
+    expect(() => receiver.registerTerminalAuthority(new MemoryTerminalAuthority()))
+      .toThrow('already registered')
+    const first = await receiver.ingest(envelopeWith('question-runtime-authority', 3_000))
+    await expect(receiver.settle(first.questionId, {
+      kind: 'declined',
+      settledByInstallationId: 'installation-runtime' as never,
+      settledByDeviceName: 'Runtime',
+      settledAt: 1_100,
+    })).resolves.toMatchObject({ outcome: 'declined' })
+    dispose()
+    const second = await receiver.ingest({
+      ...envelopeWith('question-runtime-authority-2', 3_000),
+      operation: {
+        ...envelopeWith('question-runtime-authority-2', 3_000).operation,
+        originSessionId: parseCompanionSessionId('origin-runtime-authority-2'),
+      },
+    })
+    await expect(receiver.settle(second.questionId, {
+      kind: 'declined',
+      settledByInstallationId: 'installation-runtime' as never,
+      settledByDeviceName: 'Runtime',
+      settledAt: 1_200,
+    })).rejects.toThrow('terminalAuthority is required')
   })
 
   it('keeps the predecessor pending when terminal publication fails, then retries without admitting the newer question early', async () => {

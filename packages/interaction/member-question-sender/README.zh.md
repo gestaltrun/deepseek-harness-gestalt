@@ -15,7 +15,7 @@
 
 ### 关键类型
 
-- `MemberQuestionSendPayload`：`{ toProjectMember, projectId, background, questions, references, origin, originSessionId }`。`projectId` 与 `originSessionId` 使用既有的品牌化 Platform 和 Companion id；发送器根据 `ttlMs` 推导操作的绝对 `expiresAt`。origin、questions 与 references 复用 T4 Companion 字段；本包不发明第二种协议。
+- `MemberQuestionSendPayload`：`{ toProjectMember, projectId, background, questions, references, documents?, origin, originSessionId }`。`documents` 包含与 `references` 一一对齐的任意字节，只有 `references` 为空时才能省略；发送器派生有界 `document-chunk` 帧，并拒绝数量或路径不匹配。`projectId` 与 `originSessionId` 使用既有的品牌化 Platform 和 Companion id；发送器根据 `ttlMs` 推导操作的绝对 `expiresAt`。origin、questions、references 与文档分块复用 T4 Companion 字段；本包不发明第二种协议。
 - `MemberQuestionSendResult`：`{ questionId, encoded, outcome: 'answered', answers }` 或 `{ questionId, encoded, outcome: 'declined' }`。
 - `MemberQuestionDeliveryPort`：带 `deliver(encoded)`、原子 `publishTerminal(terminal)` 与 `queryTerminal(questionId)` 的注入 port。`publishTerminal` 返回 `{ claimed, terminal }`，其中 `terminal` 始终是已保留的首个 claim。跨机注册表传输被推迟，因此组合注入该 port；测试使用 `MemoryMemberQuestionDelivery`。
 - `ProjectPeerGrantLookup`：注入的 B 侧检索，取回发给该成员的密封项目对等授权。
@@ -52,4 +52,3 @@ Indirectly, through `dsh-tool-ask-user`, which routes `to_project_member` onto `
 ## Known Limitations and Deferred Work
 
 - **跨机投递依赖被推迟的项目注册表传输**：编码与投递接口已经定义；无密钥测试注入内存实现，缺少生产 port 的组合则失败关闭。在收件人安装上打开密封对等授权，以及跨机携带该授权，仍是 [Remote Access 已知限制](../../platform/remote-access/README.zh.md#known-limitations-and-deferred-work)。生产密封仍受那里记录的独立加密评审约束。本包不发明新协议。
-- **被引用文档停留在 `member-question` 的 path 元数据上**：T4 codec 拥有 `document-chunk` 帧，并将重组视为消费方职责；本发送器只编码 `member-question` 操作，不传输文件字节。

@@ -200,6 +200,8 @@ interface MemberQuestionSendPayload {
   readonly questions: readonly MemberQuestionItem[]
   /** Workspace-validated references; an empty list is admitted. */
   readonly references: readonly MemberQuestionReference[]
+  /** File bytes aligned 1:1 with references; omission is valid only when references is empty. */
+  readonly documents?: readonly MemberQuestionDocument[]
   /** Public identity fields rendered on the receiver's Decision Brief. */
   readonly origin: MemberQuestionOrigin
   /** Originating session identity used as one half of the supersede route key. */
@@ -329,6 +331,13 @@ abstract resumeReservedHumanTurns(): Promise<void>
 abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void
 
 /**
+ * Install the single transport-owned first-terminal authority after Host composition.
+ * @param authority - global first-claim adapter owned by the active transport.
+ * @returns disposer removing this exact registration.
+ */
+abstract registerTerminalAuthority(authority: MemberQuestionTerminalAuthority): () => void
+
+/**
  * Persist or replace one exact Account/Project to local Workspace association.
  * @param accountId - authenticated receiving Account.
  * @param projectId - Cloud Project being joined.
@@ -398,6 +407,14 @@ abstract send( payload: MemberQuestionSendPayload, options?: MemberQuestionSendO
  * @returns fulfillment after the matching `send()` promise settles, or immediately when none is pending.
  */
 abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>
+
+/**
+ * Apply one already-authoritative terminal delivered by the transport.
+ * Unknown or already-settled question ids are ignored; a mismatched operation
+ * id is rejected before it can settle a local ask.
+ * @param terminal - retained global first claim received from another Installation.
+ */
+abstract applyTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<void>
 
 /**
  * Withdraw one pending question as initiator cancellation.

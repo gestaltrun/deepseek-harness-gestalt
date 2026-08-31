@@ -605,6 +605,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   MemberQuestionReceiverSnapshot: 'user-questions.md',
   MemberQuestionReceiverListener: 'user-questions.md',
   MemberQuestionReceiverSettlement: 'user-questions.md',
+  MemberQuestionTerminalAuthority: 'user-questions.md',
   AdmitMemberQuestionHumanTurnInput: 'user-questions.md',
   AdmitMemberQuestionHumanTurnResult: 'user-questions.md',
   MemberQuestionHumanTurnAdmitter: 'user-questions.md',

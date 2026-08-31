@@ -65,9 +65,24 @@ describe('Desktop Platform HTTP system-Node helper', () => {
     await expect(fetch('http://example.com')).rejects.toThrow('credential-free HTTPS')
     expect(resolveProxy).not.toHaveBeenCalled()
   })
+
+  it('constructs bodyless HTTP responses without an Undici status/body conflict', async () => {
+    const endpoint = await httpsEndpoint({ status: 204 })
+    const fetch = createDesktopSystemNodeFetch({
+      nodePath: process.execPath,
+      helperPath,
+      execArgv: ['--import', import.meta.resolve('tsx/esm')],
+      environment: { NODE_EXTRA_CA_CERTS: cert },
+      resolveProxy: async () => 'DIRECT',
+      timeoutMs: 5_000,
+    })
+    const response = await fetch(`${endpoint.origin}/heartbeat`, { method: 'POST', redirect: 'error' })
+    expect(response.status).toBe(204)
+    expect(await response.text()).toBe('')
+  })
 })
 
-async function httpsEndpoint(): Promise<{
+async function httpsEndpoint(options: { status?: number } = {}): Promise<{
   origin: string
   requests: Array<{ method: string; authorization?: string; contentType?: string; body: string }>
 }> {
@@ -82,8 +97,9 @@ async function httpsEndpoint(): Promise<{
         ...(request.headers['content-type'] === undefined ? {} : { contentType: request.headers['content-type'] }),
         body: Buffer.concat(chunks).toString(),
       })
-      response.writeHead(201, { 'content-type': 'application/json', 'x-test-response': 'node-helper' })
-      response.end(Buffer.concat(chunks))
+      const status = options.status ?? 201
+      response.writeHead(status, { 'content-type': 'application/json', 'x-test-response': 'node-helper' })
+      response.end(status === 204 ? undefined : Buffer.concat(chunks))
     })
   })
   await listen(server, 'localhost')

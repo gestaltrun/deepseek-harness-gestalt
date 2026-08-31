@@ -7,9 +7,13 @@ import type { Branded } from '@deepseek-ai/dsh-brand'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
-import type {
-  CompanionMemberQuestionSettledResult,
-  MemberQuestionId,
+import {
+  decodeProtocolBase64Url,
+  encodeProtocolBase64Url,
+  REMOTE_PROTOCOL_LIMITS,
+  type CompanionMemberQuestionOperation,
+  type CompanionMemberQuestionSettledResult,
+  type MemberQuestionId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
   EMPTY_PERSISTED_RECEIVER_STATE,
@@ -37,9 +41,13 @@ import type {
   MemberQuestionReceiverStateWriter,
   MemberQuestionReceiverTimer,
   PendingMemberQuestionView,
+  ReceivedMemberQuestionOperation,
+  ReassembledMemberQuestionDocument,
   ReceivingSessionId,
   TerminalMemberQuestionView,
 } from './types.ts'
+
+export { MemberQuestionDocumentAssembler } from './document-transfer.ts'
 
 export type {
   AdmitMemberQuestionHumanTurnInput,
@@ -62,6 +70,9 @@ export type {
   MemberQuestionReceiverStateWriter,
   MemberQuestionReceiverTimer,
   PendingMemberQuestionView,
+  ReceivedMemberQuestionOperation,
+  ReceivedMemberQuestionReference,
+  ReassembledMemberQuestionDocument,
   ReceivingSessionId,
   TerminalMemberQuestionView,
 } from './types.ts'
@@ -172,6 +183,13 @@ export abstract class MemberQuestionReceiverService extends Service implements M
   abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void
 
   /**
+   * Install the single transport-owned first-terminal authority after Host composition.
+   * @param authority - global first-claim adapter owned by the active transport.
+   * @returns disposer removing this exact registration.
+   */
+  abstract registerTerminalAuthority(authority: MemberQuestionTerminalAuthority): () => void
+
+  /**
    * Persist or replace one exact Account/Project to local Workspace association.
    * @param accountId - authenticated receiving Account.
    * @param projectId - Cloud Project being joined.
@@ -241,7 +259,9 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
   /** Absolute environment-namespaced ledger document path. */
   readonly storageFile: string
   private readonly maxRecords: number
-  private readonly terminalAuthority: MemberQuestionTerminalAuthority | undefined
+  private readonly configuredTerminalAuthority: MemberQuestionTerminalAuthority | undefined
+  private runtimeTerminalAuthority: MemberQuestionTerminalAuthority | undefined
+  private runtimeTerminalAuthorityRevision = 0
   private readonly clock: () => number
   private readonly admitter: MemberQuestionHumanTurnAdmitter | undefined
   private runtimeAdmitter: MemberQuestionHumanTurnAdmitter | undefined
@@ -263,7 +283,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
     const resolved = resolveConfig(config)
     this.storageFile = join(resolve(resolved.storagePath), resolved.environment, 'member-question-receiver.json')
     this.maxRecords = resolved.maxRecords
-    this.terminalAuthority = resolved.terminalAuthority
+    this.configuredTerminalAuthority = resolved.terminalAuthority
       ?? (resolved.terminalAuthorityMode === 'development-local' ? DEVELOPMENT_LOCAL_TERMINAL_AUTHORITY : undefined)
     this.clock = resolved.clock ?? Date.now
     this.admitter = resolved.admitter
@@ -285,10 +305,12 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
 
   override ingest(envelope: AuthenticatedMemberQuestionEnvelope): Promise<MemberQuestionIngestResult> {
     return this.enqueue(async () => {
+      const documents = encodeReceivedDocuments(envelope.operation, envelope.documents)
       const existing = this.state.questions.find(question => question.questionId === envelope.operation.questionId)
       if (existing !== undefined) {
         if (existing.receivingAccountId !== envelope.authority.accountId
-          || JSON.stringify(existing.operation) !== JSON.stringify(envelope.operation)) {
+          || JSON.stringify(existing.operation) !== JSON.stringify(envelope.operation)
+          || JSON.stringify(existing.documents) !== JSON.stringify(documents)) {
           throw new Error(`member-question-receiver: question ${envelope.operation.questionId} was replayed with different authority or content`)
         }
         return ingestResult(existing)
@@ -337,6 +359,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
         revision,
         arrivedAt: now,
         operation: structuredClone(envelope.operation),
+        documents,
         ...(terminal === undefined ? {} : { terminal: structuredClone(terminal) }),
       }
       const next: PersistedReceiverState = {
@@ -614,6 +637,23 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
     }
   }
 
+  override registerTerminalAuthority(authority: MemberQuestionTerminalAuthority): () => void {
+    if (this.configuredTerminalAuthority !== undefined || this.runtimeTerminalAuthority !== undefined) {
+      throw new Error('member-question-receiver: a terminal authority is already registered')
+    }
+    this.runtimeTerminalAuthority = authority
+    const revision = ++this.runtimeTerminalAuthorityRevision
+    return () => {
+      if (this.runtimeTerminalAuthorityRevision !== revision) return
+      this.runtimeTerminalAuthority = undefined
+      this.runtimeTerminalAuthorityRevision += 1
+    }
+  }
+
+  private get terminalAuthority(): MemberQuestionTerminalAuthority | undefined {
+    return this.runtimeTerminalAuthority ?? this.configuredTerminalAuthority
+  }
+
   private async claimAndPersist(
     question: PersistedReceivingQuestion,
     outcome: 'expired' | 'superseded',
@@ -836,7 +876,7 @@ function toPendingView(
     receivingAccountId: question.receivingAccountId as PlatformAccountId,
     revision: question.revision,
     arrivedAt: question.arrivedAt,
-    operation: structuredClone(question.operation),
+    operation: receivedOperation(question),
     ...(materialized ? { hostSessionId: question.receivingSessionId as unknown as import('@deepseek-ai/dsh-session/types').SessionId } : {}),
     ...(admission === undefined ? {} : {
       reservedAdmission: {
@@ -858,7 +898,54 @@ function toTerminalView(question: PersistedReceivingQuestion, materialized = fal
     revision: question.revision,
     arrivedAt: question.arrivedAt,
     terminal: structuredClone(terminal),
-    brief: structuredClone(question.operation),
+    brief: receivedOperation(question),
     ...(materialized ? { hostSessionId: question.receivingSessionId as unknown as import('@deepseek-ai/dsh-session/types').SessionId } : {}),
   }
+}
+
+function encodeReceivedDocuments(
+  operation: CompanionMemberQuestionOperation,
+  documents: readonly ReassembledMemberQuestionDocument[] | undefined,
+): PersistedReceivingQuestion['documents'] {
+  const supplied = documents ?? []
+  if (supplied.length !== operation.references.length
+    || supplied.some((document, index) => document.path !== operation.references[index]?.path)) {
+    throw new Error('member-question-receiver: document bytes must align 1:1 with operation references')
+  }
+  const byteLimit = Math.min(
+    REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+    REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
+  )
+  return supplied.map((document) => {
+    if (document.bytes.byteLength > byteLimit) {
+      throw new Error('member-question-receiver: document exceeds the transfer byte ceiling')
+    }
+    return { path: document.path, bytes: encodeProtocolBase64Url(document.bytes) }
+  })
+}
+
+function receivedOperation(question: PersistedReceivingQuestion): ReceivedMemberQuestionOperation {
+  const references = question.operation.references.map((reference, index) => {
+    const document = question.documents[index]
+    if (document === undefined || !isInlineDocument(reference.path)) return { ...reference }
+    try {
+      return {
+        ...reference,
+        content: new TextDecoder('utf-8', { fatal: true }).decode(decodeProtocolBase64Url(
+          document.bytes,
+          REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+          'member-question durable document bytes',
+        )),
+      }
+    } catch {
+      return { ...reference }
+    }
+  })
+  return { ...structuredClone(question.operation), references }
+}
+
+function isInlineDocument(path: string): boolean {
+  const lower = path.toLowerCase()
+  return lower.endsWith('.md') || lower.endsWith('.markdown')
+    || lower.endsWith('.html') || lower.endsWith('.htm')
 }

@@ -78,7 +78,10 @@ export function createDesktopSystemNodeFetch(options: DesktopSystemNodeFetchOpti
           Math.max(1, Math.floor(remainingMs / (candidates.length - index))),
           'request',
         )
-        return new Response(Uint8Array.from(response.body).buffer, {
+        const responseBody = [204, 205, 304].includes(response.status)
+          ? null
+          : Uint8Array.from(response.body).buffer
+        return new Response(responseBody, {
           status: response.status,
           statusText: response.statusText,
           headers: response.headers,

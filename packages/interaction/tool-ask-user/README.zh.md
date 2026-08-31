@@ -16,7 +16,7 @@
 - `multi_select`：该问题是否可以返回多个选中的选项。
 - `to_project_member`：可选的单收件人。存在时，调用经 `ctx.memberQuestionSender` 路由，不会进入本地 user-questions 提供方。运行期资格过滤会在组装后的提示中隐藏该参数，除非 `boundProjectResolver` 返回云端项目 id；静态注册表 schema 仍保留它。
 - `background`：agent 撰写的决策简报文本。与 `to_project_member` 一起时必填；1 到 600 个 Unicode 码点，构建期以 `BACKGROUND_REQUIRED` 或 `BACKGROUND_TOO_LONG` 拒绝。
-- `references`：可选的 `{ path, reason? }[]`，本地与路由提问均可使用。每个 `path` 必须解析为提问会话工作区内的现存文件；每个 `reason` 至多 100 个码点。失败会抛出 `REFERENCES_INVALID` 并指出具体项。本地提问接受 references 且不改变路由；将 details 面板聚焦到被引用文件被推迟。
+- `references`：可选的 `{ path, reason? }[]`，本地与路由提问均可使用。每个 `path` 必须解析为提问会话工作区内的现存文件；每个 `reason` 至多 100 个码点。路由提问会在同一工作区围栏内读取每个已校验文件，在校验与读取之间文件身份变化时拒绝，并把字节与对应 reference 一同传递。失败会抛出 `REFERENCES_INVALID` 并指出具体项。本地提问接受 references 且不改变路由；将 details 面板聚焦到被引用文件被推迟。
 
 没有 `to_project_member` 时，工具调用 `ctx.userQuestions.ask()`，并返回规范的 `{ answers: [{ id, selected, custom? }] }`。`selected` 包含选项标签；`custom` 携带自由填写的回答，对于多选题会补充 `selected`，对于单选题则会覆盖它。Native 渲染器会保留紧凑的 JSON 文本形式 `{ "answers": [{ "id": "...", "selected": ["..."], "custom": "..." }] }`。无法到达已组合发送器的路由提问会以 `SENDER_UNAVAILABLE` 失败。发送器生命周期失败（`MEMBER_OFFLINE`、`QUESTION_EXPIRED`、`QUESTION_WITHDRAWN`、`QUESTION_SUPERSEDED`、`REVOKED_DURING_FLIGHT`）仍作为普通工具结果保留。
 
@@ -62,4 +62,3 @@
 - **`to_project_member` 保留在静态 schema 中**：提示组装会从组装后的工具列表中为非绑定工作区省略该参数；`ctx.tools.schemas()` 与生成的目录仍记录静态参数。
 - **本地参考材料聚焦被推迟**：本地提问会接受并校验 `references`，但将 details 面板打开到被引用文件由后续工单落地。
 - **路由投递依赖 T4 注册表传输缺环**：编码与发送器接口已经存在；在收件人安装上打开密封对等授权，以及跨机携带该授权，仍是 [Remote Access 已知限制](../../platform/remote-access/README.zh.md#known-limitations-and-deferred-work)。在该传输落地之前，没有投递适配器的组合以 `SENDER_UNAVAILABLE` 或 `DELIVERY_UNAVAILABLE` 失败关闭，而不是排队。
-- **被引用文件是 path 元数据，不是 `document-chunk` 帧**：T4 codec 拥有 document-chunk 传输，并将重组视为消费方职责；本工具校验工作区 path，并在 `member-question` 操作上转发 `{ path, reason }`，不编码或重组文档字节。

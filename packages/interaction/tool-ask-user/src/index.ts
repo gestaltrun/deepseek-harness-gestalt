@@ -25,7 +25,7 @@ import {
   AskUserQuestionError,
   BACKGROUND_MAX_CODE_POINTS,
 } from './errors.ts'
-import { countUnicodeCodePoints, validateReferences } from './references.ts'
+import { countUnicodeCodePoints, validateReferences, validateRoutedReferences } from './references.ts'
 
 export { AskUserQuestionError } from './errors.ts'
 export type { AskUserQuestionErrorCode } from './errors.ts'
@@ -227,7 +227,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         }
         background = args.background
       }
-      const references = await validateReferences(args.references, exec.agent?.session.header.cwd)
+      const workspaceRoot = exec.agent?.session.header.cwd
+      const routedReferences = addressee === undefined
+        ? undefined
+        : await validateRoutedReferences(args.references, workspaceRoot)
+      if (addressee === undefined) await validateReferences(args.references, workspaceRoot)
       const questions = args.questions.map(question => ({
         id: question.id,
         question: question.question,
@@ -266,10 +270,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         projectId: parseMemberQuestionProjectId(projectId),
         background,
         questions,
-        references: (references ?? []).map(reference => ({
+        references: (routedReferences?.references ?? []).map(reference => ({
           path: reference.path,
           reason: reference.reason ?? reference.path,
         })),
+        documents: routedReferences?.documents ?? [],
         origin,
         originSessionId: parseCompanionSessionId(String(exec.agent?.session.id ?? 'unbound-origin')),
       }, {

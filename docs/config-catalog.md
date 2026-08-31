@@ -1711,7 +1711,7 @@ export type MemberQuestionReceiverRpcId = Branded<'MemberQuestionReceiverRpcId'>
 /** Durable human content handed to the Host Session adapter. */
 export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent
 
-/** Pending receiver projection retained without referenced document bodies. */
+/** Pending receiver projection retaining renderable referenced document bodies. */
 export interface PendingMemberQuestionView {
   /** Stable question identity from the authenticated operation. */
   readonly questionId: MemberQuestionId
@@ -1724,7 +1724,7 @@ export interface PendingMemberQuestionView {
   /** Absolute Unix epoch milliseconds when the Host accepted the operation. */
   readonly arrivedAt: number
   /** Bounded authenticated member-question operation. */
-  readonly operation: CompanionMemberQuestionOperation
+  readonly operation: ReceivedMemberQuestionOperation
   /** Ordinary Host Session identity after the first explicit human admission. */
   readonly hostSessionId?: HostSessionId
   /** Durable retry identity while a human-turn admission remains reserved. */
@@ -1741,9 +1741,9 @@ export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionVi
   /** Globally authoritative first-claim terminal. */
   readonly terminal: CompanionMemberQuestionSettledResult
   /** Bounded received operation retained for passive record rendering. */
-  readonly brief: Omit<CompanionMemberQuestionOperation, 'questions'> & {
+  readonly brief: Omit<ReceivedMemberQuestionOperation, 'questions'> & {
     /** Original question batch retained with the terminal record. */
-    readonly questions: CompanionMemberQuestionOperation['questions']
+    readonly questions: ReceivedMemberQuestionOperation['questions']
   }
 }
 
@@ -1762,11 +1762,23 @@ interface MemberQuestionHumanImageContent {
   /** Durable normalized attachment; raw browser bytes never enter the receiver ledger. */
   readonly attachment: ImageAttachmentRef
 }
+
+/** Authenticated operation enriched only after complete document reassembly. */
+export type ReceivedMemberQuestionOperation = Omit<CompanionMemberQuestionOperation, 'references'> & {
+  /** References augmented only with renderable bodies from transferred bytes. */
+  readonly references: readonly ReceivedMemberQuestionReference[]
+}
+
+/** Receiver projection reference with an inline body for renderable documents. */
+export type ReceivedMemberQuestionReference = CompanionMemberQuestionOperation['references'][number] & {
+  /** UTF-8 body admitted only for Markdown and HTML document paths. */
+  readonly content?: string
+}
 ```
 
 Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionOperation`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md) · [`HostSessionId`](subsystems/core.md) · [`ImageAttachmentRef`](subsystems/attachment.md) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`PlatformAccountId`](subsystems/platform-account.md) · [`ProjectId`](subsystems/project-membership.md)
 
-Source: [`packages/interaction/member-question-receiver/src/index.ts:100`](../packages/interaction/member-question-receiver/src/index.ts)
+Source: [`packages/interaction/member-question-receiver/src/index.ts:111`](../packages/interaction/member-question-receiver/src/index.ts)
 
 <a id="deepseek-aidsh-member-question-sender"></a>
 
@@ -1820,6 +1832,7 @@ export interface MemberQuestionDeliveryPort {
   deliver(encoded: EncodedMemberQuestion & {
     toProjectMember: string
     projectId: ProjectId
+    documents: readonly EncodedMemberQuestionDocument[]
   }): Promise<void>
 
   /**
@@ -1873,6 +1886,18 @@ export interface EncodedMemberQuestion {
   readonly encoded: Uint8Array
 }
 
+/** Bounded Companion frames carrying one routed reference document. */
+export interface EncodedMemberQuestionDocument {
+  /** Workspace-relative path matching the operation's reference entry. */
+  readonly path: string
+  /** Transfer identity derived from the question and reference position. */
+  readonly transferId: DocumentTransferId
+  /** Typed Companion messages in chunk order. */
+  readonly messages: readonly CompanionMessage[]
+  /** Encoded Companion application frames in chunk order. */
+  readonly encoded: readonly Uint8Array[]
+}
+
 /** Result of one atomic terminal publication attempt. */
 export interface MemberQuestionTerminalClaim {
   /** Whether this publication committed the first terminal for the question. */
@@ -1908,9 +1933,9 @@ export interface MemberMembershipWatchInput {
 }
 ```
 
-Depends on: [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md) · [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionOperationId`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`ProjectId`](subsystems/project-membership.md) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.md)
+Depends on: [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md) · [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionOperationId`](../packages/platform/remote-protocol/src/index.ts) · [`DocumentTransferId`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`ProjectId`](subsystems/project-membership.md) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.md)
 
-Source: [`packages/interaction/member-question-sender/src/index.ts:167`](../packages/interaction/member-question-sender/src/index.ts)
+Source: [`packages/interaction/member-question-sender/src/index.ts:175`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="deepseek-aidsh-message-feedback"></a>
 

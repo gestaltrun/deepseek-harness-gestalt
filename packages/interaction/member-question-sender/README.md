@@ -15,7 +15,7 @@ Service Definition and codec-backed Provider for member-directed questions. `ctx
 
 ### Key Types
 
-- `MemberQuestionSendPayload` — `{ toProjectMember, projectId, background, questions, references, origin, originSessionId }`. `projectId` and `originSessionId` use the existing branded Platform and Companion ids. The sender derives the absolute operation `expiresAt` from `ttlMs`. Origin, questions, and references reuse the T4 Companion fields; this package does not invent a second protocol.
+- `MemberQuestionSendPayload` — `{ toProjectMember, projectId, background, questions, references, documents?, origin, originSessionId }`. `documents` contains arbitrary bytes aligned 1:1 with `references` and may be omitted only when `references` is empty; the sender derives bounded `document-chunk` frames and rejects count or path misalignment. `projectId` and `originSessionId` use the existing branded Platform and Companion ids. The sender derives the absolute operation `expiresAt` from `ttlMs`. Origin, questions, references, and document chunks reuse the T4 Companion fields; this package does not invent a second protocol.
 - `MemberQuestionSendResult` — `{ questionId, encoded, outcome: 'answered', answers }` or `{ questionId, encoded, outcome: 'declined' }`.
 - `MemberQuestionDeliveryPort` — injected port with `deliver(encoded)`, atomic `publishTerminal(terminal)`, and `queryTerminal(questionId)`. `publishTerminal` returns `{ claimed, terminal }`; `terminal` is always the retained first claim. Cross-machine registry transport is deferred, so compositions inject the port; tests use `MemoryMemberQuestionDelivery`.
 - `ProjectPeerGrantLookup` — injected B-side retrieval of the sealed project-peer grant addressed to the member.
@@ -52,4 +52,3 @@ No direct token cost or invalidation. `dsh-tool-ask-user` owns schema growth for
 ## Known Limitations and Deferred Work
 
 - **Cross-machine delivery rides the deferred project-registry transport** — encoding and the delivery interface are defined; keyless tests inject the in-memory implementation, while compositions without a production port fail closed. Opening a sealed peer grant on the addressee's installation and carrying it across machines remain the [Remote Access Known Limitation](../../platform/remote-access/README.md#known-limitations-and-deferred-work). Production sealing stays behind the independent encryption review recorded there. This package does not invent a new protocol.
-- **Referenced documents stay path metadata on `member-question`** — the T4 codec owns `document-chunk` frames and treats reassembly as a consumer duty; this sender encodes only the `member-question` operation and does not transfer file bytes.

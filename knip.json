@@ -95,6 +95,7 @@
         "project-members/start.ts",
         "project-members/memory-membership.ts",
         "project-members/mock-llm.ts",
+        "project-members/memory-member-question.ts",
         "*/tests/**/*.e2e.ts",
         "*/tests/**/*.snapshot.ts"
       ],
@@ -731,12 +732,21 @@
         "src/main.ts",
         "src/preload.cjs",
         "scripts/**/*.mjs",
-        "tests/**/*.spec.ts"
+        "tests/**/*.spec.ts",
+        "tests/member-question-e2e/wdio.conf.ts",
+        "tests/member-question-e2e/electron.e2e.ts",
+        "tests/member-question-e2e/host-plugin.ts"
       ],
       "project": [
         "src/**/*.ts",
         "scripts/**/*.mjs",
         "tests/**/*.ts"
+      ],
+      "ignoreDependencies": [
+        "@wdio/cli",
+        "@wdio/electron-service",
+        "@wdio/local-runner",
+        "@wdio/spec-reporter"
       ]
     },
     "apps/platform": {

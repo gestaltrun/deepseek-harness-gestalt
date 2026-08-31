@@ -12,6 +12,7 @@ import CompanionMemberQuestionSender, {
   MemoryMemberQuestionDelivery,
   type MemberQuestionSettlement,
 } from '@deepseek-ai/dsh-member-question-sender'
+import { REMOTE_PROTOCOL_LIMITS } from '@deepseek-ai/dsh-remote-protocol'
 import * as toolAskUser from '@deepseek-ai/dsh-tool-ask-user'
 import { BACKGROUND_MAX_CODE_POINTS } from '@deepseek-ai/dsh-tool-ask-user'
 
@@ -521,6 +522,68 @@ describe('ask_user_question tool', () => {
     })
   })
 
+  it('keeps oversized local references on the local reference path without reading transfer bytes', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'dsh-ask-user-large-ref-'))
+    const byteLimit = Math.min(
+      REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+      REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
+    )
+    writeFileSync(join(workspace, 'large.bin'), new Uint8Array(byteLimit + 1))
+    const ctx = await setup()
+    ctx.userQuestions.registerProvider({
+      async ask() {
+        return { answers: [{ id: 'pkg', selected: ['ok'] }] }
+      },
+    })
+    const agent = stubAgent('local-root', 0, workspace)
+    ctx.agents.enter(agent, undefined)
+
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-refs-oversize'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        references: [{ path: 'large.bin' }],
+      },
+      agent,
+    })
+
+    expect(result.isError).toBe(false)
+    expect(result.content).toEqual([{ type: 'text', text: '{"answers":[{"id":"pkg","selected":["ok"]}]}' }])
+  })
+
+  it('rejects a routed reference whose bytes exceed the realizable chunk ceiling', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'dsh-ask-user-large-routed-ref-'))
+    const byteLimit = Math.min(
+      REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes,
+      REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks,
+    )
+    writeFileSync(join(workspace, 'large.bin'), new Uint8Array(byteLimit + 1))
+    const { ctx, delivery } = await setupRouted()
+    const agent = stubAgent('routed-large-root', 0, workspace)
+    ctx.agents.enter(agent, undefined)
+
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: CallId('ask-routed-refs-oversize'),
+      name: 'ask_user_question',
+      arguments: {
+        questions: [{ id: 'pkg', question: 'Ship it?' }],
+        to_project_member: 'account-peer',
+        background: 'Review the attached payload before deciding.',
+        references: [{ path: 'large.bin' }],
+      },
+      agent,
+    })
+
+    expect(result).toMatchObject({
+      isError: true,
+      error: { info: { name: 'AskUserQuestionError', code: 'REFERENCES_INVALID' } },
+    })
+    expect(delivery.delivered).toHaveLength(0)
+  })
+
   it('routes to_project_member through the member-question sender and skips the local provider', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'dsh-ask-user-routed-'))
     writeFileSync(join(workspace, 'plan.md'), '# plan\n')
@@ -576,6 +639,9 @@ describe('ask_user_question tool', () => {
       { path: 'plan.md', reason: 'plan.md' },
       { path: 'plan.md', reason: 'Current rollout plan' },
     ])
+    expect(delivery.delivered[0]?.documents).toHaveLength(2)
+    expect(delivery.delivered[0]?.documents.map(document => document.path)).toEqual(['plan.md', 'plan.md'])
+    expect(delivery.delivered[0]?.documents.every(document => document.encoded.length === 1)).toBe(true)
     expect(events.map(event => event.type)).toEqual(['member-question/asked', 'member-question/outcome'])
   })
 

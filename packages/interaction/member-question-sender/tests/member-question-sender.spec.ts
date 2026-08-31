@@ -60,6 +60,7 @@ function payload(overrides: Partial<MemberQuestionSendPayload> = {}): MemberQues
       },
     ],
     references: [{ path: 'plans/rollout.md', reason: 'Current rollout plan' }],
+    documents: [{ path: 'plans/rollout.md', bytes: new TextEncoder().encode('# Rollout plan\n') }],
     origin: {
       projectName: 'Atlas',
       originSessionTitle: 'Refactor the ingest pipeline',
@@ -200,9 +201,23 @@ describe('member-question sender', () => {
 
   it('accepts an empty reference list and still round-trips', () => {
     const protocol = createMemberQuestionProtocol()
-    const encoded = encodeMemberQuestion(protocol, payload({ references: [] }), 1_788_089_400_000)
+    const encoded = encodeMemberQuestion(protocol, payload({ references: [], documents: [] }), 1_788_089_400_000)
     const decoded = decodeCompanionMessage(protocol, encoded.encoded)
     expect(decoded).toEqual(encoded.message)
+  })
+
+  it('rejects omitted document bytes whenever references are present', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(CompanionMemberQuestionSender, { delivery })
+    const { documents: _documents, ...withoutDocuments } = payload()
+
+    await expect(ctx.memberQuestionSender.send(withoutDocuments)).rejects.toMatchObject({
+      name: 'MemberQuestionSenderError',
+      code: 'ENCODE_FAILED',
+    })
+    expect(delivery.delivered).toHaveLength(0)
+    await ctx.fiber.dispose()
   })
 
   it('unregisters the service when its plugin fiber is disposed', async () => {
@@ -398,6 +413,50 @@ describe('member-question sender', () => {
     await expect(ctx.memberQuestionSender.settle('mqmissing' as never, declinedSettlement()))
       .resolves.toBeUndefined()
     await expect(ctx.memberQuestionSender.withdraw('mqmissing' as never)).resolves.toBeUndefined()
+    await expect(ctx.memberQuestionSender.applyTerminal({
+      type: 'member-question-settled',
+      operationId: 'operation-missing' as never,
+      questionId: 'mqmissing' as never,
+      outcome: 'expired',
+      settledAt: SETTLED_AT,
+    })).resolves.toBeUndefined()
+  })
+
+  it('applies an authoritative terminal delivered by another Installation', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const { pending } = await startSend(ctx)
+    const delivered = delivery.delivered[0]
+    expect(delivered).toBeDefined()
+    const terminal = {
+      type: 'member-question-settled' as const,
+      operationId: delivered!.operationId,
+      questionId: delivered!.questionId,
+      outcome: 'expired' as const,
+      settledAt: SETTLED_AT,
+    }
+    await delivery.publishTerminal(terminal)
+    await ctx.memberQuestionSender.applyTerminal(terminal)
+    await expect(pending).rejects.toMatchObject({ code: 'QUESTION_EXPIRED' })
+  })
+
+  it('rejects an authoritative terminal naming another operation', async () => {
+    const ctx = new Context()
+    const delivery = new MemoryMemberQuestionDelivery()
+    await ctx.plugin(Sender, { delivery })
+    const { pending } = await startSend(ctx)
+    const delivered = delivery.delivered[0]
+    expect(delivered).toBeDefined()
+    await expect(ctx.memberQuestionSender.applyTerminal({
+      type: 'member-question-settled',
+      operationId: 'operation-other' as never,
+      questionId: delivered!.questionId,
+      outcome: 'expired',
+      settledAt: SETTLED_AT,
+    })).rejects.toThrow('different operation')
+    await ctx.memberQuestionSender.settle(delivered!.questionId, declinedSettlement())
+    await expect(pending).resolves.toMatchObject({ outcome: 'declined' })
   })
 
   it('rejects a non-function injected face at construction', () => {

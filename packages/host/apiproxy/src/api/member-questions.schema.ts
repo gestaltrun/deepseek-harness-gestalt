@@ -36,7 +36,9 @@ const memberQuestionOperationSchema = z.strictObject({
   }),
   background: z.string(),
   questions: z.array(memberQuestionItemSchema).min(1),
-  references: z.array(z.strictObject({ path: z.string(), reason: z.string() })),
+  references: z.array(z.strictObject({
+    path: z.string(), reason: z.string(), content: z.string().optional(),
+  })),
 })
 const answerSchema = z.strictObject({
   id: z.string(),

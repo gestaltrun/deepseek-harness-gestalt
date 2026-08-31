@@ -16,7 +16,7 @@ Status: implemented
 
 Decision Brief 继续放在每个提问的 `member-question` intent 上，而不是放在同级 request frame 上。因此，任一被转发的 item 都是自包含的；Host receiver snapshot 只增加 authority 所有的 routing、revision 与 terminal 字段。
 
-环境 ledger 是 pending 与 terminal projection 及本地 Workspace association 的 authority。它存 Companion codec 已接纳的有界 Decision Brief 字段、reference path/reason 元数据、routing identity、terminal 元数据、每组 Account／Project 所选择的精确 Workspace id，以及由 text 与持久 attachment reference 组成、受 request digest 保护的 reserved human action；不存参考文档正文或浏览器原始图片 bytes。启动通过当前 Companion codec 校验完整文档，并对外来格式、畸形记录、重复 binding、悬空引用、不一致 terminal 或 admission digest 不匹配失败。
+环境 ledger 是 pending 与 terminal projection、已传输 reference 文档及本地 Workspace association 的 authority。它存 Companion codec 已接纳的有界 Decision Brief 字段、reference path/reason 元数据、规范 base64url 文档字节、routing identity、terminal 元数据、每组 Account／Project 所选择的精确 Workspace id，以及由 text 与持久 attachment reference 组成、受 request digest 保护的 reserved human action。只有 transport 重组并校验所有分块后，ingest 才会以完整且 path 一一对齐的集合接纳文档字节。Markdown 与 HTML 把已解码 UTF-8 投影到 details 面板；任意其他文件类型保持字节精确且没有文本投影。不存浏览器原始图片 bytes。启动通过当前 Companion codec 校验完整文档，并对外来格式、畸形记录、重复 binding、悬空引用、文档不对齐、不一致 terminal 或 admission digest 不匹配失败。
 
 一个串行 transaction owner 强制 publication order。幂等 arrival 返回已记录 identity。新同路线提问成为 pending 前，旧 pending 提问的 `expired` 或 `superseded` candidate 必须通过注入的全局 first-claim authority，canonical 保留 terminal 随后提交到 ledger。Decline 是与 initiator withdrawal 不同的 human terminal，并携带获胜的 `InstallationId`、设备名与 settlement epoch。本地 claim 失败时提交返回的 canonical terminal，而不是 candidate。Change listener 只观察提交后的完整 projection，callback exception 会被隔离。
 
@@ -40,7 +40,7 @@ Host clock 与唯一 earliest-deadline scheduler 决定 expiry。scheduler 先 c
 
 **分别暴露 `createReceivingSession()` 与 `prompt()`。** 拒绝，因为两次调用之间的 crash 或 retry 会创建重复 Session、丢失第一条 human message 或重复 admit。一个处于 durable `rpcId` reservation 下的高层 adapter 拥有两个动作。
 
-**在 receiver ledger 中存参考文档正文或浏览器原始图片 bytes。** 拒绝，因为 Companion document transfer 与 attachment service 拥有这些 bytes。crash-safe admission 只保留重放 reserved action 所需的有界 human text 与持久 attachment reference。
+**只存 reference path，再从 receiver Workspace 取文档正文。** 拒绝，因为 sender 文件才是 authority，而 receiver Workspace 的同一路径可能包含不同文件。ledger 保留有界传输字节，使 restart 与 details 聚焦保持精确决策材料。浏览器图片 attachment 仍在该 ledger 外，因为 attachment service 拥有它们。
 
 **把 renderer countdown 当作 expiry authority。** 拒绝，因为暂停或断连的 renderer 无法结算全局状态，并可能在 Installation 间产生分歧。Host clock、canonical terminal authority 与 durable commit 建立唯一 outcome。
 
@@ -50,7 +50,7 @@ Host clock 与唯一 earliest-deadline scheduler 决定 expiry。scheduler 先 c
 
 Receiver 状态可在 Host 重启后恢复，并以稳定 Host identity 暴露唯一权威 pending/terminal projection。同路线 replacement、expiry、answer、decline 与跨设备 winner 按一个顺序提交。浏览器 reload 与 reconnect 会保留相同 id 与记录，且不创建 Host Session 或模型路径。普通提问与 plan-review 提问保留现有 Host-session 流程。
 
-显式 human admission 无需两跳 client protocol 即可重试，Web Host 通过 API Proxy 挂载该 adapter。Workspace selection 能在 Host restart 后恢复，也不会按 display title 猜测。跨机器 first-claim publication 在 project-registry transport 存在前仍由注入提供，因此生产环境中需要它的转换会 fail closed。文件格式为预发布版本 `1`，没有 compatibility shim。
+显式 human admission 无需两跳 client protocol 即可重试，Web Host 通过 API Proxy 挂载该 adapter。Workspace selection 与已传输决策材料能在 Host restart 后恢复，也不会按 display title 猜测或读取 receiver 本地文件。跨机器 first-claim publication 在 project-registry transport 存在前仍由注入提供，因此生产环境中需要它的转换会 fail closed。文件格式为预发布版本 `2`，没有 compatibility shim。
 
 ## Testing
 

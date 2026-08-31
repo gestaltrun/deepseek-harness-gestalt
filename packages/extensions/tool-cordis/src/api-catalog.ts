@@ -1274,6 +1274,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'disposer for this exact registration.',
       },
       {
+        signature: 'abstract registerTerminalAuthority(authority: MemberQuestionTerminalAuthority): () => void',
+        description: 'Install the single transport-owned first-terminal authority after Host composition.',
+        parameters: [{ name: 'authority', description: 'global first-claim adapter owned by the active transport.' }],
+        returns: 'disposer removing this exact registration.',
+      },
+      {
         signature: 'abstract bind( accountId: PlatformAccountId, projectId: ProjectId, workspaceId: Branded<\'WorkspaceId\'>, ): Promise<void>',
         description: 'Persist or replace one exact Account/Project to local Workspace association.',
         parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project being joined.' }, { name: 'workspaceId', description: 'exact local Workspace selected or cloned.' }],
@@ -1315,6 +1321,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Apply one answered or declined settlement to a pending question. Unknown or already-settled question ids are ignored (idempotent).',
         parameters: [{ name: 'questionId', description: 'branded question identity returned by `send()`.' }, { name: 'settlement', description: 'answered answers or a declined verdict with the settling Installation metadata and epoch.' }],
         returns: 'fulfillment after the matching `send()` promise settles, or immediately when none is pending.',
+      },
+      {
+        signature: 'abstract applyTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<void>',
+        description: 'Apply one already-authoritative terminal delivered by the transport. Unknown or already-settled question ids are ignored; a mismatched operation id is rejected before it can settle a local ask.',
+        parameters: [{ name: 'terminal', description: 'retained global first claim received from another Installation.' }],
       },
       {
         signature: 'abstract withdraw(questionId: MemberQuestionId): Promise<void>',
@@ -3922,7 +3933,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AuthenticatedMemberQuestionEnvelope',
-    declaration: 'export interface AuthenticatedMemberQuestionEnvelope {\n    readonly authority: MemberQuestionReceiverAuthority;\n    readonly operation: CompanionMemberQuestionOperation;\n}',
+    declaration: 'export interface AuthenticatedMemberQuestionEnvelope {\n    readonly authority: MemberQuestionReceiverAuthority;\n    readonly operation: CompanionMemberQuestionOperation;\n    readonly documents?: readonly ReassembledMemberQuestionDocument[];\n}',
   },
   {
     name: 'AuthenticatedProjectView',
@@ -4969,6 +4980,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface MemberQuestionDeclinedResult {\n    readonly questionId: MemberQuestionId;\n    readonly encoded: Uint8Array;\n    readonly outcome: \'declined\';\n}',
   },
   {
+    name: 'MemberQuestionDocument',
+    declaration: 'export interface MemberQuestionDocument {\n    readonly path: string;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
     name: 'MemberQuestionHumanTurnAdmissionContext',
     declaration: 'export interface MemberQuestionHumanTurnAdmissionContext {\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly workspaceId: Branded<\'WorkspaceId\'>;\n    readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[];\n}',
   },
@@ -5026,7 +5041,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'MemberQuestionSendPayload',
-    declaration: 'export interface MemberQuestionSendPayload {\n    readonly toProjectMember: string;\n    readonly projectId: ProjectId;\n    readonly background: string;\n    readonly questions: readonly MemberQuestionItem[];\n    readonly references: readonly MemberQuestionReference[];\n    readonly origin: MemberQuestionOrigin;\n    readonly originSessionId: CompanionSessionId;\n}',
+    declaration: 'export interface MemberQuestionSendPayload {\n    readonly toProjectMember: string;\n    readonly projectId: ProjectId;\n    readonly background: string;\n    readonly questions: readonly MemberQuestionItem[];\n    readonly references: readonly MemberQuestionReference[];\n    readonly documents?: readonly MemberQuestionDocument[];\n    readonly origin: MemberQuestionOrigin;\n    readonly originSessionId: CompanionSessionId;\n}',
   },
   {
     name: 'MemberQuestionSendResult',
@@ -5035,6 +5050,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'MemberQuestionSettlement',
     declaration: 'export type MemberQuestionSettlement = {\n    outcome: \'answered\';\n    answers: readonly MemberQuestionAnswer[];\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n} | {\n    outcome: \'declined\';\n    settledByInstallationId: InstallationId;\n    settledByDeviceName: string;\n    settledAt: number;\n};',
+  },
+  {
+    name: 'MemberQuestionTerminalAuthority',
+    declaration: 'export interface MemberQuestionTerminalAuthority {\n    claim(candidate: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>;\n}',
   },
   {
     name: 'MembershipId',
@@ -5214,7 +5233,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PendingMemberQuestionView',
-    declaration: 'export interface PendingMemberQuestionView {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly revision: number;\n    readonly arrivedAt: number;\n    readonly operation: CompanionMemberQuestionOperation;\n    readonly hostSessionId?: HostSessionId;\n    readonly reservedAdmission?: {\n        readonly rpcId: MemberQuestionReceiverRpcId;\n        readonly mode: \'queue\' | \'steer\';\n    };\n}',
+    declaration: 'export interface PendingMemberQuestionView {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly revision: number;\n    readonly arrivedAt: number;\n    readonly operation: ReceivedMemberQuestionOperation;\n    readonly hostSessionId?: HostSessionId;\n    readonly reservedAdmission?: {\n        readonly rpcId: MemberQuestionReceiverRpcId;\n        readonly mode: \'queue\' | \'steer\';\n    };\n}',
   },
   {
     name: 'PendingPairingId',
@@ -5371,6 +5390,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ReasoningEffortId',
     declaration: 'export type ReasoningEffortId = Branded<\'ReasoningEffortId\'>;',
+  },
+  {
+    name: 'ReassembledMemberQuestionDocument',
+    declaration: 'export interface ReassembledMemberQuestionDocument {\n    readonly path: string;\n    readonly bytes: Uint8Array;\n}',
+  },
+  {
+    name: 'ReceivedMemberQuestionOperation',
+    declaration: 'export type ReceivedMemberQuestionOperation = Omit<CompanionMemberQuestionOperation, \'references\'> & {\n    readonly references: readonly ReceivedMemberQuestionReference[];\n};',
+  },
+  {
+    name: 'ReceivedMemberQuestionReference',
+    declaration: 'export type ReceivedMemberQuestionReference = CompanionMemberQuestionOperation[\'references\'][number] & {\n    readonly content?: string;\n};',
   },
   {
     name: 'ReceivingSessionId',
@@ -6274,7 +6305,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TerminalMemberQuestionView',
-    declaration: 'export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionView, \'operation\'> {\n    readonly terminal: CompanionMemberQuestionSettledResult;\n    readonly brief: Omit<CompanionMemberQuestionOperation, \'questions\'> & {\n        readonly questions: CompanionMemberQuestionOperation[\'questions\'];\n    };\n}',
+    declaration: 'export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionView, \'operation\'> {\n    readonly terminal: CompanionMemberQuestionSettledResult;\n    readonly brief: Omit<ReceivedMemberQuestionOperation, \'questions\'> & {\n        readonly questions: ReceivedMemberQuestionOperation[\'questions\'];\n    };\n}',
   },
   {
     name: 'TerminalReadRequest',

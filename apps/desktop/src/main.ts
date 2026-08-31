@@ -90,6 +90,7 @@ import { connectDesktopRelayNodeHelper } from './relay-node-helper.ts'
 import { createDesktopSystemNodeFetch } from './system-node-fetch-helper.ts'
 import {
   createDesktopProjectMembershipClient,
+  createDesktopProjectMembershipPresence,
   parseInvitationDecision,
   parseInvitationId,
   parseMembershipId,
@@ -100,8 +101,10 @@ import {
   parseProjectInvitation,
   parseProjectRemote,
 } from './project-membership.ts'
+import { applyDesktopE2EProfile, resolveDesktopNetworkProxy } from './e2e-profile.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
+applyDesktopE2EProfile({ packaged: app.isPackaged, argv: process.argv, environment: process.env })
 let systemFetch: typeof globalThis.fetch
 const PRELOAD = join(here, 'preload.cjs')
 const OPERATED_PLATFORM_CONFIG = join(here, 'operated-platform.json')
@@ -130,6 +133,7 @@ let pairing: DesktopPairingActions = new UnavailableDesktopPairingController(
 )
 let stopPairingEvents: (() => void) | undefined
 let accountSignedIn = false
+let projectMembershipPresence: import('./project-membership.ts').DesktopProjectMembershipPresence | undefined
 const hostStartController = new AbortController()
 let pendingHost: Promise<RunningWebHost> | undefined
 const accountEnvironment = readDesktopPlatformEnvironment(OPERATED_PLATFORM_CONFIG)
@@ -195,14 +199,29 @@ async function boot(): Promise<void> {
   systemFetch = createDesktopSystemNodeFetch({
     nodePath: relayRuntime.node,
     helperPath: relayRuntime.fetchHelper,
-    resolveProxy: async url => await session.defaultSession.resolveProxy(url),
+    resolveProxy: async url => await resolveDesktopNetworkProxy({
+      packaged: app.isPackaged,
+      environment: process.env,
+      url,
+      resolve: async target => await session.defaultSession.resolveProxy(target),
+    }),
     timeoutMs: accountEnvironment.companionAttachmentHostTimeoutMs,
   })
   account = createDesktopAccount(accountEnvironment)
+  projectMembershipPresence = createDesktopProjectMembershipPresence({
+    account: () => account,
+    environment: accountEnvironment,
+    fetch: systemFetch,
+  })
   const relay = createDesktopRemoteRelay({
     environment: accountEnvironment,
     config: accountEnvironment.remoteRelay,
-    resolveProxy: async url => await session.defaultSession.resolveProxy(url),
+    resolveProxy: async url => await resolveDesktopNetworkProxy({
+      packaged: app.isPackaged,
+      environment: process.env,
+      url,
+      resolve: async target => await session.defaultSession.resolveProxy(target),
+    }),
     connectWithProxy: async (url, signal, limits, proxyUrl) => await connectDesktopRelayNodeHelper({
       nodePath: relayRuntime.node,
       helperPath: relayRuntime.relayHelper,
@@ -251,6 +270,7 @@ async function boot(): Promise<void> {
   if (accountReady) smokeLog('account ready')
   pairing = createDesktopPairing(accountEnvironment, account, relay, snowPairingVault)
   accountSignedIn = account.getSnapshot().status === 'signed-in'
+  projectMembershipPresence.setSignedIn(accountSignedIn)
   stopPairingEvents = pairing.subscribe(pushPairingSnapshot)
   stopAccountEvents = account.subscribe(handleAccountSnapshot)
   installIntegrationsOnce()
@@ -695,6 +715,8 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
   stopAccountEvents = undefined
   stopPairingEvents?.()
   stopPairingEvents = undefined
+  const presenceDisposal = projectMembershipPresence?.dispose() ?? Promise.resolve()
+  projectMembershipPresence = undefined
   const ownerDisposal = disposeDesktopOwners(account, pairing)
   hostStartController.abort()
   const starting = pendingHost
@@ -703,7 +725,7 @@ function requestShutdown(exitCode: number, mode: 'exit' | 'allow-quit' = 'exit')
   host = undefined
   void (async () => {
     try {
-      await ownerDisposal
+      await Promise.all([ownerDisposal, presenceDisposal])
       smokeLog(`relay quit ${JSON.stringify(pairing.getRelayState())}`)
       const started = await starting?.catch(() => undefined)
       if (started !== running) await started?.stop()
@@ -931,6 +953,7 @@ function pushAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnap
 function handleAccountSnapshot(snapshot: ReturnType<DesktopAccountActions['getSnapshot']>): void {
   pushAccountSnapshot(snapshot)
   const signedIn = snapshot.status === 'signed-in'
+  projectMembershipPresence?.setSignedIn(signedIn)
   if (signedIn && !accountSignedIn) {
     accountSignedIn = true
     void startPairingForCurrentDesktop()
@@ -965,7 +988,18 @@ function createDesktopAccount(environment: SelectedPlatformEnvironment): Desktop
     transport,
     store,
     presentation: desktopInstallationPresentation({ hostname: hostname(), platform: process.platform }),
-    systemBrowser: { open: async (url) => { await shell.openExternal(url) } },
+    systemBrowser: {
+      open: async (url) => {
+        if (!app.isPackaged && process.env.DSH_DESKTOP_E2E_AUTO_AUTHORIZE === '1') {
+          const response = await systemFetch(url)
+          if (!response.ok) {
+            throw new Error(`Desktop E2E authorization callback failed with HTTP ${String(response.status)}`)
+          }
+          return
+        }
+        await shell.openExternal(url)
+      },
+    },
   })
 }
 

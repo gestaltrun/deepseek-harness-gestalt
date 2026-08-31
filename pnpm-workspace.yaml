@@ -65,6 +65,9 @@ allowBuilds:
   # Desktop ships NSIS, not Squirrel.Windows; electron-winstaller's lifecycle
   # is unused by the selected target.
   electron-winstaller: false
+  # Electron-service uses Electron's matching Chromedriver; unrelated browser drivers stay inert.
+  edgedriver: false
+  geckodriver: false
 
 minimumReleaseAgeExclude:
   # Fresh pi-ai releases carry the model catalog updates that are the whole

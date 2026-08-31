@@ -16,11 +16,15 @@ import type { SealedProjectPeerGrant } from '@deepseek-ai/dsh-remote-access'
 import {
   createCompanionNegotiationChannel,
   createCompanionVersionOffer,
+  deriveMemberQuestionDocumentTransferId,
   encodeCompanionMessage,
+  encodeProtocolBase64Url,
   negotiateCompanionProtocol,
   parseCompanionOperationId,
   parseCompanionSessionId,
   parseMemberQuestionId,
+  REMOTE_PROTOCOL_LIMITS,
+  type CompanionDocumentChunkOperation,
   type CompanionMemberQuestionSettledResult,
   type CompanionMemberQuestionOperation,
   type CompanionMessage,
@@ -35,6 +39,8 @@ import { MemberQuestionSenderError } from './errors.ts'
 import type { MemberQuestionSenderErrorCode } from './errors.ts'
 import type {
   EncodedMemberQuestion,
+  EncodedMemberQuestionDocument,
+  MemberQuestionDocument,
   MemberQuestionAnswer,
   MemberQuestionAskedRecord,
   MemberQuestionDeliveryPort,
@@ -49,9 +55,11 @@ export { MemberQuestionSenderError } from './errors.ts'
 export type { MemberQuestionSenderErrorCode } from './errors.ts'
 export type {
   EncodedMemberQuestion,
+  EncodedMemberQuestionDocument,
   MemberQuestionAnswer,
   MemberQuestionAskedRecord,
   MemberQuestionDeliveryPort,
+  MemberQuestionDocument,
   MemberQuestionTerminalClaim,
   MemberQuestionItem,
   MemberQuestionLifetimeOutcome,
@@ -290,6 +298,14 @@ export abstract class MemberQuestionSenderService extends Service {
   abstract settle(questionId: MemberQuestionId, settlement: MemberQuestionSettlement): Promise<void>
 
   /**
+   * Apply one already-authoritative terminal delivered by the transport.
+   * Unknown or already-settled question ids are ignored; a mismatched operation
+   * id is rejected before it can settle a local ask.
+   * @param terminal - retained global first claim received from another Installation.
+   */
+  abstract applyTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<void>
+
+  /**
    * Withdraw one pending question as initiator cancellation.
    * Unknown or already-settled question ids are ignored.
    * @param questionId - branded question identity returned by `send()`.
@@ -444,6 +460,15 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
       )
     }
     const encoded = encodeMemberQuestion(this.protocol, payload, Date.now() + this.ttlMs)
+    const documentPayloads = payload.documents ?? []
+    if (documentPayloads.length !== payload.references.length
+      || documentPayloads.some((document, index) => document.path !== payload.references[index]?.path)) {
+      throw new MemberQuestionSenderError(
+        'ENCODE_FAILED: document bytes must align with member-question references',
+        'ENCODE_FAILED',
+      )
+    }
+    const documents = encodeMemberQuestionDocuments(this.protocol, encoded.questionId, documentPayloads)
     const pending = this.registerPending(
       encoded,
       routeKey,
@@ -457,6 +482,7 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
         ...encoded,
         toProjectMember: payload.toProjectMember,
         projectId: payload.projectId,
+        documents,
       })
     } catch (cause: unknown) {
       await this.complete(pending, systemCompletion(
@@ -481,6 +507,15 @@ export class CompanionMemberQuestionSender extends MemberQuestionSenderService {
         ...settlement,
       },
     }).then(() => undefined)
+  }
+
+  override applyTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<void> {
+    const pending = this.pendingById.get(terminal.questionId)
+    if (pending === undefined) return Promise.resolve()
+    if (terminal.operationId !== pending.operationId) {
+      return Promise.reject(new Error('member-question sender authoritative terminal names a different operation'))
+    }
+    return this.complete(pending, { terminal }).then(() => undefined)
   }
 
   override withdraw(questionId: MemberQuestionId): Promise<void> {
@@ -825,6 +860,66 @@ export function encodeMemberQuestion(
 }
 
 /**
+ * Encode arbitrary reference bytes into bounded Companion document frames.
+ * @param protocol - negotiated Companion major 4 protocol.
+ * @param questionId - member question owning every document.
+ * @param documents - reference paths and bytes in operation reference order.
+ * @returns one ordered frame group per input document.
+ */
+export function encodeMemberQuestionDocuments(
+  protocol: NegotiatedCompanionProtocol,
+  questionId: MemberQuestionId,
+  documents: readonly MemberQuestionDocument[],
+): EncodedMemberQuestionDocument[] {
+  if (documents.length > REMOTE_PROTOCOL_LIMITS.memberQuestionReferences) {
+    throw new MemberQuestionSenderError(
+      'ENCODE_FAILED: document count exceeds the member-question reference ceiling',
+      'ENCODE_FAILED',
+    )
+  }
+  return documents.map((document, referenceIndex) => {
+    if (document.bytes.byteLength > REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes) {
+      throw new MemberQuestionSenderError(
+        `ENCODE_FAILED: document exceeds the ${String(REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes)}-byte transfer ceiling`,
+        'ENCODE_FAILED',
+      )
+    }
+    const total = Math.max(1, Math.ceil(
+      document.bytes.byteLength / REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes,
+    ))
+    if (total > REMOTE_PROTOCOL_LIMITS.documentTransferChunks) {
+      throw new MemberQuestionSenderError(
+        `ENCODE_FAILED: document exceeds the ${String(REMOTE_PROTOCOL_LIMITS.documentTransferChunks)}-chunk transfer ceiling`,
+        'ENCODE_FAILED',
+      )
+    }
+    const transferId = deriveMemberQuestionDocumentTransferId(questionId, referenceIndex)
+    const messages = Array.from({ length: total }, (_, index): CompanionMessage => {
+      const start = index * REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes
+      const operation: CompanionDocumentChunkOperation = {
+        type: 'document-chunk',
+        operationId: parseCompanionOperationId(`op${randomUUID().replaceAll('-', '')}`),
+        transferId,
+        questionId,
+        index,
+        total,
+        bytes: encodeProtocolBase64Url(document.bytes.slice(
+          start,
+          Math.min(document.bytes.byteLength, start + REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes),
+        )),
+      }
+      return { type: 'operation', operation }
+    })
+    return {
+      path: document.path,
+      transferId,
+      messages,
+      encoded: messages.map(message => encodeCompanionMessage(protocol, message)),
+    }
+  })
+}
+
+/**
  * Negotiate a major-4 Companion protocol for encoding member-question operations.
  * @returns a process-owned negotiated protocol.
  */
@@ -842,7 +937,11 @@ export function createMemberQuestionProtocol(): NegotiatedCompanionProtocol {
  */
 export class MemoryMemberQuestionDelivery implements MemberQuestionDeliveryPort {
   /** Encoded operations accepted by this stub, in send order. */
-  readonly delivered: EncodedMemberQuestion[] = []
+  readonly delivered: Array<EncodedMemberQuestion & {
+    toProjectMember: string
+    projectId: MemberQuestionSendPayload['projectId']
+    documents: readonly EncodedMemberQuestionDocument[]
+  }> = []
   private readonly terminals = new Map<MemberQuestionId, CompanionMemberQuestionSettledResult>()
 
   /**
@@ -850,13 +949,12 @@ export class MemoryMemberQuestionDelivery implements MemberQuestionDeliveryPort 
    * @param encoded - codec output plus addressee identity.
    * @returns fulfillment after the operation is recorded.
    */
-  deliver(encoded: EncodedMemberQuestion & { toProjectMember: string; projectId: MemberQuestionSendPayload['projectId'] }): Promise<void> {
-    this.delivered.push({
-      operationId: encoded.operationId,
-      questionId: encoded.questionId,
-      message: encoded.message,
-      encoded: encoded.encoded,
-    })
+  deliver(encoded: EncodedMemberQuestion & {
+    toProjectMember: string
+    projectId: MemberQuestionSendPayload['projectId']
+    documents: readonly EncodedMemberQuestionDocument[]
+  }): Promise<void> {
+    this.delivered.push(encoded)
     return Promise.resolve()
   }
 

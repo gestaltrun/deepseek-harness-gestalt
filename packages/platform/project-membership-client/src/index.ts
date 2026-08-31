@@ -97,6 +97,7 @@ export type InvitationDecisionInput =
 
 /** Transport operations used by the workspace upgrade and invite surfaces. */
 export interface ProjectMembershipTransport {
+  heartbeat(authorization: MembershipAuthorization): Promise<void>
   createProject(authorization: MembershipAuthorization, input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView>
   projectByRemote(
     authorization: MembershipAuthorization,
@@ -213,6 +214,10 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
   constructor(options: ProjectMembershipHttpTransportOptions) {
     this.origin = options.origin
     this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis)
+  }
+
+  async heartbeat(authorization: MembershipAuthorization): Promise<void> {
+    await this.request('/v1/projects/presence/heartbeat', { method: 'POST', headers: authorization })
   }
 
   createProject(authorization: MembershipAuthorization, input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView> {

@@ -32,21 +32,24 @@ describe('validateReferences', () => {
     await expect(validateReferences(undefined, workspaceFixture().workspace)).resolves.toBeUndefined()
   })
 
-  it('keeps a relative file path and omits an absent reason', async () => {
+  it('returns a canonical relative path without reading transfer bytes or inventing a reason', async () => {
     const { workspace } = workspaceFixture()
-    await expect(validateReferences([{ path: 'inside.md' }], workspace)).resolves.toEqual([
-      { path: 'inside.md' },
-    ])
+    const result = await validateReferences([{ path: 'inside.md' }], workspace)
+    expect(result).toHaveLength(1)
+    expect(result?.[0]).toMatchObject({ path: 'inside.md' })
+    expect(result?.[0]?.reason).toBeUndefined()
+    expect(result?.[0]).not.toHaveProperty('bytes')
   })
 
-  it('keeps an absolute workspace file path and a supplied reason', async () => {
+  it('canonicalizes an absolute workspace file path and retains its reason', async () => {
     const { workspace, inside } = workspaceFixture()
-    await expect(validateReferences(
+    const result = await validateReferences(
       [{ path: inside, reason: 'Rollout plan' }],
       workspace,
-    )).resolves.toEqual([
-      { path: inside, reason: 'Rollout plan' },
-    ])
+    )
+    expect(result).toHaveLength(1)
+    expect(result?.[0]).toMatchObject({ path: 'inside.md', reason: 'Rollout plan' })
+    expect(result?.[0]).not.toHaveProperty('bytes')
   })
 
   it('rejects more than REFERENCES_MAX_COUNT items', async () => {

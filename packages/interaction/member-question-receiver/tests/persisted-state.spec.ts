@@ -36,7 +36,7 @@ function validState(): PersistedReceiverState {
     references: [],
   }
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     revision: 4,
     sessions: [{
       id: 'receiving-persisted',
@@ -54,6 +54,7 @@ function validState(): PersistedReceiverState {
         revision: 2,
         arrivedAt: 2,
         operation,
+        documents: [],
       },
       {
         questionId: 'question-terminal',
@@ -66,6 +67,7 @@ function validState(): PersistedReceiverState {
           operationId: parseCompanionOperationId('operation-terminal'),
           questionId: parseMemberQuestionId('question-terminal'),
         },
+        documents: [],
         terminal: {
           type: 'member-question-settled',
           operationId: parseCompanionOperationId('operation-terminal'),
@@ -167,8 +169,8 @@ describe('member-question receiver durable state', () => {
     expect(() => parseReceiverState('{')).toThrow('not valid JSON')
     expect(() => parseReceiverState('[]')).toThrow('must be an object')
     const foreign = document()
-    foreign.formatVersion = 2
-    expect(() => parseReceiverState(JSON.stringify(foreign))).toThrow('formatVersion 2 is unsupported')
+    foreign.formatVersion = 1
+    expect(() => parseReceiverState(JSON.stringify(foreign))).toThrow('formatVersion 1 is unsupported')
     for (const key of ['sessions', 'questions', 'admissions', 'workspaceBindings']) {
       const missing = document()
       missing[key] = {}

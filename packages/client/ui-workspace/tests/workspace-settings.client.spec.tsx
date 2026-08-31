@@ -10,6 +10,7 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { ProjectMembershipGateway, WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 import { WorkspaceBrowser } from '../src/client/WorkspaceBrowser.tsx'
+import { cloneDirectoryName } from '../src/client/WorkspaceSettings.tsx'
 import { zh } from '../src/client/locales.ts'
 
 afterEach(cleanup)
@@ -49,6 +50,7 @@ function gateway(overrides: Partial<ProjectMembershipGateway> = {}) {
   return {
     createProject: vi.fn<ProjectMembershipGateway['createProject']>()
       .mockResolvedValue({ id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE }),
+    projectForWorkspace: vi.fn<ProjectMembershipGateway['projectForWorkspace']>().mockResolvedValue(undefined),
     roster: vi.fn<ProjectMembershipGateway['roster']>().mockResolvedValue({
       project: { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE },
       members: [{
@@ -58,13 +60,17 @@ function gateway(overrides: Partial<ProjectMembershipGateway> = {}) {
     }),
     invite: vi.fn<ProjectMembershipGateway['invite']>()
       .mockResolvedValue({ invitationId: 'invitation-9', inviteeName: 'mona' }),
+    issuedInvitations: vi.fn<ProjectMembershipGateway['issuedInvitations']>().mockResolvedValue([]),
     retractInvitation: vi.fn<ProjectMembershipGateway['retractInvitation']>().mockResolvedValue(undefined),
     decideInvitation: vi.fn<ProjectMembershipGateway['decideInvitation']>().mockResolvedValue(undefined),
     changeRole: vi.fn<ProjectMembershipGateway['changeRole']>().mockResolvedValue(undefined),
     setMemberTags: vi.fn<ProjectMembershipGateway['setMemberTags']>().mockResolvedValue(undefined),
     removeMember: vi.fn<ProjectMembershipGateway['removeMember']>().mockResolvedValue(undefined),
     pendingInvitations: vi.fn<ProjectMembershipGateway['pendingInvitations']>().mockResolvedValue([]),
-    localRemoteFor: (workspaceId: WorkspaceId) => (workspaceId === wid('proj') ? SAME_REMOTE : undefined),
+    localRemoteFor: async (workspaceId: WorkspaceId) => (workspaceId === wid('proj') ? SAME_REMOTE : undefined),
+    cloneWorkspace: vi.fn<ProjectMembershipGateway['cloneWorkspace']>().mockResolvedValue({
+      workspaceId: wid('cloned'), title: 'Assembled', normalizedRemoteUrl: SAME_REMOTE,
+    }),
     ...overrides,
   }
 }
@@ -114,6 +120,14 @@ async function tick(ms = 1): Promise<void> {
 }
 
 describe('workspace settings and invite wizard (M4)', () => {
+  it('derives a safe clone directory name from HTTPS and scp-like remotes', () => {
+    expect(cloneDirectoryName('https://github.com/o/repo.git', 'fallback')).toBe('repo')
+    expect(cloneDirectoryName('git@github.com:o/Repo.git', 'fallback')).toBe('Repo')
+    expect(cloneDirectoryName('https://example.test/o/CON.git', 'fallback')).toBe('project-CON')
+    expect(cloneDirectoryName('https://example.test/o/a*b.git', 'fallback')).toBe('a-b')
+    expect(cloneDirectoryName(':', '..')).toBe('project')
+  })
+
   it('offers 工作区设置 as the first workspace-row menu item', () => {
     mount(undefined)
     openWorkspaceMenu()
@@ -129,19 +143,15 @@ describe('workspace settings and invite wizard (M4)', () => {
       mount(membership)
       openWorkspaceMenu()
       fireEvent.click(screen.getByRole('menuitem', { name: '工作区设置' }))
+      await tick()
       fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
-      // An invalid remote is rejected locally: no gateway call, rule surfaced.
-      fireEvent.change(screen.getByLabelText('Git remote 地址'), { target: { value: 'ftp://nope' } })
-      const createButton = screen.getByRole('button', { name: '创建云项目' })
-      fireEvent.click(createButton)
-      expect(membership.createProject).not.toHaveBeenCalled()
-      expect(screen.getByText('remote 必须是 http(s) 代码仓库地址。')).toBeTruthy()
-
-      fireEvent.change(screen.getByLabelText('Git remote 地址'), { target: { value: SAME_REMOTE } })
+      const remote = screen.getByLabelText('Git remote 地址') as HTMLInputElement
+      expect(remote.readOnly).toBe(true)
+      expect(remote.value).toBe(SAME_REMOTE)
       fireEvent.click(screen.getByRole('button', { name: '创建云项目' }))
       await tick()
       expect(membership.createProject).toHaveBeenCalledWith({
-        name: 'Assembled', remoteUrl: SAME_REMOTE,
+        name: 'Assembled', localWorkspaceId: wid('proj'),
       })
       // Binding resolves: the roster read rides the same gateway.
       expect(membership.roster).toHaveBeenCalledWith('project-1')
@@ -152,10 +162,60 @@ describe('workspace settings and invite wizard (M4)', () => {
     }
   })
 
+  it('blocks Cloud Project creation for a Workspace without a supported origin', async () => {
+    const membership = gateway({ localRemoteFor: vi.fn(async () => undefined) })
+    vi.useFakeTimers()
+    try {
+      mount(membership)
+      openWorkspaceMenu()
+      fireEvent.click(screen.getByRole('menuitem', { name: '工作区设置' }))
+      await tick()
+      fireEvent.change(screen.getByLabelText('云项目名称'), { target: { value: 'Assembled' } })
+      expect(screen.getByText('此工作区必须是带有 origin remote 的 Git checkout，才能升级为云项目。')).toBeTruthy()
+      expect((screen.getByRole('button', { name: '创建云项目' }) as HTMLButtonElement).disabled).toBe(true)
+      expect(membership.createProject).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('restores an existing Cloud Project for the exact Workspace after reopening settings', async () => {
+    const issuedInvitations = vi.fn<ProjectMembershipGateway['issuedInvitations']>()
+      .mockResolvedValueOnce([{ invitationId: 'invitation-issued', inviteeName: 'octocat' }])
+      .mockResolvedValueOnce([])
+    const membership = gateway({
+      projectForWorkspace: vi.fn(async () => ({
+        id: 'project-1', name: 'Restored', boundRemoteUrl: SAME_REMOTE,
+      })),
+      issuedInvitations,
+    })
+    vi.useFakeTimers()
+    try {
+      mount(membership)
+      openWorkspaceMenu()
+      fireEvent.click(screen.getByRole('menuitem', { name: '工作区设置' }))
+      await tick()
+      expect(membership.projectForWorkspace).toHaveBeenCalledWith(wid('proj'))
+      expect(screen.getByText('已绑定云项目：Restored')).toBeTruthy()
+      expect(membership.roster).toHaveBeenCalledWith('project-1')
+      expect(issuedInvitations).toHaveBeenCalledWith('project-1')
+      expect(screen.getByText('octocat')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: '撤回' }))
+      await tick()
+      expect(membership.retractInvitation).toHaveBeenCalledWith('invitation-issued')
+      expect(issuedInvitations).toHaveBeenCalledTimes(2)
+      expect(screen.queryByText('octocat')).toBeNull()
+      expect(screen.queryByRole('button', { name: '创建云项目' })).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('runs the invite wizard: accept, mandatory link with same-remote advice, close returns undecided', async () => {
     const membership = gateway({
       pendingInvitations: vi.fn(async () => [{
-        invitationId: 'invitation-1', projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE,
+        invitationId: 'invitation-1', receivingAccountId: 'account-2', projectId: 'project-1',
+        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE,
       }]),
     })
     vi.useFakeTimers()
@@ -164,6 +224,7 @@ describe('workspace settings and invite wizard (M4)', () => {
       // Poll fires immediately: the wizard opens on the invitation card.
       await tick()
       expect(screen.getByText('mona 邀请你加入云项目“Assembled”。')).toBeTruthy()
+      expect(screen.getByText(SAME_REMOTE)).toBeTruthy()
 
       // Closing at the card decides nothing: the invitation stays pending.
       fireEvent.click(screen.getByRole('button', { name: '关闭' }))
@@ -174,6 +235,7 @@ describe('workspace settings and invite wizard (M4)', () => {
       // Next poll re-offers the still-pending invitation.
       await tick(15_000)
       fireEvent.click(screen.getByRole('button', { name: '接受' }))
+      await tick()
 
       // Link step: no 暂不关联 — confirm stays disabled until a candidate (or the
       // clone item) is selected, and the same-remote workspace is recommended.
@@ -189,6 +251,9 @@ describe('workspace settings and invite wizard (M4)', () => {
       await tick()
       expect(membership.decideInvitation).toHaveBeenCalledWith('invitation-1', {
         decision: 'accept-with-link',
+        localWorkspaceId: 'proj',
+        receivingAccountId: 'account-2',
+        projectId: 'project-1',
         link: { workspaceName: 'proj', normalizedRemoteUrl: SAME_REMOTE },
       })
       expect(screen.queryByText('关联本地工作区')).toBeNull()
@@ -197,10 +262,53 @@ describe('workspace settings and invite wizard (M4)', () => {
     }
   })
 
+  it('clones before accepting and keeps the invitation pending when directory selection is cancelled', async () => {
+    const cloneWorkspace = vi.fn<ProjectMembershipGateway['cloneWorkspace']>()
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        workspaceId: wid('clone'), title: 'Assembled', normalizedRemoteUrl: SAME_REMOTE,
+      })
+    const membership = gateway({
+      pendingInvitations: vi.fn(async () => [{
+        invitationId: 'invitation-clone', receivingAccountId: 'account-2', projectId: 'project-1',
+        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE,
+      }]),
+      cloneWorkspace,
+    })
+    vi.useFakeTimers()
+    try {
+      mount(membership)
+      await tick()
+      fireEvent.click(screen.getByRole('button', { name: '接受' }))
+      await tick()
+      fireEvent.click(screen.getByRole('radio', { name: /新建克隆/ }))
+      fireEvent.click(screen.getByRole('button', { name: '关联并加入' }))
+      await tick()
+      expect(membership.decideInvitation).not.toHaveBeenCalled()
+      expect(screen.getByText('关联本地工作区')).toBeTruthy()
+
+      fireEvent.click(screen.getByRole('button', { name: '关联并加入' }))
+      await tick()
+      expect(cloneWorkspace).toHaveBeenLastCalledWith({
+        remoteUrl: SAME_REMOTE, directoryName: 'repo',
+      })
+      expect(membership.decideInvitation).toHaveBeenCalledWith('invitation-clone', {
+        decision: 'accept-with-link',
+        localWorkspaceId: 'clone',
+        receivingAccountId: 'account-2',
+        projectId: 'project-1',
+        link: { workspaceName: 'Assembled', normalizedRemoteUrl: SAME_REMOTE },
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('declining from the wizard card routes the decline decision', async () => {
     const membership = gateway({
       pendingInvitations: vi.fn(async () => [{
-        invitationId: 'invitation-1', projectName: 'Assembled', inviterName: 'mona',
+        invitationId: 'invitation-1', receivingAccountId: 'account-2', projectId: 'project-1',
+        projectName: 'Assembled', inviterName: 'mona', remoteUrl: SAME_REMOTE,
       }]),
     })
     vi.useFakeTimers()

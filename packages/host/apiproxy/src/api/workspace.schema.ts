@@ -42,6 +42,34 @@ export const workspaceCreateValueSchema = z.object({
   created: z.boolean(),
 }) satisfies z.ZodType<Wire<ResponseValue<'workspace.create'>>>
 
+/** workspace.gitRemote request payload. */
+export const workspaceGitRemoteRequestSchema = z.object({
+  workspaceId: workspaceIdSchema,
+}) satisfies z.ZodType<Wire<RequestPayload<'workspace.gitRemote'>>>
+
+/** workspace.gitRemote response value; absent means no readable origin. */
+export const workspaceGitRemoteValueSchema = z.object({
+  remoteUrl: z.string().optional(),
+}) satisfies z.ZodType<Wire<ResponseValue<'workspace.gitRemote'>>>
+
+/** workspace.cloneGit request payload. */
+export const workspaceCloneGitRequestSchema = z.object({
+  remoteUrl: z.string().trim().min(1),
+  parentPath: z.string().trim().min(1),
+  directoryName: z.string().trim().min(1),
+}).refine(
+  payload => payload.directoryName !== '.'
+    && payload.directoryName !== '..'
+    && !payload.directoryName.includes('/')
+    && !payload.directoryName.includes('\\'),
+  { message: 'workspace.cloneGit requires directoryName to be one path segment' },
+) satisfies z.ZodType<Wire<RequestPayload<'workspace.cloneGit'>>>
+
+/** workspace.cloneGit response value. */
+export const workspaceCloneGitValueSchema = z.object({
+  workspace: workspaceViewSchema,
+}) satisfies z.ZodType<Wire<ResponseValue<'workspace.cloneGit'>>>
+
 /** workspace.rename request payload: the new title must be non-blank. */
 export const workspaceRenameRequestSchema = z.object({
   workspaceId: workspaceIdSchema,

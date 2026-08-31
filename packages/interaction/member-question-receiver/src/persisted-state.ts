@@ -12,7 +12,7 @@ import {
   negotiateCompanionProtocol,
 } from '@deepseek-ai/dsh-remote-protocol'
 
-const MEMBER_QUESTION_RECEIVER_FORMAT_VERSION = 0
+const MEMBER_QUESTION_RECEIVER_FORMAT_VERSION = 1
 const PERSISTED_PROTOCOL = negotiateCompanionProtocol(
   createCompanionNegotiationChannel(),
   createCompanionVersionOffer('mobile'),
@@ -51,12 +51,20 @@ export interface PersistedReceivingQuestion {
   readonly terminal?: CompanionMemberQuestionSettledResult
 }
 
+/** Exact local Workspace selected by one member for one Cloud Project. */
+export interface PersistedMemberQuestionWorkspaceBinding {
+  readonly receivingAccountId: string
+  readonly projectId: string
+  readonly workspaceId: string
+}
+
 export interface PersistedReceiverState {
   readonly formatVersion: typeof MEMBER_QUESTION_RECEIVER_FORMAT_VERSION
   readonly revision: number
   readonly sessions: readonly PersistedReceivingSession[]
   readonly questions: readonly PersistedReceivingQuestion[]
   readonly admissions: readonly PersistedHumanTurnAdmission[]
+  readonly workspaceBindings: readonly PersistedMemberQuestionWorkspaceBinding[]
 }
 
 export const EMPTY_PERSISTED_RECEIVER_STATE: PersistedReceiverState = {
@@ -65,6 +73,7 @@ export const EMPTY_PERSISTED_RECEIVER_STATE: PersistedReceiverState = {
   sessions: [],
   questions: [],
   admissions: [],
+  workspaceBindings: [],
 }
 
 export function serializeReceiverState(state: PersistedReceiverState): string {
@@ -83,8 +92,9 @@ export function parseReceiverState(text: string): PersistedReceiverState {
     throw new Error(`member-question-receiver: durable state formatVersion ${JSON.stringify(value.formatVersion)} is unsupported`)
   }
   const revision = safeInteger(value.revision, 'revision')
-  if (!Array.isArray(value.sessions) || !Array.isArray(value.questions) || !Array.isArray(value.admissions)) {
-    throw new Error('member-question-receiver: durable state sessions, questions, and admissions must be arrays')
+  if (!Array.isArray(value.sessions) || !Array.isArray(value.questions) || !Array.isArray(value.admissions)
+    || !Array.isArray(value.workspaceBindings)) {
+    throw new Error('member-question-receiver: durable state sessions, questions, admissions, and workspaceBindings must be arrays')
   }
   const sessions = value.sessions.map(parseSession)
   const sessionIds = new Set(sessions.map(session => session.id))
@@ -123,7 +133,28 @@ export function parseReceiverState(text: string): PersistedReceiverState {
   if (new Set(admissions.map(entry => entry.rpcId)).size !== admissions.length) {
     throw new Error('member-question-receiver: durable state contains duplicate admission rpcIds')
   }
-  return { formatVersion: MEMBER_QUESTION_RECEIVER_FORMAT_VERSION, revision, sessions, questions, admissions }
+  const workspaceBindings = value.workspaceBindings.map(parseWorkspaceBinding)
+  const bindingKeys = workspaceBindings.map(binding => `${binding.receivingAccountId}\0${binding.projectId}`)
+  if (new Set(bindingKeys).size !== bindingKeys.length) {
+    throw new Error('member-question-receiver: durable state contains duplicate member Workspace bindings')
+  }
+  return {
+    formatVersion: MEMBER_QUESTION_RECEIVER_FORMAT_VERSION,
+    revision,
+    sessions,
+    questions,
+    admissions,
+    workspaceBindings,
+  }
+}
+
+function parseWorkspaceBinding(value: unknown): PersistedMemberQuestionWorkspaceBinding {
+  if (!isRecord(value)) throw new Error('member-question-receiver: durable Workspace binding must be an object')
+  return {
+    receivingAccountId: nonEmpty(value.receivingAccountId, 'binding receivingAccountId'),
+    projectId: nonEmpty(value.projectId, 'binding projectId'),
+    workspaceId: nonEmpty(value.workspaceId, 'binding workspaceId'),
+  }
 }
 
 function parsePersistedOperation(value: unknown): CompanionMemberQuestionOperation {

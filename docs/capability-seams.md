@@ -77,6 +77,10 @@ flowchart LR
   svc_projectMembership["ctx.projectMembership<br/>Project membership collaboration seam"]
   pkg_project_membership_core["project-membership-core"]
   pkg_tool_project_members["tool-project-members"]
+  pkg_project_membership_client["project-membership-client"]
+  svc_projectMembershipClient["ctx.projectMembershipClient<br/>Authenticated Project Membership client"]
+  pkg_ui_desktop["ui-desktop"]
+  pkg_ui_workspace["ui-workspace"]
   pkg_remote_access["remote-access"]
   svc_remoteAccess["ctx.remoteAccess<br/>Personal Pairing lifecycle seam"]
   pkg_remote_access_http["remote-access-http"]
@@ -296,6 +300,7 @@ flowchart LR
   pkg_platform_account --> svc_platformAccount
   pkg_platform_account_core --> svc_platformAccount
   pkg_project_membership --> svc_projectMembership
+  pkg_project_membership_client --> svc_projectMembershipClient
   pkg_project_membership_core --> svc_projectMembership
   pkg_pwsh_local --> svc_shell
   pkg_remote_access --> svc_remoteAccess
@@ -407,6 +412,8 @@ flowchart LR
   svc_platformAccount --> pkg_project_membership_http
   svc_projectMembership --> pkg_project_membership_http
   svc_projectMembership --> pkg_tool_project_members
+  svc_projectMembershipClient --> pkg_ui_desktop
+  svc_projectMembershipClient --> pkg_ui_workspace
   svc_remoteAccess --> pkg_remote_access_http
   svc_remoteAttachments --> pkg_remote_attachments
   svc_remoteRelay --> pkg_remote_access_http
@@ -515,6 +522,7 @@ flowchart LR
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | Owns local per-assistant-message feedback, lifecycle and target validation, per-item compare-and-set, and the Host unary Remote contract without entering Session history or telemetry. |
 | `ctx.platformAccount` | `seam` | [`platform-account`](../packages/platform/platform-account) | [`platform-account-core`](../packages/platform/platform-account-core) | [`platform-account-http`](../packages/platform/platform-account-http), [`platform-account-client`](../packages/platform/platform-account-client), [`project-membership-http`](../packages/platform/project-membership-http) | - | Owns GitHub public identity and proof-of-possession installation sessions; HTTP and Desktop/Mobile clients complete signed polling without receiving provider credentials. |
 | `ctx.projectMembership` | `seam` | [`project-membership`](../packages/platform/project-membership) | [`project-membership-core`](../packages/platform/project-membership-core) | [`project-membership-http`](../packages/platform/project-membership-http), [`tool-project-members`](../packages/interaction/tool-project-members) | - | Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; the HTTP consumer resolves the acting account from an Account session and adapts each route onto one service operation, and the model-facing roster tool reads one project's full roster through the same service. |
+| `ctx.projectMembershipClient` | `core` | [`project-membership-client`](../packages/platform/project-membership-client) | - | `ui-desktop`, `ui-workspace` | - | Carries current-installation membership operations into Desktop UI composition; the Desktop provider obtains a fresh Account presentation for every call, while renderer consumers receive no credentials. |
 | `ctx.remoteAccess` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | The HTTP consumer exposes endpoint-owned mailbox operations through one validated transport for Desktop Settings and Mobile; Platform receives routing metadata, opaque handshake messages, credential digests, and sealed authority only. |
 | `ctx.remoteRelay` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | Owns credential-authenticated live attachments and ciphertext-only forwarding; an expiring Redis directory and direct Pub/Sub coordinate non-sticky Platform Instances without an offline queue. |
 | `ctx.remoteAttachments` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | - | Retains endpoint-encrypted ciphertext and metadata only, issues single-use expiring capabilities scoped to one Personal Pairing, and removes blob plus capability on consume, expiry, or revocation. |

@@ -17,6 +17,18 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
   }
   return {
     memberQuestions: {
+      workspaceBinding: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { state: 'missing' as const } },
+      }),
+      ensureWorkspaceBinding: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { state: 'created' as const, workspaceId: request.payload.workspaceId } },
+      }),
+      bindWorkspace: request => Promise.resolve({
+        rpcId: request.rpcId,
+        result: { ok: true, value: { bound: true as const } },
+      }),
       snapshot: request => Promise.resolve({
         rpcId: request.rpcId,
         result: { ok: true, value: { revision: 0, pending: [], terminal: [] } },
@@ -191,6 +203,20 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
         return {
           rpcId: request.rpcId,
           result: { ok: true, value: { workspace: { workspaceId: 'w1' as never, path: '/w', title: 'w', sessionIds: [], createdAt: 't', updatedAt: 't' }, created: true } },
+        }
+      },
+      async gitRemote(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: {} } }
+      },
+      async cloneGit(request) {
+        return {
+          rpcId: request.rpcId,
+          result: { ok: true, value: { workspace: {
+            workspaceId: 'w-clone' as never,
+            path: `${request.payload.parentPath}/${request.payload.directoryName}`,
+            title: request.payload.directoryName,
+            sessionIds: [], createdAt: 't', updatedAt: 't',
+          } } },
         }
       },
       async rename(request) {

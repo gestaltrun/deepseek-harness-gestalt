@@ -106,6 +106,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       .find(workspace => workspace.path === join(scaffold.workspaceCwd, 'workspace'))
     if (receiverWorkspace === undefined) throw new Error('member-question e2e: receiver workspace unavailable')
     scaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+      bind: () => Promise.resolve(),
+      lookup: () => Promise.resolve(receiverWorkspace.id),
+      bindIfCurrent: () => Promise.resolve(false),
       resolve: () => Promise.resolve(receiverWorkspace.id),
     })
     const projectId = 'project-atlas'
@@ -224,6 +227,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await mkdir(receiverWorkspace.path, { recursive: true })
       const restartedWorkspace = await scaffold.ctx.workspaceRegistry.create(receiverWorkspace.path)
       scaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        bind: () => Promise.resolve(),
+        lookup: () => Promise.resolve(restartedWorkspace.id),
+        bindIfCurrent: () => Promise.resolve(false),
         resolve: () => Promise.resolve(restartedWorkspace.id),
       })
 
@@ -269,6 +275,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await mkdir(workspacePath, { recursive: true })
       let workspace = await restartScaffold.ctx.workspaceRegistry.create(workspacePath)
       restartScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        bind: () => Promise.resolve(),
+        lookup: () => Promise.resolve(workspace.id),
+        bindIfCurrent: () => Promise.resolve(false),
         resolve: () => Promise.resolve(workspace.id),
       })
       let service = restartScaffold.ctx.get('memberQuestionReceiver')
@@ -314,6 +323,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await mkdir(workspacePath, { recursive: true })
       workspace = await restartScaffold.ctx.workspaceRegistry.create(workspacePath)
       restartScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        bind: () => Promise.resolve(),
+        lookup: () => Promise.resolve(workspace.id),
+        bindIfCurrent: () => Promise.resolve(false),
         resolve: () => Promise.resolve(workspace.id),
       })
       service = restartScaffold.ctx.get('memberQuestionReceiver')
@@ -360,6 +372,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
         .find(candidate => candidate.path === join(faultScaffold.workspaceCwd, 'workspace'))
       if (workspace === undefined) throw new Error('member-question lost-response e2e: workspace unavailable')
       faultScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        bind: () => Promise.resolve(),
+        lookup: () => Promise.resolve(workspace.id),
+        bindIfCurrent: () => Promise.resolve(false),
         resolve: () => Promise.resolve(workspace.id),
       })
       const service = faultScaffold.ctx.get('memberQuestionReceiver')
@@ -410,6 +425,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await mkdir(workspacePath, { recursive: true })
       const workspace = await faultScaffold.ctx.workspaceRegistry.create(workspacePath)
       faultScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        bind: () => Promise.resolve(),
+        lookup: () => Promise.resolve(workspace.id),
+        bindIfCurrent: () => Promise.resolve(false),
         resolve: () => Promise.resolve(workspace.id),
       })
       const arrived = await createAuthenticatedMemberQuestionIngress(faultReceiver)({
@@ -477,6 +495,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await mkdir(workspacePath, { recursive: true })
       const workspace = await faultScaffold.ctx.workspaceRegistry.create(workspacePath)
       faultScaffold.ctx.provide('memberQuestionWorkspaceBinding', {
+        bind: () => Promise.resolve(),
+        lookup: () => Promise.resolve(workspace.id),
+        bindIfCurrent: () => Promise.resolve(false),
         resolve: () => Promise.resolve(workspace.id),
       })
       const ingress = createAuthenticatedMemberQuestionIngress(faultReceiver)

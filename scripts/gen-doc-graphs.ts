@@ -258,6 +258,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; the HTTP consumer resolves the acting account from an Account session and adapts each route onto one service operation, and the model-facing roster tool reads one project\'s full roster through the same service.',
   },
   {
+    key: 'projectMembershipClient',
+    pkg: 'project-membership-client',
+    title: 'Authenticated Project Membership client',
+    mode: 'core',
+    consumers: ['ui-desktop', 'ui-workspace'],
+    note: 'Carries current-installation membership operations into Desktop UI composition; the Desktop provider obtains a fresh Account presentation for every call, while renderer consumers receive no credentials.',
+  },
+  {
     key: 'remoteAccess',
     pkg: 'remote-access',
     title: 'Personal Pairing lifecycle seam',

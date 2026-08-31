@@ -21,8 +21,10 @@ import {
 } from '../src/api/host.schema.ts'
 import {
   workspaceArchiveSessionRequestSchema, workspaceArchiveSessionValueSchema,
+  workspaceCloneGitRequestSchema, workspaceCloneGitValueSchema,
   workspaceCreateRequestSchema, workspaceCreateValueSchema, workspaceIdSchema,
   workspaceDeleteRequestSchema, workspaceDeleteValueSchema,
+  workspaceGitRemoteRequestSchema, workspaceGitRemoteValueSchema,
   workspaceInsertBeforeRequestSchema, workspaceInsertBeforeValueSchema,
   workspaceInsertSessionBeforeRequestSchema, workspaceInsertSessionBeforeValueSchema,
   workspaceListRequestSchema, workspaceListValueSchema,
@@ -38,6 +40,9 @@ import { askUserQuestionAnswerSchema, questionResponsePayloadSchema } from '../s
 import { goalEditRequestSchema } from '../src/api/goals.schema.ts'
 import { subagentPromptRequestSchema } from '../src/api/subagents.schema.ts'
 import {
+  memberQuestionBindWorkspaceRequestSchema, memberQuestionBindWorkspaceValueSchema,
+  memberQuestionEnsureWorkspaceBindingRequestSchema, memberQuestionEnsureWorkspaceBindingValueSchema,
+  memberQuestionWorkspaceBindingRequestSchema, memberQuestionWorkspaceBindingValueSchema,
   memberQuestionSettleRequestSchema, memberQuestionSnapshotRequestSchema,
 } from '../src/api/member-questions.schema.ts'
 
@@ -68,6 +73,9 @@ describe('rpcErrorSchema', () => {
     expect(rpcErrorSchema.parse({ code: 'workspace-attach-failed', message: 'm', details: { sessionId: 's', workspaceId: 'w' } }).code).toBe('workspace-attach-failed')
     expect(rpcErrorSchema.parse({ code: 'workspace-not-found', message: 'm', details: { workspaceId: 'w' } }).code).toBe('workspace-not-found')
     expect(rpcErrorSchema.parse({ code: 'workspace-invalid-path', message: 'm', details: { path: '/x' } }).code).toBe('workspace-invalid-path')
+    expect(rpcErrorSchema.parse({
+      code: 'workspace-clone-failed', message: 'm', details: { parentPath: '/x', directoryName: 'r' },
+    }).code).toBe('workspace-clone-failed')
     expect(rpcErrorSchema.parse({ code: 'workspace-name-conflict', message: 'm', details: { name: 'x' } }).code).toBe('workspace-name-conflict')
     expect(rpcErrorSchema.parse({ code: 'workspace-move-invalid', message: 'm', details: { workspaceId: 'w', sessionId: 's' } }).code).toBe('workspace-move-invalid')
     expect(rpcErrorSchema.parse({
@@ -389,6 +397,20 @@ describe('workspace domain schemas', () => {
     expect(workspaceCreateValueSchema.parse({ workspace: view, created: false }).created).toBe(false)
   })
 
+  it('validates Git origin and clone payloads', () => {
+    expect(workspaceGitRemoteRequestSchema.parse({ workspaceId: 'w1' }).workspaceId).toBe('w1')
+    expect(workspaceGitRemoteValueSchema.parse({ remoteUrl: 'https://github.com/o/r.git' }).remoteUrl)
+      .toBe('https://github.com/o/r.git')
+    expect(workspaceGitRemoteValueSchema.parse({})).toEqual({})
+    expect(workspaceCloneGitRequestSchema.parse({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: '/projects', directoryName: 'repo',
+    }).directoryName).toBe('repo')
+    expect(() => workspaceCloneGitRequestSchema.parse({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: '/projects', directoryName: '../repo',
+    })).toThrow(/one path segment/)
+    expect(workspaceCloneGitValueSchema.parse({ workspace: view }).workspace.workspaceId).toBe('w1')
+  })
+
   it('rename requires a non-blank title (both refine arms)', () => {
     expect(workspaceRenameRequestSchema.parse({ workspaceId: 'w1', title: 'new' }).title).toBe('new')
     expect(() => workspaceRenameRequestSchema.parse({ workspaceId: 'w1', title: '  ' })).toThrow(/non-blank/)
@@ -444,6 +466,22 @@ describe('goals domain schemas', () => {
 
 describe('events frame schemas', () => {
   it('keeps member-question RPC and Host-frame fields exact', () => {
+    const binding = {
+      receivingAccountId: 'account-2', projectId: 'project-1', workspaceId: 'workspace-1',
+    }
+    expect(memberQuestionBindWorkspaceRequestSchema.parse(binding)).toEqual(binding)
+    expect(memberQuestionBindWorkspaceValueSchema.parse({ bound: true })).toEqual({ bound: true })
+    expect(memberQuestionWorkspaceBindingRequestSchema.parse({
+      receivingAccountId: binding.receivingAccountId,
+      projectId: binding.projectId,
+    })).toEqual({ receivingAccountId: 'account-2', projectId: 'project-1' })
+    expect(memberQuestionWorkspaceBindingValueSchema.parse({ state: 'live', workspaceId: 'workspace-1' }))
+      .toEqual({ state: 'live', workspaceId: 'workspace-1' })
+    expect(memberQuestionWorkspaceBindingValueSchema.parse({ state: 'missing' }))
+      .toEqual({ state: 'missing' })
+    expect(memberQuestionEnsureWorkspaceBindingRequestSchema.parse(binding)).toEqual(binding)
+    expect(memberQuestionEnsureWorkspaceBindingValueSchema.parse({ state: 'repaired', workspaceId: 'workspace-1' }))
+      .toEqual({ state: 'repaired', workspaceId: 'workspace-1' })
     expect(memberQuestionSnapshotRequestSchema.parse({})).toEqual({})
     expect(() => memberQuestionSnapshotRequestSchema.parse({ unexpected: true })).toThrow()
     const settle = {

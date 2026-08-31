@@ -105,6 +105,9 @@ describe('file-backed project membership', () => {
     await production.createProject(carol, { name: 'Solaris', remoteUrl: 'https://other.example/solaris' })
     await expect(development.createProject(bob, { name: ' Solaris ', remoteUrl: 'https://x.example/x' }))
       .rejects.toMatchObject({ code: 'PROJECT_NAME_TAKEN' })
+    await expect(development.createProject(bob, {
+      name: 'Other', remoteUrl: 'HTTPS://ORG.EXAMPLE/solaris.git',
+    })).rejects.toMatchObject({ code: 'PROJECT_REMOTE_TAKEN' })
     await expect(production.createProject(dave, { name: 'Harness', remoteUrl: 'https://x.example/y' }))
       .resolves.toMatchObject({ name: 'Harness' })
     // Development projects are invisible behind a production namespace and vice versa.
@@ -121,6 +124,11 @@ describe('file-backed project membership', () => {
     expect(attempts.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(rejected.every(result => (result.reason as ProjectMembershipError).code === 'DUPLICATE_INVITEE')).toBe(true)
     expect(await store.pendingInvitationsFor(bob)).toHaveLength(1)
+    expect(await store.pendingInvitationsIssuedBy(alice, projectId)).toHaveLength(1)
+    await expect(store.pendingInvitationContextsFor(bob)).resolves.toMatchObject([{
+      invitation: { projectId },
+      project: { id: projectId, name: 'Race' },
+    }])
   })
 
   it('enforces the role gate through every mutating executor', async () => {
@@ -136,6 +144,7 @@ describe('file-backed project membership', () => {
     await denial(store.invite(carol, { projectId, inviteeAccountId: dave }), 'ROLE_REQUIRED')
     await denial(store.invite(dave, { projectId, inviteeAccountId: dave }), 'NOT_A_MEMBER')
     await denial(store.roster(dave, projectId), 'NOT_A_MEMBER')
+    await denial(store.pendingInvitationsIssuedBy(carol, projectId), 'ROLE_REQUIRED')
     // Admins invite but every owner-facing surface answers only to owners.
     await denial(store.changeRole(bob, { membershipId: aliceMember.id, role: 'admin' }), 'ROLE_REQUIRED')
     await denial(store.changeRole(bob, { membershipId: bobMember.id, role: 'owner' }), 'ROLE_REQUIRED')

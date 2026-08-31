@@ -568,7 +568,7 @@ Source: [`packages/interaction/member-question-sender/src/index.ts:85`](../packa
 }
 ```
 
-Source: [`packages/interaction/member-question-receiver/src/types.ts:213`](../packages/interaction/member-question-receiver/src/types.ts)
+Source: [`packages/interaction/member-question-receiver/src/types.ts:241`](../packages/interaction/member-question-receiver/src/types.ts)
 
 <a id="member-questionsettled--log-only"></a>
 
@@ -579,7 +579,7 @@ Source: [`packages/interaction/member-question-receiver/src/types.ts:213`](../pa
 'member-question/settled': CompanionMemberQuestionSettledResult
 ```
 
-Source: [`packages/interaction/member-question-receiver/src/types.ts:225`](../packages/interaction/member-question-receiver/src/types.ts)
+Source: [`packages/interaction/member-question-receiver/src/types.ts:253`](../packages/interaction/member-question-receiver/src/types.ts)
 
 ### `permission/*`
 

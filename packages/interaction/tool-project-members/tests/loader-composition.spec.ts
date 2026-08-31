@@ -113,6 +113,14 @@ class MemoryProjectMembership extends ProjectMembershipService {
     throw new Error('loader-composition tests never reach membership mutations')
   }
 
+  override async pendingInvitationContextsFor(): Promise<never> {
+    throw new Error('loader-composition tests never reach membership mutations')
+  }
+
+  override async pendingInvitationsIssuedBy(): Promise<never> {
+    throw new Error('loader-composition tests never reach membership mutations')
+  }
+
   override async projectByRemote(): Promise<never> {
     throw new Error('loader-composition tests never reach membership mutations')
   }

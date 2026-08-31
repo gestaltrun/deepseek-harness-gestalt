@@ -128,6 +128,14 @@ class MemoryProjectMembership extends ProjectMembershipService {
     throw unreachable()
   }
 
+  override async pendingInvitationContextsFor(): Promise<never> {
+    throw unreachable()
+  }
+
+  override async pendingInvitationsIssuedBy(): Promise<never> {
+    throw unreachable()
+  }
+
   override async projectByRemote(): Promise<never> {
     throw unreachable()
   }

@@ -21,6 +21,7 @@ function scriptedApi(overrides: {
   sessions?: Partial<ApiProxy['sessions']>
   subagents?: Partial<ApiProxy['subagents']>
   host?: Partial<ApiProxy['host']>
+  workspace?: Partial<ApiProxy['workspace']>
   skills?: Partial<ApiProxy['skills']>
   agentPresets?: Partial<ApiProxy['agentPresets']>
   events?: Partial<ApiProxy['events']>
@@ -36,6 +37,11 @@ function scriptedApi(overrides: {
     Promise.resolve({ rpcId: r.rpcId, result: { ok: false, error: { code: 'internal' as const, message: 'stub', details: {} } } })
   return {
     memberQuestions: {
+      workspaceBinding: r => ok(r, { state: 'missing' as const }),
+      ensureWorkspaceBinding: r => ok(r, {
+        state: 'created' as const, workspaceId: r.payload.workspaceId,
+      }),
+      bindWorkspace: r => ok(r, { bound: true as const }),
       snapshot: r => ok(r, { revision: 0, pending: [], terminal: [] }),
       settle: err,
       admitHumanTurn: r => ok(r, { accepted: true as const, sessionId: r.payload.receivingSessionId }),
@@ -95,11 +101,14 @@ function scriptedApi(overrides: {
     workspace: {
       list: r => ok(r, { items: [], archivedSessionIds: [] }),
       create: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' }, created: true }),
+      gitRemote: r => ok(r, { remoteUrl: 'https://github.com/o/r.git' }),
+      cloneGit: r => ok(r, { workspace: { workspaceId: 'w2' as never, path: `${r.payload.parentPath}/${r.payload.directoryName}`, title: r.payload.directoryName, sessionIds: [], createdAt: '0', updatedAt: '0' } }),
       rename: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' } }),
       delete: r => ok(r, { deleted: true as const }),
       insertBefore: r => ok(r, { workspaceIds: [r.payload.workspaceId] }),
       insertSessionBefore: r => ok(r, { workspace: { workspaceId: 'w1' as never, path: '/t', title: 't', sessionIds: [], createdAt: '0', updatedAt: '0' } }),
       archiveSession: r => ok(r, { archivedSessionIds: [r.payload.sessionId] }),
+      ...overrides.workspace,
     },
     skills: { list: r => ok(r, { skills: [] }), ...overrides.skills },
     agentPresets: {
@@ -449,6 +458,12 @@ describe('workspace domain round trip', () => {
     const created = await c.workspace.create({ path: '/t' })
     expect(created.result.ok).toBe(true)
     if (created.result.ok) expect(created.result.value.created).toBe(true)
+    expect((await c.workspace.gitRemote({ workspaceId: 'w1' as never })).result)
+      .toEqual({ ok: true, value: { remoteUrl: 'https://github.com/o/r.git' } })
+    const cloned = await c.workspace.cloneGit({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: '/projects', directoryName: 'repo',
+    })
+    expect(cloned.result).toMatchObject({ ok: true, value: { workspace: { path: '/projects/repo' } } })
     const archivedResponse = await c.workspace.archiveSession({ sessionId: 's-arch' as never })
     expect(archivedResponse.result).toEqual({ ok: true, value: { archivedSessionIds: ['s-arch'] } })
   })

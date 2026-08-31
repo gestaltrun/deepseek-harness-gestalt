@@ -3,8 +3,10 @@ import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import type { Branded } from '@deepseek-ai/dsh-brand'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
 import type {
   CompanionMemberQuestionSettledResult,
   MemberQuestionId,
@@ -27,6 +29,7 @@ import type {
   MemberQuestionHumanTurnAdmitter,
   MemberQuestionHumanTurnAdmissionContext,
   MemberQuestionIngestResult,
+  MemberQuestionWorkspaceBinding,
   MemberQuestionReceiverListener,
   MemberQuestionReceiverSnapshot,
   MemberQuestionReceiverSettlement,
@@ -113,7 +116,7 @@ export const Config: z<Config> = z.object({
  * Host authority for member-question arrival, projection, settlement,
  * expiry, and one-step explicit human admission.
  */
-export abstract class MemberQuestionReceiverService extends Service {
+export abstract class MemberQuestionReceiverService extends Service implements MemberQuestionWorkspaceBinding {
   constructor(ctx: Context) {
     super(ctx, 'memberQuestionReceiver')
   }
@@ -167,6 +170,55 @@ export abstract class MemberQuestionReceiverService extends Service {
    * @returns disposer for this exact registration.
    */
   abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void
+
+  /**
+   * Persist or replace one exact Account/Project to local Workspace association.
+   * @param accountId - authenticated receiving Account.
+   * @param projectId - Cloud Project being joined.
+   * @param workspaceId - exact local Workspace selected or cloned.
+   */
+  abstract bind(
+    accountId: PlatformAccountId,
+    projectId: ProjectId,
+    workspaceId: Branded<'WorkspaceId'>,
+  ): Promise<void>
+
+  /**
+   * Read one exact association without requiring it to exist.
+   * @param accountId - authenticated receiving Account.
+   * @param projectId - Cloud Project whose local association is being inspected.
+   * @returns persisted local Workspace identity, or undefined before binding.
+   */
+  abstract lookup(
+    accountId: PlatformAccountId,
+    projectId: ProjectId,
+  ): Promise<Branded<'WorkspaceId'> | undefined>
+
+  /**
+   * Replace one association only if its current value matches an observation.
+   * @param accountId - authenticated receiving Account.
+   * @param projectId - Cloud Project whose association is being repaired.
+   * @param expectedWorkspaceId - observed current Workspace id, including undefined.
+   * @param workspaceId - exact live replacement Workspace id.
+   * @returns whether the replacement committed.
+   */
+  abstract bindIfCurrent(
+    accountId: PlatformAccountId,
+    projectId: ProjectId,
+    expectedWorkspaceId: Branded<'WorkspaceId'> | undefined,
+    workspaceId: Branded<'WorkspaceId'>,
+  ): Promise<boolean>
+
+  /**
+   * Resolve one exact Account/Project association.
+   * @param accountId - authenticated receiving Account.
+   * @param projectId - Cloud Project carried by the received question.
+   * @returns persisted local Workspace identity.
+   */
+  abstract resolve(
+    accountId: PlatformAccountId,
+    projectId: ProjectId,
+  ): Promise<Branded<'WorkspaceId'>>
 }
 
 /**
@@ -207,6 +259,7 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
+    ctx.provide('memberQuestionWorkspaceBinding', this)
     const resolved = resolveConfig(config)
     this.storageFile = join(resolve(resolved.storagePath), resolved.environment, 'member-question-receiver.json')
     this.maxRecords = resolved.maxRecords
@@ -302,6 +355,87 @@ export default class FileMemberQuestionReceiver extends MemberQuestionReceiverSe
       })
       this.scheduleExpiry()
       return ingestResult(question)
+    })
+  }
+
+  override bind(
+    accountId: PlatformAccountId,
+    projectId: ProjectId,
+    workspaceId: Branded<'WorkspaceId'>,
+  ): Promise<void> {
+    return this.enqueue(async () => {
+      const replacement = {
+        receivingAccountId: String(accountId),
+        projectId: String(projectId),
+        workspaceId: String(workspaceId),
+      }
+      await this.commit({
+        ...this.state,
+        revision: this.state.revision + 1,
+        workspaceBindings: [
+          ...this.state.workspaceBindings.filter(binding =>
+            binding.receivingAccountId !== accountId || binding.projectId !== projectId),
+          replacement,
+        ],
+      })
+    })
+  }
+
+  override resolve(
+    accountId: PlatformAccountId,
+    projectId: ProjectId,
+  ): Promise<Branded<'WorkspaceId'>> {
+    return this.enqueue(() => {
+      const binding = this.state.workspaceBindings.find(row =>
+        row.receivingAccountId === accountId && row.projectId === projectId)
+      if (binding === undefined) {
+        return Promise.reject(new Error(
+          `member-question-receiver: no local Workspace binding for account ${accountId} and project ${projectId}`,
+        ))
+      }
+      return Promise.resolve(
+        binding.workspaceId as Branded<'WorkspaceId'>,
+      )
+    })
+  }
+
+  override lookup(
+    accountId: PlatformAccountId,
+    projectId: ProjectId,
+  ): Promise<Branded<'WorkspaceId'> | undefined> {
+    return this.enqueue(() => Promise.resolve(
+      this.state.workspaceBindings.find(row =>
+        row.receivingAccountId === accountId && row.projectId === projectId)?.workspaceId as
+        | Branded<'WorkspaceId'>
+        | undefined,
+    ))
+  }
+
+  override bindIfCurrent(
+    accountId: PlatformAccountId,
+    projectId: ProjectId,
+    expectedWorkspaceId: Branded<'WorkspaceId'> | undefined,
+    workspaceId: Branded<'WorkspaceId'>,
+  ): Promise<boolean> {
+    return this.enqueue(async () => {
+      const current = this.state.workspaceBindings.find(row =>
+        row.receivingAccountId === accountId && row.projectId === projectId)?.workspaceId
+      if (current !== expectedWorkspaceId) return false
+      if (current === workspaceId) return true
+      await this.commit({
+        ...this.state,
+        revision: this.state.revision + 1,
+        workspaceBindings: [
+          ...this.state.workspaceBindings.filter(binding =>
+            binding.receivingAccountId !== accountId || binding.projectId !== projectId),
+          {
+            receivingAccountId: String(accountId),
+            projectId: String(projectId),
+            workspaceId: String(workspaceId),
+          },
+        ],
+      })
+      return true
     })
   }
 

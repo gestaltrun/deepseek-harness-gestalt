@@ -1273,6 +1273,29 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'admitter', description: 'high-level Host transaction adapter.' }],
         returns: 'disposer for this exact registration.',
       },
+      {
+        signature: 'abstract bind( accountId: PlatformAccountId, projectId: ProjectId, workspaceId: Branded<\'WorkspaceId\'>, ): Promise<void>',
+        description: 'Persist or replace one exact Account/Project to local Workspace association.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project being joined.' }, { name: 'workspaceId', description: 'exact local Workspace selected or cloned.' }],
+      },
+      {
+        signature: 'abstract lookup( accountId: PlatformAccountId, projectId: ProjectId, ): Promise<Branded<\'WorkspaceId\'> | undefined>',
+        description: 'Read one exact association without requiring it to exist.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project whose local association is being inspected.' }],
+        returns: 'persisted local Workspace identity, or undefined before binding.',
+      },
+      {
+        signature: 'abstract bindIfCurrent( accountId: PlatformAccountId, projectId: ProjectId, expectedWorkspaceId: Branded<\'WorkspaceId\'> | undefined, workspaceId: Branded<\'WorkspaceId\'>, ): Promise<boolean>',
+        description: 'Replace one association only if its current value matches an observation.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project whose association is being repaired.' }, { name: 'expectedWorkspaceId', description: 'observed current Workspace id, including undefined.' }, { name: 'workspaceId', description: 'exact live replacement Workspace id.' }],
+        returns: 'whether the replacement committed.',
+      },
+      {
+        signature: 'abstract resolve( accountId: PlatformAccountId, projectId: ProjectId, ): Promise<Branded<\'WorkspaceId\'>>',
+        description: 'Resolve one exact Account/Project association.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project carried by the received question.' }],
+        returns: 'persisted local Workspace identity.',
+      },
     ],
   },
   {
@@ -1312,6 +1335,23 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     summary: 'Local project-member Workspace association supplied by the Host composition.',
     description: 'Local project-member Workspace association supplied by the Host composition.',
     methods: [
+      {
+        signature: 'bind(accountId: PlatformAccountId, projectId: ProjectId, workspaceId: Branded<\'WorkspaceId\'>): Promise<void>',
+        description: 'Persist or replace the exact local Workspace selected during invitation acceptance.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'Cloud Project being joined.' }, { name: 'workspaceId', description: 'exact local Workspace selected or cloned.' }],
+      },
+      {
+        signature: 'lookup(accountId: PlatformAccountId, projectId: ProjectId): Promise<Branded<\'WorkspaceId\'> | undefined>',
+        description: 'Read the persisted local Workspace selection without requiring one to exist.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'cloud Project whose local association is being inspected.' }],
+        returns: 'exact local Workspace identity, or undefined before the first binding.',
+      },
+      {
+        signature: 'bindIfCurrent( accountId: PlatformAccountId, projectId: ProjectId, expectedWorkspaceId: Branded<\'WorkspaceId\'> | undefined, workspaceId: Branded<\'WorkspaceId\'>, ): Promise<boolean>',
+        description: 'Replace a binding only when its current value still matches the caller\'s observation.',
+        parameters: [{ name: 'accountId', description: 'authenticated receiving Account.' }, { name: 'projectId', description: 'cloud Project whose local association is being repaired.' }, { name: 'expectedWorkspaceId', description: 'exact current value observed by the caller, including undefined.' }, { name: 'workspaceId', description: 'exact live Workspace proposed as the replacement.' }],
+        returns: 'whether the comparison matched and the replacement committed.',
+      },
       {
         signature: 'resolve(accountId: PlatformAccountId, projectId: ProjectId): Promise<Branded<\'WorkspaceId\'>>',
         description: 'Resolve one authenticated receiver/project pair to an existing Workspace id.',
@@ -1462,6 +1502,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the public identity per known account; unknown accounts are absent.',
       },
       {
+        signature: 'abstract publicIdentityByGithubLogin(githubLogin: string): Promise<PublicAccountIdentity | undefined>',
+        description: 'Resolve one unambiguous current public GitHub login.',
+        parameters: [{ name: 'githubLogin', description: 'case-insensitive public login entered by an operator.' }],
+        returns: 'the matching public Account identity, or undefined when absent or ambiguous.',
+      },
+      {
         signature: 'abstract signOut(input: { accessToken: string; proof: AccountProof }): Promise<void>',
         description: 'Revoke only the current installation Account Session.',
         parameters: [{ name: 'input', description: 'access token and installation proof.' }],
@@ -1485,7 +1531,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Create one project; the actor becomes its first owner.',
         parameters: [{ name: 'actor', description: 'authenticated account performing the mutation.' }, { name: 'input', description: 'unique project name and git remote to bind.' }],
         returns: 'the stored project view.',
-        throws: ['{ProjectMembershipError} `PROJECT_NAME_TAKEN` when the name is in use, or `INVALID_REMOTE_URL` when normalization fails.'],
+        throws: ['{ProjectMembershipError} `PROJECT_NAME_TAKEN` when the name is in use, `PROJECT_REMOTE_TAKEN` when another Project owns the normalized remote, or `INVALID_REMOTE_URL` when normalization fails.'],
       },
       {
         signature: 'abstract invite(actor: PlatformAccountId, input: InviteInput): Promise<InvitationView>',
@@ -1550,6 +1596,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'pending invitations in issuance order.',
       },
       {
+        signature: 'abstract pendingInvitationsIssuedBy( actor: PlatformAccountId, projectId: ProjectId, ): Promise<readonly InvitationView[]>',
+        description: 'List pending invitations issued for one Project after an admin-or-owner gate.',
+        parameters: [{ name: 'actor', description: 'authenticated Project administrator.' }, { name: 'projectId', description: 'Project whose pending invitations are requested.' }],
+        returns: 'pending invitations in issuance order.',
+      },
+      {
+        signature: 'abstract pendingInvitationContextsFor(actor: PlatformAccountId): Promise<readonly PendingInvitationContext[]>',
+        description: 'List pending invitations with their authoritative project name and remote.',
+        parameters: [{ name: 'actor', description: 'authenticated invitee account.' }],
+        returns: 'pending invitation/project pairs in issuance order.',
+      },
+      {
         signature: 'abstract projectByRemote(actor: PlatformAccountId, normalizedRemoteUrl: string): Promise<ProjectView | undefined>',
         description: 'Find the project bound to a normalized git remote, if the actor holds a membership there.',
         parameters: [{ name: 'actor', description: 'authenticated account whose memberships scope the search.' }, { name: 'normalizedRemoteUrl', description: 'normalized remote URL recorded at creation.' }],
@@ -1561,6 +1619,75 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'projectId', description: 'project to read.' }],
         returns: 'the project\'s roster projection version.',
         throws: ['{ProjectMembershipError} `PROJECT_NOT_FOUND`.'],
+      },
+    ],
+  },
+  {
+    key: 'projectMembershipClient',
+    summary: 'Authenticated current-installation client used by product UI consumers.',
+    description: 'Authenticated current-installation client used by product UI consumers.',
+    methods: [
+      {
+        signature: 'createProject(input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView>',
+        description: 'Create one Cloud Project for a Workspace remote.',
+        parameters: [{ name: 'input', description: 'unique name and Workspace remote.' }],
+        returns: 'created Cloud Project.',
+      },
+      {
+        signature: 'projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView | undefined>',
+        description: 'Resolve the current Account\'s Project membership for one normalized Git remote.',
+        parameters: [{ name: 'normalizedRemoteUrl', description: 'canonical Workspace origin remote.' }],
+        returns: 'authorized Project context, or no value when this Account has no membership.',
+      },
+      {
+        signature: 'roster(projectId: ProjectId): Promise<RosterReadView>',
+        description: 'Read one Project roster with public identity and presence.',
+        parameters: [{ name: 'projectId', description: 'Project to read.' }],
+        returns: 'Project and complete decorated roster.',
+      },
+      {
+        signature: 'invite(input: { projectId: ProjectId; githubLogin: string }): Promise<InvitationView>',
+        description: 'Invite one uniquely resolved public GitHub login.',
+        parameters: [{ name: 'input', description: 'Project and public GitHub login.' }],
+        returns: 'created pending invitation.',
+      },
+      {
+        signature: 'decideInvitation(invitationId: InvitationId, input: InvitationDecisionInput): Promise<MemberView | undefined>',
+        description: 'Decline, or accept atomically with a local Workspace link.',
+        parameters: [{ name: 'invitationId', description: 'invitation to decide.' }, { name: 'input', description: 'decline or linked acceptance.' }],
+        returns: 'accepted member, or no value for decline.',
+      },
+      {
+        signature: 'retractInvitation(invitationId: InvitationId): Promise<void>',
+        description: 'Retract one pending invitation as its Project administrator.',
+        parameters: [{ name: 'invitationId', description: 'pending invitation to retract.' }],
+      },
+      {
+        signature: 'pendingInvitations(): Promise<readonly PendingInvitationView[]>',
+        description: 'List trusted pending invitation cards for the current Account.',
+        parameters: [],
+        returns: 'trusted pending invitation cards.',
+      },
+      {
+        signature: 'issuedInvitations(projectId: ProjectId): Promise<readonly IssuedInvitationView[]>',
+        description: 'List pending invitations issued from one administered Project.',
+        parameters: [{ name: 'projectId', description: 'Project whose issued invitations are requested.' }],
+        returns: 'authoritative pending invitation rows.',
+      },
+      {
+        signature: 'changeRole(membershipId: MembershipId, role: ProjectRole): Promise<void>',
+        description: 'Replace one member\'s collaboration role.',
+        parameters: [{ name: 'membershipId', description: 'membership to change.' }, { name: 'role', description: 'replacement collaboration role.' }],
+      },
+      {
+        signature: 'setMemberTags(membershipId: MembershipId, tags: readonly FunctionTag[]): Promise<void>',
+        description: 'Replace one member\'s non-permission function tags.',
+        parameters: [{ name: 'membershipId', description: 'membership to relabel.' }, { name: 'tags', description: 'complete replacement function tags.' }],
+      },
+      {
+        signature: 'removeMember(membershipId: MembershipId): Promise<void>',
+        description: 'Remove one member from the Project.',
+        parameters: [{ name: 'membershipId', description: 'membership to remove.' }],
       },
     ],
   },
@@ -3798,6 +3925,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AuthenticatedMemberQuestionEnvelope {\n    readonly authority: MemberQuestionReceiverAuthority;\n    readonly operation: CompanionMemberQuestionOperation;\n}',
   },
   {
+    name: 'AuthenticatedProjectView',
+    declaration: 'export type AuthenticatedProjectView = ProjectView & {\n    readonly receivingAccountId: PlatformAccountId;\n};',
+  },
+  {
     name: 'AuthorizationEntry',
     declaration: 'export interface AuthorizationEntry {\n    key: CredentialKey;\n    label: string;\n    methods: readonly AuthorizationMethod[];\n    inFlight: boolean;\n}',
   },
@@ -4594,6 +4725,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface InvariantInstaller {\n    (ctx: Context, fail: InvariantFailure): void | Promise<void>;\n    readonly inject?: Inject;\n}',
   },
   {
+    name: 'InvitationDecisionInput',
+    declaration: 'export type InvitationDecisionInput = {\n    decision: \'decline\';\n} | {\n    decision: \'accept-with-link\';\n    link: WorkspaceLink;\n};',
+  },
+  {
     name: 'InvitationId',
     declaration: 'export type InvitationId = Branded<\'InvitationId\'>;',
   },
@@ -4624,6 +4759,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'InvokeRemoteRequest',
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly signal?: AbortSignal;\n}',
+  },
+  {
+    name: 'IssuedInvitationView',
+    declaration: 'export interface IssuedInvitationView {\n    readonly invitationId: InvitationId;\n    readonly inviteeName: string;\n    readonly invitedAt: number;\n}',
   },
   {
     name: 'JobDoneListener',
@@ -5066,6 +5205,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PairingRendezvousId = Branded<\'PairingRendezvousId\'>;',
   },
   {
+    name: 'PendingInvitationContext',
+    declaration: 'export interface PendingInvitationContext {\n    readonly invitation: InvitationView;\n    readonly project: ProjectView;\n}',
+  },
+  {
+    name: 'PendingInvitationView',
+    declaration: 'export interface PendingInvitationView {\n    readonly invitationId: InvitationId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly projectId: ProjectId;\n    readonly projectName: string;\n    readonly remoteUrl: string;\n    readonly inviterName: string;\n    readonly invitedAt: number;\n}',
+  },
+  {
     name: 'PendingMemberQuestionView',
     declaration: 'export interface PendingMemberQuestionView {\n    readonly questionId: MemberQuestionId;\n    readonly receivingSessionId: ReceivingSessionId;\n    readonly receivingAccountId: PlatformAccountId;\n    readonly revision: number;\n    readonly arrivedAt: number;\n    readonly operation: CompanionMemberQuestionOperation;\n    readonly hostSessionId?: HostSessionId;\n    readonly reservedAdmission?: {\n        readonly rpcId: MemberQuestionReceiverRpcId;\n        readonly mode: \'queue\' | \'steer\';\n    };\n}',
   },
@@ -5374,6 +5521,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface RosterInvalidationBase {\n    readonly projectId: ProjectId;\n    readonly membershipId: MembershipId;\n    readonly accountId: PlatformAccountId;\n    readonly rosterVersionBefore: number;\n    readonly rosterVersionAfter: number;\n}',
   },
   {
+    name: 'RosterMemberView',
+    declaration: 'export type RosterMemberView = MemberView & {\n    readonly presence: \'online\' | \'offline\';\n    readonly displayName: string;\n    readonly avatarRef: string;\n};',
+  },
+  {
+    name: 'RosterReadView',
+    declaration: 'export interface RosterReadView {\n    readonly project: ProjectView;\n    readonly members: readonly RosterMemberView[];\n}',
+  },
+  {
     name: 'RosterRoleChanged',
     declaration: 'export interface RosterRoleChanged {\n    readonly reason: \'role-changed\';\n    readonly role: ProjectRole;\n}',
   },
@@ -5395,7 +5550,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RpcErrorDetailsMap',
-    declaration: 'export interface RpcErrorDetailsMap {\n    \'bad-request\': {\n        issues: ZodIssue[];\n    };\n    \'cancelled\': {};\n    \'session-not-found\': {\n        sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        provider: string;\n        model: string;\n    };\n    \'session-conflict\': {\n        sessionId: SessionId;\n        requestedCwd: string;\n        existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        value: string;\n    };\n    \'workspace-attach-failed\': {\n        sessionId: SessionId;\n        workspaceId: string;\n    };\n    \'workspace-not-found\': {\n        workspaceId: string;\n    };\n    \'workspace-invalid-path\': {\n        path: string;\n    };\n    \'workspace-name-conflict\': {\n        name: string;\n    };\n    \'workspace-move-invalid\': {\n        workspaceId: string;\n        sessionId: SessionId;\n        beforeSessionId?: SessionId;\n    };\n    \'directory-unreadable\': {\n        path: string;\n    };\n    \'directory-exists\': {\n        path: string;\n    };\n    \'directory-create-failed\': {\n        path: string;\n    };\n    \'directory-picker-unavailable\': {\n        capability: string;\n    };\n    \'agent-preset-read-only\': {\n        agentPreset: string;\n        reason: string;\n    };\n    \'agent-preset-locked\': {\n        sessionId: SessionId;\n        agentPreset: string;\n    };\n    \'agent-preset-conflict\': {\n        sessionId: SessionId;\n        requestedPreset: string;\n        existingPreset?: string;\n    };\n    \'agent-preset-not-found\': {\n        agentPreset: string;\n      /* …truncated — full shape in source */',
+    declaration: 'export interface RpcErrorDetailsMap {\n    \'bad-request\': {\n        issues: ZodIssue[];\n    };\n    \'cancelled\': {};\n    \'session-not-found\': {\n        sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        provider: string;\n        model: string;\n    };\n    \'session-conflict\': {\n        sessionId: SessionId;\n        requestedCwd: string;\n        existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        value: string;\n    };\n    \'workspace-attach-failed\': {\n        sessionId: SessionId;\n        workspaceId: string;\n    };\n    \'workspace-not-found\': {\n        workspaceId: string;\n    };\n    \'workspace-invalid-path\': {\n        path: string;\n    };\n    \'workspace-clone-failed\': {\n        parentPath: string;\n        directoryName: string;\n    };\n    \'workspace-name-conflict\': {\n        name: string;\n    };\n    \'workspace-move-invalid\': {\n        workspaceId: string;\n        sessionId: SessionId;\n        beforeSessionId?: SessionId;\n    };\n    \'directory-unreadable\': {\n        path: string;\n    };\n    \'directory-exists\': {\n        path: string;\n    };\n    \'directory-create-failed\': {\n        path: string;\n    };\n    \'directory-picker-unavailable\': {\n        capability: string;\n    };\n    \'agent-preset-read-only\': {\n        agentPreset: string;\n        reason: string;\n    };\n    \'agent-preset-locked\': {\n        sessionId: SessionId;\n        agentPreset: string;\n    };\n    \'agent-preset-conflict\': {\n        sessionId: SessionId;\n        requestedPreset: string;\n         /* …truncated — full shape in source */',
   },
   {
     name: 'RpcId',

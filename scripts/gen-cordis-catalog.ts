@@ -86,6 +86,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   permissionPresets: 'permission-presets.md',
   platformAccount: 'platform-account.md',
   projectMembership: 'project-membership.md',
+  projectMembershipClient: 'project-membership.md',
   remoteAccess: 'personal-pairing.md',
   remoteRelay: 'personal-pairing.md',
   remoteAttachments: 'personal-pairing.md',
@@ -242,6 +243,7 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
  * appear on more than one page.
  */
 export const LINK_MAP: Readonly<Record<string, string>> = {
+  AuthenticatedProjectView: 'project-membership.md',
   BrowserClosedState: 'browser-runtime.md',
   BrowserCreateRequest: 'browser-runtime.md',
   BrowserInputRequest: 'browser-runtime.md',
@@ -632,6 +634,8 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   InvitationId: 'project-membership.md',
   InvitationState: 'project-membership.md',
   InvitationView: 'project-membership.md',
+  InvitationDecisionInput: 'project-membership.md',
+  IssuedInvitationView: 'project-membership.md',
   InviteInput: 'project-membership.md',
   MemberView: 'project-membership.md',
   MembershipId: 'project-membership.md',
@@ -639,9 +643,12 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   ProjectId: 'project-membership.md',
   ProjectRole: 'project-membership.md',
   ProjectView: 'project-membership.md',
+  PendingInvitationContext: 'project-membership.md',
+  PendingInvitationView: 'project-membership.md',
   RosterChangeReason: 'project-membership.md',
   RosterInvalidation: 'project-membership.md',
   RosterView: 'project-membership.md',
+  RosterReadView: 'project-membership.md',
   SetMemberTagsInput: 'project-membership.md',
   WorkspaceLink: 'project-membership.md',
   Workspace: 'workspace.md',

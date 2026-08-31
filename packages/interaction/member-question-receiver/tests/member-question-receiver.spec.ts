@@ -144,6 +144,50 @@ describe('FileMemberQuestionReceiver', () => {
     })
   })
 
+  it('persists and replaces exact Account/Project Workspace bindings across restart', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-binding-'))
+    roots.push(storagePath)
+    const first = await createReceiver(storagePath, { clock: () => 1_000 })
+    await first.bind('account-receiver' as never, 'project-1' as never, 'workspace-old' as never)
+    await first.bind('account-receiver' as never, 'project-1' as never, 'workspace-new' as never)
+    await expect(first.lookup('account-receiver' as never, 'project-1' as never))
+      .resolves.toBe('workspace-new')
+    await expect(first.lookup('account-receiver' as never, 'project-missing' as never))
+      .resolves.toBeUndefined()
+    await expect(first.resolve('account-receiver' as never, 'project-1' as never))
+      .resolves.toBe('workspace-new')
+    await expect(first.resolve('account-receiver' as never, 'project-missing' as never))
+      .rejects.toThrow('no local Workspace binding')
+
+    await contexts.pop()!.fiber.dispose()
+    const reopened = await createReceiver(storagePath, { clock: () => 1_000 })
+    await expect(reopened.lookup('account-receiver' as never, 'project-1' as never))
+      .resolves.toBe('workspace-new')
+    await expect(reopened.resolve('account-receiver' as never, 'project-1' as never))
+      .resolves.toBe('workspace-new')
+  })
+
+  it('admits only one compare-and-bind winner for concurrent recovery', async () => {
+    const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-binding-cas-'))
+    roots.push(storagePath)
+    const receiver = await createReceiver(storagePath, { clock: () => 1_000 })
+    const results = await Promise.all([
+      receiver.bindIfCurrent(
+        'account-receiver' as never, 'project-1' as never, undefined, 'workspace-first' as never,
+      ),
+      receiver.bindIfCurrent(
+        'account-receiver' as never, 'project-1' as never, undefined, 'workspace-second' as never,
+      ),
+    ])
+    expect(results.filter(Boolean)).toHaveLength(1)
+    const winner = await receiver.lookup('account-receiver' as never, 'project-1' as never)
+    expect(['workspace-first', 'workspace-second']).toContain(winner)
+    await expect(receiver.bindIfCurrent(
+      'account-receiver' as never, 'project-1' as never, 'workspace-stale' as never, 'workspace-third' as never,
+    )).resolves.toBe(false)
+    await expect(receiver.lookup('account-receiver' as never, 'project-1' as never)).resolves.toBe(winner)
+  })
+
   it('expires an overdue predecessor before admitting a newer same-route question, then supersedes a live predecessor', async () => {
     const storagePath = await mkdtemp(join(tmpdir(), 'dsh-member-question-receiver-'))
     roots.push(storagePath)

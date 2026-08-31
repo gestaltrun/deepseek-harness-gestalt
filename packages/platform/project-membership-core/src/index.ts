@@ -146,6 +146,7 @@ export class FileProjectMembership extends ProjectMembershipService {
 
   private readonly projects = new Map<ProjectId, ProjectRow>()
   private readonly projectNameIndex = new Map<string, ProjectId>()
+  private readonly projectRemoteIndex = new Map<string, ProjectId>()
   private readonly projectMemberships = new Map<ProjectId, Map<MembershipId, MembershipRow>>()
   private readonly membershipAccounts = new Map<string, MembershipRow>()
   private readonly invitations = new Map<InvitationId, InvitationRow>()
@@ -231,13 +232,37 @@ export class FileProjectMembership extends ProjectMembershipService {
       .map(cloneInvitation))
   }
 
+  override pendingInvitationsIssuedBy(
+    actor: PlatformAccountId,
+    projectId: ProjectId,
+  ): Promise<readonly InvitationView[]> {
+    return this.enqueue(() => {
+      this.requireProject(projectId)
+      const administrator = this.requireAdmin(actor, projectId)
+      return [...this.invitations.values()]
+        .filter(row => row.projectId === projectId
+          && row.state === 'pending'
+          && (administrator.role === 'owner' || row.inviterAccountId === actor))
+        .sort((left, right) => left.invitedAt - right.invitedAt)
+        .map(cloneInvitation)
+    })
+  }
+
+  override pendingInvitationContextsFor(actor: PlatformAccountId) {
+    return this.enqueue(() => [...this.invitations.values()]
+      .filter(row => row.inviteeAccountId === actor && row.state === 'pending')
+      .sort((left, right) => left.invitedAt - right.invitedAt)
+      .map(invitation => ({
+        invitation: cloneInvitation(invitation),
+        project: cloneProject(this.requireProject(invitation.projectId)),
+      })))
+  }
+
   override projectByRemote(actor: PlatformAccountId, normalizedRemoteUrl: string): Promise<ProjectView | undefined> {
     return this.enqueue(() => {
-      const owned = [...this.projects.values()]
-        .filter(project => this.requireMembershipRowOrUndefined(actor, project.id) !== undefined)
-        .sort((left, right) => left.createdAt - right.createdAt)
-      const found = owned.find(project => project.boundRemoteUrl === normalizedRemoteUrl)
-      return found === undefined ? undefined : cloneProject(found)
+      const projectId = this.projectRemoteIndex.get(normalizedRemoteUrl)
+      if (projectId === undefined || this.requireMembershipRowOrUndefined(actor, projectId) === undefined) return undefined
+      return cloneProject(this.requireProject(projectId))
     })
   }
 
@@ -288,8 +313,15 @@ export class FileProjectMembership extends ProjectMembershipService {
     const state = parse(text)
     for (const project of state.projects) {
       const row: ProjectRow = { ...project, id: project.id as ProjectId }
+      if (this.projectNameIndex.has(row.name)) {
+        throw new Error(`project-membership: durable state contains duplicate project name ${JSON.stringify(row.name)}`)
+      }
+      if (this.projectRemoteIndex.has(row.boundRemoteUrl)) {
+        throw new Error(`project-membership: durable state contains duplicate project remote ${JSON.stringify(row.boundRemoteUrl)}`)
+      }
       this.projects.set(row.id, row)
       this.projectNameIndex.set(row.name, row.id)
+      this.projectRemoteIndex.set(row.boundRemoteUrl, row.id)
       this.projectMemberships.set(row.id, new Map())
     }
     for (const membership of state.memberships) {
@@ -434,6 +466,9 @@ export class FileProjectMembership extends ProjectMembershipService {
       throw new ProjectMembershipError('PROJECT_NAME_TAKEN', `project name ${name} is already in use`)
     }
     const boundRemoteUrl = normalizeGitRemoteUrl(input.remoteUrl)
+    if (this.projectRemoteIndex.has(boundRemoteUrl)) {
+      throw new ProjectMembershipError('PROJECT_REMOTE_TAKEN', `git remote ${boundRemoteUrl} is already bound to a project`)
+    }
     const now = Date.now()
     const project: ProjectRow = { id: randomUUID() as ProjectId, name, boundRemoteUrl, createdAt: now, rosterVersion: 0 }
     const founder: MembershipRow = {
@@ -447,11 +482,13 @@ export class FileProjectMembership extends ProjectMembershipService {
     }
     this.projects.set(project.id, project)
     this.projectNameIndex.set(name, project.id)
+    this.projectRemoteIndex.set(boundRemoteUrl, project.id)
     this.projectMemberships.set(project.id, new Map([[founder.id, founder]]))
     this.membershipAccounts.set(duplicateKey(project.id, actor), founder)
     await this.commit(() => {
       this.projects.delete(project.id)
       this.projectNameIndex.delete(name)
+      this.projectRemoteIndex.delete(boundRemoteUrl)
       this.projectMemberships.delete(project.id)
       this.membershipAccounts.delete(duplicateKey(project.id, actor))
     })

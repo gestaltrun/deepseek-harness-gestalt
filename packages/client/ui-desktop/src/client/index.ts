@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-project-membership-client'
 import { BrandSeat } from './BrandSeat.tsx'
 import { DragStrip } from './DragStrip.tsx'
 import { UpdateControl } from './UpdateControl.tsx'
@@ -53,6 +54,9 @@ export function apply(ctx: ClientContext): void {
     ctx.effect(() => bindDesktopUpdater(updater, desktop), 'ui-desktop: updater status')
     ctx.effect(() => bindDesktopAccount(account, desktop), 'ui-desktop: account status')
     ctx.effect(() => bindDesktopPairing(pairing, desktop), 'ui-desktop: pairing status')
+    if (desktop.projectMembership !== undefined) {
+      ctx.provide('projectMembershipClient', desktop.projectMembership)
+    }
   }
 
   ctx.slots.inject('sidebar.brand', () => ctx.slots.register(

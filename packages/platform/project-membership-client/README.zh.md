@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-面向 Project Membership 的浏览器客户端，走 HTTP Consumer 的 `/v1/projects` 路由。`ProjectMembershipHttpTransport` 把升级操作——云项目创建、带在线状态的成员名册读取、邀请的发出/决定/撤回与被邀方待确认邀请轮询，以及成员角色、职能标签与移除管理——映射到线上契约；每次请求携带调用方提供的 Account 会话凭证头，且不接触安装签名私钥。失败应答保留稳定信封：传输层解析 `{ error: { code, message } }`，以携带领域码与 HTTP 状态码的 `ProjectMembershipClientError` 拒绝，403 角色门槛呈现为 `ROLE_REQUIRED`/403；非 JSON 的代理失败回退为 `HTTP_<状态码>`。所有成功载荷先从 `unknown` 解析，再交给 UI。
+面向 Project Membership 的浏览器客户端，走 HTTP Consumer 的 `/v1/projects` 路由。`ProjectMembershipHttpTransport` 把云项目创建、按规范化 remote 恢复当前 Account 的 Project、带在线状态的成员名册读取、按 GitHub 登录名发出邀请、邀请决定、撤回、可信的被邀方卡片、按 Project 读取的权威已发出待确认邀请，以及成员角色、职能标签与移除管理，映射到线上契约。创建与 remote 恢复会在 Project 旁返回已鉴权 Account id，让 Desktop 组合可以持久化精确本地绑定而不暴露凭据。每次请求携带调用方提供的 Account 会话 presentation 头，且不会暴露安装签名私钥。失败应答保留稳定信封：传输层解析 `{ error: { code, message } }`，以携带领域码与 HTTP 状态码的 `ProjectMembershipClientError` 拒绝，403 角色门槛呈现为 `ROLE_REQUIRED`/403；非 JSON 的代理失败回退为 `HTTP_<状态码>`。所有成功载荷先从 `unknown` 解析，再交给 UI。`ProjectMembershipClient` 是无凭据参数的操作接口，由 Desktop 拥有的已鉴权适配器提供给 renderer 消费方。
 
 ## Model Experience
 
@@ -14,4 +14,4 @@ None。
 
 ## Known Limitations and Deferred Work
 
-- GitHub 登录名到账号的解析与工作区 remote 查询由组合层负责；传输层只认账号 ID。
+- 本地 Git 检查、clone、Workspace 注册与 Account/Project 绑定仍由 Host 和 UI 组合负责。

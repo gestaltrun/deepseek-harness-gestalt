@@ -2546,6 +2546,11 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
 
   const api: ApiProxy = {
     memberQuestions: {
+      workspaceBinding: request => ok(request, { state: 'missing' as const }),
+      ensureWorkspaceBinding: request => ok(request, {
+        state: 'created' as const, workspaceId: request.payload.workspaceId,
+      }),
+      bindWorkspace: request => ok(request, { bound: true as const }),
       snapshot: request => ok(request, { revision: 0, pending: [], terminal: [] }),
       settle: request => err(request, {
         code: 'internal', message: 'fixture has no member-question receiver', details: {},
@@ -2976,6 +2981,22 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         workspaces.unshift(created)
         emitHost({ type: 'host/workspace-changed', workspace: { ...created } })
         return ok(request, { workspace: { ...created }, created: true })
+      },
+      gitRemote: request => ok(request, {}),
+      cloneGit: (request) => {
+        const path = `${request.payload.parentPath}/${request.payload.directoryName}`
+        const now = new Date().toISOString()
+        const created: WorkspaceView = {
+          workspaceId: wid(`fx-ws-${nextWorkspace++}`),
+          path,
+          title: request.payload.directoryName,
+          sessionIds: [],
+          createdAt: now,
+          updatedAt: now,
+        }
+        workspaces.unshift(created)
+        emitHost({ type: 'host/workspace-changed', workspace: { ...created } })
+        return ok(request, { workspace: { ...created } })
       },
       rename: (request) => {
         const { workspaceId, title } = request.payload
@@ -3486,6 +3507,9 @@ export class FixtureApiClient extends AbstractApiClient {
     signal: AbortSignal,
   ): Promise<RpcResponse<unknown>> {
     switch (method) {
+      case 'memberQuestion.workspaceBinding': return this.api.memberQuestions.workspaceBinding(request)
+      case 'memberQuestion.ensureWorkspaceBinding': return this.api.memberQuestions.ensureWorkspaceBinding(request)
+      case 'memberQuestion.bindWorkspace': return this.api.memberQuestions.bindWorkspace(request)
       case 'memberQuestion.snapshot': return this.api.memberQuestions.snapshot(request)
       case 'memberQuestion.settle': return this.api.memberQuestions.settle(request)
       case 'memberQuestion.admitHumanTurn': return this.api.memberQuestions.admitHumanTurn(request)
@@ -3514,6 +3538,8 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'host.openPath': return this.api.host.openPath(request, new AbortController().signal)
       case 'workspace.list': return this.api.workspace.list(request)
       case 'workspace.create': return this.api.workspace.create(request)
+      case 'workspace.gitRemote': return this.api.workspace.gitRemote(request, signal)
+      case 'workspace.cloneGit': return this.api.workspace.cloneGit(request, signal)
       case 'workspace.rename': return this.api.workspace.rename(request)
       case 'workspace.delete': return this.api.workspace.delete(request)
       case 'workspace.insertBefore': return this.api.workspace.insertBefore(request)

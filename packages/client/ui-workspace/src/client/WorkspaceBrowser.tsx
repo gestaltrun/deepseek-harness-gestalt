@@ -789,6 +789,10 @@ export function WorkspaceBrowser({
 }: WorkspaceBrowserProps) {
   const home = useHostDescription(description => description?.home)
   const workspaces = useWorkspaces(state => state.items)
+  const wizardWorkspaces = useMemo(() => workspaces.map((workspace): WizardWorkspace => ({
+    workspaceId: workspace.workspaceId,
+    title: workspace.title,
+  })), [workspaces])
   const workspacePhase = useWorkspaces(state => state.phase)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
   // Live occupancy of this surface's directory-flow hole (the same source the
@@ -1256,6 +1260,7 @@ export function WorkspaceBrowser({
 
       {settingsTarget !== null && projectMembership !== undefined && (
         <WorkspaceSettingsModal
+          workspaceId={settingsTarget.workspaceId}
           workspaceTitle={settingsTarget.title}
           gateway={projectMembership}
           onClose={() => { setSettingsTarget(null) }}
@@ -1265,10 +1270,7 @@ export function WorkspaceBrowser({
       {wizardInvitation !== null && projectMembership !== undefined && (
         <InviteWizardModal
           invitation={wizardInvitation}
-          workspaces={workspaces.map((workspace): WizardWorkspace => ({
-            workspaceId: workspace.workspaceId,
-            title: workspace.title,
-          }))}
+          workspaces={wizardWorkspaces}
           gateway={projectMembership}
           onClose={() => {
             wizardCoolUntil.current = Date.now() + INVITE_POLL_MS

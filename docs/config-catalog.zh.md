@@ -1766,7 +1766,7 @@ interface MemberQuestionHumanImageContent {
 
 Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionOperation`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.zh.md) · [`HostSessionId`](subsystems/core.zh.md) · [`ImageAttachmentRef`](subsystems/attachment.zh.md) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`PlatformAccountId`](subsystems/platform-account.zh.md) · [`ProjectId`](subsystems/project-membership.zh.md)
 
-Source: [`packages/interaction/member-question-receiver/src/index.ts:97`](../packages/interaction/member-question-receiver/src/index.ts)
+Source: [`packages/interaction/member-question-receiver/src/index.ts:100`](../packages/interaction/member-question-receiver/src/index.ts)
 
 <a id="deepseek-aidsh-member-question-sender"></a>
 
@@ -2050,6 +2050,11 @@ export interface AccountBackend {
   getSession(id: AccountSessionId): Promise<SessionRecord | undefined>
   /** Read one Platform Account by id. */
   getAccount(id: PlatformAccountId): Promise<AccountRecord | undefined>
+  /** Find current Account rows whose public GitHub login matches case-insensitively. */
+  findAccountsByGithubLogin(
+    identityNamespace: string,
+    normalizedGithubLogin: string,
+  ): Promise<readonly AccountRecord[]>
   /** Atomically rotate the matching refresh token generation. */
   rotateRefresh(sessionId: AccountSessionId, expectedHash: string, replacementHash: string): Promise<SessionRecord | undefined>
   /** Revoke one session and report whether it was active. */
@@ -2182,7 +2187,7 @@ export interface AccountRecord extends PlatformAccountView {
 
 依赖：[`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.zh.md) · [`InstallationId`](subsystems/platform-account.zh.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.zh.md) · [`PlatformAccountId`](subsystems/platform-account.zh.md) · [`PlatformAccountView`](subsystems/platform-account.zh.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
 
-来源：[`packages/platform/platform-account-core/src/index.ts:507`](../packages/platform/platform-account-core/src/index.ts)
+来源：[`packages/platform/platform-account-core/src/index.ts:522`](../packages/platform/platform-account-core/src/index.ts)
 
 <a id="deepseek-aidsh-platform-account-http"></a>
 
@@ -2239,7 +2244,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/platform/project-membership-http/src/index.ts:53`](../packages/platform/project-membership-http/src/index.ts)
+来源：[`packages/platform/project-membership-http/src/index.ts:55`](../packages/platform/project-membership-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 

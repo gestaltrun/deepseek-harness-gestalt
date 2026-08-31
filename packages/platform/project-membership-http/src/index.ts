@@ -23,9 +23,11 @@ import {
 import { accountSessionPresentation } from '@deepseek-ai/dsh-platform-account-http'
 import {
   ProjectMembershipError,
+  normalizeGitRemoteUrl,
   type FunctionTag,
   type InvitationId,
   type MemberView,
+  type ProjectId,
   type ProjectMembershipErrorCode,
   type ProjectRole,
   type ProjectView,
@@ -104,14 +106,46 @@ export function apply(ctx: Context, config: Config): void {
     requireMethod(req, 'POST')
     const actor = await requireActor(ctx, req)
     const body = await readJson(req)
-    writeJson(res, 201, await ctx.projectMembership.createProject(actor, {
+    const project = await ctx.projectMembership.createProject(actor, {
       name: requiredString(body, 'name'),
       remoteUrl: requiredString(body, 'remoteUrl'),
-    }))
+    })
+    writeJson(res, 201, { ...project, receivingAccountId: actor })
+  })
+
+  route('exact', '/v1/projects/by-remote', async (req, res) => {
+    requireMethod(req, 'GET')
+    const actor = await requireActor(ctx, req)
+    const url = new URL(req.url ?? '/', 'https://platform.invalid')
+    const remoteUrl = url.searchParams.get('remoteUrl')
+    if (remoteUrl === null || remoteUrl.trim() === '') {
+      throw new HttpError(400, 'INVALID_REQUEST', 'remoteUrl must be a non-empty query parameter')
+    }
+    let normalizedRemoteUrl: string
+    try {
+      normalizedRemoteUrl = normalizeGitRemoteUrl(remoteUrl)
+    } catch (error: unknown) {
+      throw new HttpError(400, 'INVALID_REQUEST', error instanceof Error ? error.message : String(error))
+    }
+    const project = await ctx.projectMembership.projectByRemote(actor, normalizedRemoteUrl)
+    if (project === undefined) {
+      answerNoContent(res)
+      return
+    }
+    writeJson(res, 200, { ...project, receivingAccountId: actor })
   })
 
   route('prefix', '/v1/projects', async (req, res) => {
-    const roster = matchPath(requestPath(req), '/v1/projects/:projectId/members')
+    const pathname = requestPath(req)
+    const issued = matchPath(pathname, '/v1/projects/:projectId/invitations')
+    if (issued !== undefined) {
+      requireMethod(req, 'GET')
+      const actor = await requireActor(ctx, req)
+      const projectId = brandedParam<'ProjectId'>(issued, 'projectId')
+      writeJson(res, 200, await issuedInvitationPresentations(ctx, actor, projectId))
+      return
+    }
+    const roster = matchPath(pathname, '/v1/projects/:projectId/members')
     if (roster === undefined) throw unknownRoute()
     requireMethod(req, 'GET')
     const actor = await requireActor(ctx, req)
@@ -135,16 +169,20 @@ export function apply(ctx: Context, config: Config): void {
     if (matchPath(pathname, '/v1/projects/invitations/pending') !== undefined) {
       requireMethod(req, 'GET')
       const actor = await requireActor(ctx, req)
-      writeJson(res, 200, await ctx.projectMembership.pendingInvitationsFor(actor))
+      writeJson(res, 200, await pendingInvitationPresentations(ctx, actor))
       return
     }
     if (matchPath(pathname, '/v1/projects/invitations') !== undefined) {
       requireMethod(req, 'POST')
       const actor = await requireActor(ctx, req)
       const body = await readJson(req)
+      const invitee = await ctx.platformAccount.publicIdentityByGithubLogin(requiredString(body, 'githubLogin'))
+      if (invitee === undefined) {
+        throw new HttpError(404, 'ACCOUNT_NOT_FOUND', 'No unambiguous Platform Account matches that GitHub login')
+      }
       writeJson(res, 201, await ctx.projectMembership.invite(actor, {
         projectId: requiredBrandedId<'ProjectId'>(body, 'projectId'),
-        inviteeAccountId: requiredBrandedId<'PlatformAccountId'>(body, 'inviteeAccountId'),
+        inviteeAccountId: invitee.id,
       }))
       return
     }
@@ -204,6 +242,59 @@ export function apply(ctx: Context, config: Config): void {
     }
     throw unknownRoute()
   })
+}
+
+/** Invitation card fields safe to show before the invitee joins. */
+export interface PendingInvitationPresentation {
+  readonly invitationId: InvitationId
+  readonly receivingAccountId: PlatformAccountId
+  readonly projectId: ProjectId
+  readonly projectName: string
+  readonly remoteUrl: string
+  readonly inviterName: string
+  readonly invitedAt: number
+}
+
+/** Pending invitation issued from one Project with its public invitee login. */
+export interface IssuedInvitationPresentation {
+  readonly invitationId: InvitationId
+  readonly inviteeName: string
+  readonly invitedAt: number
+}
+
+async function issuedInvitationPresentations(
+  ctx: Context,
+  actor: PlatformAccountId,
+  projectId: ProjectId,
+): Promise<readonly IssuedInvitationPresentation[]> {
+  const invitations = await ctx.projectMembership.pendingInvitationsIssuedBy(actor, projectId)
+  const invitees = await ctx.platformAccount.publicIdentitiesByIds(
+    invitations.map(invitation => invitation.inviteeAccountId),
+  )
+  return invitations.map(invitation => ({
+    invitationId: invitation.id,
+    inviteeName: invitees.get(invitation.inviteeAccountId)?.githubLogin ?? '',
+    invitedAt: invitation.invitedAt,
+  }))
+}
+
+async function pendingInvitationPresentations(
+  ctx: Context,
+  actor: PlatformAccountId,
+): Promise<readonly PendingInvitationPresentation[]> {
+  const contexts = await ctx.projectMembership.pendingInvitationContextsFor(actor)
+  const inviters = await ctx.platformAccount.publicIdentitiesByIds(
+    contexts.map(row => row.invitation.inviterAccountId),
+  )
+  return contexts.map(({ invitation, project }) => ({
+    invitationId: invitation.id,
+    receivingAccountId: actor,
+    projectId: project.id,
+    projectName: project.name,
+    remoteUrl: project.boundRemoteUrl,
+    inviterName: inviters.get(invitation.inviterAccountId)?.githubLogin ?? '',
+    invitedAt: invitation.invitedAt,
+  }))
 }
 
 /**
@@ -357,6 +448,7 @@ const MEMBERSHIP_ERROR_STATUS: Readonly<Record<ProjectMembershipErrorCode, numbe
   INVITATION_NOT_FOUND: 404,
   INVITATION_NOT_PENDING: 409,
   PROJECT_NAME_TAKEN: 409,
+  PROJECT_REMOTE_TAKEN: 409,
   INVALID_PROJECT_NAME: 400,
   INVALID_REMOTE_URL: 400,
   INVALID_TAGS: 400,

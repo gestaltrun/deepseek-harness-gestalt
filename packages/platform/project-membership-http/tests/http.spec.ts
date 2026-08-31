@@ -65,13 +65,31 @@ describe('Project Membership HTTP consumer', () => {
       name: 'Assembled', remoteUrl: 'https://GitHub.com/octocat/Repo.GIT',
     }, session)
     expect(created.status).toBe(201)
-    expect(await created.json()).toMatchObject({ id: 'project-1' })
+    const createdBody: unknown = await created.json()
+    expect(createdBody).toMatchObject({ id: 'project-1', receivingAccountId: 'account-1' })
     expect(membership.createProject).toHaveBeenCalledWith('account-1', {
       name: 'Assembled', remoteUrl: 'https://GitHub.com/octocat/Repo.GIT',
     })
+    membership.projectByRemote.mockResolvedValueOnce(project())
+    const restored = await fetch(`${server.origin}/v1/projects/by-remote?remoteUrl=${encodeURIComponent('https://GitHub.com/octocat/Repo.GIT')}`, {
+      headers: { origin: ENVIRONMENT.origin, ...session },
+    })
+    expect(restored.status).toBe(200)
+    expect(await restored.json()).toMatchObject({ id: 'project-1', receivingAccountId: 'account-1' })
+    expect(membership.projectByRemote).toHaveBeenCalledWith('account-1', 'https://github.com/octocat/Repo')
+
+    membership.pendingInvitationsIssuedBy.mockResolvedValueOnce([invitation()])
+    const issued = await fetch(`${server.origin}/v1/projects/project-1/invitations`, {
+      headers: { origin: ENVIRONMENT.origin, ...session },
+    })
+    expect(issued.status).toBe(200)
+    expect(await issued.json()).toEqual([{
+      invitationId: 'invitation-1', inviteeName: 'mona', invitedAt: 1,
+    }])
+    expect(membership.pendingInvitationsIssuedBy).toHaveBeenCalledWith('account-1', 'project-1')
 
     const invited = await post(server.origin, '/v1/projects/invitations', {
-      projectId: 'project-1', inviteeAccountId: 'account-2',
+      projectId: 'project-1', githubLogin: 'mona',
     }, session)
     expect(invited.status).toBe(201)
     expect(await invited.json()).toMatchObject({ id: 'invitation-1', state: 'pending' })
@@ -105,7 +123,10 @@ describe('Project Membership HTTP consumer', () => {
       project: { id: 'project-1', name: 'Assembled', boundRemoteUrl: 'https://github.com/octocat/Repo', createdAt: 1 },
       members: [
         { ...member('membership-1', 'account-1'), role: 'owner', presence: 'online', displayName: 'octocat', avatarRef: 'https://avatars.example/octocat' },
-        { ...member('membership-2', 'account-2'), presence: 'offline', displayName: '', avatarRef: '' },
+        {
+          ...member('membership-2', 'account-2'), presence: 'offline',
+          displayName: 'mona', avatarRef: 'https://avatars.example/mona',
+        },
       ],
     })
 
@@ -145,14 +166,19 @@ describe('Project Membership HTTP consumer', () => {
 
   it('serves the invitee pending-invitation poll for the acting account', async () => {
     const membership = membershipService()
-    membership.pendingInvitationsFor.mockResolvedValue([invitation()])
+    membership.pendingInvitationContextsFor.mockResolvedValue([{
+      invitation: invitation(), project: project(),
+    }])
     const server = await start(membership, accountService())
     const pending = await fetch(`${server.origin}/v1/projects/invitations/pending`, {
       headers: { origin: ENVIRONMENT.origin, ...authHeaders() },
     })
     expect(pending.status).toBe(200)
-    expect(await pending.json()).toMatchObject([{ id: 'invitation-1', state: 'pending' }])
-    expect(membership.pendingInvitationsFor).toHaveBeenCalledWith('account-1')
+    expect(await pending.json()).toMatchObject([{
+      invitationId: 'invitation-1', receivingAccountId: 'account-1', projectName: 'Assembled',
+      remoteUrl: 'https://github.com/octocat/Repo', inviterName: 'octocat',
+    }])
+    expect(membership.pendingInvitationContextsFor).toHaveBeenCalledWith('account-1')
     expect(await error(post(server.origin, '/v1/projects/invitations/pending', {}, authHeaders())))
       .toEqual([405, 'METHOD_NOT_ALLOWED'])
   })
@@ -258,6 +284,7 @@ interface MockAccountService {
   current: Mock<AccountService['current']>
   currentInstallation: Mock<AccountService['currentInstallation']>
   publicIdentitiesByIds: Mock<AccountService['publicIdentitiesByIds']>
+  publicIdentityByGithubLogin: Mock<AccountService['publicIdentityByGithubLogin']>
 }
 
 interface MockMembershipService {
@@ -271,6 +298,9 @@ interface MockMembershipService {
   removeMember: Mock<ProjectMembershipService['removeMember']>
   roster: Mock<ProjectMembershipService['roster']>
   pendingInvitationsFor: Mock<ProjectMembershipService['pendingInvitationsFor']>
+  pendingInvitationsIssuedBy: Mock<ProjectMembershipService['pendingInvitationsIssuedBy']>
+  pendingInvitationContextsFor: Mock<ProjectMembershipService['pendingInvitationContextsFor']>
+  projectByRemote: Mock<ProjectMembershipService['projectByRemote']>
 }
 
 function accountService(): MockAccountService {
@@ -283,7 +313,11 @@ function accountService(): MockAccountService {
     currentInstallation: vi.fn<AccountService['currentInstallation']>().mockResolvedValue(installation('desktop')),
     publicIdentitiesByIds: vi.fn<AccountService['publicIdentitiesByIds']>().mockResolvedValue(new Map([
       ['account-1' as PlatformAccountId, { id: 'account-1' as PlatformAccountId, githubLogin: 'octocat', avatarUrl: 'https://avatars.example/octocat' }],
+      ['account-2' as PlatformAccountId, { id: 'account-2' as PlatformAccountId, githubLogin: 'mona', avatarUrl: 'https://avatars.example/mona' }],
     ])),
+    publicIdentityByGithubLogin: vi.fn<AccountService['publicIdentityByGithubLogin']>().mockResolvedValue({
+      id: 'account-2' as PlatformAccountId, githubLogin: 'mona', avatarUrl: 'https://avatars.example/mona',
+    }),
   }
 }
 
@@ -321,6 +355,10 @@ function membershipService(): MockMembershipService {
     removeMember: vi.fn<ProjectMembershipService['removeMember']>().mockResolvedValue(undefined),
     roster: vi.fn<ProjectMembershipService['roster']>().mockResolvedValue(roster()),
     pendingInvitationsFor: vi.fn<ProjectMembershipService['pendingInvitationsFor']>().mockResolvedValue([]),
+    pendingInvitationsIssuedBy: vi.fn<ProjectMembershipService['pendingInvitationsIssuedBy']>().mockResolvedValue([]),
+    pendingInvitationContextsFor: vi.fn<ProjectMembershipService['pendingInvitationContextsFor']>()
+      .mockResolvedValue([]),
+    projectByRemote: vi.fn<ProjectMembershipService['projectByRemote']>().mockResolvedValue(undefined),
   }
 }
 

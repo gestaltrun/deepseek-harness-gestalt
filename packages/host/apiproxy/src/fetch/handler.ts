@@ -38,8 +38,10 @@ import {
 } from '../api/host.schema.ts'
 import {
   workspaceArchiveSessionRequestSchema,
+  workspaceCloneGitRequestSchema,
   workspaceCreateRequestSchema,
   workspaceDeleteRequestSchema,
+  workspaceGitRemoteRequestSchema,
   workspaceInsertBeforeRequestSchema,
   workspaceInsertSessionBeforeRequestSchema,
   workspaceListRequestSchema,
@@ -73,6 +75,9 @@ import {
   subagentPromptRequestSchema,
 } from '../api/subagents.schema.ts'
 import {
+  memberQuestionBindWorkspaceRequestSchema,
+  memberQuestionEnsureWorkspaceBindingRequestSchema,
+  memberQuestionWorkspaceBindingRequestSchema,
   memberQuestionSettleRequestSchema,
   memberQuestionSnapshotRequestSchema,
   memberQuestionAdmitHumanTurnRequestSchema,
@@ -95,6 +100,9 @@ type UnaryRoutes = {
 }
 
 const UNARY_ROUTES: UnaryRoutes = {
+  'memberQuestion.workspaceBinding': { schema: memberQuestionWorkspaceBindingRequestSchema, invoke: (api, r) => api.memberQuestions.workspaceBinding(r) },
+  'memberQuestion.ensureWorkspaceBinding': { schema: memberQuestionEnsureWorkspaceBindingRequestSchema, invoke: (api, r) => api.memberQuestions.ensureWorkspaceBinding(r) },
+  'memberQuestion.bindWorkspace': { schema: memberQuestionBindWorkspaceRequestSchema, invoke: (api, r) => api.memberQuestions.bindWorkspace(r) },
   'memberQuestion.snapshot': { schema: memberQuestionSnapshotRequestSchema, invoke: (api, r) => api.memberQuestions.snapshot(r) },
   'memberQuestion.settle': { schema: memberQuestionSettleRequestSchema, invoke: (api, r) => api.memberQuestions.settle(r) },
   'memberQuestion.admitHumanTurn': { schema: memberQuestionAdmitHumanTurnRequestSchema, invoke: (api, r) => api.memberQuestions.admitHumanTurn(r) },
@@ -123,6 +131,8 @@ const UNARY_ROUTES: UnaryRoutes = {
   'host.openPath': { schema: hostOpenPathRequestSchema, invoke: (api, r, signal) => api.host.openPath(r, signal) },
   'workspace.list': { schema: workspaceListRequestSchema, invoke: (api, r) => api.workspace.list(r) },
   'workspace.create': { schema: workspaceCreateRequestSchema, invoke: (api, r) => api.workspace.create(r) },
+  'workspace.gitRemote': { schema: workspaceGitRemoteRequestSchema, invoke: (api, r, signal) => api.workspace.gitRemote(r, signal) },
+  'workspace.cloneGit': { schema: workspaceCloneGitRequestSchema, invoke: (api, r, signal) => api.workspace.cloneGit(r, signal) },
   'workspace.rename': { schema: workspaceRenameRequestSchema, invoke: (api, r) => api.workspace.rename(r) },
   'workspace.delete': { schema: workspaceDeleteRequestSchema, invoke: (api, r) => api.workspace.delete(r) },
   'workspace.insertBefore': { schema: workspaceInsertBeforeRequestSchema, invoke: (api, r) => api.workspace.insertBefore(r) },

@@ -64,10 +64,12 @@ export interface WorkspaceIssuedInvitation {
 /** One pending invitation addressed to the local account (poll source of the wizard). */
 export interface WorkspacePendingInvitation {
   invitationId: string
+  receivingAccountId: string
+  projectId: string
   projectName: string
   inviterName: string
   /** Normalized remote of the invited project, for same-origin link advice. */
-  remoteUrl?: string
+  remoteUrl: string
 }
 
 /**
@@ -77,13 +79,22 @@ export interface WorkspacePendingInvitation {
  * without it render no upgrade affordance.
  */
 export interface ProjectMembershipGateway {
-  createProject(input: { name: string; remoteUrl: string }): Promise<WorkspaceProjectView>
+  createProject(input: { name: string; localWorkspaceId: WorkspaceId }): Promise<WorkspaceProjectView>
+  /** Recover the current Account's Cloud Project without replacing an existing exact binding. */
+  projectForWorkspace(workspaceId: WorkspaceId): Promise<WorkspaceProjectView | undefined>
   roster(projectId: string): Promise<{ project: WorkspaceProjectView; members: readonly WorkspaceMemberRow[] }>
   invite(input: { projectId: string; githubLogin: string }): Promise<WorkspaceIssuedInvitation>
+  issuedInvitations(projectId: string): Promise<readonly WorkspaceIssuedInvitation[]>
   retractInvitation(invitationId: string): Promise<void>
   decideInvitation(
     invitationId: string,
-    input: { decision: 'decline' } | { decision: 'accept-with-link'; link: { workspaceName: string; normalizedRemoteUrl?: string } },
+    input: { decision: 'decline' } | {
+      decision: 'accept-with-link'
+      localWorkspaceId: WorkspaceId
+      receivingAccountId: string
+      projectId: string
+      link: { workspaceName: string; normalizedRemoteUrl?: string }
+    },
   ): Promise<void>
   changeRole(membershipId: string, role: WorkspaceProjectRole): Promise<void>
   setMemberTags(membershipId: string, tags: readonly string[]): Promise<void>
@@ -91,7 +102,12 @@ export interface ProjectMembershipGateway {
   /** Invitations addressed to the local account; polled while the browser is open. */
   pendingInvitations(): Promise<readonly WorkspacePendingInvitation[]>
   /** Normalized git remote of one local workspace checkout, when known. */
-  localRemoteFor?: (workspaceId: WorkspaceId) => string | undefined
+  localRemoteFor(workspaceId: WorkspaceId): Promise<string | undefined>
+  /** Pick a parent, clone the invited remote, and register the new Workspace; undefined means user cancellation. */
+  cloneWorkspace(input: {
+    remoteUrl: string
+    directoryName: string
+  }): Promise<{ workspaceId: WorkspaceId; title: string; normalizedRemoteUrl: string } | undefined>
 }
 
 /**
@@ -198,6 +214,8 @@ export type WorkspaceBrowserInjected = {
   insertSessionBefore: (workspaceId: WorkspaceId, sessionId: SessionId, beforeSessionId?: SessionId) => Promise<void>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
+  /** Authenticated Project Membership gateway supplied by a product composition. */
+  projectMembership?: ProjectMembershipGateway | undefined
 }
 
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */
@@ -208,14 +226,6 @@ export type WorkspaceBrowserProps =
   & Omit<WorkspaceBrowserInjected, 'hooks'>
   & PropsHooks<WorkspaceBrowserInjected['hooks']>
   & PropsLocale<'workspace'>
-  & {
-    /**
-     * Upgrade seam to the Project Membership client; absent in compositions
-     * without the membership client (the row menu then offers settings only
-     * as the rename/delete companion with no upgrade body).
-     */
-    projectMembership?: ProjectMembershipGateway | undefined
-  }
 
 /**
  * Picker-private injected share. Pick semantics remain in the owner's onPick

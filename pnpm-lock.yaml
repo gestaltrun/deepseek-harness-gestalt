@@ -461,6 +461,9 @@ importers:
       '@deepseek-ai/dsh-platform-account-client':
         specifier: workspace:^
         version: link:../../packages/platform/platform-account-client
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:^
+        version: link:../../packages/platform/project-membership-client
       '@deepseek-ai/dsh-remote-access':
         specifier: workspace:^
         version: link:../../packages/platform/remote-access
@@ -2910,6 +2913,9 @@ importers:
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../../platform/platform-account
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:^
+        version: link:../../platform/project-membership-client
       '@deepseek-ai/dsh-remote-access':
         specifier: workspace:^
         version: link:../../platform/remote-access
@@ -3177,9 +3183,6 @@ importers:
       '@deepseek-ai/dsh-client-ui-conversation':
         specifier: workspace:^
         version: link:../ui-conversation
-      '@deepseek-ai/dsh-client-ui-primitives':
-        specifier: workspace:^
-        version: link:../ui-primitives
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: workspace:^
         version: link:../ui-slots
@@ -4272,6 +4275,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:^
+        version: link:../../platform/project-membership-client
       '@types/react':
         specifier: ~18.3.1
         version: 18.3.31
@@ -6231,12 +6237,24 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-platform-account':
+        specifier: workspace:^
+        version: link:../../platform/platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../../platform/project-membership
       '@deepseek-ai/dsh-storage':
         specifier: workspace:^
         version: link:../../storage/storage
       '@deepseek-ai/dsh-storage-domain':
         specifier: workspace:^
         version: link:../../storage/storage-domain
+      '@deepseek-ai/dsh-subprocess':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess
+      '@deepseek-ai/dsh-subprocess-local':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess-local
       '@deepseek-ai/dsh-typert-protocol':
         specifier: workspace:^
         version: link:../../typert/protocol

@@ -66,6 +66,7 @@ const ENVIRONMENT = selectPlatformEnvironment(ENVIRONMENT_PAIR, 'development')
 interface Session {
   readonly key: ReturnType<typeof installationKey>
   readonly accountId: PlatformAccountId
+  readonly githubLogin: string
   readonly accessToken: string
 }
 
@@ -111,7 +112,7 @@ describe('two Platform instances over one membership document', () => {
     const project = await created.json() as { id: string; boundRemoteUrl: string }
     expect(project.boundRemoteUrl).toBe('https://github.com/octocat/Shared')
     const invited = await post(a.origin, '/v1/projects/invitations', {
-      projectId: project.id, inviteeAccountId: mona.accountId,
+      projectId: project.id, githubLogin: mona.githubLogin,
     }, authHeaders(octocat))
     expect(invited.status).toBe(201)
     const invitation = await invited.json() as { id: string; state: string; inviteeAccountId: string }
@@ -147,13 +148,13 @@ describe('two Platform instances over one membership document', () => {
     // acceptance immediately gates further invites: Mona now holds membership
     // but not admin, and re-inviting her hits the duplicate gate.
     expect(await errorOf(post(b.origin, '/v1/projects/invitations', {
-      projectId: project.id, inviteeAccountId: newman.accountId,
+      projectId: project.id, githubLogin: newman.githubLogin,
     }, authHeaders(mona)))).toEqual([403, 'ROLE_REQUIRED'])
     expect(await errorOf(fetch(`${b.origin}/v1/projects/${project.id}/members`, {
       headers: { origin: ENVIRONMENT.origin, ...authHeaders(newman) },
     }))).toEqual([403, 'NOT_A_MEMBER'])
     expect(await errorOf(post(b.origin, '/v1/projects/invitations', {
-      projectId: project.id, inviteeAccountId: mona.accountId,
+      projectId: project.id, githubLogin: mona.githubLogin,
     }, authHeaders(octocat)))).toEqual([409, 'DUPLICATE_INVITEE'])
 
     const joined = await rosterOf(b.origin, project.id, octocat)
@@ -238,7 +239,10 @@ async function signIn(service: AccountService, installationId: string): Promise<
     proof: key.proof('login-poll', `${attempt.id}:${hashAccountToken(attempt.pollingToken)}`),
   })
   if (polled.status !== 'complete') throw new Error('two-instance login remained pending')
-  return { key, accountId: polled.account.id, accessToken: polled.accessToken }
+  return {
+    key, accountId: polled.account.id, githubLogin: polled.account.githubLogin,
+    accessToken: polled.accessToken,
+  }
 }
 
 /** One fresh Account session presentation; every request needs a new proof. */

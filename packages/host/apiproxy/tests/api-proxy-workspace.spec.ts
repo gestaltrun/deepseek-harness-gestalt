@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -12,6 +13,9 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
 import type { DirectoryPickerCapability } from '@deepseek-ai/dsh-host-directory-picker'
+import type { NativeCommandRunner } from '@deepseek-ai/dsh-native-command'
+import type { MemberQuestionWorkspaceBinding } from '@deepseek-ai/dsh-member-question-receiver'
+import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
 import WorkspaceRegistry from '@deepseek-ai/dsh-workspace'
 import type { HostFrame, WorkspaceId } from '@deepseek-ai/dsh-host-apiproxy/api'
 import type { RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
@@ -64,6 +68,8 @@ async function harness(
   extras: {
     openPath?: (path: string, signal: AbortSignal) => Promise<void>
     canOpenPath?: () => boolean
+    workspaceGitCommand?: NativeCommandRunner
+    useProductionGitRunner?: boolean
   } = {},
 ) {
   const ctx = new Context()
@@ -77,6 +83,7 @@ async function harness(
   ctx.provide('storageDomain', storageDomain)
   ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
   await ctx.plugin(WorkspaceRegistry)
+  if (extras.useProductionGitRunner === true) new LocalSubprocessRuntime(ctx)
 
   const factory: AgentFactory = {
     async createAgent(_ownerCtx, options) {
@@ -107,6 +114,7 @@ async function harness(
     cwd: root,
     ...extras.openPath === undefined ? {} : { openPath: extras.openPath },
     ...extras.canOpenPath === undefined ? {} : { canOpenPath: extras.canOpenPath },
+    ...extras.workspaceGitCommand === undefined ? {} : { workspaceGitCommand: extras.workspaceGitCommand },
   })
   return { api, ctx, storageDomain, root }
 }
@@ -317,6 +325,250 @@ describe('workspace.create', () => {
     expect(secondResult.workspace.workspaceId).not.toBe(firstResult.workspace.workspaceId)
     expect(expectOk(await api.workspace.list(request({}))).items.map(workspace => workspace.path))
       .toEqual([second, first])
+  })
+})
+
+describe('workspace Git operations', () => {
+  it('executes a keyless local Git clone and reads its origin through the production runner', async () => {
+    const { api, root } = await harness(undefined, undefined, { useProductionGitRunner: true })
+    const remote = join(root, 'remote.git')
+    execFileSync('git', ['init', '--bare', remote], { stdio: 'ignore' })
+    const cloned = expectOk(await api.workspace.cloneGit(request({
+      remoteUrl: remote, parentPath: root, directoryName: 'real-clone',
+    }), new AbortController().signal)).workspace
+    expect(cloned.path).toBe(join(root, 'real-clone'))
+    expect(expectOk(await api.workspace.gitRemote(
+      request({ workspaceId: cloned.workspaceId }),
+      new AbortController().signal,
+    ))).toEqual({ remoteUrl: remote })
+  })
+
+  it('reads origin without a shell and treats a non-Git Workspace as unbound', async () => {
+    const command = vi.fn<NativeCommandRunner>()
+      .mockResolvedValueOnce({ stdout: 'https://github.com/o/r.git\n', stderr: '' })
+      .mockRejectedValueOnce(new Error('not a git repository'))
+    const { api, root } = await harness(undefined, undefined, { workspaceGitCommand: command })
+    const first = expectOk(await api.workspace.create(request({ path: stageDir(root, 'first') }))).workspace
+    const second = expectOk(await api.workspace.create(request({ path: stageDir(root, 'second') }))).workspace
+    const signal = new AbortController().signal
+
+    expect(expectOk(await api.workspace.gitRemote(request({ workspaceId: first.workspaceId }), signal)))
+      .toEqual({ remoteUrl: 'https://github.com/o/r.git' })
+    expect(expectOk(await api.workspace.gitRemote(request({ workspaceId: second.workspaceId }), signal)))
+      .toEqual({})
+    expect(command.mock.calls[0]?.slice(0, 2)).toEqual([
+      'git', ['-C', first.path, 'remote', 'get-url', 'origin'],
+    ])
+    expect((await api.workspace.gitRemote(request({ workspaceId: 'missing' as WorkspaceId }), signal)).result)
+      .toMatchObject({ ok: false, error: { code: 'workspace-not-found' } })
+  })
+
+  it('clones into one selected parent and registers the resulting Workspace', async () => {
+    const command = vi.fn<NativeCommandRunner>(async () => ({ stdout: '', stderr: '' }))
+    const { api, root } = await harness(undefined, undefined, { workspaceGitCommand: command })
+    const response = await api.workspace.cloneGit(request({
+      remoteUrl: 'https://github.com/o/r.git',
+      parentPath: root,
+      directoryName: 'cloned',
+    }), new AbortController().signal)
+    expect(expectOk(response).workspace).toMatchObject({
+      path: join(root, 'cloned'), title: 'cloned',
+    })
+    expect(command.mock.calls[0]?.slice(0, 2)).toEqual([
+      'git', ['clone', '--', 'https://github.com/o/r.git', join(root, 'cloned')],
+    ])
+    expect(expectOk(await api.workspace.list(request({}))).items).toHaveLength(1)
+  })
+
+  it('maps clone failures and caller aborts without registering a Workspace', async () => {
+    const failed = await harness(undefined, undefined, {
+      workspaceGitCommand: async () => { throw new Error('clone refused') },
+    })
+    expect((await failed.api.workspace.cloneGit(request({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: failed.root, directoryName: 'failed',
+    }), new AbortController().signal)).result).toMatchObject({
+      ok: false, error: { code: 'workspace-clone-failed' },
+    })
+    expect(expectOk(await failed.api.workspace.list(request({}))).items).toHaveLength(0)
+    expect(existsSync(join(failed.root, 'failed'))).toBe(false)
+
+    const preserved = join(failed.root, 'preserved')
+    mkdirSync(preserved)
+    expect((await failed.api.workspace.cloneGit(request({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: failed.root, directoryName: 'preserved',
+    }), new AbortController().signal)).result).toMatchObject({
+      ok: false, error: { code: 'workspace-clone-failed' },
+    })
+    expect(existsSync(preserved)).toBe(true)
+
+    const abort = new AbortController()
+    const aborted = await harness(undefined, undefined, {
+      workspaceGitCommand: async () => {
+        abort.abort()
+        throw new Error('aborted')
+      },
+    })
+    expect((await aborted.api.workspace.cloneGit(request({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: aborted.root, directoryName: 'aborted',
+    }), abort.signal)).result).toMatchObject({ ok: false, error: { code: 'cancelled' } })
+  })
+
+  it('does not remove a directory owned by a concurrent clone of the same target', async () => {
+    let releaseFirst!: () => void
+    const firstMayFinish = new Promise<void>((resolve) => { releaseFirst = resolve })
+    let firstStarted!: () => void
+    const firstDidStart = new Promise<void>((resolve) => { firstStarted = resolve })
+    const command = vi.fn<NativeCommandRunner>(async () => {
+      firstStarted()
+      await firstMayFinish
+      return { stdout: '', stderr: '' }
+    })
+    const { api, root } = await harness(undefined, undefined, { workspaceGitCommand: command })
+    const payload = { remoteUrl: 'https://github.com/o/r.git', parentPath: root, directoryName: 'shared' }
+    const first = api.workspace.cloneGit(request(payload), new AbortController().signal)
+    await firstDidStart
+    const second = await api.workspace.cloneGit(request(payload), new AbortController().signal)
+    expect(second.result).toMatchObject({ ok: false, error: { code: 'workspace-clone-failed' } })
+    expect(existsSync(join(root, 'shared'))).toBe(true)
+    releaseFirst()
+    expect(expectOk(await first).workspace.path).toBe(join(root, 'shared'))
+    expect(command).toHaveBeenCalledOnce()
+  })
+
+  it('maps an aborted origin read to cancelled', async () => {
+    const abort = new AbortController()
+    const { api, root } = await harness(undefined, undefined, {
+      workspaceGitCommand: async () => {
+        abort.abort()
+        throw new Error('aborted')
+      },
+    })
+    const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'origin') }))).workspace
+    expect((await api.workspace.gitRemote(request({ workspaceId: workspace.workspaceId }), abort.signal)).result)
+      .toMatchObject({ ok: false, error: { code: 'cancelled' } })
+  })
+})
+
+describe('memberQuestion.bindWorkspace', () => {
+  it('fails closed without a provider and delegates exact local identities when composed', async () => {
+    const { api, ctx, root } = await harness()
+    const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'binding') }))).workspace
+    const payload = {
+      receivingAccountId: 'account-2' as never,
+      projectId: 'project-1' as never,
+      workspaceId: workspace.workspaceId,
+    }
+    expect((await api.memberQuestions.bindWorkspace(request(payload))).result)
+      .toMatchObject({ ok: false, error: { code: 'internal' } })
+
+    let currentWorkspaceId: WorkspaceId | undefined = workspace.workspaceId
+    const bind = vi.fn(async () => {})
+    const lookup = vi.fn(async () => currentWorkspaceId)
+    const bindIfCurrent = vi.fn(async (_accountId, _projectId, expected, replacement) => {
+      if (currentWorkspaceId !== expected) return false
+      currentWorkspaceId = replacement
+      return true
+    })
+    ctx.provide('memberQuestionWorkspaceBinding', { bind, lookup, bindIfCurrent, resolve: vi.fn() })
+    expect((await api.memberQuestions.workspaceBinding(request({
+      receivingAccountId: payload.receivingAccountId,
+      projectId: payload.projectId,
+    }))).result).toEqual({ ok: true, value: { state: 'live', workspaceId: workspace.workspaceId } })
+
+    const other = expectOk(await api.workspace.create(request({ path: stageDir(root, 'binding-other') }))).workspace
+    expect((await api.memberQuestions.ensureWorkspaceBinding(request({
+      ...payload, workspaceId: other.workspaceId,
+    }))).result).toEqual({ ok: true, value: { state: 'existing', workspaceId: workspace.workspaceId } })
+    expect(bindIfCurrent).not.toHaveBeenCalled()
+
+    currentWorkspaceId = 'deleted-workspace' as WorkspaceId
+    expect((await api.memberQuestions.workspaceBinding(request({
+      receivingAccountId: payload.receivingAccountId,
+      projectId: payload.projectId,
+    }))).result).toEqual({
+      ok: true, value: { state: 'stale', workspaceId: 'deleted-workspace' },
+    })
+    expect((await api.memberQuestions.ensureWorkspaceBinding(request({
+      ...payload, workspaceId: other.workspaceId,
+    }))).result).toEqual({ ok: true, value: { state: 'repaired', workspaceId: other.workspaceId } })
+
+    currentWorkspaceId = undefined
+    expect((await api.memberQuestions.ensureWorkspaceBinding(request(payload))).result)
+      .toEqual({ ok: true, value: { state: 'created', workspaceId: workspace.workspaceId } })
+    expect((await api.memberQuestions.bindWorkspace(request(payload))).result)
+      .toEqual({ ok: true, value: { bound: true } })
+    expect(bind).toHaveBeenCalledWith('account-2', 'project-1', workspace.workspaceId)
+
+    expect((await api.memberQuestions.bindWorkspace(request({
+      ...payload, workspaceId: 'missing-workspace' as never,
+    }))).result).toMatchObject({ ok: false, error: { code: 'workspace-not-found' } })
+
+    await ctx.fiber.dispose()
+    const rejected = await harness()
+    const rejectedWorkspace = expectOk(await rejected.api.workspace.create(request({
+      path: stageDir(rejected.root, 'binding'),
+    }))).workspace
+    rejected.ctx.provide('memberQuestionWorkspaceBinding', {
+      bind: async () => { throw new Error('disk full') },
+      lookup: vi.fn(),
+      bindIfCurrent: vi.fn(),
+      resolve: vi.fn(),
+    })
+    const failed = (await rejected.api.memberQuestions.bindWorkspace(request({
+      ...payload, workspaceId: rejectedWorkspace.workspaceId,
+    }))).result
+    expect(failed.ok).toBe(false)
+    if (failed.ok) throw new Error('unreachable')
+    expect(failed.error).toMatchObject({ code: 'internal' })
+    expect(failed.error.message).toContain('disk full')
+  })
+
+  it('serializes binding ensure with deletion of the candidate Workspace', async () => {
+    const { api, ctx, root } = await harness()
+    const workspace = expectOk(await api.workspace.create(request({
+      path: stageDir(root, 'binding-delete-race'),
+    }))).workspace
+    let currentWorkspaceId: WorkspaceId | undefined
+    let entered!: () => void
+    const bindEntered = new Promise<void>((resolve) => { entered = resolve })
+    let release!: () => void
+    const mayCommit = new Promise<void>((resolve) => { release = resolve })
+    const bindIfCurrent: MemberQuestionWorkspaceBinding['bindIfCurrent'] = async (
+      _accountId, _projectId, expected, replacement,
+    ) => {
+      entered()
+      await mayCommit
+      if (currentWorkspaceId !== expected) return false
+      currentWorkspaceId = replacement
+      return true
+    }
+    ctx.provide('memberQuestionWorkspaceBinding', {
+      bind: vi.fn(),
+      lookup: async () => currentWorkspaceId,
+      bindIfCurrent,
+      resolve: async () => {
+        if (currentWorkspaceId === undefined) throw new Error('missing')
+        return currentWorkspaceId
+      },
+    })
+    const ensured = api.memberQuestions.ensureWorkspaceBinding(request({
+      receivingAccountId: 'account-2' as never,
+      projectId: 'project-1' as never,
+      workspaceId: workspace.workspaceId,
+    }))
+    await bindEntered
+    const deleted = api.workspace.delete(request({ workspaceId: workspace.workspaceId }))
+    release()
+    expect((await ensured).result).toEqual({
+      ok: true, value: { state: 'created', workspaceId: workspace.workspaceId },
+    })
+    expect((await deleted).result).toEqual({ ok: true, value: { deleted: true } })
+    expect((await api.memberQuestions.workspaceBinding(request({
+      receivingAccountId: 'account-2' as never,
+      projectId: 'project-1' as never,
+    }))).result).toEqual({
+      ok: true, value: { state: 'stale', workspaceId: workspace.workspaceId },
+    })
   })
 })
 

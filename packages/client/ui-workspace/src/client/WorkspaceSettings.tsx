@@ -30,40 +30,49 @@ export interface WizardWorkspace {
   title: string
 }
 
-/** Git remotes are accepted only as http(s) repository URLs. */
-const REMOTE_PATTERN = /^https?:\/\/\S+\/\S+$/u
-
 /**
  * The workspace settings modal. Unmounted when closed; the bound project and
  * its roster live in local state so a reopened modal re-reads fresh facts.
  */
-export function WorkspaceSettingsModal({ workspaceTitle, gateway, onClose, t }: {
+export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, onClose, t }: {
+  /** Exact local Workspace whose Cloud Project relationship is being managed. */
+  workspaceId: WorkspaceId
   /** Title of the workspace being configured (heading context only). */
   workspaceTitle: string
   gateway: ProjectMembershipGateway
   onClose: () => void
   t: SettingsTranslate
 }) {
-  const [project, setProject] = useState<WorkspaceProjectView | null>(null)
+  const [project, setProject] = useState<WorkspaceProjectView | null | undefined>(undefined)
   const [name, setName] = useState('')
-  const [remote, setRemote] = useState('')
+  const [remote, setRemote] = useState<string | null | undefined>(undefined)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const trimmedName = name.trim()
-  const trimmedRemote = remote.trim()
-  // Creation stays blocked while either field is empty or the remote is not
-  // an http(s) repository URL; the error line names which rule failed.
-  const createBlocked = creating || trimmedName === '' || trimmedRemote === ''
-  const invalidRemote = trimmedRemote !== '' && !REMOTE_PATTERN.test(trimmedRemote)
+  const createBlocked = creating || trimmedName === '' || remote === undefined || remote === null
+  const visibleCreateError = createError ?? (project === null && remote === null ? t('upgrade.missingRemote') : null)
+  useEffect(() => {
+    let alive = true
+    Promise.all([
+      gateway.projectForWorkspace(workspaceId),
+      gateway.localRemoteFor(workspaceId),
+    ]).then(([existing, localRemote]) => {
+      if (!alive) return
+      setProject(existing ?? null)
+      setRemote(localRemote ?? null)
+    }).catch((reason: unknown) => {
+      if (!alive) return
+      setProject(null)
+      setRemote(null)
+      setCreateError(reason instanceof Error ? reason.message : String(reason))
+    })
+    return () => { alive = false }
+  }, [gateway, workspaceId])
   const submitCreate = () => {
     if (createBlocked) return
-    if (invalidRemote) {
-      setCreateError(t('upgrade.invalidRemote'))
-      return
-    }
     setCreating(true)
     setCreateError(null)
-    gateway.createProject({ name: trimmedName, remoteUrl: trimmedRemote }).then((created) => {
+    gateway.createProject({ name: trimmedName, localWorkspaceId: workspaceId }).then((created) => {
       setCreating(false)
       setProject(created)
     }).catch((reason: unknown) => {
@@ -75,43 +84,43 @@ export function WorkspaceSettingsModal({ workspaceTitle, gateway, onClose, t }: 
     <Modal open onClose={onClose} closeLabel={t('close')} title={t('settings.title')}>
       <div className={css.section}>
         <div className={css.sectionTitle}>{t('upgrade.title')}</div>
-        {project === null
-          ? (
-            <div>
-              <div className={css.sectionDesc}>{t('upgrade.desc')}</div>
-              <label className={css.fieldLabel}>
-                {t('upgrade.projectName')}
-                <input
-                  className={css.fieldInput}
-                  value={name}
-                  aria-label={t('upgrade.projectName')}
-                  disabled={creating}
-                  onChange={(e) => { setName(e.target.value); setCreateError(null) }}
-                />
-              </label>
-              <label className={css.fieldLabel}>
-                {t('upgrade.remoteUrl')}
-                <input
-                  className={css.fieldInput}
-                  value={remote}
-                  aria-label={t('upgrade.remoteUrl')}
-                  placeholder="https://github.com/org/repo"
-                  disabled={creating}
-                  onChange={(e) => { setRemote(e.target.value); setCreateError(null) }}
-                />
-              </label>
-              {createError !== null && <div className={css.actionError} role="alert">{createError}</div>}
-              <Button variant="primary" disabled={createBlocked} onClick={submitCreate}>
-                {creating ? t('upgrade.creating') : t('upgrade.create')}
-              </Button>
-            </div>
-          )
-          : (
-            <div>
-              <div className={css.sectionDesc}>{t('upgrade.bound', { name: project.name })}</div>
-              <MemberManagement gateway={gateway} project={project} t={t} />
-            </div>
-          )}
+        {project === undefined
+          ? <div className={css.sectionDesc}>{t('upgrade.loading')}</div>
+          : project === null
+            ? (
+              <div>
+                <div className={css.sectionDesc}>{t('upgrade.desc')}</div>
+                <label className={css.fieldLabel}>
+                  {t('upgrade.projectName')}
+                  <input
+                    className={css.fieldInput}
+                    value={name}
+                    aria-label={t('upgrade.projectName')}
+                    disabled={creating}
+                    onChange={(e) => { setName(e.target.value); setCreateError(null) }}
+                  />
+                </label>
+                <label className={css.fieldLabel}>
+                  {t('upgrade.remoteUrl')}
+                  <input
+                    className={css.fieldInput}
+                    value={remote ?? ''}
+                    aria-label={t('upgrade.remoteUrl')}
+                    readOnly
+                  />
+                </label>
+                {visibleCreateError !== null && <div className={css.actionError} role="alert">{visibleCreateError}</div>}
+                <Button variant="primary" disabled={createBlocked} onClick={submitCreate}>
+                  {creating ? t('upgrade.creating') : t('upgrade.create')}
+                </Button>
+              </div>
+            )
+            : (
+              <div>
+                <div className={css.sectionDesc}>{t('upgrade.bound', { name: project.name })}</div>
+                <MemberManagement gateway={gateway} project={project} t={t} />
+              </div>
+            )}
       </div>
       <div className={css.settingsWorkspace} aria-hidden="true">{workspaceTitle}</div>
     </Modal>
@@ -142,17 +151,27 @@ function MemberManagement({ gateway, project, t }: {
       if (alive.current) setActionError(reason instanceof Error ? reason.message : String(reason))
     })
   }
-  useEffect(reloadRoster, [gateway, project.id])
+  const reloadIssued = () => {
+    gateway.issuedInvitations(project.id).then((rows) => {
+      if (alive.current) setIssued(rows)
+    }).catch((reason: unknown) => {
+      if (alive.current) setActionError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
+  useEffect(() => {
+    reloadRoster()
+    reloadIssued()
+  }, [gateway, project.id])
   const trimmedLogin = login.trim()
   const inviteBlocked = inviting || trimmedLogin === ''
   const submitInvite = () => {
     if (inviteBlocked) return
     setInviting(true)
     setActionError(null)
-    gateway.invite({ projectId: project.id, githubLogin: trimmedLogin }).then((row) => {
+    gateway.invite({ projectId: project.id, githubLogin: trimmedLogin }).then(() => {
       setInviting(false)
       setLogin('')
-      setIssued(rows => [...rows, row])
+      reloadIssued()
     }).catch((reason: unknown) => {
       setInviting(false)
       setActionError(reason instanceof Error ? reason.message : String(reason))
@@ -164,7 +183,7 @@ function MemberManagement({ gateway, project, t }: {
     gateway.retractInvitation(invitationId).then(() => {
       if (!alive.current) return
       setRetractingId(null)
-      setIssued(rows => rows.filter(row => row.invitationId !== invitationId))
+      reloadIssued()
     }).catch((reason: unknown) => {
       if (!alive.current) return
       setRetractingId(null)
@@ -309,12 +328,23 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
   const [cloneSelected, setCloneSelected] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const remoteFor = gateway.localRemoteFor
+  const [localRemotes, setLocalRemotes] = useState<ReadonlyMap<WorkspaceId, string | undefined>>(new Map())
+  useEffect(() => {
+    let disposed = false
+    void Promise.all(workspaces.map(async workspace => [
+      workspace.workspaceId,
+      await gateway.localRemoteFor(workspace.workspaceId),
+    ] as const)).then((rows) => {
+      if (!disposed) setLocalRemotes(new Map(rows))
+    }).catch(() => {
+      // A transient Host/Git failure leaves candidates unbadged; acceptance remains available.
+    })
+    return () => { disposed = true }
+  }, [gateway, workspaces])
   // A candidate with no known remote gets no badge; the invitation remote
   // itself recommends, a known different remote is labeled foreign.
   const badgeOf = (workspaceId: WorkspaceId): 'recommended' | 'foreign' | null => {
-    if (invitation.remoteUrl === undefined || remoteFor === undefined) return null
-    const local = remoteFor(workspaceId)
+    const local = localRemotes.get(workspaceId)
     if (local === undefined) return null
     return local === invitation.remoteUrl ? 'recommended' : 'foreign'
   }
@@ -330,27 +360,45 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
       setError(reason instanceof Error ? reason.message : String(reason))
     })
   }
-  const confirmLink = () => {
+  const confirmLink = async () => {
     // Linking is mandatory: no selection (and no clone intention) keeps the
     // confirm disabled, so this guard is the last line, not the affordance.
     if (busy || (selectedId === null && !cloneSelected)) return
     setBusy(true)
     setError(null)
-    const selected = workspaces.find(candidate => candidate.workspaceId === selectedId)
-    const localRemote = selected !== undefined && remoteFor !== undefined
-      ? remoteFor(selected.workspaceId)
-      : undefined
-    const link = {
-      workspaceName: selected === undefined ? invitation.projectName : selected.title,
-      ...(localRemote === undefined ? {} : { normalizedRemoteUrl: localRemote }),
-    }
-    gateway.decideInvitation(invitation.invitationId, {
-      decision: 'accept-with-link',
-      link,
-    }).then(onClose).catch((reason: unknown) => {
+    try {
+      const selected = workspaces.find(candidate => candidate.workspaceId === selectedId)
+      const cloned = cloneSelected
+        ? await gateway.cloneWorkspace({
+          remoteUrl: invitation.remoteUrl,
+          directoryName: cloneDirectoryName(invitation.remoteUrl, invitation.projectName),
+        })
+        : undefined
+      if (cloneSelected && cloned === undefined) {
+        setBusy(false)
+        return
+      }
+      const localRemote = selected === undefined
+        ? cloned?.normalizedRemoteUrl
+        : localRemotes.get(selected.workspaceId)
+      const localWorkspaceId = selected?.workspaceId ?? cloned?.workspaceId
+      if (localWorkspaceId === undefined) throw new Error('Workspace selection did not resolve')
+      const link = {
+        workspaceName: selected?.title ?? cloned?.title ?? invitation.projectName,
+        ...(localRemote === undefined ? {} : { normalizedRemoteUrl: localRemote }),
+      }
+      await gateway.decideInvitation(invitation.invitationId, {
+        decision: 'accept-with-link',
+        localWorkspaceId,
+        receivingAccountId: invitation.receivingAccountId,
+        projectId: invitation.projectId,
+        link,
+      })
+      onClose()
+    } catch (reason: unknown) {
       setBusy(false)
       setError(reason instanceof Error ? reason.message : String(reason))
-    })
+    }
   }
   return (
     <Modal
@@ -371,7 +419,7 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
           <Button
             variant="primary"
             disabled={busy || (selectedId === null && !cloneSelected)}
-            onClick={confirmLink}
+            onClick={() => { void confirmLink() }}
           >
             {busy ? t('wizard.link.joining') : t('wizard.link.confirm')}
           </Button>
@@ -380,7 +428,8 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
       {step === 'card'
         ? (
           <div className={css.wizardCard}>
-            {t('wizard.card.body', { inviter: invitation.inviterName, project: invitation.projectName })}
+            <div>{t('wizard.card.body', { inviter: invitation.inviterName, project: invitation.projectName })}</div>
+            <div>{t('wizard.card.remote', { remote: invitation.remoteUrl })}</div>
           </div>
         )
         : (
@@ -430,4 +479,22 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
       {error !== null && <div className={css.actionError} role="alert">{error}</div>}
     </Modal>
   )
+}
+
+/**
+ * Derive one cross-platform-safe clone directory name from a Git remote.
+ * @param remoteUrl - normalized invited-project remote.
+ * @param fallback - project name used only when the remote has no path component.
+ * @returns one non-reserved path segment.
+ */
+export function cloneDirectoryName(remoteUrl: string, fallback: string): string {
+  const withoutSuffix = remoteUrl.trim().replace(/\/+$/, '').replace(/\.git$/i, '')
+  const separator = Math.max(withoutSuffix.lastIndexOf('/'), withoutSuffix.lastIndexOf(':'))
+  const repositoryName = withoutSuffix.slice(separator + 1) || fallback
+  const safe = repositoryName
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/[. ]+$/, '')
+    .trim()
+  if (safe === '' || safe === '.' || safe === '..') return 'project'
+  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(safe) ? `project-${safe}` : safe
 }

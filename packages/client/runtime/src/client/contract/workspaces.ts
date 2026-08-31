@@ -34,6 +34,10 @@ export interface IWorkspaces {
    * @returns the created or idempotently resolved Workspace.
    */
   create(input: { path: string }): Promise<WorkspaceView>
+  /** Read the configured Git origin of one local Workspace, when present. */
+  gitRemote(workspaceId: WorkspaceId): Promise<string | undefined>
+  /** Clone a Git remote into a new child directory and register the resulting Workspace. */
+  cloneGit(input: { remoteUrl: string; parentPath: string; directoryName: string }): Promise<WorkspaceView>
   /**
    * Open the Host's native directory picker.
    * @returns the selected path, or null when the user cancelled.

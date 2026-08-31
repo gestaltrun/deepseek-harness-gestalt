@@ -327,9 +327,43 @@ abstract resumeReservedHumanTurns(): Promise<void>
  * @returns disposer for this exact registration.
  */
 abstract registerHumanTurnAdmitter(admitter: MemberQuestionHumanTurnAdmitter): () => void
+
+/**
+ * Persist or replace one exact Account/Project to local Workspace association.
+ * @param accountId - authenticated receiving Account.
+ * @param projectId - Cloud Project being joined.
+ * @param workspaceId - exact local Workspace selected or cloned.
+ */
+abstract bind( accountId: PlatformAccountId, projectId: ProjectId, workspaceId: Branded<'WorkspaceId'>, ): Promise<void>
+
+/**
+ * Read one exact association without requiring it to exist.
+ * @param accountId - authenticated receiving Account.
+ * @param projectId - Cloud Project whose local association is being inspected.
+ * @returns persisted local Workspace identity, or undefined before binding.
+ */
+abstract lookup( accountId: PlatformAccountId, projectId: ProjectId, ): Promise<Branded<'WorkspaceId'> | undefined>
+
+/**
+ * Replace one association only if its current value matches an observation.
+ * @param accountId - authenticated receiving Account.
+ * @param projectId - Cloud Project whose association is being repaired.
+ * @param expectedWorkspaceId - observed current Workspace id, including undefined.
+ * @param workspaceId - exact live replacement Workspace id.
+ * @returns whether the replacement committed.
+ */
+abstract bindIfCurrent( accountId: PlatformAccountId, projectId: ProjectId, expectedWorkspaceId: Branded<'WorkspaceId'> | undefined, workspaceId: Branded<'WorkspaceId'>, ): Promise<boolean>
+
+/**
+ * Resolve one exact Account/Project association.
+ * @param accountId - authenticated receiving Account.
+ * @param projectId - Cloud Project carried by the received question.
+ * @returns persisted local Workspace identity.
+ */
+abstract resolve( accountId: PlatformAccountId, projectId: ProjectId, ): Promise<Branded<'WorkspaceId'>>
 ```
 
-Types: [CompanionMemberQuestionSettledResult](remote-protocol.md)
+Types: [CompanionMemberQuestionSettledResult](remote-protocol.md) · [PlatformAccountId](platform-account.md) · [ProjectId](project-membership.md) · [WorkspaceId](workspace.md)
 
 Source: [`packages/interaction/member-question-receiver/src/index.ts`](../../packages/interaction/member-question-receiver/src/index.ts)
 
@@ -392,6 +426,32 @@ Source: [`packages/interaction/member-question-sender/src/index.ts`](../../packa
 Local project-member Workspace association supplied by the Host composition.
 
 ```ts cordis-catalog
+/**
+ * Persist or replace the exact local Workspace selected during invitation acceptance.
+ * @param accountId - authenticated receiving Account.
+ * @param projectId - Cloud Project being joined.
+ * @param workspaceId - exact local Workspace selected or cloned.
+ */
+bind(accountId: PlatformAccountId, projectId: ProjectId, workspaceId: Branded<'WorkspaceId'>): Promise<void>
+
+/**
+ * Read the persisted local Workspace selection without requiring one to exist.
+ * @param accountId - authenticated receiving Account.
+ * @param projectId - cloud Project whose local association is being inspected.
+ * @returns exact local Workspace identity, or undefined before the first binding.
+ */
+lookup(accountId: PlatformAccountId, projectId: ProjectId): Promise<Branded<'WorkspaceId'> | undefined>
+
+/**
+ * Replace a binding only when its current value still matches the caller's observation.
+ * @param accountId - authenticated receiving Account.
+ * @param projectId - cloud Project whose local association is being repaired.
+ * @param expectedWorkspaceId - exact current value observed by the caller, including undefined.
+ * @param workspaceId - exact live Workspace proposed as the replacement.
+ * @returns whether the comparison matched and the replacement committed.
+ */
+bindIfCurrent( accountId: PlatformAccountId, projectId: ProjectId, expectedWorkspaceId: Branded<'WorkspaceId'> | undefined, workspaceId: Branded<'WorkspaceId'>, ): Promise<boolean>
+
 /**
  * Resolve one authenticated receiver/project pair to an existing Workspace id.
  * @param accountId - authenticated receiving Account.

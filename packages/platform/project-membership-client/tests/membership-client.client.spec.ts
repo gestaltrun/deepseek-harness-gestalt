@@ -18,9 +18,10 @@ function wire(responses: Record<string, { status: number; body?: unknown }>) {
         ? input
         : new URL(input.url)
     const method = init?.method ?? 'GET'
-    const key = `${method} ${url.pathname}`
+    const path = `${url.pathname}${url.search}`
+    const key = `${method} ${path}`
     calls.push({
-      path: url.pathname, method,
+      path, method,
       body: typeof init?.body === 'string' ? JSON.parse(init.body) : undefined,
       headers: Object.fromEntries(new Headers(init?.headers).entries()),
     })
@@ -58,7 +59,10 @@ function member(): MemberView {
 describe('ProjectMembershipHttpTransport', () => {
   it('routes the upgrade operations onto the /v1/projects wire contract', async () => {
     const { transport, calls } = wire({
-      'POST /v1/projects': { status: 201, body: project() },
+      'POST /v1/projects': { status: 201, body: { ...project(), receivingAccountId: 'account-1' } },
+      'GET /v1/projects/by-remote?remoteUrl=https%3A%2F%2Fgithub.com%2Fo%2Fr': {
+        status: 200, body: { ...project(), receivingAccountId: 'account-1' },
+      },
       'GET /v1/projects/project-1/members': {
         status: 200,
         body: {
@@ -69,45 +73,67 @@ describe('ProjectMembershipHttpTransport', () => {
       'POST /v1/projects/invitations': { status: 201, body: invitation() },
       'POST /v1/projects/invitations/invitation-1/decision': { status: 200, body: member() },
       'POST /v1/projects/invitations/invitation-1/retraction': { status: 204 },
-      'GET /v1/projects/invitations/pending': { status: 200, body: [invitation()] },
+      'GET /v1/projects/invitations/pending': {
+        status: 200,
+        body: [{
+          invitationId: 'invitation-1', receivingAccountId: 'account-2',
+          projectId: 'project-1', projectName: 'Assembled',
+          remoteUrl: 'https://github.com/o/r', inviterName: 'octocat', invitedAt: 10,
+        }],
+      },
+      'GET /v1/projects/project-1/invitations': {
+        status: 200,
+        body: [{ invitationId: 'invitation-1', inviteeName: 'mona', invitedAt: 10 }],
+      },
       'POST /v1/projects/memberships/membership-2/role': { status: 204 },
       'POST /v1/projects/memberships/membership-2/tags': { status: 204 },
       'DELETE /v1/projects/memberships/membership-2': { status: 204 },
     })
 
     expect(await transport.createProject(AUTH, { name: 'Assembled', remoteUrl: 'https://github.com/o/r' }))
-      .toMatchObject({ id: 'project-1' })
+      .toMatchObject({ id: 'project-1', receivingAccountId: 'account-1' })
+    expect(await transport.projectByRemote(AUTH, 'https://github.com/o/r'))
+      .toMatchObject({ id: 'project-1', receivingAccountId: 'account-1' })
     expect(await transport.roster(AUTH, 'project-1' as ProjectId)).toMatchObject({
       members: [{ presence: 'online', displayName: 'mona', role: 'member' }],
     })
-    expect(await transport.invite(AUTH, { projectId: 'project-1' as ProjectId, inviteeAccountId: 'account-2' as never }))
+    expect(await transport.invite(AUTH, { projectId: 'project-1' as ProjectId, githubLogin: 'mona' }))
       .toMatchObject({ id: 'invitation-1', state: 'pending' })
     expect(await transport.decideInvitation(AUTH, 'invitation-1' as never, {
       decision: 'accept-with-link', link: { workspaceName: 'mona-local' },
     })).toMatchObject({ id: 'membership-2' })
     await transport.retractInvitation(AUTH, 'invitation-1' as never)
-    expect(await transport.pendingInvitations(AUTH)).toHaveLength(1)
+    expect(await transport.pendingInvitations(AUTH)).toMatchObject([{
+      invitationId: 'invitation-1', receivingAccountId: 'account-2',
+      projectName: 'Assembled', inviterName: 'octocat',
+    }])
+    expect(await transport.issuedInvitations(AUTH, 'project-1' as ProjectId)).toEqual([{
+      invitationId: 'invitation-1', inviteeName: 'mona', invitedAt: 10,
+    }])
     await transport.changeRole(AUTH, 'membership-2' as never, 'admin')
     await transport.setMemberTags(AUTH, 'membership-2' as never, ['triage' as never])
     await transport.removeMember(AUTH, 'membership-2' as never)
 
     expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
       'POST /v1/projects',
+      'GET /v1/projects/by-remote?remoteUrl=https%3A%2F%2Fgithub.com%2Fo%2Fr',
       'GET /v1/projects/project-1/members',
       'POST /v1/projects/invitations',
       'POST /v1/projects/invitations/invitation-1/decision',
       'POST /v1/projects/invitations/invitation-1/retraction',
       'GET /v1/projects/invitations/pending',
+      'GET /v1/projects/project-1/invitations',
       'POST /v1/projects/memberships/membership-2/role',
       'POST /v1/projects/memberships/membership-2/tags',
       'DELETE /v1/projects/memberships/membership-2',
     ])
     expect(calls[0]).toMatchObject({ body: { name: 'Assembled', remoteUrl: 'https://github.com/o/r' } })
-    expect(calls[3]).toMatchObject({
+    expect(calls[3]).toMatchObject({ body: { projectId: 'project-1', githubLogin: 'mona' } })
+    expect(calls[4]).toMatchObject({
       body: { decision: 'accept-with-link', link: { workspaceName: 'mona-local' } },
     })
-    expect(calls[6]).toMatchObject({ body: { role: 'admin' } })
-    expect(calls[7]).toMatchObject({ body: { tags: ['triage'] } })
+    expect(calls[8]).toMatchObject({ body: { role: 'admin' } })
+    expect(calls[9]).toMatchObject({ body: { tags: ['triage'] } })
     // Every call carries the caller-supplied account session presentation.
     expect(calls.every(call => call.headers.authorization === 'Bearer token-1')).toBe(true)
   })
@@ -117,6 +143,13 @@ describe('ProjectMembershipHttpTransport', () => {
       'POST /v1/projects/invitations/invitation-1/decision': { status: 204 },
     })
     expect(await transport.decideInvitation(AUTH, 'invitation-1' as never, { decision: 'decline' })).toBeUndefined()
+  })
+
+  it('resolves an absent remote membership to undefined', async () => {
+    const { transport } = wire({
+      'GET /v1/projects/by-remote?remoteUrl=https%3A%2F%2Fgithub.com%2Fo%2Fmissing': { status: 204 },
+    })
+    await expect(transport.projectByRemote(AUTH, 'https://github.com/o/missing')).resolves.toBeUndefined()
   })
 
   it('keeps the 403 role-gate envelope: stable code plus HTTP status', async () => {

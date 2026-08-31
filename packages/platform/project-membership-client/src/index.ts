@@ -26,8 +26,9 @@ import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 export {
   type FunctionTag, type InvitationId, type InvitationView, type MemberView,
   type MembershipId, type ProjectId, type ProjectRole, type ProjectView,
-  type WorkspaceLink,
+  type WorkspaceLink, normalizeGitRemoteUrl,
 } from '@deepseek-ai/dsh-project-membership'
+export type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 
 /** Stable failure of one membership route call: envelope code plus HTTP status. */
 export class ProjectMembershipClientError extends Error {
@@ -66,6 +67,29 @@ export interface RosterReadView {
   readonly members: readonly RosterMemberView[]
 }
 
+/** One Project together with the authenticated Account whose membership authorized the read. */
+export type AuthenticatedProjectView = ProjectView & {
+  readonly receivingAccountId: PlatformAccountId
+}
+
+/** Trusted invitation card returned before the local Account joins a project. */
+export interface PendingInvitationView {
+  readonly invitationId: InvitationId
+  readonly receivingAccountId: PlatformAccountId
+  readonly projectId: ProjectId
+  readonly projectName: string
+  readonly remoteUrl: string
+  readonly inviterName: string
+  readonly invitedAt: number
+}
+
+/** One pending invitation issued from a Project with the invitee's public login. */
+export interface IssuedInvitationView {
+  readonly invitationId: InvitationId
+  readonly inviteeName: string
+  readonly invitedAt: number
+}
+
 /** One invitation decision body: decline, or accept joined atomically with the workspace link. */
 export type InvitationDecisionInput =
   | { decision: 'decline' }
@@ -73,11 +97,15 @@ export type InvitationDecisionInput =
 
 /** Transport operations used by the workspace upgrade and invite surfaces. */
 export interface ProjectMembershipTransport {
-  createProject(authorization: MembershipAuthorization, input: { name: string; remoteUrl: string }): Promise<ProjectView>
+  createProject(authorization: MembershipAuthorization, input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView>
+  projectByRemote(
+    authorization: MembershipAuthorization,
+    normalizedRemoteUrl: string,
+  ): Promise<AuthenticatedProjectView | undefined>
   roster(authorization: MembershipAuthorization, projectId: ProjectId): Promise<RosterReadView>
   invite(
     authorization: MembershipAuthorization,
-    input: { projectId: ProjectId; inviteeAccountId: PlatformAccountId },
+    input: { projectId: ProjectId; githubLogin: string },
   ): Promise<InvitationView>
   decideInvitation(
     authorization: MembershipAuthorization,
@@ -85,10 +113,88 @@ export interface ProjectMembershipTransport {
     input: InvitationDecisionInput,
   ): Promise<MemberView | undefined>
   retractInvitation(authorization: MembershipAuthorization, invitationId: InvitationId): Promise<void>
-  pendingInvitations(authorization: MembershipAuthorization): Promise<readonly InvitationView[]>
+  pendingInvitations(authorization: MembershipAuthorization): Promise<readonly PendingInvitationView[]>
+  issuedInvitations(
+    authorization: MembershipAuthorization,
+    projectId: ProjectId,
+  ): Promise<readonly IssuedInvitationView[]>
   changeRole(authorization: MembershipAuthorization, membershipId: MembershipId, role: ProjectRole): Promise<void>
   setMemberTags(authorization: MembershipAuthorization, membershipId: MembershipId, tags: readonly FunctionTag[]): Promise<void>
   removeMember(authorization: MembershipAuthorization, membershipId: MembershipId): Promise<void>
+}
+
+/** Authenticated current-installation client used by product UI consumers. */
+export interface ProjectMembershipClient {
+  /**
+   * Create one Cloud Project for a Workspace remote.
+   * @param input - unique name and Workspace remote.
+   * @returns created Cloud Project.
+   */
+  createProject(input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView>
+  /**
+   * Resolve the current Account's Project membership for one normalized Git remote.
+   * @param normalizedRemoteUrl - canonical Workspace origin remote.
+   * @returns authorized Project context, or no value when this Account has no membership.
+   */
+  projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView | undefined>
+  /**
+   * Read one Project roster with public identity and presence.
+   * @param projectId - Project to read.
+   * @returns Project and complete decorated roster.
+   */
+  roster(projectId: ProjectId): Promise<RosterReadView>
+  /**
+   * Invite one uniquely resolved public GitHub login.
+   * @param input - Project and public GitHub login.
+   * @returns created pending invitation.
+   */
+  invite(input: { projectId: ProjectId; githubLogin: string }): Promise<InvitationView>
+  /**
+   * Decline, or accept atomically with a local Workspace link.
+   * @param invitationId - invitation to decide.
+   * @param input - decline or linked acceptance.
+   * @returns accepted member, or no value for decline.
+   */
+  decideInvitation(invitationId: InvitationId, input: InvitationDecisionInput): Promise<MemberView | undefined>
+  /**
+   * Retract one pending invitation as its Project administrator.
+   * @param invitationId - pending invitation to retract.
+   */
+  retractInvitation(invitationId: InvitationId): Promise<void>
+  /**
+   * List trusted pending invitation cards for the current Account.
+   * @returns trusted pending invitation cards.
+   */
+  pendingInvitations(): Promise<readonly PendingInvitationView[]>
+  /**
+   * List pending invitations issued from one administered Project.
+   * @param projectId - Project whose issued invitations are requested.
+   * @returns authoritative pending invitation rows.
+   */
+  issuedInvitations(projectId: ProjectId): Promise<readonly IssuedInvitationView[]>
+  /**
+   * Replace one member's collaboration role.
+   * @param membershipId - membership to change.
+   * @param role - replacement collaboration role.
+   */
+  changeRole(membershipId: MembershipId, role: ProjectRole): Promise<void>
+  /**
+   * Replace one member's non-permission function tags.
+   * @param membershipId - membership to relabel.
+   * @param tags - complete replacement function tags.
+   */
+  setMemberTags(membershipId: MembershipId, tags: readonly FunctionTag[]): Promise<void>
+  /**
+   * Remove one member from the Project.
+   * @param membershipId - membership to remove.
+   */
+  removeMember(membershipId: MembershipId): Promise<void>
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    projectMembershipClient: ProjectMembershipClient
+  }
 }
 
 /** HTTP transport construction inputs. */
@@ -109,8 +215,18 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
     this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis)
   }
 
-  createProject(authorization: MembershipAuthorization, input: { name: string; remoteUrl: string }): Promise<ProjectView> {
-    return this.json('/v1/projects', { method: 'POST', headers: authorization, body: JSON.stringify(input) }, parseProjectView)
+  createProject(authorization: MembershipAuthorization, input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView> {
+    return this.json('/v1/projects', { method: 'POST', headers: authorization, body: JSON.stringify(input) }, parseAuthenticatedProjectView)
+  }
+
+  async projectByRemote(
+    authorization: MembershipAuthorization,
+    normalizedRemoteUrl: string,
+  ): Promise<AuthenticatedProjectView | undefined> {
+    const path = `/v1/projects/by-remote?remoteUrl=${encodeURIComponent(normalizedRemoteUrl)}`
+    const response = await this.request(path, { method: 'GET', headers: authorization })
+    if (response.status === 204) return undefined
+    return parseAuthenticatedProjectView(await response.json())
   }
 
   roster(authorization: MembershipAuthorization, projectId: ProjectId): Promise<RosterReadView> {
@@ -121,7 +237,7 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
 
   invite(
     authorization: MembershipAuthorization,
-    input: { projectId: ProjectId; inviteeAccountId: PlatformAccountId },
+    input: { projectId: ProjectId; githubLogin: string },
   ): Promise<InvitationView> {
     return this.json('/v1/projects/invitations', {
       method: 'POST', headers: authorization, body: JSON.stringify(input),
@@ -150,11 +266,21 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
     })
   }
 
-  async pendingInvitations(authorization: MembershipAuthorization): Promise<readonly InvitationView[]> {
+  async pendingInvitations(authorization: MembershipAuthorization): Promise<readonly PendingInvitationView[]> {
     const rows = await this.json('/v1/projects/invitations/pending', {
       method: 'GET', headers: authorization,
     }, parseArray)
-    return rows.map(parseInvitationView)
+    return rows.map(parsePendingInvitationView)
+  }
+
+  async issuedInvitations(
+    authorization: MembershipAuthorization,
+    projectId: ProjectId,
+  ): Promise<readonly IssuedInvitationView[]> {
+    const rows = await this.json(`/v1/projects/${encodeURIComponent(projectId)}/invitations`, {
+      method: 'GET', headers: authorization,
+    }, parseArray)
+    return rows.map(parseIssuedInvitationView)
   }
 
   async changeRole(authorization: MembershipAuthorization, membershipId: MembershipId, role: ProjectRole): Promise<void> {
@@ -253,6 +379,14 @@ function parseProjectView(value: unknown): ProjectView {
   }
 }
 
+function parseAuthenticatedProjectView(value: unknown): AuthenticatedProjectView {
+  const view = record(value, 'authenticated project view')
+  return {
+    ...parseProjectView(value),
+    receivingAccountId: string(view, 'receivingAccountId', 'authenticated project view') as PlatformAccountId,
+  }
+}
+
 function parseInvitationView(value: unknown): InvitationView {
   const view = record(value, 'invitation view')
   const settledAt = typeof view.settledAt === 'number' ? view.settledAt : undefined
@@ -272,6 +406,28 @@ function parseInvitationState(value: unknown): InvitationView['state'] {
     throw new TypeError('invitation view state must be a known lifecycle state')
   }
   return value
+}
+
+function parsePendingInvitationView(value: unknown): PendingInvitationView {
+  const view = record(value, 'pending invitation view')
+  return {
+    invitationId: string(view, 'invitationId', 'pending invitation view') as InvitationId,
+    receivingAccountId: string(view, 'receivingAccountId', 'pending invitation view') as PlatformAccountId,
+    projectId: string(view, 'projectId', 'pending invitation view') as ProjectId,
+    projectName: string(view, 'projectName', 'pending invitation view'),
+    remoteUrl: string(view, 'remoteUrl', 'pending invitation view'),
+    inviterName: string(view, 'inviterName', 'pending invitation view'),
+    invitedAt: epochMs(view, 'invitedAt', 'pending invitation view'),
+  }
+}
+
+function parseIssuedInvitationView(value: unknown): IssuedInvitationView {
+  const view = record(value, 'issued invitation view')
+  return {
+    invitationId: string(view, 'invitationId', 'issued invitation view') as InvitationId,
+    inviteeName: string(view, 'inviteeName', 'issued invitation view'),
+    invitedAt: epochMs(view, 'invitedAt', 'issued invitation view'),
+  }
 }
 
 function parseMemberView(value: unknown): MemberView {

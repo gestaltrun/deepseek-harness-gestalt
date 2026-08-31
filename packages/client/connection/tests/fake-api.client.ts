@@ -42,6 +42,16 @@ export class FakeApiClient implements IApiClient {
   readonly calls: { method: string; payload: unknown }[] = []
 
   readonly memberQuestions: IApiClient['memberQuestions'] = {
+    workspaceBinding: payload => this.record(
+      'memberQuestion.workspaceBinding', payload, Promise.resolve(ok({ state: 'missing' as const })),
+    ),
+    ensureWorkspaceBinding: payload => this.record(
+      'memberQuestion.ensureWorkspaceBinding', payload,
+      Promise.resolve(ok({ state: 'created' as const, workspaceId: payload.workspaceId })),
+    ),
+    bindWorkspace: payload => this.record(
+      'memberQuestion.bindWorkspace', payload, Promise.resolve(ok({ bound: true as const })),
+    ),
     snapshot: payload => this.record('memberQuestion.snapshot', payload, Promise.resolve(ok({
       revision: 0, pending: [], terminal: [],
     }))),
@@ -182,6 +192,10 @@ export class FakeApiClient implements IApiClient {
     create: (payload: unknown) => this.record('workspace.create', payload, Promise.resolve(ok({
       workspace: { workspaceId: 'fk-ws' as never, path: '/f/ws', title: 'ws', sessionIds: [], createdAt: '0', updatedAt: '0' },
       created: true,
+    }))),
+    gitRemote: (payload: unknown) => this.record('workspace.gitRemote', payload, Promise.resolve(ok({}))),
+    cloneGit: (payload: unknown) => this.record('workspace.cloneGit', payload, Promise.resolve(ok({
+      workspace: { workspaceId: 'fk-clone' as never, path: '/f/clone', title: 'clone', sessionIds: [], createdAt: '0', updatedAt: '0' },
     }))),
     rename: (payload: unknown) => this.record('workspace.rename', payload, Promise.resolve(ok({
       workspace: { workspaceId: 'fk-ws' as never, path: '/f/ws', title: 'ws', sessionIds: [], createdAt: '0', updatedAt: '0' },

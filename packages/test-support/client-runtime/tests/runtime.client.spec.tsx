@@ -415,6 +415,25 @@ describe('workspaces', () => {
     await expect(runtime.workspaces.createDirectory('/x', 'made')).resolves.toBe('/x/made')
     await runtime.dispose()
   })
+
+  it('records Workspace Git origin and clone operations with replaceable results', async () => {
+    const runtime = await runtimeWithFrame()
+    await expect(runtime.workspaces.gitRemote('w1' as WorkspaceId)).resolves.toBeUndefined()
+    await expect(runtime.workspaces.cloneGit({
+      remoteUrl: 'git@github.com:o/r.git', parentPath: '/projects', directoryName: 'r',
+    })).resolves.toMatchObject({ path: '/projects/r', title: 'r' })
+    runtime.workspaces.stub('gitRemote', vi.fn(async () => 'https://github.com/o/r'))
+    await expect(runtime.workspaces.gitRemote('w1' as WorkspaceId)).resolves.toBe('https://github.com/o/r')
+    expect(runtime.workspaces.calls).toEqual([
+      { method: 'gitRemote', args: ['w1'] },
+      {
+        method: 'cloneGit',
+        args: [{ remoteUrl: 'git@github.com:o/r.git', parentPath: '/projects', directoryName: 'r' }],
+      },
+      { method: 'gitRemote', args: ['w1'] },
+    ])
+    await runtime.dispose()
+  })
 })
 
 describe('feature mount and disposal', () => {

@@ -87,6 +87,16 @@ export class FakeApiClient implements IApiClient {
     accepted: true, sessionId: payload.receivingSessionId,
   }))
   readonly memberQuestions: IApiClient['memberQuestions'] = {
+    workspaceBinding: payload => this.record(
+      'memberQuestion.workspaceBinding', payload, Promise.resolve(ok({ state: 'missing' as const })),
+    ),
+    ensureWorkspaceBinding: payload => this.record(
+      'memberQuestion.ensureWorkspaceBinding', payload,
+      Promise.resolve(ok({ state: 'created' as const, workspaceId: payload.workspaceId })),
+    ),
+    bindWorkspace: payload => this.record(
+      'memberQuestion.bindWorkspace', payload, Promise.resolve(ok({ bound: true as const })),
+    ),
     snapshot: (payload, signal) => this.record('memberQuestion.snapshot', payload, this.onMemberQuestionSnapshot(payload, signal)),
     settle: (payload, signal) => this.record('memberQuestion.settle', payload, this.onMemberQuestionSettle(payload, signal)),
     admitHumanTurn: (payload, signal, rpcId) => {
@@ -226,6 +236,12 @@ export class FakeApiClient implements IApiClient {
   onWorkspaceCreate: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView; created: boolean }>> =
     () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-ws'), created: true }))
 
+  onWorkspaceGitRemote: (payload: unknown) => Promise<RpcResponse<{ remoteUrl?: string }>> =
+    () => Promise.resolve(ok({}))
+
+  onWorkspaceCloneGit: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView }>> =
+    () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-clone') }))
+
   onWorkspaceRename: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView }>> =
     () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-ws') }))
 
@@ -248,6 +264,8 @@ export class FakeApiClient implements IApiClient {
         : response
     )) as ReturnType<IApiClient['workspace']['list']>),
     create: (payload: unknown) => this.record('workspace.create', payload, this.onWorkspaceCreate(payload)),
+    gitRemote: (payload: unknown) => this.record('workspace.gitRemote', payload, this.onWorkspaceGitRemote(payload)),
+    cloneGit: (payload: unknown) => this.record('workspace.cloneGit', payload, this.onWorkspaceCloneGit(payload)),
     rename: (payload: unknown) => this.record('workspace.rename', payload, this.onWorkspaceRename(payload)),
     delete: (payload: unknown) => this.record('workspace.delete', payload, this.onWorkspaceDelete(payload)),
     insertBefore: (payload: unknown) =>

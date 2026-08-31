@@ -4,9 +4,9 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { z as zod } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
@@ -108,6 +108,8 @@ import type {
 } from '@deepseek-ai/dsh-user-questions'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
+import type { NativeCommandRunner } from '@deepseek-ai/dsh-native-command'
+import type { SubprocessOutcome } from '@deepseek-ai/dsh-subprocess'
 import {
   ApiRemoteSessionNotFound as SessionNotFound,
   ApiRemoteSubagentSessionOwnership as SubagentSessionOwnership,
@@ -644,6 +646,8 @@ export interface ApiProxyDefaults {
   openPath?: (path: string, signal: AbortSignal) => Promise<void>
   /** Native text-editor handoff; injectable for settings-document tests. */
   openTextFile?: (path: string, signal: AbortSignal) => Promise<void>
+  /** No-shell Git command boundary; injectable for Workspace Git tests. */
+  workspaceGitCommand?: NativeCommandRunner
   /** Validated DEFLATE level for session-log ZIP entries; defaults to 6. */
   sessionExportCompressionLevel?: SessionLogCompressionLevel
   /** Maximum artifact size eligible for one cold blankness read. */
@@ -658,6 +662,58 @@ export interface ApiProxyDefaults {
   canOpenPath?: () => boolean
   /** Authenticated Host Installation used for receiver settlements. */
   memberQuestionInstallation?: { id: InstallationId; deviceName: string }
+}
+
+const WORKSPACE_GIT_OUTPUT_MAX_BYTES = 1024 * 1024
+const WORKSPACE_GIT_GRACE_MS = 1_000
+const WORKSPACE_GIT_ENV_ALLOWLIST = new Set([
+  'COMSPEC', 'HOME', 'LANG', 'LC_ALL', 'PATH', 'PATHEXT', 'SYSTEMROOT', 'TEMP', 'TMP', 'TMPDIR', 'USERPROFILE',
+])
+
+/** Build the production Git boundary over the managed subprocess tree service. */
+function createWorkspaceGitCommand(ctx: Context, cwd: string): NativeCommandRunner {
+  return async (command, args, signal) => {
+    if (command !== 'git') throw new TypeError(`workspace Git runner rejects executable ${JSON.stringify(command)}`)
+    const subprocess = ctx.get('subprocess')
+    if (subprocess === undefined) throw new Error('workspace Git operations require the subprocess service')
+    const env: NodeJS.ProcessEnv = {}
+    for (const key of Object.keys(process.env)) {
+      if (!WORKSPACE_GIT_ENV_ALLOWLIST.has(key.toUpperCase())) env[key] = undefined
+    }
+    env.GCM_INTERACTIVE = 'Never'
+    env.GIT_CONFIG_COUNT = '1'
+    env.GIT_CONFIG_KEY_0 = 'credential.interactive'
+    env.GIT_CONFIG_VALUE_0 = 'never'
+    env.GIT_TERMINAL_PROMPT = '0'
+    const handle = subprocess.spawn({
+      argv: [command, ...args],
+      cwd,
+      stdio: {
+        stdin: 'ignore',
+        stdout: { maxBytes: WORKSPACE_GIT_OUTPUT_MAX_BYTES },
+        stderr: { maxBytes: WORKSPACE_GIT_OUTPUT_MAX_BYTES },
+      },
+      graceMs: WORKSPACE_GIT_GRACE_MS,
+      signal,
+      env,
+    })
+    let outcome: SubprocessOutcome
+    try {
+      outcome = await handle.done
+    } finally {
+      if (signal.aborted) handle.terminate()
+      await handle.waitForExit()
+    }
+    const stdout = handle.collected.stdout?.readFrom(0)
+    const stderr = handle.collected.stderr?.readFrom(0)
+    if (stdout === undefined || stderr === undefined || stdout.lossy || stderr.lossy) {
+      throw new Error('workspace Git output exceeded the bounded capture')
+    }
+    if (outcome.exitCode !== 0) {
+      throw new Error(`workspace Git exited with ${outcome.exitCode === null ? outcome.signal ?? 'unknown signal' : `code ${String(outcome.exitCode)}`}`)
+    }
+    return { stdout: stdout.text, stderr: stderr.text }
+  }
 }
 
 /** The tool/call payload fields the presenter path reads. */
@@ -1122,6 +1178,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const coldBlankProbeMaxBytes = defaults.coldBlankProbeMaxBytes
     ?? DEFAULT_COLD_BLANK_PROBE_MAX_BYTES
   const memberQuestionReceiver = ctx.get('memberQuestionReceiver')
+  const workspaceGitCommand = defaults.workspaceGitCommand ?? createWorkspaceGitCommand(ctx, defaults.cwd)
   /** The seed model each create/resume declares; re-read so it never goes stale. */
   const agentOptions = (): AgentOptions => {
     const { provider, model } = defaults.defaultModelSelection()
@@ -1722,42 +1779,32 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return agent
   }
 
-  /** Resolve or create one path while holding the Host's workspace-create chain. */
+  /** Run one operation in the Host Workspace registry mutation order. */
+  function serializeWorkspaceMutation<T>(run: () => Promise<T>): Promise<T> {
+    const operation = workspaceCreationChain.then(run)
+    workspaceCreationChain = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  /** Resolve or create one path while holding the Host Workspace mutation order. */
   function ensureWorkspace(path: string): Promise<{ workspace: Workspace; created: boolean }> {
-    const operation = workspaceCreationChain.then(async () => {
+    return serializeWorkspaceMutation(async () => {
       const existing = await ctx.workspaceRegistry.resolveByPath(path)
       if (existing !== undefined) return { workspace: existing, created: false }
       return { workspace: await ctx.workspaceRegistry.create(path), created: true }
     })
-    workspaceCreationChain = operation.then(() => undefined, () => undefined)
-    return operation
   }
 
   /** Resolve one receiving account/project association to its exact local Workspace. */
   async function receivingWorkspace(admission: MemberQuestionHumanTurnAdmissionContext): Promise<Workspace> {
     const binding = ctx.get('memberQuestionWorkspaceBinding')
-    if (binding !== undefined) {
-      const workspaceId = await binding.resolve(admission.receivingAccountId, admission.projectId)
-      const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(workspaceId))
-      if (workspace === undefined) {
-        throw new Error(`member-question workspace binding returned unknown Workspace ${workspaceId}`)
-      }
-      return workspace
+    if (binding === undefined) {
+      throw new Error('member-question admission requires exact local Workspace binding authority')
     }
-    const membership = ctx.get('projectMembership')
-    if (membership === undefined) {
-      throw new Error('member-question admission requires project membership authority')
-    }
-    const roster = await membership.roster(admission.receivingAccountId, admission.projectId)
-    const member = roster.members.find(row => row.accountId === admission.receivingAccountId)
-    const workspaceName = member?.link?.workspaceName
-    if (workspaceName === undefined) {
-      throw new Error(`member-question admission has no local workspace link for account ${admission.receivingAccountId}`)
-    }
-    const matches = ctx.workspaceRegistry.list().filter(workspace => workspace.title === workspaceName)
-    const [workspace] = matches
-    if (workspace === undefined || matches.length !== 1) {
-      throw new Error(`member-question workspace link ${JSON.stringify(workspaceName)} resolved ${matches.length} local workspaces`)
+    const workspaceId = await binding.resolve(admission.receivingAccountId, admission.projectId)
+    const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(workspaceId))
+    if (workspace === undefined) {
+      throw new Error(`member-question workspace binding returned unknown Workspace ${workspaceId}`)
     }
     return workspace
   }
@@ -2239,6 +2286,102 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
   return {
     memberQuestions: {
+      async workspaceBinding(request) {
+        const binding = ctx.get('memberQuestionWorkspaceBinding')
+        if (binding === undefined) {
+          return err(request, { code: 'internal', message: 'member-question Workspace binding is unavailable', details: {} })
+        }
+        try {
+          const workspaceId = await binding.lookup(
+            request.payload.receivingAccountId,
+            request.payload.projectId,
+          )
+          if (workspaceId === undefined) return ok(request, { state: 'missing' as const })
+          return ok(request, {
+            state: ctx.workspaceRegistry.get(workspaceId) === undefined ? 'stale' as const : 'live' as const,
+            workspaceId,
+          })
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'internal',
+            message: `member-question Workspace binding lookup failed: ${String(error)}`,
+            details: {},
+          })
+        }
+      },
+
+      async ensureWorkspaceBinding(request) {
+        const binding = ctx.get('memberQuestionWorkspaceBinding')
+        if (binding === undefined) {
+          return err(request, { code: 'internal', message: 'member-question Workspace binding is unavailable', details: {} })
+        }
+        try {
+          const workspaceId = brandWorkspaceId(request.payload.workspaceId)
+          const ensured = await serializeWorkspaceMutation(async () => {
+            if (ctx.workspaceRegistry.get(workspaceId) === undefined) return undefined
+            let observed = await binding.lookup(
+              request.payload.receivingAccountId,
+              request.payload.projectId,
+            )
+            for (let attempt = 0; attempt < 8; attempt += 1) {
+              if (observed !== undefined && ctx.workspaceRegistry.get(observed) !== undefined) {
+                return { state: 'existing' as const, workspaceId: observed }
+              }
+              const state = observed === undefined ? 'created' as const : 'repaired' as const
+              if (await binding.bindIfCurrent(
+                request.payload.receivingAccountId,
+                request.payload.projectId,
+                observed,
+                workspaceId,
+              )) {
+                return { state, workspaceId }
+              }
+              observed = await binding.lookup(
+                request.payload.receivingAccountId,
+                request.payload.projectId,
+              )
+            }
+            throw new Error('binding changed during every repair attempt')
+          })
+          return ensured === undefined
+            ? workspaceNotFound(request, request.payload.workspaceId)
+            : ok(request, ensured)
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'internal',
+            message: `member-question Workspace binding ensure failed: ${String(error)}`,
+            details: {},
+          })
+        }
+      },
+
+      async bindWorkspace(request) {
+        const binding = ctx.get('memberQuestionWorkspaceBinding')
+        if (binding === undefined) {
+          return err(request, { code: 'internal', message: 'member-question Workspace binding is unavailable', details: {} })
+        }
+        try {
+          const workspaceId = brandWorkspaceId(request.payload.workspaceId)
+          const bound = await serializeWorkspaceMutation(async () => {
+            if (ctx.workspaceRegistry.get(workspaceId) === undefined) return false
+            await binding.bind(
+              request.payload.receivingAccountId,
+              request.payload.projectId,
+              workspaceId,
+            )
+            return true
+          })
+          if (!bound) return workspaceNotFound(request, request.payload.workspaceId)
+          return ok(request, { bound: true as const })
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'internal',
+            message: `member-question Workspace binding failed: ${String(error)}`,
+            details: {},
+          })
+        }
+      },
+
       async snapshot(request) {
         if (memberQuestionReceiver === undefined) {
           return err(request, { code: 'internal', message: 'member-question receiver is unavailable', details: {} })
@@ -3155,6 +3298,71 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             code: 'workspace-invalid-path',
             message: `cannot create a workspace at "${path}": ${error instanceof Error ? error.message : String(error)}`,
             details: { path },
+          })
+        }
+      },
+
+      async gitRemote(request, signal) {
+        const workspace = ctx.workspaceRegistry.get(brandWorkspaceId(request.payload.workspaceId))
+        if (workspace === undefined) return workspaceNotFound(request, request.payload.workspaceId)
+        try {
+          const { stdout } = await workspaceGitCommand(
+            'git', ['-C', workspace.path, 'remote', 'get-url', 'origin'], signal,
+          )
+          const remoteUrl = stdout.trim()
+          return ok(request, remoteUrl === '' ? {} : { remoteUrl })
+        } catch (_error: unknown) {
+          if (signal.aborted) {
+            return err(request, { code: 'cancelled', message: 'workspace remote inspection was aborted', details: {} })
+          }
+          // A non-Git directory and a checkout without origin are valid local
+          // Workspaces. Both project as an unknown remote to the invite UI.
+          return ok(request, {})
+        }
+      },
+
+      async cloneGit(request, signal) {
+        const { remoteUrl, parentPath, directoryName } = request.payload
+        const target = join(parentPath, directoryName)
+        let ownsTarget = false
+        try {
+          const parent = await stat(parentPath)
+          if (!parent.isDirectory()) throw new Error('parent path is not a directory')
+          await mkdir(target)
+          ownsTarget = true
+          await workspaceGitCommand('git', ['clone', '--', remoteUrl, target], signal)
+          const { workspace } = await ensureWorkspace(target)
+          return ok(request, { workspace: workspaceView(workspace) })
+        } catch (error: unknown) {
+          let cleanupError: unknown
+          if (ownsTarget) {
+            try {
+              await rm(target, { recursive: true, force: true })
+            } catch (reason: unknown) {
+              cleanupError = reason
+            }
+          }
+          if (signal.aborted) {
+            return err(request, {
+              code: 'cancelled',
+              message: cleanupError === undefined
+                ? 'workspace clone was aborted'
+                : `workspace clone was aborted and cleanup failed: ${cleanupError instanceof Error
+                  ? cleanupError.message
+                  : typeof cleanupError === 'string' ? cleanupError : 'unknown cleanup failure'}`,
+              details: {},
+            })
+          }
+          return err(request, {
+            code: 'workspace-clone-failed',
+            message: `cannot clone Workspace into "${target}": ${error instanceof Error ? error.message : String(error)}${
+              cleanupError === undefined
+                ? ''
+                : `; cleanup failed: ${cleanupError instanceof Error
+                  ? cleanupError.message
+                  : typeof cleanupError === 'string' ? cleanupError : 'unknown cleanup failure'}`
+            }`,
+            details: { parentPath, directoryName },
           })
         }
       },

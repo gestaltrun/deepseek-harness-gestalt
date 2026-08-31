@@ -342,6 +342,27 @@ describe('PlatformAccount', () => {
     expect([...identities.keys()]).toHaveLength(2)
   })
 
+  it('resolves one current public GitHub login and rejects unknown or ambiguous names', async () => {
+    let subject = 13994321
+    const provider = github()
+    provider.exchange = async () => ({
+      providerSubject: subject,
+      login: subject === 13994321 ? 'OctoCat' : 'octocat',
+      avatarUrl: `https://avatars.example/${String(subject)}`,
+    })
+    const { first } = accountHarness({ provider })
+    const octocat = await login(first)
+    await expect(first.publicIdentityByGithubLogin('  octocat  ')).resolves.toMatchObject({
+      id: octocat.session.account.id,
+      githubLogin: 'OctoCat',
+    })
+    await expect(first.publicIdentityByGithubLogin('missing')).resolves.toBeUndefined()
+
+    subject = 7
+    await login(first, installationKey(), parseInstallationId('ambiguous-login'))
+    await expect(first.publicIdentityByGithubLogin('OCTOCAT')).resolves.toBeUndefined()
+  })
+
   it('revokes a durable Mobile session that predates Installation presentation', async () => {
     const { first, backend } = accountHarness()
     const key = installationKey()

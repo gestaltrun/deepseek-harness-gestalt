@@ -142,6 +142,14 @@ class CatalogProjectMembership extends ProjectMembershipService {
     return Promise.reject(unreachable('invitation enumeration'))
   }
 
+  override pendingInvitationContextsFor(): Promise<never> {
+    return Promise.reject(unreachable('invitation context enumeration'))
+  }
+
+  override pendingInvitationsIssuedBy(): Promise<never> {
+    return Promise.reject(unreachable('issued invitation enumeration'))
+  }
+
   override projectByRemote(): Promise<never> {
     return Promise.reject(unreachable('remote lookups'))
   }

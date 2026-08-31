@@ -4,6 +4,7 @@ import type { MemberQuestionReceiverSnapshot, ReceivingSessionId } from '@deepse
 import type { CompanionMemberQuestionSettledResult } from '@deepseek-ai/dsh-remote-protocol'
 import type { Wire } from './rpc.schema.ts'
 import type { MemberQuestionsApi } from './member-questions.ts'
+import type { WorkspaceId } from './workspace.ts'
 
 const idSchema = z.string().min(1)
 const safeEpochSchema = z.number().int().nonnegative()
@@ -81,6 +82,48 @@ const terminalViewSchema = z.strictObject({
   terminal: terminalSchema,
   brief: memberQuestionOperationSchema,
   hostSessionId: idSchema.optional(),
+})
+
+/** Account and Project whose exact local Workspace association is requested. */
+export const memberQuestionWorkspaceBindingRequestSchema = z.strictObject({
+  receivingAccountId: idSchema,
+  projectId: idSchema,
+}) as unknown as z.ZodType<Wire<Parameters<MemberQuestionsApi['workspaceBinding']>[0]['payload']>>
+/** Existing exact binding, or an empty value before the first binding. */
+export const memberQuestionWorkspaceBindingValueSchema = z.strictObject({
+  state: z.literal('missing'),
+}).or(z.strictObject({
+  state: z.union([z.literal('live'), z.literal('stale')]),
+  workspaceId: idSchema,
+})) as unknown as z.ZodType<Wire<
+  | { state: 'missing' }
+  | { state: 'live' | 'stale'; workspaceId: WorkspaceId }
+>>
+
+/** Exact live Workspace proposed for an atomic missing-or-stale repair. */
+export const memberQuestionEnsureWorkspaceBindingRequestSchema = z.strictObject({
+  receivingAccountId: idSchema,
+  projectId: idSchema,
+  workspaceId: idSchema,
+}) as unknown as z.ZodType<Wire<Parameters<MemberQuestionsApi['ensureWorkspaceBinding']>[0]['payload']>>
+/** Result of retaining, creating, or repairing the exact binding. */
+export const memberQuestionEnsureWorkspaceBindingValueSchema = z.strictObject({
+  state: z.union([z.literal('created'), z.literal('existing'), z.literal('repaired')]),
+  workspaceId: idSchema,
+}) as unknown as z.ZodType<Wire<{
+  state: 'created' | 'existing' | 'repaired'
+  workspaceId: WorkspaceId
+}>>
+
+/** Exact local Workspace binding committed before Platform invitation acceptance. */
+export const memberQuestionBindWorkspaceRequestSchema = z.strictObject({
+  receivingAccountId: idSchema,
+  projectId: idSchema,
+  workspaceId: idSchema,
+}) as unknown as z.ZodType<Wire<Parameters<MemberQuestionsApi['bindWorkspace']>[0]['payload']>>
+/** Binding receipt. */
+export const memberQuestionBindWorkspaceValueSchema = z.strictObject({
+  bound: z.literal(true),
 })
 
 /** Exact empty request for the complete receiver baseline. */

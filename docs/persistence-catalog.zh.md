@@ -570,7 +570,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }
 ```
 
-来源：[`packages/interaction/member-question-receiver/src/types.ts:213`](../packages/interaction/member-question-receiver/src/types.ts)
+来源：[`packages/interaction/member-question-receiver/src/types.ts:241`](../packages/interaction/member-question-receiver/src/types.ts)
 
 <a id="member-questionsettled--log-only"></a>
 
@@ -581,7 +581,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'member-question/settled': CompanionMemberQuestionSettledResult
 ```
 
-来源：[`packages/interaction/member-question-receiver/src/types.ts:225`](../packages/interaction/member-question-receiver/src/types.ts)
+来源：[`packages/interaction/member-question-receiver/src/types.ts:253`](../packages/interaction/member-question-receiver/src/types.ts)
 
 ### `permission/*`
 

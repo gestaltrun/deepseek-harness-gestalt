@@ -10,6 +10,9 @@ import type {
 } from '@deepseek-ai/dsh-remote-protocol'
 import type { RpcRequest, RpcResponse } from './rpc.ts'
 import type { PromptContentPart } from './sessions.ts'
+import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
+import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
+import type { WorkspaceId } from './workspace.ts'
 
 export type {
   MemberQuestionReceiverSnapshot,
@@ -19,6 +22,29 @@ export type {
 
 /** Unary receiver baseline and settlement operations. */
 export interface MemberQuestionsApi {
+  /** Read the exact local Workspace already selected for an Account and Project. */
+  workspaceBinding(request: RpcRequest<{
+    receivingAccountId: PlatformAccountId
+    projectId: ProjectId
+  }>): Promise<RpcResponse<
+    | { state: 'missing' }
+    | { state: 'live' | 'stale'; workspaceId: WorkspaceId }
+  >>
+  /** Keep a live exact binding, or atomically establish one when missing or stale. */
+  ensureWorkspaceBinding(request: RpcRequest<{
+    receivingAccountId: PlatformAccountId
+    projectId: ProjectId
+    workspaceId: WorkspaceId
+  }>): Promise<RpcResponse<{
+    state: 'created' | 'existing' | 'repaired'
+    workspaceId: WorkspaceId
+  }>>
+  /** Persist the exact local Workspace selected while accepting a Project invitation. */
+  bindWorkspace(request: RpcRequest<{
+    receivingAccountId: PlatformAccountId
+    projectId: ProjectId
+    workspaceId: WorkspaceId
+  }>): Promise<RpcResponse<{ bound: true }>>
   /** Read the complete committed receiver projection. */
   snapshot(request: RpcRequest<{}>): Promise<RpcResponse<MemberQuestionReceiverSnapshot>>
   /** Settle one pending question from this authenticated Host Installation. */

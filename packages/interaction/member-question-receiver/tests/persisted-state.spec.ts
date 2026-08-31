@@ -35,7 +35,7 @@ function validState(): PersistedReceiverState {
     references: [],
   }
   return {
-    formatVersion: 0,
+    formatVersion: 1,
     revision: 4,
     sessions: [{
       id: 'receiving-persisted',
@@ -102,6 +102,11 @@ function validState(): PersistedReceiverState {
         committedRevision: 4,
       },
     ],
+    workspaceBindings: [{
+      receivingAccountId: 'receiver',
+      projectId: 'project-persisted',
+      workspaceId: 'workspace-persisted',
+    }],
   }
 }
 
@@ -142,11 +147,21 @@ describe('member-question receiver durable state', () => {
     const foreign = document()
     foreign.formatVersion = 2
     expect(() => parseReceiverState(JSON.stringify(foreign))).toThrow('formatVersion 2 is unsupported')
-    for (const key of ['sessions', 'questions', 'admissions']) {
+    for (const key of ['sessions', 'questions', 'admissions', 'workspaceBindings']) {
       const missing = document()
       missing[key] = {}
       expect(() => parseReceiverState(JSON.stringify(missing))).toThrow('must be arrays')
     }
+  })
+
+  it('rejects malformed and duplicate member Workspace bindings', () => {
+    const malformed = document()
+    ;(malformed.workspaceBindings as unknown[])[0] = null
+    expect(() => parseReceiverState(JSON.stringify(malformed))).toThrow('binding must be an object')
+    const duplicate = document()
+    const bindings = duplicate.workspaceBindings as unknown[]
+    bindings.push(structuredClone(bindings[0]))
+    expect(() => parseReceiverState(JSON.stringify(duplicate))).toThrow('duplicate member Workspace bindings')
   })
 
   it('rejects malformed and duplicate receiving Sessions', () => {

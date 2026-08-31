@@ -23,6 +23,9 @@ import type { MemberQuestionsApi } from './member-questions.ts'
  * request (command.execute): the carrier passes its request signal, never a wire field.
  */
 export interface RpcMethodMap {
+  'memberQuestion.workspaceBinding': MemberQuestionsApi['workspaceBinding']
+  'memberQuestion.ensureWorkspaceBinding': MemberQuestionsApi['ensureWorkspaceBinding']
+  'memberQuestion.bindWorkspace': MemberQuestionsApi['bindWorkspace']
   'memberQuestion.snapshot': MemberQuestionsApi['snapshot']
   'memberQuestion.settle': MemberQuestionsApi['settle']
   'memberQuestion.admitHumanTurn': MemberQuestionsApi['admitHumanTurn']
@@ -51,6 +54,8 @@ export interface RpcMethodMap {
   'host.openPath': HostApi['openPath']
   'workspace.list': WorkspaceApi['list']
   'workspace.create': WorkspaceApi['create']
+  'workspace.gitRemote': WorkspaceApi['gitRemote']
+  'workspace.cloneGit': WorkspaceApi['cloneGit']
   'workspace.rename': WorkspaceApi['rename']
   'workspace.delete': WorkspaceApi['delete']
   'workspace.insertBefore': WorkspaceApi['insertBefore']

@@ -6,6 +6,7 @@
 
 | 包 | 角色 | ctx 键 |
 |---|---|---|
+| [`phone-environment/`](phone-environment/README.zh.md) | Host 工具链探测与可信托管 mobilecli 准备 | `ctx.phoneEnvironment` |
 | [`phone-runtime/`](phone-runtime/README.zh.md) | mobilecli Provider 与 Service Definition（折叠） | `ctx.phoneDevices` |
 | [`phone-stream/`](phone-stream/README.zh.md) | 同源 IO WebSocket 与签名 MJPEG/H264 反代 | `ctx.phoneStream` |
 | [`tool-phone/`](tool-phone/README.zh.md) | 面向模型的延迟 Consumer | 注册到 `ctx.tools` |

@@ -285,6 +285,7 @@
     { "path": "./packages/browser/browser-runtime-tandem" },
     { "path": "./packages/browser/browser-workspace" },
     { "path": "./packages/browser/tool-browser" },
+    { "path": "./packages/phone/phone-environment" },
     { "path": "./packages/phone/phone-runtime" },
     { "path": "./packages/phone/phone-stream" },
     { "path": "./packages/phone/tool-phone" },

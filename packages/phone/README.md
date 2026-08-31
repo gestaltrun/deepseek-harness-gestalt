@@ -6,6 +6,7 @@ The phone device fleet over the external mobilecli binary: one Host-half Service
 
 | Package | Role | ctx key |
 |---|---|---|
+| [`phone-environment/`](phone-environment/README.md) | Host toolchain detection and trusted managed mobilecli preparation | `ctx.phoneEnvironment` |
 | [`phone-runtime/`](phone-runtime/README.md) | mobilecli Provider and Service Definition, folded | `ctx.phoneDevices` |
 | [`phone-stream/`](phone-stream/README.md) | same-origin IO WebSocket and signed MJPEG/H264 reverse-proxy | `ctx.phoneStream` |
 | [`tool-phone/`](tool-phone/README.md) | Deferred model-facing Consumer | registers on `ctx.tools` |

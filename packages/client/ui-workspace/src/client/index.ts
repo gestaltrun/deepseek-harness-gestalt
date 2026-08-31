@@ -15,7 +15,7 @@ import type {
   FunctionTag, InvitationId, MembershipId, ProjectId, ProjectMembershipClient,
   PlatformAccountId,
 } from '@deepseek-ai/dsh-project-membership-client'
-import { normalizeGitRemoteUrl } from '@deepseek-ai/dsh-project-membership-client'
+import { normalizeGitRemoteUrl } from '@deepseek-ai/dsh-project-membership/remote-url'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {

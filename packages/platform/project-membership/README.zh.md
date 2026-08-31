@@ -14,7 +14,7 @@
 
 稳定错误码:`DUPLICATE_INVITEE`、`ROLE_REQUIRED`、`NOT_A_MEMBER`、`PROJECT_NOT_FOUND`、`MEMBERSHIP_NOT_FOUND`、`INVITATION_NOT_FOUND`、`INVITATION_NOT_PENDING`、`PROJECT_NAME_TAKEN`、`INVALID_PROJECT_NAME`、`INVALID_REMOTE_URL`、`INVALID_TAGS`、`LAST_OWNER`、`INVALID_LINK`。
 
-`normalizeGitRemoteUrl` 将 `https://host/path[.git]` 与 scp 形式的 `user@host:path[.git]` 规范化为唯一绑定形态:scheme/host 小写,忽略大小写地去掉一个末尾 `.git` 后缀,修剪尾部斜杠,路径中段保持原样。
+`normalizeGitRemoteUrl` 将 `https://host/path[.git]` 与 scp 形式的 `user@host:path[.git]` 规范化为唯一绑定形态:scheme/host 小写,忽略大小写地去掉一个末尾 `.git` 后缀,修剪尾部斜杠,路径中段保持原样。只需要该纯操作的浏览器 bundle 会导入 `@deepseek-ai/dsh-project-membership/remote-url`;该 subpath 不携带 Service 或 registry identity。
 
 ## Model Experience
 

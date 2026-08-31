@@ -4275,6 +4275,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../../platform/project-membership
       '@deepseek-ai/dsh-project-membership-client':
         specifier: workspace:^
         version: link:../../platform/project-membership-client

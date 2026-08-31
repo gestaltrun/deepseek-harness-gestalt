@@ -14,7 +14,7 @@ Reading is gated too: `roster` requires an active membership of the caller, so r
 
 Stable failure codes: `DUPLICATE_INVITEE`, `ROLE_REQUIRED`, `NOT_A_MEMBER`, `PROJECT_NOT_FOUND`, `MEMBERSHIP_NOT_FOUND`, `INVITATION_NOT_FOUND`, `INVITATION_NOT_PENDING`, `PROJECT_NAME_TAKEN`, `INVALID_PROJECT_NAME`, `INVALID_REMOTE_URL`, `INVALID_TAGS`, `LAST_OWNER`, `INVALID_LINK`.
 
-`normalizeGitRemoteUrl` produces the canonical binding form from `https://host/path[.git]` and scp-like `user@host:path[.git]` spellings: scheme/host lower-cased, one terminal `.git` suffix dropped case-insensitively, trailing slashes trimmed, mid-path segments untouched.
+`normalizeGitRemoteUrl` produces the canonical binding form from `https://host/path[.git]` and scp-like `user@host:path[.git]` spellings: scheme/host lower-cased, one terminal `.git` suffix dropped case-insensitively, trailing slashes trimmed, mid-path segments untouched. Browser bundles that need only this pure operation import `@deepseek-ai/dsh-project-membership/remote-url`; the subpath carries no Service or registry identity.
 
 ## Model Experience
 

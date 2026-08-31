@@ -194,7 +194,7 @@ export interface WebScaffold {
 }
 
 /** Destinations for one quiescent Host-state backup. */
-export interface WebScaffoldStateBackup {
+interface WebScaffoldStateBackup {
   /** Destination receiving the complete JSONL persistence tree. */
   persistenceRoot: string
   /** Destination receiving the complete storage-domain tree. */

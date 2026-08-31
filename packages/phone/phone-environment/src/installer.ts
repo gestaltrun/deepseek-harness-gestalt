@@ -38,6 +38,8 @@ export interface MobilecliDownloadProgress {
 /** Installer dependencies; tests replace only the nondeterministic HTTP boundary. */
 export interface MobilecliInstallerOptions {
   readonly fetch?: typeof fetch
+  /** Test replacement for the platform executable probe. */
+  readonly probeVersion?: typeof probeMobilecliVersion
   readonly onProgress?: (progress: MobilecliDownloadProgress) => void
   readonly onPhase?: (phase: 'downloading' | 'verifying') => void
 }
@@ -94,7 +96,8 @@ export async function installManagedMobilecli(
       await handle.close()
     }
     await chmod(stagedExecutable, 0o700)
-    const version = await probeMobilecliVersion(stagedExecutable, signal)
+    const probeVersion = options.probeVersion ?? probeMobilecliVersion
+    const version = await probeVersion(stagedExecutable, signal)
     if (version !== MOBILECLI_MANAGED_VERSION) {
       throw new PhoneEnvironmentError(
         'PHONE_ENVIRONMENT_VERSION',
@@ -108,7 +111,7 @@ export async function installManagedMobilecli(
       await rename(stagedVersion, finalVersion)
     } catch (error) {
       if (!await isExistingDirectory(finalVersion)) throw error
-      const existingVersion = await probeMobilecliVersion(join(finalVersion, asset.executable), signal)
+      const existingVersion = await probeVersion(join(finalVersion, asset.executable), signal)
       if (existingVersion !== version) {
         throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_VERSION', 'existing managed mobilecli failed the pinned version probe')
       }

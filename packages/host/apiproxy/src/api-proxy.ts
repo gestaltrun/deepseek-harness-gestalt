@@ -1869,7 +1869,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             origin: operation.origin,
             background: operation.background,
             questions: operation.questions,
-            references: operation.references,
+            references: operation.references.map(reference => ({
+              path: reference.path,
+              reason: reference.reason,
+            })),
           }, { ignorable: true })
         }
         if ('terminal' in question && !agent.session.events.some(event =>

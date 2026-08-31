@@ -302,6 +302,8 @@ export interface LaunchOptions {
   harnessHome?: string
   /** Copy an existing JSONL persistence tree before the Host boots and reads it. */
   persistenceSeed?: string
+  /** Force the Host native-path capability for platform-independent UI assertions. */
+  nativeOpen?: boolean
 }
 
 /** Dispose the booted tree and remove both owned temp roots, reporting every independent cleanup failure. */
@@ -455,6 +457,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       config: {
         memberQuestionInstallationId: 'web-e2e-installation',
         memberQuestionDeviceName: 'Web E2E',
+        ...(options.nativeOpen === undefined ? {} : { nativeOpen: options.nativeOpen }),
       },
     },
     // Skill discovery is model-visible input. Pin every host-level root inside

@@ -3,7 +3,6 @@
 // assembled lane keeps a precise +N and a capability-gated folder handoff.
 // The folder request is intercepted so one real browser click can exercise
 // the full client carrier without launching a native application in CI.
-import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed, vi } from 'vitest'
@@ -17,7 +16,6 @@ import {
 import { newEnglishPage, saveFailureShot } from './support.ts'
 
 const MODE = webSnapshotMode()
-const OVERLAY = fileURLToPath(new URL('./produced-files.overlay.yml', import.meta.url))
 const SEED_ID = 'produced-files-web-e2e'
 const DONE = 'PRODUCED_FILES_DONE'
 
@@ -111,7 +109,7 @@ describe('web e2e: a finished turn ends with the files it produced', () => {
   let tripwire: ReturnType<typeof watchConsole>
 
   beforeAll(async () => {
-    scaffold = await launchWebScaffold({ extraOverlayPath: OVERLAY })
+    scaffold = await launchWebScaffold({ nativeOpen: true })
     await scaffold.ctx.settings.update(settingsNamespace('dsh-better-sidebar'), { interceptOpenPath: false })
     await seedSession(scaffold, producedFixture(), SEED_ID)
     browser = await chromium.launch()

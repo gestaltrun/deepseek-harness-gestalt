@@ -158,7 +158,7 @@ describe('phone runtime service lifecycle', () => {
   })
 
   it('cancels the in-flight baseline listing without publishing readiness', async () => {
-    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 300 })
+    const fake = await stageFake({ devices: BASE_DEVICES, listDelayMs: 5_000 })
     fakes.push(fake)
     await fake.claim()
     const context = new Context()
@@ -166,6 +166,7 @@ describe('phone runtime service lifecycle', () => {
     await context.plugin(PhoneDevices, {
       ...FAST_CONFIG,
       deferStart: true,
+      requestTimeoutMs: 6_000,
       serverPort: fake.port,
     }).await()
 
@@ -175,9 +176,13 @@ describe('phone runtime service lifecycle', () => {
     const activation = context.phoneDevices.activateExecutable(fake.executablePath, controller.signal)
     await fake.awaitOnline()
     await waitFor(async () => (await fake.counters()).requests >= 2)
+    const abortedAt = Date.now()
     controller.abort(new Error('cancel during baseline listing'))
 
     await expect(activation).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    // The five-second fake response delay makes sub-second rejection prove
+    // that caller cancellation reached the in-flight RPC.
+    expect(Date.now() - abortedAt).toBeLessThan(1_000)
     expect(context.phoneDevices.isReady()).toBe(false)
     expect(readiness).toEqual([])
   })

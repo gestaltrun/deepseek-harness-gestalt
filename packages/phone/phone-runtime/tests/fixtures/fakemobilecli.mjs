@@ -60,6 +60,7 @@ const state = {
   bootCount: 0,
   shutdownCount: 0,
   io: [],
+  captures: [],
 }
 let requests = 0
 
@@ -149,9 +150,14 @@ function reply(res, id, payload) {
 // One capture payload: an MJPEG multipart stream or a raw H264 Annex-B stream.
 // With streamFrameCount the MJPEG body stays open, emitting a frame every 40ms
 // until the client disconnects — so a mid-stream teardown reaches the proxy.
-function serveCapture(res, format) {
+function serveCapture(res, format, deviceId) {
+  state.captures.push({ deviceId, format })
   if (format === 'avc') {
     res.writeHead(200, { 'content-type': 'video/h264', 'cache-control': 'no-store' })
+    if (knobs.h264FailureDeviceIds?.includes(deviceId) === true) {
+      res.end('Error: Error 0x80001001')
+      return
+    }
     res.write(h264Stream())
     res.end()
     return
@@ -270,10 +276,13 @@ async function handleRpc(req, res) {
       // Real mobilecli 1.0.5 answers with a session envelope; the stream then
       // lives on the separate /stream?s= endpoint this server also serves.
       if (knobs.captureEnvelope === true) {
-        reply(res, id, { result: { format, sessionUrl: `/stream?s=${format}` } })
+        const device = knobs.h264FailureDeviceIds === undefined
+          ? ''
+          : `&deviceId=${encodeURIComponent(String(deviceId))}`
+        reply(res, id, { result: { format, sessionUrl: `/stream?s=${format}${device}` } })
         return
       }
-      serveCapture(res, format)
+      serveCapture(res, format, String(deviceId))
       return
     }
     default: {
@@ -308,11 +317,18 @@ const server = http.createServer((req, res) => {
           res.end()
           return
         }
-        serveCapture(res, s === 'avc' ? 'avc' : 'mjpeg')
+        const deviceId = new URL(req.url ?? '/stream', 'http://127.0.0.1').searchParams.get('deviceId') ?? ''
+        serveCapture(res, s === 'avc' ? 'avc' : 'mjpeg', deviceId)
         return
       }
       if (req.method === 'GET' && req.url === '/__test/counters') {
-        reply(res, undefined, { requests, bootCount: state.bootCount, shutdownCount: state.shutdownCount, io: state.io })
+        reply(res, undefined, {
+          requests,
+          bootCount: state.bootCount,
+          shutdownCount: state.shutdownCount,
+          io: state.io,
+          captures: state.captures,
+        })
         return
       }
       if (req.method === 'GET' && req.url === '/__test/pid') {

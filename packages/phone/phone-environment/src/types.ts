@@ -1,3 +1,5 @@
+import type { DeviceId } from '@deepseek-ai/dsh-phone-runtime'
+
 /** Node platforms with an official pinned mobilecli 1.0.5 release asset. */
 export type MobilecliPlatform = 'darwin' | 'linux' | 'win32'
 
@@ -101,7 +103,7 @@ export type PhoneAndroidState =
   | {
     readonly kind: 'ready'
     readonly plan: AndroidPreparationPlan
-    readonly deviceId?: string
+    readonly deviceId?: DeviceId
     readonly running: boolean
   }
   | {

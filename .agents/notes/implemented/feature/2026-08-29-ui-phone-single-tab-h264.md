@@ -1,4 +1,4 @@
-# Agent Note: ui-phone single-tab in-place switching, online-only lists, H264-only capture
+# Agent Note: ui-phone single-tab in-place switching, online-only lists, H264-first capture
 
 Status: implemented
 
@@ -6,7 +6,7 @@ English | [中文](2026-08-29-ui-phone-single-tab-h264.zh.md)
 
 ## Problem
 
-Issue #417's later user-acceptance pass reversed three client decisions that [the connected-tabs note](2026-08-28-ui-phone-connected-device-tabs.md) had locked: opening a second device minted a second tab, the switcher listed offline and unauthorized rows, and the live view requested MJPEG while an H264 chip sat disabled. The product now wants one 「手机」 tab that switches in place, a switcher of only online devices, and an H264-only capture request.
+Issue #417's later user-acceptance pass reversed three client decisions that [the connected-tabs note](2026-08-28-ui-phone-connected-device-tabs.md) had locked: opening a second device minted a second tab, the switcher listed offline and unauthorized rows, and the live view requested MJPEG while an H264 chip sat disabled. The product now wants one 「手机」 tab that switches in place, a switcher of only online devices, and H264-preferred capture with same-session MJPEG recovery when H264 cannot paint a frame.
 
 ## Decision
 
@@ -14,7 +14,7 @@ The `phone` descriptor is `single: true`. `打开` and the device dropdown call 
 
 The switcher lists only `online` devices. Offline rows are omitted from both the dropdown and the empty-state list. An unauthorized handset stays on the empty-state warn arm (`真机未授权调试` + `重新检测`) and never appears in the dropdown.
 
-`POST /phone/session` sends `{ deviceId, format: 'avc' }`. The live phase loads the signed `h264` URL through [the WebCodecs canvas playback module](../bug-fix/2026-08-30-ui-phone-h264-webcodecs-playback.md). The devbar renders one H264 chip (`当前画面编码 H264 · 30 fps`); the MJPEG chip is gone. Host still signs both capture URLs; the client no longer requests MJPEG.
+`POST /phone/session` sends `{ deviceId, format: 'avc' }`. The live phase loads the signed `h264` URL through [the WebCodecs canvas playback module](../bug-fix/2026-08-30-ui-phone-h264-webcodecs-playback.md), then switches to the same session's signed MJPEG URL if H264 cannot paint a frame. The devbar renders the actual encoding; H264 retains the `30 fps` design caption.
 
 ## Alternatives considered
 
@@ -22,8 +22,8 @@ The switcher lists only `online` devices. Offline rows are omitted from both the
 
 **Hide only the dropdown and keep offline rows in the empty state.** Rejected: the same "do not show unavailable devices" rule applies to the list; the unauthorized warn arm is the named exception.
 
-**Keep requesting MJPEG until an MSE/WebCodecs decoder lands.** Rejected: the live view requests H264 (`avc`) only, and the client decodes its raw Annex-B access units through WebCodecs without introducing a second format.
+**Keep requesting MJPEG as the primary format.** Rejected: the live view prefers H264 (`avc`) and decodes its raw Annex-B access units through WebCodecs; MJPEG is the recovery path when that renderer cannot paint a frame.
 
 ## Consequences
 
-Multi-device monitoring no longer means parallel tabs: switching replaces the occupying device and its stream. Layout restore of a `phone:<serial>` id is gone; a restored tab is the singleton `phone` id with device meta. The empty-state list no longer shows 离线 / 已停止 rows. The H264 chip is the live format caption, not a disabled future arm. [The connected-tabs note](2026-08-28-ui-phone-connected-device-tabs.md) keeps the controller, gateway, and error-arm decisions and records this reversal of the tab model and capture format; [the H264 playback note](../bug-fix/2026-08-30-ui-phone-h264-webcodecs-playback.md) owns client decode and canvas resource lifetime.
+Multi-device monitoring no longer means parallel tabs: switching replaces the occupying device and its stream. Layout restore of a `phone:<serial>` id is gone; a restored tab is the singleton `phone` id with device meta. The empty-state list no longer shows 离线 / 已停止 rows. The format chip names the active H264 or MJPEG renderer. [The connected-tabs note](2026-08-28-ui-phone-connected-device-tabs.md) keeps the controller, gateway, and error-arm decisions and records this reversal of the tab model and capture format; [the H264 playback note](../bug-fix/2026-08-30-ui-phone-h264-webcodecs-playback.md) owns client decode and canvas resource lifetime.

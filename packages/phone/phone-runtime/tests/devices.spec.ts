@@ -57,16 +57,37 @@ describe('devices.list result validation', () => {
     ])
   })
 
-  it('accepts the real mobilecli 1.0.5 devices.list envelope verbatim, duplicates included', () => {
+  it('accepts the real mobilecli 1.0.5 devices.list envelope and removes duplicate platform/id rows', () => {
     const refs = parseDeviceInfos(REAL_1_0_5_ENVELOPE.result)
     expect(refs.map(ref => [ref.id, ref.kind, ref.state, ref.online])).toEqual([
-      [deviceId('00008101-000A2B3C4D5E6F70'), 'real', 'online', true],
-      // The real backend listed the handset twice; the parser keeps both rows.
       [deviceId('00008101-000A2B3C4D5E6F70'), 'real', 'online', true],
       [deviceId('D5AB1F8E-11D2-4E0A-9C7E-1A2B3C4D5E6F'), 'simulator', 'online', true],
       [deviceId('9F0E1D2C-3B4A-5968-7788-99AABBCCDDEE'), 'simulator', 'online', true],
       [deviceId('C7D8E9F0-1122-3344-5566-778899AABBCC'), 'simulator', 'offline', false],
     ])
+  })
+
+  it('keeps the first same-platform row and rejects an id shared across platforms', () => {
+    const refs = parseDeviceInfos([
+      wire('shared', 'android', 'emulator', 'online', 'first'),
+      wire('shared', 'android', 'real', 'offline', 'later duplicate'),
+    ])
+    expect(refs.map(ref => [ref.platform, ref.id, ref.name, ref.kind, ref.state])).toEqual([
+      ['android', deviceId('shared'), 'first', 'emulator', 'online'],
+    ])
+    let failure: unknown
+    try {
+      parseDeviceInfos([
+        wire('shared', 'android', 'emulator'),
+        wire('shared', 'ios', 'real'),
+      ])
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(PhoneDevicesError)
+    if (!(failure instanceof PhoneDevicesError)) throw new Error('expected a phone protocol failure')
+    expect(failure.code).toBe('PHONE_PROTOCOL')
+    expect(failure.message).toContain('ambiguous')
   })
 
   it('accepts the devices envelope and the bare array shapes identically', () => {

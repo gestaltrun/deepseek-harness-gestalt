@@ -1,11 +1,12 @@
 /**
  * Phone live-view connection controller: the React-free state machine one
  * occupying device runs against the same-origin stream gateway. It mints
- * signed H264 capture sessions (`format: 'avc'` on the Host mint), owns
- * the io WebSocket lifecycle, bounds automatic reconnects after stream
- * interruptions, and maps normalized screen touches onto JSON-RPC io
- * frames. Renderers subscribe and read phase snapshots; every decision
- * stays in this module so the machine is testable without a browser.
+ * signed capture sessions (`format: 'avc'` on the Host mint), owns the io
+ * WebSocket lifecycle, falls back from H264 to the same session's MJPEG URL,
+ * bounds automatic reconnects after both encodings fail, and maps normalized
+ * screen touches onto JSON-RPC io frames. Renderers subscribe and read phase
+ * snapshots; every decision stays in this module so the machine is testable
+ * without a browser.
  * @module @deepseek-ai/dsh-client-ui-phone/client/phone-connection
  */
 import {
@@ -13,8 +14,8 @@ import {
   type PhoneClientIoRequest, type PhoneIoTarget, type PhoneStreamSessionView,
 } from './phone-stream-client.ts'
 
-/** Capture encoding the live view requests (Host `h264` maps onto upstream `avc`). */
-export type PhoneCaptureFormat = 'h264'
+/** Capture encoding currently rendered by the live view. */
+export type PhoneCaptureFormat = 'h264' | 'mjpeg'
 
 /** Closed failure vocabulary the error copy switches on. */
 export type PhoneStreamFailureKind =
@@ -246,11 +247,22 @@ export class PhoneConnectionController {
   }
 
   /**
-   * Report a failed H264 playback so a broken stream
-   * reconnects even while the io socket stays open.
+   * Report a failed capture. H264 switches to MJPEG from the already-minted
+   * session without replacing its io socket; MJPEG spends the retry budget.
+   * @param format - Encoding whose current renderer failed.
    */
-  noteCaptureFailure(): void {
-    if (this.phase.kind !== 'live') return
+  noteCaptureFailure(format: PhoneCaptureFormat): void {
+    if (this.phase.kind !== 'live' || this.phase.format !== format) return
+    if (format === 'h264' && this.session !== undefined) {
+      this.surface = undefined
+      this.setPhase({
+        kind: 'live',
+        streamUrl: this.session.mjpeg.url,
+        format: 'mjpeg',
+        expiresAt: this.session.mjpeg.expiresAt,
+      })
+      return
+    }
     this.teardown()
     this.lastTransient = 'interrupted'
     this.scheduleRetry()
@@ -258,10 +270,12 @@ export class PhoneConnectionController {
 
   /**
    * Learn the streamed frame's device pixel size from the capture element.
+   * @param format - Encoding whose renderer measured the surface.
    * @param width - natural width in device pixels.
    * @param height - natural height in device pixels.
    */
-  noteSurface(width: number, height: number): void {
+  noteSurface(format: PhoneCaptureFormat, width: number, height: number): void {
+    if (this.phase.kind !== 'live' || this.phase.format !== format) return
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
     this.surface = { width, height }
   }
@@ -349,7 +363,7 @@ export class PhoneConnectionController {
         if (!isCurrent()) return
         this.setPhase({
           kind: 'live',
-          streamUrl: this.streamUrlOf(session),
+          streamUrl: this.streamUrlOf(session, 'h264'),
           format: 'h264',
           expiresAt: session.h264.expiresAt,
         })
@@ -407,7 +421,7 @@ export class PhoneConnectionController {
     }
     this.retryAttempt += 1
     const attempt = this.retryAttempt
-    const streamUrl = this.session === undefined ? undefined : this.streamUrlOf(this.session)
+    const streamUrl = this.phase.kind === 'live' ? this.phase.streamUrl : undefined
     this.setPhase(streamUrl === undefined
       ? { kind: 'reconnecting', attempt }
       : { kind: 'reconnecting', attempt, streamUrl })
@@ -417,8 +431,8 @@ export class PhoneConnectionController {
     })
   }
 
-  private streamUrlOf(session: PhoneStreamSessionView): string {
-    return session.h264.url
+  private streamUrlOf(session: PhoneStreamSessionView, format: PhoneCaptureFormat): string {
+    return session[format].url
   }
 
   private send(request: PhoneClientIoRequest): boolean {

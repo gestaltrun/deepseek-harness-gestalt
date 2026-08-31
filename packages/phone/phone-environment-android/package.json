@@ -28,6 +28,7 @@
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-phone-environment": "workspace:^",
+    "@deepseek-ai/dsh-phone-runtime": "workspace:^",
     "@deepseek-ai/dsh-subprocess": "workspace:^"
   },
   "devDependencies": {
@@ -35,6 +36,7 @@
     "@deepseek-ai/dsh-home-paths": "workspace:^",
     "@deepseek-ai/dsh-invariants": "workspace:^",
     "@deepseek-ai/dsh-phone-environment": "workspace:^",
+    "@deepseek-ai/dsh-phone-runtime": "workspace:^",
     "@deepseek-ai/dsh-subprocess": "workspace:^"
   }
 }

@@ -9,6 +9,15 @@
     "provider": { "type": "local" }
   },
   {
+    "id": "emulator-5554",
+    "name": "Pixel_6_API_35 duplicate upstream row",
+    "platform": "android",
+    "type": "emulator",
+    "state": "online",
+    "model": "Pixel_6_API_35-duplicate-model",
+    "provider": { "type": "local" }
+  },
+  {
     "id": "R3CN30",
     "name": "SM-S9310",
     "platform": "android",

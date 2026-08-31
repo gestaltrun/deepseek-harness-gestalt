@@ -4,12 +4,24 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { withFileLock, writeFileAtomic } from '../src/index.ts'
 
-const state = vi.hoisted(() => ({ failLockCreateWithEPERM: false }))
+const state = vi.hoisted(() => ({
+  failLockCreateWithEPERM: false,
+  renameAttempts: 0,
+  renameFailures: [] as string[],
+}))
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return {
     ...actual,
+    rename: (async (...args: Parameters<typeof actual.rename>) => {
+      state.renameAttempts += 1
+      const code = state.renameFailures.shift()
+      if (code !== undefined) {
+        throw Object.assign(new Error(`${code}: injected rename failure`), { code })
+      }
+      return actual.rename(...args)
+    }) as typeof actual.rename,
     writeFile: (async (path: unknown, ...rest: never[]) => {
       if (state.failLockCreateWithEPERM && String(path).endsWith('.lock')) {
         state.failLockCreateWithEPERM = false
@@ -22,6 +34,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 afterEach(() => {
   state.failLockCreateWithEPERM = false
+  state.renameAttempts = 0
+  state.renameFailures = []
+  vi.restoreAllMocks()
 })
 
 async function scratch(): Promise<string> {
@@ -76,6 +91,48 @@ describe('writeFileAtomic', () => {
     await mkdir(target)
     await expect(writeFileAtomic(target, 'content', { mode: 0o600 })).rejects.toThrow()
     expect((await readdir(dir)).filter(entry => entry.includes('.tmp'))).toEqual([])
+  })
+
+  it('retries transient Windows replacement failures without rewriting the temp content', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const dir = await scratch()
+    const target = join(dir, 'doc.yaml')
+    await writeFile(target, 'old')
+    state.renameFailures = ['EPERM', 'EACCES', 'EBUSY']
+
+    await writeFileAtomic(target, 'new', { mode: 0o600 })
+
+    expect(state.renameAttempts).toBe(4)
+    expect(await readFile(target, 'utf8')).toBe('new')
+    expect((await readdir(dir)).filter(entry => entry.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('bounds Windows replacement retries and removes the temp sibling after exhaustion', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const dir = await scratch()
+    const target = join(dir, 'doc.yaml')
+    await writeFile(target, 'old')
+    state.renameFailures = Array.from({ length: 20 }, () => 'EPERM')
+
+    await expect(writeFileAtomic(target, 'new', { mode: 0o600 })).rejects.toMatchObject({ code: 'EPERM' })
+
+    expect(state.renameAttempts).toBe(6)
+    expect(await readFile(target, 'utf8')).toBe('old')
+    expect((await readdir(dir)).filter(entry => entry.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('does not retry Windows-only replacement errors on other platforms', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    const dir = await scratch()
+    const target = join(dir, 'doc.yaml')
+    await writeFile(target, 'old')
+    state.renameFailures = ['EPERM']
+
+    await expect(writeFileAtomic(target, 'new', { mode: 0o600 })).rejects.toMatchObject({ code: 'EPERM' })
+
+    expect(state.renameAttempts).toBe(1)
+    expect(await readFile(target, 'utf8')).toBe('old')
+    expect((await readdir(dir)).filter(entry => entry.endsWith('.tmp'))).toEqual([])
   })
 })
 

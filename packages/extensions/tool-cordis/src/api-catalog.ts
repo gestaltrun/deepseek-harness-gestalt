@@ -1405,6 +1405,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'disposer that detaches the Provider and restores the deferred state.',
       },
       {
+        signature: 'registerIosEnvironment(provider: IosEnvironmentProvider): () => void',
+        description: 'Register the iOS platform Provider while retaining this Service as the full-snapshot owner.',
+        parameters: [{ name: 'provider', description: 'Xcode runtime and Simulator lifecycle owner.' }],
+        returns: 'disposer that detaches the Provider and restores the deferred state.',
+      },
+      {
         signature: 'refresh(signal?: AbortSignal): Promise<PhoneEnvironmentSnapshot>',
         description: 'Re-detect runtime sources in fixed override-managed-system precedence.',
         parameters: [{ name: 'signal', description: 'optional owner cancellation for detection and activation.' }],
@@ -4469,6 +4475,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly signal?: AbortSignal;\n}',
   },
   {
+    name: 'IosDeviceTypePlan',
+    declaration: 'export interface IosDeviceTypePlan {\n    readonly identifier: string;\n    readonly name: string;\n}',
+  },
+  {
+    name: 'IosEnvironmentProvider',
+    declaration: 'export interface IosEnvironmentProvider {\n    snapshot(): PhoneIosState;\n    refresh(signal?: AbortSignal): Promise<PhoneIosState>;\n    prepare(signal?: AbortSignal): Promise<PhoneIosState>;\n    start(signal?: AbortSignal): Promise<PhoneIosState>;\n    cancel(): void;\n    deactivate(): Promise<void>;\n    onChanged(listener: (state: PhoneIosState) => void): () => void;\n}',
+  },
+  {
+    name: 'IosPreparationPlan',
+    declaration: 'export interface IosPreparationPlan {\n    readonly developerDir: string;\n    readonly xcodeVersion: string;\n    readonly simulatorName: string;\n    readonly runtime?: IosRuntimePlan;\n    readonly deviceType?: IosDeviceTypePlan;\n}',
+  },
+  {
+    name: 'IosRuntimePlan',
+    declaration: 'export interface IosRuntimePlan {\n    readonly identifier: string;\n    readonly name: string;\n    readonly version: string;\n    readonly available: true;\n}',
+  },
+  {
     name: 'JobDoneListener',
     declaration: 'export type JobDoneListener = (snapshot: JobSnapshot, owner: Agent | undefined) => void | PromiseLike<void>;',
   },
@@ -4878,15 +4900,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhoneEnvironmentSnapshot',
-    declaration: 'export interface PhoneEnvironmentSnapshot {\n    readonly revision: number;\n    readonly enabled: boolean;\n    readonly runtime: PhoneRuntimeState;\n    readonly platforms: {\n        readonly android: PhoneAndroidState;\n        readonly ios: PhonePlatformState;\n    };\n}',
+    declaration: 'export interface PhoneEnvironmentSnapshot {\n    readonly revision: number;\n    readonly enabled: boolean;\n    readonly runtime: PhoneRuntimeState;\n    readonly platforms: {\n        readonly android: PhoneAndroidState;\n        readonly ios: PhoneIosState;\n    };\n}',
   },
   {
     name: 'PhoneIoRequest',
     declaration: 'export type PhoneIoRequest = {\n    readonly deviceId: DeviceId;\n    readonly method: \'tap\';\n    readonly x: number;\n    readonly y: number;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'gesture\';\n    readonly actions: readonly Record<string, unknown>[];\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'text\';\n    readonly text: string;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'button\';\n    readonly button: string;\n};',
   },
   {
-    name: 'PhonePlatformState',
-    declaration: 'export type PhonePlatformState = {\n    readonly kind: \'deferred\';\n} | {\n    readonly kind: \'unsupported\';\n    readonly reason: string;\n};',
+    name: 'PhoneIosState',
+    declaration: 'export type PhoneIosState = {\n    readonly kind: \'deferred\';\n} | {\n    readonly kind: \'unsupported\';\n    readonly reason: string;\n} | {\n    readonly kind: \'checking\';\n} | {\n    readonly kind: \'xcode-missing\';\n    readonly message: string;\n} | {\n    readonly kind: \'license-required\';\n    readonly developerDir: string;\n    readonly message: string;\n} | {\n    readonly kind: \'manual-required\';\n    readonly code: \'first-launch\' | \'xcode-update\';\n    readonly message: string;\n    readonly developerDir?: string;\n} | {\n    readonly kind: \'runtime-missing\';\n    readonly plan: IosPreparationPlan;\n} | {\n    readonly kind: \'no-simulator\';\n    readonly plan: IosPreparationPlan;\n} | {\n    readonly kind: \'preparing\';\n    readonly plan: IosPreparationPlan;\n    readonly step: \'downloading-runtime\' | \'creating-simulator\' | \'booting\';\n} | {\n    readonly kind: \'ready\';\n    readonly plan: IosPreparationPlan;\n    readonly deviceId: DeviceId;\n    readonly running: boolean;\n} | {\n    readonly kind: \'failed\';\n    readonly plan?: IosPreparationPlan;\n    readonly code: string;\n    readonly message: string;\n    readonly retryable: boolean;\n};',
   },
   {
     name: 'PhoneRuntimeState',

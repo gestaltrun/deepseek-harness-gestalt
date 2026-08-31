@@ -291,6 +291,13 @@ onChanged(listener: (snapshot: PhoneEnvironmentSnapshot) => void): () => void
 registerAndroidEnvironment(provider: AndroidEnvironmentProvider): () => void
 
 /**
+ * Register the iOS platform Provider while retaining this Service as the full-snapshot owner.
+ * @param provider - Xcode runtime and Simulator lifecycle owner.
+ * @returns disposer that detaches the Provider and restores the deferred state.
+ */
+registerIosEnvironment(provider: IosEnvironmentProvider): () => void
+
+/**
  * Re-detect runtime sources in fixed override-managed-system precedence.
  * @param signal - optional owner cancellation for detection and activation.
  * @returns the committed full snapshot after detection settles.

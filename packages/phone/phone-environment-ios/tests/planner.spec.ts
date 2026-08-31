@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { deviceId } from '@deepseek-ai/dsh-phone-runtime'
 import { planIosEnvironment } from '../src/planner.ts'
 
 describe('iOS environment planner', () => {
@@ -85,7 +86,7 @@ describe('iOS environment planner', () => {
       runtimes: [{ identifier: 'runtime-26-0', name: 'iOS 26.0', version: '26.0', available: true }],
       deviceTypes: [{ identifier: 'type-iphone-17', name: 'iPhone 17' }],
       devices: [{
-        udid: 'SIMULATOR-UDID', name: 'DSH Gestalt iPhone', state: 'Booted',
+        udid: deviceId('SIMULATOR-UDID'), name: 'DSH Gestalt iPhone', state: 'Booted',
         available: true, runtimeIdentifier: 'runtime-26-0',
       }],
     })).toMatchObject({ kind: 'ready', deviceId: 'SIMULATOR-UDID', running: true })

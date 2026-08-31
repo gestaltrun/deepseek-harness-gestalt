@@ -1695,7 +1695,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-environment/src/index.ts:56`](../packages/phone/phone-environment/src/index.ts)
+来源：[`packages/phone/phone-environment/src/index.ts:70`](../packages/phone/phone-environment/src/index.ts)
 
 <a id="deepseek-aidsh-phone-environment-android"></a>
 
@@ -1757,7 +1757,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/phone/phone-runtime/src/index.ts:100`](../packages/phone/phone-runtime/src/index.ts)
+来源：[`packages/phone/phone-runtime/src/index.ts:102`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 
@@ -3844,6 +3844,7 @@ export interface Config {
 - `@deepseek-ai/dsh-host-plugin-inventory` — 需要 `loader`（[`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts)）
 - `@deepseek-ai/dsh-llm`（[`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts)）
 - `@deepseek-ai/dsh-lsp`（[`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts)）
+- `@deepseek-ai/dsh-phone-environment-ios` — 需要 `phoneEnvironment`（[`packages/phone/phone-environment-ios/src/index.ts`](../packages/phone/phone-environment-ios/src/index.ts)）
 - `@deepseek-ai/dsh-schedule` — 需要 `agents` · `sessions` · `tools` · `sessionPersistence`（[`packages/schedule/schedule/src/index.ts`](../packages/schedule/schedule/src/index.ts)）
 - `@deepseek-ai/dsh-session`（[`packages/core/session/src/index.ts`](../packages/core/session/src/index.ts)）
 - `@deepseek-ai/dsh-session-checkpoint-policy` — 需要 `llm` · `sessionPersistence` · `sessions` · `tools`（[`packages/session/session-checkpoint-policy/src/index.ts`](../packages/session/session-checkpoint-policy/src/index.ts)）

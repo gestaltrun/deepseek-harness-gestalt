@@ -1,0 +1,20 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "507-windows-atomic-replace",
+  "summary": {
+    "en": "Retry transient Windows access errors while atomically saving Desktop account and other file-backed state.",
+    "zh": "原子保存 Desktop 账号及其他文件型状态时，重试 Windows 瞬时访问错误。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "Mobile uses the client-safe runtime face; atomic-write is reached only through host-side dev and peer manifest edges and is not bundled into the Capacitor WebView artifact."
+    }
+  ]
+}

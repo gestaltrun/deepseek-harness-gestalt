@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -11,6 +11,17 @@ import PhoneEnvironment, {
   PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError,
 } from '../src/index.ts'
 import type { AndroidEnvironmentProvider, AndroidPreparationPlan, PhoneAndroidState } from '../src/index.ts'
+
+class TestPhoneEnvironment extends PhoneEnvironment {
+  protected override async probeRuntimeVersion(executablePath: string): Promise<string> {
+    try {
+      await access(executablePath)
+      return '1.0.5'
+    } catch (error) {
+      throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_VERSION', 'mobilecli version probe failed', { cause: error })
+    }
+  }
+}
 
 const contexts: Context[] = []
 const roots: string[] = []
@@ -69,7 +80,7 @@ async function mountEnvironment(context: Context, phoneDevices: object = {}, con
   }
   context.provide('phoneDevices', fleet as never)
   await context.plugin(WebServer, { host: '127.0.0.1', port: 0 }).await()
-  const fiber = context.plugin(PhoneEnvironment, config)
+  const fiber = context.plugin(TestPhoneEnvironment, config)
   await fiber.await()
   const service = context.get('phoneEnvironment')
   if (service === undefined) throw new Error('phoneEnvironment did not activate')

@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "509-phone-stream-real-fallback",
+  "summary": {
+    "en": "Show each phone once and fall back to a controllable MJPEG picture when its H264 stream is unusable.",
+    "zh": "每台手机只展示一次，并在 H264 画面不可用时回退到可控制的 MJPEG 画面。"
+  },
+  "releases": {
+    "desktop": "patch",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "Device deduplication, capture fallback, and the connected phone view run in the Desktop Host and Web client; they do not change Mobile source, build inputs, or artifacts."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "The local phone listing and capture path do not change Platform services, deployment inputs, or wire formats."
+    }
+  ]
+}

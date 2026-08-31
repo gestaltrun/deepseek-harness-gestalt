@@ -128,10 +128,9 @@ describe('acceptance: phone capture and io semantics over the fake stack', () =>
     fakes.push(fake)
     const context = await mountWith(fake)
 
-    // list: the enveloped result maps onto the grouped listing, duplicates included.
+    // list: the enveloped result maps onto a grouped listing with each addressable device once.
     const list = await context.phoneDevices.listDevices()
     expect(list.ios.reals.map(device => [device.id, device.state, device.online])).toEqual([
-      [ENVELOPE_REAL_HANDSET, 'online', true],
       [ENVELOPE_REAL_HANDSET, 'online', true],
     ])
     expect(list.ios.simulators.map(device => [device.name, device.online])).toEqual([

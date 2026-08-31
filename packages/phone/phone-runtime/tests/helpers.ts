@@ -50,6 +50,8 @@ export interface FakeKnobs {
   captureEnvelope?: boolean
   /** MJPEG frames per capture body (default 1); larger values keep the body open for mid-stream teardown tests. */
   streamFrameCount?: number
+  /** Device ids whose AVC response is HTTP 200 video/h264 carrying the real mobilecli failure text. */
+  h264FailureDeviceIds?: readonly string[]
 }
 
 /** Persistent agent state the fake CLI mode records across invocations. */
@@ -74,7 +76,13 @@ export interface StagedFake {
   setAgent(agent: FakeAgentKnobs): Promise<void>
   /** Read the persistent agent state the fake CLI invocations record. */
   agentState(): Promise<FakeAgentState>
-  counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }>
+  counters(): Promise<{
+    requests: number
+    bootCount: number
+    shutdownCount: number
+    io: unknown[]
+    captures: Array<{ readonly deviceId: string; readonly format: string }>
+  }>
   /** Resolves when the RPC endpoint answers or rejects when the fake is gone. */
   awaitOnline(timeoutMs?: number): Promise<void>
   dispose(): Promise<void>
@@ -220,12 +228,19 @@ export async function stageFake(
           return { installed: false, installCount: 0, statusCount: 0, lastInstallArgv: null }
         }
       },
-      async counters(): Promise<{ requests: number; bootCount: number; shutdownCount: number; io: unknown[] }> {
+      async counters(): Promise<{
+        requests: number
+        bootCount: number
+        shutdownCount: number
+        io: unknown[]
+        captures: Array<{ readonly deviceId: string; readonly format: string }>
+      }> {
         return await (await fetch(`${baseUrl}/__test/counters`)).json() as {
           requests: number
           bootCount: number
           shutdownCount: number
           io: unknown[]
+          captures: Array<{ readonly deviceId: string; readonly format: string }>
         }
       },
       async awaitOnline(timeoutMs = 5_000): Promise<void> {

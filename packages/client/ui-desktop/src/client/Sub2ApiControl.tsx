@@ -74,9 +74,9 @@ function useAutoSizedConsoleFrame(): {
     const next = Math.max(
       DEFAULT_CONSOLE_HEIGHT,
       content.documentElement.scrollHeight,
-      content.body?.scrollHeight ?? 0,
+      content.body.scrollHeight,
     )
-    setHeight(current => current === next ? current : next)
+    setHeight(next)
   }, [])
   const connect = useCallback(() => {
     observer.current?.disconnect()
@@ -84,7 +84,7 @@ function useAutoSizedConsoleFrame(): {
     if (content === undefined || content === null) return
     const nextObserver = new ResizeObserver(measure)
     nextObserver.observe(content.documentElement)
-    if (content.body !== null) nextObserver.observe(content.body)
+    nextObserver.observe(content.body)
     observer.current = nextObserver
     measure()
   }, [measure])

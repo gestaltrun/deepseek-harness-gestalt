@@ -131,6 +131,13 @@ describe('Sub2ApiControl', () => {
     window.dshDesktop = bridge()
     renderControl({ state: 'running', enabled: true })
     const frame = screen.getByTitle('Sub2API account console') as HTMLIFrameElement
+    Object.defineProperty(frame, 'contentDocument', {
+      configurable: true,
+      value: null,
+    })
+    fireEvent.load(frame)
+    expect(observers).toHaveLength(0)
+
     const embeddedRoot = document.createElement('html')
     const embeddedBody = document.createElement('body')
     Object.defineProperty(embeddedRoot, 'scrollHeight', {
@@ -150,6 +157,13 @@ describe('Sub2ApiControl', () => {
 
     expect(frame.style.height).toBe('1180px')
     expect(observers).toHaveLength(1)
+    observers[0]?.callback([], {} as ResizeObserver)
+    expect(frame.style.height).toBe('1180px')
+    Object.defineProperty(frame, 'contentDocument', {
+      configurable: true,
+      value: null,
+    })
+    observers[0]?.callback([], {} as ResizeObserver)
     cleanup()
     expect(observers[0]?.disconnect).toHaveBeenCalledOnce()
   })

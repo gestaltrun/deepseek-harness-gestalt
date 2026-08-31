@@ -24,7 +24,10 @@ export interface IosCommandRunner {
   run(command: string, args: readonly string[], options: IosCommandOptions): Promise<IosCommandResult>
 }
 
-/** Create the direct-spawn iOS command adapter with credential scrubbing and quiescent cancellation. */
+/**
+ * Create the direct-spawn iOS command adapter with credential scrubbing and quiescent cancellation.
+ * @returns the production-capable Xcode and simctl command runner.
+ */
 export function createNodeIosCommandRunner(): IosCommandRunner {
   return {
     run: async (command, args, options) => {

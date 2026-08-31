@@ -45,23 +45,35 @@ export class IosEnvironmentManager {
     this.lastActionable = this.current
   }
 
-  /** Read the latest committed iOS environment state. */
+  /** @returns the latest committed iOS environment state. */
   snapshot(): PhoneIosState {
     return this.current
   }
 
-  /** Subscribe to committed state replacements. */
+  /**
+   * Subscribe to committed state replacements.
+   * @param listener - callback receiving each replacement.
+   * @returns the disposer for this subscription.
+   */
   onChanged(listener: (state: PhoneIosState) => void): () => void {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
   }
 
-  /** Detect Xcode, authorization prerequisites, runtimes, and Simulator inventory. */
+  /**
+   * Detect Xcode, authorization prerequisites, runtimes, and Simulator inventory.
+   * @param signal - optional owner cancellation.
+   * @returns the committed detection state.
+   */
   refresh(signal?: AbortSignal): Promise<PhoneIosState> {
     return this.startOperation(async operationSignal => await this.detect(operationSignal), signal)
   }
 
-  /** Download the iOS runtime when needed, create the product Simulator, and boot it. */
+  /**
+   * Download the iOS runtime when needed, create the product Simulator, and boot it.
+   * @param signal - optional owner cancellation.
+   * @returns the committed booted state before Host picture verification.
+   */
   prepare(signal?: AbortSignal): Promise<PhoneIosState> {
     if (this.platform !== 'darwin') {
       const state = planIosEnvironment(this.platform)
@@ -79,7 +91,10 @@ export class IosEnvironmentManager {
     this.operation?.controller.abort(new IosEnvironmentError('PHONE_IOS_ABORTED', 'iOS environment operation cancelled'))
   }
 
-  /** Cancel active work, join it, and shut down only the Simulator booted by this Provider. */
+  /**
+   * Cancel active work, join it, and shut down only the Simulator booted by this Provider.
+   * @returns completion after child commands and the owned Simulator have settled.
+   */
   async deactivate(): Promise<void> {
     const active = this.operation
     active?.controller.abort(new IosEnvironmentError('PHONE_IOS_ABORTED', 'iOS environment operation cancelled'))

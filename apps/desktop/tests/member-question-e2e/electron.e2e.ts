@@ -1,5 +1,7 @@
 /** Visible three-installation Electron acceptance for Project Members. */
 
+/* oxlint-disable typescript/await-thenable -- WDIO native-types declares runtime-async browser commands as synchronous values. */
+
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { browser, expect } from '@wdio/globals'

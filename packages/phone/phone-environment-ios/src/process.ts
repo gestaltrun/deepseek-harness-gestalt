@@ -39,6 +39,7 @@ export interface IosProcessInternals {
 
 /**
  * Create the direct-spawn iOS command adapter with credential scrubbing and quiescent cancellation.
+ * @param internals - injectable stop grace and process-group signal edge.
  * @returns the production-capable Xcode and simctl command runner.
  */
 export function createNodeIosCommandRunner(internals: IosProcessInternals = {}): IosCommandRunner {

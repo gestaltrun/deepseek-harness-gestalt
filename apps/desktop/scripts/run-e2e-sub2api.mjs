@@ -5,12 +5,14 @@
  * temporary Harness home, Electron user data, build, and teardown.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { createConnection } from 'node:net'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { load } from 'js-yaml'
+import { withPrivateTempDirectory } from './private-temp-directory.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = join(here, '..')
@@ -113,6 +115,9 @@ if (process.platform === 'linux' && process.env.DISPLAY === undefined && process
   process.stdout.write('skipping Sub2API Electron e2e: no GUI display is available\n')
   process.exit(0)
 }
+if (process.platform !== 'darwin' && process.platform !== 'linux') {
+  throw new Error('Sub2API Electron e2e supports macOS and Linux with a GUI display')
+}
 
 const buildEnvironment = {
   ...isolatedEnvironment(process.env),
@@ -132,7 +137,7 @@ const mainBuildCode = await run(process.execPath, [join(desktopRoot, 'scripts', 
 })
 if (mainBuildCode !== 0) process.exit(mainBuildCode)
 
-const runRoot = await mkdtemp('/tmp/dsh445-e2e-')
+const runExitCode = await withPrivateTempDirectory(join(tmpdir(), 'dsh445-e2e-'), async (runRoot) => {
 const dshHome = join(runRoot, 'dsh-home')
 const userData = join(runRoot, 'electron-user-data')
 const webProfile = join(dshHome, 'profiles', 'web')
@@ -246,7 +251,9 @@ try {
   }, undefined, 2) + '\n')
   if (teardownErrors.length > 0) throw new AggregateError(teardownErrors, 'Sub2API Electron e2e teardown failed')
 }
-process.exit(exitCode)
+return exitCode
+})
+process.exit(runExitCode)
 
 async function readOwnedProcesses(dir, required) {
   let owned

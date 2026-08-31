@@ -122,7 +122,8 @@ export async function installManagedMobilecli(
     })}\n`, { mode: 0o600, dirMode: 0o700 })
     return Object.freeze({ executablePath, version })
   } catch (error) {
-    if (error instanceof PhoneEnvironmentError || signal.aborted) throw error
+    if (signal.aborted) throw cancellationError(error)
+    if (error instanceof PhoneEnvironmentError) throw error
     if (isDiskFailure(error)) {
       throw new PhoneEnvironmentError(
         'PHONE_ENVIRONMENT_DISK',
@@ -221,6 +222,7 @@ export async function probeMobilecliVersion(executablePath: string, signal?: Abo
     if (match?.[1] === undefined) throw new Error(`unexpected output ${JSON.stringify(stdout.trim())}`)
     return match[1]
   } catch (error) {
+    if (signal?.aborted === true) throw cancellationError(error)
     if (error instanceof PhoneEnvironmentError) throw error
     throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_VERSION', 'mobilecli version probe failed', { cause: error })
   }
@@ -231,17 +233,23 @@ export async function probeMobilecliVersion(executablePath: string, signal?: Abo
  * @param root - private phone root.
  * @param platform - current Node platform.
  * @param architecture - current Node architecture.
+ * @param signal - optional cancellation for the durable pointer read.
  * @returns the managed candidate, or undefined when no current pointer exists.
  */
 export async function readManagedMobilecli(
   root: string,
   platform: string,
   architecture: string,
+  signal?: AbortSignal,
 ): Promise<PhoneRuntimeCandidate | undefined> {
   let raw: string
   try {
-    raw = await readFile(join(root, CURRENT_FILE), 'utf8')
+    raw = await readFile(join(root, CURRENT_FILE), {
+      encoding: 'utf8',
+      ...(signal === undefined ? {} : { signal }),
+    })
   } catch (error) {
+    if (signal?.aborted === true) throw cancellationError(error)
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   }
@@ -258,6 +266,12 @@ export async function readManagedMobilecli(
     throw new PhoneEnvironmentError('PHONE_ENVIRONMENT_CURRENT', 'managed mobilecli current pointer leaves its private root')
   }
   return Object.freeze({ source: 'managed', executablePath })
+}
+
+function cancellationError(cause: unknown): PhoneEnvironmentError {
+  return new PhoneEnvironmentError(
+    'PHONE_ENVIRONMENT_ABORTED', 'the phone environment operation was cancelled', { cause },
+  )
 }
 
 function isCurrentPointer(value: unknown): value is {

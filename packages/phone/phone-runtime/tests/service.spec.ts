@@ -550,6 +550,22 @@ describe('phone runtime service lifecycle', () => {
     expect((outcome as PhoneDevicesError).code).toBe('PHONE_PROTOCOL')
   })
 
+  it('fails when the child exits after the baseline listing response but before readiness commits', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 1 })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    const fiber = context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      executablePath: fake.executablePath,
+      serverPort: fake.port,
+    })
+    const outcome = await fiber.await().then(() => undefined, (error: unknown) => error)
+    expect(outcome).toBeInstanceOf(PhoneDevicesError)
+    expect((outcome as PhoneDevicesError).code).toBe('PHONE_UNAVAILABLE')
+  })
+
   it('publishes removals when a ready child is lost', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)

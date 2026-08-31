@@ -270,7 +270,7 @@ export class PhoneEnvironment extends Service {
 
   private async detectRuntime(signal: AbortSignal): Promise<PhoneEnvironmentSnapshot> {
     try {
-      const managed = await readManagedMobilecli(this.root, process.platform, process.arch)
+      const managed = await readManagedMobilecli(this.root, process.platform, process.arch, signal)
       let system: string | undefined
       try {
         system = resolveMobilecliExecutable({ env: process.env })

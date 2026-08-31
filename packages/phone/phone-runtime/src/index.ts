@@ -431,6 +431,19 @@ export class PhoneDevices extends Service {
       // Commit the baseline listing inside initialization so every observer
       // attaches to a stable starting point and receives only later changes.
       await this.pollAttempt(true)
+      // Hold readiness for one configured poll interval. A process can flush
+      // the baseline response immediately before exiting; the close event may
+      // arrive on a later event-loop turn and must win before readiness is
+      // published.
+      await pauseBeforeNextProbe(
+        this.resolved.pollIntervalMs,
+        window.signal,
+        this.lifetime.signal,
+        signal,
+        exitSeen,
+      )
+      if (settledExit !== undefined) throw exitedBeforeReady(child, settledExit)
+      if (this.lost !== undefined) throw this.lost
       this.ready = true
       this.publishReadiness(true)
       this.armPoll()

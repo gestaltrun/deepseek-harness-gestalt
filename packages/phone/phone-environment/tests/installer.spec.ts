@@ -214,7 +214,7 @@ describe('managed mobilecli installer', () => {
     })
     await reading
     controller.abort(new Error('cancelled during download'))
-    await expect(operation).rejects.toThrow('cancelled during download')
+    await expect(operation).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_ABORTED' })
     await expect(readFile(join(root, 'current.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect((await readdir(root)).filter(name => name.startsWith('.staging-'))).toEqual([])
   })
@@ -227,6 +227,26 @@ describe('managed mobilecli installer', () => {
     await expect(probeMobilecliVersion(executable)).rejects.toMatchObject({
       code: 'PHONE_ENVIRONMENT_VERSION',
     })
+  })
+
+  it('normalizes cancellation during the version probe', async () => {
+    const root = await tempRoot()
+    const executable = join(root, 'mobilecli')
+    await writeFile(executable, '#!/bin/sh\nsleep 10\n')
+    await chmod(executable, 0o700)
+    const controller = new AbortController()
+    const operation = probeMobilecliVersion(executable, controller.signal)
+    setTimeout(() => { controller.abort(new Error('cancel probe')) }, 20)
+    await expect(operation).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_ABORTED' })
+  })
+
+  it('normalizes cancellation while reading the managed current pointer', async () => {
+    const root = await tempRoot()
+    await writeFile(join(root, 'current.json'), '{}\n')
+    const controller = new AbortController()
+    controller.abort(new Error('cancel current read'))
+    await expect(readManagedMobilecli(root, 'darwin', 'arm64', controller.signal))
+      .rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_ABORTED' })
   })
 
   it('preserves the prior current pointer when the filesystem runs out of space', async () => {

@@ -128,15 +128,19 @@ async function stageFake() {
     await chmod(executable, 0o755)
     await copyFile(framesSource, join(fixtures, 'u3-visible-frames.ts'))
     const devices = JSON.parse(await readFile(devicesSource, 'utf8'))
-    await writeFile(join(fixtures, 'fakemobilecli.config.json'), JSON.stringify({
-      devices,
-      listEnvelope: true,
-      captureEnvelope: true,
-      streamFrameCount: 8,
-      h264FailureDeviceIds: ['emulator-5554'],
-      ownerToken,
-    }))
-    return { root, executable, ownerToken }
+    const configPath = join(fixtures, 'fakemobilecli.config.json')
+    const configure = async (h264FailureDeviceIds = []) => {
+      await writeFile(configPath, JSON.stringify({
+        devices,
+        listEnvelope: true,
+        captureEnvelope: true,
+        streamFrameCount: 8,
+        h264FailureDeviceIds,
+        ownerToken,
+      }))
+    }
+    await configure()
+    return { root, executable, ownerToken, configure }
   } catch (error) {
     await rm(root, { recursive: true, force: true })
     throw error
@@ -354,8 +358,18 @@ async function stageAndroidSdkFixture(runtimeRoot, dshHome) {
     mkdir(image, { recursive: true, mode: 0o700 }),
     mkdir(avd, { recursive: true, mode: 0o700 }),
   ])
-  await writeFile(join(bin, 'sdkmanager'), '#!/bin/sh\nexit 0\n', { mode: 0o700 })
-  await writeFile(join(bin, 'avdmanager'), '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+  await writeFile(join(bin, 'sdkmanager'), [
+    '#!/bin/sh',
+    'if [ "$2" = "--version" ]; then printf "20.0\\n"; fi',
+    'exit 0',
+    '',
+  ].join('\n'), { mode: 0o700 })
+  await writeFile(join(bin, 'avdmanager'), [
+    '#!/bin/sh',
+    'if [ "$*" = "list device -c" ]; then printf "pixel_6\\n"; fi',
+    'exit 0',
+    '',
+  ].join('\n'), { mode: 0o700 })
   await writeFile(join(platformTools, 'adb'), [
     '#!/bin/sh',
     'case "$*" in',
@@ -455,6 +469,7 @@ try {
   const android = managed.code === 0
     ? await runSpec('phone-android', 'phone-android-environment.e2e.ts', provider, undefined, fake.ownerToken, managedFixture)
     : { code: 1, errors: ['phone-android skipped because phone-managed failed'], cleanup: [], portCollision: false }
+  if (android.code === 0) await fake.configure(['emulator-5554'])
   const live = android.code === 0
     ? await runSpec('phone-live', 'phone-tab.e2e.ts', provider, fake.executable, fake.ownerToken)
     : { code: 1, errors: ['phone-live skipped because phone-android failed'], cleanup: [], portCollision: false }

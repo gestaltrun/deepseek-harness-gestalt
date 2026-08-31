@@ -200,6 +200,34 @@ describe('product release plan', () => {
     })
   })
 
+  it('rejects an unpublished Desktop baseline before writing any release authority', async () => {
+    const root = await fixtureRepository()
+    const state = { version: 1 as const, nextSequence: 1, consumedIntentIds: [] }
+    const plan = await aggregateProductRelease(root, [
+      intent('all-release', { desktop: 'patch', mobile: 'patch', platform: 'patch' }),
+    ], state)
+    const paths = [
+      'apps/desktop/package.json',
+      'apps/mobile/package.json',
+      'apps/mobile/release.json',
+      'apps/platform/package.json',
+    ]
+    const before = await Promise.all(paths.map(path => readFile(join(root, path), 'utf8')))
+    git(root, 'init')
+    git(root, 'config', 'core.hooksPath', '/dev/null')
+
+    await expect(writeProductRelease(root, plan, state)).rejects.toThrow(
+      'publish or recover Desktop gestalt-v0.1.0 before preparing another Desktop release',
+    )
+    await expect(Promise.all(paths.map(path => readFile(join(root, path), 'utf8')))).resolves.toEqual(before)
+    await expect(readFile(join(root, 'apps/desktop/release-notes/0.1.1.json'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(root, 'product-releases/0001.json'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(root, 'product-releases/state.json'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it('admits only a generated Product Release PR without another intent', async () => {
     const root = await fixtureRepository()
     const { state, plan } = await plannedMobileRelease(root)

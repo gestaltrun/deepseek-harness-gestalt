@@ -26,6 +26,10 @@ const devicesSource = join(desktopRoot, 'tests', 'fixtures', 'phone-e2e-devices.
 const managedEnvironmentFixture = join(e2eDir, 'managed-phone-environment.mjs')
 const wdioConfig = join(e2eDir, 'wdio.conf.ts')
 const wdioBin = join(desktopRoot, 'node_modules', '@wdio', 'cli', 'bin', 'wdio.js')
+
+if (process.platform === 'win32') {
+  throw new Error('Desktop phone Electron e2e uses POSIX fakemobilecli launchers; Windows asset selection is covered separately')
+}
 const head = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim()
 const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
 const artifactRoot = process.env.DSH_ELECTRON_E2E_ARTIFACTS

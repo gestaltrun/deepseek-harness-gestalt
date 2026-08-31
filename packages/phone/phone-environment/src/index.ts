@@ -67,6 +67,8 @@ export class PhoneEnvironment extends Service {
   private prepareController: AbortController | undefined
   private prepareTask: Promise<PhoneEnvironmentSnapshot> | undefined
   private refreshTask: Promise<PhoneEnvironmentSnapshot> | undefined
+  private enableTail: Promise<void> = Promise.resolve()
+  private disposed = false
 
   /**
    * Register the trusted HTTP operations and initialize the host snapshot.
@@ -82,9 +84,19 @@ export class PhoneEnvironment extends Service {
     ctx.effect(() => ctx.webServer.register({
       kind: 'prefix', path: PHONE_ENVIRONMENT_PATH, handler: (req, res) => this.handleHttp(req, res),
     }), 'phone-environment HTTP operations')
+    ctx.effect(() => ctx.phoneDevices.onReadinessChanged((ready) => {
+      if (!ready && this.current.enabled && this.current.runtime.kind === 'ready') {
+        this.publishRuntime(environmentFailure(new PhoneEnvironmentError(
+          'PHONE_ENVIRONMENT_RUNTIME_LOST', 'the active mobilecli runtime exited unexpectedly',
+        )))
+      }
+    }), 'phone environment runtime readiness tracking')
     ctx.effect(() => async () => {
+      this.disposed = true
       this.cancel()
       await this.prepareTask?.catch(() => {})
+      await this.refreshTask?.catch(() => {})
+      await this.enableTail.catch(() => {})
       await ctx.phoneDevices.deactivate().catch(() => {})
     }, 'phone environment teardown')
   }
@@ -106,12 +118,20 @@ export class PhoneEnvironment extends Service {
    * Apply the durable settings gate and symmetrically activate or stop the child generation.
    * @param enabled - current `ui-phone.enabled` value.
    */
-  async setEnabled(enabled: boolean): Promise<void> {
-    if (enabled === this.current.enabled) return
+  setEnabled(enabled: boolean): Promise<void> {
+    if (this.disposed) return Promise.resolve()
+    if (!enabled) this.cancel()
+    const operation = this.enableTail.then(() => this.applyEnabled(enabled))
+    this.enableTail = operation.catch(() => {})
+    return operation
+  }
+
+  private async applyEnabled(enabled: boolean): Promise<void> {
+    if (this.disposed || enabled === this.current.enabled) return
     this.publish({ ...this.current, enabled })
     if (!enabled) {
-      this.cancel()
       await this.prepareTask?.catch(() => {})
+      await this.refreshTask?.catch(() => {})
       await this.ctx.phoneDevices.deactivate()
       return
     }
@@ -149,6 +169,12 @@ export class PhoneEnvironment extends Service {
    * @returns the committed full snapshot after preparation settles.
    */
   prepare(): Promise<PhoneEnvironmentSnapshot> {
+    if (this.executableOverride !== undefined) {
+      return Promise.reject(new PhoneEnvironmentError(
+        'PHONE_ENVIRONMENT_OVERRIDE',
+        'managed mobilecli preparation is unavailable while executablePath is configured',
+      ))
+    }
     if (this.prepareTask !== undefined) {
       return Promise.reject(new PhoneEnvironmentError('PHONE_ENVIRONMENT_BUSY', 'mobilecli preparation is already running'))
     }
@@ -171,7 +197,7 @@ export class PhoneEnvironment extends Service {
         })
         this.candidate = Object.freeze({ source: 'managed', executablePath: installed.executablePath })
         this.candidateVersion = installed.version
-        if (this.current.enabled) await this.activateCandidate(this.candidate, installed.version)
+        if (this.current.enabled) await this.activateCandidate(this.candidate, installed.version, controller.signal)
         else this.publishReady('managed', installed.version)
         return this.current
       } catch (error) {
@@ -225,7 +251,7 @@ export class PhoneEnvironment extends Service {
       if (candidate === undefined) {
         this.candidate = undefined
         this.candidateVersion = undefined
-        if (this.current.enabled && this.ctx.phoneDevices.isReady()) await this.ctx.phoneDevices.deactivate()
+        if (this.current.enabled) await this.ctx.phoneDevices.deactivate()
         this.publishRuntime(initialPhoneEnvironmentSnapshot(
           process.platform, process.arch, this.current.enabled,
         ).runtime)
@@ -243,17 +269,20 @@ export class PhoneEnvironment extends Service {
       if (this.current.enabled) await this.activateCandidate(candidate, version)
       else this.publishReady(candidate.source, version)
     } catch (error) {
+      this.candidate = undefined
+      this.candidateVersion = undefined
+      if (this.current.enabled) await this.ctx.phoneDevices.deactivate().catch(() => {})
       this.publishRuntime(environmentFailure(error))
     }
     return this.current
   }
 
-  private async activateCandidate(candidate: PhoneRuntimeCandidate, version: string): Promise<void> {
+  private async activateCandidate(candidate: PhoneRuntimeCandidate, version: string, signal?: AbortSignal): Promise<void> {
     this.publishRuntime({
       kind: 'activating', targetVersion: MOBILECLI_MANAGED_VERSION, source: candidate.source,
     })
     try {
-      await this.ctx.phoneDevices.activateExecutable(candidate.executablePath)
+      await this.ctx.phoneDevices.activateExecutable(candidate.executablePath, signal)
       this.publishReady(candidate.source, version)
     } catch (error) {
       this.publishRuntime(environmentFailure(error))

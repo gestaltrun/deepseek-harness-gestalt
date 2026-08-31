@@ -528,10 +528,42 @@ describe('phone runtime service lifecycle', () => {
     const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 2 })
     fakes.push(fake)
     const context = await mountWith(fake)
-    await new Promise(resolveSettle => setTimeout(resolveSettle, 200))
+    await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
     const unavailable = await errorOf(() => context.phoneDevices.listDevices())
     expect(unavailable.code).toBe('PHONE_UNAVAILABLE')
     expect(unavailable.message).toMatch(/exited unexpectedly|socket is gone/)
+  })
+
+  it('cancels a replacement while its child is waiting for readiness', async () => {
+    const initial = await stageFake({ devices: BASE_DEVICES })
+    const hanging = await stageFake({ hang: true })
+    fakes.push(initial, hanging)
+    const context = await mountWith(initial)
+    const controller = new AbortController()
+    const startedAt = Date.now()
+    const activating = context.phoneDevices.activateExecutable(hanging.executablePath, controller.signal)
+    controller.abort()
+    await expect(activating).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    expect(Date.now() - startedAt).toBeLessThan(500)
+    expect(context.phoneDevices.isReady()).toBe(false)
+  })
+
+  it('drains a replacement racing service disposal without leaving a child', async () => {
+    const fake = await stageFake({ hang: true })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      serverPort: fake.port,
+    }).await()
+    const activating = context.phoneDevices.activateExecutable(fake.executablePath)
+    const disposing = context.fiber.dispose()
+    await expect(activating).rejects.toMatchObject({ code: 'PHONE_DISPOSED' })
+    await disposing
+    await expect(fetch(`${fake.baseUrl}/__test/pid`)).rejects.toThrow()
   })
 
   it('fails initialization loudly when the server exits before answering readiness', async () => {

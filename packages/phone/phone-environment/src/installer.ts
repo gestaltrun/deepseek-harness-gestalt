@@ -7,6 +7,7 @@ import { basename, join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { unzipSync } from 'fflate'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
+import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { MOBILECLI_MANAGED_VERSION } from './manifest.ts'
 import type { MobilecliReleaseAsset, PhoneRuntimeCandidate } from './types.ts'
 
@@ -211,6 +212,7 @@ export async function probeMobilecliVersion(executablePath: string, signal?: Abo
   try {
     const { stdout } = await execFileAsync(executablePath, ['--version'], {
       encoding: 'utf8',
+      env: scrubbedParentEnv(),
       timeout: VERSION_PROBE_TIMEOUT_MS,
       windowsHide: true,
       ...(signal === undefined ? {} : { signal }),

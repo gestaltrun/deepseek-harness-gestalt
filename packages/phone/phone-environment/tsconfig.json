@@ -28,6 +28,9 @@
       "path": "../../util/request-trust"
     },
     {
+      "path": "../../subprocess/subprocess"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

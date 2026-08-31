@@ -253,6 +253,12 @@ importers:
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../../packages/platform/platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../../packages/platform/project-membership
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:^
+        version: link:../../packages/platform/project-membership-client
       '@deepseek-ai/dsh-pwsh-local':
         specifier: workspace:^
         version: link:../../packages/shell/pwsh-local

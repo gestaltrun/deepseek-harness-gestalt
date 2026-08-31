@@ -100,6 +100,8 @@
     "@deepseek-ai/dsh-tool-workflow": "workspace:^",
     "@deepseek-ai/dsh-client-ui-desktop": "workspace:^",
     "@deepseek-ai/dsh-platform-account": "workspace:^",
+    "@deepseek-ai/dsh-project-membership": "workspace:^",
+    "@deepseek-ai/dsh-project-membership-client": "workspace:^",
     "@deepseek-ai/dsh-remote-access": "workspace:^",
     "@deepseek-ai/dsh-remote-protocol": "workspace:^",
     "@deepseek-ai/dsh-web-app": "workspace:^",

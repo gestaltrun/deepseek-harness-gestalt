@@ -261,7 +261,7 @@ describe('member-question receiver edge contracts', () => {
     })
   })
 
-  it('fails same-route replacement without terminal authority and commits admissions while unrelated rows exist', async () => {
+  it('requires authority and a Workspace binding while admitting turns among unrelated rows', async () => {
     const noAuthority = await setup()
     await noAuthority.ingest({ authority: { accountId: account }, operation: operation('no-authority-first') })
     await expect(noAuthority.ingest({ authority: { accountId: account }, operation: operation('no-authority-second') }))
@@ -271,13 +271,17 @@ describe('member-question receiver edge contracts', () => {
     const receiver = await setup({ admitter })
     const first = await receiver.ingest({ authority: { accountId: account }, operation: operation('admit-first', 'origin-first') })
     const second = await receiver.ingest({ authority: { accountId: account }, operation: operation('admit-second', 'origin-second') })
-    await receiver.admitHumanTurn({
+    const firstAdmission = {
       receivingSessionId: first.receivingSessionId,
       revision: first.revision,
       rpcId: 'rpc-first' as never,
-      content: [{ type: 'text', text: 'first' }],
-      mode: 'queue',
-    })
+      content: [{ type: 'text' as const, text: 'first' }],
+      mode: 'queue' as const,
+    }
+    await expect(receiver.admitHumanTurn(firstAdmission))
+      .rejects.toThrow('no local Workspace binding for account receiver-edge and project project-edge')
+    await receiver.bind(account, operation('binding').projectId, 'workspace-edge' as never)
+    await receiver.admitHumanTurn(firstAdmission)
     await receiver.admitHumanTurn({
       receivingSessionId: second.receivingSessionId,
       revision: second.revision,

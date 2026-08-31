@@ -103,6 +103,7 @@
       "@deepseek-ai/dsh-platform-account-http": ["./packages/platform/platform-account-http/src/index.ts"],
       "@deepseek-ai/dsh-project-membership": ["./packages/platform/project-membership/src/index.ts"],
       "@deepseek-ai/dsh-project-membership/invariant": ["./packages/platform/project-membership/src/invariant.ts"],
+      "@deepseek-ai/dsh-project-membership/remote-url": ["./packages/platform/project-membership/src/remote-url.ts"],
       "@deepseek-ai/dsh-project-membership-core": ["./packages/platform/project-membership-core/src/index.ts"],
       "@deepseek-ai/dsh-project-membership-core/invariant": ["./packages/platform/project-membership-core/src/invariant.ts"],
       "@deepseek-ai/dsh-project-membership-http": ["./packages/platform/project-membership-http/src/index.ts"],

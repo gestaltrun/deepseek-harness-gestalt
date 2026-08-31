@@ -28,7 +28,9 @@ Project-membership capability. Every mutation executes its role gate inside the 
  * @param actor - authenticated account performing the mutation.
  * @param input - unique project name and git remote to bind.
  * @returns the stored project view.
- * @throws {ProjectMembershipError} `PROJECT_NAME_TAKEN` when the name is in use, or `INVALID_REMOTE_URL` when normalization fails.
+ * @throws {ProjectMembershipError} `PROJECT_NAME_TAKEN` when the name is in use,
+ * `PROJECT_REMOTE_TAKEN` when another Project owns the normalized remote,
+ * or `INVALID_REMOTE_URL` when normalization fails.
  */
 abstract createProject(actor: PlatformAccountId, input: CreateProjectInput): Promise<ProjectView>
 
@@ -116,6 +118,21 @@ abstract roster(actor: PlatformAccountId, projectId: ProjectId): Promise<RosterV
 abstract pendingInvitationsFor(actor: PlatformAccountId): Promise<readonly InvitationView[]>
 
 /**
+ * List pending invitations issued for one Project after an admin-or-owner gate.
+ * @param actor - authenticated Project administrator.
+ * @param projectId - Project whose pending invitations are requested.
+ * @returns pending invitations in issuance order.
+ */
+abstract pendingInvitationsIssuedBy( actor: PlatformAccountId, projectId: ProjectId, ): Promise<readonly InvitationView[]>
+
+/**
+ * List pending invitations with their authoritative project name and remote.
+ * @param actor - authenticated invitee account.
+ * @returns pending invitation/project pairs in issuance order.
+ */
+abstract pendingInvitationContextsFor(actor: PlatformAccountId): Promise<readonly PendingInvitationContext[]>
+
+/**
  * Find the project bound to a normalized git remote, if the actor holds a membership there.
  * @param actor - authenticated account whose memberships scope the search.
  * @param normalizedRemoteUrl - normalized remote URL recorded at creation.
@@ -137,6 +154,91 @@ abstract rosterVersion(projectId: ProjectId): Promise<number>
 Types: [PlatformAccountId](platform-account.md)
 
 Source: [`packages/platform/project-membership/src/index.ts`](../../packages/platform/project-membership/src/index.ts)
+
+<a id="ctxprojectmembershipclient--projectmembershipclient"></a>
+
+### `ctx.projectMembershipClient` — `ProjectMembershipClient`
+
+Authenticated current-installation client used by product UI consumers.
+
+```ts cordis-catalog
+/**
+ * Create one Cloud Project for a Workspace remote.
+ * @param input - unique name and Workspace remote.
+ * @returns created Cloud Project.
+ */
+createProject(input: { name: string; remoteUrl: string }): Promise<AuthenticatedProjectView>
+
+/**
+ * Resolve the current Account's Project membership for one normalized Git remote.
+ * @param normalizedRemoteUrl - canonical Workspace origin remote.
+ * @returns authorized Project context, or no value when this Account has no membership.
+ */
+projectByRemote(normalizedRemoteUrl: string): Promise<AuthenticatedProjectView | undefined>
+
+/**
+ * Read one Project roster with public identity and presence.
+ * @param projectId - Project to read.
+ * @returns Project and complete decorated roster.
+ */
+roster(projectId: ProjectId): Promise<RosterReadView>
+
+/**
+ * Invite one uniquely resolved public GitHub login.
+ * @param input - Project and public GitHub login.
+ * @returns created pending invitation.
+ */
+invite(input: { projectId: ProjectId; githubLogin: string }): Promise<InvitationView>
+
+/**
+ * Decline, or accept atomically with a local Workspace link.
+ * @param invitationId - invitation to decide.
+ * @param input - decline or linked acceptance.
+ * @returns accepted member, or no value for decline.
+ */
+decideInvitation(invitationId: InvitationId, input: InvitationDecisionInput): Promise<MemberView | undefined>
+
+/**
+ * Retract one pending invitation as its Project administrator.
+ * @param invitationId - pending invitation to retract.
+ */
+retractInvitation(invitationId: InvitationId): Promise<void>
+
+/**
+ * List trusted pending invitation cards for the current Account.
+ * @returns trusted pending invitation cards.
+ */
+pendingInvitations(): Promise<readonly PendingInvitationView[]>
+
+/**
+ * List pending invitations issued from one administered Project.
+ * @param projectId - Project whose issued invitations are requested.
+ * @returns authoritative pending invitation rows.
+ */
+issuedInvitations(projectId: ProjectId): Promise<readonly IssuedInvitationView[]>
+
+/**
+ * Replace one member's collaboration role.
+ * @param membershipId - membership to change.
+ * @param role - replacement collaboration role.
+ */
+changeRole(membershipId: MembershipId, role: ProjectRole): Promise<void>
+
+/**
+ * Replace one member's non-permission function tags.
+ * @param membershipId - membership to relabel.
+ * @param tags - complete replacement function tags.
+ */
+setMemberTags(membershipId: MembershipId, tags: readonly FunctionTag[]): Promise<void>
+
+/**
+ * Remove one member from the Project.
+ * @param membershipId - membership to remove.
+ */
+removeMember(membershipId: MembershipId): Promise<void>
+```
+
+Source: [`packages/platform/project-membership-client/src/index.ts`](../../packages/platform/project-membership-client/src/index.ts)
 
 <a id="project-membership-events"></a>
 

@@ -256,6 +256,11 @@ export interface AccountBackend {
   getSession(id: AccountSessionId): Promise<SessionRecord | undefined>
   /** Read one Platform Account by id. */
   getAccount(id: PlatformAccountId): Promise<AccountRecord | undefined>
+  /** Find current Account rows whose public GitHub login matches case-insensitively. */
+  findAccountsByGithubLogin(
+    identityNamespace: string,
+    normalizedGithubLogin: string,
+  ): Promise<readonly AccountRecord[]>
   /** Atomically rotate the matching refresh token generation. */
   rotateRefresh(sessionId: AccountSessionId, expectedHash: string, replacementHash: string): Promise<SessionRecord | undefined>
   /** Revoke one session and report whether it was active. */
@@ -395,6 +400,16 @@ export class MemoryAccountBackend implements AccountBackend {
   getAccount(id: PlatformAccountId): Promise<AccountRecord | undefined> {
     const account = this.accounts.get(id)
     return Promise.resolve(account === undefined ? undefined : structuredClone(account))
+  }
+
+  findAccountsByGithubLogin(
+    identityNamespace: string,
+    normalizedGithubLogin: string,
+  ): Promise<readonly AccountRecord[]> {
+    return Promise.resolve([...this.accounts.values()]
+      .filter(account => account.identityNamespace === identityNamespace
+        && account.githubLogin.toLowerCase() === normalizedGithubLogin)
+      .map(account => structuredClone(account)))
   }
 
   rotateRefresh(
@@ -747,6 +762,15 @@ export class PlatformAccount extends AccountService {
       }
     }
     return identities
+  }
+
+  async publicIdentityByGithubLogin(githubLogin: string): Promise<PublicAccountIdentity | undefined> {
+    const normalized = githubLogin.trim().toLowerCase()
+    if (normalized === '') return undefined
+    const accounts = await this.backend.findAccountsByGithubLogin(this.environment.identityNamespace, normalized)
+    const [account] = accounts
+    if (account === undefined || accounts.length !== 1) return undefined
+    return { id: account.id, githubLogin: account.githubLogin, avatarUrl: account.avatarUrl }
   }
 
   async signOut(input: { accessToken: string; proof: AccountProof }): Promise<void> {

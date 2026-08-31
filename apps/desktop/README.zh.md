@@ -22,6 +22,8 @@ Desktop 将 `build/icon.icns`、`build/icon.ico` 和 `build/icon.png` 作为自�
 
 Dock / 开始菜单的 cwd 是 Launch Directory（Application Support / `%APPDATA%` 下的 `defaultWorkspace`）。用户数据仍在 `~/.dsh`。
 
+Project Membership 使用同一套实际运行的 Platform environment，并在每次请求时于 Electron main 内获取新的 current-Installation proof。Preload 只暴露不含 credential 的项目操作。Desktop client plugin 把该 bridge 提供给 Workspace surface；bearer token、proof 字段与 installation signing key 永远不会进入 renderer state。
+
 ## Schedule 与能力默认值
 
 每个新 Desktop Session 都会提供 `schedule_create`、`schedule_list` 和 `schedule_delete`。绝对时间 `schedule_create.at` 必须带显式偏移量或 `time_zone`。Desktop 不挂载 `@deepseek-ai/dsh-time-context`；逐 step 时间读数仍由 Schedule Web overlay 注入。

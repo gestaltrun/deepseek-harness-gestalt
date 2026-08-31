@@ -14,6 +14,9 @@ import {
 import {
   ACCOUNT_ACCEPT_PRIVACY, ACCOUNT_BEGIN_LOGIN, ACCOUNT_GET_SNAPSHOT,
   ACCOUNT_SIGN_OUT, ACCOUNT_SNAPSHOT_CHANGED,
+  PROJECT_MEMBERSHIP_BY_REMOTE, PROJECT_MEMBERSHIP_CHANGE_ROLE, PROJECT_MEMBERSHIP_CREATE, PROJECT_MEMBERSHIP_DECIDE,
+  PROJECT_MEMBERSHIP_INVITE, PROJECT_MEMBERSHIP_ISSUED, PROJECT_MEMBERSHIP_PENDING, PROJECT_MEMBERSHIP_REMOVE,
+  PROJECT_MEMBERSHIP_RETRACT, PROJECT_MEMBERSHIP_ROSTER, PROJECT_MEMBERSHIP_SET_TAGS,
   PAIRING_CANCEL_CHALLENGE, PAIRING_CONFIRM, PAIRING_CREATE_CHALLENGE,
   BROWSER_CONCEAL, BROWSER_PRESENT,
   CHROME_OVERLAY_GET_STATE, CHROME_OVERLAY_HIDE, CHROME_OVERLAY_RESULT,
@@ -85,6 +88,18 @@ import { downloadCompanionAttachment } from './companion-attachments.ts'
 import { projectDesktopRendererEvent } from './renderer-projection.ts'
 import { connectDesktopRelayNodeHelper } from './relay-node-helper.ts'
 import { createDesktopSystemNodeFetch } from './system-node-fetch-helper.ts'
+import {
+  createDesktopProjectMembershipClient,
+  parseInvitationDecision,
+  parseInvitationId,
+  parseMembershipId,
+  parseMembershipRole,
+  parseMembershipTags,
+  parseProjectCreation,
+  parseProjectId,
+  parseProjectInvitation,
+  parseProjectRemote,
+} from './project-membership.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 let systemFetch: typeof globalThis.fetch
@@ -733,6 +748,11 @@ async function startPairingForCurrentDesktop(): Promise<void> {
 }
 
 function installIpc(): void {
+  const projectMembership = createDesktopProjectMembershipClient({
+    account: () => account,
+    environment: accountEnvironment,
+    fetch: systemFetch,
+  })
   ipcMain.handle(UPDATER_GET_STATUS, () => updater?.state() ?? { state: 'disabled', lastCheckedAt: null })
   ipcMain.on(UPDATER_CHECK_NOW, () => { updater?.checkForUpdates() })
   ipcMain.on(UPDATER_DOWNLOAD_NOW, () => { updater?.download() })
@@ -757,6 +777,33 @@ function installIpc(): void {
     await pairing.deactivate('mobile-access-disabled')
     return snapshot
   })
+  ipcMain.handle(PROJECT_MEMBERSHIP_CREATE, (_event, raw: unknown) =>
+    projectMembership.createProject(parseProjectCreation(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_BY_REMOTE, (_event, raw: unknown) =>
+    projectMembership.projectByRemote(parseProjectRemote(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_ROSTER, (_event, raw: unknown) =>
+    projectMembership.roster(parseProjectId(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_INVITE, (_event, raw: unknown) =>
+    projectMembership.invite(parseProjectInvitation(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_DECIDE, (_event, raw: unknown) => {
+    const request = parseInvitationDecision(raw)
+    return projectMembership.decideInvitation(request.invitationId, request.input)
+  })
+  ipcMain.handle(PROJECT_MEMBERSHIP_RETRACT, (_event, raw: unknown) =>
+    projectMembership.retractInvitation(parseInvitationId(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_PENDING, () => projectMembership.pendingInvitations())
+  ipcMain.handle(PROJECT_MEMBERSHIP_ISSUED, (_event, raw: unknown) =>
+    projectMembership.issuedInvitations(parseProjectId(raw)))
+  ipcMain.handle(PROJECT_MEMBERSHIP_CHANGE_ROLE, (_event, raw: unknown) => {
+    const request = parseMembershipRole(raw)
+    return projectMembership.changeRole(request.membershipId, request.role)
+  })
+  ipcMain.handle(PROJECT_MEMBERSHIP_SET_TAGS, (_event, raw: unknown) => {
+    const request = parseMembershipTags(raw)
+    return projectMembership.setMemberTags(request.membershipId, request.tags)
+  })
+  ipcMain.handle(PROJECT_MEMBERSHIP_REMOVE, (_event, raw: unknown) =>
+    projectMembership.removeMember(parseMembershipId(raw)))
   ipcMain.handle(PAIRING_GET_SNAPSHOT, () => pairing.getSnapshot())
   ipcMain.handle(PAIRING_SET_ENABLED, (_event, enabled: unknown) => setPairingEnabledFromIpc(pairing, enabled))
   ipcMain.handle(PAIRING_CREATE_CHALLENGE, () => pairing.createChallenge())

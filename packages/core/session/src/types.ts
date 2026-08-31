@@ -392,6 +392,12 @@ export interface SurfaceIntent {
   sourceEventSeqs?: number[]
 }
 
+/** Recognition metadata for a non-surface informational event. */
+export interface IgnorableEventIntent {
+  /** Older readers may skip this event when its type is unknown. */
+  ignorable: true
+}
+
 /**
  * One immutable entry in the session log.
  *

@@ -22,6 +22,8 @@ Desktop owns `build/icon.icns`, `build/icon.ico`, and `build/icon.png` as byte-f
 
 Dock / Start Menu cwd is the Launch Directory (`defaultWorkspace` under Application Support / `%APPDATA%`). User data stays in `~/.dsh`.
 
+Project Membership uses the same operated Platform environment and obtains a fresh current-Installation proof inside Electron main for every request. Preload exposes only credential-free project operations. The Desktop client plugin provides that bridge to the Workspace surface; bearer tokens, proof fields, and the installation signing key never enter renderer state.
+
 ## Schedule and capability defaults
 
 Every new Desktop Session exposes `schedule_create`, `schedule_list`, and `schedule_delete`. An absolute `schedule_create.at` value must carry an explicit offset or `time_zone`. Desktop does not mount `@deepseek-ai/dsh-time-context`; the Schedule Web overlay remains the composition that injects per-step time readings.

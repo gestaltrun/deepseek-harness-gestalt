@@ -26,11 +26,15 @@ export interface ProjectionsFace {
   faceOf(key: string): ObservableSnapshot<unknown>
 }
 
-/** Identity plus the behavior verbs features may invoke on a session. */
+/**
+ * Renderer identity plus the behavior verbs a feature may invoke. Host-backed
+ * implementations route every verb to the Host; renderer-only implementations
+ * expose only their supported read state and reject unavailable verbs.
+ */
 export interface ISession {
-  /** The session's host identity (agent id — same axis). */
+  /** Renderer identity: a Host agent id for Host-backed sessions, otherwise an implementation-owned synthetic id. */
   readonly sessionId: SessionId
-  /** Host-computed projection values by key (the useProjection seat). */
+  /** Projection reads: Host-computed for Host-backed sessions and implementation-defined for renderer-only sessions. */
   readonly projections: ProjectionsFace
   /**
    * Send a prompt into the session.
@@ -86,8 +90,9 @@ export interface ISession {
 }
 
 /**
- * The full outward face: behavior verbs plus the conversation read side
- * (the `useSession` hook source). This is the type carried by
- * `SessionBinding.session` and the provide channel.
+ * The full outward face carried by `SessionBinding.session` and the provide
+ * channel. A Host-backed face owns Host identity, projections, history, and
+ * mutations. A renderer-only face may expose synthetic identity and bounded
+ * conversation state while rejecting unsupported behavior verbs.
  */
 export type SessionFace = ISession & ObservableSnapshot<ConversationSnapshot>

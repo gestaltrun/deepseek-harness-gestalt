@@ -73,6 +73,12 @@ export interface SetMemberTagsInput {
   readonly tags: readonly FunctionTag[]
 }
 
+/** Pending invitation paired with the project facts needed for a trusted acceptance decision. */
+export interface PendingInvitationContext {
+  readonly invitation: InvitationView
+  readonly project: ProjectView
+}
+
 /**
  * Project-membership capability. Every mutation executes its role gate inside
  * the operation itself: schema omission or listener order never substitutes
@@ -89,7 +95,9 @@ export abstract class ProjectMembershipService extends Service {
    * @param actor - authenticated account performing the mutation.
    * @param input - unique project name and git remote to bind.
    * @returns the stored project view.
-   * @throws {ProjectMembershipError} `PROJECT_NAME_TAKEN` when the name is in use, or `INVALID_REMOTE_URL` when normalization fails.
+   * @throws {ProjectMembershipError} `PROJECT_NAME_TAKEN` when the name is in use,
+   * `PROJECT_REMOTE_TAKEN` when another Project owns the normalized remote,
+   * or `INVALID_REMOTE_URL` when normalization fails.
    */
   abstract createProject(actor: PlatformAccountId, input: CreateProjectInput): Promise<ProjectView>
 
@@ -175,6 +183,24 @@ export abstract class ProjectMembershipService extends Service {
    * @returns pending invitations in issuance order.
    */
   abstract pendingInvitationsFor(actor: PlatformAccountId): Promise<readonly InvitationView[]>
+
+  /**
+   * List pending invitations issued for one Project after an admin-or-owner gate.
+   * @param actor - authenticated Project administrator.
+   * @param projectId - Project whose pending invitations are requested.
+   * @returns pending invitations in issuance order.
+   */
+  abstract pendingInvitationsIssuedBy(
+    actor: PlatformAccountId,
+    projectId: ProjectId,
+  ): Promise<readonly InvitationView[]>
+
+  /**
+   * List pending invitations with their authoritative project name and remote.
+   * @param actor - authenticated invitee account.
+   * @returns pending invitation/project pairs in issuance order.
+   */
+  abstract pendingInvitationContextsFor(actor: PlatformAccountId): Promise<readonly PendingInvitationContext[]>
 
   /**
    * Find the project bound to a normalized git remote, if the actor holds a membership there.

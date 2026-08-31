@@ -41,6 +41,32 @@ export class FakeApiClient implements IApiClient {
   /** Chronological call record: [method, payload]. */
   readonly calls: { method: string; payload: unknown }[] = []
 
+  readonly memberQuestions: IApiClient['memberQuestions'] = {
+    workspaceBinding: payload => this.record(
+      'memberQuestion.workspaceBinding', payload, Promise.resolve(ok({ state: 'missing' as const })),
+    ),
+    ensureWorkspaceBinding: payload => this.record(
+      'memberQuestion.ensureWorkspaceBinding', payload,
+      Promise.resolve(ok({ state: 'created' as const, workspaceId: payload.workspaceId })),
+    ),
+    bindWorkspace: payload => this.record(
+      'memberQuestion.bindWorkspace', payload, Promise.resolve(ok({ bound: true as const })),
+    ),
+    snapshot: payload => this.record('memberQuestion.snapshot', payload, Promise.resolve(ok({
+      revision: 0, pending: [], terminal: [],
+    }))),
+    settle: payload => this.record('memberQuestion.settle', payload, Promise.resolve(ok({
+      type: 'member-question-settled', operationId: 'fake-operation' as never,
+      questionId: 'fake-question' as never, outcome: 'declined',
+      settledByInstallationId: 'fake-installation' as never,
+      settledByDeviceName: 'Fake', settledAt: 1,
+    }))),
+    admitHumanTurn: payload => this.record('memberQuestion.admitHumanTurn', payload, Promise.resolve(ok({
+      accepted: true,
+      sessionId: payload.receivingSessionId,
+    }))),
+  }
+
   // Programmable slots (defaults answer OK-empty); reassign per case.
   onList: (payload: unknown) => Promise<RpcResponse<{ items: never[] }>> = () => Promise.resolve(ok({ items: [] }))
   onSearch: (payload: unknown) => Promise<RpcResponse<{ items: SessionSearchItem[]; hasMore: boolean }>> =
@@ -166,6 +192,10 @@ export class FakeApiClient implements IApiClient {
     create: (payload: unknown) => this.record('workspace.create', payload, Promise.resolve(ok({
       workspace: { workspaceId: 'fk-ws' as never, path: '/f/ws', title: 'ws', sessionIds: [], createdAt: '0', updatedAt: '0' },
       created: true,
+    }))),
+    gitRemote: (payload: unknown) => this.record('workspace.gitRemote', payload, Promise.resolve(ok({}))),
+    cloneGit: (payload: unknown) => this.record('workspace.cloneGit', payload, Promise.resolve(ok({
+      workspace: { workspaceId: 'fk-clone' as never, path: '/f/clone', title: 'clone', sessionIds: [], createdAt: '0', updatedAt: '0' },
     }))),
     rename: (payload: unknown) => this.record('workspace.rename', payload, Promise.resolve(ok({
       workspace: { workspaceId: 'fk-ws' as never, path: '/f/ws', title: 'ws', sessionIds: [], createdAt: '0', updatedAt: '0' },

@@ -57,6 +57,22 @@ export interface WorkspaceApi {
   Promise<RpcResponse<{ workspace: WorkspaceView; created: boolean }>>
 
   /**
+   * Reads the configured `origin` remote of one local Workspace checkout.
+   * A directory that is not a Git checkout or has no origin succeeds with no
+   * `remoteUrl`; an unknown Workspace fails with `workspace-not-found`.
+   */
+  gitRemote(request: RpcRequest<{ workspaceId: WorkspaceId }>, signal: AbortSignal):
+  Promise<RpcResponse<{ remoteUrl?: string }>>
+
+  /**
+   * Clones one Git remote into a new child of an existing parent directory,
+   * then registers the checkout as a Workspace. `directoryName` is one path
+   * segment. The Host runs Git without a shell and follows the request abort.
+   */
+  cloneGit(request: RpcRequest<{ remoteUrl: string; parentPath: string; directoryName: string }>, signal: AbortSignal):
+  Promise<RpcResponse<{ workspace: WorkspaceView }>>
+
+  /**
    * Renames a workspace. `title` is trimmed and must be non-empty
    * (schema-enforced). An unknown id fails with `workspace-not-found`; a
    * title equal to another workspace's fails with `workspace-name-conflict`.

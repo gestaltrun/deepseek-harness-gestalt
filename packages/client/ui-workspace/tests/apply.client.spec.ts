@@ -1,6 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { WorkspaceBrowserInjected, WorkspacePickerInjected } from '@deepseek-ai/dsh-client-ui-workspace/client'
@@ -27,12 +28,43 @@ async function bench() {
   const renameSession = vi.fn(async (title: string) => ({ ok: true, value: { title, seq: 1 } }))
   const binding = vi.fn(() => ({ session: { rename: renameSession } }))
   const fork = vi.fn(async () => 'forked' as never)
+  const gitRemote = vi.fn(async (): Promise<string | undefined> => 'https://github.com/o/r.git')
+  const pickDirectory = vi.fn<() => Promise<string | null>>().mockResolvedValue('/projects')
+  const cloneGit = vi.fn(async () => ({
+    workspaceId: 'cloned' as never, path: '/projects/cloned', title: 'cloned',
+    sessionIds: [], createdAt: '0', updatedAt: '0',
+  }))
+  const bindWorkspace = vi.fn(async () => ({
+    rpcId: 'binding-rpc' as never,
+    result: { ok: true as const, value: { bound: true as const } },
+  }))
+  const workspaceBinding = vi.fn(async () => ({
+    rpcId: 'binding-read-rpc' as never,
+    result: { ok: true as const, value: { state: 'missing' as const } },
+  }))
+  const ensureWorkspaceBinding = vi.fn(async (input: { workspaceId: WorkspaceId }): Promise<{
+    rpcId: never
+    result: {
+      ok: true
+      value: {
+        state: 'created' | 'existing' | 'repaired'
+        workspaceId: WorkspaceId
+      }
+    }
+  }> => ({
+    rpcId: 'binding-ensure-rpc' as never,
+    result: {
+      ok: true as const,
+      value: { state: 'created' as const, workspaceId: input.workspaceId },
+    },
+  }))
   ctx.provide('workspaces', {
-    create, startSession, rename, insertSessionBefore,
+    create, startSession, rename, insertSessionBefore, gitRemote, pickDirectory, cloneGit,
   } as never)
   ctx.provide('sessions', { open, clear, search, searchResultLimit: 20, binding, fork } as never)
   ctx.provide('connection', {
     hostDescription: { getSnapshot: () => undefined, subscribe: () => () => {} },
+    api: { memberQuestions: { workspaceBinding, ensureWorkspaceBinding, bindWorkspace } },
   } as never)
   const locale = new LocaleRuntime(ctx)
   // These specs assert the shipped Chinese copy. There is no jsdom `window`
@@ -43,6 +75,7 @@ async function bench() {
   return {
     ctx, slots: ctx.get('slots') as SlotRegistry, locale, create, startSession, rename,
     insertSessionBefore, open, clear, search, renameSession, binding, fork,
+    workspaceBinding, ensureWorkspaceBinding, bindWorkspace, gitRemote, pickDirectory, cloneGit,
   }
 }
 
@@ -79,6 +112,33 @@ describe('ui-workspace apply', () => {
 
   it('routes browser actions and picker creation to the services', async () => {
     const b = await bench()
+    const createProject = vi.fn(async () => ({
+      id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r', createdAt: 1,
+      receivingAccountId: 'account-1',
+    }))
+    const projectByRemote = vi.fn(async () => ({
+      id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r', createdAt: 1,
+      receivingAccountId: 'account-1',
+    }))
+    const pendingInvitations = vi.fn(async () => [{
+      invitationId: 'invitation-1', receivingAccountId: 'account-2',
+      projectId: 'project-1', projectName: 'Atlas',
+      remoteUrl: 'https://github.com/o/r', inviterName: 'Mona', invitedAt: 1,
+    }])
+    const decideInvitation = vi.fn(async () => undefined)
+    b.ctx.provide('projectMembershipClient', {
+      createProject,
+      projectByRemote,
+      roster: vi.fn(),
+      invite: vi.fn(),
+      decideInvitation,
+      retractInvitation: vi.fn(),
+      pendingInvitations,
+      issuedInvitations: vi.fn(async () => []),
+      changeRole: vi.fn(),
+      setMemberTags: vi.fn(),
+      removeMember: vi.fn(),
+    } as never)
     declare(b.slots, 'sidebar.workspaces', 'conversation.hero.workspace')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
 
@@ -111,6 +171,80 @@ describe('ui-workspace apply', () => {
     expect(b.insertSessionBefore).toHaveBeenCalledWith('ws', 's1', 's2')
     await browser.createWorkspace({ path: '/tmp/browser-project' })
     expect(b.create).toHaveBeenCalledWith({ path: '/tmp/browser-project' })
+    await expect(browser.projectMembership?.createProject({
+      name: 'Atlas', localWorkspaceId: 'ws' as never,
+    })).resolves.toEqual({
+      id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r',
+    })
+    expect(createProject).toHaveBeenCalledWith({ name: 'Atlas', remoteUrl: 'https://github.com/o/r' })
+    expect(b.bindWorkspace).toHaveBeenCalledWith({
+      receivingAccountId: 'account-1', projectId: 'project-1', workspaceId: 'ws',
+    })
+    b.gitRemote.mockResolvedValueOnce('git@github.com:o/scp-repo.git')
+    await browser.projectMembership?.createProject({ name: 'SCP', localWorkspaceId: 'ws' as never })
+    expect(createProject).toHaveBeenLastCalledWith({ name: 'SCP', remoteUrl: 'git@github.com:o/scp-repo' })
+    b.gitRemote.mockResolvedValueOnce(undefined)
+    await expect(browser.projectMembership?.createProject({ name: 'Missing', localWorkspaceId: 'ws' as never }))
+      .rejects.toThrow('must be a Git checkout with an origin remote')
+    await expect(browser.projectMembership?.projectForWorkspace('ws' as never)).resolves.toMatchObject({
+      id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r',
+    })
+    expect(projectByRemote).toHaveBeenCalledWith('https://github.com/o/r')
+    expect(b.ensureWorkspaceBinding).toHaveBeenCalledWith({
+      receivingAccountId: 'account-1', projectId: 'project-1', workspaceId: 'ws',
+    })
+    const bindingWrites = b.bindWorkspace.mock.calls.length
+    b.ensureWorkspaceBinding.mockResolvedValueOnce({
+      rpcId: 'binding-ensure-rpc' as never,
+      result: {
+        ok: true as const,
+        value: {
+          state: 'existing' as const,
+          workspaceId: 'different-workspace' as never,
+        },
+      },
+    })
+    await expect(browser.projectMembership?.projectForWorkspace('ws' as never))
+      .rejects.toThrow('already linked to another local Workspace')
+    expect(b.bindWorkspace).toHaveBeenCalledTimes(bindingWrites)
+    await expect(browser.projectMembership?.pendingInvitations()).resolves.toEqual([{
+      invitationId: 'invitation-1', receivingAccountId: 'account-2', projectId: 'project-1',
+      projectName: 'Atlas', inviterName: 'Mona',
+      remoteUrl: 'https://github.com/o/r',
+    }])
+    expect(pendingInvitations).toHaveBeenCalledOnce()
+    await expect(browser.projectMembership?.localRemoteFor('ws' as never))
+      .resolves.toBe('https://github.com/o/r')
+    b.gitRemote.mockResolvedValueOnce('file:///tmp/not-platform-safe')
+    await expect(browser.projectMembership?.localRemoteFor('ws' as never)).resolves.toBeUndefined()
+    await expect(browser.projectMembership?.cloneWorkspace({
+      remoteUrl: 'https://github.com/o/r.git', directoryName: 'cloned',
+    })).resolves.toEqual({
+      workspaceId: 'cloned', title: 'cloned', normalizedRemoteUrl: 'https://github.com/o/r',
+    })
+    expect(b.cloneGit).toHaveBeenCalledWith({
+      remoteUrl: 'https://github.com/o/r.git', parentPath: '/projects', directoryName: 'cloned',
+    })
+    b.pickDirectory.mockResolvedValueOnce(null)
+    await expect(browser.projectMembership?.cloneWorkspace({
+      remoteUrl: 'https://github.com/o/r.git', directoryName: 'cancelled',
+    })).resolves.toBeUndefined()
+    await browser.projectMembership?.decideInvitation('invitation-1', {
+      decision: 'accept-with-link',
+      localWorkspaceId: 'ws' as never,
+      receivingAccountId: 'account-2',
+      projectId: 'project-1',
+      link: { workspaceName: 'Atlas', normalizedRemoteUrl: 'https://github.com/o/r' },
+    })
+    expect(b.bindWorkspace).toHaveBeenCalledWith({
+      receivingAccountId: 'account-2', projectId: 'project-1', workspaceId: 'ws',
+    })
+    expect(decideInvitation).toHaveBeenCalledWith('invitation-1', {
+      decision: 'accept-with-link',
+      link: { workspaceName: 'Atlas', normalizedRemoteUrl: 'https://github.com/o/r' },
+    })
+    expect(b.bindWorkspace.mock.invocationCallOrder[0])
+      .toBeLessThan(decideInvitation.mock.invocationCallOrder[0]!)
 
     const picker = (b.slots.entries('conversation.hero.workspace')[0]!.inject as () => WorkspacePickerInjected)()
     await picker.createWorkspace({ path: '/tmp/project' })

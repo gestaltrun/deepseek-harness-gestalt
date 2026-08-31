@@ -7,6 +7,8 @@
 [`scaffold.ts`](scaffold.ts) 和
 [浏览器 e2e Agent Note](../../../.agents/notes/implemented/testing/2026-07-24-web-gui-browser-e2e-lane.zh.md)中。
 
+`member-question-receiving.e2e.ts` 只用 mock remote Agent 作为发送方身份，随后运行 shipped `userQuestions.ask()` provider、api-proxy pending registry、WebSocket mux、Client Runtime、动态模块表、接收侧边栏行、成员提问组合卡、共享问题呈现、文档聚焦面板与 response POST。该测试不使用模型 replay fixture，并断言接收过程不会增加 Host Session，也不会发出 `session.create` 或 `session.history` 请求。
+
 ## 这些是 Host 面的测试
 
 它们在根 `tsconfig.host.json` 中做类型检查，而不在 Client aggregate 中，因为它们直接读取

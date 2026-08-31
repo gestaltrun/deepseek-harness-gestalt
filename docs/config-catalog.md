@@ -950,7 +950,7 @@ Source: [`packages/hooks/hooks-codex/src/index.ts:44`](../packages/hooks/hooks-c
 
 ## `@deepseek-ai/dsh-host-apiproxy`
 
-Requires: `agentDefaultModel` · `agents` · `attachments` · `directoryPicker` · `llm` · `sessions` · `subagents` · `sessionQuery` · `tools` · `userQuestions` · `workspaceRegistry`
+Requires: `agentDefaultModel` · `agents` · `attachments` · `directoryPicker` · `llm` · `sessions` · `subagents` · `sessionQuery` · `tools` · `userQuestions` · `workspaceRegistry` · `memberQuestionReceiver`
 
 ```ts config-catalog
 /** Gateway plugin configuration. */
@@ -975,10 +975,14 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /** Development-only Host Installation id for keyless receiver settlement. */
+  memberQuestionInstallationId?: string
+  /** Development-only user-facing Host Installation name. */
+  memberQuestionDeviceName?: string
 }
 ```
 
-Source: [`packages/host/apiproxy/src/index.ts:41`](../packages/host/apiproxy/src/index.ts)
+Source: [`packages/host/apiproxy/src/index.ts:42`](../packages/host/apiproxy/src/index.ts)
 
 <a id="deepseek-aidsh-host-directory-picker-browse"></a>
 
@@ -1598,6 +1602,172 @@ export interface ReconnectConfig {
 
 Source: [`packages/mcp/mcp-client/src/index.ts:103`](../packages/mcp/mcp-client/src/index.ts)
 
+<a id="deepseek-aidsh-member-question-receiver"></a>
+
+## `@deepseek-ai/dsh-member-question-receiver`
+
+```ts config-catalog
+/** Loader-facing receiver Provider configuration. */
+export type Config = MemberQuestionReceiverConfig
+
+/** File Provider configuration and injected Host authority adapters. */
+export interface MemberQuestionReceiverConfig {
+  /** Root directory whose environment child contains the receiver ledger. */
+  readonly storagePath: string
+  /** Deployment namespace isolating development from production state. */
+  readonly environment: 'development' | 'production'
+  /** Maximum durable question records retained before arrival fails loud. */
+  readonly maxRecords: number
+  /** Retry delay after authoritative expiry publication fails. */
+  readonly terminalRetryMs: number
+  /** First-claim authority shared by every receiving Installation. */
+  readonly terminalAuthority?: MemberQuestionTerminalAuthority
+  /** Explicit terminal provider selection; development-local is forbidden in production. */
+  readonly terminalAuthorityMode?: 'deferred' | 'development-local'
+  /** Authoritative wall clock; production uses Date.now. */
+  readonly clock?: () => number
+  /** High-level materialize-and-admit adapter; absent keeps human turns fail-closed. */
+  readonly admitter?: MemberQuestionHumanTurnAdmitter
+  /** Injectable expiry scheduler; production uses platform timers. */
+  readonly timer?: MemberQuestionReceiverTimer
+  /** Atomic state writer override for storage-boundary verification. */
+  readonly stateWriter?: MemberQuestionReceiverStateWriter
+}
+
+/** Authority adapter retaining exactly one global terminal per question id. */
+export interface MemberQuestionTerminalAuthority {
+  /**
+   * Commit or replay the first terminal for one question.
+   * @param candidate - terminal proposed by this Host.
+   * @returns the canonical retained terminal, including when another Installation won.
+   */
+  claim(candidate: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>
+}
+
+/**
+ * High-level Host adapter that materializes the receiving Session if needed
+ * and admits the human turn atomically under `rpcId` idempotency.
+ */
+export type MemberQuestionHumanTurnAdmitter = (
+  input: AdmitMemberQuestionHumanTurnInput,
+  context: MemberQuestionHumanTurnAdmissionContext,
+) => Promise<MemberQuestionHumanTurnAdmissionReceipt>
+
+/** Injectable scheduler used for the one earliest authoritative expiry. */
+export interface MemberQuestionReceiverTimer {
+  set(callback: () => void, delayMs: number): unknown
+  clear(handle: unknown): void
+}
+
+/** Atomic durable replacement adapter; production uses `writeFileAtomic`. */
+export type MemberQuestionReceiverStateWriter = (path: string, content: string) => Promise<void>
+
+/** Result of one global first-terminal claim. */
+export interface MemberQuestionTerminalClaim {
+  /** Whether this candidate committed the first global terminal. */
+  readonly claimed: boolean
+  /** Canonical first terminal, whether this candidate won or lost. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+}
+
+/** One explicit human turn addressed to a receiving Session. */
+export interface AdmitMemberQuestionHumanTurnInput {
+  /** Host-owned receiving thread to materialize or continue. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Exact receiving-thread revision the human observed. */
+  readonly revision: number
+  /** Stable idempotency identity retained across retries. */
+  readonly rpcId: MemberQuestionReceiverRpcId
+  /** Human-authored content retained durably for crash-safe admission replay. */
+  readonly content: readonly MemberQuestionHumanTurnContent[]
+  /** Ordinary Host queue or steering admission mode. */
+  readonly mode: 'queue' | 'steer'
+}
+
+/** Durable receiver facts needed by one Host materialize-and-admit operation. */
+export interface MemberQuestionHumanTurnAdmissionContext {
+  /** Account whose local workspace receives the Host Session. */
+  readonly receivingAccountId: PlatformAccountId
+  /** Cloud project whose accepted membership selects that workspace. */
+  readonly projectId: ProjectId
+  /** Exact bound local Workspace selected for the receiving Account and Project. */
+  readonly workspaceId: Branded<'WorkspaceId'>
+  /** Every retained question on this receiving thread, in arrival order. */
+  readonly questions: readonly (PendingMemberQuestionView | TerminalMemberQuestionView)[]
+}
+
+/** Successful high-level Host adapter admission. */
+interface MemberQuestionHumanTurnAdmissionReceipt {
+  /** The adapter materialized and admitted the human turn. */
+  readonly accepted: true
+}
+
+/** Host-owned durable identity of one member-question receiving thread. */
+export type ReceivingSessionId = Branded<'ReceivingSessionId'>
+
+/** Stable caller idempotency identity for one explicit human turn. */
+export type MemberQuestionReceiverRpcId = Branded<'MemberQuestionReceiverRpcId'>
+
+/** Durable human content handed to the Host Session adapter. */
+export type MemberQuestionHumanTurnContent = MemberQuestionHumanTextContent | MemberQuestionHumanImageContent
+
+/** Pending receiver projection retained without referenced document bodies. */
+export interface PendingMemberQuestionView {
+  /** Stable question identity from the authenticated operation. */
+  readonly questionId: MemberQuestionId
+  /** Opaque Host identity of the receiving thread. */
+  readonly receivingSessionId: ReceivingSessionId
+  /** Account whose endpoint accepted the operation. */
+  readonly receivingAccountId: PlatformAccountId
+  /** Durable receiver revision that published this row. */
+  readonly revision: number
+  /** Absolute Unix epoch milliseconds when the Host accepted the operation. */
+  readonly arrivedAt: number
+  /** Bounded authenticated member-question operation. */
+  readonly operation: CompanionMemberQuestionOperation
+  /** Ordinary Host Session identity after the first explicit human admission. */
+  readonly hostSessionId?: HostSessionId
+  /** Durable retry identity while a human-turn admission remains reserved. */
+  readonly reservedAdmission?: {
+    /** Envelope identity the Client must reuse for the reserved action. */
+    readonly rpcId: MemberQuestionReceiverRpcId
+    /** Original admission mode retained even if the Session begins running. */
+    readonly mode: 'queue' | 'steer'
+  }
+}
+
+/** Terminal receiver record retaining the globally authoritative first claim. */
+export interface TerminalMemberQuestionView extends Omit<PendingMemberQuestionView, 'operation'> {
+  /** Globally authoritative first-claim terminal. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+  /** Bounded received operation retained for passive record rendering. */
+  readonly brief: Omit<CompanionMemberQuestionOperation, 'questions'> & {
+    /** Original question batch retained with the terminal record. */
+    readonly questions: CompanionMemberQuestionOperation['questions']
+  }
+}
+
+/** Human-authored text handed to the future Host Session adapter. */
+interface MemberQuestionHumanTextContent {
+  /** Content discriminant. */
+  readonly type: 'text'
+  /** Human-authored text. */
+  readonly text: string
+}
+
+/** Human-selected image committed by the Host attachment service before reservation. */
+interface MemberQuestionHumanImageContent {
+  /** Content discriminant. */
+  readonly type: 'image'
+  /** Durable normalized attachment; raw browser bytes never enter the receiver ledger. */
+  readonly attachment: ImageAttachmentRef
+}
+```
+
+Depends on: [`Branded`](../packages/util/brand/src/index.ts) · [`CompanionMemberQuestionOperation`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md) · [`HostSessionId`](subsystems/core.md) · [`ImageAttachmentRef`](subsystems/attachment.md) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`PlatformAccountId`](subsystems/platform-account.md) · [`ProjectId`](subsystems/project-membership.md)
+
+Source: [`packages/interaction/member-question-receiver/src/index.ts:100`](../packages/interaction/member-question-receiver/src/index.ts)
+
 <a id="deepseek-aidsh-member-question-sender"></a>
 
 ## `@deepseek-ai/dsh-member-question-sender`
@@ -1610,7 +1780,7 @@ export interface Config {
    * `send()` answers the stable `DELIVERY_UNAVAILABLE` error — the same
    * fail-closed stance as the deferred registry transport.
    */
-  delivery?: MemberQuestionDelivery
+  delivery?: MemberQuestionDeliveryPort
   /**
    * Retrieves the sealed project-peer grant addressed to the member. Absent,
    * encoding still proceeds so a keyless assembly can round-trip the codec
@@ -1637,20 +1807,34 @@ export interface Config {
 }
 
 /**
- * Injected delivery adapter. Cross-machine registry transport is deferred
- * (the T4 Known Limitation); tests and keyless assemblies inject an in-memory
- * stub. Production delivery stays behind that same gap.
+ * Delivery seam for member-question operations and their first-claim terminal
+ * results. Cross-machine registry transport is deferred; tests and keyless
+ * assemblies inject an in-memory implementation, while production remains fail-closed.
  */
-export interface MemberQuestionDelivery {
+export interface MemberQuestionDeliveryPort {
   /**
    * Deliver one encoded member-question operation to the addressed member.
    * @param encoded - codec output plus the addressee and project identity.
-   * @returns fulfillment after the adapter accepts the encoded bytes.
+   * @returns fulfillment after the port accepts the encoded bytes.
    */
   deliver(encoded: EncodedMemberQuestion & {
     toProjectMember: string
-    projectId: string
+    projectId: ProjectId
   }): Promise<void>
+
+  /**
+   * Atomically publish one terminal candidate; the first claim remains authoritative.
+   * @param terminal - candidate encoded by the sender or receiving Installation.
+   * @returns whether this candidate won and the authoritative retained terminal.
+   */
+  publishTerminal(terminal: CompanionMemberQuestionSettledResult): Promise<MemberQuestionTerminalClaim>
+
+  /**
+   * Query the retained first terminal for reconnect replay.
+   * @param questionId - member-question identity to replay.
+   * @returns the authoritative terminal, or undefined while still pending or unknown.
+   */
+  queryTerminal(questionId: MemberQuestionId): Promise<CompanionMemberQuestionSettledResult | undefined>
 }
 
 /**
@@ -1677,8 +1861,10 @@ export type MemberPresenceLookup = (input: MemberPresenceLookupInput) => Promise
  */
 export type MemberMembershipWatch = (input: MemberMembershipWatchInput) => Promise<void>
 
-/** Encoded Companion operation ready for the injected delivery adapter. */
+/** Encoded Companion operation ready for the injected delivery port. */
 export interface EncodedMemberQuestion {
+  /** Companion mutation identity used by status replay. */
+  readonly operationId: CompanionOperationId
   /** Branded question identity correlated with later settlement. */
   readonly questionId: MemberQuestionId
   /** Companion `member-question` operation message. */
@@ -1687,10 +1873,18 @@ export interface EncodedMemberQuestion {
   readonly encoded: Uint8Array
 }
 
+/** Result of one atomic terminal publication attempt. */
+export interface MemberQuestionTerminalClaim {
+  /** Whether this publication committed the first terminal for the question. */
+  readonly claimed: boolean
+  /** Authoritative first terminal, equal to the candidate only when this publication won. */
+  readonly terminal: CompanionMemberQuestionSettledResult
+}
+
 /** Inputs for retrieving one sealed project-peer grant on the B side. */
 export interface ProjectPeerGrantLookupInput {
   /** Cloud project whose grant records are searched. */
-  projectId: string
+  projectId: ProjectId
   /** Account the sealed grant must address. */
   peerAccountId: string
 }
@@ -1698,7 +1892,7 @@ export interface ProjectPeerGrantLookupInput {
 /** Inputs for a live presence verdict of one project member. */
 export interface MemberPresenceLookupInput {
   /** Cloud project whose roster presence is queried. */
-  projectId: string
+  projectId: ProjectId
   /** Account whose installations are aggregated. */
   peerAccountId: string
 }
@@ -1706,7 +1900,7 @@ export interface MemberPresenceLookupInput {
 /** Inputs for watching one membership row until it is revoked or the ask settles. */
 export interface MemberMembershipWatchInput {
   /** Cloud project whose roster is watched. */
-  projectId: string
+  projectId: ProjectId
   /** Account whose membership is watched. */
   peerAccountId: string
   /** Aborts the watch when the ask settles for any other reason. */
@@ -1714,9 +1908,9 @@ export interface MemberMembershipWatchInput {
 }
 ```
 
-Depends on: [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.md)
+Depends on: [`CompanionMemberQuestionSettledResult`](subsystems/remote-protocol.md) · [`CompanionMessage`](../packages/platform/remote-protocol/src/index.ts) · [`CompanionOperationId`](../packages/platform/remote-protocol/src/index.ts) · [`MemberQuestionId`](../packages/platform/remote-protocol/src/index.ts) · [`ProjectId`](subsystems/project-membership.md) · [`SealedProjectPeerGrant`](subsystems/personal-pairing.md)
 
-Source: [`packages/interaction/member-question-sender/src/index.ts:149`](../packages/interaction/member-question-sender/src/index.ts)
+Source: [`packages/interaction/member-question-sender/src/index.ts:167`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="deepseek-aidsh-message-feedback"></a>
 
@@ -1856,6 +2050,11 @@ export interface AccountBackend {
   getSession(id: AccountSessionId): Promise<SessionRecord | undefined>
   /** Read one Platform Account by id. */
   getAccount(id: PlatformAccountId): Promise<AccountRecord | undefined>
+  /** Find current Account rows whose public GitHub login matches case-insensitively. */
+  findAccountsByGithubLogin(
+    identityNamespace: string,
+    normalizedGithubLogin: string,
+  ): Promise<readonly AccountRecord[]>
   /** Atomically rotate the matching refresh token generation. */
   rotateRefresh(sessionId: AccountSessionId, expectedHash: string, replacementHash: string): Promise<SessionRecord | undefined>
   /** Revoke one session and report whether it was active. */
@@ -1988,7 +2187,7 @@ export interface AccountRecord extends PlatformAccountView {
 
 Depends on: [`AccountProofJti`](../packages/platform/platform-account/src/index.ts) · [`AccountSessionId`](subsystems/platform-account.md) · [`InstallationId`](subsystems/platform-account.md) · [`InstallationKind`](../packages/platform/platform-account/src/index.ts) · [`InstallationPresentation`](../packages/platform/platform-account/src/index.ts) · [`LoginAttemptId`](subsystems/platform-account.md) · [`PlatformAccountId`](subsystems/platform-account.md) · [`PlatformAccountView`](subsystems/platform-account.md) · [`PlatformCapacityState`](../packages/platform/platform-account/src/index.ts) · [`PlatformEnvironment`](../packages/platform/platform-account/src/index.ts) · [`SelectedPlatformEnvironment`](../packages/platform/platform-account/src/index.ts)
 
-Source: [`packages/platform/platform-account-core/src/index.ts:507`](../packages/platform/platform-account-core/src/index.ts)
+Source: [`packages/platform/platform-account-core/src/index.ts:522`](../packages/platform/platform-account-core/src/index.ts)
 
 <a id="deepseek-aidsh-platform-account-http"></a>
 
@@ -2043,7 +2242,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/platform/project-membership-http/src/index.ts:53`](../packages/platform/project-membership-http/src/index.ts)
+Source: [`packages/platform/project-membership-http/src/index.ts:55`](../packages/platform/project-membership-http/src/index.ts)
 
 <a id="deepseek-aidsh-pwsh-local"></a>
 
@@ -3106,7 +3305,7 @@ export interface OriginResolverInput {
 
 Depends on: [`Agent`](subsystems/core.md) · [`MemberQuestionOrigin`](../packages/interaction/member-question-sender/src/index.ts)
 
-Source: [`packages/interaction/tool-ask-user/src/index.ts:72`](../packages/interaction/tool-ask-user/src/index.ts)
+Source: [`packages/interaction/tool-ask-user/src/index.ts:76`](../packages/interaction/tool-ask-user/src/index.ts)
 
 <a id="deepseek-aidsh-tool-bash"></a>
 
@@ -3979,6 +4178,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-input-trigger` ([`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-jobs` ([`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-layout` ([`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-member-questions` ([`packages/client/ui-member-questions/src/index.ts`](../packages/client/ui-member-questions/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-message-feedback` ([`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-model-selection` ([`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-permission-presets` ([`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts))
@@ -4082,6 +4282,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-noise-channel` ([`packages/platform/noise-channel/src/index.ts`](../packages/platform/noise-channel/src/index.ts))
 - `@deepseek-ai/dsh-output-retention` ([`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts))
 - `@deepseek-ai/dsh-platform-account-client` ([`packages/platform/platform-account-client/src/index.ts`](../packages/platform/platform-account-client/src/index.ts))
+- `@deepseek-ai/dsh-project-membership-client` ([`packages/platform/project-membership-client/src/index.ts`](../packages/platform/project-membership-client/src/index.ts))
 - `@deepseek-ai/dsh-remote-access-client` ([`packages/platform/remote-access-client/src/index.ts`](../packages/platform/remote-access-client/src/index.ts))
 - `@deepseek-ai/dsh-remote-access-redis` ([`packages/platform/remote-access-redis/src/index.ts`](../packages/platform/remote-access-redis/src/index.ts))
 - `@deepseek-ai/dsh-remote-protocol` ([`packages/platform/remote-protocol/src/index.ts`](../packages/platform/remote-protocol/src/index.ts))

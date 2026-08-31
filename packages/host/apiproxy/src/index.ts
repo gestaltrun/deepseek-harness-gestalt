@@ -15,6 +15,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type { InstallationId } from '@deepseek-ai/dsh-remote-protocol'
 import type { ApiProxy } from './api/index.ts'
 import { createApiProxy, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './api-proxy.ts'
 import {
@@ -59,6 +60,10 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /** Development-only Host Installation id for keyless receiver settlement. */
+  memberQuestionInstallationId?: string
+  /** Development-only user-facing Host Installation name. */
+  memberQuestionDeviceName?: string
 }
 
 /**
@@ -69,7 +74,7 @@ export interface Config {
 export class ApiProxyService extends Service implements ApiProxy {
   static inject = [
     'agentDefaultModel', 'agents', 'attachments', 'directoryPicker', 'llm', 'sessions', 'subagents', 'sessionQuery',
-    'tools', 'userQuestions', 'workspaceRegistry',
+    'tools', 'userQuestions', 'workspaceRegistry', 'memberQuestionReceiver',
   ]
 
   static Config: z<Config> = z.object({
@@ -77,6 +82,8 @@ export class ApiProxyService extends Service implements ApiProxy {
     sessionExportCompressionLevel: z.number().step(1).min(0).max(9)
       .default(DEFAULT_SESSION_LOG_COMPRESSION_LEVEL) as z<SessionLogCompressionLevel>,
     coldBlankProbeMaxBytes: z.natural().default(DEFAULT_COLD_BLANK_PROBE_MAX_BYTES),
+    memberQuestionInstallationId: z.string(),
+    memberQuestionDeviceName: z.string(),
   })
 
   readonly sessions: ApiProxy['sessions']
@@ -89,12 +96,24 @@ export class ApiProxyService extends Service implements ApiProxy {
   readonly settings: ApiProxy['settings']
   readonly credentials: ApiProxy['credentials']
   readonly llm: ApiProxy['llm']
+  readonly memberQuestions: ApiProxy['memberQuestions']
   readonly events: ApiProxy['events']
   readonly downloads: ApiProxy['downloads']
   readonly respond: ApiProxy['respond']
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'apiProxy')
+    const installationId = config.memberQuestionInstallationId
+    const deviceName = config.memberQuestionDeviceName
+    if ((installationId === undefined) !== (deviceName === undefined)) {
+      throw new TypeError('api-gateway: member-question Installation id and device name must be configured together')
+    }
+    if (installationId !== undefined && installationId.trim().length === 0) {
+      throw new TypeError('api-gateway: member-question Installation id must be non-empty')
+    }
+    if (deviceName !== undefined && deviceName.trim().length === 0) {
+      throw new TypeError('api-gateway: member-question device name must be non-empty')
+    }
     const api = createApiProxy(ctx, {
       defaultModelSelection: () => ctx.agentDefaultModel.currentSelection(),
       saveDefaultModelSelection: selection => ctx.agentDefaultModel.saveSelection(selection),
@@ -106,6 +125,12 @@ export class ApiProxyService extends Service implements ApiProxy {
       ...(config.coldBlankProbeMaxBytes === undefined
         ? {}
         : { coldBlankProbeMaxBytes: config.coldBlankProbeMaxBytes }),
+      ...(installationId === undefined || deviceName === undefined
+        ? {}
+        : { memberQuestionInstallation: {
+          id: installationId as InstallationId,
+          deviceName,
+        } }),
     })
     this.sessions = api.sessions
     this.subagents = api.subagents
@@ -117,6 +142,7 @@ export class ApiProxyService extends Service implements ApiProxy {
     this.settings = api.settings
     this.credentials = api.credentials
     this.llm = api.llm
+    this.memberQuestions = api.memberQuestions
     this.events = api.events
     this.downloads = api.downloads
     // createApiProxy returns closures (no `this` capture), so the bind is

@@ -253,6 +253,12 @@ importers:
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../../packages/platform/platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../../packages/platform/project-membership
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:^
+        version: link:../../packages/platform/project-membership-client
       '@deepseek-ai/dsh-pwsh-local':
         specifier: workspace:^
         version: link:../../packages/shell/pwsh-local
@@ -461,6 +467,9 @@ importers:
       '@deepseek-ai/dsh-platform-account-client':
         specifier: workspace:^
         version: link:../../packages/platform/platform-account-client
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:^
+        version: link:../../packages/platform/project-membership-client
       '@deepseek-ai/dsh-remote-access':
         specifier: workspace:^
         version: link:../../packages/platform/remote-access
@@ -1975,6 +1984,9 @@ importers:
       '@deepseek-ai/dsh-client-ui-layout':
         specifier: workspace:^
         version: link:../../client/ui-layout
+      '@deepseek-ai/dsh-client-ui-member-questions':
+        specifier: workspace:^
+        version: link:../../client/ui-member-questions
       '@deepseek-ai/dsh-client-ui-message-feedback':
         specifier: workspace:^
         version: link:../../client/ui-message-feedback
@@ -2083,6 +2095,9 @@ importers:
       '@deepseek-ai/dsh-launch-environment':
         specifier: workspace:^
         version: link:../../util/launch-environment
+      '@deepseek-ai/dsh-member-question-receiver':
+        specifier: workspace:^
+        version: link:../../interaction/member-question-receiver
       '@deepseek-ai/dsh-message-feedback':
         specifier: workspace:^
         version: link:../../feedback/message-feedback
@@ -2325,6 +2340,9 @@ importers:
       '@deepseek-ai/dsh-typert-registry':
         specifier: workspace:^
         version: link:../../typert/registry
+      '@deepseek-ai/dsh-user-questions':
+        specifier: workspace:^
+        version: link:../../interaction/user-questions
       '@types/react':
         specifier: ~18.3.1
         version: 18.3.31
@@ -2901,6 +2919,9 @@ importers:
       '@deepseek-ai/dsh-platform-account':
         specifier: workspace:^
         version: link:../../platform/platform-account
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:^
+        version: link:../../platform/project-membership-client
       '@deepseek-ai/dsh-remote-access':
         specifier: workspace:^
         version: link:../../platform/remote-access
@@ -3131,6 +3152,49 @@ importers:
       '@deepseek-ai/dsh-client-ui-theme':
         specifier: workspace:^
         version: link:../ui-theme
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@types/react':
+        specifier: ~18.3.1
+        version: 18.3.31
+      react:
+        specifier: ^18.2.0
+        version: 18.3.1
+
+  packages/client/ui-member-questions:
+    dependencies:
+      clsx:
+        specifier: ^2.0.0
+        version: 2.1.1
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-api-remotes':
+        specifier: workspace:^
+        version: link:../../api/remotes
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../connection
+      '@deepseek-ai/dsh-client-locale':
+        specifier: workspace:^
+        version: link:../locale
+      '@deepseek-ai/dsh-client-runtime':
+        specifier: workspace:^
+        version: link:../runtime
+      '@deepseek-ai/dsh-client-test-runtime':
+        specifier: workspace:^
+        version: link:../../test-support/client-runtime
+      '@deepseek-ai/dsh-client-ui-conversation':
+        specifier: workspace:^
+        version: link:../ui-conversation
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: workspace:^
+        version: link:../ui-slots
+      '@deepseek-ai/dsh-client-ui-user-questions':
+        specifier: workspace:^
+        version: link:../ui-user-questions
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
@@ -4217,6 +4281,12 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../../platform/project-membership
+      '@deepseek-ai/dsh-project-membership-client':
+        specifier: workspace:^
+        version: link:../../platform/project-membership-client
       '@types/react':
         specifier: ~18.3.1
         version: 18.3.31
@@ -6103,9 +6173,15 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:^
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-member-question-receiver':
+        specifier: workspace:^
+        version: link:../../interaction/member-question-receiver
       '@deepseek-ai/dsh-native-command':
         specifier: workspace:^
         version: link:../../util/native-command
+      '@deepseek-ai/dsh-remote-protocol':
+        specifier: workspace:^
+        version: link:../../platform/remote-protocol
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
@@ -6170,12 +6246,24 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-platform-account':
+        specifier: workspace:^
+        version: link:../../platform/platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../../platform/project-membership
       '@deepseek-ai/dsh-storage':
         specifier: workspace:^
         version: link:../../storage/storage
       '@deepseek-ai/dsh-storage-domain':
         specifier: workspace:^
         version: link:../../storage/storage-domain
+      '@deepseek-ai/dsh-subprocess':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess
+      '@deepseek-ai/dsh-subprocess-local':
+        specifier: workspace:^
+        version: link:../../subprocess/subprocess-local
       '@deepseek-ai/dsh-typert-protocol':
         specifier: workspace:^
         version: link:../../typert/protocol
@@ -6365,6 +6453,40 @@ importers:
       '@deepseek-ai/dsh-typert-protocol':
         specifier: workspace:^
         version: link:../../typert/protocol
+
+  packages/interaction/member-question-receiver:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-attachment':
+        specifier: workspace:^
+        version: link:../../attachment/attachment
+      '@deepseek-ai/dsh-atomic-write':
+        specifier: workspace:^
+        version: link:../../util/atomic-write
+      '@deepseek-ai/dsh-brand':
+        specifier: workspace:^
+        version: link:../../util/brand
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-platform-account':
+        specifier: workspace:^
+        version: link:../../platform/platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../../platform/project-membership
+      '@deepseek-ai/dsh-remote-protocol':
+        specifier: workspace:^
+        version: link:../../platform/remote-protocol
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
 
   packages/interaction/member-question-sender:
     dependencies:
@@ -7121,6 +7243,21 @@ importers:
         specifier: workspace:^
         version: link:../platform-account
 
+  packages/platform/project-membership-client:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-platform-account':
+        specifier: workspace:^
+        version: link:../platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../project-membership
+
   packages/platform/project-membership-core:
     dependencies:
       '@deepseek-ai/schemastery':
@@ -7324,6 +7461,12 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-platform-account':
+        specifier: workspace:^
+        version: link:../platform-account
+      '@deepseek-ai/dsh-project-membership':
+        specifier: workspace:^
+        version: link:../project-membership
 
   packages/preset/agent-presets:
     dependencies:

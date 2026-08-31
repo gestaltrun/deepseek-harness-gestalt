@@ -21,6 +21,10 @@ import { QuestionComposer } from './QuestionComposer.tsx'
 import { en, zh, type QuestionKey } from './locales.ts'
 
 export { PendingQuestion } from './contract/slots.ts'
+// Web-side consumers of the shared presentation seam mount it through this
+// package's module-table row (cross-plugin value imports ride `<pkg>/client`
+// externals); the `presentation` subpath stays the static-shell face.
+export { QuestionPresentation, type QuestionPresentationProps } from '../presentation.tsx'
 export type {
   PlanReview, QuestionAnswer, QuestionComposerProps, QuestionWait,
 } from './contract/slots.ts'
@@ -41,7 +45,8 @@ export const inject = ['slots', 'locale']
 
 /** Chain routing: claim the composer while a question wait is pending (pure — owner props only). */
 function selectQuestion({ interactions }: ComposerChainProps): QuestionWait | null {
-  return interactions.find((i): i is QuestionWait => i.kind === 'question') ?? null
+  return interactions.find((i): i is QuestionWait => i.kind === 'question'
+    && !i.payload.questions.every(question => question.intent?.kind === 'member-question')) ?? null
 }
 
 /**

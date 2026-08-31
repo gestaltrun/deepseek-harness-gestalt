@@ -102,6 +102,19 @@
     - id: plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
 
+    # Host authority for member-question receiving threads. Production keeps
+    # terminal publication deferred until the reviewed project transport is
+    # configured; test/development overlays must opt into the keyless local
+    # first-claim provider explicitly.
+    - id: member-question-receiver
+      name: '@deepseek-ai/dsh-member-question-receiver'
+      config:
+        storagePath: !!js dshHomePath('member-question-receiver')
+        environment: !!js "process.env.DSH_PLATFORM_ENVIRONMENT === 'production' ? 'production' : 'development'"
+        maxRecords: 1000
+        terminalRetryMs: 1000
+        terminalAuthorityMode: deferred
+
     # The API gateway: the transport-agnostic dispatch face every client shape
     # shares. The base layer's agent-default-model service owns the default model.
     - id: api-gateway
@@ -308,6 +321,9 @@
 
     - id: ui-user-questions
       name: '@deepseek-ai/dsh-client-ui-user-questions'
+
+    - id: ui-member-questions
+      name: '@deepseek-ai/dsh-client-ui-member-questions'
 
     - id: ui-trajectory
       name: '@deepseek-ai/dsh-client-ui-trajectory'

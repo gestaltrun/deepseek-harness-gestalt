@@ -96,6 +96,14 @@ export default class MemoryProjectMembership extends ProjectMembershipService {
     throw new Error('the demo membership provider serves reads only')
   }
 
+  override async pendingInvitationContextsFor(): Promise<never> {
+    throw new Error('the demo membership provider serves reads only')
+  }
+
+  override async pendingInvitationsIssuedBy(): Promise<never> {
+    throw new Error('the demo membership provider serves reads only')
+  }
+
   override async projectByRemote(): Promise<never> {
     throw new Error('the demo membership provider serves reads only')
   }

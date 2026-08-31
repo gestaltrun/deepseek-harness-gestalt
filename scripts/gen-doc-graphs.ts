@@ -258,6 +258,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns cloud-project authority — role-gated invitations, membership removal with roster projection invalidation, and environment-namespaced durable state; the HTTP consumer resolves the acting account from an Account session and adapts each route onto one service operation, and the model-facing roster tool reads one project\'s full roster through the same service.',
   },
   {
+    key: 'projectMembershipClient',
+    pkg: 'project-membership-client',
+    title: 'Authenticated Project Membership client',
+    mode: 'core',
+    consumers: ['ui-desktop', 'ui-workspace'],
+    note: 'Carries current-installation membership operations into Desktop UI composition; the Desktop provider obtains a fresh Account presentation for every call, while renderer consumers receive no credentials.',
+  },
+  {
     key: 'remoteAccess',
     pkg: 'remote-access',
     title: 'Personal Pairing lifecycle seam',
@@ -356,6 +364,23 @@ const SERVICE_ROLES: ServiceRole[] = [
     implementations: ['member-question-sender'],
     consumers: ['tool-ask-user'],
     note: 'Encodes a Companion member-question operation through the T4 codec and delivers the bytes through an injected adapter; peer credentials are retrieved through a B-side project-peer grant lookup.',
+  },
+  {
+    key: 'memberQuestionReceiver',
+    pkg: 'member-question-receiver',
+    title: 'Member-question receiver seam',
+    mode: 'seam',
+    implementations: ['member-question-receiver'],
+    consumers: ['member-question-receiver'],
+    note: 'Persists authenticated arrivals, canonical terminals, expiry, and one reserved high-level human admission; its package-folded ingress adapter is the current Consumer.',
+  },
+  {
+    key: 'memberQuestionWorkspaceBinding',
+    pkg: 'member-question-receiver',
+    title: 'Member-question local Workspace binding',
+    mode: 'core',
+    consumers: ['apiproxy'],
+    note: 'Resolves an authenticated receiver Account and cloud Project to one existing local Workspace; the API Proxy otherwise derives the same association from project membership.',
   },
   {
     key: 'planMode',

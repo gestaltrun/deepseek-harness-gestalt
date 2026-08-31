@@ -2,6 +2,8 @@ import { decodeProtocolBase64Url, decodeProtocolJson, encodeProtocolJson } from 
 import { RemoteProtocolError } from './errors.ts'
 import { parseAttachmentCapability } from './relay.ts'
 import { REMOTE_PROTOCOL_LIMITS } from './limits.ts'
+import type { InstallationId } from '@deepseek-ai/dsh-platform-account'
+import type { ProjectId } from '@deepseek-ai/dsh-project-membership'
 import type {
   CompanionHostFailure,
   CompanionInteractionId,
@@ -217,6 +219,15 @@ export function parseCompanionInteractionId(value: unknown): CompanionInteractio
  */
 export function parseMemberQuestionId(value: unknown): MemberQuestionId {
   return parseIdentifier(value, 'Companion member questionId') as MemberQuestionId
+}
+
+/**
+ * Parse one cloud-project identity carried by a member question.
+ * @param value - untrusted project identifier at the Companion wire boundary.
+ * @returns branded project identifier shared with project membership.
+ */
+export function parseMemberQuestionProjectId(value: unknown): ProjectId {
+  return parseIdentifier(value, 'Companion member-question projectId') as ProjectId
 }
 
 /**
@@ -443,7 +454,18 @@ function parseOperation(value: unknown, major: NegotiatedCompanionProtocol['majo
     if (major < 4) invalid('Companion member-question requires application major 4')
     exactKeys(
       record,
-      ['type', 'operationId', 'questionId', 'origin', 'background', 'questions', 'references'],
+      [
+        'type',
+        'operationId',
+        'questionId',
+        'projectId',
+        'originSessionId',
+        'expiresAt',
+        'origin',
+        'background',
+        'questions',
+        'references',
+      ],
       'Companion member-question operation',
     )
     if (!Array.isArray(record.questions) || record.questions.length === 0
@@ -461,6 +483,9 @@ function parseOperation(value: unknown, major: NegotiatedCompanionProtocol['majo
       type: 'member-question',
       operationId: parseCompanionOperationId(record.operationId),
       questionId: parseMemberQuestionId(record.questionId),
+      projectId: parseMemberQuestionProjectId(record.projectId),
+      originSessionId: parseCompanionSessionId(record.originSessionId),
+      expiresAt: positiveSafeInteger(record.expiresAt, 'Companion member-question expiresAt'),
       origin: parseMemberQuestionOrigin(record.origin),
       background: parseBoundedCodePoints(
         record.background,
@@ -826,11 +851,39 @@ function parseProjection(value: unknown, major: NegotiatedCompanionProtocol['maj
   }
   if (record.type === 'member-question-state') {
     if (major < 4) invalid('Companion member-question-state requires application major 4')
-    exactKeys(record, ['type', 'questionId', 'state'], 'Companion member-question-state projection')
+    const state = parseMemberQuestionState(record.state)
+    if (state === 'pending') {
+      exactKeys(record, ['type', 'questionId', 'state'], 'Companion member-question-state projection')
+      return { type: 'member-question-state', questionId: parseMemberQuestionId(record.questionId), state }
+    }
+    if (state === 'answered' || state === 'declined') {
+      exactKeys(
+        record,
+        ['type', 'questionId', 'state', 'settledByInstallationId', 'settledByDeviceName', 'settledAt'],
+        'Companion member-question-state projection',
+      )
+      return {
+        type: 'member-question-state',
+        questionId: parseMemberQuestionId(record.questionId),
+        state,
+        settledByInstallationId: parseIdentifier(
+          record.settledByInstallationId,
+          'Companion member-question settledByInstallationId',
+        ) as InstallationId,
+        settledByDeviceName: parseBoundedCodePoints(
+          record.settledByDeviceName,
+          REMOTE_PROTOCOL_LIMITS.memberQuestionSettledByDeviceNameCodePoints,
+          'Companion member-question settledByDeviceName',
+        ),
+        settledAt: positiveSafeInteger(record.settledAt, 'Companion member-question settledAt'),
+      }
+    }
+    exactKeys(record, ['type', 'questionId', 'state', 'settledAt'], 'Companion member-question-state projection')
     return {
       type: 'member-question-state',
       questionId: parseMemberQuestionId(record.questionId),
-      state: parseMemberQuestionState(record.state),
+      state,
+      settledAt: positiveSafeInteger(record.settledAt, 'Companion member-question settledAt'),
     }
   }
   if (record.type === 'document-transfer-state') {
@@ -924,7 +977,16 @@ function parseInteractionAnswerItems(
 }
 
 function parseMemberQuestionSettled(record: Record<string, unknown>): CompanionResult {
-  const keys = ['type', 'operationId', 'questionId', 'outcome', 'answers', 'settledByDeviceId', 'settledAtMoment']
+  const keys = [
+    'type',
+    'operationId',
+    'questionId',
+    'outcome',
+    'answers',
+    'settledByInstallationId',
+    'settledByDeviceName',
+    'settledAt',
+  ]
     .filter(key => record[key] !== undefined)
   exactKeys(record, keys, 'Companion member-question-settled result')
   if (record.outcome !== 'answered' && record.outcome !== 'declined' && record.outcome !== 'expired'
@@ -938,29 +1000,51 @@ function parseMemberQuestionSettled(record: Record<string, unknown>): CompanionR
   if (outcome !== 'answered' && record.answers !== undefined) {
     invalid('Companion member-question answers are admitted only for the answered outcome')
   }
-  return {
+  const human = outcome === 'answered' || outcome === 'declined'
+  if (human && (record.settledByInstallationId === undefined || record.settledByDeviceName === undefined)) {
+    invalid('Companion answered or declined member-question results require settling Installation metadata')
+  }
+  if (!human && (record.settledByInstallationId !== undefined || record.settledByDeviceName !== undefined)) {
+    invalid('Companion system-settled member-question results cannot name a settling Installation')
+  }
+  const base = {
     type: 'member-question-settled',
     operationId: parseCompanionOperationId(record.operationId),
     questionId: parseMemberQuestionId(record.questionId),
-    outcome,
-    ...(record.answers === undefined
-      ? {}
-      : { answers: parseInteractionAnswerItems(record.answers, 'Companion member-question answers') }),
-    ...(record.settledByDeviceId === undefined ? {} : {
-      settledByDeviceId: parseBoundedCodePoints(
-        record.settledByDeviceId,
-        REMOTE_PROTOCOL_LIMITS.memberQuestionSettledByDeviceIdCodePoints,
-        'Companion member-question settledByDeviceId',
+    settledAt: positiveSafeInteger(record.settledAt, 'Companion member-question settledAt'),
+  } as const
+  if (outcome === 'answered') {
+    return {
+      ...base,
+      outcome,
+      answers: parseInteractionAnswerItems(record.answers, 'Companion member-question answers'),
+      settledByInstallationId: parseIdentifier(
+        record.settledByInstallationId,
+        'Companion member-question settledByInstallationId',
+      ) as InstallationId,
+      settledByDeviceName: parseBoundedCodePoints(
+        record.settledByDeviceName,
+        REMOTE_PROTOCOL_LIMITS.memberQuestionSettledByDeviceNameCodePoints,
+        'Companion member-question settledByDeviceName',
       ),
-    }),
-    ...(record.settledAtMoment === undefined ? {} : {
-      settledAtMoment: parseBoundedCodePoints(
-        record.settledAtMoment,
-        REMOTE_PROTOCOL_LIMITS.memberQuestionSettledAtMomentCodePoints,
-        'Companion member-question settledAtMoment',
-      ),
-    }),
+    }
   }
+  if (outcome === 'declined') {
+    return {
+      ...base,
+      outcome,
+      settledByInstallationId: parseIdentifier(
+        record.settledByInstallationId,
+        'Companion member-question settledByInstallationId',
+      ) as InstallationId,
+      settledByDeviceName: parseBoundedCodePoints(
+        record.settledByDeviceName,
+        REMOTE_PROTOCOL_LIMITS.memberQuestionSettledByDeviceNameCodePoints,
+        'Companion member-question settledByDeviceName',
+      ),
+    }
+  }
+  return { ...base, outcome }
 }
 
 function parseSurfaceSnapshot(record: Record<string, unknown>): CompanionProjection {

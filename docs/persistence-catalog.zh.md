@@ -92,7 +92,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 }[T]
 ```
 
-来源：[`packages/core/session/src/types.ts:340`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:408`](../packages/core/session/src/types.ts)
+来源：[`packages/core/session/src/types.ts:340`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:347`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:376`](../packages/core/session/src/types.ts) · [`packages/core/session/src/types.ts:414`](../packages/core/session/src/types.ts)
 
 ## 事件
 
@@ -534,7 +534,7 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'member-question/asked': MemberQuestionAskedRecord
 ```
 
-来源：[`packages/interaction/member-question-sender/src/index.ts:72`](../packages/interaction/member-question-sender/src/index.ts)
+来源：[`packages/interaction/member-question-sender/src/index.ts:79`](../packages/interaction/member-question-sender/src/index.ts)
 
 <a id="member-questionoutcome--log-only"></a>
 
@@ -549,7 +549,39 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'member-question/outcome': MemberQuestionOutcomeRecord
 ```
 
-来源：[`packages/interaction/member-question-sender/src/index.ts:78`](../packages/interaction/member-question-sender/src/index.ts)
+来源：[`packages/interaction/member-question-sender/src/index.ts:85`](../packages/interaction/member-question-sender/src/index.ts)
+
+<a id="member-questionreceived--log-only"></a>
+
+#### `member-question/received` — log-only
+
+```ts persistence-catalog
+/** Bounded Decision Brief metadata received from another project member. */
+'member-question/received': {
+  questionId: MemberQuestionId
+  projectId: ProjectId
+  originSessionId: HostSessionId
+  arrivedAt: number
+  expiresAt: number
+  origin: CompanionMemberQuestionOperation['origin']
+  background: string
+  questions: CompanionMemberQuestionOperation['questions']
+  references: CompanionMemberQuestionOperation['references']
+}
+```
+
+来源：[`packages/interaction/member-question-receiver/src/types.ts:243`](../packages/interaction/member-question-receiver/src/types.ts)
+
+<a id="member-questionsettled--log-only"></a>
+
+#### `member-question/settled` — log-only
+
+```ts persistence-catalog
+/** Canonical terminal metadata for one received member question. */
+'member-question/settled': CompanionMemberQuestionSettledResult
+```
+
+来源：[`packages/interaction/member-question-receiver/src/types.ts:255`](../packages/interaction/member-question-receiver/src/types.ts)
 
 ### `permission/*`
 

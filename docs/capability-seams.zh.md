@@ -79,6 +79,10 @@ flowchart LR
   svc_projectMembership["ctx.projectMembership<br/>Project membership collaboration seam"]
   pkg_project_membership_core["project-membership-core"]
   pkg_tool_project_members["tool-project-members"]
+  pkg_project_membership_client["project-membership-client"]
+  svc_projectMembershipClient["ctx.projectMembershipClient<br/>Authenticated Project Membership client"]
+  pkg_ui_desktop["ui-desktop"]
+  pkg_ui_workspace["ui-workspace"]
   pkg_remote_access["remote-access"]
   svc_remoteAccess["ctx.remoteAccess<br/>Personal Pairing lifecycle seam"]
   pkg_remote_access_http["remote-access-http"]
@@ -115,6 +119,9 @@ flowchart LR
   svc_userQuestions["ctx.userQuestions<br/>Human question/answer seam"]
   pkg_member_question_sender["member-question-sender"]
   svc_memberQuestionSender["ctx.memberQuestionSender<br/>Member-question sender seam"]
+  pkg_member_question_receiver["member-question-receiver"]
+  svc_memberQuestionReceiver["ctx.memberQuestionReceiver<br/>Member-question receiver seam"]
+  svc_memberQuestionWorkspaceBinding["ctx.memberQuestionWorkspaceBinding<br/>Member-question local Workspace binding"]
   pkg_plan_mode["plan-mode"]
   svc_planMode["ctx.planMode<br/>Plan collaboration state"]
   pkg_agent_presets["agent-presets"]
@@ -285,6 +292,8 @@ flowchart LR
   pkg_llm_replay --> svc_llm
   pkg_lsp --> svc_lsp
   pkg_lsp_local --> svc_lsp
+  pkg_member_question_receiver --> svc_memberQuestionReceiver
+  pkg_member_question_receiver --> svc_memberQuestionWorkspaceBinding
   pkg_member_question_sender --> svc_memberQuestionSender
   pkg_message_feedback --> svc_messageFeedback
   pkg_modules --> svc_clientModules
@@ -293,6 +302,7 @@ flowchart LR
   pkg_platform_account --> svc_platformAccount
   pkg_platform_account_core --> svc_platformAccount
   pkg_project_membership --> svc_projectMembership
+  pkg_project_membership_client --> svc_projectMembershipClient
   pkg_project_membership_core --> svc_projectMembership
   pkg_pwsh_local --> svc_shell
   pkg_remote_access --> svc_remoteAccess
@@ -396,12 +406,16 @@ flowchart LR
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_memberQuestionReceiver --> pkg_member_question_receiver
   svc_memberQuestionSender --> pkg_tool_ask_user
+  svc_memberQuestionWorkspaceBinding --> pkg_apiproxy
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
   svc_platformAccount --> pkg_project_membership_http
   svc_projectMembership --> pkg_project_membership_http
   svc_projectMembership --> pkg_tool_project_members
+  svc_projectMembershipClient --> pkg_ui_desktop
+  svc_projectMembershipClient --> pkg_ui_workspace
   svc_remoteAccess --> pkg_remote_access_http
   svc_remoteAttachments --> pkg_remote_attachments
   svc_remoteRelay --> pkg_remote_access_http
@@ -510,6 +524,7 @@ flowchart LR
 | `ctx.messageFeedback` | `core` | [`message-feedback`](../packages/feedback/message-feedback) | - | - | - | 拥有本地逐 assistant 消息反馈、生命周期与目标校验、逐条目 compare-and-set 及 Host 一元 Remote 契约，且不进入 Session 历史或遥测。 |
 | `ctx.platformAccount` | `seam` | [`platform-account`](../packages/platform/platform-account) | [`platform-account-core`](../packages/platform/platform-account-core) | [`platform-account-http`](../packages/platform/platform-account-http), [`platform-account-client`](../packages/platform/platform-account-client), [`project-membership-http`](../packages/platform/project-membership-http) | - | 拥有 GitHub 公开身份与持有证明安装会话；HTTP 和 Desktop/Mobile 客户端通过签名轮询完成登录，不接收提供方凭证。 |
 | `ctx.projectMembership` | `seam` | [`project-membership`](../packages/platform/project-membership) | [`project-membership-core`](../packages/platform/project-membership-core) | [`project-membership-http`](../packages/platform/project-membership-http), [`tool-project-members`](../packages/interaction/tool-project-members) | - | 拥有云端项目权威——角色门邀请、伴随 roster 投影失效的成员移除、环境命名空间持久状态；HTTP 消费方从账号会话解析操作者，并把每条路由适配到唯一一次服务操作上，面向模型的名册工具经由同一服务读取单个项目的完整名册。 |
+| `ctx.projectMembershipClient` | `core` | [`project-membership-client`](../packages/platform/project-membership-client) | - | `ui-desktop`, `ui-workspace` | - | 把当前 Installation 的成员操作带入 Desktop UI 组合；Desktop 提供方为每次调用取得新的 Account presentation，而 renderer 消费方不会接收凭据。 |
 | `ctx.remoteAccess` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | HTTP 消费方通过一个共用校验传输向 Desktop 设置与 Mobile 暴露 endpoint-owned mailbox 操作；Platform 只接收路由元数据、不透明握手消息、credential digest 与密封 authority。 |
 | `ctx.remoteRelay` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | 拥有由凭据鉴权的在线 attachment 和只含密文的转发；会过期的 Redis 目录与直达 Pub/Sub 协调非 sticky Platform Instance，且不建立离线 queue。 |
 | `ctx.remoteAttachments` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | - | 只保留 endpoint 加密的密文与元数据，签发限定于单个 Personal Pairing 的一次性会过期 capability，并在 consume、过期或撤销时移除 blob 及其 capability。 |
@@ -521,7 +536,9 @@ flowchart LR
 | `ctx.systemPrompt` | `core` | [`system-prompt`](../packages/core/system-prompt) | - | [`agent-loop`](../packages/core/agent-loop), [`tools`](../packages/core/tools), [`tool-fs`](../packages/fs/tool-fs), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-web`](../packages/web/tool-web) | - | 为每个步骤收集提示词各部分和面向模型的工具 schema。 |
 | `ctx.tools` | `core` | [`tools`](../packages/core/tools) | - | [`agent-loop`](../packages/core/agent-loop), [`agent-tool-eligibility`](../packages/core/agent-tool-eligibility), [`tools-eligibility`](../packages/core/tools-eligibility), [`tool-ask-user`](../packages/interaction/tool-ask-user), [`tool-bash`](../packages/shell/tool-bash), [`tool-cordis`](../packages/extensions/tool-cordis), [`tool-fs`](../packages/fs/tool-fs), [`tool-terminal`](../packages/terminal/tool-terminal), [`tool-skill`](../packages/skill/tool-skill), [`tool-subagent`](../packages/subagent/tool-subagent), [`tool-todo`](../packages/todo/tool-todo), [`tool-web`](../packages/web/tool-web) | - | 注册能力，负责 Code Mode 传输，并让调用依次经过策略前处理、单调守卫、环绕分派、策略后处理和最终结果观测。 |
 | `ctx.userQuestions` | `seam` | [`user-questions`](../packages/interaction/user-questions) | - | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | UI 前端提供当前生效的人工回答提供方；tool-ask-user 在提供方无关的 ask() promise 上暂停工具调用。 |
-| `ctx.memberQuestionSender` | `seam` | [`member-question-sender`](../packages/interaction/member-question-sender) | [`member-question-sender`](../packages/interaction/member-question-sender) | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | 通过 T4 codec 编码 Companion member-question 操作，并经注入的适配器投递字节；对端凭证通过 B 侧项目对等授权检索取回。 |
+| `ctx.memberQuestionSender` | `seam` | [`member-question-sender`](../packages/interaction/member-question-sender) | [`member-question-sender`](../packages/interaction/member-question-sender) | [`tool-ask-user`](../packages/interaction/tool-ask-user) | - | 通过 T4 codec 编码一项 Companion member-question operation，并经注入的 adapter 投递 bytes；对端凭证通过 B 侧 project-peer grant lookup 获取。 |
+| `ctx.memberQuestionReceiver` | `seam` | [`member-question-receiver`](../packages/interaction/member-question-receiver) | [`member-question-receiver`](../packages/interaction/member-question-receiver) | [`member-question-receiver`](../packages/interaction/member-question-receiver) | - | 持久化认证 arrival、canonical terminal、expiry 与一次已 reservation 的高层 human admission；包内折叠的 ingress adapter 是当前 Consumer。 |
+| `ctx.memberQuestionWorkspaceBinding` | `core` | [`member-question-receiver`](../packages/interaction/member-question-receiver) | - | `apiproxy` | - | 把已认证的 receiver Account 与 cloud Project 解析为唯一且既存的本地 Workspace；API Proxy 未获得该 binding 时，会从 project membership 派生同一关联。 |
 | `ctx.planMode` | `core` | [`plan-mode`](../packages/plan/plan-mode) | - | - | - | 折叠已记录的计划／模式状态，在轮次边界刷新用户选择，渲染由部署方拥有的指导信息，注册 /plan，并在状态转换期间保持计划退出 schema 稳定。 |
 | `ctx.agentPresets` | `core` | [`agent-presets`](../packages/preset/agent-presets) | - | - | - | 在受信任根目录与用户创作根目录上发现 preset 目录，并在创建期把一份 preset cordis.yml 挂载到 agent 作用域之下，拒绝始终未激活或向根服务 realm 发布服务的行。 |
 | `ctx.commands` | `core` | [`commands`](../packages/interaction/commands) | - | - | - | 插件注册直接面向人的命令，而不会把调用发送给模型。 |

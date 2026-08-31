@@ -1,0 +1,24 @@
+{
+  "$schema": "./schema.json",
+  "version": 1,
+  "id": "344-member-question-host-projection",
+  "summary": {
+    "en": "Recover member-question receiving sessions and terminal outcomes from Host-owned state.",
+    "zh": "从 Host 所有的状态恢复成员提问接收 Session 与终态结果。"
+  },
+  "releases": {
+    "desktop": "minor",
+    "mobile": "none",
+    "platform": "none"
+  },
+  "compatibilityExceptions": [
+    {
+      "releaseUnit": "mobile",
+      "reason": "Mobile does not compose the Web receiver, Host member-question RPCs, or browser terminal-record presentation changed by this delivery."
+    },
+    {
+      "releaseUnit": "platform",
+      "reason": "Platform does not compose the local Host receiver or Client Runtime projection, and this delivery changes no Platform deployment input."
+    }
+  ]
+}

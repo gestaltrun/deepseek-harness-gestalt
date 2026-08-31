@@ -24,6 +24,19 @@ contextBridge.exposeInMainWorld('dshDesktop', {
     ipcRenderer.on('account:snapshot-changed', wrapped)
     return () => { ipcRenderer.removeListener('account:snapshot-changed', wrapped) }
   },
+  projectMembership: {
+    createProject: (input) => ipcRenderer.invoke('projectMembership:create', input),
+    projectByRemote: (normalizedRemoteUrl) => ipcRenderer.invoke('projectMembership:byRemote', normalizedRemoteUrl),
+    roster: (projectId) => ipcRenderer.invoke('projectMembership:roster', projectId),
+    invite: (input) => ipcRenderer.invoke('projectMembership:invite', input),
+    decideInvitation: (invitationId, input) => ipcRenderer.invoke('projectMembership:decide', { invitationId, input }),
+    retractInvitation: (invitationId) => ipcRenderer.invoke('projectMembership:retract', invitationId),
+    pendingInvitations: () => ipcRenderer.invoke('projectMembership:pending'),
+    issuedInvitations: (projectId) => ipcRenderer.invoke('projectMembership:issued', projectId),
+    changeRole: (membershipId, role) => ipcRenderer.invoke('projectMembership:changeRole', { membershipId, role }),
+    setMemberTags: (membershipId, tags) => ipcRenderer.invoke('projectMembership:setTags', { membershipId, tags }),
+    removeMember: (membershipId) => ipcRenderer.invoke('projectMembership:remove', membershipId),
+  },
   pairingGetSnapshot: () => ipcRenderer.invoke('pairing:getSnapshot'),
   pairingSetEnabled: (enabled) => ipcRenderer.invoke('pairing:setEnabled', enabled),
   pairingCreateChallenge: () => ipcRenderer.invoke('pairing:createChallenge'),

@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
-import { parseMemberQuestionId } from '@deepseek-ai/dsh-remote-protocol'
+import {
+  parseCompanionSessionId,
+  parseMemberQuestionId,
+  parseMemberQuestionProjectId,
+} from '@deepseek-ai/dsh-remote-protocol'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import * as MemberQuestionSenderInvariant from '../src/invariant.ts'
+
+const projectId = parseMemberQuestionProjectId('project-atlas')
+const originSessionId = parseCompanionSessionId('session-origin')
 
 async function setup(): Promise<Context> {
   const ctx = new Context()
@@ -22,10 +29,10 @@ describe('member-question sender invariants', () => {
     session.append('member-question/asked', {
       questionId,
       toProjectMember: 'account-peer',
-      projectId: 'project-atlas',
+      projectId,
       background: 'Need a rollback window.',
       questions: [{ id: 'q-1', question: 'Ship it?' }],
-      originSessionId: 'session-origin',
+      originSessionId,
     })
     session.append('member-question/outcome', { questionId, outcome: 'answered', answers: [{ id: 'q-1', selected: ['yes'] }] })
   })
@@ -46,10 +53,10 @@ describe('member-question sender invariants', () => {
     const asked = {
       questionId,
       toProjectMember: 'account-peer',
-      projectId: 'project-atlas',
+      projectId,
       background: 'Need a rollback window.',
       questions: [{ id: 'q-1', question: 'Ship it?' }],
-      originSessionId: 'session-origin',
+      originSessionId,
     }
     session.append('member-question/asked', asked)
     expect(() => session.append('member-question/asked', asked)).toThrow(/repeated open id/)
@@ -64,10 +71,10 @@ describe('member-question sender invariants', () => {
     session.append('member-question/asked', {
       questionId,
       toProjectMember: 'account-peer',
-      projectId: 'project-atlas',
+      projectId,
       background: 'Need a rollback window.',
       questions: [{ id: 'q-1', question: 'Ship it?' }],
-      originSessionId: 'session-origin',
+      originSessionId,
     })
     await ctx.plugin(InvariantRegistry)
     await ctx.plugin(MemberQuestionSenderInvariant)
@@ -80,19 +87,19 @@ describe('member-question sender invariants', () => {
     expect(() => session.append('member-question/asked', {
       questionId: '' as never,
       toProjectMember: 'account-peer',
-      projectId: 'project-atlas',
+      projectId,
       background: 'Need a rollback window.',
       questions: [{ id: 'q-1', question: 'Ship it?' }],
-      originSessionId: 'session-origin',
+      originSessionId,
     })).toThrow(/questionId must be non-empty/)
     const questionId = parseMemberQuestionId('mqbadout')
     session.append('member-question/asked', {
       questionId,
       toProjectMember: 'account-peer',
-      projectId: 'project-atlas',
+      projectId,
       background: 'Need a rollback window.',
       questions: [{ id: 'q-1', question: 'Ship it?' }],
-      originSessionId: 'session-origin',
+      originSessionId,
     })
     expect(() => session.append('member-question/outcome', { questionId, outcome: 'maybe' as never }))
       .toThrow(/unknown outcome/)
@@ -113,10 +120,10 @@ describe('member-question sender invariants', () => {
         data: {
           questionId,
           toProjectMember: 'account-peer',
-          projectId: 'project-atlas',
+          projectId,
           background: 'Need a rollback window.',
           questions: [{ id: 'q-1', question: 'Ship it?' }],
-          originSessionId: 'session-origin',
+          originSessionId,
         },
       })
       ctx.emit('session/event', session, {

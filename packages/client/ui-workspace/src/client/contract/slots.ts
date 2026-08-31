@@ -33,6 +33,83 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type { createWorkspaceViewStore } from '../stores.ts'
 
+/** Client-face projection of one bound cloud project. */
+export interface WorkspaceProjectView {
+  id: string
+  name: string
+  boundRemoteUrl: string
+}
+
+/** Permission role inside one cloud project. */
+export type WorkspaceProjectRole = 'owner' | 'admin' | 'member'
+
+/** One roster row as the settings surface renders it. */
+export interface WorkspaceMemberRow {
+  membershipId: string
+  accountId: string
+  /** Public GitHub login; empty when the Account plane does not know the account. */
+  displayName: string
+  role: WorkspaceProjectRole
+  tags: readonly string[]
+  presence: 'online' | 'offline'
+}
+
+/** One invitation issued from the settings surface, still awaiting confirmation. */
+export interface WorkspaceIssuedInvitation {
+  invitationId: string
+  /** Invitee shown to the inviter (GitHub login as entered). */
+  inviteeName: string
+}
+
+/** One pending invitation addressed to the local account (poll source of the wizard). */
+export interface WorkspacePendingInvitation {
+  invitationId: string
+  receivingAccountId: string
+  projectId: string
+  projectName: string
+  inviterName: string
+  /** Normalized remote of the invited project, for same-origin link advice. */
+  remoteUrl: string
+}
+
+/**
+ * Upgrade seam between this surface and the membership client composition:
+ * the browser routes every upgrade action through it. Composition adapts
+ * `@deepseek-ai/dsh-project-membership-client`'s transport; compositions
+ * without it render no upgrade affordance.
+ */
+export interface ProjectMembershipGateway {
+  createProject(input: { name: string; localWorkspaceId: WorkspaceId }): Promise<WorkspaceProjectView>
+  /** Recover the current Account's Cloud Project without replacing an existing exact binding. */
+  projectForWorkspace(workspaceId: WorkspaceId): Promise<WorkspaceProjectView | undefined>
+  roster(projectId: string): Promise<{ project: WorkspaceProjectView; members: readonly WorkspaceMemberRow[] }>
+  invite(input: { projectId: string; githubLogin: string }): Promise<WorkspaceIssuedInvitation>
+  issuedInvitations(projectId: string): Promise<readonly WorkspaceIssuedInvitation[]>
+  retractInvitation(invitationId: string): Promise<void>
+  decideInvitation(
+    invitationId: string,
+    input: { decision: 'decline' } | {
+      decision: 'accept-with-link'
+      localWorkspaceId: WorkspaceId
+      receivingAccountId: string
+      projectId: string
+      link: { workspaceName: string; normalizedRemoteUrl?: string }
+    },
+  ): Promise<void>
+  changeRole(membershipId: string, role: WorkspaceProjectRole): Promise<void>
+  setMemberTags(membershipId: string, tags: readonly string[]): Promise<void>
+  removeMember(membershipId: string): Promise<void>
+  /** Invitations addressed to the local account; polled while the browser is open. */
+  pendingInvitations(): Promise<readonly WorkspacePendingInvitation[]>
+  /** Normalized git remote of one local workspace checkout, when known. */
+  localRemoteFor(workspaceId: WorkspaceId): Promise<string | undefined>
+  /** Pick a parent, clone the invited remote, and register the new Workspace; undefined means user cancellation. */
+  cloneWorkspace(input: {
+    remoteUrl: string
+    directoryName: string
+  }): Promise<{ workspaceId: WorkspaceId; title: string; normalizedRemoteUrl: string } | undefined>
+}
+
 /**
  * Owner share of the directory-flow holes: the complete conversation between
  * the trigger surface and the picking interaction. The occupant reads `open`
@@ -137,6 +214,8 @@ export type WorkspaceBrowserInjected = {
   insertSessionBefore: (workspaceId: WorkspaceId, sessionId: SessionId, beforeSessionId?: SessionId) => Promise<void>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
+  /** Authenticated Project Membership gateway supplied by a product composition. */
+  projectMembership?: ProjectMembershipGateway | undefined
 }
 
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */

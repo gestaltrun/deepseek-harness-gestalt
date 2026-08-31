@@ -46,10 +46,8 @@ export const REMOTE_PROTOCOL_LIMITS = {
   memberQuestionReferencePathCodePoints: 512,
   /** Maximum Unicode code points in one member-question reference reason. */
   memberQuestionReferenceReasonCodePoints: 100,
-  /** Maximum Unicode code points in one member-question settling device id. */
-  memberQuestionSettledByDeviceIdCodePoints: 80,
-  /** Maximum Unicode code points in one member-question settled moment. */
-  memberQuestionSettledAtMomentCodePoints: 40,
+  /** Maximum Unicode code points in one user-facing settling Installation name. */
+  memberQuestionSettledByDeviceNameCodePoints: 128,
   /** Maximum referenced documents in one member question. */
   memberQuestionReferences: 8,
   /** Maximum selectable options in one member question. */

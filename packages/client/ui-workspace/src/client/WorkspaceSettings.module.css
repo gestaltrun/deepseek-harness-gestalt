@@ -1,0 +1,172 @@
+/* Workspace settings modal and invite wizard (prototype v10): sectioned
+   settings body, roster rows, and the two-step wizard link list. */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 420px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ds-text-primary);
+}
+
+.subTitle {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ds-text-secondary);
+}
+
+.sectionDesc {
+  font-size: 12px;
+  color: var(--ds-text-secondary);
+}
+
+.fieldLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--ds-text-secondary);
+}
+
+.fieldInput {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--ds-border);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ds-text-primary);
+  background: var(--ds-bg-input);
+}
+
+.settingsWorkspace {
+  display: none;
+}
+
+.members {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memberList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.memberRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.presence {
+  display: inline-flex;
+  align-items: center;
+  width: 16px;
+}
+
+.offlineDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ds-border);
+}
+
+.memberName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--ds-text-primary);
+}
+
+.roleSelect {
+  height: 24px;
+  border: 1px solid var(--ds-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ds-text-primary);
+  background: var(--ds-bg-input);
+}
+
+.tagsInput {
+  width: 160px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--ds-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ds-text-primary);
+  background: var(--ds-bg-input);
+}
+
+.inviteRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.inviteRow .fieldInput {
+  flex: 1;
+}
+
+.actionError {
+  font-size: 12px;
+  color: var(--ds-text-danger);
+}
+
+.wizardCard {
+  min-width: 360px;
+  font-size: 13px;
+  color: var(--ds-text-primary);
+}
+
+.linkList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.linkRow {
+  padding: 2px 0;
+}
+
+.linkLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.badgeRecommended {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--ds-text-success);
+  background: var(--ds-bg-success-soft, rgba(48, 160, 88, 0.15));
+}
+
+.badgeForeign {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--ds-text-warning);
+  background: var(--ds-bg-warning-soft, rgba(200, 140, 0, 0.15));
+}

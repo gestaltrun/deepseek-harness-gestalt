@@ -423,6 +423,25 @@ describe('WorkspaceBrowser', () => {
     expect(startSession).not.toHaveBeenCalled()
   })
 
+  it('reveals a newly pending Ungrouped session once and respects a later collapse', async () => {
+    const quiet = summary('receiving', 1)
+    const b = mount({
+      useSessions: hook(sessionState([quiet])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', [])])),
+    })
+    expect(screen.queryByText('receiving')).toBeNull()
+
+    const pending = { ...quiet, pendingInteraction: 'question' as const }
+    rerender(b, { useSessions: hook(sessionState([pending])) })
+    await waitFor(() => { expect(screen.getByText('receiving')).toBeTruthy() })
+    expect(b.store.getSnapshot().groupExpansion).toEqual({ [UNGROUPED_KEY]: true })
+
+    fireEvent.click(screen.getByText('未分组'))
+    expect(screen.queryByText('receiving')).toBeNull()
+    rerender(b, { useSessions: hook(sessionState([{ ...pending, updatedAt: 2 }])) })
+    expect(screen.queryByText('receiving')).toBeNull()
+  })
+
   it('keeps an already-expanded group when the selection moves within it', () => {
     const first = sessionState([summary('a', 2), summary('b', 1)], { current: sid('a') })
     const b = mount({

@@ -64,6 +64,7 @@ const ENVIRONMENT = selectPlatformEnvironment(ENVIRONMENT_PAIR, 'development')
 interface Session {
   readonly key: ReturnType<typeof installationKey>
   readonly accountId: PlatformAccountId
+  readonly githubLogin: string
   readonly accessToken: string
 }
 
@@ -143,7 +144,7 @@ describe('real Project Membership HTTP composition', () => {
 
     // Invite and accept.
     const invited = await post(loaded.origin, '/v1/projects/invitations', {
-      projectId: project.id, inviteeAccountId: mona.accountId,
+      projectId: project.id, githubLogin: mona.githubLogin,
     }, authHeaders(octocat))
     expect(invited.status).toBe(201)
     const invitation = await invited.json() as { id: string; state: string; inviteeAccountId: string }
@@ -431,7 +432,10 @@ async function signIn(
     proof: key.proof('login-poll', `${attempt.id}:${hashAccountToken(attempt.pollingToken)}`),
   })
   if (polled.status !== 'complete') throw new Error('assembled login remained pending')
-  return { key, accountId: polled.account.id, accessToken: polled.accessToken }
+  return {
+    key, accountId: polled.account.id, githubLogin: polled.account.githubLogin,
+    accessToken: polled.accessToken,
+  }
 }
 
 /** One fresh Account session presentation; every request needs a new proof. */
@@ -462,7 +466,7 @@ async function createProjectWithMember(origin: string, founder: Session, joiner:
   expect(created.status).toBe(201)
   const project = await created.json() as { id: string }
   const invited = await post(origin, '/v1/projects/invitations', {
-    projectId: project.id, inviteeAccountId: joiner.accountId,
+    projectId: project.id, githubLogin: joiner.githubLogin,
   }, authHeaders(founder))
   expect(invited.status).toBe(201)
   const invitation = await invited.json() as { id: string }

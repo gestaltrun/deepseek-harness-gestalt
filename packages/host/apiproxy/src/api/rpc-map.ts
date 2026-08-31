@@ -15,6 +15,7 @@ import type { CredentialsApi } from './credentials.ts'
 import type { LlmApi } from './llm.ts'
 import type { SubagentsApi } from './subagents.ts'
 import type { RpcResponse } from './rpc.ts'
+import type { MemberQuestionsApi } from './member-questions.ts'
 
 /**
  * Method name → method signature. Signatures are the single source of truth; payload/value
@@ -22,6 +23,12 @@ import type { RpcResponse } from './rpc.ts'
  * request (command.execute): the carrier passes its request signal, never a wire field.
  */
 export interface RpcMethodMap {
+  'memberQuestion.workspaceBinding': MemberQuestionsApi['workspaceBinding']
+  'memberQuestion.ensureWorkspaceBinding': MemberQuestionsApi['ensureWorkspaceBinding']
+  'memberQuestion.bindWorkspace': MemberQuestionsApi['bindWorkspace']
+  'memberQuestion.snapshot': MemberQuestionsApi['snapshot']
+  'memberQuestion.settle': MemberQuestionsApi['settle']
+  'memberQuestion.admitHumanTurn': MemberQuestionsApi['admitHumanTurn']
   'session.list': SessionsApi['list']
   'session.search': SessionsApi['search']
   'session.create': SessionsApi['create']
@@ -47,6 +54,8 @@ export interface RpcMethodMap {
   'host.openPath': HostApi['openPath']
   'workspace.list': WorkspaceApi['list']
   'workspace.create': WorkspaceApi['create']
+  'workspace.gitRemote': WorkspaceApi['gitRemote']
+  'workspace.cloneGit': WorkspaceApi['cloneGit']
   'workspace.rename': WorkspaceApi['rename']
   'workspace.delete': WorkspaceApi['delete']
   'workspace.insertBefore': WorkspaceApi['insertBefore']

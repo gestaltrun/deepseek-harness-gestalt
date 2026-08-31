@@ -70,6 +70,7 @@ export class PhoneEnvironment extends Service {
   private refreshController: AbortController | undefined
   private prepareTask: Promise<PhoneEnvironmentSnapshot> | undefined
   private refreshTask: Promise<PhoneEnvironmentSnapshot> | undefined
+  private transactionTail: Promise<unknown> = Promise.resolve()
   private enableTail: Promise<void> = Promise.resolve()
   private readonly lifetime = new AbortController()
   private disposed = false
@@ -174,7 +175,8 @@ export class PhoneEnvironment extends Service {
     const operationSignal = signal === undefined
       ? AbortSignal.any([this.lifetime.signal, controller.signal])
       : AbortSignal.any([this.lifetime.signal, controller.signal, signal])
-    const operation = this.detectRuntime(operationSignal)
+    const operation = this.transactionTail.then(() => this.detectRuntime(operationSignal))
+    this.transactionTail = operation.catch(() => {})
     this.refreshTask = operation
     void operation.then(
       () => {
@@ -192,6 +194,10 @@ export class PhoneEnvironment extends Service {
   /**
    * Download, verify, publish, and optionally activate the pinned host asset.
    * @returns the committed full snapshot after preparation settles.
+   * @throws {@link PhoneEnvironmentError} with `PHONE_ENVIRONMENT_OVERRIDE` while
+   *   `executablePath` is authoritative, `PHONE_ENVIRONMENT_BUSY` for concurrent
+   *   preparation, or the documented download, verification, filesystem,
+   *   cancellation, and activation codes.
    */
   prepare(): Promise<PhoneEnvironmentSnapshot> {
     if (this.executableOverride !== undefined) {
@@ -212,7 +218,7 @@ export class PhoneEnvironment extends Service {
     }
     const controller = new AbortController()
     this.prepareController = controller
-    const operation = (async () => {
+    const operation = this.transactionTail.then(async () => {
       try {
         const installed = await installManagedMobilecli(this.root, asset, controller.signal, {
           onPhase: phase => this.publishRuntime(phase === 'verifying'
@@ -233,7 +239,8 @@ export class PhoneEnvironment extends Service {
       } finally {
         if (this.prepareController === controller) this.prepareController = undefined
       }
-    })()
+    })
+    this.transactionTail = operation.catch(() => {})
     this.prepareTask = operation
     void operation.then(
       () => { if (this.prepareTask === operation) this.prepareTask = undefined },

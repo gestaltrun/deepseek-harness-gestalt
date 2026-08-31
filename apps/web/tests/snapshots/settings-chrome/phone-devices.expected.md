@@ -17,7 +17,13 @@
 - article:
   - heading "iOS" [level=3]
   - paragraph: 模拟器与 USB 真机
-  - strong: iOS 设备需要 Mac
+  - strong: 完整 Xcode
+  - text: 需要手动安装或更新
+  - strong: iOS Simulator Runtime
+  - text: 可在这里一键下载
+  - strong: DSH Gestalt iPhone
+  - text: 默认 iPhone 模拟器
+  - strong: iOS 模拟器需要 macOS
   - paragraph: iOS 模拟器需要在安装 Xcode 的 macOS 上使用。
 - article:
   - heading "手机设备" [level=3]

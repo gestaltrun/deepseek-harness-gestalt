@@ -40,6 +40,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Services required before activation. */
 export const inject = ['betterSidebar', 'slots', 'locale', 'settingsScope'] as const
 
+function enabledValue(settings: PhoneSettings | undefined): boolean | undefined {
+  return settings?.enabled
+}
+
 /**
  * Enable gate of the phone tab. The default stays `false`: a deployment must
  * opt in before any device discovery may run (contract placeholder until the
@@ -102,7 +106,7 @@ export function apply(ctx: ClientContext, config: Config): void {
 
   const tabEnabled = (): boolean => {
     const snapshot = scope.getSnapshot()
-    if (snapshot.status === 'ready') return snapshot.value.enabled
+    if (snapshot.status === 'ready') return enabledValue(snapshot.value) ?? compositionEnabled
     return compositionEnabled
   }
   // The body reads the gate reactively: scope invalidation (the enable

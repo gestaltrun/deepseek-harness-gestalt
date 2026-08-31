@@ -2,11 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { zipSync } from 'fflate'
 import {
   installManagedMobilecli, PhoneEnvironmentError, probeMobilecliVersion, readManagedMobilecli,
 } from '../src/installer.ts'
+import type { MobilecliInstallerOptions } from '../src/installer.ts'
 import type { MobilecliReleaseAsset } from '../src/types.ts'
 
 const diskFault = vi.hoisted(() => ({ enabled: false }))
@@ -16,7 +17,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   return {
     ...actual,
     open: async (...args: Parameters<typeof actual.open>) => {
-      if (diskFault.enabled && String(args[0]).endsWith('/mobilecli')) {
+      if (diskFault.enabled && basename(String(args[0])) === 'mobilecli') {
         const error = new Error('no space left on device') as NodeJS.ErrnoException
         error.code = 'ENOSPC'
         throw error
@@ -62,6 +63,12 @@ function responseOf(bytes: Uint8Array, declaredBytes = bytes.byteLength): Respon
   return new Response(body, { status: 200, headers: { 'content-length': String(declaredBytes) } })
 }
 
+function hostProbe(version = '1.0.5'): Pick<MobilecliInstallerOptions, 'probeVersion'> {
+  return process.platform === 'win32'
+    ? { probeVersion: async () => version }
+    : {}
+}
+
 describe('managed mobilecli installer', () => {
   it('follows only the GitHub release-asset redirect, verifies, probes, and atomically publishes current', async () => {
     const root = await tempRoot()
@@ -74,6 +81,7 @@ describe('managed mobilecli installer', () => {
       }))
       .mockResolvedValueOnce(responseOf(bytes))
     const installed = await installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      ...hostProbe(),
       fetch: fetcher,
       onProgress: value => progress.push(value.receivedBytes),
     })
@@ -113,7 +121,7 @@ describe('managed mobilecli installer', () => {
     expect(fetcher).toHaveBeenCalledTimes(6)
   })
 
-  it('scrubs host credentials from the version probe child', async () => {
+  it.runIf(process.platform !== 'win32')('scrubs host credentials from the version probe child', async () => {
     const root = await tempRoot()
     const bytes = archiveOf('1.0.5', 'mobilecli', [
       '#!/bin/sh',
@@ -168,6 +176,7 @@ describe('managed mobilecli installer', () => {
     const versionRoot = await tempRoot()
     const wrong = archiveOf('9.9.9')
     await expect(installManagedMobilecli(versionRoot, assetOf(wrong), new AbortController().signal, {
+      ...hostProbe('9.9.9'),
       fetch: vi.fn<typeof fetch>().mockResolvedValue(responseOf(wrong)),
     })).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_VERSION' })
   })
@@ -219,7 +228,7 @@ describe('managed mobilecli installer', () => {
     expect((await readdir(root)).filter(name => name.startsWith('.staging-'))).toEqual([])
   })
 
-  it('rejects a version probe whose executable exits non-zero', async () => {
+  it.runIf(process.platform !== 'win32')('rejects a version probe whose executable exits non-zero', async () => {
     const root = await tempRoot()
     const executable = join(root, 'mobilecli')
     await writeFile(executable, '#!/bin/sh\nexit 7\n')
@@ -229,7 +238,7 @@ describe('managed mobilecli installer', () => {
     })
   })
 
-  it('normalizes cancellation during the version probe', async () => {
+  it.runIf(process.platform !== 'win32')('normalizes cancellation during the version probe', async () => {
     const root = await tempRoot()
     const executable = join(root, 'mobilecli')
     await writeFile(executable, '#!/bin/sh\nsleep 10\n')
@@ -253,12 +262,14 @@ describe('managed mobilecli installer', () => {
     const root = await tempRoot()
     const bytes = archiveOf()
     const first = await installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      ...hostProbe(),
       fetch: vi.fn<typeof fetch>().mockResolvedValue(responseOf(bytes)),
     })
     const before = await readFile(join(root, 'current.json'), 'utf8')
 
     diskFault.enabled = true
     await expect(installManagedMobilecli(root, assetOf(bytes), new AbortController().signal, {
+      ...hostProbe(),
       fetch: vi.fn<typeof fetch>().mockResolvedValue(responseOf(bytes)),
     })).rejects.toMatchObject({ code: 'PHONE_ENVIRONMENT_DISK' })
     expect(await readFile(join(root, 'current.json'), 'utf8')).toBe(before)

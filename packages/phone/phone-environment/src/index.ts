@@ -200,6 +200,16 @@ export class PhoneEnvironment extends Service {
     }
     if (this.candidate === undefined || this.candidateVersion === undefined) await this.refresh(signal)
     else await this.activateCandidate(this.candidate, this.candidateVersion, signal)
+    await this.iosTask?.catch((error: unknown) => {
+      if (!isCancellation(error)) throw error
+    })
+    const ios = this.ios?.snapshot()
+    if (ios?.kind === 'ready' && ios.running
+      && (this.current.platforms.ios.kind !== 'ready' || !this.current.platforms.ios.running)) {
+      await this.runIosOperation(async (_provider, operationSignal) => {
+        await this.activateIosRuntime(ios, operationSignal)
+      }, signal)
+    }
   }
 
   /**
@@ -236,6 +246,8 @@ export class PhoneEnvironment extends Service {
 
   /**
    * Register the iOS platform Provider while retaining this Service as the full-snapshot owner.
+   * A running snapshot discovered during registration remains pending until
+   * the active mobilecli generation passes list and picture verification.
    * @param provider - Xcode runtime and Simulator lifecycle owner.
    * @returns disposer that detaches the Provider and restores the deferred state.
    */
@@ -246,7 +258,7 @@ export class PhoneEnvironment extends Service {
       this.publishIos(this.pendingIosRuntime(state))
     })
     this.publishIos(this.pendingIosRuntime(provider.snapshot()))
-    void provider.refresh(this.lifetime.signal).catch(() => {})
+    void this.refreshIos().catch(() => {})
     return () => {
       if (this.ios !== provider) return
       this.unsubscribeIos?.()
@@ -490,7 +502,12 @@ export class PhoneEnvironment extends Service {
 
   private async refreshIos(): Promise<void> {
     await this.runIosOperation(async (provider, signal) => {
-      this.publishIos(this.pendingIosRuntime(await provider.refresh(signal)))
+      const state = await provider.refresh(signal)
+      this.publishIos(this.pendingIosRuntime(state))
+      if (state.kind === 'ready' && state.running
+        && this.current.enabled && this.candidate !== undefined && this.candidateVersion !== undefined) {
+        await this.activateIosRuntime(state, signal)
+      }
     })
   }
 
@@ -539,6 +556,7 @@ export class PhoneEnvironment extends Service {
 
   private async runIosOperation(
     operation: (provider: IosEnvironmentProvider, signal: AbortSignal) => Promise<void>,
+    ownerSignal?: AbortSignal,
   ): Promise<void> {
     if (this.iosTask !== undefined) {
       throw new PhoneEnvironmentError('PHONE_IOS_BUSY', 'an iOS environment operation is already running')
@@ -546,7 +564,9 @@ export class PhoneEnvironment extends Service {
     const provider = this.requireIos()
     const controller = new AbortController()
     this.iosController = controller
-    const signal = AbortSignal.any([this.lifetime.signal, controller.signal])
+    const signal = ownerSignal === undefined
+      ? AbortSignal.any([this.lifetime.signal, controller.signal])
+      : AbortSignal.any([this.lifetime.signal, controller.signal, ownerSignal])
     const task = operation(provider, signal)
     this.iosTask = task
     try {
@@ -565,7 +585,7 @@ export class PhoneEnvironment extends Service {
     let failure: unknown
     try { await this.iosTask } catch (error) { if (!isCancellation(error)) failure = error }
     try { await this.ios?.deactivate() } catch (error) { failure ??= error }
-    if (this.ios !== undefined) this.publishIos(this.ios.snapshot())
+    if (this.ios !== undefined) this.publishIos(this.pendingIosRuntime(this.ios.snapshot()))
     if (failure !== undefined) throw failure
   }
 

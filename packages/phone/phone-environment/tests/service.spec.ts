@@ -9,6 +9,7 @@ import { deviceId } from '@deepseek-ai/dsh-phone-runtime'
 import { buildGradientJpeg } from '../../phone-runtime/tests/fixtures/u3-visible-frames.ts'
 import PhoneEnvironment, {
   PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH, PHONE_ENVIRONMENT_ANDROID_START_PATH,
+  PHONE_ENVIRONMENT_IOS_CANCEL_PATH, PHONE_ENVIRONMENT_IOS_REFRESH_PATH,
   PHONE_ENVIRONMENT_IOS_START_PATH, PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError,
 } from '../src/index.ts'
 import type {
@@ -130,14 +131,20 @@ function runningAndroidProvider() {
   return { provider, deactivate, emit }
 }
 
-function runningIosProvider() {
-  let state: PhoneIosState = { kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: false }
+function runningIosProvider(options: { readonly initialRunning?: boolean; readonly preserveRunningOnDeactivate?: boolean } = {}) {
+  let state: PhoneIosState = {
+    kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: options.initialRunning === true,
+  }
   const listeners = new Set<(value: PhoneIosState) => void>()
   const emit = (next: PhoneIosState): void => {
     state = next
     for (const listener of listeners) listener(state)
   }
-  const deactivate = vi.fn(async () => { emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: false }) })
+  const deactivate = vi.fn(async () => {
+    if (options.preserveRunningOnDeactivate !== true) {
+      emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: false })
+    }
+  })
   const provider: IosEnvironmentProvider = {
     snapshot: () => state,
     refresh: async () => state,
@@ -215,6 +222,89 @@ describe('PhoneEnvironment', () => {
     expect(service.snapshot().platforms.ios).toMatchObject({
       kind: 'failed', code: 'PHONE_IOS_RUNTIME_VERIFY', retryable: true,
     })
+  })
+
+  it('reconciles a running Simulator discovered during Provider registration through picture verification', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async () => ({
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(5)) } }),
+    }))
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { executablePath: path })
+    const { provider } = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+
+    service.registerIosEnvironment(provider)
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+    await service.setEnabled(true)
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalledOnce() })
+    await vi.waitFor(() => {
+      expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+    })
+    expect(startCapture).toHaveBeenCalledWith({
+      deviceId: IOS_ID, format: 'mjpeg', signal: expect.any(AbortSignal),
+    })
+  })
+
+  it('verifies a Simulator that becomes running before manual iOS refresh', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async () => ({
+      contentType: 'image/jpeg',
+      body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(buildGradientJpeg(6)) } }),
+    }))
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { executablePath: path })
+    const { provider, emit } = runningIosProvider()
+    service.registerIosEnvironment(provider)
+    await vi.waitFor(() => { expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: false }) })
+    await service.setEnabled(true)
+    emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: true })
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+
+    const response = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_REFRESH_PATH}`, { method: 'POST' })
+    expect(response.status).toBe(200)
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+    expect(startCapture).toHaveBeenCalledOnce()
+  })
+
+  it('never promotes an unverified running Provider snapshot when verification is cancelled', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const startCapture = vi.fn(async () => ({
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: new ReadableStream<Uint8Array>(),
+    }))
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({ android: [], ios: { simulators: [{
+        id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+      }], reals: [] } }),
+      startCapture,
+    }, { executablePath: path })
+    await service.setEnabled(true)
+    const { provider } = runningIosProvider({ initialRunning: true, preserveRunningOnDeactivate: true })
+    service.registerIosEnvironment(provider)
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalledOnce() })
+
+    const cancelled = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_CANCEL_PATH}`, { method: 'POST' })
+    expect(cancelled.status).toBe(200)
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+    expect(service.snapshot().platforms.ios).not.toMatchObject({ kind: 'ready', running: true })
   })
 
   it('requires Android license consent and reactivates mobilecli with the Provider environment', async () => {

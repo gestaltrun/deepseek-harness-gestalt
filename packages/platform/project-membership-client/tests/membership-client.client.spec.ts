@@ -152,6 +152,13 @@ describe('ProjectMembershipHttpTransport', () => {
     await expect(transport.projectByRemote(AUTH, 'https://github.com/o/missing')).resolves.toBeUndefined()
   })
 
+  it('uses the ambient fetch adapter when none is supplied', async () => {
+    const ambient = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }))
+    const transport = new ProjectMembershipHttpTransport({ origin: ORIGIN })
+    await expect(transport.projectByRemote(AUTH, 'https://github.com/o/missing')).resolves.toBeUndefined()
+    expect(ambient).toHaveBeenCalledOnce()
+  })
+
   it('keeps the 403 role-gate envelope: stable code plus HTTP status', async () => {
     const { transport } = wire({
       'POST /v1/projects': {
@@ -181,5 +188,120 @@ describe('ProjectMembershipHttpTransport', () => {
     await expect(transport.createProject(AUTH, { name: 'X', remoteUrl: 'https://github.com/o/r' })).rejects.toThrow(TypeError)
     await expect(transport.roster(AUTH, 'project-1' as ProjectId)).rejects.toThrow('presence')
     await expect(transport.pendingInvitations(AUTH)).rejects.toThrow('array')
+  })
+
+  it('projects optional response fields and lifecycle states without inventing values', async () => {
+    for (const state of ['accepted', 'declined', 'retracted'] as const) {
+      const { transport } = wire({
+        'POST /v1/projects/invitations': {
+          status: 201,
+          body: { ...invitation(), state, settledAt: 11 },
+        },
+      })
+      await expect(transport.invite(AUTH, {
+        projectId: 'project-1' as ProjectId, githubLogin: 'mona',
+      })).resolves.toMatchObject({ state, settledAt: 11 })
+    }
+
+    const emptyRoster = wire({
+      'GET /v1/projects/project-1/members': { status: 200, body: { project: project(), members: [] } },
+    }).transport
+    await expect(emptyRoster.roster(AUTH, 'project-1' as ProjectId)).resolves.toMatchObject({ members: [] })
+
+    const linkedRoster = wire({
+      'GET /v1/projects/project-1/members': {
+        status: 200,
+        body: {
+          project: project(),
+          members: [{
+            id: 'membership-2', accountId: 'account-2', role: 'admin', joinedAt: 2,
+            tags: [],
+            link: { workspaceName: 'local', normalizedRemoteUrl: 'https://github.com/o/r' },
+            presence: 'offline', displayName: '', avatarRef: '',
+          }],
+        },
+      },
+    }).transport
+    await expect(linkedRoster.roster(AUTH, 'project-1' as ProjectId)).resolves.toMatchObject({
+      members: [{
+        tags: [], displayName: '', avatarRef: '',
+        link: { workspaceName: 'local', normalizedRemoteUrl: 'https://github.com/o/r' },
+      }],
+    })
+  })
+
+  it('rejects each malformed success-payload boundary', async () => {
+    for (const body of [null, []]) {
+      const { transport } = wire({ 'POST /v1/projects': { status: 201, body } })
+      await expect(transport.createProject(AUTH, {
+        name: 'X', remoteUrl: 'https://github.com/o/r',
+      })).rejects.toThrow('must be an object')
+    }
+
+    const badCreatedAt = wire({
+      'POST /v1/projects': {
+        status: 201,
+        body: { ...project(), createdAt: 'now', receivingAccountId: 'account-1' },
+      },
+    }).transport
+    await expect(badCreatedAt.createProject(AUTH, {
+      name: 'X', remoteUrl: 'https://github.com/o/r',
+    })).rejects.toThrow('createdAt must be epoch milliseconds')
+
+    const badState = wire({
+      'POST /v1/projects/invitations': { status: 201, body: { ...invitation(), state: 'expired' } },
+    }).transport
+    await expect(badState.invite(AUTH, {
+      projectId: 'project-1' as ProjectId, githubLogin: 'mona',
+    })).rejects.toThrow('known lifecycle state')
+
+    const badTags = wire({
+      'POST /v1/projects/invitations/invitation-1/decision': {
+        status: 200,
+        body: { ...member(), tags: [42] },
+      },
+    }).transport
+    await expect(badTags.decideInvitation(AUTH, 'invitation-1' as never, {
+      decision: 'accept-with-link', link: { workspaceName: 'local' },
+    })).rejects.toThrow('tags must be strings')
+
+    const badRole = wire({
+      'GET /v1/projects/project-1/members': {
+        status: 200,
+        body: {
+          project: project(),
+          members: [{ ...member(), presence: 'online', role: 'spectator' }],
+        },
+      },
+    }).transport
+    await expect(badRole.roster(AUTH, 'project-1' as ProjectId)).rejects.toThrow('role must be owner, admin, or member')
+
+    const missingCases: Array<[string, unknown, RegExp]> = [
+      ['POST /v1/projects/invitations/invitation-1/decision', {
+        id: 'membership-2', accountId: 'account-2', role: 'member', tags: [], joinedAt: 2,
+      }, /link must be present/],
+      ['POST /v1/projects/invitations/invitation-1/decision', {
+        id: 'membership-2', accountId: 'account-2', role: 'member',
+        link: { workspaceName: 'local' }, joinedAt: 2,
+      }, /response must be an array/],
+      ['GET /v1/projects/project-1/members', { project: project() }, /response must be an array/],
+      ['GET /v1/projects/project-1/members', {
+        project: project(),
+        members: [{ ...member(), presence: 'online', avatarRef: '' }],
+      }, /displayName must be a string/],
+      ['GET /v1/projects/project-1/members', {
+        project: project(),
+        members: [{ ...member(), presence: 'online', displayName: '' }],
+      }, /avatarRef must be a string/],
+    ]
+    for (const [key, body, message] of missingCases) {
+      const transport = wire({ [key]: { status: 200, body } }).transport
+      const run = key.startsWith('POST')
+        ? transport.decideInvitation(AUTH, 'invitation-1' as never, {
+          decision: 'accept-with-link', link: { workspaceName: 'local' },
+        })
+        : transport.roster(AUTH, 'project-1' as ProjectId)
+      await expect(run).rejects.toThrow(message)
+    }
   })
 })

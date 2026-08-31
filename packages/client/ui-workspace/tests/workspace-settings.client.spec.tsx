@@ -10,7 +10,11 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { ProjectMembershipGateway, WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 import { WorkspaceBrowser } from '../src/client/WorkspaceBrowser.tsx'
-import { cloneDirectoryName } from '../src/client/WorkspaceSettings.tsx'
+import {
+  cloneDirectoryName,
+  InviteWizardModal,
+  WorkspaceSettingsModal,
+} from '../src/client/WorkspaceSettings.tsx'
 import { zh } from '../src/client/locales.ts'
 
 afterEach(cleanup)
@@ -117,6 +121,33 @@ async function tick(ms = 1): Promise<void> {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ms)
   })
+}
+
+async function flush(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
+}
+
+const projectView = { id: 'project-1', name: 'Assembled', boundRemoteUrl: SAME_REMOTE }
+const pendingInvitation = {
+  invitationId: 'invitation-1',
+  receivingAccountId: 'account-2',
+  projectId: 'project-1',
+  projectName: 'Assembled',
+  inviterName: 'mona',
+  remoteUrl: SAME_REMOTE,
 }
 
 describe('workspace settings and invite wizard (M4)', () => {
@@ -321,5 +352,382 @@ describe('workspace settings and invite wizard (M4)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('contains settings lookup completion and failure after unmount and reports active Error and string failures', async () => {
+    for (const reason of [new Error('lookup error'), 'lookup string']) {
+      const membership = gateway({
+        projectForWorkspace: vi.fn().mockRejectedValue(reason),
+        localRemoteFor: vi.fn(async () => SAME_REMOTE),
+      })
+      render(<WorkspaceSettingsModal
+        workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+      />)
+      await flush()
+      expect(screen.getByRole('alert').textContent).toBe(reason instanceof Error ? reason.message : reason)
+      cleanup()
+    }
+
+    const projectLookup = deferred<undefined>()
+    const remoteLookup = deferred<string | undefined>()
+    const resolved = render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')}
+      workspaceTitle="proj"
+      gateway={gateway({
+        projectForWorkspace: vi.fn(() => projectLookup.promise),
+        localRemoteFor: vi.fn(() => remoteLookup.promise),
+      })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    resolved.unmount()
+    await act(async () => {
+      projectLookup.resolve(undefined)
+      remoteLookup.resolve(undefined)
+      await Promise.all([projectLookup.promise, remoteLookup.promise])
+    })
+
+    const rejectedLookup = deferred<undefined>()
+    const rejected = render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')}
+      workspaceTitle="proj"
+      gateway={gateway({ projectForWorkspace: vi.fn(() => rejectedLookup.promise) })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    rejected.unmount()
+    await act(async () => {
+      rejectedLookup.reject(new Error('late lookup'))
+      await Promise.resolve()
+    })
+  })
+
+  it('reports Error and string failures while creating a Cloud Project', async () => {
+    const createProject = vi.fn<ProjectMembershipGateway['createProject']>()
+      .mockRejectedValueOnce(new Error('create error'))
+      .mockRejectedValueOnce('create string')
+    const membership = gateway({ createProject })
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+    />)
+    await flush()
+    const name = screen.getByLabelText('云项目名称')
+    fireEvent.change(name, { target: { value: 'Assembled' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建云项目' }))
+    await flush()
+    expect(screen.getByRole('alert').textContent).toBe('create error')
+    fireEvent.change(name, { target: { value: 'Assembled again' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建云项目' }))
+    await flush()
+    expect(screen.getByRole('alert').textContent).toBe('create string')
+  })
+
+  it('contains roster and issued-invitation completion after unmount and reports both failure forms', async () => {
+    for (const [rosterReason, issuedReason] of [
+      [new Error('roster error'), 'issued string'],
+      ['roster string', new Error('issued error')],
+    ] as const) {
+      render(<WorkspaceSettingsModal
+        workspaceId={wid('proj')}
+        workspaceTitle="proj"
+        gateway={gateway({
+          projectForWorkspace: vi.fn(async () => projectView as never),
+          roster: vi.fn().mockRejectedValue(rosterReason),
+          issuedInvitations: vi.fn().mockRejectedValue(issuedReason),
+        })}
+        onClose={vi.fn()}
+        t={t}
+      />)
+      await flush()
+      expect(screen.getByRole('alert')).toBeTruthy()
+      cleanup()
+    }
+
+    const rosterRead = deferred<Awaited<ReturnType<ProjectMembershipGateway['roster']>>>()
+    const issuedRead = deferred<Awaited<ReturnType<ProjectMembershipGateway['issuedInvitations']>>>()
+    const completed = render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')}
+      workspaceTitle="proj"
+      gateway={gateway({
+        projectForWorkspace: vi.fn(async () => projectView as never),
+        roster: vi.fn(() => rosterRead.promise),
+        issuedInvitations: vi.fn(() => issuedRead.promise),
+      })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    await flush()
+    completed.unmount()
+    await act(async () => {
+      rosterRead.resolve({ project: projectView, members: [] })
+      issuedRead.resolve([])
+      await Promise.all([rosterRead.promise, issuedRead.promise])
+    })
+
+    const lateRoster = deferred<Awaited<ReturnType<ProjectMembershipGateway['roster']>>>()
+    const lateIssued = deferred<Awaited<ReturnType<ProjectMembershipGateway['issuedInvitations']>>>()
+    const failed = render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')}
+      workspaceTitle="proj"
+      gateway={gateway({
+        projectForWorkspace: vi.fn(async () => projectView as never),
+        roster: vi.fn(() => lateRoster.promise),
+        issuedInvitations: vi.fn(() => lateIssued.promise),
+      })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    await flush()
+    failed.unmount()
+    await act(async () => {
+      lateRoster.reject(new Error('late roster'))
+      lateIssued.reject('late issued')
+      await Promise.allSettled([lateRoster.promise, lateIssued.promise])
+    })
+
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')}
+      workspaceTitle="proj"
+      gateway={gateway({
+        projectForWorkspace: vi.fn(async () => projectView as never),
+        roster: vi.fn(async () => ({ project: projectView, members: [] } as never)),
+      })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    await flush()
+    expect(screen.getByText(t('members.empty'))).toBeTruthy()
+  })
+
+  it('runs invitation and roster administration through pending, success, and both failure forms', async () => {
+    const inviteRun = deferred<{ invitationId: string; inviteeName: string }>()
+    const invite = vi.fn<ProjectMembershipGateway['invite']>()
+      .mockReturnValueOnce(inviteRun.promise)
+      .mockRejectedValueOnce(new Error('invite error'))
+      .mockRejectedValueOnce('invite string')
+    const retractRun = deferred<undefined>()
+    const retractInvitation = vi.fn<ProjectMembershipGateway['retractInvitation']>()
+      .mockReturnValueOnce(retractRun.promise)
+      .mockRejectedValueOnce(new Error('retract error'))
+      .mockRejectedValueOnce('retract string')
+    const setMemberTags = vi.fn<ProjectMembershipGateway['setMemberTags']>()
+      .mockRejectedValueOnce(new Error('tags error'))
+    const removeMember = vi.fn<ProjectMembershipGateway['removeMember']>()
+      .mockRejectedValueOnce('remove string')
+    const members = [
+      {
+        membershipId: 'membership-1', accountId: 'account-2', displayName: 'mona',
+        role: 'member' as const, tags: ['triage'], presence: 'online' as const,
+      },
+      {
+        membershipId: 'membership-2', accountId: 'account-3', displayName: '',
+        role: 'admin' as const, tags: [], presence: 'offline' as const,
+      },
+    ]
+    const membership = gateway({
+      projectForWorkspace: vi.fn(async () => projectView as never),
+      roster: vi.fn(async () => ({ project: projectView, members } as never)),
+      issuedInvitations: vi.fn(async () => [{ invitationId: 'issued-1', inviteeName: 'octocat' }]),
+      invite,
+      retractInvitation,
+      setMemberTags,
+      removeMember,
+    })
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+    />)
+    await flush()
+    expect(screen.getByText('account-3')).toBeTruthy()
+    expect(screen.getByText(t('members.offline'))).toBeTruthy()
+
+    const login = screen.getByLabelText(t('members.inviteLogin'))
+    fireEvent.change(login, { target: { value: ' octocat ' } })
+    fireEvent.click(screen.getByRole('button', { name: t('members.invite') }))
+    expect(screen.getByRole('button', { name: t('members.inviting') })).toBeTruthy()
+    await act(async () => { inviteRun.resolve({ invitationId: 'new', inviteeName: 'octocat' }); await inviteRun.promise })
+    expect((login as HTMLInputElement).value).toBe('')
+    for (const [value, message] of [['mona', 'invite error'], ['ada', 'invite string']] as const) {
+      fireEvent.change(login, { target: { value } })
+      fireEvent.click(screen.getByRole('button', { name: t('members.invite') }))
+      await flush()
+      expect(screen.getByRole('alert').textContent).toBe(message)
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: t('invitations.retract') }))
+    expect(screen.getByRole('button', { name: t('invitations.retracting') })).toBeTruthy()
+    await act(async () => { retractRun.resolve(undefined); await retractRun.promise })
+    for (const message of ['retract error', 'retract string']) {
+      fireEvent.click(screen.getByRole('button', { name: t('invitations.retract') }))
+      await flush()
+      expect(screen.getByRole('alert').textContent).toBe(message)
+    }
+
+    fireEvent.change(screen.getAllByRole('combobox')[0]!, { target: { value: 'admin' } })
+    await flush()
+    expect(membership.changeRole).toHaveBeenCalledWith('membership-1', 'admin')
+    const tags = screen.getAllByLabelText(t('members.tagsPlaceholder'))[0]!
+    fireEvent.blur(tags)
+    expect(setMemberTags).not.toHaveBeenCalled()
+    fireEvent.change(tags, { target: { value: ' triage, , qa ' } })
+    fireEvent.keyDown(tags, { key: 'Escape' })
+    expect(setMemberTags).not.toHaveBeenCalled()
+    fireEvent.keyDown(tags, { key: 'Enter' })
+    await flush()
+    expect(setMemberTags).toHaveBeenCalledWith('membership-1', ['triage', 'qa'])
+    expect(screen.getByRole('alert').textContent).toBe('tags error')
+    fireEvent.click(screen.getAllByRole('button', { name: t('members.remove') })[0]!)
+    await flush()
+    expect(screen.getByRole('alert').textContent).toBe('remove string')
+  })
+
+  it('contains retract completion after unmount', async () => {
+    for (const outcome of ['resolve', 'reject'] as const) {
+      const run = deferred<undefined>()
+      const membership = gateway({
+        projectForWorkspace: vi.fn(async () => projectView as never),
+        issuedInvitations: vi.fn(async () => [{ invitationId: 'issued-1', inviteeName: 'octocat' }]),
+        retractInvitation: vi.fn(() => run.promise),
+      })
+      const view = render(<WorkspaceSettingsModal
+        workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+      />)
+      await flush()
+      fireEvent.click(screen.getByRole('button', { name: t('invitations.retract') }))
+      view.unmount()
+      await act(async () => {
+        if (outcome === 'resolve') run.resolve(undefined)
+        else run.reject(new Error('late retract'))
+        await Promise.allSettled([run.promise])
+      })
+    }
+  })
+
+  it('handles wizard remote lookup, foreign badges, busy close, and both decline failure forms', async () => {
+    const remoteRun = deferred<string | undefined>()
+    const disposed = render(<InviteWizardModal
+      invitation={pendingInvitation as never}
+      workspaces={[{ workspaceId: wid('first'), title: 'First' }]}
+      gateway={gateway({ localRemoteFor: vi.fn(() => remoteRun.promise) })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    disposed.unmount()
+    await act(async () => { remoteRun.resolve(SAME_REMOTE); await remoteRun.promise })
+
+    render(<InviteWizardModal
+      invitation={pendingInvitation as never}
+      workspaces={[
+        { workspaceId: wid('unknown'), title: 'Unknown' },
+        { workspaceId: wid('foreign'), title: 'Foreign' },
+      ]}
+      gateway={gateway({
+        localRemoteFor: vi.fn(async id => id === wid('foreign') ? 'https://github.com/other/repo' : undefined),
+      })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.accept') }))
+    expect(screen.getByText(t('wizard.link.foreign'))).toBeTruthy()
+    expect(screen.queryByText(t('wizard.link.recommended'))).toBeNull()
+    cleanup()
+
+    render(<InviteWizardModal
+      invitation={pendingInvitation as never}
+      workspaces={[{ workspaceId: wid('failed'), title: 'Failed' }]}
+      gateway={gateway({ localRemoteFor: vi.fn().mockRejectedValue(new Error('git unavailable')) })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    await flush()
+    cleanup()
+
+    const declineRun = deferred<undefined>()
+    const decideInvitation = vi.fn<ProjectMembershipGateway['decideInvitation']>()
+      .mockReturnValueOnce(declineRun.promise)
+      .mockRejectedValueOnce('decline string')
+    const onClose = vi.fn()
+    render(<InviteWizardModal
+      invitation={pendingInvitation}
+      workspaces={[]}
+      gateway={gateway({ decideInvitation })}
+      onClose={onClose}
+      t={t}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.decline') }))
+    fireEvent.click(screen.getByRole('button', { name: t('close') }))
+    expect(onClose).not.toHaveBeenCalled()
+    await act(async () => { declineRun.reject(new Error('decline error')); await Promise.allSettled([declineRun.promise]) })
+    expect(screen.getByRole('alert').textContent).toBe('decline error')
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.decline') }))
+    await flush()
+    expect(screen.getByRole('alert').textContent).toBe('decline string')
+  })
+
+  it('accepts an unbadged Workspace without inventing a remote and reports candidate drift and decision failure', async () => {
+    const decideInvitation = vi.fn<ProjectMembershipGateway['decideInvitation']>().mockResolvedValue(undefined)
+    const onClose = vi.fn()
+    const selected = render(<InviteWizardModal
+      invitation={pendingInvitation as never}
+      workspaces={[{ workspaceId: wid('first'), title: 'First' }]}
+      gateway={gateway({ localRemoteFor: vi.fn(async () => undefined), decideInvitation })}
+      onClose={onClose}
+      t={t}
+    />)
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.accept') }))
+    fireEvent.click(screen.getByRole('radio', { name: /^First/ }))
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.link.confirm') }))
+    await flush()
+    expect(decideInvitation).toHaveBeenCalledWith('invitation-1', {
+      decision: 'accept-with-link',
+      localWorkspaceId: 'first',
+      receivingAccountId: 'account-2',
+      projectId: 'project-1',
+      link: { workspaceName: 'First' },
+    })
+    expect(onClose).toHaveBeenCalledOnce()
+    selected.unmount()
+
+    const driftGateway = gateway({ localRemoteFor: vi.fn(async () => SAME_REMOTE) })
+    const drift = render(<InviteWizardModal
+      invitation={pendingInvitation as never}
+      workspaces={[{ workspaceId: wid('first'), title: 'First' }]}
+      gateway={driftGateway}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.accept') }))
+    fireEvent.click(screen.getByRole('radio', { name: /^First/ }))
+    drift.rerender(<InviteWizardModal
+      invitation={pendingInvitation}
+      workspaces={[]}
+      gateway={driftGateway}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.link.confirm') }))
+    await flush()
+    expect(screen.getByRole('alert').textContent).toBe('Workspace selection did not resolve')
+    drift.unmount()
+
+    const rejected = render(<InviteWizardModal
+      invitation={pendingInvitation as never}
+      workspaces={[{ workspaceId: wid('first'), title: 'First' }]}
+      gateway={gateway({
+        localRemoteFor: vi.fn(async () => SAME_REMOTE),
+        decideInvitation: vi.fn().mockRejectedValue('decision string'),
+      })}
+      onClose={vi.fn()}
+      t={t}
+    />)
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.accept') }))
+    fireEvent.click(screen.getByRole('radio', { name: /^First/ }))
+    fireEvent.click(screen.getByRole('button', { name: t('wizard.link.confirm') }))
+    await flush()
+    expect(screen.getByRole('alert').textContent).toBe('decision string')
+    rejected.unmount()
   })
 })

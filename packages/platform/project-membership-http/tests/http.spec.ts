@@ -183,6 +183,53 @@ describe('Project Membership HTTP consumer', () => {
       .toEqual([405, 'METHOD_NOT_ALLOWED'])
   })
 
+  it('validates by-remote queries and answers an absent Project with no content', async () => {
+    const membership = membershipService()
+    const missingUrl = await start(membership, accountService(), (req, path) => {
+      if (path === '/v1/projects/by-remote') req.url = undefined
+    })
+    expect(await error(fetch(`${missingUrl.origin}/v1/projects/by-remote?remoteUrl=x`, {
+      headers: { origin: ENVIRONMENT.origin, ...authHeaders() },
+    }))).toEqual([400, 'INVALID_REQUEST'])
+
+    const server = await start(membership, accountService())
+    expect(await error(fetch(`${server.origin}/v1/projects/by-remote?remoteUrl=%20`, {
+      headers: { origin: ENVIRONMENT.origin, ...authHeaders() },
+    }))).toEqual([400, 'INVALID_REQUEST'])
+    expect(await error(fetch(`${server.origin}/v1/projects/by-remote?remoteUrl=${encodeURIComponent('ssh://host/repo')}`, {
+      headers: { origin: ENVIRONMENT.origin, ...authHeaders() },
+    }))).toEqual([400, 'INVALID_REQUEST'])
+    const absent = await fetch(`${server.origin}/v1/projects/by-remote?remoteUrl=${encodeURIComponent('https://github.com/o/missing')}`, {
+      headers: { origin: ENVIRONMENT.origin, ...authHeaders() },
+    })
+    expect(absent.status).toBe(204)
+  })
+
+  it('rejects an invitation for an unresolved GitHub login', async () => {
+    const account = accountService()
+    account.publicIdentityByGithubLogin.mockResolvedValueOnce(undefined)
+    const server = await start(membershipService(), account)
+    expect(await error(post(server.origin, '/v1/projects/invitations', {
+      projectId: 'project-1', githubLogin: 'missing',
+    }, authHeaders()))).toEqual([404, 'ACCOUNT_NOT_FOUND'])
+  })
+
+  it('uses empty public names when invitation identities are unavailable', async () => {
+    const membership = membershipService()
+    membership.pendingInvitationsIssuedBy.mockResolvedValueOnce([invitation()])
+    membership.pendingInvitationContextsFor.mockResolvedValueOnce([{
+      invitation: invitation(), project: project(),
+    }])
+    const account = accountService()
+    account.publicIdentitiesByIds.mockResolvedValue(new Map())
+    const server = await start(membership, account)
+    const headers = { origin: ENVIRONMENT.origin, ...authHeaders() }
+    const issued = await fetch(`${server.origin}/v1/projects/project-1/invitations`, { headers })
+    expect(await issued.json()).toMatchObject([{ inviteeName: '' }])
+    const pending = await fetch(`${server.origin}/v1/projects/invitations/pending`, { headers })
+    expect(await pending.json()).toMatchObject([{ inviterName: '' }])
+  })
+
   it('rejects the wrong method and a heartbeat path that no subroute owns', async () => {
     const server = await start(membershipService(), accountService())
     expect(await error(fetch(`${server.origin}/v1/projects`, { headers: { origin: ENVIRONMENT.origin } }))).toEqual([405, 'METHOD_NOT_ALLOWED'])

@@ -101,6 +101,28 @@ describe('durable documents with dangling project references are corruption', ()
 })
 
 describe('a store booting over a dangling document refuses every operation', () => {
+  it.each([
+    [
+      'name',
+      { ...ghostProject, name: realProject.name },
+      'durable state contains duplicate project name',
+    ],
+    [
+      'remote',
+      { ...ghostProject, boundRemoteUrl: realProject.boundRemoteUrl },
+      'durable state contains duplicate project remote',
+    ],
+  ])('rejects duplicate project %s indexes while loading', async (_kind, duplicateProject, message) => {
+    const root = await rootedState({
+      formatVersion: 0,
+      projects: [realProject, duplicateProject],
+      memberships: [],
+      invitations: [],
+    })
+    const store = makeStoreAt(root)
+    await expect(store.pendingInvitationsFor(alice)).rejects.toThrow(message)
+  })
+
   it('rejects reads and writes with the membership corruption error naming row and project', async () => {
     const root = await rootedState(stateWithDanglingMembership())
     const store = makeStoreAt(root)

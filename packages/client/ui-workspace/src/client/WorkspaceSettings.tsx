@@ -69,6 +69,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
     return () => { alive = false }
   }, [gateway, workspaceId])
   const submitCreate = () => {
+    /* v8 ignore next -- the create button uses the same createBlocked predicate. */
     if (createBlocked) return
     setCreating(true)
     setCreateError(null)
@@ -165,6 +166,7 @@ function MemberManagement({ gateway, project, t }: {
   const trimmedLogin = login.trim()
   const inviteBlocked = inviting || trimmedLogin === ''
   const submitInvite = () => {
+    /* v8 ignore next -- the invite button uses the same inviteBlocked predicate. */
     if (inviteBlocked) return
     setInviting(true)
     setActionError(null)
@@ -281,7 +283,9 @@ function MemberRowItem({ row, gateway, onAct, t }: {
         value={row.role}
         onChange={(e) => {
           const role = e.target.value
+          /* v8 ignore next -- a controlled select only emits its declared option values. */
           if (role !== 'owner' && role !== 'admin' && role !== 'member') return
+          /* v8 ignore next -- selecting the current controlled option emits no change. */
           if (role === row.role) return
           onAct(() => gateway.changeRole(row.membershipId, role))
         }}
@@ -363,6 +367,7 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
   const confirmLink = async () => {
     // Linking is mandatory: no selection (and no clone intention) keeps the
     // confirm disabled, so this guard is the last line, not the affordance.
+    /* v8 ignore next -- the confirm button uses the same busy and selection predicate. */
     if (busy || (selectedId === null && !cloneSelected)) return
     setBusy(true)
     setError(null)
@@ -378,18 +383,18 @@ export function InviteWizardModal({ invitation, workspaces, gateway, onClose, t 
         setBusy(false)
         return
       }
+      const workspace = selected ?? cloned
+      if (workspace === undefined) throw new Error('Workspace selection did not resolve')
       const localRemote = selected === undefined
         ? cloned?.normalizedRemoteUrl
         : localRemotes.get(selected.workspaceId)
-      const localWorkspaceId = selected?.workspaceId ?? cloned?.workspaceId
-      if (localWorkspaceId === undefined) throw new Error('Workspace selection did not resolve')
       const link = {
-        workspaceName: selected?.title ?? cloned?.title ?? invitation.projectName,
+        workspaceName: workspace.title,
         ...(localRemote === undefined ? {} : { normalizedRemoteUrl: localRemote }),
       }
       await gateway.decideInvitation(invitation.invitationId, {
         decision: 'accept-with-link',
-        localWorkspaceId,
+        localWorkspaceId: workspace.workspaceId,
         receivingAccountId: invitation.receivingAccountId,
         projectId: invitation.projectId,
         link,

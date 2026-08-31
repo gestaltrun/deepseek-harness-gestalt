@@ -356,6 +356,7 @@ describe('PlatformAccount', () => {
       id: octocat.session.account.id,
       githubLogin: 'OctoCat',
     })
+    await expect(first.publicIdentityByGithubLogin('   ')).resolves.toBeUndefined()
     await expect(first.publicIdentityByGithubLogin('missing')).resolves.toBeUndefined()
 
     subject = 7

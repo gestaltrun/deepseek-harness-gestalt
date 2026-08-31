@@ -255,7 +255,7 @@ export class ProjectMembershipHttpTransport implements ProjectMembershipTranspor
       (value) => {
         // A decline settles without joining: the route answers 204 No Content.
         if (value === undefined) return undefined
-        return parseMemberView(value)
+        return parseJoinedMemberView(value)
       },
     )
   }
@@ -440,13 +440,19 @@ function parseMemberView(value: unknown): MemberView {
     id: string(view, 'id', 'member view') as MembershipId,
     accountId: string(view, 'accountId', 'member view') as PlatformAccountId,
     role: parseRole(view.role),
-    tags: parseArray(view.tags ?? []).map((tag) => {
+    tags: parseArray(view.tags).map((tag) => {
       if (typeof tag !== 'string') throw new TypeError('member view tags must be strings')
       return tag as FunctionTag
     }),
     ...(link === undefined ? {} : { link }),
     joinedAt: epochMs(view, 'joinedAt', 'member view'),
   }
+}
+
+function parseJoinedMemberView(value: unknown): MemberView {
+  const member = parseMemberView(value)
+  if (member.link === undefined) throw new TypeError('accepted member view link must be present')
+  return member
 }
 
 function parseWorkspaceLink(value: unknown): WorkspaceLink {
@@ -467,7 +473,7 @@ function parseRole(value: unknown): ProjectRole {
 
 function parseRosterReadView(value: unknown): RosterReadView {
   const view = record(value, 'roster view')
-  const members = parseArray(view.members ?? []).map(parseRosterMemberView)
+  const members = parseArray(view.members).map(parseRosterMemberView)
   return { project: parseProjectView(view.project), members }
 }
 
@@ -480,8 +486,8 @@ function parseRosterMemberView(value: unknown): RosterMemberView {
   return {
     ...parseMemberView(view),
     presence,
-    displayName: optionalString(view, 'displayName') ?? '',
-    avatarRef: optionalString(view, 'avatarRef') ?? '',
+    displayName: string(view, 'displayName', 'roster member view'),
+    avatarRef: string(view, 'avatarRef', 'roster member view'),
   }
 }
 

@@ -360,8 +360,22 @@ async function collect<F>(stream: AsyncIterable<RpcRequest<F>>): Promise<RpcRequ
 }
 
 describe('unary round trip (handler ⇄ client, no network)', () => {
-  it('round-trips member-question snapshot and settlement methods', async () => {
+  it('round-trips member-question binding, snapshot, and settlement methods', async () => {
     const c = client()
+    expect((await c.memberQuestions.workspaceBinding({
+      receivingAccountId: 'account-2' as never,
+      projectId: 'project-1' as never,
+    })).result).toEqual({ ok: true, value: { state: 'missing' } })
+    expect((await c.memberQuestions.ensureWorkspaceBinding({
+      receivingAccountId: 'account-2' as never,
+      projectId: 'project-1' as never,
+      workspaceId: 'workspace-1' as never,
+    })).result).toEqual({ ok: true, value: { state: 'created', workspaceId: 'workspace-1' } })
+    expect((await c.memberQuestions.bindWorkspace({
+      receivingAccountId: 'account-2' as never,
+      projectId: 'project-1' as never,
+      workspaceId: 'workspace-1' as never,
+    })).result).toEqual({ ok: true, value: { bound: true } })
     expect((await c.memberQuestions.snapshot({})).result).toEqual({
       ok: true, value: { revision: 0, pending: [], terminal: [] },
     })

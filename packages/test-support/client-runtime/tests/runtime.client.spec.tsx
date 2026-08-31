@@ -423,7 +423,16 @@ describe('workspaces', () => {
       remoteUrl: 'git@github.com:o/r.git', parentPath: '/projects', directoryName: 'r',
     })).resolves.toMatchObject({ path: '/projects/r', title: 'r' })
     runtime.workspaces.stub('gitRemote', vi.fn(async () => 'https://github.com/o/r'))
+    runtime.workspaces.stub('cloneGit', vi.fn(async () => ({
+      workspaceId: 'cloned' as WorkspaceId,
+      path: '/custom/cloned',
+      title: 'cloned',
+      sessionIds: [],
+    } as never)))
     await expect(runtime.workspaces.gitRemote('w1' as WorkspaceId)).resolves.toBe('https://github.com/o/r')
+    await expect(runtime.workspaces.cloneGit({
+      remoteUrl: 'https://github.com/o/r', parentPath: '/custom', directoryName: 'cloned',
+    })).resolves.toMatchObject({ workspaceId: 'cloned', path: '/custom/cloned' })
     expect(runtime.workspaces.calls).toEqual([
       { method: 'gitRemote', args: ['w1'] },
       {
@@ -431,6 +440,10 @@ describe('workspaces', () => {
         args: [{ remoteUrl: 'git@github.com:o/r.git', parentPath: '/projects', directoryName: 'r' }],
       },
       { method: 'gitRemote', args: ['w1'] },
+      {
+        method: 'cloneGit',
+        args: [{ remoteUrl: 'https://github.com/o/r', parentPath: '/custom', directoryName: 'cloned' }],
+      },
     ])
     await runtime.dispose()
   })

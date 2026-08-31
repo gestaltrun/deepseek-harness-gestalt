@@ -9,7 +9,7 @@
 import { mkdir, readFile, rm, rmdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { PlatformAccountId } from '@deepseek-ai/dsh-platform-account'
 import {
@@ -28,6 +28,7 @@ const alice = 'account-alice' as PlatformAccountId
 const bob = 'account-bob' as PlatformAccountId
 const carol = 'account-carol' as PlatformAccountId
 const dave = 'account-dave' as PlatformAccountId
+const eve = 'account-eve' as PlatformAccountId
 
 const roots: string[] = []
 const contexts: Context[] = []
@@ -129,6 +130,38 @@ describe('file-backed project membership', () => {
       invitation: { projectId },
       project: { id: projectId, name: 'Race' },
     }])
+  })
+
+  it('filters admin-issued invitations and orders issued and cross-project contexts by invitation time', async () => {
+    const { store, projectId: alpha } = await foundProject(alice, 'Alpha')
+    const bobMember = await joinWith(store, alpha, bob, 'bob-alpha')
+    await store.changeRole(alice, { membershipId: bobMember.id, role: 'admin' })
+    const beta = (await store.createProject(bob, {
+      name: 'Beta', remoteUrl: 'https://org.example/beta',
+    })).id
+
+    const now = vi.spyOn(Date, 'now')
+      .mockReturnValueOnce(40)
+      .mockReturnValueOnce(30)
+      .mockReturnValueOnce(20)
+      .mockReturnValueOnce(10)
+    try {
+      await store.invite(alice, { projectId: alpha, inviteeAccountId: carol })
+      await store.invite(bob, { projectId: alpha, inviteeAccountId: eve })
+      await store.invite(bob, { projectId: alpha, inviteeAccountId: dave })
+      await store.invite(bob, { projectId: beta, inviteeAccountId: dave })
+    } finally {
+      now.mockRestore()
+    }
+
+    await expect(store.pendingInvitationsIssuedBy(bob, alpha)).resolves.toMatchObject([
+      { inviteeAccountId: dave, invitedAt: 20 },
+      { inviteeAccountId: eve, invitedAt: 30 },
+    ])
+    await expect(store.pendingInvitationContextsFor(dave)).resolves.toMatchObject([
+      { invitation: { projectId: beta, invitedAt: 10 }, project: { name: 'Beta' } },
+      { invitation: { projectId: alpha, invitedAt: 20 }, project: { name: 'Alpha' } },
+    ])
   })
 
   it('enforces the role gate through every mutating executor', async () => {

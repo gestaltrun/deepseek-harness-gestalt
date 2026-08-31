@@ -193,7 +193,19 @@ describe('FileMemberQuestionReceiver', () => {
     await expect(receiver.bindIfCurrent(
       'account-receiver' as never, 'project-1' as never, 'workspace-stale' as never, 'workspace-third' as never,
     )).resolves.toBe(false)
-    await expect(receiver.lookup('account-receiver' as never, 'project-1' as never)).resolves.toBe(winner)
+    const revisionBeforeReplay = (await receiver.snapshot()).revision
+    await expect(receiver.bindIfCurrent(
+      'account-receiver' as never, 'project-1' as never, winner as never, winner as never,
+    )).resolves.toBe(true)
+    expect((await receiver.snapshot()).revision).toBe(revisionBeforeReplay)
+    await receiver.bind('other-account' as never, 'other-project' as never, 'other-workspace' as never)
+    await receiver.bind('account-receiver' as never, 'other-project' as never, 'same-account-workspace' as never)
+    await expect(receiver.bindIfCurrent(
+      'account-receiver' as never, 'project-1' as never, winner as never, 'workspace-third' as never,
+    )).resolves.toBe(true)
+    await expect(receiver.lookup('account-receiver' as never, 'project-1' as never)).resolves.toBe('workspace-third')
+    await expect(receiver.lookup('other-account' as never, 'other-project' as never)).resolves.toBe('other-workspace')
+    await expect(receiver.lookup('account-receiver' as never, 'other-project' as never)).resolves.toBe('same-account-workspace')
   })
 
   it('expires an overdue predecessor before admitting a newer same-route question, then supersedes a live predecessor', async () => {

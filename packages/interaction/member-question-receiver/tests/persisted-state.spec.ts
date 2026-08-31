@@ -7,6 +7,7 @@ import {
   parseMemberQuestionProjectId,
 } from '@deepseek-ai/dsh-remote-protocol'
 import {
+  humanTurnDigest,
   parseReceiverState,
   serializeReceiverState,
   type PersistedReceiverState,
@@ -141,6 +142,27 @@ describe('member-question receiver durable state', () => {
     expect(parseReceiverState(JSON.stringify(durable)).admissions[0]?.content).toEqual(content)
   })
 
+  it('round-trips every image media type and optional attachment field', () => {
+    for (const mediaType of ['image/jpeg', 'image/webp', 'image/gif'] as const) {
+      const durable = document()
+      const admission = (durable.admissions as Array<Record<string, unknown>>)[0]!
+      const content = [{
+        type: 'image' as const,
+        attachment: {
+          attachmentId: `sha256:${'b'.repeat(64)}` as never,
+          mediaType,
+          width: 2,
+          height: 3,
+          bytes: 4,
+          originalDimensions: { width: 5, height: 6 },
+        },
+      }]
+      admission.content = content
+      admission.requestDigest = humanTurnDigest(content, 'queue')
+      expect(parseReceiverState(JSON.stringify(durable)).admissions[0]?.content).toEqual(content)
+    }
+  })
+
   it('rejects invalid JSON, non-object roots, foreign versions, and missing collections', () => {
     expect(() => parseReceiverState('{')).toThrow('not valid JSON')
     expect(() => parseReceiverState('[]')).toThrow('must be an object')
@@ -261,5 +283,46 @@ describe('member-question receiver durable state', () => {
     const admissions = duplicate.admissions as unknown[]
     admissions.push(structuredClone(admissions[0]))
     expect(() => parseReceiverState(JSON.stringify(duplicate))).toThrow('duplicate admission rpcIds')
+  })
+
+  it('rejects malformed admission content and attachment metadata', () => {
+    const contentCases: Array<[string, unknown]> = [
+      ['content', []],
+      ['content', [null]],
+      ['content', [{ type: 'audio' }]],
+      ['content', [{ type: 'text', text: 1 }]],
+      ['content', [{ type: 'image', attachment: null }]],
+      ['content', [{
+        type: 'image',
+        attachment: { attachmentId: 'id', mediaType: 'image/svg+xml', width: 1, height: 1, bytes: 1 },
+      }]],
+      ['content', [{
+        type: 'image',
+        attachment: { attachmentId: 'id', mediaType: 'image/png', width: 0, height: 1, bytes: 1 },
+      }]],
+      ['content', [{
+        type: 'image',
+        attachment: {
+          attachmentId: 'id', mediaType: 'image/png', width: 1, height: 1, bytes: 1,
+          name: 1,
+        },
+      }]],
+      ['content', [{
+        type: 'image',
+        attachment: {
+          attachmentId: 'id', mediaType: 'image/png', width: 1, height: 1, bytes: 1,
+          originalDimensions: null,
+        },
+      }]],
+    ]
+    for (const [, content] of contentCases) {
+      const invalid = document()
+      ;(invalid.admissions as Array<Record<string, unknown>>)[0]!.content = content
+      expect(() => parseReceiverState(JSON.stringify(invalid))).toThrow('durable admission')
+    }
+
+    const digestMismatch = document()
+    ;(digestMismatch.admissions as Array<Record<string, unknown>>)[0]!.requestDigest = 'different'
+    expect(() => parseReceiverState(JSON.stringify(digestMismatch))).toThrow('content digest does not match')
   })
 })

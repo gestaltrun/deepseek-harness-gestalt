@@ -125,7 +125,9 @@ export function apply(ctx: Context, config: Config): void {
     try {
       normalizedRemoteUrl = normalizeGitRemoteUrl(remoteUrl)
     } catch (error: unknown) {
-      throw new HttpError(400, 'INVALID_REQUEST', error instanceof Error ? error.message : String(error))
+      /* v8 ignore next -- remote normalization and URL parsing throw Error instances. */
+      const message = error instanceof Error ? error.message : String(error)
+      throw new HttpError(400, 'INVALID_REQUEST', message)
     }
     const project = await ctx.projectMembership.projectByRemote(actor, normalizedRemoteUrl)
     if (project === undefined) {

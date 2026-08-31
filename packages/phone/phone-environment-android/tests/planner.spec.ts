@@ -32,10 +32,10 @@ describe('Android environment planner', () => {
     ['linux', 'arm64'],
     ['freebsd', 'x64'],
   ])('reports unsupported Host tuple %s/%s', (platform, architecture) => {
-    expect(planAndroidEnvironment(platform, architecture, '/phone')).toEqual({
-      kind: 'unsupported',
-      reason: expect.stringContaining('does not have a supported Android Emulator toolchain'),
-    })
+    const result = planAndroidEnvironment(platform, architecture, '/phone')
+    expect(result.kind).toBe('unsupported')
+    if (result.kind !== 'unsupported') throw new Error('unsupported Host tuple produced an Android plan')
+    expect(result.reason).toContain('does not have a supported Android Emulator toolchain')
   })
 
   it('reuses a compatible SDK while retaining a private AVD home', () => {

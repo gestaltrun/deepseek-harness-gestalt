@@ -5,7 +5,7 @@ import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
-import { deviceId } from '@deepseek-ai/dsh-phone-runtime'
+import { deviceId, type DeviceId } from '@deepseek-ai/dsh-phone-runtime'
 import PhoneEnvironment, {
   PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH, PHONE_ENVIRONMENT_ANDROID_START_PATH,
   PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError,
@@ -99,6 +99,7 @@ function runningAndroidProvider() {
     for (const listener of listeners) listener(state)
   }
   const deactivate = vi.fn(async () => { emit({ kind: 'ready', plan: ANDROID_PLAN, running: false }) })
+  const cancel = vi.fn()
   const provider: AndroidEnvironmentProvider = {
     snapshot: () => state,
     refresh: async () => state,
@@ -109,14 +110,14 @@ function runningAndroidProvider() {
       })
       return state
     },
-    cancel: vi.fn(),
+    cancel,
     deactivate,
     runtimeEnvironment: () => ({
       ANDROID_SDK_ROOT: ANDROID_PLAN.sdkRoot, ANDROID_AVD_HOME: ANDROID_PLAN.avdHome,
     }),
     onChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
   }
-  return { provider, deactivate, emit }
+  return { provider, cancel, deactivate, emit }
 }
 
 describe('PhoneEnvironment', () => {
@@ -131,7 +132,11 @@ describe('PhoneEnvironment', () => {
       }],
       ios: { simulators: [], reals: [] },
     }))
-    const startCapture = vi.fn(async () => ({
+    const startCapture = vi.fn(async (_request: {
+      readonly deviceId: DeviceId
+      readonly format: 'h264'
+      readonly signal: AbortSignal
+    }) => ({
       contentType: 'video/h264',
       body: new ReadableStream<Uint8Array>({
         start(controller) {
@@ -147,14 +152,15 @@ describe('PhoneEnvironment', () => {
     const plan = ANDROID_PLAN
     let state: PhoneAndroidState = { kind: 'missing', plan }
     const listeners = new Set<(value: PhoneAndroidState) => void>()
+    const prepare = vi.fn(async () => {
+      state = { kind: 'ready', plan, running: false }
+      for (const listener of listeners) listener(state)
+      return state
+    })
     const provider: AndroidEnvironmentProvider = {
       snapshot: () => state,
       refresh: async () => state,
-      prepare: vi.fn(async () => {
-        state = { kind: 'ready', plan, running: false }
-        for (const listener of listeners) listener(state)
-        return state
-      }),
+      prepare,
       start: async () => {
         state = { kind: 'ready', plan, deviceId: deviceId('emulator-5554'), running: true }
         for (const listener of listeners) listener(state)
@@ -174,16 +180,18 @@ describe('PhoneEnvironment', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licenseAccepted: true }),
     })
     expect(accepted.status).toBe(200)
-    expect(provider.prepare).toHaveBeenCalledWith({ licenseAccepted: true }, expect.any(AbortSignal))
+    expect(prepare).toHaveBeenCalledWith({ licenseAccepted: true }, expect.any(AbortSignal))
     expect(activateExecutable).toHaveBeenLastCalledWith(
       path,
       expect.any(AbortSignal),
       { ANDROID_SDK_ROOT: plan.sdkRoot, ANDROID_AVD_HOME: plan.avdHome },
     )
     expect(listDevices).toHaveBeenCalledWith(expect.any(AbortSignal))
-    expect(startCapture).toHaveBeenCalledWith({
-      deviceId: deviceId('emulator-5554'), format: 'h264', signal: expect.any(AbortSignal),
-    })
+    expect(startCapture).toHaveBeenCalledOnce()
+    const captureRequest = startCapture.mock.calls[0]?.[0]
+    expect(captureRequest?.deviceId).toBe(deviceId('emulator-5554'))
+    expect(captureRequest?.format).toBe('h264')
+    expect(captureRequest?.signal).toBeInstanceOf(AbortSignal)
     expect(service.snapshot().platforms.android).toMatchObject({ kind: 'ready', running: true })
     unregister()
     expect(service.snapshot().platforms.android).toEqual({ kind: 'deferred' })
@@ -346,7 +354,7 @@ describe('PhoneEnvironment', () => {
       }),
       startCapture,
     }, { executablePath: path })
-    const { provider, deactivate } = runningAndroidProvider()
+    const { provider, cancel, deactivate } = runningAndroidProvider()
     service.registerAndroidEnvironment(provider)
     await service.setEnabled(true)
     const seen: PhoneAndroidState[] = []
@@ -359,7 +367,7 @@ describe('PhoneEnvironment', () => {
     expect((await cancelling).status).toBe(200)
 
     expect(captureCancelled).toHaveBeenCalledOnce()
-    expect(provider.cancel).toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalled()
     expect(deactivate).toHaveBeenCalled()
     expect(seen.some(state => state.kind === 'ready' && state.running)).toBe(false)
     expect(service.snapshot().platforms.android).toMatchObject({ kind: 'ready', running: false })
@@ -370,12 +378,13 @@ describe('PhoneEnvironment', () => {
     contexts.push(context)
     const { service, origin } = await mountEnvironment(context)
     const stopFailure = new Error('taskkill refused the Android process tree')
+    const cancel = vi.fn()
     const provider: AndroidEnvironmentProvider = {
       snapshot: () => ({ kind: 'ready', plan: ANDROID_PLAN, running: false }),
       refresh: async () => ({ kind: 'ready', plan: ANDROID_PLAN, running: false }),
       prepare: async () => ({ kind: 'ready', plan: ANDROID_PLAN, running: false }),
       start: async () => ({ kind: 'ready', plan: ANDROID_PLAN, running: false }),
-      cancel: vi.fn(),
+      cancel,
       deactivate: async () => { throw stopFailure },
       runtimeEnvironment: () => ({}),
       onChanged: () => () => {},
@@ -388,7 +397,7 @@ describe('PhoneEnvironment', () => {
     expect(await response.json()).toMatchObject({
       error: { code: 'PHONE_ENVIRONMENT_ACTIVATION', message: stopFailure.message },
     })
-    expect(provider.cancel).toHaveBeenCalled()
+    expect(cancel).toHaveBeenCalled()
     unregister()
   })
 

@@ -9,7 +9,8 @@ import {
 async function get(path: string): Promise<{ status: number; body: unknown }> {
   return await browser.execute(async (pathname: string) => {
     const response = await fetch(new URL(pathname, location.origin))
-    return { status: response.status, body: await response.json() }
+    const body: unknown = await response.json()
+    return { status: response.status, body }
   }, path)
 }
 

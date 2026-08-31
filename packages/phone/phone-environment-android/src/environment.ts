@@ -94,34 +94,16 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   }
 
   async refresh(signal?: AbortSignal): Promise<PhoneAndroidState> {
-    if (this.operation !== undefined) throw new AndroidEnvironmentError('PHONE_ANDROID_BUSY', 'an Android operation is already running')
-    const controller = new AbortController()
-    this.operation = controller
-    const operationSignal = signal === undefined
-      ? controller.signal
-      : AbortSignal.any([controller.signal, signal])
-    const task = (async () => {
+    return await this.runOperation('an Android operation is already running', signal, async (operationSignal) => {
       try {
         return await this.refreshOwned(operationSignal)
       } catch (error) {
         if (operationSignal.aborted) {
           throw new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android environment detection was cancelled', { cause: error })
         }
-        const failure = androidFailure(error)
-        this.publish({
-          kind: 'failed', ...(this.plan === undefined ? {} : { plan: this.plan }),
-          code: failure.code, message: failure.message, retryable: true,
-        })
-        throw failure
+        this.publishFailure(error)
       }
-    })()
-    this.operationTask = task
-    try {
-      return await task
-    } finally {
-      if (this.operationTask === task) this.operationTask = undefined
-      if (this.operation === controller) this.operation = undefined
-    }
+    })
   }
 
   private async refreshOwned(signal?: AbortSignal): Promise<PhoneAndroidState> {
@@ -154,13 +136,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     if ((request as { readonly licenseAccepted?: boolean }).licenseAccepted !== true) {
       throw new AndroidEnvironmentError('PHONE_ANDROID_LICENSE_REQUIRED', 'Android SDK license acceptance is required')
     }
-    if (this.operation !== undefined) throw new AndroidEnvironmentError('PHONE_ANDROID_BUSY', 'Android preparation is already running')
-    const controller = new AbortController()
-    this.operation = controller
-    const operationSignal = signal === undefined
-      ? controller.signal
-      : AbortSignal.any([controller.signal, signal])
-    const task = (async () => {
+    return await this.runOperation('Android preparation is already running', signal, async (operationSignal) => {
       let plan: AndroidPreparationPlan | undefined
       let ownedAvd: AndroidPreparationPlan | undefined
       try {
@@ -251,24 +227,11 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
         })
         throw failure
       }
-    })()
-    this.operationTask = task
-    try {
-      return await task
-    } finally {
-      if (this.operationTask === task) this.operationTask = undefined
-      if (this.operation === controller) this.operation = undefined
-    }
+    })
   }
 
   async start(signal?: AbortSignal): Promise<PhoneAndroidState> {
-    if (this.operation !== undefined) throw new AndroidEnvironmentError('PHONE_ANDROID_BUSY', 'an Android operation is already running')
-    const controller = new AbortController()
-    this.operation = controller
-    const operationSignal = signal === undefined
-      ? controller.signal
-      : AbortSignal.any([controller.signal, signal])
-    const task = (async () => {
+    return await this.runOperation('an Android operation is already running', signal, async (operationSignal) => {
       try {
         return await this.startEmulator(operationSignal)
       } catch (error) {
@@ -278,14 +241,23 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
           this.publish({ kind: 'ready', plan, running: false })
           throw new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android Emulator start was cancelled', { cause: error })
         }
-        const failure = androidFailure(error)
-        this.publish({
-          kind: 'failed', ...(this.plan === undefined ? {} : { plan: this.plan }),
-          code: failure.code, message: failure.message, retryable: true,
-        })
-        throw failure
+        this.publishFailure(error)
       }
-    })()
+    })
+  }
+
+  private async runOperation(
+    busyMessage: string,
+    ownerSignal: AbortSignal | undefined,
+    work: (signal: AbortSignal) => Promise<PhoneAndroidState>,
+  ): Promise<PhoneAndroidState> {
+    if (this.operation !== undefined) throw new AndroidEnvironmentError('PHONE_ANDROID_BUSY', busyMessage)
+    const controller = new AbortController()
+    this.operation = controller
+    const operationSignal = ownerSignal === undefined
+      ? controller.signal
+      : AbortSignal.any([controller.signal, ownerSignal])
+    const task = work(operationSignal)
     this.operationTask = task
     try {
       return await task
@@ -293,6 +265,15 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
       if (this.operationTask === task) this.operationTask = undefined
       if (this.operation === controller) this.operation = undefined
     }
+  }
+
+  private publishFailure(error: unknown): never {
+    const failure = androidFailure(error)
+    this.publish({
+      kind: 'failed', ...(this.plan === undefined ? {} : { plan: this.plan }),
+      code: failure.code, message: failure.message, retryable: true,
+    })
+    throw failure
   }
 
   private async startEmulator(signal?: AbortSignal): Promise<PhoneAndroidState> {
@@ -349,7 +330,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     active?.abort(new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android operation cancelled'))
     void this.stopOwnedEmulator().then(
       () => { if (active === undefined) this.publishStopped() },
-      (error) => {
+      (error: unknown) => {
         this.publishStopFailure(error)
         this.reportError(error)
       },
@@ -372,7 +353,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     if (failure === undefined) this.publishStopped()
     else {
       this.publishStopFailure(failure)
-      throw failure
+      throw asError(failure)
     }
   }
 
@@ -620,7 +601,10 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   }
 
   private async stopOwnedEmulator(): Promise<void> {
-    if (this.emulatorStop !== undefined) return await this.emulatorStop
+    if (this.emulatorStop !== undefined) {
+      await this.emulatorStop
+      return
+    }
     const owned = this.emulator
     if (owned === undefined) return
     const stop = owned.stop()
@@ -850,7 +834,7 @@ async function delay(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolveDelay, reject) => {
     const finish = (): void => { signal?.removeEventListener('abort', abort); resolveDelay() }
     const timer = setTimeout(finish, ms)
-    const abort = (): void => { clearTimeout(timer); reject(signal?.reason) }
+    const abort = (): void => { clearTimeout(timer); reject(asError(signal?.reason)) }
     signal?.addEventListener('abort', abort, { once: true })
   })
 }

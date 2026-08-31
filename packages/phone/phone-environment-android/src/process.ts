@@ -114,16 +114,16 @@ export function createNodeAndroidCommandRunner(internals: AndroidProcessInternal
         pid: child.pid,
         exit,
         stop: async () => {
-          if (child.exitCode !== null || child.signalCode !== null) {
+          if (!childIsRunning(child)) {
             await exit
             return
           }
           clearTerminationError(termination)
-          if (child.exitCode === null && child.signalCode === null) {
+          if (childIsRunning(child)) {
             recordTerminationError(termination, terminate(child, 'SIGTERM', platform, taskkill))
           }
           let outcome = await boundedExit(exit, stopGraceMs)
-          if (outcome === undefined && child.exitCode === null && child.signalCode === null) {
+          if (outcome === undefined && childIsRunning(child)) {
             recordTerminationError(termination, terminate(child, 'SIGKILL', platform, taskkill))
             outcome = await boundedExit(exit, stopGraceMs)
           }
@@ -199,6 +199,10 @@ async function settleChild(
     if (abandon !== undefined) clearTimeout(abandon)
     resolvePending = undefined
   }
+}
+
+function childIsRunning(child: ChildProcess): boolean {
+  return child.exitCode === null && child.signalCode === null
 }
 
 function terminate(

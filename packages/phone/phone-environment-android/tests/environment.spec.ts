@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { zipSync } from 'fflate'
-import { AndroidEnvironmentManager } from '../src/environment.ts'
+import { AndroidEnvironmentError, AndroidEnvironmentManager } from '../src/environment.ts'
 import type {
   AndroidCommandOptions, AndroidCommandResult, AndroidCommandRunner, AndroidOwnedProcess,
 } from '../src/process.ts'
@@ -68,6 +68,19 @@ function commandResult(overrides: Partial<AndroidCommandResult> = {}): AndroidCo
   return {
     exitCode: 0, signal: null, timedOut: false, callerAborted: false, stdout: '', stderr: '', ...overrides,
   }
+}
+
+function rejectionError(reason: unknown): Error {
+  return reason instanceof Error ? reason : new Error(String(reason))
+}
+
+async function rejectionOf(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise
+  } catch (error) {
+    return rejectionError(error)
+  }
+  throw new Error('expected operation to reject')
 }
 
 class FixtureRunner implements AndroidCommandRunner {
@@ -197,7 +210,8 @@ describe('Android environment manager', () => {
       commandLineToolsAsset: fixture.asset, freeBytes: async () => 32 * 1024 ** 3,
       fetch: async (url, init) => {
         expect(url).toBe(fixture.asset.url)
-        expect(init).toMatchObject({ redirect: 'error', signal: expect.any(AbortSignal) })
+        expect(init?.redirect).toBe('error')
+        expect(init?.signal).toBeInstanceOf(AbortSignal)
         return new Response(bodyOf(fixture.bytes), { headers: { 'content-length': String(fixture.bytes.byteLength) } })
       },
     })
@@ -252,7 +266,7 @@ describe('Android environment manager', () => {
           await writeFile(join(avdHome, 'Pixel_6_API_35_Gestalt.ini'), 'partial\n')
           createStarted.resolve(undefined)
           return await new Promise<AndroidCommandResult>((_resolve, reject) => {
-            options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+            options.signal?.addEventListener('abort', () => { reject(rejectionError(options.signal?.reason)) }, { once: true })
           })
         }
         return await base.run(command, args, options)
@@ -342,7 +356,7 @@ describe('Android environment manager', () => {
     const fixture = archiveAsset()
     const base = new FixtureRunner(root)
     const createStarted = Promise.withResolvers<undefined>()
-    const reportError = vi.fn()
+    const reportedErrors: unknown[] = []
     let removals = 0
     const runner: AndroidCommandRunner = {
       run: async (command, args, options) => {
@@ -352,7 +366,7 @@ describe('Android environment manager', () => {
           await writeFile(join(avd, 'config.ini'), 'partial\n')
           createStarted.resolve(undefined)
           return await new Promise<AndroidCommandResult>((_resolve, reject) => {
-            options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+            options.signal?.addEventListener('abort', () => { reject(rejectionError(options.signal?.reason)) }, { once: true })
           })
         }
         return await base.run(command, args, options)
@@ -362,7 +376,7 @@ describe('Android environment manager', () => {
     const manager = new AndroidEnvironmentManager({
       phoneRoot: root, platform: 'darwin', architecture: 'arm64', environment: { PATH: '' },
       homeDirectory: root, runner, freeBytes: async () => 32 * 1024 ** 3,
-      commandLineToolsAsset: fixture.asset, reportError,
+      commandLineToolsAsset: fixture.asset, reportError: (error) => { reportedErrors.push(error) },
       removePath: async (path, recursive) => {
         removals += 1
         if (removals > 2) {
@@ -378,22 +392,25 @@ describe('Android environment manager', () => {
     manager.cancel()
     const deactivating = manager.deactivate()
 
-    await expect(preparing).rejects.toMatchObject({
-      code: 'PHONE_ANDROID_CLEANUP',
-      message: expect.stringMatching(/PHONE_ANDROID_ABORTED.*AVD directory cleanup was denied; AVD ini cleanup was denied/u),
-      cause: expect.any(AggregateError),
-    })
-    await expect(deactivating).rejects.toMatchObject({ code: 'PHONE_ANDROID_CLEANUP' })
-    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({
-      errors: [
-        expect.objectContaining({ message: 'AVD directory cleanup was denied' }),
-        expect.objectContaining({ message: 'AVD ini cleanup was denied' }),
-      ],
-    }))
-    expect(manager.snapshot()).toMatchObject({
-      kind: 'failed', code: 'PHONE_ANDROID_CLEANUP',
-      message: expect.stringMatching(/cleanup was denied/u), retryable: true,
-    })
+    const preparingFailure = await rejectionOf(preparing)
+    expect(preparingFailure).toBeInstanceOf(AndroidEnvironmentError)
+    if (!(preparingFailure instanceof AndroidEnvironmentError)) throw new Error('expected AndroidEnvironmentError')
+    expect(preparingFailure.code).toBe('PHONE_ANDROID_CLEANUP')
+    expect(preparingFailure.message).toMatch(/PHONE_ANDROID_ABORTED.*AVD directory cleanup was denied; AVD ini cleanup was denied/u)
+    expect(preparingFailure.cause).toBeInstanceOf(AggregateError)
+    const deactivateFailure = await rejectionOf(deactivating)
+    expect(deactivateFailure).toMatchObject({ code: 'PHONE_ANDROID_CLEANUP' })
+    expect(reportedErrors).toHaveLength(1)
+    const reported = reportedErrors[0]
+    expect(reported).toBeInstanceOf(AggregateError)
+    if (!(reported instanceof AggregateError)) throw new Error('expected aggregate cleanup error')
+    expect(reported.errors.map(error => rejectionError(error).message)).toEqual([
+      'AVD directory cleanup was denied', 'AVD ini cleanup was denied',
+    ])
+    const current = manager.snapshot()
+    expect(current).toMatchObject({ kind: 'failed', code: 'PHONE_ANDROID_CLEANUP', retryable: true })
+    if (current.kind !== 'failed') throw new Error('cleanup failure state was not committed')
+    expect(current.message).toMatch(/cleanup was denied/u)
   })
 
   it('stops before download when the target volume has less than 16 GB free', async () => {
@@ -422,11 +439,10 @@ describe('Android environment manager', () => {
       freeBytes: async () => 32 * 1024 ** 3,
     })
     await manager.refresh()
-    expect(manager.runtimeEnvironment()).toMatchObject({
-      ANDROID_HOME: join(root, 'android', 'sdk'),
-      ANDROID_SDK_ROOT: join(root, 'android', 'sdk'),
-      PATH: expect.stringMatching(/;C:\\Windows\\System32$/u),
-    })
+    const environment = manager.runtimeEnvironment()
+    expect(environment.ANDROID_HOME).toBe(join(root, 'android', 'sdk'))
+    expect(environment.ANDROID_SDK_ROOT).toBe(join(root, 'android', 'sdk'))
+    expect(environment.PATH).toMatch(/;C:\\Windows\\System32$/u)
   })
 
   it.each([
@@ -747,7 +763,7 @@ describe('Android environment manager', () => {
         if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
         if (args[0] === '-accel-check') return commandResult({ stdout: 'accel ok' })
         return await new Promise<AndroidCommandResult>((_resolve, reject) => {
-          options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+          options.signal?.addEventListener('abort', () => { reject(rejectionError(options.signal?.reason)) }, { once: true })
         })
       },
       spawn: () => {

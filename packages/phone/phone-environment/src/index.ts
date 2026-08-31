@@ -416,7 +416,7 @@ export class PhoneEnvironment extends Service {
     try { await this.androidTask } catch (error) { if (!isCancellation(error)) failure = error }
     try { await this.android?.deactivate() } catch (error) { failure ??= error }
     if (this.android !== undefined) this.publishAndroid(this.android.snapshot())
-    if (failure !== undefined) throw failure
+    if (failure !== undefined) throw environmentError(failure)
   }
 
   private async verifyAndroidRuntime(id: DeviceId, signal: AbortSignal): Promise<void> {
@@ -633,7 +633,7 @@ export class PhoneEnvironment extends Service {
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = []
+  const chunks: Uint8Array[] = []
   let bytes = 0
   for await (const raw of req) {
     const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw)

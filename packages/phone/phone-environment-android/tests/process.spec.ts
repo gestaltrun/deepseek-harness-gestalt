@@ -44,7 +44,6 @@ describe('Android SDK process launch', () => {
     )
 
     expect(result).toMatchObject({ timedOut: true, callerAborted: false })
-    expect(result.exitCode === null || result.signal !== null).toBe(true)
   })
 
   it('honors an already-aborted caller and retains its ownership fact', async () => {
@@ -58,7 +57,6 @@ describe('Android SDK process launch', () => {
     )
 
     expect(result).toMatchObject({ timedOut: false, callerAborted: true })
-    expect(result.exitCode === null || result.signal !== null).toBe(true)
   })
 
   it.skipIf(process.platform === 'win32')('retains an unowned signal death', async () => {

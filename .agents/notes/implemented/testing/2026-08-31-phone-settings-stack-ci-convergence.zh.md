@@ -20,6 +20,8 @@ release family fixture 会先创建动态 client bundle 与最小有效 source m
 
 `runLogged` 在所有平台验证直接子进程的延迟 stdout 与 stderr 都完成持久化。独立的 POSIX-only 测试保留更强的后代继承 pipe 义务；Windows 进程树终止继续通过 `taskkill /t` 行为覆盖，不依赖 pipe 继承假设。
 
+原生 Windows coverage 汇总还会运行 mocked-child stop-policy 测试。它推进既有的终止宽限期，证明跨平台的先 `SIGTERM` 后 `SIGKILL` 义务，而不会假装原生 Windows 子进程能够忽略 Node 的终止信号。
+
 二进制发现 fixture 使用宿主分隔符拼接 `PATH`。验证 POSIX npm prefix 与 Homebrew 规则的测试显式选择 POSIX 行为；未解析服务测试则清空并恢复 resolver 会读取的所有 home 与 prefix 环境输入。
 
 ## 考虑过的替代方案

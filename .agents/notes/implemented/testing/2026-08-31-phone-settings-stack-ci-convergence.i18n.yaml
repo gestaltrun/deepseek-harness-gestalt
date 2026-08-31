@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-08-31-phone-settings-stack-ci-convergence.md
-2026-08-31-phone-settings-stack-ci-convergence.md: 4132d0ca2ada8cea63aaf372954c8a1834a58a6b
-2026-08-31-phone-settings-stack-ci-convergence.zh.md: 6f9a6ca11c847c2e1989f85d04a787c0a4f994eb
+2026-08-31-phone-settings-stack-ci-convergence.md: a4752a22ff0e33a4a0f12f75d3126bfe418f3eed
+2026-08-31-phone-settings-stack-ci-convergence.zh.md: dc4723ebde906bd72b8aced0f5a32690537dccf4

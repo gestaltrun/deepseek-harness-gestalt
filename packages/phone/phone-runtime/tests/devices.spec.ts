@@ -75,10 +75,19 @@ describe('devices.list result validation', () => {
     expect(refs.map(ref => [ref.platform, ref.id, ref.name, ref.kind, ref.state])).toEqual([
       ['android', deviceId('shared'), 'first', 'emulator', 'online'],
     ])
-    expect(() => parseDeviceInfos([
-      wire('shared', 'android', 'emulator'),
-      wire('shared', 'ios', 'real'),
-    ])).toThrow(expect.objectContaining({ code: 'PHONE_PROTOCOL', message: expect.stringContaining('ambiguous') }))
+    let failure: unknown
+    try {
+      parseDeviceInfos([
+        wire('shared', 'android', 'emulator'),
+        wire('shared', 'ios', 'real'),
+      ])
+    } catch (error) {
+      failure = error
+    }
+    expect(failure).toBeInstanceOf(PhoneDevicesError)
+    if (!(failure instanceof PhoneDevicesError)) throw new Error('expected a phone protocol failure')
+    expect(failure.code).toBe('PHONE_PROTOCOL')
+    expect(failure.message).toContain('ambiguous')
   })
 
   it('accepts the devices envelope and the bare array shapes identically', () => {

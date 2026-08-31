@@ -41,8 +41,8 @@ function stringField(record: Record<string, unknown>, key: string, index: number
 /**
  * Validate and map one raw `devices.list` result onto device snapshots. Both
  * shipped wire shapes are accepted: the bare device array and mobilecli
- * 1.0.5's `{ devices: [...] }` envelope. Duplicate upstream entries are kept
- * verbatim — the real backend has listed one handset twice.
+ * 1.0.5's `{ devices: [...] }` envelope. Every row is validated before the
+ * first row for each platform/id pair is retained.
  * @param result - JSON-RPC result value as received from the HTTP transport.
  * @returns one entry per unique platform/id pair, in first-seen upstream order.
  * @throws {@link PhoneDevicesError} with `PHONE_PROTOCOL` when the value is

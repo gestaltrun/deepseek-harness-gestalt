@@ -768,6 +768,10 @@ describe('playPhoneH264Stream', () => {
         payload: new Uint8Array(),
         message: 'phone H264 stream ended before a frame was decoded',
       },
+      {
+        payload: new TextEncoder().encode('Error: Error 0x80001001'),
+        message: 'phone H264 stream contains bytes without an Annex-B start code',
+      },
     ]
     for (const testCase of cases) {
       const error = await reportedError(streamResponse(testCase.payload))

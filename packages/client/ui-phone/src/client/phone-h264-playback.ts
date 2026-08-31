@@ -268,6 +268,9 @@ class AnnexBAccessUnitAssembler {
   push(bytes: Uint8Array): AnnexBAccessUnit[] {
     this.pending = append(this.pending, bytes)
     const starts = startCodesIn(this.pending)
+    if (starts[0] !== undefined && starts[0].index !== 0) {
+      throw new Error('phone H264 stream contains bytes without an Annex-B start code')
+    }
     if (starts.length < 2) return []
     const last = starts.reduce((start, following) => {
       this.acceptNal(this.pending.slice(start.index, following.index))
@@ -280,6 +283,9 @@ class AnnexBAccessUnitAssembler {
   finish(): AnnexBAccessUnit[] {
     const starts = startCodesIn(this.pending)
     const start = starts.at(0)
+    if (this.pending.length > 0 && start === undefined) {
+      throw new Error('phone H264 stream contains bytes without an Annex-B start code')
+    }
     if (start !== undefined) this.acceptNal(this.pending.slice(start.index))
     this.pending = new Uint8Array()
     this.emitCurrent()

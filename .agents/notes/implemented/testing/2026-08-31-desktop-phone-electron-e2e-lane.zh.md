@@ -16,7 +16,7 @@ Status: implemented
 
 降级场景用不可解析的 mobilecli 路径启动同一 Desktop 组合，要求 Host 保持存活并显示安装指引。两个场景都要求 URL 宣布、入口 HTTP 200、Session Surface 已渲染，并且稳定等待后 Desktop smoke 日志中没有错误。
 
-运行器在启动前强制重建所有被消费的 Host、client、web 与 Electron main 产物。Electron e2e TypeScript 源码使用专用 Desktop compiler face，所属 package 与仓库 typecheck 命令都会执行该编译面。运行器移除环境中的凭证与 Platform Relay 变量，提供 keyless 回环模型端点，并且只把验收产物写入 gitignored 的 `.artifacts/e2e-electron/`。每条已启动命令都持有独立进程树；中断或日志写入失败会终止整棵进程树并等待完全停稳。命令只有在 stdio 关闭且串行日志 writer 刷新完成后，才允许检查构建结果或审计日志。每个成功场景都会记录归属的 Electron 与 Host PID，并在适用时记录 fake PID；缺失证据会让清理失败。teardown 会强制终止残留进程，分别结算进程、临时根目录与端口义务，把所有结果写入 `cleanup.json`，并聚合报告错误。Electron main/renderer 错误行与 Desktop smoke 错误会让通道失败，并写入 `log-audit.json`。
+运行器在启动前强制重建所有被消费的 Host、client、web 与 Electron main 产物。Electron e2e TypeScript 源码使用专用 Desktop compiler face，所属 package 与仓库 typecheck 命令都会执行该编译面。运行器移除环境中的凭证与 Platform Relay 变量，提供 keyless 回环模型端点，并且只把验收产物写入 gitignored 的 `.artifacts/e2e-electron/`。每条已启动命令都持有独立进程树；POSIX 以 detached 方式启动，Windows 则通过 `taskkill /t` 终止整棵进程树。中断或日志写入失败会终止整棵进程树并等待完全停稳。命令只有在 stdio 关闭且串行日志 writer 刷新完成后，才允许检查构建结果或审计日志。每个成功场景都会记录归属的 Electron 与 Host PID，并在适用时记录 fake PID；缺失证据会让清理失败。teardown 会强制终止残留进程，分别结算进程、临时根目录与端口义务，把所有结果写入 `cleanup.json`，并聚合报告错误。Electron main/renderer 错误行与 Desktop smoke 错误会让通道失败，并写入 `log-audit.json`。
 
 `DSH_PHONE_SERVER_PORT` 是 Desktop overlay 中可随部署调整的 mobilecli 服务端口设置。默认值仍为 `12000`；端到端运行器传入临时值，避免并行开发服务破坏证据。
 

@@ -47,6 +47,8 @@ DSH_DESKTOP_OPERATED_PLATFORM_CONFIG=/absolute/path/to/operated-platform.json pn
 
 配置文件包含 `production` 标记、上文所述六个公开身份字段、附件 Host deadline，以及公开的 Relay WSS endpoint 与 limit；它不包含 OAuth secret。进程还需要 `DSH_NODE` 或 `npm_node_execpath` 上的真正 Node（pnpm 会设置后者）。不要让 Electron 用自己的 execPath 去跑 `dsh`。
 
+`DSH_PHONE_SERVER_PORT` 用于选择 Desktop 手机运行时连接的 mobilecli 回环服务端口。该值必须是 1 到 65535 之间的安全整数；未设置时默认为 `12000`。
+
 ESM 主进程 bundle 会内联工作区代码，但把 Electron、`electron-updater` 和 CommonJS 运行时包 `https-proxy-agent` 与 `ws` 保留为外部依赖。Relay 与单请求 HTTPS helper 是分别捆绑的 CommonJS extra resource，使官方 Node 运行时无需依赖打包应用的依赖图即可加载其网络依赖。packaged 冒烟测试会隔离 `DSH_HOME` 与 Electron userData；在 macOS 上保留已登录用户的 home，使 `safeStorage` 能访问 login Keychain。
 
 ## 发布

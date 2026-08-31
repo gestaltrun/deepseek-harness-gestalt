@@ -47,6 +47,8 @@ DSH_DESKTOP_OPERATED_PLATFORM_CONFIG=/absolute/path/to/operated-platform.json pn
 
 The config file contains the `production` marker, the six public identity fields documented above, the attachment Host deadline, and the public Relay WSS endpoint and limits; it contains no OAuth secret. The process also needs a real Node on `DSH_NODE` or `npm_node_execpath` (pnpm sets the latter). Do not point Electron at its own execPath.
 
+`DSH_PHONE_SERVER_PORT` selects the loopback mobilecli server port for the Desktop phone runtime. It accepts a safe integer from 1 through 65535 and defaults to `12000` when omitted.
+
 The ESM main bundle inlines workspace code but keeps Electron, `electron-updater`, and the CommonJS `https-proxy-agent` and `ws` runtime packages external. The Relay and one-request HTTPS helpers are separate bundled CommonJS extra resources so the official Node runtime can load their network dependencies without the packaged application dependency graph. Packaged smoke tests isolate `DSH_HOME` and Electron userData; on macOS they retain the logged-in user's home so `safeStorage` can reach the login Keychain.
 
 ## Release

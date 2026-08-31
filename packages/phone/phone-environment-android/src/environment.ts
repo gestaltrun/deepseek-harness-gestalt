@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
-  access, chmod, mkdir, mkdtemp, readFile, rename, rm, statfs, writeFile,
+  access, chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, statfs, unlink, writeFile,
 } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { dirname, join, normalize, posix, relative, resolve, sep, win32 } from 'node:path'
@@ -42,6 +42,8 @@ export interface AndroidEnvironmentOptions {
   readonly freeBytes?: (path: string) => Promise<number>
   /** Contained subscriber failure reporter; the Cordis plugin supplies its logger. */
   readonly reportError?: (error: unknown) => void
+  /** Test-only filesystem removal edge; production refuses to follow links. */
+  readonly removePath?: (path: string, recursive: boolean) => Promise<void>
   /** Test-only pinned asset replacement; production never supplies it. */
   readonly commandLineToolsAsset?: AndroidCommandLineToolsAsset
 }
@@ -56,6 +58,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   private readonly runner: AndroidCommandRunner
   private readonly freeBytes: (path: string) => Promise<number>
   private readonly reportError: (error: unknown) => void
+  private readonly removePath: (path: string, recursive: boolean) => Promise<void>
   private current: PhoneAndroidState = Object.freeze({ kind: 'checking' })
   private readonly listeners = new Set<(state: PhoneAndroidState) => void>()
   private operation: AbortController | undefined
@@ -74,6 +77,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     this.runner = options.runner ?? nodeAndroidCommandRunner
     this.freeBytes = options.freeBytes ?? availableBytes
     this.reportError = options.reportError ?? ((error) => { console.error(error) })
+    this.removePath = options.removePath ?? removeWithoutFollowing
   }
 
   snapshot(): PhoneAndroidState {
@@ -208,13 +212,35 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
         this.publish({ kind: 'ready', plan: installed.plan, running: false })
         return this.current
       } catch (error) {
-        if (ownedAvd !== undefined) await this.removeOwnedAvd(ownedAvd)
+        let cleanupFailure: Error | undefined
+        if (ownedAvd !== undefined) {
+          try {
+            await this.removeOwnedAvd(ownedAvd)
+          } catch (cleanupError) {
+            cleanupFailure = asError(cleanupError)
+            this.reportError(cleanupFailure)
+          }
+        }
         if (operationSignal.aborted) {
+          const cancellation = new AndroidEnvironmentError(
+            'PHONE_ANDROID_ABORTED', 'Android preparation was cancelled', { cause: error },
+          )
+          if (cleanupFailure !== undefined) {
+            const combined = combinePreparationAndCleanup(cancellation, cleanupFailure)
+            this.publish({
+              kind: 'failed', ...(plan === undefined ? {} : { plan }),
+              code: combined.code, message: combined.message, retryable: true,
+            })
+            throw combined
+          }
           await this.stopOwnedEmulator()
           if (plan !== undefined) this.publish({ kind: 'missing', plan })
-          throw new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android preparation was cancelled', { cause: error })
+          throw cancellation
         }
-        const failure = androidFailure(error)
+        const primary = androidFailure(error)
+        const failure = cleanupFailure === undefined
+          ? primary
+          : combinePreparationAndCleanup(primary, cleanupFailure)
         this.publish({
           kind: 'failed', ...(plan === undefined ? {} : { plan }),
           code: failure.code, message: failure.message, retryable: true,
@@ -319,7 +345,10 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     active?.abort(new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android operation cancelled'))
     void this.stopOwnedEmulator().then(
       () => { if (active === undefined) this.publishStopped() },
-      (error) => { this.reportError(error) },
+      (error) => {
+        this.publishStopFailure(error)
+        this.reportError(error)
+      },
     )
   }
 
@@ -336,8 +365,11 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     } catch (error) {
       failure ??= error
     }
-    this.publishStopped()
-    if (failure !== undefined) throw failure
+    if (failure === undefined) this.publishStopped()
+    else {
+      this.publishStopFailure(failure)
+      throw failure
+    }
   }
 
   runtimeEnvironment(): Readonly<Record<string, string>> {
@@ -586,23 +618,44 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   private async stopOwnedEmulator(): Promise<void> {
     if (this.emulatorStop !== undefined) return await this.emulatorStop
     const owned = this.emulator
-    this.emulator = undefined
     if (owned === undefined) return
     const stop = owned.stop()
     this.emulatorStop = stop
-    await stop
+    try {
+      await stop
+      if (this.emulator === owned) this.emulator = undefined
+    } finally {
+      if (this.emulatorStop === stop) this.emulatorStop = undefined
+    }
   }
 
   private async removeOwnedAvd(plan: AndroidPreparationPlan): Promise<void> {
     await Promise.all([
-      rm(join(plan.avdHome, `${plan.avdName}.avd`), { recursive: true, force: true }),
-      rm(join(plan.avdHome, `${plan.avdName}.ini`), { force: true }),
+      this.removePath(join(plan.avdHome, `${plan.avdName}.avd`), true),
+      this.removePath(join(plan.avdHome, `${plan.avdName}.ini`), false),
     ])
+  }
+
+  private publishStopFailure(error: unknown): void {
+    const plan = this.plan
+    if (plan === undefined) return
+    const failure = androidFailure(error)
+    this.publish({
+      kind: 'failed', plan,
+      code: failure.code === 'PHONE_ANDROID_PREPARE' ? 'PHONE_ANDROID_EMULATOR_STOP' : failure.code,
+      message: failure.message, retryable: true,
+    })
   }
 
   private publishStopped(): void {
     const plan = this.plan
     if (plan === undefined) return
+    if (this.current.kind === 'failed' && this.current.code === 'PHONE_ANDROID_EMULATOR_STOP') {
+      this.publish(Object.values(plan.components).every(Boolean)
+        ? { kind: 'ready', plan, running: false }
+        : { kind: 'missing', plan })
+      return
+    }
     if (this.current.kind !== 'ready'
       && this.current.kind !== 'booting'
       && this.current.kind !== 'checking-acceleration') return
@@ -673,6 +726,21 @@ function androidFailure(error: unknown): AndroidEnvironmentError {
   )
 }
 
+function combinePreparationAndCleanup(
+  primary: AndroidEnvironmentError,
+  cleanup: Error,
+): AndroidEnvironmentError {
+  return new AndroidEnvironmentError(
+    primary.code,
+    `${primary.message}; private AVD cleanup failed: ${cleanup.message}`,
+    { cause: new AggregateError([primary, cleanup], 'Android preparation and private AVD cleanup failed') },
+  )
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
+}
+
 function isAndroidCancellation(error: unknown): boolean {
   return error instanceof AndroidEnvironmentError && error.code === 'PHONE_ANDROID_ABORTED'
 }
@@ -695,6 +763,21 @@ async function availableBytes(path: string): Promise<number> {
 
 async function exists(path: string): Promise<boolean> {
   try { await access(path); return true } catch { return false }
+}
+
+async function removeWithoutFollowing(path: string, recursive: boolean): Promise<void> {
+  let entry: Awaited<ReturnType<typeof lstat>>
+  try {
+    entry = await lstat(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+    throw error
+  }
+  if (entry.isSymbolicLink()) {
+    await unlink(path)
+    return
+  }
+  await rm(path, { recursive, force: true })
 }
 
 async function writable(path: string): Promise<boolean> {

@@ -43,7 +43,7 @@ export interface AndroidProcessInternals {
   readonly stopGraceMs?: number
 }
 
-interface TerminationState { error?: Error }
+interface TerminationState { error: Error | undefined }
 
 /** Executable and argv admitted to Node's direct process spawn. */
 export interface AndroidSpawnSpec {
@@ -108,12 +108,17 @@ export function createNodeAndroidCommandRunner(internals: AndroidProcessInternal
         windowsHide: true,
         detached: platform !== 'win32',
       })
-      const termination: TerminationState = {}
+      const termination: TerminationState = { error: undefined }
       const exit = settleChild(child, options.signal, undefined, platform, taskkill, stopGraceMs, termination)
       return {
         pid: child.pid,
         exit,
         stop: async () => {
+          if (child.exitCode !== null || child.signalCode !== null) {
+            await exit
+            return
+          }
+          clearTerminationError(termination)
           if (child.exitCode === null && child.signalCode === null) {
             recordTerminationError(termination, terminate(child, 'SIGTERM', platform, taskkill))
           }
@@ -142,7 +147,7 @@ async function settleChild(
   platform: NodeJS.Platform = process.platform,
   taskkill: (pid: number, force: boolean) => void = runTaskkill,
   stopGraceMs = STOP_GRACE_MS,
-  termination: TerminationState = {},
+  termination: TerminationState = { error: undefined },
 ): Promise<AndroidCommandResult> {
   let stdout = ''
   let stderr = ''
@@ -262,4 +267,8 @@ async function boundedExit(exit: Promise<AndroidCommandResult>, ms: number): Pro
 
 function recordTerminationError(state: TerminationState, error: Error | undefined): void {
   if (error !== undefined && state.error === undefined) state.error = error
+}
+
+function clearTerminationError(state: TerminationState): void {
+  state.error = undefined
 }

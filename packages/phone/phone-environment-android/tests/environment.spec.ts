@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -278,6 +278,82 @@ describe('Android environment manager', () => {
 
     blockCreate = false
     await expect(manager.prepare({ licenseAccepted: true })).resolves.toMatchObject({ kind: 'ready', running: false })
+  })
+
+  it('unlinks an AVD junction without recursively deleting its external target', async () => {
+    const root = await tempRoot()
+    const fixture = archiveAsset()
+    const runner = new FixtureRunner(root)
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64', environment: { PATH: '' },
+      homeDirectory: root, runner, freeBytes: async () => 32 * 1024 ** 3,
+      commandLineToolsAsset: fixture.asset,
+      fetch: async () => new Response(bodyOf(fixture.bytes), { headers: { 'content-length': String(fixture.bytes.byteLength) } }),
+    })
+    await manager.refresh()
+    const external = join(root, 'external-avd-target')
+    const sentinel = join(external, 'keep.txt')
+    const avd = join(root, 'android', 'avd', 'Pixel_6_API_35_Gestalt.avd')
+    await mkdir(external, { recursive: true })
+    await writeFile(sentinel, 'keep\n')
+    await mkdir(join(avd, '..'), { recursive: true })
+    await symlink(external, avd, 'junction')
+
+    await expect(manager.prepare({ licenseAccepted: true })).resolves.toMatchObject({ kind: 'ready', running: false })
+
+    await expect(readFile(sentinel, 'utf8')).resolves.toBe('keep\n')
+    await expect(readFile(join(avd, 'config.ini'), 'utf8')).resolves.toContain('android-35')
+  })
+
+  it('keeps cancellation and AVD cleanup failure facts in the terminal state', async () => {
+    const root = await tempRoot()
+    const fixture = archiveAsset()
+    const base = new FixtureRunner(root)
+    const createStarted = Promise.withResolvers<undefined>()
+    const cleanupFailure = new Error('private AVD cleanup was denied')
+    const reportError = vi.fn()
+    let removals = 0
+    const runner: AndroidCommandRunner = {
+      run: async (command, args, options) => {
+        if (command.endsWith('avdmanager') && args.includes('create')) {
+          const avd = join(options.env.ANDROID_AVD_HOME as string, 'Pixel_6_API_35_Gestalt.avd')
+          await mkdir(avd, { recursive: true })
+          await writeFile(join(avd, 'config.ini'), 'partial\n')
+          createStarted.resolve(undefined)
+          return await new Promise<AndroidCommandResult>((_resolve, reject) => {
+            options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+          })
+        }
+        return await base.run(command, args, options)
+      },
+      spawn: () => base.spawn(),
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64', environment: { PATH: '' },
+      homeDirectory: root, runner, freeBytes: async () => 32 * 1024 ** 3,
+      commandLineToolsAsset: fixture.asset, reportError,
+      removePath: async (path, recursive) => {
+        removals += 1
+        if (removals > 2) throw cleanupFailure
+        await rm(path, { recursive, force: true })
+      },
+      fetch: async () => new Response(bodyOf(fixture.bytes), { headers: { 'content-length': String(fixture.bytes.byteLength) } }),
+    })
+    await manager.refresh()
+    const preparing = manager.prepare({ licenseAccepted: true })
+    await createStarted.promise
+    manager.cancel()
+
+    await expect(preparing).rejects.toMatchObject({
+      code: 'PHONE_ANDROID_ABORTED',
+      message: expect.stringMatching(/cancelled; private AVD cleanup failed: private AVD cleanup was denied/u),
+      cause: expect.any(AggregateError),
+    })
+    expect(reportError).toHaveBeenCalledWith(cleanupFailure)
+    expect(manager.snapshot()).toMatchObject({
+      kind: 'failed', code: 'PHONE_ANDROID_ABORTED',
+      message: expect.stringMatching(/cleanup failed/u), retryable: true,
+    })
   })
 
   it('stops before download when the target volume has less than 16 GB free', async () => {
@@ -559,11 +635,12 @@ describe('Android environment manager', () => {
     expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
   })
 
-  it('reports a cancel-started Emulator stop failure and preserves it for deactivate', async () => {
+  it('keeps a failed Emulator stop visible and retries the retained process on deactivate', async () => {
     const root = await tempRoot()
     const sdkRoot = await stageReadySdk(root)
     const stopFailure = new Error('taskkill refused the process tree')
     const reportError = vi.fn()
+    let stopAttempts = 0
     const runner: AndroidCommandRunner = {
       run: async (_command, args) => {
         if (args.includes('--version')) return commandResult({ stdout: '20.0\n' })
@@ -574,7 +651,12 @@ describe('Android environment manager', () => {
         return commandResult({ stdout: '1\n' })
       },
       spawn: () => ({
-        pid: 42, exit: new Promise(() => {}), stop: async () => { throw stopFailure },
+        pid: 42,
+        exit: new Promise(() => {}),
+        stop: async () => {
+          stopAttempts += 1
+          if (stopAttempts === 1) throw stopFailure
+        },
       }),
     }
     const manager = new AndroidEnvironmentManager({
@@ -587,7 +669,12 @@ describe('Android environment manager', () => {
 
     manager.cancel()
     await vi.waitFor(() => { expect(reportError).toHaveBeenCalledWith(stopFailure) })
-    await expect(manager.deactivate()).rejects.toBe(stopFailure)
+    expect(manager.snapshot()).toMatchObject({
+      kind: 'failed', code: 'PHONE_ANDROID_EMULATOR_STOP', retryable: true,
+    })
+    await expect(manager.deactivate()).resolves.toBeUndefined()
+    expect(stopAttempts).toBe(2)
+    expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
   })
 
   it('contains and reports a subscriber failure before notifying the next subscriber', async () => {

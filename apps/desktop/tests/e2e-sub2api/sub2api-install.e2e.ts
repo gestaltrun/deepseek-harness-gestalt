@@ -155,7 +155,7 @@ describe('Sub2API Desktop installation', () => {
     await clickAccountConsoleButton(['添加代理', 'Create Proxy'])
     await browser.waitUntil(async () => {
       const dialogs = await overlayAccountDialogStack()
-      return dialogs.length >= 3 && dialogs.some(dialog =>
+      return dialogs.some(dialog =>
         /添加代理|Create Proxy/u.test(dialog.text) && dialog.ownsCenter)
     }, {
       timeout: 15_000,

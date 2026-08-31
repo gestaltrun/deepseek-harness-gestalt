@@ -5,7 +5,10 @@ const STOP_GRACE_MS = 2_000
 
 /** Result of one bounded Android SDK command. */
 export interface AndroidCommandResult {
-  readonly code: number | null
+  readonly exitCode: number | null
+  readonly signal: NodeJS.Signals | null
+  readonly timedOut: boolean
+  readonly callerAborted: boolean
   readonly stdout: string
   readonly stderr: string
 }
@@ -127,21 +130,28 @@ async function settleChild(
   let stdout = ''
   let stderr = ''
   let escape: ReturnType<typeof setTimeout> | undefined
+  let timedOut = false
+  let callerAborted = false
   child.stdout?.on('data', (chunk: Buffer) => { stdout = retain(stdout, chunk.toString('utf8')) })
   child.stderr?.on('data', (chunk: Buffer) => { stderr = retain(stderr, chunk.toString('utf8')) })
-  const abort = (): void => {
+  const terminateGracefully = (): void => {
     terminate(child, 'SIGTERM', platform, taskkill)
     if (escape !== undefined) return
     escape = setTimeout(() => { terminate(child, 'SIGKILL', platform, taskkill) }, STOP_GRACE_MS)
     escape.unref()
   }
-  signal?.addEventListener('abort', abort, { once: true })
-  const timeout = timeoutMs === undefined ? undefined : setTimeout(abort, timeoutMs)
+  const abort = (): void => { callerAborted = true; terminateGracefully() }
+  const expire = (): void => { timedOut = true; terminateGracefully() }
+  if (signal?.aborted === true) abort()
+  else signal?.addEventListener('abort', abort, { once: true })
+  const timeout = timeoutMs === undefined ? undefined : setTimeout(expire, timeoutMs)
   timeout?.unref()
   try {
     return await new Promise((resolve, reject) => {
       child.once('error', reject)
-      child.once('close', (code) => { resolve({ code, stdout, stderr }) })
+      child.once('close', (exitCode, exitSignal) => {
+        resolve({ exitCode, signal: exitSignal, timedOut, callerAborted, stdout, stderr })
+      })
     })
   } finally {
     signal?.removeEventListener('abort', abort)

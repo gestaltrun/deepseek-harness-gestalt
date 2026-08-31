@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { androidSpawnSpec, windowsTaskkillArgs } from '../src/process.ts'
+import {
+  androidSpawnSpec, createNodeAndroidCommandRunner, windowsTaskkillArgs,
+} from '../src/process.ts'
 
 describe('Android SDK process launch', () => {
   it('routes a Windows SDK batch launcher through the command processor', () => {
@@ -32,5 +34,45 @@ describe('Android SDK process launch', () => {
   it('targets the complete Windows process tree before and after escalation', () => {
     expect(windowsTaskkillArgs(42, false)).toEqual(['/PID', '42', '/T'])
     expect(windowsTaskkillArgs(42, true)).toEqual(['/PID', '42', '/T', '/F'])
+  })
+
+  it('distinguishes a command deadline from the child exit facts', async () => {
+    const result = await createNodeAndroidCommandRunner().run(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1_000)'],
+      { env: {}, timeoutMs: 10 },
+    )
+
+    expect(result).toMatchObject({ timedOut: true, callerAborted: false })
+    expect(result.exitCode === null || result.signal !== null).toBe(true)
+  })
+
+  it('honors an already-aborted caller and retains its ownership fact', async () => {
+    const controller = new AbortController()
+    controller.abort(new Error('cancelled by caller'))
+
+    const result = await createNodeAndroidCommandRunner().run(
+      process.execPath,
+      ['-e', 'setInterval(() => {}, 1_000)'],
+      { env: {}, signal: controller.signal },
+    )
+
+    expect(result).toMatchObject({ timedOut: false, callerAborted: true })
+    expect(result.exitCode === null || result.signal !== null).toBe(true)
+  })
+
+  it.skipIf(process.platform === 'win32')('retains an unowned signal death', async () => {
+    const result = await createNodeAndroidCommandRunner().run(
+      process.execPath,
+      ['-e', "process.kill(process.pid, 'SIGTERM')"],
+      { env: {} },
+    )
+
+    expect(result).toMatchObject({
+      exitCode: null,
+      signal: 'SIGTERM',
+      timedOut: false,
+      callerAborted: false,
+    })
   })
 })

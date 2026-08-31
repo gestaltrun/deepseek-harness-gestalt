@@ -61,6 +61,8 @@ export type {
 } from './types.ts'
 export { PhoneDevicesError } from './errors.ts'
 export { deviceId } from './ids.ts'
+export { verifyAnnexBH264Picture } from './h264.ts'
+export type { H264PictureVerificationOptions } from './h264.ts'
 export { resolveMobilecliExecutable } from './resolve-binary.ts'
 export type { ServerExit } from './server-process.ts'
 

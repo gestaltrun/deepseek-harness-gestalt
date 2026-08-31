@@ -9,15 +9,18 @@ import { unzipSync } from 'fflate'
 import type {
   AndroidEnvironmentProvider, AndroidPreparationPlan, AndroidPrepareRequest, PhoneAndroidState,
 } from '@deepseek-ai/dsh-phone-environment'
+import { deviceId, type DeviceId } from '@deepseek-ai/dsh-phone-runtime'
 import { planAndroidEnvironment } from './planner.ts'
 import type { AndroidCommandLineToolsAsset, AndroidInstallationProbe } from './types.ts'
 import {
-  nodeAndroidCommandRunner, type AndroidCommandRunner, type AndroidOwnedProcess,
+  nodeAndroidCommandRunner, type AndroidCommandResult, type AndroidCommandRunner, type AndroidOwnedProcess,
 } from './process.ts'
 
 const COMMAND_TIMEOUT_MS = 15 * 60_000
+const COMPATIBILITY_PROBE_TIMEOUT_MS = 30_000
 const BOOT_TIMEOUT_MS = 180_000
 const POLL_MS = 1_000
+const MINIMUM_SDKMANAGER_MAJOR = 12
 
 /** Stable Android preparation failure consumed by the Host snapshot. */
 export class AndroidEnvironmentError extends Error {
@@ -78,7 +81,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
 
   async refresh(signal?: AbortSignal): Promise<PhoneAndroidState> {
     this.publish({ kind: 'checking' })
-    const root = await this.discoverExistingSdkRoot()
+    const root = await this.discoverExistingSdkRoot(signal)
     const probe = root === undefined ? undefined : await this.probe(root, 'existing')
     const planned = planAndroidEnvironment(
       this.platform,
@@ -107,23 +110,27 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
       throw new AndroidEnvironmentError('PHONE_ANDROID_LICENSE_REQUIRED', 'Android SDK license acceptance is required')
     }
     if (this.operation !== undefined) throw new AndroidEnvironmentError('PHONE_ANDROID_BUSY', 'Android preparation is already running')
-    if (this.plan === undefined || this.asset === undefined) await this.refresh(signal)
-    const plan = this.requirePlan()
-    const asset = this.asset as AndroidCommandLineToolsAsset
-    const free = await this.freeBytes(plan.sdkRoot)
-    if (free < plan.minimumFreeBytes) {
-      this.publish({
-        kind: 'manual-required', plan, code: 'disk-space',
-        message: `Android preparation requires 16 GB free; this volume has ${formatGiB(free)} GB.`,
-      })
-      return this.current
-    }
     const controller = new AbortController()
     this.operation = controller
     const operationSignal = signal === undefined
       ? controller.signal
       : AbortSignal.any([controller.signal, signal])
+    let plan: AndroidPreparationPlan | undefined
     try {
+      if (this.plan === undefined || this.asset === undefined) await this.refresh(operationSignal)
+      operationSignal.throwIfAborted()
+      plan = this.requirePlan()
+      const asset = this.asset as AndroidCommandLineToolsAsset
+      const free = await this.freeBytes(plan.sdkRoot)
+      operationSignal.throwIfAborted()
+      if (free < plan.minimumFreeBytes) {
+        this.publish({
+          kind: 'manual-required', plan, code: 'disk-space',
+          message: `Android preparation requires 16 GB free; this volume has ${formatGiB(free)} GB.`,
+        })
+        return this.current
+      }
+      await this.stopOwnedEmulator()
       await mkdir(dirname(plan.sdkRoot), { recursive: true, mode: 0o700 })
       if (!plan.components.commandLineTools) await this.installCommandLineTools(plan, asset, operationSignal)
       const env = this.environmentFor(plan)
@@ -159,15 +166,19 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
       )
       if (installed.kind !== 'supported') throw new AndroidEnvironmentError('PHONE_ANDROID_UNSUPPORTED', installed.reason)
       this.plan = installed.plan
-      return await this.startEmulator(operationSignal)
+      this.publish({ kind: 'ready', plan: installed.plan, running: false })
+      return this.current
     } catch (error) {
       if (operationSignal.aborted) {
         await this.stopOwnedEmulator()
-        this.publish({ kind: 'missing', plan })
+        if (plan !== undefined) this.publish({ kind: 'missing', plan })
         throw new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android preparation was cancelled', { cause: error })
       }
       const failure = androidFailure(error)
-      this.publish({ kind: 'failed', plan, code: failure.code, message: failure.message, retryable: true })
+      this.publish({
+        kind: 'failed', ...(plan === undefined ? {} : { plan }),
+        code: failure.code, message: failure.message, retryable: true,
+      })
       throw failure
     } finally {
       if (this.operation === controller) this.operation = undefined
@@ -212,7 +223,8 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     const acceleration = await this.runner.run(this.emulatorPath(plan), ['-accel-check'], {
       env, ...(signal === undefined ? {} : { signal }), timeoutMs: COMMAND_TIMEOUT_MS,
     })
-    if (acceleration.code !== 0) {
+    this.requireProcessFacts(acceleration, signal, 'PHONE_ANDROID_ACCELERATION', this.emulatorPath(plan))
+    if (acceleration.exitCode !== 0) {
       this.publish(manualAcceleration(plan, this.platform, `${acceleration.stdout}\n${acceleration.stderr}`))
       return this.current
     }
@@ -224,15 +236,27 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     void emulator.exit.then((outcome) => {
       if (this.emulator !== emulator) return
       this.emulator = undefined
-      if (this.current.kind === 'ready' && outcome.code !== null) {
+      if (this.current.kind === 'ready') {
         this.publish({
           kind: 'failed', plan, code: 'PHONE_ANDROID_EMULATOR_EXIT',
-          message: `Android Emulator exited with code ${String(outcome.code)}`, retryable: true,
+          message: processExitMessage('Android Emulator', outcome), retryable: true,
         })
       }
     }, () => {})
-    const deviceId = await this.waitForBoot(plan, env, signal)
-    this.publish({ kind: 'ready', plan, deviceId, running: true })
+    const bootController = new AbortController()
+    const bootSignal = signal === undefined
+      ? bootController.signal
+      : AbortSignal.any([signal, bootController.signal])
+    const exitedDuringBoot = emulator.exit.then((outcome) => {
+      bootController.abort(new AndroidEnvironmentError(
+        'PHONE_ANDROID_EMULATOR_EXIT', processExitMessage('Android Emulator', outcome),
+      ))
+      throw new AndroidEnvironmentError(
+        'PHONE_ANDROID_EMULATOR_EXIT', processExitMessage('Android Emulator', outcome),
+      )
+    })
+    const id = await Promise.race([this.waitForBoot(plan, env, bootSignal), exitedDuringBoot])
+    this.publish({ kind: 'ready', plan, deviceId: id, running: true })
     return this.current
   }
 
@@ -255,7 +279,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     return plan === undefined ? Object.freeze({}) : Object.freeze(this.environmentFor(plan))
   }
 
-  private async discoverExistingSdkRoot(): Promise<string | undefined> {
+  private async discoverExistingSdkRoot(signal?: AbortSignal): Promise<string | undefined> {
     const candidates = [
       environmentValue(this.ambient, 'ANDROID_HOME', this.platform),
       environmentValue(this.ambient, 'ANDROID_SDK_ROOT', this.platform),
@@ -269,9 +293,40 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     for (const candidate of candidates) {
       if (candidate === undefined) continue
       const root = resolve(candidate)
-      if (await exists(this.sdkmanagerAt(root)) && await writable(root)) return root
+      if (await this.compatibleExistingSdkRoot(root, signal)) return root
     }
     return undefined
+  }
+
+  private async compatibleExistingSdkRoot(root: string, signal?: AbortSignal): Promise<boolean> {
+    if (!await writable(root)
+      || !await exists(this.sdkmanagerAt(root))
+      || !await exists(join(root, 'cmdline-tools', 'latest', 'bin', executable('avdmanager', this.platform, true)))) {
+      return false
+    }
+    const env = this.environmentForRoots(root, join(this.options.phoneRoot, 'android', 'avd'))
+    const commandOptions = {
+      env, ...(signal === undefined ? {} : { signal }), timeoutMs: COMPATIBILITY_PROBE_TIMEOUT_MS,
+    }
+    try {
+      const version = await this.runner.run(
+        this.sdkmanagerAt(root), [`--sdk_root=${root}`, '--version'], commandOptions,
+      )
+      if (version.callerAborted) signal?.throwIfAborted()
+      const major = Number.parseInt(version.stdout.trim().split('.')[0] ?? '', 10)
+      if (version.timedOut || version.signal !== null || version.exitCode !== 0
+        || !Number.isSafeInteger(major) || major < MINIMUM_SDKMANAGER_MAJOR) return false
+      const devices = await this.runner.run(
+        join(root, 'cmdline-tools', 'latest', 'bin', executable('avdmanager', this.platform, true)),
+        ['list', 'device', '-c'], commandOptions,
+      )
+      if (devices.callerAborted) signal?.throwIfAborted()
+      return !devices.timedOut && devices.signal === null && devices.exitCode === 0
+        && devices.stdout.split(/\r?\n/u).some(line => line.trim() === 'pixel_6')
+    } catch (error) {
+      if (signal?.aborted === true) throw error
+      return false
+    }
   }
 
   private async probe(sdkRoot: string, sdkSource: 'existing' | 'managed'): Promise<AndroidInstallationProbe> {
@@ -369,8 +424,27 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     const result = await this.runner.run(command, args, {
       env, ...(input === undefined ? {} : { input }), signal, timeoutMs: COMMAND_TIMEOUT_MS,
     })
-    if (result.code !== 0) {
-      throw new AndroidEnvironmentError(code, `${command} failed with code ${String(result.code)}: ${tail(result.stderr || result.stdout)}`)
+    this.requireProcessFacts(result, signal, code, command)
+    if (result.exitCode !== 0) {
+      throw new AndroidEnvironmentError(code, `${command} failed with code ${String(result.exitCode)}: ${tail(result.stderr || result.stdout)}`)
+    }
+  }
+
+  private requireProcessFacts(
+    result: AndroidCommandResult,
+    signal: AbortSignal | undefined,
+    code: string,
+    command: string,
+  ): void {
+    if (result.callerAborted) {
+      signal?.throwIfAborted()
+      throw new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', `${command} was cancelled`)
+    }
+    if (result.timedOut) {
+      throw new AndroidEnvironmentError(`${code}_TIMEOUT`, `${command} exceeded its command deadline`)
+    }
+    if (result.signal !== null) {
+      throw new AndroidEnvironmentError(`${code}_SIGNAL`, `${command} exited by ${result.signal}`)
     }
   }
 
@@ -378,7 +452,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     plan: AndroidPreparationPlan,
     env: Readonly<Record<string, string>>,
     signal?: AbortSignal,
-  ): Promise<string> {
+  ): Promise<DeviceId> {
     const started = Date.now()
     while (Date.now() - started < BOOT_TIMEOUT_MS) {
       signal?.throwIfAborted()
@@ -392,7 +466,7 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
         const boot = await this.runner.run(this.adbPath(plan), ['-s', id, 'shell', 'getprop', 'sys.boot_completed'], {
           ...commandOptions,
         })
-        if (boot.stdout.trim() === '1') return id
+        if (boot.stdout.trim() === '1') return deviceId(id)
       }
       await delay(POLL_MS, signal)
     }
@@ -400,15 +474,19 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   }
 
   private environmentFor(plan: AndroidPreparationPlan): Readonly<Record<string, string>> {
+    return this.environmentForRoots(plan.sdkRoot, plan.avdHome)
+  }
+
+  private environmentForRoots(sdkRoot: string, avdHome: string): Readonly<Record<string, string>> {
     const tools = [
-      join(plan.sdkRoot, 'platform-tools'),
-      join(plan.sdkRoot, 'emulator'),
-      join(plan.sdkRoot, 'cmdline-tools', 'latest', 'bin'),
+      join(sdkRoot, 'platform-tools'),
+      join(sdkRoot, 'emulator'),
+      join(sdkRoot, 'cmdline-tools', 'latest', 'bin'),
     ]
     return {
-      ANDROID_HOME: plan.sdkRoot,
-      ANDROID_SDK_ROOT: plan.sdkRoot,
-      ANDROID_AVD_HOME: plan.avdHome,
+      ANDROID_HOME: sdkRoot,
+      ANDROID_SDK_ROOT: sdkRoot,
+      ANDROID_AVD_HOME: avdHome,
       PATH: [...tools, environmentValue(this.ambient, 'PATH', this.platform) ?? '']
         .filter(Boolean).join(this.platform === 'win32' ? win32.delimiter : posix.delimiter),
     }
@@ -545,6 +623,13 @@ function inside(root: string, path: string): boolean {
 function tail(value: string): string {
   const trimmed = value.trim()
   return trimmed.length > 1_000 ? trimmed.slice(-1_000) : trimmed
+}
+
+function processExitMessage(label: string, outcome: AndroidCommandResult): string {
+  if (outcome.callerAborted) return `${label} was cancelled by its caller`
+  if (outcome.timedOut) return `${label} exceeded its deadline`
+  if (outcome.signal !== null) return `${label} exited by ${outcome.signal}`
+  return `${label} exited with code ${String(outcome.exitCode)}`
 }
 
 function formatGiB(bytes: number): string {

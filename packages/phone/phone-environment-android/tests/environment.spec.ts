@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { zipSync } from 'fflate'
 import { AndroidEnvironmentManager } from '../src/environment.ts'
 import type {
@@ -20,6 +20,25 @@ async function tempRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-android-environment-'))
   roots.push(root)
   return root
+}
+
+async function stageReadySdk(root: string): Promise<string> {
+  const sdkRoot = join(root, 'sdk')
+  const avdHome = join(root, 'android', 'avd')
+  for (const path of [
+    join(sdkRoot, 'cmdline-tools', 'latest', 'bin', 'sdkmanager'),
+    join(sdkRoot, 'cmdline-tools', 'latest', 'bin', 'avdmanager'),
+    join(sdkRoot, 'platform-tools', 'adb'),
+    join(sdkRoot, 'emulator', 'emulator'),
+    join(sdkRoot, 'system-images', 'android-35', 'google_apis', 'arm64-v8a', 'package.xml'),
+    join(avdHome, 'Pixel_6_API_35_Gestalt.avd', 'config.ini'),
+  ]) {
+    await mkdir(join(path, '..'), { recursive: true })
+    await writeFile(path, path.endsWith('config.ini')
+      ? 'image.sysdir.1=system-images/android-35/google_apis/arm64-v8a/\n'
+      : 'fixture\n')
+  }
+  return sdkRoot
 }
 
 function archiveAsset(): { asset: AndroidCommandLineToolsAsset; bytes: Uint8Array } {
@@ -45,6 +64,12 @@ function bodyOf(bytes: Uint8Array): ArrayBuffer {
   return body
 }
 
+function commandResult(overrides: Partial<AndroidCommandResult> = {}): AndroidCommandResult {
+  return {
+    exitCode: 0, signal: null, timedOut: false, callerAborted: false, stdout: '', stderr: '', ...overrides,
+  }
+}
+
 class FixtureRunner implements AndroidCommandRunner {
   readonly calls: { command: string; args: readonly string[]; input?: string }[] = []
   stops = 0
@@ -66,18 +91,20 @@ class FixtureRunner implements AndroidCommandRunner {
       }
     }
     if (command.endsWith('avdmanager')) {
+      if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
       const avd = join(this.phoneRoot, 'android', 'avd', 'Pixel_6_API_35_Gestalt.avd')
       await mkdir(avd, { recursive: true })
       await writeFile(join(avd, 'config.ini'), 'image.sysdir.1=system-images/android-35/google_apis/arm64-v8a/\n')
     }
-    if (args[0] === 'devices') return { code: 0, stdout: 'List of devices attached\nemulator-5554\tdevice\n', stderr: '' }
-    if (args.includes('avd') && args.includes('name')) return { code: 0, stdout: 'Pixel_6_API_35_Gestalt\nOK\n', stderr: '' }
-    if (args.includes('getprop')) return { code: 0, stdout: '1\n', stderr: '' }
-    return { code: 0, stdout: 'accel:\n0\nHypervisor.Framework\n', stderr: '' }
+    if (args.includes('--version')) return commandResult({ stdout: '20.0\n' })
+    if (args[0] === 'devices') return commandResult({ stdout: 'List of devices attached\nemulator-5554\tdevice\n' })
+    if (args.includes('avd') && args.includes('name')) return commandResult({ stdout: 'Pixel_6_API_35_Gestalt\nOK\n' })
+    if (args.includes('getprop')) return commandResult({ stdout: '1\n' })
+    return commandResult({ stdout: 'accel:\n0\nHypervisor.Framework\n' })
   }
 
   spawn(): AndroidOwnedProcess {
-    const result = { code: null, stdout: '', stderr: '' }
+    const result = commandResult({ exitCode: null })
     return {
       pid: 42,
       exit: new Promise(() => {}),
@@ -104,6 +131,25 @@ describe('Android environment manager', () => {
     expect(runner.calls).toEqual([])
   })
 
+  it('reserves one preparation owner before disk preflight and keeps cancellation on that owner', async () => {
+    const root = await tempRoot()
+    const fixture = archiveAsset()
+    let releaseFree!: () => void
+    const free = new Promise<number>((resolve) => { releaseFree = () => { resolve(32 * 1024 ** 3) } })
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64', environment: { PATH: '' },
+      homeDirectory: join(root, 'home'), runner: new FixtureRunner(root), commandLineToolsAsset: fixture.asset,
+      freeBytes: async () => await free,
+      fetch: async () => new Response(bodyOf(fixture.bytes), { headers: { 'content-length': String(fixture.bytes.byteLength) } }),
+    })
+    await manager.refresh()
+    const first = manager.prepare({ licenseAccepted: true })
+    await expect(manager.prepare({ licenseAccepted: true })).rejects.toMatchObject({ code: 'PHONE_ANDROID_BUSY' })
+    manager.cancel()
+    releaseFree()
+    await expect(first).rejects.toMatchObject({ code: 'PHONE_ANDROID_ABORTED' })
+  })
+
   it('downloads the pinned tools, accepts licenses, installs fixed packages, creates one AVD, and boots it', async () => {
     const root = await tempRoot()
     const fixture = archiveAsset()
@@ -121,7 +167,15 @@ describe('Android environment manager', () => {
     const states: string[] = []
     manager.onChanged((state) => { states.push(state.kind) })
     await manager.refresh()
-    const ready = await manager.prepare({ licenseAccepted: true })
+    const prepared = await manager.prepare({ licenseAccepted: true })
+    expect(prepared).toMatchObject({
+      kind: 'ready', running: false,
+      plan: {
+        sdkSource: 'managed', abi: 'arm64-v8a',
+        components: { commandLineTools: true, platformTools: true, emulator: true, systemImage: true, avd: true },
+      },
+    })
+    const ready = await manager.start()
     expect(ready).toMatchObject({
       kind: 'ready', running: true, deviceId: 'emulator-5554',
       plan: {
@@ -139,6 +193,7 @@ describe('Android environment manager', () => {
     expect(await readFile(join(root, 'android', 'avd', 'Pixel_6_API_35_Gestalt.avd', 'config.ini'), 'utf8')).toContain('android-35')
     await manager.prepare({ licenseAccepted: true })
     expect(runner.calls.filter(call => call.command.endsWith('avdmanager'))).toHaveLength(1)
+    await manager.start()
     await manager.deactivate()
     expect(runner.stops).toBe(2)
     expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
@@ -174,6 +229,34 @@ describe('Android environment manager', () => {
       ANDROID_HOME: join(root, 'android', 'sdk'),
       ANDROID_SDK_ROOT: join(root, 'android', 'sdk'),
       PATH: expect.stringMatching(/;C:\\Windows\\System32$/u),
+    })
+  })
+
+  it.each([
+    ['obsolete', commandResult({ stdout: '11.0\n' })],
+    ['broken', commandResult({ exitCode: 1, stderr: 'Java runtime failed' })],
+  ])('falls back to the private SDK when an existing sdkmanager is %s', async (_label, versionResult) => {
+    const root = await tempRoot()
+    const existing = join(root, 'existing-sdk')
+    for (const name of ['sdkmanager', 'avdmanager']) {
+      const path = join(existing, 'cmdline-tools', 'latest', 'bin', name)
+      await mkdir(join(path, '..'), { recursive: true })
+      await writeFile(path, 'fixture\n')
+    }
+    const runner: AndroidCommandRunner = {
+      run: async (_command, args) => args.includes('--version')
+        ? versionResult
+        : commandResult({ stdout: 'pixel_6\n' }),
+      spawn: () => { throw new Error('an incompatible SDK must not start an emulator') },
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64',
+      environment: { ANDROID_HOME: existing, PATH: '' }, homeDirectory: join(root, 'home'), runner,
+      freeBytes: async () => 32 * 1024 ** 3,
+    })
+    await manager.refresh()
+    expect(manager.snapshot()).toMatchObject({
+      kind: 'missing', plan: { sdkSource: 'managed', sdkRoot: join(root, 'android', 'sdk') },
     })
   })
 
@@ -221,6 +304,7 @@ describe('Android environment manager', () => {
     const avdHome = join(root, 'android', 'avd')
     for (const path of [
       join(sdkRoot, 'cmdline-tools', 'latest', 'bin', platform === 'win32' ? 'sdkmanager.bat' : 'sdkmanager'),
+      join(sdkRoot, 'cmdline-tools', 'latest', 'bin', platform === 'win32' ? 'avdmanager.bat' : 'avdmanager'),
       join(sdkRoot, 'platform-tools', platform === 'win32' ? 'adb.exe' : 'adb'),
       join(sdkRoot, 'emulator', platform === 'win32' ? 'emulator.exe' : 'emulator'),
       join(sdkRoot, 'system-images', 'android-35', 'google_apis', 'x86_64', 'package.xml'),
@@ -232,9 +316,13 @@ describe('Android environment manager', () => {
         : 'fixture\n')
     }
     const runner: AndroidCommandRunner = {
-      run: async (_command, args) => args[0] === '-accel-check'
-        ? { code: 1, stdout: '', stderr: 'acceleration unavailable' }
-        : { code: 0, stdout: '', stderr: '' },
+      run: async (_command, args) => {
+        if (args.includes('--version')) return commandResult({ stdout: '20.0\n' })
+        if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
+        return args[0] === '-accel-check'
+          ? commandResult({ exitCode: 1, stderr: 'acceleration unavailable' })
+          : commandResult()
+      },
       spawn: () => { throw new Error('emulator must not start') },
     }
     const manager = new AndroidEnvironmentManager({
@@ -243,7 +331,7 @@ describe('Android environment manager', () => {
       freeBytes: async () => 32 * 1024 ** 3,
     })
     await manager.refresh()
-    await expect(manager.prepare({ licenseAccepted: true })).resolves.toMatchObject({
+    await expect(manager.start()).resolves.toMatchObject({
       kind: 'manual-required', code,
     })
   })
@@ -269,7 +357,9 @@ describe('Android environment manager', () => {
     let stops = 0
     const runner: AndroidCommandRunner = {
       run: async (_command, args, options) => {
-        if (args[0] === '-accel-check') return { code: 0, stdout: 'accel ok', stderr: '' }
+        if (args.includes('--version')) return commandResult({ stdout: '20.0\n' })
+        if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
+        if (args[0] === '-accel-check') return commandResult({ stdout: 'accel ok' })
         bootProbeStarted()
         return await new Promise<AndroidCommandResult>((_resolve, reject) => {
           options.signal?.addEventListener('abort', () => {
@@ -295,5 +385,68 @@ describe('Android environment manager', () => {
     await expect(starting).rejects.toMatchObject({ code: 'PHONE_ANDROID_ABORTED' })
     expect(stops).toBe(1)
     expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
+  })
+
+  it('fails immediately when the owned Emulator exits during boot', async () => {
+    const root = await tempRoot()
+    const sdkRoot = await stageReadySdk(root)
+    const exit = Promise.withResolvers<AndroidCommandResult>()
+    const spawned = Promise.withResolvers<undefined>()
+    const runner: AndroidCommandRunner = {
+      run: async (_command, args, options) => {
+        if (args.includes('--version')) return commandResult({ stdout: '20.0\n' })
+        if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
+        if (args[0] === '-accel-check') return commandResult({ stdout: 'accel ok' })
+        return await new Promise<AndroidCommandResult>((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+        })
+      },
+      spawn: () => {
+        spawned.resolve(undefined)
+        return { pid: 42, exit: exit.promise, stop: async () => { exit.resolve(commandResult({ callerAborted: true })) } }
+      },
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64',
+      environment: { ANDROID_HOME: sdkRoot, PATH: '' }, homeDirectory: root, runner,
+      freeBytes: async () => 32 * 1024 ** 3,
+    })
+    await manager.refresh()
+    const starting = manager.start()
+    await spawned.promise
+    exit.resolve(commandResult({ exitCode: 1, stderr: 'emulator crash' }))
+    await expect(starting).rejects.toMatchObject({ code: 'PHONE_ANDROID_EMULATOR_EXIT' })
+    expect(manager.snapshot()).toMatchObject({ kind: 'failed', code: 'PHONE_ANDROID_EMULATOR_EXIT' })
+  })
+
+  it('revokes running readiness when the owned Emulator exits after boot', async () => {
+    const root = await tempRoot()
+    const sdkRoot = await stageReadySdk(root)
+    const exit = Promise.withResolvers<AndroidCommandResult>()
+    const runner: AndroidCommandRunner = {
+      run: async (_command, args) => {
+        if (args.includes('--version')) return commandResult({ stdout: '20.0\n' })
+        if (args[0] === 'list') return commandResult({ stdout: 'pixel_6\n' })
+        if (args[0] === '-accel-check') return commandResult({ stdout: 'accel ok' })
+        if (args[0] === 'devices') return commandResult({ stdout: 'emulator-5554\tdevice\n' })
+        if (args.includes('name')) return commandResult({ stdout: 'Pixel_6_API_35_Gestalt\n' })
+        return commandResult({ stdout: '1\n' })
+      },
+      spawn: () => ({
+        pid: 42, exit: exit.promise,
+        stop: async () => { exit.resolve(commandResult({ callerAborted: true })) },
+      }),
+    }
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'darwin', architecture: 'arm64',
+      environment: { ANDROID_HOME: sdkRoot, PATH: '' }, homeDirectory: root, runner,
+      freeBytes: async () => 32 * 1024 ** 3,
+    })
+    await manager.refresh()
+    await expect(manager.start()).resolves.toMatchObject({ kind: 'ready', running: true })
+    exit.resolve(commandResult({ exitCode: null, signal: 'SIGABRT' }))
+    await vi.waitFor(() => {
+      expect(manager.snapshot()).toMatchObject({ kind: 'failed', code: 'PHONE_ANDROID_EMULATOR_EXIT' })
+    })
   })
 })

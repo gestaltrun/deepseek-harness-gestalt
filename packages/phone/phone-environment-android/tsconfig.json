@@ -8,6 +8,7 @@
     { "path": "../../runtime-diagnostics/invariants" },
     { "path": "../../util/home-paths" },
     { "path": "../../subprocess/subprocess" },
-    { "path": "../phone-environment" }
+    { "path": "../phone-environment" },
+    { "path": "../phone-runtime" }
   ]
 }

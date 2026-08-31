@@ -7088,6 +7088,9 @@ importers:
       '@deepseek-ai/dsh-phone-environment':
         specifier: workspace:^
         version: link:../phone-environment
+      '@deepseek-ai/dsh-phone-runtime':
+        specifier: workspace:^
+        version: link:../phone-runtime
       '@deepseek-ai/dsh-subprocess':
         specifier: workspace:^
         version: link:../../subprocess/subprocess

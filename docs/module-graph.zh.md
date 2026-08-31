@@ -264,6 +264,7 @@ flowchart TD
     pkg_mcp_client["mcp-client"]
   end
   subgraph group_phone["packages/phone"]
+    pkg_phone_environment["phone-environment"]
     pkg_phone_runtime["phone-runtime"]
     pkg_phone_stream["phone-stream"]
     pkg_tool_phone["tool-phone"]
@@ -464,6 +465,13 @@ flowchart TD
   pkg_credentials_local --> pkg_home_paths
   pkg_credentials_local --> pkg_invariants
   pkg_credentials_local --> pkg_launch_environment
+  pkg_phone_environment --> pkg_atomic_write
+  pkg_phone_environment --> pkg_home_paths
+  pkg_phone_environment --> pkg_host_webserver
+  pkg_phone_environment --> pkg_invariants
+  pkg_phone_environment --> pkg_phone_runtime
+  pkg_phone_environment --> pkg_request_trust
+  pkg_phone_environment --> pkg_subprocess
   pkg_phone_stream --> pkg_host_webserver
   pkg_phone_stream --> pkg_invariants
   pkg_phone_stream --> pkg_phone_runtime
@@ -1700,6 +1708,7 @@ flowchart TD
 | [`browser-runtime-tandem`](../packages/browser/browser-runtime-tandem) | `browser` | [`browser-runtime`](../packages/browser/browser-runtime), [`invariants`](../packages/runtime-diagnostics/invariants), [`subprocess`](../packages/subprocess/subprocess) |
 | [`client-hmr`](../packages/client/hmr) | `client` | [`client-modules`](../packages/client/modules), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants) |
 | [`credentials-local`](../packages/credentials/credentials-local) | `credentials` | [`atomic-write`](../packages/util/atomic-write), [`credentials`](../packages/credentials/credentials), [`home-paths`](../packages/util/home-paths), [`invariants`](../packages/runtime-diagnostics/invariants), [`launch-environment`](../packages/util/launch-environment) |
+| [`phone-environment`](../packages/phone/phone-environment) | `phone` | [`atomic-write`](../packages/util/atomic-write), [`home-paths`](../packages/util/home-paths), [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`phone-runtime`](../packages/phone/phone-runtime), [`request-trust`](../packages/util/request-trust), [`subprocess`](../packages/subprocess/subprocess) |
 | [`phone-stream`](../packages/phone/phone-stream) | `phone` | [`host-webserver`](../packages/host/webserver), [`invariants`](../packages/runtime-diagnostics/invariants), [`phone-runtime`](../packages/phone/phone-runtime), [`request-trust`](../packages/util/request-trust) |
 | [`platform-account-client`](../packages/platform/platform-account-client) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account) |
 | [`platform-account-core`](../packages/platform/platform-account-core) | `platform` | [`invariants`](../packages/runtime-diagnostics/invariants), [`platform-account`](../packages/platform/platform-account) |

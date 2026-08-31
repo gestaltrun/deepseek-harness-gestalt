@@ -50,7 +50,8 @@
       "references": [
         {
           "path": "docs/receiver-decision.md",
-          "reason": "Lists the rollout constraints"
+          "reason": "Lists the rollout constraints",
+          "content": "# Receiver decision\n\nUse a reversible release channel.\n"
         }
       ]
     },

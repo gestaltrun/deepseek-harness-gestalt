@@ -31,6 +31,10 @@ describe('member-question receiving keyless assembled snapshot', () => {
       const ingress = createAuthenticatedMemberQuestionIngress(receiver)
       const arrived = await ingress({
         authority: { accountId: 'account:receiver' as PlatformAccountId },
+        documents: [{
+          path: 'docs/receiver-decision.md',
+          bytes: new TextEncoder().encode('# Receiver decision\n\nUse a reversible release channel.\n'),
+        }],
         operation: {
           type: 'member-question',
           operationId: 'operation-snapshot' as never,

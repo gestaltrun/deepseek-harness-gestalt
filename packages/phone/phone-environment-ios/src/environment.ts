@@ -62,9 +62,10 @@ export class IosEnvironmentManager {
   /** Download the iOS runtime when needed, create the product Simulator, and boot it. */
   prepare(signal?: AbortSignal): Promise<PhoneIosState> {
     if (this.platform !== 'darwin') {
+      const state = planIosEnvironment(this.platform)
       return Promise.reject(new IosEnvironmentError(
-        'PHONE_IOS_UNSUPPORTED', planIosEnvironment(this.platform).kind === 'unsupported'
-          ? planIosEnvironment(this.platform).reason
+        'PHONE_IOS_UNSUPPORTED', state.kind === 'unsupported'
+          ? state.reason
           : 'iOS preparation requires macOS and Xcode',
       ))
     }
@@ -114,11 +115,10 @@ export class IosEnvironmentManager {
         : iosFailure(error)
       if (failure.code === 'PHONE_IOS_ABORTED') this.publish(previous)
       else {
-        this.publish({
-          kind: 'failed',
-          ...(planOf(this.current) === undefined ? {} : { plan: planOf(this.current) }),
-          code: failure.code, message: failure.message, retryable: retryable(failure.code),
-        })
+        const plan = planOf(this.current)
+        this.publish(plan === undefined
+          ? { kind: 'failed', code: failure.code, message: failure.message, retryable: retryable(failure.code) }
+          : { kind: 'failed', plan, code: failure.code, message: failure.message, retryable: retryable(failure.code) })
       }
       throw failure
     }).finally(() => {

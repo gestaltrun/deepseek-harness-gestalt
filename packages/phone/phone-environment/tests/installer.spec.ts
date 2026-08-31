@@ -85,7 +85,8 @@ describe('managed mobilecli installer', () => {
       fetch: fetcher,
       onProgress: value => progress.push(value.receivedBytes),
     })
-    expect(await probeMobilecliVersion(installed.executablePath)).toBe('1.0.5')
+    if (process.platform === 'win32') expect(installed.version).toBe('1.0.5')
+    else expect(await probeMobilecliVersion(installed.executablePath)).toBe('1.0.5')
     expect(progress.at(-1)).toBe(bytes.byteLength)
     expect(fetcher).toHaveBeenCalledTimes(2)
     expect(await readManagedMobilecli(root, 'darwin', 'arm64')).toEqual({

@@ -272,6 +272,16 @@ export class PhoneEnvironment extends Service {
     return selectMobilecliReleaseAsset(platform, architecture)
   }
 
+  /**
+   * Probe one discovered runtime candidate at the Host subprocess boundary.
+   * @param executablePath - absolute candidate executable.
+   * @param signal - operation cancellation.
+   * @returns the candidate semantic version.
+   */
+  protected probeRuntimeVersion(executablePath: string, signal: AbortSignal): Promise<string> {
+    return probeMobilecliVersion(executablePath, signal)
+  }
+
   private async detectRuntime(signal: AbortSignal): Promise<PhoneEnvironmentSnapshot> {
     try {
       const managed = await readManagedMobilecli(this.root, process.platform, process.arch, signal)
@@ -295,7 +305,7 @@ export class PhoneEnvironment extends Service {
         ).runtime)
         return this.current
       }
-      const version = await probeMobilecliVersion(candidate.executablePath, signal)
+      const version = await this.probeRuntimeVersion(candidate.executablePath, signal)
       if (version !== MOBILECLI_MANAGED_VERSION) {
         throw new PhoneEnvironmentError(
           'PHONE_ENVIRONMENT_VERSION',

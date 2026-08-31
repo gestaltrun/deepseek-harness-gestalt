@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
-  access, chmod, mkdir, mkdtemp, readFile, rm, statfs, writeFile,
+  access, chmod, mkdir, mkdtemp, readFile, rename, rm, statfs, writeFile,
 } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { delimiter, dirname, join, normalize, relative, resolve, sep } from 'node:path'
@@ -217,10 +217,13 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
       return this.current
     }
     this.publish({ kind: 'booting', plan })
-    this.emulator = this.runner.spawn(this.emulatorPath(plan), [
+    const emulator = this.runner.spawn(this.emulatorPath(plan), [
       `@${plan.avdName}`, '-no-window', '-no-audio', '-no-boot-anim', '-no-snapshot-save', '-gpu', 'auto',
     ], { env, ...(signal === undefined ? {} : { signal }) })
-    void this.emulator.exit.then((outcome) => {
+    this.emulator = emulator
+    void emulator.exit.then((outcome) => {
+      if (this.emulator !== emulator) return
+      this.emulator = undefined
       if (this.current.kind === 'ready' && outcome.code !== null) {
         this.publish({
           kind: 'failed', plan, code: 'PHONE_ANDROID_EMULATOR_EXIT',
@@ -234,13 +237,17 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
   }
 
   cancel(): void {
-    this.operation?.abort(new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android operation cancelled'))
-    void this.stopOwnedEmulator()
+    const active = this.operation
+    active?.abort(new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android operation cancelled'))
+    void this.stopOwnedEmulator().then(() => {
+      if (active === undefined) this.publishStopped()
+    })
   }
 
   async deactivate(): Promise<void> {
-    this.cancel()
+    this.operation?.abort(new AndroidEnvironmentError('PHONE_ANDROID_ABORTED', 'Android operation cancelled'))
     await this.stopOwnedEmulator()
+    this.publishStopped()
   }
 
   runtimeEnvironment(): Readonly<Record<string, string>> {
@@ -314,13 +321,16 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
       }
       if (receivedBytes !== asset.bytes) throw new AndroidEnvironmentError('PHONE_ANDROID_LENGTH', 'command-line tools download was truncated')
       if (digest.digest('hex') !== asset.sha256) throw new AndroidEnvironmentError('PHONE_ANDROID_DIGEST', 'command-line tools SHA-256 did not match the pinned asset')
+      signal.throwIfAborted()
       const archive = new Uint8Array(receivedBytes)
       let offset = 0
       for (const chunk of chunks) { archive.set(chunk, offset); offset += chunk.byteLength }
       const entries = unzipSync(archive)
       const target = join(plan.sdkRoot, 'cmdline-tools', 'latest')
-      await mkdir(target, { recursive: true, mode: 0o700 })
+      const extracted = join(staging, 'cmdline-tools', 'latest')
+      await mkdir(extracted, { recursive: true, mode: 0o700 })
       for (const [rawName, bytes] of Object.entries(entries)) {
+        signal.throwIfAborted()
         if (!rawName.startsWith('cmdline-tools/')) {
           throw new AndroidEnvironmentError('PHONE_ANDROID_ARCHIVE', 'command-line tools archive contains an entry outside cmdline-tools')
         }
@@ -329,14 +339,18 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
         if (relativeName === '..' || relativeName.startsWith(`..${sep}`)) {
           throw new AndroidEnvironmentError('PHONE_ANDROID_ARCHIVE', 'command-line tools archive escapes its root')
         }
-        const path = join(target, relativeName)
-        if (!inside(target, path)) throw new AndroidEnvironmentError('PHONE_ANDROID_ARCHIVE', 'command-line tools archive escapes its root')
+        const path = join(extracted, relativeName)
+        if (!inside(extracted, path)) throw new AndroidEnvironmentError('PHONE_ANDROID_ARCHIVE', 'command-line tools archive escapes its root')
         await mkdir(dirname(path), { recursive: true, mode: 0o700 })
         await writeFile(path, bytes, { mode: rawName.includes('/bin/') ? 0o700 : 0o600 })
       }
-      if (!await exists(this.sdkmanagerAt(plan.sdkRoot))) {
+      if (!await exists(join(extracted, 'bin', executable('sdkmanager', this.platform, true)))) {
         throw new AndroidEnvironmentError('PHONE_ANDROID_ARCHIVE', 'command-line tools archive omitted sdkmanager')
       }
+      signal.throwIfAborted()
+      await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+      await rm(target, { recursive: true, force: true })
+      await rename(extracted, target)
     } finally {
       await rm(staging, { recursive: true, force: true })
     }
@@ -414,6 +428,18 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
     const owned = this.emulator
     this.emulator = undefined
     await owned?.stop()
+  }
+
+  private publishStopped(): void {
+    const plan = this.plan
+    if (plan === undefined) return
+    if (this.current.kind !== 'ready'
+      && this.current.kind !== 'booting'
+      && this.current.kind !== 'checking-acceleration') return
+    if (this.current.kind === 'ready' && !this.current.running) return
+    this.publish(Object.values(plan.components).every(Boolean)
+      ? { kind: 'ready', plan, running: false }
+      : { kind: 'missing', plan })
   }
 
   private publish(state: PhoneAndroidState): void {

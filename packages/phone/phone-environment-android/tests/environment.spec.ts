@@ -141,6 +141,7 @@ describe('Android environment manager', () => {
     expect(runner.calls.filter(call => call.command.endsWith('avdmanager'))).toHaveLength(1)
     await manager.deactivate()
     expect(runner.stops).toBe(2)
+    expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
   })
 
   it('stops before download when the target volume has less than 16 GB free', async () => {

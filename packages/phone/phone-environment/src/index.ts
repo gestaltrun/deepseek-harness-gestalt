@@ -392,7 +392,13 @@ export class PhoneEnvironment extends Service {
       await reader.cancel()
     } catch (error) {
       if (controller.signal.aborted && controller.signal.reason instanceof Error) throw controller.signal.reason
-      throw error
+      if (signal.aborted) throw signal.reason
+      if (error instanceof PhoneEnvironmentError && error.code === 'PHONE_ANDROID_RUNTIME_VERIFY') throw error
+      throw new PhoneEnvironmentError(
+        'PHONE_ANDROID_RUNTIME_VERIFY',
+        `mobilecli could not verify the Android H264 stream: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      )
     } finally {
       clearTimeout(timeout)
     }

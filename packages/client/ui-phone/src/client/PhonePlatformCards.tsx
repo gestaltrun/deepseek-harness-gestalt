@@ -109,7 +109,7 @@ function AndroidStatus({ state }: { readonly state: PhoneAndroidView }): ReactNo
     case 'installing': return <p className={css.status}>{state.step === 'licenses' ? '正在登记 Android SDK License…' : '正在安装 platform-tools、Emulator 与 API 35 镜像…'}</p>
     case 'creating-avd': return <p className={css.status}>正在创建 Pixel 6 · API 35 默认 AVD…</p>
     case 'checking-acceleration': return <p className={css.status}>正在检查硬件虚拟化…</p>
-    case 'booting': return <p className={css.status}>正在启动模拟器并等待 Android 完成启动…</p>
+    case 'booting': return <p className={css.status}>正在启动模拟器并验证 mobilecli H264 画面…</p>
     case 'manual-required': return <p className={css.problem}>{state.message}</p>
     case 'ready': return <p className={css.success}>{state.running ? `已启动${state.deviceId === undefined ? '' : ` · ${state.deviceId}`}` : '环境已准备，可启动默认模拟器'}</p>
     case 'failed': return <p className={css.problem}>{state.message}</p>
@@ -139,7 +139,7 @@ function AndroidActions(props: {
   return (
     <div className={css.actions}>
       <Button variant="primary" onClick={props.onPrepare}>一键准备 Android</Button>
-      <Button variant="outline" onClick={props.onRefresh}>查看明细</Button>
+      <Button variant="outline" onClick={props.onRefresh}>重新检测</Button>
     </div>
   )
 }

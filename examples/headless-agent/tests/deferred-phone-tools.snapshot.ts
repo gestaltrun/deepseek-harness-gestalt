@@ -101,7 +101,7 @@ describe('deferred phone tools assembled snapshot', () => {
         // non-mutating listing and never for any mutation: the rejection arm
         // must leave the device untouched, and an empty journal would prove
         // nothing about the wiring.
-        const journal = JSON.parse(await readFile(join(cwd, 'phone-fleet-journal.json'), 'utf8'))
+        const journal: unknown = JSON.parse(await readFile(join(cwd, 'phone-fleet-journal.json'), 'utf8'))
         expect(journal).toEqual([{ op: 'listDevices' }])
 
         const log = await persistedLog(cwd)

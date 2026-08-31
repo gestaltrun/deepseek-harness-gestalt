@@ -182,7 +182,7 @@ describe('PhoneTab empty state', () => {
 
   it('uses the generic recovery copy when a listing failure has no message', async () => {
     const source = new FakeListingSource()
-    source.scriptNext(Promise.reject('offline'))
+    source.scriptNext(Promise.reject(new Error()))
     await renderTab(true, source)
     expect(screen.getByText('设备清单请求失败；请重新检测。')).toBeTruthy()
   })

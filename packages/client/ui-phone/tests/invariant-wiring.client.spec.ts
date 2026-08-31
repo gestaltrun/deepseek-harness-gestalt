@@ -52,7 +52,7 @@ describe('ui-phone invariant wiring', () => {
     expect(options.gate.snapshot()).toBe(false)
     const stopGate = options.gate.subscribe(() => {})
     expect(stopGate).toBeTypeOf('function')
-    expect(stopGate()).toBeUndefined()
+    stopGate()
     expect(() => options.createController('emulator-5554')).toThrow('never renders a tab body')
     await fiber.dispose()
   })

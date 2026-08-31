@@ -249,7 +249,7 @@ describe('PhoneSettingsCardController', () => {
     const host = readyScope(true)
     const controller = new PhoneSettingsCardController(host.scope)
     controller.inject().copyCommand('sdkmanager "platform-tools"')
-    MISSING_PHONE_ENVIRONMENT_SOURCE.redetect()
+    void MISSING_PHONE_ENVIRONMENT_SOURCE.redetect()
     controller.dispose()
   })
 })

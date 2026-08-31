@@ -29,7 +29,7 @@ describe('phone stream Loader composition', () => {
       devices: [wireDevice('emulator-5554', 'android', 'emulator', 'online')],
     })
     fakes.push(fake)
-    fake.claim()
+    await fake.claim()
     root = await mkdtemp(join(tmpdir(), 'dsh-phone-stream-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [

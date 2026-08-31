@@ -81,10 +81,12 @@ describe('single phone tab with in-place switching', () => {
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: NULL_SOURCE, view: stubView(), isEnabled: () => true,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
-      switchDevice: (tabId, serial, name) => sidebar.updateTab(tabId, {
-        title: `手机·${name}`,
-        meta: { kind: 'device', serial, name },
-      }),
+      switchDevice: (tabId, serial, name) => {
+        sidebar.updateTab(tabId, {
+          title: `手机·${name}`,
+          meta: { kind: 'device', serial, name },
+        })
+      },
       createController: () => {
         throw new Error('not expected in this spec')
       },
@@ -99,19 +101,23 @@ describe('single phone tab with in-place switching', () => {
     sidebar.registerTab(buildPhoneTabDescriptor({
       source: NULL_SOURCE, view: stubView(), isEnabled: () => true,
       gate: { snapshot: () => false, subscribe: () => () => undefined },
-      switchDevice: (tabId, serial, name) => sidebar.updateTab(tabId, {
-        title: `手机·${name}`,
-        meta: { kind: 'device', serial, name },
-      }),
+      switchDevice: (tabId, serial, name) => {
+        sidebar.updateTab(tabId, {
+          title: `手机·${name}`,
+          meta: { kind: 'device', serial, name },
+        })
+      },
       createController: () => {
         throw new Error('not expected in this spec')
       },
     }))
     sidebar.openTab({ type: PHONE_TAB_ID })
-    const switchDevice = (serial: string, name: string): void => sidebar.updateTab(PHONE_TAB_ID, {
-      title: `手机·${name}`,
-      meta: { kind: 'device', serial, name },
-    })
+    const switchDevice = (serial: string, name: string): void => {
+      sidebar.updateTab(PHONE_TAB_ID, {
+        title: `手机·${name}`,
+        meta: { kind: 'device', serial, name },
+      })
+    }
     switchDevice('emulator-5554', 'Pixel_6_API_35')
     switchDevice('R3CN30', 'SM-S9310')
     expect(sidebar.tabs).toHaveLength(1)

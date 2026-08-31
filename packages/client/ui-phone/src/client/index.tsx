@@ -96,13 +96,13 @@ export function apply(ctx: ClientContext, config: Config): void {
   const card = new PhoneSettingsCardController(
     scope,
     createListingPhoneEnvironmentSource(listing),
-    globalThis.navigator?.clipboard,
+    globalThis.navigator.clipboard,
   )
   ctx.effect(() => () => { card.dispose() }, 'ui-phone: settings section')
 
   const tabEnabled = (): boolean => {
     const snapshot = scope.getSnapshot()
-    if (snapshot.status === 'ready' && snapshot.value !== undefined) return snapshot.value.enabled === true
+    if (snapshot.status === 'ready') return snapshot.value.enabled
     return compositionEnabled
   }
   // The body reads the gate reactively: scope invalidation (the enable

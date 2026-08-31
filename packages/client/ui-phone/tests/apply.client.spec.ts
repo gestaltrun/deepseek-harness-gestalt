@@ -78,7 +78,7 @@ async function mount(
   // The loader hands apply the schema-validated config; mimic its default here.
   const fiber = ctx.plugin({
     inject: [...inject],
-    apply: (pluginCtx: Context) => { apply(pluginCtx as never, config) },
+    apply: (pluginCtx: Context) => { apply(pluginCtx, config) },
   })
   await fiber.await()
   return { ctx, fiber, host }
@@ -106,15 +106,17 @@ describe('ui-phone client apply', () => {
 
   it('fails loud when betterSidebar has not been published', () => {
     const ctx = new Context()
-    expect(() => installPhoneTab(ctx, {
-      source: createHttpPhoneListingSource(),
-      view: stubView(),
-      isEnabled: () => false,
-      gate: { snapshot: () => false, subscribe: () => () => undefined },
-      createController: () => {
-        throw new Error('not expected in this spec')
-      },
-    })).toThrow(/betterSidebar is not published/)
+    expect(() => {
+      installPhoneTab(ctx, {
+        source: createHttpPhoneListingSource(),
+        view: stubView(),
+        isEnabled: () => false,
+        gate: { snapshot: () => false, subscribe: () => () => undefined },
+        createController: () => {
+          throw new Error('not expected in this spec')
+        },
+      })
+    }).toThrow(/betterSidebar is not published/)
   })
 
   it('registers the locked 「手机」descriptor shape', async () => {
@@ -221,11 +223,7 @@ describe('ui-phone client apply', () => {
     const invalidations: boolean[] = []
     const stop = picker.props.gate.subscribe(() => { invalidations.push(picker.props.gate.snapshot()) })
     host.publish({
-      status: 'ready', writable: true, value: undefined, base: { enabled: false }, user: {}, revision: 1,
-    } as never)
-    expect(picker.props.gate.snapshot()).toBe(true)
-    host.publish({
-      status: 'ready', writable: true, value: { enabled: false }, base: { enabled: false }, user: {}, revision: 2,
+      status: 'ready', writable: true, value: { enabled: false }, base: { enabled: false }, user: {}, revision: 1,
     })
     expect(invalidations.at(-1)).toBe(false)
     stop()

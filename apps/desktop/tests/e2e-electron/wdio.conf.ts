@@ -12,6 +12,17 @@ if (artifactDir === undefined || artifactDir.length === 0) {
   throw new TypeError('DSH_ELECTRON_E2E_ARTIFACT_DIR is required')
 }
 
+const nativeFetch = globalThis.fetch
+globalThis.fetch = async (input, init) => {
+  const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url
+  if (url !== 'https://electronjs.org/headers/index.json') return await nativeFetch(input, init)
+  // Electron Service otherwise waits without a deadline instead of reaching
+  // its bundled electron-to-chromium fallback when the metadata host stalls.
+  const timeout = AbortSignal.timeout(3_000)
+  const signal = init?.signal == null ? timeout : AbortSignal.any([init.signal, timeout])
+  return await nativeFetch(input, { ...init, signal })
+}
+
 export const config: WebdriverIO.Config = {
   runner: 'local',
   specs: ['./phone-tab.e2e.ts', './phone-tab-unresolved.e2e.ts'],

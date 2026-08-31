@@ -8,7 +8,7 @@ import {
 import { createServer } from 'node:http'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { zipSync } from 'fflate'
 import {
@@ -26,6 +26,10 @@ const devicesSource = join(desktopRoot, 'tests', 'fixtures', 'phone-e2e-devices.
 const managedEnvironmentFixture = join(e2eDir, 'managed-phone-environment.mjs')
 const wdioConfig = join(e2eDir, 'wdio.conf.ts')
 const wdioBin = join(desktopRoot, 'node_modules', '@wdio', 'cli', 'bin', 'wdio.js')
+const managedPath = [
+  dirname(process.execPath),
+  ...(process.platform === 'win32' ? [] : ['/usr/bin', '/bin', '/usr/sbin', '/sbin']),
+].join(delimiter)
 
 const head = spawnSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim()
 const stamp = new Date().toISOString().replaceAll(/[:.]/g, '-')
@@ -229,6 +233,10 @@ async function runSpecAttempt({
     }
     const env = {
       ...cleanEnvironment,
+      ...(managedFixture === undefined ? {} : {
+        // The managed lane admits Node and OS utilities but no user-installed mobilecli.
+        PATH: managedPath,
+      }),
       CI: 'true',
       LANG: 'zh_CN.UTF-8',
       LANGUAGE: 'zh_CN',
@@ -373,7 +381,7 @@ try {
   const missing = join(tmpdir(), `dsh-no-such-mobilecli-${process.pid}`)
   const unresolved = await runSpec('phone-unresolved', 'phone-tab-unresolved.e2e.ts', provider, missing)
   const managed = unresolved.code === 0
-    ? await runSpec('phone-managed', 'phone-managed-environment.e2e.ts', provider, missing, fake.ownerToken, managedFixture)
+    ? await runSpec('phone-managed', 'phone-managed-environment.e2e.ts', provider, undefined, fake.ownerToken, managedFixture)
     : { code: 1, errors: ['phone-managed skipped because phone-unresolved failed'], cleanup: [], portCollision: false }
   const live = managed.code === 0
     ? await runSpec('phone-live', 'phone-tab.e2e.ts', provider, fake.executable, fake.ownerToken)

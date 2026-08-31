@@ -34,7 +34,6 @@ export class IosEnvironmentManager {
   private readonly listeners = new Set<(state: PhoneIosState) => void>()
   private operation: { readonly controller: AbortController; readonly task: Promise<PhoneIosState> } | undefined
   private ownedDeviceId: string | undefined
-  private disposed = false
 
   constructor(options: IosEnvironmentOptions = {}) {
     this.platform = options.platform ?? process.platform
@@ -79,7 +78,6 @@ export class IosEnvironmentManager {
 
   /** Cancel active work, join it, and shut down only the Simulator booted by this Provider. */
   async deactivate(): Promise<void> {
-    this.disposed = true
     const active = this.operation
     active?.controller.abort(new IosEnvironmentError('PHONE_IOS_ABORTED', 'iOS environment operation cancelled'))
     await active?.task.catch(() => {})
@@ -94,24 +92,28 @@ export class IosEnvironmentManager {
       }
     }
     if (this.current.kind === 'ready') this.publish({ ...this.current, running: false })
-    this.listeners.clear()
   }
 
   private startOperation(
     work: (signal: AbortSignal) => Promise<PhoneIosState>,
     ownerSignal?: AbortSignal,
   ): Promise<PhoneIosState> {
-    if (this.disposed) return Promise.reject(new IosEnvironmentError('PHONE_IOS_DISPOSED', 'iOS environment Provider is disposed'))
     if (this.operation !== undefined) {
       return Promise.reject(new IosEnvironmentError('PHONE_IOS_BUSY', 'an iOS environment operation is already running'))
     }
     const controller = new AbortController()
+    const previous = this.current
     const signal = ownerSignal === undefined
       ? controller.signal
       : AbortSignal.any([controller.signal, ownerSignal])
     const task = work(signal).catch((error: unknown) => {
-      const failure = iosFailure(error)
-      if (failure.code !== 'PHONE_IOS_ABORTED') {
+      const failure = signal.aborted
+        ? signal.reason instanceof IosEnvironmentError
+          ? signal.reason
+          : new IosEnvironmentError('PHONE_IOS_ABORTED', 'iOS environment operation cancelled', { cause: error })
+        : iosFailure(error)
+      if (failure.code === 'PHONE_IOS_ABORTED') this.publish(previous)
+      else {
         this.publish({
           kind: 'failed',
           ...(planOf(this.current) === undefined ? {} : { plan: planOf(this.current) }),

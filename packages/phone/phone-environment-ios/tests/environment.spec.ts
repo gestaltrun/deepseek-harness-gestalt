@@ -119,6 +119,7 @@ describe('iOS environment manager', () => {
       command: 'xcrun', args: ['simctl', 'shutdown', '8294A429-4C99-411F-A46D-0AD9499B7FDD'],
     })
     expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
+    await expect(manager.prepare()).resolves.toMatchObject({ kind: 'ready', running: true })
   })
 
   it('keeps Xcode license and first-launch authorization manual', async () => {
@@ -138,5 +139,29 @@ describe('iOS environment manager', () => {
     expect(manager.snapshot()).toMatchObject({
       kind: 'failed', code: 'PHONE_IOS_RUNTIME_DOWNLOAD', retryable: true,
     })
+  })
+
+  it('cancels the controlled download and restores the last actionable state', async () => {
+    const fixture = new FixtureRunner('runtime')
+    let downloadStarted!: () => void
+    const started = new Promise<void>((resolve) => { downloadStarted = resolve })
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => {
+        if (command !== 'xcodebuild' || args[0] !== '-downloadPlatform') {
+          return await fixture.run(command, args, options)
+        }
+        downloadStarted()
+        return await new Promise<IosCommandResult>((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => { reject(options.signal?.reason) }, { once: true })
+        })
+      },
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await manager.refresh()
+    const preparing = manager.prepare()
+    await started
+    manager.cancel()
+    await expect(preparing).rejects.toMatchObject({ code: 'PHONE_IOS_ABORTED' })
+    expect(manager.snapshot()).toMatchObject({ kind: 'runtime-missing' })
   })
 })

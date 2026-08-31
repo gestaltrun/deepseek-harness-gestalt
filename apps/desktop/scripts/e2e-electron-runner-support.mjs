@@ -369,9 +369,13 @@ export async function runLogged(command, args, options) {
   else if (outcome.signal !== null) settlementErrors.push(new Error(`${command} exited on ${outcome.signal}`))
   if (settlementErrors.length === 1) throw settlementErrors[0]
   if (settlementErrors.length > 1) throw new AggregateError(settlementErrors, `${command} process/log settlement failed`)
-  if (process.platform !== 'win32' && child.pid !== undefined && processGroupExists(child.pid)) {
-    await requestTermination()
-    throw new Error(`${command} left an owned descendant running after exit`)
+  if (process.platform !== 'win32' && child.pid !== undefined) {
+    const descendantExitDeadline = Date.now() + 1_000
+    while (processGroupExists(child.pid) && Date.now() < descendantExitDeadline) await delay(10)
+    if (processGroupExists(child.pid)) {
+      await requestTermination()
+      throw new Error(`${command} left an owned descendant running after exit`)
+    }
   }
   return outcome.code ?? 1
 }

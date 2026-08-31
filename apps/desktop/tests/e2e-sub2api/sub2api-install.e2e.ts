@@ -102,10 +102,17 @@ describe('Sub2API Desktop installation', () => {
     expect(consoleWindow.text).toMatch(/Composite 路由|Composite Routes/u)
     const workspaceUi = await overlayAccountWorkspaceUi()
     expect(workspaceUi.text).not.toMatch(/全部分组|All Groups|更多操作|More Actions|批量更新|Batch Update/u)
-    expect(workspaceUi.headers).toEqual([
-      '名称', '账号ID', '平台/类型', '容量', '状态', '调度', '今日统计', '用量窗口',
-      '代理', '优先级', '调度权值', '最近使用', '创建时间', '过期时间', '备注', '操作',
-    ])
+    expect([
+      [
+        '名称', '账号ID', '平台/类型', '容量', '状态', '调度', '今日统计', '用量窗口',
+        '代理', '优先级', '调度权值', '最近使用', '创建时间', '过期时间', '备注', '操作',
+      ],
+      [
+        'NAME', 'ACCOUNT ID', 'PLATFORM/TYPE', 'CAPACITY', 'STATUS', 'SCHEDULABLE',
+        'TODAY STATS', 'USAGE WINDOWS', 'PROXY', 'PRIORITY', 'SCHEDULER SCORE',
+        'LAST USED', 'CREATED', 'EXPIRES AT', 'NOTES', 'ACTIONS',
+      ],
+    ]).toContainEqual(workspaceUi.headers)
     expect((await mainWindowSnapshot()).url).toBe(hostSurface.url)
     const layout = await overlayAccountWorkspaceLayout()
     expect(layout.borderTopWidth).toBe('0px')

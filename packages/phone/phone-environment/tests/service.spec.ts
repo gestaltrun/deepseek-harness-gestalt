@@ -14,7 +14,7 @@ async function rawGet(url: string, host: string): Promise<{ status: number; body
   return await new Promise((resolveResponse, rejectResponse) => {
     const req = request(url, { headers: { host } }, (res) => {
       const chunks: Buffer[] = []
-      res.on('data', chunk => chunks.push(Buffer.from(chunk)))
+      res.on('data', (chunk: Buffer) => { chunks.push(chunk) })
       res.on('end', () => {
         resolveResponse({
           status: res.statusCode ?? 0,
@@ -114,7 +114,9 @@ describe('PhoneEnvironment', () => {
       activateExecutable: async (_path: string, signal?: AbortSignal) => {
         activationStarted()
         await new Promise<void>((_resolve, reject) => {
-          signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+          signal?.addEventListener('abort', () => {
+            reject(signal.reason instanceof Error ? signal.reason : new Error('phone environment activation aborted'))
+          }, { once: true })
         })
       },
       deactivate,
@@ -140,7 +142,9 @@ describe('PhoneEnvironment', () => {
       activateExecutable: async (_path: string, signal?: AbortSignal) => {
         activationStarted()
         await new Promise<void>((_resolve, reject) => {
-          signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+          signal?.addEventListener('abort', () => {
+            reject(signal.reason instanceof Error ? signal.reason : new Error('phone environment activation aborted'))
+          }, { once: true })
         })
       },
     }, { executablePath: path })
@@ -161,7 +165,9 @@ describe('PhoneEnvironment', () => {
       activateExecutable: async (_path: string, signal?: AbortSignal) => {
         activationStarted()
         await new Promise<void>((_resolve, reject) => {
-          signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+          signal?.addEventListener('abort', () => {
+            reject(signal.reason instanceof Error ? signal.reason : new Error('phone environment activation aborted'))
+          }, { once: true })
         })
       },
     }, { executablePath: path })

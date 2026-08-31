@@ -1,11 +1,37 @@
 /** Release-backed Electron flow: Settings offer, installer, Web Host restart, embedded console. */
 import { browser, expect } from '@wdio/globals'
 import {
-  clickAccountConsoleButton, clickAccountConsoleSelector, clickOverlayButton,
+  clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
+  clickAccountConsoleSelector, clickOverlayButton,
   configureRealModelRoute, connectTemporaryWorkspace, mainWindowSnapshot,
   openSettings, overlayAccountConsoleSnapshot, overlayText, overlayUrl, recordOwnedProcesses,
   recordReleaseChecksums, selectModelAndSend, sub2apiSnapshot, waitForSessionSurface,
 } from './helpers.ts'
+
+async function disableAndReEnable(cycle: number): Promise<void> {
+  await clickOverlayButton(['停用', 'Disable'])
+  await browser.waitUntil(async () => {
+    const current = await sub2apiSnapshot()
+    return (current?.state === 'installed' && !current.enabled) || current?.state === 'error'
+  }, { timeout: 120_000, interval: 1_000, timeoutMsg: `Sub2API cycle ${String(cycle)} did not disable after the Host replacement` })
+  const disabled = await sub2apiSnapshot()
+  if (disabled?.state === 'error') throw new Error(`Sub2API cycle ${String(cycle)} disable failed: ${String(disabled.error)}`)
+  expect(disabled).toMatchObject({ state: 'installed', enabled: false })
+  expect(await overlayText()).toMatch(/已停用|Disabled/u)
+
+  await clickOverlayButton(['启用', 'Enable'])
+  await browser.waitUntil(async () => {
+    const current = await sub2apiSnapshot()
+    return current?.state === 'running' || current?.state === 'error'
+  }, { timeout: 240_000, interval: 1_000, timeoutMsg: `Sub2API cycle ${String(cycle)} did not re-enable after the Host replacement` })
+  const reenabled = await sub2apiSnapshot()
+  if (reenabled?.state === 'error') throw new Error(`Sub2API cycle ${String(cycle)} re-enable failed: ${String(reenabled.error)}`)
+  expect(reenabled).toMatchObject({ state: 'running', enabled: true })
+  await browser.waitUntil(async () => /添加账号|Create Account/u.test((await overlayAccountConsoleSnapshot()).text), {
+    timeout: 60_000,
+    timeoutMsg: `Native Sub2API account workspace did not return after re-enable cycle ${String(cycle)}`,
+  })
+}
 
 describe('Sub2API Desktop installation', () => {
   it('installs the release, opens the console, selects Sub2API, and receives a real reply', async () => {
@@ -35,28 +61,8 @@ describe('Sub2API Desktop installation', () => {
       timeoutMsg: 'Settings did not render the native Sub2API account workspace by default',
     })
 
-    await clickOverlayButton(['停用', 'Disable'])
-    await browser.waitUntil(async () => {
-      const current = await sub2apiSnapshot()
-      return (current?.state === 'installed' && !current.enabled) || current?.state === 'error'
-    }, { timeout: 120_000, interval: 1_000, timeoutMsg: 'Sub2API did not disable after the Host replacement' })
-    const disabled = await sub2apiSnapshot()
-    if (disabled?.state === 'error') throw new Error(`Sub2API disable failed: ${String(disabled.error)}`)
-    expect(disabled).toMatchObject({ state: 'installed', enabled: false })
-    expect(await overlayText()).toMatch(/已停用|Disabled/u)
-
-    await clickOverlayButton(['启用', 'Enable'])
-    await browser.waitUntil(async () => {
-      const current = await sub2apiSnapshot()
-      return current?.state === 'running' || current?.state === 'error'
-    }, { timeout: 240_000, interval: 1_000, timeoutMsg: 'Sub2API did not re-enable after the Host replacement' })
-    const reenabled = await sub2apiSnapshot()
-    if (reenabled?.state === 'error') throw new Error(`Sub2API re-enable failed: ${String(reenabled.error)}`)
-    expect(reenabled).toMatchObject({ state: 'running', enabled: true })
-    await browser.waitUntil(async () => /添加账号|Create Account/u.test((await overlayAccountConsoleSnapshot()).text), {
-      timeout: 60_000,
-      timeoutMsg: 'Native Sub2API account workspace did not return after re-enable',
-    })
+    await disableAndReEnable(1)
+    await disableAndReEnable(2)
     const hostSurface = await mainWindowSnapshot()
     await configureRealModelRoute(new URL(hostSurface.url).origin)
 
@@ -74,17 +80,20 @@ describe('Sub2API Desktop installation', () => {
 
     await clickOverlayButton(['账号池', 'Account pool'])
     const consoleWindow = await overlayAccountConsoleSnapshot()
-    // The sidecar shim loads through the host prefix, then exposes the
-    // unprefixed inner route required by the upstream absolute-base router.
+    // The sidecar shim loads through the host prefix. The upstream router may
+    // retain that route or expose its absolute-base inner route after boot.
     const consoleUrl = new URL(consoleWindow.url)
-    expect(consoleUrl.pathname).toBe('/admin/accounts')
+    expect([
+      '/plugins/dsh-sub2api/ui/admin/accounts',
+      '/admin/accounts',
+    ]).toContain(consoleUrl.pathname)
     expect(consoleUrl.searchParams.get('embed')).toBe('desktop')
     expect(consoleWindow.text).toMatch(/添加账号|Create Account/u)
     expect(consoleWindow.text).toMatch(/Composite 路由|Composite Routes/u)
     expect((await mainWindowSnapshot()).url).toBe(hostSurface.url)
 
     await clickAccountConsoleButton(['Composite 路由', 'Composite Routes'])
-    await browser.waitUntil(async () => /已保存路由|Saved routes/u.test((await overlayAccountConsoleSnapshot()).text), {
+    await browser.waitUntil(async () => /已保存路由|Saved Routes/u.test((await overlayAccountConsoleSnapshot()).text), {
       timeout: 15_000,
       timeoutMsg: 'Composite route dialog did not open inside the account workspace',
     })
@@ -96,7 +105,14 @@ describe('Sub2API Desktop installation', () => {
       timeoutMsg: 'Native add-account dialog did not open',
     })
     await clickAccountConsoleSelector('.select-trigger')
-    await browser.waitUntil(async () => /IP管理|IP Management/u.test((await overlayAccountConsoleSnapshot()).text), {
+    await clickAccountConsoleOption(['Anthropic'])
+    await clickAccountConsoleButton(['下一步', 'Next'])
+    await browser.waitUntil(async () => /代理|Proxy/u.test((await overlayAccountConsoleSnapshot()).text), {
+      timeout: 15_000,
+      timeoutMsg: 'Native account flow did not reach the authorization form',
+    })
+    await clickAccountConsoleFieldSelector(['代理', 'Proxy'])
+    await browser.waitUntil(async () => /代理管理|Proxy Management|IP管理|IP Management/u.test((await overlayAccountConsoleSnapshot()).text), {
       timeout: 15_000,
       timeoutMsg: 'Proxy selector did not expose the integrated IP management entry',
     })

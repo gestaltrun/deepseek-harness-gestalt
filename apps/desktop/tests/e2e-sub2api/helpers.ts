@@ -243,6 +243,41 @@ export async function clickAccountConsoleSelector(selector: string): Promise<voi
   if (!clicked) throw new Error(`Sub2API account workspace has no element matching ${selector}`)
 }
 
+/** Click one option in a native Sub2API select dropdown by visible label. */
+export async function clickAccountConsoleOption(labels: readonly string[]): Promise<void> {
+  await switchToDesktopOverlay()
+  const clicked = await browser.execute((optionLabels: readonly string[]) => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const option = [...(frame?.contentDocument?.querySelectorAll<HTMLElement>('.select-option') ?? [])]
+      .find(element => optionLabels.some(label => element.textContent?.includes(label)))
+    if (option === undefined) return false
+    option.click()
+    return true
+  }, labels)
+  if (!clicked) throw new Error(`Sub2API account workspace has no select option matching ${labels.join(' / ')}`)
+}
+
+/** Click the select trigger belonging to a labelled native Sub2API field. */
+export async function clickAccountConsoleFieldSelector(labels: readonly string[]): Promise<void> {
+  await switchToDesktopOverlay()
+  const clicked = await browser.execute((fieldLabels: readonly string[]) => {
+    const frame = document.querySelector<HTMLIFrameElement>('iframe[src^="/plugins/dsh-sub2api/ui/admin/accounts?"]')
+    const label = [...(frame?.contentDocument?.querySelectorAll<HTMLElement>('label') ?? [])]
+      .find(element => fieldLabels.some(text => element.textContent?.includes(text)))
+    let container = label?.parentElement
+    while (container !== null && container !== undefined) {
+      const trigger = container.querySelector<HTMLElement>('.select-trigger')
+      if (trigger !== null) {
+        trigger.click()
+        return true
+      }
+      container = container.parentElement
+    }
+    return false
+  }, labels)
+  if (!clicked) throw new Error(`Sub2API account workspace has no select field matching ${labels.join(' / ')}`)
+}
+
 /** Read Sub2API state through the same isolated preload bridge used by the UI. */
 export async function sub2apiSnapshot(): Promise<Sub2ApiSnapshot | undefined> {
   await switchToDesktopOverlay()

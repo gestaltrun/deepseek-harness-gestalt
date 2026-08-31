@@ -47,6 +47,29 @@ describe('member-question document transfer receiver', () => {
     expect(() => duplicate.accept({ ...chunk, index: 0, total: 2, bytes: 'BA' })).toThrow('conflicting')
     expect(() => duplicate.accept({ ...chunk, index: 1, total: 3 })).toThrow('total')
   })
+
+  it('rejects post-completion and cumulative oversize chunks while retaining incomplete indexes', () => {
+    const [chunk] = chunksFor('mq-bounds', Uint8Array.of(1))
+    if (chunk === undefined) throw new Error('missing document chunk')
+    const completed = new MemberQuestionDocumentAssembler('mq-bounds' as never, ['one.bin'])
+    expect(completed.accept(chunk)).toMatchObject({ path: 'one.bin' })
+    expect(() => completed.accept({ ...chunk, index: 1 })).toThrow('after completion')
+
+    const sparse = new MemberQuestionDocumentAssembler('mq-bounds' as never, ['one.bin'])
+    expect(sparse.accept({ ...chunk, total: 2 })).toBeUndefined()
+    expect(sparse.accept({ ...chunk, index: 2, total: 2 })).toBeUndefined()
+
+    const oversized = new MemberQuestionDocumentAssembler('mq-bounds' as never, ['one.bin'])
+    const fullChunk = encodeProtocolBase64Url(new Uint8Array(REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes))
+    const total = Math.floor(
+      REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes / REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes,
+    ) + 1
+    for (let index = 0; index < total - 1; index += 1) {
+      expect(oversized.accept({ ...chunk, bytes: fullChunk, index, total })).toBeUndefined()
+    }
+    expect(() => oversized.accept({ ...chunk, bytes: fullChunk, index: total - 1, total }))
+      .toThrow('cumulative byte ceiling')
+  })
 })
 
 function chunksFor(question: string, bytes: Uint8Array): CompanionDocumentChunkOperation[] {

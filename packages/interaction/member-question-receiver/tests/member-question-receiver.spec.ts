@@ -10,6 +10,7 @@ import {
   parseCompanionSessionId,
   parseMemberQuestionId,
   parseMemberQuestionProjectId,
+  REMOTE_PROTOCOL_LIMITS,
 } from '@deepseek-ai/dsh-remote-protocol'
 import FileMemberQuestionReceiver from '../src/index.ts'
 import type {
@@ -164,12 +165,14 @@ describe('FileMemberQuestionReceiver', () => {
           { path: 'brief.md', reason: 'Markdown brief' },
           { path: 'preview.html', reason: 'Restricted preview' },
           { path: 'payload.bin', reason: 'Arbitrary bytes' },
+          { path: 'invalid.md', reason: 'Invalid UTF-8' },
         ],
       },
       documents: [
         { path: 'brief.md', bytes: new TextEncoder().encode('# Decision\n') },
         { path: 'preview.html', bytes: new TextEncoder().encode('<p>Preview</p>') },
         { path: 'payload.bin', bytes: Uint8Array.of(0, 255, 1, 254) },
+        { path: 'invalid.md', bytes: Uint8Array.of(255) },
       ],
     }
     const first = await createReceiver(storagePath, { clock: () => 1_000 })
@@ -179,6 +182,7 @@ describe('FileMemberQuestionReceiver', () => {
       { path: 'brief.md', reason: 'Markdown brief', content: '# Decision\n' },
       { path: 'preview.html', reason: 'Restricted preview', content: '<p>Preview</p>' },
       { path: 'payload.bin', reason: 'Arbitrary bytes' },
+      { path: 'invalid.md', reason: 'Invalid UTF-8' },
     ])
     const durable = await readFile(first.storageFile, 'utf8')
     expect(durable).not.toContain('# Decision')
@@ -206,6 +210,15 @@ describe('FileMemberQuestionReceiver', () => {
     })).rejects.toThrow('document bytes must align')
     const { documents: _documents, ...withoutDocuments } = envelope
     await expect(receiver.ingest(withoutDocuments)).rejects.toThrow('document bytes must align')
+    await expect(receiver.ingest({
+      ...envelope,
+      documents: [{
+        path: 'docs/architecture.md',
+        bytes: new Uint8Array(
+          REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks + 1,
+        ),
+      }],
+    })).rejects.toThrow('document exceeds the transfer byte ceiling')
   })
 
   it('persists and replaces exact Account/Project Workspace bindings across restart', async () => {
@@ -516,6 +529,9 @@ describe('FileMemberQuestionReceiver', () => {
       settledAt: 1_100,
     })).resolves.toMatchObject({ outcome: 'declined' })
     dispose()
+    const disposeReplacement = receiver.registerTerminalAuthority(new MemoryTerminalAuthority())
+    dispose()
+    disposeReplacement()
     const second = await receiver.ingest({
       ...envelopeWith('question-runtime-authority-2', 3_000),
       operation: {

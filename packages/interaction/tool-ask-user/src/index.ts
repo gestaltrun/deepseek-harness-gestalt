@@ -211,27 +211,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     },
     async execute(args, exec) {
       const addressee = args.to_project_member
-      let background: string | undefined
-      if (addressee !== undefined) {
-        if (args.background === undefined || args.background.length === 0) {
-          throw new AskUserQuestionError(
-            'BACKGROUND_REQUIRED: routed ask_user_question requires background of 1 to 600 characters',
-            'BACKGROUND_REQUIRED',
-          )
-        }
-        if (countUnicodeCodePoints(args.background) > BACKGROUND_MAX_CODE_POINTS) {
-          throw new AskUserQuestionError(
-            `BACKGROUND_TOO_LONG: background exceeds ${String(BACKGROUND_MAX_CODE_POINTS)} characters`,
-            'BACKGROUND_TOO_LONG',
-          )
-        }
-        background = args.background
-      }
       const workspaceRoot = exec.agent?.session.header.cwd
-      const routedReferences = addressee === undefined
-        ? undefined
-        : await validateRoutedReferences(args.references, workspaceRoot)
-      if (addressee === undefined) await validateReferences(args.references, workspaceRoot)
       const questions = args.questions.map(question => ({
         id: question.id,
         question: question.question,
@@ -239,7 +219,8 @@ export function apply(ctx: Context, config: Config = {}): void {
         ...question.options !== undefined ? { options: question.options } : {},
         ...question.multi_select !== undefined ? { multiSelect: question.multi_select } : {},
       }))
-      if (addressee === undefined || background === undefined) {
+      if (addressee === undefined) {
+        await validateReferences(args.references, workspaceRoot)
         const result = await ctx.userQuestions.ask({
           questions,
           ...exec.agent !== undefined ? { agent: exec.agent } : {},
@@ -253,6 +234,20 @@ export function apply(ctx: Context, config: Config = {}): void {
           })),
         }
       }
+      if (args.background === undefined || args.background.length === 0) {
+        throw new AskUserQuestionError(
+          'BACKGROUND_REQUIRED: routed ask_user_question requires background of 1 to 600 characters',
+          'BACKGROUND_REQUIRED',
+        )
+      }
+      if (countUnicodeCodePoints(args.background) > BACKGROUND_MAX_CODE_POINTS) {
+        throw new AskUserQuestionError(
+          `BACKGROUND_TOO_LONG: background exceeds ${String(BACKGROUND_MAX_CODE_POINTS)} characters`,
+          'BACKGROUND_TOO_LONG',
+        )
+      }
+      const background = args.background
+      const routedReferences = await validateRoutedReferences(args.references, workspaceRoot)
       const sender = ctx.get('memberQuestionSender')
       if (sender === undefined || resolved.originResolver === undefined) {
         throw new AskUserQuestionError(
@@ -270,11 +265,11 @@ export function apply(ctx: Context, config: Config = {}): void {
         projectId: parseMemberQuestionProjectId(projectId),
         background,
         questions,
-        references: (routedReferences?.references ?? []).map(reference => ({
+        references: (routedReferences.references ?? []).map(reference => ({
           path: reference.path,
           reason: reference.reason ?? reference.path,
         })),
-        documents: routedReferences?.documents ?? [],
+        documents: routedReferences.documents,
         origin,
         originSessionId: parseCompanionSessionId(String(exec.agent?.session.id ?? 'unbound-origin')),
       }, {

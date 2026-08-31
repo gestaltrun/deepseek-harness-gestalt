@@ -258,6 +258,30 @@ describe('member-question receiver durable state', () => {
     expect(() => parseReceiverState(JSON.stringify(duplicate))).toThrow('duplicate question ids')
   })
 
+  it('rejects malformed, misaligned, and invalid durable documents', () => {
+    const mutations: Array<(question: Record<string, unknown>) => void> = [
+      (question) => { question.documents = null },
+      (question) => { question.documents = [{ path: 'extra.md', bytes: '' }] },
+      (question) => {
+        ;(question.operation as Record<string, unknown>).references = [{ path: 'brief.md', reason: 'Brief' }]
+        question.documents = [null]
+      },
+      (question) => {
+        ;(question.operation as Record<string, unknown>).references = [{ path: 'brief.md', reason: 'Brief' }]
+        question.documents = [{ path: 'other.md', bytes: '' }]
+      },
+      (question) => {
+        ;(question.operation as Record<string, unknown>).references = [{ path: 'brief.md', reason: 'Brief' }]
+        question.documents = [{ path: 'brief.md', bytes: '%' }]
+      },
+    ]
+    for (const mutate of mutations) {
+      const invalid = document()
+      mutate((invalid.questions as Array<Record<string, unknown>>)[0]!)
+      expect(() => parseReceiverState(JSON.stringify(invalid))).toThrow('durable question document')
+    }
+  })
+
   it('rejects malformed, dangling, inconsistent, and duplicate admissions', () => {
     const cases: Array<(admission: Record<string, unknown>) => void> = [
       (admission) => { admission.receivingSessionId = 'missing' },

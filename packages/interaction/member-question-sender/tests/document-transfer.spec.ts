@@ -49,4 +49,18 @@ describe('member-question document transfer sender', () => {
       bytes: new Uint8Array(REMOTE_PROTOCOL_LIMITS.documentTransferTotalBytes + 1),
     }])).toThrow('document exceeds')
   })
+
+  it('rejects document counts and chunk totals outside protocol ceilings', () => {
+    const protocol = createMemberQuestionProtocol()
+    expect(() => encodeMemberQuestionDocuments(protocol, 'mq-count' as never, Array.from(
+      { length: REMOTE_PROTOCOL_LIMITS.memberQuestionReferences + 1 },
+      (_, index) => ({ path: `${String(index)}.dat`, bytes: new Uint8Array() }),
+    ))).toThrow('document count exceeds')
+    expect(() => encodeMemberQuestionDocuments(protocol, 'mq-chunks' as never, [{
+      path: 'too-many-chunks.dat',
+      bytes: new Uint8Array(
+        REMOTE_PROTOCOL_LIMITS.documentTransferChunkBytes * REMOTE_PROTOCOL_LIMITS.documentTransferChunks + 1,
+      ),
+    }])).toThrow('chunk transfer ceiling')
+  })
 })

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -103,6 +103,77 @@ describe('PhoneEnvironment', () => {
     expect(service.snapshot().enabled).toBe(true)
   })
 
+  it('actively aborts a non-prepare activation when disabled', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    let activationStarted!: () => void
+    const started = new Promise<void>((resolve) => { activationStarted = resolve })
+    const deactivate = vi.fn(async () => {})
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async (_path: string, signal?: AbortSignal) => {
+        activationStarted()
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+        })
+      },
+      deactivate,
+    }, { executablePath: path })
+    const enabling = service.setEnabled(true)
+    await started
+    const beganDisable = Date.now()
+    const disabling = service.setEnabled(false)
+    await expect(enabling).rejects.toBeTruthy()
+    await disabling
+    expect(Date.now() - beganDisable).toBeLessThan(500)
+    expect(deactivate).toHaveBeenCalled()
+    expect(service.snapshot().enabled).toBe(false)
+  })
+
+  it('lets the cancel operation interrupt a non-prepare activation', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    let activationStarted!: () => void
+    const started = new Promise<void>((resolve) => { activationStarted = resolve })
+    const { service } = await mountEnvironment(context, {
+      activateExecutable: async (_path: string, signal?: AbortSignal) => {
+        activationStarted()
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+        })
+      },
+    }, { executablePath: path })
+    const enabling = service.setEnabled(true)
+    await started
+    service.cancel()
+    await expect(enabling).rejects.toBeTruthy()
+    expect(service.snapshot().runtime).toMatchObject({ kind: 'failed' })
+  })
+
+  it('aborts and drains activation before teardown returns', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    let activationStarted!: () => void
+    const started = new Promise<void>((resolve) => { activationStarted = resolve })
+    const { fiber, service } = await mountEnvironment(context, {
+      activateExecutable: async (_path: string, signal?: AbortSignal) => {
+        activationStarted()
+        await new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => { reject(signal.reason) }, { once: true })
+        })
+      },
+    }, { executablePath: path })
+    const enabling = service.setEnabled(true)
+    await started
+    const beganTeardown = Date.now()
+    const teardown = fiber.dispose()
+    await expect(enabling).rejects.toBeTruthy()
+    await teardown
+    expect(Date.now() - beganTeardown).toBeLessThan(500)
+  })
+
   it('keeps an explicit executable override authoritative over managed preparation', async () => {
     const context = new Context()
     contexts.push(context)
@@ -156,6 +227,32 @@ describe('PhoneEnvironment', () => {
     expect(service.snapshot().runtime).toMatchObject({
       kind: 'failed', code: 'PHONE_ENVIRONMENT_RUNTIME_LOST',
     })
+  })
+
+  it('recovers an existing managed current after the Service is rebuilt', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-phone-environment-restart-'))
+    roots.push(root)
+    const executableName = process.platform === 'win32' ? 'mobilecli.exe' : 'mobilecli'
+    const versionDir = join(root, 'versions', 'persisted')
+    await mkdir(versionDir, { recursive: true })
+    const managedExecutable = join(versionDir, executableName)
+    await writeFile(managedExecutable, '#!/bin/sh\necho "mobilecli version 1.0.5"\n')
+    await chmod(managedExecutable, 0o700)
+    await writeFile(join(root, 'current.json'), `${JSON.stringify({
+      version: '1.0.5', platform: process.platform, architecture: process.arch,
+      executable: `versions/persisted/${executableName}`,
+    })}\n`)
+
+    const firstContext = new Context()
+    contexts.push(firstContext)
+    const first = await mountEnvironment(firstContext, {}, { root })
+    expect(first.service.snapshot().runtime).toEqual({ kind: 'ready', source: 'managed', version: '1.0.5' })
+    await first.fiber.dispose()
+
+    const restartedContext = new Context()
+    contexts.push(restartedContext)
+    const restarted = await mountEnvironment(restartedContext, {}, { root })
+    expect(restarted.service.snapshot().runtime).toEqual({ kind: 'ready', source: 'managed', version: '1.0.5' })
   })
 
   it('removes subscribers when its owning fiber disposes', async () => {

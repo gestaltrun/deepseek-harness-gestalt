@@ -65,9 +65,13 @@ export class PhoneEnvironment extends Service {
   private candidate: PhoneRuntimeCandidate | undefined
   private candidateVersion: string | undefined
   private prepareController: AbortController | undefined
+  private activationController: AbortController | undefined
+  private enableController: AbortController | undefined
+  private refreshController: AbortController | undefined
   private prepareTask: Promise<PhoneEnvironmentSnapshot> | undefined
   private refreshTask: Promise<PhoneEnvironmentSnapshot> | undefined
   private enableTail: Promise<void> = Promise.resolve()
+  private readonly lifetime = new AbortController()
   private disposed = false
 
   /**
@@ -93,6 +97,9 @@ export class PhoneEnvironment extends Service {
     }), 'phone environment runtime readiness tracking')
     ctx.effect(() => async () => {
       this.disposed = true
+      this.lifetime.abort(new PhoneEnvironmentError(
+        'PHONE_ENVIRONMENT_DISPOSED', 'the phone environment service is disposed',
+      ))
       this.cancel()
       await this.prepareTask?.catch(() => {})
       await this.refreshTask?.catch(() => {})
@@ -121,12 +128,18 @@ export class PhoneEnvironment extends Service {
   setEnabled(enabled: boolean): Promise<void> {
     if (this.disposed) return Promise.resolve()
     if (!enabled) this.cancel()
-    const operation = this.enableTail.then(() => this.applyEnabled(enabled))
+    const controller = new AbortController()
+    if (enabled) this.enableController = controller
+    const operation = this.enableTail.then(() => this.applyEnabled(enabled, controller.signal))
     this.enableTail = operation.catch(() => {})
+    void operation.then(
+      () => { if (this.enableController === controller) this.enableController = undefined },
+      () => { if (this.enableController === controller) this.enableController = undefined },
+    )
     return operation
   }
 
-  private async applyEnabled(enabled: boolean): Promise<void> {
+  private async applyEnabled(enabled: boolean, signal: AbortSignal): Promise<void> {
     if (this.disposed || enabled === this.current.enabled) return
     this.publish({ ...this.current, enabled })
     if (!enabled) {
@@ -135,8 +148,8 @@ export class PhoneEnvironment extends Service {
       await this.ctx.phoneDevices.deactivate()
       return
     }
-    if (this.candidate === undefined || this.candidateVersion === undefined) await this.refresh()
-    else await this.activateCandidate(this.candidate, this.candidateVersion)
+    if (this.candidate === undefined || this.candidateVersion === undefined) await this.refresh(signal)
+    else await this.activateCandidate(this.candidate, this.candidateVersion, signal)
   }
 
   /**
@@ -151,15 +164,27 @@ export class PhoneEnvironment extends Service {
 
   /**
    * Re-detect runtime sources in fixed override-managed-system precedence.
+   * @param signal - optional owner cancellation for detection and activation.
    * @returns the committed full snapshot after detection settles.
    */
-  refresh(): Promise<PhoneEnvironmentSnapshot> {
+  refresh(signal?: AbortSignal): Promise<PhoneEnvironmentSnapshot> {
     if (this.refreshTask !== undefined) return this.refreshTask
-    const operation = this.detectRuntime()
+    const controller = new AbortController()
+    this.refreshController = controller
+    const operationSignal = signal === undefined
+      ? AbortSignal.any([this.lifetime.signal, controller.signal])
+      : AbortSignal.any([this.lifetime.signal, controller.signal, signal])
+    const operation = this.detectRuntime(operationSignal)
     this.refreshTask = operation
     void operation.then(
-      () => { if (this.refreshTask === operation) this.refreshTask = undefined },
-      () => { if (this.refreshTask === operation) this.refreshTask = undefined },
+      () => {
+        if (this.refreshTask === operation) this.refreshTask = undefined
+        if (this.refreshController === controller) this.refreshController = undefined
+      },
+      () => {
+        if (this.refreshTask === operation) this.refreshTask = undefined
+        if (this.refreshController === controller) this.refreshController = undefined
+      },
     )
     return operation
   }
@@ -217,11 +242,13 @@ export class PhoneEnvironment extends Service {
     return operation
   }
 
-  /** Cancel the current download, verification read, or version probe. */
+  /** Cancel the current detection, download, version probe, or child activation. */
   cancel(): void {
-    this.prepareController?.abort(new PhoneEnvironmentError(
-      'PHONE_ENVIRONMENT_ABORTED', 'mobilecli preparation was cancelled',
-    ))
+    const reason = new PhoneEnvironmentError('PHONE_ENVIRONMENT_ABORTED', 'the phone environment operation was cancelled')
+    this.prepareController?.abort(reason)
+    this.activationController?.abort(reason)
+    this.enableController?.abort(reason)
+    this.refreshController?.abort(reason)
   }
 
   /**
@@ -234,7 +261,7 @@ export class PhoneEnvironment extends Service {
     return selectMobilecliReleaseAsset(platform, architecture)
   }
 
-  private async detectRuntime(): Promise<PhoneEnvironmentSnapshot> {
+  private async detectRuntime(signal: AbortSignal): Promise<PhoneEnvironmentSnapshot> {
     try {
       const managed = await readManagedMobilecli(this.root, process.platform, process.arch)
       let system: string | undefined
@@ -257,7 +284,7 @@ export class PhoneEnvironment extends Service {
         ).runtime)
         return this.current
       }
-      const version = await probeMobilecliVersion(candidate.executablePath)
+      const version = await probeMobilecliVersion(candidate.executablePath, signal)
       if (version !== MOBILECLI_MANAGED_VERSION) {
         throw new PhoneEnvironmentError(
           'PHONE_ENVIRONMENT_VERSION',
@@ -266,7 +293,7 @@ export class PhoneEnvironment extends Service {
       }
       this.candidate = candidate
       this.candidateVersion = version
-      if (this.current.enabled) await this.activateCandidate(candidate, version)
+      if (this.current.enabled) await this.activateCandidate(candidate, version, signal)
       else this.publishReady(candidate.source, version)
     } catch (error) {
       this.candidate = undefined
@@ -281,12 +308,22 @@ export class PhoneEnvironment extends Service {
     this.publishRuntime({
       kind: 'activating', targetVersion: MOBILECLI_MANAGED_VERSION, source: candidate.source,
     })
+    const controller = new AbortController()
+    this.activationController?.abort(new PhoneEnvironmentError(
+      'PHONE_ENVIRONMENT_ABORTED', 'the previous mobilecli activation was replaced',
+    ))
+    this.activationController = controller
+    const activationSignal = signal === undefined
+      ? AbortSignal.any([this.lifetime.signal, controller.signal])
+      : AbortSignal.any([this.lifetime.signal, controller.signal, signal])
     try {
-      await this.ctx.phoneDevices.activateExecutable(candidate.executablePath, signal)
+      await this.ctx.phoneDevices.activateExecutable(candidate.executablePath, activationSignal)
       this.publishReady(candidate.source, version)
     } catch (error) {
       this.publishRuntime(environmentFailure(error))
       throw error
+    } finally {
+      if (this.activationController === controller) this.activationController = undefined
     }
   }
 

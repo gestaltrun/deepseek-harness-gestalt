@@ -192,6 +192,43 @@ describe('managed mobilecli installer', () => {
     await chmod(root, 0o700)
   })
 
+  it('cancels an in-progress response body without publishing current', async () => {
+    const root = await tempRoot()
+    const bytes = archiveOf()
+    const controller = new AbortController()
+    let started!: () => void
+    const reading = new Promise<void>((resolve) => { started = resolve })
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        stream.enqueue(bytes.slice(0, 10))
+        started()
+        controller.signal.addEventListener('abort', () => {
+          stream.error(controller.signal.reason)
+        }, { once: true })
+      },
+    })
+    const operation = installManagedMobilecli(root, assetOf(bytes), controller.signal, {
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response(body, {
+        status: 200, headers: { 'content-length': String(bytes.byteLength) },
+      })),
+    })
+    await reading
+    controller.abort(new Error('cancelled during download'))
+    await expect(operation).rejects.toThrow('cancelled during download')
+    await expect(readFile(join(root, 'current.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await readdir(root)).filter(name => name.startsWith('.staging-'))).toEqual([])
+  })
+
+  it('rejects a version probe whose executable exits non-zero', async () => {
+    const root = await tempRoot()
+    const executable = join(root, 'mobilecli')
+    await writeFile(executable, '#!/bin/sh\nexit 7\n')
+    await chmod(executable, 0o700)
+    await expect(probeMobilecliVersion(executable)).rejects.toMatchObject({
+      code: 'PHONE_ENVIRONMENT_VERSION',
+    })
+  })
+
   it('preserves the prior current pointer when the filesystem runs out of space', async () => {
     const root = await tempRoot()
     const bytes = archiveOf()

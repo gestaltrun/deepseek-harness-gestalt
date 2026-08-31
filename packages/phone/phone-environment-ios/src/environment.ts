@@ -1,4 +1,5 @@
 import { homedir } from 'node:os'
+import { deviceId, type DeviceId } from '@deepseek-ai/dsh-phone-runtime'
 import type {
   IosDeviceType, IosInstallationProbe, IosPreparationPlan, IosRuntime, IosSimulator, PhoneIosState,
 } from './types.ts'
@@ -22,6 +23,7 @@ export interface IosEnvironmentOptions {
   readonly environment?: NodeJS.ProcessEnv
   readonly homeDirectory?: string
   readonly runner?: IosCommandRunner
+  readonly reportError?: (error: unknown) => void
 }
 
 /** Xcode and default-Simulator lifecycle owner behind the iOS platform Provider. */
@@ -30,10 +32,11 @@ export class IosEnvironmentManager {
   private readonly ambient: NodeJS.ProcessEnv
   private readonly homeDirectory: string
   private readonly runner: IosCommandRunner
+  private readonly reportError: (error: unknown) => void
   private current: PhoneIosState
   private readonly listeners = new Set<(state: PhoneIosState) => void>()
   private operation: { readonly controller: AbortController; readonly task: Promise<PhoneIosState> } | undefined
-  private ownedDeviceId: string | undefined
+  private ownedDeviceId: DeviceId | undefined
   private lastActionable: PhoneIosState
 
   constructor(options: IosEnvironmentOptions = {}) {
@@ -41,6 +44,7 @@ export class IosEnvironmentManager {
     this.ambient = options.environment ?? process.env
     this.homeDirectory = options.homeDirectory ?? homedir()
     this.runner = options.runner ?? nodeIosCommandRunner
+    this.reportError = options.reportError ?? (() => {})
     this.current = Object.freeze(planIosEnvironment(this.platform))
     this.lastActionable = this.current
   }
@@ -70,9 +74,9 @@ export class IosEnvironmentManager {
   }
 
   /**
-   * Download the iOS runtime when needed, create the product Simulator, and boot it.
+   * Download the iOS runtime when needed and create the product Simulator.
    * @param signal - optional owner cancellation.
-   * @returns the committed booted state before Host picture verification.
+   * @returns the committed prepared state without starting a stopped Simulator.
    */
   prepare(signal?: AbortSignal): Promise<PhoneIosState> {
     if (this.platform !== 'darwin') {
@@ -84,6 +88,20 @@ export class IosEnvironmentManager {
       ))
     }
     return this.startOperation(async operationSignal => await this.prepareCurrent(operationSignal), signal)
+  }
+
+  /**
+   * Boot the prepared product Simulator without installing Apple components.
+   * @param signal - optional owner cancellation.
+   * @returns the committed running state before Host picture verification.
+   */
+  start(signal?: AbortSignal): Promise<PhoneIosState> {
+    if (this.platform !== 'darwin') {
+      return Promise.reject(new IosEnvironmentError(
+        'PHONE_IOS_UNSUPPORTED', 'iOS Simulator requires macOS and a complete Xcode installation.',
+      ))
+    }
+    return this.startOperation(async operationSignal => await this.startCurrent(operationSignal), signal)
   }
 
   /** Abort the current command sequence; the operation publishes no successful terminal state. */
@@ -168,15 +186,26 @@ export class IosEnvironmentManager {
         'xcrun', ['simctl', 'create', IOS_SIMULATOR_NAME, deviceType.identifier, runtime.identifier], signal,
         'PHONE_IOS_SIMULATOR_CREATE', 'simctl create',
       )
-      const deviceId = created.stdout.trim()
-      if (!deviceIdPattern.test(deviceId)) {
+      const createdId = created.stdout.trim()
+      if (!deviceIdPattern.test(createdId)) {
         throw new IosEnvironmentError('PHONE_IOS_SIMULATOR_CREATE', 'simctl create returned no Simulator UDID')
       }
-      state = { kind: 'ready', plan: state.plan, deviceId, running: false }
+      state = { kind: 'ready', plan: state.plan, deviceId: deviceId(createdId), running: false }
       this.publish(state)
     }
     if (state.kind !== 'ready') {
       throw new IosEnvironmentError('PHONE_IOS_STATE', `iOS preparation ended in ${state.kind}`)
+    }
+    return state
+  }
+
+  private async startCurrent(signal: AbortSignal): Promise<PhoneIosState> {
+    const state = await this.detect(signal)
+    if (state.kind !== 'ready') {
+      const message = state.kind === 'unsupported' ? state.reason
+        : 'message' in state ? state.message
+          : 'Prepare an iOS Simulator runtime and the DSH Gestalt iPhone before starting it.'
+      throw new IosEnvironmentError('PHONE_IOS_NOT_PREPARED', message)
     }
     if (state.running) return state
     this.publish({ kind: 'preparing', plan: state.plan, step: 'booting' })
@@ -303,7 +332,7 @@ export class IosEnvironmentManager {
       for (const [index, value] of values.entries()) {
         const device = objectAt(value, `devices.${runtimeIdentifier}[${String(index)}]`)
         devices.push({
-          udid: stringAt(device.udid, 'device.udid'),
+          udid: deviceId(stringAt(device.udid, 'device.udid')),
           name: stringAt(device.name, 'device.name'),
           state: stringAt(device.state, 'device.state'),
           available: booleanAt(device.isAvailable, 'device.isAvailable'),
@@ -346,7 +375,7 @@ export class IosEnvironmentManager {
       this.lastActionable = this.current
     }
     for (const listener of [...this.listeners]) {
-      try { listener(this.current) } catch { /* A consumer callback cannot break Simulator lifecycle. */ }
+      try { listener(this.current) } catch (error) { this.reportError(error) }
     }
   }
 

@@ -57,9 +57,10 @@ export function planIosEnvironment(platform: string, probe?: IosInstallationProb
   }
 }
 
-function newestRuntime(runtimes: readonly IosRuntime[]): IosRuntime | undefined {
-  return [...runtimes].filter(runtime => runtime.available && /^iOS\b/u.test(runtime.name))
+function newestRuntime(runtimes: readonly IosRuntime[]): IosPreparationPlan['runtime'] {
+  const runtime = [...runtimes].filter(runtime => runtime.available && /^iOS\b/u.test(runtime.name))
     .sort((left, right) => compareVersions(right.version, left.version))[0]
+  return runtime === undefined ? undefined : { ...runtime, available: true }
 }
 
 function newestIphoneType(types: readonly IosDeviceType[]): IosDeviceType | undefined {

@@ -42,7 +42,7 @@ class FixtureRunner implements IosCommandRunner {
       const existing = this.mode === 'ready' || this.simulatorCreated
       return result(0, JSON.stringify({ devices: {
         'runtime-26-0': existing ? [{
-          udid: 'SIMULATOR-UDID', name: 'DSH Gestalt iPhone',
+          udid: '8294A429-4C99-411F-A46D-0AD9499B7FDD', name: 'DSH Gestalt iPhone',
           state: this.simulatorBooted || this.mode === 'ready' ? 'Booted' : 'Shutdown', isAvailable: true,
         }] : [],
       } }))
@@ -95,31 +95,34 @@ describe('iOS environment manager', () => {
     await expect(manager.refresh()).resolves.toMatchObject(expected)
   })
 
-  it('downloads an iOS runtime, creates the managed simulator, and boots it', async () => {
+  it('downloads an iOS runtime, creates the managed simulator, and starts it separately', async () => {
     const runner = new FixtureRunner('runtime')
     const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
     const states: string[] = []
     manager.onChanged(state => states.push(state.kind === 'preparing' ? `${state.kind}:${state.step}` : state.kind))
     await manager.refresh()
     await expect(manager.prepare()).resolves.toMatchObject({
-      kind: 'ready', deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', running: true,
+      kind: 'ready', deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', running: false,
     })
     expect(runner.calls).toEqual(expect.arrayContaining([
       { command: 'xcodebuild', args: ['-downloadPlatform', 'iOS'] },
       { command: 'xcrun', args: ['simctl', 'create', 'DSH Gestalt iPhone', 'type-iphone-17', 'runtime-26-0'] },
-      { command: 'xcrun', args: ['simctl', 'boot', '8294A429-4C99-411F-A46D-0AD9499B7FDD'] },
-      { command: 'xcrun', args: ['simctl', 'bootstatus', '8294A429-4C99-411F-A46D-0AD9499B7FDD', '-b'] },
     ]))
     expect(states).toEqual(expect.arrayContaining([
       'runtime-missing', 'preparing:downloading-runtime', 'no-simulator',
-      'preparing:creating-simulator', 'preparing:booting', 'ready',
+      'preparing:creating-simulator', 'ready',
+    ]))
+    await expect(manager.start()).resolves.toMatchObject({ kind: 'ready', running: true })
+    expect(runner.calls).toEqual(expect.arrayContaining([
+      { command: 'xcrun', args: ['simctl', 'boot', '8294A429-4C99-411F-A46D-0AD9499B7FDD'] },
+      { command: 'xcrun', args: ['simctl', 'bootstatus', '8294A429-4C99-411F-A46D-0AD9499B7FDD', '-b'] },
     ]))
     await manager.deactivate()
     expect(runner.calls).toContainEqual({
       command: 'xcrun', args: ['simctl', 'shutdown', '8294A429-4C99-411F-A46D-0AD9499B7FDD'],
     })
     expect(manager.snapshot()).toMatchObject({ kind: 'ready', running: false })
-    await expect(manager.prepare()).resolves.toMatchObject({ kind: 'ready', running: true })
+    await expect(manager.start()).resolves.toMatchObject({ kind: 'ready', running: true })
   })
 
   it('keeps Xcode license and first-launch authorization manual', async () => {
@@ -179,7 +182,8 @@ describe('iOS environment manager', () => {
       },
     }
     const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
-    const preparing = manager.prepare()
+    await manager.prepare()
+    const preparing = manager.start()
     await started
     manager.cancel()
     await expect(preparing).rejects.toMatchObject({ code: 'PHONE_IOS_ABORTED' })

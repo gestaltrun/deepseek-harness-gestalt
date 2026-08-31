@@ -1,3 +1,6 @@
+import type { IosPreparationPlan, PhoneIosState } from '@deepseek-ai/dsh-phone-environment'
+import type { DeviceId } from '@deepseek-ai/dsh-phone-runtime'
+
 /** One available iOS Simulator runtime reported by simctl. */
 export interface IosRuntime {
   readonly identifier: string
@@ -14,7 +17,7 @@ export interface IosDeviceType {
 
 /** One available Simulator instance reported by simctl. */
 export interface IosSimulator {
-  readonly udid: string
+  readonly udid: DeviceId
   readonly name: string
   readonly state: string
   readonly available: boolean
@@ -32,47 +35,7 @@ export interface IosInstallationProbe {
   readonly devices: readonly IosSimulator[]
 }
 
-/** Immutable Xcode and default-Simulator facts shown by the settings client. */
-export interface IosPreparationPlan {
-  readonly developerDir: string
-  readonly xcodeVersion: string
-  readonly simulatorName: string
-  readonly runtime?: IosRuntime
-  readonly deviceType?: IosDeviceType
-}
-
-/** iOS-specific preparation and Simulator lifecycle state. */
-export type PhoneIosState =
-  | { readonly kind: 'unsupported'; readonly reason: string }
-  | { readonly kind: 'checking' }
-  | { readonly kind: 'xcode-missing'; readonly message: string }
-  | { readonly kind: 'license-required'; readonly developerDir: string; readonly message: string }
-  | {
-    readonly kind: 'manual-required'
-    readonly code: 'first-launch' | 'xcode-update'
-    readonly message: string
-    readonly developerDir?: string
-  }
-  | { readonly kind: 'runtime-missing'; readonly plan: IosPreparationPlan }
-  | { readonly kind: 'no-simulator'; readonly plan: IosPreparationPlan }
-  | {
-    readonly kind: 'preparing'
-    readonly plan: IosPreparationPlan
-    readonly step: 'downloading-runtime' | 'creating-simulator' | 'booting'
-  }
-  | {
-    readonly kind: 'ready'
-    readonly plan: IosPreparationPlan
-    readonly deviceId: string
-    readonly running: boolean
-  }
-  | {
-    readonly kind: 'failed'
-    readonly plan?: IosPreparationPlan
-    readonly code: string
-    readonly message: string
-    readonly retryable: boolean
-  }
-
 /** Planner result before any preparation command runs. */
 export type IosHostPlan = PhoneIosState
+
+export type { IosPreparationPlan, PhoneIosState }

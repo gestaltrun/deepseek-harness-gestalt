@@ -3,6 +3,10 @@
   "compilerOptions": { "rootDir": "src", "outDir": "lib/types" },
   "include": ["src"],
   "references": [
-    { "path": "../../subprocess/subprocess" }
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../runtime-diagnostics/invariants" },
+    { "path": "../../subprocess/subprocess" },
+    { "path": "../phone-environment" },
+    { "path": "../phone-runtime" }
   ]
 }

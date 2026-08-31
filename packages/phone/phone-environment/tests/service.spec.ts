@@ -6,11 +6,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import { deviceId } from '@deepseek-ai/dsh-phone-runtime'
+import { buildGradientJpeg } from '../../phone-runtime/tests/fixtures/u3-visible-frames.ts'
 import PhoneEnvironment, {
   PHONE_ENVIRONMENT_ANDROID_CANCEL_PATH, PHONE_ENVIRONMENT_ANDROID_START_PATH,
-  PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError,
+  PHONE_ENVIRONMENT_IOS_START_PATH, PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError,
 } from '../src/index.ts'
-import type { AndroidEnvironmentProvider, AndroidPreparationPlan, PhoneAndroidState } from '../src/index.ts'
+import type {
+  AndroidEnvironmentProvider, AndroidPreparationPlan, IosEnvironmentProvider,
+  IosPreparationPlan, PhoneAndroidState, PhoneIosState,
+} from '../src/index.ts'
 
 class TestPhoneEnvironment extends PhoneEnvironment {
   protected override async probeRuntimeVersion(executablePath: string): Promise<string> {
@@ -38,6 +42,13 @@ const H264_PICTURE = Uint8Array.from([
   0, 0, 0, 1, 0x65, 0x88, 0x84, 0x86, 0x80, 0xff, 0xff, 0xff, 0xff,
   0, 0, 1, 0x09, 0xf0,
 ])
+const IOS_ID = deviceId('8294A429-4C99-411F-A46D-0AD9499B7FDD')
+const IOS_PLAN: IosPreparationPlan = {
+  developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
+  simulatorName: 'DSH Gestalt iPhone',
+  runtime: { identifier: 'runtime-26-0', name: 'iOS 26.0', version: '26.0', available: true },
+  deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
+}
 
 async function rawGet(url: string, host: string): Promise<{ status: number; body: unknown }> {
   return await new Promise((resolveResponse, rejectResponse) => {
@@ -119,7 +130,93 @@ function runningAndroidProvider() {
   return { provider, deactivate, emit }
 }
 
+function runningIosProvider() {
+  let state: PhoneIosState = { kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: false }
+  const listeners = new Set<(value: PhoneIosState) => void>()
+  const emit = (next: PhoneIosState): void => {
+    state = next
+    for (const listener of listeners) listener(state)
+  }
+  const deactivate = vi.fn(async () => { emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: false }) })
+  const provider: IosEnvironmentProvider = {
+    snapshot: () => state,
+    refresh: async () => state,
+    prepare: async () => state,
+    start: async () => {
+      emit({ kind: 'ready', plan: IOS_PLAN, deviceId: IOS_ID, running: true })
+      return state
+    },
+    cancel: vi.fn(), deactivate,
+    onChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+  }
+  return { provider, deactivate, emit }
+}
+
 describe('PhoneEnvironment', () => {
+  it('publishes iOS readiness only after mobilecli lists the Simulator and yields a JPEG picture', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    let picture!: ReadableStreamDefaultController<Uint8Array>
+    const startCapture = vi.fn(async () => ({
+      contentType: 'multipart/x-mixed-replace; boundary=frame',
+      body: new ReadableStream<Uint8Array>({ start(controller) { picture = controller } }),
+    }))
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {},
+      listDevices: async () => ({
+        android: [], ios: { simulators: [{
+          id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+        }], reals: [] },
+      }),
+      startCapture,
+    }, { executablePath: path })
+    const { provider } = runningIosProvider()
+    service.registerIosEnvironment(provider)
+    await service.setEnabled(true)
+
+    const starting = fetch(`${origin}${PHONE_ENVIRONMENT_IOS_START_PATH}`, { method: 'POST' })
+    await vi.waitFor(() => { expect(startCapture).toHaveBeenCalled() })
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'preparing', step: 'booting' })
+    picture.enqueue(buildGradientJpeg(4))
+    expect((await starting).status).toBe(200)
+    expect(startCapture).toHaveBeenCalledWith({
+      deviceId: IOS_ID, format: 'mjpeg', signal: expect.any(AbortSignal),
+    })
+    expect(service.snapshot().platforms.ios).toMatchObject({ kind: 'ready', running: true })
+  })
+
+  it('rejects iOS readiness when the Simulator stream is not a recognizable picture', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const deactivateRuntime = vi.fn(async () => {})
+    const { service, origin } = await mountEnvironment(context, {
+      activateExecutable: async () => {}, deactivate: deactivateRuntime,
+      listDevices: async () => ({
+        android: [], ios: { simulators: [{
+          id: IOS_ID, name: 'DSH Gestalt iPhone', kind: 'simulator', platform: 'ios', state: 'online', online: true,
+        }], reals: [] },
+      }),
+      startCapture: async () => ({
+        contentType: 'multipart/x-mixed-replace; boundary=frame',
+        body: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('Error')); controller.close() } }),
+      }),
+    }, { executablePath: path })
+    const { provider, deactivate } = runningIosProvider()
+    service.registerIosEnvironment(provider)
+    await service.setEnabled(true)
+
+    const response = await fetch(`${origin}${PHONE_ENVIRONMENT_IOS_START_PATH}`, { method: 'POST' })
+    expect(response.status).toBe(502)
+    expect(await response.json()).toMatchObject({ error: { code: 'PHONE_IOS_RUNTIME_VERIFY' } })
+    expect(deactivateRuntime).toHaveBeenCalled()
+    expect(deactivate).toHaveBeenCalled()
+    expect(service.snapshot().platforms.ios).toMatchObject({
+      kind: 'failed', code: 'PHONE_IOS_RUNTIME_VERIFY', retryable: true,
+    })
+  })
+
   it('requires Android license consent and reactivates mobilecli with the Provider environment', async () => {
     const path = await executable()
     const context = new Context()

@@ -195,7 +195,11 @@ export async function waitForFakeIo(match: (counters: FakeCounters) => boolean):
 }
 
 /** Persist the Electron/Web Host/fakemobilecli PIDs for post-run cleanup verification. */
-export async function recordOwnedProcesses(hostPid: number, includeFake: boolean): Promise<void> {
+export async function recordOwnedProcesses(
+  hostPid: number,
+  includeFake: boolean,
+  additional: Readonly<Record<string, number>> = {},
+): Promise<void> {
   const electronPid = await browser.electron.execute(() => process.pid)
   let fakePid: number | undefined
   if (includeFake) {
@@ -205,7 +209,9 @@ export async function recordOwnedProcesses(hostPid: number, includeFake: boolean
     )
     fakePid = record.pid
   }
-  await writeArtifact('owned-processes.json', { electronPid, hostPid, ...(fakePid === undefined ? {} : { fakePid }) })
+  await writeArtifact('owned-processes.json', {
+    electronPid, hostPid, ...(fakePid === undefined ? {} : { fakePid }), ...additional,
+  })
 }
 
 /** Save the current full Session Surface viewport as review evidence. */

@@ -37,6 +37,8 @@ export interface MobilecliAgentRunOptions {
   readonly signal: AbortSignal | undefined
   /** Validated ceiling bounding the child run, in milliseconds. */
   readonly timeoutMs: number
+  /** Non-sensitive runtime environment selected with the executable generation. */
+  readonly environment?: Readonly<Record<string, string>>
 }
 
 /**
@@ -60,7 +62,7 @@ export async function runMobilecliAgent(options: MobilecliAgentRunOptions): Prom
   const budget = deadline(options.signal, options.timeoutMs, label)
   return await new Promise<MobilecliAgentAnswer>((resolveRun, rejectRun) => {
     const child = spawn(options.executablePath, [...options.args], {
-      env: scrubbedParentEnv(),
+      env: { ...scrubbedParentEnv(), ...options.environment },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     })

@@ -10,7 +10,7 @@ import {
 } from './phone-environment.ts'
 import {
   MISSING_PHONE_ENVIRONMENT, MISSING_PHONE_RUNTIME, type PhoneManagedRuntimeView,
-  type PhonePlatformView, type PhoneRuntimeSource,
+  type PhoneAndroidView, type PhonePlatformView, type PhoneRuntimeSource,
 } from './phone-runtime-source.ts'
 
 /** What the phone settings card renders. */
@@ -24,7 +24,7 @@ export interface PhoneSettingsCardState {
   /** Shared Host-managed mobilecli runtime state. */
   readonly runtime: PhoneManagedRuntimeView
   /** Host platform capabilities, including unsupported reasons. */
-  readonly platforms: { readonly android: PhonePlatformView; readonly ios: PhonePlatformView }
+  readonly platforms: { readonly android: PhoneAndroidView; readonly ios: PhonePlatformView }
 }
 
 /** The registration-side face the card's slot entry injects. */
@@ -47,6 +47,14 @@ export interface PhoneSettingsCardFace {
   cancelRuntime: () => void
   /** Refresh runtime discovery. */
   refreshRuntime: () => void
+  /** Start Android SDK, image, AVD, and emulator preparation after explicit license consent. */
+  prepareAndroid: () => void
+  /** Cancel Android download, installation, or boot. */
+  cancelAndroid: () => void
+  /** Re-detect Android SDK and AVD state. */
+  refreshAndroid: () => void
+  /** Start the prepared default Android emulator. */
+  startAndroid: () => void
 }
 
 /**
@@ -119,6 +127,10 @@ export class PhoneSettingsCardController {
       prepareRuntime: () => { void this.runtime?.prepare().catch(() => {}) },
       cancelRuntime: () => { void this.runtime?.cancel().catch(() => {}) },
       refreshRuntime: () => { void this.runtime?.refresh().catch(() => {}) },
+      prepareAndroid: () => { void this.runtime?.prepareAndroid().catch(() => {}) },
+      cancelAndroid: () => { void this.runtime?.cancelAndroid().catch(() => {}) },
+      refreshAndroid: () => { void this.runtime?.refreshAndroid().catch(() => {}) },
+      startAndroid: () => { void this.runtime?.startAndroid().catch(() => {}) },
     }
   }
 

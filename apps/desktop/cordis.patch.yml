@@ -24,6 +24,11 @@
         root: !!js dshHomePath('phone')
         executablePath: !!js process.env.DSH_PHONE_MOBILECLI
 
+    - id: phone-environment-android
+      name: '@deepseek-ai/dsh-phone-environment-android'
+      config:
+        root: !!js dshHomePath('phone')
+
     - id: phone-stream
       name: '@deepseek-ai/dsh-phone-stream'
 

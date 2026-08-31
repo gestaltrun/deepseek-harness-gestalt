@@ -1313,9 +1313,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the disposer.',
       },
       {
-        signature: 'async activateExecutable(executablePath: string, signal?: AbortSignal): Promise<void>',
+        signature: 'async activateExecutable( executablePath: string, signal?: AbortSignal, environment: Readonly<Record<string, string>> = {}, ): Promise<void>',
         description: 'Replace the owned mobilecli child generation without replacing this Service. In-flight work on the prior generation is aborted and its process is stopped before the replacement begins readiness probing.',
-        parameters: [{ name: 'executablePath', description: 'absolute executable path selected by the environment owner.' }, { name: 'signal', description: 'optional cancellation signal for replacement and readiness.' }],
+        parameters: [{ name: 'executablePath', description: 'absolute executable path selected by the environment owner.' }, { name: 'signal', description: 'optional cancellation signal for replacement and readiness.' }, { name: 'environment', description: 'non-sensitive SDK/AVD environment owned by the selected generation.' }],
       },
       {
         signature: 'async deactivate(): Promise<void>',
@@ -1397,6 +1397,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Subscribe to committed full-snapshot replacements.',
         parameters: [{ name: 'listener', description: 'callback receiving the new immutable snapshot.' }],
         returns: 'the disposer.',
+      },
+      {
+        signature: 'registerAndroidEnvironment(provider: AndroidEnvironmentProvider): () => void',
+        description: 'Register the Android platform Provider while retaining this Service as the full-snapshot owner.',
+        parameters: [{ name: 'provider', description: 'Android SDK, AVD, and emulator lifecycle owner.' }],
+        returns: 'disposer that detaches the Provider and restores the deferred state.',
       },
       {
         signature: 'refresh(signal?: AbortSignal): Promise<PhoneEnvironmentSnapshot>',
@@ -3599,6 +3605,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type AgentStatus = \'idle\' | \'running\';',
   },
   {
+    name: 'AndroidEnvironmentProvider',
+    declaration: 'export interface AndroidEnvironmentProvider {\n    snapshot(): PhoneAndroidState;\n    refresh(signal?: AbortSignal): Promise<PhoneAndroidState>;\n    prepare(request: AndroidPrepareRequest, signal?: AbortSignal): Promise<PhoneAndroidState>;\n    start(signal?: AbortSignal): Promise<PhoneAndroidState>;\n    cancel(): void;\n    deactivate(): Promise<void>;\n    runtimeEnvironment(): Readonly<Record<string, string>>;\n    onChanged(listener: (state: PhoneAndroidState) => void): () => void;\n}',
+  },
+  {
+    name: 'AndroidPreparationPlan',
+    declaration: 'export interface AndroidPreparationPlan {\n    readonly sdkRoot: string;\n    readonly sdkSource: AndroidSdkSource;\n    readonly avdHome: string;\n    readonly avdName: string;\n    readonly abi: \'arm64-v8a\' | \'x86_64\';\n    readonly commandLineToolsVersion: string;\n    readonly commandLineToolsBytes: number;\n    readonly packageIds: readonly string[];\n    readonly minimumFreeBytes: number;\n    readonly licenseUrl: string;\n    readonly components: {\n        readonly commandLineTools: boolean;\n        readonly platformTools: boolean;\n        readonly emulator: boolean;\n        readonly systemImage: boolean;\n        readonly avd: boolean;\n    };\n}',
+  },
+  {
+    name: 'AndroidPrepareRequest',
+    declaration: 'export interface AndroidPrepareRequest {\n    readonly licenseAccepted: true;\n}',
+  },
+  {
+    name: 'AndroidSdkSource',
+    declaration: 'export type AndroidSdkSource = \'existing\' | \'managed\';',
+  },
+  {
     name: 'ApiKeyRecord',
     declaration: 'export interface ApiKeyRecord {\n    readonly kind: \'api-key\';\n    readonly key?: string;\n    readonly env?: Readonly<Record<string, string>>;\n}',
   },
@@ -4827,6 +4849,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhoneAgentStatus {\n    readonly deviceId: DeviceId;\n    readonly installed: boolean;\n    readonly version?: string;\n    readonly bundleId?: string;\n    readonly profileReminder?: string;\n}',
   },
   {
+    name: 'PhoneAndroidState',
+    declaration: 'export type PhoneAndroidState = {\n    readonly kind: \'deferred\';\n} | {\n    readonly kind: \'unsupported\';\n    readonly reason: string;\n} | {\n    readonly kind: \'checking\';\n} | {\n    readonly kind: \'missing\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'awaiting-license\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'downloading\';\n    readonly plan: AndroidPreparationPlan;\n    readonly receivedBytes: number;\n    readonly totalBytes: number;\n} | {\n    readonly kind: \'installing\';\n    readonly plan: AndroidPreparationPlan;\n    readonly step: \'licenses\' | \'packages\';\n} | {\n    readonly kind: \'creating-avd\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'checking-acceleration\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'booting\';\n    readonly plan: AndroidPreparationPlan;\n} | {\n    readonly kind: \'manual-required\';\n    readonly plan: AndroidPreparationPlan;\n    readonly code: \'disk-space\' | \'windows-hypervisor\' | \'linux-kvm\' | \'virtualization\';\n    readonly message: string;\n} | {\n    readonly kind: \'ready\';\n    readonly plan: AndroidPreparationPlan;\n    readonly deviceId?: string;\n    readonly running: boolean;\n} | {\n    readonly kind: \'failed\';\n    readonly plan?: AndroidPreparationPlan;\n    readonly code: string;\n    readonly message: string;\n    readonly retryable: boolean;\n};',
+  },
+  {
     name: 'PhoneCaptureRequest',
     declaration: 'export interface PhoneCaptureRequest {\n    readonly deviceId: DeviceId;\n    readonly format: PhoneCaptureFormat;\n    readonly signal?: AbortSignal;\n}',
   },
@@ -4852,7 +4878,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PhoneEnvironmentSnapshot',
-    declaration: 'export interface PhoneEnvironmentSnapshot {\n    readonly revision: number;\n    readonly enabled: boolean;\n    readonly runtime: PhoneRuntimeState;\n    readonly platforms: {\n        readonly android: PhonePlatformState;\n        readonly ios: PhonePlatformState;\n    };\n}',
+    declaration: 'export interface PhoneEnvironmentSnapshot {\n    readonly revision: number;\n    readonly enabled: boolean;\n    readonly runtime: PhoneRuntimeState;\n    readonly platforms: {\n        readonly android: PhoneAndroidState;\n        readonly ios: PhonePlatformState;\n    };\n}',
   },
   {
     name: 'PhoneIoRequest',

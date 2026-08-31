@@ -65,6 +65,30 @@ export function scrubbedParentEnv(): Record<string, string> {
   return env
 }
 
+/**
+ * Merge explicit child entries after the canonical scrub while honoring the
+ * target platform's environment-name semantics. Windows names are
+ * case-insensitive, so an explicit `PATH` replaces an inherited `Path`
+ * instead of creating an ambiguous duplicate.
+ * @param extra - Explicit child entries applied after the scrub.
+ * @param platform - Target platform; production callers use the current host.
+ * @returns a fresh environment object safe to hand to a child spawn.
+ */
+export function childEnv(
+  extra?: Readonly<NodeJS.ProcessEnv>,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const env = scrubbedParentEnv()
+  if (platform !== 'win32') return { ...env, ...extra }
+  let entries: [string, string | undefined][] = Object.entries(env)
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    const normalized = key.toUpperCase()
+    entries = entries.filter(([inherited]) => inherited.toUpperCase() !== normalized)
+    entries.push([key, value])
+  }
+  return Object.fromEntries(entries)
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     subprocess: SubprocessRuntime

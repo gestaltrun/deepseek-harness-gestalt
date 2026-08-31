@@ -231,6 +231,7 @@ export class PhoneDevices extends Service {
 
   private readonly resolved: ResolvedConfig
   private executablePath: string | undefined
+  private childEnvironment: Readonly<Record<string, string>> = Object.freeze({})
   private resolutionFailure: PhoneDevicesError | undefined
   private readonly subscribers = new Set<(change: PhoneDeviceChange) => void>()
   private readonly readinessSubscribers = new Set<(ready: boolean) => void>()
@@ -336,8 +337,13 @@ export class PhoneDevices extends Service {
    * before the replacement begins readiness probing.
    * @param executablePath - absolute executable path selected by the environment owner.
    * @param signal - optional cancellation signal for replacement and readiness.
+   * @param environment - non-sensitive SDK/AVD environment owned by the selected generation.
    */
-  async activateExecutable(executablePath: string, signal?: AbortSignal): Promise<void> {
+  async activateExecutable(
+    executablePath: string,
+    signal?: AbortSignal,
+    environment: Readonly<Record<string, string>> = {},
+  ): Promise<void> {
     this.assertAccepting()
     if (signal?.aborted === true) throw new PhoneDevicesError('PHONE_ABORTED', 'phone runtime activation was cancelled')
     const resolved = resolveMobilecliExecutable({ executablePath, env: process.env })
@@ -347,10 +353,15 @@ export class PhoneDevices extends Service {
       this.assertAccepting()
       if (signal?.aborted === true) throw new PhoneDevicesError('PHONE_ABORTED', 'phone runtime activation was cancelled')
       this.executablePath = resolved
+      this.childEnvironment = Object.freeze({ ...environment })
       this.resolutionFailure = undefined
       this.lost = undefined
       this.lifetime = new AbortController()
-      this.child = new MobilecliServerProcess({ executablePath: resolved, port: this.resolved.serverPort })
+      this.child = new MobilecliServerProcess({
+        executablePath: resolved,
+        port: this.resolved.serverPort,
+        environment: this.childEnvironment,
+      })
       this.rpcClient = new MobilecliRpc(`http://127.0.0.1:${String(this.resolved.serverPort)}`)
       this.startupOutcome = this.startup(signal)
       await this.startupOutcome
@@ -366,6 +377,7 @@ export class PhoneDevices extends Service {
       this.assertAccepting()
       await this.stopRuntime(new PhoneDevicesError('PHONE_ABORTED', 'the phone runtime generation was disabled'))
       this.executablePath = undefined
+      this.childEnvironment = Object.freeze({})
       this.resolutionFailure = new PhoneDevicesError('PHONE_UNRESOLVED', 'the phone runtime is not prepared')
     })
     this.activationTail = operation.catch(() => {})
@@ -670,6 +682,7 @@ export class PhoneDevices extends Service {
       args: ['agent', 'status', '--device', id],
       signal,
       timeoutMs: this.resolved.agentTimeoutMs,
+      environment: this.childEnvironment,
     })
     return this.agentAnswer(id, answer)
   }
@@ -710,6 +723,7 @@ export class PhoneDevices extends Service {
       ],
       signal: options.signal,
       timeoutMs: this.resolved.agentTimeoutMs,
+      environment: this.childEnvironment,
     })
     if (!answer.ok) {
       throw new PhoneDevicesError('PHONE_UPSTREAM', `mobilecli agent install answered ${JSON.stringify(answer.message)}`)

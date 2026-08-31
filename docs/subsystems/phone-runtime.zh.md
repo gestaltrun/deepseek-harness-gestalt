@@ -10,7 +10,7 @@ iOS 真机链路位于清单的 real 分组之后：`agentStatus` 与 `installAg
 
 发布是单调且变更驱动的：只有当新分组清单与已发布清单存在差异（id 集、名称、kind 或 online 事实）时才发布，每条 `PhoneDeviceChange` 精确标注该差异的 added/removed id。`./invariant` 伴生插件基于已发布清单重推每条候选差异，不一致即响亮停轮询。
 
-`ctx.phoneEnvironment` 发布供「手机设备」设置使用的 revisioned `PhoneEnvironmentSnapshot`：其中包含持久化启用值、共享运行时状态，以及相互独立的 Android/iOS 准备状态。运行时按运维 override、托管 current、系统发现的顺序选择；关闭或丢失就绪状态会停止所持有的 generation 并撤销其工具。
+`ctx.phoneEnvironment` 发布供「手机设备」设置使用的 revisioned `PhoneEnvironmentSnapshot`：其中包含持久化启用值、共享运行时状态，以及相互独立的 Android/iOS 准备状态。运行时按运维 override、托管 current、系统发现的顺序选择。平台 Provider 注册在同一 Service 后方；Android Provider 准备固定 API 35 SDK/AVD，并贡献仅子进程使用的 SDK 环境项。平台 ready 会让选中的 mobilecli generation 携带这些环境项重新激活；关闭、取消或 teardown 会停止所持有的 Emulator 与 mobilecli child。
 
 ```ts type-equiv
 /** Upstream OpenRPC `device.io.*` verbs this Service forwards. */
@@ -153,8 +153,9 @@ onReadinessChanged(listener: (ready: boolean) => void): () => void
  * before the replacement begins readiness probing.
  * @param executablePath - absolute executable path selected by the environment owner.
  * @param signal - optional cancellation signal for replacement and readiness.
+ * @param environment - non-sensitive SDK/AVD environment owned by the selected generation.
  */
-async activateExecutable(executablePath: string, signal?: AbortSignal): Promise<void>
+async activateExecutable( executablePath: string, signal?: AbortSignal, environment: Readonly<Record<string, string>> = {}, ): Promise<void>
 
 /** Stop the current child generation while retaining this Service for later activation. */
 async deactivate(): Promise<void>
@@ -281,6 +282,13 @@ setEnabled(enabled: boolean): Promise<void>
  * @returns the disposer.
  */
 onChanged(listener: (snapshot: PhoneEnvironmentSnapshot) => void): () => void
+
+/**
+ * Register the Android platform Provider while retaining this Service as the full-snapshot owner.
+ * @param provider - Android SDK, AVD, and emulator lifecycle owner.
+ * @returns disposer that detaches the Provider and restores the deferred state.
+ */
+registerAndroidEnvironment(provider: AndroidEnvironmentProvider): () => void
 
 /**
  * Re-detect runtime sources in fixed override-managed-system precedence.

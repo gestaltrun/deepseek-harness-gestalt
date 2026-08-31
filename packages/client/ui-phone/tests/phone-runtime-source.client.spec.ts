@@ -12,6 +12,31 @@ function snapshot(runtime: unknown, revision = 1, platforms: unknown = {
 }
 
 describe('Host phone runtime source', () => {
+  it('projects Android plans and sends explicit license consent to the trusted Host operation', async () => {
+    const plan = {
+      sdkRoot: '/dsh/phone/android/sdk', sdkSource: 'managed', avdHome: '/dsh/phone/android/avd',
+      avdName: 'Pixel_6_API_35_Gestalt', abi: 'arm64-v8a', commandLineToolsVersion: '15859902',
+      commandLineToolsBytes: 156_083_281,
+      packageIds: ['platform-tools', 'emulator', 'system-images;android-35;google_apis;arm64-v8a'],
+      minimumFreeBytes: 16 * 1024 ** 3, licenseUrl: 'https://developer.android.com/studio/terms',
+      components: { commandLineTools: false, platformTools: false, emulator: false, systemImage: false, avd: false },
+    }
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(snapshot(
+      { kind: 'ready', version: '1.0.5', source: 'managed' },
+      2,
+      { android: { kind: 'missing', plan }, ios: { kind: 'deferred' } },
+    ))
+    vi.stubGlobal('fetch', fetcher)
+    const source = createHttpPhoneRuntimeSource()
+    await source.prepareAndroid()
+    expect(source.getSnapshot().platforms.android).toMatchObject({
+      kind: 'missing', plan: { avdName: 'Pixel_6_API_35_Gestalt', abi: 'arm64-v8a' },
+    })
+    expect(fetcher).toHaveBeenCalledWith('/phone/environment/android/prepare', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ licenseAccepted: true }),
+    }))
+  })
+
   it('projects full snapshots and invokes prepare, cancel, and refresh paths', async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(snapshot({ kind: 'missing', targetVersion: '1.0.5', assetBytes: 5_458_848 }))

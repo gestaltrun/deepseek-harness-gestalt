@@ -15,8 +15,7 @@ import type { PhoneEnvironmentView } from '../src/client/phone-environment.ts'
 import { zh } from '../src/client/locales.ts'
 import type { PhoneSettingsCardState } from '../src/client/phone-settings-controller.ts'
 import {
-  ANDROID_CREATE_AVD, ANDROID_INSTALL_PLATFORM_TOOLS, ANDROID_INSTALL_SYSTEM_IMAGE,
-  ANDROID_LAUNCH_EMULATOR, IOS_CREATE_SIMULATOR, IOS_DOWNLOAD_PLATFORM,
+  ANDROID_INSTALL_PLATFORM_TOOLS, IOS_CREATE_SIMULATOR, IOS_DOWNLOAD_PLATFORM,
 } from '../src/client/phone-wizard-commands.ts'
 
 afterEach(() => {
@@ -109,21 +108,14 @@ describe('PhoneSettingsCard six states', () => {
     expect(screen.getByText('1')).toBeTruthy()
   })
 
-  it('renders the Android wizard with copyable install commands', () => {
+  it('routes the Android wizard to product-managed preparation instead of shell commands', () => {
     const onCopy = vi.fn()
     renderCard({ kind: 'android-wizard', platformToolsInstalled: true }, { onCopy })
     expect(screen.getByRole('heading', { name: '创建第一台 Android 模拟器' })).toBeTruthy()
-    expect(screen.getByText(ANDROID_INSTALL_SYSTEM_IMAGE)).toBeTruthy()
-    expect(screen.getByText(ANDROID_CREATE_AVD)).toBeTruthy()
-    expect(screen.getByText(ANDROID_LAUNCH_EMULATOR)).toBeTruthy()
-    const buttons = screen.getAllByRole('button', { name: '复制' })
-    expect(buttons).toHaveLength(3)
-    fireEvent.click(buttons[0]!)
-    expect(onCopy).toHaveBeenCalledWith(ANDROID_INSTALL_SYSTEM_IMAGE)
-    fireEvent.click(buttons[1]!)
-    expect(onCopy).toHaveBeenCalledWith(ANDROID_CREATE_AVD)
-    fireEvent.click(buttons[2]!)
-    expect(onCopy).toHaveBeenCalledWith(ANDROID_LAUNCH_EMULATOR)
+    expect(screen.getByText('Android 环境尚未准备')).toBeTruthy()
+    expect(screen.getByText(/使用上方 Android 分栏/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '复制' })).toBeNull()
+    expect(onCopy).not.toHaveBeenCalled()
   })
 
   it('renders the iOS wizard with runtime commands and the WDA note', () => {
@@ -306,11 +298,58 @@ describe('PhoneSettingsSection', () => {
       prepareRuntime: vi.fn(),
       cancelRuntime: vi.fn(),
       refreshRuntime: vi.fn(),
+      prepareAndroid: vi.fn(),
+      cancelAndroid: vi.fn(),
+      refreshAndroid: vi.fn(),
+      startAndroid: vi.fn(),
     } as unknown as PhoneSettingsSectionProps
     render(<PhoneSettingsSection {...props} />)
     expect(screen.getByRole('heading', { level: 2, name: '手机设备' })).toBeTruthy()
     expect(screen.getByText(/这与「移动伴侣」不同/)).toBeTruthy()
     expect(screen.getByRole('switch', { name: '启用手机设备' })).toBeTruthy()
     expect(screen.getByText('iOS 模拟器需要在安装 Xcode 的 macOS 上使用。')).toBeTruthy()
+  })
+
+  it('requires explicit license consent before Android preparation', () => {
+    const prepareAndroid = vi.fn()
+    const store = createSnapshotStore<PhoneSettingsCardState>({
+      enabled: true,
+      writable: true,
+      view: { kind: 'android-wizard', platformToolsInstalled: false },
+      runtime: { kind: 'ready', version: '1.0.5', source: 'managed' },
+      platforms: {
+        android: {
+          kind: 'missing',
+          plan: {
+            sdkRoot: '/dsh/phone/android/sdk', sdkSource: 'managed',
+            avdHome: '/dsh/phone/android/avd', avdName: 'Pixel_6_API_35_Gestalt', abi: 'arm64-v8a',
+            commandLineToolsVersion: '15859902', commandLineToolsBytes: 156_083_281,
+            packageIds: ['platform-tools', 'emulator', 'system-images;android-35;google_apis;arm64-v8a'],
+            minimumFreeBytes: 16 * 1024 ** 3, licenseUrl: 'https://developer.android.com/studio/terms',
+            components: {
+              commandLineTools: false, platformTools: false, emulator: false, systemImage: false, avd: false,
+            },
+          },
+        },
+        ios: { kind: 'deferred' },
+      },
+    })
+    const props = {
+      t: (key: keyof typeof zh) => zh[key],
+      usePhoneSettingsCard: bindSnapshotSelector(store),
+      setEnabled: vi.fn(), redetect: vi.fn(), copyCommand: vi.fn(), nextAction: vi.fn(),
+      prepareRuntime: vi.fn(), cancelRuntime: vi.fn(), refreshRuntime: vi.fn(),
+      prepareAndroid, cancelAndroid: vi.fn(), refreshAndroid: vi.fn(), startAndroid: vi.fn(),
+    } as unknown as PhoneSettingsSectionProps
+    render(<PhoneSettingsSection {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '一键准备 Android' }))
+    const submit = screen.getByRole('button', { name: '接受并准备' }) as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    expect(screen.getByText('/dsh/phone/android/sdk')).toBeTruthy()
+    expect(screen.getByText(/15859902/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect(submit.disabled).toBe(false)
+    fireEvent.click(submit)
+    expect(prepareAndroid).toHaveBeenCalledOnce()
   })
 })

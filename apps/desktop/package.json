@@ -28,6 +28,7 @@
     "@deepseek-ai/dsh-noise-channel": "workspace:^",
     "@deepseek-ai/dsh-phone-runtime": "workspace:^",
     "@deepseek-ai/dsh-phone-environment": "workspace:^",
+    "@deepseek-ai/dsh-phone-environment-android": "workspace:^",
     "@deepseek-ai/dsh-phone-stream": "workspace:^",
     "@deepseek-ai/dsh-platform-account": "workspace:^",
     "@deepseek-ai/dsh-platform-account-client": "workspace:^",

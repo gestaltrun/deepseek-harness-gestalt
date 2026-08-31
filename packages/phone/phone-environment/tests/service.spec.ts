@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import PhoneEnvironment, { PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError } from '../src/index.ts'
+import type { AndroidEnvironmentProvider, AndroidPreparationPlan, PhoneAndroidState } from '../src/index.ts'
 
 const contexts: Context[] = []
 const roots: string[] = []
@@ -63,6 +64,54 @@ async function mountEnvironment(context: Context, phoneDevices: object = {}, con
 }
 
 describe('PhoneEnvironment', () => {
+  it('requires Android license consent and reactivates mobilecli with the Provider environment', async () => {
+    const path = await executable()
+    const context = new Context()
+    contexts.push(context)
+    const activateExecutable = vi.fn(async () => {})
+    const { service, origin } = await mountEnvironment(context, { activateExecutable }, { executablePath: path })
+    const plan: AndroidPreparationPlan = {
+      sdkRoot: '/managed/android/sdk', sdkSource: 'managed', avdHome: '/managed/android/avd',
+      avdName: 'Pixel_6_API_35_Gestalt', abi: 'arm64-v8a', commandLineToolsVersion: '15859902',
+      commandLineToolsBytes: 1, packageIds: ['platform-tools', 'emulator', 'system-image'],
+      minimumFreeBytes: 16 * 1024 ** 3, licenseUrl: 'https://developer.android.com/studio/terms',
+      components: { commandLineTools: true, platformTools: true, emulator: true, systemImage: true, avd: true },
+    }
+    let state: PhoneAndroidState = { kind: 'missing', plan }
+    const listeners = new Set<(value: PhoneAndroidState) => void>()
+    const provider: AndroidEnvironmentProvider = {
+      snapshot: () => state,
+      refresh: async () => state,
+      prepare: vi.fn(async () => {
+        state = { kind: 'ready', plan, deviceId: 'emulator-5554', running: true }
+        for (const listener of listeners) listener(state)
+        return state
+      }),
+      start: async () => state,
+      cancel: vi.fn(),
+      deactivate: vi.fn(async () => {}),
+      runtimeEnvironment: () => ({ ANDROID_SDK_ROOT: plan.sdkRoot, ANDROID_AVD_HOME: plan.avdHome }),
+      onChanged: (listener) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    }
+    const unregister = service.registerAndroidEnvironment(provider)
+    await service.setEnabled(true)
+    const refused = await fetch(`${origin}${PHONE_ENVIRONMENT_PATH}/android/prepare`, { method: 'POST' })
+    expect(refused.status).toBe(502)
+    expect(await refused.json()).toMatchObject({ error: { code: 'PHONE_ANDROID_LICENSE_REQUIRED' } })
+    const accepted = await fetch(`${origin}${PHONE_ENVIRONMENT_PATH}/android/prepare`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ licenseAccepted: true }),
+    })
+    expect(accepted.status).toBe(200)
+    expect(provider.prepare).toHaveBeenCalledWith({ licenseAccepted: true }, expect.any(AbortSignal))
+    expect(activateExecutable).toHaveBeenLastCalledWith(
+      path,
+      expect.any(AbortSignal),
+      { ANDROID_SDK_ROOT: plan.sdkRoot, ANDROID_AVD_HOME: plan.avdHome },
+    )
+    unregister()
+    expect(service.snapshot().platforms.android).toEqual({ kind: 'deferred' })
+  })
+
   it('updates the durable enable gate without remounting the Service', async () => {
     const context = new Context()
     contexts.push(context)

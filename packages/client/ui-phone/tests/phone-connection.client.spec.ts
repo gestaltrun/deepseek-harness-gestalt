@@ -24,12 +24,6 @@ function parseSentFrame(value: string): unknown {
   return JSON.parse(value)
 }
 
-/** Exercise the state machine's defensive guard against late internal retry requests. */
-function requestDefensiveRetry(controller: PhoneConnectionController): void {
-  const testController = controller as unknown as { scheduleRetry(): void }
-  testController.scheduleRetry()
-}
-
 /** Drive one full connect cycle to the live phase. */
 async function connectToLive(gateway: FakeGateway, scheduler: ManualScheduler): Promise<PhoneConnectionController> {
   const controller = controllerOn(gateway, scheduler)
@@ -278,25 +272,6 @@ describe('PhoneConnectionController lifecycle', () => {
     await flush()
     controller.setVisible(false)
     expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'device-offline' } })
-  })
-
-  it('refuses late retry requests from idle, suspended, and terminal phases', async () => {
-    const gateway = new FakeGateway()
-    const scheduler = new ManualScheduler()
-    const controller = controllerOn(gateway, scheduler)
-
-    requestDefensiveRetry(controller)
-    expect(controller.snapshot()).toEqual({ kind: 'idle' })
-    controller.setVisible(false)
-    requestDefensiveRetry(controller)
-    expect(controller.snapshot()).toEqual({ kind: 'suspended' })
-
-    gateway.queueMint({ error: new PhoneStreamHttpError(404, 'not-found', 'gone') })
-    controller.setVisible(true)
-    await flush()
-    requestDefensiveRetry(controller)
-    expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'device-offline' } })
-    expect(scheduler.scheduledCount).toBe(0)
   })
 
   it('ignores capture failures before a stream is live', () => {

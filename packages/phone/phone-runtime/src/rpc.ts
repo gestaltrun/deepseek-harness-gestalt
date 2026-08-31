@@ -157,7 +157,6 @@ export class MobilecliRpc {
         `mobilecli answered HTTP ${String(response.status)} instead of a capture stream`,
       )
     }
-    /* v8 ignore next 4 -- node:fetch always attaches a body on a completed HTTP response */
     if (response.body === null) {
       throw new PhoneDevicesError('PHONE_PROTOCOL', `mobilecli ${JSON.stringify(method)} answered no capture body`)
     }
@@ -210,7 +209,6 @@ export class MobilecliRpc {
       )
     }
     const sessionType = session.headers.get('content-type')
-    /* v8 ignore next 4 -- node:fetch always attaches a body on a completed HTTP response */
     if (session.body === null) {
       throw new PhoneDevicesError('PHONE_PROTOCOL', 'the mobilecli capture session answered no body')
     }

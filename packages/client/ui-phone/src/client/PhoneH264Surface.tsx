@@ -66,9 +66,7 @@ export function PhoneH264Surface(props: PhoneH264SurfaceProps): ReactNode {
   onError.current = props.onError
 
   useEffect(() => {
-    const target = canvas.current
-    /* v8 ignore next -- React assigns the host ref before running this effect. */
-    if (target === null) return
+    const target = canvas.current as HTMLCanvasElement
     return props.owner.start({
       url: props.url,
       canvas: target,

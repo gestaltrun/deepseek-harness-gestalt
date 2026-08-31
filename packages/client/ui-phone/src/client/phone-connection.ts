@@ -401,7 +401,6 @@ export class PhoneConnectionController {
   }
 
   private scheduleRetry(): void {
-    if (this.phase.kind === 'error' || this.phase.kind === 'suspended' || this.phase.kind === 'idle') return
     if (this.retryAttempt >= this.retryLimit) {
       this.setPhase({ kind: 'error', failure: { kind: this.lastTransient } })
       return

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-08-31-phone-feature-per-file-coverage.md
-2026-08-31-phone-feature-per-file-coverage.md: d4f21fd822cfd4de9e50714cdd4fb212470f7783
-2026-08-31-phone-feature-per-file-coverage.zh.md: 8708db118da533958e2584df0b08615a2c487a2f
+2026-08-31-phone-feature-per-file-coverage.md: d1ea0c2b211a80ba58c409e24ab988bbd3f041d0
+2026-08-31-phone-feature-per-file-coverage.zh.md: e199f62af87862254c83fd50ad27920bdc8557a9

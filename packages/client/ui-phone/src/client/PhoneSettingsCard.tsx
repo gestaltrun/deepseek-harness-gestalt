@@ -104,11 +104,6 @@ function titleOf(view: PhoneEnvironmentView): string {
     case 'ready':
     case 'errors':
       return '手机设备'
-    /* v8 ignore next -- closed PhoneEnvironmentView union */
-    default: {
-      const _exhaustive: never = view
-      return _exhaustive
-    }
   }
 }
 
@@ -126,11 +121,6 @@ function descriptionOf(view: PhoneEnvironmentView): string {
       return '环境就绪。点击任一设备的「打开面板」在右侧查看实时画面，Agent 的 device_* 工具同时生效。'
     case 'errors':
       return '启用后发现的问题列在这里，每条都带下一步动作；处理完条目自动消失。'
-    /* v8 ignore next -- closed PhoneEnvironmentView union */
-    default: {
-      const _exhaustive: never = view
-      return _exhaustive
-    }
   }
 }
 
@@ -151,11 +141,6 @@ function bodyOf(
       return <ReadyBody devices={view.devices} />
     case 'errors':
       return <ErrorsBody errors={view.errors} onNextAction={actions.onNextAction} />
-    /* v8 ignore next -- closed PhoneEnvironmentView union */
-    default: {
-      const _exhaustive: never = view
-      return _exhaustive
-    }
   }
 }
 
@@ -172,11 +157,6 @@ function footerOf(view: PhoneEnvironmentView): ReactNode {
     case 'probing':
     case 'errors':
       return null
-    /* v8 ignore next -- closed PhoneEnvironmentView union */
-    default: {
-      const _exhaustive: never = view
-      return _exhaustive
-    }
   }
 }
 

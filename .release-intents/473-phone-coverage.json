@@ -3,26 +3,22 @@
   "version": 1,
   "id": "473-phone-coverage",
   "summary": {
-    "en": "Complete behavior coverage for every phone-runtime and ui-phone source file.",
-    "zh": "补齐 phone-runtime 与 ui-phone 全部源文件的行为覆盖率。"
+    "en": "Complete behavior coverage without exclusions for every phone-runtime, phone-stream, and ui-phone source file.",
+    "zh": "在不使用排除项的前提下补齐 phone-runtime、phone-stream 与 ui-phone 全部源文件的行为覆盖率。"
   },
   "releases": {
-    "desktop": "none",
+    "desktop": "patch",
     "mobile": "none",
     "platform": "none"
   },
   "compatibilityExceptions": [
     {
-      "releaseUnit": "desktop",
-      "reason": "Only phone-owned tests, testing documentation, and release metadata change; Desktop production and packaging inputs are unchanged."
-    },
-    {
       "releaseUnit": "mobile",
-      "reason": "Only phone-owned tests, testing documentation, and release metadata change; Mobile production and build inputs are unchanged."
+      "reason": "The change covers and simplifies Desktop Host and browser phone paths without changing Mobile source or artifacts."
     },
     {
       "releaseUnit": "platform",
-      "reason": "Only phone-owned tests, testing documentation, and release metadata change; Platform production, deployment, and wire inputs are unchanged."
+      "reason": "The change covers and simplifies Desktop Host and browser phone paths without changing Platform services, deployment inputs, or wire formats."
     }
   ]
 }

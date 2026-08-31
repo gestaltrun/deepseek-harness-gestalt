@@ -1,9 +1,9 @@
 /** Release-backed Electron flow: Settings offer, installer, Web Host restart, embedded console. */
 import { browser, expect } from '@wdio/globals'
 import {
-  clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
+  ACCOUNT_PROVIDER_MODEL, clickAccountConsoleButton, clickAccountConsoleFieldSelector, clickAccountConsoleOption,
   clickAccountConsoleSelector, clickOverlayButton, clickTopAccountDialogButton,
-  configureRealModelRoute, connectTemporaryWorkspace, DYNAMIC_PROVIDER_MODEL, expandProviderSettings,
+  configureRealModelRoute, connectTemporaryWorkspace, expandProviderSettings,
   mainWindowSnapshot,
   openProviderEditor,
   openSettings, overlayAccountConsoleSnapshot, overlayAccountDialogStack, overlayAccountWorkspaceLayout,
@@ -82,7 +82,7 @@ describe('Sub2API Desktop installation', () => {
     expect(modelsText).not.toMatch(/加载提供方目录失败|Loading the provider directory failed/u)
     await openProviderEditor(['Sub2API (sub2api)', 'Sub2API'])
     await expandProviderSettings(['自定义设置', 'Customized settings'])
-    await browser.waitUntil(async () => (await overlayText()).includes(DYNAMIC_PROVIDER_MODEL), {
+    await browser.waitUntil(async () => (await overlayText()).includes(ACCOUNT_PROVIDER_MODEL), {
       timeout: 30_000,
       interval: 500,
       timeoutMsg: 'Models Settings did not receive the live Sub2API account catalog',

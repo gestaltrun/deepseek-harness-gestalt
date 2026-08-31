@@ -11,7 +11,7 @@ import { isExpectedSessionSurface } from './session-surface.ts'
 const ADMIN_PREFIX = '/plugins/dsh-sub2api/admin'
 const REAL_PROVIDER_CREDENTIAL_REF = 'ZAI_CODING_CN_API_KEY'
 const SUB2API_PUBLIC_MODEL = 'claude-sonnet-4-5-20250929'
-export const DYNAMIC_PROVIDER_MODEL = 'dsh445-dynamic-model'
+export const ACCOUNT_PROVIDER_MODEL = 'claude-fable-5'
 const execFileAsync = promisify(execFile)
 
 interface Sub2ApiSnapshot {
@@ -477,25 +477,23 @@ export async function configureRealModelRoute(hostOrigin: string): Promise<void>
     hostOrigin,
     `/groups/${String(composite.id)}/composite-routes`,
   )
-  for (const publicModel of [SUB2API_PUBLIC_MODEL, DYNAMIC_PROVIDER_MODEL]) {
-    const route = routes.find(entry => entry.public_model === publicModel)
-    const routePath = `/groups/${String(composite.id)}/composite-routes`
-      + (route === undefined ? '' : `/${String(route.id)}`)
-    await adminJson(hostOrigin, routePath, {
-      method: route === undefined ? 'POST' : 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        public_model: publicModel,
-        match_type: 'exact',
-        target_platform: 'zhipu',
-        upstream_model: 'glm-5.3-flash',
-        endpoint: 'chat_completions',
-        priority: 100,
-        enabled: true,
-        notes: 'ephemeral Electron E2E route',
-      }),
-    })
-  }
+  const route = routes.find(entry => entry.public_model === SUB2API_PUBLIC_MODEL)
+  const routePath = `/groups/${String(composite.id)}/composite-routes`
+    + (route === undefined ? '' : `/${String(route.id)}`)
+  await adminJson(hostOrigin, routePath, {
+    method: route === undefined ? 'POST' : 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      public_model: SUB2API_PUBLIC_MODEL,
+      match_type: 'exact',
+      target_platform: 'zhipu',
+      upstream_model: 'glm-5.3-flash',
+      endpoint: 'chat_completions',
+      priority: 100,
+      enabled: true,
+      notes: 'ephemeral Electron E2E route',
+    }),
+  })
 }
 
 /** Connect an empty temporary workspace so the first Session composer unlocks. */

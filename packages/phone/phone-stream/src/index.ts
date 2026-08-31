@@ -35,9 +35,6 @@ export const PHONE_SESSION_PATH = '/phone/session'
 /** Exact-path GET listing of the grouped device fleet behind the `/api` fence. */
 export const PHONE_DEVICES_PATH = '/phone/devices'
 
-type PhoneIoMethod = PhoneIoRequest['method']
-
-const IO_METHODS: ReadonlySet<PhoneIoMethod> = new Set(['tap', 'gesture', 'text', 'button'])
 const JSON_BODY_LIMITS = {
   maxBytes: 64 * 1024,
   tooLarge: { status: 413, code: 'payload-too-large', message: 'phone stream JSON body exceeds 64 KiB' },
@@ -264,8 +261,9 @@ export class PhoneStream extends Service {
       'x-content-type-options': 'nosniff',
     })
     const reader = (multipart ? normalizeMultipartImageStream(capture.body) : capture.body).getReader()
+    let cancellation: Promise<void> | undefined
     const abort = (): void => {
-      void reader.cancel()
+      cancellation ??= reader.cancel()
     }
     req.on('aborted', abort)
     res.on('close', abort)
@@ -282,6 +280,7 @@ export class PhoneStream extends Service {
     } finally {
       req.off('aborted', abort)
       res.off('close', abort)
+      if (cancellation !== undefined) await cancellation
     }
   }
 
@@ -377,7 +376,7 @@ function parseCapturePath(pathname: string): { readonly deviceId: string; readon
 }
 
 function parseIoRequest(method: unknown, params: unknown): PhoneIoRequest {
-  if (!isIoMethod(method)) {
+  if (typeof method !== 'string') {
     throw new HttpError(400, 'bad-request', `unsupported phone io method ${JSON.stringify(method)}`)
   }
   if (typeof params !== 'object' || params === null) {
@@ -403,11 +402,9 @@ function parseIoRequest(method: unknown, params: unknown): PhoneIoRequest {
         throw new HttpError(400, 'bad-request', 'button is required')
       }
       return { deviceId: id, method: 'button', button: record.button }
+    default:
+      throw new HttpError(400, 'bad-request', `unsupported phone io method ${JSON.stringify(method)}`)
   }
-}
-
-function isIoMethod(value: unknown): value is PhoneIoMethod {
-  return typeof value === 'string' && IO_METHODS.has(value as PhoneIoMethod)
 }
 
 function requireInteger(value: unknown, name: string): number {

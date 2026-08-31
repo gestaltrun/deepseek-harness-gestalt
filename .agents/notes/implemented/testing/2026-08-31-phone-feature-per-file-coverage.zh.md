@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-手机 package 的全部自有源文件保留在正常覆盖率清单中。归属测试覆盖 runtime 启停、可执行文件解析、publication invariant、设备列表与切换、H264 播放与画面所有权、连接 generation 与重试、capture proxy 取消与失败收敛、归一化输入映射、失败文案以及插件注册。保护终止状态、无效设备尺寸、进程故障或 wire 故障的防御分支具有明确的结果断言。封闭类型 union 与自有生命周期 invariant 不保留不可达的运行时分支。手机路径不使用 coverage exclusion、忽略区间、降低阈值或仅供测试的生产分支。
+手机 package 的全部自有源文件保留在正常覆盖率清单中。归属测试覆盖 runtime 启停、可执行文件解析、publication invariant、设备列表与切换、H264 播放与画面所有权、连接 generation 与重试、capture proxy 取消与失败收敛、归一化输入映射、失败文案以及插件注册。保护终止状态、无效设备尺寸、进程故障或 wire 故障的防御分支具有明确的结果断言。封闭类型 union 使用完整映射或 `assertNever` 后备分支；自有生命周期 invariant 不保留不可达的运行时分支。手机路径不使用 coverage exclusion、忽略区间、降低阈值或仅供测试的生产分支。
 
 ## 考虑过的替代方案
 
@@ -24,4 +24,4 @@ Status: implemented
 
 ## 验证
 
-受支持的手机三分区清单运行 395 个测试，另有两个平台条件跳过；1,986 个 statements、1,101 个 branches、471 个 functions 与 1,732 行均为 100%。仓库 partitioned coverage lane 仍是合并权威。
+受支持的手机三分区清单运行 396 个测试，另有两个平台条件跳过；1,976 个 statements、1,081 个 branches、471 个 functions 与 1,721 行均为 100%。仓库 partitioned coverage lane 仍是合并权威。

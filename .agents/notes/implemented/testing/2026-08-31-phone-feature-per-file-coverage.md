@@ -10,7 +10,7 @@ The phone feature adds lifecycle, transport, renderer, and platform-resolution b
 
 ## Decision
 
-The phone packages keep every owned source file in the normal coverage inventory. Their tests exercise runtime startup and shutdown, executable resolution, publication invariants, device listing and switching, H264 playback and surface ownership, connection generations and retries, capture proxy cancellation and failure containment, normalized input mapping, failure copy, and plugin registration. Defensive branches that protect terminal phases, invalid device dimensions, or process and wire failures have explicit outcome assertions. Closed typed unions and owned lifecycle invariants are expressed without unreachable runtime branches. No phone path uses a coverage exclusion, ignored range, reduced threshold, or test-only production branch.
+The phone packages keep every owned source file in the normal coverage inventory. Their tests exercise runtime startup and shutdown, executable resolution, publication invariants, device listing and switching, H264 playback and surface ownership, connection generations and retries, capture proxy cancellation and failure containment, normalized input mapping, failure copy, and plugin registration. Defensive branches that protect terminal phases, invalid device dimensions, or process and wire failures have explicit outcome assertions. Closed typed unions use exhaustive tables or an `assertNever` backstop; owned lifecycle invariants avoid unreachable runtime branches. No phone path uses a coverage exclusion, ignored range, reduced threshold, or test-only production branch.
 
 ## Alternatives considered
 
@@ -24,4 +24,4 @@ Changes to `packages/phone/phone-runtime/src/**`, `packages/phone/phone-stream/s
 
 ## Verification
 
-The supported three-part phone inventory runs 395 tests with two platform-conditional skips and reports 100% for 1,986 statements, 1,101 branches, 471 functions, and 1,732 lines. The repository partitioned coverage lane remains the merge authority.
+The supported three-part phone inventory runs 396 tests with two platform-conditional skips and reports 100% for 1,976 statements, 1,081 branches, 471 functions, and 1,721 lines. The repository partitioned coverage lane remains the merge authority.

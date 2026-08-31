@@ -803,16 +803,9 @@ function allRefsOf(list: PhoneDeviceList): readonly PhoneDeviceRef[] {
 }
 
 function ioParams(request: PhoneIoRequest): Record<string, unknown> {
-  switch (request.method) {
-    case 'tap':
-      return { deviceId: request.deviceId, x: request.x, y: request.y }
-    case 'gesture':
-      return { deviceId: request.deviceId, actions: request.actions }
-    case 'text':
-      return { deviceId: request.deviceId, text: request.text }
-    case 'button':
-      return { deviceId: request.deviceId, button: request.button }
-  }
+  const { method, ...params } = request
+  void method
+  return params
 }
 
 function tailOf(text: string): string {

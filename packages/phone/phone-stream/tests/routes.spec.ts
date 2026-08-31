@@ -280,19 +280,22 @@ describe('phone stream Host routes', () => {
     expect(jpegDimensions(frame)).toEqual({ width: 390, height: 844 })
   })
 
-  it('cancels the upstream capture when the browser disconnects mid-stream', async () => {
+  it('awaits and reports rejected upstream cancellation after a browser disconnect', async () => {
     const { origin, context } = await mount()
     const host = new URL(origin).host
     const session = await mint(origin)
-    let cancelled = false
+    const cancellationStarted = Promise.withResolvers<undefined>()
+    const cancellationRelease = Promise.withResolvers<undefined>()
+    const warn = vi.spyOn(context.logger, 'warn').mockImplementation(() => undefined)
     context.phoneDevices.startCapture = async () => ({
       contentType: 'video/h264',
       body: new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(new Uint8Array([0x00, 0x00, 0x00, 0x01]))
         },
-        cancel() {
-          cancelled = true
+        async cancel() {
+          cancellationStarted.resolve(undefined)
+          await cancellationRelease.promise
         },
       }),
     })
@@ -317,7 +320,12 @@ describe('phone stream Host routes', () => {
       req.once('error', reject)
       req.end()
     })
-    await vi.waitFor(() => { expect(cancelled).toBe(true) })
+    await cancellationStarted.promise
+    expect(warn).not.toHaveBeenCalled()
+    cancellationRelease.reject(new Error('capture cancellation failed'))
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(expect.objectContaining({ message: 'capture cancellation failed' }))
+    })
   })
 
   it('closes the browser response when the upstream capture stream fails', async () => {
@@ -428,6 +436,8 @@ describe('phone stream Host routes', () => {
     socket.send('null')
     expect(await next()).toMatchObject({ error: { code: -32600 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'swipe', params: { deviceId: 'emulator-5554' } }))
+    expect(await next()).toMatchObject({ error: { code: -32000 } })
+    socket.send(JSON.stringify({ jsonrpc: '2.0', id: 13, method: 42, params: { deviceId: 'emulator-5554' } }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })
     socket.send(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tap', params: { deviceId: 'emulator-5554', x: 1 } }))
     expect(await next()).toMatchObject({ error: { code: -32000 } })

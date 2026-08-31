@@ -55,9 +55,12 @@ export function Sub2ApiControl({ t, useSub2api }: Sub2ApiControlProps) {
 
 function sub2ApiConsoleUrl(): string {
   const presented = document.documentElement.style.colorScheme
+  const media = typeof matchMedia === 'undefined'
+    ? undefined
+    : matchMedia('(prefers-color-scheme: dark)')
   const theme = presented === 'dark' || presented === 'light'
     ? presented
-    : window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    : media?.matches === true ? 'dark' : 'light'
   const lang = document.documentElement.lang.toLowerCase().startsWith('zh') ? 'zh' : 'en'
   return `/plugins/dsh-sub2api/ui/admin/accounts?embed=desktop&theme=${theme}&lang=${lang}`
 }
@@ -72,7 +75,9 @@ function useSub2ApiConsoleUrl(): string {
     }
     const observer = new MutationObserver(sync)
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'lang'] })
-    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
+    const media = typeof matchMedia === 'undefined'
+      ? undefined
+      : matchMedia('(prefers-color-scheme: dark)')
     media?.addEventListener('change', sync)
     return () => {
       observer.disconnect()

@@ -7,6 +7,7 @@ import { en } from '../src/client/locales.ts'
 
 afterEach(() => {
   cleanup()
+  vi.unstubAllGlobals()
   delete window.dshDesktop
   document.documentElement.style.colorScheme = ''
   document.documentElement.lang = ''
@@ -128,6 +129,31 @@ describe('Sub2ApiControl', () => {
     await waitFor(() => {
       expect(frame.getAttribute('src')).toContain('theme=dark&lang=zh')
     })
+  })
+
+  it('uses the system theme without reloading for an equivalent presentation', () => {
+    const addEventListener = vi.fn()
+    const removeEventListener = vi.fn()
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      addEventListener,
+      removeEventListener,
+    })))
+    window.dshDesktop = bridge()
+    document.documentElement.lang = 'en'
+    renderControl({ state: 'running', enabled: true })
+    const frame = screen.getByTitle('Sub2API account console')
+    const initialUrl = frame.getAttribute('src')
+
+    expect(initialUrl).toContain('theme=dark&lang=en')
+    document.documentElement.lang = 'en-US'
+    const listener = addEventListener.mock.calls[0]?.[1] as (() => void) | undefined
+    if (listener === undefined) throw new Error('system theme listener was not registered')
+    listener()
+    expect(frame.getAttribute('src')).toBe(initialUrl)
+
+    cleanup()
+    expect(removeEventListener).toHaveBeenCalledWith('change', listener)
   })
 
   it('shows the actionable error with retry and uninstall exits', () => {

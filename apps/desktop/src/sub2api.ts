@@ -378,9 +378,6 @@ export class DesktopSub2ApiController implements DesktopSub2ApiActions {
   }
 }
 
-// The two enable paths set this around their install call so the restart
-// failure handler can tell a fresh install (rollback) from a re-enable (report).
-
 /** Error text for a deployment without configured component sources. */
 const PLACEHOLDER_ERROR =
   'Sub2API 组件下载源未配置。请使用包含 sub2api-sources.json 的 Desktop 发行版，或通过 DSH_DESKTOP_SUB2API_SOURCES 指向经批准的发布源。'

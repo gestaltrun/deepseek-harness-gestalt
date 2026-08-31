@@ -20,7 +20,7 @@ Release-family fixtures create both the dynamic client bundle and a minimal vali
 
 `runLogged` verifies direct late stdout and stderr persistence on every platform. A separate POSIX-only test retains the stronger inherited-descendant-pipe obligation; Windows process-tree termination remains covered through its `taskkill /t` behavior rather than a pipe-inheritance assumption.
 
-The native Windows coverage merge also executes a mocked-child stop-policy test. It advances the existing termination grace period and proves the platform-independent `SIGTERM` then `SIGKILL` obligation without pretending a native Windows child can ignore Node's terminating signal.
+The native Windows coverage shards include a mocked-child stop-policy test. It advances the existing termination grace period and proves the platform-independent `SIGTERM` then `SIGKILL` obligation without pretending a native Windows child can ignore Node's terminating signal; the merge gate then enforces that combined coverage.
 
 Binary-discovery fixtures join `PATH` with the host delimiter. Tests for the POSIX npm-prefix and Homebrew rules select POSIX behavior explicitly, while the unresolved-service test clears and restores every home and prefix environment input that the resolver reads.
 

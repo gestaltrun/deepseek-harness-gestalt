@@ -122,6 +122,30 @@ function fakeAgent(): Agent {
 }
 
 describe('deferred phone device Consumer', () => {
+  it('registers and unregisters every device tool with runtime readiness', async () => {
+    const base = fakeFleet()
+    const listeners = new Set<(ready: boolean) => void>()
+    let ready = false
+    const fleet = {
+      ...base,
+      isReady: () => ready,
+      onReadinessChanged(listener: (next: boolean) => void) {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+    }
+    const { ctx } = await harness(fleet)
+    expect(ctx.tools.catalogSchemas().map(schema => schema.name)).toEqual([])
+
+    ready = true
+    for (const listener of [...listeners]) listener(true)
+    expect(ctx.tools.catalogSchemas().map(schema => schema.name).sort()).toEqual([...DEVICE_TOOLS])
+
+    ready = false
+    for (const listener of [...listeners]) listener(false)
+    expect(ctx.tools.catalogSchemas().map(schema => schema.name)).toEqual([])
+  })
+
   it('keeps device schemas out of the initial request until tool_search reconstructs them', async () => {
     const { ctx } = await harness()
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual(['tool_search'])

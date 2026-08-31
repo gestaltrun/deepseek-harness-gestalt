@@ -222,14 +222,17 @@ export class PhoneDevices extends Service {
   readonly [PHONE_RUNTIME_STATE_OWNER]: PhoneRuntimeStateOwner = Object.freeze({})
 
   private readonly resolved: ResolvedConfig
-  private readonly executablePath: string | undefined
-  private readonly resolutionFailure: PhoneDevicesError | undefined
+  private executablePath: string | undefined
+  private resolutionFailure: PhoneDevicesError | undefined
   private readonly subscribers = new Set<(change: PhoneDeviceChange) => void>()
-  private readonly lifetime = new AbortController()
+  private readonly readinessSubscribers = new Set<(ready: boolean) => void>()
+  private lifetime = new AbortController()
+  private activationTail: Promise<void> = Promise.resolve()
   private queueTail: Promise<void> = Promise.resolve()
   private closing = false
   private disposed = false
   private ready = false
+  private publishedReadiness = false
   private lost: PhoneDevicesError | undefined
   private child: MobilecliServerProcess | undefined
   private rpcClient: MobilecliRpc | undefined
@@ -264,6 +267,7 @@ export class PhoneDevices extends Service {
     }
     ctx.effect(() => () => {
       this.subscribers.clear()
+      this.readinessSubscribers.clear()
     }, 'phone runtime subscriber registry cleanup')
     ctx.effect(() => () => this.teardown(), 'phone runtime teardown')
     ctx.effect(
@@ -286,6 +290,57 @@ export class PhoneDevices extends Service {
     if (this.resolutionFailure !== undefined) return Promise.resolve()
     this.startupOutcome ??= this.startup()
     return this.startupOutcome
+  }
+
+  /** @returns whether the current mobilecli generation completed readiness. */
+  isReady(): boolean {
+    return this.ready && this.lost === undefined && !this.closing && !this.disposed
+  }
+
+  /**
+   * Subscribe to ready/not-ready transitions of the replaceable runtime generation.
+   * @param listener - callback receiving the committed readiness value.
+   * @returns the disposer.
+   */
+  onReadinessChanged(listener: (ready: boolean) => void): () => void {
+    this.readinessSubscribers.add(listener)
+    return () => { this.readinessSubscribers.delete(listener) }
+  }
+
+  /**
+   * Replace the owned mobilecli child generation without replacing this Service.
+   * In-flight work on the prior generation is aborted and its process is stopped
+   * before the replacement begins readiness probing.
+   * @param executablePath - absolute executable path selected by the environment owner.
+   */
+  async activateExecutable(executablePath: string): Promise<void> {
+    this.assertAccepting()
+    const resolved = resolveMobilecliExecutable({ executablePath, env: process.env })
+    const operation = this.activationTail.then(async () => {
+      await this.stopRuntime(new PhoneDevicesError('PHONE_ABORTED', 'the phone runtime generation was replaced'))
+      this.executablePath = resolved
+      this.resolutionFailure = undefined
+      this.lost = undefined
+      this.lifetime = new AbortController()
+      this.child = new MobilecliServerProcess({ executablePath: resolved, port: this.resolved.serverPort })
+      this.rpcClient = new MobilecliRpc(`http://127.0.0.1:${String(this.resolved.serverPort)}`)
+      this.startupOutcome = this.startup()
+      await this.startupOutcome
+    })
+    this.activationTail = operation.catch(() => {})
+    await operation
+  }
+
+  /** Stop the current child generation while retaining this Service for later activation. */
+  async deactivate(): Promise<void> {
+    this.assertAccepting()
+    const operation = this.activationTail.then(async () => {
+      await this.stopRuntime(new PhoneDevicesError('PHONE_ABORTED', 'the phone runtime generation was disabled'))
+      this.executablePath = undefined
+      this.resolutionFailure = new PhoneDevicesError('PHONE_UNRESOLVED', 'the phone runtime is not prepared')
+    })
+    this.activationTail = operation.catch(() => {})
+    await operation
   }
 
   /** Refuse operations while the mobilecli executable is unresolvable. */
@@ -344,6 +399,7 @@ export class PhoneDevices extends Service {
       }
       void child.exit.then((exit) => { this.onChildExit(child, exit) })
       this.ready = true
+      this.publishReadiness(true)
       // Commit the baseline listing inside initialization so every observer
       // attaches to a stable starting point and receives only later changes.
       await this.pollAttempt()
@@ -768,6 +824,8 @@ export class PhoneDevices extends Service {
   private markLost(reason: PhoneDevicesError): void {
     if (this.lost !== undefined) return
     this.lost = reason
+    this.ready = false
+    this.publishReadiness(false)
     this.clearPollTimer()
     this.ctx.logger.error(reason.message)
   }
@@ -777,16 +835,49 @@ export class PhoneDevices extends Service {
    * and reach child-exit quiescence before returning.
    */
   private teardown(): void | Promise<void> {
+    if (this.disposed) return undefined
     this.closing = true
-    this.clearPollTimer()
-    this.lifetime.abort(new PhoneDevicesError('PHONE_DISPOSED', 'the phone runtime service is disposed'))
     this.subscribers.clear()
+    this.readinessSubscribers.clear()
     this.disposed = true
+    return this.stopRuntime(new PhoneDevicesError('PHONE_DISPOSED', 'the phone runtime service is disposed'))
+  }
+
+  private publishReadiness(next: boolean): void {
+    if (next === this.publishedReadiness) return
+    this.publishedReadiness = next
+    for (const listener of [...this.readinessSubscribers]) {
+      try {
+        listener(next)
+      } catch (error) {
+        this.ctx.logger.warn('phone-runtime: a readiness observer failed')
+        this.ctx.logger.warn(error)
+      }
+    }
+  }
+
+  /** Abort, drain, and stop exactly the current child generation. */
+  private async stopRuntime(reason: PhoneDevicesError): Promise<void> {
+    this.clearPollTimer()
+    this.lifetime.abort(reason)
+    this.ready = false
+    this.publishReadiness(false)
+    await this.startupOutcome?.catch(() => {})
+    await this.queueTail
     const child = this.child
     this.child = undefined
     this.rpcClient = undefined
-    if (child === undefined) return undefined
-    return child.stop()
+    this.startupOutcome = undefined
+    if (this.publishedList !== undefined && allRefsOf(this.publishedList).length > 0) {
+      const empty = emptyDeviceList()
+      const delta = changeSets(this.publishedList, empty)
+      this.publish(Object.freeze({
+        list: empty,
+        added: Object.freeze(delta.added),
+        removed: Object.freeze(delta.removed),
+      }))
+    }
+    if (child !== undefined) await child.stop()
   }
 }
 
@@ -800,6 +891,13 @@ function exitedBeforeReady(child: MobilecliServerProcess, exit: { readonly code:
 
 function allRefsOf(list: PhoneDeviceList): readonly PhoneDeviceRef[] {
   return [...list.android, ...list.ios.simulators, ...list.ios.reals]
+}
+
+function emptyDeviceList(): PhoneDeviceList {
+  return Object.freeze({
+    android: Object.freeze([]),
+    ios: Object.freeze({ simulators: Object.freeze([]), reals: Object.freeze([]) }),
+  })
 }
 
 function ioParams(request: PhoneIoRequest): Record<string, unknown> {

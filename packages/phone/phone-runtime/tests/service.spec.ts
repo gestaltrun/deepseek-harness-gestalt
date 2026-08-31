@@ -80,6 +80,36 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
 }
 
 describe('phone runtime service lifecycle', () => {
+  it('hot-activates and deactivates replaceable generations behind one Service', async () => {
+    const fake = await stageFake({
+      devices: [wireDevice('emulator-5554', 'android', 'emulator', 'online')],
+    })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      executablePath: `${fake.executablePath}.missing`,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    expect(context.phoneDevices.isReady()).toBe(false)
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    expect(context.phoneDevices.isReady()).toBe(true)
+    expect((await context.phoneDevices.listDevices()).android.map(device => device.id))
+      .toEqual(['emulator-5554'])
+
+    await context.phoneDevices.deactivate()
+    expect(context.phoneDevices.isReady()).toBe(false)
+    await expect(context.phoneDevices.listDevices()).rejects.toMatchObject({ code: 'PHONE_UNRESOLVED' })
+    await context.phoneDevices.activateExecutable(fake.executablePath)
+    expect(context.phoneDevices.isReady()).toBe(true)
+    expect(readiness).toEqual([true, false, true])
+  })
+
   it('activates with an unavailable service when PATH carries no mobilecli', async () => {
     const context = new Context()
     contexts.push(context)

@@ -187,6 +187,8 @@ interface PhoneFleet {
   shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
   io?(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
   screenshot?(id: DeviceId, signal?: AbortSignal): Promise<{ readonly mediaType: 'image/png'; readonly data: string }>
+  isReady?(): boolean
+  onReadinessChanged?(listener: (ready: boolean) => void): () => void
 }
 
 /** Complete phone facts are rendered into the durable ordinary tool result. */
@@ -321,7 +323,28 @@ export function apply(ctx: Context, config: Config): void {
     })
   })
 
-  ctx.tools.register({
+  let disposeTools: (() => void) | undefined
+  const synchronizeTools = (): void => {
+    const ready = fleet.isReady?.() ?? true
+    if (ready && disposeTools === undefined) disposeTools = registerPhoneTools(ctx, fleet, timeoutMs)
+    if (!ready && disposeTools !== undefined) {
+      disposeTools()
+      disposeTools = undefined
+    }
+  }
+  const unsubscribe = fleet.onReadinessChanged?.(() => { synchronizeTools() })
+  synchronizeTools()
+  ctx.effect(() => () => {
+    unsubscribe?.()
+    disposeTools?.()
+    disposeTools = undefined
+  }, 'tool-phone readiness registration')
+}
+
+function registerPhoneTools(ctx: Context, fleet: PhoneFleet, timeoutMs: number): () => void {
+  const disposers: Array<() => void> = []
+
+  disposers.push(ctx.tools.register({
     ...defineTool({
       name: 'device_list',
       description: 'List every Android and iOS device known to the phone fleet, including offline simulators and emulators.',
@@ -344,9 +367,9 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
     deferLoading: true,
-  })
+  }))
 
-  ctx.tools.register({
+  disposers.push(ctx.tools.register({
     ...defineTool({
       name: 'device_observe',
       description: 'Observe one phone device from the latest fleet listing.',
@@ -363,9 +386,9 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
     deferLoading: true,
-  })
+  }))
 
-  ctx.tools.register({
+  disposers.push(ctx.tools.register({
     ...defineTool({
       name: 'device_open',
       description: 'Boot one iOS simulator or Android emulator. Physical handsets are refused.',
@@ -383,9 +406,9 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
     deferLoading: true,
-  })
+  }))
 
-  ctx.tools.register({
+  disposers.push(ctx.tools.register({
     ...defineTool({
       name: 'device_close',
       description: 'Shut down one iOS simulator or Android emulator. Physical handsets are refused.',
@@ -403,9 +426,9 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
     deferLoading: true,
-  })
+  }))
 
-  ctx.tools.register({
+  disposers.push(ctx.tools.register({
     ...defineTool({
       name: 'device_act',
       description: 'Perform one closed tap, swipe, type, or hardware-button action on a phone device. There is no arbitrary shell.',
@@ -434,9 +457,9 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
     deferLoading: true,
-  })
+  }))
 
-  ctx.tools.register({
+  disposers.push(ctx.tools.register({
     ...defineTool({
       name: 'device_screenshot',
       description: 'Capture one PNG screenshot of a phone device.',
@@ -457,5 +480,8 @@ export function apply(ctx: Context, config: Config): void {
       },
     }),
     deferLoading: true,
-  })
+  }))
+  return () => {
+    for (const dispose of disposers.reverse()) dispose()
+  }
 }

@@ -1,7 +1,5 @@
 /** Visible three-installation Electron acceptance for Project Members. */
 
-/* oxlint-disable typescript/await-thenable -- WDIO native-types declares runtime-async browser commands as synchronous values. */
-
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { browser, expect } from '@wdio/globals'
@@ -556,26 +554,7 @@ async function postControl<T = unknown>(name: InstallationName, path: string, bo
   let failure: unknown
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const result = await getInstance(name).electron.execute(async (
-        _electron,
-        url: string,
-        encodedBody: string,
-      ) => {
-        try {
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: encodedBody,
-          })
-          return { ok: response.ok, status: response.status, text: await response.text() }
-        }
-        catch (error) {
-          return { ok: false, status: 0, text: String(error) }
-        }
-      }, origin + path, JSON.stringify(body))
-      if (result === undefined) throw new Error(`POST ${origin + path} returned no Electron result`)
-      if (!result.ok) throw new Error(`POST ${origin + path} failed with HTTP ${String(result.status)}: ${result.text}`)
-      return (result.text === '' ? undefined : JSON.parse(result.text)) as T
+      return await postJson<T>(origin + path, body)
     }
     catch (error) {
       failure = error

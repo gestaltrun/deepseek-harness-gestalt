@@ -32,4 +32,4 @@ Binary-discovery fixtures join `PATH` with the host delimiter. Tests for the POS
 
 ## Consequences
 
-The repaired gates describe the shipped settings composition, validate a complete client artifact fixture, prepare the artifact plane before running real Host subprocess tests without irrelevant parent instrumentation, and keep binary-discovery assertions independent from unrelated runner environment state. These changes affect test evidence only and do not authorize a release or merge to `master`.
+The repaired gates describe the shipped settings composition, validate a complete client artifact fixture, prepare the artifact plane before running real Host subprocess tests without irrelevant parent instrumentation, and keep binary-discovery assertions independent from unrelated runner environment state. The CLI installation closure repair is a Desktop patch impact; it does not authorize a release or merge to `master`.

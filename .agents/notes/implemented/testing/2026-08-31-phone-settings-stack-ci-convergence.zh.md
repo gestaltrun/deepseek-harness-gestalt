@@ -32,4 +32,4 @@ release family fixture 会先创建动态 client bundle 与最小有效 source m
 
 ## 结果
 
-修复后的门禁描述已交付的设置组合，验证完整的 client 产物 fixture，在没有无关父进程插桩的情况下先准备产物面再运行真实 Host 子进程测试，并让二进制发现断言不受 runner 无关环境状态影响。这些变更只影响测试证据，不授权发布或合入 `master`。
+修复后的门禁描述已交付的设置组合，验证完整的 client 产物 fixture，在没有无关父进程插桩的情况下先准备产物面再运行真实 Host 子进程测试，并让二进制发现断言不受 runner 无关环境状态影响。CLI 安装闭包修复构成 Desktop patch 影响，但不授权发布或合入 `master`。

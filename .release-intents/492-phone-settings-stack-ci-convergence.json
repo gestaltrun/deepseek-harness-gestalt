@@ -3,26 +3,22 @@
   "version": 1,
   "id": "492-phone-settings-stack-ci-convergence",
   "summary": {
-    "en": "Align Phone Devices Web snapshots and cross-platform CI fixtures without changing product runtime behavior.",
-    "zh": "校准手机设备 Web 快照与跨平台 CI fixture，不改变产品运行时行为。"
+    "en": "Align Phone Devices Web snapshots and cross-platform CI fixtures, and complete the Desktop CLI phone-stream installation closure.",
+    "zh": "校准手机设备 Web 快照与跨平台 CI fixture，并补全 Desktop CLI 的 phone-stream 安装闭包。"
   },
   "releases": {
-    "desktop": "none",
+    "desktop": "patch",
     "mobile": "none",
     "platform": "none"
   },
   "compatibilityExceptions": [
     {
-      "releaseUnit": "desktop",
-      "reason": "Only Web goldens, test fixtures, coverage scheduling, runner tests, and their decision record change; Desktop production and packaging inputs are unchanged."
-    },
-    {
       "releaseUnit": "mobile",
-      "reason": "Only Web goldens, test fixtures, coverage scheduling, runner tests, and their decision record change; Mobile production and build inputs are unchanged."
+      "reason": "The Web goldens, test fixtures, CI scheduling, runner tests, and Desktop CLI installation closure do not change Mobile source, build inputs, or artifacts."
     },
     {
       "releaseUnit": "platform",
-      "reason": "Only Web goldens, test fixtures, coverage scheduling, runner tests, and their decision record change; Platform production, deployment, and wire inputs are unchanged."
+      "reason": "The Web goldens, test fixtures, CI scheduling, runner tests, and Desktop CLI installation closure do not change Platform services, deployment inputs, or wire formats."
     }
   ]
 }

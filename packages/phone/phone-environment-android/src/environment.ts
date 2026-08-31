@@ -3,7 +3,7 @@ import {
   access, chmod, mkdir, mkdtemp, readFile, rename, rm, statfs, writeFile,
 } from 'node:fs/promises'
 import { constants } from 'node:fs'
-import { delimiter, dirname, join, normalize, relative, resolve, sep } from 'node:path'
+import { dirname, join, normalize, posix, relative, resolve, sep, win32 } from 'node:path'
 import { homedir } from 'node:os'
 import { unzipSync } from 'fflate'
 import type {
@@ -257,12 +257,14 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
 
   private async discoverExistingSdkRoot(): Promise<string | undefined> {
     const candidates = [
-      this.ambient.ANDROID_HOME,
-      this.ambient.ANDROID_SDK_ROOT,
+      environmentValue(this.ambient, 'ANDROID_HOME', this.platform),
+      environmentValue(this.ambient, 'ANDROID_SDK_ROOT', this.platform),
       this.platform === 'darwin' ? join(this.homeDirectory, 'Library', 'Android', 'sdk') : undefined,
-      this.platform === 'win32' ? join(this.ambient.LOCALAPPDATA ?? this.homeDirectory, 'Android', 'Sdk') : undefined,
+      this.platform === 'win32'
+        ? join(environmentValue(this.ambient, 'LOCALAPPDATA', this.platform) ?? this.homeDirectory, 'Android', 'Sdk')
+        : undefined,
       this.platform === 'linux' ? join(this.homeDirectory, 'Android', 'Sdk') : undefined,
-      sdkRootFromPath(this.ambient.PATH, this.platform),
+      sdkRootFromPath(environmentValue(this.ambient, 'PATH', this.platform), this.platform),
     ]
     for (const candidate of candidates) {
       if (candidate === undefined) continue
@@ -407,7 +409,8 @@ export class AndroidEnvironmentManager implements AndroidEnvironmentProvider {
       ANDROID_HOME: plan.sdkRoot,
       ANDROID_SDK_ROOT: plan.sdkRoot,
       ANDROID_AVD_HOME: plan.avdHome,
-      PATH: [...tools, this.ambient.PATH ?? ''].filter(Boolean).join(delimiter),
+      PATH: [...tools, environmentValue(this.ambient, 'PATH', this.platform) ?? '']
+        .filter(Boolean).join(this.platform === 'win32' ? win32.delimiter : posix.delimiter),
     }
   }
 
@@ -458,15 +461,21 @@ function executable(name: string, platform: string, script = false): string {
 
 function sdkRootFromPath(pathValue: string | undefined, platform: string): string | undefined {
   if (pathValue === undefined) return undefined
-  const basename = platform === 'win32' ? 'sdkmanager.bat' : 'sdkmanager'
-  for (const entry of pathValue.split(delimiter)) {
-    const normalized = normalize(entry)
-    if (normalized.endsWith(join('cmdline-tools', 'latest', 'bin'))) {
-      return resolve(normalized, '..', '..', '..')
+  const paths = platform === 'win32' ? win32 : posix
+  for (const entry of pathValue.split(paths.delimiter)) {
+    const normalized = paths.normalize(entry)
+    if (normalized.endsWith(paths.join('cmdline-tools', 'latest', 'bin'))) {
+      return paths.resolve(normalized, '..', '..', '..')
     }
-    if (normalized.endsWith(join('tools', 'bin')) && basename.length > 0) return resolve(normalized, '..', '..')
+    if (normalized.endsWith(paths.join('tools', 'bin'))) return paths.resolve(normalized, '..', '..')
   }
   return undefined
+}
+
+function environmentValue(environment: NodeJS.ProcessEnv, name: string, platform: string): string | undefined {
+  if (platform !== 'win32') return environment[name]
+  const entry = Object.entries(environment).find(([key]) => key.toUpperCase() === name)
+  return entry?.[1]
 }
 
 function emulatorIds(output: string): readonly string[] {

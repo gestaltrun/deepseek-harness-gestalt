@@ -161,6 +161,22 @@ describe('Android environment manager', () => {
     expect(fetched).toBe(false)
   })
 
+  it('reads Windows environment names case-insensitively and emits one explicit PATH', async () => {
+    const root = await tempRoot()
+    const manager = new AndroidEnvironmentManager({
+      phoneRoot: root, platform: 'win32', architecture: 'x64',
+      environment: { Path: 'C:\\Windows\\System32', LocalAppData: join(root, 'local') },
+      homeDirectory: join(root, 'home'), runner: new FixtureRunner(root),
+      freeBytes: async () => 32 * 1024 ** 3,
+    })
+    await manager.refresh()
+    expect(manager.runtimeEnvironment()).toMatchObject({
+      ANDROID_HOME: join(root, 'android', 'sdk'),
+      ANDROID_SDK_ROOT: join(root, 'android', 'sdk'),
+      PATH: expect.stringMatching(/;C:\\Windows\\System32$/u),
+    })
+  })
+
   it('rejects a digest mismatch without publishing a prepared state', async () => {
     const root = await tempRoot()
     const fixture = archiveAsset()

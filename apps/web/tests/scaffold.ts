@@ -23,7 +23,7 @@
 // (the plugin-row path discards the ReplayHandle; the direct install keeps
 // assertConsumed for the teardown fixture-consumption check).
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -300,6 +300,8 @@ export interface LaunchOptions {
   remoteAuthority?: string
   /** Reuse an existing harness home so a second Host can verify user settings across origins. */
   harnessHome?: string
+  /** Copy an existing JSONL persistence tree before the Host boots and reads it. */
+  persistenceSeed?: string
 }
 
 /** Dispose the booted tree and remove both owned temp roots, reporting every independent cleanup failure. */
@@ -375,12 +377,19 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     }
   }
   Object.assign(process.env, skillRootEnvironment)
-  let persistenceRoot: string
+  let persistenceRoot = ''
   try {
     persistenceRoot = await mkdtemp(join(tmpdir(), 'dsh-web-e2e-sessions-'))
+    if (options.persistenceSeed !== undefined) {
+      await cp(options.persistenceSeed, persistenceRoot, { recursive: true })
+    }
   } catch (error) {
     const failures: unknown[] = [error]
     await rm(workspaceCwd, { recursive: true, force: true }).catch((cleanupError: unknown) => failures.push(cleanupError))
+    if (persistenceRoot !== '') {
+      await rm(persistenceRoot, { recursive: true, force: true })
+        .catch((cleanupError: unknown) => failures.push(cleanupError))
+    }
     restoreSkillRootEnvironment()
     if (failures.length > 1) throw new AggregateError(failures, 'web scaffold temp-root setup failed')
     throw error

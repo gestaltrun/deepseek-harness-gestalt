@@ -148,6 +148,7 @@ describe('web e2e: a finished turn ends with the files it produced', () => {
     expect(await chips.nth(1).innerText()).toBe('index.html')
     expect(await row.getByText('+ 8 files', { exact: true }).count()).toBe(1)
     const showFolder = page.getByRole('button', { name: 'Show in folder', exact: true })
+    await showFolder.waitFor({ timeout: 15_000 })
     expect(await showFolder.count()).toBe(1)
     expect(await page.getByText('Produced', { exact: true }).count()).toBe(1)
 

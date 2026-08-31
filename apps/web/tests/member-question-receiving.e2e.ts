@@ -63,6 +63,10 @@ function bindReceiverWorkspace(
   return receiver.bind('account:receiver' as PlatformAccountId, projectId as never, workspaceId)
 }
 
+function sessionRow(page: Page, title: string) {
+  return page.getByText(title, { exact: true }).locator('xpath=ancestor::*[@role="treeitem"][1]')
+}
+
 describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receiving session', () => {
   let scaffold: WebScaffold
   let browser: Browser
@@ -127,9 +131,10 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       expect(first.receivingSessionId).not.toMatch(/^mq-recv:/u)
 
       const title = 'Project Atlas — Receiver launch decision'
-      const row = page.locator('[role="treeitem"]', { hasText: title })
+      const row = sessionRow(page, title)
       await row.waitFor({ timeout: 30_000 })
       await row.click()
+      await expect.poll(() => row.getAttribute('aria-selected')).toBe('true')
       const card = page.locator('[data-question-key]').filter({ has: page.locator('[data-member-presentation]') })
       await card.waitFor({ timeout: 30_000 })
       expect(scaffold.ctx.sessions.list().map(session => session.id)).toEqual(initialSessionIds)
@@ -210,8 +215,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       await browser.close()
       await scaffold.close()
 
-      scaffold = await launchWebScaffold({ harnessHome })
-      await cp(sessionBackup, scaffold.persistenceRoot, { recursive: true })
+      scaffold = await launchWebScaffold({ harnessHome, persistenceSeed: sessionBackup })
       const restartedService = scaffold.ctx.get('memberQuestionReceiver')
       if (restartedService === undefined) throw new Error('member-question e2e: restarted receiver unavailable')
       receiver = restartedService
@@ -233,8 +237,10 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
 
       const afterRestart = await receiver.snapshot()
       expect(afterRestart).toEqual({ ...beforeRestart, revision: beforeRestart.revision + 1 })
-      const restartedRow = page.locator('[role="treeitem"]', { hasText: title })
-      await restartedRow.evaluate((element: HTMLElement) => { element.click() })
+      const restartedRow = sessionRow(page, title)
+      await restartedRow.waitFor({ timeout: 30_000 })
+      await restartedRow.click()
+      await expect.poll(() => restartedRow.getAttribute('aria-selected')).toBe('true')
       await expect.poll(() => page.locator('[data-question-key]').filter({
         has: page.locator('[data-member-presentation]'),
       }).count()).toBe(1)
@@ -310,8 +316,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
       vi.restoreAllMocks()
       await restartScaffold.close()
 
-      restartScaffold = await launchWebScaffold({ harnessHome: restartHome })
-      await cp(backup, restartScaffold.persistenceRoot, { recursive: true })
+      restartScaffold = await launchWebScaffold({ harnessHome: restartHome, persistenceSeed: backup })
       await mkdir(workspacePath, { recursive: true })
       workspace = await restartScaffold.ctx.workspaceRegistry.create(workspacePath)
       service = restartScaffold.ctx.get('memberQuestionReceiver')
@@ -365,7 +370,9 @@ describe.skipIf(MODE === 'record')('web e2e: Host-owned member-question receivin
         authority: { accountId: 'account:receiver' as PlatformAccountId },
         operation: operation('mq-web-lost-response', 'mq-operation-lost-response', 'project-lost-response'),
       })
-      await faultPage.locator('[role="treeitem"]', { hasText: 'Project Atlas — Receiver launch decision' }).click()
+      const faultRow = sessionRow(faultPage, 'Project Atlas — Receiver launch decision')
+      await faultRow.click()
+      await expect.poll(() => faultRow.getAttribute('aria-selected')).toBe('true')
       const rpcIds: string[] = []
       faultPage.on('request', (request) => {
         if (!new URL(request.url()).pathname.endsWith('/api/memberQuestion.admitHumanTurn')) return

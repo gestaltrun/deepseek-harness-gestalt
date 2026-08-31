@@ -10,6 +10,8 @@ The iOS real-device link lives behind the listing's real group: `agentStatus` an
 
 Publication is monotonic and change-driven: a poll publishes only when the freshly grouped listing differs from the published one (id set, name, kind, or online fact), and each `PhoneDeviceChange` names exactly the added/removed ids of that difference. The `./invariant` companion re-derives every candidate difference from the published listing and halts polling loudly on a mismatch.
 
+`ctx.phoneEnvironment` publishes the revisioned `PhoneEnvironmentSnapshot` consumed by Phone Devices settings: the durable enable value, shared runtime state, and independent Android/iOS preparation states. Runtime selection uses operator override, managed current, then system discovery; disabling or losing readiness stops the owned generation and revokes its tools.
+
 ```ts type-equiv
 /** Upstream OpenRPC `device.io.*` verbs this Service forwards. */
 type PhoneIoMethod = 'tap' | 'gesture' | 'text' | 'button'
@@ -133,6 +135,31 @@ Operation failure codes:
 
 ```ts cordis-catalog
 /**
+ * Read whether the current child may accept fleet operations.
+ * @returns current generation readiness.
+ */
+isReady(): boolean
+
+/**
+ * Subscribe to ready/not-ready transitions of the replaceable runtime generation.
+ * @param listener - callback receiving the committed readiness value.
+ * @returns the disposer.
+ */
+onReadinessChanged(listener: (ready: boolean) => void): () => void
+
+/**
+ * Replace the owned mobilecli child generation without replacing this Service.
+ * In-flight work on the prior generation is aborted and its process is stopped
+ * before the replacement begins readiness probing.
+ * @param executablePath - absolute executable path selected by the environment owner.
+ * @param signal - optional cancellation signal for replacement and readiness.
+ */
+async activateExecutable(executablePath: string, signal?: AbortSignal): Promise<void>
+
+/** Stop the current child generation while retaining this Service for later activation. */
+async deactivate(): Promise<void>
+
+/**
  * Fetch and publish one fresh grouped device listing.
  * @param signal - Caller's optional cancellation signal.
  * @returns the current grouped listing.
@@ -228,4 +255,48 @@ onChanged(sub: (change: PhoneDeviceChange) => void): () => void
 ```
 
 Source: [`packages/phone/phone-runtime/src/index.ts`](../../packages/phone/phone-runtime/src/index.ts)
+
+<a id="ctxphoneenvironment--phoneenvironment"></a>
+
+### `ctx.phoneEnvironment` — `PhoneEnvironment`
+
+Stable Host Service for phone runtime discovery, preparation, and activation.
+
+```ts cordis-catalog
+/**
+ * Read the latest committed environment state.
+ * @returns the current immutable full snapshot.
+ */
+snapshot(): PhoneEnvironmentSnapshot
+
+/**
+ * Apply the durable settings gate and symmetrically activate or stop the child generation.
+ * @param enabled - current `ui-phone.enabled` value.
+ */
+setEnabled(enabled: boolean): Promise<void>
+
+/**
+ * Subscribe to committed full-snapshot replacements.
+ * @param listener - callback receiving the new immutable snapshot.
+ * @returns the disposer.
+ */
+onChanged(listener: (snapshot: PhoneEnvironmentSnapshot) => void): () => void
+
+/**
+ * Re-detect runtime sources in fixed override-managed-system precedence.
+ * @returns the committed full snapshot after detection settles.
+ */
+refresh(): Promise<PhoneEnvironmentSnapshot>
+
+/**
+ * Download, verify, publish, and optionally activate the pinned host asset.
+ * @returns the committed full snapshot after preparation settles.
+ */
+prepare(): Promise<PhoneEnvironmentSnapshot>
+
+/** Cancel the current download, verification read, or version probe. */
+cancel(): void
+```
+
+Source: [`packages/phone/phone-environment/src/index.ts`](../../packages/phone/phone-environment/src/index.ts)
 <!-- END GENERATED cordis-surface -->

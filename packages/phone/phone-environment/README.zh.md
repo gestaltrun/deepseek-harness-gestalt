@@ -12,7 +12,7 @@ mobilecli 使用 FSL-1.1，并带 Apache-2.0 future license。运行时从上游
 
 ## Model Experience
 
-该 Service 不增加 prompt 或工具 schema。启用的 generation 就绪后，独立的 `dsh-tool-phone` Consumer 可以注册其延迟 `device_*` 工具。
+通过 `dsh-tool-phone` 间接影响模型；仅当启用的运行时 generation 就绪后，该 Consumer 才注册延迟 `device_*` 工具。
 
 #### KV Cache effect
 

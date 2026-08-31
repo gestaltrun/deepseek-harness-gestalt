@@ -1301,6 +1301,28 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Phone fleet Service over one external mobilecli server child. All operations accept an optional cancellation signal and enforce validated time ceilings; every failure normalizes onto PhoneDevicesError. A device-set notification is published only after a poll observes a real difference from the previously committed listing. An unresolvable mobilecli still activates the Service; every operation then rejects with `PHONE_UNRESOLVED` and install guidance instead of failing composition.\n\nOperation failure codes:\n\n- `PHONE_DISPOSED` — the owning fiber began teardown.\n- `PHONE_ABORTED` — the caller\'s signal won before completion.\n- `PHONE_TIMEOUT` — the operation\'s configured ceiling elapsed.\n- `PHONE_UNAVAILABLE` — the child died or its socket refuses connections.\n- `PHONE_UNRESOLVED` — the mobilecli executable could not be resolved.\n- `PHONE_PROTOCOL` — the upstream answer breaks its documented contract.\n- `PHONE_UPSTREAM` — mobilecli returned a JSON-RPC error other than `-32010`.\n- `PHONE_DEVICE_NOT_FOUND` — the id answers nothing upstream (`-32010`).\n- `PHONE_REAL_DEVICE` — boot/shutdown targeted a physical handset.\n- `PHONE_REAL_DEVICE_ISSUE` — the upstream output named a structured real-device failure arm; PhoneDevicesError.issue carries which one (`device-locked`, `cert-untrusted`, `profile-expired`, `tunnel-failed`, `device-unplugged`).\n\n`io` and `startCapture` accept physical handsets; they only refuse ids absent from the latest published listing. `agentStatus` and `installAgent` drive the upstream `agent status` / `agent install` commands as one-shot child runs of the same executable, keep the on-device agent installed idempotently, re-sign real handsets through the configured provisioning profile, and attach the free-signing expiry reminder to every answer about a re-signed real handset.',
     methods: [
       {
+        signature: 'isReady(): boolean',
+        description: 'Read whether the current child may accept fleet operations.',
+        parameters: [],
+        returns: 'current generation readiness.',
+      },
+      {
+        signature: 'onReadinessChanged(listener: (ready: boolean) => void): () => void',
+        description: 'Subscribe to ready/not-ready transitions of the replaceable runtime generation.',
+        parameters: [{ name: 'listener', description: 'callback receiving the committed readiness value.' }],
+        returns: 'the disposer.',
+      },
+      {
+        signature: 'async activateExecutable(executablePath: string, signal?: AbortSignal): Promise<void>',
+        description: 'Replace the owned mobilecli child generation without replacing this Service. In-flight work on the prior generation is aborted and its process is stopped before the replacement begins readiness probing.',
+        parameters: [{ name: 'executablePath', description: 'absolute executable path selected by the environment owner.' }, { name: 'signal', description: 'optional cancellation signal for replacement and readiness.' }],
+      },
+      {
+        signature: 'async deactivate(): Promise<void>',
+        description: 'Stop the current child generation while retaining this Service for later activation.',
+        parameters: [],
+      },
+      {
         signature: 'async listDevices(signal?: AbortSignal): Promise<PhoneDeviceList>',
         description: 'Fetch and publish one fresh grouped device listing.',
         parameters: [{ name: 'signal', description: 'Caller\'s optional cancellation signal.' }],
@@ -1351,6 +1373,47 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Subscribe to committed device-set changes. Delivery happens synchronously after each committing poll; a throwing subscriber is contained and logged.',
         parameters: [{ name: 'sub', description: 'Observer receiving every committed {@link PhoneDeviceChange}.' }],
         returns: 'disposer removing exactly this subscription; subscriptions never outlive the Service.',
+      },
+    ],
+  },
+  {
+    key: 'phoneEnvironment',
+    summary: 'Stable Host Service for phone runtime discovery, preparation, and activation.',
+    description: 'Stable Host Service for phone runtime discovery, preparation, and activation.',
+    methods: [
+      {
+        signature: 'snapshot(): PhoneEnvironmentSnapshot',
+        description: 'Read the latest committed environment state.',
+        parameters: [],
+        returns: 'the current immutable full snapshot.',
+      },
+      {
+        signature: 'setEnabled(enabled: boolean): Promise<void>',
+        description: 'Apply the durable settings gate and symmetrically activate or stop the child generation.',
+        parameters: [{ name: 'enabled', description: 'current `ui-phone.enabled` value.' }],
+      },
+      {
+        signature: 'onChanged(listener: (snapshot: PhoneEnvironmentSnapshot) => void): () => void',
+        description: 'Subscribe to committed full-snapshot replacements.',
+        parameters: [{ name: 'listener', description: 'callback receiving the new immutable snapshot.' }],
+        returns: 'the disposer.',
+      },
+      {
+        signature: 'refresh(): Promise<PhoneEnvironmentSnapshot>',
+        description: 'Re-detect runtime sources in fixed override-managed-system precedence.',
+        parameters: [],
+        returns: 'the committed full snapshot after detection settles.',
+      },
+      {
+        signature: 'prepare(): Promise<PhoneEnvironmentSnapshot>',
+        description: 'Download, verify, publish, and optionally activate the pinned host asset.',
+        parameters: [],
+        returns: 'the committed full snapshot after preparation settles.',
+      },
+      {
+        signature: 'cancel(): void',
+        description: 'Cancel the current download, verification read, or version probe.',
+        parameters: [],
       },
     ],
   },
@@ -4787,8 +4850,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PhoneDeviceRef {\n    readonly id: DeviceId;\n    readonly name: string;\n    readonly kind: PhoneDeviceKind;\n    readonly platform: \'ios\' | \'android\';\n    readonly state: string;\n    readonly online: boolean;\n}',
   },
   {
+    name: 'PhoneEnvironmentSnapshot',
+    declaration: 'export interface PhoneEnvironmentSnapshot {\n    readonly revision: number;\n    readonly enabled: boolean;\n    readonly runtime: PhoneRuntimeState;\n    readonly platforms: {\n        readonly android: PhonePlatformState;\n        readonly ios: PhonePlatformState;\n    };\n}',
+  },
+  {
     name: 'PhoneIoRequest',
     declaration: 'export type PhoneIoRequest = {\n    readonly deviceId: DeviceId;\n    readonly method: \'tap\';\n    readonly x: number;\n    readonly y: number;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'gesture\';\n    readonly actions: readonly Record<string, unknown>[];\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'text\';\n    readonly text: string;\n} | {\n    readonly deviceId: DeviceId;\n    readonly method: \'button\';\n    readonly button: string;\n};',
+  },
+  {
+    name: 'PhonePlatformState',
+    declaration: 'export type PhonePlatformState = {\n    readonly kind: \'deferred\';\n} | {\n    readonly kind: \'unsupported\';\n    readonly reason: string;\n};',
+  },
+  {
+    name: 'PhoneRuntimeState',
+    declaration: 'export type PhoneRuntimeState = {\n    readonly kind: \'missing\';\n    readonly targetVersion: string;\n    readonly assetBytes?: number;\n} | {\n    readonly kind: \'downloading\';\n    readonly targetVersion: string;\n    readonly receivedBytes: number;\n    readonly totalBytes: number;\n} | {\n    readonly kind: \'verifying\';\n    readonly targetVersion: string;\n} | {\n    readonly kind: \'activating\';\n    readonly targetVersion: string;\n    readonly source: PhoneRuntimeSource;\n} | {\n    readonly kind: \'ready\';\n    readonly version: string;\n    readonly source: PhoneRuntimeSource;\n} | {\n    readonly kind: \'failed\';\n    readonly targetVersion: string;\n    readonly code: string;\n    readonly message: string;\n};',
   },
   {
     name: 'PhoneStreamSession',

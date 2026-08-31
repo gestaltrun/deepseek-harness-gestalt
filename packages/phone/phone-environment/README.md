@@ -12,7 +12,7 @@ mobilecli is licensed under FSL-1.1 with an Apache-2.0 future license. A runtime
 
 ## Model Experience
 
-This Service adds no prompt or tool schema. Once a ready generation is enabled, the separate `dsh-tool-phone` Consumer may register its deferred `device_*` tools.
+Indirectly, through `dsh-tool-phone`, which registers deferred `device_*` tools only when an enabled runtime generation is ready.
 
 #### KV Cache effect
 

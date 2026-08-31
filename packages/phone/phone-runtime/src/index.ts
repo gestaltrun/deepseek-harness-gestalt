@@ -108,7 +108,9 @@ export interface Config {
   serverPort?: number
   /** Interval between health probes and device-list polls, in milliseconds. */
   pollIntervalMs?: number
-  /** Total window granted to the first readiness probe, in milliseconds. */
+  /** Stable-child interval required after the first valid device listing, in milliseconds. */
+  readyStabilityMs?: number
+  /** Total window granted to readiness probing, baseline listing, and stability, in milliseconds. */
   readyTimeoutMs?: number
   /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
   requestTimeoutMs?: number
@@ -130,6 +132,7 @@ export const Config: z<Config> = z.object({
   deferStart: z.boolean().default(false),
   serverPort: z.number().default(12_000),
   pollIntervalMs: z.number().default(5_000),
+  readyStabilityMs: z.number().default(50),
   readyTimeoutMs: z.number().default(60_000),
   requestTimeoutMs: z.number().default(30_000),
   bootTimeoutMs: z.number().default(180_000),
@@ -154,6 +157,7 @@ function resolveValidatedConfig(config: Config): ResolvedConfig {
   const values = config as ResolvedConfig
   assertPortField(values.serverPort)
   assertDurationField('pollIntervalMs', values.pollIntervalMs)
+  assertDurationField('readyStabilityMs', values.readyStabilityMs)
   assertDurationField('readyTimeoutMs', values.readyTimeoutMs)
   assertDurationField('requestTimeoutMs', values.requestTimeoutMs)
   assertDurationField('bootTimeoutMs', values.bootTimeoutMs)
@@ -431,12 +435,12 @@ export class PhoneDevices extends Service {
       // Commit the baseline listing inside initialization so every observer
       // attaches to a stable starting point and receives only later changes.
       await this.pollAttempt(true)
-      // Hold readiness for one configured poll interval. A process can flush
+      // Hold readiness for the configured stability interval. A process can flush
       // the baseline response immediately before exiting; the close event may
       // arrive on a later event-loop turn and must win before readiness is
       // published.
       await pauseBeforeNextProbe(
-        this.resolved.pollIntervalMs,
+        this.resolved.readyStabilityMs,
         window.signal,
         this.lifetime.signal,
         signal,
@@ -444,6 +448,11 @@ export class PhoneDevices extends Service {
       )
       if (settledExit !== undefined) throw exitedBeforeReady(child, settledExit)
       if (this.lost !== undefined) throw this.lost
+      if (isSignalAborted(signal) || this.lifetime.signal.aborted) {
+        throw new PhoneDevicesError('PHONE_ABORTED', 'phone runtime activation was cancelled')
+      }
+      if (window.signal.aborted) throw this.readinessWindowElapsed(child)
+      this.assertAccepting()
       this.ready = true
       this.publishReadiness(true)
       this.armPoll()
@@ -1007,6 +1016,10 @@ function haltReason(signal: AbortSignal): Error {
   const reason: unknown = signal.reason
   if (reason instanceof TimeoutReason) return normalizeOperationError(reason)
   return new PhoneDevicesError('PHONE_ABORTED', 'cancelled while waiting for the phone runtime')
+}
+
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true
 }
 
 async function pauseBeforeNextProbe(

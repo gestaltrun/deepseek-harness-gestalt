@@ -1719,7 +1719,9 @@ export interface Config {
   serverPort?: number
   /** Interval between health probes and device-list polls, in milliseconds. */
   pollIntervalMs?: number
-  /** Total window granted to the first readiness probe, in milliseconds. */
+  /** Stable-child interval required after the first valid device listing, in milliseconds. */
+  readyStabilityMs?: number
+  /** Total window granted to readiness probing, baseline listing, and stability, in milliseconds. */
   readyTimeoutMs?: number
   /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
   requestTimeoutMs?: number

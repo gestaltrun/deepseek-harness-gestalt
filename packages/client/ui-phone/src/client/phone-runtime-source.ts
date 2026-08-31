@@ -56,6 +56,7 @@ const PREPARE_POLL_MS = 100
 
 /**
  * Create the production source over the Host's trusted phone-environment routes.
+ * @param onListenerError - Reporter for subscriber failures contained during notification.
  * @returns the full-snapshot runtime source.
  */
 export function createHttpPhoneRuntimeSource(

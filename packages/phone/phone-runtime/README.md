@@ -22,7 +22,8 @@ All operations accept an optional `AbortSignal` and enforce validated time ceili
 | `deferStart` | `false` | Keep the stable Service unresolved until an environment owner calls `activateExecutable(path, signal?)`; use this when runtime selection or managed preparation happens after Host composition. |
 | `serverPort` | `12000` | Loopback port passed as `--listen 127.0.0.1:<port>`; mirrors the upstream default. |
 | `pollIntervalMs` | `5000` | Health-probe and device-poll cadence. |
-| `readyTimeoutMs` | `60000` | Total window for the first readiness probe; exceeded readiness fails the plugin loudly. |
+| `readyStabilityMs` | `50` | Stable-child interval required after the first valid device listing before readiness is published. |
+| `readyTimeoutMs` | `60000` | Total window for readiness probes, the first device listing, and the stability interval; exceeded readiness fails the plugin loudly. |
 | `requestTimeoutMs` | `30000` | Ceiling per JSON-RPC round trip other than boot; mirrors the upstream RPC timeout. |
 | `bootTimeoutMs` | `180000` | Ceiling for `device.boot`; mirrors the upstream extended write deadline for slow boots. |
 | `agentTimeoutMs` | `120000` | Ceiling on one `agent status` / `agent install` child run. |

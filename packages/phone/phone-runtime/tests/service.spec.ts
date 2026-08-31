@@ -110,6 +110,32 @@ describe('phone runtime service lifecycle', () => {
     expect(readiness).toEqual([true, false, true])
   })
 
+  it('does not publish readiness when activation is cancelled during the baseline hold', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    await fake.claim()
+    const context = new Context()
+    contexts.push(context)
+    await context.plugin(PhoneDevices, {
+      ...FAST_CONFIG,
+      deferStart: true,
+      readyStabilityMs: 200,
+      serverPort: fake.port,
+    }).await()
+
+    const readiness: boolean[] = []
+    context.phoneDevices.onReadinessChanged(ready => readiness.push(ready))
+    const controller = new AbortController()
+    const activation = context.phoneDevices.activateExecutable(fake.executablePath, controller.signal)
+    await fake.awaitOnline()
+    await waitFor(async () => (await fake.counters()).requests >= 2)
+    controller.abort(new Error('cancel during baseline hold'))
+
+    await expect(activation).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    expect(context.phoneDevices.isReady()).toBe(false)
+    expect(readiness).toEqual([])
+  })
+
   it('activates with an unavailable service when PATH carries no mobilecli', async () => {
     const context = new Context()
     contexts.push(context)
@@ -524,8 +550,8 @@ describe('phone runtime service lifecycle', () => {
   })
 
   it('turns an unexpected child exit into persistent unavailability', async () => {
-    // The fake answers the readiness probe and the baseline listing, then exits.
-    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 2 })
+    // The fake survives readiness, answers the first background poll, then exits.
+    const fake = await stageFake({ devices: BASE_DEVICES, exitAfter: 3 })
     fakes.push(fake)
     const context = await mountWith(fake)
     await vi.waitFor(() => { expect(context.phoneDevices.isReady()).toBe(false) })
@@ -686,5 +712,10 @@ describe('phone runtime service lifecycle', () => {
     contexts.push(badInterval)
     await expect(badInterval.plugin(PhoneDevices, { ...FAST_CONFIG, pollIntervalMs: -5 }).await())
       .rejects.toThrow(/pollIntervalMs/)
+
+    const badStability = new Context()
+    contexts.push(badStability)
+    await expect(badStability.plugin(PhoneDevices, { ...FAST_CONFIG, readyStabilityMs: 0 }).await())
+      .rejects.toThrow(/readyStabilityMs/)
   })
 })

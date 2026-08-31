@@ -22,7 +22,8 @@
 | `deferStart` | `false` | 让稳定 Service 保持未解析，直到环境 owner 调用 `activateExecutable(path, signal?)`；运行时选择或托管准备发生在 Host 组合之后时使用。 |
 | `serverPort` | `12000` | 以 `--listen 127.0.0.1:<port>` 传入的回环端口；对齐上游默认。 |
 | `pollIntervalMs` | `5000` | 健康探测与设备轮询节奏。 |
-| `readyTimeoutMs` | `60000` | 首次就绪探测的总窗口；超时就绪失败将使插件响亮失败。 |
+| `readyStabilityMs` | `50` | 首份有效设备清单之后，发布就绪前要求子进程保持存活的时间。 |
+| `readyTimeoutMs` | `60000` | 就绪探测、首份设备清单与稳定期的总窗口；超时就绪失败将使插件响亮失败。 |
 | `requestTimeoutMs` | `30000` | boot 之外每次 JSON-RPC 往返的上限；对齐上游 RPC 超时。 |
 | `bootTimeoutMs` | `180000` | `device.boot` 的上限；对齐上游为慢启动授予的扩展写超时。 |
 | `agentTimeoutMs` | `120000` | 单次 `agent status` / `agent install` 子进程的上限。 |

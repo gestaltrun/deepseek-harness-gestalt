@@ -574,6 +574,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Opaque DeviceId identities stay behind ctx.phoneDevices; the deferred Consumer uses ordinary discovery, results, and tools/pre-execute ask for mutations; the same-origin stream Consumer reverse-proxies io and capture.',
   },
   {
+    key: 'phoneEnvironment',
+    pkg: 'phone-environment',
+    title: 'Host-owned phone toolchain environment',
+    mode: 'core',
+    consumers: ['client-ui-phone'],
+    note: 'Owns trusted runtime discovery, managed preparation, activation, and revisioned full snapshots; the settings Consumer drives its durable enable value and renders preparation state.',
+  },
+  {
     key: 'phoneStream',
     pkg: 'phone-stream',
     title: 'Same-origin phone IO and capture reverse-proxy',

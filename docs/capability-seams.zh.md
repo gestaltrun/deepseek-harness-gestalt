@@ -201,6 +201,9 @@ flowchart LR
   svc_phoneDevices["ctx.phoneDevices<br/>Phone device fleet capability"]
   pkg_tool_phone["tool-phone"]
   pkg_phone_stream["phone-stream"]
+  pkg_phone_environment["phone-environment"]
+  svc_phoneEnvironment["ctx.phoneEnvironment<br/>Host-owned phone toolchain environment"]
+  pkg_client_ui_phone["client-ui-phone"]
   svc_phoneStream["ctx.phoneStream<br/>Same-origin phone IO and capture reverse-proxy"]
   pkg_web["web"]
   svc_web["ctx.web<br/>Web access provider registry"]
@@ -286,6 +289,7 @@ flowchart LR
   pkg_message_feedback --> svc_messageFeedback
   pkg_modules --> svc_clientModules
   pkg_permission_presets --> svc_permissionPresets
+  pkg_phone_environment --> svc_phoneEnvironment
   pkg_phone_runtime --> svc_phoneDevices
   pkg_phone_stream --> svc_phoneStream
   pkg_plan_mode --> svc_planMode
@@ -395,6 +399,7 @@ flowchart LR
   svc_lsp --> pkg_tool_lsp
   svc_phoneDevices --> pkg_phone_stream
   svc_phoneDevices --> pkg_tool_phone
+  svc_phoneEnvironment --> pkg_client_ui_phone
   svc_platformAccount --> pkg_platform_account_client
   svc_platformAccount --> pkg_platform_account_http
   svc_remoteAccess --> pkg_remote_access_http
@@ -543,6 +548,7 @@ flowchart LR
 | `ctx.browserRuntime` | `seam` | `browser` | [`browser-runtime-deterministic`](../packages/browser/browser-runtime-deterministic), [`browser-runtime-electron`](../packages/browser/browser-runtime-electron), [`browser-runtime-tandem`](../packages/browser/browser-runtime-tandem) | [`tool-browser`](../packages/browser/tool-browser), [`browser-workspace`](../packages/browser/browser-workspace) | - | 不透明的 Profile、Workspace、浏览器与标签页身份保留在 ctx.browserRuntime 后；deferred Consumer 使用普通发现、结果与展示路径。 |
 | `ctx.browserWorkspace` | `core` | `browser` | - | [`tool-browser`](../packages/browser/tool-browser), [`client-ui-browser`](../packages/client/ui-browser), [`client-ui-workbench`](../packages/client/ui-workbench) | - | 每个 Session 独立持有 Dock 事实、实例与标签页，并建立在 ctx.browserRuntime 身份之上；当调用 Agent Session 存在时，deferred Consumer 会绑定所创建的标签页；工作台侧栏读取同一份快照。 |
 | `ctx.phoneDevices` | `seam` | [`phone-runtime`](../packages/phone/phone-runtime) | - | [`tool-phone`](../packages/phone/tool-phone), [`phone-stream`](../packages/phone/phone-stream) | - | 不透明 DeviceId 身份保留在 ctx.phoneDevices 后；deferred Consumer 使用普通发现、结果，并对变更默认走 tools/pre-execute ask；同源流 Consumer 反代 io 与采集。 |
+| `ctx.phoneEnvironment` | `core` | [`phone-environment`](../packages/phone/phone-environment) | - | [`client-ui-phone`](../packages/client/ui-phone) | - | 负责可信运行时发现、托管准备、激活与带 revision 的完整快照；设置 Consumer 驱动持久启用值并渲染准备状态。 |
 | `ctx.phoneStream` | `core` | [`phone-stream`](../packages/phone/phone-stream) | - | - | - | 注册 Host WebSocket 与签名 HTTP 采集路由，使浏览器永不直连 mobilecli :12000。 |
 | `ctx.web` | `seam` | [`web`](../packages/web/web) | [`web-search-exa`](../packages/web/web-search-exa), [`web-search-perplexity`](../packages/web/web-search-perplexity), [`web-search-deepseek`](../packages/web/web-search-deepseek), [`web-fetch-http`](../packages/web/web-fetch-http) | [`tool-web`](../packages/web/tool-web) | - | 搜索和抓取提供方注册到同一个 ctx.web seam；tool-web 负责稳定的面向模型名称。 |
 | `ctx.spillStore` | `seam` | [`spill`](../packages/spill/spill) | [`spill-local`](../packages/spill/spill-local) | [`spill-policy`](../packages/spill/spill-policy) | - | 后端保存过大的工具文本，并返回面向模型的定位信息和取回提示；spill-policy 是 tools/post-execute 消费方，负责决定何时 spill。 |

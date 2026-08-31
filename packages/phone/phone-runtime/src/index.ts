@@ -446,12 +446,13 @@ export class PhoneDevices extends Service {
         signal,
         exitSeen,
       )
-      if (settledExit !== undefined) throw exitedBeforeReady(child, settledExit)
+      const exitAfterStability = readSettledExit(() => settledExit)
+      if (exitAfterStability !== undefined) throw exitedBeforeReady(child, exitAfterStability)
       if (this.lost !== undefined) throw this.lost
       if (isSignalAborted(signal) || this.lifetime.signal.aborted) {
         throw new PhoneDevicesError('PHONE_ABORTED', 'phone runtime activation was cancelled')
       }
-      if (window.signal.aborted) throw this.readinessWindowElapsed(child)
+      if (isSignalAborted(window.signal)) throw this.readinessWindowElapsed(child)
       this.assertAccepting()
       this.ready = true
       this.publishReadiness(true)
@@ -895,15 +896,7 @@ export class PhoneDevices extends Service {
     this.ready = false
     this.publishReadiness(false)
     this.clearPollTimer()
-    if (this.publishedList !== undefined && allRefsOf(this.publishedList).length > 0) {
-      const empty = emptyDeviceList()
-      const delta = changeSets(this.publishedList, empty)
-      this.publish(Object.freeze({
-        list: empty,
-        added: Object.freeze(delta.added),
-        removed: Object.freeze(delta.removed),
-      }))
-    }
+    this.clearPublishedList()
     this.ctx.logger.error(reason.message)
     void this.child?.stop().catch((error: unknown) => {
       this.ctx.logger.warn('phone-runtime: failed to stop the lost mobilecli child')
@@ -953,16 +946,19 @@ export class PhoneDevices extends Service {
     this.child = undefined
     this.rpcClient = undefined
     this.startupOutcome = undefined
-    if (this.publishedList !== undefined && allRefsOf(this.publishedList).length > 0) {
-      const empty = emptyDeviceList()
-      const delta = changeSets(this.publishedList, empty)
-      this.publish(Object.freeze({
-        list: empty,
-        added: Object.freeze(delta.added),
-        removed: Object.freeze(delta.removed),
-      }))
-    }
+    this.clearPublishedList()
     if (child !== undefined) await child.stop()
+  }
+
+  private clearPublishedList(): void {
+    if (this.publishedList === undefined || allRefsOf(this.publishedList).length === 0) return
+    const empty = emptyDeviceList()
+    const delta = changeSets(this.publishedList, empty)
+    this.publish(Object.freeze({
+      list: empty,
+      added: Object.freeze(delta.added),
+      removed: Object.freeze(delta.removed),
+    }))
   }
 }
 
@@ -1023,6 +1019,10 @@ function haltReason(signal: AbortSignal): Error {
 
 function isSignalAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true
+}
+
+function readSettledExit<T>(read: () => T): T {
+  return read()
 }
 
 async function pauseBeforeNextProbe(

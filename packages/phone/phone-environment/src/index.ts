@@ -214,17 +214,21 @@ export class PhoneEnvironment extends Service {
       asset = this.selectManagedAsset(process.platform, process.arch)
     } catch (error) {
       this.publishRuntime(environmentFailure(error))
-      return Promise.reject(error)
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)))
     }
     const controller = new AbortController()
     this.prepareController = controller
     const operation = this.transactionTail.then(async () => {
       try {
         const installed = await installManagedMobilecli(this.root, asset, controller.signal, {
-          onPhase: phase => this.publishRuntime(phase === 'verifying'
-            ? { kind: 'verifying', targetVersion: MOBILECLI_MANAGED_VERSION }
-            : downloadingState(asset.bytes, 0)),
-          onProgress: progress => this.publishRuntime(downloadingState(progress.totalBytes, progress.receivedBytes)),
+          onPhase: (phase) => {
+            this.publishRuntime(phase === 'verifying'
+              ? { kind: 'verifying', targetVersion: MOBILECLI_MANAGED_VERSION }
+              : downloadingState(asset.bytes, 0))
+          },
+          onProgress: (progress) => {
+            this.publishRuntime(downloadingState(progress.totalBytes, progress.receivedBytes))
+          },
         })
         this.candidate = Object.freeze({ source: 'managed', executablePath: installed.executablePath })
         this.candidateVersion = installed.version

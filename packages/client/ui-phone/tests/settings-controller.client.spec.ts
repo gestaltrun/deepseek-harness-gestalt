@@ -9,6 +9,7 @@ import {
   type PhoneEnvironmentSource, type PhoneEnvironmentView,
 } from '../src/client/phone-environment.ts'
 import { PhoneSettingsCardController } from '../src/client/phone-settings-controller.ts'
+import type { PhoneRuntimeSource } from '../src/client/phone-runtime-source.ts'
 import { createListingPhoneEnvironmentSource } from '../src/client/phone-environment-listing.ts'
 import { FakeListingSource, flush, listingOf } from './phone-fakes.client.ts'
 import type { PhoneSettings } from '../src/phone-settings.ts'
@@ -143,6 +144,29 @@ describe('PhoneSettingsCardController publish re-entrancy', () => {
 })
 
 describe('PhoneSettingsCardController', () => {
+  it('keeps the runtime subscription across environment-source replacement and disposes it', () => {
+    const runtimeListeners = new Set<() => void>()
+    const runtime: PhoneRuntimeSource = {
+      getRuntime: () => ({ kind: 'missing', targetVersion: '1.0.5' }),
+      refresh: async () => {},
+      prepare: async () => {},
+      cancel: async () => {},
+      ensureDetected: () => {},
+      subscribe: (listener) => {
+        runtimeListeners.add(listener)
+        return () => { runtimeListeners.delete(listener) }
+      },
+    }
+    const controller = new PhoneSettingsCardController(
+      readyScope(false).scope, MISSING_PHONE_ENVIRONMENT_SOURCE, undefined, runtime,
+    )
+    expect(runtimeListeners.size).toBe(1)
+    controller.setSource(MISSING_PHONE_ENVIRONMENT_SOURCE)
+    expect(runtimeListeners.size).toBe(1)
+    controller.dispose()
+    expect(runtimeListeners.size).toBe(0)
+  })
+
   it('projects the durable enable flag onto the off / probe-failed views', () => {
     const host = readyScope(false)
     const controller = new PhoneSettingsCardController(host.scope)

@@ -85,7 +85,6 @@ export class PhoneSettingsCardController {
    */
   setSource(source: PhoneEnvironmentSource): void {
     this.unsubscribeSource()
-    this.unsubscribeRuntime()
     this.source = source
     this.unsubscribeSource = source.subscribe(() => { this.publish() })
     this.publish()
@@ -95,6 +94,7 @@ export class PhoneSettingsCardController {
   dispose(): void {
     this.unsubscribeScope()
     this.unsubscribeSource()
+    this.unsubscribeRuntime()
   }
 
   /**

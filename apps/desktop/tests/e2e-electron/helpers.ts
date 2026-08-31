@@ -161,12 +161,13 @@ export async function assertPhoneDevicesSettingsSection(): Promise<void> {
   await trigger.waitForClickable({ timeout: 20_000 })
   await trigger.click()
   await switchToDesktopOverlay()
-  const phoneDevices = browser.$('//button[contains(., "手机设备")]')
+  const phoneDevices = browser.$('//button[contains(., "手机设备") or contains(., "Phone Devices")]')
   await phoneDevices.waitForDisplayed({ timeout: 20_000 })
   await phoneDevices.click()
-  await browser.waitUntil(async () => await browser.execute(() => (
-    document.body.innerText.includes('把 Android / iOS 模拟器')
-  )), { timeout: 20_000, timeoutMsg: 'Phone Devices settings body did not render' })
+  await browser.$('[data-phone-settings]').waitForDisplayed({
+    timeout: 20_000,
+    timeoutMsg: 'Phone Devices settings body did not render',
+  })
   await writeArtifact('phone-devices-settings.json', await browser.execute(() => ({
     url: location.href,
     text: document.body.innerText,

@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { androidSystemImagePackage, planAndroidEnvironment } from '../src/planner.ts'
 
@@ -21,8 +22,8 @@ describe('Android environment planner', () => {
     expect(result.kind).toBe('supported')
     if (result.kind !== 'supported') return
     expect(result.plan).toMatchObject({
-      sdkRoot: '/phone/android/sdk',
-      avdHome: '/phone/android/avd',
+      sdkRoot: join('/phone', 'android', 'sdk'),
+      avdHome: join('/phone', 'android', 'avd'),
       avdName: 'Pixel_6_API_35_Gestalt',
       abi,
       commandLineToolsVersion: '15859902',
@@ -62,7 +63,7 @@ describe('Android environment planner', () => {
     expect(result.plan).toMatchObject({
       sdkRoot: '/existing-sdk',
       sdkSource: 'existing',
-      avdHome: '/phone/android/avd',
+      avdHome: join('/phone', 'android', 'avd'),
       commandLineToolsBytes: 0,
       components: { commandLineTools: true, platformTools: true, emulator: true },
     })

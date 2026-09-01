@@ -106,7 +106,7 @@ function internals(value: AndroidEnvironmentManager): ManagerInternals {
   return value as unknown as ManagerInternals
 }
 
-async function compatibleRoot(root: string, platform: NodeJS.Platform = process.platform): Promise<string> {
+async function compatibleRoot(root: string, platform: NodeJS.Platform = 'darwin'): Promise<string> {
   const sdk = join(root, 'sdk')
   for (const name of ['sdkmanager', 'avdmanager']) {
     const path = join(sdk, 'cmdline-tools', 'latest', 'bin', platform === 'win32' ? `${name}.bat` : name)

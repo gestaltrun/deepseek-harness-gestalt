@@ -166,7 +166,7 @@ describe('phone stream Host routes', () => {
     ])
     context.phoneDevices.agentStatus = async id => ({ deviceId: id, installed: true })
 
-    expect((await mint(origin, 'android-real')).preferredFormat).toBe('h264')
+    expect(await mint(origin, 'android-real')).toMatchObject({ preferredFormat: 'h264', agentManaged: true })
     expect((await mint(origin, 'ios-real')).preferredFormat).toBe('h264')
     expect((await mint(origin, 'ios-simulator')).preferredFormat).toBe('mjpeg')
   })
@@ -273,8 +273,9 @@ describe('phone stream Host routes', () => {
     })
   })
 
-  it('serves iOS real-device agent operations only on the trusted exact POST routes', async () => {
+  it('serves managed Android and iOS real-device agent operations only on trusted exact POST routes', async () => {
     const { origin, context } = await mount([
+      wireDevice('android-real', 'android', 'real', 'online'),
       wireDevice('UDID-9', 'ios', 'real', 'online'),
       wireDevice('SIM-9', 'ios', 'simulator', 'online'),
     ])
@@ -300,6 +301,13 @@ describe('phone stream Host routes', () => {
       body: JSON.stringify({ deviceId: 'UDID-9', force: true }),
     })
     expect(JSON.parse(install.body.toString('utf8'))).toMatchObject({ installed: true, reinstalled: true })
+
+    const androidStatus = await rawRequest({
+      origin, method: 'POST', path: '/phone/agent/status', host,
+      body: JSON.stringify({ deviceId: 'android-real' }),
+    })
+    expect(androidStatus.status).toBe(200)
+    expect(JSON.parse(androidStatus.body.toString('utf8'))).toMatchObject({ installed: true })
 
     expect((await rawRequest({
       origin, method: 'POST', path: '/phone/agent/status', host: 'evil.example', body: '{}',

@@ -29,8 +29,9 @@ export type PhoneStreamFailureKind =
   | 'refused'
   /** The stream channel is unreachable (network or upstream). */
   | 'unavailable'
-  /** The iOS real-device control agent has not been installed. */
+  /** The managed device control agent has not been installed. */
   | 'agent-missing'
+  | 'agent-install-restricted'
   /** Agent installation is blocked until the Host names a provisioning profile. */
   | 'agent-profile-required'
   /** The real iPhone must be unlocked before agent or picture operations continue. */
@@ -100,9 +101,9 @@ export interface PhoneIoSocket {
 export interface PhoneStreamGateway {
   /** Mint one signed same-origin session for the device. */
   mintSession(deviceId: string): Promise<PhoneStreamSessionView>
-  /** Detect the iOS real-device control agent through the Host. */
+  /** Detect the managed device control agent through the Host. */
   agentStatus(deviceId: string): Promise<PhoneAgentStatusView>
-  /** Install or force-reinstall the iOS real-device control agent through the Host. */
+  /** Install or force-reinstall the managed device control agent through the Host. */
   installAgent(deviceId: string, force: boolean): Promise<PhoneAgentStatusView>
   /** Open the io WebSocket on the session's minted path; events fire asynchronously. */
   connectIo(target: PhoneIoTarget, handlers: PhoneIoHandlers): PhoneIoSocket
@@ -160,6 +161,7 @@ export function devicePointOf(point: PhoneScreenPoint, surface: PhoneSurfaceSize
 export function classifyPhoneStreamFailure(error: unknown): PhoneStreamFailureKind {
   if (error instanceof PhoneStreamHttpError) {
     if (error.code === 'PHONE_AGENT_MISSING') return 'agent-missing'
+    if (error.message.includes('INSTALL_FAILED_USER_RESTRICTED')) return 'agent-install-restricted'
     if (error.code === 'PHONE_AGENT_PROFILE_REQUIRED') return 'agent-profile-required'
     if (error.code === 'PHONE_REAL_DEVICE_ISSUE' && error.issue !== undefined) return error.issue
     if (error.status === 404) return 'device-offline'
@@ -173,6 +175,7 @@ export function classifyPhoneStreamFailure(error: unknown): PhoneStreamFailureKi
 function failureOf(error: unknown): PhoneStreamFailure {
   const kind = classifyPhoneStreamFailure(error)
   if (kind === 'agent-missing') return { kind, agentRecovery: 'install' }
+  if (kind === 'agent-install-restricted') return { kind, agentRecovery: 'install' }
   if (kind === 'profile-expired') return { kind, agentRecovery: 'reinstall' }
   return { kind }
 }
@@ -263,7 +266,7 @@ export class PhoneConnectionController {
   }
 
   /**
-   * Install or force-reinstall the iOS real-device agent, then reconnect the picture session.
+   * Install or force-reinstall the managed device agent, then reconnect the picture session.
    * @param force - whether to replace an already installed agent and refresh its signing.
    */
   recoverAgent(force: boolean): void {
@@ -455,7 +458,7 @@ export class PhoneConnectionController {
       this.setPhase({ kind: 'error', failure })
       return
     }
-    if (kind === 'agent-missing' || kind === 'agent-profile-required'
+    if (kind === 'agent-missing' || kind === 'agent-install-restricted' || kind === 'agent-profile-required'
       || kind === 'device-locked' || kind === 'cert-untrusted'
       || kind === 'profile-expired' || kind === 'tunnel-failed' || kind === 'device-unplugged') {
       this.teardown()
@@ -479,6 +482,12 @@ export class PhoneConnectionController {
     if (reply.message !== undefined && isUnauthorizedMessage(reply.message)) {
       this.teardown()
       this.setPhase({ kind: 'error', failure: { kind: 'unauthorized' } })
+      return
+    }
+    if (this.session?.agentManaged === true) {
+      this.teardown()
+      this.lastTransient = 'unavailable'
+      this.checkAgentAfterFailure()
     }
   }
 

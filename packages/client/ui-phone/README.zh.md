@@ -18,6 +18,8 @@ Loader `Config.enabled`（boolean，schemastery 校验，默认 `false`）仍是
 
 组装关系：`tsconfig.client.json` 聚合引用本包；`packages/bundle/web-app/cordis.patch.yml` 携带 `ui-phone` 浏览器行；`packages/bundle/web-app/package.json` 声明依赖。包 invariant 伴生体在同进程 fake 注册表上以真实 cordis fiber 证明 tab 注册/注销对称。
 
+Android session 在 runtime 能用系统 Annex-B encoder 替换畸形 mobilecli AVC 响应时继续显示 H264。托管 Android 的控制请求被拒绝后会立即检查设备 agent；agent 缺失时错误卡保留一键安装。OEM 仍可能要求用户在手机上确认 USB 安装或调试安全开关。`INSTALL_FAILED_USER_RESTRICTED` 使用独立、可重试的提示卡，不要求用户手工下载安装器或执行命令。
+
 ## 模型体验
 
 无，因为浏览器界面、Host 设置命名空间与视频播放不注册提示词、工具 schema、会话事件或提供方请求；模型侧能力归独立消费方所有。

@@ -14,10 +14,12 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { deadline, TimeoutReason } from '@deepseek-ai/dsh-timeout'
 import z from '@deepseek-ai/schemastery'
+import { openAndroidSystemH264 } from './android-h264-process.ts'
 import { runMobilecliAgent } from './agent-process.ts'
 import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
 import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
 import { ioParams, iosScreenScale } from './io.ts'
+import { inspectAnnexBH264KeyAccessUnit } from './h264.ts'
 import type { MobilecliAgentAnswer } from './agent-process.ts'
 import { MobilecliRpc, normalizeOperationError } from './rpc.ts'
 import { resolveMobilecliExecutable } from './resolve-binary.ts'
@@ -88,6 +90,8 @@ const METHOD_DEVICE_INFO = 'device.info'
 const METHOD_DEVICE_SCREENCAPTURE = 'device.screencapture'
 /** OpenRPC method probed until the spawned server answers its first request. */
 const METHOD_SERVER_INFO = 'server.info'
+/** Maximum bytes inspected before one Android H264 source is rejected. */
+const ANDROID_H264_PROBE_MAX_BYTES = 4 * 1024 * 1024
 
 const IO_METHODS = {
   tap: 'device.io.tap',
@@ -121,6 +125,8 @@ export interface Config {
   readyTimeoutMs?: number
   /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
   requestTimeoutMs?: number
+  /** Ceiling for recognizing one H264 key access unit from each Android source. */
+  h264ProbeTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
   /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
@@ -142,6 +148,7 @@ export const Config: z<Config> = z.object({
   readyStabilityMs: z.number().default(50),
   readyTimeoutMs: z.number().default(60_000),
   requestTimeoutMs: z.number().default(30_000),
+  h264ProbeTimeoutMs: z.number().default(15_000),
   bootTimeoutMs: z.number().default(180_000),
   agentTimeoutMs: z.number().default(120_000),
 })
@@ -174,6 +181,7 @@ function resolveValidatedConfig(config: Config): ResolvedConfig {
   assertDurationField('readyStabilityMs', values.readyStabilityMs)
   assertDurationField('readyTimeoutMs', values.readyTimeoutMs)
   assertDurationField('requestTimeoutMs', values.requestTimeoutMs)
+  assertDurationField('h264ProbeTimeoutMs', values.h264ProbeTimeoutMs)
   assertDurationField('bootTimeoutMs', values.bootTimeoutMs)
   assertDurationField('agentTimeoutMs', values.agentTimeoutMs)
   const trimmedPath = values.executablePath?.trim()
@@ -195,6 +203,10 @@ function assertProfileFile(path: string): void {
     // reported below; there is no other readable fact to surface first.
   }
   throw new Error(`phone-runtime: provisioningProfilePath ${JSON.stringify(path)} is not an existing file; fix the path or drop the field.`)
+}
+
+function failureText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -261,6 +273,7 @@ export class PhoneDevices extends Service {
   private rpcClient: MobilecliRpc | undefined
   private publishedList: PhoneDeviceList | undefined
   private iosScreenScales = new Map<DeviceId, number>()
+  private readonly openNativeAndroidH264 = openAndroidSystemH264
   private startupOutcome: Promise<void> | undefined
   private pollTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -702,7 +715,7 @@ export class PhoneDevices extends Service {
   async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream> {
     this.requireResolved()
     this.assertUsable()
-    this.requireKnown(request.deviceId, 'capture')
+    const known = this.requireKnown(request.deviceId, 'capture')
     await this.whenReady(request.signal)
     this.assertUsable()
     if (request.signal?.aborted === true) {
@@ -710,8 +723,9 @@ export class PhoneDevices extends Service {
     }
     const fused = fuseCallerAndLifetime(request.signal, this.lifetime.signal)
     const budget = deadline(fused, this.resolved.requestTimeoutMs, METHOD_DEVICE_SCREENCAPTURE)
+    let capture: PhoneCaptureStream
     try {
-      const capture = await (this.rpcClient as MobilecliRpc).stream(
+      capture = await (this.rpcClient as MobilecliRpc).stream(
         METHOD_DEVICE_SCREENCAPTURE,
         {
           deviceId: request.deviceId,
@@ -719,7 +733,6 @@ export class PhoneDevices extends Service {
         },
         budget.signal,
       )
-      return Object.freeze({ contentType: capture.contentType, body: capture.body })
     } catch (error) {
       const normalized = normalizeOperationError(error)
       if (normalized.code !== 'PHONE_TIMEOUT') throw normalized
@@ -728,6 +741,63 @@ export class PhoneDevices extends Service {
         `${JSON.stringify(METHOD_DEVICE_SCREENCAPTURE)} exceeded its ${String(this.resolved.requestTimeoutMs)}ms ceiling`,
         { cause: normalized },
       )
+    } finally {
+      budget[Symbol.dispose]()
+    }
+    if (request.format !== 'h264' || known.platform !== 'android') {
+      return Object.freeze({ contentType: capture.contentType, body: capture.body })
+    }
+    return await this.preferAndroidH264(capture, request.deviceId, fused)
+  }
+
+  /** Keep mobilecli AVC when valid, otherwise try Android system H264 before the renderer sees failure bytes. */
+  private async preferAndroidH264(
+    capture: PhoneCaptureStream,
+    id: DeviceId,
+    signal: AbortSignal,
+  ): Promise<PhoneCaptureStream> {
+    const mobilecli = await this.inspectAndroidH264(capture.body, signal)
+    if (mobilecli.recognizable) {
+      return Object.freeze({ contentType: capture.contentType, body: mobilecli.body })
+    }
+    if (signal.aborted) {
+      await mobilecli.body.cancel().catch(() => {})
+      throw normalizeOperationError(signal.reason)
+    }
+    let nativeBody: ReadableStream<Uint8Array> | undefined
+    try {
+      nativeBody = this.openNativeAndroidH264({
+        deviceId: id,
+        environment: this.childEnvironment,
+        signal,
+      })
+      const native = await this.inspectAndroidH264(nativeBody, signal)
+      if (!native.recognizable) {
+        await native.body.cancel().catch(() => {})
+        throw native.failure ?? new Error('Android system H264 stream was not recognizable')
+      }
+      await mobilecli.body.cancel().catch(() => {})
+      return Object.freeze({ contentType: 'video/h264', body: native.body })
+    } catch (nativeFailure) {
+      await nativeBody?.cancel().catch(() => {})
+      this.ctx.logger.warn(
+        `[phone-runtime] Android H264 sources failed for ${JSON.stringify(id)}; renderer fallback remains available: ${failureText(mobilecli.failure)}; ${failureText(nativeFailure)}`,
+      )
+      return Object.freeze({ contentType: capture.contentType, body: mobilecli.body })
+    }
+  }
+
+  /** Bound syntax recognition independently from the JSON-RPC header deadline. */
+  private async inspectAndroidH264(
+    body: ReadableStream<Uint8Array>,
+    signal: AbortSignal,
+  ): Promise<Awaited<ReturnType<typeof inspectAnnexBH264KeyAccessUnit>>> {
+    const budget = deadline(signal, this.resolved.h264ProbeTimeoutMs, 'Android H264 key access unit')
+    try {
+      return await inspectAnnexBH264KeyAccessUnit(body, {
+        signal: budget.signal,
+        maxBytes: ANDROID_H264_PROBE_MAX_BYTES,
+      })
     } finally {
       budget[Symbol.dispose]()
     }
@@ -789,8 +859,9 @@ export class PhoneDevices extends Service {
       const current = await this.agentStatus(id, options.signal)
       if (current.installed) return Object.freeze({ ...current, reinstalled: false })
     }
-    const profile = this.resolved.provisioningProfilePath
-    if (known.kind === 'real' && profile === undefined) {
+    const iosReal = known.platform === 'ios' && known.kind === 'real'
+    const profile = iosReal ? this.resolved.provisioningProfilePath : undefined
+    if (iosReal && profile === undefined) {
       throw new PhoneDevicesError(
         'PHONE_AGENT_PROFILE_REQUIRED',
         'configure provisioningProfilePath before installing the iOS real-device control agent',
@@ -822,7 +893,8 @@ export class PhoneDevices extends Service {
    * @returns the frozen public status.
    */
   private agentAnswer(id: DeviceId, answer: MobilecliAgentAnswer): PhoneAgentStatus {
-    const reminder = answer.ok && this.findKnown(id)?.kind === 'real' && this.resolved.provisioningProfilePath !== undefined
+    const known = this.findKnown(id)
+    const reminder = answer.ok && known?.platform === 'ios' && known.kind === 'real' && this.resolved.provisioningProfilePath !== undefined
       ? FREE_SIGNING_PROFILE_REMINDER
       : undefined
     return Object.freeze({

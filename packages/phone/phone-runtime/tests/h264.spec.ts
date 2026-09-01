@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { buildGradientH264 } from './fixtures/u3-visible-frames.ts'
-import { verifyAnnexBH264KeyAccessUnit } from '../src/h264.ts'
+import { inspectAnnexBH264KeyAccessUnit, verifyAnnexBH264KeyAccessUnit } from '../src/h264.ts'
+import { inspectRecognizable, readUntilRecognizable } from '../src/recognizable-stream.ts'
 
 const REAL_ACCESS_UNIT = [...buildGradientH264(1)]
 const SPS = REAL_ACCESS_UNIT.slice(0, 14)
@@ -162,6 +163,48 @@ describe('verifyAnnexBH264KeyAccessUnit', () => {
     )).resolves.toBeUndefined()
   })
 
+  it('accepts a live IDR once its slice header is complete without waiting for the next NAL', async () => {
+    let cancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(Uint8Array.from(annex(sps(), pps(), idr({ pocBits: 4 }))))
+      },
+      cancel() { cancelled = true },
+    })
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      body,
+      { signal: new AbortController().signal, maxBytes: 1024 * 1024 },
+    )).resolves.toBeUndefined()
+    expect(cancelled).toBe(true)
+  })
+
+  it('waits through a live truncated IDR and still honors cancellation', async () => {
+    const signal = AbortSignal.timeout(10)
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.from(annex(
+            sps(), pps(), [0x65],
+          )))
+        },
+      }),
+      { signal, maxBytes: 1024 * 1024 },
+    )).rejects.toMatchObject({ name: 'TimeoutError' })
+  })
+
+  it('surfaces a non-truncation error from a live trailing IDR', async () => {
+    await expect(verifyAnnexBH264KeyAccessUnit(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.from(annex(
+            sps(), pps(), idr({ ppsId: 1 }),
+          )))
+        },
+      }),
+      { signal: new AbortController().signal, maxBytes: 1024 * 1024 },
+    )).rejects.toThrow('unknown PPS')
+  })
+
   it.each([
     ['an empty body', []],
     ['upstream Error bytes', [0x80, 0x00, 0x10, 0x01]],
@@ -284,5 +327,133 @@ describe('verifyAnnexBH264KeyAccessUnit', () => {
     controller.abort(new Error('late abort'))
     await Promise.resolve()
     expect(cancellations).toBe(1)
+  })
+})
+
+describe('inspectAnnexBH264KeyAccessUnit', () => {
+  it('rejects invalid byte limits before acquiring the body', async () => {
+    await expect(inspectAnnexBH264KeyAccessUnit(
+      streamOf([]), { signal: new AbortController().signal, maxBytes: 0 },
+    )).rejects.toThrow(TypeError)
+  })
+
+  it('recognizes a live prefix and replays it before the unread continuation', async () => {
+    let source!: ReadableStreamDefaultController<Uint8Array>
+    const prefix = Uint8Array.from([...REAL_ACCESS_UNIT, ...AUD])
+    const tail = Uint8Array.from([1, 2, 3])
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        source = controller
+        controller.enqueue(prefix)
+      },
+    })
+    const inspected = await inspectAnnexBH264KeyAccessUnit(body, {
+      signal: new AbortController().signal,
+      maxBytes: 1024 * 1024,
+    })
+    source.enqueue(tail)
+    source.close()
+
+    expect(inspected.recognizable).toBe(true)
+    expect(inspected.failure).toBeUndefined()
+    expect(Buffer.from(await new Response(inspected.body).arrayBuffer()))
+      .toEqual(Buffer.concat([Buffer.from(prefix), Buffer.from(tail)]))
+  })
+
+  it('returns failure facts and the complete invalid EOF body', async () => {
+    const bytes = Uint8Array.from(Buffer.from('Error: Error 0x80001001'))
+    const inspected = await inspectAnnexBH264KeyAccessUnit(
+      new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close() } }),
+      { signal: new AbortController().signal, maxBytes: 1024 },
+    )
+
+    expect(inspected.recognizable).toBe(false)
+    expect(inspected.failure?.message).toContain('ended before a complete SPS')
+    expect(Buffer.from(await new Response(inspected.body).arrayBuffer())).toEqual(Buffer.from(bytes))
+  })
+})
+
+describe('recognizable stream replay', () => {
+  it('recognizes an EOF-complete probe and closes its empty replay', async () => {
+    const inspected = await inspectRecognizable(
+      streamOf([]),
+      new AbortController().signal,
+      { push: () => false, finish: () => true },
+      'incomplete',
+    )
+    expect(inspected.recognizable).toBe(true)
+    expect((await new Response(inspected.body).arrayBuffer()).byteLength).toBe(0)
+  })
+
+  it('normalizes thrown probe values and replays the inspected prefix', async () => {
+    const pushed = Uint8Array.from([1, 2])
+    const pushFailure = await inspectRecognizable(
+      streamOf([...pushed]),
+      new AbortController().signal,
+      { push: () => { throw 'push refusal' }, finish: () => false },
+      'incomplete',
+    )
+    expect(pushFailure.failure?.message).toBe('push refusal')
+    expect(Buffer.from(await new Response(pushFailure.body).arrayBuffer())).toEqual(Buffer.from(pushed))
+
+    const finishFailure = await inspectRecognizable(
+      streamOf([]),
+      new AbortController().signal,
+      { push: () => false, finish: () => { throw 'finish refusal' } },
+      'incomplete',
+    )
+    expect(finishFailure.failure?.message).toBe('finish refusal')
+
+    const exact = new Error('exact probe refusal')
+    const errorFailure = await inspectRecognizable(
+      streamOf([3]),
+      new AbortController().signal,
+      { push: () => { throw exact }, finish: () => false },
+      'incomplete',
+    )
+    expect(errorFailure.failure).toBe(exact)
+  })
+
+  it('cancels the source when inspection is already aborted and contains cancellation failure', async () => {
+    let cancelled = 0
+    const body = new ReadableStream<Uint8Array>({
+      cancel() { cancelled += 1; throw new Error('cancel refusal') },
+    })
+    const controller = new AbortController()
+    controller.abort('inspection stopped')
+    await expect(inspectRecognizable(
+      body,
+      controller.signal,
+      { push: () => false, finish: () => false },
+      'incomplete',
+    )).rejects.toThrow('phone stream verification was cancelled')
+    expect(cancelled).toBe(1)
+  })
+
+  it('forwards replay cancellation to the unread source', async () => {
+    let source!: ReadableStreamDefaultController<Uint8Array>
+    let cancellation: unknown
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) { source = controller; controller.enqueue(Uint8Array.from([7])) },
+      cancel(reason) { cancellation = reason },
+    })
+    const inspected = await inspectRecognizable(
+      body,
+      new AbortController().signal,
+      { push: () => true, finish: () => false },
+      'incomplete',
+    )
+    await inspected.body.cancel('renderer replaced')
+    expect(cancellation).toBe('renderer replaced')
+    expect(source).toBeDefined()
+  })
+
+  it('lets the non-replaying verifier accept completion at EOF', async () => {
+    await expect(readUntilRecognizable(
+      streamOf([]),
+      new AbortController().signal,
+      { push: () => false, finish: () => true },
+      'incomplete',
+    )).resolves.toBeUndefined()
   })
 })

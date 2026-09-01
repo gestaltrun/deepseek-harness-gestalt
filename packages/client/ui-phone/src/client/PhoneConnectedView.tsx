@@ -65,7 +65,12 @@ const FAILURE_COPY: Record<PhoneStreamFailureKind, {
   'agent-missing': {
     tone: 'warn',
     title: '设备控制代理未安装',
-    detail: () => '此 iPhone 需要设备控制代理才能显示画面并接收操作；安装会使用 Host 当前配置的签名描述文件。',
+    detail: () => '安装后设备才能稳定接收点击、拖拽与文本操作；Android 会通过 USB 安装，iPhone 会使用 Host 当前配置的签名描述文件。',
+  },
+  'agent-install-restricted': {
+    tone: 'warn',
+    title: '设备拒绝安装控制代理',
+    detail: () => '请保持手机解锁，并在开发者选项中允许「USB 安装」与「USB 调试（安全设置）」后重试。系统确认必须在手机上完成。',
   },
   'agent-profile-required': {
     tone: 'warn',

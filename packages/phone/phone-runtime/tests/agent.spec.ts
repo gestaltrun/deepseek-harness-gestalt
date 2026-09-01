@@ -33,9 +33,11 @@ async function errorOf(run: () => Promise<unknown>): Promise<PhoneDevicesError> 
 
 const IOS_REAL = deviceId('REAL-UDID')
 const ANDROID_EMULATOR = deviceId('emulator-5554')
+const ANDROID_REAL = deviceId('ANDROID-REAL')
 
 const BASE_DEVICES = [
   wireDevice('emulator-5554', 'android', 'emulator', 'online'),
+  wireDevice('ANDROID-REAL', 'android', 'real', 'online'),
   wireDevice('REAL-UDID', 'ios', 'real', 'online'),
 ]
 
@@ -149,6 +151,20 @@ describe('phone runtime on-device agent operations', () => {
     expect(installed.installed).toBe(true)
     expect((await fake.agentState()).lastInstallArgv).toEqual([
       'agent', 'install', '--device', 'emulator-5554',
+    ])
+  })
+
+  it('installs an agent on an Android real device without applying an iOS provisioning profile', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+
+    const installed = await context.phoneDevices.installAgent(ANDROID_REAL)
+
+    expect(installed.installed).toBe(true)
+    expect(installed.profileReminder).toBeUndefined()
+    expect((await fake.agentState()).lastInstallArgv).toEqual([
+      'agent', 'install', '--device', 'ANDROID-REAL',
     ])
   })
 

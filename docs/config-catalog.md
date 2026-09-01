@@ -1749,6 +1749,8 @@ export interface Config {
   readyTimeoutMs?: number
   /** Ceiling on each JSON-RPC round trip other than boot, in milliseconds. */
   requestTimeoutMs?: number
+  /** Ceiling for recognizing one H264 key access unit from each Android source. */
+  h264ProbeTimeoutMs?: number
   /** Ceiling on a `device.boot` round trip, in milliseconds. */
   bootTimeoutMs?: number
   /** Ceiling on one `agent status` / `agent install` child run, in milliseconds. */
@@ -1763,7 +1765,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/phone/phone-runtime/src/index.ts:105`](../packages/phone/phone-runtime/src/index.ts)
+Source: [`packages/phone/phone-runtime/src/index.ts:109`](../packages/phone/phone-runtime/src/index.ts)
 
 <a id="deepseek-aidsh-phone-stream"></a>
 

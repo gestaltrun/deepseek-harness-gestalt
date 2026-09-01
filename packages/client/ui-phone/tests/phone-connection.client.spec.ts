@@ -230,6 +230,13 @@ describe('PhoneConnectionController lifecycle', () => {
         failure: { kind: 'agent-missing', agentRecovery: 'install' },
       },
       {
+        name: 'Android rejected USB agent installation',
+        error: new PhoneStreamHttpError(
+          502, 'PHONE_UPSTREAM', 'adb install failed: INSTALL_FAILED_USER_RESTRICTED',
+        ),
+        failure: { kind: 'agent-install-restricted', agentRecovery: 'install' },
+      },
+      {
         name: 'iPhone is locked',
         error: new PhoneStreamHttpError(
           502, 'PHONE_REAL_DEVICE_ISSUE', 'unlock the device', 'device-locked',
@@ -358,6 +365,25 @@ describe('PhoneConnectionController lifecycle', () => {
     await flush()
     expect(controller.snapshot()).toEqual({ kind: 'error', failure: { kind: 'tunnel-failed' } })
     expect(gateway.agentStatusDevices).toEqual(['UDID-9'])
+  })
+
+  it('checks the managed Android agent immediately after a real io rejection', async () => {
+    const gateway = new FakeGateway()
+    gateway.queueMint({ session: { ...SESSION_A, agentManaged: true } })
+    gateway.queueAgentStatus({ installed: false })
+    const controller = controllerOn(gateway, new ManualScheduler())
+    controller.connect()
+    await flush()
+    gateway.lastSocket!.accept()
+    gateway.lastSocket!.receive(JSON.stringify({
+      jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'input command failed' },
+    }))
+    expect(controller.snapshot()).toEqual({ kind: 'checking-agent' })
+    await flush()
+    expect(controller.snapshot()).toEqual({
+      kind: 'error', failure: { kind: 'agent-missing', agentRecovery: 'install' },
+    })
+    expect(gateway.agentStatusDevices).toEqual(['emulator-5554'])
   })
 
   it('offers install or reinstall after a managed picture failure based on agent status', async () => {

@@ -32,7 +32,7 @@ export const PHONE_IO_PATH = '/phone/ws/io'
 export const PHONE_STREAM_PATH = '/phone/stream'
 /** Prefix for minting signed same-origin session URLs. */
 export const PHONE_SESSION_PATH = '/phone/session'
-/** Prefix for iOS real-device agent detection and installation operations. */
+/** Prefix for managed device-agent detection and installation operations. */
 export const PHONE_AGENT_PATH = '/phone/agent'
 /** Exact-path GET listing of the grouped device fleet behind the `/api` fence. */
 export const PHONE_DEVICES_PATH = '/phone/devices'
@@ -127,7 +127,7 @@ export class PhoneStream extends Service {
   /**
    * Mint signed same-origin MJPEG and H264 URLs for one known device.
    * @param id - Branded device id present in the latest published listing.
-   * @param agentManaged - Whether the session addresses an iOS real device whose agent is managed through this Consumer.
+   * @param agentManaged - Whether control failures should enter the managed device-agent recovery flow.
    * @param preferredFormat - Encoding the browser should open first for this device class.
    * @returns the IO upgrade path plus both capture URLs and their expiry.
    */
@@ -205,7 +205,7 @@ export class PhoneStream extends Service {
       }
       writeJson(res, 200, this.sessionFor(
         id,
-        knownReal !== undefined,
+        knownReal !== undefined || known.platform === 'android',
         knownSimulator === undefined ? 'h264' : 'mjpeg',
       ))
     } catch (error) {
@@ -234,7 +234,7 @@ export class PhoneStream extends Service {
         throw new HttpError(400, 'bad-request', 'deviceId is required')
       }
       const id = deviceId(rawId)
-      await this.requireIosReal(id)
+      await this.requireManagedAgentDevice(id)
       if (pathname === `${PHONE_AGENT_PATH}/status`) {
         writeJson(res, 200, await this.ctx.phoneDevices.agentStatus(id))
         return
@@ -248,11 +248,12 @@ export class PhoneStream extends Service {
     }
   }
 
-  private async requireIosReal(id: DeviceId): Promise<void> {
+  private async requireManagedAgentDevice(id: DeviceId): Promise<void> {
     const list = await this.ctx.phoneDevices.listDevices()
-    if (list.ios.reals.some(device => device.id === id)) return
-    const known = [...list.android, ...list.ios.simulators].some(device => device.id === id)
-    if (known) throw new HttpError(400, 'not-real-ios', 'phone agent operations require an iOS real device')
+    if ([...list.android, ...list.ios.reals].some(device => device.id === id)) return
+    if (list.ios.simulators.some(device => device.id === id)) {
+      throw new HttpError(400, 'agent-not-managed', 'phone agent operations require Android or an iOS real device')
+    }
     throw new PhoneDevicesError(
       'PHONE_DEVICE_NOT_FOUND',
       `cannot operate the device agent: ${JSON.stringify(id)} is absent from the latest device listing`,

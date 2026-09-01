@@ -18,6 +18,8 @@ Both the strip badge and the bodies read one injected abstraction, `PhoneListing
 
 Composition: the `tsconfig.client.json` aggregate references the package; `packages/bundle/web-app/cordis.patch.yml` carries the `ui-phone` browser row; `packages/bundle/web-app/package.json` declares the dependency. The package invariant companion proves tab register/dispose symmetry on a live cordis fiber against a same-process fake registry.
 
+Android sessions keep H264 visible when the runtime can replace a malformed mobilecli AVC response with the system Annex-B encoder. A managed Android control rejection immediately checks the device agent; a missing agent keeps one-click installation in the error card. OEMs may still require an on-device USB-install or debugging-security confirmation. `INSTALL_FAILED_USER_RESTRICTED` has its own retryable card and never asks the user to download or run the installer manually.
+
 ## Model Experience
 
 None, as the browser UI, Host settings namespace, and video playback register no prompt, tool schema, session event, or provider request; model-facing capabilities belong to separate consumers.

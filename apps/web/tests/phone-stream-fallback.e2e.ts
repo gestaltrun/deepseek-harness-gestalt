@@ -74,7 +74,10 @@ describe('web e2e: phone H264 fallback', () => {
     await page.route('**/phone/devices', route => route.fulfill({
       status: 200, contentType: 'application/json',
       body: JSON.stringify({
-        android: [{ id: 'android-real', name: 'Android Real', kind: 'real', state: 'online', online: true }],
+        android: [
+          { id: 'android-real', name: 'Android Real', kind: 'real', state: 'online', online: true },
+          { id: 'android-restricted', name: 'Android Restricted', kind: 'real', state: 'online', online: true },
+        ],
         ios: {
           simulators: [{ id: 'ios-simulator', name: 'iOS Simulator', kind: 'simulator', state: 'online', online: true }],
           reals: [],
@@ -83,6 +86,12 @@ describe('web e2e: phone H264 fallback', () => {
     }))
     await page.route('**/phone/session', (route) => {
       const { deviceId } = route.request().postDataJSON() as { readonly deviceId: string }
+      if (deviceId === 'android-restricted') {
+        return route.fulfill({
+          status: 409, contentType: 'application/json',
+          body: JSON.stringify({ error: { code: 'PHONE_AGENT_MISSING', message: 'agent missing' } }),
+        })
+      }
       const simulator = deviceId === 'ios-simulator'
       const token = simulator ? 'y' : 'x'
       return route.fulfill({
@@ -95,6 +104,16 @@ describe('web e2e: phone H264 fallback', () => {
         }),
       })
     })
+    await page.route('**/phone/agent/**', route => route.fulfill({
+      status: 502,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'PHONE_UPSTREAM',
+          message: 'adb install failed: INSTALL_FAILED_USER_RESTRICTED',
+        },
+      }),
+    }))
     const blocked = new Promise<void>((resolve) => { releaseH264 = resolve })
     await page.route('**/phone/stream/android-real/h264?token=x', async (route) => {
       await blocked
@@ -139,7 +158,7 @@ describe('web e2e: phone H264 fallback', () => {
     const phoneItem = page.getByRole('menuitem', { name: '手机' })
     await phoneItem.waitFor({ timeout: 10_000 })
     await phoneItem.click()
-    const open = page.getByRole('button', { name: '打开', exact: true })
+    const open = page.getByRole('button', { name: '打开', exact: true }).first()
     await open.waitFor({ timeout: 10_000 })
     await open.click()
     await page.getByLabel('当前画面编码 H264 · 30 fps').waitFor({ timeout: 10_000 })
@@ -154,6 +173,12 @@ describe('web e2e: phone H264 fallback', () => {
     await page.getByRole('img', { name: 'iOS Simulator 实时画面' }).waitFor()
     const simulator = await capturePhoneState(page, scaffold, 'simulator')
     expect(iosSimulatorH264Requests).toBe(0)
-    await compareOrRefreshGolden(EXPECTED, `${before}\n${after}\n${simulator}`, MODE)
+    await page.getByRole('button', { name: '切换设备：iOS Simulator' }).click()
+    await page.getByRole('menuitem', { name: /Android Restricted/ }).click()
+    await page.getByText('设备控制代理未安装').waitFor({ timeout: 10_000 })
+    await page.getByRole('button', { name: '安装设备控制代理' }).click()
+    await page.getByText('设备拒绝安装控制代理').waitFor({ timeout: 10_000 })
+    const restricted = await captureStableAria(page, '[data-phone-connected]', scaffold.workspaceCwd)
+    await compareOrRefreshGolden(EXPECTED, `${before}\n${after}\n${simulator}\nrestricted:\n${restricted}`, MODE)
   }, 30_000)
 })

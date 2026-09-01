@@ -7,7 +7,7 @@
 - `listDevices(signal?)` — 返回分组清单 `{ android, ios: { simulators, reals } }`；每项为冻结的 `PhoneDeviceRef`（`id` 为 branded `DeviceId`、`name`、`kind: 'emulator' | 'simulator' | 'real'`、`platform`、`state` 原样保留、`online`）。关机的模拟器/仿真器同样是合法 boot 目标，因此始终随查询发送 `includeOffline: true`。仅上游 `online` 状态映射为 `online: true`；其余一切上游状态——`offline`、`unauthorized` 等——在 `state` 上原样携带而不互相折叠，因此 `unauthorized` 真机在清单中始终可辨识（上游在其接受信任提示前拒绝其 io）。`devices.list` 结果的两种已发布形态——裸设备数组与 mobilecli 1.0.5 的 `{ devices: [...] }` 信封——均被接受。wire 解析器会验证每一行，再为每个 `(platform, id)` 组合保留首行，避免上游重复项进入设置、picker 或 badge。由于 operation 只接受 `deviceId`，同一 id 出现在两个平台时会以歧义 `PHONE_PROTOCOL` 失败。
 - `boot(id, signal?)` / `shutdown(id, signal?)` — 对应上游 `device.boot` / `device.shutdown`，以 branded id 寻址。真机在本包内先于 RPC 以 `PHONE_REAL_DEVICE` 拒绝（上游仅允许模拟器/仿真器），最新清单中不存在的 id 以 `PHONE_DEVICE_NOT_FOUND` 失败。变更成功后立即调度一次刷新轮询。
 - `io(request, signal?)` — 对应上游 `device.io.tap` / `gesture` / `text` / `button`。此 API 的 tap 与 gesture 坐标使用采集画面像素；iOS 会读取并缓存官方 `device.info.screenSize.scale`，再把像素换算成 XCTest 逻辑点后转发；Android 保持逐像素传递。真机是合法目标；仅最新清单中不存在的 id 在本包内以 `PHONE_DEVICE_NOT_FOUND` 失败。
-- `startCapture(request)` — 对应上游 `device.screencapture`。`h264` 映射为上游 `avc`；返回的 `PhoneCaptureStream` 是尚未读取的 body，`contentType` 为上游响应头。两种已发布应答形态均被接受：裸流，以及 mobilecli 1.0.5 的 `{ format, sessionUrl }` 信封——信封形态下会话 URL 相对服务器源归一，并在打开流之前强制回到回环栅栏内。`requestTimeoutMs` 只约束等待响应头的时间；body 取消由调用方持有。最新清单中不存在的 id 以 `PHONE_DEVICE_NOT_FOUND` 失败。
+- `startCapture(request)` — 对应上游 `device.screencapture`。`h264` 映射为上游 `avc`；Android AVC 在到达 renderer 前先经过语法识别。mobilecli 若以 HTTP 200 返回错误正文或畸形码流，runtime 会从已选择的 SDK 或 PATH 调用 Android 系统 `screenrecord --output-format=h264`，继续保留 H264；设备发现与控制仍由 mobilecli 承担。两条 H264 源都失败时，原 mobilecli body 仍交给 renderer 的 MJPEG 策略。mobilecli 的裸流和 1.0.5 `{ format, sessionUrl }` 信封都会被接受，信封会话 URL 必须留在回环栅栏内。`requestTimeoutMs` 约束响应头，`h264ProbeTimeoutMs` 约束每条 H264 源的识别；body 取消由调用方持有。未知 id 以 `PHONE_DEVICE_NOT_FOUND` 失败。
 - `verifyAnnexBH264KeyAccessUnit(body, options)` — 对一个 Annex-B key access unit 内相互引用的 SPS、PPS 与 IDR slice 执行有界语法探测。它拒绝不完整、畸形、超限或已取消的输入，并在返回前等待 reader 取消完成；它不解码像素。
 - `agentStatus(id, signal?)` / `installAgent(id, options?)` — 面向 iOS 模拟器与真机的设备端 agent 管理，以对同一可执行文件的一次性 `agent status` / `agent install` 进程树驱动。取消操作会等 Node 启动器与原生 mobilecli 后代进程全部退出后再返回。安装幂等：不带 `force` 时先做 status 探测，已安装的 agent 直接应答而不触发任何安装子进程；`reinstalled` 标示一次强制重装。真机通过所配置的 `provisioningProfilePath` 重签（上游要求真机 iOS 安装必须提供）。凡关于已安装、已重签真机的应答都携带 `FREE_SIGNING_PROFILE_REMINDER`——免费团队签名 7 天过期的主动提示，并指明 `installAgent(id, { force: true })` 这一复跑入口。
 - `onChanged(sub)` — 返回 disposer 的订阅；每条已提交的 `PhoneDeviceChange` 携带完整新清单以及相对上一条已发布清单的 `added`/`removed` id 数组。通知在提交轮询后同步投递，抛错的订阅者被拦截并记日志，订阅绝不比 Service 更长寿。
@@ -26,6 +26,7 @@
 | `readyStabilityMs` | `50` | 首份有效设备清单之后，发布就绪前要求子进程保持存活的时间。 |
 | `readyTimeoutMs` | `60000` | 就绪探测、首份设备清单与稳定期的总窗口；超时就绪失败将使插件响亮失败。 |
 | `requestTimeoutMs` | `30000` | boot 之外每次 JSON-RPC 往返的上限；对齐上游 RPC 超时。 |
+| `h264ProbeTimeoutMs` | `15000` | 从每条候选源识别一个 Android H264 key access unit 的上限。 |
 | `bootTimeoutMs` | `180000` | `device.boot` 的上限；对齐上游为慢启动授予的扩展写超时。 |
 | `agentTimeoutMs` | `120000` | 单次 `agent status` / `agent install` 子进程的上限。 |
 | `provisioningProfilePath` | — | 在真机上安装或重签 agent 时以 `--provisioning-profile` 传入的 `.mobileprovision`（上游要求真机 iOS 安装必须提供）；设置时该路径必须指向存在的文件。 |

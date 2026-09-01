@@ -130,7 +130,7 @@ if (args[0] === 'agent') {
       agentState.lastInstallArgv = [...args]
       writeAgentState(agentState)
       const deviceEntry = state.devices.find(candidate => candidate.id === device)
-      if (deviceEntry?.type === 'real' && !args.includes('--provisioning-profile')) {
+      if (deviceEntry?.platform === 'ios' && deviceEntry.type === 'real' && !args.includes('--provisioning-profile')) {
         process.stderr.write('--provisioning-profile is required for real iOS devices\n')
         process.exit(1)
       }

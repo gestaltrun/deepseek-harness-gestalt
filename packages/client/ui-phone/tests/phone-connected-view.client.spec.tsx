@@ -616,6 +616,34 @@ describe('PhoneConnectedView error and recovery arms', () => {
     expect(gateway.agentInstallCalls).toEqual([{ deviceId: 'UDID-9', force: false }])
   })
 
+  it('keeps one-click Android agent preparation visible when USB installation is restricted', async () => {
+    const gateway = new FakeGateway()
+    gateway.queueMint({ error: new PhoneStreamHttpError(409, 'PHONE_AGENT_MISSING', 'agent missing') })
+    gateway.queueAgentInstall({
+      error: new PhoneStreamHttpError(
+        502, 'PHONE_UPSTREAM', 'adb install failed: INSTALL_FAILED_USER_RESTRICTED',
+      ),
+    })
+    render(
+      <PhoneConnectedView
+        serial="fbcd1d21"
+        name="MI 8"
+        visible={true}
+        source={new FakeListingSource().seed(listingOf([
+          { id: 'fbcd1d21', name: 'MI 8', channel: 'usb', state: 'online', online: true },
+        ], []))}
+        onOpenDevice={() => {}}
+        createController={serial => new PhoneConnectionController({ gateway, deviceId: serial })}
+      />,
+    )
+    await step(() => {})
+    fireEvent.click(screen.getByRole('button', { name: '安装设备控制代理' }))
+    await flush()
+    expect(screen.getByText('设备拒绝安装控制代理')).toBeTruthy()
+    expect(screen.getByText(/USB 调试（安全设置）/u)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '安装设备控制代理' })).toBeTruthy()
+  })
+
   it('renders every structured real-iPhone prerequisite without claiming automatic signing or trust', async () => {
     const cases = [
       ['device-locked', '请解锁 iPhone', 'iPhone 已锁定'],

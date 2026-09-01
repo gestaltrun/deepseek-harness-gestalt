@@ -1438,7 +1438,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: 'sessionFor( id: DeviceId, agentManaged: boolean = false, preferredFormat: PhoneCaptureFormat = \'h264\', ): PhoneStreamSession',
         description: 'Mint signed same-origin MJPEG and H264 URLs for one known device.',
-        parameters: [{ name: 'id', description: 'Branded device id present in the latest published listing.' }, { name: 'agentManaged', description: 'Whether the session addresses an iOS real device whose agent is managed through this Consumer.' }, { name: 'preferredFormat', description: 'Encoding the browser should open first for this device class.' }],
+        parameters: [{ name: 'id', description: 'Branded device id present in the latest published listing.' }, { name: 'agentManaged', description: 'Whether control failures should enter the managed device-agent recovery flow.' }, { name: 'preferredFormat', description: 'Encoding the browser should open first for this device class.' }],
         returns: 'the IO upgrade path plus both capture URLs and their expiry.',
       },
     ],

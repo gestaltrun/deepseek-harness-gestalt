@@ -6,13 +6,13 @@ Status: implemented
 
 ## 问题
 
-mobilecli 1.0.5 可能重复报告同一台物理手机，也可能接受 AVC 采集请求却不产出 AVC 画面。直接诊断区分了三种失败。iOS Simulator 以 `avc format is not supported on iOS simulators` 拒绝请求。Android 真机由 DeviceKit `AvcServer` 返回 HTTP 200 `video/h264` 与 `Error 0x80001001`；设备 logcat 确认失败配置是 Qualcomm AVC encoder 拒绝输入颜色格式 `0x7f000789`，但同一设备的原生 `screenrecord --output-format=h264` 能产出有效 Annex-B。iOS 真机可能报告 test runner 已安装，但因 DeviceKit 主应用缺失而以零字节结束 AVC。这些设备都能产出 MJPEG 帧。把 HTTP 状态或 session 铸造当成画面就绪，会同时留下重复设备行与空白 H264-only 视图。
+mobilecli 1.0.5 可能重复报告同一台物理手机，也可能接受 AVC 采集请求却不产出 AVC 画面。直接诊断区分了三种失败。iOS Simulator 以 `avc format is not supported on iOS simulators` 拒绝请求。Android 真机由 DeviceKit `AvcServer` 返回 HTTP 200 `video/h264` 与 `Error 0x80001001`；设备 logcat 确认失败配置是 Qualcomm AVC encoder 拒绝输入颜色格式 `0x7f000789`，但同一设备的原生 `screenrecord --output-format=h264` 能产出有效 Annex-B；其 DeviceKit MJPEG 路径也可能无法创建 virtual display。iOS 真机可能报告 test runner 已安装，但因 DeviceKit 主应用缺失而以零字节结束 AVC。把 HTTP 状态或 session 铸造当成画面就绪，会同时留下重复设备行与空白 H264-only 视图。
 
 ## 决策
 
 phone runtime 会验证每一条 `devices.list` 记录，再为每个 `(platform, id)` 组合保留首行。由于每个 operation 只接受 `deviceId`，同一 id 出现在两个平台时会以 `PHONE_PROTOCOL` 失败，不会投影成无法区分的目标。同平台重复项不会进入设置、手机 picker、已连接下拉框或在线 badge。
 
-Host 把 H264 标为 Android 设备与 iOS 真机的首选格式。iOS Simulator 这个 mobilecli 设备类别会明确拒绝 AVC，因此 Host 把 MJPEG 标为其首选格式。`PhoneConnectionController` 打开首选 URL。任何已尝试 H264 的拉取、协议、解析、浏览器支持、解码、绘制或零帧结束失败，都会清空已学习的触控面，并把 live 阶段切换到同一 session 的签名 MJPEG URL，不关闭或替换其 io socket。devbar 只显示 live 阶段的实际编码，不把 fallback 诊断当作修复。MJPEG 元素把 `naturalWidth` 与 `naturalHeight` 发布为触控坐标面；已被替换的 H264 renderer 回调不能覆盖它。MJPEG 失败后才关闭当前资源并进入既有三次有界重连策略。
+Host 把 H264 标为 Android 设备与 iOS 真机的首选格式。iOS Simulator 这个 mobilecli 设备类别会明确拒绝 AVC，因此 Host 把 MJPEG 标为其首选格式。Android H264 到达 renderer 前，runtime 会有界识别 SPS/PPS/IDR 前缀。无效 mobilecli AVC 先切到 Android 系统 `screenrecord --output-format=h264`；两条 H264 源都失败后才把原正文留给 renderer 的同 session MJPEG 策略。live IDR 的 slice header 完整后即可接纳，无需等待画面运动产生下一个 NAL 分隔符。devbar 只显示 live 编码，不展示 fallback 原因。Android 与 iOS 真机 session 都托管设备 agent 恢复；Android io 被拒绝后会检查 agent 并提供一键安装，OEM 要求的 USB 安装或调试安全确认仍在手机上完成。
 
 已连接画面在按下时捕获活动 pointer。它记录每个归一化 move，把松开位移也纳入拖动阈值判定，发送完整 `pointerDown` / `pointerMove`... / `pointerUp` 路径，并在完成或取消时释放捕获。隐藏 tab、更换设备/controller 或替换 live stream 也会释放并丢弃待发路径。取消与生命周期替换都不发送不完整 gesture。
 

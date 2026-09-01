@@ -9,7 +9,7 @@ import type { PhoneIoHandlers, PhoneIoSocket, PhoneStreamGateway } from './phone
 
 /** Minting endpoint for signed same-origin capture URLs. */
 export const PHONE_SESSION_PATH = '/phone/session'
-/** Prefix for iOS real-device agent status and installation operations. */
+/** Prefix for managed device-agent status and installation operations. */
 export const PHONE_AGENT_PATH = '/phone/agent'
 
 /** Structured iOS real-device failure arms projected by the Host. */
@@ -249,8 +249,8 @@ async function phoneAgentOperation(
 }
 
 /**
- * Read the iOS real-device control-agent status from the Host.
- * @param deviceId - iOS real-device id from the current fleet listing.
+ * Read a managed device control-agent status from the Host.
+ * @param deviceId - Android or iOS real-device id from the current fleet listing.
  * @returns the current on-device agent status.
  */
 export function readPhoneAgentStatus(deviceId: string): Promise<PhoneAgentStatusView> {
@@ -258,8 +258,8 @@ export function readPhoneAgentStatus(deviceId: string): Promise<PhoneAgentStatus
 }
 
 /**
- * Install or force-reinstall the iOS real-device control agent through the Host.
- * @param deviceId - iOS real-device id from the current fleet listing.
+ * Install or force-reinstall a managed device control agent through the Host.
+ * @param deviceId - Android or iOS real-device id from the current fleet listing.
  * @param force - whether to replace an already installed agent and refresh its signing.
  * @returns the post-install on-device agent status.
  */

@@ -5,13 +5,14 @@
  * temporary Harness home, Electron user data, build, and teardown.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { access, chmod, cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { load } from 'js-yaml'
+import { assertArtifactSecretsAbsent, credentialValues } from './artifact-secret-safety.mjs'
 import { withPrivateTempDirectory } from './private-temp-directory.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -39,8 +40,9 @@ await access(credentialsSource)
 await mkdir(artifactDir, { recursive: true })
 const sourceDocument = publicSourceDocument(JSON.parse(await readFile(sourceManifest, 'utf8')))
 const credentialDocument = load(await readFile(credentialsSource, 'utf8'))
-const artifactSecret = record(record(credentialDocument)?.refs)?.ZAI_CODING_CN_API_KEY
-if (typeof artifactSecret !== 'string' || artifactSecret.length === 0) {
+const credentialSecrets = credentialValues(credentialDocument)
+const providerSecret = record(record(credentialDocument)?.refs)?.ZAI_CODING_CN_API_KEY
+if (typeof providerSecret !== 'string' || providerSecret.length === 0) {
   throw new Error('Sub2API Electron e2e credentials have no ZAI_CODING_CN_API_KEY')
 }
 const gestaltHead = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).stdout.trim()
@@ -219,7 +221,7 @@ try {
   )
   let artifactsSecretFree = true
   try {
-    await assertArtifactSecretFree(artifactDir, artifactSecret)
+    await assertArtifactSecretsAbsent(artifactDir, credentialSecrets)
   } catch (error) {
     artifactsSecretFree = false
     teardownErrors.push(error)
@@ -358,21 +360,6 @@ function processMatches(process) {
 
 function uniqueProcesses(processes) {
   return [...new Map(processes.map(process => [`${String(process.pid)}\0${process.signature}`, process])).values()]
-}
-
-async function assertArtifactSecretFree(root, secret) {
-  const pending = [root]
-  const needle = Buffer.from(secret)
-  while (pending.length > 0) {
-    const directory = pending.pop()
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name)
-      if (entry.isDirectory()) pending.push(path)
-      else if (entry.isFile() && (await readFile(path)).includes(needle)) {
-        throw new Error(`artifact contains the configured provider secret: ${path.slice(root.length + 1)}`)
-      }
-    }
-  }
 }
 
 async function assertMissing(path) {

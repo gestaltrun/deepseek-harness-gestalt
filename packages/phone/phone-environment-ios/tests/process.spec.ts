@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createNodeIosCommandRunner } from '../src/process.ts'
 
 describe('iOS command runner', () => {
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])('rejects invalid stdoutMaxBytes %s', async (stdoutMaxBytes) => {
+    await expect(createNodeIosCommandRunner().run(process.execPath, ['-e', ''], {
+      env: { PATH: process.env.PATH ?? '' }, stdoutMaxBytes,
+    })).rejects.toThrow(TypeError)
+  })
+
   it('spawns directly with a scrubbed environment and reports exit facts independently', async () => {
     const runner = createNodeIosCommandRunner()
     const previous = process.env.DSH_TEST_SECRET
@@ -78,5 +84,88 @@ describe('iOS command runner', () => {
     })
     expect(result.terminationError).toBe('kill refused process group')
     if (pid !== undefined) process.kill(-pid, 'SIGKILL')
+  })
+
+  it.skipIf(process.platform === 'win32')('normalizes non-Error termination failures and ignores later stdout', async () => {
+    let pid: number | undefined
+    const controller = new AbortController()
+    const runner = createNodeIosCommandRunner({
+      stopGraceMs: 5,
+      killProcessGroup: (value) => { pid = value; throw 'kill failed' },
+    })
+    const operation = runner.run(process.execPath, ['-e', [
+      'process.stdout.write("before")',
+      'setTimeout(() => process.stdout.write("late"), 400)',
+    ].join(';')], {
+      env: { PATH: process.env.PATH ?? '' }, signal: controller.signal,
+    })
+    await new Promise(resolve => setTimeout(resolve, 200))
+    controller.abort()
+    const result = await operation
+    expect(result.terminationError).toBe('iOS process termination failed with a non-Error reason')
+    expect(result.stdout).toBe('before')
+    if (pid !== undefined) process.kill(-pid, 'SIGKILL')
+  })
+
+  it.skipIf(process.platform === 'win32')('contains an already-gone process group and deduplicates termination timers', async () => {
+    const controller = new AbortController()
+    const runner = createNodeIosCommandRunner({
+      stopGraceMs: 100,
+      killProcessGroup: () => {
+        const gone = new Error('already gone') as NodeJS.ErrnoException
+        gone.code = 'ESRCH'
+        throw gone
+      },
+    })
+    const operation = runner.run(process.execPath, ['-e', 'setTimeout(() => {}, 50)'], {
+      env: { PATH: process.env.PATH ?? '' }, signal: controller.signal, timeoutMs: 5,
+    })
+    controller.abort()
+    const result = await operation
+    expect(result.timedOut).toBe(true)
+    expect(result.terminationError).toBeUndefined()
+  })
+
+  it.skipIf(process.platform === 'win32')('ignores stdout delivered after the byte ceiling already failed', async () => {
+    const result = await createNodeIosCommandRunner({
+      stopGraceMs: 500,
+      killProcessGroup: () => {},
+    }).run(process.execPath, ['-e', [
+      'process.stdout.write("a".repeat(2048))',
+      'setTimeout(() => process.stdout.write("b".repeat(2048)), 20)',
+    ].join(';')], {
+      env: { PATH: process.env.PATH ?? '' }, stdoutMaxBytes: 1024,
+    })
+    expect(result.terminationError).toMatch(/stdout exceeded 1024 bytes/u)
+    expect(result.stdout).toBe('')
+  })
+
+  it('rejects a command that cannot spawn even when cancellation races its error event', async () => {
+    const controller = new AbortController()
+    const operation = createNodeIosCommandRunner().run('/path/that/does/not/exist/dsh-ios-command', [], {
+      env: { PATH: process.env.PATH ?? '' }, signal: controller.signal,
+    })
+    controller.abort()
+    await expect(operation).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('observes an abort that lands between the initial check and listener registration', async () => {
+    const controller = new AbortController()
+    const aborted = vi.spyOn(controller.signal, 'aborted', 'get').mockReturnValue(true)
+    const throwIfAborted = vi.spyOn(controller.signal, 'throwIfAborted').mockImplementation(() => {})
+    const result = await createNodeIosCommandRunner().run(process.execPath, ['-e', ''], {
+      env: { PATH: process.env.PATH ?? '' }, signal: controller.signal,
+    })
+    expect(result.signal).toBe('SIGTERM')
+    aborted.mockRestore()
+    throwIfAborted.mockRestore()
+  })
+
+  it('retains only the bounded stderr tail', async () => {
+    const result = await createNodeIosCommandRunner().run(
+      process.execPath, ['-e', 'process.stderr.write("x".repeat(20000))'],
+      { env: { PATH: process.env.PATH ?? '' } },
+    )
+    expect(Buffer.byteLength(result.stderr)).toBe(16_384)
   })
 })

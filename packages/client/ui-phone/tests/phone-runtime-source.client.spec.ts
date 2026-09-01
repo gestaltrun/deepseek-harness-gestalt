@@ -10,6 +10,13 @@ const ANDROID_PLAN = {
   components: { commandLineTools: false, platformTools: false, emulator: false, systemImage: false, avd: false },
 } as const
 
+const IOS_PLAN = {
+  developerDir: '/Applications/Xcode.app/Contents/Developer', xcodeVersion: '17.0',
+  simulatorName: 'DSH Gestalt iPhone',
+  runtime: { identifier: 'runtime-26', name: 'iOS 26.0', version: '26.0', available: true },
+  deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
+} as const
+
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
 
 function snapshot(runtime: unknown, revision = 1, platforms: unknown = {
@@ -28,7 +35,7 @@ describe('Host phone runtime source', () => {
       runtime: { identifier: 'runtime-26-0', name: 'iOS 26.0', version: '26.0', isAvailable: true },
       deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
     }
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(snapshot(
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => snapshot(
       { kind: 'ready', version: '1.0.5', source: 'managed' }, 2,
       { android: { kind: 'deferred' }, ios: { kind: 'no-simulator', plan: {
         ...plan, runtime: { ...plan.runtime, available: true },
@@ -37,10 +44,18 @@ describe('Host phone runtime source', () => {
     vi.stubGlobal('fetch', fetcher)
     const source = createHttpPhoneRuntimeSource()
     await source.prepareIos()
+    await source.cancelIos()
+    await source.refreshIos()
+    await source.startIos()
     expect(source.getSnapshot().platforms.ios).toMatchObject({
       kind: 'no-simulator', plan: { simulatorName: 'DSH Gestalt iPhone', runtime: { version: '26.0' } },
     })
-    expect(fetcher).toHaveBeenCalledWith('/phone/environment/ios/prepare', expect.objectContaining({ method: 'POST' }))
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/phone/environment/ios/prepare',
+      '/phone/environment/ios/cancel',
+      '/phone/environment/ios/refresh',
+      '/phone/environment/ios/start',
+    ])
   })
 
   it('projects Android plans and sends explicit license consent to the trusted Host operation', async () => {
@@ -306,6 +321,81 @@ describe('Host phone runtime source', () => {
       { kind: 'missing', targetVersion: '1.0.5' },
       1,
       { android: { kind: 'deferred' }, ios },
+    )))
+    await expect(createHttpPhoneRuntimeSource().refresh()).rejects.toThrow(expectedMessage)
+  })
+
+  it.each([
+    { kind: 'deferred' },
+    { kind: 'unsupported', reason: 'macOS required' },
+    { kind: 'checking' },
+    { kind: 'xcode-missing', message: 'install Xcode' },
+    { kind: 'license-required', developerDir: IOS_PLAN.developerDir, message: 'accept license' },
+    { kind: 'manual-required', code: 'first-launch', message: 'finish launch' },
+    { kind: 'manual-required', code: 'xcode-update', message: 'update Xcode', developerDir: IOS_PLAN.developerDir },
+    { kind: 'failed', code: 'BROKEN', message: 'failed', retryable: false },
+    { kind: 'failed', code: 'BROKEN', message: 'failed', retryable: true, plan: IOS_PLAN },
+    { kind: 'runtime-missing', plan: IOS_PLAN },
+    { kind: 'runtime-missing', plan: {
+      developerDir: IOS_PLAN.developerDir,
+      xcodeVersion: IOS_PLAN.xcodeVersion,
+      simulatorName: IOS_PLAN.simulatorName,
+    } },
+    { kind: 'no-simulator', plan: IOS_PLAN },
+    { kind: 'preparing', plan: IOS_PLAN, step: 'downloading-runtime' },
+    { kind: 'preparing', plan: IOS_PLAN, step: 'creating-simulator' },
+    { kind: 'preparing', plan: IOS_PLAN, step: 'booting' },
+    { kind: 'ready', plan: IOS_PLAN, deviceId: 'ios-simulator-1', running: false },
+  ])('accepts iOS state %#', async (ios) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(snapshot(
+      { kind: 'ready', version: '1.0.5', source: 'managed' }, 1,
+      { android: { kind: 'deferred' }, ios },
+    )))
+    const source = createHttpPhoneRuntimeSource()
+    await source.refresh()
+    expect(source.getSnapshot().platforms.ios).toMatchObject(ios)
+  })
+
+  it.each([
+    [{}, 'invalid iOS state'],
+    [{ kind: 'xcode-missing', message: 1 }, 'invalid iOS plan'],
+    [{ kind: 'license-required', developerDir: 1, message: 'accept' }, 'invalid iOS plan'],
+    [{ kind: 'license-required', developerDir: IOS_PLAN.developerDir, message: 1 }, 'invalid iOS plan'],
+    [{ kind: 'manual-required', code: 'other', message: 'manual' }, 'invalid iOS plan'],
+    [{ kind: 'manual-required', code: 'first-launch', message: 1 }, 'invalid iOS plan'],
+    [{ kind: 'manual-required', code: 'first-launch', message: 'manual', developerDir: 1 }, 'invalid iOS plan'],
+    [{ kind: 'failed', code: 1, message: 'failed', retryable: true }, 'invalid iOS plan'],
+    [{ kind: 'failed', code: 'BROKEN', message: 1, retryable: true }, 'invalid iOS plan'],
+    [{ kind: 'failed', code: 'BROKEN', message: 'failed', retryable: 'yes' }, 'invalid iOS plan'],
+    [{ kind: 'failed', code: 'BROKEN', message: 'failed', retryable: true, plan: {} }, 'invalid iOS plan'],
+    [{ kind: 'preparing', plan: IOS_PLAN, step: 'other' }, 'invalid iOS state'],
+    [{ kind: 'ready', plan: IOS_PLAN, deviceId: 1, running: false }, 'invalid iOS state'],
+    [{ kind: 'ready', plan: IOS_PLAN, deviceId: 'ios-simulator-1', running: 'yes' }, 'invalid iOS state'],
+    [{ kind: 'other', plan: IOS_PLAN }, 'invalid iOS state'],
+  ])('rejects malformed iOS state %#', async (ios, expectedMessage) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(snapshot(
+      { kind: 'ready', version: '1.0.5', source: 'managed' }, 1,
+      { android: { kind: 'deferred' }, ios },
+    )))
+    await expect(createHttpPhoneRuntimeSource().refresh()).rejects.toThrow(expectedMessage)
+  })
+
+  it.each([
+    [{ ...IOS_PLAN, developerDir: 1 }, 'invalid iOS plan'],
+    [{ ...IOS_PLAN, xcodeVersion: 1 }, 'invalid iOS plan'],
+    [{ ...IOS_PLAN, simulatorName: 1 }, 'invalid iOS plan'],
+    [{ ...IOS_PLAN, runtime: null }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, runtime: { ...IOS_PLAN.runtime, identifier: 1 } }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, runtime: { ...IOS_PLAN.runtime, name: 1 } }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, runtime: { ...IOS_PLAN.runtime, version: 1 } }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, runtime: { ...IOS_PLAN.runtime, available: false } }, 'invalid iOS runtime'],
+    [{ ...IOS_PLAN, deviceType: null }, 'invalid iOS device type'],
+    [{ ...IOS_PLAN, deviceType: { ...IOS_PLAN.deviceType, identifier: 1 } }, 'invalid iOS device type'],
+    [{ ...IOS_PLAN, deviceType: { ...IOS_PLAN.deviceType, name: 1 } }, 'invalid iOS device type'],
+  ])('rejects malformed iOS plan %#', async (plan, expectedMessage) => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValueOnce(snapshot(
+      { kind: 'ready', version: '1.0.5', source: 'managed' }, 1,
+      { android: { kind: 'deferred' }, ios: { kind: 'runtime-missing', plan } },
     )))
     await expect(createHttpPhoneRuntimeSource().refresh()).rejects.toThrow(expectedMessage)
   })

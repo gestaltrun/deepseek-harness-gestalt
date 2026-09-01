@@ -21,7 +21,7 @@ export const name = 'phone-environment-ios'
 /** Register the iOS Provider into the stable full-snapshot owner. */
 export function apply(ctx: Context): void {
   const manager = new IosEnvironmentManager({
-    reportError: (error) => { ctx.logger.error(error) },
+    reportError: ctx.logger.error.bind(ctx.logger),
   })
   ctx.effect(() => ctx.phoneEnvironment.registerIosEnvironment(manager), 'iOS phone environment Provider')
   ctx.effect(() => async () => { await manager.deactivate() }, 'iOS phone environment teardown')

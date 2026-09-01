@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { IosEnvironmentManager } from '../src/environment.ts'
 import type { IosCommandOptions, IosCommandResult, IosCommandRunner } from '../src/process.ts'
+import type { PhoneIosState } from '../src/types.ts'
 
 type Call = { readonly command: string; readonly args: readonly string[] }
 
@@ -9,6 +10,7 @@ class FixtureRunner implements IosCommandRunner {
   runtimeInstalled = false
   simulatorCreated = false
   simulatorBooted = false
+  deviceIdentifier = '8294A429-4C99-411F-A46D-0AD9499B7FDD'
 
   constructor(readonly mode: 'ready' | 'xcode-missing' | 'license' | 'first-launch' | 'runtime' | 'no-simulator' | 'failed') {}
 
@@ -42,14 +44,14 @@ class FixtureRunner implements IosCommandRunner {
       const existing = this.mode === 'ready' || this.simulatorCreated
       return result(0, JSON.stringify({ devices: {
         'runtime-26-0': existing ? [{
-          udid: '8294A429-4C99-411F-A46D-0AD9499B7FDD', name: 'DSH Gestalt iPhone',
+          udid: this.deviceIdentifier, name: 'DSH Gestalt iPhone',
           state: this.simulatorBooted || this.mode === 'ready' ? 'Booted' : 'Shutdown', isAvailable: true,
         }] : [],
       } }))
     }
     if (command === 'xcrun' && args[1] === 'create') {
       this.simulatorCreated = true
-      return result(0, '8294A429-4C99-411F-A46D-0AD9499B7FDD\n')
+      return result(0, `${this.deviceIdentifier}\n`)
     }
     if (command === 'xcrun' && args[1] === 'boot') {
       this.simulatorBooted = true
@@ -74,6 +76,12 @@ function abortReason(signal: AbortSignal | undefined): Error {
 }
 
 describe('iOS environment manager', () => {
+  it('constructs the production defaults without running a Host command', () => {
+    expect(new IosEnvironmentManager().snapshot()).toMatchObject({
+      kind: process.platform === 'darwin' ? 'xcode-missing' : 'unsupported',
+    })
+  })
+
   it('reserves operation ownership before checking-state notification', async () => {
     const manager = new IosEnvironmentManager({ platform: 'darwin', runner: new FixtureRunner('ready') })
     let reentry: Promise<unknown> | undefined
@@ -96,6 +104,7 @@ describe('iOS environment manager', () => {
       reason: `${family} cannot run iOS Simulator or control iPhone devices; use macOS with a complete Xcode installation.`,
     })
     await expect(manager.prepare()).rejects.toMatchObject({ code: 'PHONE_IOS_UNSUPPORTED' })
+    await expect(manager.start()).rejects.toMatchObject({ code: 'PHONE_IOS_UNSUPPORTED' })
     expect(runner.calls).toEqual([])
   })
 
@@ -151,6 +160,269 @@ describe('iOS environment manager', () => {
       })
       expect(runner.calls.some(call => call.args.includes('-downloadPlatform'))).toBe(false)
     }
+  })
+
+  it('keeps a missing Xcode installation manual', async () => {
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner: new FixtureRunner('xcode-missing') })
+    await expect(manager.prepare()).rejects.toMatchObject({ code: 'PHONE_IOS_XCODE_MISSING' })
+  })
+
+  it('reports listener failures, removes subscriptions, and uses a private command environment', async () => {
+    const fixture = new FixtureRunner('ready')
+    const environments: IosCommandOptions[] = []
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => {
+        environments.push(options)
+        return await fixture.run(command, args, options)
+      },
+    }
+    const reported: unknown[] = []
+    const manager = new IosEnvironmentManager({
+      platform: 'darwin', runner, environment: {}, homeDirectory: '/private/dsh-home',
+      reportError: error => reported.push(error),
+    })
+    manager.onChanged(() => { throw new Error('broken subscriber') })
+    const survivor: PhoneIosState[] = []
+    const remove = manager.onChanged(state => survivor.push(state))
+    await manager.refresh()
+    remove()
+    await manager.refresh()
+    expect(reported).toHaveLength(4)
+    expect(survivor).toHaveLength(2)
+    expect(environments[0]?.env).toEqual({
+      HOME: '/private/dsh-home', PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+    })
+    expect(environments.some(options => options.env.DEVELOPER_DIR === '/Applications/Xcode.app/Contents/Developer')).toBe(true)
+
+    const silent = new IosEnvironmentManager({ platform: 'darwin', runner: new FixtureRunner('ready') })
+    silent.onChanged(() => { throw new Error('ignored subscriber') })
+    await expect(silent.refresh()).resolves.toMatchObject({ kind: 'ready' })
+  })
+
+  it('rejects an external non-Error cancellation and joins it during deactivate', async () => {
+    const fixture = new FixtureRunner('runtime')
+    let downloadStarted!: () => void
+    const started = new Promise<void>((resolve) => { downloadStarted = resolve })
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => {
+        if (command !== 'xcodebuild' || args[0] !== '-downloadPlatform') return await fixture.run(command, args, options)
+        downloadStarted()
+        return await new Promise<IosCommandResult>((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => {
+            const reason: unknown = 'external stop'
+            // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- exercise arbitrary command rejection normalization
+            reject(reason)
+          }, { once: true })
+        })
+      },
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    const controller = new AbortController()
+    const preparing = manager.prepare(controller.signal)
+    await started
+    controller.abort('owner stopped')
+    await expect(preparing).rejects.toMatchObject({ code: 'PHONE_IOS_ABORTED' })
+    await expect(manager.deactivate()).resolves.toBeUndefined()
+  })
+
+  it('deactivate cancels and joins an active operation', async () => {
+    const fixture = new FixtureRunner('runtime')
+    let downloadStarted!: () => void
+    const started = new Promise<void>((resolve) => { downloadStarted = resolve })
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => {
+        if (command !== 'xcodebuild' || args[0] !== '-downloadPlatform') return await fixture.run(command, args, options)
+        downloadStarted()
+        return await new Promise<IosCommandResult>((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => { reject(abortReason(options.signal)) }, { once: true })
+        })
+      },
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    const preparing = manager.prepare()
+    await started
+    await expect(manager.deactivate()).resolves.toBeUndefined()
+    await expect(preparing).rejects.toMatchObject({ code: 'PHONE_IOS_ABORTED' })
+  })
+
+  it('surfaces shutdown failure when cancellation cleanup cannot stop the owned Simulator', async () => {
+    const fixture = new FixtureRunner('no-simulator')
+    let bootstatusStarted!: () => void
+    const started = new Promise<void>((resolve) => { bootstatusStarted = resolve })
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => {
+        if (command === 'xcrun' && args[1] === 'bootstatus') {
+          bootstatusStarted()
+          return await new Promise<IosCommandResult>((_resolve, reject) => {
+            options.signal?.addEventListener('abort', () => { reject(abortReason(options.signal)) }, { once: true })
+          })
+        }
+        if (command === 'xcrun' && args[1] === 'shutdown') return result(1, '', 'shutdown blocked')
+        return await fixture.run(command, args, options)
+      },
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await manager.prepare()
+    const starting = manager.start()
+    await started
+    manager.cancel()
+    await expect(starting).rejects.toMatchObject({ code: 'PHONE_IOS_SHUTDOWN' })
+  })
+
+  it('fails when a runtime download reports success without installing a runtime', async () => {
+    const fixture = new FixtureRunner('runtime')
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => command === 'xcodebuild' && args[0] === '-downloadPlatform'
+        ? result(0)
+        : await fixture.run(command, args, options),
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await expect(manager.prepare()).rejects.toMatchObject({ code: 'PHONE_IOS_RUNTIME_DOWNLOAD' })
+  })
+
+  it('fails if Xcode becomes unusable after a runtime download', async () => {
+    const fixture = new FixtureRunner('runtime')
+    let versionChecks = 0
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => {
+        if (command === 'xcodebuild' && args[0] === '-version') {
+          versionChecks += 1
+          if (versionChecks > 1) return result(0, 'Build version only')
+        }
+        return await fixture.run(command, args, options)
+      },
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await expect(manager.prepare()).rejects.toMatchObject({ code: 'PHONE_IOS_STATE' })
+  })
+
+  it('rejects an invalid Simulator identifier returned by simctl create', async () => {
+    const fixture = new FixtureRunner('no-simulator')
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => command === 'xcrun' && args[1] === 'create'
+        ? result(0, 'not-a-udid')
+        : await fixture.run(command, args, options),
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await expect(manager.prepare()).rejects.toMatchObject({ code: 'PHONE_IOS_SIMULATOR_CREATE' })
+  })
+
+  it.each([
+    ['xcode-missing', /Install or update/u],
+    ['runtime', /Prepare an iOS Simulator runtime/u],
+  ] as const)('requires preparation before start from %s', async (mode, message) => {
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner: new FixtureRunner(mode) })
+    await expect(manager.start()).rejects.toThrow(message)
+  })
+
+  it('does not boot an already running Simulator', async () => {
+    const fixture = new FixtureRunner('ready')
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner: fixture })
+    await expect(manager.start()).resolves.toMatchObject({ kind: 'ready', running: true })
+    expect(fixture.calls.some(call => call.args[1] === 'boot')).toBe(false)
+  })
+
+  it('preparing an existing Simulator does not create another one', async () => {
+    const fixture = new FixtureRunner('ready')
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner: fixture })
+    await expect(manager.prepare()).resolves.toMatchObject({ kind: 'ready' })
+    expect(fixture.calls.some(call => call.args[1] === 'create')).toBe(false)
+  })
+
+  it('reports failed boot exit facts with a bounded diagnostic tail', async () => {
+    const fixture = new FixtureRunner('no-simulator')
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => command === 'xcrun' && args[1] === 'boot'
+        ? result(1, '', `prefix-${'x'.repeat(1_100)}`)
+        : await fixture.run(command, args, options),
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await manager.prepare()
+    const failure = await manager.start().catch((error: unknown) => error)
+    expect(failure).toMatchObject({ code: 'PHONE_IOS_SIMULATOR_BOOT' })
+    expect((failure as Error).message).not.toContain('prefix-')
+  })
+
+  it('maps an invalid Xcode version response to the manual update state', async () => {
+    const fixture = new FixtureRunner('ready')
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => command === 'xcodebuild' && args[0] === '-version'
+        ? result(0, 'Build version only')
+        : await fixture.run(command, args, options),
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await expect(manager.refresh()).resolves.toMatchObject({ kind: 'manual-required', code: 'xcode-update' })
+  })
+
+  it.each([
+    [new Error('runner exploded'), 'runner exploded'],
+    ['non-error runner failure', 'non-error runner failure'],
+  ])('normalizes a thrown command failure %#', async (failure, message) => {
+    const runner: IosCommandRunner = { run: async () => { throw failure } }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await expect(manager.refresh()).rejects.toMatchObject({ code: 'PHONE_IOS_PREPARE', message })
+  })
+
+  it('rejects abnormal xcode-select termination facts', async () => {
+    const runner: IosCommandRunner = { run: async () => ({ ...result(0), signal: 'SIGTERM' }) }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await expect(manager.refresh()).rejects.toMatchObject({ code: 'PHONE_IOS_XCODE_SELECT' })
+  })
+
+  it.each([
+    ['runtimes', '{'],
+    ['runtimes', '[]'],
+    ['runtimes', '{}'],
+    ['runtimes', '{"runtimes":[null]}'],
+    ['runtimes', '{"runtimes":[{"identifier":"","name":"iOS 26","version":"26","isAvailable":true}]}'],
+    ['runtimes', '{"runtimes":[{"identifier":"runtime","name":"iOS 26","version":"26","isAvailable":"yes"}]}'],
+    ['devicetypes', '{}'],
+    ['devicetypes', '{"devicetypes":[{"identifier":"type","name":""}]}'],
+    ['devices available', '{"devices":[]}'],
+    ['devices available', '{"devices":{"runtime":"not-an-array"}}'],
+  ])('rejects malformed simctl %s output %#', async (subject, stdout) => {
+    const fixture = new FixtureRunner('ready')
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => command === 'xcrun' && args.join(' ').includes(`list ${subject}`)
+        ? result(0, stdout)
+        : await fixture.run(command, args, options),
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await expect(manager.refresh()).rejects.toMatchObject({ code: 'PHONE_IOS_PROTOCOL' })
+  })
+
+  it('does not clear newer Simulator ownership when an older shutdown settles', async () => {
+    const fixture = new FixtureRunner('no-simulator')
+    let firstShutdownStarted!: () => void
+    const started = new Promise<void>((resolve) => { firstShutdownStarted = resolve })
+    let finishFirstShutdown!: (value: IosCommandResult) => void
+    const firstShutdown = new Promise<IosCommandResult>((resolve) => { finishFirstShutdown = resolve })
+    const shutdownIds: string[] = []
+    const runner: IosCommandRunner = {
+      run: async (command, args, options) => {
+        if (command === 'xcrun' && args[1] === 'shutdown') {
+          shutdownIds.push(String(args[2]))
+          if (shutdownIds.length === 1) {
+            firstShutdownStarted()
+            return await firstShutdown
+          }
+        }
+        return await fixture.run(command, args, options)
+      },
+    }
+    const manager = new IosEnvironmentManager({ platform: 'darwin', runner })
+    await manager.prepare()
+    await manager.start()
+    const oldDevice = fixture.deviceIdentifier
+    const stoppingOld = manager.deactivate()
+    await started
+    fixture.deviceIdentifier = '1A294A29-4C99-411F-A46D-0AD9499B7FEE'
+    fixture.simulatorBooted = false
+    await manager.start()
+    finishFirstShutdown(result(0))
+    await stoppingOld
+    await manager.deactivate()
+    expect(shutdownIds).toEqual([oldDevice, fixture.deviceIdentifier])
   })
 
   it('publishes a retryable failed state when the controlled runtime download fails', async () => {

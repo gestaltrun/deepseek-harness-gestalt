@@ -19,7 +19,7 @@ export async function readUntilRecognizable(
   incompleteMessage: string,
 ): Promise<void> {
   const reader = body.getReader()
-  let rejectAbort: (reason?: unknown) => void = () => {}
+  let rejectAbort!: (reason?: unknown) => void
   const halt = (): void => { rejectAbort(abortError(signal.reason)) }
   const aborted = new Promise<never>((_resolve, reject) => {
     rejectAbort = reject

@@ -285,8 +285,7 @@ function parseRuntime(runtime: Record<string, unknown>): PhoneManagedRuntimeView
   throw new Error('phone environment snapshot carried an invalid runtime state')
 }
 
-function parsePlatform(value: unknown): PhonePlatformView {
-  if (!record(value)) throw new Error('phone environment snapshot carried an invalid platform state')
+function parsePlatform(value: Record<string, unknown>): PhonePlatformView {
   if (value.kind === 'deferred') return Object.freeze({ kind: 'deferred' })
   if (value.kind === 'unsupported' && string(value.reason)) {
     return Object.freeze({ kind: 'unsupported', reason: value.reason })

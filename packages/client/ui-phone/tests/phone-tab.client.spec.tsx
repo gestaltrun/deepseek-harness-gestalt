@@ -122,6 +122,15 @@ describe('PhoneTab empty state', () => {
     expect(screen.queryByRole('button', { name: '打开' })).toBeNull()
   })
 
+  it('renders iOS trust and Developer Mode guidance for an unauthorized iPhone', async () => {
+    const source = new FakeListingSource().seed(listingOf([], [
+      { id: 'iphone-1', name: 'iPhone 17', channel: 'usb', state: 'unauthorized', online: false },
+    ]))
+    await renderTab(true, source)
+    fireEvent.click(screen.getByRole('button', { name: 'iOS' }))
+    expect(screen.getByText(/解锁设备，确认信任此 Mac 并启用 Developer Mode/)).toBeTruthy()
+  })
+
   it('re-pulls the listing from the 重新检测 action of the unauthorized arm', async () => {
     const source = new FakeListingSource().seed(listingOf([
       { id: 'R3CN30', name: 'SM-S9310', channel: 'usb', state: 'unauthorized', online: false },

@@ -33,7 +33,7 @@ export class IosEnvironmentManager {
   private readonly ambient: NodeJS.ProcessEnv
   private readonly homeDirectory: string
   private readonly runner: IosCommandRunner
-  private readonly reportError: (error: unknown) => void
+  private readonly reportError: ((error: unknown) => void) | undefined
   private current: PhoneIosState
   private readonly listeners = new Set<(state: PhoneIosState) => void>()
   private operation: { readonly controller: AbortController; readonly task: Promise<PhoneIosState> } | undefined
@@ -45,7 +45,7 @@ export class IosEnvironmentManager {
     this.ambient = options.environment ?? process.env
     this.homeDirectory = options.homeDirectory ?? homedir()
     this.runner = options.runner ?? nodeIosCommandRunner
-    this.reportError = options.reportError ?? (() => {})
+    this.reportError = options.reportError
     this.current = Object.freeze(planIosEnvironment(this.platform))
     this.lastActionable = this.current
   }
@@ -84,11 +84,9 @@ export class IosEnvironmentManager {
    */
   prepare(signal?: AbortSignal): Promise<PhoneIosState> {
     if (this.platform !== 'darwin') {
-      const state = planIosEnvironment(this.platform)
+      const state = planIosEnvironment(this.platform) as Extract<PhoneIosState, { kind: 'unsupported' }>
       return Promise.reject(new IosEnvironmentError(
-        'PHONE_IOS_UNSUPPORTED', state.kind === 'unsupported'
-          ? state.reason
-          : 'iOS preparation requires macOS and Xcode',
+        'PHONE_IOS_UNSUPPORTED', state.reason,
       ))
     }
     return this.startOperation(async operationSignal => await this.prepareCurrent(operationSignal), signal)
@@ -159,7 +157,7 @@ export class IosEnvironmentManager {
       }
       throw failure
     }).finally(() => {
-      if (this.operation?.controller === controller) this.operation = undefined
+      this.operation = undefined
     })
     this.operation = { controller, task }
     return task
@@ -170,10 +168,6 @@ export class IosEnvironmentManager {
     if (state.kind === 'xcode-missing') throw new IosEnvironmentError('PHONE_IOS_XCODE_MISSING', state.message)
     if (state.kind === 'license-required') throw new IosEnvironmentError('PHONE_IOS_LICENSE_REQUIRED', state.message)
     if (state.kind === 'manual-required') throw new IosEnvironmentError(`PHONE_IOS_${state.code.toUpperCase().replace('-', '_')}`, state.message)
-    if (state.kind === 'unsupported') throw new IosEnvironmentError('PHONE_IOS_UNSUPPORTED', state.reason)
-    if (state.kind === 'failed' || state.kind === 'checking' || state.kind === 'preparing') {
-      throw new IosEnvironmentError('PHONE_IOS_STATE', `iOS preparation cannot start from ${state.kind}`)
-    }
     if (state.kind === 'runtime-missing') {
       this.publish({ kind: 'preparing', plan: state.plan, step: 'downloading-runtime' })
       await this.requireSuccess(
@@ -186,8 +180,8 @@ export class IosEnvironmentManager {
       }
     }
     if (state.kind === 'no-simulator') {
-      const runtime = requireRuntime(state.plan)
-      const deviceType = requireDeviceType(state.plan)
+      const runtime = state.plan.runtime as IosRuntime
+      const deviceType = state.plan.deviceType as IosDeviceType
       this.publish({ kind: 'preparing', plan: state.plan, step: 'creating-simulator' })
       const created = await this.requireSuccess(
         'xcrun', ['simctl', 'create', IOS_SIMULATOR_NAME, deviceType.identifier, runtime.identifier], signal,
@@ -209,9 +203,8 @@ export class IosEnvironmentManager {
   private async startCurrent(signal: AbortSignal): Promise<PhoneIosState> {
     const state = await this.detect(signal)
     if (state.kind !== 'ready') {
-      const message = state.kind === 'unsupported' ? state.reason
-        : 'message' in state ? state.message
-          : 'Prepare an iOS Simulator runtime and the DSH Gestalt iPhone before starting it.'
+      const message = 'message' in state ? state.message
+        : 'Prepare an iOS Simulator runtime and the DSH Gestalt iPhone before starting it.'
       throw new IosEnvironmentError('PHONE_IOS_NOT_PREPARED', message)
     }
     if (state.running) return state
@@ -392,7 +385,7 @@ export class IosEnvironmentManager {
       this.lastActionable = this.current
     }
     for (const listener of [...this.listeners]) {
-      try { listener(this.current) } catch (error) { this.reportError(error) }
+      try { listener(this.current) } catch (error) { this.reportError?.(error) }
     }
   }
 
@@ -412,16 +405,6 @@ export class IosEnvironmentManager {
 }
 
 const deviceIdPattern = /^[0-9A-Fa-f-]{8,}$/u
-
-function requireRuntime(plan: IosPreparationPlan): IosRuntime {
-  if (plan.runtime !== undefined) return plan.runtime
-  throw new IosEnvironmentError('PHONE_IOS_RUNTIME_MISSING', 'no available iOS Simulator runtime was selected')
-}
-
-function requireDeviceType(plan: IosPreparationPlan): IosDeviceType {
-  if (plan.deviceType !== undefined) return plan.deviceType
-  throw new IosEnvironmentError('PHONE_IOS_DEVICE_TYPE', 'no iPhone Simulator device type was selected')
-}
 
 function jsonRecord(output: string, subject: string): Record<string, unknown> {
   try { return objectAt(JSON.parse(output) as unknown, subject) } catch (error) {

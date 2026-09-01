@@ -31,11 +31,23 @@ function plan(components: Partial<AndroidPreparationPlanView['components']> = {}
   }
 }
 
-function props(android: PhoneAndroidView, ios: PhoneIosView = { kind: 'deferred' }) {
+const IOS_PLAN = {
+  developerDir: '/Applications/Xcode.app/Contents/Developer',
+  xcodeVersion: '17.0',
+  simulatorName: 'DSH Gestalt iPhone',
+  runtime: { identifier: 'runtime-26', name: 'iOS 26.0', version: '26.0', available: true as const },
+  deviceType: { identifier: 'type-iphone-17', name: 'iPhone 17' },
+}
+
+function props(
+  android: PhoneAndroidView,
+  ios: PhoneIosView = { kind: 'deferred' },
+  iosUnsupportedMessage = 'iOS simulators require macOS and Xcode.',
+) {
   return {
     android,
     ios,
-    iosUnsupportedMessage: 'iOS simulators require macOS and Xcode.',
+    iosUnsupportedMessage,
     onPrepareAndroid: vi.fn(),
     onCancelAndroid: vi.fn(),
     onRefreshAndroid: vi.fn(),
@@ -134,5 +146,76 @@ describe('PhonePlatformCards', () => {
     expect(screen.getByRole('progressbar', { name: '正在下载 Android 命令行工具' })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(card.onCancelAndroid).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    [{ kind: 'deferred' }, '等待 iOS 环境 Provider…'],
+    [{ kind: 'checking' }, '正在检测 Xcode、Apple 授权、iOS Runtime 与模拟器…'],
+    [{ kind: 'xcode-missing', message: 'install full Xcode' }, 'install full Xcode'],
+    [{ kind: 'license-required', developerDir: IOS_PLAN.developerDir, message: 'license pending' }, 'license pending'],
+    [{ kind: 'manual-required', code: 'first-launch', message: 'finish first launch' }, 'finish first launch'],
+    [{ kind: 'manual-required', code: 'xcode-update', message: 'update Xcode', developerDir: IOS_PLAN.developerDir }, 'update Xcode'],
+    [{ kind: 'runtime-missing', plan: {
+      developerDir: IOS_PLAN.developerDir,
+      xcodeVersion: IOS_PLAN.xcodeVersion,
+      simulatorName: IOS_PLAN.simulatorName,
+      deviceType: IOS_PLAN.deviceType,
+    } }, '可由 Xcode 下载 iOS Simulator Runtime'],
+    [{ kind: 'no-simulator', plan: IOS_PLAN }, 'iOS Runtime 已就绪'],
+    [{ kind: 'preparing', plan: IOS_PLAN, step: 'downloading-runtime' }, '正在通过 Xcode 下载 iOS Simulator Runtime…'],
+    [{ kind: 'preparing', plan: IOS_PLAN, step: 'creating-simulator' }, '正在创建 DSH Gestalt iPhone…'],
+    [{ kind: 'preparing', plan: IOS_PLAN, step: 'booting' }, '正在启动模拟器，并由设备控制代理验证 mobilecli MJPEG 真实画面…'],
+    [{ kind: 'failed', code: 'BROKEN', message: 'iOS preparation failed', retryable: false }, 'iOS preparation failed'],
+  ] satisfies Array<[PhoneIosView, string]>)('renders iOS state %#', (ios, text) => {
+    render(<PhonePlatformCards {...props({ kind: 'deferred' }, ios)} />)
+    expect(screen.getByText(text, { exact: false })).toBeTruthy()
+  })
+
+  it('runs each iOS preparation, cancellation, refresh, and start action', () => {
+    const missing = props({ kind: 'deferred' }, { kind: 'runtime-missing', plan: IOS_PLAN })
+    const rendered = render(<PhonePlatformCards {...missing} />)
+    fireEvent.click(screen.getByRole('button', { name: '一键准备 iOS' }))
+    fireEvent.click(screen.getByRole('button', { name: '重新检测' }))
+    expect(missing.onPrepareIos).toHaveBeenCalledOnce()
+    expect(missing.onRefreshIos).toHaveBeenCalledOnce()
+
+    const preparing = props({ kind: 'deferred' }, { kind: 'preparing', plan: IOS_PLAN, step: 'booting' })
+    rendered.rerender(<PhonePlatformCards {...preparing} />)
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(preparing.onCancelIos).toHaveBeenCalledOnce()
+
+    const stopped = props({ kind: 'deferred' }, {
+      kind: 'ready', plan: IOS_PLAN, deviceId: 'ios-simulator-1', running: false,
+    })
+    rendered.rerender(<PhonePlatformCards {...stopped} />)
+    fireEvent.click(screen.getByRole('button', { name: '启动默认模拟器' }))
+    fireEvent.click(screen.getByRole('button', { name: '重新检测' }))
+    expect(stopped.onStartIos).toHaveBeenCalledOnce()
+    expect(stopped.onRefreshIos).toHaveBeenCalledOnce()
+
+    const running = props({ kind: 'deferred' }, {
+      kind: 'ready', plan: IOS_PLAN, deviceId: 'ios-simulator-1', running: true,
+    })
+    rendered.rerender(<PhonePlatformCards {...running} />)
+    expect(screen.getByText('已启动 · MJPEG 实时画面 · ios-simulator-1')).toBeTruthy()
+
+    const manual = props({ kind: 'deferred' }, { kind: 'xcode-missing', message: 'install Xcode' })
+    rendered.rerender(<PhonePlatformCards {...manual} />)
+    fireEvent.click(screen.getByRole('button', { name: '完成手动步骤后重新检测' }))
+    expect(manual.onRefreshIos).toHaveBeenCalledOnce()
+
+    const retryable = props({ kind: 'deferred' }, {
+      kind: 'failed', plan: IOS_PLAN, code: 'RETRY', message: 'retry preparation', retryable: true,
+    })
+    rendered.rerender(<PhonePlatformCards {...retryable} />)
+    fireEvent.click(screen.getByRole('button', { name: '一键准备 iOS' }))
+    expect(retryable.onPrepareIos).toHaveBeenCalledOnce()
+  })
+
+  it('uses the Provider reason when the deployment has no platform-specific copy', () => {
+    render(<PhonePlatformCards {...props(
+      { kind: 'deferred' }, { kind: 'unsupported', reason: 'Linux host' }, '',
+    )} />)
+    expect(screen.getByText('Linux host')).toBeTruthy()
   })
 })

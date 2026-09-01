@@ -266,6 +266,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Carries current-installation membership operations into Desktop UI composition; the Desktop provider obtains a fresh Account presentation for every call, while renderer consumers receive no credentials.',
   },
   {
+    key: 'projectMembershipAccess',
+    pkg: 'project-membership-client',
+    title: 'Project Membership Account access',
+    mode: 'core',
+    implementations: ['ui-desktop'],
+    consumers: ['ui-workspace'],
+    note: 'Projects the shared current-installation Platform Account lifecycle and opens the owning sign-in surface; it carries no Account token or installation key.',
+  },
+  {
     key: 'remoteAccess',
     pkg: 'remote-access',
     title: 'Personal Pairing lifecycle seam',

@@ -7,7 +7,9 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
-import type {} from '@deepseek-ai/dsh-project-membership-client'
+import type {
+  ProjectMembershipAccess, ProjectMembershipAccessSnapshot,
+} from '@deepseek-ai/dsh-project-membership-client'
 import { BrandSeat } from './BrandSeat.tsx'
 import { DragStrip } from './DragStrip.tsx'
 import { UpdateControl } from './UpdateControl.tsx'
@@ -17,6 +19,7 @@ import { bindDesktopUpdater, createUpdaterSource } from './status-source.ts'
 import { bindDesktopAccount, createDesktopAccountSource } from './account-source.ts'
 import { bindDesktopPairing, createDesktopPairingSource } from './pairing-source.ts'
 import { en, zh, type DesktopKey } from './locales.ts'
+import type { DesktopAccountSnapshot, DesktopBridge } from '../protocol.ts'
 
 export type { DesktopBridge, UpdaterPhase, UpdaterStatus } from '../protocol.ts'
 export type { DesktopKey } from './locales.ts'
@@ -38,6 +41,34 @@ const NS = 'desktop'
 /** Required services: slots plus desktop copy. */
 export const inject = ['slots', 'locale']
 
+function membershipAccessSnapshot(snapshot: DesktopAccountSnapshot): ProjectMembershipAccessSnapshot {
+  const status = snapshot.status === 'unavailable'
+    ? 'unavailable'
+    : snapshot.status === 'authorizing' || snapshot.status === 'polling'
+      ? 'signing-in'
+      : snapshot.status === 'signed-in'
+        ? 'signed-in'
+        : snapshot.status === 'signing-out'
+          ? 'signing-out'
+          : 'signed-out'
+  return { status, ...(snapshot.error === undefined ? {} : { error: snapshot.error }) }
+}
+
+function projectMembershipAccess(
+  account: ReturnType<typeof createDesktopAccountSource>,
+  desktop: DesktopBridge,
+): ProjectMembershipAccess {
+  return {
+    getSnapshot: () => membershipAccessSnapshot(account.getSnapshot()),
+    subscribe: listener => account.subscribe(listener),
+    openSignIn: () => {
+      void desktop.chromeOverlayShow({
+        kind: 'settings', requestId: crypto.randomUUID(), sectionId: 'mobile-pairing',
+      }).catch((error: unknown) => { console.error('failed to open Platform Account settings', error) })
+    },
+  }
+}
+
 /**
  * Register Desktop chrome into sidebar holes declared by ui-sidebar.
  * @param ctx - client root context.
@@ -54,6 +85,7 @@ export function apply(ctx: ClientContext): void {
     ctx.effect(() => bindDesktopUpdater(updater, desktop), 'ui-desktop: updater status')
     ctx.effect(() => bindDesktopAccount(account, desktop), 'ui-desktop: account status')
     ctx.effect(() => bindDesktopPairing(pairing, desktop), 'ui-desktop: pairing status')
+    ctx.provide('projectMembershipAccess', projectMembershipAccess(account, desktop))
     if (desktop.projectMembership !== undefined) {
       ctx.provide('projectMembershipClient', desktop.projectMembership)
     }

@@ -11,12 +11,12 @@
  * different remote is labeled 异源, and a new clone is always selectable.
  * Closing the wizard decides nothing: the invitation stays pending.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Button, Modal, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { WorkspaceBrowserProps } from './contract/slots.ts'
 import type {
-  ProjectMembershipGateway, WorkspaceIssuedInvitation, WorkspaceMemberRow,
+  ProjectMembershipAccessSnapshot, ProjectMembershipGateway, WorkspaceIssuedInvitation, WorkspaceMemberRow,
   WorkspacePendingInvitation, WorkspaceProjectView,
 } from './contract/slots.ts'
 import css from './WorkspaceSettings.module.css'
@@ -43,6 +43,20 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
   onClose: () => void
   t: SettingsTranslate
 }) {
+  const accessSource = gateway.access
+  const subscribeAccess = accessSource === undefined
+    ? noopSubscribe
+    : (listener: () => void) => accessSource.subscribe(listener)
+  const readAccess: () => ProjectMembershipAccessSnapshot = accessSource === undefined
+    ? signedInAccess
+    : () => accessSource.getSnapshot()
+  const openSignIn = accessSource === undefined ? undefined : () => { accessSource.openSignIn() }
+  const access = useSyncExternalStore(
+    subscribeAccess,
+    readAccess,
+    readAccess,
+  )
+  const authorized = access.status === 'signed-in'
   const [project, setProject] = useState<WorkspaceProjectView | null | undefined>(undefined)
   const [name, setName] = useState('')
   const [remote, setRemote] = useState<string | null | undefined>(undefined)
@@ -52,6 +66,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
   const createBlocked = creating || trimmedName === '' || remote === undefined || remote === null
   const visibleCreateError = createError ?? (project === null && remote === null ? t('upgrade.missingRemote') : null)
   useEffect(() => {
+    if (!authorized) return
     let alive = true
     Promise.all([
       gateway.projectForWorkspace(workspaceId),
@@ -67,7 +82,7 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
       setCreateError(reason instanceof Error ? reason.message : String(reason))
     })
     return () => { alive = false }
-  }, [gateway, workspaceId])
+  }, [authorized, gateway, workspaceId])
   const submitCreate = () => {
     /* v8 ignore next -- the create button uses the same createBlocked predicate. */
     if (createBlocked) return
@@ -85,46 +100,89 @@ export function WorkspaceSettingsModal({ workspaceId, workspaceTitle, gateway, o
     <Modal open onClose={onClose} closeLabel={t('close')} title={t('settings.title')}>
       <div className={css.section}>
         <div className={css.sectionTitle}>{t('upgrade.title')}</div>
-        {project === undefined
-          ? <div className={css.sectionDesc}>{t('upgrade.loading')}</div>
-          : project === null
-            ? (
-              <div>
-                <div className={css.sectionDesc}>{t('upgrade.desc')}</div>
-                <label className={css.fieldLabel}>
-                  {t('upgrade.projectName')}
-                  <input
-                    className={css.fieldInput}
-                    value={name}
-                    aria-label={t('upgrade.projectName')}
-                    disabled={creating}
-                    onChange={(e) => { setName(e.target.value); setCreateError(null) }}
-                  />
-                </label>
-                <label className={css.fieldLabel}>
-                  {t('upgrade.remoteUrl')}
-                  <input
-                    className={css.fieldInput}
-                    value={remote ?? ''}
-                    aria-label={t('upgrade.remoteUrl')}
-                    readOnly
-                  />
-                </label>
-                {visibleCreateError !== null && <div className={css.actionError} role="alert">{visibleCreateError}</div>}
-                <Button variant="primary" disabled={createBlocked} onClick={submitCreate}>
-                  {creating ? t('upgrade.creating') : t('upgrade.create')}
-                </Button>
-              </div>
-            )
-            : (
-              <div>
-                <div className={css.sectionDesc}>{t('upgrade.bound', { name: project.name })}</div>
-                <MemberManagement gateway={gateway} project={project} t={t} />
-              </div>
-            )}
+        {!authorized
+          ? <ProjectMembershipAccessGate
+            access={access}
+            openSignIn={openSignIn}
+            t={t}
+          />
+          : project === undefined
+            ? <div className={css.sectionDesc}>{t('upgrade.loading')}</div>
+            : project === null
+              ? (
+                <div>
+                  <div className={css.sectionDesc}>{t('upgrade.desc')}</div>
+                  <label className={css.fieldLabel}>
+                    {t('upgrade.projectName')}
+                    <input
+                      className={css.fieldInput}
+                      value={name}
+                      aria-label={t('upgrade.projectName')}
+                      disabled={creating}
+                      onChange={(e) => { setName(e.target.value); setCreateError(null) }}
+                    />
+                  </label>
+                  <label className={css.fieldLabel}>
+                    {t('upgrade.remoteUrl')}
+                    <input
+                      className={css.fieldInput}
+                      value={remote ?? ''}
+                      aria-label={t('upgrade.remoteUrl')}
+                      readOnly
+                    />
+                  </label>
+                  {visibleCreateError !== null && <div className={css.actionError} role="alert">{visibleCreateError}</div>}
+                  <Button variant="primary" disabled={createBlocked} onClick={submitCreate}>
+                    {creating ? t('upgrade.creating') : t('upgrade.create')}
+                  </Button>
+                </div>
+              )
+              : (
+                <div>
+                  <div className={css.sectionDesc}>{t('upgrade.bound', { name: project.name })}</div>
+                  <MemberManagement gateway={gateway} project={project} t={t} />
+                </div>
+              )}
       </div>
       <div className={css.settingsWorkspace} aria-hidden="true">{workspaceTitle}</div>
     </Modal>
+  )
+}
+
+const noopSubscribe = (): (() => void) => () => {}
+const signedInAccessSnapshot = { status: 'signed-in' as const }
+const signedInAccess = () => signedInAccessSnapshot
+
+function ProjectMembershipAccessGate({ access, openSignIn, t }: {
+  access: ProjectMembershipAccessSnapshot
+  openSignIn: (() => void) | undefined
+  t: SettingsTranslate
+}) {
+  const pending = access.status === 'signing-in'
+  const unavailable = access.status === 'unavailable'
+  return (
+    <div>
+      <div className={css.subTitle}>{t('upgrade.accountRequired')}</div>
+      <div className={css.sectionDesc}>
+        {pending
+          ? t('upgrade.signingIn')
+          : access.status === 'signing-out'
+            ? t('upgrade.signingOut')
+            : unavailable
+              ? t('upgrade.accountUnavailable')
+              : t('upgrade.accountDescription')}
+      </div>
+      {access.error !== undefined && <div className={css.actionError} role="alert">{access.error}</div>}
+      {!unavailable && (
+        <Button
+          variant="primary"
+          disabled={pending || access.status === 'signing-out' || openSignIn === undefined}
+          onClick={openSignIn}
+        >
+          {t('upgrade.signIn')}
+        </Button>
+      )}
+    </div>
   )
 }
 

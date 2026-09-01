@@ -1634,6 +1634,30 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'projectMembershipAccess',
+    summary: 'Shared Platform Account access used to gate authenticated Project Membership operations.',
+    description: 'Shared Platform Account access used to gate authenticated Project Membership operations.',
+    methods: [
+      {
+        signature: 'getSnapshot(): ProjectMembershipAccessSnapshot',
+        description: 'Read the current installation authorization state.',
+        parameters: [],
+        returns: 'current installation authorization state.',
+      },
+      {
+        signature: 'subscribe(listener: () => void): () => void',
+        description: 'Observe current installation authorization changes.',
+        parameters: [{ name: 'listener', description: 'callback invoked after the snapshot changes.' }],
+        returns: 'disposer for this subscription.',
+      },
+      {
+        signature: 'openSignIn(): void',
+        description: 'Open the product surface that owns Platform Account sign-in.',
+        parameters: [],
+      },
+    ],
+  },
+  {
     key: 'projectMembershipClient',
     summary: 'Authenticated current-installation client used by product UI consumers.',
     description: 'Authenticated current-installation client used by product UI consumers.',
@@ -5326,6 +5350,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ProjectionSnapshot',
     declaration: 'export interface ProjectionSnapshot {\n    asOfSeq: number;\n    values: Partial<SessionProjectionMap>;\n}',
+  },
+  {
+    name: 'ProjectMembershipAccessSnapshot',
+    declaration: 'export type ProjectMembershipAccessSnapshot = {\n    status: \'unavailable\' | \'signed-out\' | \'signing-in\' | \'signed-in\' | \'signing-out\';\n    error?: string;\n};',
   },
   {
     name: 'ProjectPeerGrantId',

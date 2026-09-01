@@ -155,6 +155,32 @@ Types: [PlatformAccountId](platform-account.md)
 
 Source: [`packages/platform/project-membership/src/index.ts`](../../packages/platform/project-membership/src/index.ts)
 
+<a id="ctxprojectmembershipaccess--projectmembershipaccess"></a>
+
+### `ctx.projectMembershipAccess` — `ProjectMembershipAccess`
+
+Shared Platform Account access used to gate authenticated Project Membership operations.
+
+```ts cordis-catalog
+/**
+ * Read the current installation authorization state.
+ * @returns current installation authorization state.
+ */
+getSnapshot(): ProjectMembershipAccessSnapshot
+
+/**
+ * Observe current installation authorization changes.
+ * @param listener - callback invoked after the snapshot changes.
+ * @returns disposer for this subscription.
+ */
+subscribe(listener: () => void): () => void
+
+/** Open the product surface that owns Platform Account sign-in. */
+openSignIn(): void
+```
+
+Source: [`packages/platform/project-membership-client/src/index.ts`](../../packages/platform/project-membership-client/src/index.ts)
+
 <a id="ctxprojectmembershipclient--projectmembershipclient"></a>
 
 ### `ctx.projectMembershipClient` — `ProjectMembershipClient`

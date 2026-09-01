@@ -192,9 +192,33 @@ export interface ProjectMembershipClient {
   removeMember(membershipId: MembershipId): Promise<void>
 }
 
+/** Current installation authorization state consumed by Project Membership UI. */
+export type ProjectMembershipAccessSnapshot = {
+  status: 'unavailable' | 'signed-out' | 'signing-in' | 'signed-in' | 'signing-out'
+  error?: string
+}
+
+/** Shared Platform Account access used to gate authenticated Project Membership operations. */
+export interface ProjectMembershipAccess {
+  /**
+   * Read the current installation authorization state.
+   * @returns current installation authorization state.
+   */
+  getSnapshot(): ProjectMembershipAccessSnapshot
+  /**
+   * Observe current installation authorization changes.
+   * @param listener - callback invoked after the snapshot changes.
+   * @returns disposer for this subscription.
+   */
+  subscribe(listener: () => void): () => void
+  /** Open the product surface that owns Platform Account sign-in. */
+  openSignIn(): void
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     projectMembershipClient: ProjectMembershipClient
+    projectMembershipAccess: ProjectMembershipAccess
   }
 }
 

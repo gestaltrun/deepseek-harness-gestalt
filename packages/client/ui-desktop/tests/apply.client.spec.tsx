@@ -4,7 +4,8 @@ import { Context } from '@deepseek-ai/cordis'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-desktop/client'
-import type { DesktopBridge, UpdaterStatus } from '../src/protocol.ts'
+import type {} from '@deepseek-ai/dsh-project-membership-client'
+import type { DesktopAccountSnapshot, DesktopBridge, UpdaterStatus } from '../src/protocol.ts'
 
 afterEach(() => {
   delete window.dshDesktop
@@ -68,6 +69,7 @@ describe('ui-desktop apply', () => {
   })
 
   it('subscribes to the Desktop updater bridge when present', async () => {
+    let accountListener: ((snapshot: Awaited<ReturnType<DesktopBridge['accountGetSnapshot']>>) => void) | undefined
     const desktop: DesktopBridge = {
       platform: 'darwin',
       getStatus: vi.fn(() => Promise.resolve({ state: 'idle', lastCheckedAt: 1 } satisfies UpdaterStatus)),
@@ -85,7 +87,10 @@ describe('ui-desktop apply', () => {
       accountAcceptPrivacy: vi.fn(),
       accountBeginLogin: vi.fn(),
       accountSignOut: vi.fn(),
-      onAccountSnapshot: vi.fn(() => () => {}),
+      onAccountSnapshot: vi.fn((listener: (snapshot: DesktopAccountSnapshot) => void) => {
+        accountListener = listener
+        return () => {}
+      }),
       pairingGetSnapshot: vi.fn().mockResolvedValue({ status: 'unavailable', enabled: false, pairings: [] }),
       pairingSetEnabled: vi.fn(),
       pairingCreateChallenge: vi.fn(),
@@ -94,7 +99,7 @@ describe('ui-desktop apply', () => {
       pairingReject: vi.fn(),
       pairingRevoke: vi.fn(),
       onPairingSnapshot: vi.fn(() => () => {}),
-      chromeOverlayShow: async () => {},
+      chromeOverlayShow: vi.fn(async () => {}),
       chromeOverlayHide: async () => {},
       chromeOverlayGetState: async () => null,
       chromeOverlayResult: () => {},
@@ -125,6 +130,41 @@ describe('ui-desktop apply', () => {
     expect(desktop.pairingGetSnapshot).toHaveBeenCalledOnce()
     expect(desktop.onPairingSnapshot).toHaveBeenCalledOnce()
     expect(b.ctx.get('projectMembershipClient')).toBe(desktop.projectMembership)
+    const membershipAccess = b.ctx.get('projectMembershipAccess')
+    expect(membershipAccess?.getSnapshot()).toEqual({ status: 'unavailable' })
+    const accessListener = vi.fn()
+    const disposeAccessListener = membershipAccess?.subscribe(accessListener)
+    for (const [snapshot, expected] of [
+      [{ status: 'idle', privacyAccepted: false }, { status: 'signed-out' }],
+      [{ status: 'failed', privacyAccepted: true, error: 'login failed' }, { status: 'signed-out', error: 'login failed' }],
+      [{ status: 'authorizing', privacyAccepted: true }, { status: 'signing-in' }],
+      [{ status: 'polling', privacyAccepted: true }, { status: 'signing-in' }],
+      [{ status: 'signed-in', privacyAccepted: true, account: {
+        id: 'account-1', githubId: 1, githubLogin: 'mona', avatarUrl: 'https://avatars.example/mona.png',
+      } }, { status: 'signed-in' }],
+      [{ status: 'signing-out', privacyAccepted: true, account: {
+        id: 'account-1', githubId: 1, githubLogin: 'mona', avatarUrl: 'https://avatars.example/mona.png',
+      } }, { status: 'signing-out' }],
+    ] as const) {
+      accountListener?.(snapshot)
+      expect(membershipAccess?.getSnapshot()).toEqual(expected)
+    }
+    expect(accessListener).toHaveBeenCalledTimes(6)
+    disposeAccessListener?.()
+    membershipAccess?.openSignIn()
+    expect(desktop.chromeOverlayShow).toHaveBeenCalledOnce()
+    const overlayRequest = vi.mocked(desktop.chromeOverlayShow).mock.calls[0]?.[0]
+    expect(overlayRequest?.kind).toBe('settings')
+    if (overlayRequest?.kind !== 'settings') throw new Error('expected Settings overlay request')
+    expect(overlayRequest.sectionId).toBe('mobile-pairing')
+    expect(overlayRequest?.requestId).toEqual(expect.any(String))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(desktop.chromeOverlayShow).mockRejectedValueOnce(new Error('overlay unavailable'))
+    membershipAccess?.openSignIn()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(consoleError).toHaveBeenCalledWith('failed to open Platform Account settings', expect.any(Error))
+    consoleError.mockRestore()
     const brand = b.slots.entries('sidebar.brand')[0]
     expect(brand?.select?.({} as never)).toEqual({})
     const footer = b.slots.entries('sidebar.footer.action').find(entry => entry.options.id === 'desktop-update')
@@ -136,5 +176,16 @@ describe('ui-desktop apply', () => {
     await Promise.resolve()
     await fiber.dispose()
     expect(b.ctx.get('projectMembershipClient')).toBeUndefined()
+    expect(b.ctx.get('projectMembershipAccess')).toBeUndefined()
+
+    const desktopWithoutMembership = { ...desktop }
+    delete desktopWithoutMembership.projectMembership
+    window.dshDesktop = desktopWithoutMembership
+    const accessOnly = await bench()
+    const accessOnlyFiber = accessOnly.ctx.plugin({ inject: [...inject], apply })
+    await accessOnlyFiber.await()
+    expect(accessOnly.ctx.get('projectMembershipAccess')).toBeDefined()
+    expect(accessOnly.ctx.get('projectMembershipClient')).toBeUndefined()
+    await accessOnlyFiber.dispose()
   })
 })

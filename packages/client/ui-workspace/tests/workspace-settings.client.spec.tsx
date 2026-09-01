@@ -7,7 +7,9 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { ProjectMembershipGateway, WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
+import type {
+  ProjectMembershipAccessSnapshot, ProjectMembershipGateway, WorkspaceBrowserProps,
+} from '../src/client/contract/slots.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 import { WorkspaceBrowser } from '../src/client/WorkspaceBrowser.tsx'
 import {
@@ -76,6 +78,24 @@ function gateway(overrides: Partial<ProjectMembershipGateway> = {}) {
       workspaceId: wid('cloned'), title: 'Assembled', normalizedRemoteUrl: SAME_REMOTE,
     }),
     ...overrides,
+  }
+}
+
+function accessHarness(initial: ProjectMembershipAccessSnapshot) {
+  let snapshot = initial
+  const listeners = new Set<() => void>()
+  const openSignIn = vi.fn()
+  return {
+    access: {
+      getSnapshot: () => snapshot,
+      subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+      openSignIn,
+    },
+    openSignIn,
+    publish(value: ProjectMembershipAccessSnapshot) {
+      snapshot = value
+      for (const listener of listeners) listener()
+    },
   }
 }
 
@@ -165,6 +185,58 @@ describe('workspace settings and invite wizard (M4)', () => {
     const items = screen.getAllByRole('menuitem').map(item => item.textContent)
     expect(items[0]).toBe('工作区设置')
     expect(items).toEqual(['工作区设置', '重命名', '删除工作区'])
+  })
+
+  it('gates Cloud Project lookup on the shared Platform Account and resumes after sign-in', async () => {
+    const account = accessHarness({ status: 'signed-out' })
+    const membership = gateway({ access: account.access })
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+    />)
+
+    expect(screen.getByText('Project Members 使用与手机配对相同的 Platform 账号。')).toBeTruthy()
+    expect(screen.queryByLabelText('云项目名称')).toBeNull()
+    expect(membership.projectForWorkspace).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '登录 Platform' }))
+    expect(account.openSignIn).toHaveBeenCalledOnce()
+
+    act(() => { account.publish({ status: 'signing-in' }) })
+    expect(screen.getByText('请在浏览器中完成登录。')).toBeTruthy()
+    expect(membership.projectForWorkspace).not.toHaveBeenCalled()
+
+    act(() => { account.publish({ status: 'signed-in' }) })
+    await flush()
+    expect(membership.projectForWorkspace).toHaveBeenCalledWith(wid('proj'))
+    expect(screen.getByLabelText('云项目名称')).toBeTruthy()
+  })
+
+  it.each([
+    {
+      access: { status: 'unavailable' as const },
+      description: '此安装上的 Platform 账号不可用。',
+      button: false,
+    },
+    {
+      access: { status: 'signing-out' as const },
+      description: '正在退出 Platform…',
+      button: true,
+    },
+    {
+      access: { status: 'signed-out' as const, error: '登录未完成' },
+      description: 'Project Members 使用与手机配对相同的 Platform 账号。',
+      button: true,
+    },
+  ])('renders the shared Platform Account gate for $access.status', ({ access, button, description }) => {
+    const account = accessHarness(access)
+    const membership = gateway({ access: account.access })
+    render(<WorkspaceSettingsModal
+      workspaceId={wid('proj')} workspaceTitle="proj" gateway={membership} onClose={vi.fn()} t={t}
+    />)
+
+    expect(screen.getByText(description)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '登录 Platform' }) !== null).toBe(button)
+    expect(membership.projectForWorkspace).not.toHaveBeenCalled()
+    if (access.error !== undefined) expect(screen.getByRole('alert').textContent).toBe(access.error)
   })
 
   it('routes the upgrade create action through the membership gateway and shows the roster', async () => {

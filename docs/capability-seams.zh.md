@@ -83,6 +83,7 @@ flowchart LR
   svc_projectMembershipClient["ctx.projectMembershipClient<br/>Authenticated Project Membership client"]
   pkg_ui_desktop["ui-desktop"]
   pkg_ui_workspace["ui-workspace"]
+  svc_projectMembershipAccess["ctx.projectMembershipAccess<br/>Project Membership Account access"]
   pkg_remote_access["remote-access"]
   svc_remoteAccess["ctx.remoteAccess<br/>Personal Pairing lifecycle seam"]
   pkg_remote_access_http["remote-access-http"]
@@ -302,6 +303,7 @@ flowchart LR
   pkg_platform_account --> svc_platformAccount
   pkg_platform_account_core --> svc_platformAccount
   pkg_project_membership --> svc_projectMembership
+  pkg_project_membership_client --> svc_projectMembershipAccess
   pkg_project_membership_client --> svc_projectMembershipClient
   pkg_project_membership_core --> svc_projectMembership
   pkg_pwsh_local --> svc_shell
@@ -355,6 +357,7 @@ flowchart LR
   pkg_token_meter --> svc_tokenMeter
   pkg_tools --> svc_tools
   pkg_typert_registry --> svc_typert
+  pkg_ui_desktop --> svc_projectMembershipAccess
   pkg_user_questions --> svc_userQuestions
   pkg_web --> svc_web
   pkg_web_fetch_http --> svc_web
@@ -414,6 +417,7 @@ flowchart LR
   svc_platformAccount --> pkg_project_membership_http
   svc_projectMembership --> pkg_project_membership_http
   svc_projectMembership --> pkg_tool_project_members
+  svc_projectMembershipAccess --> pkg_ui_workspace
   svc_projectMembershipClient --> pkg_ui_desktop
   svc_projectMembershipClient --> pkg_ui_workspace
   svc_remoteAccess --> pkg_remote_access_http
@@ -525,6 +529,7 @@ flowchart LR
 | `ctx.platformAccount` | `seam` | [`platform-account`](../packages/platform/platform-account) | [`platform-account-core`](../packages/platform/platform-account-core) | [`platform-account-http`](../packages/platform/platform-account-http), [`platform-account-client`](../packages/platform/platform-account-client), [`project-membership-http`](../packages/platform/project-membership-http) | - | 拥有 GitHub 公开身份与持有证明安装会话；HTTP 和 Desktop/Mobile 客户端通过签名轮询完成登录，不接收提供方凭证。 |
 | `ctx.projectMembership` | `seam` | [`project-membership`](../packages/platform/project-membership) | [`project-membership-core`](../packages/platform/project-membership-core) | [`project-membership-http`](../packages/platform/project-membership-http), [`tool-project-members`](../packages/interaction/tool-project-members) | - | 拥有云端项目权威——角色门邀请、伴随 roster 投影失效的成员移除、环境命名空间持久状态；HTTP 消费方从账号会话解析操作者，并把每条路由适配到唯一一次服务操作上，面向模型的名册工具经由同一服务读取单个项目的完整名册。 |
 | `ctx.projectMembershipClient` | `core` | [`project-membership-client`](../packages/platform/project-membership-client) | - | `ui-desktop`, `ui-workspace` | - | 把当前 Installation 的成员操作带入 Desktop UI 组合；Desktop 提供方为每次调用取得新的 Account presentation，而 renderer 消费方不会接收凭据。 |
+| `ctx.projectMembershipAccess` | `core` | [`project-membership-client`](../packages/platform/project-membership-client) | `ui-desktop` | `ui-workspace` | - | 投影共用当前安装 Platform Account 的生命周期，并打开拥有登录流程的界面；它不携带 Account token 或安装密钥。 |
 | `ctx.remoteAccess` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | HTTP 消费方通过一个共用校验传输向 Desktop 设置与 Mobile 暴露 endpoint-owned mailbox 操作；Platform 只接收路由元数据、不透明握手消息、credential digest 与密封 authority。 |
 | `ctx.remoteRelay` | `seam` | [`remote-access`](../packages/platform/remote-access) | [`remote-access`](../packages/platform/remote-access) | [`remote-access-http`](../packages/platform/remote-access-http) | - | 拥有由凭据鉴权的在线 attachment 和只含密文的转发；会过期的 Redis 目录与直达 Pub/Sub 协调非 sticky Platform Instance，且不建立离线 queue。 |
 | `ctx.remoteAttachments` | `seam` | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | [`remote-attachments`](../packages/platform/remote-attachments) | - | 只保留 endpoint 加密的密文与元数据，签发限定于单个 Personal Pairing 的一次性会过期 capability，并在 consume、过期或撤销时移除 blob 及其 capability。 |

@@ -112,6 +112,12 @@ describe('ui-workspace apply', () => {
 
   it('routes browser actions and picker creation to the services', async () => {
     const b = await bench()
+    const membershipAccess = {
+      getSnapshot: () => ({ status: 'signed-out' as const }),
+      subscribe: () => () => {},
+      openSignIn: vi.fn(),
+    }
+    b.ctx.provide('projectMembershipAccess', membershipAccess)
     const createProject = vi.fn(async () => ({
       id: 'project-1', name: 'Atlas', boundRemoteUrl: 'https://github.com/o/r', createdAt: 1,
       receivingAccountId: 'account-1',
@@ -143,6 +149,7 @@ describe('ui-workspace apply', () => {
     await b.ctx.plugin({ inject: [...inject], apply }).await()
 
     const browser = (b.slots.entries('sidebar.workspaces')[0]!.inject as () => WorkspaceBrowserInjected)()
+    expect(browser.projectMembership?.access).toBe(membershipAccess)
     // Both arms delegate to the runtime's shared New Session action.
     browser.startSession('ws' as never)
     expect(b.startSession).toHaveBeenCalledWith('ws')

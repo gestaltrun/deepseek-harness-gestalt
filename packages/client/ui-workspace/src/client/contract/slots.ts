@@ -31,7 +31,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {
   SessionId, SessionSearchResultItem, WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ProjectMembershipAccess } from '@deepseek-ai/dsh-project-membership-client'
 import type { createWorkspaceViewStore } from '../stores.ts'
+
+export type {
+  ProjectMembershipAccess, ProjectMembershipAccessSnapshot,
+} from '@deepseek-ai/dsh-project-membership-client'
 
 /** Client-face projection of one bound cloud project. */
 export interface WorkspaceProjectView {
@@ -79,6 +84,8 @@ export interface WorkspacePendingInvitation {
  * without it render no upgrade affordance.
  */
 export interface ProjectMembershipGateway {
+  /** Shared Platform Account access; absent in compositions that own authorization elsewhere. */
+  access?: ProjectMembershipAccess
   createProject(input: { name: string; localWorkspaceId: WorkspaceId }): Promise<WorkspaceProjectView>
   /** Recover the current Account's Cloud Project without replacing an existing exact binding. */
   projectForWorkspace(workspaceId: WorkspaceId): Promise<WorkspaceProjectView | undefined>

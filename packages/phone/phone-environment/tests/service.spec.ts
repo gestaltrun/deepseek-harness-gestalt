@@ -4,7 +4,7 @@ import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { createServer, request, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { zipSync } from 'fflate'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import PhoneEnvironment, { PHONE_ENVIRONMENT_PATH, PhoneEnvironmentError } from '../src/index.ts'
@@ -169,6 +169,17 @@ async function rawRequest(
 }
 
 describe('PhoneEnvironment', () => {
+  it('discovers a compatible system mobilecli from PATH', async () => {
+    const path = await executable()
+    vi.stubEnv('PATH', dirname(path))
+    const context = new Context()
+    contexts.push(context)
+    const { service } = await mountEnvironment(context)
+    expect(service.snapshot().runtime).toEqual({
+      kind: 'ready', source: 'system', version: '1.0.5',
+    })
+  })
+
   it('updates the durable enable gate without remounting the Service', async () => {
     const context = new Context()
     contexts.push(context)

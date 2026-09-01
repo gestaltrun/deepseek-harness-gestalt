@@ -168,6 +168,11 @@ describe('Sub2API Desktop installation', () => {
     }
 
     await clickOverlayButton(['账号池', 'Account pool'])
+    await browser.waitUntil(async () => /添加账号|Create Account/u.test((await overlayAccountConsoleSnapshot()).text), {
+      timeout: 30_000,
+      interval: 500,
+      timeoutMsg: 'Native account workspace did not finish rendering after returning from provider settings',
+    })
     const consoleWindow = await overlayAccountConsoleSnapshot()
     // The sidecar shim loads through the host prefix. The upstream router may
     // retain that route or expose its absolute-base inner route after boot.

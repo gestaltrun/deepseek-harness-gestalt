@@ -20,6 +20,8 @@ The stable Service publishes running platform readiness only after its current m
 
 The Browser keeps pulling full Host snapshots while any runtime or platform lane is transient, and stops at a terminal state. This covers Host startup activation that begins before the Settings subscriber exists. The runtime owns `mobilecli server start` as a process tree rather than a direct child: npm's Node launcher may spawn the native server, and replacement or teardown must terminate both before another generation binds the configured loopback port. One-shot `agent status` and `agent install` commands use the same process-tree owner so cancellation reaches the native descendant before returning.
 
+The GUI and Agent coordinate vocabulary stays in capture pixels on both platforms. Android forwards those pixels unchanged. XCTest consumes logical points, so the first iOS tap or gesture reads the official `device.info.screenSize`, validates its positive finite width, height, and scale, caches the scale for that mobilecli generation, and divides every tap or gesture `x`/`y` coordinate before forwarding. Generation replacement clears the cache. A missing or malformed iOS screen size fails as `PHONE_PROTOCOL` instead of returning a successful no-op.
+
 ## Alternatives considered
 
 **Install Xcode or accept Apple authorization from Desktop.** Rejected because the App Store distribution, license, administrator, account, device-trust, and signing decisions require Apple or user authority that this product does not own.
@@ -34,4 +36,4 @@ The Browser keeps pulling full Host snapshots while any runtime or platform lane
 
 ## Consequences
 
-The scheme-C settings page separates automatable runtime and Simulator preparation from Apple-controlled manual steps. Cross-platform fixtures cover every state without large downloads, while final acceptance still requires a real iOS runtime, list and boot, recognizable picture, GUI tap and Home, and a real-model `device_act` call. Physical iPhones receive an actionable missing-agent state before picture load, can install or reinstall through the product, and resume the same GUI and Agent control path after a picture becomes available. Unlock, trust, signing, and provisioning remain explicit user prerequisites.
+The scheme-C settings page separates automatable runtime and Simulator preparation from Apple-controlled manual steps. Cross-platform fixtures cover every state without large downloads, while final acceptance still requires a real iOS runtime, list and boot, recognizable picture, a visibly effective GUI tap and Home, and a real-model `device_act` call. Physical iPhones receive an actionable missing-agent state before picture load, can install or reinstall through the product, and resume the same GUI and Agent control path after a picture becomes available. Unlock, trust, signing, and provisioning remain explicit user prerequisites.

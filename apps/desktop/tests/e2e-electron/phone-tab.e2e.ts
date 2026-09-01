@@ -131,7 +131,11 @@ describe('Desktop phone tab live chain', () => {
     expect(pointer.v).toBeLessThan(0.51)
     expect(afterTap.io.at(-1)).toMatchObject({
       method: 'device.io.tap',
-      params: { deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD', x: pointer.x, y: pointer.y },
+      params: {
+        deviceId: '8294A429-4C99-411F-A46D-0AD9499B7FDD',
+        x: Math.round(pointer.x / 3),
+        y: Math.round(pointer.y / 3),
+      },
     })
 
     const beforeHome = afterTap.io.length

@@ -2,7 +2,7 @@
  * JSON-RPC 2.0 client over HTTP for one loopback mobilecli `/rpc` endpoint,
  * plus normalization of transport failures onto the public error vocabulary.
  * Method names follow the upstream OpenRPC specification (`devices.list`,
- * `device.boot`, `device.shutdown`, `server.info`, `device.io.*`,
+ * `device.boot`, `device.shutdown`, `device.info`, `server.info`, `device.io.*`,
  * `device.screencapture`); this module owns no other mobilecli behavior.
  * The capture answer follows both upstream shapes: the bare byte stream and
  * mobilecli 1.0.5's `{ format, sessionUrl }` envelope, whose session URL is

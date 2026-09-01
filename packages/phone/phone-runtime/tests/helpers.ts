@@ -36,6 +36,8 @@ export interface FakeKnobs {
   /** Apply listDelayMs only after this many total RPC requests. */
   listDelayAfterRequests?: number
   screencaptureDelayMs?: number
+  /** Delay one device.info answer after recording that the request arrived. */
+  infoDelayMs?: number
   hang?: boolean
   exitAfter?: number
   /** Exit before binding anything; simulates a binary that cannot start. */
@@ -82,6 +84,7 @@ export interface StagedFake {
     requests: number
     bootCount: number
     shutdownCount: number
+    infoCount: number
     io: unknown[]
     captures: Array<{ readonly deviceId: string; readonly format: string }>
   }>
@@ -234,6 +237,7 @@ export async function stageFake(
         requests: number
         bootCount: number
         shutdownCount: number
+        infoCount: number
         io: unknown[]
         captures: Array<{ readonly deviceId: string; readonly format: string }>
       }> {
@@ -241,6 +245,7 @@ export async function stageFake(
           requests: number
           bootCount: number
           shutdownCount: number
+          infoCount: number
           io: unknown[]
           captures: Array<{ readonly deviceId: string; readonly format: string }>
         }

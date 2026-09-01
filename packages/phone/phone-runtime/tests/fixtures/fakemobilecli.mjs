@@ -59,6 +59,7 @@ const state = {
   devices: knobs.devices ?? [],
   bootCount: 0,
   shutdownCount: 0,
+  infoCount: 0,
   io: [],
   captures: [],
 }
@@ -221,6 +222,28 @@ async function handleRpc(req, res) {
       reply(res, id, { result: knobs.listEnvelope === true ? { devices: entries } : entries })
       return
     }
+    case 'device.info': {
+      const deviceId = params?.deviceId
+      const device = state.devices.find(candidate => candidate.id === deviceId)
+      if (device === undefined) {
+        reply(res, id, { error: { code: -32010, message: `no device ${String(deviceId)}` } })
+        return
+      }
+      state.infoCount += 1
+      const infoDelayMs = knobs.infoDelayMs ?? 0
+      if (infoDelayMs > 0) await new Promise(resolveDelay => setTimeout(resolveDelay, infoDelayMs))
+      reply(res, id, {
+        result: {
+          device: {
+            ...device,
+            screenSize: device.screenSize ?? (device.platform === 'ios'
+              ? { width: 402, height: 874, scale: 3 }
+              : { width: 390, height: 844, scale: 1 }),
+          },
+        },
+      })
+      return
+    }
     case 'device.boot':
     case 'device.shutdown': {
       const deviceId = params?.deviceId
@@ -330,6 +353,7 @@ const server = http.createServer((req, res) => {
           requests,
           bootCount: state.bootCount,
           shutdownCount: state.shutdownCount,
+          infoCount: state.infoCount,
           io: state.io,
           captures: state.captures,
         })

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/phone/phone-runtime/README.md
-README.md: c070a7eb2b56b3178d25e8f934dc6c8a457257e2
-README.zh.md: 2d946c4e6213f2d7a3bc8b24cf8718c10b5972c4
+README.md: bc8d13d4a02fab5df99ef6605be5a38ef9860f95
+README.zh.md: d6b376eb90bdf5c05667ea62ffedaa013e1fbceb

@@ -17,6 +17,7 @@ import z from '@deepseek-ai/schemastery'
 import { runMobilecliAgent } from './agent-process.ts'
 import { changeSets, groupEntries, parseDeviceInfos } from './devices.ts'
 import { phoneFailureWithCleanup, PhoneDevicesError } from './errors.ts'
+import { ioParams, iosScreenScale } from './io.ts'
 import type { MobilecliAgentAnswer } from './agent-process.ts'
 import { MobilecliRpc, normalizeOperationError } from './rpc.ts'
 import { resolveMobilecliExecutable } from './resolve-binary.ts'
@@ -81,6 +82,8 @@ const METHOD_DEVICES_LIST = 'devices.list'
 const METHOD_DEVICE_BOOT = 'device.boot'
 /** OpenRPC method shutting down one simulator or emulator. */
 const METHOD_DEVICE_SHUTDOWN = 'device.shutdown'
+/** OpenRPC method reporting logical screen size and device-pixel scale. */
+const METHOD_DEVICE_INFO = 'device.info'
 /** OpenRPC method opening an MJPEG or AVC screen-capture stream. */
 const METHOD_DEVICE_SCREENCAPTURE = 'device.screencapture'
 /** OpenRPC method probed until the spawned server answers its first request. */
@@ -144,6 +147,13 @@ export const Config: z<Config> = z.object({
 })
 
 type ResolvedConfig = Omit<Required<Config>, 'executablePath' | 'provisioningProfilePath'> & Pick<Config, 'executablePath' | 'provisioningProfilePath'>
+
+/** Immutable references that keep a chained io operation on one runtime generation. */
+interface IoGeneration {
+  readonly client: MobilecliRpc
+  readonly lifetime: AbortController
+  readonly iosScreenScales: Map<DeviceId, number>
+}
 
 function assertDurationField(name: string, value: number): void {
   if (!Number.isSafeInteger(value) || value < 1) {
@@ -250,6 +260,7 @@ export class PhoneDevices extends Service {
   private child: MobilecliServerProcess | undefined
   private rpcClient: MobilecliRpc | undefined
   private publishedList: PhoneDeviceList | undefined
+  private iosScreenScales = new Map<DeviceId, number>()
   private startupOutcome: Promise<void> | undefined
   private pollTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -361,6 +372,7 @@ export class PhoneDevices extends Service {
       this.resolutionFailure = undefined
       this.lost = undefined
       this.lifetime = new AbortController()
+      this.iosScreenScales = new Map()
       this.child = new MobilecliServerProcess({
         executablePath: resolved,
         port: this.resolved.serverPort,
@@ -534,14 +546,23 @@ export class PhoneDevices extends Service {
    */
   private async roundTrip(method: string, params: unknown, signal: AbortSignal | undefined, ceilingMs: number): Promise<unknown> {
     this.assertUsable()
+    return await this.roundTripInGeneration(this.captureIoGeneration(), method, params, signal, ceilingMs)
+  }
+
+  /** Run one round trip against immutable references to a single generation. */
+  private async roundTripInGeneration(
+    generation: IoGeneration,
+    method: string,
+    params: unknown,
+    signal: AbortSignal | undefined,
+    ceilingMs: number,
+  ): Promise<unknown> {
     if (signal?.aborted === true) {
       throw new PhoneDevicesError('PHONE_ABORTED', 'cancelled before the request was sent')
     }
-    const budget = deadline(fuseCallerAndLifetime(signal, this.lifetime.signal), ceilingMs, method)
+    const budget = deadline(fuseCallerAndLifetime(signal, generation.lifetime.signal), ceilingMs, method)
     try {
-      // this.rpcClient is constructor-guaranteed; teardown nulls it only with
-      // this.disposed, which assertUsable already rejected above.
-      return await (this.rpcClient as MobilecliRpc).call(method, params, budget.signal)
+      return await generation.client.call(method, params, budget.signal)
     } catch (error) {
       const normalized = normalizeOperationError(error)
       if (normalized.code === 'PHONE_TIMEOUT') {
@@ -607,20 +628,65 @@ export class PhoneDevices extends Service {
 
   /**
    * Forward one `device.io.tap` / `gesture` / `text` / `button` round trip.
+   * Public tap and gesture coordinates are capture pixels. Android forwards
+   * them unchanged; iOS reads and caches `device.info.screenSize.scale` for
+   * the current runtime generation and converts them to XCTest logical points.
    * Physical handsets are valid targets; only ids absent from the latest
    * published listing fail locally before any RPC.
-   * @param request - Branded device id plus the OpenRPC params for that verb.
+   * @param request - Branded device id plus capture-pixel or non-coordinate input.
    * @param signal - Caller's optional cancellation signal.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
-   *   absent from the latest published listing, and otherwise per the
-   *   class-documented failure modes.
+   *   absent from the latest published listing, `PHONE_PROTOCOL` when an iOS
+   *   `device.info` answer lacks a valid positive screen size, and otherwise
+   *   per the class-documented failure modes.
    */
   async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void> {
     this.requireResolved()
     this.assertUsable()
-    this.requireKnown(request.deviceId, 'io')
+    const known = this.requireKnown(request.deviceId, 'io')
     await this.whenReady(signal)
-    await this.roundTrip(IO_METHODS[request.method], ioParams(request), signal, this.resolved.requestTimeoutMs)
+    const generation = this.captureIoGeneration()
+    const scale = await this.ioScale(generation, known, request, signal)
+    await this.roundTripInGeneration(
+      generation,
+      IO_METHODS[request.method],
+      ioParams(request, scale),
+      signal,
+      this.resolved.requestTimeoutMs,
+    )
+  }
+
+  /** Resolve and cache the iOS capture-pixel to XCTest logical-point scale. */
+  private async ioScale(
+    generation: IoGeneration,
+    known: PhoneDeviceRef,
+    request: PhoneIoRequest,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    if (known.platform !== 'ios' || request.method === 'text' || request.method === 'button') return 1
+    const cached = generation.iosScreenScales.get(known.id)
+    if (cached !== undefined) return cached
+    const result = await this.roundTripInGeneration(
+      generation,
+      METHOD_DEVICE_INFO,
+      { deviceId: known.id },
+      signal,
+      this.resolved.requestTimeoutMs,
+    )
+    const scale = iosScreenScale(result)
+    generation.iosScreenScales.set(known.id, scale)
+    return scale
+  }
+
+  /** Capture the process, cancellation, and coordinate cache of the current generation. */
+  private captureIoGeneration(): IoGeneration {
+    // Callers enter only after resolution/readiness; teardown aborts the
+    // captured lifetime before clearing the active client.
+    return {
+      client: this.rpcClient as MobilecliRpc,
+      lifetime: this.lifetime,
+      iosScreenScales: this.iosScreenScales,
+    }
   }
 
   /**
@@ -974,6 +1040,7 @@ export class PhoneDevices extends Service {
     await this.startupOutcome?.catch(() => {})
     await this.queueTail
     const child = this.child
+    this.iosScreenScales.clear()
     this.clearPublishedList()
     if (child !== undefined) await child.stop()
     if (child !== this.child) return
@@ -1011,12 +1078,6 @@ function emptyDeviceList(): PhoneDeviceList {
     android: Object.freeze([]),
     ios: Object.freeze({ simulators: Object.freeze([]), reals: Object.freeze([]) }),
   })
-}
-
-function ioParams(request: PhoneIoRequest): Record<string, unknown> {
-  const { method, ...params } = request
-  void method
-  return params
 }
 
 function tailOf(text: string): string {

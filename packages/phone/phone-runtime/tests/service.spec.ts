@@ -455,6 +455,89 @@ describe('phone runtime service lifecycle', () => {
     ])
   })
 
+  it('normalizes iOS screenshot pixels onto device logical points and caches the scale', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'tap',
+      x: 984,
+      y: 1_228,
+    })
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'gesture',
+      actions: [
+        { type: 'pointerDown', x: 3, y: 6, pressure: 0.5 },
+        { type: 'pointerUp', x: 984, y: 1_228 },
+      ],
+    })
+    await context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'button',
+      button: 'HOME',
+    })
+    expect((await fake.counters())).toMatchObject({
+      infoCount: 1,
+      io: [
+        { method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 328, y: 409 } },
+        {
+          method: 'device.io.gesture',
+          params: {
+            deviceId: 'REAL-UDID',
+            actions: [
+              { type: 'pointerDown', x: 1, y: 2, pressure: 0.5 },
+              { type: 'pointerUp', x: 328, y: 409 },
+            ],
+          },
+        },
+        { method: 'device.io.button', params: { deviceId: 'REAL-UDID', button: 'HOME' } },
+      ],
+    })
+  })
+
+  it('rejects an invalid iOS device.info screen scale before sending io', async () => {
+    const fake = await stageFake({
+      devices: [{ ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 0 } }],
+    })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const failure = await errorOf(() => context.phoneDevices.io({
+      deviceId: IOS_REAL,
+      method: 'tap',
+      x: 12,
+      y: 34,
+    }))
+    expect(failure.code).toBe('PHONE_PROTOCOL')
+    expect(failure.message).toMatch(/screenSize\.scale/u)
+    expect((await fake.counters()).io).toEqual([])
+  })
+
+  it('keeps chained iOS info and io on one generation and re-queries after replacement', async () => {
+    const first = await stageFake({
+      devices: [{ ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 3 } }],
+      infoDelayMs: 200,
+    })
+    const second = await stageFake({
+      devices: [{ ...wireDevice('REAL-UDID', 'ios', 'real', 'online'), screenSize: { width: 402, height: 874, scale: 2 } }],
+    })
+    fakes.push(first, second)
+    const context = await mountWith(first)
+    const staleIo = context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 12, y: 18 })
+    const staleAssertion = expect(staleIo).rejects.toMatchObject({ code: 'PHONE_ABORTED' })
+    await waitFor(async () => (await first.counters()).infoCount === 1)
+    await second.claim()
+    await context.phoneDevices.activateExecutable(second.executablePath)
+    await staleAssertion
+
+    await context.phoneDevices.io({ deviceId: IOS_REAL, method: 'tap', x: 12, y: 18 })
+    expect((await first.counters())).toMatchObject({
+      infoCount: 1,
+      io: [{ method: 'device.io.tap', params: { deviceId: 'REAL-UDID', x: 6, y: 9 } }],
+    })
+  })
+
   it('refuses io and capture for ids absent from the latest listing', async () => {
     const fake = await stageFake({ devices: BASE_DEVICES })
     fakes.push(fake)

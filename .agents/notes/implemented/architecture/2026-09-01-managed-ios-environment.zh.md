@@ -20,6 +20,8 @@ Xcode 安装或更新、Apple 许可接受、首次启动授权、Apple ID、系
 
 只要任一 runtime 或平台通道仍处于短暂状态，Browser 就会继续拉取 Host 完整快照，并在终态停止。这覆盖设置订阅方出现之前已经开始的 Host 启动激活。runtime 以进程树而非直接子进程持有 `mobilecli server start`：npm 的 Node 启动器可能派生原生服务进程，generation 替换或 teardown 必须在下一代绑定指定回环端口之前终止二者。一次性 `agent status` 与 `agent install` 命令复用同一个进程树持有者，使取消操作在返回前终止原生后代进程。
 
+GUI 与 Agent 的坐标词汇在两个平台上都保持为采集画面像素。Android 原样转发这些像素。XCTest 消费逻辑点，因此第一次 iOS tap 或 gesture 会读取官方 `device.info.screenSize`，校验其中 width、height 与 scale 均为正有限数，为当前 mobilecli generation 缓存 scale，并在转发前换算每个 tap 或 gesture 的 `x`/`y` 坐标。generation 替换会清空缓存。iOS 屏幕尺寸缺失或畸形时以 `PHONE_PROTOCOL` 失败，不会返回成功但不生效。
+
 ## Alternatives considered
 
 **由 Desktop 安装 Xcode 或接受 Apple 授权。** 拒绝，因为 App Store 分发、许可、管理员、账号、设备信任和签名决策需要本产品不具备的 Apple 或用户权限。
@@ -34,4 +36,4 @@ Xcode 安装或更新、Apple 许可接受、首次启动授权、Apple ID、系
 
 ## Consequences
 
-方案 C 设置页把可自动化的运行时和模拟器准备与 Apple 控制的人工步骤分离。跨平台 fixture 在不下载大型资源的前提下覆盖所有状态，最终验收仍需真实 iOS 运行时、list 与 boot、可识别画面、GUI tap 与 Home，以及真实模型 `device_act` 调用。iPhone 真机会在加载画面前得到可操作的缺失 agent 状态，可通过产品安装或重装，并在画面可用后恢复同一条 GUI 与 Agent 控制路径。解锁、信任、签名和 provisioning 仍是明确的用户前提。
+方案 C 设置页把可自动化的运行时和模拟器准备与 Apple 控制的人工步骤分离。跨平台 fixture 在不下载大型资源的前提下覆盖所有状态，最终验收仍需真实 iOS 运行时、list 与 boot、可识别画面、视觉上确实生效的 GUI tap 与 Home，以及真实模型 `device_act` 调用。iPhone 真机会在加载画面前得到可操作的缺失 agent 状态，可通过产品安装或重装，并在画面可用后恢复同一条 GUI 与 Agent 控制路径。解锁、信任、签名和 provisioning 仍是明确的用户前提。

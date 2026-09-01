@@ -79,12 +79,21 @@ export function openAndroidSystemH264(
     })
   const stdout = tree.process.stdout
   if (stdout === null) {
-    void tree.stop().catch(() => {})
-    throw new PhoneDevicesError('PHONE_UNAVAILABLE', 'adb screenrecord exposed no stdout stream')
+    return new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          await tree.stop()
+          controller.error(new PhoneDevicesError('PHONE_UNAVAILABLE', 'adb screenrecord exposed no stdout stream'))
+        } catch (error) {
+          controller.error(captureFailure('exposed no stdout and cleanup failed', tree, error))
+        }
+      },
+    })
   }
 
   let settled = false
   let removeListeners: () => void
+  stdout.pause()
   return new ReadableStream<Uint8Array>({
     start(controller) {
       const stopForAbort = (): void => {
@@ -97,7 +106,9 @@ export function openAndroidSystemH264(
         )
       }
       const onData = (chunk: Buffer): void => {
-        if (!settled) controller.enqueue(Uint8Array.from(chunk))
+        if (settled) return
+        controller.enqueue(Uint8Array.from(chunk))
+        if ((controller.desiredSize as number) <= 0) stdout.pause()
       }
       stdout.on('data', onData)
       options.signal.addEventListener('abort', stopForAbort, { once: true })
@@ -120,6 +131,9 @@ export function openAndroidSystemH264(
         if (exit.code === 0) controller.close()
         else controller.error(captureFailure(`exited with code ${String(exit.code)}`, tree))
       })
+    },
+    pull() {
+      if (!settled) stdout.resume()
     },
     async cancel() {
       settled = true

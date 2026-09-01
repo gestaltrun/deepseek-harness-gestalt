@@ -12,7 +12,7 @@ mobilecli 1.0.5 可能重复报告同一台物理手机，也可能接受 AVC �
 
 phone runtime 会验证每一条 `devices.list` 记录，再为每个 `(platform, id)` 组合保留首行。由于每个 operation 只接受 `deviceId`，同一 id 出现在两个平台时会以 `PHONE_PROTOCOL` 失败，不会投影成无法区分的目标。同平台重复项不会进入设置、手机 picker、已连接下拉框或在线 badge。
 
-Host 把 H264 标为 Android 设备与 iOS 真机的首选格式。iOS Simulator 这个 mobilecli 设备类别会明确拒绝 AVC，因此 Host 把 MJPEG 标为其首选格式。Android H264 到达 renderer 前，runtime 会有界识别 SPS/PPS/IDR 前缀。无效 mobilecli AVC 先切到 Android 系统 `screenrecord --output-format=h264`；两条 H264 源都失败后才把原正文留给 renderer 的同 session MJPEG 策略。live IDR 的 slice header 完整后即可接纳，无需等待画面运动产生下一个 NAL 分隔符。devbar 只显示 live 编码，不展示 fallback 原因。Android 与 iOS 真机 session 都托管设备 agent 恢复；Android io 被拒绝后会检查 agent 并提供一键安装，OEM 要求的 USB 安装或调试安全确认仍在手机上完成。
+Host 把 H264 标为 Android 设备与 iOS 真机的首选格式。iOS Simulator 这个 mobilecli 设备类别会明确拒绝 AVC，因此 Host 把 MJPEG 标为其首选格式。Android H264 到达 renderer 前，runtime 会有界识别 SPS/PPS/IDR 前缀。无效或探测超时的 mobilecli AVC 先切到 Android 系统 `screenrecord --output-format=h264`；两条 H264 源都失败后才进入 renderer 的同 session MJPEG 策略。live IDR 的 slice header 完整后即可接纳，无需等待画面运动产生下一个 NAL 分隔符。devbar 只显示 live 编码，不展示 fallback 原因。Android 与 iOS 真机 session 都托管设备 agent 恢复；Android io 被拒绝后会检查 agent 并提供一键安装，OEM 要求的 USB 安装或调试安全确认仍在手机上完成。
 
 已连接画面在按下时捕获活动 pointer。它记录每个归一化 move，把松开位移也纳入拖动阈值判定，发送完整 `pointerDown` / `pointerMove`... / `pointerUp` 路径，并在完成或取消时释放捕获。隐藏 tab、更换设备/controller 或替换 live stream 也会释放并丢弃待发路径。取消与生命周期替换都不发送不完整 gesture。
 

@@ -1349,7 +1349,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async startCapture(request: PhoneCaptureRequest): Promise<PhoneCaptureStream>',
-        description: 'Open one upstream `device.screencapture` stream. `h264` maps onto the upstream `avc` format; the returned body is unread so the Host can proxy frames without buffering a capture.',
+        description: 'Open one `device.screencapture` stream. `h264` maps onto upstream `avc`; Android pre-reads and replays at most one bounded key-access-unit probe, then replaces an invalid, failed, or timed-out source with the system `screenrecord` H264 stream when available. Other bodies remain unread.',
         parameters: [{ name: 'request', description: 'Branded device id, encoding, and optional cancellation.' }],
         returns: 'the live capture content type and body; the caller owns cancellation.',
         throws: ['{@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids absent from the latest published listing, and otherwise per the class-documented failure modes.'],

@@ -207,9 +207,10 @@ async shutdown(id: DeviceId, signal?: AbortSignal): Promise<void>
 async io(request: PhoneIoRequest, signal?: AbortSignal): Promise<void>
 
 /**
- * Open one upstream `device.screencapture` stream. `h264` maps onto the
- * upstream `avc` format; the returned body is unread so the Host can proxy
- * frames without buffering a capture.
+ * Open one `device.screencapture` stream. `h264` maps onto upstream `avc`;
+ * Android pre-reads and replays at most one bounded key-access-unit probe,
+ * then replaces an invalid, failed, or timed-out source with the system
+ * `screenrecord` H264 stream when available. Other bodies remain unread.
  * @param request - Branded device id, encoding, and optional cancellation.
  * @returns the live capture content type and body; the caller owns cancellation.
  * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids

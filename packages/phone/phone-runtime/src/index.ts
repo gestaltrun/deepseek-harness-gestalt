@@ -209,6 +209,14 @@ function failureText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function errorValue(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
+}
+
+function failedCaptureBody(error: unknown): ReadableStream<Uint8Array> {
+  return new ReadableStream({ start(controller) { controller.error(errorValue(error)) } })
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** The phone device fleet Service backed by one local mobilecli server. */
@@ -703,9 +711,10 @@ export class PhoneDevices extends Service {
   }
 
   /**
-   * Open one upstream `device.screencapture` stream. `h264` maps onto the
-   * upstream `avc` format; the returned body is unread so the Host can proxy
-   * frames without buffering a capture.
+   * Open one `device.screencapture` stream. `h264` maps onto upstream `avc`;
+   * Android pre-reads and replays at most one bounded key-access-unit probe,
+   * then replaces an invalid, failed, or timed-out source with the system
+   * `screenrecord` H264 stream when available. Other bodies remain unread.
    * @param request - Branded device id, encoding, and optional cancellation.
    * @returns the live capture content type and body; the caller owns cancellation.
    * @throws {@link PhoneDevicesError} with `PHONE_DEVICE_NOT_FOUND` for ids
@@ -756,7 +765,17 @@ export class PhoneDevices extends Service {
     id: DeviceId,
     signal: AbortSignal,
   ): Promise<PhoneCaptureStream> {
-    const mobilecli = await this.inspectAndroidH264(capture.body, signal)
+    let mobilecli: Awaited<ReturnType<typeof inspectAnnexBH264KeyAccessUnit>>
+    try {
+      mobilecli = await this.inspectAndroidH264(capture.body, signal)
+    } catch (error) {
+      if (signal.aborted) throw normalizeOperationError(signal.reason)
+      mobilecli = Object.freeze({
+        recognizable: false,
+        body: failedCaptureBody(error),
+        failure: errorValue(error),
+      })
+    }
     if (mobilecli.recognizable) {
       return Object.freeze({ contentType: capture.contentType, body: mobilecli.body })
     }
@@ -780,6 +799,10 @@ export class PhoneDevices extends Service {
       return Object.freeze({ contentType: 'video/h264', body: native.body })
     } catch (nativeFailure) {
       await nativeBody?.cancel().catch(() => {})
+      if (isSignalAborted(signal)) {
+        await mobilecli.body.cancel().catch(() => {})
+        throw normalizeOperationError(signal.reason)
+      }
       this.ctx.logger.warn(
         `[phone-runtime] Android H264 sources failed for ${JSON.stringify(id)}; renderer fallback remains available: ${failureText(mobilecli.failure)}; ${failureText(nativeFailure)}`,
       )

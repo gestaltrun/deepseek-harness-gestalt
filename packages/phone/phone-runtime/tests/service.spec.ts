@@ -7,6 +7,7 @@ import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import { MobilecliProcessTree, MobilecliServerProcess } from '../src/server-process.ts'
 import { assertRecognizableH264Picture, firstMjpegFrame, jpegDimensions, stageFake, wireDevice } from './helpers.ts'
 import { buildGradientH264 } from './fixtures/u3-visible-frames.ts'
+import { TimeoutReason } from '@deepseek-ai/dsh-timeout'
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 })
 
@@ -616,6 +617,126 @@ describe('phone runtime service lifecycle', () => {
       deviceId: 'emulator-5554',
       format: 'avc',
     })
+  })
+
+  it('tries native Android H264 when the mobilecli key-unit probe times out', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    const nativeBody = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(Uint8Array.from([4, 5, 6])); controller.close() },
+    })
+    vi.spyOn(captured, 'inspectAndroidH264')
+      .mockRejectedValueOnce(new TimeoutReason('ANDROID_H264_PROBE', 15_000))
+      .mockResolvedValueOnce({ recognizable: true, body: nativeBody })
+    const native = vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(nativeBody)
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+
+    expect(Buffer.from(await new Response(h264.body).arrayBuffer())).toEqual(Buffer.from([4, 5, 6]))
+    expect(native).toHaveBeenCalledOnce()
+  })
+
+  it('tries native Android H264 when the mobilecli body read fails', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const captured = context.phoneDevices as unknown as {
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    const nativeBody = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(Uint8Array.from([7])); controller.close() },
+    })
+    vi.spyOn(captured, 'inspectAndroidH264')
+      .mockRejectedValueOnce('mobilecli reader refusal')
+      .mockResolvedValueOnce({ recognizable: true, body: nativeBody })
+    vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(nativeBody)
+
+    const h264 = await context.phoneDevices.startCapture({
+      deviceId: ANDROID_EMULATOR,
+      format: 'h264',
+    })
+    expect(Buffer.from(await new Response(h264.body).arrayBuffer())).toEqual(Buffer.from([7]))
+  })
+
+  it('propagates cancellation that wins during native Android H264 inspection', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const controller = new AbortController()
+    const mobilecliCancel = vi.fn(async () => { throw new Error('mobilecli cleanup refusal') })
+    const nativeCancel = vi.fn(async () => {})
+    const captured = context.phoneDevices as unknown as {
+      preferAndroidH264(
+        capture: { contentType: string; body: ReadableStream<Uint8Array> },
+        id: DeviceId,
+        signal: AbortSignal,
+      ): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }>
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<{
+        recognizable: boolean
+        body: ReadableStream<Uint8Array>
+        failure?: Error
+      }>
+      openNativeAndroidH264(options: { deviceId: string; signal: AbortSignal }): ReadableStream<Uint8Array>
+    }
+    const mobilecliBody = new ReadableStream<Uint8Array>({ cancel: mobilecliCancel })
+    const nativeBody = new ReadableStream<Uint8Array>({ cancel: nativeCancel })
+    vi.spyOn(captured, 'inspectAndroidH264')
+      .mockResolvedValueOnce({ recognizable: false, body: mobilecliBody, failure: new Error('invalid') })
+      .mockImplementationOnce(async () => {
+        controller.abort(new DOMException('runtime replaced', 'AbortError'))
+        throw controller.signal.reason
+      })
+    vi.spyOn(captured, 'openNativeAndroidH264').mockReturnValue(nativeBody)
+
+    const cancelled = await errorOf(() => captured.preferAndroidH264({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>(),
+    }, ANDROID_EMULATOR, controller.signal))
+    expect(cancelled.code).toBe('PHONE_ABORTED')
+    expect(nativeCancel).toHaveBeenCalledOnce()
+    expect(mobilecliCancel).toHaveBeenCalledOnce()
+  })
+
+  it('propagates cancellation that rejects the mobilecli H264 inspection', async () => {
+    const fake = await stageFake({ devices: BASE_DEVICES })
+    fakes.push(fake)
+    const context = await mountWith(fake)
+    const controller = new AbortController()
+    const captured = context.phoneDevices as unknown as {
+      preferAndroidH264(
+        capture: { contentType: string; body: ReadableStream<Uint8Array> },
+        id: DeviceId,
+        signal: AbortSignal,
+      ): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }>
+      inspectAndroidH264(body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<never>
+    }
+    vi.spyOn(captured, 'inspectAndroidH264').mockImplementation(async () => {
+      controller.abort(new DOMException('runtime replaced', 'AbortError'))
+      throw controller.signal.reason
+    })
+
+    const cancelled = await errorOf(() => captured.preferAndroidH264({
+      contentType: 'video/h264',
+      body: new ReadableStream<Uint8Array>(),
+    }, ANDROID_EMULATOR, controller.signal))
+    expect(cancelled.code).toBe('PHONE_ABORTED')
   })
 
   it('preserves mobilecli failure bytes when Android system H264 is unavailable', async () => {

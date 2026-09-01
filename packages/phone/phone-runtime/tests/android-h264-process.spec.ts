@@ -118,21 +118,22 @@ describe('openAndroidSystemH264', () => {
       .rejects.toThrow('exited with code 9; stderr tail follows\nencoder refused')
   })
 
-  it('rejects a missing stdout and asks the owned tree to stop', () => {
+  it('rejects a missing stdout after the owned tree stops', async () => {
     const stop = vi.fn(async () => {})
     const fake = tree({ stdout: null, stop })
-    expect(() => openAndroidSystemH264({
+    const body = openAndroidSystemH264({
       deviceId: 'missing-stdout', environment: {}, signal: new AbortController().signal,
-    }, { launch: () => fake.value })).toThrow('exposed no stdout')
+    }, { launch: () => fake.value })
+    await expect(new Response(body).arrayBuffer()).rejects.toThrow('exposed no stdout')
     expect(stop).toHaveBeenCalledOnce()
   })
 
-  it('contains a missing-stdout cleanup rejection', async () => {
+  it('surfaces a missing-stdout cleanup rejection', async () => {
     const fake = tree({ stdout: null, stop: async () => { throw new Error('cleanup refusal') } })
-    expect(() => openAndroidSystemH264({
+    const body = openAndroidSystemH264({
       deviceId: 'missing-stdout-cleanup', environment: {}, signal: new AbortController().signal,
-    }, { launch: () => fake.value })).toThrow('exposed no stdout')
-    await Promise.resolve()
+    }, { launch: () => fake.value })
+    await expect(new Response(body).arrayBuffer()).rejects.toThrow('exposed no stdout and cleanup failed')
   })
 
   it('stops the tree when the consumer cancels', async () => {
@@ -145,6 +146,26 @@ describe('openAndroidSystemH264', () => {
     fake.settle({ code: 0 })
     await Promise.resolve()
     expect(stop).toHaveBeenCalledOnce()
+  })
+
+  it('pauses stdout when the Web stream queue fills and resumes for demand', async () => {
+    const stdout = new PassThrough()
+    const pause = vi.spyOn(stdout, 'pause')
+    const resume = vi.spyOn(stdout, 'resume')
+    const fake = tree({ stdout })
+    const body = openAndroidSystemH264({
+      deviceId: 'backpressure', environment: {}, signal: new AbortController().signal,
+    }, { launch: () => fake.value })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    stdout.write(Buffer.from([1]))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(pause.mock.calls.length).toBeGreaterThanOrEqual(2)
+
+    const reader = body.getReader()
+    expect(await reader.read()).toEqual({ done: false, value: Uint8Array.from([1]) })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(resume).toHaveBeenCalled()
+    await reader.cancel()
   })
 
   it('ignores captured data and abort callbacks after a clean exit', async () => {

@@ -2,7 +2,7 @@
 
 import type { ChildProcess } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
-import { join } from 'node:path'
+import { posix, win32 } from 'node:path'
 import { PhoneDevicesError } from './errors.ts'
 import { MobilecliProcessTree, type ServerExit } from './server-process.ts'
 
@@ -44,7 +44,7 @@ function adbExecutable(
   const sdkRoot = environment.ANDROID_SDK_ROOT?.trim() || environment.ANDROID_HOME?.trim()
   const basename = platform === 'win32' ? 'adb.exe' : 'adb'
   if (sdkRoot !== undefined && sdkRoot.length > 0) {
-    const selected = join(sdkRoot, 'platform-tools', basename)
+    const selected = (platform === 'win32' ? win32 : posix).join(sdkRoot, 'platform-tools', basename)
     if (isExecutable(selected)) return selected
   }
   return basename

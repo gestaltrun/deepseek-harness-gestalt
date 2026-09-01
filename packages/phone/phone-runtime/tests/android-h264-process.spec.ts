@@ -68,6 +68,21 @@ describe('openAndroidSystemH264', () => {
     expect(launch).toHaveBeenCalledWith(expect.objectContaining({ executablePath: 'adb.exe' }))
   })
 
+  it('uses Windows path syntax for a selected Windows SDK', async () => {
+    const fake = tree()
+    const launch = vi.fn(() => fake.value)
+    const body = openAndroidSystemH264({
+      deviceId: 'device-win-sdk',
+      environment: { ANDROID_SDK_ROOT: 'C:\\sdk' },
+      signal: new AbortController().signal,
+    }, { platform: 'win32', isExecutable: () => true, launch })
+    fake.settle({ code: 0 })
+    expect((await new Response(body).arrayBuffer()).byteLength).toBe(0)
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({
+      executablePath: 'C:\\sdk\\platform-tools\\adb.exe',
+    }))
+  })
+
   it('falls back from a selected but incomplete SDK to adb on PATH', async () => {
     const fake = tree()
     const launch = vi.fn(() => fake.value)
@@ -81,7 +96,7 @@ describe('openAndroidSystemH264', () => {
     expect(launch).toHaveBeenCalledWith(expect.objectContaining({ executablePath: 'adb' }))
   })
 
-  it('launches the owned process tree with an executable selected SDK adb', async () => {
+  it.skipIf(process.platform === 'win32')('launches the owned process tree with an executable selected SDK adb', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-adb-h264-'))
     const platformTools = join(root, 'platform-tools')
     const adb = join(platformTools, 'adb')

@@ -29,16 +29,10 @@ export async function inspectRecognizable(
   const prefix: Uint8Array[] = []
   let sourceDone = false
   let failure: Error | undefined
-  let rejectAbort!: (reason?: unknown) => void
-  const halt = (): void => { rejectAbort(abortError(signal.reason)) }
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject
-    if (signal.aborted) halt()
-    else signal.addEventListener('abort', halt, { once: true })
-  })
+  const abortRace = rejectWhenAborted(signal)
   try {
     for (;;) {
-      const chunk = await Promise.race([reader.read(), aborted])
+      const chunk = await Promise.race([reader.read(), abortRace.promise])
       if (chunk.done) {
         sourceDone = true
         try {
@@ -60,7 +54,7 @@ export async function inspectRecognizable(
     await reader.cancel().catch(() => {})
     throw error
   } finally {
-    signal.removeEventListener('abort', halt)
+    abortRace.dispose()
   }
   return {
     recognizable: failure === undefined,
@@ -85,16 +79,10 @@ export async function readUntilRecognizable(
   incompleteMessage: string,
 ): Promise<void> {
   const reader = body.getReader()
-  let rejectAbort!: (reason?: unknown) => void
-  const halt = (): void => { rejectAbort(abortError(signal.reason)) }
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject
-    if (signal.aborted) halt()
-    else signal.addEventListener('abort', halt, { once: true })
-  })
+  const abortRace = rejectWhenAborted(signal)
   try {
     for (;;) {
-      const chunk = await Promise.race([reader.read(), aborted])
+      const chunk = await Promise.race([reader.read(), abortRace.promise])
       if (chunk.done) {
         if (probe.finish()) return
         throw new Error(incompleteMessage)
@@ -102,8 +90,25 @@ export async function readUntilRecognizable(
       if (probe.push(chunk.value)) return
     }
   } finally {
-    signal.removeEventListener('abort', halt)
+    abortRace.dispose()
     await reader.cancel().catch(() => {})
+  }
+}
+
+function rejectWhenAborted(signal: AbortSignal): {
+  readonly promise: Promise<never>
+  dispose(): void
+} {
+  let rejectAbort!: (reason?: unknown) => void
+  const halt = (): void => { rejectAbort(abortError(signal.reason)) }
+  const promise = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject
+    if (signal.aborted) halt()
+    else signal.addEventListener('abort', halt, { once: true })
+  })
+  return {
+    promise,
+    dispose() { signal.removeEventListener('abort', halt) },
   }
 }
 

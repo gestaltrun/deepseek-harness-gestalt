@@ -25,6 +25,8 @@ export interface PhoneSettingsCardProps {
   readonly onCopy: (command: string) => void
   /** Fire the unified next-action verb for one error row. */
   readonly onNextAction: (kind: string) => void
+  /** Open one online device in the singleton Phone tab. */
+  readonly onOpenDevice: (deviceId: string) => void
 }
 
 const DEVICE_GROUPS: readonly {
@@ -75,7 +77,7 @@ function assertNever(value: never): never {
  * @returns the card.
  */
 export function PhoneSettingsCard(props: PhoneSettingsCardProps): ReactNode {
-  const { enabled, view, onEnabledChange, onRedetect, onCopy, onNextAction } = props
+  const { enabled, view, onEnabledChange, onRedetect, onCopy, onNextAction, onOpenDevice } = props
   return (
     <article className={css.card}>
       <header className={css.head}>
@@ -107,7 +109,7 @@ export function PhoneSettingsCard(props: PhoneSettingsCardProps): ReactNode {
           <span className={css.knob} />
         </label>
       </header>
-      {bodyOf(view, { onCopy, onNextAction })}
+      {bodyOf(view, { onCopy, onNextAction, onOpenDevice })}
       {footerOf(view)}
     </article>
   )
@@ -123,7 +125,11 @@ function descriptionOf(view: PhoneEnvironmentView): string {
 
 function bodyOf(
   view: PhoneEnvironmentView,
-  actions: { onCopy: (command: string) => void; onNextAction: (kind: string) => void },
+  actions: {
+    onCopy: (command: string) => void
+    onNextAction: (kind: string) => void
+    onOpenDevice: (deviceId: string) => void
+  },
 ): ReactNode {
   switch (view.kind) {
     case 'off':
@@ -135,7 +141,7 @@ function bodyOf(
     case 'ios-wizard':
       return <IosWizardBody />
     case 'ready':
-      return <ReadyBody devices={view.devices} />
+      return <ReadyBody devices={view.devices} onOpenDevice={actions.onOpenDevice} />
     case 'errors':
       return <ErrorsBody errors={view.errors} onNextAction={actions.onNextAction} />
     default:
@@ -227,11 +233,14 @@ function IosWizardBody(): ReactNode {
   )
 }
 
-function ReadyBody({ devices }: { devices: readonly PhoneReadyDevice[] }): ReactNode {
+function ReadyBody(props: {
+  devices: readonly PhoneReadyDevice[]
+  onOpenDevice: (deviceId: string) => void
+}): ReactNode {
   return (
     <div className={css.body}>
       {DEVICE_GROUPS.map((group) => {
-        const rows = devices.filter(device => device.group === group.id)
+        const rows = props.devices.filter(device => device.group === group.id)
         if (rows.length === 0) return null
         return (
           <section key={group.id} className={css.devGroup} aria-label={group.title}>
@@ -244,6 +253,14 @@ function ReadyBody({ devices }: { devices: readonly PhoneReadyDevice[] }): React
                 />
                 <span className={css.devName}>{device.name}</span>
                 <span className={css.devMeta}>{device.meta}</span>
+                <button
+                  type="button"
+                  className={clsx(css.ghost, css.openDevice)}
+                  disabled={!device.online}
+                  onClick={() => { props.onOpenDevice(device.id) }}
+                >
+                  打开面板
+                </button>
               </div>
             ))}
           </section>

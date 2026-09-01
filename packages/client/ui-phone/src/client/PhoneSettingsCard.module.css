@@ -268,6 +268,22 @@
   outline-offset: 2px;
 }
 
+.openDevice:not(:disabled) {
+  border-color: var(--dsw-alias-button-primary-fill);
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-static-neutral-bluish-00);
+}
+
+.openDevice:not(:disabled):hover {
+  background: var(--dsw-alias-button-primary-hover);
+  color: var(--dsw-static-neutral-bluish-00);
+}
+
+.openDevice:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
 .steps {
   display: flex;
   flex-wrap: wrap;

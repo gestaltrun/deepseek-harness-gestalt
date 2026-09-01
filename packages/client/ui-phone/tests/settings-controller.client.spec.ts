@@ -176,6 +176,7 @@ describe('PhoneSettingsCardController', () => {
       readyScope(false).scope, MISSING_PHONE_ENVIRONMENT_SOURCE, undefined, runtime,
     )
     expect(runtimeListeners.size).toBe(1)
+    expect(() => { controller.inject().openDevice('offline') }).not.toThrow()
     controller.setSource(MISSING_PHONE_ENVIRONMENT_SOURCE)
     expect(runtimeListeners.size).toBe(1)
     controller.dispose()

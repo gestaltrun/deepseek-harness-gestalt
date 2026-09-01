@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildPhoneTabDescriptor, installPhoneTab, PHONE_TAB_ID,
-  phoneDeviceTabMetaOf,
+  openPhoneDevicePanel, phoneDeviceTabMetaOf,
   type PhoneListingSource, type PhoneTabDescriptor, type PhoneTabView,
 } from '../src/client/registry.ts'
 
@@ -31,6 +31,7 @@ class ContractSidebar {
   readonly opened: string[] = []
   readonly activated: string[] = []
   readonly patches: { readonly tabId: string; readonly patch: { readonly title?: string; readonly meta?: unknown } }[] = []
+  panelOpen = false
 
   registerTab(descriptor: PhoneTabDescriptor): () => void {
     this.descriptor = descriptor
@@ -62,6 +63,10 @@ class ContractSidebar {
     if (patch.meta !== undefined) tab.meta = patch.meta
     this.patches.push({ tabId, patch })
   }
+
+  setPanelOpen(open: boolean): void {
+    this.panelOpen = open
+  }
 }
 
 function stubView(): PhoneTabView {
@@ -76,6 +81,20 @@ const NULL_SOURCE: PhoneListingSource = {
 }
 
 describe('single phone tab with in-place switching', () => {
+  it('opens a Settings device in the singleton visible panel', () => {
+    const sidebar = new ContractSidebar()
+    openPhoneDevicePanel(sidebar, () => true, 'fbcd1d21', 'MI 8')
+    expect(sidebar.tabs).toEqual([{
+      id: PHONE_TAB_ID,
+      type: PHONE_TAB_ID,
+      title: '手机·MI 8',
+      meta: { kind: 'device', serial: 'fbcd1d21', name: 'MI 8' },
+    }])
+    expect(sidebar.panelOpen).toBe(true)
+    openPhoneDevicePanel(sidebar, () => false, 'other', 'Blocked')
+    expect(sidebar.tabs).toHaveLength(1)
+  })
+
   it('keeps a single tab and switches it in place when a device opens', () => {
     const sidebar = new ContractSidebar()
     sidebar.registerTab(buildPhoneTabDescriptor({

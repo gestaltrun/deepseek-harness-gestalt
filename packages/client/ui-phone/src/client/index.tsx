@@ -24,8 +24,12 @@ import { PhoneConnectionController } from './phone-connection.ts'
 import { createHttpPhoneGateway } from './phone-stream-client.ts'
 import { createHttpPhoneListingSource } from './phone-listing.ts'
 import {
-  installPhoneTab, phoneDeviceTabMetaOf,
-  type PhoneTabBodyProps, type PhoneTabEnvironment, type PhoneTabView,
+  isDesktopOverlayDocument, phoneDesktopOverlayBridgeOf, phoneDeviceIdFromSelection,
+  selectPhoneDeviceFromOverlay,
+} from './desktop-device-open.ts'
+import {
+  installPhoneTab, openPhoneDevicePanel, phoneDeviceTabMetaOf,
+  type PhoneTabBodyProps, type PhoneTabEnvironment, type PhoneTabOpenFace, type PhoneTabView,
 } from './registry.ts'
 import { en, NS, zh, type PhoneSettingsKey } from './locales.ts'
 import { PHONE_SETTINGS_NAMESPACE } from '../phone-settings.ts'
@@ -98,19 +102,38 @@ export function apply(ctx: ClientContext, config: Config): void {
   const scope = ctx.settingsScope.bind<PhoneSettings>({ namespace: PHONE_SETTINGS_NAMESPACE })
   const listing = createHttpPhoneListingSource()
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-phone: settings dictionaries')
-  const card = new PhoneSettingsCardController(
-    scope,
-    createListingPhoneEnvironmentSource(listing),
-    globalThis.navigator.clipboard,
-    createHttpPhoneRuntimeSource(),
-  )
-  ctx.effect(() => () => { card.dispose() }, 'ui-phone: settings section')
-
   const tabEnabled = (): boolean => {
     const snapshot = scope.getSnapshot()
     if (snapshot.status === 'ready') return enabledValue(snapshot.value) ?? compositionEnabled
     return compositionEnabled
   }
+  const sidebar = ctx.get('betterSidebar') as PhoneTabOpenFace
+  const openListedDevice = (deviceId: string): void => {
+    const devices = [...listing.snapshot().android, ...listing.snapshot().ios]
+    const device = devices.find(candidate => candidate.id === deviceId && candidate.online)
+    if (device === undefined) return
+    openPhoneDevicePanel(sidebar, tabEnabled, device.id, device.name)
+  }
+  const overlayBridge = phoneDesktopOverlayBridgeOf(
+    (globalThis as { dshDesktop?: unknown }).dshDesktop,
+  )
+  const openFromSettings = isDesktopOverlayDocument() && overlayBridge !== undefined
+    ? (deviceId: string): void => { void selectPhoneDeviceFromOverlay(overlayBridge, deviceId) }
+    : openListedDevice
+  if (!isDesktopOverlayDocument() && overlayBridge !== undefined) {
+    ctx.effect(() => overlayBridge.onChromeOverlayResult((result) => {
+      const deviceId = phoneDeviceIdFromSelection(result)
+      if (deviceId !== undefined) openListedDevice(deviceId)
+    }), 'ui-phone: Desktop settings device open')
+  }
+  const card = new PhoneSettingsCardController(
+    scope,
+    createListingPhoneEnvironmentSource(listing),
+    globalThis.navigator.clipboard,
+    createHttpPhoneRuntimeSource(),
+    openFromSettings,
+  )
+  ctx.effect(() => () => { card.dispose() }, 'ui-phone: settings section')
   // The body reads the gate reactively: scope invalidation (the enable
   // switch toggling) re-renders the gate strip on the same tick.
   const gate = { snapshot: tabEnabled, subscribe: (listener: () => void) => scope.subscribe(listener) }

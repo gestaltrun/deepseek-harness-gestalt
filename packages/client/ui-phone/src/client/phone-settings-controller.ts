@@ -41,6 +41,8 @@ export interface PhoneSettingsCardFace {
   copyCommand: (command: string) => void
   /** Fire the unified next-action verb for one error row. */
   nextAction: (kind: string) => void
+  /** Open one online device in the singleton Phone tab. */
+  openDevice: (deviceId: string) => void
   /** Start trusted managed mobilecli preparation. */
   prepareRuntime: () => void
   /** Cancel the active preparation operation. */
@@ -86,12 +88,14 @@ export class PhoneSettingsCardController {
    * @param source - environment snapshot; defaults to the missing-service arm.
    * @param clipboard - optional clipboard writer used by copy buttons.
    * @param runtime - owned Host source released with this controller.
+   * @param openDevice - browser-owned projection from Settings to the Phone tab.
    */
   constructor(
     private readonly scope: SettingsScope<PhoneSettings>,
     source: PhoneEnvironmentSource = MISSING_PHONE_ENVIRONMENT_SOURCE,
     private readonly clipboard?: { writeText(text: string): Promise<void> },
     private readonly runtime?: PhoneRuntimeSource,
+    private readonly openDevice: (deviceId: string) => void = () => {},
   ) {
     this.source = source
     this.unsubscribeScope = scope.subscribe(() => { this.publish() })
@@ -136,6 +140,7 @@ export class PhoneSettingsCardController {
           void this.source.redetect()
         }
       },
+      openDevice: this.openDevice,
       prepareRuntime: () => { void this.runtime?.prepare().catch(() => {}) },
       cancelRuntime: () => { void this.runtime?.cancel().catch(() => {}) },
       refreshRuntime: () => { void this.runtime?.refresh().catch(() => {}) },

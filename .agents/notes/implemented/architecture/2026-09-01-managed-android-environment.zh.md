@@ -30,4 +30,4 @@ Google command-line tools build `15859902` 按 Host tuple 固定，并记录精�
 
 ## Consequences
 
-方案 C 设置页在共享 mobilecli 运行时下方分别显示 Android 与 iOS 平台卡。Android 准备展示来源、固定工具 build、SDK 根、AVD 标识、磁盘要求、许可同意、进度、人工要求与重试状态。包测试与 Electron fixture 验证确定性布局和生命周期行为；发布验收仍需要官方下载、真实 API 35 启动、真实 H264、GUI 控制和真实模型工具调用。
+方案 C 设置页在共享 mobilecli 运行时下方分别显示 Android 与 iOS 平台卡。Android 准备展示来源、固定工具 build、SDK 根、AVD 标识、磁盘要求、许可同意、进度、人工要求与重试状态。在线设备行会把所选设备打开到单例「手机」tab；Desktop 先把选择从隔离的设置 overlay 转交给 Session Surface，再展开面板。离线行操作保持禁用，默认模拟器仍由平台卡启动。包测试与 Electron fixture 验证确定性布局和生命周期行为；发布验收仍需要官方下载、真实 API 35 启动、真实 H264、GUI 控制和真实模型工具调用。

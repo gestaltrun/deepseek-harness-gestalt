@@ -35,6 +35,8 @@ interface RegisteredTab {
 /** The suite's view of the shared fake: one registered descriptor by id. */
 class SidebarUnderTest extends RecordingSidebar {
   readonly updates: Array<{ tabId: string; patch: { readonly title?: string; readonly meta?: unknown } }> = []
+  readonly opens: string[] = []
+  panelOpen = false
 
   override getTab(id: string): RegisteredTab | undefined {
     return super.getTab(id) as RegisteredTab | undefined
@@ -42,6 +44,14 @@ class SidebarUnderTest extends RecordingSidebar {
 
   updateTab(tabId: string, patch: { readonly title?: string; readonly meta?: unknown }): void {
     this.updates.push({ tabId, patch })
+  }
+
+  openTab(seed: { readonly type: string }): void {
+    this.opens.push(seed.type)
+  }
+
+  setPanelOpen(open: boolean): void {
+    this.panelOpen = open
   }
 }
 
@@ -155,9 +165,75 @@ describe('ui-phone client apply', () => {
     const entry = ctx.slots.entries('settings.section')[0]!
     const face = (entry.inject as () => {
       hooks: { phoneSettingsCard: { getSnapshot: () => { view: { kind: string } } } }
+      openDevice: (deviceId: string) => void
     })()
     await vi.waitFor(() => {
       expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('ready')
+    })
+    face.openDevice('missing')
+    expect(sidebar.opens).toEqual([])
+    face.openDevice('emulator-5554')
+    expect(sidebar.opens).toEqual(['phone'])
+    expect(sidebar.updates.at(-1)).toEqual({
+      tabId: 'phone',
+      patch: {
+        title: '手机·Pixel_6_API_35',
+        meta: { kind: 'device', serial: 'emulator-5554', name: 'Pixel_6_API_35' },
+      },
+    })
+    expect(sidebar.panelOpen).toBe(true)
+  })
+
+  it('projects a Desktop Settings row through the overlay result channel', async () => {
+    vi.stubGlobal('location', { search: '?dsh-desktop-overlay=1' })
+    const chromeOverlayResult = vi.fn()
+    vi.stubGlobal('dshDesktop', {
+      chromeOverlayGetState: async () => ({ kind: 'settings', requestId: 'settings-1' }),
+      chromeOverlayResult,
+      onChromeOverlayResult: () => () => {},
+    })
+    const sidebar = new SidebarUnderTest()
+    const { ctx, fiber } = await mount(sidebar)
+    const entry = ctx.slots.entries('settings.section')[0]!
+    const face = (entry.inject as () => { openDevice: (deviceId: string) => void })()
+    face.openDevice('fbcd1d21')
+    await vi.waitFor(() => {
+      expect(chromeOverlayResult).toHaveBeenCalledWith({
+        type: 'select', requestId: 'settings-1', id: 'phone-device:fbcd1d21',
+      })
+    })
+    await fiber.dispose()
+  })
+
+  it('accepts a Desktop Settings selection only for an online listed device', async () => {
+    let listener: ((result: unknown) => void) | undefined
+    vi.stubGlobal('dshDesktop', {
+      chromeOverlayGetState: async () => null,
+      chromeOverlayResult: () => {},
+      onChromeOverlayResult: (next: (result: unknown) => void) => {
+        listener = next
+        return () => { listener = undefined }
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      android: [{ id: 'fbcd1d21', name: 'MI 8', kind: 'real', state: 'online', online: true }],
+      ios: { simulators: [], reals: [] },
+    }), { status: 200 })))
+    const sidebar = new SidebarUnderTest()
+    const host = stubSettingsScope<PhoneSettings>()
+    host.publish({
+      status: 'ready', writable: true, value: { enabled: true },
+      base: { enabled: false }, user: { enabled: true }, revision: 1,
+    })
+    const { ctx } = await mount(sidebar, host)
+    const face = (ctx.slots.entries('settings.section')[0]!.inject as () => {
+      hooks: { phoneSettingsCard: { getSnapshot: () => { view: { kind: string } } } }
+    })()
+    await vi.waitFor(() => { expect(face.hooks.phoneSettingsCard.getSnapshot().view.kind).toBe('ready') })
+    listener?.({ type: 'select', id: 'unrelated' })
+    listener?.({ type: 'select', id: 'phone-device:fbcd1d21' })
+    expect(sidebar.updates.at(-1)?.patch).toMatchObject({
+      title: '手机·MI 8', meta: { serial: 'fbcd1d21' },
     })
   })
 

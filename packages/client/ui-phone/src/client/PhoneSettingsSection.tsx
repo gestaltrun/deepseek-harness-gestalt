@@ -54,6 +54,7 @@ export function PhoneSettingsSection(props: PhoneSettingsSectionProps) {
         onRedetect={props.redetect}
         onCopy={props.copyCommand}
         onNextAction={props.nextAction}
+        onOpenDevice={props.openDevice}
       />
     </section>
   )

@@ -27,6 +27,7 @@ function renderCard(view: PhoneEnvironmentView, rest: {
   onRedetect?: () => void
   onCopy?: (command: string) => void
   onNextAction?: (kind: string) => void
+  onOpenDevice?: (deviceId: string) => void
 } = {}) {
   render(
     <PhoneSettingsCard
@@ -36,6 +37,7 @@ function renderCard(view: PhoneEnvironmentView, rest: {
       onRedetect={rest.onRedetect ?? (() => {})}
       onCopy={rest.onCopy ?? (() => {})}
       onNextAction={rest.onNextAction ?? (() => {})}
+      onOpenDevice={rest.onOpenDevice ?? (() => {})}
     />,
   )
 }
@@ -128,7 +130,8 @@ describe('PhoneSettingsCard six states', () => {
     expect(onCopy).not.toHaveBeenCalled()
   })
 
-  it('renders the ready inventory grouped by platform', () => {
+  it('renders the ready inventory grouped by platform and opens only online devices', () => {
+    const onOpenDevice = vi.fn()
     renderCard({
       kind: 'ready',
       availableCount: 3,
@@ -162,7 +165,7 @@ describe('PhoneSettingsCard six states', () => {
           meta: '已授权 USB 调试 · WDA 未构建前仅 Android 动作可用',
         },
       ],
-    })
+    }, { onOpenDevice })
     expect(screen.getByText('环境正常 · 3 台可用')).toBeTruthy()
     expect(screen.getByText('模拟器 · ANDROID')).toBeTruthy()
     expect(screen.getByText('模拟器 · IOS')).toBeTruthy()
@@ -171,6 +174,15 @@ describe('PhoneSettingsCard six states', () => {
     expect(screen.getByText('iPhone 16 Pro')).toBeTruthy()
     expect(screen.getByText('SM-S9310（Galaxy S24）')).toBeTruthy()
     expect(screen.getByRole('button', { name: '重新检测' })).toBeTruthy()
+    const open = screen.getAllByRole('button', { name: '打开面板' }) as HTMLButtonElement[]
+    expect(open).toHaveLength(4)
+    expect(open[1]!.disabled).toBe(true)
+    for (const button of open) fireEvent.click(button)
+    expect(onOpenDevice.mock.calls).toEqual([
+      ['emulator-5554'],
+      ['iphone-16-pro'],
+      ['R3CN30'],
+    ])
   })
 
   it('omits empty device groups in the ready inventory', () => {

@@ -4,7 +4,7 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  redactWebHostDiagnostic, spawnWebHost, type RunningWebHost, webHostDiagnosticTail,
+  redactWebHostDiagnostic, spawnWebHost, type RunningWebHost, webHostDiagnosticSummary,
 } from '../src/spawn-web-host.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -33,11 +33,13 @@ describe('spawnWebHost', () => {
 
   it('redacts before truncating across a credential boundary', () => {
     const secret = 'credential-prefix-and-visible-suffix'
-    const output = `SERVICE_API_KEY=${secret}${'x'.repeat(790)}`
+    const output = `SERVICE_API_KEY=${secret}\n${'x'.repeat(900)}\ntail diagnostic`
 
-    const diagnostic = webHostDiagnosticTail(output, { SERVICE_API_KEY: secret })
+    const diagnostic = webHostDiagnosticSummary(output, { SERVICE_API_KEY: secret })
 
     expect(diagnostic).not.toContain('visible-suffix')
+    expect(diagnostic).toContain('[REDACTED]')
+    expect(diagnostic).toContain('tail diagnostic')
     expect(diagnostic.length).toBeLessThanOrEqual(800)
   })
 

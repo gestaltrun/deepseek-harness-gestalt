@@ -48,8 +48,10 @@ export function redactWebHostDiagnostic(output: string, environment: NodeJS.Proc
 }
 
 /** Return a bounded credential-free child diagnostic. */
-export function webHostDiagnosticTail(output: string, environment: NodeJS.ProcessEnv): string {
-  return redactWebHostDiagnostic(output.trim(), environment).slice(-800)
+export function webHostDiagnosticSummary(output: string, environment: NodeJS.ProcessEnv): string {
+  const redacted = redactWebHostDiagnostic(output.trim(), environment)
+  if (redacted.length <= 800) return redacted
+  return `${redacted.slice(0, 398)}\n…\n${redacted.slice(-398)}`
 }
 
 /**
@@ -100,7 +102,7 @@ export function spawnWebHost(
     }
     command.signal?.addEventListener('abort', onAbort, { once: true })
     const timer = setTimeout(() => {
-      const tail = webHostDiagnosticTail(buffer, environment)
+      const tail = webHostDiagnosticSummary(buffer, environment)
       terminateBeforeReady(new Error(
         `dsh web did not print a loopback URL within ${String(timeoutMs)}ms`
         + (tail.length === 0 ? '' : `\n${tail}`),
@@ -127,7 +129,7 @@ export function spawnWebHost(
       if (settled) return
       settled = true
       clearTimeout(timer)
-      const tail = webHostDiagnosticTail(buffer, environment)
+      const tail = webHostDiagnosticSummary(buffer, environment)
       reject(new Error(
         'dsh web exited before announcing a URL (code ' + String(code) + ', signal ' + String(signal) + ')'
         + (tail.length === 0 ? '' : '\n' + tail),

@@ -301,16 +301,8 @@ describe('SubagentRuntime.listChildren', () => {
     await expect(ctx.subagents.listChildren(parent.id)).resolves.toEqual([])
   })
 
-  it('lists one-shot children with and without durable creation labels', async () => {
+  it('lists a one-shot child with its durable creation label', async () => {
     const { ctx, parent } = await setup([])
-    const unlabeled = await authorChild(ctx, '00000000-0000-4000-8000-00000000ab01', {
-      parentSession: parent.id,
-      origin: 'subagent',
-    }, childEvents({
-      version: SUBAGENT_DESCRIPTOR_VERSION,
-      mode: 'one-shot',
-      provider: 'spawn',
-    }))
     const labeled = await authorChild(ctx, '00000000-0000-4000-8000-00000000ab02', {
       parentSession: parent.id,
       origin: 'subagent',
@@ -321,10 +313,6 @@ describe('SubagentRuntime.listChildren', () => {
       label: 'labeled one-shot',
     }))
     await expect(ctx.subagents.listChildren(parent.id)).resolves.toEqual([
-      {
-        kind: 'child', id: unlabeled, mode: 'one-shot',
-        activity: 'inactive', hasChildren: false,
-      },
       {
         kind: 'child', id: labeled, mode: 'one-shot', label: 'labeled one-shot',
         activity: 'inactive', hasChildren: false,

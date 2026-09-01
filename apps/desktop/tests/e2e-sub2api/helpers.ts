@@ -819,11 +819,24 @@ export async function selectModelAndSend(
   const modelPane = browser.$('div[role="menu"] button[role="menuitem"]')
   await modelPane.waitForClickable({ timeout: 30_000 })
   await modelPane.click()
-  const choice = browser.$(`button[title="${model}"]`)
+  const choices = await browser.$$('button[data-model-id]')
+  let choice: WebdriverIO.Element | undefined
+  for (const candidate of choices) {
+    if (await candidate.getAttribute('data-model-id') === model) {
+      choice = candidate
+      break
+    }
+  }
+  if (choice === undefined) {
+    const advertised: Array<string | null> = []
+    for (const candidate of choices) advertised.push(await candidate.getAttribute('data-model-id'))
+    throw new Error(`Desktop model menu omitted ${model}; advertised ${JSON.stringify(advertised)}`)
+  }
+  const choiceLabel = await choice.getAttribute('title')
   await choice.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   await choice.waitForClickable({ timeout: 30_000 })
   await choice.click()
-  await browser.waitUntil(async () => (await browser.$(triggerSelector).getAttribute('title'))?.includes(model) === true, {
+  await browser.waitUntil(async () => (await browser.$(triggerSelector).getAttribute('title'))?.includes(choiceLabel ?? model) === true, {
     timeout: 30_000,
     timeoutMsg: `Desktop did not select ${model}`,
   })

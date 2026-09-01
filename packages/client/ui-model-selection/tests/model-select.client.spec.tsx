@@ -142,6 +142,31 @@ describe('ModelSelect reasoning effort', () => {
     expect(screen.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash' })).toBeTruthy()
   })
 
+  it('exposes the model id independently from its display name', () => {
+    const directory = createSnapshotStore(state({
+      groups: [{
+        id: 'sub2api',
+        name: 'Sub2API',
+        models: [{ id: 'glm-5.2', name: 'GLM-5.2' }],
+      }],
+      current: null,
+    }))
+    render(<ModelSelect
+      locked={false}
+      available
+      directory={directory}
+      load={vi.fn()}
+      select={vi.fn().mockResolvedValue(true)}
+      t={t}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: '选择模型' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /模型/ }))
+
+    expect(screen.getByRole('menuitemradio', { name: 'GLM-5.2' }).getAttribute('data-model-id'))
+      .toBe('glm-5.2')
+  })
+
   it('keeps long model names inside the vertical menu scroller', () => {
     expect(modelSelectCss).toMatch(/\.groups\s*\{[^}]*overflow-x:\s*hidden/u)
   })
